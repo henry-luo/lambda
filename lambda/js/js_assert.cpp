@@ -41,6 +41,7 @@ static void js_assert_append_error_label(StrBuf* sb, Item value);
 static int js_assert_append_value_type(char* buf, int buf_size, Item value);
 static bool js_assert_is_real_regexp(Item value);
 static bool js_assert_constructor_name(Item value, char* out, int out_size);
+static bool js_assert_is_buffer_value(Item value);
 static void js_assert_append_item_text(StrBuf* sb, Item value);
 static bool js_assert_has_own_property_key(Item object, Item key);
 static void js_assert_append_quoted_key(StrBuf* sb, String* key);
@@ -279,6 +280,11 @@ static bool js_assert_prototypes_differ(Item actual, Item expected) {
     if (!js_assert_is_prototype_checked_value(actual) ||
             !js_assert_is_prototype_checked_value(expected)) {
         return false;
+    }
+    // Buffer uses Uint8Array storage/prototype internally; strict deep equality
+    // still has to observe Node's Buffer brand as a prototype distinction.
+    if (js_assert_is_buffer_value(actual) != js_assert_is_buffer_value(expected)) {
+        return true;
     }
     extern Item js_get_prototype_of(Item object);
     Item actual_proto = js_get_prototype_of(actual);
@@ -3037,6 +3043,13 @@ static Item js_assert_throw_invalid_throws_expected(Item error_expected) {
     return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE, msg);
 }
 
+static bool js_assert_is_vm_context_error(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    Item marker = js_property_get(value, assert_make_string("__vm_context_error__"));
+    return (get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker)) ||
+           (get_type_id(marker) == LMD_TYPE_INT && it2i(marker) != 0);
+}
+
 static Item js_assert_throw_constructor_mismatch(Item thrown, Item expected_ctor) {
     Item expected_name = js_property_get(expected_ctor, assert_make_string("name"));
     if (get_type_id(expected_name) != LMD_TYPE_STRING ||
@@ -3073,20 +3086,29 @@ static Item js_assert_throw_constructor_mismatch(Item thrown, Item expected_ctor
     StrBuf* sb = strbuf_new();
     strbuf_append_str(sb, "The error is expected to be an instance of \"");
     js_assert_append_item_text(sb, expected_name);
-    strbuf_append_str(sb, "\". Received \"");
-    if (js_assert_is_symbol_value(thrown)) {
+    strbuf_append_char(sb, '"');
+    if (js_assert_is_vm_context_error(thrown) &&
+            get_type_id(actual_name) == LMD_TYPE_STRING &&
+            js_assert_string_equals(expected_name, it2s(actual_name)->chars)) {
+        // VM-created Errors can share the host class name while still failing
+        // constructor matching because their realm prototype is distinct.
+        strbuf_append_str(sb, ". Received an error with identical name but a different prototype.");
+    } else {
+        strbuf_append_str(sb, ". Received \"");
+        if (js_assert_is_symbol_value(thrown)) {
         // Primitive Symbols have no instance constructor; diagnostics must show
         // the observable Symbol(description) value, not the Symbol function.
-        Item symbol_text = js_symbol_to_string(thrown);
-        js_assert_append_item_text(sb, symbol_text);
-    } else if (get_type_id(thrown) == LMD_TYPE_ARRAY) {
+            Item symbol_text = js_symbol_to_string(thrown);
+            js_assert_append_item_text(sb, symbol_text);
+        } else if (get_type_id(thrown) == LMD_TYPE_ARRAY) {
         // Array throw values are reported by their public inspect tag, not by
         // the Array constructor name, in instance-mismatch diagnostics.
-        strbuf_append_str(sb, "[Array]");
-    } else {
-        js_assert_append_item_text(sb, actual_name);
+            strbuf_append_str(sb, "[Array]");
+        } else {
+            js_assert_append_item_text(sb, actual_name);
+        }
+        strbuf_append_char(sb, '"');
     }
-    strbuf_append_str(sb, "\"");
     Item thrown_msg = js_property_get(thrown, assert_make_string("message"));
     if (get_type_id(thrown_msg) == LMD_TYPE_STRING) {
         String* ms = it2s(thrown_msg);
@@ -3765,6 +3787,24 @@ static Item js_assert_throw_ambiguous_assert_message(Item message) {
 
 static Item js_assert_match_default_message(Item string_val, Item regexp, const char* op) {
     StrBuf* sb = strbuf_new();
+    if (strcmp(op, "doesNotMatch") == 0) {
+        strbuf_append_str(sb, "The input was expected to not match the regular expression ");
+    } else {
+        strbuf_append_str(sb, "The input did not match the regular expression ");
+    }
+    js_assert_append_item_text(sb, regexp);
+    strbuf_append_str(sb, ". Input:\n\n");
+    // Generated assert.match diagnostics include the inspected input on its
+    // own line; the compact operator form loses Node's message contract.
+    js_assert_append_inspected_value(sb, string_val);
+    strbuf_append_char(sb, '\n');
+    Item result = assert_make_string_n(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+static Item js_assert_match_compact_default_message(Item string_val, Item regexp, const char* op) {
+    StrBuf* sb = strbuf_new();
     js_assert_append_inspected_value(sb, string_val);
     strbuf_append_char(sb, ' ');
     strbuf_append_str(sb, op);
@@ -3783,6 +3823,14 @@ static Item js_assert_match_message_or_default(Item message, Item string_val, It
         // function/Error in the message slot would make the call shape unclear.
         return js_assert_throw_ambiguous_assert_message(message);
     }
+    if (get_type_id(message) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(message))) {
+        extern void js_throw_value(Item error);
+        // Error-valued assert.match messages are thrown verbatim; wrapping them
+        // in AssertionError loses the documented message-object contract.
+        js_throw_value(message);
+        return make_js_undefined();
+    }
+    bool message_is_function = js_assert_is_function_like_value(message);
     bool has_user_message = false;
     Item user_message = js_assert_resolve_user_message(message, string_val, regexp, &has_user_message);
     extern int js_check_exception(void);
@@ -3790,9 +3838,37 @@ static Item js_assert_match_message_or_default(Item message, Item string_val, It
     if (has_user_message) {
         return throw_assertion_error_full_item(user_message, string_val, regexp, op, false);
     }
+    if (message_is_function) {
+        // Faulty message callbacks fall back to Node's legacy compact operator
+        // form, distinct from the no-message generated assert.match text.
+        return throw_assertion_error_full_item(
+            js_assert_match_compact_default_message(string_val, regexp, op),
+            string_val, regexp, op, true);
+    }
     return throw_assertion_error_full_item(
         js_assert_match_default_message(string_val, regexp, op),
         string_val, regexp, op, true);
+}
+
+static Item js_assert_match_invalid_string(Item string_val, Item regexp, const char* op) {
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, "The \"string\" argument must be of type string. Received ");
+    if (js_assert_is_object_like_value(string_val)) {
+        Item inspected = js_util_inspect(string_val, make_js_undefined());
+        String* is = get_type_id(inspected) == LMD_TYPE_STRING ? it2s(inspected) : NULL;
+        // assert.match reports the bad input as assertion data; object inputs
+        // need their inspected value rather than the generic constructor name.
+        strbuf_append_str(sb, "type object (");
+        if (is) strbuf_append_str_n(sb, is->chars, is->len);
+        strbuf_append_char(sb, ')');
+    } else {
+        char received[160];
+        js_assert_append_value_type(received, sizeof(received), string_val);
+        strbuf_append_str(sb, received);
+    }
+    Item msg = assert_make_string_n(sb->str, sb->length);
+    strbuf_free(sb);
+    return throw_assertion_error_full_item(msg, string_val, regexp, op, true);
 }
 
 extern "C" Item js_assert_match(Item string_val, Item regexp, Item message) {
@@ -3800,7 +3876,7 @@ extern "C" Item js_assert_match(Item string_val, Item regexp, Item message) {
         return js_assert_throw_invalid_assert_arg_type("regexp", "an instance of RegExp", regexp);
     }
     if (get_type_id(string_val) != LMD_TYPE_STRING) {
-        return js_assert_throw_invalid_assert_arg_type("string", "of type string", string_val);
+        return js_assert_match_invalid_string(string_val, regexp, "match");
     }
     Item result = js_regex_test(regexp, string_val);
     if (!it2b(result)) {
@@ -3814,7 +3890,7 @@ extern "C" Item js_assert_doesNotMatch(Item string_val, Item regexp, Item messag
         return js_assert_throw_invalid_assert_arg_type("regexp", "an instance of RegExp", regexp);
     }
     if (get_type_id(string_val) != LMD_TYPE_STRING) {
-        return js_assert_throw_invalid_assert_arg_type("string", "of type string", string_val);
+        return js_assert_match_invalid_string(string_val, regexp, "doesNotMatch");
     }
     Item result = js_regex_test(regexp, string_val);
     if (it2b(result)) {

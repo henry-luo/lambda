@@ -8393,6 +8393,70 @@ extern "C" Item js_subtle_digest(Item alg_item, Item data_item) {
     return js_promise_resolve(result);
 }
 
+static Item js_subtle_clone_usages(Item usages_item) {
+    Item usages = js_array_new(0);
+    if (get_type_id(usages_item) != LMD_TYPE_ARRAY) return usages;
+    int64_t count = js_array_length(usages_item);
+    for (int64_t i = 0; i < count; i++) {
+        js_array_push(usages, js_array_get_int(usages_item, i));
+    }
+    return usages;
+}
+
+static Item js_subtle_hmac_algorithm(Item alg_item, int key_len) {
+    Item algorithm = js_new_object();
+    Item name = make_string_item_crypto("HMAC");
+    Item hash_name = make_string_item_crypto("SHA-256");
+    if (get_type_id(alg_item) == LMD_TYPE_MAP) {
+        Item alg_name = js_property_get(alg_item, make_string_item_crypto("name"));
+        if (get_type_id(alg_name) == LMD_TYPE_STRING) name = alg_name;
+        Item hash = js_property_get(alg_item, make_string_item_crypto("hash"));
+        if (get_type_id(hash) == LMD_TYPE_STRING) {
+            hash_name = hash;
+        } else if (get_type_id(hash) == LMD_TYPE_MAP) {
+            Item nested_name = js_property_get(hash, make_string_item_crypto("name"));
+            if (get_type_id(nested_name) == LMD_TYPE_STRING) hash_name = nested_name;
+        }
+    }
+    Item hash_obj = js_new_object();
+    js_property_set(hash_obj, make_string_item_crypto("name"), hash_name);
+    js_property_set(algorithm, make_string_item_crypto("name"), name);
+    js_property_set(algorithm, make_string_item_crypto("hash"), hash_obj);
+    js_property_set(algorithm, make_string_item_crypto("length"), (Item){.item = i2it((int64_t)key_len * 8)});
+    return algorithm;
+}
+
+// subtle.importKey('raw', keyData, {name:'HMAC', hash}, extractable, usages)
+extern "C" Item js_subtle_importKey(Item format_item, Item key_data_item, Item alg_item,
+                                    Item extractable_item, Item usages_item) {
+    if (!crypto_string_equals(format_item, "raw")) return js_promise_resolve(ItemNull);
+
+    uint8_t* key = NULL;
+    int key_len = 0;
+    if (!extract_bytes(key_data_item, &key, &key_len)) return js_promise_resolve(ItemNull);
+
+    Item bytes = js_typed_array_new(JS_TYPED_UINT8, key_len);
+    uint8_t* out = (uint8_t*)js_typed_array_current_data_ptr(bytes);
+    if (out && key && key_len > 0) memcpy(out, key, (size_t)key_len);
+    mem_free(key);
+
+    Item key_obj = js_new_object();
+    // Lambda does not yet expose full WebCrypto key operations; deep equality
+    // still needs the raw key metadata so distinct imported HMAC keys differ.
+    js_property_set(key_obj, make_string_item_crypto("type"), make_string_item_crypto("secret"));
+    js_property_set(key_obj, make_string_item_crypto("extractable"),
+                    (extractable_item.item == ITEM_TRUE ||
+                     (get_type_id(extractable_item) == LMD_TYPE_BOOL && it2b(extractable_item)))
+                        ? (Item){.item = ITEM_TRUE}
+                        : (Item){.item = ITEM_FALSE});
+    js_property_set(key_obj, make_string_item_crypto("algorithm"),
+                    js_subtle_hmac_algorithm(alg_item, key_len));
+    js_property_set(key_obj, make_string_item_crypto("usages"),
+                    js_subtle_clone_usages(usages_item));
+    js_property_set(key_obj, make_string_item_crypto("__crypto_key_data__"), bytes);
+    return js_promise_resolve(key_obj);
+}
+
 // subtle.encrypt({name, iv}, key, data) → Promise<ArrayBuffer>
 extern "C" Item js_subtle_encrypt(Item alg_item, Item key_item, Item data_item) {
     // extract algorithm name and IV from options object
@@ -8619,6 +8683,7 @@ extern "C" Item js_get_crypto_namespace(void) {
     // subtle Web Crypto API (subset)
     Item subtle = js_new_object();
     crypto_set_method(subtle, "digest",  (void*)js_subtle_digest, 2);
+    crypto_set_method(subtle, "importKey", (void*)js_subtle_importKey, 5);
     crypto_set_method(subtle, "encrypt", (void*)js_subtle_encrypt, 3);
     crypto_set_method(subtle, "decrypt", (void*)js_subtle_decrypt, 3);
     js_property_set(crypto_namespace, make_string_item_crypto("subtle"), subtle);

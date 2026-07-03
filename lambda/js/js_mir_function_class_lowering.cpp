@@ -76,6 +76,19 @@ static JsMirVarEntry* jm_function_find_current_scope_var(JsMirTranspiler* mt, co
     return found ? &found->var : NULL;
 }
 
+static void jm_function_clear_shadowed_capture_binding(JsMirVarEntry* var) {
+    if (!var) return;
+    // Direct function-body declarations create a local binding even when an
+    // arrow has already loaded a same-named outer capture into the scope.
+    var->from_env = false;
+    var->env_slot = -1;
+    var->env_reg = 0;
+    var->from_shared_env = false;
+    var->in_scope_env = false;
+    var->scope_env_slot = -1;
+    var->scope_env_reg = 0;
+}
+
 static bool jm_function_has_direct_body_function_binding(JsFunctionNode* fn, const char* vname) {
     if (!fn || !vname || !fn->body ||
         fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
@@ -488,7 +501,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t viter = 0; void* vitem;
             while (hashmap_iter(body_locals, &viter, &vitem)) {
                 JsNameSetEntry* e = (JsNameSetEntry*)vitem;
-                if (e->from_func_decl && effective_strict) {
+                if (e->from_func_decl && effective_strict &&
+                    !jm_function_has_direct_body_function_binding(fn, e->name)) {
+                    // Strict mode only suppresses nested block function hoists;
+                    // direct body declarations still create local bindings.
                     log_debug("js-mir: strict skip nested function hoist '%s'", e->name);
                     continue;
                 }
@@ -503,7 +519,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
                     continue;
                 }
-                if (!jm_find_var(mt, e->name)) {
+                JsMirVarEntry* current_binding = jm_function_find_current_scope_var(mt, e->name);
+                // Function-body declarations shadow outer names, including
+                // arrow captures installed as from_env bindings.
+                if (!current_binding || current_binding->from_env) {
                     // Skip hoisting vars that are module vars in IIFE body functions
                     // — these are accessed via js_get/set_module_var, not local registers
                     if (mt->current_fc && mt->current_fc->is_iife_body && mt->module_consts) {
@@ -520,7 +539,13 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     // v50: mark as hoisted so var_reused path can distinguish from parameters
                     {
                         JsMirVarEntry* hvar = jm_find_var(mt, e->name);
-                        if (hvar) hvar->from_hoist = true;
+                        if (hvar) {
+                            if (e->from_func_decl &&
+                                jm_function_has_direct_body_function_binding(fn, e->name)) {
+                                jm_function_clear_shadowed_capture_binding(hvar);
+                            }
+                            hvar->from_hoist = true;
+                        }
                     }
                 }
             }
@@ -575,6 +600,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                                 MIR_new_reg_op(mt->ctx, hvar),
                                 MIR_new_reg_op(mt->ctx, fn_item)));
                             jm_set_var(mt, hvname, hvar);
+                            jm_function_clear_shadowed_capture_binding(
+                                jm_function_find_current_scope_var(mt, hvname));
                             // Bug 4: keep the module-var slot in sync for nested
                             // closures that resolve this hoist via js_get_module_var.
                             jm_hoisted_func_modvar_write_through(mt, hvname, hvar);
@@ -2775,7 +2802,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t viter = 0; void* vitem;
             while (hashmap_iter(body_locals, &viter, &vitem)) {
                 JsNameSetEntry* e = (JsNameSetEntry*)vitem;
-                if (e->from_func_decl && effective_strict) {
+                if (e->from_func_decl && effective_strict &&
+                    !jm_function_has_direct_body_function_binding(fn, e->name)) {
+                    // Strict mode only suppresses nested block function hoists;
+                    // direct body declarations still create local bindings.
                     log_debug("js-mir: strict skip nested function hoist '%s'", e->name);
                     continue;
                 }
@@ -2790,7 +2820,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
                     continue;
                 }
-                if (!jm_find_var(mt, e->name)) {
+                JsMirVarEntry* current_binding = jm_function_find_current_scope_var(mt, e->name);
+                // Function-body declarations shadow outer names, including
+                // arrow captures installed as from_env bindings.
+                if (!current_binding || current_binding->from_env) {
                     // Skip hoisting vars that are module vars in IIFE body functions
                     if (mt->current_fc && mt->current_fc->is_iife_body && mt->module_consts) {
                         JsModuleConstEntry mclookup;
@@ -2806,7 +2839,13 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     // v50: mark as hoisted so var_reused path can distinguish from parameters
                     {
                         JsMirVarEntry* hvar = jm_find_var(mt, e->name);
-                        if (hvar) hvar->from_hoist = true;
+                        if (hvar) {
+                            if (e->from_func_decl &&
+                                jm_function_has_direct_body_function_binding(fn, e->name)) {
+                                jm_function_clear_shadowed_capture_binding(hvar);
+                            }
+                            hvar->from_hoist = true;
+                        }
                     }
                 }
             }
@@ -3085,6 +3124,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                                 MIR_new_reg_op(mt->ctx, hvar),
                                 MIR_new_reg_op(mt->ctx, fn_item)));
                             jm_set_var(mt, hvname, hvar);
+                            jm_function_clear_shadowed_capture_binding(
+                                jm_function_find_current_scope_var(mt, hvname));
                             jm_scope_env_mark_and_writeback(mt, hvname, hvar);
                             // Bug 4: an IIFE-scope inner function declaration is
                             // resolved by nested closures via js_get_module_var(int_val)

@@ -8645,7 +8645,6 @@ struct JsTemplateRegistryEntry {
 };
 
 static JsTemplateRegistryEntry* js_template_registry = NULL;
-static bool js_template_registry_atexit_registered = false;
 
 extern "C" void js_reset_template_registry(void) {
     JsTemplateRegistryEntry* entry = js_template_registry;
@@ -8680,12 +8679,6 @@ extern "C" Item js_build_template_object_cached(Item* cooked, Item* raw, int cou
         if (entry->site_id == site_id && entry->count == count) return entry->object;
     }
     Item obj = js_build_template_object(cooked, raw, count);
-    if (!js_template_registry_atexit_registered) {
-        // Tagged-template cache entries are native allocations; the last script
-        // in a process may exit without another batch reset to free them.
-        atexit(js_reset_template_registry);
-        js_template_registry_atexit_registered = true;
-    }
     JsTemplateRegistryEntry* entry = (JsTemplateRegistryEntry*)mem_calloc(1, sizeof(JsTemplateRegistryEntry), MEM_CAT_JS_RUNTIME);
     if (entry) {
         entry->site_id = site_id;
@@ -33289,6 +33282,13 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
     js_vm_swap_global_this(prev_global);
     js_vm_restore_context_bindings(sandbox, vm_bindings, vm_binding_count);
     js_set_prototype(sandbox, previous_proto);
+    if (get_type_id(result) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(result))) {
+        // VM contexts do not yet allocate separate Error prototypes; mark the
+        // result so host-realm instanceof checks still observe the realm split.
+        Item vm_error_key = (Item){.item = s2it(heap_create_name("__vm_context_error__", 20))};
+        js_property_set(result, vm_error_key, (Item){.item = b2it(true)});
+        js_mark_non_enumerable(result, vm_error_key);
+    }
     return result;
 }
 

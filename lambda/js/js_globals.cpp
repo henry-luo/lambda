@@ -6854,6 +6854,26 @@ static bool js_class_matches_instanceof_target(JsClass actual, JsClass target) {
     return false;
 }
 
+static bool js_instanceof_is_host_error_constructor(JsFuncName* fn) {
+    if (!fn || !fn->name) return false;
+    String* name = fn->name;
+    if (name->len == 5 && strncmp(name->chars, "Error", 5) == 0) return true;
+    if (name->len == 9 && strncmp(name->chars, "TypeError", 9) == 0) return true;
+    if (name->len == 10 && strncmp(name->chars, "RangeError", 10) == 0) return true;
+    if (name->len == 14 && strncmp(name->chars, "ReferenceError", 14) == 0) return true;
+    if (name->len == 11 && strncmp(name->chars, "SyntaxError", 11) == 0) return true;
+    if (name->len == 8 && strncmp(name->chars, "URIError", 8) == 0) return true;
+    if (name->len == 9 && strncmp(name->chars, "EvalError", 9) == 0) return true;
+    return false;
+}
+
+static bool js_instanceof_is_vm_context_error(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    Item marker = js_property_get(value, (Item){.item = s2it(heap_create_name("__vm_context_error__", 20))});
+    return (get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker)) ||
+           (get_type_id(marker) == LMD_TYPE_INT && it2i(marker) != 0);
+}
+
 extern "C" Item js_instanceof(Item left, Item right) {
     return js_instanceof_impl(left, right, false);
 }
@@ -6934,6 +6954,12 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
         TypeId fp_type = get_type_id(func_proto);
         if (!js_instanceof_is_object_like_type(fp_type)) {
             js_throw_type_error("Function has non-object prototype in instanceof check");
+            return (Item){.item = b2it(false)};
+        }
+        if (js_instanceof_is_vm_context_error(left) &&
+                js_instanceof_is_host_error_constructor(right_fn)) {
+            // VM-created Errors are same-named but cross-realm; the shared host
+            // prototype is an implementation detail, not an instanceof match.
             return (Item){.item = b2it(false)};
         }
         bool contains_func_proto = func_proto.item != ItemNull.item && js_prototype_chain_contains(left, func_proto);

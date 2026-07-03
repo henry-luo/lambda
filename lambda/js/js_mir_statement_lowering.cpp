@@ -166,10 +166,33 @@ static bool jm_statement_function_decl_is_direct_binding(JsFunctionNode* fn) {
         strcmp(grandparent_type, "generator_function") == 0 ||
         strcmp(grandparent_type, "arrow_function") == 0;
     if (!function_body_parent) return false;
+    if (strcmp(grandparent_type, "arrow_function") == 0) {
+        // Tree-sitter does not expose arrow block bodies through the same body
+        // field shape; direct arrow-body declarations still create local names.
+        return true;
+    }
     TSNode body = ts_node_child_by_field_name(grandparent, "body", 4);
     return !ts_node_is_null(body) &&
         ts_node_start_byte(body) == ts_node_start_byte(parent) &&
         ts_node_end_byte(body) == ts_node_end_byte(parent);
+}
+
+static bool jm_current_function_has_direct_body_function_binding(JsFunctionNode* fn, const char* vname) {
+    if (!fn || !vname || !fn->body ||
+        fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
+        return false;
+    }
+    JsBlockNode* body = (JsBlockNode*)fn->body;
+    for (JsAstNode* stmt = body->statements; stmt; stmt = stmt->next) {
+        if (stmt->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        JsFunctionNode* decl = (JsFunctionNode*)stmt;
+        if (!decl->name) continue;
+        char name[128];
+        snprintf(name, sizeof(name), "_js_%.*s",
+            (int)decl->name->len, decl->name->chars);
+        if (strcmp(name, vname) == 0) return true;
+    }
+    return false;
 }
 
 static bool jm_assignment_targets_name(JsAstNode* left, const char* bare_name, int bare_len) {
@@ -5039,27 +5062,35 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         // do NOT overwrite the parameter binding (B.3.3.1 step 2.ii).
         JsFunctionNode* fn_decl = (JsFunctionNode*)stmt;
         if (fn_decl->name) {
+            char fn_vname[128];
+            snprintf(fn_vname, sizeof(fn_vname), "_js_%.*s",
+                (int)fn_decl->name->len, fn_decl->name->chars);
             // Check Annex B skip condition: parameter name collision
             JsFunctionNode* enclosing_fn = mt->current_fc ? mt->current_fc->node : NULL;
+            bool current_body_direct = enclosing_fn &&
+                jm_current_function_has_direct_body_function_binding(enclosing_fn, fn_vname);
             bool effective_strict = mt->is_global_strict || mt->is_module ||
                 (mt->current_fc && mt->current_fc->is_strict) ||
                 (enclosing_fn && jm_has_use_strict_directive(enclosing_fn));
-            if (effective_strict && !jm_statement_function_decl_is_direct_binding(fn_decl)) {
+            if (effective_strict && !jm_statement_function_decl_is_direct_binding(fn_decl) &&
+                !current_body_direct) {
                 break;
             }
             if (enclosing_fn && jm_func_has_param_named(enclosing_fn,
                     fn_decl->name->chars, (int)fn_decl->name->len)) {
                 break;
             }
-            char fn_vname[128];
-            snprintf(fn_vname, sizeof(fn_vname), "_js_%.*s",
-                (int)fn_decl->name->len, fn_decl->name->chars);
             if (mt->current_fc && mt->current_fc->uses_arguments &&
                 strcmp(fn_vname, "_js_arguments") == 0 &&
-                !jm_statement_function_decl_is_direct_binding(fn_decl)) {
+                !jm_statement_function_decl_is_direct_binding(fn_decl) &&
+                !current_body_direct) {
                 break;
             }
-            JsMirVarEntry* existing = jm_find_var(mt, fn_vname);
+            // Direct function-body declarations shadow outer names; Annex B
+            // replacement is the only path that should search parent scopes.
+            JsMirVarEntry* existing = current_body_direct ?
+                jm_find_var_in_scope_depth(mt, fn_vname, mt->scope_depth) :
+                jm_find_var(mt, fn_vname);
             // Annex B runtime replacement targets the var/function environment,
             // not an intervening block/catch binding.  In `catch (f) { { function f(){} } }`,
             // the simple catch parameter is intentionally allowed by B.3.5 while

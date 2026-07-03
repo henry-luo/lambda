@@ -679,17 +679,54 @@ Results:
 
 ### Assert / Inspect / Diff Progress
 
-The remaining Node official regressions are now concentrated in two baseline
-tests:
+Update after the assert/deep fix pass and the follow-up rollback: the broad
+`jm_emit_pending_call_source()` approach was reverted because emitting
+call-source metadata around generic calls introduced a major Test262
+performance regression. The issue is not isolated to Node's official assert
+scripts: Test262 also uses thousands of harness-level `assert(...)` calls, and
+those passing hot assertions do not need Node's original-source diagnostic
+payload.
 
-- `test-assert.js`
-- `test-assert-deep.js`
+Current policy: keep the assert work to a syntax fix for the time being. MIR
+emits pending call-source metadata only for syntactic Node assert call sites
+that can consume it, such as `assert(...)`, `assert.ok(...)`, `strict.ok(...)`,
+and the corresponding `.call()` / `.apply()` forms. Test262's global harness
+`assert(...)` is excluded from this source-capture path so the js262 suite does
+not pay the Node assert diagnostic cost.
 
-Two subagent-led assert passes narrowed the failures and kept the work scoped
-to the assert/inspect/runtime call-source path. The baseline was intentionally
-not updated because these two tests are still red.
+Known temporary gap: the dynamic alias case, for example
+`const wrapper = (fn, value) => fn(value); wrapper(assert, false);`, still
+fails because `fn(value)` cannot be identified as Node assert from syntax
+alone. That runtime-identity design is intentionally deferred.
 
-Confirmed improvements:
+Latest js262 status from the user's run after the syntax-only policy:
+`make test262-baseline` completed in 253.9s wall time.
+
+The baseline was intentionally not updated in this pass; this only verifies the
+focused regression slice and records the assert-source policy.
+
+New fixes in this pass:
+
+- `test-assert.js`: direct calls inside arrow bodies now fall back to dynamic
+  dispatch when the current MIR scope has a same-named direct function-body
+  declaration, so local function declarations shadow outer `test` bindings.
+- `test-assert.js`: VM-context Error results are marked as cross-realm for
+  host `instanceof` checks, and `assert.throws()` now reports the
+  same-name/different-prototype RangeError diagnostic Node expects.
+- `test-assert.js`: `assert.match()` / `assert.doesNotMatch()` now use Node's
+  generated message text, throw Error-valued message arguments verbatim, keep
+  legacy compact fallback for faulty message callbacks, and report non-string
+  inputs as AssertionErrors with `actual` / `expected` / `operator`.
+- `test-assert-deep.js`: Buffer-vs-Uint8Array strict prototype comparison now
+  observes Buffer branding even though Buffer is backed by Uint8Array storage.
+- `test-assert-deep.js`: `crypto.subtle.importKey('raw', ...)` now returns a
+  structural HMAC key object with raw bytes and metadata needed by the deep
+  equality checks.
+- `test-assert-deep.js`: tagged-template registry cleanup now runs before
+  memtrack shutdown instead of from a late `atexit()` hook, avoiding the bad
+  free that appeared after the deep comparison reached later test coverage.
+
+Previously confirmed improvements:
 
 - Date and RegExp subclass construction now preserve their hidden native slots
   when constructed through subclass paths, and Date methods read the private
@@ -704,7 +741,9 @@ Confirmed improvements:
 - `Arguments` versus plain object `strictEqual` diff indentation was fixed.
 - Several nested object/array diff cases for overlapping arrays and swapped
   keys now pass in direct instrumented runs.
-- One native direct-call path now emits pending call-source metadata.
+- Native/direct/fallback call lowering now routes pending call-source metadata
+  through the syntax-gated assert helper instead of emitting it for generic
+  calls.
 
 Current focused command:
 
@@ -712,39 +751,21 @@ Current focused command:
 ./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_assert:NodeOfficial/NodeOfficialTest.Run/test_assert_deep' --gtest_brief=1
 ```
 
-Current result: both selected tests still fail.
-
-Outstanding `test-assert.js` buckets:
-
-- `new Function('assert', 'assert(1 === 2);')(assert)` still loses the captured
-  source expression and falls back to `Expected true but got false`.
-- One long array diff still chooses the wrong LCS/order for the expected Node
-  message.
-- A null-versus-object `assert.throws()` pattern failure still formats through
-  `Comparison {}` instead of the direct `+ null` / `- { ... }` diff shape.
-
-Outstanding `test-assert-deep.js` buckets:
-
-- Three expected deep-equality failures are still missing, so the relevant
-  comparisons are still incorrectly accepted.
-- The extra-properties-on-errors `assert.throws()` case still prints the nested
-  multiline AssertionError message raw instead of Node's escaped
-  `'\n' +` inspect form.
-- One deep nested tail-array diff still needs Node's `... Skipped lines`
-  abbreviation.
+Current result after the syntax-only rollback: `test-assert-deep.js` passes;
+`test-assert.js` still fails only the deferred dynamic alias assertion-source
+case described above.
 
 Likely next root-cause areas:
 
-- call-source metadata for native/direct function calls created by
-  `new Function()` or eval-style dynamic compilation;
-- deep/partial equality cases that still accept structures which Node rejects;
-- AssertionError inspect formatting for nested multiline messages;
-- the array diff LCS / skipped-lines renderer used by assert failure messages.
+- run the broader assert slice to catch regressions outside these two selected
+  scripts;
+- rerun Node prelim/full official baseline-only before refreshing baseline
+  metadata;
+- keep the assert/inspect diff paths under watch because this pass changed both
+  assertion formatting and VM/Error prototype semantics.
 
 Baseline policy for the next session:
 
-- do not update `test/node/official_baseline.txt` while
-  `test-assert.js` or `test-assert-deep.js` is red;
-- after both focused tests pass, rerun the broader assert slice, Node prelim,
-  full Node official baseline-only, and `make test262-baseline` before
-  refreshing the official baseline metadata.
+- before updating `test/node/official_baseline.txt`, rerun the broader assert
+  slice, Node prelim, full Node official baseline-only, and
+  `make test262-baseline`.

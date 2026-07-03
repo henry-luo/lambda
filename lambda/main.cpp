@@ -334,6 +334,7 @@ extern "C" {
     void write_text_file(const char *filename, const char *content);
     int write_binary_file(const char* filename, const char* data, size_t len);
     TSTree* lambda_parse_source(TSParser* parser, const char* source);
+    void js_reset_template_registry(void);
 }
 
 static bool g_lambda_main_memtrack_shutdown_done = false;
@@ -351,6 +352,9 @@ static void lambda_main_pre_memtrack_cleanup_once(void) {
     // emitting live-allocation telemetry or entering memtrack shutdown.
     js_args_stack_cleanup();
     js_array_runtime_items_cleanup_all();
+    // Tagged-template cache entries are tracked allocations; freeing them from
+    // a late atexit hook runs after memtrack shutdown and becomes a raw bad free.
+    js_reset_template_registry();
 }
 
 static size_t lambda_main_memtrack_shutdown_once(void) {
