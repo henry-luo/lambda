@@ -52,28 +52,43 @@ C-style `%` are choices languages differ on (Python floors: `-7 // 2 == -4`,
 `-7 % 2 == 1`). The moment a Python model exists, Lambda's own convention must be
 precisely stated to keep meta- and object-language arithmetic distinct.
 
-### A3. `"" ≡ null`: the string type is not closed under its own operations
+### A3. `"" ≡ null`: two kinds of empty string (REVISED after deeper probing)
 
-| Expression | Result |
-|---|---|
-| `"" == null` | `true` |
-| `"" is string` | **`false`** |
-| `"" is null` | `true` |
-| `len("")`, `len(null)` | `0`, `0` |
-| `[] == null` | `false` |
-| `{} == null` | `false` |
+The identification is applied only to **literals**, not to runtime values — so the
+language currently has *two distinct empty strings*:
+
+| Expression | Result | |
+|---|---|---|
+| `"" == null` | `true` | literal `""` normalizes to null at compile time |
+| `"" is string` | `false` | |
+| `match "" { case string: ... }` | takes `default` arm | |
+| `d.name == null` (where `d.name` is `""` from JSON input) | **`false`** | runtime empty string is a real string |
+| `d.name is string` | **`true`** | |
+| `len(d.name)` | `0` | |
+| **`d.name == ""`** | **`false`** | **runtime `""` ≠ literal `""`** |
+| `split("a,,b", ",")` | `["a", "", "b"]` | runtime `""` survives in data |
+| `format(input('{"name":"","note":null}'), 'json')` | `"name": ""`, `"note": null` | round-trip preserves the distinction |
+| `[] == null`, `{} == null` | `false`, `false` | empty containers never normalize |
 
 Consequences:
 
-- `string` is not closed: `replace(s, "a", "")` applied to `"a"` yields a value that
-  is *not a string*. Any function typed `fn f(s: string) string` can be broken by a
-  value its own operations produced.
-- `++` has no identity element within the type.
-- The identification is **asymmetric**: only scalars (`""`, `''`) normalize to null;
-  empty containers do not.
+- **An empty field from data equals nothing writable.** `d.name == ""` is false
+  (literal is null) and `d.name == null` is false (runtime value is a string) — the
+  most common data-cleaning comparison there is cannot be expressed with a literal.
+  Only `len(x) == 0` reaches it.
+- The intended design (`""` as string's null) is **not implemented uniformly and
+  cannot be**: input parsers and string functions produce genuine empty strings, so
+  either every boundary normalizes them (destroying `""`-vs-`null` round-trip
+  fidelity, which the formatter currently preserves) or the identity fractures as it
+  has. There is no third option.
+- Generic code over `string` (match arms, `is`-guards) silently misses literal `""`
+  but accepts data-derived `""` — the same value classifies differently by
+  provenance.
+- The identification is **asymmetric** across types: only scalar literals (`""`,
+  `''`) normalize; empty containers do not, and `0` is truthy.
 
-Docs acknowledge the normalization (`Lambda_Type.md` § Constrained Types) but not its
-consequences. See B1.
+Docs acknowledge the literal normalization (`Lambda_Type.md` § Constrained Types) but
+not the two-empty-strings consequence. See B1.
 
 ### A4. `symbol == string` raises instead of returning false (doc divergence)
 
@@ -274,13 +289,415 @@ one behavior, stated, and no silent error values flowing into containers.
 
 ---
 
+## Part C — Design decision records
+
+Resolved design questions, recorded **with the full back-and-forth** — the reasoning
+and the arguments that failed are as important as the conclusion, both for future
+archaeology ("why is it this way?") and because rejected arguments tend to be
+re-proposed.
+
+### C1. The `"" ≡ null` decision (2026-07-03) — RESOLVED: `""` is a string
+
+**Decision:** Lambda accepts `""` as a genuine string value. Empty symbol `''` and
+empty binary `b''` remain normalized to `null`. A `text` keyword/type may be added as
+an alias for `string that (len(~) > 0)` for APIs that want solid strings.
+**Deciding argument:** cross-language interop. **Follow-ups deferred:** truthiness of
+`""`, literal/`==`/`is` mechanics, fixture migration, empty JSON keys (§C1.7).
+
+#### C1.1 Opening position (review)
+
+Finding A3 established that the identification is applied only to *literals*: source
+`""` normalizes to null (`"" == null` true, `"" is string` false), while
+runtime-produced empty strings (from JSON input, `split`, `replace`) are genuine
+strings — so `d.name == ""` is **false** for an empty JSON field: it equals nothing
+writable in source. The formatter meanwhile round-trips `""` vs `null` faithfully.
+Initial recommendation (B1): retire the identification; make `""` a falsy string.
+
+#### C1.2 The designer's case for `"" ≡ null`
+
+1. **Universal null.** `null` should be the one absence value for all types —
+   otherwise every type needs its own null: a null datetime? a null binary? If a
+   "null datetime" is weird, why is a "null string" not equally weird? With `"" ≡
+   null` (and `'' ≡ null`, `b'' ≡ null`), null is a universal null for scalar values
+   (NaN excepted).
+2. **Leverage built-in null support.** The language already has optional types
+   (`T?`), null checks, falsy null — a universal null value rides on all of it.
+3. **Ergonomics.** C/C++/Java/JS force checking *both* `null` and `""` — tedious and
+   verbose. One absence value means one check.
+4. **Document normalization.** In document processing, `<e "">` should normalize to
+   `<e>`, and `<e "" "text">` to `<e "text">`. Strings should be *solid* strings
+   (with chars); text nodes should be solid text nodes.
+5. *(refined in discussion)* **Two-scenario model.** Scenario 1: Lambda-internal —
+   the type system should be coherent, simple, clean; `string` means solid string.
+   Scenario 2: interop with the outside world, which undeniably has `""` — handle it
+   there with a special extended value (e.g. a reserved symbol `'emstr'`), one of
+   several extended types Lambda will need anyway (JS `undefined`, etc.).
+
+#### C1.3 The review's counter-case
+
+1. **The identification cannot be uniform.** Data sources deliver genuine empty
+   strings. Either every boundary normalizes them (then `{"name": ""}` round-trips as
+   `{"name": null}` — data corruption in Lambda's core domain), or the identity
+   fractures into the two-empty-strings state of A3. Empirically found during the
+   discussion: JSON `{"": 1}` already round-trips as `{"''": 1}` — real corruption
+   from the normalization family.
+2. **Sequence-like vs. point-like** (the answer to the symmetry argument). `string`,
+   `binary`, and sliceable `symbol` are *sequences*; sequences have a natural empty
+   case — the identity of concatenation, the base case of induction, the result of
+   `s[2 to 1]`. `""` is not string's *null*; it is string's *zero*, as `0` is int's
+   and `[]` is array's. `datetime`/`int`/`bool` are *point-like*: they have no empty,
+   which is why `t''` is absurd — not because empty ≡ absent. The scalar/container
+   line cuts through the middle of the sequence family; Lambda already keeps the
+   zeros of `[]` and `{}` (both `!= null`) and treats `0` as truthy — strings were
+   the sole exception. `b''` is the sharpest case: zero-length byte sequences arrive
+   from the world (empty files, empty HTTP bodies), and `b'' ≡ null` conflates "empty
+   data" with "no data". (NaN, conversely, is the cautionary tale of an in-band
+   no-value living *inside* a type: `nan == nan` false poisons the algebra.)
+3. **Null-vs-empty is a distinction optional types exist to express.** `name:
+   string?` should have three states: absent, present-empty, present-non-empty
+   (HTML `alt=""` vs missing `alt` is accessibility-meaningful; SQL `''` vs `NULL`;
+   form submitted-empty vs not-submitted). The identification makes the middle state
+   unrepresentable — it fights the optional-type machinery rather than leveraging it.
+4. **Ergonomics achievable without the axiom.** (a) Non-nullable types kill most
+   checks at the root: a param typed `string` (not `string?`) can never be null — the
+   Java double-check pain stems from universal nullability, already fixed in Lambda.
+   (b) Falsiness gives the one-check idiom: make `""` falsy and `if (name)`,
+   `name or "default"` work — Python is the existence proof (`""` falsy yet
+   `"" != None`, famously ergonomic).
+5. **Precedent.** Oracle SQL's `'' = NULL` is the one large-scale precedent for the
+   identification — universally regarded as Oracle's most notorious wart, contradicts
+   ANSI SQL, adopted by no other database, unfixable for compat reasons.
+6. **Document normalization conceded — but as a tree rule, not an equality rule.**
+   The XQuery/XPath Data Model is the precedent: *no empty text nodes in trees*
+   (normalized away at construction), yet `""` remains an atomic value distinct from
+   the empty sequence `()`. "Text nodes are solid" and "`""` is a string" are
+   compatible.
+7. **The `'emstr'` escape hatch inverts the burden.** Recursion problem: `'emstr'` is
+   a symbol, so `x is string` is false for a JS empty string — the classification
+   problem recurs one level up; giving it a distinct string-like TypeId is an empty
+   string with extra steps (and the runtime already has the representation: `String`
+   with `len 0`). Scale problem: this is not future interop — LambdaJS ships today
+   and JS traffics in `""` ubiquitously; Python/Ruby/Bash likewise; JSON/XML/CSV/SQL
+   boundaries all need the shim. When 100% of boundaries need the escape hatch, the
+   escape hatch is the design. (JS `undefined` is different: genuinely foreign,
+   deserving an extended value. `""` is the zero of a type Lambda already has.)
+8. **The erosion problem.** If `string` excludes empty, `split`/`slice`/`replace`
+   must return `string?` — then every intermediate result of string processing is
+   nullable and the null-check tedium returns *inside* Lambda; or the ops absorb null
+   as a concat-identity/len-0 value (the current behavior: `"a" ++ null` → `"a"`,
+   `len(null)` → 0) — in which case null operationally *is* an empty string under a
+   misleading name, same algebra, minus round-trip fidelity.
+
+#### C1.4 What did *not* persuade
+
+The closing challenge — "what should `split("a,,b", ",")` return?" — did **not**
+move the designer: under the solid-string model, `["a", null, "b"]` is perfectly
+natural, and string functions returning null is accepted and consistent. Recorded
+because it will be re-raised: within Scenario 1 the model is internally coherent;
+the case against it does not rest on internal incoherence.
+
+#### C1.5 What did persuade
+
+**Interop.** JS, Python, and the other languages Lambda hosts and models all accept
+`""` as a string. If Lambda string values are to pass between languages with little
+or no hassle — LambdaJS today, the guest-language semantic models next, plus every
+data boundary — accepting `""` as a string is effectively the only workable design
+(C1.3 points 1 and 7).
+
+#### C1.6 The decision
+
+- `""` **is a string**: a genuine value of type `string` with `len 0`.
+- **Symbols and binaries keep normalization**: `'' ≡ null` and `b'' ≡ null` stand.
+  Rationale: symbols are identifiers — point-like in use (the empty name names
+  nothing) even if sliceable in implementation; the review conceded this carve-out,
+  noting the empty-JSON-key corner (§C1.7) needs an answer.
+- **`text` type under consideration**: `type text = string that (len(~) > 0)` — the
+  solid-string discipline recovered as a *visible refinement in signatures* ("parse,
+  don't validate") rather than an ambient equality axiom. Lambda-native APIs (tag
+  names, field names, document text) can require `text`.
+- **Element normalization stays**: `<e "">` → `<e>` as a tree-construction rule
+  (the XDM position), independent of string equality.
+
+#### C1.7 Deferred follow-ups
+
+1. **Truthiness of `""`** — review recommends falsy (preserves the one-check
+   ergonomics that motivated the original design); to be decided.
+2. Literal/operator mechanics: `""` literal denotes the empty string; `"" == null` →
+   false; `"" is string` → true; `match "" { case string }` matches. Implementation
+   touches parse-time literal normalization and `==`/`is`/match paths.
+3. Fixture and stdlib migration: audit for reliance on `"" == null` (note: code
+   comparing *data-derived* empties to `""` or `null` is already broken today, so
+   part of the migration is bug-fixing).
+4. Empty JSON keys: `{"": 1}` currently round-trips as `{"''": 1}` (corruption);
+   with `'' ≡ null` retained for symbols, map keys from data need a defined answer
+   (e.g. string keys for non-identifier keys).
+5. Whether `b''` merits revisiting separately once file/network I/O semantics are
+   formalized (empty file vs. missing file).
+6. Doc updates: `Lambda_Data.md`, `Lambda_Type.md`, `Lambda_Cheatsheet.md` all state
+   `"" == null` is true.
+
+### C2. Truthiness of literals (2026-07-03) — RESOLVED: falsy = {null, false, error, ""}
+
+**Decision (designer ruling):**
+
+1. **All numbers are truthy** — including `0` and `nan`. The C family treating 0 as
+   false is legacy (C had no bool; `int` was bool). Truthy-0 also keeps `or` a safe
+   coalescing operator.
+2. **`""` is falsy** — it is an *empty scalar*.
+3. **There is no `b''` under Lambda** — stated as a type invariant: every `binary`
+   value has `len ≥ 1`; `b''` and any zero-byte result normalize to `null`. (Same
+   invariant holds for `symbol` per C1.)
+4. **`[]` and `{}` are truthy** — *all containers are truthy*. An empty container is
+   empty, but is not nothing: "an empty box is empty, but the box itself is not
+   nothing." Being empty just means having no content; the container itself exists.
+   Supporting examples: `[[]]` is a 2D array, `[null]` is a 1D array with one
+   element, `[""]` is a 1D array — showing `[]` is fundamentally different from
+   `null` and `""`.
+
+So the complete falsy set is **`null`, `false`, `error`, `""`** — exactly one *data*
+value in the whole language is falsy. Elements and ranges, as containers, are always
+truthy (`if (html?<img>)` is always true — see follow-ups).
+
+#### C2.1 The discussion
+
+**Context.** With `""` accepted as a string (C1) and intended falsy, the question was
+whether `0` should follow (C/JS/Python camp) or stay truthy (Ruby/Lua/Lisp camp).
+Empirical baseline: current falsy set was `{null, false, error, ""-as-null}`; `0`,
+`0.0`, `nan`, `[]`, `{}`, `<br>` all truthy; `0 or 99` → `0` (no clobber).
+
+**Review's recommendation: 0 stays truthy** (adopted). Arguments:
+
+- *Coherence with C1:* `""` is falsy because **empty** (`len == 0`), not because
+  zero-like; `0` is not empty — it is a definite point value. The sequence/point
+  taxonomy from C1 decides both questions consistently.
+- *The `or` economy:* with truthy-0, `config.port or 8080` never clobbers a
+  legitimate 0. JS's falsy-0 + `||` bug class forced JS to add `??` (nullish
+  coalescing) as an admission of the mistake; Python has the trap with no fix.
+  Truthy-0 means Lambda never needs a second coalescing operator.
+- *Domain fit:* in a data-processing language, 0 is among the most common legitimate
+  values (counts, indices, offsets, deltas); falsy-0 is the worst-fit convention.
+- *Interop does not transfer from C1:* truthiness is behavior, not data — it never
+  crosses a language boundary. JS's `ToBoolean` lives in the JS engine's/model's own
+  rules. The argument that decided C1 is absent here.
+- *Heritage:* falsy-0 descends from C's boolless int; real-bool languages chose
+  truthy-0 (Ruby, Lua, Lisp/Clojure, Erlang). The Redex project had already recorded
+  "0 is truthy" as a resolved designer ruling.
+- *NaN truthy* (adopted): though Lambda treats failure as falsy and `nan` is float's
+  in-band failure, falsy-nan would let `or` **silently rescue poisoned
+  computations**; NaN should propagate loudly, with `is nan` as the explicit test.
+  Bonus guarantee: "no number is ever falsy."
+
+**Where the review was overruled — `[]`/`{}`.** The review leaned Python-style
+(empty collections falsy), citing the emptiness principle, `if (matches)` ergonomics,
+and Lambda's own empty-for→spreadable-null / `<e "">`→`<e>` precedents. The designer
+ruled containers always truthy via the empty-box argument (above). On reflection the
+ruling is the stronger position, for two reasons the review conceded:
+
+- It preserves `or`-safety *fully*: `or` never clobbers a legitimate value of any
+  type except `""` (where empty→default is almost always intended). The review's
+  version reintroduced for collections the same clobber it used to defend truthy-0.
+- It is more consistent than Python itself, which makes `[]` falsy but arbitrary
+  empty user objects truthy — an inconsistency at the value/object line. The adopted
+  system is essentially **JavaScript's object rule (objects never falsy) with the
+  C-legacy number mistakes removed** — a spot no mainstream language occupies.
+
+#### C2.2 Reconciling C1 and C2: the 2×2 model
+
+The two discussions rest on the same insight — **emptiness ≠ nothingness** ("an empty
+box is not nothing" is C1's "an empty string is not null", one level down; `[""]`
+having one element proves both at once). Two orthogonal axes classify every type:
+
+| | **value** (content-only identity) | **container** (a thing with identity — containers alias, A7) |
+|---|---|---|
+| **has an empty member** | `string`: `""` exists; empty content ⇒ **falsy** | `array`, `map`, `element`, `range`: empty exists; the box itself is something ⇒ **truthy** |
+| **point-like (no empty member)** | `int`, `float`, `bool`, `datetime`: always truthy (`0`, `nan` included) | — |
+| **empty member removed by fiat** | `symbol`, `binary`: `''`/`b''` ⇒ null (C1/C2.3); every member solid ⇒ always truthy | |
+
+Formally: `truthy(v) = false  iff  v = null ∨ v = false ∨ v is error ∨ (v is string ∧ len(v) = 0)` —
+a total function over the value domain, to be encoded as a judgment in the formal
+model.
+
+#### C2.3 Follow-ups
+
+1. **Document the emptiness idiom prominently**: `if (results)` does NOT ask "any
+   results?" — containers are always truthy; the blessed idiom is
+   `len(results) > 0`. This is the #1 footgun for JS/Python-comers, especially with
+   query results (`if (html?<img>)` is always true). Consider a lint hint:
+   "condition is a container — always true; did you mean `len(...) > 0`?".
+2. **State the solid-type invariants**: `binary` and `symbol` have `len ≥ 1` by
+   construction; zero-byte/zero-char results (zero-length slices, conversions) yield
+   `null`. The C1 "solid values" vision survives in these two types.
+   **Empty files (resolved, designer ruling):** an empty file is modeled as a
+   `<file>` *object with empty/null content* — a childless `<file>` element — not as
+   an empty binary. The C2 box model does the work: the file object is the box
+   (exists, truthy), the binary is the content; "empty file" (`<file>` with no
+   content) and "missing file" (error) stay distinguishable, so solid `binary` costs
+   nothing. Note the C1/C2 normalization rules compose to give this for free: text
+   content `""` vanishes by `<e "">` → `<e>`, and `b''` → null, so empty text and
+   binary files uniformly yield a childless `<file>`. To pin down with file-I/O
+   specification: the `<file>` object shape (name/size/mime attributes, content as
+   child).
+3. Update docs (`Lambda_Expr_Stam.md`, error-handling truthiness section,
+   cheatsheet) with the complete falsy set and the total `truthy()` definition;
+   update the Redex model's truthiness accordingly (it already has 0-truthy).
+4. Implementation delta vs. current behavior is minimal: only `""` changes (from
+   falsy-because-null to falsy-as-string, pending C1's literal mechanics); `0`,
+   `nan`, `[]`, `{}`, elements already behave as ruled.
+
+### C3. Integer overflow and the numeric model (2026-07-03) — RESOLVED: 53-bit symmetric `int` promoting to float; Go-aligned machine tier
+
+**Decision (designer ruling):**
+
+- **Two-tier numeric model.** The flex tier is `int` alone; the machine tier is the
+  sized types `i8`…`i64`, `u8`…`u64`.
+- **`int` becomes 53-bit symmetric**: range **±(2⁵³ − 1)** (= JS
+  `MAX_SAFE_INTEGER`), so every `int` is exactly representable as a `float64`.
+  On overflow, `int` arithmetic **auto-promotes to float** (correctly-rounded
+  float64 result). Types are sticky: once float, stays float; no auto-demotion.
+- **Machine tier is Go-aligned**: runtime overflow wraps (two's complement, all
+  ops); constant/literal overflow is a **compile error** (`let x: i8 = 200i8`
+  rejected); division by zero → error; `MinInt / -1` wraps to `MinInt` (Go spec
+  behavior, stated explicitly since C makes it UB).
+- **Literal strictness**: an unsuffixed integer literal that exceeds the `int`
+  range is a **compile error** — never a silent conversion. The programmer writes
+  `...i64`, `...n` (decimal), or an explicit float literal.
+- **Data takes the smallest exact home**: input parsers (JSON/CSV/…) cannot reject
+  data, so integer tokens land in `int`, else `int64`, else `decimal` — always
+  exact. (Large database IDs — the Twitter-snowflake class — survive intact,
+  better than JS itself manages.)
+
+#### C3.1 Current implementation behavior (probed — the bug catalog)
+
+All verified against master `lambda.exe`:
+
+| Probe | Result | Status under the ruling |
+|---|---|---|
+| `36028797018963967` (2⁵⁵−1) | fits | range shrinks to ±(2⁵³−1); values in (2⁵³, 2⁵⁵) need migration audit |
+| `36028797018963967 + 1` | `error` (unchecked error value, flows silently — A6 family) | becomes float promotion |
+| `3000000000 * 3000000000` | `error` | becomes float promotion |
+| `127i8 + 1i8` → `-128`, `255u8 + 1u8` → `0` | silent wrap | **correct** — now blessed as the Go tier |
+| `9223372036854775807` (literal) | **`9.22337e+18`** — silent float at parse time, precision lost | becomes a compile error (literal strictness) |
+| `9000000000000000000 + 9000000000000000000` | `1.8e+19` — both operands corrupted *before* the `+` ran | fixed by literal strictness |
+| `36028797018963966 + 0.5` | `3.60288e+16` — non-overflow int/float mixing silently loses precision (int in (2⁵³, 2⁵⁵) exceeds float mantissa) | **impossible by construction** once int ⊆ float64 |
+| `2.0**53 == 2.0**53 + 1` | `true` | inherent float behavior past 2⁵³ — documented, not fixed |
+| `9007199254740992 + 1` | `9007199254740993` **exact** | shows current int is *more* precise than float in [2⁵³, 2⁵⁵] — the range being given up |
+| `type(3000000000 * 3000000000)` | `error` — `type()` propagates error values (Redex disagreement #5) | separate fix |
+| `1/0` → `inf`, `1 div 0` → `error` (A2) | inconsistent failure modes, undocumented | A2 documentation still pending |
+
+Summary of the pre-existing trichotomy (A1): `int` overflow → error value;
+sized types → silent wrap; oversized literal → silent float. Three regimes, none
+documented; the ruling reduces it to two *stated* regimes (promote / wrap) plus
+compile-time strictness.
+
+#### C3.2 The discussion arc (three rounds)
+
+**Round 1 — checked errors (review's original B2, retracted).** Checked-error
+everywhere matches the `T^E` philosophy, but is hostile ergonomics for a scripting
+language: every `+` becomes raise-able, poisoning ordinary arithmetic. The current
+state (unchecked error *values* flowing from overflow) was the worst of all worlds.
+The designer's auto-promotion instinct was accepted as the right direction.
+
+**Round 2 — promote to decimal (review's counter-proposal, ultimately not
+adopted).** The case for decimal128 as the promotion target, recorded in full since
+it may be re-proposed:
+
+- float64 has a 53-bit mantissa vs (then) 56-bit int: every overflow result is
+  ≥ 2⁵⁵ where float spacing (ulp) is 8 — promoted values snap to multiples of 8,
+  and `(2⁵⁵−2)+2 == (2⁵⁵−2)+3` collides immediately at the boundary.
+- decimal128 carries 34 significant digits ≈ 113 bits, and
+  `int56 × int56 < 2¹¹⁰ ≈ 1.3×10³³ < 10³⁴` — so **every single-operation overflow
+  result fits exactly**. Promotion would be lossless, always.
+- Precedent: Scheme/Python promote exact→exact; you enter float only by explicit
+  choice. JS's all-numbers-are-float needed the BigInt retrofit — the cautionary
+  tale. Slogan: "integers get bigger, never blurrier."
+
+**The designer's objections to decimal** (had tried this design before):
+
+1. **The lattice problem**: float literals like `0.5` are `float`; with int→decimal
+   promotion, int-mixed-with-float arithmetic becomes cumbersome in both the type
+   system and the implementation (what is `decimal + 0.5`, at what precision? —
+   Scheme needed its whole exact/inexact tower to manage this).
+2. **Performance**: decimal cannot compete with hardware doubles; post-promotion
+   chained arithmetic stays at decimal speed — a real cliff for hot loops.
+3. Initial stance on float precision loss: "let it be — people must bear float
+   precision loss anyway."
+
+**Round 3 — the 53-bit alignment (designer's second thought, adopted).** Shrink
+`int` from 56 to 53 bits to align with the float mantissa. The review endorsed this
+over its own decimal proposal for a decisive reason: **decimal promotion never fixed
+the mixing path.** Even with decimal, non-overflow expressions like
+`36028797018963966 + 0.5` still silently corrupted the int operand (ints in
+(2⁵³, 2⁵⁵) exceed the mantissa). The 53-bit alignment fixes conversion *and* mixing
+*and* overflow in one stroke: **`int` is exactly the integer subset of `float64`** —
+one numeric continuum; no value is ever changed by conversion, only by genuine,
+documented float rounding.
+
+Additional points in favor, recorded:
+
+- **JIT / gradual-guarantee bonus (B7)**: with int ⊂ float64, the JIT can hold
+  int-typed values in double registers and convert freely with zero observable
+  difference — making inference-unobservability structurally cheap. The historic
+  JS→MIR numeric-inference bug class existed precisely because int56 and double were
+  not interchangeable; this removes the trap at the representation level.
+- **Intuition transfer**: ±(2⁵³−1) is exactly JS's safe-integer boundary; JS
+  engines' SMI/HeapNumber model lives on the same value space. Lambda adopts the
+  coherent core of the JS number model while keeping what JS lacks — a real `int`
+  type below the boundary and machine ints beside it.
+- **Symmetric range deletes an edge-case family**: with ±(2⁵³−1) there is no MinInt
+  in the flex tier — negation and `abs` are total; the `MinInt/-1` anomaly exists
+  only in the machine tier, where Go's rule covers it.
+
+**Costs accepted deliberately** (recorded so they are not relitigated):
+
+- Overflow promotion is *approximately* correct, not exact: `(2⁵³−1) + 2` promotes
+  to `2⁵³+1`, which rounds to `2⁵³` — so `x+1 == x+2` collisions begin immediately
+  past the boundary for odd results. This is the trade against decimal's exactness,
+  made for continuum coherence, hardware performance, and lattice simplicity.
+  Precision-critical big-integer work opts into `i64`/`u64` or `decimal` explicitly.
+- Sticky types are observable: `type()` distinguishes an `int` from an equal
+  promoted `float` (JS hides this only by having a single number type).
+- The range shrinks: current ints in (2⁵³, 2⁵⁵) — where `int` today is more precise
+  than `float` — lose exact representation. Anything relying on that range is
+  arguably already a latent mixing bug; still, fixtures and stdlib need an audit.
+
+#### C3.3 Follow-ups
+
+1. Implement: range change, promotion on overflow (replacing error values), literal
+   strictness (both tiers), machine-tier constant checks, smallest-exact-home in
+   input parsers.
+2. Document the boundary: expose `math.max_int` (= 2⁵³−1) or similar; document that
+   `int` arithmetic enters float past it; document A2's `/`-vs-`div` failure modes
+   while in the area (still pending).
+3. Migration audit: fixtures/stdlib for values in (2⁵³, 2⁵⁵).
+4. Separate fix, surfaced by probing: `type(error_value)` propagates the error
+   instead of returning a type (Redex disagreement #5).
+5. Formal model (Stage 4): the flex-tier rule is `n₁ op n₂ → int(r) if |r| ≤ 2⁵³−1,
+   else float64(r)`; machine tier is `mod 2ⁿ` — both now clean one-line rules, which
+   was the point of forcing the decision.
+
+#### C3.4 Designer addenda (for the record)
+
+1. **Auto-promotion is a safety net, not a precision guarantee.** If a user wants
+   precise integer arithmetic (beyond the `int` range), they should **start with
+   `decimal` in the first place** (`n`-suffix literals). Depending on auto-promotion
+   for precision is unreliable — past the boundary the arithmetic is float, with
+   float's rounding. This is the blessed idiom to document alongside `math.max_int`.
+2. **Implementation history of `int`'s width.** For a period, Lambda internally
+   mapped `int` to **int32** — simple, but wasteful of the extra tag-payload bits —
+   and was later widened to **int56** (the full tagged-pointer payload). This ruling
+   narrows it to **53-bit symmetric**, trading 3 payload bits for exact float64
+   alignment. Recorded so the width's trajectory (32 → 56 → 53) and the reasoning at
+   each step aren't lost.
+
+---
+
 ## Triage summary
 
 | ID | Finding | Suggested disposition |
 |----|---------|----------------------|
-| A1 | Overflow trichotomy | **Decide & fix** (B2); literal→float is a bug regardless |
-| A2 | div/mod conventions | **Document** (behavior itself defensible) |
-| A3 | `"" ≡ null` leaks | **Design decision needed** (B1) |
+| A1 | Overflow trichotomy | **RESOLVED** (§C3): 53-bit symmetric `int` → float promotion; Go-aligned machine tier; literal strictness; smallest-exact-home for data |
+| A2 | div/mod conventions | **Document** (behavior itself defensible); machine-tier corners (div-by-zero, MinInt/-1) now ruled in §C3 |
+| A3 | `"" ≡ null` leaks | **RESOLVED** (§C1): `""` is a string; `''`/`b''` stay null; `text` type considered; follow-ups in §C1.7 |
 | A4 | `'a' == "a"` raises | **Fix or re-document** — impl and docs must agree |
 | A5 | `==` non-reflexive / repr-sensitive | Document NaN; **fix ArrayNum ==** (task_38782787) |
 | A6 | OOB trichotomy, silent error values | **Decide & fix** (B8) |
@@ -288,7 +705,7 @@ one behavior, stated, and no silent error values flowing into containers.
 | A8 | Covariance log-only failure | **Fix failure mode**; decide assignment-subtyping rule |
 | A9 | REPL rollback replay | **Bug fix** (tooling) |
 | A10 | Spec gaps (generics, `as`, open maps, match order, `~`) | **Document**; delete aspirational generics text or implement |
-| B1–B8 | Design recommendations | Discussion — this document's purpose |
+| B1–B8 | Design recommendations | Discussion — this document's purpose. B1 resolved via §C1 (adopted for strings, rejected for symbols/binary). B2 superseded by §C3 (checked-error retracted; promotion + Go tier adopted) |
 
 Every "decide" row above is a decision that formal rules (the Redex model of
 [Lambda_Semantics.md](Lambda_Semantics.md), or the proposed native DSL) will force
