@@ -46,6 +46,11 @@ one verification harness — five language models.
   randomized testing against real implementations.
 - **Smoosh** (Greenberg & Blatt) — the executable POSIX shell semantics; the reference
   point for how gnarly (and how tractable) modeling Bash actually is.
+- **In-house: the Lambda Redex model** (`vibe/Lambda_Semantics.md`) — an existing
+  PLT Redex big-step model of Lambda's functional core, procedural extension, and
+  object types (~8k lines of Racket), with an `--emit-sexpr` AST bridge and a
+  `make test-redex-baseline` harness already at 87/194 fixture agreement. It validates
+  this proposal's end goal empirically and is discussed in §13.4.
 
 The design below is closest in spirit to Redex ("embedded, executable, test-focused")
 with K's configuration/strictness machinery and Ott's binder specs grafted on.
@@ -551,7 +556,93 @@ captured goldens.
 
 ---
 
-## 8. Deliberate non-goals (v1)
+## 8. Further directions: what else the model buys
+
+Fixture verification (§7) is one consumer of a more general asset — an executable,
+queryable definition of "what should happen." Once the model exists, the following
+applications open up, roughly ordered by how directly they pay off for this repo.
+None are v1 scope; all are reachable without redesign.
+
+### 8.1 Fuzzing the JIT with a real oracle
+
+Once `syntax` sorts exist, Redex-style random program generation is nearly free — and
+the model says what each generated program *should* produce. This targets the bug
+class historically found by accident rather than by search: the JS→MIR
+numeric-inference bugs, the pn param-inference mis-typing, the reg-0 index-assign
+sentinel, the GC-rooting use-after-free were each exposed because some benchmark
+happened to trip them. A generator biased toward the delicate corners (numeric
+promotion boundaries, closures over `var`, spread-flattening, error propagation
+through pipes) plus the model as oracle finds these systematically.
+
+### 8.2 Arbitrating between the three execution paths
+
+`lambda-eval.cpp` interpretation, MIR-Direct, and legacy C2MIR are already de-facto
+differential tests of each other — but when they disagree, deciding which is right is
+reasoning from intent. The model is the tie-breaker, and disagreement between any one
+backend and the model localizes the fault to that backend rather than to "somewhere in
+the pipeline."
+
+### 8.3 Spec-first language evolution
+
+Lambda grows features at a fast clip (`push`/`splice`, error destructuring, typed
+arrays, the object system), and today a feature's edge-case semantics is settled
+implicitly by whatever the implementation does — discovered later as inference bugs.
+With the DSL, an RFC ships as rules: edge cases (how does `^` interact with pipes?
+what does spread do inside a `for` inside an array literal?) surface when the rule is
+*written*, not when a benchmark breaks. The rules then become the regression contract
+when the transpiler is refactored.
+
+### 8.4 Testing metatheory, not just programs
+
+Property-test the language design itself, over random programs:
+
+- **type soundness** — run the typing judgment, then step the term: well-typed terms
+  don't get stuck;
+- **determinism** — no two rules fire on the same configuration;
+- **equivalence laws** — `xs | f | g` ≡ `xs | g(f(~))`, purity of `fn`, confluence of
+  the functional subset.
+
+The last item matters for the performance work: every optimization proposal
+implicitly claims a semantic equivalence, and the model can check that claim on
+random inputs before the optimization lands.
+
+### 8.5 Generated, always-correct documentation
+
+Ott's headline feature: since `syntax`/`rule`/`judgment` declarations are data after
+`build_ast`, rendering them to LaTeX/HTML/Markdown is a formatter. The prose
+semantics in `doc/Lambda_*.md` can carry generated rule boxes that *cannot* drift
+from the checked model — and Lambda's own math/LaTeX pipeline is unusually well
+suited to render inference rules.
+
+### 8.6 Tooling built on the judgments
+
+The typing judgment is a type checker for free — usable for hover types in an LSP,
+ahead-of-time diagnostics in the REPL, or a `lambda check script.ls` mode. Derivation
+recording (§5.4) gives an "explain" facility — *why* is this expression `int`? *why*
+is this term stuck? — useful both to users and when triaging engine bugs.
+
+### 8.7 Conformance grading for the guest languages
+
+For JS/Python/Bash/Ruby, the model doubles as a coverage instrument: run a corpus
+through model and runtime, and the diff *is* the compat report — which constructs the
+runtime mis-executes versus simply doesn't reach. That is sharper than a bare
+pass-rate (e.g. the Node-compat baseline), which counts outcomes without attributing
+semantic causes. The same mechanism validates the TS→JS erasure pass as a judgment.
+
+### 8.8 Long-term options the rule format keeps open
+
+K's ecosystem shows where this road goes if ever wanted: symbolic execution (rules
+over terms with logical variables), deductive program verification, and
+correct-by-construction interpreter generation. All out of scope here — but they are
+the reason rules stay declarative data rather than being compiled away irreversibly.
+
+The common thread: §8.1–8.4 attack the same root problem as §7 — the implementation
+is currently its own specification — but from the direction of *future* code
+(fuzzing, spec-first) and *invariants* (metatheory) rather than existing goldens.
+
+---
+
+## 9. Deliberate non-goals (v1)
 
 - **Concrete-syntax rules** (K's writing rules in the object language's own notation).
   Element notation is a readable term syntax; tree-sitter ingestion covers real
@@ -569,7 +660,7 @@ captured goldens.
 
 ---
 
-## 9. Implementation plan
+## 10. Implementation plan
 
 Staged so each stage lands with its own tests and is useful standalone.
 
@@ -620,7 +711,7 @@ listable declaration (§5.6).
 
 ---
 
-## 10. Open questions
+## 11. Open questions
 
 1. **Rewrite arrow spelling** — `~>` assumed here; `-->` is the visible alternative.
    `~>` conflicts with nothing in the current grammar but sits close to `~` (current
@@ -641,7 +732,7 @@ listable declaration (§5.6).
 
 ---
 
-## 11. Summary
+## 12. Summary
 
 Lambda's elements, symbols, recursive union types, string patterns, error values, and
 the view-template precedent already provide the term language, grammar language, and
@@ -656,3 +747,155 @@ The end goal is concrete: an executable Lambda semantics that independently veri
 the `test/lambda` fixtures, converting a golden suite that can only detect regressions
 into one that can detect *captured bugs* — and then extends the same oracle to every
 guest language the engine runs.
+
+---
+
+# Follow-up Parts
+
+The sections below were added after the original proposal, following a close review
+of Lambda's own semantics (findings in
+[Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md)) and an assessment of how
+far the framework stretches toward low-level languages.
+
+## 13. Follow-up: is Lambda ready to be the meta-language?
+
+Honest assessment, in four parts.
+
+### 13.1 The data model: yes
+
+Elements, symbols-distinct-from-strings, structural equality, occurrence types,
+errors-as-values with compile-enforced handling — the fragment the DSL engine and
+models stand on is more principled than any mainstream scripting language's core.
+Nothing in the review shook the §2 mapping table; the term language, grammar
+language, and failure semantics are sound foundations.
+
+### 13.2 The definition rigor: not yet
+
+The docs are user-guide-grade, not spec-grade, and probing the implementation found
+doc-vs-implementation divergences on core operators within minutes (`'a' == "a"`
+raises where docs say `false`; three inconsistent integer-overflow regimes; three
+aliasing regimes; OOB indexing yielding unchecked error values). The full verified
+list is [Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md) Part A (findings
+A1–A10), with design recommendations in Part B.
+
+This does not undermine the proposal — it sharpens it. The DSL uses a bounded
+meta-fragment, and every A-finding is precisely a decision the formal rules would
+have forced anyway. But it does create a prerequisite:
+
+### 13.3 Prerequisite: meta-fragment hardening
+
+Before Stage 4 (the Lambda model) is written, the semantic corners the *meta-language
+itself* relies on must be decided and fixed — at minimum A1 (overflow regimes,
+because model arithmetic runs on Lambda numerics; this supersedes open question 5 in
+§11), A5 (`==` reflexivity and representation-independence, because `==` is the
+harness's comparison primitive), and A7 (aliasing, because the rewrite engine passes
+terms around). The triage table in Lambda_Formal_Semantics.md is the worklist; the
+Stage-4 gate is "every finding the meta-fragment touches is resolved (fixed or
+formally documented as-is)."
+
+A second, structural caveat: Lambda's type system is *gradual*, not "strong static"
+as the docs claim, and inference is currently **observable** — inferred types have
+changed runtime results twice (the pn param float-div truncation; the JS→MIR
+numeric-inference bugs). For a meta-language this must become an invariant: erasing
+inferred types must never change observable results (the "gradual guarantee",
+finding B7). The model itself is the checking instrument — it has no inference, so
+any model-vs-runtime divergence on inference-sensitive programs is a violation by
+construction.
+
+### 13.4 The existing Redex model: prior art, seed, and second oracle
+
+[Lambda_Semantics.md](Lambda_Semantics.md) documents an existing PLT Redex model of
+Lambda — functional core, procedural extension (store-based), and object types, with
+an `--emit-sexpr` bridge from the production parser and a fixture-verification
+harness (`make test-redex-baseline`, 87/194 agreement, and a designer-ruling protocol
+for disagreements). Three consequences for this proposal:
+
+- **Feasibility is no longer speculative.** The Redex project has already executed
+  this proposal's §7 loop end-to-end: model → bridge → fixture comparison →
+  disagreement triage. Its §4.7 disagreement log (e.g. `list` vs `array` under `is`,
+  `fill()` coercion into typed arrays, `type(error_value)`) is exactly the
+  "suspect golden / underspecified semantics" bucket §7.1 predicts.
+- **It is a migration source, not a competitor.** The native DSL replaces the
+  external Racket dependency and big-step-only shape with in-language declarations,
+  small-step configurations, strictness generation, binder support, and guest-language
+  reach. The Redex big-step rules port naturally to `judgment` declarations
+  (§5.4 compiles moded judgments to exactly the recursive-function shape Redex's
+  evaluator has); the `--emit-sexpr` mapping is the direct precedent for
+  `input(f, 'lambda')` (§4.4); and the Redex-verified fixture subset seeds Stage 5's
+  `semantics-manifest.json`.
+- **Keep it as the independent cross-check.** §7.3's honest weakness was that model
+  and runtime share a host. A maintained Redex fragment (even just arithmetic +
+  closures) runs on a *different* host and satisfies the "escape hatch for full
+  independence" §7.3 wanted — cheaper than the deferred K exporter.
+
+**Verdict:** ready in structure, not yet in rigor — and the gap is a finite,
+enumerated worklist (Lambda_Formal_Semantics.md) rather than an open-ended research
+problem. The fixture-verification goal and the hardening prerequisite reinforce each
+other: fixing the meta-fragment is the first triage sweep.
+
+## 14. Follow-up: modeling low-level languages — the C+ subset
+
+Can the framework stretch to a C/C++ subset — specifically the **C+ convention**
+(`doc/dev/C_Plus_Convention.md`) Lambda itself is written in? Yes, and it is arguably
+a *better* fit than the scripting languages, because low-level formalization is the
+most battle-tested application of this style: CompCert's **Clight** (the verified-C
+fragment), and **KCC / RV-Match**, which turned an executable K semantics of C into a
+commercial undefined-behavior detector.
+
+### 14.1 What a C+ model needs beyond §6
+
+- **A memory model as cells — with abstract pointers.** Model pointers
+  CompCert-style as *(block, offset)* pairs rather than raw integers over a flat byte
+  array: allocation creates a fresh block (§4.3 `fresh()`), field access is
+  offset-within-block, and pointer arithmetic that escapes its block simply has no
+  rule. Struct layout can stay abstract (field-indexed, as Clight does) unless a
+  model needs `sizeof`/padding fidelity — then a per-target layout judgment computes
+  offsets explicitly.
+- **UB as stuckness — the payoff.** Out-of-bounds access, use-after-free, signed
+  overflow, aliasing violations: in a rewrite semantics these are configurations
+  where **no rule applies**, i.e. detected, not silently executed. That converts the
+  model into a UB detector for C+ code — directly relevant given the engine's own bug
+  history (JIT GC-rooting use-after-free, `array_num_get` guard violations) is
+  dominated by exactly this class.
+- **Bit-precise arithmetic in the meta-language.** A C model needs exact
+  i8…u64/f32/f64 operations including wrap. Ironically, Lambda's sized types with
+  wrapping semantics are the right tool — but per finding A1
+  ([Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md)), their own semantics is
+  currently implicit. The §13.3 hardening prerequisite therefore gates this model
+  too: the meta-language's numeric story must be written down before it can carry
+  someone else's.
+- **Control flow** (`goto`, `switch` fallthrough, `break`/`continue`) is the k-cell
+  discipline of §6.2, unchanged. Function pointers are store values. `longjmp`-style
+  features are absent from C+ and stay out of scope.
+
+### 14.2 Why C+ specifically is a well-chosen target
+
+The C+ convention deliberately excludes the features that make full C++
+formalization hopeless — exceptions, virtual dispatch, RTTI, template
+metaprogramming (no one has formalized their interaction). What remains is roughly
+Clight plus a small delta, each part cheap in the framework:
+
+| C+ feature | Modeling cost |
+|---|---|
+| Structs, pointers, arrays | The §14.1 memory model — the core work |
+| Struct inheritance (layout extension) | Prefix-layout: field lookup walks the base chain — one rule |
+| Inline member functions | Desugar to free functions with explicit `this` — a normalization judgment |
+| `extern "C"` / dual `.h`/`.hpp` views | Irrelevant at the semantic level (same layout by construction) |
+| Manual ref-counting, pools, arenas | Ordinary heap operations *in* the model — and their disciplines (no leak, no double-free, arena-outlives-borrower) become checkable properties |
+| Error sentinels, `GUARD_ERROR` | Plain values and rules; no unwinding machinery needed |
+| Templates (utility-only) | Instantiate-then-model; no generic template semantics required |
+
+Tree-sitter's C/C++ grammar covers ingestion (§4.4). The scope is a Clight-sized
+effort, not a C++-standard-sized one.
+
+### 14.3 The horizon: the full bootstrap
+
+The Lambda runtime is *written* in C+. A C+ model therefore closes the deepest loop
+available to this project: model enough of C+ to state and check invariants of the
+runtime's own core — `Item` tagging (a value is never read at a type it wasn't
+tagged with), ref-count/ownership discipline, arena-lifetime rules ("arena data
+lives until reset"), the GC-rooting invariant that BUG-001 violated. That is Lambda
+modeling the language it is implemented in, with its own implementation as the test
+corpus. Explicitly a horizon goal, not a milestone — but nothing in the DSL design
+needs to change to keep it reachable, which is itself a reason to prefer the §14.1
+block-based memory model from the start.
