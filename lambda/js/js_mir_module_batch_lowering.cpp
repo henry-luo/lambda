@@ -2550,6 +2550,88 @@ TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg) {
     return LMD_TYPE_ANY;
 }
 
+static int jm_p6_param_index_for_identifier(JsAstNode* arg, JsFuncCollected* fc) {
+    if (!arg || arg->node_type != JS_AST_NODE_IDENTIFIER || !fc || !fc->node) return -1;
+    JsIdentifierNode* id = (JsIdentifierNode*)arg;
+    char vname[128];
+    snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+    JsAstNode* p = fc->node->params;
+    for (int i = 0; p && i < fc->param_count && i < 16; i++, p = p->next) {
+        char pname[128];
+        jm_get_param_name(p, i, pname, sizeof(pname));
+        if (strcmp(vname, pname) == 0) return i;
+    }
+    return -1;
+}
+
+static TypeId jm_p6_evidence_type(P6NarrowEvidence* e) {
+    if (!e || e->other_count > 0) return LMD_TYPE_ANY;
+    if (e->float_count > 0) return LMD_TYPE_FLOAT;
+    if (e->int_count > 0) return LMD_TYPE_INT;
+    return LMD_TYPE_ANY;
+}
+
+static bool jm_p6_function_has_duplicate_param_names(JsFunctionNode* fn) {
+    if (!fn) return false;
+    char names[16][128];
+    int count = 0;
+    for (JsAstNode* p = fn->params; p && count < 16; p = p->next) {
+        char pname[128];
+        jm_get_param_name(p, count, pname, sizeof(pname));
+        for (int i = 0; i < count; i++) {
+            if (strcmp(names[i], pname) == 0) return true;
+        }
+        snprintf(names[count], sizeof(names[count]), "%s", pname);
+        count++;
+    }
+    return false;
+}
+
+static bool jm_p6_function_allows_native_specialization(JsFuncCollected* fc) {
+    if (!fc || !fc->node) return false;
+    JsFunctionNode* fn = fc->node;
+    if (jm_p6_function_has_duplicate_param_names(fn)) return false;
+    if (fn->is_arrow && fn->body &&
+        fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) return false;
+    return true;
+}
+
+static TypeId jm_p6_arg_type_with_evidence(JsMirTranspiler* mt, JsAstNode* arg,
+                                           JsFuncCollected* fc,
+                                           P6NarrowEvidence* evidence_for_func) {
+    int param_index = jm_p6_param_index_for_identifier(arg, fc);
+    if (param_index >= 0) {
+        TypeId evidence_type = jm_p6_evidence_type(&evidence_for_func[param_index]);
+        if (evidence_type != LMD_TYPE_ANY) return evidence_type;
+    }
+    if (!arg || arg->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
+        return jm_p6_static_arg_type(mt, arg);
+    }
+
+    JsBinaryNode* bin = (JsBinaryNode*)arg;
+    TypeId lt = jm_p6_arg_type_with_evidence(mt, bin->left, fc, evidence_for_func);
+    TypeId rt = jm_p6_arg_type_with_evidence(mt, bin->right, fc, evidence_for_func);
+    if (lt == LMD_TYPE_DECIMAL || rt == LMD_TYPE_DECIMAL) return LMD_TYPE_ANY;
+    switch (bin->op) {
+    case JS_OP_ADD:
+        if (lt == LMD_TYPE_STRING || rt == LMD_TYPE_STRING) return LMD_TYPE_STRING;
+        if (lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
+        if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) return LMD_TYPE_INT;
+        return LMD_TYPE_ANY;
+    case JS_OP_SUB: case JS_OP_MUL: case JS_OP_MOD:
+        if (lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
+        if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) return LMD_TYPE_INT;
+        return LMD_TYPE_ANY;
+    case JS_OP_DIV: case JS_OP_EXP:
+        return LMD_TYPE_FLOAT;
+    case JS_OP_BIT_AND: case JS_OP_BIT_OR: case JS_OP_BIT_XOR:
+    case JS_OP_BIT_LSHIFT: case JS_OP_BIT_RSHIFT: case JS_OP_BIT_URSHIFT:
+        return LMD_TYPE_INT;
+    default:
+        return jm_p6_static_arg_type(mt, arg);
+    }
+}
+
 // ============================================================================
 // Phase 1.78: P4b constructor call-site type propagation
 // Walks AST to find new ClassName(args) expressions and accumulates argument
@@ -2783,7 +2865,7 @@ void jm_p6_narrow_walk(JsMirTranspiler* mt, JsAstNode* node,
             int fi = (int)(callee_fc - mt->func_entries);
             JsAstNode* arg = call->arguments;
             for (int pi = 0; pi < callee_fc->param_count && pi < 16; pi++) {
-                TypeId at = arg ? jm_p6_static_arg_type(mt, arg) : LMD_TYPE_ANY;
+                TypeId at = arg ? jm_p6_arg_type_with_evidence(mt, arg, callee_fc, evidence[fi]) : LMD_TYPE_ANY;
                 if (at == LMD_TYPE_INT || at == LMD_TYPE_BOOL)
                     evidence[fi][pi].int_count++;
                 else if (at == LMD_TYPE_FLOAT)
@@ -5431,8 +5513,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // This allows jm_resolve_native_call() (which checks has_native_version) to see the flag
         // when transpiling earlier functions that call later-defined native functions, enabling
         // `let x = f(...)` to propagate f's return type into x's variable type.
+        // Native specialization cannot use duplicate MIR param names, and arrow
+        // block bodies still need boxed statement-completion return handling.
         bool eligible = (fc->capture_count == 0 && fc->param_count > 0 &&
                          fc->param_count <= 16 && !fc->uses_arguments &&
+                         jm_p6_function_allows_native_specialization(fc) &&
                          !fc->has_non_simple_params &&
                          (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT));
         if (eligible) {
@@ -5474,8 +5559,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // allocate evidence per function per param (max 16 params)
         P6NarrowEvidence (*evi)[16] = (P6NarrowEvidence (*)[16])mem_calloc(
             mt->func_count * 16, sizeof(P6NarrowEvidence), MEM_CAT_JS_RUNTIME);
-        // walk program body (top-level calls)
-        jm_p6_narrow_walk(mt, (JsAstNode*)program->body, evi);
+        // Program bodies are linked statement lists; walking only the head
+        // misses later top-level calls that seed recursive parameter types.
+        for (JsAstNode* top = (JsAstNode*)program->body; top; top = top->next) {
+            jm_p6_narrow_walk(mt, top, evi);
+        }
         // walk all function bodies
         for (int i = 0; i < mt->func_count; i++) {
             JsFuncCollected* fc = &mt->func_entries[i];
@@ -5519,6 +5607,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 bool eligible = (fc->capture_count == 0 &&
                                  !(fc->node && fc->node->is_generator) &&
                                  !(fc->node && fc->node->is_async) &&
+                                 jm_p6_function_allows_native_specialization(fc) &&
                                  !fc->has_non_simple_params &&
                                  fc->param_count <= 16);
                 if (eligible) {
@@ -5541,6 +5630,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     fc->has_native_version = false;
                     fc->native_func_item = 0;
                 }
+                // P6 can make recursive accumulator functions native-eligible;
+                // recompute TCO after narrowing so deep tail calls stay loops.
+                fc->is_tco_eligible = eligible && jm_has_tail_call(fc->node->body, fc);
             }
         }
         mem_free(evi);

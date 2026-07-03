@@ -692,7 +692,10 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                 MIR_new_reg_op(mt->ctx, existing_var->reg),
                                 MIR_new_reg_op(mt->ctx, val)));
                             jm_write_env_backing_if_needed(mt, existing_var, val, LMD_TYPE_ANY);
-                            jm_scope_env_mark_and_writeback(mt, vname, existing_var->reg);
+                            // Hoisted `var` initializers may shadow same-named
+                            // outer helpers; update the slot for this declarator.
+                            jm_scope_env_mark_and_writeback_binding(mt, vname, d->id,
+                                existing_var->reg);
                             jm_define_global_var_property_for_main_var(mt, var, id, val);
                             // v18: function name inference for anonymous function expressions
                             if (d->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
