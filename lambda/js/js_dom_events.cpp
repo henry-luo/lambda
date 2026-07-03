@@ -148,7 +148,13 @@ static void js_dom_run_form_submit_navigation(DomElement* form, DomElement* subm
 static void event_apply_new_target_prototype(Item event) {
     Item new_target = js_get_new_target();
     TypeId nt_type = get_type_id(new_target);
-    if (nt_type != LMD_TYPE_MAP && nt_type != LMD_TYPE_FUNC) return;
+    if (nt_type != LMD_TYPE_MAP && nt_type != LMD_TYPE_FUNC) {
+        // Native-dispatched events are not constructed with new.target, but
+        // descriptor checks still expect them to inherit Event.prototype.
+        Item event_proto = js_get_intrinsic_prototype_for_class(JS_CLASS_EVENT);
+        if (get_type_id(event_proto) == LMD_TYPE_MAP) js_set_prototype(event, event_proto);
+        return;
+    }
 
     Item proto = js_property_get(new_target,
         (Item){.item = s2it(heap_create_name("prototype"))});

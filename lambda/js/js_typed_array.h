@@ -2,7 +2,7 @@
  * JavaScript Typed Array, ArrayBuffer, and DataView Support for Lambda
  *
  * Implements Int8Array, Uint8Array, Int16Array, Uint16Array,
- * Int32Array, Uint32Array, Float32Array, Float64Array,
+ * Int32Array, Uint32Array, Float16Array, Float32Array, Float64Array,
  * ArrayBuffer, and DataView.
  *
  * Typed arrays are stored as Map objects with a sentinel marker,
@@ -28,6 +28,7 @@ typedef enum JsTypedArrayType {
     JS_TYPED_UINT8_CLAMPED,
     JS_TYPED_BIGINT64,
     JS_TYPED_BIGUINT64,
+    JS_TYPED_FLOAT16,
 } JsTypedArrayType;
 
 // ArrayBuffer: raw byte storage

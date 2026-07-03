@@ -12,11 +12,24 @@ static bool js_eval_source_compact_stack[JS_EVAL_SOURCE_STACK_MAX];
 static int js_eval_source_stack_depth = 0;
 static bool js_eval_source_roots_registered = false;
 
+#define JS_RUNTIME_CALL_STACK_MAX 256
+static Item js_runtime_call_stack[JS_RUNTIME_CALL_STACK_MAX];
+static Item js_runtime_call_stack_filename[JS_RUNTIME_CALL_STACK_MAX];
+static int js_runtime_call_stack_depth = 0;
+static bool js_runtime_call_stack_roots_registered = false;
+
 static void js_eval_source_register_roots(void) {
     if (js_eval_source_roots_registered) return;
     heap_register_gc_root_range((uint64_t*)js_eval_source_filename_stack, JS_EVAL_SOURCE_STACK_MAX);
     heap_register_gc_root_range((uint64_t*)js_eval_source_code_stack, JS_EVAL_SOURCE_STACK_MAX);
     js_eval_source_roots_registered = true;
+}
+
+static void js_runtime_call_stack_register_roots(void) {
+    if (js_runtime_call_stack_roots_registered) return;
+    heap_register_gc_root_range((uint64_t*)js_runtime_call_stack, JS_RUNTIME_CALL_STACK_MAX);
+    heap_register_gc_root_range((uint64_t*)js_runtime_call_stack_filename, JS_RUNTIME_CALL_STACK_MAX);
+    js_runtime_call_stack_roots_registered = true;
 }
 
 static void js_eval_source_push_mode(Item filename, Item source,
@@ -68,6 +81,50 @@ static bool js_eval_source_current(Item* out_filename, Item* out_source,
     if (out_column_offset) *out_column_offset = js_eval_source_column_offset_stack[idx];
     if (out_compact_stack) *out_compact_stack = js_eval_source_compact_stack[idx];
     return true;
+}
+
+extern "C" int64_t js_runtime_call_frame_push(Item func_item) {
+    js_runtime_call_stack_register_roots();
+    if (js_runtime_call_stack_depth >= JS_RUNTIME_CALL_STACK_MAX) return 0;
+    if (get_type_id(func_item) != LMD_TYPE_FUNC) return 0;
+    Item filename = (Item){.item = ITEM_JS_UNDEFINED};
+    JsFunction* fn = (JsFunction*)func_item.function;
+    if (fn && fn->vm_stack_filename) {
+        filename = (Item){.item = s2it(fn->vm_stack_filename)};
+    } else {
+        Item current_filename = ItemNull;
+        if (!js_eval_source_current(&current_filename, NULL, NULL, NULL, NULL)) return 0;
+        filename = current_filename;
+    }
+    if (get_type_id(filename) != LMD_TYPE_STRING) return 0;
+    int idx = js_runtime_call_stack_depth++;
+    js_runtime_call_stack[idx] = func_item;
+    js_runtime_call_stack_filename[idx] = filename;
+    return 1;
+}
+
+extern "C" int64_t js_runtime_call_frame_push_name(const char* name, int64_t name_len) {
+    js_runtime_call_stack_register_roots();
+    if (js_runtime_call_stack_depth >= JS_RUNTIME_CALL_STACK_MAX) return 0;
+    Item current_filename = ItemNull;
+    if (!js_eval_source_current(&current_filename, NULL, NULL, NULL, NULL)) return 0;
+    if (get_type_id(current_filename) != LMD_TYPE_STRING) return 0;
+    if (!name || name_len < 0) name_len = 0;
+    int idx = js_runtime_call_stack_depth++;
+    js_runtime_call_stack[idx] = (Item){.item = s2it(heap_create_name(name, (size_t)name_len))};
+    js_runtime_call_stack_filename[idx] = current_filename;
+    return 1;
+}
+
+extern "C" void js_runtime_call_frame_pop(void) {
+    if (js_runtime_call_stack_depth <= 0) return;
+    int idx = --js_runtime_call_stack_depth;
+    js_runtime_call_stack[idx] = ItemNull;
+    js_runtime_call_stack_filename[idx] = ItemNull;
+}
+
+extern "C" void js_runtime_call_frame_pop_guarded(int64_t pushed) {
+    if (pushed) js_runtime_call_frame_pop();
 }
 
 static int js_eval_source_first_line(String* source, const char** out_line) {
@@ -348,6 +405,8 @@ extern "C" void js_set_active_module_vars(Item* vars) {
 // Exception Handling State
 // =============================================================================
 
+static void js_format_exception_message(Item value, char* buf, size_t buf_size);
+
 // Throw TypeError if value is null or undefined (ES spec RequireObjectCoercible)
 extern "C" void js_require_object_coercible(Item value) {
     TypeId type = get_type_id(value);
@@ -367,6 +426,12 @@ extern "C" void js_throw_value(Item value) {
     js_exception_value = value;
     // Capture exception message into static buffer while context is alive
     js_exception_msg_buf[0] = '\0';
+    js_format_exception_message(value, js_exception_msg_buf, sizeof(js_exception_msg_buf));
+}
+
+static void js_format_exception_message(Item value, char* buf, size_t buf_size) {
+    if (!buf || buf_size == 0) return;
+    buf[0] = '\0';
     if (get_type_id(value) == LMD_TYPE_MAP) {
         Item name_key = (Item){.item = s2it(heap_create_name("name"))};
         Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
@@ -379,21 +444,34 @@ extern "C" void js_throw_value(Item value) {
         }
         if (get_type_id(msg_val) == LMD_TYPE_STRING) {
             String* ms = it2s(msg_val);
-            snprintf(js_exception_msg_buf, sizeof(js_exception_msg_buf),
+            snprintf(buf, buf_size,
                      "%.*s: %.*s", nlen, nstr, ms->len, ms->chars);
         } else {
-            snprintf(js_exception_msg_buf, sizeof(js_exception_msg_buf),
+            snprintf(buf, buf_size,
                      "%.*s", nlen, nstr);
         }
     } else if (get_type_id(value) == LMD_TYPE_STRING) {
         String* s = it2s(value);
-        snprintf(js_exception_msg_buf, sizeof(js_exception_msg_buf),
+        snprintf(buf, buf_size,
                  "%.*s", s->len, s->chars);
     }
 }
 
 extern "C" const char* js_get_exception_message(void) {
     return js_exception_msg_buf;
+}
+
+extern "C" void js_report_uncaught_exception(Item value) {
+    char buf[1024];
+    js_format_exception_message(value, buf, sizeof(buf));
+    if (buf[0] == '\0') return;
+    // Fatal uncaught errors are no longer pending after process hook dispatch,
+    // so the CLI fallback cannot print them later.
+    // Process fatal output is stack/error shaped; adding an "Uncaught" prefix
+    // hides the Error line that child_process callers inspect.
+    fputs(buf, stderr);
+    fputc('\n', stderr);
+    fflush(stderr);
 }
 
 extern "C" int js_check_exception(void) {
@@ -697,6 +775,80 @@ extern "C" Item js_new_aggregate_error(Item errors, Item message) {
     return err;
 }
 
+static Item js_error_default_stack_string(Item error_name, Item message) {
+    const char* name_str = "Error";
+    int name_len = 5;
+    if (get_type_id(error_name) == LMD_TYPE_STRING) {
+        String* ns = it2s(error_name);
+        if (ns) {
+            name_str = ns->chars;
+            name_len = (int)ns->len;
+        }
+    }
+    const char* msg_str = "";
+    int msg_len = 0;
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        String* ms = it2s(message);
+        if (ms) {
+            msg_str = ms->chars;
+            msg_len = (int)ms->len;
+        }
+    }
+    char buf[512];
+    int len = msg_len > 0
+        ? snprintf(buf, sizeof(buf), "%.*s: %.*s", name_len, name_str, msg_len, msg_str)
+        : snprintf(buf, sizeof(buf), "%.*s", name_len, name_str);
+    if (len < 0) len = 0;
+    if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+    return (Item){.item = s2it(heap_create_name(buf, len))};
+}
+
+static Item js_error_prepare_stack_trace(Item error_obj) {
+    Item error_name = (Item){.item = s2it(heap_create_name("Error", 5))};
+    Item error_ctor = js_get_constructor(error_name);
+    if (get_type_id(error_ctor) != LMD_TYPE_FUNC) return (Item){.item = ITEM_JS_UNDEFINED};
+    Item prepare_key = (Item){.item = s2it(heap_create_name("prepareStackTrace", 17))};
+    Item prepare = js_property_get(error_ctor, prepare_key);
+    if (get_type_id(prepare) != LMD_TYPE_FUNC) return (Item){.item = ITEM_JS_UNDEFINED};
+
+    Item frames = js_array_new(0);
+    for (int i = js_runtime_call_stack_depth - 1; i >= 0; i--) {
+        Item fn_item = js_runtime_call_stack[i];
+        Item filename_item = js_runtime_call_stack_filename[i];
+        if (get_type_id(filename_item) != LMD_TYPE_STRING) continue;
+        JsFunction* fn = get_type_id(fn_item) == LMD_TYPE_FUNC ? (JsFunction*)fn_item.function : NULL;
+        String* filename = it2s(filename_item);
+        if (!filename) continue;
+        const char* name = NULL;
+        int name_len = 0;
+        if (fn && fn->name && fn->name->len > 0) {
+            name = fn->name->chars;
+            name_len = (int)fn->name->len;
+        } else if (get_type_id(fn_item) == LMD_TYPE_STRING) {
+            String* ns = it2s(fn_item);
+            if (ns) {
+                name = ns->chars;
+                name_len = (int)ns->len;
+            }
+        }
+        char buf[512];
+        int len = name_len > 0
+            ? snprintf(buf, sizeof(buf), "%.*s (%.*s:1:1)",
+                       name_len, name, (int)filename->len, filename->chars)
+            : snprintf(buf, sizeof(buf), "%.*s:1:1",
+                       (int)filename->len, filename->chars);
+        if (len < 0) len = 0;
+        if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+        js_array_push(frames, (Item){.item = s2it(heap_create_name(buf, len))});
+    }
+
+    Item args[2] = { error_obj, frames };
+    Item prepared = js_call_function(prepare, (Item){.item = ITEM_JS_UNDEFINED}, args, 2);
+    if (js_exception_pending) return (Item){.item = ITEM_JS_UNDEFINED};
+    if (get_type_id(prepared) == LMD_TYPE_STRING) return prepared;
+    return js_to_string(prepared);
+}
+
 // v12: Create Error with a compile-time stack trace string
 extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
     Item obj = js_new_object();
@@ -714,31 +866,7 @@ extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
         // mark message as non-enumerable per spec §19.5.1.1
         js_mark_non_enumerable(obj, msg_key);
     }
-    // Set stack property from compile-time stack trace
     Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
-    Item eval_stack = js_eval_source_stack_string(name_val, message);
-    if (eval_stack.item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj, stack_key, eval_stack);
-    } else if (stack_str.item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj, stack_key, stack_str);
-    } else {
-        // Default: "Error" + message
-        const char* msg_str = "";
-        int msg_len = 0;
-        if (get_type_id(message) == LMD_TYPE_STRING) {
-            String* ms = it2s(message);
-            msg_str = ms->chars;
-            msg_len = ms->len;
-        }
-        char buf[512];
-        int len;
-        if (msg_len > 0) {
-            len = snprintf(buf, sizeof(buf), "Error: %.*s", msg_len, msg_str);
-        } else {
-            len = snprintf(buf, sizeof(buf), "Error");
-        }
-        js_property_set(obj, stack_key, (Item){.item = s2it(heap_create_name(buf, len))});
-    }
     js_class_stamp(obj, JS_CLASS_ERROR);
     // Set __proto__ to Error.prototype so prototype methods (toString) are found
     {
@@ -750,6 +878,19 @@ extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
                 js_set_prototype(obj, proto);
             }
         }
+    }
+    // Error.prepareStackTrace observes dynamic call frames; the older lexical
+    // fallback alone drops REPL-loaded call chains such as d -> c -> b -> a.
+    Item prepared_stack = js_error_prepare_stack_trace(obj);
+    Item eval_stack = js_eval_source_stack_string(name_val, message);
+    if (prepared_stack.item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj, stack_key, prepared_stack);
+    } else if (eval_stack.item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj, stack_key, eval_stack);
+    } else if (stack_str.item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj, stack_key, stack_str);
+    } else {
+        js_property_set(obj, stack_key, js_error_default_stack_string(name_val, message));
     }
     return obj;
 }
@@ -775,37 +916,7 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
         // mark message as non-enumerable per spec §20.5.1.1
         js_mark_non_enumerable(obj, msg_key);
     }
-    // Set stack property
     Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
-    Item eval_stack = js_eval_source_stack_string(error_name, message);
-    if (eval_stack.item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj, stack_key, eval_stack);
-    } else if (stack_str.item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj, stack_key, stack_str);
-    } else {
-        const char* name_str = "Error";
-        int name_len = 5;
-        if (get_type_id(error_name) == LMD_TYPE_STRING) {
-            String* ns = it2s(error_name);
-            name_str = ns->chars;
-            name_len = ns->len;
-        }
-        const char* msg_str = "";
-        int msg_len = 0;
-        if (get_type_id(message) == LMD_TYPE_STRING) {
-            String* ms = it2s(message);
-            msg_str = ms->chars;
-            msg_len = ms->len;
-        }
-        char buf[512];
-        int len;
-        if (msg_len > 0) {
-            len = snprintf(buf, sizeof(buf), "%.*s: %.*s", name_len, name_str, msg_len, msg_str);
-        } else {
-            len = snprintf(buf, sizeof(buf), "%.*s", name_len, name_str);
-        }
-        js_property_set(obj, stack_key, (Item){.item = s2it(heap_create_name(buf, len))});
-    }
     // Stamp typed class identity. Unknown engine-created names ending in
     // "Error" still get generic Error identity.
     {
@@ -839,6 +950,19 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
         Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
         js_property_set(obj, name_key, error_name);
         js_mark_non_enumerable(obj, name_key);
+    }
+    // Error.prepareStackTrace may test err instanceof SyntaxError, so typed
+    // errors must be linked to their prototype before invoking the hook.
+    Item prepared_stack = js_error_prepare_stack_trace(obj);
+    Item eval_stack = js_eval_source_stack_string(error_name, message);
+    if (prepared_stack.item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj, stack_key, prepared_stack);
+    } else if (eval_stack.item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj, stack_key, eval_stack);
+    } else if (stack_str.item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj, stack_key, stack_str);
+    } else {
+        js_property_set(obj, stack_key, js_error_default_stack_string(error_name, message));
     }
     // Mark stack as non-enumerable (per ES spec)
     js_runtime_make_non_enumerable(obj, stack_key);

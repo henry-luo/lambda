@@ -1002,6 +1002,11 @@ void js_next_tick_enqueue(Item callback);
 void js_module_register(Item specifier, Item namespace_obj);
 
 /**
+ * Get a native built-in module namespace object without consulting user modules.
+ */
+Item js_module_get_builtin(Item specifier);
+
+/**
  * Get a registered module namespace object.
  */
 Item js_module_get(Item specifier);

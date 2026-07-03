@@ -716,11 +716,14 @@ static NodeTestResult run_single_test(const std::string& test_path, size_t ordin
              "cd temp\\node_test && ..\\..\\lambda.exe js \"../../%s\"%s --no-log 2>&1",
              test_path.c_str(), node_flags.c_str());
 #else
+    // Parallel popen() children inherit sibling capture pipes unless the execed
+    // test command closes extras; leaked writers make fast tests wait on EOF.
     snprintf(command, sizeof(command),
              "mkdir -p \"temp/node_test/%s\" && cd \"temp/node_test/%s\" && "
-             "ln -sfn \"../../../ref/node/test\" test && "
-             "env -u DYLD_INSERT_LIBRARIES -u DYLD_LIBRARY_PATH -u ASAN_OPTIONS -u MallocNanoZone "
+             "rm -f test && ln -s \"../../../ref/node/test\" test && "
+             "exec env -u DYLD_INSERT_LIBRARIES -u DYLD_LIBRARY_PATH -u ASAN_OPTIONS -u MallocNanoZone "
              "-u LAMBDA_NODE_BASELINE_ONLY PATH=%s TERM=xterm-256color NODE_COMMON_PORT=%u TEST_THREAD_ID=%u "
+             "python3 -c 'import os,resource,sys; limit=resource.getrlimit(resource.RLIMIT_NOFILE)[0]; os.closerange(3, min(limit, 1024)); os.execv(sys.argv[1], sys.argv[1:])' "
              "%s -k 5s %d ../../../lambda.exe js \"../../../%s\"%s --no-log 2>&1",
              filename.c_str(), filename.c_str(), path_env, node_common_port, (unsigned int)ordinal,
              timeout_cmd, (g_timeout_ms + 999) / 1000, test_path.c_str(), node_flags.c_str());

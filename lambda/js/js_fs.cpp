@@ -463,6 +463,7 @@ static const char* fs_typed_array_name(JsTypedArray* ta) {
         case JS_TYPED_UINT16: return "Uint16Array";
         case JS_TYPED_INT32: return "Int32Array";
         case JS_TYPED_UINT32: return "Uint32Array";
+        case JS_TYPED_FLOAT16: return "Float16Array";
         case JS_TYPED_FLOAT32: return "Float32Array";
         case JS_TYPED_FLOAT64: return "Float64Array";
         case JS_TYPED_UINT8_CLAMPED: return "Uint8ClampedArray";

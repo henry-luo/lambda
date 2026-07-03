@@ -280,7 +280,8 @@ static int typed_array_element_size(JsTypedArrayType type) {
     case JS_TYPED_UINT8:
     case JS_TYPED_UINT8_CLAMPED: return 1;
     case JS_TYPED_INT16:
-    case JS_TYPED_UINT16:   return 2;
+    case JS_TYPED_UINT16:
+    case JS_TYPED_FLOAT16:  return 2;
     case JS_TYPED_INT32:
     case JS_TYPED_UINT32:
     case JS_TYPED_FLOAT32:  return 4;
@@ -291,6 +292,64 @@ static int typed_array_element_size(JsTypedArrayType type) {
     }
 }
 
+static uint16_t js_float64_to_float16_bits(double value) {
+    uint64_t bits = 0;
+    memcpy(&bits, &value, sizeof(bits));
+    uint16_t sign = (uint16_t)((bits >> 48) & 0x8000);
+    uint64_t exp_bits = (bits >> 52) & 0x7ff;
+    uint64_t mant = bits & 0x000fffffffffffffULL;
+
+    if (exp_bits == 0x7ff) {
+        if (mant != 0) return (uint16_t)(sign | 0x7e00);
+        return (uint16_t)(sign | 0x7c00);
+    }
+    if ((bits & 0x7fffffffffffffffULL) == 0) return sign;
+
+    double abs_value = value < 0.0 ? -value : value;
+    if (abs_value < 0x1.0p-14) {
+        // round directly from JS Number to binary16; a float32 pre-round loses
+        // subnormal tie decisions such as 2^-25 plus one double ulp.
+        double scaled = ldexp(abs_value, 24);
+        double floor_scaled = floor(scaled);
+        double fraction = scaled - floor_scaled;
+        uint32_t half_mant = (uint32_t)floor_scaled;
+        if (fraction > 0.5 || (fraction == 0.5 && (half_mant & 1))) half_mant++;
+        if (half_mant == 0) return sign;
+        if (half_mant >= 1024) return (uint16_t)(sign | 0x0400);
+        return (uint16_t)(sign | (uint16_t)half_mant);
+    }
+
+    int exp2 = 0;
+    frexp(abs_value, &exp2);
+    int half_exp = exp2 - 1 + 15;
+    double scaled = ldexp(abs_value, 11 - exp2);
+    double floor_scaled = floor(scaled);
+    double fraction = scaled - floor_scaled;
+    uint32_t significand = (uint32_t)floor_scaled;
+    if (fraction > 0.5 || (fraction == 0.5 && (significand & 1))) significand++;
+    if (significand >= 2048) {
+        significand = 1024;
+        half_exp++;
+    }
+    if (half_exp >= 31) return (uint16_t)(sign | 0x7c00);
+    return (uint16_t)(sign | ((uint16_t)half_exp << 10) | (uint16_t)(significand - 1024));
+}
+
+static double js_float16_bits_to_float64(uint16_t bits) {
+    int sign = (bits & 0x8000) ? -1 : 1;
+    int exp = (bits >> 10) & 0x1f;
+    int mant = bits & 0x03ff;
+    if (exp == 0) {
+        if (mant == 0) return sign < 0 ? -0.0 : 0.0;
+        return (double)sign * ldexp((double)mant, -24);
+    }
+    if (exp == 0x1f) {
+        if (mant == 0) return sign < 0 ? -INFINITY : INFINITY;
+        return NAN;
+    }
+    return (double)sign * ldexp(1024.0 + (double)mant, exp - 25);
+}
+
 static ArrayNumElemType js_typed_array_elem_type(JsTypedArrayType type) {
     switch (type) {
     case JS_TYPED_INT8:          return ELEM_INT8;
@@ -299,6 +358,7 @@ static ArrayNumElemType js_typed_array_elem_type(JsTypedArrayType type) {
     case JS_TYPED_UINT16:        return ELEM_UINT16;
     case JS_TYPED_INT32:         return ELEM_INT32;
     case JS_TYPED_UINT32:        return ELEM_UINT32;
+    case JS_TYPED_FLOAT16:       return ELEM_UINT16;
     case JS_TYPED_FLOAT32:       return ELEM_FLOAT32;
     case JS_TYPED_FLOAT64:       return ELEM_FLOAT64;
     case JS_TYPED_UINT8_CLAMPED: return ELEM_UINT8_CLAMPED;
@@ -454,6 +514,9 @@ static bool js_typed_array_ranges_overlap(const char* dst_data, int dst_byte_len
 
 static double js_typed_array_raw_load_number(JsTypedArray* ta, const char* data, int index) {
     if (!ta) return 0.0;
+    if (ta->element_type == JS_TYPED_FLOAT16 && data && index >= 0) {
+        return js_float16_bits_to_float64(((uint16_t*)data)[index]);
+    }
     if (js_typed_array_arraynum_view_matches(ta, data, index) &&
         js_typed_array_is_number_element(ta->element_type)) {
         return array_num_get_number_value(ta->view, index);
@@ -502,6 +565,12 @@ static void js_typed_array_arraynum_store_number(JsTypedArray* ta, int index, do
         return;
     case JS_TYPED_UINT32:
         array_num_set_int64_value(ta->view, index, js_typed_array_to_int_n(value, 32, false));
+        return;
+    case JS_TYPED_FLOAT16:
+        // Float16Array stores IEEE-754 binary16 bits; using ArrayNum's uint16
+        // view here would expose backing bits instead of rounded JS Numbers.
+        if (ta->view->data && index >= 0 && index < ta->view->length)
+            ((uint16_t*)ta->view->data)[index] = js_float64_to_float16_bits(value);
         return;
     case JS_TYPED_FLOAT32:
     case JS_TYPED_FLOAT64:
@@ -587,7 +656,7 @@ static bool js_typed_array_try_arraynum_convert_number(JsTypedArray* dst, JsType
     }
 
     for (int i = 0; i < src_len; i++) {
-        double value = array_num_get_number_value(src->view, i);
+        double value = js_typed_array_raw_load_number(src, src_data, i);
         js_typed_array_arraynum_store_number(dst, offset + i, value);
     }
     return true;
@@ -1412,6 +1481,7 @@ extern "C" const char* js_typed_array_type_name(Item val) {
     case JS_TYPED_UINT16:        return "Uint16Array";
     case JS_TYPED_INT32:         return "Int32Array";
     case JS_TYPED_UINT32:        return "Uint32Array";
+    case JS_TYPED_FLOAT16:       return "Float16Array";
     case JS_TYPED_FLOAT32:       return "Float32Array";
     case JS_TYPED_FLOAT64:       return "Float64Array";
     case JS_TYPED_BIGINT64:      return "BigInt64Array";
@@ -2274,6 +2344,11 @@ extern "C" Item js_typed_array_raw_get_item(JsTypedArray* ta, void* data, int id
         case JS_TYPED_UINT32:
         case JS_TYPED_UINT8_CLAMPED:
             return (Item){.item = i2it((int64_t)value)};
+        case JS_TYPED_FLOAT16: {
+            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+            *fp = js_float16_bits_to_float64(((uint16_t*)data)[idx]);
+            return (Item){.item = d2it(fp)};
+        }
         case JS_TYPED_FLOAT32:
         case JS_TYPED_FLOAT64: {
             double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
@@ -2298,6 +2373,11 @@ extern "C" Item js_typed_array_raw_get_item(JsTypedArray* ta, void* data, int id
         return (Item){.item = i2it((int64_t)((int32_t*)data)[idx])};
     case JS_TYPED_UINT32:
         return (Item){.item = i2it((int64_t)((uint32_t*)data)[idx])};
+    case JS_TYPED_FLOAT16: {
+        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *fp = js_float16_bits_to_float64(((uint16_t*)data)[idx]);
+        return (Item){.item = d2it(fp)};
+    }
     case JS_TYPED_FLOAT32: {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = (double)((float*)data)[idx];
@@ -2451,6 +2531,7 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
     case JS_TYPED_UINT16:  ((uint16_t*)data)[idx] = (uint16_t)js_typed_array_to_int_n(num_val, 16, false); break;
     case JS_TYPED_INT32:   ((int32_t*)data)[idx] = (int32_t)js_typed_array_to_int_n(num_val, 32, true); break;
     case JS_TYPED_UINT32:  ((uint32_t*)data)[idx] = (uint32_t)js_typed_array_to_int_n(num_val, 32, false); break;
+    case JS_TYPED_FLOAT16: ((uint16_t*)data)[idx] = js_float64_to_float16_bits(num_val); break;
     case JS_TYPED_FLOAT32: ((float*)data)[idx] = (float)num_val; break;
     case JS_TYPED_FLOAT64: ((double*)data)[idx] = num_val; break;
     case JS_TYPED_BIGINT64: ((int64_t*)data)[idx] = (int64_t)num_val; break;
@@ -2581,6 +2662,12 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
     case JS_TYPED_UINT32: {
         uint32_t v = (uint32_t)js_typed_array_to_int_n(num_val, 32, false);
         uint32_t* p = (uint32_t*)data + start;
+        for (int i = 0; i < count; i++) p[i] = v;
+        return ta_item;
+    }
+    case JS_TYPED_FLOAT16: {
+        uint16_t v = js_float64_to_float16_bits(num_val);
+        uint16_t* p = (uint16_t*)data + start;
         for (int i = 0; i < count; i++) p[i] = v;
         return ta_item;
     }
