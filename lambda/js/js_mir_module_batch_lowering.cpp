@@ -7677,6 +7677,7 @@ bool jm_validate_mir_labels(MIR_context_t ctx) { (void)ctx; return true; }
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
     log_debug("js-mir: compiling module '%s'", filename ? filename : "<module>");
     extern int js_dynamic_import_suppress_module_drain;
+    extern int js_check_exception(void);
     // Js57 P4 (Track B3): bump depth at the very start so jm_load_imports
     // nested calls see depth >= 2 while the outermost transpile sits at 1;
     // the matching exit at the end of the function drains continuations only
@@ -7872,6 +7873,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         // modules and TLA-importers.
         js_module_assign_async_eval_order(spec_item);
     }
+    bool module_body_threw = false;
     if (p7d_pending > 0) {
         // Importer with pending TLA deps — skip js_main now; the AEO drain
         // will invoke it once all deps have settled.
@@ -7879,6 +7881,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         // namespace stays as the empty/placeholder until deferred run completes.
     } else {
         namespace_obj = js_main((Context*)context);
+        module_body_threw = js_check_exception() != 0;
     }
     // Js56 P9 (SIGSEGV fix): keep _lambda_rt set during the microtask drain.
     // Microtasks scheduled by the module (e.g. `Promise.resolve(0).then(...)`
@@ -7888,7 +7891,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // tests (prev_lambda_rt == NULL) hit a NULL-deref EXC_BAD_ACCESS in the
     // microtask. Restore after the drain instead. Same reasoning for
     // module_vars and module_namespace — handlers may read module-level vars.
-    if (js_dynamic_import_suppress_module_drain <= 0) {
+    if (!module_body_threw && js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_drain();
     }
     _lambda_rt = prev_lambda_rt;
@@ -7900,6 +7903,26 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // namespace the outer caller had — typically the entry module's.
     extern void js_tla_exit_module(void);
     js_tla_exit_module();
+
+    if (module_body_threw) {
+        // Module body exceptions must remain pending so require() callers can
+        // catch them; continuing here made top-level throws print and then
+        // return a cached placeholder namespace.
+        log_debug("js-mir: module '%s' body threw during evaluation", filename ? filename : "<module>");
+        jm_clear_active_js_transpile(NULL, mt, NULL);
+        jm_destroy_mir_transpiler(mt);
+        jm_defer_mir_cleanup(ctx);
+        if (module_mir_context_count > 0) {
+            module_mir_name_pools[module_mir_context_count - 1] = tp->name_pool;
+            module_mir_ast_pools[module_mir_context_count - 1] = tp->ast_pool;
+        }
+        tp->name_pool = NULL;
+        tp->ast_pool = NULL;
+        jm_clear_active_js_transpile(tp, NULL, NULL);
+        js_transpiler_destroy(tp);
+        js_source_runtime = prev_source_runtime;
+        return ItemNull;
+    }
 
     // Register the module with its resolved path as key. In normal execution
     // this re-registers the pre-created namespace; if compilation returned a

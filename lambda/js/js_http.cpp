@@ -46,6 +46,7 @@ extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
 extern "C" void js_throw_value(Item error);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
+extern "C" Item js_symbol_for(Item key);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -1784,17 +1785,37 @@ static void http_response_flush(Item self) {
         if (sent_len > body_len) sent_len = body_len;
         int remaining_len = body_len - sent_len;
 
-        // Partial responses have already committed headers without a known
-        // final length, so connection close is the body delimiter at end().
-        if (remaining_len > 0) {
+        bool partial_chunked = http_response_bool_prop(self, "__partial_chunked__");
+        bool partial_close_after = http_response_bool_prop(self, "__partial_close_after__");
+        if (partial_chunked) {
+            int frame_cap = remaining_len + 40;
+            char* frame = (char*)mem_alloc(frame_cap, MEM_CAT_JS_RUNTIME);
+            int fpos = 0;
+            if (remaining_len > 0) {
+                char* remaining = (char*)mem_alloc(remaining_len, MEM_CAT_JS_RUNTIME);
+                int copied = http_response_copy_body_range(self, remaining, sent_len, remaining_len);
+                fpos += snprintf(frame + fpos, frame_cap - fpos, "%X\r\n", (unsigned int)copied);
+                memcpy(frame + fpos, remaining, (size_t)copied);
+                fpos += copied;
+                memcpy(frame + fpos, "\r\n", 2);
+                fpos += 2;
+                mem_free(remaining);
+            }
+            memcpy(frame + fpos, "0\r\n\r\n", 5);
+            fpos += 5;
+            http_conn_write_bytes(conn, make_string_item(frame, fpos), partial_close_after);
+            mem_free(frame);
+            js_property_set(self, make_string_item("__partial_body_len__"),
+                            (Item){.item = i2it(body_len)});
+        } else if (remaining_len > 0) {
             char* remaining = (char*)mem_alloc(remaining_len, MEM_CAT_JS_RUNTIME);
             int copied = http_response_copy_body_range(self, remaining, sent_len, remaining_len);
-            http_conn_write_bytes(conn, make_string_item(remaining, copied), true);
+            http_conn_write_bytes(conn, make_string_item(remaining, copied), partial_close_after);
             mem_free(remaining);
             js_property_set(self, make_string_item("__partial_body_len__"),
                             (Item){.item = i2it(body_len)});
         } else {
-            http_conn_write_bytes(conn, make_string_item("", 0), true);
+            http_conn_write_bytes(conn, make_string_item("", 0), partial_close_after);
         }
         js_property_set(self, make_string_item("__sent__"), (Item){.item = b2it(true)});
         js_property_set(self, make_string_item("__write_head_called__"), (Item){.item = b2it(true)});
@@ -2127,25 +2148,65 @@ static bool http_response_flush_partial(Item self) {
                                                 &has_content_length, &has_content_type,
                                                 &has_connection, &has_keep_alive,
                                                 &has_transfer_encoding, &has_date);
+        bool request_http_10 = false;
+        Item req_version = js_property_get(self, make_string_item("__request_http_version__"));
+        if (get_type_id(req_version) == LMD_TYPE_STRING) {
+            String* vs = it2s(req_version);
+            request_http_10 = vs->len == 8 && memcmp(vs->chars, "HTTP/1.0", 8) == 0;
+        }
+        bool server_close_requested = conn && conn->server && conn->server->close_requested;
+        bool close_after = http_response_bool_prop(self, "__close_after_response__") ||
+                           (conn && conn->read_ended) ||
+                           server_close_requested;
+        bool explicit_chunked_body = has_transfer_encoding &&
+            http_response_header_has_token(self, "transfer-encoding", "chunked");
+        bool chunked_body = !has_content_length && !request_http_10 &&
+                            (explicit_chunked_body || !close_after);
         if (!has_content_type) {
             head_len += snprintf(head + head_len, sizeof(head) - head_len,
                                  "Content-Type: text/plain\r\n");
         }
+        if (chunked_body && !has_transfer_encoding) {
+            head_len += snprintf(head + head_len, sizeof(head) - head_len,
+                                 "Transfer-Encoding: chunked\r\n");
+        }
         if (!has_connection) {
             head_len += snprintf(head + head_len, sizeof(head) - head_len,
-                                 "Connection: close\r\n");
+                                 close_after ? "Connection: close\r\n" : "Connection: keep-alive\r\n");
         }
+        // Partial HTTP/1.1 responses need chunk framing to keep the socket
+        // reusable; without it close is the only unambiguous body delimiter.
+        js_property_set(self, make_string_item("__partial_chunked__"),
+                        (Item){.item = b2it(chunked_body)});
+        js_property_set(self, make_string_item("__partial_close_after__"),
+                        (Item){.item = b2it(close_after || (!chunked_body && !has_content_length))});
         head_len += snprintf(head + head_len, sizeof(head) - head_len, "\r\n");
     }
 
     int emit_len = body_len - sent_len;
-    int total = head_len + emit_len;
+    bool partial_chunked = http_response_bool_prop(self, "__partial_chunked__");
+    int total = head_len + emit_len + (partial_chunked && emit_len > 0 ? 32 : 0);
     char* full = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
     if (head_len > 0) memcpy(full, head, (size_t)head_len);
-    if (emit_len > 0) http_response_copy_body_range(self, full + head_len, sent_len, emit_len);
+    int output_len = head_len;
+    if (emit_len > 0) {
+        if (partial_chunked) {
+            char* chunk = (char*)mem_alloc(emit_len, MEM_CAT_JS_RUNTIME);
+            int copied = http_response_copy_body_range(self, chunk, sent_len, emit_len);
+            output_len += snprintf(full + output_len, total - output_len, "%X\r\n", (unsigned int)copied);
+            memcpy(full + output_len, chunk, (size_t)copied);
+            output_len += copied;
+            memcpy(full + output_len, "\r\n", 2);
+            output_len += 2;
+            mem_free(chunk);
+        } else {
+            int copied = http_response_copy_body_range(self, full + output_len, sent_len, emit_len);
+            output_len += copied;
+        }
+    }
     // response.write() can leave the response open; flushing the newly
     // buffered bytes lets clients receive/destroy the IncomingMessage.
-    bool below_hwm = http_conn_write_bytes(conn, make_string_item(full, total), false);
+    bool below_hwm = http_conn_write_bytes(conn, make_string_item(full, output_len), false);
     if (!below_hwm) {
         // write(false) must be paired with a later drain event or handlers
         // that wait to call end() leave the response and connection open.
@@ -4128,6 +4189,7 @@ typedef struct JsHttpClientReq {
     Item       callback;          // response callback
     Item       als_context;
     Item       async_resource;
+    Item       socket_object;
     Item       agent;
     Item       response;
     char*      send_buf;
@@ -4138,9 +4200,11 @@ typedef struct JsHttpClientReq {
     int        recv_cap;
     int        response_hdr_size;
     int        response_delivered;
+    int        response_decoded_delivered;
     char       method[16];
     bool       response_emitted;
     bool       response_ended;
+    bool       response_chunked;
     bool       destroyed;
     bool       sent;
     bool       end_called;
@@ -4157,6 +4221,10 @@ typedef struct JsHttpClientReq {
     Item       abort_signal;
     Item       abort_handler;
 } JsHttpClientReq;
+
+static Item http_client_socket_object(JsHttpClientReq* creq);
+static void http_client_stamp_socket_from_resource(JsHttpClientReq* creq);
+static void http_client_mark_socket_idle(JsHttpClientReq* creq);
 
 static void http_client_sync_header_property(JsHttpClientReq* creq, Item req_obj) {
     if (!creq || !creq->send_buf || creq->send_head_len <= 0 || req_obj.item == 0) return;
@@ -4255,6 +4323,77 @@ static uv_stream_t* http_client_stream(JsHttpClientReq* creq) {
 
 static uv_handle_t* http_client_handle(JsHttpClientReq* creq) {
     return (uv_handle_t*)http_client_stream(creq);
+}
+
+static Item http_client_async_symbol_key(const char* name, int len) {
+    return js_symbol_for(make_string_item(name, len));
+}
+
+static int64_t http_client_resource_int_prop(Item resource, const char* name) {
+    Item value = js_property_get(resource, make_string_item(name));
+    return get_type_id(value) == LMD_TYPE_INT ? it2i(value) : -1;
+}
+
+static void http_client_stamp_socket_async_ids(Item socket, int64_t async_id, int64_t trigger_id) {
+    if (socket.item == 0) return;
+    js_property_set(socket, http_client_async_symbol_key("nodejs.async_id_symbol", 22),
+                    (Item){.item = i2it(async_id)});
+    js_property_set(socket, http_client_async_symbol_key("nodejs.trigger_async_id_symbol", 30),
+                    (Item){.item = i2it(trigger_id)});
+}
+
+static void http_client_stamp_socket_from_resource(JsHttpClientReq* creq) {
+    if (!creq || creq->socket_object.item == 0) return;
+    int64_t async_id = http_client_resource_int_prop(creq->async_resource, "__lambda_async_id__");
+    int64_t trigger_id = http_client_resource_int_prop(creq->async_resource, "__lambda_trigger_async_id__");
+    http_client_stamp_socket_async_ids(creq->socket_object, async_id, trigger_id);
+}
+
+static Item http_client_socket_object(JsHttpClientReq* creq) {
+    if (!creq) return make_js_undefined();
+    if (creq->socket_object.item != 0) {
+        if (!creq->reusable_idle) {
+            // Reused keep-alive sockets keep their JS identity but need the
+            // fresh request async id after the idle marker parked them at -1.
+            http_client_stamp_socket_from_resource(creq);
+        }
+        return creq->socket_object;
+    }
+
+    Item obj = js_new_object();
+    js_class_stamp(obj, JS_CLASS_SOCKET);
+    Item net_proto = js_net_get_socket_prototype();
+    if (get_type_id(net_proto) == LMD_TYPE_MAP) {
+        js_set_prototype(obj, net_proto);
+    }
+    js_property_set(obj, make_string_item("__client__"),
+                    (Item){.item = i2it((int64_t)(uintptr_t)creq)});
+    js_property_set(obj, make_string_item("destroyed"), (Item){.item = b2it(false)});
+    js_property_set(obj, make_string_item("bytesRead"), (Item){.item = i2it(0)});
+    js_property_set(obj, make_string_item("bytesWritten"), (Item){.item = i2it(0)});
+    js_property_set(obj, make_string_item("bufferSize"), (Item){.item = i2it(0)});
+    Item hwm = (Item){.item = i2it(16 * 1024)};
+    Item readable_state = js_new_object();
+    js_property_set(readable_state, make_string_item("highWaterMark"), hwm);
+    Item writable_state = js_new_object();
+    js_property_set(writable_state, make_string_item("highWaterMark"), hwm);
+    js_property_set(obj, make_string_item("_readableState"), readable_state);
+    js_property_set(obj, make_string_item("_writableState"), writable_state);
+    js_property_set(obj, make_string_item("readableHighWaterMark"), hwm);
+    js_property_set(obj, make_string_item("writableHighWaterMark"), hwm);
+    creq->socket_object = obj;
+    http_client_stamp_socket_from_resource(creq);
+    if (creq->js_object.item != 0) js_property_set(creq->js_object, make_string_item("socket"), obj);
+    return obj;
+}
+
+static void http_client_mark_socket_idle(JsHttpClientReq* creq) {
+    if (!creq) return;
+    Item socket = http_client_socket_object(creq);
+    // Keep-alive reuse parks the public socket between requests; Node marks
+    // the old handle id dead until a fresh async resource is assigned.
+    js_async_hooks_emit_destroy_resource(creq->async_resource);
+    http_client_stamp_socket_async_ids(socket, -1, -1);
 }
 
 static void http_client_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
@@ -4540,6 +4679,7 @@ static void js_http_agent_store_idle_client(JsHttpClientReq* creq) {
         creq->destroyed || !creq->connected) return;
     // keepAlive agents own one idle native connection here; closing it at
     // response end prevents official reuse tests from ever seeing a hot socket.
+    http_client_mark_socket_idle(creq);
     creq->reusable_idle = true;
     js_property_set(creq->js_object, make_string_item("__client__"), ItemNull);
     js_property_set(creq->agent, make_string_item("__lambda_idle_client__"),
@@ -4746,6 +4886,9 @@ static bool js_http_client_try_emit_response(JsHttpClientReq* creq) {
     js_property_set(res, make_string_item("statusMessage"), status_message);
     js_property_set(res, make_string_item("headers"), headers);
     js_property_set(res, make_string_item("rawHeaders"), raw_headers);
+    Item socket = http_client_socket_object(creq);
+    js_property_set(res, make_string_item("socket"), socket);
+    js_property_set(creq->js_object, make_string_item("socket"), socket);
     js_property_set(res, make_string_item("destroy"),
                     js_new_function((void*)js_http_client_res_inst_destroy, 2));
     js_property_set(res, make_string_item("on"),
@@ -4783,6 +4926,8 @@ static bool js_http_client_try_emit_response(JsHttpClientReq* creq) {
     creq->response = res;
     creq->response_hdr_size = hdr_size;
     creq->response_delivered = creq->recv_len;
+    creq->response_chunked = chunked;
+    creq->response_decoded_delivered = chunked ? decoded_body_len : 0;
     js_http_emit_client_response(creq, res);
     if (chunked) {
         if (chunked_complete) {
@@ -4828,7 +4973,39 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
             int body_start = creq->response_hdr_size;
             int prev = creq->response_delivered;
             if (prev < body_start) prev = body_start;
-            if (creq->recv_len > prev) {
+            if (creq->response_chunked) {
+                int raw_body_len = creq->recv_len - creq->response_hdr_size;
+                if (raw_body_len > 0) {
+                    char* decoded_body = (char*)mem_alloc(raw_body_len + 1, MEM_CAT_JS_RUNTIME);
+                    int chunked_consumed = 0;
+                    bool chunked_complete = false;
+                    int decoded_len = http_decode_chunked_body(
+                        creq->recv_buf + creq->response_hdr_size, raw_body_len,
+                        decoded_body, &chunked_consumed, &chunked_complete);
+                    if (decoded_len > creq->response_decoded_delivered) {
+                        // Transfer-Encoding frames are transport delimiters;
+                        // response streams must expose only newly decoded data.
+                        js_readable_push(creq->response,
+                                         make_string_item(decoded_body + creq->response_decoded_delivered,
+                                                          decoded_len - creq->response_decoded_delivered));
+                        creq->response_decoded_delivered = decoded_len;
+                    }
+                    if (chunked_complete && !creq->response_ended) {
+                        js_readable_push(creq->response, ItemNull);
+                        creq->response_ended = true;
+                        if (creq->keep_alive_agent) {
+                            js_http_agent_store_idle_client(creq);
+                        } else {
+                            creq->destroyed = true;
+                            js_property_set(creq->js_object, make_string_item("destroyed"),
+                                            (Item){.item = b2it(true)});
+                            js_http_close_client_req(creq);
+                        }
+                    }
+                    mem_free(decoded_body);
+                }
+                creq->response_delivered = creq->recv_len;
+            } else if (creq->recv_len > prev) {
                 js_readable_push(creq->response, make_string_item(creq->recv_buf + prev, creq->recv_len - prev));
                 creq->response_delivered = creq->recv_len;
                 Item headers = js_property_get(creq->response, make_string_item("headers"));
@@ -5853,7 +6030,9 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
     bool has_connection_header = http_client_headers_have_name(custom_headers, "connection", 10);
     bool has_expect_header = http_client_headers_have_name(custom_headers, "expect", 6);
     bool has_transfer_encoding = http_client_headers_have_name(custom_headers, "transfer-encoding", 17);
-    bool use_chunked_request_body = !explicit_content_length && (has_expect_header || has_transfer_encoding);
+    bool method_allows_body = strcmp(method_buf, "GET") != 0 && strcmp(method_buf, "HEAD") != 0;
+    bool use_chunked_request_body = !explicit_content_length &&
+        (has_expect_header || has_transfer_encoding || method_allows_body);
 
     if (set_default_headers && set_host && !has_headers_array) {
         if (port == 80) {
@@ -5886,7 +6065,9 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         rlen = http_client_append_basic_auth(req_str, rlen, (int)sizeof(req_str), auth_item);
     }
 
-    if (has_expect_header && !explicit_content_length && !has_transfer_encoding) {
+    if (use_chunked_request_body && !has_transfer_encoding) {
+        // Reused sockets can write the body after headers are already sent;
+        // unknown-length request bodies need chunk framing in that state.
         rlen += snprintf(req_str + rlen, sizeof(req_str) - rlen, "Transfer-Encoding: chunked\r\n");
     }
 
@@ -5923,8 +6104,10 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         creq->recv_len = 0;
         creq->response_hdr_size = 0;
         creq->response_delivered = 0;
+        creq->response_decoded_delivered = 0;
         creq->response_emitted = false;
         creq->response_ended = false;
+        creq->response_chunked = false;
         creq->sent = false;
         creq->end_called = false;
         creq->close_after_send = false;
@@ -5967,6 +6150,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
     Item obj = http_client_make_request_object(creq, method_buf, path_buf);
 
     creq->js_object = obj;
+    if (reused_idle_client) http_client_socket_object(creq);
     http_client_sync_header_property(creq, obj);
     http_client_metadata_from_headers(obj, custom_headers);
     if (set_host && !http_client_headers_have_name(custom_headers, "host", 4)) {

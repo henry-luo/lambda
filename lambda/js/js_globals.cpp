@@ -1659,6 +1659,8 @@ static bool js_date_parse_iso_ms(String* s, double* out_ms) {
         }
     }
 
+    // Date subclasses inherit Date methods; reading the hidden slot through
+    // property lookup can re-enter prototype dispatch instead of validating this receiver.
     bool has_time = false;
     bool has_offset = false;
     int hour = 0, minute = 0, second = 0, millis = 0;
@@ -1920,12 +1922,14 @@ extern "C" Item js_date_utc(Item args_array) {
 //   8=toISOString, 9=toLocaleDateString
 extern "C" Item js_date_method(Item date_obj, int method_id) {
     // extract epoch-ms from the _time property
-    Item key = (Item){.item = s2it(heap_create_name("__time__"))};
-    Item time_val = js_property_get(date_obj, key);
+    bool has_time = false;
+    Item time_val = get_type_id(date_obj) == LMD_TYPE_MAP
+        ? js_map_get_fast_ext(date_obj.map, "__time__", 8, &has_time)
+        : ItemNull;
 
     // guard: if no _time property, receiver is not a Date object — TypeError per ES spec
     TypeId tv_type = get_type_id(time_val);
-    if (tv_type != LMD_TYPE_FLOAT && tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_INT64) {
+    if (!has_time || (tv_type != LMD_TYPE_FLOAT && tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_INT64)) {
         // The transpiler routes .toISOString() here unconditionally;
         // non-Date objects may have their own methods via prototype chain.
         if (method_id == 8) { // toISOString
@@ -17919,17 +17923,31 @@ extern "C" void js_eval_env_track_global_binding(Item key) {
     binding->old_value = binding->had_own ? js_property_get(global, key) : make_js_undefined();
 }
 
+static void js_eval_restore_global_binding(Item global, JsEvalEnvBinding* binding) {
+    if (binding->had_own) {
+        js_property_set(global, binding->key, binding->old_value);
+        return;
+    }
+    if (get_type_id(binding->key) == LMD_TYPE_STRING) {
+        String* key = it2s(binding->key);
+        if (key && key->len > 0 && key->len < 200) {
+            // Pending eval SyntaxErrors make ordinary delete short-circuit;
+            // tombstone bridge-created globals directly while preserving the throw.
+            js_shape_mark_deleted_own(global, key->chars, (int)key->len,
+                                      /*create_if_missing=*/false);
+            return;
+        }
+    }
+    js_delete_property(global, binding->key);
+}
+
 extern "C" void js_eval_env_pop_frame(void) {
     if (js_eval_env_frame_depth <= 0) return;
     int frame_start = js_eval_env_frame_stack[--js_eval_env_frame_depth];
     Item global = js_get_global_this();
     while (js_eval_env_binding_count > frame_start) {
         JsEvalEnvBinding* binding = &js_eval_env_bindings[--js_eval_env_binding_count];
-        if (binding->had_own) {
-            js_property_set(global, binding->key, binding->old_value);
-        } else {
-            js_delete_property(global, binding->key);
-        }
+        js_eval_restore_global_binding(global, binding);
     }
 }
 
@@ -17940,11 +17958,7 @@ extern "C" void js_eval_global_lexical_pop_frame(void) {
     while (js_eval_global_lexical_binding_count > frame_start) {
         JsEvalEnvBinding* binding =
             &js_eval_global_lexical_bindings[--js_eval_global_lexical_binding_count];
-        if (binding->had_own) {
-            js_property_set(global, binding->key, binding->old_value);
-        } else {
-            js_delete_property(global, binding->key);
-        }
+        js_eval_restore_global_binding(global, binding);
     }
 }
 

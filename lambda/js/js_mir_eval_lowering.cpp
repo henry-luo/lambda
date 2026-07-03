@@ -1397,6 +1397,22 @@ static Item js_eval_parse_error_message(void) {
     return (Item){.item = s2it(heap_create_name(message, strlen(message)))};
 }
 
+extern "C" int64_t js_eval_env_is_active(void);
+extern "C" void js_eval_env_pop_frame(void);
+extern "C" void js_eval_global_lexical_pop_frame(void);
+
+static void js_eval_unwind_direct_bridge(bool is_direct_eval, bool is_global_scope) {
+    if (js_eval_env_is_active()) {
+        // CJS/direct eval exposes local bindings as temporary global slots;
+        // thrown eval compilation must remove active bridges before caller cleanup is skipped.
+        js_eval_env_pop_frame();
+    }
+    if (is_direct_eval || is_global_scope) {
+        // Global-script direct eval bridges top-level lexicals through globalThis.
+        js_eval_global_lexical_pop_frame();
+    }
+}
+
 extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
                                               Item filename_item,
                                               int64_t line_offset,
@@ -1639,6 +1655,11 @@ extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
             Item body_item = (Item){.item = s2it(heap_create_name(body, total - 1))};
             mem_free(body);
             fn_item = js_new_function_from_string(&body_item, 1);
+            if (js_check_exception()) {
+                js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
+                if (has_eval_source) js_eval_source_pop();
+                return ItemNull;
+            }
         }
     }
 
@@ -1647,6 +1668,7 @@ extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
         extern Item js_get_this();
         Item eval_this = js_get_this();
         Item result = js_call_function(fn_item, eval_this, NULL, 0);
+        if (js_check_exception()) js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
         if (has_eval_source) js_eval_source_pop();
         return result;
     }
@@ -1670,6 +1692,7 @@ extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
         if (!js_transpiler_parse(tp, source, source_len)) {
             log_error("js-eval: parse failed for direct script");
             js_transpiler_destroy(tp);
+            js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
             // Dynamic eval surfaces parser diagnostics through SyntaxError;
             // the REPL uses the same location to render the source caret.
             js_throw_syntax_error(js_eval_parse_error_message());
@@ -1784,6 +1807,7 @@ extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
         }
 
         Item result = js_main_fn((Context*)context);
+        if (js_check_exception()) js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
         if (has_eval_source) js_eval_source_pop();
 
         if (js_eval_fresh_module_scope) {

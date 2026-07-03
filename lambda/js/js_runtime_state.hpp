@@ -42,6 +42,8 @@ struct JsRuntimeState {
     int super_this_bound_depth = 0;
     Item* pending_call_args = NULL;
     int pending_call_argc = 0;
+    const char* pending_call_source = NULL;
+    int pending_call_source_len = 0;
     Item array_method_real_this = {0};
     // Js54 P5: true when the currently-dispatched builtin was invoked through
     // an Array.prototype function object (no JS_FUNC_FLAG_TYPED_ARRAY_METHOD).
@@ -99,6 +101,8 @@ static inline Item*& js_active_module_vars_ref() {
 #define js_super_this_bound_depth (js_runtime_state.super_this_bound_depth)
 #define js_pending_call_args (js_runtime_state.pending_call_args)
 #define js_pending_call_argc (js_runtime_state.pending_call_argc)
+#define js_pending_call_source (js_runtime_state.pending_call_source)
+#define js_pending_call_source_len (js_runtime_state.pending_call_source_len)
 #define js_array_method_real_this (js_runtime_state.array_method_real_this)
 #define js_dispatch_as_array_method (js_runtime_state.dispatch_as_array_method)
 #define js_cached_object_proto (js_runtime_state.cached_object_proto)

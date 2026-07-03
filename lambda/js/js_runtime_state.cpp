@@ -1071,6 +1071,15 @@ extern "C" void js_set_direct_new_target(Item target) {
     js_new_target = target;
 }
 
+extern "C" void js_set_pending_call_source(const char* source, int64_t len) {
+    js_pending_call_source = source;
+    js_pending_call_source_len = (len > 0 && len < 8192) ? (int)len : 0;
+    if (!source || js_pending_call_source_len == 0) {
+        js_pending_call_source = NULL;
+        js_pending_call_source_len = 0;
+    }
+}
+
 // Build the 'arguments' array-like object from the pending call args.
 // Called at the top of JIT-compiled functions that reference 'arguments'.
 
@@ -1090,6 +1099,8 @@ void js_reset_transient_call_state() {
     memset(js_super_this_value_stack, 0, sizeof(js_runtime_state.super_this_value_stack));
     js_pending_call_args = NULL;
     js_pending_call_argc = 0;
+    js_pending_call_source = NULL;
+    js_pending_call_source_len = 0;
     js_pending_args_is_strict = 0;
     js_pending_args_callee = (Item){0};
     js_array_method_real_this = (Item){0};
@@ -1150,6 +1161,11 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
         leak_count++;
         log_error("js-batch-state: %s left pending call args ptr=%p argc=%d",
             name, (void*)js_pending_call_args, js_pending_call_argc);
+    }
+    if (js_pending_call_source || js_pending_call_source_len != 0) {
+        leak_count++;
+        log_error("js-batch-state: %s left pending call source ptr=%p len=%d",
+            name, (void*)js_pending_call_source, js_pending_call_source_len);
     }
     if (js_pending_args_is_strict || js_pending_args_callee.item != 0) {
         leak_count++;

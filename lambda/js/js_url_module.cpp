@@ -16,6 +16,10 @@
 #include <cstring>
 #include <cstdlib>
 
+extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
+extern "C" Item js_throw_invalid_arg_type(const char* name, const char* expected, Item actual);
+extern "C" Item js_throw_type_error(const char* message);
+
 // Helper: make JS undefined value
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
@@ -42,6 +46,75 @@ static Item make_string_item(const char* str, int len) {
 static Item make_string_item(const char* str) {
     if (!str) return ItemNull;
     return make_string_item(str, (int)strlen(str));
+}
+
+#define JS_BLOB_URL_MAX 1024
+static Item js_blob_url_values[JS_BLOB_URL_MAX];
+static char js_blob_url_ids[JS_BLOB_URL_MAX][64];
+static int64_t js_blob_url_next_id = 1;
+static bool js_blob_url_roots_registered = false;
+
+static void js_blob_url_register_roots(void) {
+    if (js_blob_url_roots_registered) return;
+    heap_register_gc_root_range((uint64_t*)js_blob_url_values, JS_BLOB_URL_MAX);
+    js_blob_url_roots_registered = true;
+}
+
+extern "C" Item js_blob_url_resolve(Item id_item) {
+    if (get_type_id(id_item) != LMD_TYPE_STRING) return make_js_undefined();
+    String* id = it2s(id_item);
+    if (!id || id->len <= 0) return make_js_undefined();
+    for (int i = 0; i < JS_BLOB_URL_MAX; i++) {
+        if (js_blob_url_values[i].item == 0) continue;
+        if ((int)id->len == (int)strlen(js_blob_url_ids[i]) &&
+            memcmp(id->chars, js_blob_url_ids[i], (size_t)id->len) == 0) {
+            return js_blob_url_values[i];
+        }
+    }
+    return make_js_undefined();
+}
+
+static Item js_url_createObjectURL(Item blob) {
+    if (js_class_id(blob) != JS_CLASS_BLOB) {
+        return js_throw_invalid_arg_type("obj", "Blob", blob);
+    }
+    js_blob_url_register_roots();
+    for (int i = 0; i < JS_BLOB_URL_MAX; i++) {
+        if (js_blob_url_values[i].item != 0) continue;
+        int id_len = snprintf(js_blob_url_ids[i], sizeof(js_blob_url_ids[i]),
+                              "blob:nodedata:%lld", (long long)js_blob_url_next_id++);
+        if (id_len < 0) id_len = 0;
+        if (id_len >= (int)sizeof(js_blob_url_ids[i])) id_len = (int)sizeof(js_blob_url_ids[i]) - 1;
+        js_blob_url_values[i] = blob;
+        // Blob URLs are process-local handles; the registry is the owning root
+        // until revokeObjectURL clears the slot.
+        return make_string_item(js_blob_url_ids[i], id_len);
+    }
+    return js_throw_type_error("Blob URL registry is full");
+}
+
+static Item js_url_revokeObjectURL(Item id_item) {
+    if (get_type_id(id_item) != LMD_TYPE_STRING) return make_js_undefined();
+    String* id = it2s(id_item);
+    if (!id) return make_js_undefined();
+    for (int i = 0; i < JS_BLOB_URL_MAX; i++) {
+        if (js_blob_url_values[i].item == 0) continue;
+        if ((int)id->len == (int)strlen(js_blob_url_ids[i]) &&
+            memcmp(id->chars, js_blob_url_ids[i], (size_t)id->len) == 0) {
+            js_blob_url_values[i] = (Item){0};
+            js_blob_url_ids[i][0] = '\0';
+            return make_js_undefined();
+        }
+    }
+    return make_js_undefined();
+}
+
+extern "C" void js_blob_url_reset(void) {
+    for (int i = 0; i < JS_BLOB_URL_MAX; i++) {
+        js_blob_url_values[i] = (Item){0};
+        js_blob_url_ids[i][0] = '\0';
+    }
+    js_blob_url_next_id = 1;
 }
 
 // Helper: convert Url* to JS object with URL properties
@@ -98,9 +171,17 @@ static Item url_to_js_object(Url* url) {
             }
             pair = strtok(NULL, "&");
         }
-        js_property_set(obj, make_string_item("searchParams"), params);
+        Item search_params_key = make_string_item("searchParams");
+        js_property_set(obj, search_params_key, params);
+        // searchParams is a per-instance wrapper; if enumerable, deep equality
+        // compares wrapper identity instead of the URL's canonical href.
+        js_mark_non_enumerable(obj, search_params_key);
     } else {
-        js_property_set(obj, make_string_item("searchParams"), js_new_object());
+        Item search_params_key = make_string_item("searchParams");
+        js_property_set(obj, search_params_key, js_new_object());
+        // searchParams is a per-instance wrapper; if enumerable, deep equality
+        // compares wrapper identity instead of the URL's canonical href.
+        js_mark_non_enumerable(obj, search_params_key);
     }
 
     return obj;
@@ -135,7 +216,11 @@ static Item url_parse_legacy_path_only(const char* url_str) {
     js_property_set(obj, make_string_item("pathname"), make_string_item(url_str, pathname_len));
     js_property_set(obj, make_string_item("search"), search_len > 0 ? make_string_item(query, search_len) : make_string_item(""));
     js_property_set(obj, make_string_item("hash"), hash_len > 0 ? make_string_item(hash, hash_len) : make_string_item(""));
-    js_property_set(obj, make_string_item("searchParams"), js_new_object());
+    Item search_params_key = make_string_item("searchParams");
+    js_property_set(obj, search_params_key, js_new_object());
+    // searchParams is a per-instance wrapper; if enumerable, deep equality
+    // compares wrapper identity instead of the URL's canonical href.
+    js_mark_non_enumerable(obj, search_params_key);
     js_property_set(obj, make_string_item("path"), make_string_item(url_str, path_len));
     js_property_set(obj, make_string_item("query"), search_len > 0 ? make_string_item(query, search_len) : make_string_item(""));
     js_property_set(obj, make_string_item("slashes"), (Item){.item = b2it(false)});
@@ -713,11 +798,19 @@ extern "C" Item js_url_search_params_new(Item init) {
         entries = js_array_new(0);
     }
 
-    js_property_set(obj, make_string_item("__entries__"), entries);
+    Item entries_key = make_string_item("__entries__");
+    js_property_set(obj, entries_key, entries);
+    // URLSearchParams entries are an internal list; exposing the backing array
+    // as enumerable makes assert deep-equality compare implementation storage.
+    js_mark_non_enumerable(obj, entries_key);
 
     // set methods
     auto usp_method = [&](const char* name, void* fn, int params) {
-        js_property_set(obj, make_string_item(name), js_new_function(fn, params));
+        Item key = make_string_item(name);
+        js_property_set(obj, key, js_new_function(fn, params));
+        // URLSearchParams methods live on the prototype in Node; keeping these
+        // fallback own methods enumerable leaks per-instance functions.
+        js_mark_non_enumerable(obj, key);
     };
     usp_method("append",  (void*)js_usp_append, 2);
     usp_method("delete",  (void*)js_usp_delete, 2);
@@ -734,7 +827,10 @@ extern "C" Item js_url_search_params_new(Item init) {
 
     // size as getter
     int64_t sz = js_array_length(entries);
-    js_property_set(obj, make_string_item("size"), (Item){.item = i2it((int)sz)});
+    Item size_key = make_string_item("size");
+    js_property_set(obj, size_key, (Item){.item = i2it((int)sz)});
+    // size is observable as state, but it is not an enumerable data field.
+    js_mark_non_enumerable(obj, size_key);
 
     return obj;
 }
@@ -745,10 +841,11 @@ extern "C" Item js_url_search_params_new(Item init) {
 
 static Item url_module_namespace = {0};
 
-static void js_url_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
+static Item js_url_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);
     Item fn = js_new_function(func_ptr, param_count);
     js_property_set(ns, key, fn);
+    return fn;
 }
 
 extern "C" Item js_get_url_namespace(void) {
@@ -757,7 +854,9 @@ extern "C" Item js_get_url_namespace(void) {
     url_module_namespace = js_new_object();
 
     // URL constructor (as a function, not class)
-    js_url_set_method(url_module_namespace, "URL", (void*)js_url_module_construct, 2);
+    Item url_ctor = js_url_set_method(url_module_namespace, "URL", (void*)js_url_module_construct, 2);
+    js_url_set_method(url_ctor, "createObjectURL", (void*)js_url_createObjectURL, 1);
+    js_url_set_method(url_ctor, "revokeObjectURL", (void*)js_url_revokeObjectURL, 1);
 
     // legacy methods
     js_url_set_method(url_module_namespace, "parse", (void*)js_url_parse_legacy, 1);
@@ -780,4 +879,5 @@ extern "C" Item js_get_url_namespace(void) {
 
 extern "C" void js_url_module_reset(void) {
     url_module_namespace = (Item){0};
+    js_blob_url_reset();
 }

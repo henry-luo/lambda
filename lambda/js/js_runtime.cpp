@@ -48,6 +48,7 @@ extern "C" int js_parse_error_get(int64_t* out_row, int64_t* out_col,
                                   char* out_message, int64_t out_message_size);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_process_emit2(Item event_name, Item arg1, Item arg2);
+extern "C" Item js_symbol_for(Item key);
 extern "C" int js_is_process_object_value(Item object);
 extern "C" Item js_get_process_exec_argv(void);
 extern "C" Item js_get_process_argv(void);
@@ -988,6 +989,27 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end);
 static int64_t js_utf16_len(const char* chars, int str_len, bool is_ascii);
 extern "C" Item js_intern_ascii_char(int code);  // §7.2.B (defined in js_globals.cpp)
 
+static Item js_proxy_missing_own_key_error(Item key) {
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, "'ownKeys' on proxy: trap result did not include ");
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* s = it2s(key);
+        strbuf_append_char(sb, '\'');
+        if (s) strbuf_append_str_n(sb, s->chars, s->len);
+        strbuf_append_char(sb, '\'');
+    } else {
+        // The ownKeys invariant is about the exact omitted key; the generic
+        // non-configurable text hid array length failures expected by Node.
+        Item text = js_to_string_val(key);
+        String* s = get_type_id(text) == LMD_TYPE_STRING ? it2s(text) : NULL;
+        if (s) strbuf_append_str_n(sb, s->chars, s->len);
+        else strbuf_append_str(sb, "non-configurable key");
+    }
+    Item result = js_throw_type_error(sb->str);
+    strbuf_free(sb);
+    return result;
+}
+
 extern "C" Item js_proxy_trap_own_keys(Item proxy) {
     JsProxyData* pd = js_get_proxy_data(proxy);
     if (!pd) return js_array_new(0);
@@ -1079,7 +1101,7 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
                         if (it2b(js_strict_equal(tk, js_array_get_int(key_list, j)))) { found = true; break; }
                     }
                     if (!found) {
-                        return js_throw_type_error("'ownKeys' on proxy: trap result did not include non-configurable key");
+                        return js_proxy_missing_own_key_error(tk);
                     }
                 }
             }
@@ -2020,7 +2042,10 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_has_pending_new_target = false;
                 Item pattern = (argc > 0 && args) ? args[0] : make_js_undefined();
                 Item flags = (argc > 1 && args) ? args[1] : make_js_undefined();
-                return js_regexp_construct(pattern, flags);
+                Item result = js_regexp_construct(pattern, flags);
+                // RegExp subclasses rely on GetPrototypeFromConstructor; without
+                // this the native RegExp object loses the derived constructor.
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // Symbol — not constructable (ES §19.4.1 step 1)
@@ -2034,12 +2059,18 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             if (nl == 4 && strncmp(n, "Date", 4) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                if (argc == 0) return js_date_new();
-                if (argc == 1) return js_date_new_from(args[0]);
-                // Multi-arg: pack into an array and call js_date_new_multi
-                Item arr = js_array_new(0);
-                for (int i = 0; i < argc; i++) js_array_push(arr, args[i]);
-                return js_date_new_multi(arr);
+                Item result = ItemNull;
+                if (argc == 0) result = js_date_new();
+                else if (argc == 1) result = js_date_new_from(args[0]);
+                else {
+                    // Multi-arg: pack into an array and call js_date_new_multi
+                    Item arr = js_array_new(0);
+                    for (int i = 0; i < argc; i++) js_array_push(arr, args[i]);
+                    result = js_date_new_multi(arr);
+                }
+                // Date subclasses need the derived prototype while retaining
+                // the native Date slot installed by the built-in constructor.
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // Error and subclasses
@@ -3141,6 +3172,9 @@ static bool js_upgrade_native_backed_map_for_properties(Map* m, const char* tag_
     m->data_cap = 0;
     String* tag_key = heap_create_name(tag_name, tag_len);
     map_put(m, tag_key, (Item){.item = i2it((int64_t)(uintptr_t)native_ptr)}, js_input);
+    // native backing tags preserve internal slots after shape upgrade; exposing
+    // them as enumerable own keys makes deep equality compare pointer values.
+    js_attr_set_enumerable((Item){.map = m}, tag_name, tag_len, false);
     return true;
 }
 
@@ -8611,6 +8645,7 @@ struct JsTemplateRegistryEntry {
 };
 
 static JsTemplateRegistryEntry* js_template_registry = NULL;
+static bool js_template_registry_atexit_registered = false;
 
 extern "C" void js_reset_template_registry(void) {
     JsTemplateRegistryEntry* entry = js_template_registry;
@@ -8645,6 +8680,12 @@ extern "C" Item js_build_template_object_cached(Item* cooked, Item* raw, int cou
         if (entry->site_id == site_id && entry->count == count) return entry->object;
     }
     Item obj = js_build_template_object(cooked, raw, count);
+    if (!js_template_registry_atexit_registered) {
+        // Tagged-template cache entries are native allocations; the last script
+        // in a process may exit without another batch reset to free them.
+        atexit(js_reset_template_registry);
+        js_template_registry_atexit_registered = true;
+    }
     JsTemplateRegistryEntry* entry = (JsTemplateRegistryEntry*)mem_calloc(1, sizeof(JsTemplateRegistryEntry), MEM_CAT_JS_RUNTIME);
     if (entry) {
         entry->site_id = site_id;
@@ -8767,6 +8808,7 @@ static bool js_invoke_trace_enabled() {
 
 static void js_invoke_trace_call(JsFunction* fn, int arg_count, int effective_count) {
     if (!js_invoke_trace_enabled()) return;
+#ifndef NDEBUG
     // Browser-smoke crash recovery can land after generated code faults, so
     // emit the callee before entering it while the JsFunction metadata is valid.
     const char* source_chars = "";
@@ -8788,6 +8830,11 @@ static void js_invoke_trace_call(JsFunction* fn, int arg_count, int effective_co
         fn && fn->name ? fn->name->chars : "(anon)",
         source_len,
         source_chars);
+#else
+    // Release builds strip debug logging; avoid preparing trace-only values
+    // that would be optimized away and trip -Wunused-but-set-variable.
+    (void)fn; (void)arg_count; (void)effective_count;
+#endif
 }
 
 static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count) {
@@ -12673,6 +12720,10 @@ static bool js_builtin_super_constructs_via_construct(Item callee) {
            // or exotic-Array element/length behaviour with the subclass prototype.
            (len == 7 && strncmp(name, "Boolean", 7) == 0) ||
            (len == 6 && strncmp(name, "String", 6) == 0) ||
+           // Date and RegExp carry hidden native slots; merging their enumerable
+           // properties into the preallocated derived `this` drops those slots.
+           (len == 4 && strncmp(name, "Date", 4) == 0) ||
+           (len == 6 && strncmp(name, "RegExp", 6) == 0) ||
            (len == 5 && strncmp(name, "Array", 5) == 0) ||
            (len == 3 && strncmp(name, "Map", 3) == 0) ||
            (len == 3 && strncmp(name, "Set", 3) == 0) ||
@@ -18230,6 +18281,9 @@ static Item js_collection_create(int type) {
     Item cd_key = (Item){.item = s2it(heap_create_name(JS_COLLECTION_DATA_KEY))};
     Item cd_val = (Item){.item = i2it((int64_t)(uintptr_t)cd)};
     js_property_set(obj, cd_key, cd_val);
+    // Collection backing storage is an internal slot; exposing it as enumerable
+    // makes deep equality and inspect compare native pointer values.
+    js_mark_non_enumerable(obj, cd_key);
     return obj;
 }
 
@@ -18532,6 +18586,11 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
         case 8: { // entries() — returns iterator
             int bid = (cd->type == JS_COLLECTION_SET) ? JS_BUILTIN_SET_ENTRIES : JS_BUILTIN_MAP_ENTRIES;
             return js_dispatch_builtin(bid, obj, NULL, 0);
+        }
+        case 9: { // size getter
+            // Deep equality and property access share the dispatcher contract;
+            // omitting size made unequal Map/Set cardinalities compare equal.
+            return (Item){.item = i2it((int64_t)hashmap_count(cd->hmap))};
         }
         default: return ItemNull;
     }
@@ -36763,6 +36822,8 @@ extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_
 }
 
 // AsyncLocalStorage: constructor creates an object with run/getStore/enterWith/disable
+static Item js_async_hooks_key(const char* name);
+
 static Item js_als_constructor(Item options) {
     Item self = js_get_this();
     // handle options: { defaultValue, name }
@@ -36811,6 +36872,38 @@ static Item js_als_disable(void) {
     Item self = js_get_this();
     js_property_set(self, js_als_store_key(), (Item){.item = ITEM_JS_UNDEFINED});
     return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static Item js_als_scope_dispose(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    Item storage = env[0];
+    Item previous = env[1];
+    Item disposed_key = js_async_hooks_key("__lambda_als_scope_disposed__");
+    Item disposed = js_property_get(js_get_this(), disposed_key);
+    if (get_type_id(disposed) == LMD_TYPE_BOOL && it2b(disposed)) {
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    js_property_set(js_get_this(), disposed_key, (Item){.item = b2it(true)});
+    js_property_set(storage, js_als_store_key(), previous);
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static Item js_als_withScope(Item store) {
+    Item self = js_get_this();
+    Item previous = js_property_get(self, js_als_store_key());
+    js_property_set(self, js_als_store_key(), store);
+    Item scope = js_new_object();
+    Item* env = js_alloc_env(2);
+    env[0] = self;
+    env[1] = previous;
+    Item dispose = js_new_closure((void*)js_als_scope_dispose, 0, env, 2);
+    // Node's RunScope supports both `using` disposal and explicit .dispose().
+    Item dispose_key = js_symbol_well_known((Item){.item = s2it(heap_create_name("dispose", 7))});
+    js_property_set(scope, dispose_key, dispose);
+    js_property_set(scope, (Item){.item = s2it(heap_create_name("dispose", 7))}, dispose);
+    js_property_set(scope, js_async_hooks_key("__lambda_als_scope_disposed__"),
+                    (Item){.item = b2it(false)});
+    return scope;
 }
 
 // trace_events: enough of Node's tracing model for dynamic async_hooks traces.
@@ -37203,6 +37296,19 @@ static Item js_async_hooks_key(const char* name) {
     return (Item){.item = s2it(heap_create_name(name, (int)strlen(name)))};
 }
 
+static Item js_async_hooks_symbol_key(const char* name, int name_len) {
+    return js_symbol_for((Item){.item = s2it(heap_create_name(name, name_len))});
+}
+
+static void js_async_hooks_stamp_id_symbols(Item resource, int64_t async_id, int64_t trigger_id) {
+    // Node exposes the same async ids through internal/async_hooks.symbols for
+    // socket/resource tests that do not read Lambda's private string keys.
+    js_property_set(resource, js_async_hooks_symbol_key("nodejs.async_id_symbol", 22),
+                    (Item){.item = i2it(async_id)});
+    js_property_set(resource, js_async_hooks_symbol_key("nodejs.trigger_async_id_symbol", 30),
+                    (Item){.item = i2it(trigger_id)});
+}
+
 static void js_async_hooks_register_roots(void) {
     if (js_async_hooks_roots_registered) return;
     heap_register_gc_root_range((uint64_t*)js_async_hooks, JS_ASYNC_HOOK_MAX);
@@ -37331,6 +37437,7 @@ extern "C" Item js_async_hooks_stamp_resource(Item resource, const char* type_ch
     js_property_set(resource, js_async_hooks_key("__lambda_async_id__"), (Item){.item = i2it(async_id)});
     js_property_set(resource, js_async_hooks_key("__lambda_trigger_async_id__"), (Item){.item = i2it(trigger_id)});
     js_property_set(resource, js_async_hooks_key("__lambda_async_resource_destroyed__"), (Item){.item = b2it(false)});
+    js_async_hooks_stamp_id_symbols(resource, async_id, trigger_id);
     js_async_hooks_emit_init(async_id, type, trigger_id, resource);
     js_trace_emit_async_hooks_init(type_chars, type_len, async_id, trigger_id);
     return resource;
@@ -37407,6 +37514,7 @@ extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_
     js_property_set(resource, js_async_hooks_key("__lambda_async_id__"), (Item){.item = i2it(async_id)});
     js_property_set(resource, js_async_hooks_key("__lambda_trigger_async_id__"), (Item){.item = i2it(trigger_id)});
     js_property_set(resource, js_async_hooks_key("__lambda_async_resource_destroyed__"), (Item){.item = b2it(false)});
+    js_async_hooks_stamp_id_symbols(resource, async_id, trigger_id);
     js_async_hooks_emit_init(async_id, type, trigger_id, resource);
     js_trace_emit_async_hooks_init(type_chars, type_len, async_id, trigger_id);
     return resource;
@@ -37492,6 +37600,7 @@ static Item js_ar_constructor(Item type, Item options) {
     js_property_set(self, js_async_hooks_key("__lambda_async_id__"), (Item){.item = i2it(async_id)});
     js_property_set(self, js_async_hooks_key("__lambda_trigger_async_id__"), (Item){.item = i2it(trigger_id)});
     js_property_set(self, js_async_hooks_key("__lambda_async_resource_destroyed__"), (Item){.item = b2it(false)});
+    js_async_hooks_stamp_id_symbols(self, async_id, trigger_id);
     js_async_hooks_emit_init(async_id, type, trigger_id, self);
     js_trace_emit_async_hooks_init(type_str->chars, (int)type_str->len, async_id, trigger_id);
     if (!require_manual_destroy && !js_async_hooks_is_gc_tracker(self)) {
@@ -37524,8 +37633,83 @@ static Item js_ar_triggerAsyncId_method(void) {
     return (Item){.item = i2it(0)};
 }
 
-static Item js_ar_bind(Item fn) {
-    return fn;
+static Item js_ar_bound_call(Item env_item, Item rest_args) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    Item resource = env[0];
+    Item fn = env[1];
+    Item bound_this = env[2];
+    Item call_this = bound_this.item == ITEM_JS_TDZ ? js_get_this() : bound_this;
+    if (bound_this.item == ITEM_JS_TDZ && js_is_global_this_object_value(call_this)) {
+        // Plain bound-function calls arrive with the runtime global receiver;
+        // Node's AsyncResource.bind forwards that case as an unbound call.
+        call_this = (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    Item* args = NULL;
+    int argc = 0;
+    if (get_type_id(rest_args) == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(rest_args);
+        if (len > 64) len = 64;
+        if (len > 0) {
+            args = LAMBDA_ALLOCA((int)len, Item);
+            for (int64_t i = 0; i < len; i++) args[i] = js_array_get_int(rest_args, i);
+            argc = (int)len;
+        }
+    }
+    Item previous = js_async_hooks_enter_resource(resource);
+    Item result = js_call_function(fn, call_this, args, argc);
+    js_async_hooks_restore_resource(previous);
+    return result;
+}
+
+static Item js_ar_make_bound(Item resource, Item fn, Item this_arg) {
+    if (get_type_id(fn) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("fn", "function", fn);
+    }
+    Item* env = js_alloc_env(3);
+    env[0] = resource;
+    env[1] = fn;
+    env[2] = this_arg;
+    // AsyncResource.bind wraps the callback; returning the original callback
+    // skipped Node's type validation and async-scope restoration.
+    Item bound = js_new_closure((void*)js_ar_bound_call, -1, env, 3);
+    JsFunction* bound_fn = (JsFunction*)bound.function;
+    if (bound_fn) {
+        bound_fn->formal_length = (int)js_get_length(fn);
+        bound_fn->flags |= JS_FUNC_FLAG_STRICT;
+    }
+    return bound;
+}
+
+static Item js_ar_bind(Item rest_args) {
+    Item fn = js_array_get_int(rest_args, 0);
+    Item this_arg = js_array_length(rest_args) > 1
+        ? js_array_get_int(rest_args, 1)
+        : (Item){.item = ITEM_JS_TDZ};
+    return js_ar_make_bound(js_get_this(), fn, this_arg);
+}
+
+static Item js_ar_static_bind(Item rest_args) {
+    Item fn = js_array_get_int(rest_args, 0);
+    Item type_or_this_arg = js_array_get_int(rest_args, 1);
+    Item explicit_third = js_array_length(rest_args) > 2
+        ? js_array_get_int(rest_args, 2)
+        : (Item){.item = ITEM_JS_TDZ};
+    Item resource_type = (get_type_id(type_or_this_arg) == LMD_TYPE_STRING)
+        ? type_or_this_arg
+        : (Item){.item = s2it(heap_create_name("AsyncResource.bind", 18))};
+    Item bound_this;
+    if (get_type_id(type_or_this_arg) == LMD_TYPE_STRING) {
+        bound_this = explicit_third;
+    } else {
+        bound_this = js_array_length(rest_args) > 1
+            ? type_or_this_arg
+            : (Item){.item = ITEM_JS_TDZ};
+    }
+    String* type_str = get_type_id(resource_type) == LMD_TYPE_STRING ? it2s(resource_type) : NULL;
+    Item resource = js_async_hooks_create_resource(
+        type_str ? type_str->chars : "AsyncResource.bind",
+        type_str ? (int)type_str->len : 18);
+    return js_ar_make_bound(resource, fn, bound_this);
 }
 
 // createHook: returns object with enable/disable
@@ -37696,6 +37880,14 @@ extern "C" Item js_get_internal_async_hooks_namespace(void) {
         js_property_set(iah_ns,
             (Item){.item = s2it(heap_create_name("enabledHooksExist", 17))},
             js_new_function((void*)js_internal_async_enabledHooksExist, 0));
+        Item symbols = js_new_object();
+        // The public internal namespace must export the same symbol keys used
+        // when resources are stamped, otherwise destructuring .symbols fails.
+        js_property_set(symbols, (Item){.item = s2it(heap_create_name("async_id_symbol", 15))},
+                        js_async_hooks_symbol_key("nodejs.async_id_symbol", 22));
+        js_property_set(symbols, (Item){.item = s2it(heap_create_name("trigger_async_id_symbol", 23))},
+                        js_async_hooks_symbol_key("nodejs.trigger_async_id_symbol", 30));
+        js_property_set(iah_ns, (Item){.item = s2it(heap_create_name("symbols", 7))}, symbols);
         js_property_set(iah_ns, (Item){.item = s2it(heap_create_name("default", 7))}, iah_ns);
     }
     return iah_ns;
@@ -37738,6 +37930,8 @@ extern "C" Item js_get_async_hooks_namespace(void) {
                         js_new_function((void*)js_als_enterWith, 1));
         js_property_set(als_proto, (Item){.item = s2it(heap_create_name("disable", 7))},
                         js_new_function((void*)js_als_disable, 0));
+        js_property_set(als_proto, (Item){.item = s2it(heap_create_name("withScope", 9))},
+                        js_new_function((void*)js_als_withScope, 1));
         js_property_set(als_class, (Item){.item = s2it(heap_create_name("prototype", 9))}, als_proto);
         js_property_set(als_class, (Item){.item = s2it(heap_create_name("__instance_proto__", 18))}, als_proto);
         Item als_ctor_fn = js_new_function((void*)js_als_constructor, 1);
@@ -37756,10 +37950,12 @@ extern "C" Item js_get_async_hooks_namespace(void) {
         js_property_set(ar_proto, (Item){.item = s2it(heap_create_name("triggerAsyncId", 14))},
                         js_new_function((void*)js_ar_triggerAsyncId_method, 0));
         js_property_set(ar_proto, (Item){.item = s2it(heap_create_name("bind", 4))},
-                        js_new_function((void*)js_ar_bind, 1));
+                        js_new_function((void*)js_ar_bind, -1));
         js_property_set(ar_class, (Item){.item = s2it(heap_create_name("prototype", 9))}, ar_proto);
         js_property_set(ar_class, (Item){.item = s2it(heap_create_name("__instance_proto__", 18))}, ar_proto);
         Item ar_ctor_fn = js_new_function((void*)js_ar_constructor, 2);
+        js_property_set(ar_class, (Item){.item = s2it(heap_create_name("bind", 4))},
+                        js_new_function((void*)js_ar_static_bind, -1));
         js_property_set(ar_class, (Item){.item = s2it(heap_create_name("__ctor__", 8))}, ar_ctor_fn);
         js_function_set_prototype(ar_ctor_fn, ar_proto);
 
@@ -38688,12 +38884,14 @@ extern "C" Item js_module_get_builtin(Item specifier) {
         extern Item js_get_internal_assert_myers_diff_namespace(void);
         return js_get_internal_assert_myers_diff_namespace();
     }
-    // assert/strict, node:assert/strict — same as assert (always strict in our impl)
+    // assert/strict, node:assert/strict — return the strict export, not the
+    // loose namespace, so identity matches require('assert').strict.
     if ((spec->len == 13 && memcmp(spec->chars, "assert/strict", 13) == 0) ||
         (spec->len == 16 && memcmp(spec->chars, "assert/strict.js", 16) == 0) ||
         (spec->len == 18 && memcmp(spec->chars, "node:assert/strict", 18) == 0)) {
         extern Item js_get_assert_namespace(void);
-        return js_get_assert_namespace();
+        Item assert_ns = js_get_assert_namespace();
+        return js_property_get(assert_ns, (Item){.item = s2it(heap_create_name("strict", 6))});
     }
     // node:timers — alias to global timer functions
     if ((spec->len == 6 && memcmp(spec->chars, "timers", 6) == 0) ||
@@ -39873,6 +40071,9 @@ extern "C" Item js_weakmap_new(void) {
     Item obj = js_map_collection_new();
     // Override prototype to WeakMap.prototype (js_map_collection_new sets Map.prototype)
     js_collection_link_prototype(obj, "WeakMap", 7);
+    // WeakMap shares collection storage, but its brand must remain weak so
+    // deep equality treats distinct weak collections as unobservable.
+    js_class_stamp(obj, JS_CLASS_WEAK_MAP);
     // Mark as weak collection
     JsCollectionData* cd = js_get_collection_data(obj);
     if (cd) cd->is_weak = true;
@@ -39883,6 +40084,9 @@ extern "C" Item js_weakset_new(void) {
     Item obj = js_set_collection_new();
     // Override prototype to WeakSet.prototype (js_set_collection_new sets Set.prototype)
     js_collection_link_prototype(obj, "WeakSet", 7);
+    // WeakSet shares collection storage, but its brand must remain weak so
+    // deep equality treats distinct weak collections as unobservable.
+    js_class_stamp(obj, JS_CLASS_WEAK_SET);
     // Mark as weak collection
     JsCollectionData* cd = js_get_collection_data(obj);
     if (cd) cd->is_weak = true;
@@ -40081,6 +40285,11 @@ extern "C" bool js_is_map_instance(Item obj) {
 extern "C" bool js_is_set_instance(Item obj) {
     JsCollectionData* cd = js_get_collection_data(obj);
     return cd && cd->type == JS_COLLECTION_SET;
+}
+
+extern "C" bool js_is_weak_collection_instance(Item obj) {
+    JsCollectionData* cd = js_get_collection_data(obj);
+    return cd && cd->is_weak;
 }
 
 // =============================================================================

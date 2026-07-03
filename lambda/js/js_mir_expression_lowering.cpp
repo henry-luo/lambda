@@ -14,6 +14,26 @@ static bool jm_test262_fast_paths_enabled(JsMirTranspiler* mt) {
            strstr(mt->filename, "test/js262/test/") != NULL;
 }
 
+static void jm_emit_pending_call_source(JsMirTranspiler* mt, JsCallNode* call) {
+    if (!mt || !call || !mt->tp || !mt->tp->source) return;
+    TSNode node = call->base.node;
+    if (ts_node_is_null(node)) return;
+    uint32_t start = ts_node_start_byte(node);
+    uint32_t end = ts_node_end_byte(node);
+    if (end <= start || end > (uint32_t)mt->tp->source_length) return;
+    // assert.ok() uses the original call expression in generated messages;
+    // fallback calls previously erased that source-level invariant at runtime.
+    jm_call_void_2(mt, "js_set_pending_call_source",
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)(mt->tp->source + start)),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(end - start)));
+}
+
+static void jm_emit_clear_pending_call_source(JsMirTranspiler* mt) {
+    jm_call_void_2(mt, "js_set_pending_call_source",
+        MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+}
+
 typedef struct JsMirClosureTrackerSnapshot {
     bool has_env;
     MIR_reg_t env_reg;
@@ -7573,7 +7593,12 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 // (e.g. `const assert = require('assert')` in Node.js tests)
                 NameEntry* assert_entry = js_scope_lookup(mt->tp, obj->name);
                 if (!assert_entry) assert_entry = obj->entry;
-                bool is_local_assert = (assert_entry && assert_entry->node);
+                char assert_vname[16];
+                snprintf(assert_vname, sizeof(assert_vname), "_js_assert");
+                // Dynamic Function parameters can be MIR locals without a
+                // useful scope node; the Test262 fast path must not bypass them.
+                bool is_local_assert = (assert_entry && assert_entry->node) ||
+                    (jm_find_var(mt, assert_vname) != NULL);
                 const char* native_fn = NULL;
                 if (!is_local_assert) {
                 if (prop->name && prop->name->len == 9 && strncmp(prop->name->chars, "sameValue", 9) == 0)
@@ -7666,7 +7691,12 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (id->name->len == 6 && strncmp(id->name->chars, "assert", 6) == 0 && arg_count >= 1 && arg_count <= 2) {
                 NameEntry* assert_entry = js_scope_lookup(mt->tp, id->name);
                 if (!assert_entry) assert_entry = id->entry;
-                bool is_local = (assert_entry && assert_entry->node);
+                char assert_vname[16];
+                snprintf(assert_vname, sizeof(assert_vname), "_js_assert");
+                // Dynamic Function parameters can be MIR locals without a
+                // useful scope node; the Test262 fast path must not bypass them.
+                bool is_local = (assert_entry && assert_entry->node) ||
+                    (jm_find_var(mt, assert_vname) != NULL);
                 if (!is_local) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
@@ -9335,21 +9365,25 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_new_reg_op(mt->ctx, is_dom)));
 
                 jm_emit_label(mt, l_map_fallback);
+                jm_emit_pending_call_source(mt, call);
                 MIR_reg_t map_r = jm_call_4(mt, "js_map_method", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
                     MIR_T_I64, args_op,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                jm_emit_clear_pending_call_source(mt);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, map_r)));
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_map_end)));
 
                 jm_emit_label(mt, l_map_dom);
+                jm_emit_pending_call_source(mt, call);
                 MIR_reg_t dom_r = jm_call_4(mt, "js_dom_element_method", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
                     MIR_T_I64, args_op,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                jm_emit_clear_pending_call_source(mt);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, dom_r)));
                 jm_emit_label(mt, l_map_end);
@@ -9462,11 +9496,13 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             // MAP path: dispatch through js_map_method (handles collections + fallback)
             jm_emit_label(mt, l_map);
             {
+                jm_emit_pending_call_source(mt, call);
                 MIR_reg_t r = jm_call_4(mt, "js_map_method", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
                     MIR_T_I64, args_op,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                jm_emit_clear_pending_call_source(mt);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, r)));
             }
@@ -9501,11 +9537,13 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)cs_id));
+                jm_emit_pending_call_source(mt, call);
                 MIR_reg_t r = jm_call_4(mt, "js_call_function", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, args_op,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                jm_emit_clear_pending_call_source(mt);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, r)));
             }
@@ -10217,7 +10255,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             }
                             jm_transpile_discard_call_args(mt, arg);
 
+                            // Native direct calls bypass js_call_function, so
+                            // assert.ok() would otherwise lose its call-site source.
+                            jm_emit_pending_call_source(mt, call);
                             jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+                            jm_emit_clear_pending_call_source(mt);
                             return result; // returns NATIVE value
                         }
                 }
@@ -10307,7 +10349,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)fc->node->name->chars),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)fc->node->name->len));
                 }
+                jm_emit_pending_call_source(mt, call);
                 jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+                jm_emit_clear_pending_call_source(mt);
                 if (fc->node && fc->node->name) {
                     jm_call_void_1(mt, "js_runtime_call_frame_pop_guarded",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, pushed_stack_frame));
@@ -10392,18 +10436,22 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         if (fallback_has_spread) {
             MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
+            jm_emit_pending_call_source(mt, call);
             call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
+            jm_emit_clear_pending_call_source(mt);
         } else {
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
+            jm_emit_pending_call_source(mt, call);
             call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
                 MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+            jm_emit_clear_pending_call_source(mt);
         }
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
             MIR_new_reg_op(mt->ctx, call_result)));
@@ -10446,18 +10494,22 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         if (fallback_has_spread) {
             MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
+            jm_emit_pending_call_source(mt, call);
             call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
+            jm_emit_clear_pending_call_source(mt);
         } else {
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
+            jm_emit_pending_call_source(mt, call);
             call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
                 MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+            jm_emit_clear_pending_call_source(mt);
         }
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
             MIR_new_reg_op(mt->ctx, call_result)));
@@ -10477,10 +10529,12 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         // v17: pass undefined as this for ordinary plain calls; `with` identifier
         // calls are patched by jm_emit_plain_call_this_arg to preserve the base object.
         MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
+        jm_emit_pending_call_source(mt, call);
         MIR_reg_t call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
+        jm_emit_clear_pending_call_source(mt);
         jm_emit_exc_propagate_check(mt);
         jm_readback_closure_env(mt);
         return call_result;
@@ -10491,11 +10545,13 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     // v17: pass undefined as this for ordinary plain calls; `with` identifier
     // calls are patched by jm_emit_plain_call_this_arg to preserve the base object.
     MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
+    jm_emit_pending_call_source(mt, call);
     MIR_reg_t call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
         MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+    jm_emit_clear_pending_call_source(mt);
     jm_emit_exc_propagate_check(mt);
     jm_readback_closure_env(mt);
     return call_result;
