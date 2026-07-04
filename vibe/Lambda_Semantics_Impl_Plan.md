@@ -1,7 +1,7 @@
 # Lambda Semantics — Implementation Plan
 
 **Status:** actionable worklist, derived from the finalized semantics ledger
-**Sources:** [Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md) (C1–C4, findings A1–A10) · [Lambda_Formal_Semantics2.md](Lambda_Formal_Semantics2.md) (C5–C11)
+**Sources:** [Lambda_Semantics_Formal.md](Lambda_Semantics_Formal.md) (C1–C4, findings A1–A10) · [Lambda_Semantics_Formal2.md](Lambda_Semantics_Formal2.md) (C5–C11)
 **Companion:** [Lambda_Semantics_DSL_Proposal.md](Lambda_Semantics_DSL_Proposal.md) — Stage 4 (the formal model) consumes the language this plan implements.
 
 Conventions:

@@ -967,7 +967,7 @@ anyway. Resolving them first means the formal model describes the language you
 
 With C1–C4 decided, this document concludes on the core principles and designs.
 Remaining open items (see below) continue in a follow-up document,
-**Lambda_Formal_Semantics2.md**. The review's overall assessment:
+**Lambda_Semantics_Formal2.md**. The review's overall assessment:
 
 ### The language now has a theory of itself
 
@@ -1044,7 +1044,7 @@ implementation, argue from principles, record the losing arguments alongside the
 winners. The log is worth more than the decisions themselves — it is what will keep
 the next ten decisions consistent with these four.
 
-### Carried forward to Lambda_Formal_Semantics2.md
+### Carried forward to Lambda_Semantics_Formal2.md
 
 A2 (document div/mod conventions) · A4 (`symbol == string`) · A5 (ArrayNum `==`
 fix) · A6/B8 (OOB + builtin error-value leaks) · A8 (covariance failure mode) ·

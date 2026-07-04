@@ -1,7 +1,7 @@
 # Lambda Formal Semantics 2 — Continuation
 
 **Status:** open backlog — discussions to be held
-**Predecessor:** [Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md) — concluded 2026-07-04 with the core principles and designs (decision records C1–C4, findings A1–A10, recommendations B1–B8, and the overall assessment). Finding/decision IDs below refer to that document. New decisions here continue the numbering at **C5**.
+**Predecessor:** [Lambda_Semantics_Formal.md](Lambda_Semantics_Formal.md) — concluded 2026-07-04 with the core principles and designs (decision records C1–C4, findings A1–A10, recommendations B1–B8, and the overall assessment). Finding/decision IDs below refer to that document. New decisions here continue the numbering at **C5**.
 
 The core principles decided there, which future decisions should stay consistent
 with:

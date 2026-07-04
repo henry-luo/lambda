@@ -716,7 +716,7 @@ listable declaration (§5.6).
 1. **Rewrite arrow spelling** — ~~`~>` assumed here~~ **resolved: use `-->`**
    (the classic PL reduction arrow). The parser-ambiguity check this question asked
    for was done during the C6 pipe-syntax discussion
-   (`Lambda_Formal_Semantics2.md` §C6.2) and killed `~>`: rule templates and `when`
+   (`Lambda_Semantics_Formal2.md` §C6.2) and killed `~>`: rule templates and `when`
    clauses contain expressions, where `~ > 3`-style comparisons are common —
    `~>` would differ from `~ >` by one space with silently different meanings.
    Read every `~>` in this proposal's rule sketches as `-->`.
@@ -758,7 +758,7 @@ guest language the engine runs.
 
 The sections below were added after the original proposal, following a close review
 of Lambda's own semantics (findings in
-[Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md)) and an assessment of how
+[Lambda_Semantics_Formal.md](Lambda_Semantics_Formal.md)) and an assessment of how
 far the framework stretches toward low-level languages.
 
 ## 13. Follow-up: is Lambda ready to be the meta-language?
@@ -779,7 +779,7 @@ The docs are user-guide-grade, not spec-grade, and probing the implementation fo
 doc-vs-implementation divergences on core operators within minutes (`'a' == "a"`
 raises where docs say `false`; three inconsistent integer-overflow regimes; three
 aliasing regimes; OOB indexing yielding unchecked error values). The full verified
-list is [Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md) Part A (findings
+list is [Lambda_Semantics_Formal.md](Lambda_Semantics_Formal.md) Part A (findings
 A1–A10), with design recommendations in Part B.
 
 This does not undermine the proposal — it sharpens it. The DSL uses a bounded
@@ -793,7 +793,7 @@ itself* relies on must be decided and fixed — at minimum A1 (overflow regimes,
 because model arithmetic runs on Lambda numerics; this supersedes open question 5 in
 §11), A5 (`==` reflexivity and representation-independence, because `==` is the
 harness's comparison primitive), and A7 (aliasing, because the rewrite engine passes
-terms around). The triage table in Lambda_Formal_Semantics.md is the worklist; the
+terms around). The triage table in Lambda_Semantics_Formal.md is the worklist; the
 Stage-4 gate is "every finding the meta-fragment touches is resolved (fixed or
 formally documented as-is)."
 
@@ -833,7 +833,7 @@ for disagreements). Three consequences for this proposal:
   independence" §7.3 wanted — cheaper than the deferred K exporter.
 
 **Verdict:** ready in structure, not yet in rigor — and the gap is a finite,
-enumerated worklist (Lambda_Formal_Semantics.md) rather than an open-ended research
+enumerated worklist (Lambda_Semantics_Formal.md) rather than an open-ended research
 problem. The fixture-verification goal and the hardening prerequisite reinforce each
 other: fixing the meta-fragment is the first triage sweep.
 
@@ -864,7 +864,7 @@ commercial undefined-behavior detector.
 - **Bit-precise arithmetic in the meta-language.** A C model needs exact
   i8…u64/f32/f64 operations including wrap. Ironically, Lambda's sized types with
   wrapping semantics are the right tool — but per finding A1
-  ([Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md)), their own semantics is
+  ([Lambda_Semantics_Formal.md](Lambda_Semantics_Formal.md)), their own semantics is
   currently implicit. The §13.3 hardening prerequisite therefore gates this model
   too: the meta-language's numeric story must be written down before it can carry
   someone else's.
