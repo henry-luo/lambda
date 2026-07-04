@@ -266,6 +266,9 @@ void jm_scope_env_mark_and_writeback_binding(JsMirTranspiler* mt, const char* na
 MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MIR_reg_t val, JsAstNode* expr);
 MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                                          TypeId expr_type, TypeId target_type);
+MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,
+                                             JsConditionalNode* cond,
+                                             TypeId target_type);
 JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode* call);
 JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call);
 bool jm_is_recursive_call(JsCallNode* call, JsFuncCollected* fc);

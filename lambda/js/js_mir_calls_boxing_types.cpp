@@ -765,6 +765,15 @@ MIR_reg_t jm_emit_double_to_int(JsMirTranspiler* mt, MIR_reg_t d_reg) {
 
 // Ensure a register is native int64_t, converting from boxed if needed
 MIR_reg_t jm_ensure_native_int(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_type) {
+    MIR_type_t rt = MIR_reg_type(mt->ctx, reg, mt->current_func);
+    if (rt == MIR_T_I64 && src_type == LMD_TYPE_INT) return reg;
+    if (rt == MIR_T_D) return jm_emit_double_to_int(mt, reg);
+    if (rt == MIR_T_F) {
+        MIR_reg_t d = jm_new_reg(mt, "f2d_i", MIR_T_D);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_F2D,
+            MIR_new_reg_op(mt->ctx, d), MIR_new_reg_op(mt->ctx, reg)));
+        return jm_emit_double_to_int(mt, d);
+    }
     if (src_type == LMD_TYPE_INT) return reg;  // already native int
     if (src_type == LMD_TYPE_FLOAT) return jm_emit_double_to_int(mt, reg);
     // boxed Item of unknown type → call it2i for safe conversion
@@ -775,6 +784,18 @@ MIR_reg_t jm_ensure_native_int(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_ty
 
 // Ensure a register is native double, converting from int or boxed if needed
 MIR_reg_t jm_ensure_native_float(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_type) {
+    MIR_type_t rt = MIR_reg_type(mt->ctx, reg, mt->current_func);
+    if (rt == MIR_T_D) return reg;
+    if (rt == MIR_T_F) {
+        MIR_reg_t d = jm_new_reg(mt, "f2d_f", MIR_T_D);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_F2D,
+            MIR_new_reg_op(mt->ctx, d), MIR_new_reg_op(mt->ctx, reg)));
+        return d;
+    }
+    // P6 widening can leave an expression's TypeId as FLOAT while the emitted
+    // native register is still integral; native call operands must match MIR mode.
+    if (rt == MIR_T_I64 && (src_type == LMD_TYPE_INT || src_type == LMD_TYPE_FLOAT))
+        return jm_emit_int_to_double(mt, reg);
     if (src_type == LMD_TYPE_FLOAT) return reg;  // already native double
     if (src_type == LMD_TYPE_INT) return jm_emit_int_to_double(mt, reg);
     // boxed Item → unbox
@@ -785,7 +806,12 @@ MIR_reg_t jm_ensure_native_float(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_
 MIR_reg_t jm_box_native(JsMirTranspiler* mt, MIR_reg_t reg, TypeId type_id) {
     switch (type_id) {
     case LMD_TYPE_INT:   return jm_box_int_reg(mt, reg);
-    case LMD_TYPE_FLOAT: return jm_box_float(mt, reg);
+    case LMD_TYPE_FLOAT: {
+        // P6 inlining can preserve a widened FLOAT semantic type while the
+        // emitted native value is still an integer register; push_d requires D.
+        MIR_reg_t d = jm_ensure_native_float(mt, reg, type_id);
+        return jm_box_float(mt, d);
+    }
     case LMD_TYPE_BOOL: {
         MIR_reg_t result = jm_new_reg(mt, "boxb", MIR_T_I64);
         uint64_t BOOL_TAG = (uint64_t)LMD_TYPE_BOOL << 56;
@@ -1522,6 +1548,12 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
             MIR_reg_t as_dbl = jm_emit_unbox_float(mt, result);
             return jm_emit_double_to_int(mt, as_dbl);
         }
+    }
+
+    if (expr && expr->node_type == JS_AST_NODE_CONDITIONAL_EXPRESSION) {
+        // Ternary lowering normally joins boxed Item arms; native returns need
+        // each arm lowered to the target MIR mode before the branch join.
+        return jm_transpile_conditional_as_native(mt, (JsConditionalNode*)expr, target_type);
     }
 
     // Phase 4: Call expressions — if native call, result is already native

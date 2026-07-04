@@ -2656,7 +2656,8 @@ void jm_p4b_ctor_walk(JsMirTranspiler* mt, JsAstNode* node,
                 JsAstNode* arg = call->arguments;
                 for (int pi = 0; arg && pi < 16; pi++, arg = arg->next) {
                     TypeId at = jm_p6_static_arg_type(mt, arg);
-                    if (at == LMD_TYPE_INT || at == LMD_TYPE_BOOL)
+                    // boolean arguments are control values, not numeric slot evidence.
+                    if (at == LMD_TYPE_INT)
                         evidence[ci * 16 + pi].int_count++;
                     else if (at == LMD_TYPE_FLOAT)
                         evidence[ci * 16 + pi].float_count++;
@@ -2866,7 +2867,9 @@ void jm_p6_narrow_walk(JsMirTranspiler* mt, JsAstNode* node,
             JsAstNode* arg = call->arguments;
             for (int pi = 0; pi < callee_fc->param_count && pi < 16; pi++) {
                 TypeId at = arg ? jm_p6_arg_type_with_evidence(mt, arg, callee_fc, evidence[fi]) : LMD_TYPE_ANY;
-                if (at == LMD_TYPE_INT || at == LMD_TYPE_BOOL)
+                // boolean arguments must stay boxed; treating them as INT makes
+                // native conditions read boxed boolean tags as nonzero numbers.
+                if (at == LMD_TYPE_INT)
                     evidence[fi][pi].int_count++;
                 else if (at == LMD_TYPE_FLOAT)
                     evidence[fi][pi].float_count++;

@@ -12468,6 +12468,44 @@ MIR_reg_t jm_transpile_conditional(JsMirTranspiler* mt, JsConditionalNode* cond)
     return result;
 }
 
+MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,
+                                             JsConditionalNode* cond,
+                                             TypeId target_type) {
+    MIR_reg_t truthy = jm_transpile_condition(mt, cond->test);
+    MIR_type_t result_type = (target_type == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+    MIR_insn_code_t move_code = (result_type == MIR_T_D) ? MIR_DMOV : MIR_MOV;
+    MIR_reg_t result = jm_new_reg(mt, "tern_n", result_type);
+    MIR_label_t l_false = jm_new_label(mt);
+    MIR_label_t l_end = jm_new_label(mt);
+
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_false),
+        MIR_new_reg_op(mt->ctx, truthy)));
+
+    JsMirBranchState branch_state;
+    jm_save_branch_state(mt, &branch_state);
+    jm_push_scope(mt);
+    TypeId cons_type = jm_get_effective_type(mt, cond->consequent);
+    MIR_reg_t cons = jm_transpile_as_native(mt, cond->consequent, cons_type, target_type);
+    while (mt->scope_depth > branch_state.scope_depth) jm_pop_scope(mt);
+    jm_restore_branch_state(mt, &branch_state);
+    jm_emit(mt, MIR_new_insn(mt->ctx, move_code,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, cons)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+    jm_emit_label(mt, l_false);
+    jm_save_branch_state(mt, &branch_state);
+    jm_push_scope(mt);
+    TypeId alt_type = jm_get_effective_type(mt, cond->alternate);
+    MIR_reg_t alt = jm_transpile_as_native(mt, cond->alternate, alt_type, target_type);
+    while (mt->scope_depth > branch_state.scope_depth) jm_pop_scope(mt);
+    jm_restore_branch_state(mt, &branch_state);
+    jm_emit(mt, MIR_new_insn(mt->ctx, move_code,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, alt)));
+
+    jm_emit_label(mt, l_end);
+    return result;
+}
+
 // Template literal
 MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNode* tmpl) {
     // Get pool pointer from _lambda_rt for StringBuf allocation
