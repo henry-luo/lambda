@@ -713,9 +713,13 @@ listable declaration (§5.6).
 
 ## 11. Open questions
 
-1. **Rewrite arrow spelling** — `~>` assumed here; `-->` is the visible alternative.
-   `~>` conflicts with nothing in the current grammar but sits close to `~` (current
-   item); needs a parser-ambiguity check.
+1. **Rewrite arrow spelling** — ~~`~>` assumed here~~ **resolved: use `-->`**
+   (the classic PL reduction arrow). The parser-ambiguity check this question asked
+   for was done during the C6 pipe-syntax discussion
+   (`Lambda_Formal_Semantics2.md` §C6.2) and killed `~>`: rule templates and `when`
+   clauses contain expressions, where `~ > 3`-style comparisons are common —
+   `~>` would differ from `~ >` by one space with silently different meanings.
+   Read every `~>` in this proposal's rule sketches as `-->`.
 2. **Determined-key marker** — `(x)` in map-pattern key position (§6.3) vs. an
    explicit `key(x):`. The former is terser; the latter survives skimming better.
 3. **Where models live** — `semantics/` at repo root vs. `lambda/semantics/` vs.

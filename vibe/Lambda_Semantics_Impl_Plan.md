@@ -1,0 +1,204 @@
+# Lambda Semantics — Implementation Plan
+
+**Status:** actionable worklist, derived from the finalized semantics ledger
+**Sources:** [Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md) (C1–C4, findings A1–A10) · [Lambda_Formal_Semantics2.md](Lambda_Formal_Semantics2.md) (C5–C11)
+**Companion:** [Lambda_Semantics_DSL_Proposal.md](Lambda_Semantics_DSL_Proposal.md) — Stage 4 (the formal model) consumes the language this plan implements.
+
+Conventions:
+- Every item cites its ruling (`C#`) — the ruling text is the spec; this plan is only the work breakdown.
+- **Gate for every phase**: `make test-lambda-baseline` at 100%, with every golden change traced to a C-ruling in the commit message (goldens are captured output — a golden change without a ruling citation is a red flag, per the DSL proposal's oracle discipline).
+- New `.ls` tests always get their `.txt` expected file (CLAUDE.md rule 8).
+- Grammar changes go through `grammar.js` + `make generate-grammar`; never `parser.c` directly.
+- Code targets cite files/lines as read during the review (may drift; anchors, not gospel).
+
+---
+
+## Phase 0 — Standalone bug fixes (no semantic change; land first, in any order)
+
+These are wrong under *current* semantics and every future ruling alike. Fixing
+them first stabilizes the test substrate.
+
+| # | Item | Ruling | Code target | Acceptance |
+|---|------|--------|-------------|------------|
+| 0.1 | **Element `==` cast bug** (priority one): `element_eq` compares attrs via `map_eq((Map*)a, …)` but `Element : List` puts `type`/`data` at a different offset than `Map` — reads the children pointer as a `TypeMap*`. Pass the element's own `type`/`data` (or refactor `map_eq` to take `type + data` directly). | C8.7-2 | `lambda/lambda-eval.cpp` ~1011–1035 (`element_eq`, the cast at ~1024) | `<div class:"x"> == <div class:"x">` → true; attr-order case per C8.6-R |
+| 0.2 | **Array slice broken**: `a[i to j]` returns `a[0]` instead of the slice. | C11.1 (found); clamp semantics C5-3 | slice path in `lambda-eval.cpp` / transpiler index lowering | `[10,20,30][1 to 2]` → `[20,30]`; OOB clamps: `[10,20,30][1 to 99]` → `[20,30]` |
+| 0.3 | **Object-mutation cluster**: (a) default-constructed `<Counter>` pn-method mutation no-ops; (b) second mutation lost once aliases exist; (c) `pn add(n: int)` methods with parameters fail to parse; (d) `let`-receiver mutation silently no-ops (becomes compile error in Phase 5; until then must at least error). | C4.1 | object construction/method dispatch; `grammar.js` (pn method params) | Counter probe suite passes; parameterized pn methods parse |
+| 0.4 | **`is [T]` inline parse crash** (+ REPL rollback trigger) — collision with child-query `expr[T]` grammar. | C7.2 | `grammar.js` type-pattern vs postfix-query precedence | `[5] is [int]` parses and returns per C7 semantics |
+| 0.5 | **REPL rollback replays session** and leaves parser in continuation state after runtime errors. | A9 | REPL driver (`main` / repl loop) | error in input N doesn't re-execute inputs 1..N-1 |
+| 0.6 | **`fn_lt` NUL-unsafe `strcmp`** — ignores length prefix, inconsistent with `fn_eq`'s `memcmp(len)`. Also needed as C11's string comparator. | C8.7-7 | `lambda-eval.cpp` ~1346–1350, ~1400–1404 | strings with embedded NULs compare by full content |
+| 0.7 | **A8 failure mode**: `var ys: any[] = xs` rejection is log-only, execution continues with invalid `ys`. Interim: make it a proper raised error. (Final semantics per **C12**: the rejection disappears entirely — covariant assignment becomes legal with lazy representation-widening at COW-copy time, landing with Phase 5; the `var`-param invariance compile check lands with 5.2.) | A8/C12 | `ensure_typed_array` path | failed coercion halts (interim); legal + widening (Phase 5) |
+| 0.8 | **Shadow-proof `tag(elem)` accessor** — `.name` is shadowed by a `name:` attribute; models can't read tags reliably. Add `tag(elem)` system function (and `attrs(elem)`/`children(elem)` while there, for symmetry). | C9a probing | sys-func registry (`lambda-eval.cpp` / sys_func defs) | `tag(<x name:'v'>)` → `'x'` |
+
+**Regression fixture pack 0** (new `.ls` + `.txt`): `eq_element.ls`, `slice_clamp.ls`, `object_mutation.ls` (extended), `repl` covered by driver test.
+
+---
+
+## Phase 1 — Equality completion (C8 family)
+
+`==` is the comparison primitive of the whole test/verification pipeline — land
+before phases that churn goldens.
+
+| # | Item | Ruling | Code target | Acceptance |
+|---|------|--------|-------------|------------|
+| 1.1 | **Cross-family `==` → false, two layers**: (a) MIR transpiler operator resolution — statically-known mismatches emit `false`, not "== not found"; (b) runtime `fn_eq_depth` mismatch fallthroughs (`BOOL_ERROR` at ~1217, ~1264) → `BOOL_FALSE`. `!=` negates. | C8 | `lambda/transpile-mir.cpp` (op resolution); `lambda-eval.cpp` `fn_eq_depth` | `'a' == "a"` → false; `1 == "1"` → false; `{a:1} == [1]` → false; no logs |
+| 1.2 | **`error == error` → explicit poison branch**: clean `BOOL_FALSE`, no `unknown comparing type` log. | C8.5 | `fn_eq_depth` (add `LMD_TYPE_ERROR` branch) | `error("x") == error("x")` → false, silent |
+| 1.3 | **Function equality — site + captures**: stamp `(module id, AST node index)` at closure creation; `==` compares site then deep-compares captures. Builtins: builtin index as site. | C8.7-8 | closure creation (transpilers + `build_ast` node ids); `fn_eq_depth` `LMD_TYPE_FUNC` branch (currently pointer-only, ~1258) | `f == f` → true; `make_adder(10) == make_adder(10)` → true; `!= make_adder(20)` |
+| 1.4 | **decimal ↔ float exact comparison**: compare exact mathematical values (float's exact decimal expansion), not lossy conversion. | C8.5 | `decimal_cmp_items` / mixed-numeric compare path | `0.1n == 0.1` → false; `1.5n == 1.5` → true |
+| 1.5 | **Depth limit raises**: `EQ_MAX_DEPTH` (256, ~line 917) exceedance becomes a raised error, not log + error-value; review the 256 value (deep JSON). | C8.5 | `fn_eq_depth` entry | deep-nest test raises catchable error |
+| 1.6 | **ArrayNum `==` representation audit** (task_38782787): `array_num_eq` read looks correct — locate the actual repro (likely a vec/2-D or ARRAY-vs-ARRAY_NUM path) and fix. | A5/C8.7-6 | `array_num_eq`, `cross_seq_eq` | task_38782787 repro → true |
+| 1.7 | **`map_eq` performance**: different-shape path O(n²) linear scan → O(n) expected via existing `TypeMap.field_index` hash. (Semantics unchanged — C8.6-R keeps unordered `==`.) | C8.6-R | `map_eq` ~983–1005 | perf test on large reordered maps |
+| 1.8 | **Map hashing canonicalization**: wherever maps are hashed (C9 content hash, future set keys), hash in sorted-key order — equal maps must hash equal. | C8.6-R | hashing utilities (when built) | property test: `a == b ⟹ hash(a) == hash(b)` |
+
+**Fixture pack 1**: `eq_total.ls` (cross-family matrix), `eq_fn.ls`, `eq_decimal_float.ls`, `eq_poison.ls` (nan/error/reflexivity).
+
+---
+
+## Phase 2 — Absence model & aggregation (C5)
+
+| # | Item | Ruling | Code target | Acceptance |
+|---|------|--------|-------------|------------|
+| 2.1 | **Array OOB / negative-index reads → null** (replacing error values). | C5-1 | index read path (`fn_index` family) | `[1,2,3][10]` → null; `[-1]` → null; chains propagate |
+| 2.2 | **OOB writes raise** (replacing `fn_array_set` log-and-continue). | C5-4 | `fn_array_set` | `arr[10] = 99` raises; `arr` unchanged |
+| 2.3 | **Builtin failure audit → declared `T^`**: `div 0`, failed conversions (`int("abc")`), I/O — enumerate every naked-error emitter; give each a `T^` signature participating in compile-time enforcement (like `input()`); delete all remaining naked error-value emissions. | C5-5 | sys-func registry + transpiler call-site checks | `let x = 1 div 0` fails to compile un-handled; no naked error values reachable |
+| 2.4 | **Empty identity-less aggregates → null**: `avg([])`, `min([])`, `max([])` (keep `sum([])`=0, `prod([])`=1). | C5.3 pinned corner | aggregate builtins | probed values |
+| 2.5 | **Strict null propagation in aggregates** + `skip_null` option on `avg/mean/variance/deviation/median/quantile`. | C5.3 | aggregate builtins; named-param plumbing | `sum([1,null,2])` → null; `sum(xs[!null])` → 3; `avg(v, skip_null: true)` |
+| 2.6 | **`at` membership operator**: grammar (precedence with `is`/`in`); semantics over maps (keys), elements (attrs), arrays (index possession), ranges (index); verify/define `for (k at elem)` iterates attributes. | C5.3a | `grammar.js`, `build_ast.cpp`, eval | `'k' at {k:null}` → true; `'z' at m` → false; `i at arr` bounds test; checked-write idiom test |
+
+**Fixture pack 2**: `oob_read_null.ls`, `oob_write_error.ls`, `agg_null.ls`, `at_membership.ls`.
+
+---
+
+## Phase 3 — Strings & truthiness (C1 + C2; one coordinated change)
+
+| # | Item | Ruling | Code target | Acceptance |
+|---|------|--------|-------------|------------|
+| 3.1 | **Literal `""` is a string**: remove parse-time normalization to null; `"" == null` → false; `"" is string` → true; `match "" { case string }` matches; `d.name == ""` works for data-derived empties (kills the two-empty-strings split, A3). | C1 | literal lowering in `build_ast.cpp`/transpilers | A3 probe table inverted |
+| 3.2 | **`""` is falsy** (string with len 0); full falsy set = {null, false, error, ""}. | C2 | `is_truthy` | truthiness probe table |
+| 3.3 | **Solid-type invariants enforced**: `''` and `b''` (and any zero-length symbol/binary result) → null everywhere (literals already do; audit runtime producers — slices, conversions). | C1/C2-3 | string/binary/symbol producers | `len ≥ 1` property test |
+| 3.4 | **Empty JSON key fix**: `{"": 1}` currently round-trips as `{"''": 1}` (corruption). Define: non-identifier keys (incl. empty) stored/emitted as string keys. | C1.7-4 | `input-json.cpp`, map key handling, formatter | `{"":1}` round-trips exactly |
+| 3.5 | Optional: **`text` type** = `string that (len(~) > 0)` as a predeclared alias. | C1.6 | type registry | `"" is text` → false |
+| 3.6 | **Migration**: sweep fixtures/stdlib for `"" == null` reliance; goldens re-captured with C1 citations. | C1.7-3 | test/lambda | baseline green |
+
+**Fixture pack 3**: `empty_string.ls` (the full A3 matrix), `json_empty_key.ls`.
+
+---
+
+## Phase 4 — Numeric model (C3)
+
+| # | Item | Ruling | Code target | Acceptance |
+|---|------|--------|-------------|------------|
+| 4.1 | **`int` → 53-bit symmetric** ±(2⁵³−1); all overflow checks against new bound. | C3 | `lambda.h`/`lambda-data.hpp` int packing; arith ops in eval + MIR codegen | boundary probes |
+| 4.2 | **Overflow → float promotion** (correctly rounded), replacing error values; sticky (no demotion). | C3 | `fn_add`/`fn_mul`/… + MIR fast paths | `(2⁵³−1) + 1` → float 2⁵³; `type()` shows float |
+| 4.3 | **Literal strictness**: unsuffixed integer literal beyond int range = compile error (never silent float). Machine-tier constant overflow (`let x: i8 = 200i8`) = compile error. | C3 | `build_ast.cpp` literal checking | `9007199254740993` → E-code; suffix forms accepted |
+| 4.4 | **Machine-tier corners**: div-by-zero raises (verify all widths); `MinInt / -1` wraps (verify); document wrap as designed. | C3/A2 | sized-int ops | corner probes |
+| 4.5 | **Data path — smallest exact home**: input parsers place integer tokens int → int64 → decimal (never float). | C3 | `input-json.cpp`, csv, toml, … | snowflake-ID JSON round-trips exact |
+| 4.6 | **`math.max_int`** (= 2⁵³−1) exposed; docs state the boundary + "start with decimal for precise big-int arithmetic" (C3.4 addendum). | C3.3/C3.4 | math module; docs | constant present |
+| 4.7 | **`type(error_value)`** returns the error type, not a propagated error (Redex #5). | C3.3-4 | `fn_type` | `type(err)` usable in match |
+| 4.8 | **Migration audit**: fixtures/stdlib values in (2⁵³, 2⁵⁵). | C3.2 | test/lambda sweep | documented list; goldens updated w/ citations |
+
+**Fixture pack 4**: `int53_boundary.ls`, `int_promotion.ls`, `literal_strictness.ls` (compile-error tests), `machine_tier_corners.ls`.
+
+---
+
+## Phase 5 — Mutability model (C4; the largest phase — schedule after semantics above are stable)
+
+| # | Item | Ruling | Code target | Acceptance |
+|---|------|--------|-------------|------------|
+| 5.1 | **COW at mutation points**: refcount-triggered (`ref_cnt > 1` → copy) for arrays, maps, elements, objects; spine-copy for nested paths. **`let`-finality is the anchor**: the `let g = [4,5,6]; var h = g; h[0]=77 → g[0]==77` probe becomes the canonical regression fixture. | C4-1/2 | assignment/index/member-write paths in eval + MIR; `ref_cnt` discipline | A7 probe matrix: all copies observable; `let` never mutates |
+| 5.2 | **`var` params (inout)**: grammar `pn f(var a: T)`; **four** compile checks — var-args-only (let/literal arg = error), exclusivity (same var / overlapping paths to two var params = error), `var` receiver required for `pn` methods, **invariance (C12): `var` param argument type must match exactly** (covariant var-arg = compile error with "declare as any[] or use a value parameter"); borrow-pass (no refcount bump) keeps `push`/`splice` in-place. Plus **C12 widening**: covariant *assignment* legal via lazy ArrayNum→boxed widening at COW-copy. | C4-3, C12 | `grammar.js`, `build_ast.cpp` checks, call lowering, COW copy path | check quartet tests; covariant assignment + widening test; awfy benchmarks green |
+| 5.3 | **Immutable captures**: assignment (incl. interior `b[0]=…`) to captured name = compile error with teaching message, both `fn` and `pn` closures (replacing silent-continue and the `unknown add type` crash). Capture snapshots at creation (already correct). | C4-4, C4.2a | closure capture analysis in `build_ast.cpp` | error messages; nested-pn parser case |
+| 5.4 | **Migrations**: awfy benchmark signatures gain `var`; editor/Radiant element-aliasing audit; **element-COW perf benchmark before ship** (worst case: whole-document copies). | C4.3 | benchmarks; radiant bridge | `make test-radiant-baseline` 100%; perf report |
+| 5.5 | **Docs**: delete/rewrite `Lambda_Func.md` § Mutable Captures (fiction); write the aliasing/mutability model section; state idioms (object-with-pn-methods, view `state`, module var). | C4.4 | doc/ | — |
+| 5.6 | Deferred, spec'd: Pascal-style non-escaping nested-`pn` relaxation (§C4.2a) — do **not** implement now; keep the spec cross-referenced. | C4.2a | — | — |
+
+**Fixture pack 5**: `let_finality.ls`, `cow_alias.ls`, `var_param.ls`, `capture_immutable.ls` (compile-error suite).
+
+---
+
+## Phase 6 — Operator syntax migrations (C6 + C10; mechanical but wide)
+
+**⚠ Decision gate: C6a (file write/append syntax) must be ruled before 6.2.**
+
+| # | Item | Ruling | Code target | Acceptance |
+|---|------|--------|-------------|------------|
+| 6.1 | **`|` = union everywhere; `|>` = pipe**: grammar swap; pipe dual-mode on **free `~`** (parse-time: no free `~` → whole-value application, `~`-free non-callable body → type error); transition guard: `~`-free bare string/path-literal pipe body = compile error ("file output has moved"). | C6 | `grammar.js`, `build_ast.cpp`, transpilers | `let T = int \| string` in expr position; `data \|> sum`; `data \|> ~ * 2`; guard fires |
+| 6.2 | **File output: C6a syntax DEFERRED to future** (designer, 2026-07-04). Interim: migrate the 8 `|>`/`|>>` sites to the **existing `output(data, file)` function** (append variant needed — add an options arg or `output_append`); `|>`/`|>>` freed for the pipe with no dangling dependency. Keyword syntax (`into`/`onto` candidates) revisited later. | C6a (deferred) | the one fixture file; sys-func for append | 8 sites migrated; `\|>>` freed |
+| 6.3 | **Pipe migration**: ~140 sites / 38 fixture files + docs + stdlib — scripted rewrite `|` → `|>` in pipe position, hand-review union-adjacent cases. | C6.3 | test/lambda, doc/ | baseline green |
+| 6.4 | **Revert comparison vectorization**: remove `vec_cmp` dispatch from `fn_lt/fn_gt/fn_le/fn_ge` (bare `< <= > >=` scalar-only again). | C10 | `lambda-eval.cpp` ~1414+ | `[1,2,3] > 1` is a type error/scalar rule; `if ([1,2,3] > 99)` impossible |
+| 6.5 | **Keyword elementwise family `eq ne lt le gt ge`**: grammar (comparison precedence); semantics = per-element scalar compare (nan → false entries); broadcasting identical to arithmetic; retarget `vec_cmp` kernel. Identifier-collision sweep first. | C10 | `grammar.js`, eval/MIR, `vec_cmp` | `img gt t` masks; `[1,nan] eq [1,nan]` → `[true,false]` |
+| 6.6 | **Mask consumption spec** (with image-toolkit migration): `sum(mask)` counts trues; decide mask indexing `a[mask]`; mask combination via `and`/`or` or vec ops. Migrate image toolkit + `numpy_props`/`image_props` bare-`>` masks. | C10.3 | image toolkit `.ls` files | toolkit tests green |
+| 6.7 | **Lints**: elementwise-comparison result in condition position; container-always-true condition hint (C2.3). | C10.2/C2.3 | lint infra (`make lint` rules) | lint tests |
+
+**Fixture pack 6**: `pipe_dual_mode.ls`, `union_expr.ls`, `elementwise_ops.ls`, migration-guard compile-error tests.
+
+---
+
+## Phase 7 — Pattern composition & sort (C7 + C11)
+
+| # | Item | Ruling | Code target | Acceptance |
+|---|------|--------|-------------|------------|
+| 7.1 | **Array-pattern composition implemented**: mixed value/type members (`[1, int, "str"]`), arity enforcement (`[int]` = exactly one; `[1,2] is [int]` → false), annotation enforcement (`let xs: [int] = [1,2,3]` = compile error with "did you mean `int[]`?" teaching message). | C7 | validator/pattern matcher; annotation checking | C7.2 probe table inverted |
+| 7.2 | **Positional lint**: bare single-type `[T]` in annotation position → suppressible hint; never in pattern positions. | C7.3-2 | lint | lint tests |
+| 7.3 | **Sort rewrite — total order**: type-aware comparator implementing `null < false < true < number(value) < datetime < symbol(path) < string < binary < sequence(range=list=array, lexicographic) < map(sorted-key) < object < element < type < function < nan < error`; **never float coercion** (kills the string-destruction bug); stable; `desc` = full reversal; `order by` same path; within-band rules per C11.4 (bytewise-UTF-8 strings; element tag/attrs/children; datetime cross-kind rule to pin). | C11.4 | `sort` builtin, `order by` lowering; new `total_cmp(Item,Item)` beside `fn_lt` (two-relation design) | `sort(["b","a","c"])` → `["a","b","c"]`; `sort([3.0,nan,1.0])` → `[1,3,nan]`; mixed-family arrays deterministic; `desc` reverses null/nan/error too |
+| 7.4 | Property test: **total order refines `==`** — `a == b ⟹` tie (adjacent after stable sort, order-independent). | C11.4 principle | property tests | randomized value-pair suite |
+
+**Fixture pack 7**: `pattern_composition.ls`, `sort_total_order.ls`, `sort_poison.ls`, `orderby_desc.ls`.
+
+---
+
+## Phase 8 — Metaprogramming foundation (C9; additive feature work)
+
+| # | Item | Ruling | Code target | Acceptance |
+|---|------|--------|-------------|------------|
+| 8.1 | **Element grammar: expression children in sequences** (the key enabler — `<add ; sel <lm.lit val:9>>`); parenthesized control-flow children (`(if (a) e1 else e2)`); document whitespace separation. Quoted-symbol tags blessed (already parse). | C9a worklist | `grammar.js` content rules | C9a probe table inverted |
+| 8.2 | **`lm` AST schema**: namespaced tags (`<lm.if>`, `<lm.var>`, …) derived from grammar node names; declared as validator types; `lm` as ambient builtin namespace (no import boilerplate). | C9a revision | schema module + namespace registry | hand-built and loaded ASTs validate |
+| 8.3 | **`input(f, 'lambda')`**: Lambda source → `lm.` element AST (CST→element mapping; also the DSL proposal §4.4 prerequisite). | C9-2 | new `input-lambda.cpp` using tree-sitter CST | round-trip: parse → format → parse stable |
+| 8.4 | **`compile(ast, env?) fn^`**: closed compilation (stdlib + explicit env only, never ambient scope); validation against the `lm` schema before compile; AST input **only** (strings are never code — no string overload); produced fn carries its body's `fn`/`pn` nature. | C9-1, C9 guardrails | new builtin over existing parse→MIR pipeline | constructed `<lm.fn …>` compiles and runs; string arg = type error |
+| 8.5 | **Content-hash site identity** for dynamic functions: normalized AST hash (strip positions; alpha-normalize/de-Bruijn; sorted-key map hashing per 1.8); hash fast-path + full normalized compare on collision. | C9-4 | hashing + `fn_eq` integration | `compile(t) == compile(t)` → true; `(x)=>x+1 == (y)=>y+1` per alpha rule |
+| 8.6 | Deferred, design pending: **`quote { ... }`** + `$`-splices (C9b) — grammar-conflict check for `$` when taken up. | C9a | — | — |
+| 8.7 | **Docs**: update "closed over metaprogramming" statements citing C9. | C9 | doc/ | — |
+
+**Fixture pack 8**: `ast_construct.ls`, `input_lambda_ast.ls`, `compile_basic.ls`, `compile_closed_env.ls`, `dynfn_equality.ls`.
+
+---
+
+## Phase 9 — Documentation & specification sweep
+
+Doc updates that trail their phases are listed there; this phase is the residue
+that has no code dependency:
+
+1. **A2**: document `/` vs `div` failure modes; truncation and C-style `%` (contrast with Python floor before guest models exist).
+2. **A10 sweep**: delete aspirational generics text (`fn identity<T>`) or file as future work; define `as` semantics; open-vs-closed map matching in `is` vs assignment; `match` arm ordering = first-match (state it); nested `~` scoping = innermost-wins + explicit-lambda escape idiom (B4).
+3. **Truthiness section**: complete falsy set + total `truthy()` definition (C2.3).
+4. **Equality section**: the full C8/C8.5/C8.6-R model in one place — total, deep value; family table; poison carve-outs; map order model ("ordered storage, unordered equality"; `a == b` does not imply `format(a) == format(b)`).
+5. **Sort/order-by section**: the C11.4 total order, stability, `desc` reversal, "sort order refines `==`".
+6. **Absence section**: reads total, null propagation, slice clamping, write errors, `or`-coalescing, `in`/`at` value/key axis (C5, C5.3a).
+7. **"Types compose like values"**: invert the `[int]` footnote into the led-with strength section (C7.4-2).
+8. **Cheatsheet**: regenerate against all of the above.
+
+---
+
+## Phase 10 — Verification closure
+
+1. **Regression fixture packs 0–8** land with their phases; this phase audits coverage: every landmark probe in the C-records has a named fixture (`let`-mutation, took-then vectorization trap, element equality, sort string-destruction, two-empty-strings, literal-overflow, covariance, capture crash, `.name` shadowing, …).
+2. **Redex model sync** (`vibe/Lambda_Semantics.md` project): update rules for C1–C11 (0-truthy already agrees; `""`, int53, COW/store, absence, total order all diverge until synced) — it is the second, different-host oracle (DSL proposal §13.4).
+3. **B7 differential harness**: boxed-interpreter vs MIR-JIT runs over the fixture corpus — any observable divergence is an inference-unobservability violation by construction. Wire as `make` target; seed with the numeric fixtures (the historical bug class).
+4. **Golden re-capture discipline**: one commit per phase's golden churn, each diff annotated with its C-ruling; unexplained diffs block.
+5. **DSL Stage 4 readiness check**: the formal model (proposal §10, Stage 4) starts only when phases 1–7 are green — the model describes the *ruled* language, and these phases make the implementation agree with the rulings first.
+
+---
+
+## Open decision gates (block specific items only)
+
+| Gate | Blocks | Status |
+|------|--------|--------|
+| **C6a** — file write/append syntax (`into`/`onto` candidates) | nothing — **deferred to future** (interim: existing `output()` function per 6.2) | deferred by ruling |
+| **C9b** — `quote { … }` form (`$`-splices, grammar check) | 8.6 only | deferred by design |
+| **A8** — assignment-subtyping rule | — | **RESOLVED as C12**: covariance where values copy, invariance for `var` params; folded into 0.7 + 5.2 |
+| **C10 masks** — `sum(mask)`, `a[mask]`, mask combination | 6.6 details | spec with migration |
+| **C11 pins** — datetime cross-kind ordering; element within-band detail; function within-band (tie vs site order) | 7.3 edge cases | pin at implementation |
+| Empty-file `<file>` object shape (name/size/mime attrs) | file I/O spec, not this plan | when file objects land |
+
+## Suggested sequencing summary
+
+**0 → 1 → 2 → 3 → 4** (correctness core: bugs, equality, absence, strings, numbers — each churns goldens once, in dependency order) → **5** (mutability — biggest, benchmark-gated) → **6 → 7** (operator/syntax migrations + sort, mechanical but wide) → **8** (new feature: metaprogramming) → **9 → 10** (docs, verification closure) → **DSL Stage 4** (the formal model, against a now-conformant implementation).
