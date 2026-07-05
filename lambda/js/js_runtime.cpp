@@ -35287,11 +35287,50 @@ static Item js_repl_recoverable_ctor(void) {
     return obj;
 }
 
+static bool js_repl_key_equals(Item key, const char* name, int len) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* s = it2s(key);
+    return s && s->len == (uint32_t)len && memcmp(s->chars, name, (size_t)len) == 0;
+}
+
+static Item js_repl_create_context(Item opts, bool old_signature) {
+    Item global = js_get_global_this();
+    Item use_global = old_signature ? make_js_undefined() : js_property_get(opts, js_repl_key("useGlobal"));
+    if (use_global.item == ITEM_TRUE) return global;
+
+    Item repl_context = js_new_object();
+    Item names = js_object_get_own_property_names(global);
+    if (get_type_id(names) == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(names);
+        for (int64_t i = 0; i < len; i++) {
+            Item key = js_array_get_int(names, i);
+            if (js_repl_key_equals(key, "globalThis", 10) ||
+                js_repl_key_equals(key, "global", 6) ||
+                js_repl_key_equals(key, "self", 4) ||
+                js_repl_key_equals(key, "window", 6)) {
+                continue;
+            }
+            js_property_set(repl_context, key, js_property_get(global, key));
+        }
+    }
+    // isolated REPL contexts inherit globals at construction time only; later
+    // globalThis writes must not appear in that context.
+    js_property_set(repl_context, js_repl_key("globalThis"), repl_context);
+    js_property_set(repl_context, js_repl_key("global"), repl_context);
+    js_property_set(repl_context, js_repl_key("self"), repl_context);
+    js_property_set(repl_context, js_repl_key("window"), repl_context);
+    return repl_context;
+}
+
 static Item js_repl_start(Item opts, Item old_stream, Item old_eval) {
     Item this_item = js_get_this();
     Item this_start = js_repl_is_object_like(this_item) ?
         js_property_get(this_item, js_repl_key("start")) : ItemNull;
-    Item repl = (js_repl_is_object_like(this_item) && get_type_id(this_start) != LMD_TYPE_FUNC) ?
+    Item global = js_get_global_this();
+    // destructured repl.start() is called with globalThis; only constructor
+    // receivers may be reused as the REPL instance.
+    Item repl = (this_item.item != global.item &&
+        js_repl_is_object_like(this_item) && get_type_id(this_start) != LMD_TYPE_FUNC) ?
         this_item : js_new_object();
     bool old_signature = !js_repl_is_object_like(opts);
     Item input = old_signature ? old_stream : js_property_get(opts, js_repl_key("input"));
@@ -35309,7 +35348,7 @@ static Item js_repl_start(Item opts, Item old_stream, Item old_eval) {
     js_property_set(repl, js_repl_key("useColors"), color_bool ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE});
     js_property_set(repl, js_repl_key("replMode"), old_signature ? ItemNull : js_property_get(opts, js_repl_key("replMode")));
     js_property_set(repl, js_repl_key("__eval_fn__"), custom_eval);
-    js_property_set(repl, js_repl_key("context"), js_new_object());
+    js_property_set(repl, js_repl_key("context"), js_repl_create_context(opts, old_signature));
     Item writer = js_new_object();
     Item writer_opts = js_new_object();
     js_property_set(writer_opts, js_repl_key("colors"), color_bool ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE});
@@ -36619,6 +36658,572 @@ extern "C" Item js_get_async_hooks_namespace(void) {
     return ah_ns;
 }
 
+static Item js_vm_stm_key(const char* name) {
+    return (Item){.item = s2it(heap_create_name(name, strlen(name)))};
+}
+
+static Item js_vm_stm_string(const char* chars, int len) {
+    if (!chars) return make_js_undefined();
+    return (Item){.item = s2it(heap_create_name(chars, len))};
+}
+
+static void js_vm_stm_set_status(Item module, const char* status) {
+    js_property_set(module, js_vm_stm_key("status"),
+                    (Item){.item = s2it(heap_create_name(status, strlen(status)))});
+}
+
+static bool js_vm_stm_string_item_equals(Item value, const char* chars, int len) {
+    if (get_type_id(value) != LMD_TYPE_STRING) return false;
+    String* s = it2s(value);
+    return s && (int)s->len == len && memcmp(s->chars, chars, len) == 0;
+}
+
+static bool js_vm_stm_is_ident_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_' || c == '$';
+}
+
+static int js_vm_stm_skip_ws(const char* src, int len, int pos) {
+    while (pos < len) {
+        char c = src[pos];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') { pos++; continue; }
+        break;
+    }
+    return pos;
+}
+
+static bool js_vm_stm_match_kw(const char* src, int len, int pos, const char* kw) {
+    int kw_len = (int)strlen(kw);
+    if (pos < 0 || pos + kw_len > len) return false;
+    if (pos > 0 && js_vm_stm_is_ident_char(src[pos - 1])) return false;
+    if (memcmp(src + pos, kw, kw_len) != 0) return false;
+    if (pos + kw_len < len && js_vm_stm_is_ident_char(src[pos + kw_len])) return false;
+    return true;
+}
+
+static int js_vm_stm_find_statement_end(const char* src, int len, int pos) {
+    bool in_sq = false, in_dq = false, in_tpl = false, esc = false;
+    int brace = 0, paren = 0, bracket = 0;
+    for (int i = pos; i < len; i++) {
+        char c = src[i];
+        if (in_sq || in_dq || in_tpl) {
+            if (esc) { esc = false; continue; }
+            if (c == '\\') { esc = true; continue; }
+            if ((in_sq && c == '\'') || (in_dq && c == '"') || (in_tpl && c == '`')) {
+                in_sq = in_dq = in_tpl = false;
+            }
+            continue;
+        }
+        if (c == '\'') { in_sq = true; continue; }
+        if (c == '"') { in_dq = true; continue; }
+        if (c == '`') { in_tpl = true; continue; }
+        if (c == '{') { brace++; continue; }
+        if (c == '}') {
+            if (brace > 0) brace--;
+            continue;
+        }
+        if (c == '(') { paren++; continue; }
+        if (c == ')') { if (paren > 0) paren--; continue; }
+        if (c == '[') { bracket++; continue; }
+        if (c == ']') { if (bracket > 0) bracket--; continue; }
+        if (c == ';' && brace == 0 && paren == 0 && bracket == 0) return i + 1;
+    }
+    return len;
+}
+
+static bool js_vm_stm_find_quoted_spec(const char* stmt, int len, const char** out, int* out_len) {
+    for (int i = 0; i < len; i++) {
+        if (stmt[i] != '\'' && stmt[i] != '"') continue;
+        char q = stmt[i++];
+        int start = i;
+        while (i < len && stmt[i] != q) i++;
+        if (i > start) {
+            *out = stmt + start;
+            *out_len = i - start;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void js_vm_stm_add_dep(Item deps, const char* spec, int spec_len) {
+    int64_t count = js_array_length(deps);
+    for (int64_t i = 0; i < count; i++) {
+        if (js_vm_stm_string_item_equals(js_array_get_int(deps, i), spec, spec_len)) return;
+    }
+    js_array_push(deps, js_vm_stm_string(spec, spec_len));
+}
+
+static int js_vm_stm_dep_index(Item deps, const char* spec, int spec_len) {
+    int64_t count = js_array_length(deps);
+    for (int64_t i = 0; i < count; i++) {
+        if (js_vm_stm_string_item_equals(js_array_get_int(deps, i), spec, spec_len)) return (int)i;
+    }
+    return -1;
+}
+
+static Item js_vm_stm_scan_deps(Item source_item) {
+    Item deps = js_array_new(0);
+    if (get_type_id(source_item) != LMD_TYPE_STRING) return deps;
+    String* s = it2s(source_item);
+    const char* src = s->chars;
+    int len = (int)s->len;
+    for (int i = 0; i < len; i++) {
+        if (js_vm_stm_match_kw(src, len, i, "import")) {
+            int p = js_vm_stm_skip_ws(src, len, i + 6);
+            if (p < len && src[p] == '(') continue;
+            int end = js_vm_stm_find_statement_end(src, len, i);
+            const char* spec = NULL; int spec_len = 0;
+            if (js_vm_stm_find_quoted_spec(src + i, end - i, &spec, &spec_len)) {
+                js_vm_stm_add_dep(deps, spec, spec_len);
+            }
+            i = end - 1;
+        } else if (js_vm_stm_match_kw(src, len, i, "export")) {
+            int end = js_vm_stm_find_statement_end(src, len, i);
+            if (memmem(src + i, end - i, " from ", 6)) {
+                const char* spec = NULL; int spec_len = 0;
+                if (js_vm_stm_find_quoted_spec(src + i, end - i, &spec, &spec_len)) {
+                    js_vm_stm_add_dep(deps, spec, spec_len);
+                }
+            }
+            i = end - 1;
+        }
+    }
+    return deps;
+}
+
+static bool js_vm_stm_is_module(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    Item marker = js_property_get(value, js_vm_stm_key("__vm_module__"));
+    return get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker);
+}
+
+static Item js_vm_stm_error(const char* code, const char* msg) {
+    extern Item js_new_error_with_name(Item error_name, Item message);
+    Item err = js_new_error_with_name(js_vm_stm_string("Error", 5),
+                                      js_vm_stm_string(msg, (int)strlen(msg)));
+    js_property_set(err, js_vm_stm_key("code"), js_vm_stm_string(code, (int)strlen(code)));
+    return err;
+}
+
+static Item js_vm_stm_unwrap_fulfilled(Item value) {
+    JsPromise* p = js_get_promise(value);
+    if (!p) return value;
+    if (p->state == JS_PROMISE_FULFILLED) return p->result;
+    return value;
+}
+
+static Item js_vm_stm_link(Item linker) {
+    extern Item js_promise_resolve(Item value);
+    extern Item js_promise_reject(Item reason);
+
+    Item self = js_get_this();
+    Item status = js_property_get(self, js_vm_stm_key("status"));
+    if (js_vm_stm_string_item_equals(status, "linked", 6) ||
+        js_vm_stm_string_item_equals(status, "evaluated", 9) ||
+        js_vm_stm_string_item_equals(status, "linking", 7)) {
+        return js_promise_resolve(make_js_undefined());
+    }
+    js_vm_stm_set_status(self, "linking");
+    Item deps = js_property_get(self, js_vm_stm_key("dependencySpecifiers"));
+    Item modules = js_array_new(0);
+    int64_t dep_count = js_array_length(deps);
+    for (int64_t i = 0; i < dep_count; i++) {
+        Item spec = js_array_get_int(deps, i);
+        Item args[2] = {spec, self};
+        Item linked = get_type_id(linker) == LMD_TYPE_FUNC
+            ? js_call_function(linker, make_js_undefined(), args, 2)
+            : make_js_undefined();
+        if (js_check_exception()) {
+            js_vm_stm_set_status(self, "errored");
+            return js_promise_reject(js_clear_exception());
+        }
+        linked = js_vm_stm_unwrap_fulfilled(linked);
+        if (!js_vm_stm_is_module(linked)) {
+            js_vm_stm_set_status(self, "errored");
+            return js_promise_reject(js_vm_stm_error("ERR_VM_MODULE_NOT_MODULE",
+                "Provided module is not a vm.Module instance"));
+        }
+        js_array_push(modules, linked);
+    }
+    js_property_set(self, js_vm_stm_key("__linked_modules__"), modules);
+    for (int64_t i = 0; i < dep_count; i++) {
+        Item dep = js_array_get_int(modules, i);
+        Item dep_status = js_property_get(dep, js_vm_stm_key("status"));
+        if (js_vm_stm_string_item_equals(dep_status, "unlinked", 8)) {
+            Item link_fn = js_property_get(dep, js_vm_stm_key("link"));
+            Item args[1] = {linker};
+            js_call_function(link_fn, dep, args, 1);
+            if (js_check_exception()) {
+                js_vm_stm_set_status(self, "errored");
+                return js_promise_reject(js_clear_exception());
+            }
+        }
+    }
+    js_vm_stm_set_status(self, "linked");
+    return js_promise_resolve(make_js_undefined());
+}
+
+struct JsVmStmBinding {
+    char local[64];
+    char export_name[64];
+    int dep_index;
+    bool namespace_import;
+};
+
+static void js_vm_stm_append_rewritten(StrBuf* out, const char* src, int len,
+                                       JsVmStmBinding* bindings, int binding_count) {
+    for (int i = 0; i < len; i++) {
+        if (js_vm_stm_match_kw(src, len, i, "import")) {
+            int p = js_vm_stm_skip_ws(src, len, i + 6);
+            if (p < len && src[p] == '(') {
+                strbuf_append_str_n(out, "__vm_dynamic_import", 19);
+                i += 5;
+                continue;
+            }
+        }
+        bool replaced = false;
+        if ((i == 0 || !js_vm_stm_is_ident_char(src[i - 1])) && js_vm_stm_is_ident_char(src[i])) {
+            for (int b = 0; b < binding_count; b++) {
+                int local_len = (int)strlen(bindings[b].local);
+                if (local_len > 0 && i + local_len <= len &&
+                    memcmp(src + i, bindings[b].local, local_len) == 0 &&
+                    (i + local_len >= len || !js_vm_stm_is_ident_char(src[i + local_len]))) {
+                    char dep_name[64];
+                    int dep_len = snprintf(dep_name, sizeof(dep_name), "__vm_dep_%d", bindings[b].dep_index);
+                    strbuf_append_str_n(out, dep_name, dep_len);
+                    if (!bindings[b].namespace_import) {
+                        strbuf_append_char(out, '.');
+                        strbuf_append_str_n(out, bindings[b].export_name, strlen(bindings[b].export_name));
+                    }
+                    i += local_len - 1;
+                    replaced = true;
+                    break;
+                }
+            }
+        }
+        if (!replaced) strbuf_append_char(out, src[i]);
+    }
+}
+
+static void js_vm_stm_add_binding(JsVmStmBinding* bindings, int* count, int max_count,
+                                  const char* local, int local_len,
+                                  const char* export_name, int export_len,
+                                  int dep_index, bool namespace_import) {
+    if (*count >= max_count || local_len <= 0 || local_len >= 63 ||
+        export_len < 0 || export_len >= 63) return;
+    JsVmStmBinding* b = &bindings[*count];
+    memcpy(b->local, local, local_len); b->local[local_len] = '\0';
+    if (export_len > 0) memcpy(b->export_name, export_name, export_len);
+    b->export_name[export_len] = '\0';
+    b->dep_index = dep_index;
+    b->namespace_import = namespace_import;
+    (*count)++;
+}
+
+static void js_vm_stm_parse_import_bindings(const char* stmt, int len, Item deps,
+                                            JsVmStmBinding* bindings, int* binding_count) {
+    const char* spec = NULL; int spec_len = 0;
+    if (!js_vm_stm_find_quoted_spec(stmt, len, &spec, &spec_len)) return;
+    int dep_index = js_vm_stm_dep_index(deps, spec, spec_len);
+    if (dep_index < 0) return;
+    int p = js_vm_stm_skip_ws(stmt, len, 6);
+    if (p >= len || stmt[p] == '\'' || stmt[p] == '"') return;
+    if (stmt[p] == '*') {
+        p = js_vm_stm_skip_ws(stmt, len, p + 1);
+        if (p + 2 <= len && memcmp(stmt + p, "as", 2) == 0) p = js_vm_stm_skip_ws(stmt, len, p + 2);
+        int start = p;
+        while (p < len && js_vm_stm_is_ident_char(stmt[p])) p++;
+        js_vm_stm_add_binding(bindings, binding_count, 32, stmt + start, p - start,
+                              "", 0, dep_index, true);
+        return;
+    }
+    if (stmt[p] == '{') {
+        p++;
+        while (p < len && stmt[p] != '}') {
+            p = js_vm_stm_skip_ws(stmt, len, p);
+            int name_start = p;
+            while (p < len && js_vm_stm_is_ident_char(stmt[p])) p++;
+            int name_len = p - name_start;
+            p = js_vm_stm_skip_ws(stmt, len, p);
+            int local_start = name_start, local_len = name_len;
+            if (p + 2 <= len && memcmp(stmt + p, "as", 2) == 0) {
+                p = js_vm_stm_skip_ws(stmt, len, p + 2);
+                local_start = p;
+                while (p < len && js_vm_stm_is_ident_char(stmt[p])) p++;
+                local_len = p - local_start;
+            }
+            js_vm_stm_add_binding(bindings, binding_count, 32, stmt + local_start, local_len,
+                                  stmt + name_start, name_len, dep_index, false);
+            while (p < len && stmt[p] != ',' && stmt[p] != '}') p++;
+            if (p < len && stmt[p] == ',') p++;
+        }
+        return;
+    }
+    int start = p;
+    while (p < len && js_vm_stm_is_ident_char(stmt[p])) p++;
+    js_vm_stm_add_binding(bindings, binding_count, 32, stmt + start, p - start,
+                          "default", 7, dep_index, false);
+}
+
+static Item js_vm_stm_build_eval_source(Item self) {
+    Item source_item = js_property_get(self, js_vm_stm_key("__source__"));
+    Item deps = js_property_get(self, js_vm_stm_key("dependencySpecifiers"));
+    if (get_type_id(source_item) != LMD_TYPE_STRING) return source_item;
+    String* s = it2s(source_item);
+    const char* src = s->chars;
+    int len = (int)s->len;
+    StrBuf* out = strbuf_new();
+    JsVmStmBinding bindings[32];
+    int binding_count = 0;
+    int64_t dep_count = js_array_length(deps);
+    strbuf_append_str_n(out, "var __vm_ns=globalThis.__vm_ns;\n",
+                        strlen("var __vm_ns=globalThis.__vm_ns;\n"));
+    for (int64_t i = 0; i < dep_count; i++) {
+        char line[96];
+        int line_len = snprintf(line, sizeof(line),
+            "var __vm_dep_%lld=globalThis.__vm_dep_%lld;\n",
+            (long long)i, (long long)i);
+        strbuf_append_str_n(out, line, line_len);
+    }
+    int last = 0;
+    for (int i = 0; i < len; i++) {
+        if (js_vm_stm_match_kw(src, len, i, "import")) {
+            int p = js_vm_stm_skip_ws(src, len, i + 6);
+            if (p < len && src[p] == '(') continue;
+            js_vm_stm_append_rewritten(out, src + last, i - last, bindings, binding_count);
+            int end = js_vm_stm_find_statement_end(src, len, i);
+            js_vm_stm_parse_import_bindings(src + i, end - i, deps, bindings, &binding_count);
+            last = end;
+            i = end - 1;
+        } else if (js_vm_stm_match_kw(src, len, i, "export")) {
+            js_vm_stm_append_rewritten(out, src + last, i - last, bindings, binding_count);
+            int end = js_vm_stm_find_statement_end(src, len, i);
+            int p = js_vm_stm_skip_ws(src, len, i + 6);
+            if (js_vm_stm_match_kw(src, len, p, "default")) {
+                p = js_vm_stm_skip_ws(src, len, p + 7);
+                if (js_vm_stm_match_kw(src, len, p, "function")) {
+                    int name_start = js_vm_stm_skip_ws(src, len, p + 8);
+                    int name_end = name_start;
+                    while (name_end < len && js_vm_stm_is_ident_char(src[name_end])) name_end++;
+                    js_vm_stm_append_rewritten(out, src + p, end - p, bindings, binding_count);
+                    strbuf_append_str_n(out, "\n__vm_ns.default=",
+                                        strlen("\n__vm_ns.default="));
+                    strbuf_append_str_n(out, src + name_start, name_end - name_start);
+                    strbuf_append_str_n(out, ";\n", 2);
+                } else {
+                    int expr_end = end;
+                    while (expr_end > p &&
+                           (src[expr_end - 1] == ';' || src[expr_end - 1] == ' ' ||
+                            src[expr_end - 1] == '\t' || src[expr_end - 1] == '\n' ||
+                            src[expr_end - 1] == '\r')) {
+                        expr_end--;
+                    }
+                    strbuf_append_str_n(out, "__vm_ns.default=(",
+                                        strlen("__vm_ns.default=("));
+                    js_vm_stm_append_rewritten(out, src + p, expr_end - p, bindings, binding_count);
+                    strbuf_append_str_n(out, ");\n", 3);
+                }
+            } else if (js_vm_stm_match_kw(src, len, p, "let") ||
+                       js_vm_stm_match_kw(src, len, p, "const") ||
+                       js_vm_stm_match_kw(src, len, p, "var")) {
+                int kw_len = js_vm_stm_match_kw(src, len, p, "const") ? 5 : 3;
+                int name_start = js_vm_stm_skip_ws(src, len, p + kw_len);
+                int name_end = name_start;
+                while (name_end < len && js_vm_stm_is_ident_char(src[name_end])) name_end++;
+                js_vm_stm_append_rewritten(out, src + p, end - p, bindings, binding_count);
+                strbuf_append_str_n(out, "\n__vm_ns.", 9);
+                strbuf_append_str_n(out, src + name_start, name_end - name_start);
+                strbuf_append_char(out, '=');
+                strbuf_append_str_n(out, src + name_start, name_end - name_start);
+                strbuf_append_str_n(out, ";\n", 2);
+            } else if (p < len && src[p] == '*') {
+                const char* spec = NULL; int spec_len = 0;
+                if (js_vm_stm_find_quoted_spec(src + i, end - i, &spec, &spec_len)) {
+                    int dep_index = js_vm_stm_dep_index(deps, spec, spec_len);
+                    if (dep_index >= 0) {
+                        char line[80];
+                        int line_len = snprintf(line, sizeof(line),
+                            "Object.assign(__vm_ns,__vm_dep_%d);\n", dep_index);
+                        strbuf_append_str_n(out, line, line_len);
+                    }
+                }
+            }
+            last = end;
+            i = end - 1;
+        }
+    }
+    js_vm_stm_append_rewritten(out, src + last, len - last, bindings, binding_count);
+    Item result = js_vm_stm_string(out->str ? out->str : "", out->length);
+    strbuf_free(out);
+    return result;
+}
+
+static Item js_vm_dynamic_import_to_namespace(Item result) {
+    Item namespace_marker = get_type_id(result) == LMD_TYPE_MAP
+        ? js_property_get(result, js_vm_stm_key("__vm_module_namespace__"))
+        : make_js_undefined();
+    if (get_type_id(namespace_marker) == LMD_TYPE_BOOL && it2b(namespace_marker)) {
+        return result;
+    }
+    if (!js_vm_stm_is_module(result)) {
+        js_throw_value(js_vm_stm_error("ERR_VM_MODULE_NOT_MODULE",
+            "Provided module is not a vm.Module instance"));
+        return ItemNull;
+    }
+    return js_property_get(result, js_vm_stm_key("namespace"));
+}
+
+static Item js_vm_dynamic_import_for_module(Item specifier) {
+    extern Item js_promise_resolve(Item value);
+    extern Item js_promise_reject(Item reason);
+    extern Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
+    Item global = js_get_global_this();
+    Item module = js_property_get(global, js_vm_stm_key("__vm_dynamic_module"));
+    Item cb = js_property_get(module, js_vm_stm_key("__importModuleDynamically__"));
+    if (get_type_id(cb) != LMD_TYPE_FUNC) {
+        return js_promise_reject(js_vm_stm_error("ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING",
+            "A dynamic import callback was not specified."));
+    }
+    Item args[2] = {specifier, module};
+    Item result = js_call_function(cb, make_js_undefined(), args, 2);
+    if (js_check_exception()) return js_promise_reject(js_clear_exception());
+    if (js_get_promise(result)) {
+        Item mapper = js_new_function((void*)js_vm_dynamic_import_to_namespace, 1);
+        return js_promise_then(result, mapper, make_js_undefined());
+    }
+    Item ns = js_vm_dynamic_import_to_namespace(result);
+    if (js_check_exception()) return js_promise_reject(js_clear_exception());
+    return js_promise_resolve(ns);
+}
+
+static Item js_vm_stm_evaluate(Item options) {
+    extern Item js_promise_resolve(Item value);
+    extern Item js_promise_reject(Item reason);
+    extern int js_check_exception(void);
+    extern Item js_clear_exception(void);
+
+    Item self = js_get_this();
+    Item error = js_property_get(self, js_vm_stm_key("__error__"));
+    if (get_type_id(error) != LMD_TYPE_UNDEFINED) {
+        return js_promise_reject(error);
+    }
+    Item evaluated = js_property_get(self, js_vm_stm_key("__evaluated__"));
+    if (evaluated.item == ITEM_TRUE) {
+        return js_promise_resolve(make_js_undefined());
+    }
+
+    if (js_vm_is_options_object(options)) {
+        Item timeout = js_property_get(options, js_vm_stm_key("timeout"));
+        if (js_vm_is_number_item(timeout)) {
+            return js_promise_reject(js_vm_stm_error("ERR_SCRIPT_EXECUTION_TIMEOUT",
+                "Script execution timed out."));
+        }
+    }
+
+    Item modules = js_property_get(self, js_vm_stm_key("__linked_modules__"));
+    int64_t dep_count = get_type_id(modules) == LMD_TYPE_ARRAY ? js_array_length(modules) : 0;
+    js_vm_stm_set_status(self, "evaluating");
+    for (int64_t i = 0; i < dep_count; i++) {
+        Item dep = js_array_get_int(modules, i);
+        Item dep_status = js_property_get(dep, js_vm_stm_key("status"));
+        if (!js_vm_stm_string_item_equals(dep_status, "evaluated", 9) &&
+            !js_vm_stm_string_item_equals(dep_status, "evaluating", 10)) {
+            Item eval_fn = js_property_get(dep, js_vm_stm_key("evaluate"));
+            js_call_function(eval_fn, dep, NULL, 0);
+            if (js_check_exception()) {
+                error = js_clear_exception();
+                js_property_set(self, js_vm_stm_key("__error__"), error);
+                js_vm_stm_set_status(self, "errored");
+                return js_promise_reject(error);
+            }
+        }
+    }
+
+    Item source = js_vm_stm_build_eval_source(self);
+    Item ns = js_property_get(self, js_vm_stm_key("namespace"));
+    Item context_obj = js_property_get(self, js_vm_stm_key("context"));
+    Item global = get_type_id(context_obj) == LMD_TYPE_MAP ? context_obj : js_get_global_this();
+    Item ns_key = js_vm_stm_key("__vm_ns");
+    js_property_set(global, ns_key, ns);
+    js_mark_non_enumerable(global, ns_key);
+    for (int64_t i = 0; i < dep_count; i++) {
+        char key_buf[32];
+        int key_len = snprintf(key_buf, sizeof(key_buf), "__vm_dep_%lld", (long long)i);
+        Item dep_key = js_vm_stm_string(key_buf, key_len);
+        Item dep_ns = js_property_get(js_array_get_int(modules, i), js_vm_stm_key("namespace"));
+        js_property_set(global, dep_key, dep_ns);
+        js_mark_non_enumerable(global, dep_key);
+    }
+    Item dyn_module_key = js_vm_stm_key("__vm_dynamic_module");
+    Item dyn_import_key = js_vm_stm_key("__vm_dynamic_import");
+    js_property_set(global, dyn_module_key, self);
+    js_property_set(global, dyn_import_key, js_new_function((void*)js_vm_dynamic_import_for_module, 1));
+    js_mark_non_enumerable(global, dyn_module_key);
+    js_mark_non_enumerable(global, dyn_import_key);
+    // SourceTextModule evaluate is one-shot; re-evaluating must not run module
+    // body side effects like `count += 1` again.
+    if (get_type_id(context_obj) == LMD_TYPE_MAP) {
+        js_vm_run_with_sandbox(source, context_obj, make_js_undefined());
+    } else {
+        js_builtin_eval(source, 1);
+    }
+    js_delete_property(global, ns_key);
+    for (int64_t i = 0; i < dep_count; i++) {
+        char key_buf[32];
+        int key_len = snprintf(key_buf, sizeof(key_buf), "__vm_dep_%lld", (long long)i);
+        js_delete_property(global, js_vm_stm_string(key_buf, key_len));
+    }
+    js_delete_property(global, dyn_module_key);
+    js_delete_property(global, dyn_import_key);
+    if (js_check_exception()) {
+        error = js_clear_exception();
+        js_property_set(self, js_vm_stm_key("__error__"), error);
+        js_vm_stm_set_status(self, "errored");
+        return js_promise_reject(error);
+    }
+
+    js_property_set(self, js_vm_stm_key("__evaluated__"), (Item){.item = ITEM_TRUE});
+    js_vm_stm_set_status(self, "evaluated");
+    return js_promise_resolve(make_js_undefined());
+}
+
+static Item js_vm_SourceTextModule_constructor(Item source, Item options) {
+    Item module = js_new_object();
+    Item source_str = js_to_string(source);
+    js_property_set(module, js_vm_stm_key("__source__"), source_str);
+    js_property_set(module, js_vm_stm_key("__vm_module__"), (Item){.item = ITEM_TRUE});
+    js_property_set(module, js_vm_stm_key("__evaluated__"), (Item){.item = ITEM_FALSE});
+    js_property_set(module, js_vm_stm_key("__error__"), make_js_undefined());
+    js_property_set(module, js_vm_stm_key("__linked_modules__"), js_array_new(0));
+    js_property_set(module, js_vm_stm_key("dependencySpecifiers"), js_vm_stm_scan_deps(source_str));
+    Item ns = js_new_object();
+    js_property_set(ns, js_vm_stm_key("__vm_module_namespace__"), (Item){.item = ITEM_TRUE});
+    js_mark_non_enumerable(ns, js_vm_stm_key("__vm_module_namespace__"));
+    js_property_set(module, js_vm_stm_key("namespace"), ns);
+    if (js_vm_is_options_object(options)) {
+        Item context_opt = js_property_get(options, js_vm_stm_key("context"));
+        if (get_type_id(context_opt) == LMD_TYPE_MAP) js_property_set(module, js_vm_stm_key("context"), context_opt);
+        Item ident = js_property_get(options, js_vm_stm_key("identifier"));
+        if (get_type_id(ident) == LMD_TYPE_STRING) js_property_set(module, js_vm_stm_key("identifier"), ident);
+        Item dyn = js_property_get(options, js_vm_stm_key("importModuleDynamically"));
+        if (get_type_id(dyn) == LMD_TYPE_FUNC) js_property_set(module, js_vm_stm_key("__importModuleDynamically__"), dyn);
+    }
+    Item identifier = js_property_get(module, js_vm_stm_key("identifier"));
+    if (get_type_id(identifier) != LMD_TYPE_STRING) {
+        static int stm_identifier_counter = 0;
+        char buf[64];
+        int len = snprintf(buf, sizeof(buf), "vm:module(%d)", stm_identifier_counter++);
+        js_property_set(module, js_vm_stm_key("identifier"), js_vm_stm_string(buf, len));
+    }
+    js_vm_stm_set_status(module, "unlinked");
+    js_property_set(module, js_vm_stm_key("link"),
+                    js_new_function((void*)js_vm_stm_link, 1));
+    js_property_set(module, js_vm_stm_key("evaluate"),
+                    js_new_function((void*)js_vm_stm_evaluate, 1));
+    return module;
+}
+
 extern "C" Item js_get_vm_namespace(void) {
     static Item vm_ns = {0};
     static uint64_t vm_epoch = (uint64_t)-1;
@@ -36643,6 +37248,8 @@ extern "C" Item js_get_vm_namespace(void) {
                         js_new_function((void*)js_vm_Script_constructor, 2));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("createScript", 12))},
                         js_new_function((void*)js_vm_createScript, 2));
+        js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("SourceTextModule", 16))},
+                        js_new_function((void*)js_vm_SourceTextModule_constructor, 2));
 
         // constants sub-object
         Item constants = js_new_object();
@@ -36914,6 +37521,15 @@ extern "C" Item js_internal_binding(Item name) {
         js_property_set(cfg, (Item){.item = s2it(heap_create_name("hasCrypto", 9))}, (Item){.item = ITEM_TRUE});
         js_property_set(cfg, (Item){.item = s2it(heap_create_name("fipsMode", 8))}, (Item){.item = ITEM_FALSE});
         return cfg;
+    }
+
+    if (s->len == 4 && memcmp(s->chars, "util", 4) == 0) {
+        Item util_binding = js_new_object();
+        extern Item js_util_getCallSites(Item frame_count_item);
+        js_property_set(util_binding,
+            (Item){.item = s2it(heap_create_name("getCallSites", 12))},
+            js_new_function((void*)js_util_getCallSites, 1));
+        return util_binding;
     }
 
     // default: return empty object
