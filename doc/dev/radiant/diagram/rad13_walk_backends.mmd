@@ -1,0 +1,21 @@
+flowchart TD
+    VT["Layout ViewTree (ViewBlock / ViewSpan / ViewText / marker)"]
+    VT --> WALK["render_walk_block / _inline / _children (single traversal, z-order, effect-group, transform)"]
+    WALK --> VTABLE["RenderBackend vtable dispatch"]
+
+    VTABLE -->|raster overrides| RASTER["Raster painters draw through rc_* gateway"]
+    VTABLE -->|pdf_cb_* callbacks| PDFCB["PDF backend callbacks"]
+    VTABLE -->|svg_cb_* callbacks| SVGCB["SVG backend callbacks (RAD_14)"]
+
+    RASTER --> PIR1["Semantic PaintIR (PaintList)"]
+    PIR1 --> LOWER["paint_ir_lower_raster_fragment"]
+    LOWER --> DL["DisplayList"]
+    DL --> REPLAY["dl_replay / tiled / strip"]
+    REPLAY --> SURF["ImageSurface ABGR8888 pixels"]
+    SURF --> IMG["window / PNG / JPEG"]
+
+    PDFCB --> PIR2["Same PaintIR lowered directly"]
+    PIR2 --> HPDF["HPDF page ops (plus raster fallback embeds)"]
+    HPDF --> PDFFILE["PDF file"]
+
+    SVGCB --> SVGOUT["SVG markup (RAD_14)"]

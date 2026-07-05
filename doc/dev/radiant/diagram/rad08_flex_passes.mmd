@@ -1,0 +1,41 @@
+flowchart TB
+    subgraph entry["layout_flex_content (multipass)"]
+        E1[depth guard MAX_FLEX_DEPTH]
+        E2[layout_pass_cache_get]
+        E3[ComputeSize early bailout]
+        E4[refresh font context]
+    end
+
+    subgraph orch["layout_flex_container_with_nested_content"]
+        O1[init_flex_container]
+        O2[collect_and_prepare_flex_items]
+        O3[core algorithm]
+        O4[layout_final_flex_content sub-pass 2]
+        O5[apply_auto_margin_centering]
+    end
+
+    subgraph measure["PASS 1 measurement (layout_flex_measurement)"]
+        M1[requires_content_measurement]
+        M2[measure_flex_child_content ComputeSize]
+        M3[calculate_item_intrinsic_sizes]
+    end
+
+    subgraph core["core algorithm (layout_flex.cpp)"]
+        C1[layout_flex_container Phases 1 to 10]
+        C2[resolve_flexible_lengths section 9.7]
+    end
+
+    CacheA[(measurement_cache 1000 entries)]
+    CacheB[(layout_pass_cache KnownDimensions)]
+
+    E1 --> E2 --> E3 --> E4 --> O1
+    E2 -.hit.-> CacheB
+    O2 --> M1
+    M2 --> CacheA
+    M3 --> CacheA
+    O2 -.reads.-> CacheA
+    O3 --> C1
+    C1 --> C2
+    O3 --> O4
+    O4 --> O5
+    O5 --> CacheB

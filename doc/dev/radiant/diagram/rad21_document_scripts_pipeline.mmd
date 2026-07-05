@@ -1,0 +1,17 @@
+flowchart TD
+    A[Element star HTML parse tree] --> B[collect_scripts_recursive walks in document order]
+    B --> C[JsScriptTaskCollection inline plus external src plus body onload]
+    C --> D{has executable tasks and under browser JS budget}
+    D -- no --> Z[skip render parsed DOM and CSS only]
+    D -- yes --> E[install watchdog SIGSEGV SIGBUS SIGALRM alarm and sigsetjmp]
+    E --> F[append_browser_document_preamble window document XHR WebSocket stubs]
+    F --> G[transpile preamble to MIR via LambdaJS]
+    G --> H[execute scheduler queues post-dom defer async-ready then body onload]
+    H --> I[LambdaJS DOM binding mutates DomElement star tree the unified tree]
+    I --> J{host driven loop}
+    J -- yes --> K[flush microtasks only timers deferred to host loop]
+    J -- no --> L[drain event loop under watchdog]
+    K --> M[retain runtime on DomDocument heap nursery name_pool mir_ctx]
+    L --> M
+    M --> N[cancel alarm restore signal handlers]
+    N --> O[CSS cascade then layout runs AFTER scripts]

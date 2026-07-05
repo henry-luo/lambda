@@ -1,0 +1,24 @@
+flowchart TB
+    subgraph RAD["radiant/ — CSS to engine bridge (thin)"]
+        FP["FontProp (view.hpp)<br/>CSS-resolved style plus cached FontHandle"]
+        SF["setup_font (font.cpp)<br/>map weight and slant, cache and reuse handle"]
+        FF["font_face.cpp<br/>parse at-font-face, register descriptors"]
+        FSD["font_style_desc_from_prop (view.hpp)"]
+    end
+    subgraph LIB["lib/font/ — the real font engine (about 30 files)"]
+        RESOLVE["font_resolve, font_face_register<br/>DB match, at-font-face, platform fallback"]
+        GLYPH["font_load_glyph, font_measure_text<br/>cmap, per-codepoint fallback, glyph cache"]
+        KERN["font_get_kerning (GPOS and kern)"]
+        RAST["rasterizers: CoreText (mac)<br/>ThorVG plus glyf reader (Linux and Win)"]
+        COLOR["COLR and CBDT color emoji, woff2 decode"]
+        METRICS["font_get_metrics, line-height splits"]
+    end
+    FP --> SF
+    SF --> RESOLVE
+    SF --> METRICS
+    FF --> RESOLVE
+    FP --> FSD
+    FSD --> GLYPH
+    GLYPH --> KERN
+    GLYPH --> RAST
+    GLYPH --> COLOR

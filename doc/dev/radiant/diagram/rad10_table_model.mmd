@@ -1,0 +1,28 @@
+graph TB
+    subgraph ViewTree["View tree (aliases DOM, zero extra fields)"]
+        T["ViewTable (RDT_VIEW_TABLE)<br/>tb -> TableProp"]
+        RG["ViewTableRowGroup<br/>thead and tbody and tfoot"]
+        R["ViewTableRow"]
+        C["ViewTableCell<br/>td -> TableCellProp<br/>col_span row_span col_index row_index"]
+        CG["ViewTableColumnGroup and Column"]
+        CAP["caption block"]
+        T --> RG
+        T --> CG
+        T --> CAP
+        RG --> R
+        R --> C
+    end
+
+    subgraph Scratch["TableMetadata (scratch arena, transient)"]
+        GRID["grid_occupied row-major via grid(r,c)"]
+        COLS["per-column arrays<br/>col_widths col_min_widths col_max_widths<br/>col_percent_widths col_collapsed col_edge_max_border"]
+        ROWS["per-row arrays<br/>row_heights row_y_positions row_collapsed"]
+        BORD["collapsed_border top right bottom left"]
+    end
+
+    C -. "measured MCW and PCW" .-> COLS
+    C -. "occupies slots" .-> GRID
+    R -. "row height" .-> ROWS
+    T -. "resolved borders" .-> BORD
+    COLS -. "final geometry written back" .-> C
+    ROWS -. "final y written back" .-> R

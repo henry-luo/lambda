@@ -291,7 +291,7 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 | [C+ Coding Convention](doc/dev/C_Plus_Convention.md)  | C/C++ coding convention                                                                |
 | [Lambda Runtime](doc/dev/Lamdba_Runtime.md)           | Runtime internals and architecture                                                     |
 | [Lambda Core Runtime Design](doc/dev/lambda/LR_00_Overview.md) | Detailed design of the core runtime — compilation pipeline, value & type model, the C and MIR-Direct transpilers, MIR JIT, memory & GC, builtins, error handling, Mark API, and the procedural runtime |
-| [Radiant Layout Design](doc/dev/Radiant_Layout_Design.md) | HTML/CSS layout engine internals                                                       |
+| [Radiant Engine Design](doc/dev/radiant/RAD_00_Overview.md) | Detailed design of the HTML/CSS layout, rendering, and interaction engine — view/DOM model, CSS resolution, layout (block/inline/flex/grid/table), rendering pipeline, SVG, events, editing, state, shell, JS scripting, WebDriver (index to the RAD_01–RAD_23 set) |
 | [Lambda Jube Runtime](doc/Lambda_Jube_Runtime.md)      | Polyglot runtime build — Python, Bash, Ruby, and legacy C2MIR transpiler               |
 | [LambdaJS Support](doc/JS_DOM_Support.md)             | Experimental JavaScript JIT engine and browser DOM — supported features and benchmarks |
 | [LambdaJS Runtime Design](doc/dev/js/JS_00_Overview.md) | Detailed design of the embedded JavaScript engine — compilation pipeline, value model, runtime, standard library, RegExp, async/modules, DOM, and Node.js compatibility |

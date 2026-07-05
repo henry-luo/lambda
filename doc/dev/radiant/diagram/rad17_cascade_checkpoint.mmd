@@ -1,0 +1,23 @@
+sequenceDiagram
+    participant EV as event.cpp or editing_controller
+    participant SM as state_machine
+    participant DS as DocState
+    participant VAL as validate and invariants
+
+    EV->>SM: state_begin_event_cascade cause
+    SM->>DS: set active_event_log and bump cascade_depth
+    SM->>DS: state_begin_batch sets s_in_batch true
+
+    Note right of DS: mutation-time asserts now suppressed
+
+    EV->>DS: transition APIs and doc_state_set_ mutate fields
+    DS->>DS: state_set bumps version and marks dirty
+    DS->>DS: assert skipped while in batch or cascade
+
+    EV->>SM: state_end_event_cascade
+    SM->>DS: state_end_batch clears s_in_batch and runs assert once
+    SM->>VAL: radiant_state_settle validate interaction
+    VAL->>DS: sm_derive_state per invariant binding
+    VAL-->>SM: state.validated or state.invalid plus snapshot
+    SM->>SM: radiant_state_dump_emit_cascade diffable Mark tree
+    SM->>DS: decrement cascade_depth and clear log at zero

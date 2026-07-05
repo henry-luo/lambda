@@ -1,0 +1,11 @@
+flowchart TD
+    START["run_enhanced_track_sizing<br/>columns then rows"]
+    START --> DEMOTE["12.5 indefinite handling<br/>demote percentage tracks to auto or max-content"]
+    DEMOTE --> INIT["11.4 initialize_track_sizes<br/>base_size and growth_limit floors"]
+    INIT --> INTR["11.5 resolve_intrinsic_track_sizes<br/>collect_item_contributions then span batching"]
+    INTR --> CAP["Definite-width auto-track growth-limit cap"]
+    CAP --> MAX["11.6 maximize_tracks"]
+    MAX --> FLEX["11.7 expand_flexible_tracks<br/>fr distribution and freeze"]
+    FLEX --> STRETCH["11.8 stretch_auto_tracks"]
+    STRETCH --> OFF["compute_track_offsets<br/>plus content-alignment gutters"]
+    OFF --> COPY["copy_enhanced_tracks_to_old"]

@@ -1,0 +1,28 @@
+flowchart TB
+    subgraph IN["SVG IN (render_svg_inline.cpp)"]
+        direction TB
+        H["HTML or standalone SVG parsed by Radiant<br/>html5_parse_svg_document -> Element tree"]
+        H --> RE["render_svg_element dispatch per tag"]
+        RE --> PIR["append PaintIR / DisplayList ops (record)"]
+        PIR --> RP["replay into RdtVector (render_svg_to_vec_via_display_list)"]
+        RP --> BK["ThorVG or CoreGraphics pixels"]
+    end
+
+    subgraph OUT["SVG OUT (render_svg.cpp) opposite direction"]
+        direction TB
+        VT["laid-out view tree"]
+        VT --> RB["svg_make_backend render walk callbacks"]
+        RB --> TXT["emit SVG text document (render_view_tree_to_svg)"]
+        RB -. "inexpressible effects" .-> RAST["rasterize to base64 PNG image element"]
+    end
+
+    subgraph GRAPH["GRAPH -> SVG (graph_to_svg.cpp)"]
+        direction TB
+        MMD[".mmd / .d2 / .dot parsed to graph Element"]
+        MMD --> LG["layout_graph -> LayoutGraph"]
+        LG --> DG["layout_graph_dagre (Dagre-inspired)"]
+        DG --> GS["graph_to_svg builds Lambda SVG Element via MarkBuilder"]
+    end
+
+    GS -->|re-enters SVG renderer| RE
+    GS -->|or serialized| FMT["format_xml SVG text"]

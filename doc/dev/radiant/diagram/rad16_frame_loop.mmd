@@ -1,0 +1,24 @@
+flowchart TD
+    subgraph native["Native vsync thread (background)"]
+        CV["CVDisplayLink / DWM DwmFlush / timerfd poll"]
+        CB["frame_clock_wake_if_requested"]
+        CV --> CB
+    end
+    CB -->|"only if wants_frame_wake"| WAKE["wake_callback = view_wake_glfw"]
+    WAKE --> POST["glfwPostEmptyEvent unblocks the wait"]
+
+    subgraph ui["UI thread render loop (window.cpp view_frame_clock)"]
+        NOW["radiant_frame_clock_now"]
+        POLL["glfwPollEvents plus uv_run NOWAIT"]
+        RAF["js_animation_frame_flush (requestAnimationFrame)"]
+        SIM["event_sim_update (test harness)"]
+        CARET["radiant_editing_animation_tick (caret blink)"]
+        TICK["animation_scheduler_tick when has_active_animations"]
+        VIDEO["check video_frame_pending"]
+        REDRAW["window_refresh_callback then mark_presented"]
+        TIMEOUT["view_next_wait_timeout then glfwWaitEventsTimeout"]
+        NOW --> POLL --> RAF --> SIM --> CARET --> TICK --> VIDEO --> REDRAW --> TIMEOUT
+    end
+    POST -.-> POLL
+    TICK -->|"marks dirty rects"| REDRAW
+    TIMEOUT -->|"loop"| NOW

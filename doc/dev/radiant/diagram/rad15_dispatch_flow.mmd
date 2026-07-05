@@ -1,0 +1,22 @@
+flowchart TD
+    GLFW["window.cpp GLFW callbacks<br/>cursor/button/scroll/key/char"] --> HE
+    IME["ime_mac.mm / ime_win.cpp<br/>native composition"] --> BRIDGE["radiant_dispatch_editing_composition_event"]
+    SIM["event_sim.cpp<br/>synthesized RdtEvent"] --> HE
+    BRIDGE --> HE["handle_event (single funnel)"]
+
+    HE --> INIT["event_context_init<br/>begin cascade + raw-input log"]
+    INIT --> HT["hit-test<br/>target_html_doc then target_block_view"]
+    HT --> STACK["build_view_stack<br/>root to target, no capture phase"]
+    STACK --> FIRE["fire_events<br/>walk stack down"]
+
+    FIRE --> NATIVE["native default actions<br/>link nav, checkbox, select, scroll, drag"]
+    FIRE --> JS["dispatch_lambda_handler<br/>Lambda and JS listeners"]
+    FIRE --> EDIT["editing controllers<br/>selection, IME, transactions"]
+
+    JS --> PD{"default_prevented ?"}
+    PD -->|yes| SKIP["skip native default"]
+    PD -->|no| NATIVE
+
+    NATIVE --> REPAINT["need_repaint and DocState dirty"]
+    EDIT --> REPAINT
+    HE --> LOG["EventStateLog JSONL<br/>optional, gated by --event-log"]

@@ -1,0 +1,24 @@
+flowchart LR
+    S["LayoutGraph (nodes, edges)"] --> P1
+
+    subgraph P1["1. Back-edge marking"]
+        A["detect_back_edges_dfs<br/>WHITE GRAY BLACK DFS<br/>marks cycles, does not remove"]
+    end
+    P1 --> P2
+    subgraph P2["2. Rank assignment"]
+        B["dagre_assign_ranks<br/>longest-path DFS (compute_rank_dfs)<br/>NOT network-simplex"]
+    end
+    P2 --> P3
+    subgraph P3["3. Layer creation"]
+        C["dagre_create_layers by rank"]
+    end
+    P3 --> P4
+    subgraph P4["4. Crossing reduction"]
+        D["dagre_reduce_crossings<br/>barycenter heuristic<br/>up and down sweeps to max_iterations"]
+    end
+    P4 --> P5
+    subgraph P5["5. Coordinate assignment"]
+        E["dagre_assign_coordinates<br/>simple grid then shift to origin<br/>NOT Brandes Koepf"]
+    end
+    P5 --> P6["dagre_route_edges (straight or spline)"]
+    P6 --> R["NodePosition and EdgePath results<br/>no dummy nodes, no normalize, no subgraph nesting"]

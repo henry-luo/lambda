@@ -1,0 +1,20 @@
+flowchart TD
+    A[layout_html_doc] --> B[layout_init]
+    A --> C[layout_html_root]
+    C --> D[block_context_init root BFC]
+    C --> E[layout_flow_node per html child]
+    E --> F{node kind}
+    F -->|text| G[layout_text]
+    F -->|element| H{display.outer}
+    H -->|block, inline-block, list-item, table-cell| I[layout_block]
+    H -->|inline and replaced or inline-table| I
+    H -->|inline| J[layout_inline]
+    H -->|none| K[skip]
+    H -->|contents| L[recurse children directly]
+    I --> M{display.inner}
+    M -->|flow or flow-root| N[child recursion via layout_flow_node]
+    M -->|flex| O[layout_flex_content]
+    M -->|grid| P[layout_grid_content]
+    M -->|table| Q[layout_table_content]
+    M -->|replaced| R[iframe, svg, hr, form control]
+    A --> S[finalize static abs descendants]

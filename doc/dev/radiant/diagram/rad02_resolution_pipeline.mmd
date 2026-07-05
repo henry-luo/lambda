@@ -1,0 +1,14 @@
+flowchart TD
+    A[layout_flow_node reaches an element] --> B[apply_element_default_style UA defaults and HTML attrs]
+    B --> C[resolve_css_styles]
+    C --> D{has_any_font_prop}
+    D -- yes --> E[Pass 1 font-only callback resolve font first]
+    D -- no --> F[skip pass 1]
+    E --> G[Chromium monospace font-size quirk]
+    F --> H[Color pre-pass so currentColor sees cascaded color]
+    G --> H
+    H --> I[Pass 2 non-font callback each winning_decl through resolve_css_property]
+    I --> J[Inheritance loop over inheritable_props copy from parent when unset]
+    J --> K[Re-resolve display separately]
+    K --> L[css_animation_resolve reads same StyleTree]
+    L --> M[Computed values land on view prop structs]

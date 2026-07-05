@@ -1,0 +1,15 @@
+flowchart TD
+    ENTRY["layout_grid_content<br/>depth guard plus pass cache"]
+    ENTRY --> BAIL{"ComputeSize and<br/>both dims known"}
+    BAIL -->|yes| CACHE["return cached size"]
+    BAIL -->|no| P0
+
+    P0["Pass 0 resolve_grid_item_styles<br/>create item Views, resolve CSS"]
+    P0 --> P1["Pass 1 measure_grid_items<br/>intrinsic min and max content"]
+    P1 --> P2["Pass 2 layout_grid_container<br/>collect, expand repeat, place, size, position, align"]
+    P2 --> P3["Pass 3 layout_final_grid_content<br/>lay out each item content"]
+    P3 --> RECON["Row-height reconcile<br/>auto and intrinsic tracks only (7.2.1)"]
+    RECON --> P4["layout_grid_absolute_children"]
+
+    P2 -.nested grid.- ENTRY
+    P3 -.nested flex.- FLEX["layout_flex_container_with_nested_content"]

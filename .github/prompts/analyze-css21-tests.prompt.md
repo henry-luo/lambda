@@ -35,7 +35,7 @@ Run and analyze the CSS 2.1 conformance test suite for the Radiant layout engine
 - **Do not fix without root cause** — it's OK to leave tests as failed
 - **No hard coding or workarounds** — conform to CSS spec
 - **Structured design** — understand the spec algorithm before implementing
-- Refer to [Radiant_Layout_Design.md](../../doc/dev/Radiant_Layout_Design.md) for engine architecture
+- Refer to [RAD_00_Overview.md](../../doc/dev/radiant/RAD_00_Overview.md) for engine architecture (esp. RAD_03 block/BFC, RAD_10 table layout)
 - Key source files: `radiant/layout_table.cpp`, `radiant/layout_inline.cpp`, `radiant/layout_block.cpp`, `radiant/dom_build.cpp`
 
 ## Current Baseline (r8/r9, March 2026)

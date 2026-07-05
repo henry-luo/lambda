@@ -1,0 +1,30 @@
+flowchart TD
+    DL[Immutable DisplayList] --> GATE{render_output_replay_display_list}
+
+    GATE -->|multi-thread and no glyphs and not dirty| TILED[Tiled path]
+    GATE -->|else - serial or glyphs present| SERIAL[dl_replay single thread]
+
+    subgraph TILED [Parallel tiled replay]
+        GRID[tile_grid_init 256 CSS px tiles]
+        JOBS[Build TileJob array]
+        POOL[render_pool_dispatch to N workers]
+        TR[dl_replay_tile per tile]
+        OFF[Translate page-absolute to tile-local]
+        COMP[tile_grid_composite to surface]
+        GRID --> JOBS --> POOL --> TR --> OFF --> COMP
+    end
+
+    subgraph SERIAL [Serial replay with dirty skip]
+        PDC[dl_replay_push_dirty_clip]
+        LOOP[Loop items switch on op]
+        SKIP{Item intersects dirty clip}
+        JUMP[Jump to matching_index - skip subtree]
+        DRAW[rdt_* batched draw]
+        PDC --> LOOP --> SKIP
+        SKIP -->|no| JUMP
+        SKIP -->|yes| DRAW
+    end
+
+    CACHE[RetainedDisplayList cache] -.append clean fragment.-> DL
+    DIRTY[DirtyTracker rects] --> CACHE
+    DIRTY --> SKIP

@@ -1,0 +1,35 @@
+flowchart TB
+    START["measure_element_intrinsic_widths(element, content_only)"]
+    CACHE{"styles resolved and has cached widths"}
+    REENT{"measuring_intrinsic_width already set"}
+    FONT["install guards, set lycon view, resolve font context"]
+    DISP{"display outer or inner is none"}
+    ZERO["return zero, zero"]
+
+    START --> CACHE
+    CACHE -- yes --> RET["return cached min and max"]
+    CACHE -- no --> REENT
+    REENT -- yes --> ZERO
+    REENT -- no --> FONT --> DISP
+    DISP -- yes --> ZERO
+    DISP -- no --> SHORT
+
+    subgraph SHORT["short-circuits (skip content walk)"]
+        W1["explicit CSS width to both min and max"]
+        W2["aspect-ratio: width from known height"]
+        W3["replaced: natural size or UA default"]
+    end
+
+    SHORT -- none apply --> MODE{"display inner"}
+    MODE -- table --> TBL["per-column col_min and col_max sum, plus border-spacing and caption"]
+    MODE -- grid --> GRD["sum fixed track sizes plus gaps, early return"]
+    MODE -- flex --> FLX["row: sum max, min sum or max if wrap; column: max of children"]
+    MODE -- block or inline --> BLK["inline-run accumulation: inline_min_sum is max, inline_max_sum is sum"]
+
+    TBL --> EXTRAS
+    FLX --> EXTRAS
+    BLK --> EXTRAS
+    EXTRAS["add padding and border, apply min-width floor and max-width clamp"]
+    EXTRAS --> WRITE["cache write-back, SLOW MEASURE check"]
+    GRD --> RET2["return"]
+    WRITE --> RET2

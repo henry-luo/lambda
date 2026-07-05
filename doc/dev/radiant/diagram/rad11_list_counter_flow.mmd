@@ -1,0 +1,13 @@
+flowchart TD
+    A[block layout enters element] --> B[counter_push_scope]
+    B --> C[setup_list_container_counters for OL UL MENU DIR]
+    C --> D[counter_reset counter_increment counter_set from BlockProp]
+    D --> E{is list item}
+    E -- yes --> F[process_list_item]
+    F --> G[handle li value, auto-increment list-item]
+    G --> H[create_marker_element]
+    H --> I[counter_format list-item into marker text]
+    I --> J[MarkerProp on synthetic ::marker DomElement, view_type MARKER]
+    E -- no --> K[layout children]
+    J --> K
+    K --> L[counter_pop_scope_propagate on leave]

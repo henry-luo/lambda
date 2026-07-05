@@ -1,0 +1,13 @@
+flowchart TB
+    A[HTML / markdown / XML / .ls / PDF source] --> B[MarkBuilder + CSS DOM builder]
+    B --> C[DomNode tree with embedded Lambda Element]
+    C --> D[resolve_css_styles: fills specified_style and property groups on each DomElement]
+    D --> E[layout_flow_node then set_view: stamps view_type and fills x/y/width/height in place]
+    E --> F[the same tree IS the view tree - view_tree.root points at the html node]
+    F --> G[render_walk consumes the tree via view_require_element / view_require_block]
+    G --> H[raster surface / PDF / SVG]
+
+    I[DOM mutation from JS or editor] --> J[mark layout_dirty on node and ancestors]
+    J --> K{relayout strategy}
+    K -->|clean child: reuse layout_height_contribution| E
+    K -->|view_pool_reset_retained: keep nodes, swap property pool| E

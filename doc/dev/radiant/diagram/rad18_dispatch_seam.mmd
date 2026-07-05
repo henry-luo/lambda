@@ -1,0 +1,18 @@
+flowchart TD
+    KEY["GLFW key / text / composition / paste (event.cpp)"]
+    SURF["editing_surface_from_target -- resolve EditingSurface"]
+    INTENT["input_intent_from_key_event / _text / _composition -- WHATWG inputType"]
+    RUN["editing_run_transaction (editing_dispatch.cpp:805)"]
+    RICH{"surface is rich AND intent is dispatchable"}
+    SEAM["editing_dispatch_beforeinput_ex -- fire beforeinput to JS and Lambda hooks"]
+    BYPASS["return true -- native apply bypassed -- mutated equals false (Stage 4B)"]
+    JSOWN["JS or Lambda owns the model, mutates DOM, restores selection"]
+    NATIVE["native branch: target ranges + selection snapshot"]
+    SM["SmTransitionGuard state machine BEGIN then BEFOREINPUT then MUTATE then SET_SELECTION then INPUT then COMMIT"]
+    MUTATE["tx.mutate callback (te_replace_byte_range for form controls)"]
+    ENV["dom_mutation_* envelopes adjust live ranges"]
+    PAINT["relayout / repaint (invalidate_layout and paint flags)"]
+
+    KEY --> SURF --> INTENT --> RUN --> RICH
+    RICH -- yes --> SEAM --> BYPASS --> JSOWN
+    RICH -- no (form control or non-dispatchable) --> NATIVE --> SM --> MUTATE --> ENV --> PAINT

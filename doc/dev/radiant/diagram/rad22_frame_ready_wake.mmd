@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant Ext as External content
+    participant Wake as Wake bridge
+    participant MainLoop as GLFW main loop
+    participant DL as Display list
+    participant Post as Post-composite pass
+
+    Ext->>Wake: on_frame_ready or MutationObserver dirty
+    Wake->>Wake: mark video_frame_pending or webview dirty
+    Wake->>MainLoop: wake via glfwPostEmptyEvent
+    MainLoop->>MainLoop: unblock glfwWaitEventsTimeout
+    MainLoop->>MainLoop: webview_manager_poll_dirty re-snapshots layers
+    MainLoop->>DL: render walk emits video and webview placeholders
+    DL->>Post: render_video_frames scans placeholders
+    Post->>Post: rdt_video_get_frame then blit plus controls overlay
+    Post->>MainLoop: clear video_frame_pending then swap buffers

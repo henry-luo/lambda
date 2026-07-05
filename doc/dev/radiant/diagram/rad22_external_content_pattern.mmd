@@ -1,0 +1,32 @@
+graph TD
+    subgraph Sources["External content sources"]
+        GIF["GIF frames (lib/image)"]
+        LOT["Lottie JSON (ThorVG)"]
+        VID["Video (RdtVideo C API)"]
+        WV["webview element (WKWebView / WebKitGTK)"]
+    end
+
+    subgraph Backends["Platform abstraction (ifdef-selected)"]
+        AVF["rdt_video_avf.mm (mac)"]
+        VSTUB["rdt_video_stub.cpp (linux and windows)"]
+        WVMAC["webview mac.mm (WKWebView)"]
+        WVLINUX["webview linux.cpp (WebKitGTK)"]
+        WVSTUB["webview stub.cpp (no-op)"]
+    end
+
+    subgraph Surface["ImageSurface (composited)"]
+        PIX["surface.pixels + generation"]
+    end
+
+    GIF -->|frame-swap tick| PIX
+    LOT -->|re-raster tick| PIX
+    VID --> AVF
+    VID --> VSTUB
+    AVF -->|get_frame post-composite blit| PIX
+    WV --> WVMAC
+    WV --> WVLINUX
+    WV --> WVSTUB
+    WVMAC -->|child overlay or layer snapshot| PIX
+    WVLINUX -->|child overlay or layer snapshot| PIX
+
+    PIX -->|bump generation invalidates fragment cache| RENDER["Render walk (RAD_13)"]

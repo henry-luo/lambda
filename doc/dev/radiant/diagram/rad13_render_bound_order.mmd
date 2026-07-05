@@ -1,0 +1,13 @@
+flowchart TD
+    START["render_bound(view, rect)"]
+    START --> RADIUS["resolve percentage border-radius"]
+    RADIUS --> SHADOW["render_box_shadow (outer, underneath)"]
+    SHADOW --> MASK["optional radial-gradient mask clip push"]
+    MASK --> BG["render_background (color, gradient, image)"]
+    BG --> INSET["render_box_shadow_inset (inside)"]
+    INSET --> BORDER{table-cell collapsed borders}
+    BORDER -->|yes| RESOLVED["fill resolved collapsed edges (rc_fill_surface_rect)"]
+    BORDER -->|no| NORMAL["render_border"]
+    RESOLVED --> POP["pop mask clip"]
+    NORMAL --> POP
+    POP --> OUTLINE["render_outline_deferred (separate, after children)"]

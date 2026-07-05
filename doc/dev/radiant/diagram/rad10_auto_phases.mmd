@@ -1,0 +1,17 @@
+flowchart TD
+    E["layout_table_content<br/>save table font-size, ensure tb allocated"] --> BT["build_table_tree<br/>generate anonymous boxes, mark view types"]
+    BT --> DA["detect_anonymous_boxes"]
+    DA --> AL["table_auto_layout (2900-line orchestrator)"]
+
+    AL --> CAP0["collect all captions, sum caption_height<br/>caption-only shrink-to-fit fast path"]
+    CAP0 --> S1["Step 1 analyze_table_structure<br/>count rows and columns, assign col_index row_index<br/>normalize rowspans, build occupancy grid"]
+    S1 --> S15["Step 1.5 resolve_collapsed_borders<br/>section 17.6.2 conflict resolution by priority"]
+    S15 --> S2["Step 2 measure_cell_widths per cell<br/>MCW and PCW, clamp constraints, colspan distribution"]
+    S2 --> MODE{"table_layout FIXED<br/>and width given"}
+    MODE -- "yes" --> FX["Fixed layout<br/>widths from first row and col, fill table width"]
+    MODE -- "no" --> S3["Step 3 auto width distribution (17.5.2)<br/>shrink to min, grow auto and percent, scale min to pref"]
+    FX --> S4["Step 4 position cells and row heights<br/>column visual x (RTL aware), rowspan height distribution<br/>vertical-align and baseline"]
+    S3 --> S4
+    S4 --> CT["place top captions before grid"]
+    CT --> CB["place bottom captions after grid"]
+    CB --> FIN["write advance_y and max_width back to block flow<br/>apply relative and sticky positioning"]

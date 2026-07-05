@@ -1,0 +1,26 @@
+flowchart TD
+    VT[View tree - tagged DomNodes] --> RW[render_raster_view_tree walk]
+    RW --> RC[rc_* painter render_painter.cpp]
+    RC --> GW[PaintRecordTarget gateway]
+    GW --> PL[PaintList - PaintIR semantic cmds]
+
+    PL -->|paint_ir_lower_raster| DL[DisplayList - raster ops in ScratchArena]
+    PL -->|paint_ir_lower_svg| SVGOUT[SVG fragment StrBuf]
+
+    subgraph Backends [RenderBackend vtable seam]
+        RASTER[Raster - full-node overrides]
+        SVGB[SVG backend render_svg.cpp]
+        PDFB[PDF backend render_pdf.cpp]
+    end
+
+    RC -.through.-> RASTER
+    SVGB -->|consumes PaintIR| PL
+    PDFB -->|consumes PaintIR| PL
+
+    DL --> CAP[retained_dl_cache_capture]
+    CAP --> CACHE[RetainedDisplayList cache]
+    DL --> REPLAY1[dl_replay single thread]
+    DL --> REPLAYN[dl_replay_tile x N parallel]
+    CACHE -.reuse clean fragments.-> DL
+    REPLAY1 --> PIX[surface pixels via rdt_*]
+    REPLAYN --> PIX

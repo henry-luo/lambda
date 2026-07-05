@@ -1,0 +1,25 @@
+flowchart TD
+    SHEETS["Document stylesheets with @keyframes rules"]
+    REG["keyframe_registry_create parses each rule into CssKeyframes with sorted CssKeyframeStop array"]
+    SHEETS --> REG
+
+    RESOLVE["css_animation_resolve during layout at layout.cpp 858"]
+    RESOLVE -->|"reads animation-name and friends"| FIND["keyframe_registry_find by name"]
+    REG --> FIND
+    FIND --> CREATE["css_animation_create builds CssAnimProp then AnimationInstance"]
+    CREATE --> STATE["CssAnimState keyframes plus element stored in AnimationInstance.state"]
+    CREATE --> SCHED["animation_scheduler_add appends to DocState animation_scheduler"]
+
+    subgraph pertick["Per frame on UI thread"]
+        PROG["compute_animation_progress (delay, iteration, direction)"]
+        EASE["timing_function_eval (global easing)"]
+        CBTICK["css_animation_tick"]
+        PAIR["find_keyframe_pair then per-stop easing"]
+        INTERP["interpolate float, color, length, transform list"]
+        APPLY["apply_animated_value writes InlineProp, BackgroundProp, TransformProp"]
+        DIRTY["update bounds then dirty_mark_rect old and new"]
+        PROG --> EASE --> CBTICK --> PAIR --> INTERP --> APPLY --> DIRTY
+    end
+    SCHED --> PROG
+    APPLY -->|"mutates view in place"| REPAINT["repaint via render walk"]
+    DIRTY --> REPAINT

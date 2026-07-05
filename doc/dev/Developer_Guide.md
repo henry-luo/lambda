@@ -496,7 +496,7 @@ make test-mir                    # Run MIR JIT test suite
 
 Radiant is Lambda's HTML/CSS layout and rendering engine. It implements browser-compatible layout algorithms (block, inline, flex, grid, table) and renders to SVG, PDF, PNG, and an interactive viewer window.
 
-For the full design document, see [Radiant_Layout_Design.md](../Radiant_Layout_Design.md).
+For the full design document set, see [the Radiant engine design overview](radiant/RAD_00_Overview.md).
 
 ### Architecture Overview
 

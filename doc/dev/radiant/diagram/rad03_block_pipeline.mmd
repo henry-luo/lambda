@@ -1,0 +1,24 @@
+flowchart TD
+    A[layout_block] --> A1[detect float or blockified inline abspos]
+    A1 --> A2[save parent context pa_block pa_line pa_font]
+    A2 --> A3[set_view choose BLOCK INLINE_BLOCK LIST_ITEM TABLE]
+    A3 --> A4[dom_node_resolve_style]
+    A4 --> A5{cache hit or ComputeSize both dims known}
+    A5 -->|yes| A6[restore parent context and return]
+    A5 -->|no| A7[CSS counters and list-item]
+    A7 --> B[layout_block_content]
+    B --> B1[position at pa_line left and pa_block advance_y]
+    B1 --> B2[block_context_establishes_bfc]
+    B2 --> B3{should avoid floats}
+    B3 -->|yes| B4[section 9.5 float avoidance shift down or reduce width]
+    B3 -->|no| B5[resolve width height and replaced defaults]
+    B4 --> B5
+    B5 --> C[layout_block_inner_content]
+    C --> C1[reset abs child list]
+    C1 --> C2[materialize pseudo elements]
+    C2 --> C3[dispatch by inner display]
+    C3 --> D[finalize_block_flow]
+    D --> D1[content_width from max_width and content_height from advance_y]
+    D1 --> D2[list-item min line box, text-box-trim, line-clamp]
+    D2 --> D3[apply min and max constraints]
+    D3 --> E[restore parent context and flow block into parent]

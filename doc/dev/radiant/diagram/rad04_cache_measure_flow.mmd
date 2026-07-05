@@ -1,0 +1,19 @@
+sequenceDiagram
+    participant Caller as flex or grid or block driver
+    participant Measure as layout_measure_intrinsic
+    participant Scope as LayoutMeasureScope
+    participant Cache as LayoutCache (9 slots)
+    participant Layout as block or replaced layout
+
+    Caller->>Measure: measure(node, AvailableSpace)
+    Measure->>Scope: construct (snapshot subtree, force ComputeSize)
+    Measure->>Cache: layout_pass_cache_get (slot from KnownDimensions and AvailableSpace)
+    alt cache hit
+        Cache-->>Measure: cached SizeF
+    else cache miss
+        Measure->>Layout: run measurement layout
+        Layout-->>Measure: computed SizeF
+        Measure->>Cache: layout_pass_cache_store into slot
+    end
+    Measure->>Scope: destruct (restore snapshot, restore RunMode)
+    Measure-->>Caller: IntrinsicSize

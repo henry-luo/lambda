@@ -1,0 +1,19 @@
+flowchart TB
+    subgraph LAYOUT["PerformLayout run mode (commits geometry)"]
+        L1["layout_flow_node walks DOM"]
+        L2["writes x, y, width, height on nodes"]
+        L3["allocates blk, in_line, bound property groups"]
+        L1 --> L2 --> L3
+    end
+
+    subgraph MEASURE["ComputeSize run mode (no commit)"]
+        M1["measure_element_intrinsic_widths"]
+        M2["reads specified_style directly"]
+        M3["RAII guards restore lycon view, font and clear flag"]
+        M4["returns IntrinsicSizes (min-content, max-content)"]
+        M1 --> M2 --> M3 --> M4
+    end
+
+    CB["LayoutRunModeScope sets RunMode ComputeSize"]
+    CB --> M1
+    M4 -. "feeds shrink-to-fit, flex basis, grid tracks, table columns" .-> L2

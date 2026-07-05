@@ -1,0 +1,22 @@
+sequenceDiagram
+    participant L as Layout (setup_font)
+    participant FP as FontProp cache
+    participant E as lib/font engine
+    L->>L: map font_weight and font_style to FontWeight and FontSlant
+    L->>L: build FontStyleDesc (family, size_px, weight, slant)
+    L->>FP: font_handle_matches_prop on cached handle
+    alt cached handle matches
+        FP-->>L: reuse font_handle (no resolve)
+    else miss or stale
+        L->>FP: font_prop_release_handle (release old ref)
+        L->>E: font_resolve(font_ctx, style)
+        E->>E: DB match, at-font-face, platform fallback, cache
+        E-->>L: FontHandle (ref-counted)
+        L->>FP: cache handle, set owns_font_handle
+    end
+    L->>E: font_get_metrics and font_get_normal_lh_split
+    E-->>L: metrics
+    L->>FP: populate space_width, ascender, descender, has_kerning
+    Note right of E: later, per glyph during text flow
+    L->>E: font_load_glyph (cmap, fallback, cache)
+    L->>E: font_get_kerning(prev, cur)

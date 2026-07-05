@@ -1,0 +1,24 @@
+sequenceDiagram
+    participant Client as WebDriver client (Selenium)
+    participant HTTP as lambda serve Server
+    participant Route as Route handler
+    participant Sess as WebDriverSession
+    participant Loc as Locator (CSS matcher)
+    participant Act as Actions (event synth)
+    participant Ev as handle_event
+
+    Client->>HTTP: POST /session/:id/element/:id/click
+    HTTP->>Route: dispatch by pattern, extract params
+    Route->>Sess: get_session by sessionId
+    Route->>Sess: element_registry_get by elementId
+    Note left of Route: for find: parse body, run locator
+    Route->>Loc: traverse_views over layout view tree
+    Loc->>Loc: selector_matcher_matches on DomElement
+    Loc-->>Route: matched View pointer
+    Route->>Act: webdriver_element_click(View)
+    Act->>Act: get_element_center walks parent chain
+    Act->>Ev: synthesize RdtEvent MOUSE_DOWN then UP
+    Ev-->>Act: DocState dirty flags updated
+    Act-->>Route: WD_SUCCESS
+    Route-->>HTTP: JSON value null
+    HTTP-->>Client: 200 application json

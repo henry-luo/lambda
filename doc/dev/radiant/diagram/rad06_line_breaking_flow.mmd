@@ -1,0 +1,32 @@
+flowchart TD
+    A[layout_text enter] --> B[resolve white-space, word-break, transform, lang]
+    B --> C[skip leading collapsible spaces]
+    C --> LT[LAYOUT_TEXT label]
+    LT --> D{first word fits remaining space}
+    D -- no --> LB1[line_break]
+    LB1 --> LT
+    D -- yes --> E[allocate TextRect, set x y height]
+    E --> LOOP[do-while per codepoint]
+    LOOP --> F{kind of codepoint}
+    F -- Latin run --> G[measure_shaped_simple_latin_run fast path]
+    F -- space or tab --> H[measure_current_space_advance]
+    F -- newline preserved --> N[output_text then forced line_break then goto]
+    F -- other --> I[font_load_glyph per codepoint plus kerning]
+    G --> J[add width to rect]
+    H --> J
+    I --> J
+    J --> K{advance_x plus width greater than line_right}
+    K -- no --> REC[record break opportunity into last_space with BreakKind]
+    REC --> LOOP
+    K -- yes --> W{wrap decision}
+    W -- hang pre-wrap or U3000 --> REC
+    W -- break at current space --> S[output_text then line_break then goto]
+    W -- rewind to last_space --> R[str equals last_space plus 1, SHY fallback]
+    R --> S
+    W -- no break point, emergency --> EM[break-word mid-word or overflow]
+    EM --> S
+    S --> LT
+    LOOP -- end of node --> Z{last_space set and rest overflows}
+    Z -- yes --> R2[rewind to last_space and break]
+    R2 --> LT
+    Z -- no --> OUT[output_text whole rect]

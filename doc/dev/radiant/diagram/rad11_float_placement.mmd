@@ -1,0 +1,13 @@
+flowchart TD
+    A[layout_float_element block] --> B[block_context_find_bfc parent_ctx]
+    B --> C[compute parent offset in BFC coords]
+    C --> D[Rule 5: raise Y to max preceding float top]
+    D --> E{fits at current Y}
+    E -- yes --> F[set block.x at left or right edge of available space]
+    E -- no and wider than CB --> F
+    E -- no --> G[shift Y down to next float margin_box_bottom]
+    G --> E
+    F --> H[convert final Y back to parent-relative, set block.y]
+    H --> I[caller: block_context_add_float bfc block]
+    I --> J[FloatBox pushed onto left_floats or right_floats list]
+    J --> K[adjust_line_for_floats shrinks later lineboxes]

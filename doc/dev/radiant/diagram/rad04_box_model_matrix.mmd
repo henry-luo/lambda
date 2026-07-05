@@ -1,0 +1,21 @@
+flowchart TB
+    subgraph BOX["CSS box model (all floats)"]
+        M["margin edge"] --> B["border edge (x,y,width,height)"]
+        B --> P["padding edge"]
+        P --> C["content edge"]
+    end
+
+    subgraph SIZING["sizing constraint currency"]
+        RM["RunMode: ComputeSize or PerformLayout or PerformHiddenLayout"]
+        SM["SizingMode: InherentSize or ContentSize"]
+        AS["AvailableSize per axis"]
+    end
+
+    AS --> D1["DEFINITE (pixel value)"]
+    AS --> D2["INDEFINITE (auto)"]
+    AS --> D3["MIN_CONTENT (break everywhere)"]
+    AS --> D4["MAX_CONTENT (never wrap)"]
+
+    RM -->|ComputeSize plus intrinsic AvailableSize| MEASURE["measurement pass"]
+    RM -->|PerformLayout plus definite| REAL["real layout pass"]
+    SM -->|ContentSize ignores CSS width and height| MEASURE

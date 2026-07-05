@@ -1,0 +1,39 @@
+flowchart TB
+    P1[Phase 1 use prepared items]
+    P2[Phase 2 sort by order]
+    P25[Phase 2.5 resolve min and max constraints]
+    P3[Phase 3 create_flex_lines wrap by outer hypothetical size]
+    P4[Phase 4 resolve_flexible_lengths per line]
+    P4b[Phase 4b shrink-to-fit main size fixup]
+    P45[Phase 4.5 determine hypothetical cross sizes]
+    P5[Phase 5 calculate_line_cross_sizes]
+    P5b[Phase 5b apply container min-size]
+    P5c[Phase 5c re-run flex if min made main definite]
+    P6[Phase 6 align_items_main_axis justify-content]
+    P7[Phase 7 finalize auto cross and main size]
+    P7b[Phase 7b min-height]
+    P7c[Phase 7c max clamp may re-run flex]
+    P8[Phase 8 align_content]
+    P8b[Phase 8b relayout after align-content stretch]
+    P9[Phase 9 align_items_cross_axis]
+    P9a[Phase 9a baseline line adjust]
+    P95[Phase 9.5 store first_baseline]
+    P10[Phase 10 apply relative offsets]
+
+    P1 --> P2 --> P25 --> P3 --> P4 --> P4b --> P45 --> P5 --> P5b --> P5c --> P6 --> P7 --> P7b --> P7c --> P8 --> P8b --> P9 --> P9a --> P95 --> P10
+
+    subgraph loop["resolve_flexible_lengths (section 9.7 iterative)"]
+        L1[targets equal hypothetical]
+        L2[pre-freeze inflexible grow-0 shrink-0]
+        L3[free_space from BASE sizes]
+        L4[distribute by grow or scaled shrink]
+        L5[apply min and max two-phase freeze]
+        L6{violations or iteration less than 10}
+        L1 --> L2 --> L3 --> L4 --> L5 --> L6
+        L6 -->|yes| L4
+        L6 -->|no| L7[done]
+    end
+
+    P4 -.calls.-> L1
+    P5c -.calls.-> L1
+    P7c -.calls.-> L1

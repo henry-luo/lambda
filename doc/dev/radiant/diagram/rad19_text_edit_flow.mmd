@@ -1,0 +1,20 @@
+sequenceDiagram
+    participant EV as event.cpp key or text or paste
+    participant DF as dispatch_form_text_replace
+    participant BI as editing_dispatch_form_beforeinput
+    participant TE as te_replace_byte_range_no_events
+    participant TC as tc_set_value
+    participant H as te_history_push
+    participant V as te_validate
+    participant RP as relayout and repaint
+
+    EV->>DF: resolve EditingSurface text control
+    DF->>BI: fire cancellable beforeinput
+    BI-->>DF: prevented then abort mutation
+    DF->>TE: apply UTF-8 byte range replacement
+    TE->>TC: write current_value and mirror to form.value
+    TC->>H: push value plus selection snapshot to ring
+    TC->>V: re-evaluate constraint validation
+    TE->>TE: place caret and clear selection and sync projection
+    DF->>BI: editing_dispatch_form_input fires input event
+    TE->>RP: mutation invalidates layout and paint

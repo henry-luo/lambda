@@ -1,0 +1,34 @@
+graph TB
+    subgraph UiContext [global UiContext window.cpp]
+        WIN[GLFWwindow window]
+        SURF[ImageSurface surface backbuffer]
+        FONT[FontContext plus default and fallback fonts]
+        IMGC[image_cache hashmap]
+        DOC[DomDocument document]
+        SESS[BrowsingSession browsing_session]
+        WVM[WebViewManager webview_mgr lazy]
+        MOUSE[MouseState mouse_state]
+    end
+
+    SESS -->|borrows not owns| NET[NetworkThreadPool and EnhancedFileCache owned by window]
+    DOC --> RM[resource_manager pulls from NET]
+    DOC --> STATE[DocState state dirty and reflow flags]
+
+    subgraph MainLoop [RadiantFrameClock paced main loop]
+        L1[glfwPollEvents]
+        L2[uv_run UV_RUN_NOWAIT libuv]
+        L3[js_animation_frame_flush rAF]
+        L4[resource_manager_flush_layout_updates drain network on UI thread]
+        L5[event_sim_update simulated events]
+        L6[editing animation tick and caret blink]
+        L7[animation_scheduler_tick]
+        L8[video_frame_pending check]
+        L9[webview_manager_poll_dirty]
+        L10[if do_redraw then render via window_refresh_callback]
+        L11[glfwWaitEventsTimeout next frame budget]
+        L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7 --> L8 --> L9 --> L10 --> L11 --> L1
+    end
+
+    MainLoop --> STATE
+    L10 --> SURF
+    WVM --> L9

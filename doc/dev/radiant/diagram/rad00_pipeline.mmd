@@ -1,0 +1,17 @@
+flowchart TB
+    src[Source: HTML, markdown, XML, SVG, .ls, PDF, LaTeX] --> load[Document loading: normalize to DomDocument - RAD_20]
+    load --> tree[Unified DomNode tree - RAD_01]
+    tree --> css[CSS style resolution: computed props on nodes - RAD_02]
+    css --> layout[Layout: tag views, size and place - RAD_03 to RAD_11]
+    layout --> paint[Paint IR and display list - RAD_12]
+    paint --> render[Render walk and painters, or SVG and PDF export - RAD_13, RAD_14]
+    render --> pixels[Window surface, PNG, PDF, SVG]
+
+    input[Platform input] --> events[Events and hit-testing - RAD_15]
+    events --> state[Interaction state - RAD_17]
+    events --> editing[Editing and forms - RAD_18, RAD_19]
+    scripts[Page scripts - RAD_21] --> tree
+    state --> relayout[Mark dirty, relayout]
+    editing --> relayout
+    relayout --> layout
+    clock[Frame clock and animation - RAD_16] --> render

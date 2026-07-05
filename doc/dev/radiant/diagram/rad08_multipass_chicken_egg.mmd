@@ -1,0 +1,17 @@
+flowchart LR
+    subgraph problem["chicken and egg"]
+        A[item main and cross sizes need intrinsic content sizes]
+        B[content layout needs final box sizes]
+        A -.needs.-> B
+        B -.needs.-> A
+    end
+
+    subgraph resolution["resolved by a measurement pass and two caches"]
+        S1[PASS 1 measure children in ComputeSize mode gives intrinsic min and max content]
+        S2[core algorithm picks basis wraps grows shrinks gives final boxes]
+        S3[SUB-PASS 2 layout real children inside now-known content boxes]
+        S1 --> S2 --> S3
+        S3 -.reconcile auto-height via flex_in_flow_content_bottom.-> S2
+    end
+
+    problem --> resolution

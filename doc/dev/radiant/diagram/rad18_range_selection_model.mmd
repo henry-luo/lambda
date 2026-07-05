@@ -1,0 +1,36 @@
+classDiagram
+    class DomBoundary {
+        DomNode node
+        uint32 offset (UTF16 for text, child index for elements)
+    }
+    class DomRange {
+        DomBoundary start
+        DomBoundary end (invariant start less-or-equal end)
+        bool is_live
+        uint32 ref_count
+        DomRange prev and next (live-range list)
+        layout cache (start_view end_view x y height)
+        void host_wrapper (JS binding)
+    }
+    class DomSelection {
+        DomRange ranges (MAX equals 1, Chromium)
+        uint32 range_count (0 or 1)
+        DomSelectionDirection direction
+        DomNode associated_doc_root
+    }
+    class EditingSelection {
+        EditingSelectionKind kind
+        DomRange range (rich)
+        DomElement control (form)
+        uint32 start_u16 and end_u16 (form)
+    }
+    class DomText {
+        UTF-8 storage
+        TextRect rect chain (layout)
+    }
+    DomSelection --> DomRange : holds 0 or 1
+    DomRange --> DomBoundary : start and end
+    DomBoundary --> DomText : text node target
+    EditingSelection --> DomRange : rich branch
+    EditingSelection --> DomText : facade over both
+    note for DomBoundary "API offsets are UTF-16 code units; internal storage is UTF-8. dom_text_utf16_to_utf8 converts only at the DOM-API boundary."

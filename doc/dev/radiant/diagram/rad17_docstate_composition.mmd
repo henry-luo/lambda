@@ -1,0 +1,50 @@
+flowchart TB
+    subgraph Store[StateStore per document]
+        SS[StateStore] --> DS[DocState single mutable struct]
+    end
+
+    subgraph Reactive[Reactive core]
+        MAP[state_map StateKey to StateEntry]
+        VER[version counter and prev_version]
+        VS[view_state_map ViewState scroll and form]
+        TS[template_state_map and render_map]
+    end
+
+    subgraph Interaction[Interaction sub-states]
+        FOCUS[focus hover active]
+        SEL[dom_selection and EditingSelection canonical]
+        LEG[CaretState SelectionState FocusState legacy projections]
+        IME[IME composition drag-drop]
+        OVL[dropdown and context-menu overlays]
+        FORM[form values scroll]
+        RICH[rich-edit transaction phase]
+    end
+
+    subgraph Render[Render scheduling]
+        DIRTY[DirtyTracker]
+        REFLOW[ReflowScheduler]
+    end
+
+    DS --> MAP
+    DS --> VER
+    DS --> VS
+    DS --> TS
+    DS --> FOCUS
+    DS --> SEL
+    DS --> LEG
+    DS --> IME
+    DS --> OVL
+    DS --> FORM
+    DS --> RICH
+    DS --> DIRTY
+    DS --> REFLOW
+
+    subgraph Boundary[State machine holds no state]
+        SM[sm_derive_ per family derives FSM on demand]
+        SCHEMA[RADIANT_STATE_RULES and RADIANT_INVARIANTS declarative tables]
+        GUARD[SmTransitionGuard debug recorder]
+    end
+
+    DS -. read only .-> SM
+    SM --> SCHEMA
+    GUARD --> SCHEMA

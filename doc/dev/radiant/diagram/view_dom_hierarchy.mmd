@@ -1,0 +1,40 @@
+classDiagram
+    DomNode <|-- DomText
+    DomNode <|-- DomElement
+    DomText <|-- ViewText
+    DomElement <|-- ViewElement
+    DomElement <|-- ViewMarker
+    ViewElement <|-- ViewBlock
+    ViewBlock <|-- ViewTable
+    ViewBlock <|-- ViewTableRowGroup
+    ViewBlock <|-- ViewTableRow
+    ViewBlock <|-- ViewTableCell
+
+    class DomNode {
+      uint32 id
+      DomNodeType node_type
+      ViewType view_type
+      float x y width height
+      bool layout_dirty
+      float layout_height_contribution
+    }
+    class DomText {
+      String text
+      TextRect rect
+      FontBox font
+    }
+    class DomElement {
+      Element elmt
+      StyleTree specified_style
+      font bound in_line blk position ...
+      first_child last_child
+    }
+    class ViewElement {
+      methods only (ViewSpan alias)
+    }
+    class ViewBlock {
+      methods only
+    }
+    class ViewText {
+      methods only
+    }

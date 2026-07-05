@@ -1,0 +1,43 @@
+classDiagram
+    class Linebox {
+        left right effective_left effective_right
+        advance_x
+        max_ascender max_descender
+        last_space (break cursor)
+        last_space_pos last_space_kind
+        last_non_shy_space (SHY fallback)
+        trailing_space_width hanging_space_width
+        prev_codepoint (kerning)
+        start_view line_start_font
+        reset_space()
+    }
+    class BreakKind {
+        BRK_SPACE BRK_PRESERVED_SPACE
+        BRK_TAB BRK_HARD_BREAK
+        BRK_GLUE BRK_ZWJ
+        BRK_ZERO_WIDTH_BREAK BRK_SOFT_HYPHEN
+        BRK_HYPHEN BRK_CJK
+        BRK_OP BRK_CL BRK_NS BRK_CJ
+        BRK_IDEOGRAPHIC_SPACE
+    }
+    class TextRect {
+        x y width height
+        start_index length (byte range)
+        line_number hanging_trim
+        has_trailing_hyphen
+        next
+    }
+    class ViewText {
+        rect (linked list head)
+        font
+    }
+    class BlockContext {
+        line_height advance_y lead_y
+        text_align direction
+        block_container_font (tab-size)
+        line_number is_first_line
+    }
+    Linebox --> BreakKind : last_space_kind tags cursor
+    ViewText --> TextRect : owns list of fragments
+    Linebox --> TextRect : last_text_rect (trim target)
+    BlockContext --> Linebox : drives advance_y and align

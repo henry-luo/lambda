@@ -1,0 +1,16 @@
+flowchart LR
+    subgraph parse [lambda input css]
+        A[Stylesheet text] --> B[CSS parser]
+        B --> C[CssDeclaration values with specificity origin source order]
+        C --> D[Selector match plus cascade]
+        D --> E[StyleTree AVL keyed by CssPropertyId]
+        E --> F[StyleNode winning_decl plus weak_list of losers]
+    end
+    subgraph radiant [radiant resolve]
+        F --> G[dom_elem specified_style read only]
+        G --> H[resolve_css_property switch]
+        H --> I[Value resolvers length color var]
+        I --> J[Computed props on view node]
+    end
+    J --> K[FontProp InlineProp BoundaryProp BlockProp FlexProp PositionProp]
+    K --> L[Consumed by layout and renderer]

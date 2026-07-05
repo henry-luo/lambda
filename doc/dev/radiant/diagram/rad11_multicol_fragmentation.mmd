@@ -1,0 +1,13 @@
+flowchart TD
+    A[layout_multicol_content] --> B[calculate_multicol_dimensions count width gap]
+    B --> C{column_count less than or equal to 1}
+    C -- yes --> D[fall back to normal flow, single column]
+    C -- no --> E[Phase 1: layout content once at column width]
+    E --> F[Phase 2: collect block children, split at spanners into groups]
+    F --> G[per group: multicol_balanced_target_search]
+    G --> H[binary search target height using multicol_simulate_column_count]
+    H --> I[ColumnGroup with ColumnFragment array]
+    I --> J[FragmentedFlowCursor places blocks, advances fragments]
+    J --> K[multicol_project_fragmented_inline_descendants for line splitting]
+    K --> L[multicol_apply_positioned_fragment_anchors for OOF descendants]
+    L --> M[spanners laid out full container width between groups]

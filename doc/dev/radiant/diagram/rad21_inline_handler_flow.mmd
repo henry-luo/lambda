@@ -1,0 +1,14 @@
+flowchart TD
+    A[collect_and_compile_event_handlers on DomDocument] --> B[collect_handlers_recursive over DomElement tree]
+    B --> C[read on-type attributes onclick onmouseover and so on]
+    C --> D[emit wrapper function __evt_handler_N event]
+    D --> E{attr is a plain global call}
+    E -- yes --> F[append_global_call_inline_handler rewrites to globalThis lookup and call]
+    E -- no --> G[inline the raw attribute body verbatim]
+    F --> H[concatenate all wrappers into one compile buffer]
+    G --> H
+    H --> I[transpile_js_to_mir_with_preamble reuses retained heap reusing_context true]
+    I --> J[new MIR context deferred not destroyed]
+    J --> K[for each element js_property_get wrapper by name]
+    K --> L[js_dom_set_event_handler_function installs into on-type IDL slot]
+    L --> M[later js_dom_dispatch_event fires with this element and Event arg]

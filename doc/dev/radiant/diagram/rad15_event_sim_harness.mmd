@@ -1,0 +1,19 @@
+flowchart TD
+    JSON["scenario JSON<br/>event_sim_load"] --> CTX["EventSimContext<br/>ArrayList of SimEvent"]
+    JSONL["event/state JSONL replay<br/>event_sim_load_replay_log"] --> CTX
+
+    CTX --> UPD["event_sim_update<br/>per render tick"]
+    UPD --> PROC["process_sim_event<br/>giant dispatch on SimEventType"]
+
+    PROC --> RESOLVE["find_element_by_selector<br/>selector, text, or index"]
+    PROC --> SYNTH["synthesize RdtEvent<br/>sim_mouse_move, sim_key, ..."]
+    SYNTH --> HE["handle_event<br/>same production funnel"]
+
+    PROC --> ACTIONS["high-level actions<br/>click, dblclick, type, drag_and_drop, ime_compose, paste, select_option"]
+    ACTIONS --> SYNTH
+
+    PROC --> ASSERT["assert_* vocabulary<br/>caret, selection, target, text, value, checked, visible, focus, rect, style, pixel, scroll, event_log, editing_event, state_store, state_dump"]
+    PROC --> FUZZ["event_sim_fuzz_schema<br/>deterministic legal-input fuzz"]
+
+    ASSERT --> RESULTS["pass and fail counts<br/>event_sim_print_results"]
+    FUZZ --> RESULTS

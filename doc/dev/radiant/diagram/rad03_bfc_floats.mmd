@@ -1,0 +1,38 @@
+classDiagram
+    class LayoutContext {
+        View view
+        BlockContext block
+        Linebox line
+        FontBox font
+        AvailableSpace available_space
+        RunMode run_mode
+        SizingMode sizing_mode
+        int depth
+        int node_count
+    }
+    class BlockContext {
+        float advance_y
+        float max_width
+        float content_width
+        BlockContext parent
+        ViewBlock establishing_element
+        bool is_bfc_root
+        float bfc_offset_x
+        float bfc_offset_y
+        FloatBox left_floats
+        FloatBox right_floats
+        float lowest_float_bottom
+        float saved_clear_y
+    }
+    class FloatBox {
+        ViewBlock element
+        CssEnum float_side
+        float margin_box_top
+        float margin_box_bottom
+        float margin_box_left
+        float margin_box_right
+        FloatBox next
+    }
+    LayoutContext --> BlockContext : block
+    BlockContext --> BlockContext : parent
+    BlockContext --> FloatBox : left and right float lists

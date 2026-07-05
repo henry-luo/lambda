@@ -1,0 +1,30 @@
+graph TB
+    URL[input URL or file path] --> DISP[load_html_doc_no_redirect dispatch by scheme then extension]
+
+    DISP -->|http and html and htm and default| HTML[load_lambda_html_doc]
+    DISP -->|svg and png and jpg and gif| IMG[load_dom_backed_image_document generates html body img]
+    DISP -->|xml| XML[load_xml_doc needs xml-stylesheet else falls to text]
+    DISP -->|json yaml txt csv and more| TEXT[load_text_doc wraps source in pre]
+    DISP -->|ls| LS[load_lambda_script_doc runs script retains Runtime]
+    DISP -->|pdf| PDF[load_pdf_bridge_doc in-memory ls bridge]
+    DISP -->|tex and latex| TEX[load_latex_doc package render standalone html]
+    DISP -->|md and markdown| MD[load_markdown_doc plus math subflow]
+    DISP -->|wiki| WIKI[load_wiki_doc]
+
+    IMG --> HTML
+    PDF --> LS
+
+    HTML --> ELEM[Lambda Element tree]
+    XML --> ELEM
+    TEXT --> ELEM
+    LS --> ELEM
+    TEX --> ELEM
+    MD --> ELEM
+    WIKI --> ELEM
+
+    ELEM --> DDC[dom_document_create]
+    DDC --> BDT[build_dom_tree_from_element retained DomElement tree]
+    BDT --> CSS[collect stylesheets then optional scripts then CSS cascade]
+    CSS --> DD[DomDocument ready]
+    DD --> LR[shared layout_html_doc]
+    LR --> RN[shared render_html_doc RAD_13]
