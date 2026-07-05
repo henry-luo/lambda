@@ -441,6 +441,19 @@ data boundary — accepting `""` as a string is effectively the only workable de
 - **Element normalization stays**: `<e "">` → `<e>` as a tree-construction rule
   (the XDM position), independent of string equality.
 
+#### C1.6a Amendment (designer, 2026-07-04): the `''` literal is removed
+
+The original ruling kept `''` (and `b''`) as literals *normalizing to null*.
+Amended: **the literal spellings are removed — writing `''` or `b''` is a
+compile error** (teaching hint: "empty symbol does not exist; use `null`").
+Rationale: with `""` now a genuine string, `''` silently meaning null is a
+confusion trap — a visual near-twin of `""` with opposite semantics. Banning
+the spelling makes the solid-type invariant (`symbol`/`binary` have `len ≥ 1`)
+syntactically visible rather than silently enforced. The *semantic* invariant
+is unchanged: zero-length symbols/binaries still cannot exist; runtime
+producers (slices, conversions) still yield null. `b''` included for symmetry
+(review recommendation, same rationale). Implementation: impl plan item 3.3.
+
 #### C1.7 Deferred follow-ups
 
 1. **Truthiness of `""`** — review recommends falsy (preserves the one-check
