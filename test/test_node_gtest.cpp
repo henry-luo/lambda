@@ -952,8 +952,17 @@ static std::vector<NodeOfficialParam> discover_node_official_tests(bool honor_sl
 
 static std::unordered_map<std::string, NodeTestResult> g_test_results;
 static std::mutex g_test_results_mutex;
+static std::mutex g_node_progress_mutex;
+static std::atomic<int> g_node_progress_total{0};
+static std::atomic<int> g_node_progress_completed{0};
+static std::atomic<int> g_node_progress_passed{0};
+static std::atomic<int> g_node_progress_failed{0};
+static std::atomic<int> g_node_progress_timed_out{0};
+static std::atomic<int> g_node_progress_crashed{0};
 static bool g_node_socket_preflight_failed = false;
 static std::string g_node_socket_preflight_message;
+
+static const char* node_result_status(const NodeTestResult& r);
 
 static bool node_test_requires_serial(const NodeOfficialParam& t) {
     load_serial_list();
@@ -1036,8 +1045,50 @@ static bool run_node_socket_preflight(std::string& message) {
 #endif
 }
 
+static void node_progress_note_result(const NodeOfficialParam& t,
+                                      const NodeTestResult& result) {
+    int completed = ++g_node_progress_completed;
+    if (result.passed) {
+        ++g_node_progress_passed;
+    } else if (result.timed_out) {
+        ++g_node_progress_timed_out;
+    } else if (result.exit_code > 128) {
+        ++g_node_progress_crashed;
+    } else {
+        ++g_node_progress_failed;
+    }
+
+    bool print_detail = !result.passed;
+    bool print_progress = print_detail || completed == g_node_progress_total.load()
+        || (completed % 100) == 0;
+    if (!print_progress) return;
+
+    std::lock_guard<std::mutex> progress_lock(g_node_progress_mutex);
+    fprintf(stderr,
+            "[node-official] progress %d/%d pass=%d fail=%d timeout=%d crash=%d\n",
+            completed, g_node_progress_total.load(),
+            g_node_progress_passed.load(),
+            g_node_progress_failed.load(),
+            g_node_progress_timed_out.load(),
+            g_node_progress_crashed.load());
+    if (print_detail) {
+        const char* status = node_result_status(result);
+        fprintf(stderr,
+                "[node-official] %s %s exit=%d elapsed=%.1fs\n",
+                status, t.filename.c_str(), result.exit_code,
+                result.elapsed_ms / 1000.0);
+        size_t line_end = result.output.find('\n');
+        if (!result.output.empty()) {
+            std::string first_line = result.output.substr(0, line_end);
+            if (first_line.size() > 240) first_line.resize(240);
+            fprintf(stderr, "[node-official] output: %s\n", first_line.c_str());
+        }
+    }
+}
+
 static void execute_one_test(const NodeOfficialParam& t) {
     NodeTestResult result = run_single_test(t.test_path, t.ordinal);
+    node_progress_note_result(t, result);
     std::lock_guard<std::mutex> lock(g_test_results_mutex);
     g_test_results[t.filename] = std::move(result);
 }
@@ -1057,6 +1108,12 @@ static void execute_all_tests(const std::vector<NodeOfficialParam>& tests) {
 
     fprintf(stderr, "[node-official] Running %zu serial tests, then %zu tests with %d workers...\n",
             serial_tests.size(), parallel_tests.size(), PARALLEL_WORKERS);
+    g_node_progress_total = (int)tests.size();
+    g_node_progress_completed = 0;
+    g_node_progress_passed = 0;
+    g_node_progress_failed = 0;
+    g_node_progress_timed_out = 0;
+    g_node_progress_crashed = 0;
 
     for (const auto& t : serial_tests) {
         execute_one_test(t);

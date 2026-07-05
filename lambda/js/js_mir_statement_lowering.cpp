@@ -376,7 +376,7 @@ static bool jm_mutable_native_var_needs_boxing(JsMirTranspiler* mt,
 static void jm_define_global_var_property_for_main_var(JsMirTranspiler* mt,
         JsVariableDeclarationNode* decl, JsIdentifierNode* id, MIR_reg_t value) {
     if (!mt || !decl || !id || !id->name || !value) return;
-    if (decl->kind != JS_VAR_VAR || !mt->in_main || mt->is_module) return;
+    if (decl->kind != JS_VAR_VAR || !mt->in_main || mt->is_module || mt->is_eval_direct) return;
     MIR_reg_t key_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
     jm_call_void_3(mt, "js_define_global_property_v",
         MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
@@ -536,7 +536,9 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                 MIR_new_reg_op(mt->ctx, existing_modvar_local->reg),
                                 MIR_new_reg_op(mt->ctx, boxed_val)));
                         }
-                        if (mt->in_main) {
+                        if (mt->in_main && !mt->is_eval_direct) {
+                            // direct eval exports vars after executing the snippet so
+                            // caller-local eval frames do not leak initializer writes.
                             jm_call_void_3(mt, "js_define_global_property_v",
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
@@ -596,7 +598,9 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                 MIR_new_reg_op(mt->ctx, existing_modvar_local->reg),
                                 MIR_new_reg_op(mt->ctx, boxed_val)));
                         }
-                        if (var->kind == JS_VAR_VAR && mt->in_main) {
+                        if (var->kind == JS_VAR_VAR && mt->in_main && !mt->is_eval_direct) {
+                            // direct eval var bindings are exported by the eval epilogue;
+                            // eager global writes break function-local eval scoping.
                             MIR_reg_t key_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
                             jm_call_void_3(mt, "js_define_global_property_v",
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
