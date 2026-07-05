@@ -15,20 +15,6 @@
 
 extern "C" Item js_get_current_this(void);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
-extern "C" bool js_process_dispatch_uncaught_exception(Item error, Item origin);
-extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len);
-extern "C" Item js_async_hooks_enter_resource(Item resource);
-extern "C" void js_async_hooks_restore_resource(Item previous);
-extern "C" void js_async_hooks_emit_before_resource(Item resource);
-extern "C" void js_async_hooks_emit_after_resource(Item resource);
-extern "C" void js_async_hooks_emit_destroy_resource(Item resource);
-extern "C" Item js_domain_capture_stack(void);
-extern "C" Item js_domain_set_stack(Item stack);
-extern "C" void js_domain_restore_stack(Item previous);
-extern "C" int js_domain_emit_current_error(Item error);
-extern "C" Item js_setImmediate_resource_args(Item callback, Item args_array,
-                                               const char* resource_name,
-                                               int resource_len);
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include <cstring>
@@ -527,41 +513,6 @@ static Item crypto_buffer_from_bytes(const uint8_t* bytes, int len) {
     return result;
 }
 
-static void crypto_call_ready_callback_resource(Item callback, Item* args, int arg_count,
-                                                const char* resource_name, int resource_len) {
-    Item resource = js_async_hooks_create_resource(resource_name, resource_len);
-    Item domain = js_domain_capture_stack();
-    Item previous_resource = js_async_hooks_enter_resource(resource);
-    Item previous_domain = js_domain_set_stack(domain);
-    js_async_hooks_emit_before_resource(resource);
-    js_call_function(callback, ItemNull, args, arg_count);
-    if (js_check_exception()) {
-        Item error = js_clear_exception();
-        // native crypto jobs complete before returning; deferring through
-        // setImmediate changes observable callback order while the resource
-        // still must own domain/uncaught dispatch.
-        if (!js_domain_emit_current_error(error) && !js_check_exception()) {
-            js_throw_value(error);
-        }
-    }
-    Item pending_error = js_check_exception() ? js_clear_exception() : ItemNull;
-    js_async_hooks_emit_after_resource(resource);
-    if (pending_error.item != ItemNull.item) {
-        Item origin = make_string_item_crypto("uncaughtException");
-        if (!js_process_dispatch_uncaught_exception(pending_error, origin)) {
-            js_throw_value(pending_error);
-        }
-    }
-    js_domain_restore_stack(previous_domain);
-    js_async_hooks_restore_resource(previous_resource);
-    js_async_hooks_emit_destroy_resource(resource);
-}
-
-static bool crypto_has_current_domain(void) {
-    Item stack = js_domain_capture_stack();
-    return get_type_id(stack) == LMD_TYPE_ARRAY && js_array_length(stack) > 0;
-}
-
 static void crypto_format_number_for_error(Item item, char* out, int out_size) {
     if (!out || out_size <= 0) return;
     TypeId type = get_type_id(item);
@@ -688,19 +639,8 @@ extern "C" Item js_crypto_randomBytes(Item size_item, Item callback_item) {
     }
 
     if (has_callback) {
-        if (crypto_has_current_domain()) {
-            Item args_array = js_array_new(0);
-            js_array_push(args_array, ItemNull);
-            js_array_push(args_array, result);
-            // domain-owned crypto callbacks must stay deferred so errors from
-            // the enclosing async callback reach the domain before child jobs.
-            js_setImmediate_resource_args(callback_item, args_array,
-                                          "RANDOMBYTESREQUEST", 18);
-            return make_js_undefined_crypto();
-        }
         Item args[2] = { ItemNull, result };
-        crypto_call_ready_callback_resource(callback_item, args, 2,
-                                            "RANDOMBYTESREQUEST", 18);
+        js_call_function(callback_item, ItemNull, args, 2);
         return make_js_undefined_crypto();
     }
     return result;

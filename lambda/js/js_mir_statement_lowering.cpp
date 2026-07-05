@@ -34,6 +34,7 @@ typedef struct JsMirLastClosureSnapshot {
     int capture_slots[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool capture_is_transitive[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    bool capture_is_assigned[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
 } JsMirLastClosureSnapshot;
 
 static int jm_last_closure_capture_count_clamped(int count) {
@@ -54,6 +55,7 @@ static void jm_save_last_closure_snapshot(JsMirTranspiler* mt, JsMirLastClosureS
         snapshot->capture_slots[i] = mt->last_closure_capture_slots[i];
         snapshot->capture_is_transitive[i] = mt->last_closure_capture_is_transitive[i];
         snapshot->capture_is_nfe[i] = mt->last_closure_capture_is_nfe[i];
+        snapshot->capture_is_assigned[i] = mt->last_closure_capture_is_assigned[i];
     }
 }
 
@@ -77,6 +79,7 @@ static void jm_restore_last_closure_snapshot(JsMirTranspiler* mt,
         mt->last_closure_capture_slots[i] = snapshot->capture_slots[i];
         mt->last_closure_capture_is_transitive[i] = snapshot->capture_is_transitive[i];
         mt->last_closure_capture_is_nfe[i] = snapshot->capture_is_nfe[i];
+        mt->last_closure_capture_is_assigned[i] = snapshot->capture_is_assigned[i];
     }
 }
 

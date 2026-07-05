@@ -349,8 +349,6 @@ extern "C" void js_set_active_module_vars(Item* vars) {
 // Exception Handling State
 // =============================================================================
 
-static void js_format_exception_message(Item value, char* buf, size_t buf_size);
-
 // Throw TypeError if value is null or undefined (ES spec RequireObjectCoercible)
 extern "C" void js_require_object_coercible(Item value) {
     TypeId type = get_type_id(value);
@@ -370,12 +368,6 @@ extern "C" void js_throw_value(Item value) {
     js_exception_value = value;
     // Capture exception message into static buffer while context is alive
     js_exception_msg_buf[0] = '\0';
-    js_format_exception_message(value, js_exception_msg_buf, sizeof(js_exception_msg_buf));
-}
-
-static void js_format_exception_message(Item value, char* buf, size_t buf_size) {
-    if (!buf || buf_size == 0) return;
-    buf[0] = '\0';
     if (get_type_id(value) == LMD_TYPE_MAP) {
         Item name_key = (Item){.item = s2it(heap_create_name("name"))};
         Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
@@ -388,34 +380,21 @@ static void js_format_exception_message(Item value, char* buf, size_t buf_size) 
         }
         if (get_type_id(msg_val) == LMD_TYPE_STRING) {
             String* ms = it2s(msg_val);
-            snprintf(buf, buf_size,
+            snprintf(js_exception_msg_buf, sizeof(js_exception_msg_buf),
                      "%.*s: %.*s", nlen, nstr, ms->len, ms->chars);
         } else {
-            snprintf(buf, buf_size,
+            snprintf(js_exception_msg_buf, sizeof(js_exception_msg_buf),
                      "%.*s", nlen, nstr);
         }
     } else if (get_type_id(value) == LMD_TYPE_STRING) {
         String* s = it2s(value);
-        snprintf(buf, buf_size,
+        snprintf(js_exception_msg_buf, sizeof(js_exception_msg_buf),
                  "%.*s", s->len, s->chars);
     }
 }
 
 extern "C" const char* js_get_exception_message(void) {
     return js_exception_msg_buf;
-}
-
-extern "C" void js_report_uncaught_exception(Item value) {
-    char buf[1024];
-    js_format_exception_message(value, buf, sizeof(buf));
-    if (buf[0] == '\0') return;
-    // Fatal uncaught errors are no longer pending after process hook dispatch,
-    // so the CLI fallback cannot print them later.
-    // Process fatal output is stack/error shaped; adding an "Uncaught" prefix
-    // hides the Error line that child_process callers inspect.
-    fputs(buf, stderr);
-    fputc('\n', stderr);
-    fflush(stderr);
 }
 
 extern "C" int js_check_exception(void) {

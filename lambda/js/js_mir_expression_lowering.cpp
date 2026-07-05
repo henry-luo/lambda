@@ -123,6 +123,7 @@ typedef struct JsMirClosureTrackerSnapshot {
     int capture_slots[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool capture_is_transitive[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    bool capture_is_assigned[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
 } JsMirClosureTrackerSnapshot;
 
 static int jm_closure_tracker_capture_count_clamped(int count) {
@@ -145,6 +146,7 @@ static void jm_save_closure_tracker_snapshot(JsMirTranspiler* mt,
         snapshot->capture_slots[i] = mt->last_closure_capture_slots[i];
         snapshot->capture_is_transitive[i] = mt->last_closure_capture_is_transitive[i];
         snapshot->capture_is_nfe[i] = mt->last_closure_capture_is_nfe[i];
+        snapshot->capture_is_assigned[i] = mt->last_closure_capture_is_assigned[i];
     }
 }
 
@@ -163,6 +165,7 @@ static void jm_restore_closure_tracker_snapshot(JsMirTranspiler* mt,
         mt->last_closure_capture_is_transitive[i] =
             snapshot->capture_is_transitive[i];
         mt->last_closure_capture_is_nfe[i] = snapshot->capture_is_nfe[i];
+        mt->last_closure_capture_is_assigned[i] = snapshot->capture_is_assigned[i];
     }
 }
 
@@ -6623,6 +6626,7 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
         MIR_new_int_op(mt->ctx, 0)));
     for (int i = 0; i < readback_count; i++) {
         if (mt->last_closure_capture_is_nfe[i]) continue;
+        if (!mt->last_closure_capture_is_assigned[i]) continue;
         JsMirVarEntry* var = jm_find_var(mt, mt->last_closure_capture_names[i]);
         if (!var) {
             if (getenv("JS56_READBACK_TRACE")) fprintf(stderr, "  skip: var '%s' not found\n", mt->last_closure_capture_names[i]); // PRINTF_OK: env-gated dev tracer.
@@ -9500,8 +9504,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, dom_r)));
                 jm_emit_label(mt, l_map_end);
-                jm_emit_exc_propagate_check(mt);
+                // callback-capable map/typed-array methods can throw before normal
+                // fallthrough; read captured locals back before propagating so a
+                // caught exception cannot leave stale closure state for the next call.
                 jm_readback_closure_env(mt);
+                jm_emit_exc_propagate_check(mt);
                 return result;
             }
 
@@ -12311,6 +12318,7 @@ struct JsMirBranchState {
     int last_closure_capture_slots[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool last_closure_capture_is_transitive[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool last_closure_capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    bool last_closure_capture_is_assigned[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool scopes_saved;
     struct hashmap* original_var_scopes[64];
     struct hashmap* cloned_var_scopes[64];
@@ -12360,6 +12368,8 @@ static void jm_save_branch_state(JsMirTranspiler* mt, JsMirBranchState* state) {
         state->last_closure_capture_is_transitive[i] =
             mt->last_closure_capture_is_transitive[i];
         state->last_closure_capture_is_nfe[i] = mt->last_closure_capture_is_nfe[i];
+        state->last_closure_capture_is_assigned[i] =
+            mt->last_closure_capture_is_assigned[i];
     }
     state->scopes_saved = true;
 
@@ -12422,6 +12432,8 @@ static void jm_restore_branch_state(JsMirTranspiler* mt, JsMirBranchState* state
         mt->last_closure_capture_is_transitive[i] =
             state->last_closure_capture_is_transitive[i];
         mt->last_closure_capture_is_nfe[i] = state->last_closure_capture_is_nfe[i];
+        mt->last_closure_capture_is_assigned[i] =
+            state->last_closure_capture_is_assigned[i];
     }
 
     if (!state->scopes_saved) return;
@@ -12797,6 +12809,11 @@ static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
         JsFuncCollected* fc, bool use_capture_slots) {
     if (!mt || !fc || env == 0) return;
     int count = jm_last_closure_track_count(fc);
+    struct hashmap* assigned = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    if (assigned && fc->node && fc->node->body) {
+        jm_collect_func_assignments(fc->node->body, assigned);
+    }
     mt->last_closure_env_reg = env;
     mt->last_closure_capture_count = count;
     for (int ci = 0; ci < count; ci++) {
@@ -12808,7 +12825,18 @@ static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
         mt->last_closure_capture_is_transitive[ci] =
             fc->captures[ci].grandparent_slot >= 0;
         mt->last_closure_capture_is_nfe[ci] = fc->captures[ci].is_nfe_binding;
+        bool capture_assigned = false;
+        if (assigned) {
+            JsNameSetEntry lookup;
+            memset(&lookup, 0, sizeof(lookup));
+            snprintf(lookup.name, sizeof(lookup.name), "%s", fc->captures[ci].name);
+            capture_assigned = hashmap_get(assigned, &lookup) != NULL;
+        }
+        // readback is only valid for captures this closure can mutate; read-only
+        // captures can be stale private copies and must not overwrite caller locals.
+        mt->last_closure_capture_is_assigned[ci] = capture_assigned;
     }
+    if (assigned) hashmap_free(assigned);
     mt->last_closure_has_env = count > 0;
 }
 
