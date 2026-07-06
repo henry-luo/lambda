@@ -413,6 +413,12 @@ struct DomElement : DomNode {
     PositionProp* position;
     // CSS transform properties
     TransformProp* transform;
+    // CSS transitions: persistent per-element snapshot of the last-applied used
+    // values of transitionable properties, plus back-pointers to running
+    // transition instances. Allocated lazily from doc->pool (survives view-pool
+    // relayout, unlike in_line/bound/transform which are view-pool allocated).
+    // Opaque here (radiant/css_animation.h owns the type) to avoid a header dep.
+    void* transition_state;
     // CSS filter properties
     FilterProp* filter;
     // CSS backdrop-filter properties
@@ -464,7 +470,8 @@ struct DomElement : DomNode {
         pending_element_scroll_x(0), pending_element_scroll_y(0),
         has_pending_element_scroll_x(false), has_pending_element_scroll_y(false),
         embed(nullptr), position(nullptr),
-        transform(nullptr), filter(nullptr), backdrop_filter(nullptr), multicol(nullptr),
+        transform(nullptr), transition_state(nullptr),
+        filter(nullptr), backdrop_filter(nullptr), multicol(nullptr),
         layout_fragments(nullptr), layout_fragment_count(0), pseudo(nullptr),
         vpath(nullptr), layout_cache(nullptr),
         cached_min_content_width(0), cached_max_content_width(0),

@@ -856,6 +856,11 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // CSS Animations: check if element has animation-name and start animations
             if (lycon->ui_context) {
                 css_animation_resolve(dom_elem, lycon);
+                // CSS Transitions: snapshot/diff the element's just-computed used values
+                // (opacity/color/background-color) against the persistent per-element
+                // snapshot and start interpolating instances for changed, declared props.
+                // Must run AFTER resolve_css_styles so the new used values are present.
+                css_transition_resolve(dom_elem, lycon);
             }
 
             // CSS 2.1 §15.2: When CSS changes an element's font-size, UA-default

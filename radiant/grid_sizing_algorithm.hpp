@@ -1495,44 +1495,6 @@ inline void stretch_auto_tracks(
     }
 }
 
-// --- Main track sizing function ---
-
-/**
- * Run the complete track sizing algorithm.
- *
- * @param ctx The track sizing context with all necessary parameters
- * @param get_item_contribution Function to get intrinsic contribution of an item in a track
- */
-inline void run_track_sizing_algorithm(
-    TrackSizingContext& ctx
-) {
-    if (!ctx.axis_tracks || ctx.axis_tracks->empty()) return;
-
-    // 11.4 Initialize Track Sizes
-    initialize_track_sizes(*ctx.axis_tracks, ctx.axis_inner_size);
-
-    // 11.5 Resolve Intrinsic Track Sizes
-    // Note: This requires item contribution calculations which need the item list
-    // For now we skip this step - it will be implemented when we integrate with the grid items
-
-    // 11.6 Maximize Tracks
-    maximize_tracks(*ctx.axis_tracks, ctx.axis_inner_size, ctx.axis_available_space);
-
-    // 11.7 Expand Flexible Tracks
-    expand_flexible_tracks(
-        *ctx.axis_tracks,
-        ctx.axis_min_size,
-        ctx.axis_max_size,
-        ctx.axis_available_space
-    );
-
-    // 11.8 Stretch auto Tracks
-    // Per CSS Grid spec, auto tracks always stretch to fill remaining positive free space
-    // when justify/align-content is 'normal' (the default) or 'stretch'.
-    // axis_alignment == 0 is the default (normal), which acts like stretch for auto tracks.
-    stretch_auto_tracks(*ctx.axis_tracks, ctx.axis_min_size, ctx.axis_available_space);
-}
-
 /**
  * Compute track offsets from their sizes.
  * Call this after track sizing to determine the position of each track.

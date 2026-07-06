@@ -902,7 +902,11 @@ inline ContribArray collect_item_contributions(
 }
 
 /**
- * Run the enhanced track sizing algorithm
+ * Run the enhanced track sizing algorithm.
+ *
+ * INVARIANT: This is the single live CSS Grid §11 track-sizing entry point (§11.4–§11.8,
+ * including §11.5 Resolve Intrinsic Track Sizes). Do not add a parallel track-sizing driver
+ * that skips §11.5 — an earlier dead `run_track_sizing_algorithm` did exactly that and was removed.
  *
  * @param grid_layout The existing GridContainerLayout
  * @param items Array of ViewBlock* grid items

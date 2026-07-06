@@ -1050,30 +1050,6 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         }
     }
 
-    // Layer-mode webview: Radiant owns events but forwards them to the offscreen web view.
-    // Set target to the webview block and inject the mouse event.
-    if (block->embed && block->embed->webview &&
-        block->embed->webview->mode == WEBVIEW_MODE_LAYER &&
-        block->embed->webview->handle) {
-        float bx = evcon->block.x, by = evcon->block.y;
-        MousePositionEvent* mev = &evcon->event.mouse_position;
-        if (bx <= mev->x && mev->x < bx + block->width &&
-            by <= mev->y && mev->y < by + block->height) {
-            log_debug("hit on webview (layer mode), forwarding event: %s", block->node_name());
-            evcon->target = static_cast<View*>(block);
-            evcon->offset_x = mev->x - bx;
-            evcon->offset_y = mev->y - by;
-
-            // translate to webview-local coordinates and inject
-            float local_x = mev->x - bx;
-            float local_y = mev->y - by;
-            // mouse type: 2=mousemove for hover, 3=click for press (injected on actual click)
-            webview_layer_platform_inject_mouse(block->embed->webview->handle,
-                2, local_x, local_y, 0, 0);
-            goto RETURN;
-        }
-    }
-
     // Check if this block contains an embedded iframe document
     // If so, target into the iframe's document instead of treating it as a normal block
     if (block->embed && block->embed->doc) {
