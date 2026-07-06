@@ -1,6 +1,6 @@
 # Lambda Jube DOM Implementation Plan
 
-> Status: implementation plan for POC 1.
+> Status: POC 1 implementation progress record, updated 2026-07-06.
 > Parent design: [Lambda_Native_Module_Design.md](./Lambda_Native_Module_Design.md).
 > Working module name: `radiant`, imported as `import radiant`.
 
@@ -8,12 +8,22 @@
 
 Build the first visible Jube native-module POC by moving Radiant DOM access behind a module-owned interface while preserving current JS DOM behavior.
 
-Implementation status:
+Current checkpoint:
+
+- POC 1A is now implemented as a compatibility checkpoint. `radiant` is statically registered, JS DOM get/set/wrapper entry points cross the module boundary, the DOM wrapper cache lives under `lambda/module/radiant`, and a tiny Lambda script imports `radiant` and mutates a real Radiant DOM node.
+- The current wrapper representation is still `MAP_KIND_DOM`. This is intentional: the module now owns more policy, but the VMap/native-object representation switch is deferred until the host-object semantics are specified and tested.
+- Module-owned JS DOM reads currently cover the safe first cluster: element `tagName`, `nodeName`, `localName`, `namespaceURI`, `prefix`, `id`, `className`, `nodeType`; text `data`, `nodeValue`, `textContent`, `length`, `nodeType`, `nodeName`; comment `data`, `nodeValue`, `textContent`, `length`, `nodeType`, `nodeName`.
+- Remaining JS fallback areas are deliberate: setters, style/CSSOM, Range/Selection, methods, collections, layout geometry, document proxy cases, navigation reads, and anything depending on mutation notification or script-visible traversal helpers.
+- Latest gate: `make build`, focused DOM smokes, the Lambda `radiant_poc` sample, and full `./test/test_js_gtest.exe` passed `305/305`.
+
+Implementation log:
 
 - 2026-07-06: Phase 1 static skeleton started. Added a fixed-capacity static Jube registry, `JubeModuleDef`/descriptor scaffolding, and a statically registered `radiant` module with a stub `dom_node` type. No DOM dispatch behavior has moved yet.
 - 2026-07-06 verification: `make build` passed. Runtime smoke `./lambda.exe --no-log test/lambda/value.ls` passed.
 - 2026-07-06: Phase 2 compatibility bridge started. Public `js_dom_get_property()` / `js_dom_set_property()` now route through `radiant_dom_get_property()` / `radiant_dom_set_property()`, which delegate to the preserved JS DOM implementation bodies. This moves the call boundary without changing wrapper representation or per-property behavior.
 - 2026-07-06 bridge verification: `make build` passed. DOM smokes `./lambda.exe js test/js/dom_style.js --document test/js/dom_style.html --no-log` and `./lambda.exe js test/js/dom_mutation.js --document test/js/dom_mutation.html --no-log` passed.
+- 2026-07-06: Phase 2 first property cluster moved. `radiant_dom_get_property()` now handles simple module-owned DOM reads before falling back to `js_dom_get_property_impl()`: element `tagName`, `nodeName`, `localName`, `namespaceURI`, `prefix`, `id`, `className`, `nodeType`; text `data`, `nodeValue`, `textContent`, `length`, `nodeType`, `nodeName`; comment `data`, `nodeValue`, `textContent`, `length`, `nodeType`, `nodeName`. Range, Selection, CSSOM, style, navigation, collections, methods, layout geometry, and setters remain on the JS fallback path.
+- 2026-07-06 property-cluster verification: `make build` passed. Added `test/js/dom_module_props.js` / `.html` / `.txt`; raw DOM run returned the expected output, filtered gtest `JavaScriptTests/JsFileTest.Run/dom_module_props` passed, existing DOM identity/style/mutation smokes passed, and full `./test/test_js_gtest.exe` passed `305/305`.
 - 2026-07-06: Phase 3 compatibility bridge started. Public `js_dom_wrap_element()`, `js_dom_unwrap_element()`, and `js_is_dom_node()` now route through `radiant_dom_wrap_node()`, `radiant_dom_unwrap_node()`, and `radiant_dom_is_node()`. The physical cache/rooting implementation is still in `js_dom.cpp`, but the module boundary now owns the wrapper factory surface.
 - 2026-07-06 wrapper verification: `make build` passed. Added `test/js/dom_identity.js` / `.html` / `.txt` and verified repeated Radiant node access preserves strict JS identity through the module bridge.
 - 2026-07-06: Phase 3 cache ownership moved. The wrapper cache, GC rooting, and reset/unroot cleanup now live in `lambda/module/radiant/radiant_dom_bridge.cpp`. `js_dom.cpp` keeps only the fresh compatibility wrapper constructor for `MAP_KIND_DOM` until the VMap phase.
@@ -24,14 +34,16 @@ Implementation status:
 - 2026-07-06 sample verification: `make build` passed. `./lambda.exe --no-log test/lambda/radiant_poc.ls` returned `"ok"`. Existing built-in import smokes `builtin_import_global.ls` and `builtin_import_alias.ls` still passed.
 - 2026-07-06: Phase 4 sample upgraded from the one-shot helper to the first real DOM API cluster. `test/lambda/radiant_poc.ls` now uses `radiant.load()`, `radiant.root()`, `radiant.set_attr()`, `radiant.attr()`, and `radiant.free()` over module-owned DOM wrappers. Calls are module-qualified because bare `load()` already exists as a core built-in and should not be shadowed by a global import fallback.
 - 2026-07-06 API cluster verification: `make build` passed. The upgraded `./lambda.exe --no-log test/lambda/radiant_poc.ls` returned `"ok"` and forces `radiant.free(doc)` through the final expression. Focused JS DOM identity/style/mutation smokes passed. `make test-lambda-baseline` reached 3233/3234 with one `child_process_detached_kill` miss; direct rerun of that case and the full `test_node_prelim_gtest.exe` binary passed.
+- 2026-07-06: Phase 2 class-name read moved. Element `className` now joins Radiant's parsed class list inside `radiant_dom_bridge.cpp`, and `test/js/dom_module_props` covers the module-owned read from a static HTML `class` attribute. Writable `id` / `className` and navigation reads still remain on the JS fallback path because mutation notifications and script-visible traversal helpers are still JS-local.
+- 2026-07-06 class-name verification: `make build` passed. Direct `dom_module_props` run matched the expected output, filtered gtest `JavaScriptTests/JsFileTest.Run/dom_module_props` passed, identity/style/mutation/Radiant sample smokes passed, and full `./test/test_js_gtest.exe` passed `305/305`.
 
-The first deliverable is intentionally conservative:
+POC 1A deliverable status:
 
-1. Add a statically linked `radiant` Jube module.
-2. Move DOM property and method resolution tables into module-owned code.
-3. Keep existing `MAP_KIND_DOM` wrappers for the first checkpoint, but make their get/set path delegate through the module-owned dispatch layer.
-4. Add the host/module DOM wrapper cache required by the native-module design, without scoping it per `DomDocument`.
-5. Add one tiny Lambda-facing sample early so the POC proves cross-front-end access, not only JS compatibility.
+1. Done: add a statically linked `radiant` Jube module.
+2. In progress: move DOM property and method resolution tables into module-owned code. The first safe read cluster has moved; broad methods and mutation-sensitive paths remain on JS fallback.
+3. Done for checkpoint: keep existing `MAP_KIND_DOM` wrappers, but make their get/set and wrapper factory surface delegate through the module-owned bridge.
+4. Done: add the host/module DOM wrapper cache required by the native-module design, without scoping it per `DomDocument`.
+5. Done: add one tiny Lambda-facing sample early so the POC proves cross-front-end access, not only JS compatibility.
 
 This is not the phase that deletes `MAP_KIND_DOM`. The representation migration to VMap comes after the behavior-preserving checkpoint is green.
 
@@ -48,7 +60,10 @@ This is not the phase that deletes `MAP_KIND_DOM`. The representation migration 
 
 Current relevant code paths:
 
-- `lambda/js/js_dom.cpp`: DOM wrapper creation, property/method dispatch, DOM mutation helpers.
+- `lambda/js/js_dom.cpp`: compatibility wrapper constructor, fallback property/method dispatch, DOM mutation helpers.
+- `lambda/module/radiant/radiant_dom_bridge.cpp`: module-owned JS DOM wrapper cache, wrapper entry points, simple DOM read dispatch, and delegation to preserved JS fallback.
+- `lambda/module/radiant/radiant_module.cpp`: Lambda-facing `radiant` functions over real Radiant DOM wrappers.
+- `lambda/jube/jube.h` and `lambda/jube/jube_registry.cpp`: static Jube registry and module descriptor scaffolding.
 - `lambda/js/js_runtime.cpp`: JS property get/set routes `MAP_KIND_DOM` to `js_dom_get_property()` / `js_dom_set_property()`.
 - `lambda/js/js_dom_events.cpp` and `lambda/js/js_dom_selection.cpp`: large consumers of `js_dom_wrap_element()`.
 - `lambda/js/js_cssom.cpp`: CSSOM host objects that should follow the same module boundary later.
@@ -96,15 +111,21 @@ POC cache policy:
 - Ownership: DOM node wrappers are non-owning; cache reset/unroot releases wrapper roots but does not free DOM nodes.
 - Document teardown: the cache must expose invalidation for nodes belonging to a destroyed document, but the cache itself is not stored inside the document.
 
-The current thread-local wrapper cache in `js_dom.cpp` proves the identity requirement. The POC moves that idea toward the module/host boundary so it can later create VMap wrappers instead of `MAP_KIND_DOM` maps.
+Current implementation:
 
-Open implementation detail: whether the first cache object lives in `lambda/js/` while still JS-only, or in a new `lambda/module/radiant/` area immediately. Prefer the latter if build wiring stays small.
+- The cache lives in `lambda/module/radiant/radiant_dom_bridge.cpp`.
+- `js_dom_wrap_element()`, `js_dom_unwrap_element()`, and `js_is_dom_node()` delegate through `radiant_dom_wrap_node()`, `radiant_dom_unwrap_node()`, and `radiant_dom_is_node()`.
+- Cache entries root wrapper `Item`s and store an owner `DomDocument*` for teardown invalidation.
+- `free_document()` calls `radiant_dom_invalidate_document()` before the document arena is destroyed.
+- On cache miss, the bridge still calls `js_dom_create_wrapper_impl()` to create the current `MAP_KIND_DOM` compatibility carrier.
 
 ## 6. Phased Implementation
 
 ### Phase 0: Baseline and Guardrails
 
 Purpose: capture current behavior before moving dispatch.
+
+Status: complete for the current checkpoint.
 
 Tasks:
 
@@ -118,12 +139,14 @@ Tasks:
 
 Acceptance:
 
-- No code changes yet.
-- Baseline command and result are known.
+- Complete: baseline command and result were recorded in the implementation log.
+- Complete: later phase gates kept the compatibility checkpoint green.
 
 ### Phase 1: Static `radiant` Module Skeleton
 
 Purpose: create the module boundary without changing behavior.
+
+Status: complete.
 
 Tasks:
 
@@ -145,13 +168,21 @@ Suggested files:
 
 Acceptance:
 
-- `make build` passes.
-- No JS DOM behavior changes.
-- `radiant` appears in a debug/log-visible static registry path.
+- Complete: `make build` passed.
+- Complete: no JS DOM behavior moved in this phase.
+- Complete: `radiant` is statically registered with Jube descriptors.
 
 ### Phase 2: Module-Owned DOM Dispatch Tables
 
 Purpose: move DOM policy into the module while preserving wrappers.
+
+Status:
+
+- Started 2026-07-06 with the compatibility bridge: public JS DOM get/set entry points route through `radiant_dom_get_property()` / `radiant_dom_set_property()`.
+- First read cluster moved 2026-07-06. The module now owns simple identity/name/value reads for elements, text nodes, and comment nodes, including element `className`, then falls back to the old JS implementation for everything else.
+- Added `test/js/dom_module_props.js` / `.html` / `.txt` to pin the moved cluster through the normal JS DOM harness.
+- Current verification: direct `dom_module_props`, filtered gtest `JavaScriptTests/JsFileTest.Run/dom_module_props`, identity/style/mutation smokes, Lambda `radiant_poc`, and full JS gtest passed.
+- Remaining Phase 2 work: move writable `id` / `className` and narrow navigation reads (`parentNode`, `firstChild`, sibling reads, `childNodes`) once mutation notification and script-visible traversal dependencies are cleanly exposed or duplicated in module-owned form.
 
 Tasks:
 
@@ -171,9 +202,10 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
 
 Acceptance:
 
-- Existing `MAP_KIND_DOM` property get/set still works.
-- The first moved cluster has no behavior delta in targeted JS DOM tests.
-- `make build` passes.
+- Complete for first cluster: existing `MAP_KIND_DOM` property get/set still works.
+- Complete for first cluster: moved reads have no behavior delta in targeted JS DOM tests.
+- Complete: `make build` passed.
+- In progress overall: writable properties, navigation, methods, style/CSSOM, collections, Range/Selection, and geometry remain to migrate.
 
 ### Phase 3: Module/Host Wrapper Cache
 
@@ -204,9 +236,10 @@ Cache invariants:
 
 Acceptance:
 
-- JS identity tests still pass.
-- No leaked roots after document teardown/reset paths.
-- `make build` passes.
+- Complete for checkpoint: JS identity tests still pass.
+- Complete for document teardown: document invalidation unroots matching cached wrappers before arena destruction.
+- Complete: `make build` passed.
+- Remaining lifecycle gap: finer-grained subtree/node invalidation if future Radiant code frees individual nodes before document teardown.
 
 ### Phase 4: Tiny Lambda-Facing Sample
 
@@ -245,9 +278,9 @@ If `input('html')` does not expose the right document/root handle cleanly yet, u
 
 Acceptance:
 
-- A real Lambda script imports `radiant`.
-- It reads and mutates a real DOM node.
-- If a new `*.ls` test is added, add the matching `*.txt` expected file in the same change.
+- Complete: a real Lambda script imports `radiant`.
+- Complete: it reads and mutates a real Radiant DOM node.
+- Complete: `test/lambda/radiant_poc.ls` has the matching expected `test/lambda/radiant_poc.txt`.
 
 ### Phase 5: VMap Readiness Spec
 
@@ -318,12 +351,15 @@ Acceptance:
 
 The first visible POC deliverable is complete when:
 
-- `import radiant` is the planned script surface and the static module is registered.
-- `MAP_KIND_DOM` get/set delegates to module-owned DOM dispatch for at least the first property cluster.
-- Wrapper cache ownership has moved behind module/host APIs, still returning current map wrappers.
-- One tiny Lambda sample proves real DOM read/write access.
-- `make build` passes.
-- A focused JS DOM/Radiant regression gate has no behavior delta.
+- Done: `import radiant` is the planned script surface and the static module is registered.
+- Done: `MAP_KIND_DOM` get/set delegates to module-owned DOM dispatch for at least the first property cluster.
+- Done: wrapper cache ownership has moved behind module/host APIs, still returning current map wrappers.
+- Done: one tiny Lambda sample proves real DOM read/write access.
+- Done: `make build` passes.
+- Done: focused JS DOM/Radiant regression gates have no behavior delta.
+- Done: full `./test/test_js_gtest.exe` passed `305/305` at the current checkpoint.
+
+The POC 1A deliverable is therefore complete as a compatibility checkpoint. The next work is POC 1B: finish the dependency cleanup that lets setters/navigation move, then write the VMap readiness spec before changing wrapper representation.
 
 ## 8. Test Gates
 
