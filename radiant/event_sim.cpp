@@ -3137,9 +3137,9 @@ static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* e
     }
 
     DocState* state = doc->state;
-    bool legacy_collapsed = !selection_has(state);
+    bool projection_collapsed = !selection_has(state);
     bool text_control_selection = state->sel.kind == EDIT_SEL_TEXT_CONTROL;
-    bool canonical_collapsed = legacy_collapsed;
+    bool canonical_collapsed = projection_collapsed;
     if (text_control_selection) {
         canonical_collapsed = state->sel.start_u16 == state->sel.end_u16;
     } else {
@@ -3148,10 +3148,10 @@ static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* e
     }
 
 
-    if (legacy_collapsed != ev->expected_is_collapsed) {
-        log_error("event_sim: assert_selection - legacy is_collapsed mismatch: expected %s, got %s",
+    if (projection_collapsed != ev->expected_is_collapsed) {
+        log_error("event_sim: assert_selection - projection is_collapsed mismatch: expected %s, got %s",
                  ev->expected_is_collapsed ? "true" : "false",
-                 legacy_collapsed ? "true" : "false");
+                 projection_collapsed ? "true" : "false");
         ctx->fail_count++;
         return false;
     }
@@ -3168,8 +3168,8 @@ static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* e
         return false;
     }
 
-    log_info("event_sim: assert_selection PASS (legacy=%s%s)",
-             legacy_collapsed ? "collapsed" : "non-collapsed",
+    log_info("event_sim: assert_selection PASS (projection=%s%s)",
+             projection_collapsed ? "collapsed" : "non-collapsed",
              ev->check_dom_selection ?
                 (canonical_collapsed ? ", canonical=collapsed" : ", canonical=non-collapsed") : "");
     ctx->pass_count++;
@@ -4326,11 +4326,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             if (start == end) {
                 if (selection_has_projection((DocState*)doc->state)) {
-                    state_store_legacy_selection_clear((DocState*)doc->state);
+                    state_store_selection_clear((DocState*)doc->state);
                 }
-                state_store_legacy_caret_set((DocState*)doc->state, range_view, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
+                state_store_caret_collapse_to_view_offset((DocState*)doc->state, range_view, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
             } else {
-                state_store_legacy_selection_set((DocState*)doc->state, range_view,
+                state_store_selection_set_view_offsets((DocState*)doc->state, range_view,
                               (int)start, (int)end); // INT_CAST_OK: StateStore selection API uses int offsets.
             }
             log_info("event_sim: set_editing_selection [%u..%u]", start, end);
@@ -4375,7 +4375,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             dom_element_set_attribute(owner, "value", text);
-            state_store_legacy_caret_set((DocState*)doc->state, surface.view, (int)text_len);
+            state_store_caret_collapse_to_view_offset((DocState*)doc->state, surface.view, (int)text_len);
             log_info("event_sim: set_editing_value len=%u", text_len);
             doc_state_request_repaint((DocState*)doc->state);
             break;

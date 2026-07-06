@@ -9,7 +9,7 @@
  *
  * Deliberately does NOT include state_store.hpp (which would drag GLFW +
  * the entire render stack into unit-test binaries). The legacy-mirror
- * helpers `dom_selection_sync_from_legacy_*()` live in state_store.cpp.
+ * helpers `dom_selection_sync_from_*_projection()` live in state_store.cpp.
  */
 
 #include "dom_range_resolver.hpp"

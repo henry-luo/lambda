@@ -535,7 +535,7 @@ extern const StateInvariantBinding RADIANT_INVARIANTS[] = {
     { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_EDITING_FALSE_ISLAND, "rich_edit.false_island" },
     { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_EDITING_TARGET_RANGES, "rich_edit.target_ranges" },
     { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_DOM_SELECTION_CACHE, "rich_edit.dom_selection_cache" },
-    { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_LEGACY_SELECTION_PROJECTION, "rich_edit.legacy_selection_projection" },
+    { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_SELECTION_PROJECTION_CACHE, "rich_edit.selection_projection_cache" },
     { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_INPUT_EVENT_ORDER, "rich_edit.input_event_order" },
     { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_CARET_PROJECTION, "rich_edit.caret" },
     { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_SELECTION_PROJECTION, "rich_edit.selection" },

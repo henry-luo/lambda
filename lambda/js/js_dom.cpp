@@ -837,7 +837,7 @@ static inline void dom_pre_remove(DomNode* child) {
         } else {
             View* caret_view = caret_get_view(st);
             if (caret_view && js_dom_node_contains(child, (DomNode*)caret_view)) {
-                state_store_legacy_caret_clear(st);
+                state_store_caret_clear(st);
             }
 
             View* anchor_view = nullptr;
@@ -845,7 +845,7 @@ static inline void dom_pre_remove(DomNode* child) {
             if (selection_get_extent_views(st, &anchor_view, &focus_view) &&
                 ((anchor_view && js_dom_node_contains(child, (DomNode*)anchor_view)) ||
                  (focus_view && js_dom_node_contains(child, (DomNode*)focus_view)))) {
-                state_store_legacy_selection_clear(st);
+                state_store_selection_clear(st);
             }
         }
     }
@@ -4487,8 +4487,8 @@ static void js_dom_collapse_selection_before_child_replace(DomElement* elem,
     if (!state_store_set_selection(state, &boundary, &boundary, &exc)) {
         log_debug("js_dom_collapse_selection_before_child_replace: %s rejected: %s",
                   context ? context : "replace children", exc ? exc : "?");
-        state_store_legacy_selection_clear(state);
-        state_store_legacy_caret_clear(state);
+        state_store_selection_clear(state);
+        state_store_caret_clear(state);
         return;
     }
     js_dom_queue_selectionchange(state->dom_selection);

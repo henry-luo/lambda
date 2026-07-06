@@ -653,8 +653,8 @@ static void clear_document_interaction_state_before_detach(DomDocument* doc) {
     log_debug("[IFRAME_DETACH_STATE] clearing transient interaction state for %p", (void*)doc);
 
     focus_clear(state);
-    state_store_legacy_caret_clear(state);
-    state_store_legacy_selection_clear(state);
+    state_store_caret_clear(state);
+    state_store_selection_clear(state);
     selection_press_in_range_clear(state);
     editing_interaction_clear_autoscroll(state);
     editing_interaction_set_active_surface(state, NULL);
@@ -2636,7 +2636,7 @@ static bool dispatch_form_selection_byte_range(DomElement* elem, DocState* state
     if (!elem || !state || !target || !tc_is_text_control(elem)) return false;
 
     tc_ensure_init(elem);
-    tc_sync_legacy_to_form(elem, state);
+    tc_sync_selection_to_form(elem, state);
     FormControlProp* form = elem->form;
     if (!form || !form->current_value) return false;
 
@@ -2759,10 +2759,10 @@ static bool dispatch_form_select_all(EventContext* evcon, DomElement* elem,
 
     uint32_t value_len = 0;
     form_control_live_value(elem, &value_len);
-    state_store_legacy_selection_start(state, target, 0);
-    state_store_legacy_selection_extend(state, (int)value_len); // INT_CAST_OK: StateStore selection API uses int offsets.
+    state_store_selection_start_pointer(state, target, 0);
+    state_store_selection_extend_to_offset(state, (int)value_len); // INT_CAST_OK: StateStore selection API uses int offsets.
     selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
-    tc_sync_legacy_to_form(elem, state);
+    tc_sync_selection_to_form(elem, state);
     event_log_editing_selection(state, &surface, &intent, "selectAll",
                                 0, value_len);
     return true;
@@ -2792,8 +2792,8 @@ static bool dispatch_form_caret_collapse(EventContext* evcon, DomElement* elem,
     form_control_live_value(elem, &value_len);
     if (offset > value_len) offset = value_len;
 
-    state_store_legacy_caret_set(state, target, (int)offset); // INT_CAST_OK: StateStore caret API uses int offsets.
-    tc_sync_legacy_to_form(elem, state);
+    state_store_caret_collapse_to_view_offset(state, target, (int)offset); // INT_CAST_OK: StateStore caret API uses int offsets.
+    tc_sync_selection_to_form(elem, state);
     event_log_editing_selection(state, &surface, nullptr,
                                 operation ? operation : "collapse",
                                 offset, offset);
@@ -2832,12 +2832,12 @@ static bool dispatch_form_selection_extend(EventContext* evcon, DomElement* elem
         anchor_offset = existing_anchor_offset;
         log_anchor = existing_anchor_offset;
     } else {
-        state_store_legacy_selection_start(state, target, anchor_offset);
+        state_store_selection_start_pointer(state, target, anchor_offset);
         selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
     }
 
-    state_store_legacy_selection_extend(state, focus_offset);
-    tc_sync_legacy_to_form(elem, state);
+    state_store_selection_extend_to_offset(state, focus_offset);
+    tc_sync_selection_to_form(elem, state);
     event_log_editing_selection(state, &surface, nullptr,
                                 operation ? operation : "extend",
                                 (uint32_t)log_anchor, (uint32_t)focus_offset);
@@ -2864,9 +2864,9 @@ static bool dispatch_form_selection_start(EventContext* evcon, DomElement* elem,
     SmTransitionGuard sm_guard(state, SM_FAMILY_SELECTION,
                                SM_EV_UI_START_POINTER_SELECTION, target);
     dispatch_selectstart(evcon, target);
-    state_store_legacy_selection_start(state, target, (int)offset); // INT_CAST_OK: StateStore selection API uses int offsets.
+    state_store_selection_start_pointer(state, target, (int)offset); // INT_CAST_OK: StateStore selection API uses int offsets.
     sm_guard.commit();
-    tc_sync_legacy_to_form(elem, state);
+    tc_sync_selection_to_form(elem, state);
     event_log_editing_selection(state, &surface, nullptr,
                                 operation ? operation : "start",
                                 offset, offset);
@@ -2897,14 +2897,14 @@ static bool dispatch_form_selection_range(EventContext* evcon, DomElement* elem,
     }
 
     if (start == end) {
-        if (selection_has_projection(state)) state_store_legacy_selection_clear(state);
-        state_store_legacy_caret_set(state, target, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
+        if (selection_has_projection(state)) state_store_selection_clear(state);
+        state_store_caret_collapse_to_view_offset(state, target, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
     } else {
-        state_store_legacy_selection_start(state, target, (int)start); // INT_CAST_OK: StateStore selection API uses int offsets.
-        state_store_legacy_selection_extend(state, (int)end); // INT_CAST_OK: StateStore selection API uses int offsets.
+        state_store_selection_start_pointer(state, target, (int)start); // INT_CAST_OK: StateStore selection API uses int offsets.
+        state_store_selection_extend_to_offset(state, (int)end); // INT_CAST_OK: StateStore selection API uses int offsets.
     }
     selection_finish_active_gesture(state);
-    tc_sync_legacy_to_form(elem, state);
+    tc_sync_selection_to_form(elem, state);
     event_log_editing_selection(state, &surface, nullptr,
                                 operation ? operation : "selectRange",
                                 start, end);
@@ -2931,16 +2931,16 @@ static bool dispatch_form_history_restore_selection(DomElement* elem,
     if (end8 > value_len) end8 = value_len;
 
     if (start8 == end8) {
-        if (selection_has_projection(state)) state_store_legacy_selection_clear(state);
-        state_store_legacy_caret_set(state, target, (int)start8); // INT_CAST_OK: StateStore caret API uses int offsets.
+        if (selection_has_projection(state)) state_store_selection_clear(state);
+        state_store_caret_collapse_to_view_offset(state, target, (int)start8); // INT_CAST_OK: StateStore caret API uses int offsets.
     } else if (form->selection_direction == 2) {
-        state_store_legacy_selection_start(state, target, (int)end8); // INT_CAST_OK: StateStore selection API uses int offsets.
-        state_store_legacy_selection_extend(state, (int)start8); // INT_CAST_OK: StateStore selection API uses int offsets.
+        state_store_selection_start_pointer(state, target, (int)end8); // INT_CAST_OK: StateStore selection API uses int offsets.
+        state_store_selection_extend_to_offset(state, (int)start8); // INT_CAST_OK: StateStore selection API uses int offsets.
     } else {
-        state_store_legacy_selection_start(state, target, (int)start8); // INT_CAST_OK: StateStore selection API uses int offsets.
-        state_store_legacy_selection_extend(state, (int)end8); // INT_CAST_OK: StateStore selection API uses int offsets.
+        state_store_selection_start_pointer(state, target, (int)start8); // INT_CAST_OK: StateStore selection API uses int offsets.
+        state_store_selection_extend_to_offset(state, (int)end8); // INT_CAST_OK: StateStore selection API uses int offsets.
     }
-    tc_sync_legacy_to_form(elem, state);
+    tc_sync_selection_to_form(elem, state);
     event_log_editing_selection(state, surface, intent, "historyRestore",
                                 start8, end8);
     return true;
@@ -3206,10 +3206,10 @@ static bool editing_text_drag_set_range(EventContext* evcon,
                                              operation);
     }
     if (start == end) {
-        if (selection_has_projection(state)) state_store_legacy_selection_clear(state);
-        state_store_legacy_caret_set(state, range_view, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
+        if (selection_has_projection(state)) state_store_selection_clear(state);
+        state_store_caret_collapse_to_view_offset(state, range_view, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
     } else {
-        state_store_legacy_selection_set(state, range_view, (int)start, (int)end); // INT_CAST_OK: StateStore selection API uses int offsets.
+        state_store_selection_set_view_offsets(state, range_view, (int)start, (int)end); // INT_CAST_OK: StateStore selection API uses int offsets.
     }
     dispatch_rich_selection_snapshot(evcon, state, range_view,
                                      operation ? operation : "dragDropRange",
@@ -6703,11 +6703,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     event_log_raw_input(cascade_log, cascade_id, event);
 
     // ------------------------------------------------------------------
-    // Phase 6 (single source of truth): legacy selection/caret writes are
-    // deliberately spelled state_store_legacy_* and route through DomSelection
-    // plus state-machine transitions. Event code may compute glyph-precise
-    // visual geometry, but new rich DOM mutations should use canonical
-    // StateStore selection boundaries or editing transactions.
+    // Phase 6 (single source of truth): view/offset selection helpers route
+    // through DomSelection plus state-machine transitions. Event code may
+    // compute glyph-precise visual geometry, but new rich DOM mutations should
+    // use canonical StateStore selection boundaries or editing transactions.
     // ------------------------------------------------------------------
 
     // find target view based on mouse position
@@ -7068,18 +7067,18 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 // Always use selection_extend_to_view so that focus_view is
                 // refreshed to the current drag target. Using the same-view
-                // state_store_legacy_selection_extend() leaves focus_view at whatever it was last
+                // state_store_selection_extend_to_offset() leaves focus_view at whatever it was last
                 // set to — which is wrong if the user previously dragged across
                 // a different text view and now drags back: focus_view stays
                 // pointing at the OTHER view while focus_offset becomes a byte
                 // offset valid only in this (anchor) view, producing a broken
                 // DomSelection range that renders as collapsed.
-                state_store_legacy_selection_extend_to_view(state, drag_target_view, char_offset);
+                state_store_selection_extend_to_view(state, drag_target_view, char_offset);
                 if (drag_target_view != anchor_view) {
                     log_debug("[CROSS-VIEW SEL] Extending from anchor_view=%p to focus_view=%p",
                         anchor_view, drag_target_view);
                 }
-                state_store_legacy_caret_set(state, drag_target_view, char_offset);
+                state_store_caret_collapse_to_view_offset(state, drag_target_view, char_offset);
                 dispatch_rich_selection_snapshot(&evcon, state, drag_target_view,
                     "dragExtend", nullptr);
 
@@ -7294,7 +7293,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     uint32_t fallback_len = fallback_text->length > 0
                         ? (uint32_t)fallback_text->length
                         : (uint32_t)strlen(fallback_text->text ? fallback_text->text : "");
-                    state_store_legacy_caret_set(state, static_cast<View*>(fallback_text),
+                    state_store_caret_collapse_to_view_offset(state, static_cast<View*>(fallback_text),
                               (int)fallback_len); // INT_CAST_OK: StateStore caret API uses int offsets.
                     EditingSurface surface;
                     if (editing_surface_from_target(static_cast<View*>(fallback_text), &surface) &&
@@ -7357,7 +7356,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (!shift_extending) {
                     // Set caret at clicked position for a fresh placement. A
                     // shift-click must preserve the existing collapsed
-                    // selection anchor so state_store_legacy_selection_extend() can use it.
+                    // selection anchor so state_store_selection_extend_to_offset() can use it.
                     View* focused = focus_get(state);
                     if (focused && focused->is_element()) {
                         DomElement* focused_elem = lam::dom_require_element(focused);
@@ -7372,7 +7371,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         }
                     }
                     collapse_active_text_control_selection_for_rich_target(state, evcon.target);
-                    state_store_legacy_caret_set(state, evcon.target, char_offset);
+                    state_store_caret_collapse_to_view_offset(state, evcon.target, char_offset);
                 }
 
                 // Calculate visual position for the caret
@@ -7422,7 +7421,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     SmTransitionGuard sm_guard(state, SM_FAMILY_SELECTION,
                         SM_EV_UI_START_POINTER_SELECTION, evcon.target);
                     dispatch_selectstart(&evcon, evcon.target);
-                    state_store_legacy_selection_start(state, evcon.target, char_offset);
+                    state_store_selection_start_pointer(state, evcon.target, char_offset);
                     sm_guard.commit();
                     dispatch_rich_selection_snapshot(&evcon, state, evcon.target,
                         "mouseDown", nullptr);
@@ -7431,7 +7430,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     selection_project_anchor_visual_from_caret(state, caret_x, caret_y, caret_height);
                 } else if (shift_extending) {
                     // Shift-click extends selection
-                    state_store_legacy_selection_extend(state, char_offset);
+                    state_store_selection_extend_to_offset(state, char_offset);
                     dispatch_rich_selection_snapshot(&evcon, state, evcon.target,
                         "extendMouse", nullptr);
 
@@ -7585,8 +7584,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         }
                     } else {
                         // Non-text replaced elements: clear caret
-                        state_store_legacy_caret_clear(state);
-                        state_store_legacy_selection_clear(state);
+                        state_store_caret_clear(state);
+                        state_store_selection_clear(state);
                     }
                     evcon.need_repaint = true;
                 }
@@ -7595,8 +7594,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Click outside all content (e.g., below body) — clear caret and selection
             // In browsers, clicking outside the document body clears the text caret
             if (state) {
-                state_store_legacy_caret_clear(state);
-                state_store_legacy_selection_clear(state);
+                state_store_caret_clear(state);
+                state_store_selection_clear(state);
                 evcon.need_repaint = true;
             }
         }
@@ -7777,7 +7776,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     evcon.font = saved_font;
                 }
-                state_store_legacy_selection_start(state, collapse_view, collapse_offset);
+                state_store_selection_start_pointer(state, collapse_view, collapse_offset);
                 selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
                 selection_press_in_range_clear(state);
                 log_debug("[TEXT SEL PRESS] collapsed preserved selection on mouse up");
@@ -8163,15 +8162,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
             to_repaint();
         }
-        // Phase 6E: sync legacy caret/selection into form->selection_*
-        // after mouse-driven focus / hit-test / drag operations.
+        // Phase 6E: sync canonical selection/projection caches into
+        // form->selection_* after mouse-driven focus / hit-test / drag ops.
         {
             DocState* tc_state = event_context_target_state(&evcon);
             View* tc_focused = tc_state ? focus_get(tc_state) : nullptr;
             if (tc_focused && tc_focused->is_element()) {
                 DomElement* tc_elem = lam::dom_require_element(tc_focused);
                 if (tc_is_text_control(tc_elem)) {
-                    tc_sync_legacy_to_form(tc_elem, tc_state);
+                    tc_sync_selection_to_form(tc_elem, tc_state);
                     tc_set_active_element(tc_state, tc_elem);
                     tc_set_last_focused_text_control(tc_state, tc_elem);
                 }
@@ -9296,7 +9295,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     case RDT_KEY_A:
                         // Select all (Ctrl+A / Cmd+A)
                         if (ctrl || cmd) {
-                            state_store_legacy_selection_select_all(state);
+                            state_store_selection_select_all(state);
                             evcon.need_repaint = true;
                         }
                         break;
@@ -9315,7 +9314,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 copy_current_selection_to_clipboard(state, "legacy cut");
 
                                 // TODO: delete selected text
-                                state_store_legacy_selection_clear(state);
+                                state_store_selection_clear(state);
                                 evcon.need_repaint = true;
                             }
                         }
@@ -9346,7 +9345,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (tc_focused && tc_focused->is_element()) {
                 DomElement* tc_elem = lam::dom_require_element(tc_focused);
                 if (tc_is_text_control(tc_elem)) {
-                    tc_sync_legacy_to_form(tc_elem, tc_state);
+                    tc_sync_selection_to_form(tc_elem, tc_state);
                 }
             }
         }
@@ -9500,14 +9499,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Delete any existing selection first
             if (selection_has(state)) {
                 // TODO: delete selected text
-                state_store_legacy_selection_clear(state);
+                state_store_selection_clear(state);
             }
 
             // TODO: insert character at caret position
             // This requires access to the text content of the focused element
 
             // Move caret forward
-            state_store_legacy_caret_move(state, 1);
+            state_store_caret_move(state, 1);
         }
         evcon.need_repaint = true;
         break;

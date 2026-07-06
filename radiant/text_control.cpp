@@ -401,7 +401,7 @@ void tc_set_selection_range(DomElement* elem,
 // the DomElement (since DomElement extends ViewBlock in radiant's unified
 // DOM). Caller passes the *known* DomElement so we don't have to dispatch.
 
-void tc_sync_legacy_to_form(DomElement* elem, DocState* state) {
+void tc_sync_selection_to_form(DomElement* elem, DocState* state) {
     if (!elem || !state) return;
     if (!tc_is_text_control(elem)) return;
     tc_ensure_init(elem);
@@ -430,7 +430,7 @@ void tc_sync_legacy_to_form(DomElement* elem, DocState* state) {
         return;
     }
 
-    bool have_legacy_range = false;
+    bool have_projection_range = false;
     int anchor_byte = 0;
     int focus_byte = 0;
     View* view = (View*)elem;
@@ -440,11 +440,11 @@ void tc_sync_legacy_to_form(DomElement* elem, DocState* state) {
         selection_get_focus_snapshot(state, &focus_view, &focus_byte,
             nullptr, nullptr, nullptr) &&
         anchor_view == view && focus_view == view) {
-        have_legacy_range = true;
+        have_projection_range = true;
     } else if (caret_get_position(state, &focus_view, &focus_byte) &&
                focus_view == view) {
         anchor_byte = focus_byte;
-        have_legacy_range = true;
+        have_projection_range = true;
     } else if (state->dom_selection && state->dom_selection->range_count > 0) {
         DomSelection* ds = state->dom_selection;
         DomBoundary anchor = dom_selection_anchor_boundary(ds);
@@ -452,11 +452,11 @@ void tc_sync_legacy_to_form(DomElement* elem, DocState* state) {
         if (anchor.node == (DomNode*)elem && focus.node == (DomNode*)elem) {
             anchor_byte = static_cast<int>(anchor.offset); // INT_CAST_OK: fallback DomSelection text-control offsets are bytes.
             focus_byte = static_cast<int>(focus.offset); // INT_CAST_OK: fallback DomSelection text-control offsets are bytes.
-            have_legacy_range = true;
+            have_projection_range = true;
         }
     }
 
-    if (!have_legacy_range) {
+    if (!have_projection_range) {
         form_control_sync_text_control_state(state, (View*)elem);
         return;
     }

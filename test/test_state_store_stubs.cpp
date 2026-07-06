@@ -134,7 +134,7 @@ void tc_notify_selection_changed(DomElement* elem) {
     (void)elem;
 }
 
-void tc_sync_legacy_to_form(DomElement* elem, DocState* state) {
+void tc_sync_selection_to_form(DomElement* elem, DocState* state) {
     (void)elem;
     (void)state;
 }
