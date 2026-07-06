@@ -3939,6 +3939,10 @@ static void js_dom_clear_focus_if_disabled_now(DomElement* changed_elem) {
     }
 }
 
+extern "C" void js_dom_after_disabled_attribute_set(void* elem_ptr) {
+    js_dom_clear_focus_if_disabled_now((DomElement*)elem_ptr);
+}
+
 static bool js_dom_style_preserves_leading_ws(DomElement* elem, bool inherited) {
     const char* style = elem ? dom_element_get_attribute(elem, "style") : nullptr;
     if (!style) return inherited;

@@ -114,6 +114,11 @@ main.autofocus = true;
 console.log(main.hasAttribute("autofocus"));
 main.autofocus = false;
 console.log(main.hasAttribute("autofocus"));
+button.disabled = true;
+console.log(button.getAttribute("disabled"));
+console.log(button.disabled);
+button.disabled = false;
+console.log(button.hasAttribute("disabled"));
 
 var text = document.getElementById("intro").firstChild;
 console.log(text.nodeType);

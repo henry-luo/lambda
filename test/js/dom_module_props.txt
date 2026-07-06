@@ -59,6 +59,9 @@ false
 true
 true
 false
+
+true
+false
 3
 #text
 Alpha
