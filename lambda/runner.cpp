@@ -1495,6 +1495,7 @@ Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transp
 // can clean up a document's reactive lambda_runtime without dom_element.cpp
 // hard-linking runner.cpp (keeps input/DOM unit tests free of the runtime).
 extern "C" void dom_set_runtime_cleanup_hook(void (*fn)(Runtime*));
+extern "C" void jube_register_builtin_modules(void);
 
 void runtime_init(Runtime* runtime) {
     memset(runtime, 0, sizeof(Runtime));
@@ -1505,6 +1506,7 @@ void runtime_init(Runtime* runtime) {
     runtime->transpile_dir = NULL;  // default: no file output; set via --transpile-dir
     runtime->dry_run = false;  // default: real IO
     module_registry_init();
+    jube_register_builtin_modules();
     dom_set_runtime_cleanup_hook(runtime_cleanup);  // wire DOM-layer cleanup hook
 }
 
