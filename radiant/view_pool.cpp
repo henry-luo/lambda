@@ -151,57 +151,112 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
     return view;
 }
 
-void free_view(ViewTree* tree, View* view) {
-    log_debug("free view %p, type %s", view, view->node_name());
-    if (view->view_type >= RDT_VIEW_INLINE) {
-        View* child = (lam::view_require_element(view))->first_child;
-        while (child) {
-            View* next = child->next();
-            free_view(tree, child);
-            child = next;
-        }
-        // free view property groups
-        ViewSpan* span = lam::view_require_element(view);
-        if (span->font) {
-            log_debug("free font prop");
-            font_prop_release_handle(span->font);
-            // font-family could be static and not from the pool
-            if (span->font->family) {
-                pool_free(tree->pool, span->font->family);
-            }
-            pool_free(tree->pool, span->font);
-        }
-        if (span->in_line) {
-            log_debug("free inline prop");
-            pool_free(tree->pool, span->in_line);
-        }
-        if (span->bound) {
-            log_debug("free bound prop");
-            if (span->bound->background) pool_free(tree->pool, span->bound->background);
-            if (span->bound->border) pool_free(tree->pool, span->bound->border);
-            pool_free(tree->pool, span->bound);
-        }
-        if (view->is_block()) {
-            ViewBlock* block = lam::view_require_block(view);
-            if (block->blk) {
-                log_debug("free block prop");
-                pool_free(tree->pool, block->blk);
-            }
-            if (block->scroller) {
-                log_debug("free scroller");
-                if (block->scroller->pane) pool_free(tree->pool, block->scroller->pane);
-                pool_free(tree->pool, block->scroller);
-            }
-        }
+typedef enum ViewTeardownFlag {
+    VIEW_TEARDOWN_RELEASE_EXTERNAL = 1 << 0,
+    VIEW_TEARDOWN_CLEAR_POINTERS   = 1 << 1,
+    VIEW_TEARDOWN_FREE_POOL        = 1 << 2,
+    VIEW_TEARDOWN_FREE_NODE        = 1 << 3,
+} ViewTeardownFlag;
+
+typedef void (*ViewPropReleaseFn)(DomElement* elem, ViewTree* tree);
+typedef void (*ViewPropClearFn)(DomElement* elem);
+typedef void (*ViewPropFreeFn)(DomElement* elem, ViewTree* tree);
+
+typedef struct ViewPropTeardownEntry {
+    const char* name;
+    ViewPropReleaseFn release_external;
+    ViewPropClearFn clear_pointer;
+    ViewPropFreeFn free_pool;
+} ViewPropTeardownEntry;
+
+static void view_teardown_visit_node(ViewTree* tree, DomNode* node, int flags, bool include_siblings);
+
+static void view_pool_free_ptr(ViewTree* tree, void* ptr) {
+    if (tree && tree->pool && ptr) {
+        pool_free(tree->pool, ptr);
     }
-    else { // text or br view
-        log_debug("free text/br view");
-    }
-    pool_free(tree->pool, view);
 }
 
-static void release_form_control_prop(DomElement* elem) {
-    form_control_release_prop(elem);
+static void release_font_prop(FontProp* font) {
+    if (font) {
+        font_prop_release_handle(font);
+    }
+}
+
+static void release_element_font_prop(DomElement* elem, ViewTree*) {
+    release_font_prop(elem ? elem->font : nullptr);
+}
+
+static void clear_element_font_prop(DomElement* elem) {
+    if (elem) elem->font = nullptr;
+}
+
+static void free_element_font_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->font) return;
+    // FontProp family is sometimes retained separately from the prop; the
+    // teardown table owns both members so new font-owned pool pointers only
+    // need to register in one place.
+    if (elem->font->family) {
+        view_pool_free_ptr(tree, elem->font->family);
+    }
+    view_pool_free_ptr(tree, elem->font);
+    elem->font = nullptr;
+}
+
+static void clear_inline_prop(DomElement* elem) {
+    if (elem) elem->in_line = nullptr;
+}
+
+static void free_inline_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->in_line) return;
+    view_pool_free_ptr(tree, elem->in_line);
+    elem->in_line = nullptr;
+}
+
+static void clear_boundary_prop(DomElement* elem) {
+    if (elem) elem->bound = nullptr;
+}
+
+static void free_boundary_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->bound) return;
+    view_pool_free_ptr(tree, elem->bound->background);
+    view_pool_free_ptr(tree, elem->bound->border);
+    view_pool_free_ptr(tree, elem->bound->mask);
+    view_pool_free_ptr(tree, elem->bound->box_shadow);
+    view_pool_free_ptr(tree, elem->bound->outline);
+    view_pool_free_ptr(tree, elem->bound);
+    elem->bound = nullptr;
+}
+
+static void clear_block_prop(DomElement* elem) {
+    if (elem) elem->blk = nullptr;
+}
+
+static void free_block_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->blk) return;
+    view_pool_free_ptr(tree, elem->blk);
+    elem->blk = nullptr;
+}
+
+static void clear_scroll_prop(DomElement* elem) {
+    if (elem) elem->scroller = nullptr;
+}
+
+static void free_scroll_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->scroller) return;
+    view_pool_free_ptr(tree, elem->scroller->pane);
+    view_pool_free_ptr(tree, elem->scroller);
+    elem->scroller = nullptr;
+}
+
+static void clear_position_prop(DomElement* elem) {
+    if (elem) elem->position = nullptr;
+}
+
+static void free_position_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->position) return;
+    view_pool_free_ptr(tree, elem->position);
+    elem->position = nullptr;
 }
 
 static void release_embedded_document(DomElement* elem) {
@@ -247,22 +302,17 @@ static void release_grid_prop(GridProp* grid) {
     }
 }
 
-static void release_view_owned_resources_in_node(DomNode* node);
-
 static void release_pseudo_content_prop(DomElement* elem) {
     if (!elem || !elem->pseudo) {
         return;
     }
-
-    // Generated marker/before/after nodes can be held from PseudoContentProp
-    // without being reachable through first_child; release their FontProp
-    // handles before the view pool is discarded.
-    release_view_owned_resources_in_node(static_cast<DomNode*>(elem->pseudo->before));
-    release_view_owned_resources_in_node(static_cast<DomNode*>(elem->pseudo->after));
-    release_view_owned_resources_in_node(static_cast<DomNode*>(elem->pseudo->marker));
     elem->pseudo->before = nullptr;
     elem->pseudo->after = nullptr;
     elem->pseudo->marker = nullptr;
+}
+
+static void release_pseudo_content_prop_entry(DomElement* elem, ViewTree*) {
+    release_pseudo_content_prop(elem);
 }
 
 static void release_embed_prop(DomElement* elem) {
@@ -283,6 +333,219 @@ static void release_embed_prop(DomElement* elem) {
     release_media_prop(elem->embed);
     release_embedded_document(elem);
     release_grid_prop(elem->embed->grid);
+}
+
+static void release_embed_prop_entry(DomElement* elem, ViewTree*) {
+    release_embed_prop(elem);
+}
+
+static void clear_embed_prop(DomElement* elem) {
+    if (elem) elem->embed = nullptr;
+}
+
+static void free_embed_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->embed) return;
+    view_pool_free_ptr(tree, elem->embed->flex);
+    view_pool_free_ptr(tree, elem->embed->grid);
+    view_pool_free_ptr(tree, elem->embed);
+    elem->embed = nullptr;
+}
+
+static void clear_transform_prop(DomElement* elem) {
+    if (elem) elem->transform = nullptr;
+}
+
+static void free_transform_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->transform) return;
+    view_pool_free_ptr(tree, elem->transform);
+    elem->transform = nullptr;
+}
+
+static void clear_filter_prop(DomElement* elem) {
+    if (elem) elem->filter = nullptr;
+}
+
+static void free_filter_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->filter) return;
+    view_pool_free_ptr(tree, elem->filter);
+    elem->filter = nullptr;
+}
+
+static void clear_backdrop_filter_prop(DomElement* elem) {
+    if (elem) elem->backdrop_filter = nullptr;
+}
+
+static void free_backdrop_filter_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->backdrop_filter) return;
+    view_pool_free_ptr(tree, elem->backdrop_filter);
+    elem->backdrop_filter = nullptr;
+}
+
+static void clear_multicol_prop(DomElement* elem) {
+    if (elem) elem->multicol = nullptr;
+}
+
+static void free_multicol_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->multicol) return;
+    view_pool_free_ptr(tree, elem->multicol);
+    elem->multicol = nullptr;
+}
+
+static void release_form_prop(DomElement* elem, ViewTree*) {
+    if (!elem || elem->item_prop_type != DomElement::ITEM_PROP_FORM || !elem->form) {
+        return;
+    }
+
+    FormControlProp* form = elem->form;
+    if (form->placeholder_font) {
+        font_prop_release_handle(form->placeholder_font);
+        form->placeholder_font = nullptr;
+    }
+    form_control_prop_release(form);
+    if (form->heap_allocated) {
+        mem_free(form);
+        elem->form = nullptr;
+    }
+}
+
+static void clear_item_prop(DomElement* elem) {
+    if (!elem) return;
+    elem->fi = nullptr;
+    elem->item_prop_type = DomElement::ITEM_PROP_NONE;
+}
+
+static void free_item_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem) return;
+    switch (elem->item_prop_type) {
+        case DomElement::ITEM_PROP_FLEX:
+            view_pool_free_ptr(tree, elem->fi);
+            break;
+        case DomElement::ITEM_PROP_GRID:
+            view_pool_free_ptr(tree, elem->gi);
+            break;
+        case DomElement::ITEM_PROP_TABLE:
+            view_pool_free_ptr(tree, elem->tb);
+            break;
+        case DomElement::ITEM_PROP_CELL:
+            view_pool_free_ptr(tree, elem->td);
+            break;
+        case DomElement::ITEM_PROP_FORM:
+            if (elem->form && !elem->form->heap_allocated) {
+                view_pool_free_ptr(tree, elem->form);
+            }
+            break;
+        default:
+            break;
+    }
+    elem->fi = nullptr;
+    elem->item_prop_type = DomElement::ITEM_PROP_NONE;
+}
+
+static void clear_pseudo_content_prop(DomElement* elem) {
+    if (elem) elem->pseudo = nullptr;
+}
+
+static void free_pseudo_content_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->pseudo) return;
+    view_pool_free_ptr(tree, elem->pseudo);
+    elem->pseudo = nullptr;
+}
+
+static void clear_vector_path_prop(DomElement* elem) {
+    if (elem) elem->vpath = nullptr;
+}
+
+static void free_vector_path_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->vpath) return;
+    view_pool_free_ptr(tree, elem->vpath);
+    elem->vpath = nullptr;
+}
+
+static void clear_layout_cache_prop(DomElement* elem) {
+    if (elem) elem->layout_cache = nullptr;
+}
+
+static void free_layout_cache_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->layout_cache) return;
+    view_pool_free_ptr(tree, elem->layout_cache);
+    elem->layout_cache = nullptr;
+}
+
+static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
+    { "font",            release_element_font_prop, clear_element_font_prop, free_element_font_prop },
+    { "inline",          nullptr,                   clear_inline_prop,       free_inline_prop },
+    { "boundary",        nullptr,                   clear_boundary_prop,     free_boundary_prop },
+    { "block",           nullptr,                   clear_block_prop,        free_block_prop },
+    { "scroll",          nullptr,                   clear_scroll_prop,       free_scroll_prop },
+    { "embed",           release_embed_prop_entry,  clear_embed_prop,        free_embed_prop },
+    { "position",        nullptr,                   clear_position_prop,     free_position_prop },
+    { "transform",       nullptr,                   clear_transform_prop,    free_transform_prop },
+    { "filter",          nullptr,                   clear_filter_prop,       free_filter_prop },
+    { "backdrop-filter", nullptr,                   clear_backdrop_filter_prop, free_backdrop_filter_prop },
+    { "multicol",        nullptr,                   clear_multicol_prop,     free_multicol_prop },
+    { "form",            release_form_prop,         nullptr,                 nullptr },
+    { "item",            nullptr,                   clear_item_prop,         free_item_prop },
+    { "pseudo",          release_pseudo_content_prop_entry, clear_pseudo_content_prop, free_pseudo_content_prop },
+    { "vector-path",     nullptr,                   clear_vector_path_prop,  free_vector_path_prop },
+    { "layout-cache",    nullptr,                   clear_layout_cache_prop, free_layout_cache_prop },
+};
+
+static void view_teardown_visit_pseudo(ViewTree* tree,
+                                       PseudoContentProp* pseudo,
+                                       int flags) {
+    if (!pseudo) return;
+
+    // Generated pseudo nodes are not always reachable from first_child. The
+    // unified visitor must see them before the pseudo pointer is cleared, or
+    // their font/form/embed handles survive a retained relayout.
+    view_teardown_visit_node(tree, static_cast<DomNode*>(pseudo->before), flags, false);
+    view_teardown_visit_node(tree, static_cast<DomNode*>(pseudo->after), flags, false);
+    view_teardown_visit_node(tree, static_cast<DomNode*>(pseudo->marker), flags, false);
+}
+
+static void view_teardown_apply_table(ViewTree* tree,
+                                      DomElement* elem,
+                                      int flags) {
+    if (!elem) return;
+    int count = sizeof(VIEW_PROP_TEARDOWN) / sizeof(VIEW_PROP_TEARDOWN[0]);
+    for (int i = 0; i < count; i++) {
+        const ViewPropTeardownEntry* entry = &VIEW_PROP_TEARDOWN[i];
+        if ((flags & VIEW_TEARDOWN_RELEASE_EXTERNAL) && entry->release_external) {
+            entry->release_external(elem, tree);
+        }
+        if ((flags & VIEW_TEARDOWN_FREE_POOL) && entry->free_pool) {
+            entry->free_pool(elem, tree);
+        }
+        if ((flags & VIEW_TEARDOWN_CLEAR_POINTERS) && entry->clear_pointer) {
+            entry->clear_pointer(elem);
+        }
+    }
+}
+
+static void view_teardown_clear_element_scalars(DomElement* elem) {
+    if (!elem) return;
+    elem->view_type = RDT_VIEW_NONE;
+    elem->content_width = 0.0f;
+    elem->content_height = 0.0f;
+    elem->has_cached_intrinsic_widths = false;
+    elem->styles_resolved = false;
+    elem->float_prelaid = false;
+}
+
+static void view_teardown_clear_text(DomText* text) {
+    if (!text) return;
+    text->rect = nullptr;
+    text->font = nullptr;
+    text->view_type = RDT_VIEW_NONE;
+}
+
+static void view_teardown_free_text_font(ViewTree* tree, DomText* text) {
+    if (!text || !text->font) return;
+    if (text->font->family) {
+        view_pool_free_ptr(tree, text->font->family);
+    }
+    view_pool_free_ptr(tree, text->font);
+    text->font = nullptr;
 }
 
 static bool release_should_walk_dom_children(DomElement* elem) {
@@ -320,37 +583,53 @@ static bool release_should_walk_dom_children(DomElement* elem) {
     return true;
 }
 
-static void release_view_owned_resources_in_node(DomNode* node) {
-    if (!node) {
-        return;
-    }
+static void view_teardown_visit_node(ViewTree* tree,
+                                     DomNode* node,
+                                     int flags,
+                                     bool include_siblings) {
+    while (node) {
+        DomNode* next = include_siblings ? node->next_sibling : nullptr;
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            PseudoContentProp* pseudo = elem->pseudo;
+            DomNode* first_child = elem->first_child;
+            int child_flags = flags;
+            if (!release_should_walk_dom_children(elem)) {
+                child_flags &= ~VIEW_TEARDOWN_RELEASE_EXTERNAL;
+            }
 
-    if (node->is_element()) {
-        DomElement* elem = node->as_element();
-        if (release_should_walk_dom_children(elem)) {
-            DomNode* child = elem->first_child;
-            while (child) {
-                DomNode* next = child->next_sibling;
-                release_view_owned_resources_in_node(child);
-                child = next;
+            view_teardown_visit_pseudo(tree, pseudo, flags);
+            view_teardown_visit_node(tree, first_child, child_flags, true);
+            view_teardown_apply_table(tree, elem, flags);
+            if (flags & VIEW_TEARDOWN_CLEAR_POINTERS) {
+                view_teardown_clear_element_scalars(elem);
+            }
+        } else if (node->is_text()) {
+            DomText* text = node->as_text();
+            if ((flags & VIEW_TEARDOWN_RELEASE_EXTERNAL) && text->font) {
+                font_prop_release_handle(text->font);
+            }
+            if (flags & VIEW_TEARDOWN_FREE_POOL) {
+                view_teardown_free_text_font(tree, text);
+            }
+            if (flags & VIEW_TEARDOWN_CLEAR_POINTERS) {
+                view_teardown_clear_text(text);
             }
         }
 
-        if (elem->font) {
-            font_prop_release_handle(elem->font);
+        if ((flags & VIEW_TEARDOWN_FREE_NODE) && tree && tree->pool) {
+            pool_free(tree->pool, node);
         }
-        release_pseudo_content_prop(elem);
-        release_embed_prop(elem);
-        release_form_control_prop(elem);
-        return;
+        node = next;
     }
+}
 
-    if (node->is_text()) {
-        DomText* text = node->as_text();
-        if (text->font) {
-            font_prop_release_handle(text->font);
-        }
-    }
+void free_view(ViewTree* tree, View* view) {
+    if (!tree || !view) return;
+    log_debug("free view %p, type %s", view, view->node_name());
+    view_teardown_visit_node(tree, static_cast<DomNode*>(view),
+        VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_FREE_POOL | VIEW_TEARDOWN_FREE_NODE,
+        false);
 }
 
 void* alloc_prop(LayoutContext* lycon, size_t size) {
@@ -560,60 +839,15 @@ void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span) {
     }
 }
 
-static void clear_view_owned_pointers_in_node(DomNode* node) {
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = node->as_element();
-            DomNode* child = elem->first_child;
-            PseudoContentProp* pseudo = elem->pseudo;
-            if (pseudo) {
-                clear_view_owned_pointers_in_node(static_cast<DomNode*>(pseudo->before));
-                clear_view_owned_pointers_in_node(static_cast<DomNode*>(pseudo->after));
-                clear_view_owned_pointers_in_node(static_cast<DomNode*>(pseudo->marker));
-            }
-            elem->font = nullptr;
-            elem->bound = nullptr;
-            elem->in_line = nullptr;
-            elem->blk = nullptr;
-            elem->scroller = nullptr;
-            elem->embed = nullptr;
-            elem->position = nullptr;
-            elem->transform = nullptr;
-            elem->filter = nullptr;
-            elem->backdrop_filter = nullptr;
-            elem->multicol = nullptr;
-            elem->pseudo = nullptr;
-            elem->vpath = nullptr;
-            elem->layout_cache = nullptr;
-            elem->view_type = RDT_VIEW_NONE;
-            elem->content_width = 0.0f;
-            elem->content_height = 0.0f;
-            elem->has_cached_intrinsic_widths = false;
-            elem->styles_resolved = false;
-            elem->float_prelaid = false;
-            elem->fi = nullptr;
-            elem->item_prop_type = DomElement::ITEM_PROP_NONE;
-            if (child) {
-                clear_view_owned_pointers_in_node(child);
-            }
-        } else if (node->is_text()) {
-            DomText* text = node->as_text();
-            text->rect = nullptr;
-            text->font = nullptr;
-            text->view_type = RDT_VIEW_NONE;
-        }
-        node = node->next_sibling;
-    }
-}
-
 void view_pool_release_detached_subtree(DomNode* root) {
     if (!root) return;
 
     // JS DOM removals can leave detached nodes alive after they stop being part
-    // of the document view tree; release their layout-owned handles before the
-    // final view_pool_destroy walk loses reachability to that subtree.
-    release_view_owned_resources_in_node(root);
-    clear_view_owned_pointers_in_node(root);
+    // of the document view tree; release handles and clear layout-pool pointers
+    // in the same visitor so pseudo nodes and replaced children cannot diverge.
+    view_teardown_visit_node(nullptr, root,
+        VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_CLEAR_POINTERS,
+        false);
 }
 
 void view_pool_init(ViewTree* tree) {
@@ -634,8 +868,9 @@ void view_pool_reset_retained(ViewTree* tree) {
     if (tree->root) {
         // DOM mutation fallback keeps DOM/view nodes; only layout-pool-owned
         // props are replaced so StateStore anchors can keep binding by node id.
-        release_view_owned_resources_in_node(tree->root);
-        clear_view_owned_pointers_in_node(tree->root);
+        view_teardown_visit_node(tree, tree->root,
+            VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_CLEAR_POINTERS,
+            false);
         tree->root = NULL;
     }
 
@@ -650,7 +885,9 @@ void view_pool_reset_retained(ViewTree* tree) {
 
 void view_pool_destroy(ViewTree* tree) {
     if (tree->root) {
-        release_view_owned_resources_in_node(tree->root);
+        view_teardown_visit_node(tree, tree->root,
+            VIEW_TEARDOWN_RELEASE_EXTERNAL,
+            false);
         tree->root = NULL;
     }
     Arena* arena = tree->arena;

@@ -106,7 +106,7 @@ Three entry points feed it:
 
 The engine's `FontContext` — the shared font database, face cache, glyph cache, and native backend state — is created once per `UiContext` in `ui_context.cpp:159-163`: a `FontContextConfig` sets `pixel_ratio`, `max_cached_faces = 64`, and `enable_lcd_rendering = true`, and `font_context_create` builds it (the database is owned internally). `uicon->default_font` and `legacy_default_font` seed the serif default (Times New Roman / Times) matching Chrome (`ui_context.cpp:165-174`). On teardown the context is destroyed and `font_ctx` nulled (`ui_context.cpp:312`).
 
-Handle lifetime is reference-counted and cache-anchored. A `FontProp` that resolves a handle holds one ref (`owns_font_handle = true`) and releases it in `font_prop_release_handle`; the teardown walks in [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md) (`release_view_owned_resources_in_node`) release font handles as part of view teardown. Because handles are shared and cached, the same physical face is loaded once and reused across layout, measurement, events, and rendering. Between documents in batch mode the engine offers `font_context_reset_document_fonts` (clears `@font-face` descriptors + face cache + codepoint-fallback cache, keeps the system DB) and `font_context_reset_glyph_caches` (`font.h:378-382`).
+Handle lifetime is reference-counted and cache-anchored. A `FontProp` that resolves a handle holds one ref (`owns_font_handle = true`) and releases it in `font_prop_release_handle`; the table-driven teardown visitor in [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md) releases font handles through `VIEW_PROP_TEARDOWN` as part of view teardown. Because handles are shared and cached, the same physical face is loaded once and reused across layout, measurement, events, and rendering. Between documents in batch mode the engine offers `font_context_reset_document_fonts` (clears `@font-face` descriptors + face cache + codepoint-fallback cache, keeps the system DB) and `font_context_reset_glyph_caches` (`font.h:378-382`).
 
 ---
 
@@ -143,7 +143,7 @@ This doc stops at the handle and its metrics; the consumers are documented elsew
 ## Appendix B — Related documents
 
 - [RAD_00 — Overview](RAD_00_Overview.md) — the set index and architecture.
-- [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md) — the view teardown that releases font handles; `FontProp` lives on `DomElement`.
+- [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md) — the table-driven view teardown that releases font handles; `FontProp` lives on `DomElement`.
 - [RAD_02 — CSS Style Resolution & Computed Style](RAD_02_CSS_Style_Resolution.md) — populates the `FontProp` this doc consumes.
 - [RAD_05 — Intrinsic Sizing](RAD_05_Intrinsic_Sizing.md) — re-enters `setup_font` during measurement.
 - [RAD_06 — Inline & Text Layout](RAD_06_Inline_and_Text_Layout.md) — the primary consumer: the per-character line breaker calling `font_load_glyph`/`font_measure_text`/`font_get_kerning`.
