@@ -1,0 +1,9 @@
+'=== error poison ==='
+false
+true
+false
+false
+'=== nan ==='
+false
+true
+false

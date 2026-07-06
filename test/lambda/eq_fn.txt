@@ -1,0 +1,7 @@
+'same closure variable'
+true
+'same site, equal captures'
+true
+'same site, different captures'
+false
+true
