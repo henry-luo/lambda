@@ -22,6 +22,7 @@
 #include "editing_geometry.hpp"
 #include "editing_intent.hpp"
 #include "editing_target_range.hpp"
+#include "stacking_order.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/font/font.h"
@@ -750,19 +751,63 @@ static float pdf_text_run_visible_natural_width(EventContext* evcon, TextRect* r
     return pdf_text_run_visible_natural_width(evcon ? &evcon->font : NULL, rect, copy_space);
 }
 
+static void target_stacking_view(EventContext* evcon, View* view) {
+    if (!evcon || !view || evcon->target) return;
+
+    if (view->is_block()) {
+        target_block_view(evcon, lam::view_require_block(view));
+    } else if (view->view_type == RDT_VIEW_INLINE) {
+        target_inline_view(evcon, lam::view_require_element(view));
+    } else if (view->view_type == RDT_VIEW_TEXT) {
+        target_text_view(evcon, lam::view_require_text(view));
+    }
+}
+
+static void target_stacking_list_reverse(EventContext* evcon, ArrayList* views) {
+    if (!evcon || !views) return;
+
+    // Hit-testing consumes the same stable paint-order list in reverse so equal
+    // z-index siblings target the later painted node instead of drifting from render.
+    for (int i = views->length - 1; i >= 0 && !evcon->target; i--) {
+        target_stacking_view(evcon, (View*)views->data[i]);
+    }
+}
+
+static void target_positive_z_descendants(EventContext* evcon, View* first_child) {
+    ArrayList* views = radiant_stack_collect_positive_z_descendants(
+        first_child, "[RAD_CAP_POSITIONED_HIT]");
+    if (!views) return;
+
+    radiant_stack_sort_in_paint_order(views);
+    target_stacking_list_reverse(evcon, views);
+    arraylist_free(views);
+}
+
+static void target_positioned_children(EventContext* evcon, ViewBlock* block) {
+    ArrayList* views = radiant_stack_collect_positioned_children(
+        block, "[RAD_CAP_POSITIONED_HIT]");
+    if (!views) return;
+
+    radiant_stack_sort_in_paint_order(views);
+    target_stacking_list_reverse(evcon, views);
+    arraylist_free(views);
+}
+
 void target_children(EventContext* evcon, View* view) {
     do {
         if (view->is_block()) {
             ViewBlock* block = lam::view_require_block(view);
-            if (block->position &&
-                (block->position->position == CSS_VALUE_ABSOLUTE ||
-                 block->position->position == CSS_VALUE_FIXED)) {
-                // skip absolute/fixed positioned block (tested via first_abs_child)
+            if (radiant_stack_is_deferred_from_normal_flow(view)) {
+                // skip deferred stacking entries; target_block_view walks them in reverse paint order.
             } else {
                 target_block_view(evcon, block);
             }
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
+            if (radiant_stack_is_deferred_from_normal_flow(view)) {
+                view = view->next();
+                continue;
+            }
             ViewSpan* span = lam::view_require_element(view);
             target_inline_view(evcon, span);
         }
@@ -1026,6 +1071,17 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         }
     }
 
+    if (block->font) {
+        setup_font(evcon->ui_context, &evcon->font, block->font);
+    }
+
+    // Positioned content paints above the block's embedded self-content; walking
+    // it first prevents iframe/webview hit targets from stealing covered clicks.
+    target_positive_z_descendants(evcon, block->first_child);
+    if (evcon->target) goto RETURN;
+    target_positioned_children(evcon, block);
+    if (evcon->target) goto RETURN;
+
     // Layer-mode webview: Radiant owns events but forwards them to the offscreen web view.
     // Set target to the webview block and inject the mouse event.
     if (block->embed && block->embed->webview &&
@@ -1082,59 +1138,9 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         }
     }
 
-    // target absolute/fixed positioned children
-    if (block->position && block->position->first_abs_child) {
-        ArrayList* positioned_children = arraylist_new(8);
-        if (!positioned_children) {
-            log_warn("[RAD_CAP_POSITIONED_HIT] failed to allocate positioned hit-test list");
-        } else {
-            ViewBlock* abs_child = block->position->first_abs_child;
-            while (abs_child) {
-                if (!arraylist_append(positioned_children, abs_child)) {
-                    log_warn("[RAD_CAP_POSITIONED_HIT] failed to grow positioned hit-test list");
-                    break;
-                }
-                abs_child = abs_child->position->next_abs_sibling;
-            }
-
-            // Hit-testing must walk topmost positioned children first; the old source
-            // order pass could target content painted below a higher z-index sibling.
-            for (int i = 1; i < positioned_children->length; i++) {
-                ViewBlock* key = (ViewBlock*)positioned_children->data[i];
-                int key_z = key->position ? key->position->z_index : 0;
-                int j = i - 1;
-                while (j >= 0) {
-                    ViewBlock* current = (ViewBlock*)positioned_children->data[j];
-                    int current_z = current->position ? current->position->z_index : 0;
-                    if (current_z < key_z) {
-                        positioned_children->data[j + 1] = positioned_children->data[j];
-                        j--;
-                    } else {
-                        break;
-                    }
-                }
-                positioned_children->data[j + 1] = key;
-            }
-
-            for (int i = 0; i < positioned_children->length; i++) {
-                abs_child = (ViewBlock*)positioned_children->data[i];
-                log_debug("targetting positioned child block: %s", abs_child->node_name());
-                target_block_view(evcon, abs_child);
-                if (evcon->target) {
-                    arraylist_free(positioned_children);
-                    goto RETURN;
-                }
-            }
-            arraylist_free(positioned_children);
-        }
-    }
-
     // target static positioned children
     view = block->first_child;
     if (view) {
-        if (block->font) {
-            setup_font(evcon->ui_context, &evcon->font, block->font);
-        }
         target_children(evcon, view);
         bool rich_host_margin_hit_allowed = event_inside_block(evcon, block);
         bool rich_host = is_rich_editable_host(static_cast<View*>(block));

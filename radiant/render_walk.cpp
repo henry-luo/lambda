@@ -2,10 +2,10 @@
 #include "paint_ir.h"
 #include "render_geometry.hpp"
 #include "render_paint_block.hpp"
+#include "stacking_order.hpp"
 #include "view.hpp"
 #include "webview.h"
 #include "../lib/tagged.hpp"
-#include "../lib/arraylist.h"
 #include "../lambda/input/css/dom_element.hpp"
 extern "C" {
 #include "../lib/log.h"
@@ -34,20 +34,6 @@ typedef struct RenderWalkBlockDriver {
     RenderWalkState* state;
     RenderWalkBlockPhase phase;
 } RenderWalkBlockDriver;
-
-static bool render_walk_is_positive_z_positioned(View* view) {
-    ViewElement* element = lam::view_as_element(view);
-    return element && element->position &&
-        element->position->z_index > 0 &&
-        element->position->position != CSS_VALUE_STATIC;
-}
-
-static bool render_walk_is_out_of_flow_positioned(View* view) {
-    ViewElement* element = lam::view_as_element(view);
-    return element && element->position &&
-        (element->position->position == CSS_VALUE_ABSOLUTE ||
-         element->position->position == CSS_VALUE_FIXED);
-}
 
 static float render_walk_css_opacity(const InlineProp* in_line) {
     if (!in_line) return 1.0f;
@@ -364,24 +350,8 @@ static void render_walk_view(RenderBackend* backend, RenderWalkState* state, Vie
 
 void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* view) {
     while (view) {
-        if (!render_walk_is_positive_z_positioned(view) &&
-            !render_walk_is_out_of_flow_positioned(view)) {
+        if (!radiant_stack_is_deferred_from_normal_flow(view)) {
             render_walk_view(backend, state, view);
-        }
-        view = view->next();
-    }
-}
-
-static void render_walk_collect_positive_z_descendants(View* view, ArrayList* out_views) {
-    while (view) {
-        if (render_walk_is_positive_z_positioned(view)) {
-            if (!arraylist_append(out_views, view)) {
-                log_warn("[RAD_CAP_RENDER_Z] failed to grow positive z-order render list");
-                return;
-            }
-        } else if (view->view_type == RDT_VIEW_INLINE) {
-            ViewElement* element = lam::view_require_element(view);
-            render_walk_collect_positive_z_descendants(element->first_child, out_views);
         }
         view = view->next();
     }
@@ -390,29 +360,10 @@ static void render_walk_collect_positive_z_descendants(View* view, ArrayList* ou
 void render_walk_positive_z_descendants(RenderBackend* backend, RenderWalkState* state, View* view) {
     if (!backend || !state || !view) return;
 
-    ArrayList* positive_views = arraylist_new(16);
-    if (!positive_views) {
-        log_warn("[RAD_CAP_RENDER_Z] failed to allocate positive z-order render list");
-        return;
-    }
-    render_walk_collect_positive_z_descendants(view, positive_views);
-
-    for (int i = 1; i < positive_views->length; i++) {
-        View* key = (View*)positive_views->data[i];
-        int key_z = lam::view_require_element(key)->position->z_index;
-        int j = i - 1;
-        while (j >= 0) {
-            View* current = (View*)positive_views->data[j];
-            int j_z = lam::view_require_element(current)->position->z_index;
-            if (j_z > key_z) {
-                positive_views->data[j + 1] = positive_views->data[j];
-                j--;
-            } else {
-                break;
-            }
-        }
-        positive_views->data[j + 1] = key;
-    }
+    ArrayList* positive_views = radiant_stack_collect_positive_z_descendants(
+        view, "[RAD_CAP_RENDER_Z]");
+    if (!positive_views) return;
+    radiant_stack_sort_in_paint_order(positive_views);
 
     for (int i = 0; i < positive_views->length; i++) {
         render_walk_view(backend, state, (View*)positive_views->data[i]);
@@ -423,37 +374,10 @@ void render_walk_positive_z_descendants(RenderBackend* backend, RenderWalkState*
 void render_walk_positioned_children(RenderBackend* backend, RenderWalkState* state, ViewBlock* block) {
     if (!backend || !state || !block || !block->position) return;
 
-    ArrayList* abs_children = arraylist_new(16);
-    if (!abs_children) {
-        log_warn("[RAD_CAP_RENDER_ABS] failed to allocate positioned render list");
-        return;
-    }
-    ViewBlock* child_block = block->position->first_abs_child;
-    while (child_block) {
-        if (!arraylist_append(abs_children, child_block)) {
-            log_warn("[RAD_CAP_RENDER_ABS] failed to grow positioned render list");
-            break;
-        }
-        child_block = child_block->position->next_abs_sibling;
-    }
-
-    // stable insertion sort by z-index, matching the legacy raster order.
-    for (int i = 1; i < abs_children->length; i++) {
-        ViewBlock* key = (ViewBlock*)abs_children->data[i];
-        int key_z = key->position ? key->position->z_index : 0;
-        int j = i - 1;
-        while (j >= 0) {
-            ViewBlock* current = (ViewBlock*)abs_children->data[j];
-            int j_z = current->position ? current->position->z_index : 0;
-            if (j_z > key_z) {
-                abs_children->data[j + 1] = abs_children->data[j];
-                j--;
-            } else {
-                break;
-            }
-        }
-        abs_children->data[j + 1] = key;
-    }
+    ArrayList* abs_children = radiant_stack_collect_positioned_children(
+        block, "[RAD_CAP_RENDER_ABS]");
+    if (!abs_children) return;
+    radiant_stack_sort_in_paint_order(abs_children);
 
     for (int i = 0; i < abs_children->length; i++) {
         ViewBlock* abs_child = (ViewBlock*)abs_children->data[i];
