@@ -45,6 +45,7 @@ The editor's **1960-test vitest suite is green under `jsdom` (Node)** — a brow
 - commands+model+input **207/209** (2 = `Intl.Segmenter`) · helpers+smoke **8/9** (1 = custom-element parse) · **drawing 50/50** · **all tiers 1601/1601** (Slate 293 · PM 212 · HTML 520 · Chromium 163 · structural 22 · drawing 391).
 
 **Phase A view lane — in progress (the hard part).** The 7 plain-DOM `view/*.ts` files exercise the real mount → event → command → reconcile → DOM/selection loop, which surfaced a **chain of LambdaJS runtime bugs** (all documented with symptom / root-cause / minimal-repro / fix in **[vibe/Lambda_Bug.md](../Lambda_Bug.md)**):
+
 | # | Bug (JS runtime) | Status | Effect |
 |---|---|---|---|
 | — | **`window.document` was `undefined`** (bare `document` is transpiler-special-cased, never a real global prop) → `window.document.createRange()` threw | **FIXED** (`js_dom_selection.cpp`) | unblocked dom-bridge/render-vnode/etc. |
