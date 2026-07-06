@@ -22,6 +22,8 @@ Implementation status:
 - 2026-07-06 invalidation verification: `make build` passed. DOM identity/style/mutation smokes and `./lambda.exe --no-log test/lambda/value.ls` passed.
 - 2026-07-06: Phase 4 tiny Lambda-facing sample landed. `import radiant; poc_attr("test/js/dom_identity.html")` loads a real Radiant HTML document, mutates the root `data-poc` attribute, reads it back, frees the document, and returns `"ok"`. This uses a temporary sys-func compatibility bridge (`radiant_poc_attr` -> `fn_radiant_poc_attr`) until Jube descriptors feed Lambda import metadata directly.
 - 2026-07-06 sample verification: `make build` passed. `./lambda.exe --no-log test/lambda/radiant_poc.ls` returned `"ok"`. Existing built-in import smokes `builtin_import_global.ls` and `builtin_import_alias.ls` still passed.
+- 2026-07-06: Phase 4 sample upgraded from the one-shot helper to the first real DOM API cluster. `test/lambda/radiant_poc.ls` now uses `radiant.load()`, `radiant.root()`, `radiant.set_attr()`, `radiant.attr()`, and `radiant.free()` over module-owned DOM wrappers. Calls are module-qualified because bare `load()` already exists as a core built-in and should not be shadowed by a global import fallback.
+- 2026-07-06 API cluster verification: `make build` passed. The upgraded `./lambda.exe --no-log test/lambda/radiant_poc.ls` returned `"ok"` and forces `radiant.free(doc)` through the final expression. Focused JS DOM identity/style/mutation smokes passed. `make test-lambda-baseline` reached 3233/3234 with one `child_process_detached_kill` miss; direct rerun of that case and the full `test_node_prelim_gtest.exe` binary passed.
 
 The first deliverable is intentionally conservative:
 
@@ -213,9 +215,11 @@ Purpose: prove the module is not JS-only.
 Status:
 
 - Completed first visible sample 2026-07-06 with `test/lambda/radiant_poc.ls` and `test/lambda/radiant_poc.txt`.
-- Current API is intentionally temporary: `poc_attr(path)` is exposed through `import radiant;` using the existing built-in module import resolver and sys-func table. It is also declared in the `radiant` Jube descriptor so the compatibility bridge and module metadata stay aligned.
-- The sample loads a real HTML document through `load_lambda_html_doc()`, mutates `doc->root`, reads the attribute back, and calls `free_document()`.
-- Next API slice should replace this one-shot helper with real `radiant.root/attr/set_attr` functions over module-owned native DOM wrappers.
+- Upgraded 2026-07-06 to a first real API cluster: `radiant.load(path)`, `radiant.root(doc)`, `radiant.set_attr(node, name, value)`, `radiant.attr(node, name)`, and `radiant.free(doc)`.
+- The current document handle is still the root DOM wrapper; `radiant.root(doc)` returns the owning document root from that wrapper. This is a compatibility compromise until `radiant.document` becomes a first-class native type.
+- `poc_attr(path)` remains as a compatibility smoke, but new sample code should prefer the module-qualified API cluster. Bare `load()` intentionally resolves to the existing core built-in, so the sample uses `radiant.load()`.
+- The sample loads a real HTML document through `load_lambda_html_doc()`, mutates `doc->root`, reads the attribute back, and forces `free_document()` through `radiant.free(doc)`.
+- Next API slice should either introduce a first-class `radiant.document` wrapper or start Phase 5's VMap readiness spec before adding more DOM surface.
 
 The first sample should be deliberately small. It should avoid needing full script-level package management or dynamic loading.
 
@@ -224,11 +228,11 @@ Candidate API:
 ```lambda
 import radiant
 
-let doc = input("test/input/simple.html", 'html')
+let doc = radiant.load("test/input/simple.html")
 let root = radiant.root(doc)
 radiant.set_attr(root, "data-poc", "ok")
 let value = radiant.attr(root, "data-poc")
-value
+[value, radiant.free(doc)][0]
 ```
 
 Candidate expected result:

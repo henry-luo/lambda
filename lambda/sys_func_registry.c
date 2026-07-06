@@ -95,6 +95,11 @@ extern Item bigint_from_string(const char* str, int len);
 // view/edit template apply
 extern Item fn_apply1(Item target);
 extern Item fn_apply2(Item target, Item options);
+extern Item fn_radiant_load(Item path_item);
+extern Item fn_radiant_root(Item doc_item);
+extern Item fn_radiant_attr(Item node_item, Item name_item);
+extern Item fn_radiant_set_attr(Item node_item, Item name_item, Item value_item);
+extern Item fn_radiant_free(Item node_item);
 extern Item fn_radiant_poc_attr(Item path_item);
 
 // template state store (reactive UI Phase 2)
@@ -904,6 +909,23 @@ SysFuncInfo sys_func_defs[] = {
     // Radiant module POC — temporary sys-func bridge until Jube descriptors
     // feed Lambda import/type metadata directly.
     // ========================================================================
+    {SYSFUNC_RADIANT_LOAD, "radiant_load", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_radiant_load", FPTR(fn_radiant_load), NULL, NULL, false, 0},
+
+    {SYSFUNC_RADIANT_ROOT, "radiant_root", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_radiant_root", FPTR(fn_radiant_root), NULL, NULL, false, 0},
+
+    {SYSFUNC_RADIANT_ATTR, "radiant_attr", 2, &TYPE_STRING, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_radiant_attr", FPTR(fn_radiant_attr), NULL, NULL, false, 0},
+
+    // Temporary functional mutation helper: it returns the node so functional
+    // Lambda samples can prove real DOM writes before proc descriptors exist.
+    {SYSFUNC_RADIANT_SET_ATTR, "radiant_set_attr", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_radiant_set_attr", FPTR(fn_radiant_set_attr), NULL, NULL, false, 0},
+
+    {SYSFUNC_RADIANT_FREE, "radiant_free", 1, &TYPE_NULL, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_radiant_free", FPTR(fn_radiant_free), NULL, NULL, false, 0},
+
     {SYSFUNC_RADIANT_POC_ATTR, "radiant_poc_attr", 1, &TYPE_STRING, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_radiant_poc_attr", FPTR(fn_radiant_poc_attr), NULL, NULL, false, 0},
 
