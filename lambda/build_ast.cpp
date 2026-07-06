@@ -3254,6 +3254,41 @@ static inline bool is_relational_op(Operator op) {
     return op == OPERATOR_LT || op == OPERATOR_LE || op == OPERATOR_GT || op == OPERATOR_GE;
 }
 
+static void normalize_is_array_type_rhs(Transpiler* tp, AstBinaryNode* ast_node) {
+    if (!ast_node || ast_node->op != OPERATOR_IS || !ast_node->right) return;
+    AstNode* rhs = ast_node->right;
+    if (rhs->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)rhs;
+        rhs = primary->expr;
+    }
+    if (!rhs || rhs->node_type != AST_NODE_ARRAY) return;
+
+    AstArrayNode* arr = (AstArrayNode*)rhs;
+    Type* nested_type = NULL;
+    int64_t length = 0;
+    for (AstNode* item = arr->item; item; item = item->next) {
+        if (!item->type || item->type->type_id != LMD_TYPE_TYPE) return;
+        TypeType* item_type = (TypeType*)item->type;
+        Type* actual_type = item_type->type;
+        if (!actual_type) return;
+        if (!nested_type) nested_type = actual_type;
+        else if (nested_type->type_id != actual_type->type_id) nested_type = NULL;
+        length++;
+    }
+    if (length == 0) return;
+
+    // `is [T]` parses as an array literal; reinterpret type-valued items as an array type pattern.
+    TypeType* node_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeArray* type = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
+    node_type->type = (Type*)type;
+    type->nested = nested_type;
+    type->length = length;
+    arraylist_append(tp->type_list, node_type);
+    type->type_index = tp->type_list->length - 1;
+    rhs->node_type = AST_NODE_ARRAY_TYPE;
+    rhs->type = (Type*)node_type;
+}
+
 AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     log_debug("build binary expr");
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp, AST_NODE_BINARY, bi_node, sizeof(AstBinaryNode));
@@ -3334,6 +3369,8 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         ast_node->type = &TYPE_ERROR;
         return (AstNode*)ast_node;
     }
+
+    normalize_is_array_type_rhs(tp, ast_node);
 
     // Special case: 'expr is nan' — IEEE NaN check
     // nan is a float value, not a type, so 'is' type-check doesn't work.

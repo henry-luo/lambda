@@ -45,7 +45,6 @@ static const char* MIR_SKIP_TESTS[] = {
     "object_inherit",   // object inheritance not yet supported in MIR transpiler
     "object_default",   // object default values not yet supported in MIR transpiler
     "object_update",    // object update syntax not yet supported in MIR transpiler
-    "object_mutation",  // object mutation methods not yet supported in MIR transpiler
     "object_pattern",   // object pattern matching not yet supported in MIR transpiler
     "object_constraint", // object constraint checking not yet supported in MIR transpiler
     "object_direct_access", // object direct struct access (C2MIR only, uses TypeObject features)
@@ -382,6 +381,52 @@ void test_lambda_script_expects_error(const char* script_path) {
 
 TEST(LambdaNegativeTests, test_func_param_type_errors) {
     test_lambda_script_expects_error("test/lambda/negative/func_param_negative.ls");
+}
+
+void test_lambda_proc_script_expects_error(const char* script_path) {
+    char command[512];
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "lambda.exe --no-log run \"%s\" 2>&1", script_path);
+#else
+    snprintf(command, sizeof(command), "./lambda.exe --no-log run \"%s\" 2>&1", script_path);
+#endif
+
+    FILE* pipe = popen(command, "r");
+    ASSERT_NE(pipe, nullptr) << "Failed to execute command: " << command;
+
+    char buffer[4096];
+    char output[8192];
+    size_t output_len = 0;
+    output[0] = '\0';
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        size_t len = strlen(buffer);
+        size_t available = sizeof(output) - output_len - 1;
+        if (len > available) len = available;
+        if (len > 0) {
+            memcpy(output + output_len, buffer, len);
+            output_len += len;
+            output[output_len] = '\0';
+        }
+    }
+
+    int exit_code = pclose(pipe);
+    EXPECT_NE(WEXITSTATUS(exit_code), 0) << "Expected failure for: " << script_path
+                                         << "\nOutput was: " << output;
+
+    bool has_error_msg = strstr(output, "Error:") != nullptr ||
+                         strstr(output, "[ERR!]") != nullptr ||
+                         strstr(output, "error[E") != nullptr;
+    EXPECT_TRUE(has_error_msg) << "Expected error messages in output for: " << script_path
+                               << "\nOutput was: " << output;
+
+    EXPECT_EQ(strstr(output, "Segmentation fault"), nullptr)
+        << "Runtime crashed on: " << script_path;
+    EXPECT_EQ(strstr(output, "SIGABRT"), nullptr)
+        << "Runtime aborted on: " << script_path;
+}
+
+TEST(LambdaNegativeTests, test_typed_array_coercion_error) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/typed_array_coercion_error.ls");
 }
 
 static void patch_lambda_gtest_json_case_times() {

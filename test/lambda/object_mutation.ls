@@ -45,3 +45,9 @@ r.area()
 r.width
 1
 r.height
+
+// default-constructed receiver
+let d = <Counter>
+d.count
+d.increment()
+d.count

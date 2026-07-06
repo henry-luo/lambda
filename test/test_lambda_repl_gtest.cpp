@@ -114,6 +114,27 @@ TEST(LambdaReplTests, test_invalid_command) {
     free_test_result(&result);
 }
 
+static int count_substr(const char* text, const char* needle) {
+    int count = 0;
+    const char* p = text;
+    while (p && *p) {
+        p = strstr(p, needle);
+        if (!p) break;
+        count++;
+        p += strlen(needle);
+    }
+    return count;
+}
+
+TEST(LambdaReplTests, test_runtime_error_does_not_replay_previous_output) {
+    test_result result = run_lambda_repl("1 + 1\n[1, 2, 3] + \"hello\"\n2 + 2\nquit");
+    ASSERT_NE(result.output, nullptr);
+    EXPECT_EQ(count_substr(result.output, "> 2\n"), 1) << result.output;
+    EXPECT_EQ(count_substr(result.output, "> error\n"), 1) << result.output;
+    EXPECT_EQ(count_substr(result.output, "> 4\n"), 1) << result.output;
+    free_test_result(&result);
+}
+
 TEST(LambdaReplTests, test_empty_input) {
     test_result result = run_lambda_repl("");
     ASSERT_NE(result.output, nullptr);
