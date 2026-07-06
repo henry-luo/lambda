@@ -115,6 +115,14 @@ console.log(docCustomCount);
 document.removeEventListener("doccustom", markDocCustom);
 document.dispatchEvent({ type: "doccustom", bubbles: false });
 console.log(docCustomCount);
+var winCustomCount = 0;
+function markWinCustom() { winCustomCount = winCustomCount + 1; }
+addEventListener("wincustom", markWinCustom);
+window.dispatchEvent({ type: "wincustom", bubbles: false });
+console.log(winCustomCount);
+window.removeEventListener("wincustom", markWinCustom);
+dispatchEvent({ type: "wincustom", bubbles: false });
+console.log(winCustomCount);
 input.focus();
 console.log(document.activeElement === input);
 input.blur();

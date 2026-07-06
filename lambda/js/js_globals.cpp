@@ -33,6 +33,9 @@ extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" Item js_dom_range_get_prototype_value(void);
 extern "C" Item js_dom_selection_get_prototype_value(void);
+extern "C" Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts);
+extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
+extern "C" Item radiant_dom_window_dispatch_event(Item event_item);
 extern "C" Item js_internal_binding(Item name);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
@@ -15887,18 +15890,15 @@ extern "C" Item js_get_global_this() {
         // EventTarget interface methods on globalThis (window/self acts as
         // an EventTarget per HTML spec).
         {
-            extern Item js_eventtarget_add_listener(Item, Item, Item);
-            extern Item js_eventtarget_remove_listener(Item, Item, Item);
-            extern Item js_eventtarget_dispatch(Item);
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("addEventListener", 16))},
-                js_new_function((void*)js_eventtarget_add_listener, 3));
+                js_new_function((void*)radiant_dom_window_add_event_listener, 3));
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("removeEventListener", 19))},
-                js_new_function((void*)js_eventtarget_remove_listener, 3));
+                js_new_function((void*)radiant_dom_window_remove_event_listener, 3));
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("dispatchEvent", 13))},
-                js_new_function((void*)js_eventtarget_dispatch, 1));
+                js_new_function((void*)radiant_dom_window_dispatch_event, 1));
         }
 
         // Node.js: Buffer is a global

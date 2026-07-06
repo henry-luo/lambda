@@ -17,6 +17,7 @@ extern "C" void heap_unregister_gc_root(uint64_t* slot);
 
 extern "C" void* js_dom_get_document(void);
 extern "C" Item js_get_document_object_value(void);
+extern "C" Item js_get_global_this(void);
 extern "C" Item js_dom_create_wrapper_impl(void* dom_elem);
 extern "C" void* js_dom_unwrap_element_impl(Item item);
 extern "C" bool js_is_dom_node_impl(Item item);
@@ -2030,4 +2031,19 @@ extern "C" Item radiant_dom_document_method(Item method_name, Item* args, int ar
     }
 
     return ItemNull;
+}
+
+extern "C" Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts) {
+    // window EventTarget storage must key on the canonical global object.
+    return js_dom_add_event_listener_bridge(js_get_global_this(), type, callback, opts);
+}
+
+extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts) {
+    // window EventTarget storage must key on the canonical global object.
+    return js_dom_remove_event_listener_bridge(js_get_global_this(), type, callback, opts);
+}
+
+extern "C" Item radiant_dom_window_dispatch_event(Item event_item) {
+    // dispatch must use the same global-object key that listener registration uses.
+    return js_dom_dispatch_event_bridge(js_get_global_this(), event_item);
 }
