@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "../lib/mem.h"
 #include "../lib/mem_factory.h"
 #include "../lib/uv_loop.h"
@@ -2620,6 +2621,129 @@ void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* styleshe
     free_selector_index(index);
 }
 
+static bool load_scripts_before_cascade_legacy() {
+    const char* env = getenv("RADIANT_SCRIPT_BEFORE_CASCADE");
+    return env && env[0] && env[0] != '0';
+}
+
+static void clear_load_stylesheet_cascade_recursive(DomNode* node) {
+    if (!node) return;
+    if (node->is_element()) {
+        DomElement* elem = lam::dom_require_element(node);
+        bool changed = false;
+        if (elem->specified_style &&
+            style_tree_remove_non_inline_declarations(elem->specified_style)) {
+            changed = true;
+        }
+        if (elem->before_styles) { style_tree_clear(elem->before_styles); changed = true; }
+        if (elem->after_styles) { style_tree_clear(elem->after_styles); changed = true; }
+        if (elem->first_letter_styles) { style_tree_clear(elem->first_letter_styles); changed = true; }
+        if (elem->marker_styles) { style_tree_clear(elem->marker_styles); changed = true; }
+        if (elem->placeholder_styles) { style_tree_clear(elem->placeholder_styles); changed = true; }
+        if (changed) {
+            // Load-time scripts now run after an initial cascade; the recascade
+            // must drop old selector matches without erasing JS inline styles.
+            elem->style_version++;
+            elem->needs_style_recompute = true;
+        }
+        elem->styles_resolved = false;
+
+        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+            clear_load_stylesheet_cascade_recursive(child);
+        }
+    }
+}
+
+static void store_document_stylesheets(DomDocument* dom_doc,
+                                       CssStylesheet* external_stylesheet,
+                                       CssStylesheet** inline_stylesheets,
+                                       int inline_stylesheet_count,
+                                       Pool* pool,
+                                       const char* reason) {
+    if (!dom_doc || !pool) return;
+
+    int total_stylesheets = inline_stylesheet_count + (external_stylesheet ? 1 : 0);
+    dom_doc->stylesheet_capacity = total_stylesheets;
+    dom_doc->stylesheet_count = 0;
+    dom_doc->stylesheets = total_stylesheets > 0
+        ? (CssStylesheet**)pool_alloc(pool, total_stylesheets * sizeof(CssStylesheet*))
+        : nullptr;
+
+    if (external_stylesheet && dom_doc->stylesheets) {
+        dom_doc->stylesheets[dom_doc->stylesheet_count++] = external_stylesheet;
+    }
+    for (int i = 0; i < inline_stylesheet_count; i++) {
+        if (inline_stylesheets && inline_stylesheets[i] && dom_doc->stylesheets) {
+            dom_doc->stylesheets[dom_doc->stylesheet_count++] = inline_stylesheets[i];
+        }
+    }
+    log_debug("[Lambda CSS] Stored %d stylesheets in DomDocument for %s",
+              dom_doc->stylesheet_count, reason ? reason : "load");
+}
+
+static void apply_load_css_cascade(DomDocument* dom_doc,
+                                   DomElement* dom_root,
+                                   CssStylesheet* external_stylesheet,
+                                   CssStylesheet** inline_stylesheets,
+                                   int inline_stylesheet_count,
+                                   CssEngine* css_engine,
+                                   Pool* pool,
+                                   const char* phase) {
+    if (!dom_doc || !dom_root || !pool || !css_engine) return;
+    using namespace std::chrono;
+
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
+
+    auto t_cascade_start = high_resolution_clock::now();
+    reset_cascade_timing();
+    reset_dom_element_timing();
+
+    if (external_stylesheet && external_stylesheet->rule_count > 0) {
+        log_debug("[Lambda CSS] Applying external stylesheet with %d rules", external_stylesheet->rule_count);
+        apply_stylesheet_to_dom_tree_fast(dom_root, external_stylesheet, matcher, pool, css_engine);
+    }
+
+    auto t_external = high_resolution_clock::now();
+    log_info("[TIMING] cascade(%s): external stylesheet: %.1fms",
+             phase ? phase : "load",
+             duration<double, std::milli>(t_external - t_cascade_start).count());
+
+    for (int i = 0; i < inline_stylesheet_count; i++) {
+        log_debug("[Lambda CSS] Inline stylesheet %d: ptr=%p, rule_count=%zu",
+            i, inline_stylesheets ? inline_stylesheets[i] : nullptr,
+            (inline_stylesheets && inline_stylesheets[i]) ? inline_stylesheets[i]->rule_count : 0);
+        if (inline_stylesheets && inline_stylesheets[i]) {
+            log_debug("[Lambda CSS] Stylesheet %d is not null, rule_count=%zu",
+                i, inline_stylesheets[i]->rule_count);
+            if (inline_stylesheets[i]->rule_count > 0) {
+                log_debug("[Lambda CSS] Applying inline stylesheet %d with %zu rules",
+                    i, inline_stylesheets[i]->rule_count);
+                auto t_inline_start = high_resolution_clock::now();
+                apply_stylesheet_to_dom_tree_fast(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
+                auto t_inline_end = high_resolution_clock::now();
+                log_info("[TIMING] cascade(%s): inline stylesheet %d (%zu rules): %.1fms",
+                    phase ? phase : "load", i, inline_stylesheets[i]->rule_count,
+                    duration<double, std::milli>(t_inline_end - t_inline_start).count());
+                log_debug("[Lambda CSS] Finished applying inline stylesheet %d", i);
+            } else {
+                log_debug("[Lambda CSS] Skipping stylesheet %d: rule_count=%zu is not > 0",
+                    i, inline_stylesheets[i]->rule_count);
+            }
+        } else {
+            log_debug("[Lambda CSS] Stylesheet %d is NULL", i);
+        }
+    }
+
+    auto t_cascade = high_resolution_clock::now();
+    log_debug("[Lambda CSS] CSS cascade complete (%s)", phase ? phase : "load");
+    log_cascade_timing_summary();
+    log_dom_element_timing();
+    log_info("[TIMING] load: CSS cascade (%s): %.1fms",
+             phase ? phase : "load",
+             duration<double, std::milli>(t_cascade - t_cascade_start).count());
+}
+
 /**
  * Check if content starts with a UTF-8 BOM (EF BB BF).
  */
@@ -3224,25 +3348,11 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         }
     }
 
-    // Store stylesheets in DomDocument BEFORE scripts
-    // This enables getComputedStyle to do on-demand selector matching
-    int total_stylesheets = inline_stylesheet_count + (external_stylesheet ? 1 : 0);
-    if (total_stylesheets > 0) {
-        dom_doc->stylesheet_capacity = total_stylesheets;
-        dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, total_stylesheets * sizeof(CssStylesheet*));
-        dom_doc->stylesheet_count = 0;
-
-        if (external_stylesheet) {
-            dom_doc->stylesheets[dom_doc->stylesheet_count++] = external_stylesheet;
-        }
-        for (int i = 0; i < inline_stylesheet_count; i++) {
-            if (inline_stylesheets[i]) {
-                dom_doc->stylesheets[dom_doc->stylesheet_count++] = inline_stylesheets[i];
-            }
-        }
-        log_debug("[Lambda CSS] Stored %d stylesheets in DomDocument for getComputedStyle + @font-face",
-                  dom_doc->stylesheet_count);
-    }
+    // Store stylesheets before scripts so getComputedStyle and @font-face share
+    // the same sheet list that the pre-script cascade uses.
+    store_document_stylesheets(dom_doc, external_stylesheet, inline_stylesheets,
+                               inline_stylesheet_count, pool,
+                               "getComputedStyle + @font-face");
 
     // Step 2c: Apply inline style="" attributes BEFORE scripts
     // Inline style="" attributes from HTML are applied first as the baseline.
@@ -3254,14 +3364,26 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     apply_inline_styles_to_tree(dom_root, html_root, pool);
     log_mem_stage("load_html: after_inline_attrs");
 
-    dom_doc->root = dom_root;  // set root for JS DOM API access
+    dom_doc->root = dom_root;  // set root for CSSOM and JS DOM API access
+
+    bool legacy_scripts_before_cascade = load_scripts_before_cascade_legacy();
+    bool css_cascade_current = false;
+    if (!legacy_scripts_before_cascade) {
+        log_mem_stage("load_html: before_pre_script_cascade");
+        apply_load_css_cascade(dom_doc, dom_root, external_stylesheet,
+                               inline_stylesheets, inline_stylesheet_count,
+                               css_engine, pool, "pre-script");
+        css_cascade_current = true;
+        log_mem_stage("load_html: pre_script_cascade_done");
+    } else {
+        log_warn("[P17] RADIANT_SCRIPT_BEFORE_CASCADE enabled; using legacy load order");
+    }
 
     if (execute_scripts) {
         // Step 2d: Execute <script> elements (inline + external) and body onload handlers
-        // Scripts run after inline style application so JS style changes override HTML attrs.
-        // Scripts run before stylesheet cascade so JS DOM mutations (className changes,
-        // appendChild, removeChild, etc.) take effect before styles are resolved.
-        // getComputedStyle can query parsed stylesheets via on-demand matching.
+        // P17: scripts run after the initial cascade so load-time CSSOM reads see
+        // resolved styles; if scripts mutate DOM/classes/stylesheets we recascade
+        // below while preserving JS inline style writes.
         log_mem_stage("load_html: before_scripts");
         execute_document_scripts(html_root, dom_doc, pool, html_url);
         log_mem_stage("load_html: after_scripts");
@@ -3276,9 +3398,8 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
             }
         }
 
-        // Log JS DOM mutations — cascade will pick these up since it runs after scripts
         if (dom_doc->js_mutation_count > 0) {
-            log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve",
+            log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve after scripts",
                      dom_doc->js_mutation_count);
 
             // Re-collect inline <style> stylesheets from the DomElement* tree to pick up:
@@ -3313,18 +3434,17 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
             inline_stylesheets = merged_sheets;
             inline_stylesheet_count = merged_count;
 
-            // Update DomDocument stylesheet cache for getComputedStyle
-            int new_total = merged_count + (external_stylesheet ? 1 : 0);
-            dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, new_total * sizeof(CssStylesheet*));
-            dom_doc->stylesheet_count = 0;
-            dom_doc->stylesheet_capacity = new_total;
-            if (external_stylesheet) {
-                dom_doc->stylesheets[dom_doc->stylesheet_count++] = external_stylesheet;
-            }
-            for (int i = 0; i < merged_count; i++) {
-                if (merged_sheets[i]) {
-                    dom_doc->stylesheets[dom_doc->stylesheet_count++] = merged_sheets[i];
-                }
+            store_document_stylesheets(dom_doc, external_stylesheet, merged_sheets,
+                                       merged_count, pool,
+                                       "post-script getComputedStyle + @font-face");
+
+            if (!legacy_scripts_before_cascade) {
+                clear_load_stylesheet_cascade_recursive(static_cast<DomNode*>(dom_root));
+                apply_load_css_cascade(dom_doc, dom_root, external_stylesheet,
+                                       inline_stylesheets, inline_stylesheet_count,
+                                       css_engine, pool, "post-script");
+                css_cascade_current = true;
+                log_mem_stage("load_html: post_script_cascade_done");
             }
         }
 
@@ -3335,54 +3455,13 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         log_debug("[Lambda CSS] Skipping document script execution for caller-managed JS");
     }
 
-    // Step 6: Apply CSS cascade (external + <style> elements)
-    SelectorMatcher* matcher = selector_matcher_create(pool);
-    state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
-
-    auto t_cascade_start = high_resolution_clock::now();
-    reset_cascade_timing();  // reset timing accumulators
-    reset_dom_element_timing();  // reset declaration timing
-
-    // Apply external stylesheet first (lower priority)
-    if (external_stylesheet && external_stylesheet->rule_count > 0) {
-        log_debug("[Lambda CSS] Applying external stylesheet with %d rules", external_stylesheet->rule_count);
-        apply_stylesheet_to_dom_tree_fast(dom_root, external_stylesheet, matcher, pool, css_engine);
+    if (!css_cascade_current) {
+        apply_load_css_cascade(dom_doc, dom_root, external_stylesheet,
+                               inline_stylesheets, inline_stylesheet_count,
+                               css_engine, pool,
+                               legacy_scripts_before_cascade ? "legacy-post-script" : "no-script");
+        css_cascade_current = true;
     }
-
-    auto t_external = high_resolution_clock::now();
-    log_info("[TIMING] cascade: external stylesheet: %.1fms", duration<double, std::milli>(t_external - t_cascade_start).count());
-
-    // Apply inline stylesheets (higher priority)
-    for (int i = 0; i < inline_stylesheet_count; i++) {
-        log_debug("[Lambda CSS] Inline stylesheet %d: ptr=%p, rule_count=%zu",
-            i, inline_stylesheets[i], inline_stylesheets[i] ? inline_stylesheets[i]->rule_count : 0);
-        if (inline_stylesheets[i]) {
-            log_debug("[Lambda CSS] Stylesheet %d is not null, rule_count=%zu", i, inline_stylesheets[i]->rule_count);
-            if (inline_stylesheets[i]->rule_count > 0) {
-                log_debug("[Lambda CSS] Applying inline stylesheet %d with %zu rules", i, inline_stylesheets[i]->rule_count);
-                auto t_inline_start = high_resolution_clock::now();
-                apply_stylesheet_to_dom_tree_fast(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
-                auto t_inline_end = high_resolution_clock::now();
-                log_info("[TIMING] cascade: inline stylesheet %d (%zu rules): %.1fms",
-                    i, inline_stylesheets[i]->rule_count,
-                    duration<double, std::milli>(t_inline_end - t_inline_start).count());
-                log_debug("[Lambda CSS] Finished applying inline stylesheet %d", i);
-            } else {
-                log_debug("[Lambda CSS] Skipping stylesheet %d: rule_count=%zu is not > 0", i, inline_stylesheets[i]->rule_count);
-            }
-        } else {
-            log_debug("[Lambda CSS] Stylesheet %d is NULL", i);
-        }
-    }
-
-    auto t_inline_done = high_resolution_clock::now();
-    log_debug("[Lambda CSS] CSS cascade complete");
-
-    auto t_cascade = high_resolution_clock::now();
-    log_info("[TIMING] cascade: inline style attrs: %.1fms", duration<double, std::milli>(t_cascade - t_inline_done).count());
-    log_cascade_timing_summary();  // log selector matching and property application stats
-    log_dom_element_timing();  // log detailed cascade timing
-    log_info("[TIMING] load: CSS cascade: %.1fms", duration<double, std::milli>(t_cascade - t_css_parse).count());
     log_mem_stage("load_html: cascade_done");
 
     // Dump CSS computed values for testing/comparison (includes inheritance, before layout).

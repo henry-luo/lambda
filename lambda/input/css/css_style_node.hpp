@@ -94,6 +94,13 @@ void style_tree_destroy(StyleTree* style_tree);
 void style_tree_clear(StyleTree* style_tree);
 
 /**
+ * Remove stylesheet-origin declarations while preserving inline style writes.
+ * @param style_tree Tree to filter
+ * @return true when at least one declaration was removed
+ */
+bool style_tree_remove_non_inline_declarations(StyleTree* style_tree);
+
+/**
  * Create a CSS declaration
  * @param property_id CSS property ID
  * @param value Parsed property value
