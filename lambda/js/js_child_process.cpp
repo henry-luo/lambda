@@ -41,8 +41,6 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" void js_next_tick_enqueue(Item callback);
 extern "C" Item js_json_parse(Item str_item);
 extern "C" Item js_json_stringify(Item value);
-extern "C" Item js_ipc_serialize_message(Item value, bool advanced);
-extern "C" Item js_ipc_deserialize_message(Item str_item);
 extern "C" Item js_clear_exception(void);
 extern "C" Item js_buffer_from_bytes(const char* data, int len);
 extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe);
@@ -411,9 +409,6 @@ static void maybe_complete(JsChildProcess* cp) {
                 snprintf(emsg, sizeof(emsg), "Command failed with exit code %d", cp->exit_code);
             }
             err = js_new_error(make_string_item(emsg));
-            // exec/execFile callback errors expose the child status as code;
-            // leaving it absent makes callers treat real nonzero exits as shape errors.
-            js_property_set(err, make_string_item("code"), (Item){.item = i2it(cp->exit_code)});
         }
         Item stdout_str = cp->stdout_buf
             ? make_string_item(cp->stdout_buf, (int)cp->stdout_len)
@@ -507,9 +502,6 @@ static void child_remove_abort_signal(JsChildProcess* cp) {
 // exec(command, callback) — async, buffers stdout/stderr
 // =============================================================================
 
-static char** build_envp(Item env_item, int* out_count);
-static void free_envp(char** envp, int count);
-
 static Item js_cp_exec_with_options(Item command_item, Item options_item,
                                     Item callback_item, size_t max_buffer) {
     char cmd_buf[4096];
@@ -561,22 +553,10 @@ static Item js_cp_exec_with_options(Item command_item, Item options_item,
     opts.stdio = stdio;
     opts.stdio_count = 3;
     opts.exit_cb = child_exit_cb;
-    int env_count = 0;
-    char** envp = NULL;
-    if (is_object_item(options_item)) {
-        Item env = js_property_get(options_item, make_string_item("env"));
-        if (is_object_item(env)) {
-            // execFile lowers through exec(); dropping options.env here makes
-            // child test flags like NODE_TEST_KNOWN_GLOBALS disappear.
-            envp = build_envp(env, &env_count);
-            if (envp) opts.env = envp;
-        }
-    }
 
     cp->process.data = cp;
 
     int r = uv_spawn(loop, &cp->process, &opts);
-    free_envp(envp, env_count);
     if (r != 0) {
         log_error("child_process: exec: spawn failed: %s", uv_strerror(r));
         if (get_type_id(callback_item) == LMD_TYPE_FUNC) {
@@ -738,7 +718,6 @@ typedef struct JsSpawnProcess {
     bool         stdout_pipe_reading;
     bool         stderr_pipe_reading;
     bool         ipc_pipe_active;
-    bool         ipc_advanced_serialization;
     int          stdin_pending_writes;
     size_t       stdin_pending_bytes;
     bool         stdin_end_requested;
@@ -759,9 +738,6 @@ typedef struct JsSpawnProcess {
     Item*        ref_env;
     Item*        unref_env;
     Item*        abort_env;
-    Item         pending_cluster_listening;
-    bool         pending_cluster_listening_set;
-    bool         pending_cluster_listening_rooted;
     char*        ipc_buf;
     size_t       ipc_len;
     size_t       ipc_cap;
@@ -791,7 +767,6 @@ typedef struct SpawnWriteReq {
 } SpawnWriteReq;
 
 static Item spawn_signal_name_item(int signal_number);
-static void spawn_emit_disconnect_once(JsSpawnProcess* sp);
 
 #define CP_STDIO_MAX 16
 #define CP_STDIO_PIPE 0
@@ -818,10 +793,6 @@ static bool spawn_listener_once(Item record) {
     return once.item == ITEM_TRUE || once.item == b2it(true);
 }
 
-static bool spawn_listener_matches(Item record, Item callback) {
-    return spawn_listener_callback(record).item == callback.item;
-}
-
 static void spawn_emit_event(Item obj, const char* event, Item* args, int argc) {
     char key_buf[64];
     snprintf(key_buf, sizeof(key_buf), "__on_%s__", event);
@@ -846,18 +817,6 @@ static void spawn_emit_event(Item obj, const char* event, Item* args, int argc) 
             }
         }
         js_microtask_flush();
-    }
-    if (strcmp(event, "listening") == 0) {
-        Item user_key = make_string_item("__user_on_listening__");
-        Item user_listener = js_property_get(obj, user_key);
-        Item cb = spawn_listener_callback(user_listener);
-        if (is_callable(cb)) {
-            if (spawn_listener_once(user_listener)) {
-                js_property_set(obj, user_key, make_js_undefined());
-            }
-            js_call_function(cb, obj, args, argc);
-            js_microtask_flush();
-        }
     }
 }
 
@@ -887,47 +846,12 @@ static Item spawn_pending_messages_key(void) {
     return make_string_item("__pending_ipc_messages__");
 }
 
+static Item spawn_pending_cluster_listening_key(void) {
+    return make_string_item("__pending_cluster_listening__");
+}
+
 static Item spawn_pending_cluster_online_key(void) {
     return make_string_item("__pending_cluster_online__");
-}
-
-static void spawn_schedule_cluster_online_flush(Item obj);
-
-#define SPAWN_PROCESS_MAP_MAX 256
-typedef struct SpawnProcessMapEntry {
-    Item obj;
-    JsSpawnProcess* sp;
-} SpawnProcessMapEntry;
-
-static SpawnProcessMapEntry spawn_process_map[SPAWN_PROCESS_MAP_MAX];
-
-static void spawn_process_map_register(Item obj, JsSpawnProcess* sp) {
-    if (!sp || !obj.item) return;
-    for (int i = 0; i < SPAWN_PROCESS_MAP_MAX; i++) {
-        if (!spawn_process_map[i].obj.item || spawn_process_map[i].obj.item == obj.item) {
-            spawn_process_map[i].obj = obj;
-            spawn_process_map[i].sp = sp;
-            return;
-        }
-    }
-}
-
-static void spawn_process_map_unregister(JsSpawnProcess* sp) {
-    if (!sp) return;
-    for (int i = 0; i < SPAWN_PROCESS_MAP_MAX; i++) {
-        if (spawn_process_map[i].sp == sp) {
-            spawn_process_map[i].obj = (Item){0};
-            spawn_process_map[i].sp = NULL;
-        }
-    }
-}
-
-static JsSpawnProcess* spawn_from_object(Item obj) {
-    if (!obj.item) return NULL;
-    for (int i = 0; i < SPAWN_PROCESS_MAP_MAX; i++) {
-        if (spawn_process_map[i].obj.item == obj.item) return spawn_process_map[i].sp;
-    }
-    return NULL;
 }
 
 static void spawn_queue_ipc_message(Item obj, Item message, Item handle) {
@@ -1000,92 +924,25 @@ static bool spawn_ipc_is_handle_accepted_control(Item message) {
     return value.item == ITEM_TRUE || value.item == b2it(true);
 }
 
-static bool spawn_ipc_unwrap_handle_message(Item* message) {
-    if (!message || (get_type_id(*message) != LMD_TYPE_MAP &&
-        get_type_id(*message) != LMD_TYPE_OBJECT &&
-        get_type_id(*message) != LMD_TYPE_VMAP)) {
-        return false;
-    }
-    Item has_handle = js_property_get(*message, make_string_item("__lambda_ipc_has_handle__"));
-    if (has_handle.item != ITEM_TRUE && has_handle.item != b2it(true)) return false;
-    Item payload = js_property_get(*message, make_string_item("__lambda_ipc_payload__"));
-    // ChildProcess IPC mirrors process-side unwrapping so descriptor-bearing
-    // messages expose the user payload, not Lambda's transfer envelope.
-    *message = payload;
-    return true;
-}
-
-static void spawn_root_pending_cluster_listening(JsSpawnProcess* sp) {
-    if (!sp || sp->pending_cluster_listening_rooted) return;
-    heap_register_gc_root(&sp->pending_cluster_listening.item);
-    sp->pending_cluster_listening_rooted = true;
-}
-
-static void spawn_schedule_cluster_listening_flush(Item obj);
-
-static void spawn_emit_or_queue_cluster_listening(JsSpawnProcess* sp, Item address) {
-    if (!sp) return;
-    Item obj = sp->js_object;
+static void spawn_emit_or_queue_cluster_listening(Item obj) {
     if (!spawn_has_event_listener(obj, "listening")) {
-        spawn_root_pending_cluster_listening(sp);
-        sp->pending_cluster_listening = address;
-        sp->pending_cluster_listening_set = true;
-        spawn_schedule_cluster_listening_flush(obj);
+        js_property_set(obj, spawn_pending_cluster_listening_key(), (Item){.item = ITEM_TRUE});
         return;
     }
-    Item args[1] = { address };
-    spawn_emit_event(obj, "listening", args, 1);
+    spawn_emit_event(obj, "listening", NULL, 0);
 }
 
-extern "C" void js_child_process_preserve_cluster_listening(Item obj, Item address) {
-    JsSpawnProcess* sp = spawn_from_object(obj);
-    if (!sp) return;
-    // cluster namespace forwarding is an internal listener; preserve readiness
-    // for user worker.on('listening') without reentering listener registration.
-    spawn_root_pending_cluster_listening(sp);
-    sp->pending_cluster_listening = address;
-    sp->pending_cluster_listening_set = true;
-    spawn_schedule_cluster_listening_flush(obj);
-}
-
-static bool spawn_take_pending_cluster_listening(JsSpawnProcess* sp, Item* out_address) {
-    if (!sp || !sp->pending_cluster_listening_set) return false;
-    if (out_address) *out_address = sp->pending_cluster_listening;
-    sp->pending_cluster_listening = make_js_undefined();
-    sp->pending_cluster_listening_set = false;
-    return true;
-}
-
-static Item spawn_flush_cluster_listening_scheduled(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    Item obj = env[0];
-    JsSpawnProcess* sp = spawn_from_object(obj);
-    if (!sp || !sp->pending_cluster_listening_set || !spawn_has_event_listener(obj, "listening")) {
-        return make_js_undefined();
-    }
-    Item address = make_js_undefined();
-    if (spawn_take_pending_cluster_listening(sp, &address)) {
-        Item args[1] = { address };
-        spawn_emit_event(obj, "listening", args, 1);
-    }
-    return make_js_undefined();
-}
-
-static void spawn_schedule_cluster_listening_flush(Item obj) {
-    JsSpawnProcess* sp = spawn_from_object(obj);
-    if (!sp || !sp->pending_cluster_listening_set) return;
-    Item* env = js_alloc_env(1);
-    env[0] = obj;
-    // queued cluster readiness must run after listener registration unwinds;
-    // synchronous replay mutates outer loop/closure state during worker.on().
-    js_setImmediate(js_new_closure((void*)spawn_flush_cluster_listening_scheduled, 0, env, 1));
+static void spawn_flush_cluster_listening(Item obj) {
+    Item pending = js_property_get(obj, spawn_pending_cluster_listening_key());
+    if (pending.item != ITEM_TRUE && pending.item != b2it(true)) return;
+    if (!spawn_has_event_listener(obj, "listening")) return;
+    js_property_set(obj, spawn_pending_cluster_listening_key(), (Item){.item = ITEM_FALSE});
+    spawn_emit_event(obj, "listening", NULL, 0);
 }
 
 static void spawn_emit_or_queue_cluster_online(Item obj) {
     if (!spawn_has_event_listener(obj, "online")) {
         js_property_set(obj, spawn_pending_cluster_online_key(), (Item){.item = ITEM_TRUE});
-        spawn_schedule_cluster_online_flush(obj);
         return;
     }
     spawn_emit_event(obj, "online", NULL, 0);
@@ -1097,27 +954,6 @@ static void spawn_flush_cluster_online(Item obj) {
     if (!spawn_has_event_listener(obj, "online")) return;
     js_property_set(obj, spawn_pending_cluster_online_key(), (Item){.item = ITEM_FALSE});
     spawn_emit_event(obj, "online", NULL, 0);
-}
-
-static bool spawn_has_pending_cluster_online(Item obj) {
-    Item pending = js_property_get(obj, spawn_pending_cluster_online_key());
-    return pending.item == ITEM_TRUE || pending.item == b2it(true);
-}
-
-static Item spawn_flush_cluster_online_scheduled(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    spawn_flush_cluster_online(env[0]);
-    return make_js_undefined();
-}
-
-static void spawn_schedule_cluster_online_flush(Item obj) {
-    if (!spawn_has_pending_cluster_online(obj)) return;
-    Item* env = js_alloc_env(1);
-    env[0] = obj;
-    // worker.on('online') observes an already-queued fork event on a later turn;
-    // firing inside listener registration can reenter primary cluster setup.
-    js_setImmediate(js_new_closure((void*)spawn_flush_cluster_online_scheduled, 0, env, 1));
 }
 
 extern "C" void js_child_process_emit_or_queue_cluster_online(Item obj) {
@@ -1319,11 +1155,6 @@ static void spawn_release_process(JsSpawnProcess* sp) {
     spawn_drain_transferred_connections(sp);
     spawn_close_pending_sent_stream_wrappers(sp);
     spawn_clear_stdio_handle_properties(sp);
-    if (sp->pending_cluster_listening_rooted) {
-        heap_unregister_gc_root(&sp->pending_cluster_listening.item);
-    }
-    // late ChildProcess listeners must not recover a freed native process.
-    spawn_process_map_unregister(sp);
     if (sp->ipc_buf) mem_free(sp->ipc_buf);
     mem_free(sp);
 }
@@ -1466,9 +1297,6 @@ static void spawn_ipc_write_cb(uv_write_t* req, int status) {
         schedule_spawn_send_callback(callback, err);
     }
     if (close_ipc_after && sp && sp->ipc_pipe_active && !uv_is_closing((uv_handle_t*)&sp->ipc_pipe)) {
-        // ChildProcess.disconnect() is observable only after the IPC close is
-        // queued; synchronous emission makes post-disconnect listeners miss it.
-        spawn_emit_disconnect_once(sp);
         sp->ipc_pipe_active = false;
         uv_read_stop((uv_stream_t*)&sp->ipc_pipe);
         uv_close((uv_handle_t*)&sp->ipc_pipe, spawn_handle_close_cb);
@@ -1552,7 +1380,7 @@ static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message, uv_stream_t* 
                         (Item){.item = ITEM_TRUE});
         js_property_set(wire_message, make_string_item("__lambda_ipc_payload__"), message);
     }
-    Item json = js_ipc_serialize_message(wire_message, sp->ipc_advanced_serialization);
+    Item json = js_json_stringify(wire_message);
     if (js_check_exception() || get_type_id(json) != LMD_TYPE_STRING) return false;
     String* s = it2s(json);
     if (!s) return false;
@@ -1650,8 +1478,7 @@ static void spawn_ipc_send_disconnect_and_close(JsSpawnProcess* sp) {
     }
     sp->ipc_pipe_active = false;
     // parent disconnect sends an internal close frame when possible; if the
-    // frame cannot be queued, still emit while closing locally so waiters run.
-    spawn_emit_disconnect_once(sp);
+    // frame cannot be queued, close locally so the parent does not watchdog-wait.
     uv_read_stop((uv_stream_t*)&sp->ipc_pipe);
     uv_close((uv_handle_t*)&sp->ipc_pipe, spawn_handle_close_cb);
 }
@@ -1659,14 +1486,12 @@ static void spawn_ipc_send_disconnect_and_close(JsSpawnProcess* sp) {
 static void spawn_ipc_handle_line(JsSpawnProcess* sp, const char* chars, int len) {
     if (!sp || len <= 0) return;
     Item json = make_string_item(chars, len);
-    Item message = js_ipc_deserialize_message(json);
+    Item message = js_json_parse(json);
     if (js_check_exception()) return;
     if (spawn_ipc_is_cluster_listening(message)) {
         // cluster readiness is carried over ChildProcess IPC but surfaces as a
         // worker 'listening' event, not as a user-visible message payload.
-        Item address = js_property_get(message, make_string_item("address"));
-        if (is_undefined_item(address) || address.item == 0) address = make_js_undefined();
-        spawn_emit_or_queue_cluster_listening(sp, address);
+        spawn_emit_or_queue_cluster_listening(sp->js_object);
         return;
     }
     if (spawn_ipc_is_handle_accepted_control(message)) {
@@ -1681,8 +1506,7 @@ static void spawn_ipc_handle_line(JsSpawnProcess* sp, const char* chars, int len
         spawn_complete_next_transferred_connection(sp);
         return;
     }
-    bool has_handle = spawn_ipc_unwrap_handle_message(&message);
-    Item handle = has_handle ? js_net_accept_ipc_tcp_handle(&sp->ipc_pipe) : make_js_undefined();
+    Item handle = js_net_accept_ipc_tcp_handle(&sp->ipc_pipe);
     spawn_emit_ipc_message_or_queue(sp->js_object, message, handle);
 }
 
@@ -1732,25 +1556,6 @@ static void spawn_ipc_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t
         spawn_emit_disconnect_once(sp);
         uv_close((uv_handle_t*)stream, spawn_handle_close_cb);
     }
-}
-
-static Item spawn_start_ipc_read_scheduled(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
-    if (!sp || !sp->ipc_pipe_active || uv_is_closing((uv_handle_t*)&sp->ipc_pipe)) {
-        return make_js_undefined();
-    }
-    // child IPC must not dispatch worker readiness while fork() callers are
-    // still registering listeners; start reads on the next turn.
-    uv_read_start((uv_stream_t*)&sp->ipc_pipe, spawn_alloc_cb, spawn_ipc_read_cb);
-    return make_js_undefined();
-}
-
-static void spawn_schedule_ipc_read_start(JsSpawnProcess* sp) {
-    if (!sp || !sp->ipc_pipe_active) return;
-    Item* env = js_alloc_env(1);
-    env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
-    js_setImmediate(js_new_closure((void*)spawn_start_ipc_read_scheduled, 0, env, 1));
 }
 
 static bool spawn_write_stdin_chunk(JsSpawnProcess* sp, Item chunk, bool* out_should_continue) {
@@ -2027,43 +1832,12 @@ static Item spawn_add_listener(Item self, Item event_item, Item callback, bool o
     if (ev->len == 7 && memcmp(ev->chars, "message", 7) == 0) {
         spawn_flush_queued_ipc_messages(self);
     } else if (ev->len == 9 && memcmp(ev->chars, "listening", 9) == 0) {
-        spawn_schedule_cluster_listening_flush(self);
+        spawn_flush_cluster_listening(self);
+    } else if (ev->len == 6 && memcmp(ev->chars, "online", 6) == 0) {
+        spawn_flush_cluster_online(self);
     } else if (ev->len == 4 && memcmp(ev->chars, "data", 4) == 0) {
         spawn_resume_stdio_stream(self);
     }
-    return self;
-}
-
-static Item spawn_remove_listener(Item self, Item event_item, Item callback) {
-    if (get_type_id(event_item) != LMD_TYPE_STRING || !is_callable(callback)) return self;
-    String* ev = it2s(event_item);
-    char key_buf[64];
-    snprintf(key_buf, sizeof(key_buf), "__on_%.*s__", (int)ev->len, ev->chars);
-    Item key = make_string_item(key_buf);
-    Item existing = js_property_get(self, key);
-    if (is_callable(existing)) {
-        if (existing.item == callback.item) js_property_set(self, key, make_js_undefined());
-        return self;
-    }
-    if (get_type_id(existing) != LMD_TYPE_ARRAY) return self;
-
-    int64_t len = js_array_length(existing);
-    int64_t remove_index = -1;
-    for (int64_t i = len - 1; i >= 0; i--) {
-        if (spawn_listener_matches(js_array_get_int(existing, i), callback)) {
-            remove_index = i;
-            break;
-        }
-    }
-    if (remove_index < 0) return self;
-
-    Item next = js_array_new(0);
-    for (int64_t i = 0; i < len; i++) {
-        if (i != remove_index) js_array_push(next, js_array_get_int(existing, i));
-    }
-    // ChildProcess uses compact __on_<event> slots; removing the official
-    // message listener must update that slot or server transfer setup aborts.
-    js_property_set(self, key, next);
     return self;
 }
 
@@ -2075,16 +1849,6 @@ extern "C" Item js_spawn_once(Item event_item, Item callback) {
     // fork cleanup commonly waits on once('message'); treating it as missing
     // leaves IPC children and transferred sockets referenced until drain.
     return spawn_add_listener(js_get_this(), event_item, callback, true);
-}
-
-extern "C" Item js_spawn_removeListener(Item event_item, Item callback) {
-    // ChildProcess is an EventEmitter; missing removal aborts official tests
-    // before their cleanup listener can run, leaving workers to the watchdog.
-    return spawn_remove_listener(js_get_this(), event_item, callback);
-}
-
-extern "C" Item js_spawn_off(Item event_item, Item callback) {
-    return spawn_remove_listener(js_get_this(), event_item, callback);
 }
 
 // on() for stdout/stderr stream sub-objects
@@ -2329,10 +2093,9 @@ static Item js_spawn_disconnect_with_env(Item env_item) {
     spawn_set_connected(self, false);
     if (sp && sp->ipc_pipe_active) {
         spawn_ipc_send_disconnect_and_close(sp);
-    } else if (sp) {
-        spawn_emit_disconnect_once(sp);
     }
-    if (!sp) spawn_emit_event(self, "disconnect", NULL, 0);
+    if (sp) spawn_emit_disconnect_once(sp);
+    else spawn_emit_event(self, "disconnect", NULL, 0);
     return make_js_undefined();
 }
 
@@ -2361,10 +2124,6 @@ static Item make_child_process_object(void) {
                     js_new_function((void*)js_spawn_on, 2));
     js_property_set(obj, make_string_item("once"),
                     js_new_function((void*)js_spawn_once, 2));
-    js_property_set(obj, make_string_item("removeListener"),
-                    js_new_function((void*)js_spawn_removeListener, 2));
-    js_property_set(obj, make_string_item("off"),
-                    js_new_function((void*)js_spawn_removeListener, 2));
     js_property_set(obj, make_string_item("pid"), make_js_undefined());
     js_property_set(obj, make_string_item("killed"), (Item){.item = ITEM_FALSE});
     js_property_set(obj, make_string_item("exitCode"), ItemNull);
@@ -2412,10 +2171,6 @@ static void install_spawn_lifecycle_surface(Item obj, JsSpawnProcess* sp) {
     sp->unref_env = unref_env;
     js_property_set(obj, make_string_item("unref"),
                     js_new_closure((void*)spawn_unref_with_env, 0, unref_env, 1));
-    js_property_set(obj, make_string_item("removeListener"),
-                    js_new_function((void*)js_spawn_removeListener, 2));
-    js_property_set(obj, make_string_item("off"),
-                    js_new_function((void*)js_spawn_off, 2));
 }
 
 static void install_ipc_legacy_surface(Item obj) {
@@ -2433,7 +2188,6 @@ typedef struct SpawnRequest {
     bool shell;
     bool detached;
     bool ipc;
-    bool ipc_advanced_serialization;
     int stdio_mode[CP_STDIO_MAX];
     int stdio_fd[CP_STDIO_MAX];
     Item stdio_handle[CP_STDIO_MAX];
@@ -2565,7 +2319,6 @@ static bool normalize_spawn_request(Item rest_args, SpawnRequest* req) {
     req->shell = false;
     req->detached = false;
     req->ipc = false;
-    req->ipc_advanced_serialization = false;
     req->stdio_count = 3;
     req->ipc_index = -1;
     for (int i = 0; i < CP_STDIO_MAX; i++) {
@@ -2635,14 +2388,6 @@ static bool normalize_spawn_request(Item rest_args, SpawnRequest* req) {
         req->detached = get_type_id(detached) == LMD_TYPE_BOOL && it2b(detached);
         Item env = js_property_get(req->options, make_string_item("env"));
         if (is_object_item(env)) req->env = env;
-        Item serialization = js_property_get(req->options, make_string_item("serialization"));
-        if (item_string_equals(serialization, "advanced")) {
-            req->ipc_advanced_serialization = true;
-        } else if (!(is_nullish_item(serialization) || item_string_equals(serialization, "json"))) {
-            js_throw_error_with_code("ERR_INVALID_ARG_VALUE",
-                "The property 'options.serialization' must be one of: undefined, 'json', 'advanced'");
-            return false;
-        }
         if (!normalize_stdio_options(req)) return false;
     }
     return true;
@@ -2723,60 +2468,6 @@ static char** envp_set(char** envp, int* count, const char* key, const char* val
     (*count)++;
     envp[*count] = NULL;
     return envp;
-}
-
-typedef struct SpawnSavedEnv {
-    const char* key;
-    char value[512];
-    bool had_value;
-} SpawnSavedEnv;
-
-#define SPAWN_CLUSTER_INTERNAL_ENV_MAX 8
-
-static void spawn_save_and_unset_env(SpawnSavedEnv* saved, const char* key) {
-    if (!saved || !key) return;
-    saved->key = key;
-    const char* value = getenv(key);
-    saved->had_value = value != NULL;
-    if (value) {
-        int len = (int)strlen(value);
-        if (len >= (int)sizeof(saved->value)) len = (int)sizeof(saved->value) - 1;
-        memcpy(saved->value, value, (size_t)len);
-        saved->value[len] = '\0';
-        unsetenv(key);
-    } else {
-        saved->value[0] = '\0';
-    }
-}
-
-static void spawn_restore_env(SpawnSavedEnv* saved) {
-    if (!saved || !saved->key) return;
-    if (saved->had_value) setenv(saved->key, saved->value, 1);
-    else unsetenv(saved->key);
-}
-
-static void spawn_clear_cluster_internal_env(SpawnSavedEnv* saved, int* count) {
-    static const char* keys[] = {
-        "NODE_UNIQUE_ID",
-        "LAMBDA_JS_CLUSTER_WORKER_ID",
-        "LAMBDA_JS_IPC",
-        "LAMBDA_JS_IPC_FD",
-        "LAMBDA_JS_IPC_REF",
-        "LAMBDA_JS_IPC_SERIALIZATION",
-        "LAMBDA_JS_CLUSTER_SCHED"
-    };
-    int key_count = (int)(sizeof(keys) / sizeof(keys[0]));
-    if (key_count > SPAWN_CLUSTER_INTERNAL_ENV_MAX) key_count = SPAWN_CLUSTER_INTERNAL_ENV_MAX;
-    if (count) *count = key_count;
-    for (int i = 0; i < key_count; i++) {
-        spawn_save_and_unset_env(&saved[i], keys[i]);
-    }
-}
-
-static void spawn_restore_cluster_internal_env(SpawnSavedEnv* saved, int count) {
-    for (int i = count - 1; i >= 0; i--) {
-        spawn_restore_env(&saved[i]);
-    }
 }
 
 extern "C" Item js_cp_spawn(Item rest_args) {
@@ -2874,8 +2565,6 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     js_property_set(obj, make_string_item("spawnargs"), spawnargs);
 
     sp->js_object = obj;
-    sp->ipc_advanced_serialization = req.ipc_advanced_serialization;
-    spawn_process_map_register(obj, sp);
     install_spawn_lifecycle_surface(obj, sp);
     if (req.ipc) install_ipc_surface(obj, sp);
 
@@ -2984,9 +2673,6 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     if (req.ipc && envp) {
         envp = envp_set(envp, &env_count, "LAMBDA_JS_IPC", "1");
         envp = envp_set(envp, &env_count, "LAMBDA_JS_IPC_FD", ipc_fd_buf);
-        if (req.ipc_advanced_serialization) {
-            envp = envp_set(envp, &env_count, "LAMBDA_JS_IPC_SERIALIZATION", "advanced");
-        }
     }
     if (envp) opts.env = envp;
 
@@ -3012,38 +2698,8 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         old_ipc_fd_buf[old_len] = '\0';
     }
     if (req.ipc) setenv("LAMBDA_JS_IPC_FD", ipc_fd_buf, 1);
-    const char* old_ipc_serial_env = getenv("LAMBDA_JS_IPC_SERIALIZATION");
-    char old_ipc_serial_buf[32];
-    bool had_ipc_serial_env = old_ipc_serial_env != NULL;
-    if (had_ipc_serial_env) {
-        int old_len = (int)strlen(old_ipc_serial_env);
-        if (old_len >= (int)sizeof(old_ipc_serial_buf)) old_len = (int)sizeof(old_ipc_serial_buf) - 1;
-        memcpy(old_ipc_serial_buf, old_ipc_serial_env, (size_t)old_len);
-        old_ipc_serial_buf[old_len] = '\0';
-    }
-    if (req.ipc_advanced_serialization) {
-        // advanced IPC mode belongs only to the forked channel being spawned;
-        // restoring it after uv_spawn prevents nested ordinary children inheriting it.
-        setenv("LAMBDA_JS_IPC_SERIALIZATION", "advanced", 1);
-    } else if (req.ipc) {
-        unsetenv("LAMBDA_JS_IPC_SERIALIZATION");
-    }
-
-    // hidden cluster env keys must be saved as a set; a fixed undersized stack
-    // array corrupts ordinary child_process.spawn() when new native markers land.
-    SpawnSavedEnv cleared_env[SPAWN_CLUSTER_INTERNAL_ENV_MAX];
-    int cleared_env_count = 0;
-    if (!req.ipc) {
-        // cluster workers keep native markers in getenv() for detection, but
-        // ordinary child processes must not inherit them and re-enter as workers.
-        spawn_clear_cluster_internal_env(cleared_env, &cleared_env_count);
-    }
 
     int r = pre_spawn_error ? pre_spawn_error : uv_spawn(loop, &sp->process, &opts);
-
-    if (cleared_env_count > 0) {
-        spawn_restore_cluster_internal_env(cleared_env, cleared_env_count);
-    }
 
 #ifndef _WIN32
     for (int i = 0; i < req.stdio_count; i++) {
@@ -3056,8 +2712,6 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         else unsetenv("LAMBDA_JS_IPC");
         if (had_ipc_fd_env) setenv("LAMBDA_JS_IPC_FD", old_ipc_fd_buf, 1);
         else unsetenv("LAMBDA_JS_IPC_FD");
-        if (had_ipc_serial_env) setenv("LAMBDA_JS_IPC_SERIALIZATION", old_ipc_serial_buf, 1);
-        else unsetenv("LAMBDA_JS_IPC_SERIALIZATION");
     }
 
     // free arg copies
@@ -3114,7 +2768,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         }
     }
     if (sp->ipc_pipe_active) {
-        spawn_schedule_ipc_read_start(sp);
+        uv_read_start((uv_stream_t*)&sp->ipc_pipe, spawn_alloc_cb, spawn_ipc_read_cb);
     }
 
     return obj;
@@ -3353,12 +3007,6 @@ extern "C" Item js_cp_fork(Item rest_args) {
         if (get_type_id(detached) == LMD_TYPE_BOOL) {
             js_property_set(spawn_options, make_string_item("detached"), detached);
         }
-        Item serialization = js_property_get(options, make_string_item("serialization"));
-        if (get_type_id(serialization) == LMD_TYPE_STRING) {
-            // fork() delegates to spawn(); dropping this option makes cluster
-            // advanced IPC fall back to JSON and lose circular payloads.
-            js_property_set(spawn_options, make_string_item("serialization"), serialization);
-        }
     }
     Item stdio = js_array_new(0);
     bool copied_stdio = false;
@@ -3531,21 +3179,6 @@ static void cp_append_env_assignments(char* cmd, int cmd_size, int* pos, Item en
     }
 }
 
-static void cp_append_cluster_internal_env_clear(char* cmd, int cmd_size, int* pos) {
-    if (!cmd || !pos ||
-        (!getenv("NODE_UNIQUE_ID") && !getenv("LAMBDA_JS_CLUSTER_WORKER_ID"))) return;
-#ifndef _WIN32
-    const char* prefix =
-        "env -u NODE_UNIQUE_ID -u LAMBDA_JS_CLUSTER_WORKER_ID -u LAMBDA_JS_IPC -u LAMBDA_JS_IPC_FD -u LAMBDA_JS_IPC_REF ";
-    int remaining = cmd_size - *pos;
-    if (remaining <= 1) return;
-    int wrote = snprintf(cmd + *pos, (size_t)remaining, "%s", prefix);
-    if (wrote > 0) {
-        *pos += wrote < remaining ? wrote : remaining - 1;
-    }
-#endif
-}
-
 static bool cp_spawnSync_prepare_lambda_snapshot(const char* cmd, Item args_item, Item options_item,
                                                  char* full_cmd, int full_cmd_size) {
     if (!is_lambda_executable_path(cmd) || !cp_args_contain_string(args_item, "--snapshot-blob")) {
@@ -3576,9 +3209,6 @@ static bool cp_spawnSync_prepare_lambda_snapshot(const char* cmd, Item args_item
         pos += snprintf(full_cmd + pos, (size_t)(full_cmd_size - pos), " && ");
     }
     Item env = is_object_item(options_item) ? js_property_get(options_item, make_string_item("env")) : make_js_undefined();
-    // spawnSync runs through the shell; clear cluster's native env markers so
-    // sync children from workers do not bootstrap as accidental cluster workers.
-    cp_append_cluster_internal_env_clear(full_cmd, full_cmd_size, &pos);
     cp_append_env_assignment(full_cmd, full_cmd_size, &pos, "NODE_TEST_HOST", env);
     cp_append_env_assignment(full_cmd, full_cmd_size, &pos, "NODE_TEST_PROMISE", env);
     cp_append_env_assignment(full_cmd, full_cmd_size, &pos, "NODE_TEST_DNS", env);
@@ -3627,9 +3257,6 @@ static bool cp_spawnSync_prepare_shell_command(const char* cmd, Item args_item, 
         pos += snprintf(full_cmd + pos, (size_t)(full_cmd_size - pos), " && ");
     }
     Item env = is_object_item(options_item) ? js_property_get(options_item, make_string_item("env")) : make_js_undefined();
-    // spawnSync inherits the process environment unless the shell prefix strips
-    // Lambda's cluster markers; otherwise worker tests recursively fork.
-    cp_append_cluster_internal_env_clear(full_cmd, full_cmd_size, &pos);
     cp_append_env_assignments(full_cmd, full_cmd_size, &pos, env);
     Item cmd_item = make_string_item(cmd);
     if (!append_shell_arg(full_cmd, full_cmd_size, &pos, cmd_item)) return false;

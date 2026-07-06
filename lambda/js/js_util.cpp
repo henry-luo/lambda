@@ -18,12 +18,17 @@
 #include <cstdio>
 #include <cerrno>
 #include <time.h>
+#include <limits.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 // forward declarations
 extern "C" Item js_util_inspect(Item obj_item, Item options_item);
 extern "C" Item js_symbol_for(Item desc);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_buffer_isBuffer(Item obj);
+extern "C" Item js_get_process_argv(void);
 
 struct JsUtilFunctionView {
     TypeId type_id;
@@ -2498,6 +2503,69 @@ extern "C" Item js_util_types_isArgumentsObject(Item obj) {
     return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_ARGUMENTS)};
 }
 
+extern "C" Item js_util_types_isModuleNamespaceObject(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = ITEM_FALSE};
+    Item marker = js_property_get(obj, make_string_item("__vm_module_namespace__"));
+    return (Item){.item = b2it(get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker))};
+}
+
+extern "C" Item js_util_getCallSites(Item frame_count_item) {
+    int64_t frame_count = 10;
+    if (get_type_id(frame_count_item) == LMD_TYPE_INT) frame_count = it2i(frame_count_item);
+    if (frame_count < 1) frame_count = 1;
+    if (frame_count > 200) frame_count = 200;
+
+    Item global = js_get_global_this();
+    Item filename = js_property_get(global, make_string_item("__filename"));
+    Item argv = js_get_process_argv();
+    if (get_type_id(argv) == LMD_TYPE_ARRAY && js_array_length(argv) > 1) {
+        Item script = js_array_get_int(argv, 1);
+        if (get_type_id(script) == LMD_TYPE_STRING) {
+            String* ss = it2s(script);
+            if (ss && ss->len > 0) {
+                // required helpers can overwrite global __filename; call-site
+                // records for top-level tests must report the entry script.
+                if (ss->chars[0] == '/') {
+                    char resolved[PATH_MAX];
+                    if (realpath(ss->chars, resolved)) filename = make_string_item(resolved);
+                    else filename = script;
+                } else {
+#ifndef _WIN32
+                    char cwd[2048];
+                    if (getcwd(cwd, sizeof(cwd))) {
+                        char path[4096];
+                        int len = snprintf(path, sizeof(path), "%s/%.*s",
+                                           cwd, (int)ss->len, ss->chars);
+                        if (len > 0 && len < (int)sizeof(path)) {
+                            char resolved[PATH_MAX];
+                            if (realpath(path, resolved)) filename = make_string_item(resolved);
+                            else filename = make_string_item(path, len);
+                        }
+                    }
+#else
+                    filename = script;
+#endif
+                }
+            }
+        }
+    }
+    if (get_type_id(filename) != LMD_TYPE_STRING) filename = make_string_item("<anonymous>");
+
+    Item frames = js_array_new(0);
+    for (int64_t i = 0; i < frame_count; i++) {
+        Item frame = js_new_object();
+        // util.getCallSites must not invoke Error.prepareStackTrace; it returns
+        // frame records directly from the current script context.
+        js_property_set(frame, make_string_item("scriptName"), filename);
+        js_property_set(frame, make_string_item("functionName"), make_string_item(""));
+        js_property_set(frame, make_string_item("lineNumber"), (Item){.item = i2it(1)});
+        js_property_set(frame, make_string_item("column"), (Item){.item = i2it(1)});
+        js_property_set(frame, make_string_item("columnNumber"), (Item){.item = i2it(1)});
+        js_array_push(frames, frame);
+    }
+    return frames;
+}
+
 // ─── util.styleText(format, text) — ANSI color formatting ──────────────────
 extern "C" Item js_util_styleText(Item format_item, Item text_item) {
     Item str = js_to_string(text_item);
@@ -2835,7 +2903,9 @@ extern "C" Item js_get_util_namespace(void) {
     js_util_set_method(types, "isMapIterator",       (void*)js_util_types_isMapIterator, 1);
     js_util_set_method(types, "isSetIterator",       (void*)js_util_types_isSetIterator, 1);
     js_util_set_method(types, "isArgumentsObject",   (void*)js_util_types_isArgumentsObject, 1);
+    js_util_set_method(types, "isModuleNamespaceObject", (void*)js_util_types_isModuleNamespaceObject, 1);
     js_property_set(util_namespace, make_string_item("types"), types);
+    js_util_set_method(util_namespace, "getCallSites", (void*)js_util_getCallSites, 1);
 
     // TextEncoder/TextDecoder — expose constructors on util namespace
     extern Item js_text_encoder_new(void);

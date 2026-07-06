@@ -542,38 +542,6 @@ extern "C" Item js_to_string(Item value) {
             // delegate to js_date_method(obj, 17=toString)
             return js_date_method(value, 17);
         }
-        JsClass value_class = js_class_id(value);
-        if (value_class == JS_CLASS_ERROR || value_class == JS_CLASS_TYPE_ERROR ||
-            value_class == JS_CLASS_RANGE_ERROR || value_class == JS_CLASS_SYNTAX_ERROR ||
-            value_class == JS_CLASS_REFERENCE_ERROR || value_class == JS_CLASS_URI_ERROR ||
-            value_class == JS_CLASS_EVAL_ERROR || value_class == JS_CLASS_AGGREGATE_ERROR) {
-            // Error names live on prototypes; checking only own properties lets
-            // Object.prototype.toString mask Error.prototype.toString in joins.
-            Item name_val = js_property_get(value, (Item){.item = s2it(heap_create_name("name", 4))});
-            Item msg_val = js_property_get(value, (Item){.item = s2it(heap_create_name("message", 7))});
-            const char* name = "Error";
-            int name_len = 5;
-            if (get_type_id(name_val) == LMD_TYPE_STRING) {
-                String* ns = it2s(name_val);
-                if (ns) {
-                    name = ns->chars;
-                    name_len = (int)ns->len;
-                }
-            }
-            if (get_type_id(msg_val) == LMD_TYPE_STRING) {
-                String* ms = it2s(msg_val);
-                if (ms && ms->len > 0) {
-                    StrBuf* sb = strbuf_new();
-                    strbuf_append_str_n(sb, name, name_len);
-                    strbuf_append_str_n(sb, ": ", 2);
-                    strbuf_append_str_n(sb, ms->chars, (int)ms->len);
-                    String* result = heap_create_name(sb->str, sb->length);
-                    strbuf_free(sb);
-                    return (Item){.item = s2it(result)};
-                }
-            }
-            return (Item){.item = s2it(heap_create_name(name, name_len))};
-        }
         bool bigint_wrapper = false;
         // Wrapper objects with __primitiveValue__ (e.g. new Number(42), new String("hi"))
         // Skip fast path if custom toString/valueOf/@@toPrimitive exists on the object
