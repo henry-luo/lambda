@@ -16,6 +16,7 @@ extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
 
 extern "C" void* js_dom_get_document(void);
+extern "C" Item js_get_document_object_value(void);
 extern "C" Item js_dom_create_wrapper_impl(void* dom_elem);
 extern "C" void* js_dom_unwrap_element_impl(Item item);
 extern "C" bool js_is_dom_node_impl(Item item);
@@ -1998,4 +1999,35 @@ extern "C" Item radiant_dom_element_method(Item elem_item, Item method_name, Ite
         return result;
     }
     return js_dom_element_method_impl(elem_item, method_name, args, argc);
+}
+
+extern "C" Item radiant_dom_document_method(Item method_name, Item* args, int argc) {
+    const char* method = fn_to_cstr(method_name);
+    if (!method) return ItemNull;
+
+    Item doc_item = js_get_document_object_value();
+    if (strcmp(method, "addEventListener") == 0) {
+        // document EventTarget storage is keyed by the singleton document wrapper.
+        return argc >= 2
+            ? js_dom_add_event_listener_bridge(doc_item, args[0], args[1],
+                argc >= 3 ? args[2] : ItemNull)
+            : radiant_dom_undefined_item();
+    }
+
+    if (strcmp(method, "removeEventListener") == 0) {
+        // document EventTarget storage is keyed by the singleton document wrapper.
+        return argc >= 2
+            ? js_dom_remove_event_listener_bridge(doc_item, args[0], args[1],
+                argc >= 3 ? args[2] : ItemNull)
+            : radiant_dom_undefined_item();
+    }
+
+    if (strcmp(method, "dispatchEvent") == 0) {
+        // dispatch must use the same wrapper identity listeners were registered with.
+        return argc >= 1
+            ? js_dom_dispatch_event_bridge(doc_item, args[0])
+            : (Item){.item = b2it(0)};
+    }
+
+    return ItemNull;
 }

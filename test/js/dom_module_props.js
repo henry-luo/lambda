@@ -107,6 +107,14 @@ console.log(customCount);
 button.removeEventListener("custom", markCustom);
 button.dispatchEvent({ type: "custom", bubbles: false });
 console.log(customCount);
+var docCustomCount = 0;
+function markDocCustom() { docCustomCount = docCustomCount + 1; }
+document.addEventListener("doccustom", markDocCustom);
+document.dispatchEvent({ type: "doccustom", bubbles: false });
+console.log(docCustomCount);
+document.removeEventListener("doccustom", markDocCustom);
+document.dispatchEvent({ type: "doccustom", bubbles: false });
+console.log(docCustomCount);
 input.focus();
 console.log(document.activeElement === input);
 input.blur();

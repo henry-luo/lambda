@@ -90,6 +90,12 @@ extern "C" Item js_eventtarget_remove_listener(Item type, Item callback, Item op
 extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
                                                   const char* text_html);
 extern "C" Item js_eventtarget_dispatch(Item event_item);
+extern "C" Item js_dom_add_event_listener_bridge(Item target_item, Item type,
+                                                 Item callback, Item opts);
+extern "C" Item js_dom_remove_event_listener_bridge(Item target_item, Item type,
+                                                    Item callback, Item opts);
+extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
+extern "C" Item radiant_dom_document_method(Item method_name, Item* args, int argc);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
 extern "C" void js_throw_value(Item error);
 extern "C" Item js_dom_get_selection_function_for_document(void* doc);
@@ -1952,6 +1958,10 @@ extern "C" Item js_get_document_object_value() {
 extern "C" Item js_document_proxy_method(Item method_name, Item* args, int argc) {
     const char* method = fn_to_cstr(method_name);
     if (method) {
+        Item module_result = radiant_dom_document_method(method_name, args, argc);
+        if (module_result.item != ITEM_NULL) {
+            return module_result;
+        }
         Item fn = js_document_get_property(method_name);
         if (get_type_id(fn) == LMD_TYPE_FUNC) {
             return js_call_function(fn, js_get_document_object_value(), args, argc);
@@ -5339,19 +5349,19 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     // EventTarget interface on document
     if (strcmp(method, "addEventListener") == 0) {
         if (argc >= 2) {
-            js_dom_add_event_listener(js_get_document_object_value(), args[0], args[1], argc > 2 ? args[2] : ItemNull);
+            js_dom_add_event_listener_bridge(js_get_document_object_value(), args[0], args[1], argc > 2 ? args[2] : ItemNull);
         }
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (strcmp(method, "removeEventListener") == 0) {
         if (argc >= 2) {
-            js_dom_remove_event_listener(js_get_document_object_value(), args[0], args[1], argc > 2 ? args[2] : ItemNull);
+            js_dom_remove_event_listener_bridge(js_get_document_object_value(), args[0], args[1], argc > 2 ? args[2] : ItemNull);
         }
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (strcmp(method, "dispatchEvent") == 0) {
         if (argc >= 1) {
-            return js_dom_dispatch_event(js_get_document_object_value(), args[0]);
+            return js_dom_dispatch_event_bridge(js_get_document_object_value(), args[0]);
         }
         return (Item){.item = ITEM_FALSE};
     }
