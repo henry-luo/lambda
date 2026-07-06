@@ -178,6 +178,46 @@ static bool radiant_dom_bool_reflected(DomElement* elem, const char* prop, const
     return false;
 }
 
+static bool radiant_dom_simple_bool_setter(DomElement* elem, const char* prop, const char** attr_name) {
+    if (!elem || !prop || !attr_name) return false;
+    bool input = radiant_dom_is_tag(elem, "input");
+    bool button = radiant_dom_is_tag(elem, "button");
+    bool select = radiant_dom_is_tag(elem, "select");
+    bool textarea = radiant_dom_is_tag(elem, "textarea");
+    bool form = radiant_dom_is_tag(elem, "form");
+    bool details = radiant_dom_is_tag(elem, "details");
+    if (strcmp(prop, "required") == 0 && (input || select || textarea)) {
+        *attr_name = "required";
+        return true;
+    }
+    if (strcmp(prop, "multiple") == 0 && input) {
+        *attr_name = "multiple";
+        return true;
+    }
+    if ((strcmp(prop, "readOnly") == 0 || strcmp(prop, "readonly") == 0) &&
+        (input || textarea)) {
+        *attr_name = "readonly";
+        return true;
+    }
+    if (strcmp(prop, "noValidate") == 0 && form) {
+        *attr_name = "novalidate";
+        return true;
+    }
+    if (strcmp(prop, "formNoValidate") == 0 && (input || button)) {
+        *attr_name = "formnovalidate";
+        return true;
+    }
+    if (strcmp(prop, "open") == 0 && details) {
+        *attr_name = "open";
+        return true;
+    }
+    if (strcmp(prop, "autofocus") == 0) {
+        *attr_name = "autofocus";
+        return true;
+    }
+    return false;
+}
+
 static bool radiant_dom_int_reflected(DomElement* elem, const char* prop,
                                       const char** attr_name, int* default_value) {
     if (!elem || !prop || !attr_name || !default_value) return false;
@@ -1158,6 +1198,19 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
         if (class_str && dom_element_set_attribute(elem, "class", class_str)) {
             js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
         }
+        *out = value;
+        return true;
+    }
+    const char* bool_attr = nullptr;
+    if (radiant_dom_simple_bool_setter(elem, prop, &bool_attr)) {
+        // only side-effect-free boolean reflections move here; live-state
+        // booleans stay on the JS fallback until their invariants move too.
+        if (js_is_truthy(value)) {
+            dom_element_set_attribute(elem, bool_attr, "");
+        } else {
+            dom_element_remove_attribute(elem, bool_attr);
+        }
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
         *out = value;
         return true;
     }
