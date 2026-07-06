@@ -7,6 +7,8 @@
 #include "../../../lib/mem.h"
 #include "../../../lib/strbuf.h"
 #include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 extern "C" void heap_register_gc_root(uint64_t* slot);
@@ -25,6 +27,8 @@ extern "C" bool js_is_truthy(Item value);
 extern "C" void js_dom_after_set_attribute(void* elem, const char* attr_name, const char* attr_value);
 extern "C" void js_dom_after_remove_attribute(void* elem, const char* attr_name);
 extern "C" void js_dom_after_toggle_attribute_remove(void* elem, const char* attr_name);
+extern "C" void js_dom_after_disabled_attribute_set(void* elem);
+extern "C" void js_dom_throw_contenteditable_syntax_error(void);
 extern "C" Item js_dom_set_text_data_property(void* text, Item value);
 extern "C" Item js_dom_text_replace_data_bridge(void* text, Item offset, Item count, Item data);
 extern "C" Item js_dom_text_insert_data_bridge(void* text, Item offset, Item data);
@@ -34,6 +38,15 @@ extern "C" Item js_dom_text_substring_data_bridge(void* text, Item offset, Item 
 extern "C" Item js_dom_append_child_bridge(void* parent, Item child);
 extern "C" Item js_dom_remove_child_bridge(void* parent, Item child);
 extern "C" Item js_dom_insert_before_bridge(void* parent, Item new_child, Item ref_child);
+extern "C" Item js_dom_remove_bridge(void* node);
+extern "C" Item js_dom_normalize_bridge(void* elem);
+extern "C" Item js_dom_clone_node_bridge(void* elem, Item deep, bool has_deep);
+extern "C" Item js_dom_replace_child_bridge(void* parent, Item new_child, Item old_child);
+extern "C" Item js_dom_replace_with_bridge(void* node, Item* args, int argc);
+extern "C" Item js_dom_insert_adjacent_element_bridge(void* elem, Item position, Item new_node);
+extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem, Item position, Item html);
+extern "C" Item js_dom_append_variadic_bridge(void* elem, Item* args, int argc);
+extern "C" Item js_dom_prepend_variadic_bridge(void* elem, Item* args, int argc);
 extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
 extern "C" Item radiant_dom_wrap_node(void* dom_elem);
 extern "C" Item js_new_object(void);
@@ -105,6 +118,320 @@ static Item radiant_dom_class_name_item(DomElement* elem) {
     Item result = radiant_dom_string_item(sb->str ? sb->str : "");
     strbuf_free(sb);
     return result;
+}
+
+static bool radiant_dom_is_tag(DomElement* elem, const char* tag) {
+    return elem && elem->tag_name && tag && strcasecmp(elem->tag_name, tag) == 0;
+}
+
+static bool radiant_dom_bool_reflected(DomElement* elem, const char* prop, const char** attr_name) {
+    if (!elem || !prop || !attr_name) return false;
+    bool input = radiant_dom_is_tag(elem, "input");
+    bool button = radiant_dom_is_tag(elem, "button");
+    bool select = radiant_dom_is_tag(elem, "select");
+    bool textarea = radiant_dom_is_tag(elem, "textarea");
+    bool form = radiant_dom_is_tag(elem, "form");
+    bool details = radiant_dom_is_tag(elem, "details");
+    bool fieldset = radiant_dom_is_tag(elem, "fieldset");
+    bool option = radiant_dom_is_tag(elem, "option");
+    bool optgroup = radiant_dom_is_tag(elem, "optgroup");
+    if (strcmp(prop, "disabled") == 0 &&
+        (input || button || select || textarea || fieldset || option || optgroup)) {
+        *attr_name = "disabled";
+        return true;
+    }
+    if (strcmp(prop, "required") == 0 && (input || select || textarea)) {
+        *attr_name = "required";
+        return true;
+    }
+    if (strcmp(prop, "multiple") == 0 && (input || select)) {
+        *attr_name = "multiple";
+        return true;
+    }
+    if ((strcmp(prop, "readOnly") == 0 || strcmp(prop, "readonly") == 0) &&
+        (input || textarea)) {
+        *attr_name = "readonly";
+        return true;
+    }
+    if (strcmp(prop, "noValidate") == 0 && form) {
+        *attr_name = "novalidate";
+        return true;
+    }
+    if (strcmp(prop, "formNoValidate") == 0 && (input || button)) {
+        *attr_name = "formnovalidate";
+        return true;
+    }
+    if (strcmp(prop, "open") == 0 && details) {
+        *attr_name = "open";
+        return true;
+    }
+    if (strcmp(prop, "defaultChecked") == 0 && input) {
+        *attr_name = "checked";
+        return true;
+    }
+    if (strcmp(prop, "defaultSelected") == 0 && option) {
+        *attr_name = "selected";
+        return true;
+    }
+    if (strcmp(prop, "autofocus") == 0) {
+        *attr_name = "autofocus";
+        return true;
+    }
+    return false;
+}
+
+static bool radiant_dom_simple_bool_setter(DomElement* elem, const char* prop, const char** attr_name) {
+    if (!elem || !prop || !attr_name) return false;
+    bool input = radiant_dom_is_tag(elem, "input");
+    bool button = radiant_dom_is_tag(elem, "button");
+    bool select = radiant_dom_is_tag(elem, "select");
+    bool textarea = radiant_dom_is_tag(elem, "textarea");
+    bool form = radiant_dom_is_tag(elem, "form");
+    bool details = radiant_dom_is_tag(elem, "details");
+    if (strcmp(prop, "required") == 0 && (input || select || textarea)) {
+        *attr_name = "required";
+        return true;
+    }
+    if (strcmp(prop, "multiple") == 0 && input) {
+        *attr_name = "multiple";
+        return true;
+    }
+    if ((strcmp(prop, "readOnly") == 0 || strcmp(prop, "readonly") == 0) &&
+        (input || textarea)) {
+        *attr_name = "readonly";
+        return true;
+    }
+    if (strcmp(prop, "noValidate") == 0 && form) {
+        *attr_name = "novalidate";
+        return true;
+    }
+    if (strcmp(prop, "formNoValidate") == 0 && (input || button)) {
+        *attr_name = "formnovalidate";
+        return true;
+    }
+    if (strcmp(prop, "open") == 0 && details) {
+        *attr_name = "open";
+        return true;
+    }
+    if (strcmp(prop, "autofocus") == 0) {
+        *attr_name = "autofocus";
+        return true;
+    }
+    return false;
+}
+
+static bool radiant_dom_disabled_setter(DomElement* elem, const char* prop, const char** attr_name) {
+    if (!elem || !prop || !attr_name || strcmp(prop, "disabled") != 0) return false;
+    bool input = radiant_dom_is_tag(elem, "input");
+    bool button = radiant_dom_is_tag(elem, "button");
+    bool select = radiant_dom_is_tag(elem, "select");
+    bool textarea = radiant_dom_is_tag(elem, "textarea");
+    bool fieldset = radiant_dom_is_tag(elem, "fieldset");
+    bool option = radiant_dom_is_tag(elem, "option");
+    bool optgroup = radiant_dom_is_tag(elem, "optgroup");
+    if (!(input || button || select || textarea || fieldset || option || optgroup)) return false;
+    *attr_name = "disabled";
+    return true;
+}
+
+static bool radiant_dom_int_reflected(DomElement* elem, const char* prop,
+                                      const char** attr_name, int* default_value) {
+    if (!elem || !prop || !attr_name || !default_value) return false;
+    bool input = radiant_dom_is_tag(elem, "input");
+    bool textarea = radiant_dom_is_tag(elem, "textarea");
+    bool select = radiant_dom_is_tag(elem, "select");
+    if (strcmp(prop, "maxLength") == 0 && (input || textarea)) {
+        *attr_name = "maxlength"; *default_value = -1; return true;
+    }
+    if (strcmp(prop, "minLength") == 0 && (input || textarea)) {
+        *attr_name = "minlength"; *default_value = 0; return true;
+    }
+    if (strcmp(prop, "size") == 0 && input) {
+        *attr_name = "size"; *default_value = 20; return true;
+    }
+    if (strcmp(prop, "width") == 0 && input) {
+        *attr_name = "width"; *default_value = 0; return true;
+    }
+    if (strcmp(prop, "height") == 0 && input) {
+        *attr_name = "height"; *default_value = 0; return true;
+    }
+    if (strcmp(prop, "size") == 0 && select) {
+        *attr_name = "size"; *default_value = 0; return true;
+    }
+    if (strcmp(prop, "rows") == 0 && textarea) {
+        *attr_name = "rows"; *default_value = 2; return true;
+    }
+    if (strcmp(prop, "cols") == 0 && textarea) {
+        *attr_name = "cols"; *default_value = 20; return true;
+    }
+    return false;
+}
+
+static int64_t radiant_dom_reflected_int_value(DomElement* elem, const char* attr_name,
+                                               int default_value) {
+    const char* raw = dom_element_get_attribute(elem, attr_name);
+    if (!raw) return default_value;
+    char* end = nullptr;
+    long value = strtol(raw, &end, 10);
+    if (end == raw || value < 0) return default_value;
+    return (int64_t)value;
+}
+
+static long radiant_dom_item_to_reflected_int(Item value, int default_value) {
+    TypeId type = get_type_id(value);
+    long out = default_value;
+    if (type == LMD_TYPE_INT) {
+        out = (long)it2i(value);
+    } else if (type == LMD_TYPE_INT64) {
+        out = (long)it2l(value);
+    } else if (type == LMD_TYPE_FLOAT) {
+        out = (long)it2d(value);
+    } else {
+        const char* text = fn_to_cstr(value);
+        if (text && *text) {
+            char* end = nullptr;
+            long parsed = strtol(text, &end, 10);
+            out = (end != text) ? parsed : 0;
+        } else {
+            out = 0;
+        }
+    }
+    return out < 0 ? default_value : out;
+}
+
+static bool radiant_dom_string_reflected(DomElement* elem, const char* prop, const char** attr_name) {
+    if (!elem || !prop || !attr_name) return false;
+    if (strcmp(prop, "src") == 0 &&
+        (radiant_dom_is_tag(elem, "img") || radiant_dom_is_tag(elem, "script") ||
+         radiant_dom_is_tag(elem, "iframe") || radiant_dom_is_tag(elem, "embed") ||
+         radiant_dom_is_tag(elem, "source") || radiant_dom_is_tag(elem, "track") ||
+         radiant_dom_is_tag(elem, "audio") || radiant_dom_is_tag(elem, "video") ||
+         radiant_dom_is_tag(elem, "input"))) {
+        *attr_name = "src";
+        return true;
+    }
+    if (strcmp(prop, "href") == 0 &&
+        (radiant_dom_is_tag(elem, "a") || radiant_dom_is_tag(elem, "area") ||
+         radiant_dom_is_tag(elem, "link") || radiant_dom_is_tag(elem, "base"))) {
+        *attr_name = "href";
+        return true;
+    }
+    if (strcmp(prop, "alt") == 0 && radiant_dom_is_tag(elem, "img")) {
+        *attr_name = "alt";
+        return true;
+    }
+    if (strcmp(prop, "name") == 0 &&
+        (radiant_dom_is_tag(elem, "input") || radiant_dom_is_tag(elem, "button") ||
+         radiant_dom_is_tag(elem, "select") || radiant_dom_is_tag(elem, "textarea") ||
+         radiant_dom_is_tag(elem, "form") || radiant_dom_is_tag(elem, "fieldset") ||
+         radiant_dom_is_tag(elem, "output") || radiant_dom_is_tag(elem, "object"))) {
+        *attr_name = "name";
+        return true;
+    }
+    if (strcmp(prop, "placeholder") == 0 &&
+        (radiant_dom_is_tag(elem, "input") || radiant_dom_is_tag(elem, "textarea"))) {
+        *attr_name = "placeholder";
+        return true;
+    }
+    if (strcmp(prop, "autocomplete") == 0 &&
+        (radiant_dom_is_tag(elem, "form") || radiant_dom_is_tag(elem, "input") ||
+         radiant_dom_is_tag(elem, "select") || radiant_dom_is_tag(elem, "textarea"))) {
+        *attr_name = "autocomplete";
+        return true;
+    }
+    if (radiant_dom_is_tag(elem, "input") &&
+        (strcmp(prop, "pattern") == 0 || strcmp(prop, "min") == 0 ||
+         strcmp(prop, "max") == 0 || strcmp(prop, "step") == 0 ||
+         strcmp(prop, "accept") == 0)) {
+        *attr_name = prop;
+        return true;
+    }
+    if (strcmp(prop, "htmlFor") == 0 &&
+        (radiant_dom_is_tag(elem, "label") || radiant_dom_is_tag(elem, "output"))) {
+        *attr_name = "for";
+        return true;
+    }
+    if (strcmp(prop, "target") == 0 && radiant_dom_is_tag(elem, "form")) {
+        *attr_name = "target";
+        return true;
+    }
+    if (strcmp(prop, "acceptCharset") == 0 && radiant_dom_is_tag(elem, "form")) {
+        *attr_name = "accept-charset";
+        return true;
+    }
+    if (strcmp(prop, "formTarget") == 0 &&
+        (radiant_dom_is_tag(elem, "input") || radiant_dom_is_tag(elem, "button"))) {
+        *attr_name = "formtarget";
+        return true;
+    }
+    if (strcmp(prop, "wrap") == 0 && radiant_dom_is_tag(elem, "textarea")) {
+        *attr_name = "wrap";
+        return true;
+    }
+    return false;
+}
+
+static const char* radiant_dom_canonical_token_attr(DomElement* elem, const char* attr_name,
+                                                    const char* const* keywords) {
+    const char* value = dom_element_get_attribute(elem, attr_name);
+    if (!value) return "";
+
+    char lowered[32];
+    size_t len = 0;
+    while (value[len] && len < sizeof(lowered) - 1) {
+        lowered[len] = (char)tolower((unsigned char)value[len]);
+        len++;
+    }
+    if (value[len] != '\0') return "";
+    lowered[len] = '\0';
+
+    for (int i = 0; keywords[i]; i++) {
+        if (strcmp(lowered, keywords[i]) == 0) return keywords[i];
+    }
+    return "";
+}
+
+static const char* radiant_dom_normalize_contenteditable(const char* value) {
+    if (!value || *value == '\0' || strcasecmp(value, "true") == 0) return "true";
+    if (strcasecmp(value, "false") == 0) return "false";
+    if (strcasecmp(value, "plaintext-only") == 0) return "plaintext-only";
+    if (strcasecmp(value, "inherit") == 0) return "inherit";
+    return nullptr;
+}
+
+static bool radiant_dom_is_content_editable(DomElement* elem) {
+    bool saw_false = false;
+    DomNode* node = (DomNode*)elem;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* current = node->as_element();
+            if (dom_element_has_attribute(current, "contenteditable")) {
+                const char* normalized = radiant_dom_normalize_contenteditable(
+                    dom_element_get_attribute(current, "contenteditable"));
+                if (!normalized) normalized = "inherit";
+                if (strcmp(normalized, "true") == 0 || strcmp(normalized, "plaintext-only") == 0) {
+                    return !saw_false;
+                }
+                if (strcmp(normalized, "false") == 0) {
+                    saw_false = true;
+                }
+            }
+        }
+        node = node->parent;
+    }
+    return false;
+}
+
+static bool radiant_dom_hint_reflected(const char* prop, const char** attr_name) {
+    if (strcmp(prop, "inputMode") == 0) {
+        *attr_name = "inputmode";
+        return true;
+    }
+    if (strcmp(prop, "enterKeyHint") == 0) {
+        *attr_name = "enterkeyhint";
+        return true;
+    }
+    return false;
 }
 
 static String* radiant_dom_uppercase_name(const char* name) {
@@ -712,6 +1039,52 @@ static bool radiant_dom_get_element_property(DomElement* elem, const char* prop,
         *out = radiant_dom_int_item((int64_t)elem->node_type);
         return true;
     }
+    const char* bool_attr = nullptr;
+    if (radiant_dom_bool_reflected(elem, prop, &bool_attr)) {
+        *out = (Item){.item = b2it(dom_element_has_attribute(elem, bool_attr) ? 1 : 0)};
+        return true;
+    }
+    const char* int_attr = nullptr;
+    int int_default = 0;
+    if (radiant_dom_int_reflected(elem, prop, &int_attr, &int_default)) {
+        *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, int_attr, int_default));
+        return true;
+    }
+    const char* string_attr = nullptr;
+    if (radiant_dom_string_reflected(elem, prop, &string_attr)) {
+        const char* value = dom_element_get_attribute(elem, string_attr);
+        *out = radiant_dom_string_item(value ? value :
+            (radiant_dom_is_tag(elem, "textarea") && strcmp(prop, "wrap") == 0 ? "soft" : ""));
+        return true;
+    }
+    if (strcmp(prop, "inputMode") == 0) {
+        static const char* const keywords[] = {
+            "none", "text", "decimal", "numeric", "tel", "search", "email", "url", nullptr
+        };
+        *out = radiant_dom_string_item(radiant_dom_canonical_token_attr(elem, "inputmode", keywords));
+        return true;
+    }
+    if (strcmp(prop, "enterKeyHint") == 0) {
+        static const char* const keywords[] = {
+            "enter", "done", "go", "next", "previous", "search", "send", nullptr
+        };
+        *out = radiant_dom_string_item(radiant_dom_canonical_token_attr(elem, "enterkeyhint", keywords));
+        return true;
+    }
+    if (strcmp(prop, "contentEditable") == 0) {
+        if (!dom_element_has_attribute(elem, "contenteditable")) {
+            *out = radiant_dom_string_item("inherit");
+            return true;
+        }
+        const char* normalized = radiant_dom_normalize_contenteditable(
+            dom_element_get_attribute(elem, "contenteditable"));
+        *out = radiant_dom_string_item(normalized ? normalized : "inherit");
+        return true;
+    }
+    if (strcmp(prop, "isContentEditable") == 0) {
+        *out = (Item){.item = b2it(radiant_dom_is_content_editable(elem) ? 1 : 0)};
+        return true;
+    }
     if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
         DomNode* parent = elem->parent;
         *out = (parent && parent->is_element()) ? radiant_dom_node_item(parent) : ItemNull;
@@ -844,6 +1217,87 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
         *out = value;
         return true;
     }
+    if (strcmp(prop, "contentEditable") == 0) {
+        const char* text = nullptr;
+        if (get_type_id(value) == LMD_TYPE_BOOL) {
+            text = it2b(value) ? "true" : "false";
+        } else {
+            text = fn_to_cstr(value);
+        }
+        if (!text) text = "";
+        if (*text == '\0') {
+            dom_element_remove_attribute(elem, "contenteditable");
+            js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+            *out = value;
+            return true;
+        }
+        const char* normalized = radiant_dom_normalize_contenteditable(text);
+        if (!normalized) {
+            js_dom_throw_contenteditable_syntax_error();
+            *out = value;
+            return true;
+        }
+        if (strcmp(normalized, "inherit") == 0) {
+            dom_element_remove_attribute(elem, "contenteditable");
+        } else {
+            dom_element_set_attribute(elem, "contenteditable", normalized);
+        }
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        *out = value;
+        return true;
+    }
+    const char* disabled_attr = nullptr;
+    if (radiant_dom_disabled_setter(elem, prop, &disabled_attr)) {
+        if (js_is_truthy(value)) {
+            dom_element_set_attribute(elem, disabled_attr, "");
+            js_dom_after_disabled_attribute_set((void*)elem);
+        } else {
+            dom_element_remove_attribute(elem, disabled_attr);
+        }
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        *out = value;
+        return true;
+    }
+    const char* bool_attr = nullptr;
+    if (radiant_dom_simple_bool_setter(elem, prop, &bool_attr)) {
+        // only side-effect-free boolean reflections move here; live-state
+        // booleans stay on the JS fallback until their invariants move too.
+        if (js_is_truthy(value)) {
+            dom_element_set_attribute(elem, bool_attr, "");
+        } else {
+            dom_element_remove_attribute(elem, bool_attr);
+        }
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        *out = value;
+        return true;
+    }
+    const char* int_attr = nullptr;
+    int int_default = 0;
+    if (radiant_dom_int_reflected(elem, prop, &int_attr, &int_default)) {
+        long reflected = radiant_dom_item_to_reflected_int(value, int_default);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%ld", reflected);
+        dom_element_set_attribute(elem, int_attr, buf);
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        *out = value;
+        return true;
+    }
+    const char* string_attr = nullptr;
+    if (radiant_dom_string_reflected(elem, prop, &string_attr)) {
+        const char* text = js_dom_to_attribute_cstr(value);
+        dom_element_set_attribute(elem, string_attr, text ? text : "");
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        *out = value;
+        return true;
+    }
+    const char* hint_attr = nullptr;
+    if (radiant_dom_hint_reflected(prop, &hint_attr)) {
+        const char* text = js_dom_to_attribute_cstr(value);
+        dom_element_set_attribute(elem, hint_attr, text ? text : "");
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        *out = value;
+        return true;
+    }
     return false;
 }
 
@@ -880,6 +1334,16 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
     if (strcmp(method, "compareDocumentPosition") == 0) {
         DomNode* other = (argc >= 1) ? (DomNode*)radiant_dom_unwrap_node(args[0]) : nullptr;
         *out = radiant_dom_int_item(radiant_dom_compare_document_position(node, other));
+        return true;
+    }
+
+    if (strcmp(method, "remove") == 0) {
+        *out = js_dom_remove_bridge((void*)node);
+        return true;
+    }
+
+    if (strcmp(method, "replaceWith") == 0) {
+        *out = js_dom_replace_with_bridge((void*)node, args, argc);
         return true;
     }
 
@@ -1128,6 +1592,54 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             return true;
         }
         *out = js_dom_insert_before_bridge((void*)elem, args[0], args[1]);
+        return true;
+    }
+
+    if (strcmp(method, "normalize") == 0) {
+        *out = js_dom_normalize_bridge((void*)elem);
+        return true;
+    }
+
+    if (strcmp(method, "cloneNode") == 0) {
+        *out = js_dom_clone_node_bridge((void*)elem,
+            argc >= 1 ? args[0] : radiant_dom_undefined_item(), argc >= 1);
+        return true;
+    }
+
+    if (strcmp(method, "replaceChild") == 0) {
+        if (argc < 2) {
+            *out = ItemNull;
+            return true;
+        }
+        *out = js_dom_replace_child_bridge((void*)elem, args[0], args[1]);
+        return true;
+    }
+
+    if (strcmp(method, "insertAdjacentElement") == 0) {
+        if (argc < 2) {
+            *out = ItemNull;
+            return true;
+        }
+        *out = js_dom_insert_adjacent_element_bridge((void*)elem, args[0], args[1]);
+        return true;
+    }
+
+    if (strcmp(method, "insertAdjacentHTML") == 0) {
+        if (argc < 2) {
+            *out = ItemNull;
+            return true;
+        }
+        *out = js_dom_insert_adjacent_html_bridge((void*)elem, args[0], args[1]);
+        return true;
+    }
+
+    if (strcmp(method, "append") == 0) {
+        *out = js_dom_append_variadic_bridge((void*)elem, args, argc);
+        return true;
+    }
+
+    if (strcmp(method, "prepend") == 0) {
+        *out = js_dom_prepend_variadic_bridge((void*)elem, args, argc);
         return true;
     }
 
