@@ -2175,6 +2175,32 @@ static inline bool comparison_vectorizes(int op, TypeId lt, TypeId rt) {
     return l_arr || r_arr;
 }
 
+static inline bool eq_is_numeric_type(TypeId tid) {
+    return tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT ||
+        tid == LMD_TYPE_DECIMAL || tid == LMD_TYPE_NUM_SIZED || tid == LMD_TYPE_UINT64;
+}
+
+static inline bool eq_is_sequence_type(TypeId tid) {
+    return tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_ARRAY_NUM || tid == LMD_TYPE_RANGE;
+}
+
+static bool eq_known_cross_family_false(TypeId left_tid, TypeId right_tid) {
+    if (left_tid == right_tid) return false;
+    if (left_tid == LMD_TYPE_ANY || right_tid == LMD_TYPE_ANY) return false;
+    if (left_tid == LMD_TYPE_RAW_POINTER || right_tid == LMD_TYPE_RAW_POINTER) return false;
+    if (left_tid == LMD_TYPE_TYPE || right_tid == LMD_TYPE_TYPE) return false;
+    if (eq_is_numeric_type(left_tid) && eq_is_numeric_type(right_tid)) return false;
+    if (eq_is_sequence_type(left_tid) && eq_is_sequence_type(right_tid)) return false;
+    return true;
+}
+
+static MIR_reg_t emit_bool_const(MirTranspiler* mt, bool value) {
+    MIR_reg_t result = new_reg(mt, value ? "true" : "false", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_int_op(mt->ctx, value ? 1 : 0)));
+    return result;
+}
+
 // Get effective runtime type for a node. If the node is an identifier whose
 // variable is stored as boxed (ANY) — e.g. optional params — return ANY instead
 // of the AST-declared type. This prevents native op dispatch on boxed values.
@@ -2449,6 +2475,12 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
 
     TypeId left_tid = get_effective_type(mt, bi->left);
     TypeId right_tid = get_effective_type(mt, bi->right);
+
+    if ((bi->op == OPERATOR_EQ || bi->op == OPERATOR_NE) &&
+        eq_known_cross_family_false(left_tid, right_tid)) {
+        // statically-known cross-family equality is total and never calls fn_eq.
+        return emit_bool_const(mt, bi->op == OPERATOR_NE);
+    }
 
     // Vectorized comparison → element-wise ELEM_BOOL mask (boxed Item).
     // Ordering (< <= > >=): vectorize when any operand is an array.

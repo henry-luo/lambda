@@ -934,16 +934,48 @@ static Bool list_eq(List* a, List* b, int depth) {
     return BOOL_TRUE;
 }
 
+static bool array_num_shape_eq(ArrayNum* a, ArrayNum* b) {
+    int a_ndim = 1, b_ndim = 1;
+    int64_t a_dims_stack[32], b_dims_stack[32];
+    a_dims_stack[0] = a ? a->length : 0;
+    b_dims_stack[0] = b ? b->length : 0;
+
+    if (a && a->is_ndim && a->extra) {
+        ArrayNumShape* s = (ArrayNumShape*)(uintptr_t)a->extra;
+        if (s && s->ndim >= 1 && s->ndim <= 32) {
+            a_ndim = s->ndim;
+            int64_t* dims = array_num_shape_dims(s);
+            for (int i = 0; i < a_ndim; i++) a_dims_stack[i] = dims[i];
+        }
+    }
+    if (b && b->is_ndim && b->extra) {
+        ArrayNumShape* s = (ArrayNumShape*)(uintptr_t)b->extra;
+        if (s && s->ndim >= 1 && s->ndim <= 32) {
+            b_ndim = s->ndim;
+            int64_t* dims = array_num_shape_dims(s);
+            for (int i = 0; i < b_ndim; i++) b_dims_stack[i] = dims[i];
+        }
+    }
+
+    if (a_ndim != b_ndim) return false;
+    for (int i = 0; i < a_ndim; i++) {
+        if (a_dims_stack[i] != b_dims_stack[i]) return false;
+    }
+    return true;
+}
+
 // helper: structural equality for typed numeric arrays
 static Bool array_num_eq(ArrayNum* a, ArrayNum* b) {
     if (a == b) return BOOL_TRUE;
     if (a->length != b->length) return BOOL_FALSE;
+    if (!array_num_shape_eq(a, b)) {
+        // n-D arrays expose their shape as structure; equal flat storage alone is insufficient.
+        return BOOL_FALSE;
+    }
     if (a->get_elem_type() != b->get_elem_type()) {
         // different elem types: compare element-wise with numeric promotion
         for (int64_t i = 0; i < a->length; i++) {
-            Item ea = array_num_get(a, i);
-            Item eb = array_num_get(b, i);
-            if (it2d(ea) != it2d(eb)) return BOOL_FALSE;
+            if (array_num_get_number_value(a, i) != array_num_get_number_value(b, i)) return BOOL_FALSE;
         }
         return BOOL_TRUE;
     }
@@ -954,8 +986,25 @@ static Bool array_num_eq(ArrayNum* a, ArrayNum* b) {
         }
         return BOOL_TRUE;
     }
-    // ELEM_INT and ELEM_INT64 both use items (int64_t*)
-    return (memcmp(a->items, b->items, a->length * sizeof(int64_t)) == 0) ? BOOL_TRUE : BOOL_FALSE;
+    uint8_t elem_size = ELEM_TYPE_SIZE[a->get_elem_type() >> 4];
+    return (elem_size && memcmp(a->data, b->data, (size_t)a->length * elem_size) == 0) ? BOOL_TRUE : BOOL_FALSE;
+}
+
+static ShapeEntry* map_find_matching_field(TypeMap* map_type, ShapeEntry* needle) {
+    if (!map_type || !needle || !needle->name) return NULL;
+    ShapeEntry* hit = typemap_hash_lookup(map_type, needle->name->str, (int)needle->name->length);
+    if (hit && target_equal(needle->ns, hit->ns)) return hit;
+
+    // hash lookup is name-only; namespace collisions must fall back to the full shape chain.
+    ShapeEntry* field = map_type->shape;
+    while (field) {
+        if (strview_equal(needle->name, field->name->str) &&
+            target_equal(needle->ns, field->ns)) {
+            return field;
+        }
+        field = field->next;
+    }
+    return NULL;
 }
 
 // helper: structural equality for map-shaped data (order-independent key-value comparison)
@@ -981,18 +1030,8 @@ static Bool map_data_eq(TypeMap* type_a, void* data_a, TypeMap* type_b, void* da
     // different shapes: for each key in A, look up in B by name+namespace
     ShapeEntry* field_a = type_a->shape;
     while (field_a) {
-        // find matching field in B by name and namespace
-        ShapeEntry* field_b = type_b->shape;
-        bool found = false;
-        while (field_b) {
-            if (strview_equal(field_a->name, field_b->name->str) &&
-                target_equal(field_a->ns, field_b->ns)) {
-                found = true;
-                break;
-            }
-            field_b = field_b->next;
-        }
-        if (!found) return BOOL_FALSE;
+        ShapeEntry* field_b = map_find_matching_field(type_b, field_a);
+        if (!field_b) return BOOL_FALSE;
 
         Item val_a = _map_field_value(type_a, data_a, field_a);
         Item val_b = _map_field_value(type_b, data_b, field_b);
@@ -1097,6 +1136,28 @@ static Bool cross_seq_eq(Item a_item, TypeId a_tid, Item b_item, TypeId b_tid, i
     return BOOL_TRUE;
 }
 
+static Bool function_eq(Function* a, Function* b, int depth) {
+    if (a == b) return BOOL_TRUE;
+    if (!a || !b) return BOOL_FALSE;
+    if (a->ptr != b->ptr || a->arity != b->arity || a->flags != b->flags) return BOOL_FALSE;
+    if (a->closure_field_count != b->closure_field_count) return BOOL_FALSE;
+    if (a->closure_field_count > 0) {
+        if (!a->closure_env || !b->closure_env) return BOOL_FALSE;
+        Item* a_fields = (Item*)a->closure_env;
+        Item* b_fields = (Item*)b->closure_env;
+        for (uint8_t i = 0; i < a->closure_field_count; i++) {
+            Bool r = fn_eq_depth(a_fields[i], b_fields[i], depth + 1);
+            if (r != BOOL_TRUE) return r;
+        }
+        return BOOL_TRUE;
+    }
+    if (a->closure_env || b->closure_env) {
+        // bound methods store the receiver as closure_env without a field count.
+        return (a->closure_env == b->closure_env) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    return BOOL_TRUE;
+}
+
 // 3-states comparison with depth tracking for structural equality
 static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
     if (depth > EQ_MAX_DEPTH) {
@@ -1142,12 +1203,16 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
             return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth);
         }
 
-        // Type mismatch error for equality comparisons (e.g., true == 1)
-        return BOOL_ERROR;
+        // equality is total across families; incompatible concrete families are unequal.
+        return BOOL_FALSE;
     }
 
     if (a_item._type_id == LMD_TYPE_NULL) {
         return BOOL_TRUE; // null == null
+    }
+    else if (a_item._type_id == LMD_TYPE_ERROR) {
+        // error values are poison for equality: even two errors are not equal.
+        return BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_BOOL) {
         return (a_item.bool_val == b_item.bool_val) ? BOOL_TRUE : BOOL_FALSE;
@@ -1197,6 +1262,11 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         TypeId a_tid = get_type_id(a_item);
         TypeId b_tid = get_type_id(b_item);
 
+        if (a_tid == LMD_TYPE_ERROR || b_tid == LMD_TYPE_ERROR) {
+            // error containers must not become equal through pointer identity.
+            return BOOL_FALSE;
+        }
+
         // pointer identity fast-path for all container types
         if (a_item.item == b_item.item) return BOOL_TRUE;
 
@@ -1218,7 +1288,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
             if (a_is_seq && b_is_seq) {
                 return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth);
             }
-            return BOOL_ERROR;
+            return BOOL_FALSE;
         }
 
         // list structural equality
@@ -1260,7 +1330,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         }
         // function reference equality
         if (a_tid == LMD_TYPE_FUNC) {
-            return (a_item.function == b_item.function) ? BOOL_TRUE : BOOL_FALSE;
+            return function_eq(a_item.function, b_item.function, depth);
         }
         log_error("eq unsupported container type: %s", get_type_name(a_tid));
         return BOOL_ERROR;

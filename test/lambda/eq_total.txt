@@ -1,0 +1,17 @@
+'=== cross-family ==='
+false
+true
+false
+false
+false
+false
+'=== preserved families ==='
+true
+true
+true
+'=== maps ==='
+true
+false
+'=== arraynum shape ==='
+false
+true

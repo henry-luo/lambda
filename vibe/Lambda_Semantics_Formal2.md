@@ -533,6 +533,163 @@ raises (C8) · decimal↔float lossy comparison · error-comparison via logged
 `unknown comparing type` instead of clean rule · map `==` order-independence
 (§C8.6 — semantic change).
 
+#### C8.5a AMENDMENT (designer ruling, 2026-07-06): float↔decimal — "a float denotes its shortest round-trip decimal"
+
+C8.5's "exact numeric comparison" left open *which* exact value a float denotes
+when it meets a decimal. The designer rejected the exact-binary-expansion answer
+(`0.1n == 0.1` → false was the unacceptable consequence) and ruled:
+
+**A float's canonical decimal value is its shortest round-trip decimal** — the
+exact string modern printers (Ryū/Dragonbox) produce. And the convention governs
+**all mixed decimal↔float operations, not just comparison**: wherever a float
+meets a decimal (`==`, `!=`, ordering, the C11 total order, arithmetic,
+hashing), the float is **promoted to decimal via shortest-round-trip, and the
+operation proceeds in decimal arithmetic**. The performance cost of the decimal
+path in mixed operations is accepted by ruling: "that's the cost of decimal
+precision we want, and the price to pay."
+
+So: `0.1n == 0.1` → **true**; `0.1 - 0.1n` → **`0n`**; equality agrees with
+`format` — **two numbers are equal iff they print the same** (WYSIWYG equality,
+the document-native reading of "deep value equality").
+
+##### Why this formalization and not the naive one (recorded)
+
+- **The broken candidate — "round the decimal to a double and compare" — is
+  ruled out by transitivity**: both `0.1n` and the 55-digit expansion
+  `0.1000…055n` round to the same double, so both would equal float `0.1` while
+  being unequal to each other. `a == c, b == c, a != b` destroys everything C8
+  built on equivalence: C8.6 dedup, C11 sort ties, the equal-must-hash-equal
+  invariant. Any convention mapping *many* decimals onto one float is dead on
+  arrival.
+- **Shortest-round-trip is sound because it is injective**: distinct floats
+  have distinct shortest decimals, so each float is identified with exactly one
+  decimal and `==` remains a true equivalence relation.
+- **The uniformity invariant** (the one hard requirement): a single conversion
+  function `float → shortest-decimal`, used everywhere floats enter the decimal
+  world. If `==` canonicalized but arithmetic used a different conversion, you
+  could have `a == b` with `a - b != 0` — incoherence worse than either pure
+  choice.
+
+##### Prior art on float/decimal interop (survey, recorded)
+
+- **Exact-binary-expansion camp**: Python 3 (`Decimal('0.1') == 0.1` → False
+  via exact `from_float`; migrated there from 2.x's arbitrary type-name
+  comparison), Julia (documented "== compares mathematical values regardless of
+  type", exact even for `Int64 == Float64` above 2⁵³), JS `BigInt == Number`
+  (spec-exact), Ruby/Haskell idiomatically via `to_r`/`toRational`. These are
+  *numerics-first* languages; documents-first weighs "what does a float mean"
+  differently.
+- **Shortest-round-trip as the blessed conversion**: **Java** —
+  `BigDecimal.valueOf(double)` is documented as "the preferred way to convert a
+  double into a BigDecimal", defined via `Double.toString` (shortest); Java's
+  famous footgun is that the exact-expansion constructor `new
+  BigDecimal(double)` also exists and surprises everyone. **Groovy** — a
+  decimal-by-default language (`0.1` literal is BigDecimal) — compares mixed
+  numerics through the `valueOf`-style path: the closest existing language to
+  this ruling's semantics. **Serialization practice universally**: every float
+  through JSON/YAML is canonicalized to its shortest decimal — the convention
+  is already the de-facto interop meaning of a float in Lambda's core domain
+  (jq 1.6+ preserves number literals textually — the same value-is-its-
+  canonical-text philosophy). Full `==` adoption is rare — Lambda is making a
+  mildly novel but well-precedented choice, aligned with its document-native
+  identity.
+- **Lossy-toward-float camp (cautionary)**: SQL type precedence converts
+  NUMERIC → FLOAT for comparison — the source of eternal
+  `WHERE decimal_col = 0.1` surprises, and exactly Lambda's pre-ruling behavior.
+- **Refuse camp**: C# (`decimal == double` is a compile error); foreclosed for
+  Lambda by C8 totality.
+
+##### Costs recorded (accepted deliberately)
+
+1. Sub-ulp distinctions are unobservable through mixed `==`: the float's exact
+   binary value never participates; only its canonical decimal does.
+2. **This does not repair float arithmetic**: `0.1 + 0.2 == 0.3n` is still
+   **false** — the sum is the double whose shortest form is
+   `0.30000000000000004`. The convention aligns *values* with their decimal
+   twins; it cannot make float arithmetic decimal. (Stated here so it is not
+   reported as a bug later.)
+3. Mixed-operation performance: decimal-path arithmetic wherever floats meet
+   decimals — accepted.
+
+##### Implementation notes (and a hidden bonus)
+
+- **The convention is *cheaper* than exact expansion**: `shortest(f)` has ≤ 17
+  significant digits, so it always fits decimal128 exactly — the
+  exact-expansion trap (a double's exact decimal expansion needs up to ~767
+  digits, exceeding decimal128's 34 and even the 200-digit ultra mode) simply
+  disappears. Conversion = the Ryū/Dragonbox routine the formatter already has,
+  plus a decimal128 comparison.
+- **Promotion lattice**: mixed-operation promotions now form a clean tower —
+  `int` →(overflow / float-mix, C3)→ `float` →(decimal-mix, C8.5a)→ `decimal`.
+- **Hashing (feeds impl plan 1.8)**: floats hash via their canonical decimal;
+  the unified numeric hash must satisfy `1 == 1.0 == 1n ⟹` equal hashes
+  (Python/Julia both engineered exactly this).
+
+##### Acceptance tests
+
+`0.1n == 0.1` → true · `0.1 + 0.2 == 0.3n` → false ·
+`0.1000000000000000055511151231257827n == 0.1` → false (kills the naive
+formalization) · `1.0n == 1.00n` → true (the Java scale wart — decimal equality
+is value-, not scale-based) · `0.1 - 0.1n == 0n` → true (uniformity across
+arithmetic) · **`0.1n + 0.2 == 0.3n` → true** (decimal contagion: one decimal
+operand promotes the whole mixed chain into decimal arithmetic — the designed
+escape from float artifacts).
+
+##### C8.5a follow-up discovery (2026-07-06): the float printer is not shortest-round-trip
+
+Probing the designer's question "why isn't `0.1 + 0.2` just `0.3`?" exposed a
+prerequisite bug: **Lambda prints `0.1 + 0.2` as `0.3` while
+`0.1 + 0.2 == 0.3` is false** — the formatter uses lossy (~15-digit) precision
+and renders two *distinct* doubles identically. Consequences: (1) print→parse
+round-trip corrupts the value (A1/C1-family document-language sin); (2) the
+WYSIWYG equality story ("equal iff they print the same") requires an injective
+printer — currently violated; (3) it actively misleads users about float
+results (it caused the very question that found it). Fix: shortest-round-trip
+float printing (Ryū/Dragonbox) in the formatter — a **prerequisite** for impl
+plan 1.4, which had assumed the routine already existed.
+
+##### The float print convention (ruled with C8.5a, 2026-07-06)
+
+`print`/`format` render a float as its **shortest round-trip decimal** — the
+fewest digits that parse back to exactly the same double. Consequences, now the
+stated convention:
+
+- `print(0.3)` → `0.3` (that double's shortest form *is* 0.3);
+- `print(0.1 + 0.2)` → **`0.30000000000000004`** (the sum is the neighboring
+  double, one ulp above; "0.3" would parse to the wrong double, so 17 digits
+  are required) — matching Python, JavaScript, Java, and Julia exactly;
+- **the printer is injective**: distinct doubles always print distinctly —
+  artifacts are *visible*, never hidden;
+- **WYSIWYG equality becomes literally true**: two numbers compare equal iff
+  they print the same, because `format`, C8.5a promotion, and hashing all share
+  the one shortest-round-trip routine.
+
+##### User guidance: how to help yourself when `0.1 + 0.2 != 0.3` (ruled into the user docs, 2026-07-06)
+
+*Teaching text for the user documentation — Phase 9 lifts this verbatim into the
+numerics section:*
+
+> **Seeing `0.1 + 0.2 == 0.3` come out false?** That's floating point being
+> honest — the sum really is `0.30000000000000004` (print it and see; every
+> IEEE language agrees). Lambda gives you three ways out, in increasing order
+> of commitment:
+>
+> 1. **Add one `n` — decimal contagion.** A single decimal operand anywhere in
+>    a mixed expression promotes the *whole chain* into exact decimal
+>    arithmetic: `0.1n + 0.2 == 0.3n` → **true**. One keystroke; the rest of
+>    the expression follows.
+> 2. **Start decimal, stay decimal.** For money, measurements, or anything
+>    where exactness is the point, write decimal literals throughout:
+>    `0.1n + 0.2n == 0.3n`. (This is the C3 guidance: auto-promotion is a
+>    safety net, not a precision strategy — if you want precise arithmetic,
+>    begin with `decimal`.)
+> 3. **If you must stay in float, compare with a tolerance**, as in every
+>    float-based language: `abs(a - b) < eps`.
+>
+> What Lambda will *never* do is pretend: the printer shows the true value
+> (`print(0.1 + 0.2)` → `0.30000000000000004`), and two numbers print the same
+> exactly when they are equal.
+
 #### C8.6 Dedup/grouping and map order (2026-07-04, designer rulings)
 
 **1. Dedup and grouping are defined by `==`, with no special cases.**
@@ -1111,3 +1268,89 @@ covariant). A8 thus stops being an array-special problem and becomes a
 log-only failure mode (`ensure_typed_array` logs, execution continues with an
 invalid binding) is fixed independently (impl plan 0.7); the invariance compile
 check lands with the C4 `var`-param machinery (impl plan Phase 5).
+
+### C13. The decimal tiers (2026-07-06) — RESOLVED: keep both `n` (decimal128) and `N` (extended decimal)
+
+**Decision (designer-approved):** Lambda keeps two decimal variants —
+
+- **`n` = IEEE 754-2008 decimal128**: 34 significant digits, fixed cost, the
+  *standard interchange format* (SQL `DECIMAL`, Arrow, databases, IEEE). The
+  decimal for the 99%: money, measurements, documents — 34 digits covers every
+  currency computation on earth.
+- **`N` = extended-precision decimal**: exact addition, subtraction, and
+  multiplication at any size; division and irrational operations round at a
+  stated operating context (currently 200 digits). The decimal for the 1%:
+  high-precision science and number-theoretic work.
+
+#### C13.1 Why two tiers fits Lambda (recorded)
+
+1. **Third instance of the house two-tier philosophy**: C3 split integers into
+   flex `int` (adaptive) and machine ints (exact-width, standard-conformant);
+   `n`/`N` is the same shape — `n` the "machine" decimal (standard,
+   fixed-cost), `N` the "flex" decimal. A user who understood C3 already
+   understands C13. Internal consistency is what makes the feature teachable
+   rather than confusing.
+2. **Type-carried precision beats the alternative, and the alternative is the
+   confusing one**: Java and Python control decimal precision via a *context* —
+   and Python's is **mutable global state that changes what arithmetic means**
+   (`getcontext().prec = 50` silently alters every subsequent operation) —
+   spooky action, famously bug-prone, and anathema to C4 value semantics.
+   Precision in the value's type is the value-semantics-compatible design; two
+   suffixes is the honest price of no global knob.
+3. **Prior art**: C# — bounded only (96-bit coefficient, ~28–29 digits; no
+   unbounded decimal in the BCL); Java/Python — one type + context (see above);
+   IEEE 754-2008 — bounded formats only (decimal32/64/128); **Raku
+   `Rat`/`FatRat`** — the living two-tier precedent, whose lesson is that the
+   split works *when promotion rules are explicit* (Raku's fuzzy degradation
+   rules are where its confusion lives); **the JS BigDecimal proposal** spent
+   years deadlocked on exactly "bounded IEEE decimal128 vs unbounded" — both
+   sides have real use cases, and Lambda's answer dissolves the deadlock: have
+   both, clearly labeled.
+
+#### C13.2 The four pins (the subtleties that would otherwise become the confusion)
+
+1. **The `N` honesty clause: `N` is *not* mathematically unbounded, and the
+   docs must not say it is.** `1N / 3N` does not terminate — every decimal type
+   needs a rounding rule for division (and sqrt, etc.). "Unbounded" honestly
+   means: exact `+`/`−`/`×` at any size; division and irrational operations
+   round at the stated operating context (200 digits; possibly configurable
+   later — but per-operation or per-value, never a mutable global).
+2. **`n` rounds silently past 34 significant digits** — IEEE decimal128
+   behavior, conformant and correct, but the one place a "I used decimal for
+   exactness" user can be surprised: document prominently (the C8.5a
+   teaching-box territory). And the C3-literal-strictness analog: **a literal
+   with more digits than its suffix can hold is a compile error**
+   ("exceeds decimal128's 34 digits — use `N`"), never a silent parse-time
+   round.
+3. **The promotion lattice extends by one rung, contagion explicit**:
+   `int → float → n → N`. Mixed `n + N` → `N` (wider is contagious, same
+   direction as C8.5a); `float + N` → `N` and `float + n` → `n`, both via the
+   single C8.5a shortest-round-trip conversion. One paragraph of rules —
+   written, per the Raku lesson.
+4. **Equality and hashing need nothing new**: by C8 representation-invisibility,
+   `0.1n == 0.1N` → true (same value, different width); the unified numeric
+   hash (impl plan 1.8) covers both. Width is representation; value is value.
+
+#### C13.3 Rejected alternative and accepted caveat
+
+- **Rational type (`p/q`) rejected** as the "truly exact" alternative: rationals
+  give exact division (Raku `FatRat`, Scheme exacts), but no data format can
+  round-trip them (JSON/SQL/XML have no rational) — off-ecosystem for a
+  document-processing language. Consciously rejected; decimals align with where
+  Lambda's data lives.
+- **Accepted aesthetic caveat**: `n` vs `N` is a single-case distinction, easy
+  to misread in review. Accepted — Lambda already lives with `i8`/`u8`/`f32`
+  suffix discipline, and the two tiers rarely coexist in one file — but
+  acknowledged in the docs rather than left for users to discover.
+
+#### C13.4 Follow-ups
+
+1. Impl plan Phase 4: literal-strictness check for `n` (>34-digit literal →
+   compile error suggesting `N`); the lattice/contagion rules in mixed
+   arithmetic; `N`'s division context stated and tested.
+2. Acceptance tests: `0.1n == 0.1N` → true · over-34-digit `n` literal →
+   compile error · `type(0.1n + 0.2N)` → N-tier · `1N / 3N` rounds at the
+   documented context · `float + n` stays `n` via shortest conversion.
+3. Docs (Phase 9 numerics section): the two-tier story told via the C3
+   parallel; the `N` honesty clause; the 34-digit rounding note in the
+   self-help box.
