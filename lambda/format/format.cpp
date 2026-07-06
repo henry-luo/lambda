@@ -1,5 +1,6 @@
 #include "format.h"
 #include "format-markup.h"
+#include "../lambda-decimal.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/log.h"
 
@@ -65,7 +66,7 @@ void format_number(StringBuf* sb, Item item) {
             } else if (isinf(*dptr)) {
                 stringbuf_append_str(sb, "null");
             } else {
-                snprintf(num_buf, sizeof(num_buf), "%.15g", *dptr);
+                lambda_double_to_shortest(*dptr, num_buf, sizeof(num_buf));
                 stringbuf_append_str(sb, num_buf);
             }
         } else {
@@ -80,7 +81,7 @@ void format_number(StringBuf* sb, Item item) {
             if (isnan(d) || isinf(d)) {
                 stringbuf_append_str(sb, "null");
             } else {
-                snprintf(num_buf, sizeof(num_buf), "%.15g", d);
+                lambda_double_to_shortest(d, num_buf, sizeof(num_buf));
                 stringbuf_append_str(sb, num_buf);
             }
         } else {
@@ -94,9 +95,8 @@ void format_number(StringBuf* sb, Item item) {
 }
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool) {
-    if (!type) return NULL;
-
-    const char* t = type->chars;
+    // format(x) documents a default serializer; null type must not drop scalars.
+    const char* t = type ? type->chars : "text";
     const char* f = (flavor && flavor->len > 0) ? flavor->chars : NULL;
 
     log_debug("Formatting with type: %s%s%s", t, f ? "-" : "", f ? f : "");

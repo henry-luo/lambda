@@ -3,7 +3,7 @@
   x: 12300000000
 }
 {
-  value: 1.23e+10
+  value: 12300000000
 }
 {
   big: 9007199254740991
@@ -13,14 +13,14 @@
 }
 "Test 2: Scientific notation integers"
 {
-  sci1: 1e+10,
-  sci2: 2e+10,
-  sci3: 5e+09
+  sci1: 10000000000,
+  sci2: 20000000000,
+  sci3: 5000000000
 }
-1.23e+10
+12300000000
 {
-  a: 1.23e+10,
-  b: 2.34e+10
+  a: 12300000000,
+  b: 23400000000
 }
 "Test 3: Integer boundary values (56-bit range)"
 {
@@ -78,7 +78,7 @@
     number_float: 3.14159,
     number_negative: -123,
     number_zero: 0,
-    number_scientific: 1.23e+10,
+    number_scientific: 12300000000,
     boolean_true: true,
     boolean_false: false,
     null_value: null
@@ -105,16 +105,16 @@
 }
 "Test 9: Arrays with large integers"
 {
-  arr: [1e+10, 2e+10, 3e+10]
+  arr: [10000000000, 20000000000, 30000000000]
 }
 "Test 10: Field access"
 12300000000
 42
 12300000042
 "Test 11: Arithmetic with map values"
-3e+10
-2e+10
-1e+10
+30000000000
+20000000000
+10000000000
 "Test 12: Comparisons"
 true
 true

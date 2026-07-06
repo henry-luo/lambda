@@ -40,7 +40,7 @@ error
 -4
 5
 "Advanced Mathematical Operations:"
-0.6
+0.6000000000000001
 3
 0.6
 0

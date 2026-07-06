@@ -1,0 +1,28 @@
+'=== builtin fn identity ==='
+true
+true
+'len'
+'=== shortest floats ==='
+'sum'
+"0.30000000000000004"
+'exact'
+"0.3"
+'=== decimal float canonical ==='
+false
+true
+true
+'=== depth limit raises ==='
+true
+'=== vmap numeric hash ==='
+true
+true
+true
+1
+'int key'
+"float"
+'float key'
+"float"
+'decimal key'
+"float"
+'decimal map float key'
+"dec"

@@ -4,13 +4,13 @@
 1
 [0, 1, 8]
 "2. math constants without prefix"
-3.1415926536
-2.7182818285
+3.141592653589793
+2.718281828459045
 "3. statistics without prefix"
 4
-2.6666666667
+2.6666666666666665
 "4. trigonometric without prefix"
 [0, 0, 0]
 "5. use in expressions"
-6.2831853072
-2
+6.283185307179586
+2.0000000000000004

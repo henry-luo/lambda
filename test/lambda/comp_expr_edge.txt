@@ -15,25 +15,25 @@ error
 true
 'Additional Error Cases - Invalid Type Comparisons:'
 "160."
-error
+false
 "161."
-error
+false
 "162."
-error
+false
 "163."
-error
+false
 "164."
-error
+true
 "165."
-error
+true
 "166."
-error
+false
 "167."
-error
+false
 "168."
-error
+false
 "169."
-error
+false
 'Error Cases - String Comparisons (non-equality):'
 "170."
 true

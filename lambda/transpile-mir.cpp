@@ -6584,12 +6584,13 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
         }
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
-        // Slow path: item_at (saves index-type dispatch vs fn_index)
+        // Slow path: unknown objects may be VMap/map keys, not sequences.
         emit_label(mt, l_slow);
         {
-            MIR_reg_t slow_result = emit_call_2(mt, "item_at", MIR_T_I64,
+            MIR_reg_t boxed_idx = emit_box_int(mt, idx_native);
+            MIR_reg_t slow_result = emit_call_2(mt, "fn_index", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, slow_result)));
         }
@@ -6632,13 +6633,12 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             }
         }
         if (field_known_int) {
-            // Field produces an integer Item — use item_at(obj, it2i(field))
+            // Field produces an integer Item, but unknown obj may still be VMap/map.
             MIR_reg_t boxed_field = transpile_box_item(mt, field_node->field);
-            MIR_reg_t field_native = emit_unbox(mt, boxed_field, LMD_TYPE_INT);
             MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
-            return emit_call_2(mt, "item_at", MIR_T_I64,
+            return emit_call_2(mt, "fn_index", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, field_native));
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_field));
         }
     }
 
@@ -9881,6 +9881,27 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
             MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
         return r;
+    }
+    case AST_NODE_SYS_FUNC: {
+        AstSysFuncNode* sys = (AstSysFuncNode*)node;
+        SysFuncInfo* info = sys->fn_info;
+        if (!info || !info->func_ptr) {
+            MIR_reg_t r = new_reg(mt, "sysfn_null", MIR_T_I64);
+            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+            return r;
+        }
+
+        // Bare sys funcs have no compiled MIR item, so use registry identity.
+        MIR_reg_t fn_addr = new_reg(mt, "sysfnaddr", MIR_T_P);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, fn_addr),
+            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)info->func_ptr)));
+        MIR_reg_t name_reg = emit_load_string_literal(mt, info->name);
+        return emit_call_3(mt, "to_sys_fn_named", MIR_T_P,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_addr),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, info->arg_count),
+            MIR_T_P, MIR_new_reg_op(mt->ctx, name_reg));
     }
     case AST_NODE_STRING_PATTERN:
     case AST_NODE_SYMBOL_PATTERN:

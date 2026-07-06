@@ -185,37 +185,9 @@ void write_type(StrBuf* code_buf, Type *type) {
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth = 0, const char* indent = NULL, bool is_attrs = false);
 
 void print_double(StrBuf *strbuf, double num) {
-    // Handle special cases: NaN should always be printed as "nan" (never "-nan")
-    if (isnan(num)) {
-        strbuf_append_str(strbuf, "nan");
-        return;
-    }
-    int exponent;
-    frexp(num, &exponent);
-    if (-20 < exponent && exponent < 30) {
-        // log_debug("printing fancy double: %.10f", num);
-        strbuf_append_format(strbuf, "%.10f", num);
-        // trim trailing zeros
-        char *end = strbuf->str + strbuf->length - 1;
-        while (*end == '0' && end > strbuf->str) { *end-- = '\0'; }
-        // if it ends with a dot, remove that too
-        if (*end == '.') { *end-- = '\0'; }
-        strbuf->length = end - strbuf->str + 1;
-    }
-    else if (-30 < exponent && exponent <= -20) {
-        // log_debug("printing small double: %.10f", num);
-        strbuf_append_format(strbuf, "%.g", num);
-        // remove the zero in exponent, like 'e07'
-        char *end = strbuf->str + strbuf->length - 1;
-        if (*(end-1) == '0' && *(end-2) == '-' && *(end-3) == 'e') {
-            *(end-1) = *end;  *end = '\0';
-            strbuf->length = end - strbuf->str;
-        }
-    }
-    else {
-        // log_debug("printing normal double: %.10f", num);
-        strbuf_append_format(strbuf, "%g", num);
-    }
+    char num_buf[64];
+    lambda_double_to_shortest(num, num_buf, sizeof(num_buf));
+    strbuf_append_str(strbuf, num_buf);
 }
 
 void print_decimal(StrBuf *strbuf, Decimal *decimal) {

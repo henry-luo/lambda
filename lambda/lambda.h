@@ -763,6 +763,7 @@ typedef void* (*fn_ptr)();
 #define FN_FLAG_HAS_KWARGS    0x02  // bit 1: fn->ptr has an extra Item **kwargs_map param
 #define FN_FLAG_IS_GENERATOR  0x04  // bit 2: function is a Python generator (resume fn, frame in closure_env)
 #define FN_FLAG_IS_COROUTINE  0x08  // bit 3: function is a Python coroutine (async def)
+#define FN_FLAG_SYS_REF       0x10  // bit 4: first-class builtin identity, not dynamic-call ABI
 
 // Function as first-class value
 // Supports both direct function references and closures
@@ -812,6 +813,7 @@ Bool fn_exists(Item path);
 Function* to_fn(fn_ptr ptr);
 Function* to_fn_n(fn_ptr ptr, int arity);
 Function* to_fn_named(fn_ptr ptr, int arity, const char* name);
+Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name);
 Function* to_closure(fn_ptr ptr, int arity, void* env);
 Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name);
 
