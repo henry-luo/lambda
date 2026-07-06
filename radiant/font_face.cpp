@@ -337,53 +337,6 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
     }
 }
 
-/* Original lexbor-dependent code - commented out:
-void parse_font_face_rule_OLD(LayoutContext* lycon, lxb_css_rule_t* rule) {
-    if (!lycon) {
-        clog_error(font_log, "Invalid LayoutContext for parse_font_face_rule");
-        return;
-    }
-
-    // For hardcoded implementation, rule can be NULL
-    if (!rule) {
-        clog_info(font_log, "Processing hardcoded @font-face rule (rule=NULL)");
-    }
-
-    clog_info(font_log, "Processing @font-face rules for Liberation font family");
-
-    // Register Liberation Sans variants
-    const char* liberation_sans_fonts[] = {
-        "./test/layout/font/LiberationSans-Regular.ttf",
-        "./test/layout/font/LiberationSans-Bold.ttf",
-        "./test/layout/font/LiberationSans-Italic.ttf",
-        "./test/layout/font/LiberationSans-BoldItalic.ttf"
-    };
-
-    CssEnum weights[] = {CSS_VALUE_NORMAL, CSS_VALUE_BOLD, CSS_VALUE_NORMAL, CSS_VALUE_BOLD};
-    CssEnum styles[] = {CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_ITALIC, CSS_VALUE_ITALIC};
-
-    for (int i = 0; i < 4; i++) {
-        FontFaceDescriptor* descriptor = create_font_face_descriptor(lycon);
-        if (!descriptor) {
-            clog_error(font_log, "Failed to create font face descriptor");
-            continue;
-        }
-
-        descriptor->family_name = mem_strdup("Liberation Sans", MEM_CAT_LAYOUT);
-        descriptor->src_local_path = mem_strdup(liberation_sans_fonts[i], MEM_CAT_LAYOUT);
-        descriptor->font_style = styles[i];
-        descriptor->font_weight = weights[i];
-        descriptor->font_display = CSS_VALUE_AUTO;
-        descriptor->is_loaded = false;
-
-        register_font_face(lycon->ui_context, descriptor);
-
-        clog_info(font_log, "Registered @font-face: %s -> %s (weight=%d, style=%d)",
-                  descriptor->family_name, descriptor->src_local_path, weights[i], styles[i]);
-    }
-}
-*/
-
 void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
     if (!uicon || !descriptor) {
         clog_error(font_log, "Invalid parameters for register_font_face");

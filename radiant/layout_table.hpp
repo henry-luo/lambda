@@ -13,10 +13,6 @@ struct ViewTable* build_table_tree(LayoutContext* lycon, DomNode* elmt);
 // Placeholder for Phase 1 column/row sizing
 void table_auto_layout(LayoutContext* lycon, struct ViewTable* table);
 
-// Phase 3: Table layout algorithm implementations
-void table_auto_layout_algorithm(LayoutContext* lycon, struct ViewTable* table, int columns, float* col_pref, float* col_widths, float sum_pref, float avail_width);
-void table_fixed_layout_algorithm(LayoutContext* lycon, struct ViewTable* table, int columns, float* col_widths, float avail_width);
-
 // Text positioning adjustment helpers (called after cell positions are calculated)
 void adjust_table_text_positions_final(struct ViewTable* table);
 

@@ -34,6 +34,7 @@
 #include <math.h>    // isinf, INFINITY, fabsf
 #include <float.h>   // FLT_MAX
 #include "../lib/mem.h"
+#include "../lib/log.h"
 
 struct LayoutContext;
 struct ViewBlock;
@@ -232,14 +233,24 @@ struct GridItemContribution {
 struct ContribArray {
     GridItemContribution data[MAX_GRID_ITEMS];  // LARGE_ARRAY_OK: fixed-capacity struct field; bound = MAX_GRID_ITEMS (256) × ~56 B ≈ 14 KiB; parent struct is short-lived (single layout pass).
     size_t count;
-    ContribArray() : count(0) {}
+    bool truncation_logged;
+    ContribArray() : count(0), truncation_logged(false) {}
     size_t size() const { return count; }
     bool empty() const { return count == 0; }
     GridItemContribution& operator[](size_t i) { return data[i]; }
     const GridItemContribution& operator[](size_t i) const { return data[i]; }
-    void push_back(const GridItemContribution& c) { if (count < MAX_GRID_ITEMS) data[count++] = c; }
+    void push_back(const GridItemContribution& c) {
+        if (count < MAX_GRID_ITEMS) {
+            data[count++] = c;
+            return;
+        }
+        if (!truncation_logged) {
+            log_warn("[RAD_CAP_GRID_CONTRIB] dropping grid contribution beyond MAX_GRID_ITEMS=%d", MAX_GRID_ITEMS);
+            truncation_logged = true;
+        }
+    }
     void reserve(size_t) {} // no-op
-    void clear() { count = 0; }
+    void clear() { count = 0; truncation_logged = false; }
     GridItemContribution* begin() { return data; }
     GridItemContribution* end()   { return data + count; }
     const GridItemContribution* begin() const { return data; }

@@ -1140,9 +1140,6 @@ typedef struct ViewText : DomText {
  * Fixed-width element that renders bullets using vector graphics
  */
 typedef struct ViewMarker : DomElement {
-    MarkerProp* marker;  // Marker properties (type, size, text content for numbers)
-    float width;         // Fixed marker width
-    float height;        // Marker height (line height)
 } ViewMarker;
 
 struct ViewElement : DomElement {
@@ -1430,6 +1427,19 @@ struct TableCellProp {
 
 typedef struct ViewTableCell : ViewBlock {
 } ViewTableCell;
+
+// Radiant view wrappers are static_cast/reinterpret_cast overlays on DOM storage
+// (see lib/tagged.hpp unsafe_* helpers), so adding fields here corrupts nodes.
+static_assert(sizeof(View) == sizeof(DomNode), "View must remain a DomNode alias");
+static_assert(sizeof(ViewText) == sizeof(DomText), "ViewText must not add fields");
+static_assert(sizeof(ViewElement) == sizeof(DomElement), "ViewElement must not add fields");
+static_assert(sizeof(ViewSpan) == sizeof(DomElement), "ViewSpan must not add fields");
+static_assert(sizeof(ViewMarker) == sizeof(DomElement), "ViewMarker must not add fields");
+static_assert(sizeof(ViewBlock) == sizeof(DomElement), "ViewBlock must not add fields");
+static_assert(sizeof(ViewTable) == sizeof(DomElement), "ViewTable must not add fields");
+static_assert(sizeof(ViewTableRowGroup) == sizeof(DomElement), "ViewTableRowGroup must not add fields");
+static_assert(sizeof(ViewTableRow) == sizeof(DomElement), "ViewTableRow must not add fields");
+static_assert(sizeof(ViewTableCell) == sizeof(DomElement), "ViewTableCell must not add fields");
 
 typedef enum HtmlVersion {
     HTML5 = 1,              // HTML5

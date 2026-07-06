@@ -5,6 +5,7 @@
 #include "view.hpp"
 #include "webview.h"
 #include "../lib/tagged.hpp"
+#include "../lib/arraylist.h"
 #include "../lambda/input/css/dom_element.hpp"
 extern "C" {
 #include "../lib/log.h"
@@ -371,14 +372,16 @@ void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* 
     }
 }
 
-static void render_walk_collect_positive_z_descendants(View* view, View** out_views,
-                                                       int* out_count, int max_count) {
-    while (view && *out_count < max_count) {
+static void render_walk_collect_positive_z_descendants(View* view, ArrayList* out_views) {
+    while (view) {
         if (render_walk_is_positive_z_positioned(view)) {
-            out_views[(*out_count)++] = view;
+            if (!arraylist_append(out_views, view)) {
+                log_warn("[RAD_CAP_RENDER_Z] failed to grow positive z-order render list");
+                return;
+            }
         } else if (view->view_type == RDT_VIEW_INLINE) {
             ViewElement* element = lam::view_require_element(view);
-            render_walk_collect_positive_z_descendants(element->first_child, out_views, out_count, max_count);
+            render_walk_collect_positive_z_descendants(element->first_child, out_views);
         }
         view = view->next();
     }
@@ -387,65 +390,79 @@ static void render_walk_collect_positive_z_descendants(View* view, View** out_vi
 void render_walk_positive_z_descendants(RenderBackend* backend, RenderWalkState* state, View* view) {
     if (!backend || !state || !view) return;
 
-    View* positive_views[256];
-    int positive_count = 0;
-    render_walk_collect_positive_z_descendants(view, positive_views, &positive_count, 256);
+    ArrayList* positive_views = arraylist_new(16);
+    if (!positive_views) {
+        log_warn("[RAD_CAP_RENDER_Z] failed to allocate positive z-order render list");
+        return;
+    }
+    render_walk_collect_positive_z_descendants(view, positive_views);
 
-    for (int i = 1; i < positive_count; i++) {
-        View* key = positive_views[i];
+    for (int i = 1; i < positive_views->length; i++) {
+        View* key = (View*)positive_views->data[i];
         int key_z = lam::view_require_element(key)->position->z_index;
         int j = i - 1;
         while (j >= 0) {
-            int j_z = lam::view_require_element(positive_views[j])->position->z_index;
+            View* current = (View*)positive_views->data[j];
+            int j_z = lam::view_require_element(current)->position->z_index;
             if (j_z > key_z) {
-                positive_views[j + 1] = positive_views[j];
+                positive_views->data[j + 1] = positive_views->data[j];
                 j--;
             } else {
                 break;
             }
         }
-        positive_views[j + 1] = key;
+        positive_views->data[j + 1] = key;
     }
 
-    for (int i = 0; i < positive_count; i++) {
-        render_walk_view(backend, state, positive_views[i]);
+    for (int i = 0; i < positive_views->length; i++) {
+        render_walk_view(backend, state, (View*)positive_views->data[i]);
     }
+    arraylist_free(positive_views);
 }
 
 void render_walk_positioned_children(RenderBackend* backend, RenderWalkState* state, ViewBlock* block) {
     if (!backend || !state || !block || !block->position) return;
 
-    ViewBlock* abs_children[256];
-    int abs_count = 0;
+    ArrayList* abs_children = arraylist_new(16);
+    if (!abs_children) {
+        log_warn("[RAD_CAP_RENDER_ABS] failed to allocate positioned render list");
+        return;
+    }
     ViewBlock* child_block = block->position->first_abs_child;
-    while (child_block && abs_count < 256) {
-        abs_children[abs_count++] = child_block;
+    while (child_block) {
+        if (!arraylist_append(abs_children, child_block)) {
+            log_warn("[RAD_CAP_RENDER_ABS] failed to grow positioned render list");
+            break;
+        }
         child_block = child_block->position->next_abs_sibling;
     }
 
     // stable insertion sort by z-index, matching the legacy raster order.
-    for (int i = 1; i < abs_count; i++) {
-        ViewBlock* key = abs_children[i];
+    for (int i = 1; i < abs_children->length; i++) {
+        ViewBlock* key = (ViewBlock*)abs_children->data[i];
         int key_z = key->position ? key->position->z_index : 0;
         int j = i - 1;
         while (j >= 0) {
-            int j_z = abs_children[j]->position ? abs_children[j]->position->z_index : 0;
+            ViewBlock* current = (ViewBlock*)abs_children->data[j];
+            int j_z = current->position ? current->position->z_index : 0;
             if (j_z > key_z) {
-                abs_children[j + 1] = abs_children[j];
+                abs_children->data[j + 1] = abs_children->data[j];
                 j--;
             } else {
                 break;
             }
         }
-        abs_children[j + 1] = key;
+        abs_children->data[j + 1] = key;
     }
 
-    for (int i = 0; i < abs_count; i++) {
+    for (int i = 0; i < abs_children->length; i++) {
+        ViewBlock* abs_child = (ViewBlock*)abs_children->data[i];
         if (backend->render_block) {
-            backend->render_block(backend->ctx, abs_children[i],
+            backend->render_block(backend->ctx, abs_child,
                                   state->x, state->y, &state->font, state->color);
         } else {
-            render_walk_block(backend, state, abs_children[i]);
+            render_walk_block(backend, state, abs_child);
         }
     }
+    arraylist_free(abs_children);
 }

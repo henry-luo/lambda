@@ -986,8 +986,36 @@ static void adjust_abs_descendants_y(ViewElement* parent, float delta) {
 
 // DEBUG: Global for tracking table height between calls
 // WORKAROUND: Table height gets corrupted between layout_block_content return and caller
-// This is a mysterious issue that needs further investigation
+// RAD_TABLE_HEIGHT_GUARD: shared table-height preservation tag for the save/restore sites below.
 static float g_layout_table_height = 0;
+
+static bool radiant_verify_incremental_layout_enabled() {
+    static int cached = -1;
+    if (cached < 0) {
+        const char* value = getenv("RADIANT_VERIFY_INCREMENTAL_LAYOUT");
+        cached = (value && value[0] == '1') ? 1 : 0;
+    }
+    return cached == 1;
+}
+
+static void verify_incremental_layout_skip(LayoutContext* lycon, DomNode* child,
+                                           float pre_advance_y) {
+    if (!lycon || !child || !radiant_verify_incremental_layout_enabled()) return;
+
+    float cached_contribution = child->layout_height_contribution;
+    {
+        radiant::LayoutMeasureScope verify_scope(lycon, child);
+        lycon->run_mode = radiant::RunMode::PerformLayout;
+        layout_flow_node(lycon, child);
+        float replayed_contribution = lycon->block.advance_y - pre_advance_y;
+        float delta = fabsf(replayed_contribution - cached_contribution);
+        if (delta > 0.5f) {
+            log_error("[RAD_VERIFY_INCREMENTAL] stale layout_height_contribution for %s: cached=%.3f replayed=%.3f",
+                      child->source_loc(), cached_contribution, replayed_contribution);
+            assert(delta <= 0.5f);
+        }
+    }
+}
 
 // Thread-local iframe depth counter to prevent infinite recursion
 // (e.g., <iframe src="index.html"> loading itself)
@@ -4505,6 +4533,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                             && child->is_element() && !child->layout_dirty
                             && child->height > 0 && child->view_type != RDT_VIEW_NONE) {
                             DomElement* skip_elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
+                            verify_incremental_layout_skip(lycon, child, pre_advance_y);
                             // Adjust y position (may have shifted due to upstream changes)
                             skip_elem->y = lycon->block.advance_y;
                             // Advance by stored contribution from previous layout pass
@@ -4693,9 +4722,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                               block->width, block->content_width);
                 }
 
-                // WORKAROUND: Save table height to global - it gets corrupted after return
-                // This is a mysterious issue where the height field gets zeroed between
-                // the return statement and the caller's next instruction
+                // RAD_TABLE_HEIGHT_GUARD: preserve a table height lost between
+                // layout_block_content() return and caller inspection; keep this
+                // tag on every site until the writer that clears height is removed.
                 g_layout_table_height = block->height;
                 return;
             }
@@ -4764,6 +4793,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                               block->width, block->content_width);
                 }
 
+                // RAD_TABLE_HEIGHT_GUARD: see the non-empty table return above.
                 g_layout_table_height = block->height;
                 return;
             }
@@ -7750,9 +7780,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         float child_line_clamp_last_line_max_ascender = block->blk ? block->blk->line_clamp_last_line_max_ascender : 0.0f;
         float child_line_clamp_last_line_max_descender = block->blk ? block->blk->line_clamp_last_line_max_descender : 0.0f;
 
-        // WORKAROUND: Restore table height from global - it gets corrupted after return
-        // This is a mysterious issue where the height field gets zeroed between
-        // the return statement in layout_block_content and this point
+        // RAD_TABLE_HEIGHT_GUARD: paired with the save sites in layout_block_content().
         if (is_table && g_layout_table_height > 0) {
             block->height = g_layout_table_height;
             g_layout_table_height = 0;  // Reset for next table
