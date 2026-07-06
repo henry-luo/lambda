@@ -28,6 +28,13 @@ extern "C" void js_dom_after_set_attribute(void* elem, const char* attr_name, co
 extern "C" void js_dom_after_remove_attribute(void* elem, const char* attr_name);
 extern "C" void js_dom_after_toggle_attribute_remove(void* elem, const char* attr_name);
 extern "C" void js_dom_after_disabled_attribute_set(void* elem);
+extern "C" void js_dom_after_default_checked_set(void* elem, bool checked);
+extern "C" void js_dom_after_default_selected_set(void* elem, bool selected);
+extern "C" void js_dom_after_select_multiple_removed(void* elem);
+extern "C" void js_dom_set_checked_dirty(void* elem, bool checked);
+extern "C" void js_dom_select_set_value_bridge(void* elem, const char* value);
+extern "C" void js_dom_select_set_selected_index_bridge(void* elem, Item value);
+extern "C" void js_dom_set_option_selected_dirty(void* elem, bool selected);
 extern "C" void js_dom_throw_contenteditable_syntax_error(void);
 extern "C" Item js_dom_set_text_data_property(void* text, Item value);
 extern "C" Item js_dom_text_replace_data_bridge(void* text, Item offset, Item count, Item data);
@@ -232,6 +239,23 @@ static bool radiant_dom_disabled_setter(DomElement* elem, const char* prop, cons
     if (!(input || button || select || textarea || fieldset || option || optgroup)) return false;
     *attr_name = "disabled";
     return true;
+}
+
+static bool radiant_dom_live_bool_setter(DomElement* elem, const char* prop, const char** attr_name) {
+    if (!elem || !prop || !attr_name) return false;
+    if (strcmp(prop, "multiple") == 0 && radiant_dom_is_tag(elem, "select")) {
+        *attr_name = "multiple";
+        return true;
+    }
+    if (strcmp(prop, "defaultChecked") == 0 && radiant_dom_is_tag(elem, "input")) {
+        *attr_name = "checked";
+        return true;
+    }
+    if (strcmp(prop, "defaultSelected") == 0 && radiant_dom_is_tag(elem, "option")) {
+        *attr_name = "selected";
+        return true;
+    }
+    return false;
 }
 
 static bool radiant_dom_int_reflected(DomElement* elem, const char* prop,
@@ -1255,6 +1279,52 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
             dom_element_remove_attribute(elem, disabled_attr);
         }
         js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        *out = value;
+        return true;
+    }
+    const char* live_bool_attr = nullptr;
+    if (radiant_dom_live_bool_setter(elem, prop, &live_bool_attr)) {
+        bool truthy = js_is_truthy(value);
+        if (truthy) {
+            dom_element_set_attribute(elem, live_bool_attr, "");
+        } else {
+            dom_element_remove_attribute(elem, live_bool_attr);
+        }
+        // These reflected booleans carry live checked/selected invariants that
+        // remain centralized in js_dom.cpp while dispatch moves into the module.
+        if (strcmp(prop, "defaultChecked") == 0) {
+            js_dom_after_default_checked_set((void*)elem, truthy);
+        } else if (strcmp(prop, "defaultSelected") == 0) {
+            js_dom_after_default_selected_set((void*)elem, truthy);
+        } else if (!truthy) {
+            js_dom_after_select_multiple_removed((void*)elem);
+        }
+        if (strcmp(prop, "multiple") == 0) {
+            js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        }
+        *out = value;
+        return true;
+    }
+    if (strcmp(prop, "checked") == 0 && radiant_dom_is_tag(elem, "input")) {
+        js_dom_set_checked_dirty((void*)elem, js_is_truthy(value));
+        *out = value;
+        return true;
+    }
+    if (radiant_dom_is_tag(elem, "select")) {
+        if (strcmp(prop, "value") == 0) {
+            const char* text = fn_to_cstr(value);
+            js_dom_select_set_value_bridge((void*)elem, text ? text : "");
+            *out = value;
+            return true;
+        }
+        if (strcmp(prop, "selectedIndex") == 0) {
+            js_dom_select_set_selected_index_bridge((void*)elem, value);
+            *out = value;
+            return true;
+        }
+    }
+    if (strcmp(prop, "selected") == 0 && radiant_dom_is_tag(elem, "option")) {
+        js_dom_set_option_selected_dirty((void*)elem, js_is_truthy(value));
         *out = value;
         return true;
     }
