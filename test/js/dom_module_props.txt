@@ -5,6 +5,17 @@ true
 main
 alpha beta
 1
+number
+true
+1
+number
+10
+20
+15
+10
+0
+7
+true
 /docs
 hero.png
 Hero

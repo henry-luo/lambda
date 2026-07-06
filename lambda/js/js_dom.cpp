@@ -10857,6 +10857,93 @@ static Item js_dom_text_control_boundary_from_point(DomElement* elem,
     return out;
 }
 
+extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem) return ItemNull;
+    if (elem->doc) js_dom_ensure_layout_for_geometry(elem->doc);
+    float abs_x = 0.0f;
+    float abs_y = 0.0f;
+    js_dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
+    return js_dom_make_rect_object(abs_x, abs_y, elem->width, elem->height);
+}
+
+extern "C" Item js_dom_get_client_rects_bridge(void* dom_elem) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem) return js_array_new(0);
+    if (elem->doc) js_dom_ensure_layout_for_geometry(elem->doc);
+
+    float abs_x = 0.0f;
+    float abs_y = 0.0f;
+    js_dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
+    float w = elem->width;
+    float h = elem->height;
+
+    Item rect = js_new_object();
+    Item k;
+    k = (Item){.item = s2it(heap_create_name("x"))};
+    js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_x)});
+    k = (Item){.item = s2it(heap_create_name("y"))};
+    js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_y)});
+    k = (Item){.item = s2it(heap_create_name("top"))};
+    js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_y)});
+    k = (Item){.item = s2it(heap_create_name("left"))};
+    js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_x)});
+    k = (Item){.item = s2it(heap_create_name("right"))};
+    js_property_set(rect, k, (Item){.item = i2it((int64_t)(abs_x + w))});
+    k = (Item){.item = s2it(heap_create_name("bottom"))};
+    js_property_set(rect, k, (Item){.item = i2it((int64_t)(abs_y + h))});
+    k = (Item){.item = s2it(heap_create_name("width"))};
+    js_property_set(rect, k, (Item){.item = i2it((int64_t)w)});
+    k = (Item){.item = s2it(heap_create_name("height"))};
+    js_property_set(rect, k, (Item){.item = i2it((int64_t)h)});
+
+    Item arr = js_array_new(0);
+    js_array_push(arr, rect);
+    return arr;
+}
+
+extern "C" Item js_dom_scroll_into_view_bridge(void* dom_elem) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem) return make_js_undefined();
+    DomDocument* doc = elem->doc ? elem->doc : _js_current_document;
+    if (doc) {
+        doc->pending_scroll_into_view_target = elem;
+        log_debug("js_dom_scrollIntoView: queued target <%s>",
+                  elem->tag_name ? elem->tag_name : "?");
+    }
+    return make_js_undefined();
+}
+
+extern "C" Item js_dom_scroll_method_bridge(Item elem_item, Item method_name,
+                                            Item* args, int argc) {
+    const char* method = fn_to_cstr(method_name);
+    if (!method) return make_js_undefined();
+    float x = 0.0f;
+    float y = 0.0f;
+    if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
+        Item left = js_property_get(args[0], js_string_key("left"));
+        Item top = js_property_get(args[0], js_string_key("top"));
+        x = js_dom_item_to_float(left);
+        y = js_dom_item_to_float(top);
+    } else {
+        if (argc >= 1) x = js_dom_item_to_float(args[0]);
+        if (argc >= 2) y = js_dom_item_to_float(args[1]);
+    }
+    if (x != x) x = 0.0f;
+    if (y != y) y = 0.0f;
+    if (strcmp(method, "scrollBy") == 0) {
+        x += js_dom_item_to_float(js_dom_get_property(elem_item, js_string_key("scrollLeft")));
+        y += js_dom_item_to_float(js_dom_get_property(elem_item, js_string_key("scrollTop")));
+    }
+    if (x < 0.0f) x = 0.0f;
+    if (y < 0.0f) y = 0.0f;
+    // scroll(), scrollTo(), and scrollBy() share the element scroll setters
+    // so pending viewport/element scroll state stays in one place.
+    js_dom_set_property(elem_item, js_string_key("scrollLeft"), js_dom_float_item(x));
+    js_dom_set_property(elem_item, js_string_key("scrollTop"), js_dom_float_item(y));
+    return make_js_undefined();
+}
+
 extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
     DomElement* elem = (DomElement*)parent_ptr;
     if (!elem) return ItemNull;
@@ -12098,49 +12185,17 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // getBoundingClientRect() — returns {top, left, right, bottom, width, height}
     // Walks parent chain to compute absolute position.
     if (strcmp(method, "getBoundingClientRect") == 0) {
-        if (elem->doc) js_dom_ensure_layout_for_geometry(elem->doc);
-        float abs_x = 0, abs_y = 0;
-        js_dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
-        float w = elem->width;
-        float h = elem->height;
-        return js_dom_make_rect_object(abs_x, abs_y, w, h);
+        return js_dom_get_bounding_client_rect_bridge((void*)elem);
     }
 
     if (strcmp(method, "scrollIntoView") == 0) {
-        DomDocument* doc = elem->doc ? elem->doc : _js_current_document;
-        if (doc) {
-            doc->pending_scroll_into_view_target = elem;
-            log_debug("js_dom_scrollIntoView: queued target <%s>",
-                      elem->tag_name ? elem->tag_name : "?");
-        }
-        return make_js_undefined();
+        return js_dom_scroll_into_view_bridge((void*)elem);
     }
 
     if (strcmp(method, "scroll") == 0 ||
         strcmp(method, "scrollTo") == 0 ||
         strcmp(method, "scrollBy") == 0) {
-        float x = 0.0f;
-        float y = 0.0f;
-        if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
-            Item left = js_property_get(args[0], js_string_key("left"));
-            Item top = js_property_get(args[0], js_string_key("top"));
-            x = js_dom_item_to_float(left);
-            y = js_dom_item_to_float(top);
-        } else {
-            if (argc >= 1) x = js_dom_item_to_float(args[0]);
-            if (argc >= 2) y = js_dom_item_to_float(args[1]);
-        }
-        if (x != x) x = 0.0f;
-        if (y != y) y = 0.0f;
-        if (strcmp(method, "scrollBy") == 0) {
-            x += js_dom_item_to_float(js_dom_get_property(elem_item, js_string_key("scrollLeft")));
-            y += js_dom_item_to_float(js_dom_get_property(elem_item, js_string_key("scrollTop")));
-        }
-        if (x < 0.0f) x = 0.0f;
-        if (y < 0.0f) y = 0.0f;
-        js_dom_set_property(elem_item, js_string_key("scrollLeft"), js_dom_float_item(x));
-        js_dom_set_property(elem_item, js_string_key("scrollTop"), js_dom_float_item(y));
-        return make_js_undefined();
+        return js_dom_scroll_method_bridge(elem_item, method_name, args, argc);
     }
 
     // compareDocumentPosition(otherNode) — returns bitmask per W3C DOM spec
@@ -12236,35 +12291,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
 
     // getClientRects() — returns array containing single DOMRect (same as getBoundingClientRect)
     if (strcmp(method, "getClientRects") == 0) {
-        if (elem->doc) js_dom_ensure_layout_for_geometry(elem->doc);
-        // compute absolute position
-        float abs_x = 0, abs_y = 0;
-        js_dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
-        float w = elem->width;
-        float h = elem->height;
-        // create the DOMRect
-        Item rect = js_new_object();
-        Item k;
-        k = (Item){.item = s2it(heap_create_name("x"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_x)});
-        k = (Item){.item = s2it(heap_create_name("y"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_y)});
-        k = (Item){.item = s2it(heap_create_name("top"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_y)});
-        k = (Item){.item = s2it(heap_create_name("left"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_x)});
-        k = (Item){.item = s2it(heap_create_name("right"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)(abs_x + w))});
-        k = (Item){.item = s2it(heap_create_name("bottom"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)(abs_y + h))});
-        k = (Item){.item = s2it(heap_create_name("width"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)w)});
-        k = (Item){.item = s2it(heap_create_name("height"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)h)});
-        // wrap in array
-        Item arr = js_array_new(0);
-        js_array_push(arr, rect);
-        return arr;
+        return js_dom_get_client_rects_bridge((void*)elem);
     }
 
     if (strcmp(method, "__lambdaTextControlCaretBounds") == 0 &&

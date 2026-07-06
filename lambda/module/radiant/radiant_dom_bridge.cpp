@@ -54,6 +54,10 @@ extern "C" Item js_dom_click_method_bridge(Item elem_item);
 extern "C" Item js_dom_add_event_listener_bridge(Item target_item, Item type, Item callback, Item opts);
 extern "C" Item js_dom_remove_event_listener_bridge(Item target_item, Item type, Item callback, Item opts);
 extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
+extern "C" Item js_dom_get_bounding_client_rect_bridge(void* elem);
+extern "C" Item js_dom_get_client_rects_bridge(void* elem);
+extern "C" Item js_dom_scroll_into_view_bridge(void* elem);
+extern "C" Item js_dom_scroll_method_bridge(Item elem_item, Item method_name, Item* args, int argc);
 extern "C" Item js_dom_text_replace_data_bridge(void* text, Item offset, Item count, Item data);
 extern "C" Item js_dom_text_insert_data_bridge(void* text, Item offset, Item data);
 extern "C" Item js_dom_text_append_data_bridge(void* text, Item data);
@@ -1842,6 +1846,28 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         *out = argc >= 1
             ? js_dom_dispatch_event_bridge(elem_item, args[0])
             : (Item){.item = b2it(0)};
+        return true;
+    }
+
+    if (strcmp(method, "getBoundingClientRect") == 0) {
+        *out = js_dom_get_bounding_client_rect_bridge((void*)elem);
+        return true;
+    }
+
+    if (strcmp(method, "getClientRects") == 0) {
+        *out = js_dom_get_client_rects_bridge((void*)elem);
+        return true;
+    }
+
+    if (strcmp(method, "scrollIntoView") == 0) {
+        *out = js_dom_scroll_into_view_bridge((void*)elem);
+        return true;
+    }
+
+    if (strcmp(method, "scroll") == 0 ||
+        strcmp(method, "scrollTo") == 0 ||
+        strcmp(method, "scrollBy") == 0) {
+        *out = js_dom_scroll_method_bridge(elem_item, method_name, args, argc);
         return true;
     }
 
