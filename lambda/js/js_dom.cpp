@@ -79,6 +79,10 @@ static const char* js_dom_to_attr_cstr(Item value) {
     return s ? s : "";
 }
 
+extern "C" const char* js_dom_to_attribute_cstr(Item value) {
+    return js_dom_to_attr_cstr(value);
+}
+
 // Forward declarations
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" Item js_eventtarget_add_listener(Item type, Item callback, Item opts);
@@ -95,7 +99,9 @@ static CssDeclaration* js_match_custom_property(DomElement* elem, const char* pr
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 void js_dom_register_named_elements(DomElement* root);
 static bool js_dom_node_is_connected(DomNode* node);
+static DomElement* _nearest_select_for_node(DomNode* node);
 static void _select_refresh_cached_selected_options_for_node(DomNode* node);
+static void _select_ask_for_reset(DomElement* sel);
 
 #define JS_DOM_RICH_HISTORY_CAP 64
 #define JS_DOM_RICH_HISTORY_PATH_CAP 32
@@ -2131,6 +2137,22 @@ static Item lookup_foreign_doc_wrapper(DomDocument* doc) {
         }
     }
     return ItemNull;
+}
+
+extern "C" Item js_dom_owner_document_for_node(void* node_ptr) {
+    DomNode* node = (DomNode*)node_ptr;
+    DomNode* p = node;
+    while (p && !p->is_element()) p = p->parent;
+    if (p) {
+        DomDocument* od = p->as_element()->doc;
+        if (od && od != _js_current_document) {
+            // ownerDocument must preserve cached foreign-document wrapper identity
+            // while Radiant owns the property dispatch table.
+            Item w = lookup_foreign_doc_wrapper(od);
+            if (w.item != ITEM_NULL) return w;
+        }
+    }
+    return js_get_document_object_value();
 }
 
 // Build a minimal HTML document tree:
@@ -6070,6 +6092,44 @@ static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_ar
     return (Item){.item = s2it(s)};
 }
 
+extern "C" Item js_dom_set_text_data_property(void* text_ptr, Item value) {
+    DomText* text_node = (DomText*)text_ptr;
+    if (!text_node) return value;
+    const char* new_text = fn_to_cstr(value);
+    if (new_text) {
+        uint32_t old_u16_len = dom_text_utf16_length(text_node);
+        // text data writes must continue through the JS helper because it
+        // updates live ranges and publishes the text mutation kind.
+        js_dom_replace_text_data(text_node, 0, old_u16_len, new_text);
+        log_debug("js_dom_set_text_data_property: set text node data='%.30s'", new_text);
+    }
+    return value;
+}
+
+extern "C" Item js_dom_text_replace_data_bridge(void* text_ptr, Item offset_arg,
+                                                Item count_arg, Item data_arg) {
+    return js_dom_text_replace_data_method((DomText*)text_ptr, offset_arg, count_arg, data_arg);
+}
+
+extern "C" Item js_dom_text_insert_data_bridge(void* text_ptr, Item offset_arg,
+                                               Item data_arg) {
+    return js_dom_text_insert_data_method((DomText*)text_ptr, offset_arg, data_arg);
+}
+
+extern "C" Item js_dom_text_append_data_bridge(void* text_ptr, Item data_arg) {
+    return js_dom_text_append_data_method((DomText*)text_ptr, data_arg);
+}
+
+extern "C" Item js_dom_text_delete_data_bridge(void* text_ptr, Item offset_arg,
+                                               Item count_arg) {
+    return js_dom_text_delete_data_method((DomText*)text_ptr, offset_arg, count_arg);
+}
+
+extern "C" Item js_dom_text_substring_data_bridge(void* text_ptr, Item offset_arg,
+                                                  Item count_arg) {
+    return js_dom_text_substring_data_method((DomText*)text_ptr, offset_arg, count_arg);
+}
+
 static Item js_text_replace_data_method(Item offset_arg, Item count_arg, Item data_arg) {
     Item self = js_get_this();
     DomNode* node = (DomNode*)js_dom_unwrap_element(self);
@@ -6521,6 +6581,41 @@ extern "C" void js_dom_options_collection_before_property_set(Item object, Item 
     DomElement* owner = _select_options_owner(object, &kind);
     if (!owner || kind != SELECT_COLLECTION_OPTIONS || !_is_tag(owner, "select")) return;
     _select_set_selected_index(owner, _select_index_from_item(value));
+}
+
+extern "C" void js_dom_after_set_attribute(void* elem_ptr,
+                                           const char* attr_name,
+                                           const char* attr_value) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    if (!elem || !attr_name || !attr_value) return;
+    js_dom_compile_event_attr_to_expando(elem, attr_name, attr_value);
+    if (_is_tag(elem, "option") && strcasecmp(attr_name, "selected") == 0) {
+        DomElement* sel = _nearest_select_for_node((DomNode*)elem);
+        if (sel && !dom_element_has_attribute(sel, "multiple")) _select_ask_for_reset(sel);
+    }
+    _select_refresh_cached_selected_options_for_node((DomNode*)elem);
+}
+
+extern "C" void js_dom_after_remove_attribute(void* elem_ptr,
+                                              const char* attr_name) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    if (!elem || !attr_name) return;
+    js_dom_clear_event_attr_expando(elem, attr_name);
+    if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
+        _select_ask_for_reset(elem);
+    }
+    _select_refresh_cached_selected_options_for_node((DomNode*)elem);
+}
+
+extern "C" void js_dom_after_toggle_attribute_remove(void* elem_ptr,
+                                                     const char* attr_name) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    if (!elem || !attr_name) return;
+    // toggleAttribute historically only ran the select reset side effect for
+    // removing "multiple"; keep the moved dispatch behavior-compatible.
+    if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
+        _select_ask_for_reset(elem);
+    }
 }
 
 // Find the parent <select> of an <option>. Returns nullptr if none.
@@ -10536,7 +10631,15 @@ static Item js_dom_text_control_boundary_from_point(DomElement* elem,
     return out;
 }
 
+extern "C" Item radiant_dom_element_method(Item elem_item, Item method_name, Item* args, int argc);
+
 extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* args, int argc) {
+    // Jube POC: keep the public JS entry point while Radiant takes ownership
+    // of progressively larger DOM method dispatch clusters.
+    return radiant_dom_element_method(elem_item, method_name, args, argc);
+}
+
+extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Item* args, int argc) {
     DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
     if (!node) {
         log_error("js_dom_element_method: not a DOM element");
