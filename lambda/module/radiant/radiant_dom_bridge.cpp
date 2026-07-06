@@ -3,6 +3,8 @@
 #include "../../input/css/dom_element.hpp"
 #include "../../../radiant/form_control.hpp"
 #include "../../../lib/mem.h"
+#include "../../../lib/strbuf.h"
+#include <ctype.h>
 #include <string.h>
 
 extern "C" void heap_register_gc_root(uint64_t* slot);
@@ -31,6 +33,67 @@ struct RadiantDomWrapperCacheChunk {
 
 static __thread RadiantDomWrapperCacheChunk* s_radiant_dom_wrapper_cache_head = nullptr;
 static __thread RadiantDomWrapperCacheChunk* s_radiant_dom_wrapper_cache_tail = nullptr;
+
+static Item radiant_dom_string_item(const char* value) {
+    return (Item){.item = s2it(heap_create_name(value ? value : ""))};
+}
+
+static Item radiant_dom_int_item(int64_t value) {
+    return (Item){.item = i2it(value)};
+}
+
+static Item radiant_dom_class_name_item(DomElement* elem) {
+    if (!elem || elem->class_count == 0) return radiant_dom_string_item("");
+    StrBuf* sb = strbuf_new_cap(64);
+    if (!sb) return radiant_dom_string_item("");
+    for (int i = 0; i < elem->class_count; i++) {
+        if (i > 0) strbuf_append_char(sb, ' ');
+        strbuf_append_str(sb, elem->class_names[i]);
+    }
+    Item result = radiant_dom_string_item(sb->str ? sb->str : "");
+    strbuf_free(sb);
+    return result;
+}
+
+static String* radiant_dom_uppercase_name(const char* name) {
+    if (!name) return heap_create_name("");
+    size_t len = strlen(name);
+    char stack_buf[64];
+    char* upper = (len < sizeof(stack_buf)) ? stack_buf : (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
+    if (!upper) return heap_create_name("");
+    for (size_t i = 0; i < len; i++) {
+        upper[i] = (char)toupper((unsigned char)name[i]);
+    }
+    upper[len] = '\0';
+    String* result = heap_create_name(upper);
+    if (upper != stack_buf) mem_free(upper);
+    return result;
+}
+
+static int64_t radiant_dom_utf16_length(const char* text) {
+    if (!text) return 0;
+    int64_t units = 0;
+    const unsigned char* p = (const unsigned char*)text;
+    while (*p) {
+        if ((*p & 0x80) == 0) {
+            p++;
+            units++;
+        } else if ((*p & 0xE0) == 0xC0 && p[1]) {
+            p += 2;
+            units++;
+        } else if ((*p & 0xF0) == 0xE0 && p[1] && p[2]) {
+            p += 3;
+            units++;
+        } else if ((*p & 0xF8) == 0xF0 && p[1] && p[2] && p[3]) {
+            p += 4;
+            units += 2;
+        } else {
+            p++;
+            units++;
+        }
+    }
+    return units;
+}
 
 static DomDocument* radiant_dom_node_document(DomNode* node, bool active_fallback) {
     DomNode* current = node;
@@ -147,7 +210,108 @@ extern "C" bool radiant_dom_is_node(Item item) {
     return js_is_dom_node_impl(item);
 }
 
+static bool radiant_dom_get_text_property(DomText* text_node, const char* prop, Item* out) {
+    if (!text_node || !prop || !out) return false;
+    if (strcmp(prop, "data") == 0 || strcmp(prop, "nodeValue") == 0 ||
+        strcmp(prop, "textContent") == 0) {
+        *out = radiant_dom_string_item(text_node->text);
+        return true;
+    }
+    if (strcmp(prop, "length") == 0) {
+        *out = radiant_dom_int_item(radiant_dom_utf16_length(text_node->text));
+        return true;
+    }
+    if (strcmp(prop, "nodeType") == 0) {
+        *out = radiant_dom_int_item(3);
+        return true;
+    }
+    if (strcmp(prop, "nodeName") == 0) {
+        *out = radiant_dom_string_item("#text");
+        return true;
+    }
+    return false;
+}
+
+static bool radiant_dom_get_comment_property(DomComment* comment_node, const char* prop, Item* out) {
+    if (!comment_node || !prop || !out) return false;
+    if (strcmp(prop, "data") == 0 || strcmp(prop, "nodeValue") == 0 ||
+        strcmp(prop, "textContent") == 0) {
+        *out = radiant_dom_string_item(comment_node->content);
+        return true;
+    }
+    if (strcmp(prop, "nodeType") == 0) {
+        *out = radiant_dom_int_item((int64_t)comment_node->node_type);
+        return true;
+    }
+    if (strcmp(prop, "nodeName") == 0) {
+        *out = radiant_dom_string_item("#comment");
+        return true;
+    }
+    if (strcmp(prop, "length") == 0) {
+        *out = radiant_dom_int_item((int64_t)comment_node->length);
+        return true;
+    }
+    return false;
+}
+
+static bool radiant_dom_get_element_property(DomElement* elem, const char* prop, Item* out) {
+    if (!elem || !prop || !out) return false;
+    if (strcmp(prop, "tagName") == 0 || strcmp(prop, "nodeName") == 0) {
+        *out = (Item){.item = s2it(radiant_dom_uppercase_name(elem->tag_name))};
+        return true;
+    }
+    if (strcmp(prop, "localName") == 0) {
+        *out = radiant_dom_string_item(elem->tag_name);
+        return true;
+    }
+    if (strcmp(prop, "namespaceURI") == 0) {
+        const char* ns = dom_element_get_attribute(elem, "__lambda_ns_uri");
+        *out = radiant_dom_string_item((ns && ns[0] != '\0') ? ns : "http://www.w3.org/1999/xhtml");
+        return true;
+    }
+    if (strcmp(prop, "prefix") == 0) {
+        *out = ItemNull;
+        return true;
+    }
+    if (strcmp(prop, "id") == 0) {
+        *out = radiant_dom_string_item(elem->id);
+        return true;
+    }
+    if (strcmp(prop, "className") == 0) {
+        *out = radiant_dom_class_name_item(elem);
+        return true;
+    }
+    if (strcmp(prop, "nodeType") == 0) {
+        *out = radiant_dom_int_item((int64_t)elem->node_type);
+        return true;
+    }
+    return false;
+}
+
+static bool radiant_dom_get_basic_property(Item elem_item, Item prop_name, Item* out) {
+    if (!out) return false;
+    const char* prop = fn_to_cstr(prop_name);
+    if (!prop) return false;
+
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
+    if (!node) return false;
+    if (node->is_text()) {
+        return radiant_dom_get_text_property(node->as_text(), prop, out);
+    }
+    if (node->is_comment()) {
+        return radiant_dom_get_comment_property(node->as_comment(), prop, out);
+    }
+    if (node->is_element()) {
+        return radiant_dom_get_element_property(node->as_element(), prop, out);
+    }
+    return false;
+}
+
 extern "C" Item radiant_dom_get_property(Item elem_item, Item prop_name) {
+    Item result = ItemNull;
+    if (radiant_dom_get_basic_property(elem_item, prop_name, &result)) {
+        return result;
+    }
     return js_dom_get_property_impl(elem_item, prop_name);
 }
 

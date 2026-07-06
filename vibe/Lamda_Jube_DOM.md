@@ -14,6 +14,8 @@ Implementation status:
 - 2026-07-06 verification: `make build` passed. Runtime smoke `./lambda.exe --no-log test/lambda/value.ls` passed.
 - 2026-07-06: Phase 2 compatibility bridge started. Public `js_dom_get_property()` / `js_dom_set_property()` now route through `radiant_dom_get_property()` / `radiant_dom_set_property()`, which delegate to the preserved JS DOM implementation bodies. This moves the call boundary without changing wrapper representation or per-property behavior.
 - 2026-07-06 bridge verification: `make build` passed. DOM smokes `./lambda.exe js test/js/dom_style.js --document test/js/dom_style.html --no-log` and `./lambda.exe js test/js/dom_mutation.js --document test/js/dom_mutation.html --no-log` passed.
+- 2026-07-06: Phase 2 first property cluster moved. `radiant_dom_get_property()` now handles simple module-owned DOM reads before falling back to `js_dom_get_property_impl()`: element `tagName`, `nodeName`, `localName`, `namespaceURI`, `prefix`, `id`, `className`, `nodeType`; text `data`, `nodeValue`, `textContent`, `length`, `nodeType`, `nodeName`; comment `data`, `nodeValue`, `textContent`, `length`, `nodeType`, `nodeName`. Range, Selection, CSSOM, style, navigation, collections, methods, layout geometry, and setters remain on the JS fallback path.
+- 2026-07-06 property-cluster verification: `make build` passed. Added `test/js/dom_module_props.js` / `.html` / `.txt`; raw DOM run returned the expected output, filtered gtest `JavaScriptTests/JsFileTest.Run/dom_module_props` passed, existing DOM identity/style/mutation smokes passed, and full `./test/test_js_gtest.exe` passed `305/305`.
 - 2026-07-06: Phase 3 compatibility bridge started. Public `js_dom_wrap_element()`, `js_dom_unwrap_element()`, and `js_is_dom_node()` now route through `radiant_dom_wrap_node()`, `radiant_dom_unwrap_node()`, and `radiant_dom_is_node()`. The physical cache/rooting implementation is still in `js_dom.cpp`, but the module boundary now owns the wrapper factory surface.
 - 2026-07-06 wrapper verification: `make build` passed. Added `test/js/dom_identity.js` / `.html` / `.txt` and verified repeated Radiant node access preserves strict JS identity through the module bridge.
 - 2026-07-06: Phase 3 cache ownership moved. The wrapper cache, GC rooting, and reset/unroot cleanup now live in `lambda/module/radiant/radiant_dom_bridge.cpp`. `js_dom.cpp` keeps only the fresh compatibility wrapper constructor for `MAP_KIND_DOM` until the VMap phase.
@@ -24,6 +26,8 @@ Implementation status:
 - 2026-07-06 sample verification: `make build` passed. `./lambda.exe --no-log test/lambda/radiant_poc.ls` returned `"ok"`. Existing built-in import smokes `builtin_import_global.ls` and `builtin_import_alias.ls` still passed.
 - 2026-07-06: Phase 4 sample upgraded from the one-shot helper to the first real DOM API cluster. `test/lambda/radiant_poc.ls` now uses `radiant.load()`, `radiant.root()`, `radiant.set_attr()`, `radiant.attr()`, and `radiant.free()` over module-owned DOM wrappers. Calls are module-qualified because bare `load()` already exists as a core built-in and should not be shadowed by a global import fallback.
 - 2026-07-06 API cluster verification: `make build` passed. The upgraded `./lambda.exe --no-log test/lambda/radiant_poc.ls` returned `"ok"` and forces `radiant.free(doc)` through the final expression. Focused JS DOM identity/style/mutation smokes passed. `make test-lambda-baseline` reached 3233/3234 with one `child_process_detached_kill` miss; direct rerun of that case and the full `test_node_prelim_gtest.exe` binary passed.
+- 2026-07-06: Phase 2 class-name read moved. Element `className` now joins Radiant's parsed class list inside `radiant_dom_bridge.cpp`, and `test/js/dom_module_props` covers the module-owned read from a static HTML `class` attribute. Writable `id` / `className` and navigation reads still remain on the JS fallback path because mutation notifications and script-visible traversal helpers are still JS-local.
+- 2026-07-06 class-name verification: `make build` passed. Direct `dom_module_props` run matched the expected output, filtered gtest `JavaScriptTests/JsFileTest.Run/dom_module_props` passed, identity/style/mutation/Radiant sample smokes passed, and full `./test/test_js_gtest.exe` passed `305/305`.
 
 The first deliverable is intentionally conservative:
 
@@ -152,6 +156,13 @@ Acceptance:
 ### Phase 2: Module-Owned DOM Dispatch Tables
 
 Purpose: move DOM policy into the module while preserving wrappers.
+
+Status:
+
+- Started 2026-07-06 with the compatibility bridge: public JS DOM get/set entry points route through `radiant_dom_get_property()` / `radiant_dom_set_property()`.
+- First read cluster moved 2026-07-06. The module now owns simple identity/name/value reads for elements, text nodes, and comment nodes, then falls back to the old JS implementation for everything else.
+- Added `test/js/dom_module_props.js` / `.html` / `.txt` to pin the moved cluster through the normal JS DOM harness.
+- Remaining Phase 2 work: move writable `id` / `className` and narrow navigation reads (`parentNode`, `firstChild`, sibling reads, `childNodes`) once mutation notification and script-visible traversal dependencies are cleanly exposed or duplicated in module-owned form.
 
 Tasks:
 
