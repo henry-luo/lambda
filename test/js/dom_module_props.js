@@ -19,8 +19,10 @@ console.log(text.parentNode === document.getElementById("intro"));
 console.log(text.parentElement === document.getElementById("intro"));
 console.log(text.firstChild === null);
 console.log(text.childNodes.length);
+console.log(text.isConnected);
 
 var comment = document.createComment("note");
+console.log(comment.isConnected);
 main.appendChild(comment);
 console.log(comment.nodeType);
 console.log(comment.nodeName);
@@ -34,6 +36,21 @@ console.log(main.lastChild === comment);
 console.log(main.childNodes.length);
 console.log(document.getElementById("intro").nextSibling === comment);
 console.log(comment.previousSibling.parentNode === main);
+console.log(comment.isConnected);
+console.log(main.isConnected);
+console.log(main.childElementCount);
+console.log(main.firstElementChild === document.getElementById("intro"));
+console.log(main.lastElementChild === document.getElementById("intro"));
+console.log(document.getElementById("intro").nextElementSibling === null);
+
+var tail = document.createElement("span");
+tail.id = "tail";
+main.appendChild(tail);
+console.log(main.childElementCount);
+console.log(main.lastElementChild === tail);
+console.log(document.getElementById("intro").nextElementSibling === tail);
+console.log(tail.previousElementSibling === document.getElementById("intro"));
+console.log(tail.isConnected);
 
 main.id = "main-updated";
 main.className = "gamma delta";
