@@ -47,6 +47,14 @@ inherit
 true
 false
 false
+true
+true
+false
+inherit
+false
+false
+false
+inherit
 false
 
 true

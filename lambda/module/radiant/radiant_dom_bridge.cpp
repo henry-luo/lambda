@@ -28,6 +28,7 @@ extern "C" void js_dom_after_set_attribute(void* elem, const char* attr_name, co
 extern "C" void js_dom_after_remove_attribute(void* elem, const char* attr_name);
 extern "C" void js_dom_after_toggle_attribute_remove(void* elem, const char* attr_name);
 extern "C" void js_dom_after_disabled_attribute_set(void* elem);
+extern "C" void js_dom_throw_contenteditable_syntax_error(void);
 extern "C" Item js_dom_set_text_data_property(void* text, Item value);
 extern "C" Item js_dom_text_replace_data_bridge(void* text, Item offset, Item count, Item data);
 extern "C" Item js_dom_text_insert_data_bridge(void* text, Item offset, Item data);
@@ -1213,6 +1214,35 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
         if (class_str && dom_element_set_attribute(elem, "class", class_str)) {
             js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
         }
+        *out = value;
+        return true;
+    }
+    if (strcmp(prop, "contentEditable") == 0) {
+        const char* text = nullptr;
+        if (get_type_id(value) == LMD_TYPE_BOOL) {
+            text = it2b(value) ? "true" : "false";
+        } else {
+            text = fn_to_cstr(value);
+        }
+        if (!text) text = "";
+        if (*text == '\0') {
+            dom_element_remove_attribute(elem, "contenteditable");
+            js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+            *out = value;
+            return true;
+        }
+        const char* normalized = radiant_dom_normalize_contenteditable(text);
+        if (!normalized) {
+            js_dom_throw_contenteditable_syntax_error();
+            *out = value;
+            return true;
+        }
+        if (strcmp(normalized, "inherit") == 0) {
+            dom_element_remove_attribute(elem, "contenteditable");
+        } else {
+            dom_element_set_attribute(elem, "contenteditable", normalized);
+        }
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
         *out = value;
         return true;
     }

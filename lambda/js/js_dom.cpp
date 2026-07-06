@@ -4095,6 +4095,10 @@ static void js_dom_throw_syntax_error(const char* message) {
     js_throw_value(js_new_error_with_name(name, msg));
 }
 
+extern "C" void js_dom_throw_contenteditable_syntax_error(void) {
+    js_dom_throw_syntax_error("Invalid contentEditable value");
+}
+
 // ============================================================================
 // Helper: find elements by class name (tree walk, appends to array)
 // ============================================================================
