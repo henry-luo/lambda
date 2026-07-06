@@ -1,7 +1,7 @@
 "1. Trigonometric functions (native)"
 [0, 1, 1, -1, 0]
 "2. Exponential and logarithmic (native)"
-[2, 3, 0.9999999998, 2, 1, 2.7182818285]
+[2, 3, 0.9999999998311266, 2, 1, 2.718281828459045]
 "3. Rounding functions (native)"
 [5.5, 3.3, 3, -4, 4, -3, 4, 3]
 "4. Int argument (promoted to double)"
@@ -13,5 +13,5 @@
 "7. Math in conditionals"
 [3, 0]
 "8. Math in recursive/complex expressions"
-[118.0191678902, 3598695.6166849951]
+[118.01916789016178, 3598695.616684995]
 "All native math optimization tests passed."

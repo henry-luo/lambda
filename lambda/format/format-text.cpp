@@ -1,4 +1,5 @@
 #include "format.h"
+#include "../lambda-decimal.hpp"
 #include <string.h>
 #include <ctype.h>
 #include "../../lib/stringbuf.h"
@@ -29,7 +30,7 @@ static void format_scalar_value_reader(TextContext& ctx, const ItemReader& item)
         double val = item.asFloat();
         if (!isnan(val) && !isinf(val)) {
             char num_buf[32];
-            snprintf(num_buf, sizeof(num_buf), "%.15g", val);
+            lambda_double_to_shortest(val, num_buf, sizeof(num_buf));
             ctx.write_text(num_buf);
         }
     }

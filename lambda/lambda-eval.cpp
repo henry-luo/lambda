@@ -497,6 +497,13 @@ Function* to_fn_named(fn_ptr ptr, int arity, const char* name) {
     return fn;
 }
 
+Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name) {
+    Function *fn = to_fn_named(ptr, arity, name);
+    // builtin C functions have heterogeneous ABIs; this value is for identity/name.
+    fn->flags |= FN_FLAG_SYS_REF;
+    return fn;
+}
+
 // Create a closure with captured environment
 Function* to_closure(fn_ptr ptr, int arity, void* env) {
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
@@ -557,6 +564,11 @@ static inline bool is_valid_function(Function* fn) {
 Item fn_call(Function* fn, List* args) {
     if (!is_valid_function(fn)) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call: invalid function (null or wrong type)");
+        return ItemError;
+    }
+    if (fn->flags & FN_FLAG_SYS_REF) {
+        set_runtime_error(ERR_INVALID_CALL,
+            "fn_call: builtin function '%s' is not dynamically callable", fn->name ? fn->name : "<anonymous>");
         return ItemError;
     }
     if (!fn->ptr) {
@@ -661,6 +673,11 @@ Item fn_call0(Function* fn) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call0: cannot call non-function value");
         return ItemError;
     }
+    if (fn->flags & FN_FLAG_SYS_REF) {
+        set_runtime_error(ERR_INVALID_CALL,
+            "fn_call0: builtin function '%s' is not dynamically callable", fn->name ? fn->name : "<anonymous>");
+        return ItemError;
+    }
     if (!fn->ptr) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call0: null function pointer");
         return ItemError;
@@ -677,6 +694,11 @@ Item fn_call0(Function* fn) {
 Item fn_call1(Function* fn, Item a) {
     if (!is_valid_function(fn)) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call1: cannot call non-function value");
+        return ItemError;
+    }
+    if (fn->flags & FN_FLAG_SYS_REF) {
+        set_runtime_error(ERR_INVALID_CALL,
+            "fn_call1: builtin function '%s' is not dynamically callable", fn->name ? fn->name : "<anonymous>");
         return ItemError;
     }
     if (!fn->ptr) {
@@ -697,6 +719,11 @@ Item fn_call2(Function* fn, Item a, Item b) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call2: cannot call non-function value");
         return ItemError;
     }
+    if (fn->flags & FN_FLAG_SYS_REF) {
+        set_runtime_error(ERR_INVALID_CALL,
+            "fn_call2: builtin function '%s' is not dynamically callable", fn->name ? fn->name : "<anonymous>");
+        return ItemError;
+    }
     if (!fn->ptr) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call2: null function pointer");
         return ItemError;
@@ -713,6 +740,11 @@ Item fn_call2(Function* fn, Item a, Item b) {
 Item fn_call3(Function* fn, Item a, Item b, Item c) {
     if (!is_valid_function(fn)) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call3: cannot call non-function value");
+        return ItemError;
+    }
+    if (fn->flags & FN_FLAG_SYS_REF) {
+        set_runtime_error(ERR_INVALID_CALL,
+            "fn_call3: builtin function '%s' is not dynamically callable", fn->name ? fn->name : "<anonymous>");
         return ItemError;
     }
     if (!fn->ptr) {
@@ -1161,7 +1193,8 @@ static Bool function_eq(Function* a, Function* b, int depth) {
 // 3-states comparison with depth tracking for structural equality
 static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
     if (depth > EQ_MAX_DEPTH) {
-        log_error("eq depth limit exceeded: structural equality recursion too deep (> %d)", EQ_MAX_DEPTH);
+        set_runtime_error(ERR_RUNTIME_ERROR,
+            "structural equality recursion too deep (> %d)", EQ_MAX_DEPTH);
         return BOOL_ERROR;
     }
 
@@ -1187,6 +1220,11 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         }
         // number promotion - only for numeric types (int/int64/float/decimal/num_sized/uint64)
         if (IS_NUMERIC_ID(a_item._type_id) && IS_NUMERIC_ID(b_item._type_id)) {
+            if (a_item._type_id == LMD_TYPE_DECIMAL || b_item._type_id == LMD_TYPE_DECIMAL) {
+                // Decimal-visible comparisons must avoid lossy binary-double fallback.
+                int cmp = decimal_cmp_items(a_item, b_item);
+                return (cmp == 0) ? BOOL_TRUE : BOOL_FALSE;
+            }
             double a_val = it2d(a_item), b_val = it2d(b_item);
             return (a_val == b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
@@ -1381,6 +1419,11 @@ Bool fn_lt_scalar(Item a_item, Item b_item) {
         }
         // number promotion - only for numeric types
         if (IS_NUMERIC_ID(a_item._type_id) && IS_NUMERIC_ID(b_item._type_id)) {
+            if (a_item._type_id == LMD_TYPE_DECIMAL || b_item._type_id == LMD_TYPE_DECIMAL) {
+                // Decimal-visible ordering uses the same canonical float conversion as equality.
+                int cmp = decimal_cmp_items(a_item, b_item);
+                return (cmp < 0) ? BOOL_TRUE : BOOL_FALSE;
+            }
             double a_val = it2d(a_item), b_val = it2d(b_item);
             return (a_val < b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
@@ -1439,6 +1482,11 @@ Bool fn_gt_scalar(Item a_item, Item b_item) {
         }
         // number promotion - only for numeric types
         if (IS_NUMERIC_ID(a_item._type_id) && IS_NUMERIC_ID(b_item._type_id)) {
+            if (a_item._type_id == LMD_TYPE_DECIMAL || b_item._type_id == LMD_TYPE_DECIMAL) {
+                // Decimal-visible ordering uses the same canonical float conversion as equality.
+                int cmp = decimal_cmp_items(a_item, b_item);
+                return (cmp > 0) ? BOOL_TRUE : BOOL_FALSE;
+            }
             double a_val = it2d(a_item), b_val = it2d(b_item);
             return (a_val > b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
@@ -2669,6 +2717,12 @@ Item fn_index(Item item, Item index_item) {
     if (item_type == LMD_TYPE_NULL || item_type == LMD_TYPE_ERROR) {
         return ItemNull;
     }
+    if (item_type == LMD_TYPE_VMAP) {
+        // VMap integer-looking keys are still map keys, not sequence offsets.
+        VMap* vm = item.vmap;
+        if (vm && vm->vtable) return vm->vtable->get(vm->data, index_item);
+        return ItemNull;
+    }
 
     // Determine the type and delegate to appropriate getter
     int64_t index = -1;
@@ -2711,13 +2765,6 @@ Item fn_index(Item item, Item index_item) {
         // boolean mask index: arr[mask] — select elements where mask is true
         if (index_type == LMD_TYPE_ARRAY_NUM && item_type == LMD_TYPE_ARRAY_NUM) {
             return fn_mask_index(item, index_item);
-        }
-        // for VMap, support arbitrary key types (int, float, etc.)
-        TypeId item_type = get_type_id(item);
-        if (item_type == LMD_TYPE_VMAP) {
-            VMap* vm = item.vmap;
-            if (vm && vm->vtable) return vm->vtable->get(vm->data, index_item);
-            return ItemNull;
         }
         log_debug("invalid index type %d", index_item._type_id);
         return ItemNull;

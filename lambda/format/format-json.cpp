@@ -1,5 +1,6 @@
 #include "format.h"
 #include "format-utils.hpp"
+#include "../lambda-decimal.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/datetime.h"
@@ -161,7 +162,14 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
     } else if (item.isInt()) {
         stringbuf_append_format(ctx.output(), "%" PRId64, item.asInt());
     } else if (item.isFloat()) {
-        stringbuf_append_format(ctx.output(), "%g", item.asFloat());
+        double val = item.asFloat();
+        if (isnan(val) || isinf(val)) {
+            ctx.write_text("null");
+        } else {
+            char num_buf[64];
+            lambda_double_to_shortest(val, num_buf, sizeof(num_buf));
+            ctx.write_text(num_buf);
+        }
     } else if (item.isString()) {
         String* str = item.asString();
         if (str) {

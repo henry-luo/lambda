@@ -9,6 +9,10 @@
 #include "../lib/mem.h"
 #include "../lib/strbuf.h"
 #include <mpdecimal.h>  // only included here
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 // ─────────────────────────────────────────────────────────────────────
 // Global Contexts
@@ -52,6 +56,143 @@ mpd_context_t* decimal_fixed_context() {
 mpd_context_t* decimal_unlimited_context() {
     if (!g_initialized) decimal_init();
     return &g_unlimited_ctx;
+}
+
+void lambda_double_to_shortest(double d, char* out, int out_size) {
+    if (!out || out_size <= 0) return;
+    if (isnan(d)) {
+        snprintf(out, out_size, "nan");
+        return;
+    }
+    if (isinf(d)) {
+        snprintf(out, out_size, "%sinf", d < 0 ? "-" : "");
+        return;
+    }
+    if (d == 0.0) {
+        snprintf(out, out_size, "0");
+        return;
+    }
+
+    bool neg = false;
+    if (d < 0) {
+        neg = true;
+        d = -d;
+    }
+
+    char sci[64];
+    int best_len = 0;
+    for (int prec = 1; prec <= 21; prec++) {
+        snprintf(sci, sizeof(sci), "%.*e", prec - 1, d);
+        double roundtrip = 0.0;
+        sscanf(sci, "%lf", &roundtrip);
+        if (roundtrip == d) {
+            best_len = prec;
+            break;
+        }
+    }
+    if (best_len == 0) best_len = 17;
+
+    snprintf(sci, sizeof(sci), "%.*e", best_len - 1, d);
+
+    char digits[32];
+    int digit_count = 0;
+    int exp_val = 0;
+    char* p = sci;
+    if (*p == '-') p++;
+    while (*p && *p != 'e' && *p != 'E') {
+        if (*p != '.') {
+            digits[digit_count++] = *p;
+        }
+        p++;
+    }
+    digits[digit_count] = '\0';
+    while (digit_count > 1 && digits[digit_count - 1] == '0') {
+        digit_count--;
+        digits[digit_count] = '\0';
+    }
+    if (*p == 'e' || *p == 'E') {
+        p++;
+        exp_val = atoi(p);
+    }
+
+    int k = digit_count;
+    int e = exp_val + 1;
+    char* o = out;
+    char* end = out + out_size - 1;
+    if (neg && o < end) *o++ = '-';
+
+    if (k <= e && e <= 21) {
+        for (int i = 0; i < k && o < end; i++) *o++ = digits[i];
+        for (int i = 0; i < e - k && o < end; i++) *o++ = '0';
+        *o = '\0';
+    } else if (0 < e && e <= 21) {
+        for (int i = 0; i < e && o < end; i++) *o++ = digits[i];
+        if (o < end) *o++ = '.';
+        for (int i = e; i < k && o < end; i++) *o++ = digits[i];
+        *o = '\0';
+    } else if (-6 < e && e <= 0) {
+        if (o < end) *o++ = '0';
+        if (o < end) *o++ = '.';
+        for (int i = 0; i < -e && o < end; i++) *o++ = '0';
+        for (int i = 0; i < k && o < end; i++) *o++ = digits[i];
+        *o = '\0';
+    } else if (k == 1) {
+        if (o < end) *o++ = digits[0];
+        if (o < end) *o++ = 'e';
+        if (e - 1 >= 0 && o < end) *o++ = '+';
+        snprintf(o, (size_t)(end - o + 1), "%d", e - 1);
+    } else {
+        if (o < end) *o++ = digits[0];
+        if (o < end) *o++ = '.';
+        for (int i = 1; i < k && o < end; i++) *o++ = digits[i];
+        if (o < end) *o++ = 'e';
+        if (e - 1 >= 0 && o < end) *o++ = '+';
+        snprintf(o, (size_t)(end - o + 1), "%d", e - 1);
+    }
+}
+
+bool lambda_numeric_to_canonical_string(Item item, char* out, int out_size) {
+    if (!out || out_size <= 0) return false;
+    out[0] = '\0';
+    TypeId type = get_type_id(item);
+    if (!IS_NUMERIC_ID(type)) return false;
+
+    if (type == LMD_TYPE_FLOAT) {
+        double val = item.get_double();
+        if (isnan(val) || isinf(val)) return false;
+    } else if (type == LMD_TYPE_NUM_SIZED) {
+        double val = item.get_num_sized_as_double();
+        if ((item.get_num_type() == NUM_FLOAT16 || item.get_num_type() == NUM_FLOAT32) &&
+            (isnan(val) || isinf(val))) {
+            return false;
+        }
+    }
+
+    mpd_context_t* ctx = decimal_unlimited_context();
+    mpd_t* dec = decimal_item_to_mpd(item, ctx);
+    if (!dec) return false;
+
+    mpd_t* reduced = mpd_new(ctx);
+    if (!reduced) {
+        mpd_del(dec);
+        return false;
+    }
+
+    // Equal decimal values must hash the same even when their source spelling differs.
+    uint32_t status = 0;
+    mpd_qreduce(reduced, dec, ctx, &status);
+    mpd_t* canon = (status == 0) ? reduced : dec;
+    char* str = mpd_to_sci(canon, 1);
+    if (!str) {
+        mpd_del(reduced);
+        mpd_del(dec);
+        return false;
+    }
+    snprintf(out, out_size, "%s", str);
+    mpd_free(str);
+    mpd_del(reduced);
+    mpd_del(dec);
+    return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -112,7 +253,7 @@ Item decimal_from_double(double val, EvalContext* ctx) {
     if (!dec_val) return ItemError;
     
     char str_buf[64];
-    snprintf(str_buf, sizeof(str_buf), "%.17g", val);
+    lambda_double_to_shortest(val, str_buf, sizeof(str_buf));
     
     uint32_t status = 0;
     mpd_qset_string(dec_val, str_buf, dec_ctx, &status);
@@ -229,7 +370,7 @@ Item decimal_from_double_arena(double val, void* arena_ptr) {
     if (!dec_val) return ItemNull;
     
     char str_buf[64];
-    snprintf(str_buf, sizeof(str_buf), "%.17g", val);
+    lambda_double_to_shortest(val, str_buf, sizeof(str_buf));
     
     uint32_t status = 0;
     mpd_qset_string(dec_val, str_buf, ctx, &status);
@@ -348,7 +489,8 @@ void decimal_release(Decimal* dec) {
 // ─────────────────────────────────────────────────────────────────────
 
 mpd_t* decimal_item_to_mpd(Item item, mpd_context_t* ctx) {
-    TypeId type = item._type_id;
+    // Decimal Items are heap pointers; use the resolved type, not the raw tag.
+    TypeId type = get_type_id(item);
     
     // If already a decimal, make a copy
     if (type == LMD_TYPE_DECIMAL) {
@@ -370,10 +512,28 @@ mpd_t* decimal_item_to_mpd(Item item, mpd_context_t* ctx) {
     else if (type == LMD_TYPE_INT64) {
         mpd_set_ssize(result, item.get_int64(), ctx);
     }
+    else if (type == LMD_TYPE_UINT64) {
+        mpd_set_u64(result, item.get_uint64(), ctx);
+    }
+    else if (type == LMD_TYPE_NUM_SIZED) {
+        if (item.get_num_type() == NUM_FLOAT16 || item.get_num_type() == NUM_FLOAT32) {
+            double val = item.get_num_sized_as_double();
+            char str_buf[64];
+            lambda_double_to_shortest(val, str_buf, sizeof(str_buf));
+            uint32_t status = 0;
+            mpd_qset_string(result, str_buf, ctx, &status);
+            if (status != 0) {
+                mpd_del(result);
+                return NULL;
+            }
+        } else {
+            mpd_set_ssize(result, item.get_num_sized_as_int64(), ctx);
+        }
+    }
     else if (type == LMD_TYPE_FLOAT) {
         double val = item.get_double();
         char str_buf[64];
-        snprintf(str_buf, sizeof(str_buf), "%.17g", val);
+        lambda_double_to_shortest(val, str_buf, sizeof(str_buf));
         uint32_t status = 0;
         mpd_qset_string(result, str_buf, ctx, &status);
         if (status != 0) {

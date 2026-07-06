@@ -1034,6 +1034,7 @@ extern Item fn_call_boxed_5(void* fp, Item a, Item b, Item c, Item d, Item e);
 extern Item fn_call_boxed_6(void* fp, Item a, Item b, Item c, Item d, Item e, Item f);
 extern Item fn_call_boxed_7(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g);
 extern Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h);
+extern Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name);
 
 // Debug tracing helpers
 
@@ -2716,6 +2717,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_call_boxed_6", FPTR(fn_call_boxed_6)},
     {"fn_call_boxed_7", FPTR(fn_call_boxed_7)},
     {"fn_call_boxed_8", FPTR(fn_call_boxed_8)},
+    {"to_sys_fn_named", FPTR(to_sys_fn_named)},
 
     // ========================================================================
     // Template state store (reactive UI Phase 2)

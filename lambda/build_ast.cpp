@@ -194,6 +194,22 @@ SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
     return NULL;
 }
 
+static SysFuncInfo* get_unambiguous_sys_func_value(StrView* name) {
+    init_sys_func_maps();
+
+    SysFuncInfo* found = NULL;
+    for (int i = 0; i < sys_func_def_count; i++) {
+        int name_len = (int)strlen(sys_func_defs[i].name);
+        if (name_len != (int)name->length || strncmp(sys_func_defs[i].name, name->str, name->length) != 0) {
+            continue;
+        }
+        if (!sys_func_defs[i].func_ptr) return NULL;
+        if (found) return NULL;
+        found = &sys_func_defs[i];
+    }
+    return found;
+}
+
 // Look up a system function for method-style call: obj.method(args)
 // This searches for a sys func where arg_count includes the object (+1)
 // and validates that the function is method-eligible and type-compatible
@@ -2093,6 +2109,20 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
                 log_debug("global import math constant resolved: %.*s", (int)var_name.length, var_name.str);
                 return (AstNode*)pn;
             }
+        }
+        SysFuncInfo* sys_value = get_unambiguous_sys_func_value(&var_name);
+        if (sys_value) {
+            AstSysFuncNode* sys_node = (AstSysFuncNode*)alloc_ast_node(tp,
+                AST_NODE_SYS_FUNC, id_node, sizeof(AstSysFuncNode));
+            TypeFunc* fn_type = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
+            fn_type->param_count = sys_value->arg_count;
+            fn_type->required_param_count = sys_value->arg_count;
+            fn_type->returned = sys_value->return_type;
+            fn_type->is_proc = sys_value->is_proc;
+            fn_type->can_raise = sys_value->can_raise;
+            sys_node->fn_info = sys_value;
+            sys_node->type = (Type*)fn_type;
+            return (AstNode*)sys_node;
         }
         // ident is used for member access, thus we return TYPE_ANY
         ast_node->type = &TYPE_ANY;

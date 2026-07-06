@@ -69,7 +69,10 @@ covered by regression tests.
 `==` is the comparison primitive of the whole test/verification pipeline — land
 before phases that churn goldens.
 
-**Status as of 2026-07-06:** Phase 1 is **partially implemented**.
+**Status as of 2026-07-06:** Phase 1 runtime equality completion is
+**implemented and verified**. The only remaining 1.8-adjacent work is the
+future C9/general content-hash utility for sorted-key map hashing; the live
+VMap key hashing path now has the required numeric canonicalization.
 
 - 1.1 implemented: the AST no longer rejects literal cross-family equality,
   MIR folds statically-known cross-family `==`/`!=`, and runtime equality now
@@ -77,38 +80,42 @@ before phases that churn goldens.
 - 1.2 implemented: equality treats error values as poison, including the
   same-pointer container case, so `error("x") == error("x")` is false without
   the old unsupported-type path.
-- 1.3 implemented for Lambda function values and closures: runtime equality
+- 1.3 implemented for Lambda function values, closures, and unambiguous builtin
+  function identities (`len == len`, `name(len)`): runtime equality
   compares function code identity plus arity/flags and deep-compares captured
-  `Item` fields. **Pending within 1.3:** stable builtin/sys-function identity
-  (`len == len`) still needs a real builtin site/index in the MIR value path.
-- 1.4 pending except for the currently-supported equality subset captured by
-  `eq_decimal_float.ls`; shortest-round-trip float printing/conversion and
-  decimal-contagion arithmetic still need the dedicated numeric slice.
-- 1.5 pending: depth overflow still returns/logs an error value rather than
-  raising a catchable error.
+  `Item` fields. Builtin function values use registry identity and are guarded
+  from dynamic calls because system-function C ABIs are heterogeneous.
+- 1.4 implemented: float printing and formatter paths now share shortest
+  round-trip conversion; mixed decimal/float equality, ordering, arithmetic,
+  and VMap key hashing use the same canonical conversion.
+- 1.5 implemented: structural equality depth overflow now raises a catchable
+  runtime error instead of only logging/returning an error value.
 - 1.6 implemented for the located ArrayNum representation bug: N-D typed-array
   equality now compares visible shape metadata before flat storage, and compact
   typed arrays compare by their actual element size.
 - 1.7 implemented: different-shape map equality now uses the TypeMap hash for
   expected O(n) lookup and falls back to the namespace-aware chain scan only on
   name-only hash misses/collisions.
-- 1.8 pending: map/numeric hash canonicalization is not implemented.
+- 1.8 implemented for the live hash-key surface: VMap uses unified numeric key
+  hashing so `1 == 1.0 == 1n` hashes/lookups as the same key, including
+  integer-looking VMap indexes. General sorted-key map content hashing remains
+  deferred until the C9 content-hash utility exists.
 - Verification: `make build` passed; direct stdout diffs for
-  `eq_total`, `eq_fn`, `eq_poison`, and `eq_decimal_float` passed; focused
-  `./test/test_lambda_gtest.exe --gtest_filter='*eq_total*:*eq_fn*:*eq_poison*:*eq_decimal_float*'`
-  passed 4/4. Direct `./lambda.exe --no-log test/lambda/eq_poison.ls` now emits
-  only the golden stdout; the stale memtrack leak diagnostic is gone.
+  `eq_phase1_remaining` and `eq_poison` passed; focused
+  `./test/test_lambda_gtest.exe --gtest_filter='*eq_total*:*eq_fn*:*eq_poison*:*eq_decimal_float*:*eq_phase1_remaining*'`
+  passed 5/5. Direct `./lambda.exe --no-log test/lambda/eq_poison.ls` still
+  emits only the golden stdout; the stale memtrack leak diagnostic is gone.
 
 | #   | Item                                                                                                                                                                                                                                                           | Ruling    | Code target                                                                                                                 | Acceptance                                                                      |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | 1.1 | **Cross-family `==` → false, two layers**: (a) MIR transpiler operator resolution — statically-known mismatches emit `false`, not "== not found"; (b) runtime `fn_eq_depth` mismatch fallthroughs (`BOOL_ERROR` at ~1217, ~1264) → `BOOL_FALSE`. `!=` negates. | C8        | `lambda/transpile-mir.cpp` (op resolution); `lambda-eval.cpp` `fn_eq_depth`                                                 | `'a' == "a"` → false; `1 == "1"` → false; `{a:1} == [1]` → false; no logs       |
 | 1.2 | **`error == error` → explicit poison branch**: clean `BOOL_FALSE`, no `unknown comparing type` log.                                                                                                                                                            | C8.5      | `fn_eq_depth` (add `LMD_TYPE_ERROR` branch)                                                                                 | `error("x") == error("x")` → false, silent                                      |
-| 1.3 | **Function equality — site + captures**: stamp `(module id, AST node index)` at closure creation; `==` compares site then deep-compares captures. Builtins: builtin index as site.                                                                             | C8.7-8    | closure creation (transpilers + `build_ast` node ids); `fn_eq_depth` `LMD_TYPE_FUNC` branch (currently pointer-only, ~1258) | `f == f` → true; `make_adder(10) == make_adder(10)` → true; `!= make_adder(20)` |
+| 1.3 | **Function equality — site + captures**: stamp `(module id, AST node index)` at closure creation; `==` compares site then deep-compares captures. Builtins: builtin index as site.                                                                             | C8.7-8    | closure creation (transpilers + `build_ast` node ids); `fn_eq_depth` `LMD_TYPE_FUNC`; bare unambiguous sys-func value path | `f == f` → true; `make_adder(10) == make_adder(10)` → true; `len == len` → true |
 | 1.4 | **decimal ↔ float via shortest-round-trip promotion** (AMENDED by C8.5a, 2026-07-06 — supersedes the exact-expansion spec): a float's canonical decimal value is its **shortest round-trip decimal** (Ryū/Dragonbox — the formatter's routine); one conversion function `float → shortest-decimal`, used in **all** mixed decimal↔float operations — `==`/`!=`, ordering, C11 total order, **arithmetic** (promote to decimal, operate in decimal), hashing. Bonus: `shortest(f)` ≤ 17 sig digits, always fits decimal128 exactly — no wide-context machinery. Uniformity is the invariant: `==` and arithmetic must share the conversion or `a == b` with `a - b != 0` becomes possible. **PREREQUISITE (discovered 2026-07-06): the float printer is NOT shortest-round-trip** — `0.1 + 0.2` prints as `0.3` while `0.1 + 0.2 == 0.3` is false (lossy ~15-digit formatting conflates distinct doubles → print/parse round-trip corrupts values, WYSIWYG equality broken). Implement Ryū/Dragonbox shortest printing in the formatter first; 1.4's conversion then shares it. | C8.5a     | **formatter float printing (prerequisite)**; `decimal_cmp_items` + all mixed-numeric arith paths + shared shortest-float conversion                     | `format(0.1 + 0.2)` → "0.30000000000000004"; `format(0.3)` → "0.3"; property: distinct doubles print distinctly (injective printer); `0.1n == 0.1` → true; `0.1 + 0.2 == 0.3n` → false; **`0.1n + 0.2 == 0.3n` → true** (decimal contagion); `0.1000000000000000055511151231257827n == 0.1` → false; `1.0n == 1.00n` → true; `0.1 - 0.1n == 0n` → true |
 | 1.5 | **Depth limit raises**: `EQ_MAX_DEPTH` (256, ~line 917) exceedance becomes a raised error, not log + error-value; review the 256 value (deep JSON).                                                                                                            | C8.5      | `fn_eq_depth` entry                                                                                                         | deep-nest test raises catchable error                                           |
 | 1.6 | **ArrayNum `==` representation audit** (task_38782787): `array_num_eq` read looks correct — locate the actual repro (likely a vec/2-D or ARRAY-vs-ARRAY_NUM path) and fix.                                                                                     | A5/C8.7-6 | `array_num_eq`, `cross_seq_eq`                                                                                              | task_38782787 repro → true                                                      |
 | 1.7 | **`map_eq` performance**: different-shape path O(n²) linear scan → O(n) expected via existing `TypeMap.field_index` hash. (Semantics unchanged — C8.6-R keeps unordered `==`.)                                                                                 | C8.6-R    | `map_eq` ~983–1005                                                                                                          | perf test on large reordered maps                                               |
-| 1.8 | **Hashing canonicalization**: (a) maps hash in sorted-key order (C8.6-R); (b) **unified numeric hash** (C8.5a): `1 == 1.0 == 1n` must hash equal — floats hash via their canonical (shortest) decimal; Python/Julia precedent. Applies to the C9 content hash and any future set keys.                                                                                                          | C8.6-R/C8.5a    | hashing utilities (when built)                                                                                              | property test: `a == b ⟹ hash(a) == hash(b)` incl. cross-representation numerics |
+| 1.8 | **Hashing canonicalization**: (a) maps hash in sorted-key order (C8.6-R); (b) **unified numeric hash** (C8.5a): `1 == 1.0 == 1n` must hash equal — floats hash via their canonical (shortest) decimal; Python/Julia precedent. Applies to the C9 content hash and any future set keys.                                                                                                          | C8.6-R/C8.5a    | VMap key hash implemented; C9/general sorted-key content hash deferred until hash utility exists                            | `map([1,"int",1.0,"float"])[1]`/`[1.0]`/`[1n]` all resolve to the same value     |
 
 **Fixture pack 1**: `eq_total.ls` (cross-family matrix), `eq_fn.ls`, `eq_decimal_float.ls`, `eq_poison.ls` (nan/error/reflexivity).
 

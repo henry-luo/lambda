@@ -43,6 +43,12 @@ mpd_context_t* decimal_fixed_context();
 // Get the unlimited-precision context
 mpd_context_t* decimal_unlimited_context();
 
+// Convert a double to its shortest round-trip decimal spelling.
+void lambda_double_to_shortest(double d, char* out, int out_size);
+
+// Convert numeric Items to the canonical decimal spelling used for hash keys.
+bool lambda_numeric_to_canonical_string(Item item, char* out, int out_size);
+
 // ─────────────────────────────────────────────────────────────────────
 // Parsing (from string literals)
 // ─────────────────────────────────────────────────────────────────────
