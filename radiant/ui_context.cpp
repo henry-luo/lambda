@@ -22,6 +22,7 @@
 
 void fontface_cleanup(UiContext* uicon);
 char* load_font_path(FontContext *font_ctx, const char* font_name);
+extern "C" void radiant_dom_invalidate_document(DomDocument* doc);
 
 // F7: platform IME shims (radiant/ime_mac.mm, radiant/ime_win.cpp).
 // Take an opaque GLFWwindow*; resolve focus/state through provided
@@ -247,6 +248,10 @@ static void destroy_dom_owned_embed_images(DomNode* node) {
 
 void free_document(DomDocument* doc) {
     if (!doc) return;
+
+    // Module-owned DOM wrappers are non-owning; unroot wrappers before the
+    // document arena destroys the native nodes they point at.
+    radiant_dom_invalidate_document(doc);
 
     if (script_runner_js_batch_cleanup_unsafe()) {
         js_event_loop_abandon_document_timers(doc);

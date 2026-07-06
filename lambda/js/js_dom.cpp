@@ -1495,76 +1495,10 @@ static Item doc_to_proxy_item(DomDocument* doc) {
 // DOM Wrapping / Unwrapping
 // ============================================================================
 
-static const int DOM_WRAPPER_CACHE_CHUNK_SIZE = 4096;
-struct DomWrapperCacheEntry {
-    DomNode* node;
-    uint64_t item;
-};
-struct DomWrapperCacheChunk {
-    DomWrapperCacheEntry entries[DOM_WRAPPER_CACHE_CHUNK_SIZE];
-    int count;
-    DomWrapperCacheChunk* next;
-};
-static __thread DomWrapperCacheChunk* s_dom_wrapper_cache_head = nullptr;
-static __thread DomWrapperCacheChunk* s_dom_wrapper_cache_tail = nullptr;
-
-static Item lookup_dom_wrapper(DomNode* node) {
-    for (DomWrapperCacheChunk* chunk = s_dom_wrapper_cache_head; chunk; chunk = chunk->next) {
-        for (int i = 0; i < chunk->count; i++) {
-            if (chunk->entries[i].node == node) {
-                return (Item){.item = chunk->entries[i].item};
-            }
-        }
-    }
-    return ItemNull;
-}
-
-static DomWrapperCacheChunk* alloc_dom_wrapper_cache_chunk() {
-    DomWrapperCacheChunk* chunk = (DomWrapperCacheChunk*)mem_alloc(
-        sizeof(DomWrapperCacheChunk), MEM_CAT_JS_RUNTIME);
-    if (!chunk) return nullptr;
-    memset(chunk, 0, sizeof(*chunk));
-    if (!s_dom_wrapper_cache_head) {
-        s_dom_wrapper_cache_head = chunk;
-        s_dom_wrapper_cache_tail = chunk;
-    } else {
-        s_dom_wrapper_cache_tail->next = chunk;
-        s_dom_wrapper_cache_tail = chunk;
-    }
-    return chunk;
-}
-
-static void cache_dom_wrapper(DomNode* node, Item wrapper) {
-    if (!node || wrapper.item == ITEM_NULL) return;
-    DomWrapperCacheChunk* chunk = s_dom_wrapper_cache_tail;
-    if (!chunk || chunk->count >= DOM_WRAPPER_CACHE_CHUNK_SIZE) {
-        chunk = alloc_dom_wrapper_cache_chunk();
-        if (!chunk) return;
-    }
-    int index = chunk->count++;
-    chunk->entries[index].node = node;
-    chunk->entries[index].item = wrapper.item;
-    heap_register_gc_root(&chunk->entries[index].item);
-}
+extern "C" void radiant_dom_reset_wrapper_cache(void);
 
 static void reset_dom_wrapper_cache() {
-    DomWrapperCacheChunk* chunk = s_dom_wrapper_cache_head;
-    while (chunk) {
-        for (int i = 0; i < chunk->count; i++) {
-            DomNode* node = chunk->entries[i].node;
-            if (node && node->is_element()) {
-                form_control_release_prop(node->as_element());
-            }
-            heap_unregister_gc_root(&chunk->entries[i].item);
-            chunk->entries[i].node = nullptr;
-            chunk->entries[i].item = 0;
-        }
-        DomWrapperCacheChunk* next = chunk->next;
-        mem_free(chunk);
-        chunk = next;
-    }
-    s_dom_wrapper_cache_head = nullptr;
-    s_dom_wrapper_cache_tail = nullptr;
+    radiant_dom_reset_wrapper_cache();
 }
 
 extern "C" Item radiant_dom_wrap_node(void* dom_elem);
@@ -1575,13 +1509,10 @@ extern "C" Item js_dom_wrap_element(void* dom_elem) {
     return radiant_dom_wrap_node(dom_elem);
 }
 
-extern "C" Item js_dom_wrap_element_impl(void* dom_elem) {
+extern "C" Item js_dom_create_wrapper_impl(void* dom_elem) {
     if (!dom_elem) return ItemNull;
 
     DomNode* node = (DomNode*)dom_elem;
-    Item cached = lookup_dom_wrapper(node);
-    if (cached.item != ITEM_NULL) return cached;
-
     // If this DomNode is a document stub, return the document proxy / foreign
     // doc wrapper instead so identity comparisons in JS (e.g. `r.startContainer
     // === document`) work.
@@ -1615,7 +1546,6 @@ extern "C" Item js_dom_wrap_element_impl(void* dom_elem) {
     }
 
     Item wrapped = (Item){.map = wrapper};
-    cache_dom_wrapper(node, wrapped);
     return wrapped;
 }
 

@@ -1548,10 +1548,11 @@ static bool tsnode_has_current_item_ref(Transpiler* tp, TSNode node) {
 }
 
 // Check if an identifier matches a built-in module name or a registered alias for one.
-// Returns the real module name ("math" or "io") if matched, or NULL if not a builtin module.
+// Returns the real module name if matched, or NULL if not a builtin module.
 static const char* resolve_builtin_module(Transpiler* tp, StrView* name) {
     if (strview_equal(name, "math")) return "math";
     if (strview_equal(name, "io")) return "io";
+    if (strview_equal(name, "radiant")) return "radiant";
     // check aliases
     if (tp->builtin_alias_math && (int)name->length == (int)tp->builtin_alias_math->len
         && strncmp(name->str, tp->builtin_alias_math->chars, name->length) == 0)
@@ -1559,6 +1560,9 @@ static const char* resolve_builtin_module(Transpiler* tp, StrView* name) {
     if (tp->builtin_alias_io && (int)name->length == (int)tp->builtin_alias_io->len
         && strncmp(name->str, tp->builtin_alias_io->chars, name->length) == 0)
         return "io";
+    if (tp->builtin_alias_radiant && (int)name->length == (int)tp->builtin_alias_radiant->len
+        && strncmp(name->str, tp->builtin_alias_radiant->chars, name->length) == 0)
+        return "radiant";
     return NULL;
 }
 
@@ -1815,13 +1819,15 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                 ast_node->pipe_inject = true;
             }
         }
-        // Global import fallback: if `import math;` or `import io;` was used,
+        // Global import fallback: if `import math;`, `import io;`, or a POC
+        // native module import was used,
         // try prefixing the function name with the module name (e.g., sqrt -> math_sqrt)
         if (!sys_func_info) {
-            const char* modules[] = { NULL, NULL };
+            const char* modules[] = { NULL, NULL, NULL };
             int mod_count = 0;
-            if (tp->builtin_import_math) modules[mod_count++] = "math";
-            if (tp->builtin_import_io)   modules[mod_count++] = "io";
+            if (tp->builtin_import_math)    modules[mod_count++] = "math";
+            if (tp->builtin_import_io)      modules[mod_count++] = "io";
+            if (tp->builtin_import_radiant) modules[mod_count++] = "radiant";
             for (int mi = 0; mi < mod_count && !sys_func_info; mi++) {
                 char prefixed[128];
                 snprintf(prefixed, sizeof(prefixed), "%s_%.*s",
@@ -8092,6 +8098,18 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
             } else {
                 tp->builtin_import_io = true;
                 log_debug("built-in module global import: io");
+            }
+            return NULL;  // no AST node needed: resolved at call sites
+        }
+        if (strview_equal(&ast_node->module, "radiant")) {
+            if (ast_node->alias) {
+                tp->builtin_alias_radiant = ast_node->alias;
+                log_debug("built-in module aliased import: %.*s:%.*s",
+                    (int)ast_node->alias->len, ast_node->alias->chars,
+                    (int)ast_node->module.length, ast_node->module.str);
+            } else {
+                tp->builtin_import_radiant = true;
+                log_debug("built-in module global import: radiant");
             }
             return NULL;  // no AST node needed: resolved at call sites
         }

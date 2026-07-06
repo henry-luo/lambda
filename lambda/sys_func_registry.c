@@ -95,6 +95,7 @@ extern Item bigint_from_string(const char* str, int len);
 // view/edit template apply
 extern Item fn_apply1(Item target);
 extern Item fn_apply2(Item target, Item options);
+extern Item fn_radiant_poc_attr(Item path_item);
 
 // template state store (reactive UI Phase 2)
 extern Item tmpl_state_get(Item model_item, const char* template_ref, const char* state_name);
@@ -898,6 +899,13 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSPROC_VMAP_SET, "set", 3, &TYPE_NULL, true, true, true, LMD_TYPE_VMAP, false,
      C_RET_ITEM, C_ARG_ITEM, "pn_set3", NULL, NULL, NULL, false, 0},  // transpiler special case
+
+    // ========================================================================
+    // Radiant module POC — temporary sys-func bridge until Jube descriptors
+    // feed Lambda import/type metadata directly.
+    // ========================================================================
+    {SYSFUNC_RADIANT_POC_ATTR, "radiant_poc_attr", 1, &TYPE_STRING, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_radiant_poc_attr", FPTR(fn_radiant_poc_attr), NULL, NULL, false, 0},
 
     // ========================================================================
     // Replace-in-file procedures (sed-like) — NOT YET IMPLEMENTED

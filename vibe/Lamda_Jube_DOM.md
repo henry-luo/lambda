@@ -16,6 +16,12 @@ Implementation status:
 - 2026-07-06 bridge verification: `make build` passed. DOM smokes `./lambda.exe js test/js/dom_style.js --document test/js/dom_style.html --no-log` and `./lambda.exe js test/js/dom_mutation.js --document test/js/dom_mutation.html --no-log` passed.
 - 2026-07-06: Phase 3 compatibility bridge started. Public `js_dom_wrap_element()`, `js_dom_unwrap_element()`, and `js_is_dom_node()` now route through `radiant_dom_wrap_node()`, `radiant_dom_unwrap_node()`, and `radiant_dom_is_node()`. The physical cache/rooting implementation is still in `js_dom.cpp`, but the module boundary now owns the wrapper factory surface.
 - 2026-07-06 wrapper verification: `make build` passed. Added `test/js/dom_identity.js` / `.html` / `.txt` and verified repeated Radiant node access preserves strict JS identity through the module bridge.
+- 2026-07-06: Phase 3 cache ownership moved. The wrapper cache, GC rooting, and reset/unroot cleanup now live in `lambda/module/radiant/radiant_dom_bridge.cpp`. `js_dom.cpp` keeps only the fresh compatibility wrapper constructor for `MAP_KIND_DOM` until the VMap phase.
+- 2026-07-06 cache verification: `make build` passed. DOM identity/style/mutation smokes passed after the cache move.
+- 2026-07-06: Phase 3 document invalidation hook added. `free_document()` now calls `radiant_dom_invalidate_document()` before the document arena is destroyed, so module-owned non-owning wrappers are unrooted before native nodes disappear. Cache entries store an owner `DomDocument*` at cache time so detached text/comment wrappers can be invalidated even when they do not carry their own document pointer.
+- 2026-07-06 invalidation verification: `make build` passed. DOM identity/style/mutation smokes and `./lambda.exe --no-log test/lambda/value.ls` passed.
+- 2026-07-06: Phase 4 tiny Lambda-facing sample landed. `import radiant; poc_attr("test/js/dom_identity.html")` loads a real Radiant HTML document, mutates the root `data-poc` attribute, reads it back, frees the document, and returns `"ok"`. This uses a temporary sys-func compatibility bridge (`radiant_poc_attr` -> `fn_radiant_poc_attr`) until Jube descriptors feed Lambda import metadata directly.
+- 2026-07-06 sample verification: `make build` passed. `./lambda.exe --no-log test/lambda/radiant_poc.ls` returned `"ok"`. Existing built-in import smokes `builtin_import_global.ls` and `builtin_import_alias.ls` still passed.
 
 The first deliverable is intentionally conservative:
 
@@ -174,7 +180,9 @@ Purpose: prepare for VMap wrappers without changing wrapper representation yet.
 Status:
 
 - Started 2026-07-06. The JS ABI entry points now delegate to module-owned wrapper, unwrap, and type-test functions.
-- Current checkpoint preserves `MAP_KIND_DOM` wrappers and the existing thread-local cache implementation. The next slice should move lookup/cache/root/unroot storage behind module-owned functions without changing cache semantics.
+- Cache ownership moved 2026-07-06. `radiant_dom_wrap_node()` performs module-owned lookup/cache/rooting and calls back into `js_dom_create_wrapper_impl()` only on cache miss to construct the current `MAP_KIND_DOM` compatibility carrier.
+- Document invalidation hook added 2026-07-06. `radiant_dom_invalidate_document()` removes matching cache entries by stored owner document or live parent-chain ownership before `free_document()` destroys native nodes.
+- Current checkpoint preserves `MAP_KIND_DOM` wrappers. The remaining Phase 3 lifecycle gap is finer-grained subtree/node invalidation if Radiant later frees individual nodes before document teardown.
 - Added `test/js/dom_identity.js` to cover repeated access identity for element and text nodes.
 
 Tasks:
@@ -201,6 +209,13 @@ Acceptance:
 ### Phase 4: Tiny Lambda-Facing Sample
 
 Purpose: prove the module is not JS-only.
+
+Status:
+
+- Completed first visible sample 2026-07-06 with `test/lambda/radiant_poc.ls` and `test/lambda/radiant_poc.txt`.
+- Current API is intentionally temporary: `poc_attr(path)` is exposed through `import radiant;` using the existing built-in module import resolver and sys-func table. It is also declared in the `radiant` Jube descriptor so the compatibility bridge and module metadata stay aligned.
+- The sample loads a real HTML document through `load_lambda_html_doc()`, mutates `doc->root`, reads the attribute back, and calls `free_document()`.
+- Next API slice should replace this one-shot helper with real `radiant.root/attr/set_attr` functions over module-owned native DOM wrappers.
 
 The first sample should be deliberately small. It should avoid needing full script-level package management or dynamic loading.
 
