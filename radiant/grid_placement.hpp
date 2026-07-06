@@ -31,6 +31,7 @@
 
 #include "grid_types.hpp"
 #include "grid_occupancy.hpp"
+#include "../lib/log.h"
 
 namespace radiant {
 namespace grid {
@@ -228,15 +229,25 @@ struct GridItemInfo {
 struct ItemInfoArray {
     GridItemInfo data[MAX_GRID_ITEMS];  // LARGE_ARRAY_OK: fixed-capacity struct field; bound = MAX_GRID_ITEMS (256) × ~24 B ≈ 6 KiB; layout-pass scratch.
     size_t count;
-    ItemInfoArray() : count(0) {}
+    bool truncation_logged;
+    ItemInfoArray() : count(0), truncation_logged(false) {}
     size_t size() const { return count; }
     bool empty() const { return count == 0; }
     GridItemInfo& operator[](size_t i) { return data[i]; }
     const GridItemInfo& operator[](size_t i) const { return data[i]; }
-    void push_back(const GridItemInfo& v) { if (count < MAX_GRID_ITEMS) data[count++] = v; }
+    void push_back(const GridItemInfo& v) {
+        if (count < MAX_GRID_ITEMS) {
+            data[count++] = v;
+            return;
+        }
+        if (!truncation_logged) {
+            log_warn("[RAD_CAP_GRID_ITEMS] dropping grid item beyond MAX_GRID_ITEMS=%d", MAX_GRID_ITEMS);
+            truncation_logged = true;
+        }
+    }
     GridItemInfo& back() { return data[count - 1]; }
     void reserve(size_t) {} // no-op
-    void clear() { count = 0; }
+    void clear() { count = 0; truncation_logged = false; }
     GridItemInfo* begin() { return data; }
     GridItemInfo* end()   { return data + count; }
     const GridItemInfo* begin() const { return data; }

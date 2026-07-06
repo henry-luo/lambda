@@ -115,6 +115,48 @@ typedef struct CssAnimState {
 } CssAnimState;
 
 // ============================================================================
+// CSS Transition Runtime State
+// ============================================================================
+
+// The set of properties this vertical slice can transition. Only value types
+// that both apply_animated_value (write side) and the used-value snapshot
+// (read side) already handle are supported; others are deferred.
+#define CSS_TRANSITION_MAX_TRACKED 3   // opacity, color, background-color
+
+// One tracked transitionable property: its last-applied used value (the
+// snapshot) plus the currently running transition instance (if any).
+typedef struct CssTransitionTrack {
+    CssPropertyId property_id;
+    CssAnimValueType value_type;
+    bool has_snapshot;              // false until the first used value is observed
+    union {
+        float f;                    // ANIM_VAL_FLOAT (opacity)
+        Color color;                // ANIM_VAL_COLOR (color, background-color)
+    } snapshot;                     // last-applied used value
+} CssTransitionTrack;
+
+// Persistent per-element transition state (pointed to by DomElement.transition_state).
+typedef struct CssTransitionElemState {
+    CssTransitionTrack tracks[CSS_TRANSITION_MAX_TRACKED];
+    int track_count;
+} CssTransitionElemState;
+
+// Per-instance transition state (attached to AnimationInstance.state).
+typedef struct CssTransitionState {
+    DomElement* element;
+    CssPropertyId property_id;
+    CssAnimValueType value_type;
+    union {
+        float f;
+        Color color;
+    } from;
+    union {
+        float f;
+        Color color;
+    } to;
+} CssTransitionState;
+
+// ============================================================================
 // Property Interpolation
 // ============================================================================
 
@@ -150,5 +192,22 @@ void css_animation_finish(AnimationInstance* anim);
 // Process animation properties during style resolution and start animations
 // if animation-name references valid @keyframes. Called after resolve_css_styles.
 void css_animation_resolve(DomElement* element, LayoutContext* lycon);
+
+// ============================================================================
+// CSS Transition Lifecycle
+// ============================================================================
+
+// Transition tick callback: interpolates from→to and applies via apply_animated_value.
+void css_transition_tick(AnimationInstance* anim, float t);
+
+// Transition finish callback.
+void css_transition_finish(AnimationInstance* anim);
+
+// Process transition-* properties during style resolution. Reads the element's
+// newly-computed used values (opacity/color/background-color), compares them to
+// the persistent per-element snapshot, and starts an ANIM_CSS_TRANSITION for each
+// property that actually changed (given a matching transition declaration).
+// Called from layout, right after resolve_css_styles + css_animation_resolve.
+void css_transition_resolve(DomElement* element, LayoutContext* lycon);
 
 #endif // RADIANT_CSS_ANIMATION_H

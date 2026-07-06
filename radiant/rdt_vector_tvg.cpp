@@ -1458,7 +1458,7 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
 // store the active clip path(s) in the impl and apply in tvg_push_draw_remove.
 
 // Active clip state
-#define RDT_MAX_CLIP_DEPTH 8
+#define RDT_INITIAL_CLIP_DEPTH 8
 
 struct ClipEntry {
     RdtPath* path;
@@ -1466,15 +1466,44 @@ struct ClipEntry {
     bool has_transform;
 };
 
-// We extend RdtVectorImpl with clip state via a parallel static array
-// (avoiding modifying the struct definition visible to other code)
-static thread_local ClipEntry s_clip_stack[RDT_MAX_CLIP_DEPTH];
+// We extend RdtVectorImpl with clip state via thread-local storage to avoid
+// modifying the struct definition visible to other code.
+static thread_local ClipEntry s_clip_inline_stack[RDT_INITIAL_CLIP_DEPTH];
+static thread_local ClipEntry* s_clip_stack = s_clip_inline_stack;
 static thread_local int s_clip_depth = 0;
+static thread_local int s_clip_capacity = RDT_INITIAL_CLIP_DEPTH;
+
+static bool ensure_clip_capacity(int needed_depth) {
+    if (needed_depth <= s_clip_capacity) return true;
+    int new_capacity = s_clip_capacity * 2;
+    while (new_capacity < needed_depth) new_capacity *= 2;
+    ClipEntry* new_stack = (ClipEntry*)mem_calloc((size_t)new_capacity, sizeof(ClipEntry), MEM_CAT_RENDER);
+    if (!new_stack) {
+        log_warn("[RAD_CAP_TVG_CLIP] failed to grow clip stack to depth %d", needed_depth);
+        return false;
+    }
+    if (s_clip_depth > 0) {
+        memcpy(new_stack, s_clip_stack, (size_t)s_clip_depth * sizeof(ClipEntry));
+    }
+    if (s_clip_stack != s_clip_inline_stack) {
+        mem_free(s_clip_stack);
+    }
+    s_clip_stack = new_stack;
+    s_clip_capacity = new_capacity;
+    log_warn("[RAD_CAP_TVG_CLIP] grew clip stack to depth %d", s_clip_capacity);
+    return true;
+}
+
+static void release_heap_clip_stack_if_empty() {
+    if (s_clip_depth != 0 || s_clip_stack == s_clip_inline_stack) return;
+    mem_free(s_clip_stack);
+    s_clip_stack = s_clip_inline_stack;
+    s_clip_capacity = RDT_INITIAL_CLIP_DEPTH;
+}
 
 void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transform) {
     if (!vec || !vec->impl || !clip_path) return;
-    if (s_clip_depth >= RDT_MAX_CLIP_DEPTH) {
-        log_error("rdt_push_clip: clip stack overflow (depth %d)", s_clip_depth);
+    if (!ensure_clip_capacity(s_clip_depth + 1)) {
         return;
     }
 
@@ -1503,6 +1532,7 @@ void rdt_pop_clip(RdtVector* vec) {
     ClipEntry* entry = &s_clip_stack[s_clip_depth];
     rdt_path_free(entry->path);
     entry->path = nullptr;
+    release_heap_clip_stack_if_empty();
 }
 
 int rdt_clip_save_depth() {
@@ -1512,6 +1542,9 @@ int rdt_clip_save_depth() {
 }
 
 void rdt_clip_restore_depth(int saved_depth) {
+    if (!ensure_clip_capacity(saved_depth)) {
+        saved_depth = s_clip_capacity;
+    }
     s_clip_depth = saved_depth;
 }
 

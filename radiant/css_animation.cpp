@@ -1159,3 +1159,518 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     double now = scheduler->current_time;
     css_animation_create(scheduler, element, &anim_prop, keyframes, now, doc->pool);
 }
+
+// ============================================================================
+// CSS Transitions
+// ============================================================================
+//
+// A transition is a single from->to segment for one property. It reuses the
+// exact keyframe-animation machinery: the tick builds a CssAnimatedProp and
+// calls apply_animated_value. The "from" value is the used value applied on the
+// previous style resolution (snapshotted per element); the "to" value is the
+// used value just computed by resolve_css_styles. When the two differ and a
+// transition-* declaration covers the property, an ANIM_CSS_TRANSITION instance
+// is started interpolating from->to over duration/delay with the timing function.
+//
+// Scope: this vertical slice supports the property/value-types that both the
+// write side (apply_animated_value) and the read side (used-value snapshot)
+// already handle: opacity (float), color (color), background-color (color).
+// transform and length-valued properties are deferred — see report.
+
+// Read the current used value of a transitionable property from the element's
+// view props (the symmetric read side of apply_animated_value). Returns false
+// if the property is unsupported or its used value is not currently determinable.
+static bool css_transition_read_used_value(DomElement* element,
+                                           CssPropertyId prop_id,
+                                           CssAnimValueType* out_type,
+                                           float* out_f, Color* out_color) {
+    ViewSpan* span = lam::view_require_element(static_cast<View*>(element));
+    switch (prop_id) {
+        case CSS_PROPERTY_OPACITY: {
+            *out_type = ANIM_VAL_FLOAT;
+            // opacity defaults to 1.0 when no InlineProp/opacity has been set.
+            *out_f = (span->in_line) ? span->in_line->opacity : 1.0f;
+            return true;
+        }
+        case CSS_PROPERTY_COLOR: {
+            // Only snapshot color once it has an explicitly resolved used value;
+            // otherwise the "from" would be an arbitrary zero-initialized color.
+            if (span->in_line && span->in_line->has_color) {
+                *out_type = ANIM_VAL_COLOR;
+                *out_color = span->in_line->color;
+                return true;
+            }
+            return false;
+        }
+        case CSS_PROPERTY_BACKGROUND_COLOR: {
+            if (span->bound && span->bound->background) {
+                *out_type = ANIM_VAL_COLOR;
+                *out_color = span->bound->background->color;
+                return true;
+            }
+            return false;
+        }
+        default:
+            return false;
+    }
+}
+
+// Map a supported property id to its transitionable value type (or ANIM_VAL_NONE).
+static CssAnimValueType css_transition_value_type_for(CssPropertyId prop_id) {
+    switch (prop_id) {
+        case CSS_PROPERTY_OPACITY:          return ANIM_VAL_FLOAT;
+        case CSS_PROPERTY_COLOR:            return ANIM_VAL_COLOR;
+        case CSS_PROPERTY_BACKGROUND_COLOR: return ANIM_VAL_COLOR;
+        default:                            return ANIM_VAL_NONE;
+    }
+}
+
+void css_transition_tick(AnimationInstance* anim, float t) {
+    CssTransitionState* st = (CssTransitionState*)anim->state;
+    if (!st || !st->element) return;
+
+    CssAnimatedProp interp;
+    interp.property_id = st->property_id;
+    interp.value_type = st->value_type;
+
+    // On the final tick (play_state flipped to FINISHED by the scheduler), snap
+    // exactly to the target so no rounding residue is left behind.
+    bool finished = (anim->play_state == ANIM_PLAY_FINISHED);
+
+    switch (st->value_type) {
+        case ANIM_VAL_FLOAT:
+            interp.value.f = finished ? st->to.f
+                                      : css_interpolate_float(st->from.f, st->to.f, t);
+            break;
+        case ANIM_VAL_COLOR:
+            interp.value.color = finished ? st->to.color
+                                          : css_interpolate_color(st->from.color, st->to.color, t);
+            break;
+        default:
+            return; // unsupported — nothing to apply
+    }
+
+    apply_animated_value(st->element, &interp);
+
+    // update bounds from element's current absolute layout position for dirty-region marking
+    View* span = static_cast<View*>(anim->target);
+    float abs_x = span->x, abs_y = span->y;
+    ViewElement* p = span->parent_view();
+    while (p) { abs_x += p->x; abs_y += p->y; p = p->parent_view(); }
+    anim->bounds[0] = abs_x;
+    anim->bounds[1] = abs_y;
+    anim->bounds[2] = span->width;
+    anim->bounds[3] = span->height;
+}
+
+// Locate (or lazily append) the track for a property in the element's persistent state.
+static CssTransitionTrack* css_transition_track_for(CssTransitionElemState* es,
+                                                    CssPropertyId prop_id,
+                                                    CssAnimValueType vt) {
+    for (int i = 0; i < es->track_count; i++) {
+        if (es->tracks[i].property_id == prop_id) return &es->tracks[i];
+    }
+    if (es->track_count >= CSS_TRANSITION_MAX_TRACKED) return NULL;
+    CssTransitionTrack* tk = &es->tracks[es->track_count++];
+    tk->property_id = prop_id;
+    tk->value_type = vt;
+    tk->has_snapshot = false;
+    return tk;
+}
+
+void css_transition_finish(AnimationInstance* anim) {
+    CssTransitionState* st = (CssTransitionState*)anim->state;
+    if (!st || !st->element) return;
+    // Snap the element's persistent snapshot to the target so a subsequent style
+    // change interpolates from the true end value. We locate the track fresh (no
+    // raw back-pointer is kept, to stay safe across view-pool relayouts).
+    CssTransitionElemState* es = (CssTransitionElemState*)st->element->transition_state;
+    if (es) {
+        for (int i = 0; i < es->track_count; i++) {
+            if (es->tracks[i].property_id == st->property_id) {
+                es->tracks[i].value_type = st->value_type;
+                es->tracks[i].has_snapshot = true;
+                if (st->value_type == ANIM_VAL_FLOAT) es->tracks[i].snapshot.f = st->to.f;
+                else if (st->value_type == ANIM_VAL_COLOR) es->tracks[i].snapshot.color = st->to.color;
+                break;
+            }
+        }
+    }
+    log_debug("css-transition: finished prop=%d for element %p", st->property_id, st->element);
+}
+
+// Find a live transition instance for (element, property) in the scheduler, or NULL.
+// Scanning the authoritative list avoids dangling back-pointers across relayouts.
+static AnimationInstance* css_transition_find_running(AnimationScheduler* scheduler,
+                                                      DomElement* element,
+                                                      CssPropertyId prop_id) {
+    for (AnimationInstance* a = scheduler->first; a; a = a->next) {
+        if (a->type == ANIM_CSS_TRANSITION && a->target == element) {
+            CssTransitionState* s = (CssTransitionState*)a->state;
+            if (s && s->property_id == prop_id) return a;
+        }
+    }
+    return NULL;
+}
+
+// Determine whether a resolved CssTransitionProp covers a given property, and
+// return its duration/delay/timing. property_count == -1 means "all".
+static bool css_transition_covers(const CssTransitionProp* tp, CssPropertyId prop_id) {
+    if (tp->property_count < 0) return true; // "all"
+    for (int i = 0; i < tp->property_count; i++) {
+        if (tp->properties[i] == prop_id) return true;
+    }
+    return false;
+}
+
+// Append a property id to the transition-property list (dedup, capacity-checked).
+static void css_transition_add_property(CssTransitionProp* tp, CssPropertyId* buf,
+                                        int cap, CssPropertyId prop_id) {
+    // css_property_id_from_name returns 0 (not -1) for unknown names; ids start at 1.
+    if (prop_id == CSS_PROPERTY_UNKNOWN || (int)prop_id <= 0) return;
+    if (tp->property_count < 0) return;         // already "all"
+    for (int i = 0; i < tp->property_count; i++) {
+        if (tp->properties[i] == prop_id) return;
+    }
+    if (tp->property_count >= cap) return;
+    buf[tp->property_count++] = prop_id;
+}
+
+// Resolve a single CssValue item into a property id (keyword `all` -> -1 sentinel
+// handled by caller; property-name keyword/custom -> CssPropertyId). Returns
+// CSS_PROPERTY_UNKNOWN if not a property name.
+static CssPropertyId css_transition_value_to_property(const CssValue* v, bool* out_all) {
+    *out_all = false;
+    if (!v) return CSS_PROPERTY_UNKNOWN;
+    if (v->type == CSS_VALUE_TYPE_KEYWORD) {
+        if (v->data.keyword == CSS_VALUE_ALL) { *out_all = true; return CSS_PROPERTY_UNKNOWN; }
+        if (v->data.keyword == CSS_VALUE_NONE) return CSS_PROPERTY_UNKNOWN;
+        const CssEnumInfo* info = css_enum_info(v->data.keyword);
+        if (info && info->name) return (CssPropertyId)css_property_id_from_name(info->name);
+    } else if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name) {
+        return (CssPropertyId)css_property_id_from_name(v->data.custom_property.name);
+    } else if (v->type == CSS_VALUE_TYPE_STRING && v->data.string) {
+        return (CssPropertyId)css_property_id_from_name(v->data.string);
+    }
+    return CSS_PROPERTY_UNKNOWN;
+}
+
+// Read a duration/delay CssValue (a time dimension, stored as CSS_VALUE_TYPE_LENGTH
+// with unit s/ms) into seconds. Returns false if not a time value.
+static bool css_transition_read_time(const CssValue* v, float* out_seconds) {
+    if (!v) return false;
+    if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_TIME) {
+        float val = (float)v->data.length.value;
+        if (v->data.length.unit == CSS_UNIT_MS) val /= 1000.0f;
+        *out_seconds = val;
+        return true;
+    }
+    return false;
+}
+
+// Resolve the element's transition-* declarations (longhands + `transition`
+// shorthand) into a CssTransitionProp. `prop_buf` backs the property list.
+// Returns true if a usable transition config with duration > 0 was found.
+static bool css_transition_resolve_config(StyleTree* style_tree, Pool* pool,
+                                          CssTransitionProp* tp,
+                                          CssPropertyId* prop_buf, int prop_cap) {
+    memset(tp, 0, sizeof(*tp));
+    tp->properties = prop_buf;
+    tp->property_count = 0;
+    tp->duration = 0.0f;
+    tp->delay = 0.0f;
+    tp->timing = TIMING_EASE;
+
+    bool saw_duration = false;
+    bool all_props = false;
+
+    // --- longhands ---
+    AvlNode* dur_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_TRANSITION_DURATION);
+    if (dur_node) {
+        StyleNode* sn = (StyleNode*)dur_node->declaration;
+        CssDeclaration* d = sn ? sn->winning_decl : NULL;
+        // transition-duration may be a comma list; use the first value (single-timing slice).
+        const CssValue* v = d ? d->value : NULL;
+        if (v && (v->type == CSS_VALUE_TYPE_LIST) && v->data.list.count > 0) v = v->data.list.values[0];
+        float secs;
+        if (v && css_transition_read_time(v, &secs)) { tp->duration = secs; saw_duration = true; }
+    }
+
+    AvlNode* delay_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_TRANSITION_DELAY);
+    if (delay_node) {
+        StyleNode* sn = (StyleNode*)delay_node->declaration;
+        CssDeclaration* d = sn ? sn->winning_decl : NULL;
+        const CssValue* v = d ? d->value : NULL;
+        if (v && (v->type == CSS_VALUE_TYPE_LIST) && v->data.list.count > 0) v = v->data.list.values[0];
+        float secs;
+        if (v && css_transition_read_time(v, &secs)) tp->delay = secs;
+    }
+
+    AvlNode* tf_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_TRANSITION_TIMING_FUNCTION);
+    if (tf_node) {
+        StyleNode* sn = (StyleNode*)tf_node->declaration;
+        CssDeclaration* d = sn ? sn->winning_decl : NULL;
+        const CssValue* v = d ? d->value : NULL;
+        if (v && (v->type == CSS_VALUE_TYPE_LIST) && v->data.list.count > 0) v = v->data.list.values[0];
+        if (v) parse_timing_function_value(v, &tp->timing);
+    }
+
+    bool longhand_prop_present = false;
+    AvlNode* prop_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_TRANSITION_PROPERTY);
+    if (prop_node) {
+        StyleNode* sn = (StyleNode*)prop_node->declaration;
+        CssDeclaration* d = sn ? sn->winning_decl : NULL;
+        const CssValue* v = d ? d->value : NULL;
+        longhand_prop_present = (v != NULL);
+        if (v && v->type == CSS_VALUE_TYPE_LIST) {
+            for (int i = 0; i < v->data.list.count; i++) {
+                bool is_all = false;
+                CssPropertyId pid = css_transition_value_to_property(v->data.list.values[i], &is_all);
+                if (is_all) { all_props = true; break; }
+                css_transition_add_property(tp, prop_buf, prop_cap, pid);
+            }
+        } else if (v) {
+            bool is_all = false;
+            CssPropertyId pid = css_transition_value_to_property(v, &is_all);
+            if (is_all) all_props = true;
+            else css_transition_add_property(tp, prop_buf, prop_cap, pid);
+        }
+    }
+
+    // --- shorthand `transition` (not expanded by the CSS parser) ---
+    // The shorthand contributes property names too. The final property set is
+    // decided after both longhand and shorthand are read (see below).
+    // Parse each comma-separated group: [property] [duration] [timing] [delay].
+    // Time dimensions: first is duration, second is delay.
+    AvlNode* sh_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_TRANSITION);
+    if (sh_node) {
+        StyleNode* sn = (StyleNode*)sh_node->declaration;
+        CssDeclaration* d = sn ? sn->winning_decl : NULL;
+        const CssValue* sv = d ? d->value : NULL;
+        if (sv) {
+            // Normalize into a flat item list. A single group is a LIST of items;
+            // multiple comma groups are a LIST of LISTs. We take the first group's
+            // duration/delay/timing (single-timing slice) but collect property names
+            // across all groups.
+            const CssValue* const* groups = NULL;
+            int group_count = 0;
+            const CssValue* single_items[1];
+            const CssValue* first_group_flat[16];
+            if (sv->type == CSS_VALUE_TYPE_LIST && sv->data.list.count > 0 &&
+                sv->data.list.values[0] &&
+                sv->data.list.values[0]->type == CSS_VALUE_TYPE_LIST) {
+                groups = sv->data.list.values;
+                group_count = sv->data.list.count;
+            } else {
+                single_items[0] = sv;
+                groups = single_items;
+                group_count = 1;
+            }
+
+            bool sh_saw_time = false;
+            for (int g = 0; g < group_count; g++) {
+                const CssValue* grp = groups[g];
+                const CssValue* const* items;
+                int item_count;
+                if (grp && grp->type == CSS_VALUE_TYPE_LIST) {
+                    items = grp->data.list.values;
+                    item_count = grp->data.list.count;
+                } else {
+                    first_group_flat[0] = grp;
+                    items = first_group_flat;
+                    item_count = 1;
+                }
+                int time_seen = 0;
+                for (int i = 0; i < item_count; i++) {
+                    const CssValue* it = items[i];
+                    if (!it) continue;
+                    float secs;
+                    if (css_transition_read_time(it, &secs)) {
+                        // only the first group drives duration/delay for this slice
+                        if (g == 0) {
+                            if (time_seen == 0) { tp->duration = secs; saw_duration = true; sh_saw_time = true; }
+                            else if (time_seen == 1) { tp->delay = secs; }
+                        }
+                        time_seen++;
+                    } else if (it->type == CSS_VALUE_TYPE_FUNCTION ||
+                               (it->type == CSS_VALUE_TYPE_KEYWORD &&
+                                (it->data.keyword == CSS_VALUE_EASE || it->data.keyword == CSS_VALUE_EASE_IN ||
+                                 it->data.keyword == CSS_VALUE_EASE_OUT || it->data.keyword == CSS_VALUE_EASE_IN_OUT ||
+                                 it->data.keyword == CSS_VALUE_LINEAR || it->data.keyword == CSS_VALUE_STEP_START ||
+                                 it->data.keyword == CSS_VALUE_STEP_END))) {
+                        if (g == 0) parse_timing_function_value(it, &tp->timing);
+                    } else {
+                        bool is_all = false;
+                        CssPropertyId pid = css_transition_value_to_property(it, &is_all);
+                        if (is_all) all_props = true;
+                        else css_transition_add_property(tp, prop_buf, prop_cap, pid);
+                    }
+                }
+            }
+            (void)sh_saw_time;
+        }
+    }
+
+    // Decide the property set. "all" wins if any source said `all`. Otherwise, if
+    // an explicit list was collected (from shorthand or longhand), use it. If no
+    // source named any property, the initial value "all" applies.
+    bool any_explicit_list = (tp->property_count > 0);
+    (void)longhand_prop_present;
+    if (all_props || !any_explicit_list) {
+        tp->property_count = -1;   // covers all supported properties
+        tp->properties = NULL;
+    }
+
+    return saw_duration && tp->duration > 0.0f;
+}
+
+// Supported transitionable properties for the "all" keyword.
+static const CssPropertyId kTransitionSupported[] = {
+    CSS_PROPERTY_OPACITY, CSS_PROPERTY_COLOR, CSS_PROPERTY_BACKGROUND_COLOR,
+};
+static const int kTransitionSupportedCount =
+    (int)(sizeof(kTransitionSupported) / sizeof(kTransitionSupported[0]));
+
+// Start (or restart) a transition for one property from `from` to `to`.
+static void css_transition_start(AnimationScheduler* scheduler, DomElement* element,
+                                 CssTransitionTrack* track, const CssTransitionProp* tp,
+                                 CssAnimValueType vt, float from_f, Color from_c,
+                                 float to_f, Color to_c, double now, Pool* pool) {
+    // If a transition for this property is already running, reverse/interrupt from
+    // its current interpolated value: cancel the old one and start fresh so we don't
+    // stack instances. The current applied used value IS the interpolated value.
+    AnimationInstance* existing = css_transition_find_running(scheduler, element, track->property_id);
+    if (existing) {
+        CssAnimValueType cvt; float cf = 0; Color cc; cc.c = 0;
+        if (css_transition_read_used_value(element, track->property_id, &cvt, &cf, &cc)) {
+            if (cvt == ANIM_VAL_FLOAT) from_f = cf;
+            else if (cvt == ANIM_VAL_COLOR) from_c = cc;
+        }
+        animation_scheduler_remove(scheduler, existing);
+    }
+
+    CssTransitionState* st = (CssTransitionState*)pool_calloc(pool, sizeof(CssTransitionState));
+    st->element = element;
+    st->property_id = track->property_id;
+    st->value_type = vt;
+    if (vt == ANIM_VAL_FLOAT) { st->from.f = from_f; st->to.f = to_f; }
+    else { st->from.color = from_c; st->to.color = to_c; }
+
+    AnimationInstance* inst = animation_instance_create(scheduler);
+    if (!inst) return;
+    inst->type = ANIM_CSS_TRANSITION;
+    inst->target = element;
+    inst->state = st;
+    inst->start_time = now;
+    inst->duration = tp->duration;
+    inst->delay = tp->delay;
+    inst->iteration_count = 1;
+    inst->direction = ANIM_DIR_NORMAL;
+    // hold the end value after completion so the transitioned property does not
+    // snap back before the next style resolution re-applies it.
+    inst->fill_mode = ANIM_FILL_FORWARDS;
+    inst->play_state = ANIM_PLAY_RUNNING;
+    inst->timing = tp->timing;
+    inst->tick = css_transition_tick;
+    inst->on_finish = css_transition_finish;
+
+    View* span = static_cast<View*>(element);
+    float abs_x = span->x, abs_y = span->y;
+    ViewElement* pe = span->parent_view();
+    while (pe) { abs_x += pe->x; abs_y += pe->y; pe = pe->parent_view(); }
+    inst->bounds[0] = abs_x; inst->bounds[1] = abs_y;
+    inst->bounds[2] = span->width; inst->bounds[3] = span->height;
+
+    animation_scheduler_add(scheduler, inst);
+
+    log_debug("css-transition: started prop=%d for <%s> (dur=%.3fs delay=%.3fs)",
+              track->property_id, element->tag_name ? element->tag_name : "?",
+              tp->duration, tp->delay);
+}
+
+void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
+    if (!element || !lycon || !lycon->ui_context) return;
+
+    StyleTree* style_tree = element->specified_style;
+    if (!style_tree || !style_tree->tree) return;
+
+    DomDocument* doc = lycon->ui_context->document;
+    if (!doc) return;
+    DocState* rs = (DocState*)doc->state;
+    if (!rs || !rs->animation_scheduler) return;
+    AnimationScheduler* scheduler = rs->animation_scheduler;
+    Pool* pool = doc->pool;
+
+    // Resolve the transition config. Even if no transition is declared we still
+    // maintain the used-value snapshot below (so a later declaration starts from
+    // a correct "from"), but we only START transitions when duration > 0.
+    CssTransitionProp tp;
+    CssPropertyId prop_buf[8];
+    bool has_transition = css_transition_resolve_config(style_tree, pool, &tp, prop_buf, 8);
+    if (has_transition) {
+        log_debug("css-transition: resolve <%s> dur=%.3fs count=%d",
+                  element->tag_name ? element->tag_name : "?", tp.duration, tp.property_count);
+    }
+
+    // Lazily allocate the persistent per-element transition state (survives the
+    // view-pool relayout because it lives in the doc pool, not the view pool).
+    CssTransitionElemState* es = (CssTransitionElemState*)element->transition_state;
+    if (!es) {
+        es = (CssTransitionElemState*)pool_calloc(pool, sizeof(CssTransitionElemState));
+        es->track_count = 0;
+        element->transition_state = es;
+    }
+
+    double now = scheduler->current_time;
+
+    // Walk the supported property set. For each: read the new used value, compare
+    // to the snapshot; if changed and covered by a transition declaration (with
+    // a positive duration), start an interpolating instance. Always update the
+    // snapshot to the new used value.
+    for (int i = 0; i < kTransitionSupportedCount; i++) {
+        CssPropertyId prop_id = kTransitionSupported[i];
+        CssAnimValueType vt = css_transition_value_type_for(prop_id);
+
+        CssAnimValueType read_vt; float new_f = 0.0f; Color new_c; new_c.c = 0;
+        if (!css_transition_read_used_value(element, prop_id, &read_vt, &new_f, &new_c)) {
+            continue; // used value not determinable this pass — skip
+        }
+
+        CssTransitionTrack* track = css_transition_track_for(es, prop_id, vt);
+        if (!track) continue;
+
+        // A running transition owns the property: its own tick overwrites the used
+        // value each frame, so we must NOT diff against the snapshot (that would be
+        // a spurious change) and must NOT overwrite the snapshot. Scan the scheduler
+        // (authoritative) rather than trusting a raw pointer across relayouts.
+        bool is_running = (css_transition_find_running(scheduler, element, prop_id) != NULL);
+        if (is_running) continue;
+
+        bool changed = false;
+        float from_f = new_f; Color from_c = new_c;
+        if (track->has_snapshot) {
+            if (vt == ANIM_VAL_FLOAT) {
+                from_f = track->snapshot.f;
+                changed = (fabsf(track->snapshot.f - new_f) > 0.0001f);
+            } else if (vt == ANIM_VAL_COLOR) {
+                from_c = track->snapshot.color;
+                changed = (track->snapshot.color.c != new_c.c);
+            }
+        }
+
+        bool covered = has_transition && css_transition_covers(&tp, prop_id);
+
+        if (changed && covered) {
+            css_transition_start(scheduler, element, track, &tp, vt,
+                                 from_f, from_c, new_f, new_c, now, pool);
+            // snapshot stays at the OLD value until the instance finishes (finish
+            // snaps it to `to`); do not overwrite here.
+        } else {
+            // no active transition — track the current used value as the baseline
+            track->value_type = vt;
+            track->has_snapshot = true;
+            if (vt == ANIM_VAL_FLOAT) track->snapshot.f = new_f;
+            else if (vt == ANIM_VAL_COLOR) track->snapshot.color = new_c;
+        }
+    }
+}

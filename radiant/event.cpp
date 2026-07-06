@@ -1050,30 +1050,6 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         }
     }
 
-    // Layer-mode webview: Radiant owns events but forwards them to the offscreen web view.
-    // Set target to the webview block and inject the mouse event.
-    if (block->embed && block->embed->webview &&
-        block->embed->webview->mode == WEBVIEW_MODE_LAYER &&
-        block->embed->webview->handle) {
-        float bx = evcon->block.x, by = evcon->block.y;
-        MousePositionEvent* mev = &evcon->event.mouse_position;
-        if (bx <= mev->x && mev->x < bx + block->width &&
-            by <= mev->y && mev->y < by + block->height) {
-            log_debug("hit on webview (layer mode), forwarding event: %s", block->node_name());
-            evcon->target = static_cast<View*>(block);
-            evcon->offset_x = mev->x - bx;
-            evcon->offset_y = mev->y - by;
-
-            // translate to webview-local coordinates and inject
-            float local_x = mev->x - bx;
-            float local_y = mev->y - by;
-            // mouse type: 2=mousemove for hover, 3=click for press (injected on actual click)
-            webview_layer_platform_inject_mouse(block->embed->webview->handle,
-                2, local_x, local_y, 0, 0);
-            goto RETURN;
-        }
-    }
-
     // Check if this block contains an embedded iframe document
     // If so, target into the iframe's document instead of treating it as a normal block
     if (block->embed && block->embed->doc) {
@@ -1108,14 +1084,49 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
     // target absolute/fixed positioned children
     if (block->position && block->position->first_abs_child) {
-        ViewBlock* abs_child = block->position->first_abs_child;
-        do {
-            // todo: should target based on z-index order
-            log_debug("targetting positioned child block: %s", abs_child->node_name());
-            target_block_view(evcon, abs_child);
-            if (evcon->target) { goto RETURN; }
-            abs_child = abs_child->position->next_abs_sibling;
-        } while (abs_child);
+        ArrayList* positioned_children = arraylist_new(8);
+        if (!positioned_children) {
+            log_warn("[RAD_CAP_POSITIONED_HIT] failed to allocate positioned hit-test list");
+        } else {
+            ViewBlock* abs_child = block->position->first_abs_child;
+            while (abs_child) {
+                if (!arraylist_append(positioned_children, abs_child)) {
+                    log_warn("[RAD_CAP_POSITIONED_HIT] failed to grow positioned hit-test list");
+                    break;
+                }
+                abs_child = abs_child->position->next_abs_sibling;
+            }
+
+            // Hit-testing must walk topmost positioned children first; the old source
+            // order pass could target content painted below a higher z-index sibling.
+            for (int i = 1; i < positioned_children->length; i++) {
+                ViewBlock* key = (ViewBlock*)positioned_children->data[i];
+                int key_z = key->position ? key->position->z_index : 0;
+                int j = i - 1;
+                while (j >= 0) {
+                    ViewBlock* current = (ViewBlock*)positioned_children->data[j];
+                    int current_z = current->position ? current->position->z_index : 0;
+                    if (current_z < key_z) {
+                        positioned_children->data[j + 1] = positioned_children->data[j];
+                        j--;
+                    } else {
+                        break;
+                    }
+                }
+                positioned_children->data[j + 1] = key;
+            }
+
+            for (int i = 0; i < positioned_children->length; i++) {
+                abs_child = (ViewBlock*)positioned_children->data[i];
+                log_debug("targetting positioned child block: %s", abs_child->node_name());
+                target_block_view(evcon, abs_child);
+                if (evcon->target) {
+                    arraylist_free(positioned_children);
+                    goto RETURN;
+                }
+            }
+            arraylist_free(positioned_children);
+        }
     }
 
     // target static positioned children
@@ -6627,13 +6638,16 @@ void update_caret_visual_position(UiContext* uicon, DocState* state) {
     } else if (view->view_type == RDT_VIEW_MARKER) {
         // For markers: caret is at left edge (offset 0) or right edge (offset 1)
         ViewMarker* marker = lam::view_require<RDT_VIEW_MARKER>(view);
+        MarkerProp* marker_prop = marker && marker->blk ? (MarkerProp*)marker->blk : nullptr;
+        float marker_width = marker_prop ? marker_prop->width : view->width;
+        float marker_height = marker_prop ? marker_prop->height : view->height;
         if (caret_offset == 0) {
             caret_x = view->x;
         } else {
-            caret_x = view->x + marker->width;
+            caret_x = view->x + marker_width;
         }
         caret_y = view->y;
-        caret_height = marker->height;
+        caret_height = marker_height;
         log_debug("[CARET-VISUAL] Marker view: x=%.1f y=%.1f height=%.1f",
             caret_x, caret_y, caret_height);
 

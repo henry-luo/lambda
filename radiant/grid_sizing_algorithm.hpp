@@ -34,6 +34,7 @@
 #include <math.h>    // isinf, INFINITY, fabsf
 #include <float.h>   // FLT_MAX
 #include "../lib/mem.h"
+#include "../lib/log.h"
 
 struct LayoutContext;
 struct ViewBlock;
@@ -232,14 +233,24 @@ struct GridItemContribution {
 struct ContribArray {
     GridItemContribution data[MAX_GRID_ITEMS];  // LARGE_ARRAY_OK: fixed-capacity struct field; bound = MAX_GRID_ITEMS (256) × ~56 B ≈ 14 KiB; parent struct is short-lived (single layout pass).
     size_t count;
-    ContribArray() : count(0) {}
+    bool truncation_logged;
+    ContribArray() : count(0), truncation_logged(false) {}
     size_t size() const { return count; }
     bool empty() const { return count == 0; }
     GridItemContribution& operator[](size_t i) { return data[i]; }
     const GridItemContribution& operator[](size_t i) const { return data[i]; }
-    void push_back(const GridItemContribution& c) { if (count < MAX_GRID_ITEMS) data[count++] = c; }
+    void push_back(const GridItemContribution& c) {
+        if (count < MAX_GRID_ITEMS) {
+            data[count++] = c;
+            return;
+        }
+        if (!truncation_logged) {
+            log_warn("[RAD_CAP_GRID_CONTRIB] dropping grid contribution beyond MAX_GRID_ITEMS=%d", MAX_GRID_ITEMS);
+            truncation_logged = true;
+        }
+    }
     void reserve(size_t) {} // no-op
-    void clear() { count = 0; }
+    void clear() { count = 0; truncation_logged = false; }
     GridItemContribution* begin() { return data; }
     GridItemContribution* end()   { return data + count; }
     const GridItemContribution* begin() const { return data; }
@@ -1493,44 +1504,6 @@ inline void stretch_auto_tracks(
             }
         }
     }
-}
-
-// --- Main track sizing function ---
-
-/**
- * Run the complete track sizing algorithm.
- *
- * @param ctx The track sizing context with all necessary parameters
- * @param get_item_contribution Function to get intrinsic contribution of an item in a track
- */
-inline void run_track_sizing_algorithm(
-    TrackSizingContext& ctx
-) {
-    if (!ctx.axis_tracks || ctx.axis_tracks->empty()) return;
-
-    // 11.4 Initialize Track Sizes
-    initialize_track_sizes(*ctx.axis_tracks, ctx.axis_inner_size);
-
-    // 11.5 Resolve Intrinsic Track Sizes
-    // Note: This requires item contribution calculations which need the item list
-    // For now we skip this step - it will be implemented when we integrate with the grid items
-
-    // 11.6 Maximize Tracks
-    maximize_tracks(*ctx.axis_tracks, ctx.axis_inner_size, ctx.axis_available_space);
-
-    // 11.7 Expand Flexible Tracks
-    expand_flexible_tracks(
-        *ctx.axis_tracks,
-        ctx.axis_min_size,
-        ctx.axis_max_size,
-        ctx.axis_available_space
-    );
-
-    // 11.8 Stretch auto Tracks
-    // Per CSS Grid spec, auto tracks always stretch to fill remaining positive free space
-    // when justify/align-content is 'normal' (the default) or 'stretch'.
-    // axis_alignment == 0 is the default (normal), which acts like stretch for auto tracks.
-    stretch_auto_tracks(*ctx.axis_tracks, ctx.axis_min_size, ctx.axis_available_space);
 }
 
 /**

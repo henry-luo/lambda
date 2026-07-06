@@ -23,6 +23,7 @@
 #include <math.h>
 
 #include "grid_types.hpp"
+#include "../lib/log.h"
 
 // Undefine min/max macros if defined (commonly from windows.h or view.hpp)
 #ifdef min
@@ -458,8 +459,9 @@ struct EnhancedGridTrack {
 struct TrackArray {
     EnhancedGridTrack data[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: fixed-capacity struct field; bound = MAX_GRID_TRACKS (64) × ~64 B ≈ 4 KiB; layout-pass scratch.
     size_t count;
+    bool truncation_logged;
 
-    TrackArray() : count(0) {}
+    TrackArray() : count(0), truncation_logged(false) {}
 
     size_t size() const { return count; }
     bool empty() const { return count == 0; }
@@ -468,13 +470,20 @@ struct TrackArray {
     const EnhancedGridTrack& operator[](size_t i) const { return data[i]; }
 
     void push_back(const EnhancedGridTrack& t) {
-        if (count < MAX_GRID_TRACKS) data[count++] = t;
+        if (count < MAX_GRID_TRACKS) {
+            data[count++] = t;
+            return;
+        }
+        if (!truncation_logged) {
+            log_warn("[RAD_CAP_GRID_TRACKS] dropping grid track beyond MAX_GRID_TRACKS=%d", MAX_GRID_TRACKS);
+            truncation_logged = true;
+        }
     }
 
     void reserve(size_t) {} // no-op (pre-allocated)
 
     /** Remove all elements (reset count, don't destruct — trivially reset) */
-    void clear() { count = 0; }
+    void clear() { count = 0; truncation_logged = false; }
 
     // Iterator support for range-based for
     EnhancedGridTrack* begin() { return data; }
@@ -489,14 +498,24 @@ struct TrackArray {
 struct IndexArray {
     size_t data[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: fixed-capacity struct field; bound = MAX_GRID_TRACKS (64) × 8 B = 512 B; layout-pass scratch.
     size_t count;
+    bool truncation_logged;
 
-    IndexArray() : count(0) {}
+    IndexArray() : count(0), truncation_logged(false) {}
 
     size_t size() const { return count; }
     bool empty() const { return count == 0; }
 
-    void push_back(size_t v) { if (count < MAX_GRID_TRACKS) data[count++] = v; }
-    void clear() { count = 0; }
+    void push_back(size_t v) {
+        if (count < MAX_GRID_TRACKS) {
+            data[count++] = v;
+            return;
+        }
+        if (!truncation_logged) {
+            log_warn("[RAD_CAP_GRID_INDEX] dropping grid index beyond MAX_GRID_TRACKS=%d", MAX_GRID_TRACKS);
+            truncation_logged = true;
+        }
+    }
+    void clear() { count = 0; truncation_logged = false; }
 
     // Filter in-place (replaces erase–remove_if idiom)
     template<typename Predicate>
