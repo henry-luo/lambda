@@ -46,6 +46,14 @@ extern "C" Item js_dom_text_control_set_selection_start_bridge(void* elem, Item 
 extern "C" Item js_dom_text_control_set_selection_end_bridge(void* elem, Item value);
 extern "C" Item js_dom_text_control_set_selection_direction_bridge(void* elem, Item value);
 extern "C" Item js_dom_text_control_set_default_value_bridge(void* elem, Item value);
+extern "C" Item js_dom_text_control_set_selection_range_bridge(void* elem, Item start, Item end, Item dir);
+extern "C" Item js_dom_text_control_set_range_text_bridge(void* elem, Item replacement, Item start, Item end, Item mode);
+extern "C" Item js_dom_text_control_select_bridge(void* elem);
+extern "C" Item js_dom_focus_method_bridge(void* elem, bool focus);
+extern "C" Item js_dom_click_method_bridge(Item elem_item);
+extern "C" Item js_dom_add_event_listener_bridge(Item target_item, Item type, Item callback, Item opts);
+extern "C" Item js_dom_remove_event_listener_bridge(Item target_item, Item type, Item callback, Item opts);
+extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
 extern "C" Item js_dom_text_replace_data_bridge(void* text, Item offset, Item count, Item data);
 extern "C" Item js_dom_text_insert_data_bridge(void* text, Item offset, Item data);
 extern "C" Item js_dom_text_append_data_bridge(void* text, Item data);
@@ -1812,6 +1820,66 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
     if (strcmp(method, "prepend") == 0) {
         *out = js_dom_prepend_variadic_bridge((void*)elem, args, argc);
         return true;
+    }
+
+    if (strcmp(method, "addEventListener") == 0) {
+        *out = argc >= 2
+            ? js_dom_add_event_listener_bridge(elem_item, args[0], args[1],
+                argc >= 3 ? args[2] : ItemNull)
+            : radiant_dom_undefined_item();
+        return true;
+    }
+
+    if (strcmp(method, "removeEventListener") == 0) {
+        *out = argc >= 2
+            ? js_dom_remove_event_listener_bridge(elem_item, args[0], args[1],
+                argc >= 3 ? args[2] : ItemNull)
+            : radiant_dom_undefined_item();
+        return true;
+    }
+
+    if (strcmp(method, "dispatchEvent") == 0) {
+        *out = argc >= 1
+            ? js_dom_dispatch_event_bridge(elem_item, args[0])
+            : (Item){.item = b2it(0)};
+        return true;
+    }
+
+    if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
+        *out = js_dom_focus_method_bridge((void*)elem, strcmp(method, "focus") == 0);
+        return true;
+    }
+
+    if (strcmp(method, "click") == 0) {
+        *out = js_dom_click_method_bridge(elem_item);
+        return true;
+    }
+
+    if (tc_is_text_control(elem)) {
+        if (strcmp(method, "setSelectionRange") == 0) {
+            // preserve the legacy DOM fallback no-op when required offsets are absent.
+            if (argc < 2) {
+                *out = radiant_dom_undefined_item();
+                return true;
+            }
+            *out = js_dom_text_control_set_selection_range_bridge((void*)elem,
+                argc >= 1 ? args[0] : radiant_dom_undefined_item(),
+                argc >= 2 ? args[1] : radiant_dom_undefined_item(),
+                argc >= 3 ? args[2] : radiant_dom_undefined_item());
+            return true;
+        }
+        if (strcmp(method, "setRangeText") == 0) {
+            *out = js_dom_text_control_set_range_text_bridge((void*)elem,
+                argc >= 1 ? args[0] : radiant_dom_undefined_item(),
+                argc >= 2 ? args[1] : radiant_dom_undefined_item(),
+                argc >= 3 ? args[2] : radiant_dom_undefined_item(),
+                argc >= 4 ? args[3] : radiant_dom_undefined_item());
+            return true;
+        }
+        if (strcmp(method, "select") == 0) {
+            *out = js_dom_text_control_select_bridge((void*)elem);
+            return true;
+        }
     }
 
     if (strcmp(method, "setAttribute") == 0) {

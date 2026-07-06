@@ -5899,9 +5899,28 @@ static uint8_t text_control_direction_from_item(Item value) {
     return 0;
 }
 
+extern "C" Item js_dom_text_control_set_selection_range_bridge(void* dom_elem,
+                                                               Item start_arg,
+                                                               Item end_arg,
+                                                               Item dir_arg);
+extern "C" Item js_dom_text_control_select_bridge(void* dom_elem);
+extern "C" Item js_dom_text_control_set_range_text_bridge(void* dom_elem,
+                                                          Item replacement_arg,
+                                                          Item start_arg,
+                                                          Item end_arg,
+                                                          Item mode_arg);
+
 static Item js_text_control_set_selection_range(Item start_arg, Item end_arg, Item dir_arg) {
     Item self = js_get_this();
     DomElement* elem = (DomElement*)js_dom_unwrap_element(self);
+    return js_dom_text_control_set_selection_range_bridge((void*)elem, start_arg, end_arg, dir_arg);
+}
+
+extern "C" Item js_dom_text_control_set_selection_range_bridge(void* dom_elem,
+                                                               Item start_arg,
+                                                               Item end_arg,
+                                                               Item dir_arg) {
+    DomElement* elem = (DomElement*)dom_elem;
     if (!elem || !tc_is_text_control_elem(elem)) return make_js_undefined();
     DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
 
@@ -5917,6 +5936,11 @@ static Item js_text_control_set_selection_range(Item start_arg, Item end_arg, It
 static Item js_text_control_select(void) {
     Item self = js_get_this();
     DomElement* elem = (DomElement*)js_dom_unwrap_element(self);
+    return js_dom_text_control_select_bridge((void*)elem);
+}
+
+extern "C" Item js_dom_text_control_select_bridge(void* dom_elem) {
+    DomElement* elem = (DomElement*)dom_elem;
     if (!elem || !tc_is_text_control_elem(elem)) return make_js_undefined();
 
     tc_ensure_init(elem);
@@ -6066,8 +6090,75 @@ static Item js_text_control_set_range_text(Item replacement_arg, Item start_arg,
                                            Item end_arg, Item mode_arg) {
     Item self = js_get_this();
     DomElement* elem = (DomElement*)js_dom_unwrap_element(self);
-    return js_text_control_set_range_text_for_elem(elem, replacement_arg,
+    return js_dom_text_control_set_range_text_bridge((void*)elem, replacement_arg,
         start_arg, end_arg, mode_arg);
+}
+
+extern "C" Item js_dom_text_control_set_range_text_bridge(void* dom_elem,
+                                                          Item replacement_arg,
+                                                          Item start_arg,
+                                                          Item end_arg,
+                                                          Item mode_arg) {
+    return js_text_control_set_range_text_for_elem((DomElement*)dom_elem,
+        replacement_arg, start_arg, end_arg, mode_arg);
+}
+
+extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem) return make_js_undefined();
+    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+    if (focus) {
+        if (js_dom_is_script_focusable(elem)) {
+            View* old_focus = state ? focus_get(state) : nullptr;
+            js_document_active_element = elem;
+            focus_set(state, (View*)elem, false);
+            js_dom_focus_set_selection_for_element(state, elem);
+            if (old_focus != (View*)elem) js_dom_dispatch_focus_events(elem);
+        }
+    } else {
+        if (js_document_active_element == elem) js_document_active_element = nullptr;
+        if (focus_get(state) == (View*)elem) focus_clear(state);
+    }
+    return make_js_undefined();
+}
+
+extern "C" Item js_dom_click_method_bridge(Item elem_item) {
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    if (!elem) return make_js_undefined();
+    if (elem->tag_name) {
+        const char* tag = elem->tag_name;
+        bool is_form_ctrl =
+            strcasecmp(tag, "button") == 0 ||
+            strcasecmp(tag, "input") == 0 ||
+            strcasecmp(tag, "select") == 0 ||
+            strcasecmp(tag, "textarea") == 0 ||
+            strcasecmp(tag, "fieldset") == 0;
+        if (is_form_ctrl && dom_element_has_attribute(elem, "disabled")) {
+            return make_js_undefined();
+        }
+    }
+    // click() synthesizes a JS MouseEvent and dispatches through the existing event system.
+    Item ev = js_create_click_mouse_event();
+    return js_dom_dispatch_event(elem_item, ev);
+}
+
+extern "C" Item js_dom_add_event_listener_bridge(Item target_item, Item type,
+                                                 Item callback, Item opts) {
+    // EventTarget listener storage is keyed by the wrapped JS target item.
+    js_dom_add_event_listener(target_item, type, callback, opts);
+    return make_js_undefined();
+}
+
+extern "C" Item js_dom_remove_event_listener_bridge(Item target_item, Item type,
+                                                    Item callback, Item opts) {
+    // EventTarget listener storage is keyed by the wrapped JS target item.
+    js_dom_remove_event_listener(target_item, type, callback, opts);
+    return make_js_undefined();
+}
+
+extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item) {
+    // Dispatch keeps the wrapped target identity shared with listener lookup.
+    return js_dom_dispatch_event(target_item, event_item);
 }
 
 static Item js_dom_text_replace_data_method(DomText* text_node, Item offset_arg,
@@ -11990,21 +12081,17 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
 
     // EventTarget interface
     if (strcmp(method, "addEventListener") == 0) {
-        if (argc >= 2) {
-            js_dom_add_event_listener(elem_item, args[0], args[1], argc > 2 ? args[2] : ItemNull);
-        }
-        return (Item){.item = ITEM_JS_UNDEFINED};
+        return argc >= 2
+            ? js_dom_add_event_listener_bridge(elem_item, args[0], args[1], argc > 2 ? args[2] : ItemNull)
+            : make_js_undefined();
     }
     if (strcmp(method, "removeEventListener") == 0) {
-        if (argc >= 2) {
-            js_dom_remove_event_listener(elem_item, args[0], args[1], argc > 2 ? args[2] : ItemNull);
-        }
-        return (Item){.item = ITEM_JS_UNDEFINED};
+        return argc >= 2
+            ? js_dom_remove_event_listener_bridge(elem_item, args[0], args[1], argc > 2 ? args[2] : ItemNull)
+            : make_js_undefined();
     }
     if (strcmp(method, "dispatchEvent") == 0) {
-        if (argc >= 1) {
-            return js_dom_dispatch_event(elem_item, args[0]);
-        }
+        if (argc >= 1) return js_dom_dispatch_event_bridge(elem_item, args[0]);
         return (Item){.item = ITEM_FALSE};
     }
 
@@ -12199,42 +12286,14 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
 
     // focus() / blur() — stubs for headless mode
     if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
-        DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
-        if (strcmp(method, "focus") == 0) {
-            if (js_dom_is_script_focusable(elem)) {
-                View* old_focus = state ? focus_get(state) : nullptr;
-                js_document_active_element = elem;
-                focus_set(state, (View*)elem, false);
-                js_dom_focus_set_selection_for_element(state, elem);
-                if (old_focus != (View*)elem) js_dom_dispatch_focus_events(elem);
-            }
-        } else {
-            if (js_document_active_element == elem) js_document_active_element = nullptr;
-            if (focus_get(state) == (View*)elem) focus_clear(state);
-        }
-        return make_js_undefined();
+        return js_dom_focus_method_bridge((void*)elem, strcmp(method, "focus") == 0);
     }
 
     // HTMLElement.click() — synthesise and dispatch a `click` MouseEvent
     // (bubbles, cancelable, composed). Per the HTML spec §6.4.4, calling
     // click() on a disabled form control is a no-op (no event fires).
     if (strcmp(method, "click") == 0) {
-        // Disabled form-control guard: button/input/select/textarea with the
-        // `disabled` content attribute set must not dispatch the click event.
-        if (elem->tag_name) {
-            const char* tag = elem->tag_name;
-            bool is_form_ctrl =
-                strcasecmp(tag, "button") == 0 ||
-                strcasecmp(tag, "input") == 0 ||
-                strcasecmp(tag, "select") == 0 ||
-                strcasecmp(tag, "textarea") == 0 ||
-                strcasecmp(tag, "fieldset") == 0;
-            if (is_form_ctrl && dom_element_has_attribute(elem, "disabled")) {
-                return make_js_undefined();
-            }
-        }
-        Item ev = js_create_click_mouse_event();
-        return js_dom_dispatch_event(elem_item, ev);
+        return js_dom_click_method_bridge(elem_item);
     }
 
     // getElementById(id) — for DocumentFragment hosts. The DOM spec puts
@@ -12252,44 +12311,26 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
 
     // setSelectionRange(start, end [, direction]) — text controls only.
     if (strcmp(method, "setSelectionRange") == 0 && tc_is_text_control_elem(elem)) {
+        // preserve the legacy DOM fallback no-op when required offsets are absent.
         if (argc < 2) return make_js_undefined();
-        int64_t s = it2i(args[0]);
-        int64_t e = it2i(args[1]);
-        if (s < 0) s = 0;
-        if (e < 0) e = 0;
-        uint8_t dir = 0;
-        if (argc >= 3) {
-            const char* d = fn_to_cstr(args[2]);
-            if (d) {
-                if (strcmp(d, "forward") == 0) dir = 1;
-                else if (strcmp(d, "backward") == 0) dir = 2;
-            }
-        }
-        DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
-        form_control_set_selection(state, (View*)elem, (uint32_t)s, (uint32_t)e, dir);
-        return make_js_undefined();
+        return js_dom_text_control_set_selection_range_bridge((void*)elem,
+            argc >= 1 ? args[0] : make_js_undefined(),
+            argc >= 2 ? args[1] : make_js_undefined(),
+            argc >= 3 ? args[2] : make_js_undefined());
     }
 
     // setRangeText(replacement [, start, end, selectionMode]) — text controls only.
     if (strcmp(method, "setRangeText") == 0 && tc_is_text_control_elem(elem)) {
-        Item replacement_arg = argc >= 1 ? args[0] : make_js_undefined();
-        Item start_arg = argc >= 2 ? args[1] : make_js_undefined();
-        Item end_arg = argc >= 3 ? args[2] : make_js_undefined();
-        Item mode_arg = argc >= 4 ? args[3] : make_js_undefined();
-        return js_text_control_set_range_text_for_elem(elem, replacement_arg,
-            start_arg, end_arg, mode_arg);
+        return js_dom_text_control_set_range_text_bridge((void*)elem,
+            argc >= 1 ? args[0] : make_js_undefined(),
+            argc >= 2 ? args[1] : make_js_undefined(),
+            argc >= 3 ? args[2] : make_js_undefined(),
+            argc >= 4 ? args[3] : make_js_undefined());
     }
 
     // select() — text controls only. Selects the entire value and focuses.
     if (strcmp(method, "select") == 0 && tc_is_text_control_elem(elem)) {
-        tc_ensure_init(elem);
-        FormControlProp* f = elem->form;
-        DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
-        if (js_dom_is_script_focusable(elem)) {
-            focus_set(state, (View*)elem, false);
-        }
-        form_control_set_selection(state, (View*)elem, 0, f->current_value_u16_len, 0);
-        return make_js_undefined();
+        return js_dom_text_control_select_bridge((void*)elem);
     }
 
     // ----------------------------------------------------------------
