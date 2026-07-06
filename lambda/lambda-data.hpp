@@ -548,6 +548,7 @@ typedef enum Operator {
     OPERATOR_IS,
     OPERATOR_IS_NAN,  // expr is nan — IEEE NaN check
     OPERATOR_IN,
+    OPERATOR_AT,
 
     // pipe operators
     OPERATOR_PIPE,      // | pipe operator

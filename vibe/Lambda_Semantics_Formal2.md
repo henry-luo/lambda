@@ -1354,3 +1354,133 @@ check lands with the C4 `var`-param machinery (impl plan Phase 5).
 3. Docs (Phase 9 numerics section): the two-tier story told via the C3
    parallel; the `N` honesty clause; the 34-digit rounding note in the
    self-help box.
+
+### C14. Builtin failure channels — the fn/pn split (2026-07-06) — RESOLVED: fn return error; pn raise error
+
+**Decision (designer ruling): the general rule/style under Lambda is —
+`fn` return error; `pn` raise error.**
+
+1. **Built-in `pn`s raise**: `T^E` signatures, `^` propagation, `let v^err`
+   destructuring, compile-enforced call sites. Commands halt on failure —
+   consistent with C5-4 (writes raise).
+2. **Built-in `fn`s never raise** — failures are *values*, keeping fns
+   chainable and set-friendly (a raise aborts the whole set operation; a value
+   flows per-item). Decision principle for the audit:
+   - **absence in / no answer exists → `null`** (lookups, finds, `avg([])`,
+     `int(null)`);
+   - **present but invalid → `error()`** (`int("abc")`, `1 div 0`) — loud
+     poison carrying a diagnostic: visible in output, never equal to anything,
+     sorts last, taints arithmetic;
+   - both are falsy, so **`f(x) or default` uniformly rescues both** failure
+     modes.
+3. **Type honesty**: fn signatures declare their channel — `T?`
+   (null-returning) or `T | error` (poison-returning); **never `T^E` on a
+   system fn**. The forbidden type `a | error ^ exception` "is simply too
+   complicated and ugly" — by ruling, it cannot arise.
+4. **System/resource faults are unchecked exceptions** (designer refinement,
+   overruling the review's raise-in-fn recommendation): stack overflow, memory
+   exhaustion, the `==` depth limit — these raise from *anywhere*, including
+   inside `fn`, but are **invisible to fn signatures**, propagate transparently
+   through fn frames, and are handled by an enclosing `pn` (via its `^err`
+   boundary) or a global handler; unhandled = abort with report. Precedent:
+   Java's `Error` class — the checked/unchecked split done right. This
+   *resolves* the review's depth-limit objection: the raise still happens
+   (loud, never a silent falsy poison in a condition); it just isn't in the
+   type.
+5. **The two channels, taught in one line**: *raised errors are control flow;
+   returned errors are data.* `let v^err = f(x)` binds only raised errors — a
+   returned `error()` lands in `v`, caught by falsiness or `is error`.
+6. **The invariant, amended** (supersedes C5-5's phrasing, which was too strong
+   even then — user-level `error("msg")` construction always existed): **every
+   error value is deliberate** — constructed by `error()`, returned by a
+   declared `T | error` builtin, or raised in a `T^E` context. *Accidental*
+   emission (the A6 leak class) remains a bug. System exceptions never appear
+   as values in fn results.
+
+**Reconciliations with earlier rulings:**
+
+- `==` depth limit (C8.5): reclassified as a system exception — the "raise"
+  ruling stands, the channel changes.
+- **I/O classification**: `input`/`fetch` are fn-callable reads → **return
+  error values** (their current `T^` compile-enforcement retires; the
+  `pub data^err = input(f)` pattern migrates to `let d = input(f)` + falsy /
+  `is error` check — doc examples must be rewritten); `output`/`io.*`/`cmd`
+  are commands (pn) → raise.
+- `1 div 0` → returned `error()` (was "declared `T^`" in C5-5); `avg([])` →
+  null (unchanged, absence rule).
+- **User fns**: `raise`/`T^E` on user `fn` remains *legal* (the existing
+  error-handling chapter's `fn divide(a,b) int^` examples stay valid) but the
+  documented *style* is the C14 rule — fns return, pns raise; the system
+  library follows it strictly ("fn never raise error — at least in system
+  fns").
+- **P6 exemption noted**: resource-fault behavior (when a stack limit fires)
+  may legitimately differ across execution tiers — resource limits are exempt
+  from the unobservability principle; the B7 differential harness must not
+  flag them.
+- Forward note: the deferred resource-cleanup construct (`defer`/`with`,
+  Features doc) must account for unchecked exceptions crossing fn frames when
+  designed.
+
+**Rationale (recorded).** This is C5's read/write asymmetry lifted to the
+function level: fn = query world (failures are data), pn = command world
+(failures halt). It also completes the "error is modelled after NaN" design:
+IEEE returns poison (`nan`) instead of trapping precisely so pipeline
+computation continues — `error()` is the universal nan, and the poison
+infrastructure (C8.5 never-equal, C2 falsy, C11 sorts-last, GUARD taint
+propagation) was already built for it. Accepted cost: poison-returning fns
+lose compile-time you-must-handle enforcement (`let x = 1 div 0` compiles,
+`x` is poison) — the deliberate price of chainability, softened by poison
+being loud rather than silent. Prior art: SQL's CAST vs TRY_CAST (both were
+needed; TRY_ returns NULL); Java's checked/unchecked split.
+
+#### C14a Amendment (designer ruling, 2026-07-06): `input()` raises — classification, not exception
+
+The C14 reconciliation that reclassified `input`/`fetch` as error-returning is
+**reverted**. Resolution of the "should input() be an exception?" question:
+
+**One consistent rule, case-by-case *classification*.** The rule — fn return,
+pn raise — never bends; the judgment lives in the taxonomy: *is this thing
+actually an fn?* `input()` is not a computational fn — it reads the
+filesystem/network: nondeterministic, environment-dependent, effectful. It is
+an **effectful reader, pn-family**, permitted in expression position for
+ergonomics. Therefore it **raises** (`T^E`, `^err`, compile-enforced) — which
+is the original design, verified working during the review. Zero migration:
+`pub data^err = input(f)` docs and fixtures stay valid. (An *exception to the
+rule* would erode it — every future borderline function cites the precedent; a
+*classification judgment* keeps the rule absolute.)
+
+**Designer rationale (recorded):** input() raising is a good thing — running
+input() as a batch/set operation and hoping it goes through without issue is
+too optimistic; input() is likely to fail in all sorts of ways and should be
+*carefully handled* by the user. The boundary/interior framing: C5's
+"don't abort the set" protects per-item operations *inside* pipelines; input()
+loads the set at the *head*, where aborting loses nothing and unacknowledged
+poison would surface far from its cause. **Boundary → raise; interior →
+return** — the fn/pn line viewed from the environment's side.
+
+**Set-oriented input is a deliberate opt-in via the wrapper idiom** (designer:
+"user really wants set-oriented input? wrap input() in a fn, then set over the
+fn"):
+
+```lambda
+fn my_input(f) {
+    let d^err = input(f)     // catch the raise inside the fn
+    if (^err) err else d     // return it as a value: T | error
+}
+files |> (my_input(~) or fallback)
+```
+
+`let v^err` inside an fn is the **raise→value channel converter** — built
+entirely from existing primitives. This supersedes C14's deferred remedy
+(lenient option-variant / `try()` form): **no new construct is needed**; the
+wrapper's small friction is the feature (per-item tolerance of I/O failure is
+consciously chosen, never the silent default).
+
+**The complete classification (no exceptions anywhere):**
+
+| Family | Channel | Examples |
+|---|---|---|
+| Computational fns | return: absence → `null`, invalid → `error()` | `int()`, `find()`, `avg()`, `div` |
+| Effectful readers | **pn-family: raise, `T^E`, enforced** | `input`, `fetch` |
+| Effectful writers/commands | pn: raise, `T^E`, enforced | `output`, `io.*`, `cmd` |
+| System/resource faults | unchecked exception → pn/global handler | stack, memory, `==` depth |

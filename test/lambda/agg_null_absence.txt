@@ -1,0 +1,24 @@
+'=== empty aggregates ==='
+true
+true
+true
+0
+1
+'=== strict null propagation ==='
+true
+true
+true
+true
+true
+true
+true
+true
+true
+'=== skip null option ==='
+2
+2
+2
+1
+1
+2
+true

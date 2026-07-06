@@ -397,6 +397,25 @@ static Item vector_get(Item item, int64_t index) {
     }
 }
 
+static bool aggregate_number_value(Item item, double* out, bool* is_float) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_NULL) return false;
+    if (type == LMD_TYPE_INT) {
+        *out = (double)item.get_int56();
+        return true;
+    }
+    if (type == LMD_TYPE_INT64) {
+        *out = (double)item.get_int64();
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        *out = item.get_double();
+        *is_float = true;
+        return true;
+    }
+    return false;
+}
+
 Item fn_add(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
@@ -1321,7 +1340,7 @@ Item fn_min1(Item item_a) {
     if (type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = item_a.array_num;
         if (arr->length == 0) {
-            return ItemError; // Empty array has no minimum
+            return ItemNull; // identity-less aggregate over absence yields null
         }
         ArrayNumElemType et = arr->get_elem_type();
         if (et == ELEM_FLOAT) {
@@ -1353,29 +1372,23 @@ Item fn_min1(Item item_a) {
     else if (type_id == LMD_TYPE_ARRAY) {
         List* arr = item_a.array;
         if (!arr || arr->length == 0) {
-            return ItemError; // Empty array has no minimum
+            return ItemNull; // identity-less aggregate over absence yields null
         }
         Item min_item = type_id == LMD_TYPE_ARRAY ? list_get(arr, 0) : array_get(arr, 0);
         double min_val = 0.0;
         bool is_float = false;
 
-        // Convert first element
-        if (min_item._type_id == LMD_TYPE_INT) {
-            min_val = (double)min_item.get_int56();
+        // null in aggregate inputs is an unknown value; propagate it instead of treating it as non-numeric.
+        if (get_type_id(min_item) == LMD_TYPE_NULL) {
+            return ItemNull;
         }
-        else if (min_item._type_id == LMD_TYPE_INT64) {
-            min_val = (double)min_item.get_int64();
-        }
-        else if (min_item._type_id == LMD_TYPE_FLOAT) {
-            min_val = min_item.get_double();
-            is_float = true;
-        }
-        else if (min_item._type_id == LMD_TYPE_DECIMAL) {
+        else if (!aggregate_number_value(min_item, &min_val, &is_float)) {
+            if (get_type_id(min_item) == LMD_TYPE_DECIMAL) {
             log_error("decimal not supported yet in fn_min");
-            return ItemError;
-        }
-        else {
+            }
+            else {
             log_error("non-numeric array element type: %d", min_item._type_id);
+            }
             return ItemError;
         }
 
@@ -1384,21 +1397,13 @@ Item fn_min1(Item item_a) {
             Item elem_item = type_id == LMD_TYPE_ARRAY ? list_get(arr, i) : array_get(arr, i);
             double elem_val = 0.0;
 
-            if (elem_item._type_id == LMD_TYPE_INT) {
-                elem_val = (double)elem_item.get_int56();
+            if (get_type_id(elem_item) == LMD_TYPE_NULL) {
+                return ItemNull;
             }
-            else if (elem_item._type_id == LMD_TYPE_INT64) {
-                elem_val = (double)elem_item.get_int64();
-            }
-            else if (elem_item._type_id == LMD_TYPE_FLOAT) {
-                elem_val = elem_item.get_double();
-                is_float = true;
-            }
-            else if (elem_item._type_id == LMD_TYPE_DECIMAL) {
+            else if (!aggregate_number_value(elem_item, &elem_val, &is_float)) {
+                if (get_type_id(elem_item) == LMD_TYPE_DECIMAL) {
                 log_error("decimal not supported yet in fn_min");
-                return ItemError;
-            }
-            else {
+                }
                 return ItemError;
             }
             if (elem_val < min_val) {
@@ -1420,7 +1425,7 @@ Item fn_min1(Item item_a) {
     else if (type_id == LMD_TYPE_RANGE) {
         Range* rng = item_a.range;
         if (!rng || rng->length == 0) {
-            return ItemError;
+            return ItemNull;
         }
         // For a range, min is the smaller of start or end
         int64_t min_val = (rng->start < rng->end) ? rng->start : rng->end;
@@ -1523,7 +1528,7 @@ Item fn_max1(Item item_a) {
     if (type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = item_a.array_num;
         if (arr->length == 0) {
-            return ItemError; // Empty array has no maximum
+            return ItemNull; // identity-less aggregate over absence yields null
         }
         ArrayNumElemType et = arr->get_elem_type();
         if (et == ELEM_FLOAT) {
@@ -1555,24 +1560,17 @@ Item fn_max1(Item item_a) {
     else if (type_id == LMD_TYPE_ARRAY) {
         Array* arr = item_a.array;
         if (!arr || arr->length == 0) {
-            return ItemError; // Empty array has no maximum
+            return ItemNull; // identity-less aggregate over absence yields null
         }
         Item max_item = type_id == LMD_TYPE_ARRAY ? list_get(arr, 0) : array_get(arr, 0);
         double max_val = 0.0;
         bool is_float = false;
 
-        // Convert first element
-        if (max_item._type_id == LMD_TYPE_INT) {
-            max_val = (double)max_item.get_int56();
+        // null in aggregate inputs is an unknown value; propagate it instead of treating it as non-numeric.
+        if (get_type_id(max_item) == LMD_TYPE_NULL) {
+            return ItemNull;
         }
-        else if (max_item._type_id == LMD_TYPE_INT64) {
-            max_val = (double)max_item.get_int64();
-        }
-        else if (max_item._type_id == LMD_TYPE_FLOAT) {
-            max_val = max_item.get_double();
-            is_float = true;
-        }
-        else {
+        else if (!aggregate_number_value(max_item, &max_val, &is_float)) {
             return ItemError;
         }
 
@@ -1581,17 +1579,10 @@ Item fn_max1(Item item_a) {
             Item elem_item = type_id == LMD_TYPE_ARRAY ? list_get(arr, i) : array_get(arr, i);
             double elem_val = 0.0;
 
-            if (elem_item._type_id == LMD_TYPE_INT) {
-                elem_val = (double)elem_item.get_int56();
+            if (get_type_id(elem_item) == LMD_TYPE_NULL) {
+                return ItemNull;
             }
-            else if (elem_item._type_id == LMD_TYPE_INT64) {
-                elem_val = (double)elem_item.get_int64();
-            }
-            else if (elem_item._type_id == LMD_TYPE_FLOAT) {
-                elem_val = elem_item.get_double();
-                is_float = true;
-            }
-            else {
+            else if (!aggregate_number_value(elem_item, &elem_val, &is_float)) {
                 return ItemError;
             }
 
@@ -1614,7 +1605,7 @@ Item fn_max1(Item item_a) {
     else if (type_id == LMD_TYPE_RANGE) {
         Range* rng = item_a.range;
         if (!rng || rng->length == 0) {
-            return ItemError;
+            return ItemNull;
         }
         // For a range, max is the larger of start or end
         int64_t max_val = (rng->start > rng->end) ? rng->start : rng->end;
@@ -1643,18 +1634,13 @@ Item fn_sum(Item item) {
         bool has_float = false;
         for (size_t i = 0; i < (size_t)arr->length; i++) {
             Item elem_item = array_get(arr, i);
-            if (elem_item._type_id == LMD_TYPE_INT) {
-                int64_t val = elem_item.get_int56();
-                sum += (double)val;
+            double val = 0.0;
+            if (get_type_id(elem_item) == LMD_TYPE_NULL) {
+                // null in aggregate inputs is an unknown value; propagate it unless a skip_null variant is used.
+                return ItemNull;
             }
-            else if (elem_item._type_id == LMD_TYPE_INT64) {
-                int64_t val = elem_item.get_int64();
-                sum += (double)val;
-            }
-            else if (elem_item._type_id == LMD_TYPE_FLOAT) {
-                double val = elem_item.get_double();
+            else if (aggregate_number_value(elem_item, &val, &has_float)) {
                 sum += val;
-                has_float = true;
             }
             else {
                 log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, elem_item._type_id);
@@ -1715,18 +1701,13 @@ Item fn_sum(Item item) {
         bool has_float = false;
         for (size_t i = 0; i < (size_t)list->length; i++) {
             Item elem_item = list_get(list, i);
-            if (elem_item._type_id == LMD_TYPE_INT) {
-                int64_t val = elem_item.get_int56();
-                sum += (double)val;
+            double val = 0.0;
+            if (get_type_id(elem_item) == LMD_TYPE_NULL) {
+                // null in aggregate inputs is an unknown value; propagate it unless a skip_null variant is used.
+                return ItemNull;
             }
-            else if (elem_item._type_id == LMD_TYPE_INT64) {
-                int64_t val = elem_item.get_int64();
-                sum += (double)val;
-            }
-            else if (elem_item._type_id == LMD_TYPE_FLOAT) {
-                double val = elem_item.get_double();
+            else if (aggregate_number_value(elem_item, &val, &has_float)) {
                 sum += val;
-                has_float = true;
             }
             else {
                 log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, elem_item._type_id);
@@ -1764,39 +1745,41 @@ Item fn_sum(Item item) {
     }
 }
 
-Item fn_avg(Item item) {
+Item fn_avg_skip_null(Item item, bool skip_null) {
     GUARD_ERROR1(item);
     // avg() - average of all elements in an array or list
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_ARRAY) {
         Array* arr = item.array;  // Use item.array, not item.pointer
         if (!arr || arr->length == 0) {
-            return ItemError;
+            return ItemNull;
         }
         double sum = 0.0;
+        int64_t count = 0;
         for (size_t i = 0; i < (size_t)arr->length; i++) {
             Item elem_item = array_get(arr, i);
-            if (elem_item._type_id == LMD_TYPE_INT) {
-                int64_t val = elem_item.get_int56();
-                sum += (double)val;
+            double val = 0.0;
+            bool elem_is_float = false;
+            if (get_type_id(elem_item) == LMD_TYPE_NULL) {
+                if (skip_null) continue;
+                // null in aggregate inputs is an unknown value; strict avg propagates it.
+                return ItemNull;
             }
-            else if (elem_item._type_id == LMD_TYPE_INT64) {
-                sum += (double)elem_item.get_int64();
-            }
-            else if (elem_item._type_id == LMD_TYPE_FLOAT) {
-                sum += elem_item.get_double();
+            else if (aggregate_number_value(elem_item, &val, &elem_is_float)) {
+                sum += val;
+                count++;
             }
             else {
                 log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item._type_id);
                 return ItemError;
             }
         }
-        return push_d(sum / (double)arr->length);
+        return count == 0 ? ItemNull : push_d(sum / (double)count);
     }
     else if (type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = item.array_num;
         if (!arr || arr->length == 0) {
-            return ItemError;
+            return ItemNull;
         }
         // generic reducer reads every element type correctly (the old else
         // branch mis-read compact buffers via `items`); bit-identical for FLOAT/INT.
@@ -1805,32 +1788,34 @@ Item fn_avg(Item item) {
     else if (type_id == LMD_TYPE_ARRAY) {
         List* list = item.array;
         if (!list || list->length == 0) {
-            return ItemError;
+            return ItemNull;
         }
         double sum = 0.0;
+        int64_t count = 0;
         for (size_t i = 0; i < (size_t)list->length; i++) {
             Item elem_item = list_get(list, i);
-            if (elem_item._type_id == LMD_TYPE_INT) {
-                int64_t val = elem_item.get_int56();
-                sum += (double)val;
+            double val = 0.0;
+            bool elem_is_float = false;
+            if (get_type_id(elem_item) == LMD_TYPE_NULL) {
+                if (skip_null) continue;
+                // null in aggregate inputs is an unknown value; strict avg propagates it.
+                return ItemNull;
             }
-            else if (elem_item._type_id == LMD_TYPE_INT64) {
-                sum += (double)elem_item.get_int64();
-            }
-            else if (elem_item._type_id == LMD_TYPE_FLOAT) {
-                sum += elem_item.get_double();
+            else if (aggregate_number_value(elem_item, &val, &elem_is_float)) {
+                sum += val;
+                count++;
             }
             else {
                 log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item._type_id);
                 return ItemError;
             }
         }
-        return push_d(sum / (double)list->length);
+        return count == 0 ? ItemNull : push_d(sum / (double)count);
     }
     else if (type_id == LMD_TYPE_RANGE) {
         Range* rng = item.range;
         if (!rng || rng->length == 0) {
-            return ItemError;
+            return ItemNull;
         }
         // Average of arithmetic sequence: (first + last) / 2
         double avg = (double)(rng->start + rng->end) / 2.0;
@@ -1844,6 +1829,10 @@ Item fn_avg(Item item) {
         log_debug("avg not supported for type: %d", type_id);
         return ItemError;
     }
+}
+
+Item fn_avg(Item item) {
+    return fn_avg_skip_null(item, false);
 }
 
 Item fn_pos(Item item) {

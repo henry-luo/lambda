@@ -1880,6 +1880,13 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         transpile_box_item(tp, bi_node->right);
         strbuf_append_char(tp->code_buf, ')');
     }
+    else if (bi_node->op == OPERATOR_AT) {
+        strbuf_append_str(tp->code_buf, "fn_at(");
+        transpile_box_item(tp, bi_node->left);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_box_item(tp, bi_node->right);
+        strbuf_append_char(tp->code_buf, ')');
+    }
     else if (bi_node->op == OPERATOR_TO) {
         strbuf_append_str(tp->code_buf, "fn_to(");
         transpile_box_item(tp, bi_node->left);
@@ -2385,6 +2392,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
             Type* expr_type = loop_node->as->type ? loop_node->as->type : &TYPE_ANY;
             LoopKeyFilter key_filter = loop_node->key_filter;
             bool has_index = (loop_node->index_name != NULL);
+            bool key_only = loop_node->key_only;
 
             // Check if it's a known indexed type (array/range) at compile time
             bool is_generic_array = (expr_type->type_id == LMD_TYPE_ARRAY);
@@ -2500,10 +2508,13 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                     strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
                     strbuf_append_str(tp->code_buf, "=y2it(symbol_key_list_at(attr_keys, ki));\n");
                 }
-                // v = value
                 strbuf_append_str(tp->code_buf, "  Item _");
                 strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
-                strbuf_append_str(tp->code_buf, "=item_attr(it, symbol_key_list_at(attr_keys, ki)->chars);\n");
+                if (key_only) {
+                    strbuf_append_str(tp->code_buf, "=y2it(symbol_key_list_at(attr_keys, ki));\n");
+                } else {
+                    strbuf_append_str(tp->code_buf, "=item_attr(it, symbol_key_list_at(attr_keys, ki)->chars);\n");
+                }
             }
             // Generic path: unknown type or element => use unified runtime helpers
             else {
@@ -2535,7 +2546,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 }
                 strbuf_append_str(tp->code_buf, "  Item _");
                 strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
-                strbuf_append_str(tp->code_buf, "=iter_val_at(it, iter_keys, idx, ");
+                strbuf_append_str(tp->code_buf, key_only ? "=iter_key_at(it, iter_keys, idx, " : "=iter_val_at(it, iter_keys, idx, ");
                 strbuf_append_str(tp->code_buf, filter_str);
                 strbuf_append_str(tp->code_buf, ");\n");
             }

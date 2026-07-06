@@ -939,7 +939,7 @@ static bool js_regexp_virtual_prop_name(const char* name, int len) {
 }
 
 extern void* heap_alloc(int size, TypeId type_id);
-extern void fn_array_set(Array* arr, int64_t index, Item value);
+extern Item fn_array_set(Array* arr, int64_t index, Item value);
 extern "C" void js_set_prototype(Item object, Item prototype);
 extern "C" Item js_get_prototype(Item object);
 extern Item _map_read_field(ShapeEntry* field, void* map_data);

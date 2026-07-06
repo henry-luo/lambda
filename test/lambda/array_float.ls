@@ -80,9 +80,9 @@ max_float; max_mixed; max_single
 // ========================================
 
 // Test 14: Empty array edge cases
-let empty_min = min(empty_arr)        // Should be error or null
-let empty_max = max(empty_arr)        // Should be error or null
-empty_min; empty_max
+let empty_min = min(empty_arr)        // Phase 2: identity-less aggregates over absence return null
+let empty_max = max(empty_arr)        // Phase 2: identity-less aggregates over absence return null
+empty_min is null; empty_max is null
 
 // Test 15: Large arrays
 let large_arr = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]

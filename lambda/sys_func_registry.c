@@ -640,14 +640,23 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_MEAN2, "math_mean", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_math_mean2", FPTR(fn_math_mean2), NULL, NULL, false, 0},
 
-    {SYSFUNC_MEDIAN, "math_median", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_median", FPTR(fn_math_median), NULL, NULL, false, 0},
+    {SYSFUNC_MEDIAN, "math_median", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_median1", FPTR(fn_math_median1), NULL, NULL, false, 0},
 
-    {SYSFUNC_VARIANCE, "math_variance", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_variance", FPTR(fn_math_variance), NULL, NULL, false, 0},
+    {SYSFUNC_MEDIAN2, "math_median", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_median2", FPTR(fn_math_median2), NULL, NULL, false, 0},
 
-    {SYSFUNC_DEVIATION, "math_deviation", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_deviation", FPTR(fn_math_deviation), NULL, NULL, false, 0},
+    {SYSFUNC_VARIANCE, "math_variance", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_variance1", FPTR(fn_math_variance1), NULL, NULL, false, 0},
+
+    {SYSFUNC_VARIANCE2, "math_variance", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_variance2", FPTR(fn_math_variance2), NULL, NULL, false, 0},
+
+    {SYSFUNC_DEVIATION, "math_deviation", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_deviation1", FPTR(fn_math_deviation1), NULL, NULL, false, 0},
+
+    {SYSFUNC_DEVIATION2, "math_deviation", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_deviation2", FPTR(fn_math_deviation2), NULL, NULL, false, 0},
 
     // ========================================================================
     // Element-wise math functions — math module (with native C math optimization)
@@ -760,8 +769,11 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_RANGE3, "range", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_range3", FPTR(fn_range3), NULL, NULL, false, 0},
 
-    {SYSFUNC_QUANTILE, "math_quantile", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_quantile", FPTR(fn_math_quantile), NULL, NULL, false, 0},
+    {SYSFUNC_QUANTILE, "math_quantile", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_quantile2", FPTR(fn_math_quantile2), NULL, NULL, false, 0},
+
+    {SYSFUNC_QUANTILE3, "math_quantile", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_quantile3", FPTR(fn_math_quantile3), NULL, NULL, false, 0},
 
     {SYSFUNC_REDUCE, "reduce", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_reduce", FPTR(fn_reduce), NULL, NULL, false, 0},
@@ -1333,6 +1345,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_is", FPTR(fn_is)},
     {"fn_is_nan", FPTR(fn_is_nan)},
     {"fn_in", FPTR(fn_in)},
+    {"fn_at", FPTR(fn_at)},
 
     // ========================================================================
     // Pipe operations
