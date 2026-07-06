@@ -952,6 +952,22 @@ static MIR_reg_t emit_box_bool(MirTranspiler* mt, MIR_reg_t val_reg) {
     return result;
 }
 
+static void emit_return_item_error_if_zero(MirTranspiler* mt, MIR_reg_t ptr_reg) {
+    MIR_reg_t is_zero = new_reg(mt, "is_null_ptr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_zero),
+        MIR_new_reg_op(mt->ctx, ptr_reg), MIR_new_int_op(mt->ctx, 0)));
+    MIR_label_t l_ok = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_ok),
+        MIR_new_reg_op(mt->ctx, is_zero)));
+    uint64_t ITEM_ERROR_VAL = (uint64_t)LMD_TYPE_ERROR << 56;
+    MIR_reg_t err = new_reg(mt, "coerce_err", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, err),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_ERROR_VAL)));
+    emit_jit_root_frame_exit(mt);
+    emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, err)));
+    emit_label(mt, l_ok);
+}
+
 // Box float (double) -> Item via push_d runtime call
 static MIR_reg_t emit_box_float(MirTranspiler* mt, MIR_reg_t val_reg) {
     return emit_call_1(mt, "push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, val_reg));
@@ -3873,11 +3889,15 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                             val = emit_call_2(mt, "ensure_sized_array", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)et));
+                            // failed coercions must halt before a null pointer is stored as an array value.
+                            emit_return_item_error_if_zero(mt, val);
                         } else {
                             // call ensure_typed_array(item, element_type_id) → void* (pointer)
                             val = emit_call_2(mt, "ensure_typed_array", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, elem_tid));
+                            // failed coercions must halt before a null pointer is stored as an array value.
+                            emit_return_item_error_if_zero(mt, val);
                         }
                         // result is a pointer (stored as I64), treat as ANY
                         var_tid = LMD_TYPE_ANY;
@@ -5659,10 +5679,33 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
     }
 
+    bool is_range_index = false;
+    if (idx_node && idx_node->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* bi = (AstBinaryNode*)idx_node;
+        is_range_index = (bi->op == OPERATOR_TO);
+    }
+    if (is_range_index) {
+        // range indexes are slices; never coerce the range pointer through integer fast paths.
+        MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
+        MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
+        return emit_call_2(mt, "fn_index", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+    }
+
     // Boolean mask index: arr[mask] — when the index is a typed array, defer to
     // fn_index which routes ELEM_BOOL masks to the gather path. (Int fast paths
     // below would otherwise try to unbox the array as a scalar index.)
     if (idx_tid == LMD_TYPE_ARRAY_NUM) {
+        MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
+        MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
+        return emit_call_2(mt, "fn_index", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+    }
+
+    if (idx_tid != LMD_TYPE_INT && idx_tid != LMD_TYPE_INT64 && idx_tid != LMD_TYPE_ANY) {
+        // range/string/type indexes have runtime semantics in fn_index; numeric fast paths corrupt them.
         MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
         MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
         return emit_call_2(mt, "fn_index", MIR_T_I64,
@@ -11020,6 +11063,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                 final_reg = emit_call_2(mt, "ensure_typed_array", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, preg),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, param_elem_tid));
+                // failed parameter coercions must exit before fast array paths see a null pointer.
+                emit_return_item_error_if_zero(mt, final_reg);
                 log_debug("mir: param '%s' — inserted ensure_typed_array (elem=%d)", pname, param_elem_tid);
             } else if (var_type == LMD_TYPE_NUM_SIZED) {
                 final_reg = emit_coerce_boxed_to_declared(mt, preg, param_decl_type);
@@ -11237,6 +11282,32 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     if (is_variadic) {
         MIR_reg_t saved_vargs = MIR_reg(mt->ctx, "_saved_vargs", func);
         emit_call_void_1(mt, "restore_vargs", MIR_T_P, MIR_new_reg_op(mt->ctx, saved_vargs));
+    }
+    if (is_method && !is_closure && mt->self_reg) {
+        TypeObject* owner = mt->method_owner;
+        ShapeEntry* field = owner ? owner->shape : NULL;
+        while (field) {
+            if (field->name) {
+                char field_name[128];
+                snprintf(field_name, sizeof(field_name), "%.*s",
+                    (int)field->name->length, field->name->str);
+                MirVarEntry* var = find_var(mt, field_name);
+                if (var) {
+                    MIR_reg_t name_ptr = emit_load_string_literal(mt, field->name->str);
+                    MIR_reg_t sym_ptr = emit_call_2(mt, "heap_create_symbol", MIR_T_P,
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, name_ptr),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)field->name->length));
+                    MIR_reg_t key_boxed = emit_box_symbol(mt, sym_ptr);
+                    MIR_reg_t boxed_val = emit_box(mt, var->reg, var->type_id);
+                    // method field locals are snapshots; write them back before returning to preserve mutations.
+                    emit_call_void_3(mt, "fn_map_set",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->self_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_boxed),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+                }
+            }
+            field = field->next;
+        }
     }
     emit_jit_root_frame_exit(mt);
     emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, body_result)));

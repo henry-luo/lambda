@@ -958,11 +958,9 @@ static Bool array_num_eq(ArrayNum* a, ArrayNum* b) {
     return (memcmp(a->items, b->items, a->length * sizeof(int64_t)) == 0) ? BOOL_TRUE : BOOL_FALSE;
 }
 
-// helper: structural equality for maps (order-independent key-value comparison)
-static Bool map_eq(Map* a, Map* b, int depth) {
-    if (a == b) return BOOL_TRUE;  // pointer identity fast-path
-    TypeMap* type_a = (TypeMap*)a->type;
-    TypeMap* type_b = (TypeMap*)b->type;
+// helper: structural equality for map-shaped data (order-independent key-value comparison)
+static Bool map_data_eq(TypeMap* type_a, void* data_a, TypeMap* type_b, void* data_b, int depth) {
+    if (type_a == type_b && data_a == data_b) return BOOL_TRUE;  // pointer identity fast-path
     if (!type_a || !type_b) return BOOL_FALSE;
     if (type_a->length != type_b->length) return BOOL_FALSE;
 
@@ -970,8 +968,8 @@ static Bool map_eq(Map* a, Map* b, int depth) {
     if (type_a == type_b) {
         ShapeEntry* field = type_a->shape;
         while (field) {
-            Item val_a = _map_field_value(type_a, a->data, field);
-            Item val_b = _map_field_value(type_b, b->data, field);
+            Item val_a = _map_field_value(type_a, data_a, field);
+            Item val_b = _map_field_value(type_b, data_b, field);
             Bool r = fn_eq_depth(val_a, val_b, depth + 1);
             if (r == BOOL_ERROR) return BOOL_ERROR;
             if (r == BOOL_FALSE) return BOOL_FALSE;
@@ -996,8 +994,8 @@ static Bool map_eq(Map* a, Map* b, int depth) {
         }
         if (!found) return BOOL_FALSE;
 
-        Item val_a = _map_field_value(type_a, a->data, field_a);
-        Item val_b = _map_field_value(type_b, b->data, field_b);
+        Item val_a = _map_field_value(type_a, data_a, field_a);
+        Item val_b = _map_field_value(type_b, data_b, field_b);
         Bool r = fn_eq_depth(val_a, val_b, depth + 1);
         if (r == BOOL_ERROR) return BOOL_ERROR;
         if (r == BOOL_FALSE) return BOOL_FALSE;
@@ -1005,6 +1003,12 @@ static Bool map_eq(Map* a, Map* b, int depth) {
     }
     // key-count check already done above — no extra keys in B
     return BOOL_TRUE;
+}
+
+// helper: structural equality for maps (order-independent key-value comparison)
+static Bool map_eq(Map* a, Map* b, int depth) {
+    if (a == b) return BOOL_TRUE;  // pointer identity fast-path
+    return map_data_eq((TypeMap*)a->type, a->data, (TypeMap*)b->type, b->data, depth);
 }
 
 // helper: structural equality for elements (tag + attrs + children)
@@ -1020,8 +1024,8 @@ static Bool element_eq(Element* a, Element* b, int depth) {
     // compare namespaces
     if (!target_equal(type_a->ns, type_b->ns)) return BOOL_FALSE;
 
-    // compare attributes (map part) — use map_eq on the element's map fields
-    Bool attr_r = map_eq((Map*)a, (Map*)b, depth);
+    // Element stores list fields before attr type/data, so attrs must compare by explicit attr storage.
+    Bool attr_r = map_data_eq((TypeMap*)type_a, a->data, (TypeMap*)type_b, b->data, depth);
     if (attr_r != BOOL_TRUE) return attr_r;
 
     // compare children (list part)
@@ -1346,7 +1350,11 @@ Bool fn_lt_scalar(Item a_item, Item b_item) {
     else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
         a_item._type_id == LMD_TYPE_BINARY) {
         const char* chars_a = a_item.get_chars();  const char* chars_b = b_item.get_chars();
-        bool result = strcmp(chars_a, chars_b) < 0;
+        uint32_t len_a = a_item.get_len();  uint32_t len_b = b_item.get_len();
+        uint32_t min_len = len_a < len_b ? len_a : len_b;
+        int cmp = min_len ? memcmp(chars_a, chars_b, min_len) : 0;
+        // strings/binaries are length-prefixed; embedded NUL bytes participate in ordering.
+        bool result = cmp < 0 || (cmp == 0 && len_a < len_b);
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
     log_error("unknown comparing type: %s", get_type_name(a_item._type_id));
@@ -1400,7 +1408,11 @@ Bool fn_gt_scalar(Item a_item, Item b_item) {
     else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
         a_item._type_id == LMD_TYPE_BINARY) {
         const char* chars_a = a_item.get_chars();  const char* chars_b = b_item.get_chars();
-        bool result = strcmp(chars_a, chars_b) > 0;
+        uint32_t len_a = a_item.get_len();  uint32_t len_b = b_item.get_len();
+        uint32_t min_len = len_a < len_b ? len_a : len_b;
+        int cmp = min_len ? memcmp(chars_a, chars_b, min_len) : 0;
+        // strings/binaries are length-prefixed; embedded NUL bytes participate in ordering.
+        bool result = cmp > 0 || (cmp == 0 && len_a > len_b);
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
     log_error("unknown comparing type: %s", get_type_name(a_item._type_id));

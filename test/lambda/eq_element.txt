@@ -1,0 +1,9 @@
+{
+  same_attrs: true
+}
+{
+  reordered_attrs: true
+}
+{
+  different_child: false
+}

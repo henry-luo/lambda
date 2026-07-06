@@ -851,9 +851,15 @@ designed). Resolution:
 written):** `<'var' name: 'x'>.name` returns `'x'`, not the tag — the `name:`
 *attribute* shadows the built-in `.name` tag property (documented precedence).
 Since AST `var` nodes naturally carry a `name:` attribute, the tag accessor is
-unreliable for exactly the nodes that need it most. Required: a shadow-proof tag
-accessor (e.g. a `tag(elem)` system function) as a prerequisite for the AST
-schema and for model-writing generally.
+unreliable for exactly the nodes that need it most. Required: a shadow-proof
+accessor as a prerequisite for the AST schema and for model-writing generally.
+**Ruled (designer, 2026-07-06): the function is `name(item)`, not `tag(elem)`** —
+the shadow-proof function form of the existing documented `.name` property (one
+word, one concept), and it generalizes naturally to other named values:
+`name(fn)` → declaration name, `name(type)` → type name, `name(obj)` → its type
+name, unnamed values → null (C5 absence). Companion accessors
+`attrs(elem)`/`children(elem)` are **deferred** — `for (k at elem)` /
+`for (x in elem)` iteration covers them (the C5.3a in/at facet pair).
 
 The docs' "closed over metaprogramming" statements must be updated when this
 lands, citing this record.
