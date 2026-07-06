@@ -151,6 +151,7 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 2. Inspect the transpiled MIR — debug builds dump the JIT'd MIR to `temp/mir_dump.txt`; read it to debug Lambda script transpilation/codegen issues (boxing, type, comparison representation)
 
 ## Lambda Language Documentation
+- `doc/Lambda_Formal_Semantics.md` — **Normative semantics specification (ADR)** — core principles, value domain, truthiness, numerics, equality, total order, absence/errors, mutability, operators, metaprogramming; the semantic authority when docs or implementation disagree (decision records in `vibe/Lambda_Semantics_Formal*.md`)
 - `doc/Lambda_Reference.md` — Language overview and quick reference
 - `doc/Lambda_Data.md` — Literals and collections (primitives, arrays, lists, maps, elements, ranges)
 - `doc/Lambda_Type.md` — Type system (union types, function types, type patterns)
