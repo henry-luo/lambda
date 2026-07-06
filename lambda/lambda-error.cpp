@@ -948,7 +948,10 @@ char* err_format_json_array(LambdaError** errors, int count) {
 void err_free_stack_trace(StackFrame* trace) {
     while (trace) {
         StackFrame* next = trace->next;
-        // note: function_name may be strdup'd or static, need to track ownership
+        // native frame names are duplicated during capture; Lambda frame names are debug-table owned.
+        if (trace->is_native && trace->function_name) {
+            mem_free((void*)trace->function_name);
+        }
         mem_free(trace);
         trace = next;
     }

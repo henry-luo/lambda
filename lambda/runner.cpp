@@ -321,6 +321,23 @@ void clear_persistent_last_error() {
     }
 }
 
+void preserve_context_last_error(EvalContext* ctx, Item result) {
+    if (!ctx || !ctx->last_error) {
+        return;
+    }
+
+    if (get_type_id(result) == LMD_TYPE_ERROR) {
+        clear_persistent_last_error();  // free any previous error
+        persistent_last_error = ctx->last_error;
+        ctx->last_error = NULL;  // transfer ownership
+        return;
+    }
+
+    // error() values can be consumed by total equality, so a non-error result must drop stale diagnostics.
+    err_free(ctx->last_error);
+    ctx->last_error = NULL;
+}
+
 // Helper functions for C code to access EvalContext members (used by path.c)
 extern "C" {
 Pool* eval_context_get_pool(EvalContext* ctx) {
@@ -1402,13 +1419,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         context->heap->result_root = context->result.item;
     }
 
-    // Preserve runtime error before runner goes out of scope
-    // context points to runner's stack-allocated EvalContext, so we need to copy the error
-    if (context && context->last_error) {
-        clear_persistent_last_error();  // free any previous error
-        persistent_last_error = context->last_error;
-        context->last_error = NULL;  // transfer ownership
-    }
+    preserve_context_last_error(context, result);
 
     // Create output Input with its own pool (independent from Script's pool)
     // This allows safe cleanup of the execution context and heap

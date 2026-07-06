@@ -96,8 +96,8 @@ before phases that churn goldens.
 - Verification: `make build` passed; direct stdout diffs for
   `eq_total`, `eq_fn`, `eq_poison`, and `eq_decimal_float` passed; focused
   `./test/test_lambda_gtest.exe --gtest_filter='*eq_total*:*eq_fn*:*eq_poison*:*eq_decimal_float*'`
-  passed 4/4. `eq_poison` still emits the existing memtrack leak diagnostic on
-  stderr, but the harness-compared stdout matches the golden.
+  passed 4/4. Direct `./lambda.exe --no-log test/lambda/eq_poison.ls` now emits
+  only the golden stdout; the stale memtrack leak diagnostic is gone.
 
 | #   | Item                                                                                                                                                                                                                                                           | Ruling    | Code target                                                                                                                 | Acceptance                                                                      |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
