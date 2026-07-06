@@ -31,6 +31,9 @@ extern "C" Item js_dom_text_insert_data_bridge(void* text, Item offset, Item dat
 extern "C" Item js_dom_text_append_data_bridge(void* text, Item data);
 extern "C" Item js_dom_text_delete_data_bridge(void* text, Item offset, Item count);
 extern "C" Item js_dom_text_substring_data_bridge(void* text, Item offset, Item count);
+extern "C" Item js_dom_append_child_bridge(void* parent, Item child);
+extern "C" Item js_dom_remove_child_bridge(void* parent, Item child);
+extern "C" Item js_dom_insert_before_bridge(void* parent, Item new_child, Item ref_child);
 extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
 extern "C" Item radiant_dom_wrap_node(void* dom_elem);
 extern "C" Item js_new_object(void);
@@ -356,6 +359,52 @@ static bool radiant_dom_node_contains(DomNode* root, DomNode* other) {
         if (current == root) return true;
     }
     return false;
+}
+
+static int64_t radiant_dom_compare_document_position(DomNode* node, DomNode* other) {
+    if (!other) return 1;
+    if (node == other) return 0;
+    for (DomNode* p = other->parent; p; p = p->parent) {
+        if (p == node) return 16 + 4;
+    }
+    for (DomNode* p = node->parent; p; p = p->parent) {
+        if (p == other) return 8 + 2;
+    }
+    DomNode* a_path[256];
+    int a_depth = 0;
+    for (DomNode* p = node; p && a_depth < 256; p = p->parent) a_path[a_depth++] = p;
+    DomNode* b_path[256];
+    int b_depth = 0;
+    for (DomNode* p = other; p && b_depth < 256; p = p->parent) b_path[b_depth++] = p;
+    if (a_depth == 0 || b_depth == 0 || a_path[a_depth - 1] != b_path[b_depth - 1]) {
+        return 1;
+    }
+    int ai = a_depth - 1;
+    int bi = b_depth - 1;
+    while (ai > 0 && bi > 0 && a_path[ai - 1] == b_path[bi - 1]) {
+        ai--;
+        bi--;
+    }
+    DomNode* a_child = (ai > 0) ? a_path[ai - 1] : node;
+    DomNode* b_child = (bi > 0) ? b_path[bi - 1] : other;
+    for (DomNode* s = a_child->next_sibling; s; s = s->next_sibling) {
+        if (s == b_child) return 4;
+    }
+    return 2;
+}
+
+static DomElement* radiant_dom_find_by_id(DomElement* root, const char* id) {
+    if (!root || !id) return nullptr;
+    if (root->id && strcmp(root->id, id) == 0) return root;
+    DomNode* child = root->first_child;
+    while (child) {
+        if (child->is_element()) {
+            DomElement* found = radiant_dom_find_by_id(child->as_element(), id);
+            if (found) return found;
+        }
+        child = child->next_sibling;
+    }
+    return nullptr;
 }
 
 static void radiant_dom_find_by_class(DomElement* root, const char* cls, Array* arr) {
@@ -828,6 +877,12 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
+    if (strcmp(method, "compareDocumentPosition") == 0) {
+        DomNode* other = (argc >= 1) ? (DomNode*)radiant_dom_unwrap_node(args[0]) : nullptr;
+        *out = radiant_dom_int_item(radiant_dom_compare_document_position(node, other));
+        return true;
+    }
+
     if (node->is_text()) {
         DomText* text = node->as_text();
         if (strcmp(method, "replaceData") == 0) {
@@ -1032,6 +1087,47 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             current = (parent && parent->is_element()) ? parent->as_element() : nullptr;
         }
         *out = ItemNull;
+        return true;
+    }
+
+    if (strcmp(method, "getElementById") == 0) {
+        if (argc < 1) {
+            *out = ItemNull;
+            return true;
+        }
+        const char* id = fn_to_cstr(args[0]);
+        if (!id) {
+            *out = ItemNull;
+            return true;
+        }
+        *out = radiant_dom_node_item((DomNode*)radiant_dom_find_by_id(elem, id));
+        return true;
+    }
+
+    if (strcmp(method, "appendChild") == 0) {
+        if (argc < 1) {
+            *out = ItemNull;
+            return true;
+        }
+        *out = js_dom_append_child_bridge((void*)elem, args[0]);
+        return true;
+    }
+
+    if (strcmp(method, "removeChild") == 0) {
+        if (argc < 1) {
+            *out = ItemNull;
+            return true;
+        }
+        *out = js_dom_remove_child_bridge((void*)elem, args[0]);
+        return true;
+    }
+
+    if (strcmp(method, "insertBefore") == 0) {
+        if (argc < 2) {
+            *out = ItemNull;
+            return true;
+        }
+        *out = js_dom_insert_before_bridge((void*)elem, args[0], args[1]);
         return true;
     }
 

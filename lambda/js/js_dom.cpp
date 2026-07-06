@@ -10631,6 +10631,120 @@ static Item js_dom_text_control_boundary_from_point(DomElement* elem,
     return out;
 }
 
+extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
+    DomElement* elem = (DomElement*)parent_ptr;
+    if (!elem) return ItemNull;
+    DomNode* child_node = (DomNode*)js_dom_unwrap_element(child_arg);
+    if (!child_node) {
+        log_error("js_dom_append_child_bridge: argument is not a DOM node");
+        return ItemNull;
+    }
+    if (child_node->is_element()) {
+        DomElement* child_elem = child_node->as_element();
+        if (child_elem->tag_name && strcmp(child_elem->tag_name, "#document-fragment") == 0) {
+            DomNode* frag_child = child_elem->first_child;
+            while (frag_child) {
+                DomNode* next = frag_child->next_sibling;
+                dom_pre_remove(frag_child);
+                child_elem->remove_child(frag_child);
+                ((DomNode*)elem)->append_child(frag_child);
+                dom_post_insert((DomNode*)elem, frag_child);
+                frag_child = next;
+            }
+            js_dom_mutation_notify();
+            return child_arg;
+        }
+    }
+    if (child_node->parent) {
+        DomNode* old_parent = child_node->parent;
+        if (old_parent->is_element()) {
+            dom_pre_remove(child_node);
+            old_parent->remove_child(child_node);
+        }
+    }
+    ((DomNode*)elem)->append_child(child_node);
+    dom_post_insert((DomNode*)elem, child_node);
+    if (child_node->is_element() && child_node->as_element()->tag() == HTM_TAG_OPTION &&
+        elem->tag() == HTM_TAG_SELECT) {
+        _select_ask_for_reset(elem);
+    }
+    _select_refresh_cached_selected_options_for_node((DomNode*)elem);
+    js_dom_mutation_notify();
+    if (child_node->is_element()) {
+        DomElement* ce = child_node->as_element();
+        if (ce->tag_name && strcmp(ce->tag_name, "iframe") == 0) {
+            _schedule_iframe_load(ce);
+        }
+    }
+    return child_arg;
+}
+
+extern "C" Item js_dom_remove_child_bridge(void* parent_ptr, Item child_arg) {
+    DomElement* elem = (DomElement*)parent_ptr;
+    if (!elem) return ItemNull;
+    DomNode* child_node = (DomNode*)js_dom_unwrap_element(child_arg);
+    if (!child_node) {
+        log_error("js_dom_remove_child_bridge: argument is not a DOM node");
+        return ItemNull;
+    }
+    dom_pre_remove(child_node);
+    ((DomNode*)elem)->remove_child(child_node);
+    if (child_node->is_element() && child_node->as_element()->tag() == HTM_TAG_OPTION &&
+        elem->tag() == HTM_TAG_SELECT) {
+        _select_ask_for_reset(elem);
+    }
+    js_dom_mutation_notify();
+    return child_arg;
+}
+
+extern "C" Item js_dom_insert_before_bridge(void* parent_ptr, Item new_child_arg,
+                                            Item ref_child_arg) {
+    DomElement* elem = (DomElement*)parent_ptr;
+    if (!elem) return ItemNull;
+    DomNode* new_child = (DomNode*)js_dom_unwrap_element(new_child_arg);
+    DomNode* ref_child = (DomNode*)js_dom_unwrap_element(ref_child_arg);
+    if (!new_child) return ItemNull;
+    DomNode* parent_node = (DomNode*)elem;
+    if (new_child == ref_child) {
+        // insertBefore(node, node) must stay a no-op; detaching first drops
+        // keyed reconciler children and changes live-range behavior.
+        return new_child_arg;
+    }
+    if (ref_child && ref_child->parent != parent_node) {
+        log_error("js_dom_insert_before_bridge: reference node is not a child of target parent");
+        return ItemNull;
+    }
+    if (new_child->is_element()) {
+        DomElement* new_elem = new_child->as_element();
+        if (new_elem->tag_name && strcmp(new_elem->tag_name, "#document-fragment") == 0) {
+            bool mutated = false;
+            DomNode* frag_child = new_elem->first_child;
+            while (frag_child) {
+                DomNode* next = frag_child->next_sibling;
+                dom_pre_remove(frag_child);
+                new_elem->remove_child(frag_child);
+                if (parent_node->insert_before(frag_child, ref_child)) {
+                    dom_post_insert(parent_node, frag_child);
+                    mutated = true;
+                }
+                frag_child = next;
+            }
+            if (mutated) js_dom_mutation_notify();
+            return new_child_arg;
+        }
+    }
+    if (new_child->parent) {
+        dom_pre_remove(new_child);
+        new_child->parent->remove_child(new_child);
+    }
+    if (!parent_node->insert_before(new_child, ref_child)) {
+        return ItemNull;
+    }
+    dom_post_insert(parent_node, new_child);
+    js_dom_mutation_notify();
+    return new_child_arg;
+}
+
 extern "C" Item radiant_dom_element_method(Item elem_item, Item method_name, Item* args, int argc);
 
 extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* args, int argc) {
