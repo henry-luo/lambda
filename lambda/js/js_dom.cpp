@@ -7460,7 +7460,15 @@ static const char* _form_control_name_or_id(DomElement* e) {
     return nullptr;
 }
 
+extern "C" Item radiant_dom_get_property(Item elem_item, Item prop_name);
+
 extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
+    // Jube POC: keep the JS ABI stable while routing DOM policy through the
+    // radiant module boundary before changing wrapper representation.
+    return radiant_dom_get_property(elem_item, prop_name);
+}
+
+extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // Range / Selection wrappers also live under MAP_KIND_DOM and route here.
     if (js_dom_item_is_range(elem_item))
         return js_dom_range_get_property(elem_item, prop_name);
@@ -9013,7 +9021,15 @@ static void parse_class_names(DomElement* elem, const char* class_str) {
     elem->styles_resolved = false;  // mark for re-cascading
 }
 
+extern "C" Item radiant_dom_set_property(Item elem_item, Item prop_name, Item value);
+
 extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) {
+    // Jube POC: preserve MAP_KIND_DOM behavior while the radiant module starts
+    // owning the dispatch surface.
+    return radiant_dom_set_property(elem_item, prop_name, value);
+}
+
+extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item value) {
     // Range wrappers expose only read-only attributes; silently ignore writes.
     if (js_dom_item_is_range(elem_item))
         return value;

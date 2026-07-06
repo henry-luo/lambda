@@ -151,7 +151,7 @@ Everything a front-end can call lives in **one 2,902-line file**, `lambda/sys_fu
                                   ┌────────────────────────────────────────────┐
                                   │                lambda.exe                   │
    ~/.lambda/modules/…            │                                            │
-   ./lambda_modules/…             │  ┌──────────────┐     ┌─────────────────┐  │
+   ./lambda/…                     │  ┌──────────────┐     ┌─────────────────┐  │
    $LAMBDA_MODULE_PATH            │  │ Module Loader │────▶│ Jube Registry   │  │
   ┌────────────────────┐  scan    │  │ (manifest,    │     │ funcs / langs / │  │
   │ spellcheck/1.2.0/  │─────────▶│  │  dlopen,      │     │ formats / ns    │  │
@@ -478,7 +478,7 @@ The `jube:` prefix on the JS side keeps the npm-package namespace unambiguous; L
 
 Precedence order:
 
-1. `./lambda_modules/` — project-local
+1. `./lambda/` — project-local
 2. `$LAMBDA_MODULE_PATH` — colon-separated
 3. `~/.lambda/modules/<name>/<version>/` — user cache (the future registry's download target)
 
