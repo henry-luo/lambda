@@ -47,13 +47,13 @@ The walker carries `struct RenderWalkState` (`render_backend.h:89`): the accumul
 
 ### 2.4 Paint order and z-index
 
-Document-order-plus-z is the walker's responsibility, and it is deliberately three passes over the children (`render_walk.cpp:364-451`):
+Document-order-plus-z is the walker's responsibility, and it is deliberately three passes over the children (`render_walk.cpp`):
 
-1. `render_walk_children` (`render_walk.cpp:364`) walks in-flow children, **skipping** any child that is out-of-flow positioned (`absolute`/`fixed`) or positive-z positioned — those are deferred.
-2. `render_walk_positioned_children` (`render_walk.cpp:415`) collects the block's `first_abs_child` chain and stable-insertion-sorts it by `z_index`, then paints. The stable insertion sort is chosen to match the legacy raster order exactly.
-3. `render_walk_positive_z_descendants` (`render_walk.cpp:387`) collects positive-z positioned descendants (recursing through inline elements, `render_walk.cpp:374`) and paints them last, insertion-sorted by z-index.
+1. `render_walk_children` walks in-flow children, **skipping** any child that is out-of-flow positioned (`absolute`/`fixed`) or positive-z positioned — those are deferred.
+2. `render_walk_positioned_children` asks `stacking_order.cpp` to collect the block's `first_abs_child` chain, stable-sort it by `z_index`, then paints in ascending paint order.
+3. `render_walk_positive_z_descendants` asks the same helper to collect positive-z positioned descendants (recursing through inline elements) and paints them last, again in stable ascending paint order.
 
-Both collection buffers are **fixed 256-entry stack arrays** (`render_walk.cpp:390`, `:418`), and overflow is silently dropped — a real correctness hazard on deeply-positioned pages ([§9](#9-known-issues--future-improvements)).
+The shared helper uses growable `ArrayList` buffers and preserves source order for equal `z-index` entries. `event.cpp` consumes the same paint-order lists in reverse for hit-testing, so topmost targeting and render order do not carry separate sort rules.
 
 ### 2.5 Per-node dispatch
 
@@ -156,7 +156,7 @@ Two capability structures decide native-vs-fallback. **Runtime** `RenderBackendC
 
 ## 10. Known Issues & Future Improvements
 
-1. **Fixed 256-entry z-order stack arrays silently drop overflow.** `render_walk_positive_z_descendants` (`render_walk.cpp:390`) and `render_walk_positioned_children` (`render_walk.cpp:418`) each collect into `View*[256]`; a page with more than 256 positioned or positive-z children in one stacking context loses the excess with no warning. *Improvement:* grow into the scratch arena, or at minimum `log_error` on overflow.
+1. **CSS stacking contexts are still simplified.** Collection/sort order is now shared by render and hit-testing, but the engine still models only its existing positioned/positive-z phases rather than the full CSS stacking-context layer algorithm for negative z-index, floats, inline stacking contexts, isolation, and descendants of independently stacking elements. *Improvement:* extend `stacking_order.cpp` from a shared sorter into the full stacking-context builder.
 2. **PDF success paths emit `log_error` noise.** Multiple non-error PDF outcomes log at error level — e.g. "fallback effect group rendered as passthrough content" (`render_pdf.cpp:1033`) and the raster-fallback effect-group notice (`:598`) fire on the *success* path where a fallback is the intended behavior. This makes real PDF errors hard to spot. *Improvement:* demote intended fallbacks to `log_debug`.
 3. **Duplicated body-background propagation.** `render_output_canvas_background` (`render_output.cpp:205`) and the iframe branch of `render_embed_doc` (`render.cpp:122-156`) reimplement the same `<html>`-then-`<body>` background walk. *Improvement:* extract one shared helper.
 4. **File sprawl (~50 `render_*` files, ~26.8k LOC).** Painter logic, low-level pixel ops, and IO decode are interleaved; the largest are `render_svg_inline.cpp` (5633), `render_pdf.cpp` (2384), `render_background.cpp` (2107), `render_svg.cpp` (1978). No TODO/FIXME/HACK markers exist — the debt is structural (sprawl + duplication), not annotated.
@@ -172,6 +172,7 @@ Two capability structures decide native-vs-fallback. **Runtime** `RenderBackendC
 |---|---|
 | `radiant/render_backend.h` | The `RenderBackend` vtable and `RenderWalkState`; shared-walker API. |
 | `radiant/render_walk.cpp` | The single tree walk: block/inline phases, effect-group decision, z-order, transform wrappers. |
+| `radiant/stacking_order.{hpp,cpp}` | Shared positioned/positive-z collection and stable paint-order sorting consumed by render and hit-testing. |
 | `radiant/render_raster_walk.cpp` | Raster backend wiring + `render_raster_dispatch_block` feature router + `render_children`. |
 | `radiant/render.hpp` / `render.cpp` | `RenderContext` god-struct; `render_inline_view`; iframe `render_embed_doc`. |
 | `radiant/render_block.cpp` | `render_bound` orchestrator, `render_outline_deferred`, the four-phase raster block pipeline, skip/dirty/retained gating. |
