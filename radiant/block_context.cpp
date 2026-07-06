@@ -436,6 +436,10 @@ float block_context_find_y_for_width(BlockContext* ctx, float required_width, fl
         }
         y = next_y;
     }
+    if (max_iterations < 0) {
+        log_warn("[RAD_CAP_FLOAT_FIND_Y] exhausted float-step search at y=%.1f for required_width=%.1f",
+                 y, required_width);
+    }
 
     return y;
 }

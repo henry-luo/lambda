@@ -13,6 +13,7 @@
 #include "state_store.hpp"
 
 #include "../lib/log.h"
+#include "../lib/mem.h"
 #include "../lib/tagged.hpp"
 #include <cmath>
 
@@ -2005,14 +2006,40 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         }
     }
 
-    // Track original heights before content layout.
-    // Used by both COLUMN ADJUST (for non-aspect-ratio items) and
-    // ROW FLEX ASPECT RESTORE (to protect aspect-ratio items in row flex).
-    float original_heights[256] = {0};  // Max 256 flex items
+    int original_height_count = 0;
+    {
+        View* count_item = flex_container->first_child;
+        while (count_item) {
+            if (count_item->view_type == RDT_VIEW_BLOCK || count_item->view_type == RDT_VIEW_INLINE_BLOCK ||
+                count_item->view_type == RDT_VIEW_LIST_ITEM) {
+                ViewElement* flex_item = lam::view_require_element(count_item);
+                if (has_flex_item_prop(flex_item) ||
+                    (flex_item->item_prop_type == DomElement::ITEM_PROP_FORM && flex_item->form)) {
+                    original_height_count++;
+                }
+            }
+            count_item = count_item->next();
+        }
+    }
+
+    // Height restoration is keyed by flex-item order; allocate to the actual item count
+    // so documents with more than 256 items do not silently lose aspect/realign state.
+    float* original_heights = original_height_count > 0
+        ? (float*)mem_calloc((size_t)original_height_count, sizeof(float), MEM_CAT_LAYOUT)
+        : nullptr;
+    if (original_height_count > 256) {
+        log_warn("[RAD_CAP_FLEX_ORIGINAL_HEIGHTS] tracking %d flex item heights beyond legacy cap 256 for %s",
+                 original_height_count, flex_container->node_name());
+    }
+    if (!original_heights && original_height_count > 0) {
+        log_error("[RAD_CAP_FLEX_ORIGINAL_HEIGHTS] unable to allocate %d flex item heights for %s",
+                  original_height_count, flex_container->node_name());
+        original_height_count = 0;
+    }
     int item_index = 0;
     {
         View* pre_item = flex_container->first_child;
-        while (pre_item && item_index < 256) {
+        while (pre_item && item_index < original_height_count) {
             if (pre_item->view_type == RDT_VIEW_BLOCK || pre_item->view_type == RDT_VIEW_INLINE_BLOCK ||
                 pre_item->view_type == RDT_VIEW_LIST_ITEM) {
                 ViewElement* flex_item = lam::view_require_element(pre_item);
@@ -2071,7 +2098,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         int adj_index = 0;
 
         View* item = flex_container->first_child;
-        while (item && adj_index < 256) {
+        while (item && adj_index < original_height_count) {
             if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK ||
                 item->view_type == RDT_VIEW_LIST_ITEM) {
                 ViewElement* flex_item = lam::view_require_element(item);
@@ -2207,7 +2234,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     if (flex && is_main_axis_horizontal(flex)) {
         View* restore_item = flex_container->first_child;
         int restore_idx = 0;
-        while (restore_item && restore_idx < 256) {
+        while (restore_item && restore_idx < original_height_count) {
             if (restore_item->view_type == RDT_VIEW_BLOCK || restore_item->view_type == RDT_VIEW_INLINE_BLOCK ||
                 restore_item->view_type == RDT_VIEW_LIST_ITEM) {
                 ViewElement* flex_item = lam::view_require_element(restore_item);
@@ -2240,7 +2267,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         bool any_height_changed = false;
         int check_idx = 0;
         View* check_item = flex_container->first_child;
-        while (check_item && check_idx < 256) {
+        while (check_item && check_idx < original_height_count) {
             if (check_item->view_type == RDT_VIEW_BLOCK || check_item->view_type == RDT_VIEW_INLINE_BLOCK ||
                 check_item->view_type == RDT_VIEW_LIST_ITEM) {
                 ViewElement* fi = lam::view_require_element(check_item);
@@ -2512,6 +2539,9 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     }
 
     log_info("FINAL FLEX CONTENT LAYOUT END: container=%p", flex_container);
+    if (original_heights) {
+        mem_free(original_heights);
+    }
     log_leave();
 }
 

@@ -68,9 +68,11 @@ typedef struct CGClipEntry {
     CGPathRef path;
 } CGClipEntry;
 
-static const int RDT_CG_MAX_CLIP_DEPTH = 8;
-static thread_local CGClipEntry s_cg_clip_stack[RDT_CG_MAX_CLIP_DEPTH];
+static const int RDT_CG_INITIAL_CLIP_DEPTH = 8;
+static thread_local CGClipEntry s_cg_clip_inline_stack[RDT_CG_INITIAL_CLIP_DEPTH];
+static thread_local CGClipEntry* s_cg_clip_stack = s_cg_clip_inline_stack;
 static thread_local int s_cg_clip_depth = 0;
+static thread_local int s_cg_clip_capacity = RDT_CG_INITIAL_CLIP_DEPTH;
 
 // ============================================================================
 // Helpers
@@ -109,13 +111,45 @@ static void cg_apply_active_clips(RdtVectorImpl* cg) {
 
 static void cg_free_clip_range(int begin_depth, int end_depth) {
     if (begin_depth < 0) begin_depth = 0;
-    if (end_depth > RDT_CG_MAX_CLIP_DEPTH) end_depth = RDT_CG_MAX_CLIP_DEPTH;
+    if (end_depth > s_cg_clip_capacity) end_depth = s_cg_clip_capacity;
     for (int i = begin_depth; i < end_depth; i++) {
         if (s_cg_clip_stack[i].path) {
             CGPathRelease(s_cg_clip_stack[i].path);
             s_cg_clip_stack[i].path = nullptr;
         }
     }
+}
+
+static bool cg_ensure_clip_capacity(int needed_depth) {
+    if (needed_depth <= s_cg_clip_capacity) return true;
+
+    int new_capacity = s_cg_clip_capacity * 2;
+    while (new_capacity < needed_depth) {
+        new_capacity *= 2;
+    }
+    CGClipEntry* grown = (CGClipEntry*)mem_calloc((size_t)new_capacity, sizeof(CGClipEntry), MEM_CAT_RENDER);
+    if (!grown) {
+        log_warn("[RAD_CAP_CG_CLIP] unable to grow Core Graphics clip stack to depth %d", needed_depth);
+        return false;
+    }
+    // Active clip paths own CGPathRefs; moving the entries preserves ownership while growing.
+    if (s_cg_clip_depth > 0) {
+        memcpy(grown, s_cg_clip_stack, (size_t)s_cg_clip_depth * sizeof(CGClipEntry));
+    }
+    if (s_cg_clip_stack != s_cg_clip_inline_stack) {
+        mem_free(s_cg_clip_stack);
+    }
+    s_cg_clip_stack = grown;
+    s_cg_clip_capacity = new_capacity;
+    log_warn("[RAD_CAP_CG_CLIP] grew Core Graphics clip stack to depth %d", s_cg_clip_capacity);
+    return true;
+}
+
+static void cg_release_heap_clip_stack_if_empty() {
+    if (s_cg_clip_depth != 0 || s_cg_clip_stack == s_cg_clip_inline_stack) return;
+    mem_free(s_cg_clip_stack);
+    s_cg_clip_stack = s_cg_clip_inline_stack;
+    s_cg_clip_capacity = RDT_CG_INITIAL_CLIP_DEPTH;
 }
 
 static inline uint8_t cg_premul_channel(uint8_t channel, uint8_t alpha) {
@@ -318,6 +352,7 @@ void rdt_vector_destroy(RdtVector* vec) {
     cg_flush_to_target(cg);
     cg_free_clip_range(0, s_cg_clip_depth);
     s_cg_clip_depth = 0;
+    cg_release_heap_clip_stack_if_empty();
     cg_destroy_bitmap_context(cg);
     if (cg->colorspace) CGColorSpaceRelease(cg->colorspace);
     free(cg);
@@ -752,8 +787,7 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
 
 void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transform) {
     if (!vec || !vec->impl || !clip_path) return;
-    if (s_cg_clip_depth >= RDT_CG_MAX_CLIP_DEPTH) {
-        log_error("rdt_push_clip: Core Graphics clip stack overflow (depth %d)", s_cg_clip_depth);
+    if (!cg_ensure_clip_capacity(s_cg_clip_depth + 1)) {
         return;
     }
     CGPathRef copied_path = nullptr;
@@ -775,6 +809,7 @@ void rdt_pop_clip(RdtVector* vec) {
     }
     s_cg_clip_depth--;
     cg_free_clip_range(s_cg_clip_depth, s_cg_clip_depth + 1);
+    cg_release_heap_clip_stack_if_empty();
 }
 
 int rdt_clip_save_depth() {
@@ -785,9 +820,12 @@ int rdt_clip_save_depth() {
 
 void rdt_clip_restore_depth(int saved_depth) {
     if (saved_depth < 0) saved_depth = 0;
-    if (saved_depth > RDT_CG_MAX_CLIP_DEPTH) saved_depth = RDT_CG_MAX_CLIP_DEPTH;
+    if (!cg_ensure_clip_capacity(saved_depth)) {
+        saved_depth = s_cg_clip_capacity;
+    }
     cg_free_clip_range(saved_depth, s_cg_clip_depth);
     s_cg_clip_depth = saved_depth;
+    cg_release_heap_clip_stack_if_empty();
 }
 
 // ============================================================================

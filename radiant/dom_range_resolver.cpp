@@ -473,7 +473,6 @@ static bool is_inline_sequence_neighbor(DomNode* node) {
         case RDT_VIEW_BR:
         case RDT_VIEW_MARKER:
         case RDT_VIEW_INLINE:
-        case RDT_VIEW_MATH:
         case RDT_VIEW_INLINE_BLOCK:
             return true;
         default:

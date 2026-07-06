@@ -54,7 +54,11 @@ static int dl_restore_raster_clip_shapes(const DlClipShapeStack* src, ClipShape*
                                          float tile_x, float tile_y) {
     if (!src || !shapes || !shape_ptrs || src->depth <= 0) return 0;
     int depth = src->depth;
-    if (depth > RDT_MAX_CLIP_SHAPES) depth = RDT_MAX_CLIP_SHAPES;
+    if (depth > RDT_MAX_CLIP_SHAPES) {
+        log_warn("[RAD_CAP_TILE_CLIP_RESTORE] truncating raster clip stack from %d to %d shapes",
+                 depth, RDT_MAX_CLIP_SHAPES);
+        depth = RDT_MAX_CLIP_SHAPES;
+    }
     int out_depth = 0;
     for (int i = 0; i < depth; i++) {
         if (src->type[i] == CLIP_SHAPE_NONE) continue;

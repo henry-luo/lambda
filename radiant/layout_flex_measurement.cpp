@@ -11,6 +11,7 @@
 #include "../lambda/input/css/selector_matcher.hpp"
 
 #include "../lib/log.h"
+#include "../lib/mem.h"
 #include "../lib/tagged.hpp"
 #include <float.h>
 #include <limits.h>
@@ -551,10 +552,39 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
 // Content measurement for multi-pass flex layout
 // This file implements the first pass of the multi-pass flex layout algorithm
 
-// Global measurement cache (simplified implementation)
-static MeasurementCacheEntry measurement_cache[1000]; // Fixed size for simplicity
+// Global measurement cache
+static MeasurementCacheEntry* measurement_cache = nullptr;
 static int cache_count = 0;
+static int cache_capacity = 0;
 static uint32_t cache_generation = 0;  // incremented on each top-level layout
+
+static bool ensure_measurement_cache_capacity(int required) {
+    if (required <= cache_capacity) return true;
+
+    int new_capacity = cache_capacity > 0 ? cache_capacity : 1024;
+    while (new_capacity < required) {
+        new_capacity *= 2;
+    }
+    MeasurementCacheEntry* grown = (MeasurementCacheEntry*)mem_realloc(
+        measurement_cache, (size_t)new_capacity * sizeof(MeasurementCacheEntry), MEM_CAT_CACHE_LAYOUT);
+    if (!grown) {
+        log_error("RAD_CAP_FLEX_MEASURE_CACHE: unable to grow measurement cache from %d to %d entries",
+                  cache_capacity, new_capacity);
+        return false;
+    }
+    // New slots are zeroed so a failed/incomplete entry cannot look like a stale node hit.
+    if (new_capacity > cache_capacity) {
+        memset(grown + cache_capacity, 0,
+               (size_t)(new_capacity - cache_capacity) * sizeof(MeasurementCacheEntry));
+    }
+    if (cache_capacity > 0) {
+        log_warn("[RAD_CAP_FLEX_MEASURE_CACHE] grew measurement cache from %d to %d entries",
+                 cache_capacity, new_capacity);
+    }
+    measurement_cache = grown;
+    cache_capacity = new_capacity;
+    return true;
+}
 
 void advance_measurement_cache_generation() {
     cache_generation++;
@@ -568,8 +598,7 @@ uint32_t get_measurement_cache_generation() {
 void store_in_measurement_cache(DomNode* node, float width, float height,
                                float content_width, float content_height,
                                float context_width) {
-    if (cache_count >= 1000) {
-        log_error("Measurement cache overflow");
+    if (!ensure_measurement_cache_capacity(cache_count + 1)) {
         return;
     }
 

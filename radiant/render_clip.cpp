@@ -402,6 +402,9 @@ static bool render_clip_push_shape_scope(RenderContext* rdcon, RenderClipScope* 
     if (rdcon->clip_shape_depth < RDT_MAX_CLIP_SHAPES) {
         rdcon->clip_shapes[rdcon->clip_shape_depth++] = shape;
         scope->pushed_shape = true;
+    } else {
+        log_warn("[RAD_CAP_RENDER_CLIP_SHAPES] dropping retained clip shape beyond depth %d",
+                 RDT_MAX_CLIP_SHAPES);
     }
     return true;
 }

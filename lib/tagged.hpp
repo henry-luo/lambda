@@ -19,7 +19,6 @@ template<> struct ViewTagToType<RDT_VIEW_TEXT> { typedef ViewText type; };
 template<> struct ViewTagToType<RDT_VIEW_BR> { typedef ViewElement type; };
 template<> struct ViewTagToType<RDT_VIEW_MARKER> { typedef ViewMarker type; };
 template<> struct ViewTagToType<RDT_VIEW_INLINE> { typedef ViewSpan type; };
-template<> struct ViewTagToType<RDT_VIEW_MATH> { typedef ViewSpan type; };
 template<> struct ViewTagToType<RDT_VIEW_INLINE_BLOCK> { typedef ViewBlock type; };
 template<> struct ViewTagToType<RDT_VIEW_BLOCK> { typedef ViewBlock type; };
 template<> struct ViewTagToType<RDT_VIEW_LIST_ITEM> { typedef ViewBlock type; };
@@ -62,7 +61,6 @@ decltype(auto) visit_view(View* v, F&& f) {
         case RDT_VIEW_BR: return f(view_require<RDT_VIEW_BR>(v));
         case RDT_VIEW_MARKER: return f(view_require<RDT_VIEW_MARKER>(v));
         case RDT_VIEW_INLINE: return f(view_require<RDT_VIEW_INLINE>(v));
-        case RDT_VIEW_MATH: return f(view_require<RDT_VIEW_MATH>(v));
         case RDT_VIEW_INLINE_BLOCK: return f(view_require<RDT_VIEW_INLINE_BLOCK>(v));
         case RDT_VIEW_BLOCK: return f(view_require<RDT_VIEW_BLOCK>(v));
         case RDT_VIEW_LIST_ITEM: return f(view_require<RDT_VIEW_LIST_ITEM>(v));

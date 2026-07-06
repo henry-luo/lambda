@@ -2434,6 +2434,10 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
                   final_y_bfc, next_y);
         final_y_bfc = next_y;
     }
+    if (max_iterations < 0) {
+        log_warn("[RAD_CAP_FLOAT_PLACE] exhausted float placement search for %s at y=%.1f",
+                 block->source_loc(), final_y_bfc);
+    }
 
     // Convert final Y position back to parent-relative coordinates and apply
     float final_y_local = final_y_bfc - parent_y_in_bfc;

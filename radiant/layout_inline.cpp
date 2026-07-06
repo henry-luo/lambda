@@ -39,7 +39,6 @@ static inline ViewBlock* layout_inline_as_block_view(View* view) {
         case RDT_VIEW_BR:
         case RDT_VIEW_MARKER:
         case RDT_VIEW_INLINE:
-        case RDT_VIEW_MATH:
             return nullptr;
     }
     return nullptr;

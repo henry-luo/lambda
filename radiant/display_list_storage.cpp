@@ -52,7 +52,11 @@ void dl_store_clip_shapes(DisplayList* dl, DlClipShapeStack* dst,
     if (!dst) return;
     memset(dst, 0, sizeof(DlClipShapeStack));
     if (!dl || !clip_shapes || clip_depth <= 0) return;
-    if (clip_depth > RDT_MAX_CLIP_SHAPES) clip_depth = RDT_MAX_CLIP_SHAPES;
+    if (clip_depth > RDT_MAX_CLIP_SHAPES) {
+        log_warn("[RAD_CAP_DL_CLIP_SHAPES] truncating clip stack from %d to %d shapes",
+                 clip_depth, RDT_MAX_CLIP_SHAPES);
+        clip_depth = RDT_MAX_CLIP_SHAPES;
+    }
     dst->depth = clip_depth;
     for (int i = 0; i < clip_depth; i++) {
         ClipShape* shape = clip_shapes[i];
@@ -82,7 +86,11 @@ int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
                            ClipShape** shape_ptrs) {
     if (!src || !shapes || !shape_ptrs || src->depth <= 0) return 0;
     int depth = src->depth;
-    if (depth > RDT_MAX_CLIP_SHAPES) depth = RDT_MAX_CLIP_SHAPES;
+    if (depth > RDT_MAX_CLIP_SHAPES) {
+        log_warn("[RAD_CAP_DL_CLIP_RESTORE] truncating stored clip stack from %d to %d shapes",
+                 depth, RDT_MAX_CLIP_SHAPES);
+        depth = RDT_MAX_CLIP_SHAPES;
+    }
     int out_depth = 0;
     for (int i = 0; i < depth; i++) {
         if (src->type[i] == CLIP_SHAPE_NONE) continue;

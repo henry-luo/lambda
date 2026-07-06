@@ -313,6 +313,8 @@ inline void place_definite_row_item(
     }
 
     // Fallback: place at end of grid
+    log_warn("[RAD_CAP_GRID_AUTO_PLACE] exhausted definite-row search after %d iterations; placing at grid end",
+             MAX_SEARCH_ITERATIONS);
     OriginZeroLine fallback_col = matrix.track_counts(AbsoluteAxis::Horizontal).implicit_end_line();
     LineSpan col_span(fallback_col, fallback_col + column_item_span);
     matrix.ensure_fits(AbsoluteAxis::Horizontal, col_span, row_span);
@@ -364,6 +366,8 @@ inline void place_definite_column_item(
     }
 
     // Fallback: place at end of grid
+    log_warn("[RAD_CAP_GRID_AUTO_PLACE] exhausted definite-column search after %d iterations; placing at grid end",
+             MAX_SEARCH_ITERATIONS);
     OriginZeroLine fallback_row = matrix.track_counts(AbsoluteAxis::Vertical).implicit_end_line();
     LineSpan row_span(fallback_row, fallback_row + row_item_span);
     matrix.ensure_fits(AbsoluteAxis::Horizontal, col_span, row_span);
@@ -436,6 +440,8 @@ inline void place_definite_secondary_axis_item(
     }
 
     // Fallback: If we couldn't find a spot, place at the end of the grid
+    log_warn("[RAD_CAP_GRID_AUTO_PLACE] exhausted secondary-axis search after %d iterations; placing at grid end",
+             MAX_SEARCH_ITERATIONS);
     OriginZeroLine fallback_pos = matrix.track_counts(primary).implicit_end_line();
     LineSpan primary_span(fallback_pos, fallback_pos + primary_item_span);
     matrix.ensure_fits(primary, primary_span, secondary_span);
@@ -525,6 +531,8 @@ inline GridCursor place_indefinite_item(
         }
 
         // Fallback: place at the end of secondary axis
+        log_warn("[RAD_CAP_GRID_AUTO_PLACE] exhausted definite-primary search after %d iterations; placing at grid end",
+                 MAX_SEARCH_ITERATIONS);
         OriginZeroLine fallback_secondary = matrix.track_counts(other_axis(primary)).implicit_end_line();
         LineSpan secondary_span(fallback_secondary, fallback_secondary + secondary_item_span);
         matrix.ensure_fits(primary, primary_span_resolved, secondary_span);
@@ -573,6 +581,8 @@ inline GridCursor place_indefinite_item(
         }
 
         // Fallback: place at the end of the grid
+        log_warn("[RAD_CAP_GRID_AUTO_PLACE] exhausted indefinite search after %d iterations; placing at grid end",
+                 MAX_SEARCH_ITERATIONS);
         OriginZeroLine fallback_primary = matrix.track_counts(primary).implicit_end_line();
         OriginZeroLine fallback_secondary = secondary_idx;
         LineSpan primary_span(fallback_primary, fallback_primary + primary_item_span);

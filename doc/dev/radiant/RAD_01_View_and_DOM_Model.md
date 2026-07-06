@@ -106,7 +106,7 @@ The DOM→source direction (`source_pos_from_dom_boundary`) walks DOM ancestors 
 3. **`native_element` is a transitional copy, not an alias.** `DomElement::native_element` is marked `TODO(Phase 4): Remove; use dom_element_to_element()` (`dom_element.hpp:307`), and the embedded `Element` is currently *copied* from the source element in `dom_element_init` rather than aliased. Until removed, there are two notions of "the element" to keep in sync.
 4. **Incremental relayout correctness is implicit.** The skip-clean optimization depends on `layout_height_contribution` being exactly recomputed on every non-skipped child (`layout_block.cpp`). There is no assertion tying the cached contribution to the actual advance, so a bug there manifests as silently mis-placed siblings rather than a crash.
 5. **Source-position bridge maturity.** The header warns that functions may be no-op `return false` pending `render_map` path recording (`source_pos_bridge.hpp:24-27`); editor round-trip fragility is concentrated here and depends on a weak/incremental `render_map` dependency.
-6. **Dead / deprecated enum span.** `RDT_VIEW_MATH` is marked DEPRECATED (`dom_node.hpp:53`) but still occupies the `ViewType` ordering that `is_group`/`is_inline`/`is_block` depend on. A class-name stub in `view_pool.cpp` also assumes a single class ("TODO: split on whitespace for multiple classes").
+6. **Class-name handling is still a single-token stub.** The deprecated `RDT_VIEW_MATH` enum span has been removed, but the class-name path in `view_pool.cpp` still assumes a single class ("TODO: split on whitespace for multiple classes").
 
 ---
 

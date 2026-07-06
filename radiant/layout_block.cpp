@@ -986,9 +986,6 @@ static void adjust_abs_descendants_y(ViewElement* parent, float delta) {
 
 // DEBUG: Global for tracking table height between calls
 // WORKAROUND: Table height gets corrupted between layout_block_content return and caller
-// RAD_TABLE_HEIGHT_GUARD: shared table-height preservation tag for the save/restore sites below.
-static float g_layout_table_height = 0;
-
 static bool radiant_verify_incremental_layout_enabled() {
     static int cached = -1;
     if (cached < 0) {
@@ -4722,10 +4719,6 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                               block->width, block->content_width);
                 }
 
-                // RAD_TABLE_HEIGHT_GUARD: preserve a table height lost between
-                // layout_block_content() return and caller inspection; keep this
-                // tag on every site until the writer that clears height is removed.
-                g_layout_table_height = block->height;
                 return;
             }
             else {
@@ -4793,8 +4786,6 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                               block->width, block->content_width);
                 }
 
-                // RAD_TABLE_HEIGHT_GUARD: see the non-empty table return above.
-                g_layout_table_height = block->height;
                 return;
             }
         }
@@ -5439,6 +5430,10 @@ static float find_line_y_for_width_with_floats(BlockContext* bfc, BlockContext* 
         if (next_y <= y_bfc || isinf(next_y) || next_y == FLT_MAX) break;
         y_bfc = next_y;
     }
+    if (max_iterations < 0) {
+        log_warn("[RAD_CAP_FLOAT_LINE_Y] exhausted float-step search at y=%.1f for required_width=%.1f",
+                 y_bfc, required_width);
+    }
 
     return y_bfc - block_ctx->bfc_offset_y;
 }
@@ -5650,6 +5645,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     log_debug("%s [BFC Float Avoid] Element doesn't fit, shifting from y=%.1f to y=%.1f", block->source_loc(),
                               current_y, next_y);
                     current_y = next_y;
+                }
+                if (max_iterations < 0) {
+                    log_warn("[RAD_CAP_BFC_FLOAT_AVOID] exhausted float avoidance for %s at y=%.1f",
+                             block->source_loc(), current_y);
                 }
             } else {
                 // No explicit width - element may shrink to fit beside the float.
@@ -7768,9 +7767,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
     } else {
         // layout block content to determine content width and height
-        // DEBUG: Check if this is a table before layout_block_content
-        // Always print block type for debugging
-        bool is_table = (block->view_type == RDT_VIEW_TABLE);
         layout_block_content(lycon, block, &pa_block, &pa_line);
         bool child_line_clamp_inherited = block->blk && block->blk->line_clamp_inherited;
         bool child_line_clamped = block->blk && block->blk->line_clamped;
@@ -7779,12 +7775,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         float child_line_clamp_last_line_ascender = block->blk ? block->blk->line_clamp_last_line_ascender : 0.0f;
         float child_line_clamp_last_line_max_ascender = block->blk ? block->blk->line_clamp_last_line_max_ascender : 0.0f;
         float child_line_clamp_last_line_max_descender = block->blk ? block->blk->line_clamp_last_line_max_descender : 0.0f;
-
-        // RAD_TABLE_HEIGHT_GUARD: paired with the save sites in layout_block_content().
-        if (is_table && g_layout_table_height > 0) {
-            block->height = g_layout_table_height;
-            g_layout_table_height = 0;  // Reset for next table
-        }
 
         // CSS 2.1 Section 10.8.1: For non-replaced inline-blocks with in-flow line boxes
         // and overflow:visible, the baseline is the baseline of the last line box.
