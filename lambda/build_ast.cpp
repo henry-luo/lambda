@@ -3362,6 +3362,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, "!")) { ast_node->op = OPERATOR_EXCLUDE; }
     else if (strview_equal(&op, "is")) { ast_node->op = OPERATOR_IS; }
     else if (strview_equal(&op, "in")) { ast_node->op = OPERATOR_IN; }
+    else if (strview_equal(&op, "at")) { ast_node->op = OPERATOR_AT; }
     else {
         log_error("Error: build_binary_expr unknown operator: %.*s", (int)op.length, op.str);
         ast_node->op = OPERATOR_ADD; // Default fallback to prevent crashes
@@ -3510,7 +3511,8 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (ast_node->op == OPERATOR_EQ || ast_node->op == OPERATOR_NE ||
         ast_node->op == OPERATOR_LT || ast_node->op == OPERATOR_LE ||
         ast_node->op == OPERATOR_GT || ast_node->op == OPERATOR_GE ||
-        ast_node->op == OPERATOR_IS || ast_node->op == OPERATOR_IN) {
+        ast_node->op == OPERATOR_IS || ast_node->op == OPERATOR_IN ||
+        ast_node->op == OPERATOR_AT) {
         type_id = LMD_TYPE_BOOL;
 
         // Ordering comparisons (< <= > >=) now return Item from fn_lt/gt/le/ge, so
@@ -5957,6 +5959,17 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     AstLoopNode* ast_node = (AstLoopNode*)alloc_ast_node(tp, AST_NODE_LOOP, loop_node, sizeof(AstLoopNode));
     ast_node->index_name = NULL;  // default: no index variable
     ast_node->key_filter = LOOP_KEY_ALL;  // default: iterate all entries
+    ast_node->key_only = false;
+
+    TSNode op_node = ts_node_child_by_field_id(loop_node, FIELD_OP);
+    if (!ts_node_is_null(op_node)) {
+        StrView op_view = ts_node_source(tp, op_node);
+        if (strview_equal(&op_view, "at")) {
+            // `for k at item` is key-only iteration; values remain available via `for k, v in item`.
+            ast_node->key_filter = LOOP_KEY_SYMBOL;
+            ast_node->key_only = true;
+        }
+    }
 
     // Check for optional index variable (first identifier in 'for k, v in expr')
     TSNode index_node = ts_node_child_by_field_id(loop_node, FIELD_INDEX);
@@ -5994,7 +6007,10 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
 
     // determine the type of the loop variable
     Type* expr_type = ast_node->as->type;
-    if (expr_type->type_id == LMD_TYPE_ARRAY) {
+    if (ast_node->key_only) {
+        ast_node->type = &TYPE_ANY;
+    }
+    else if (expr_type->type_id == LMD_TYPE_ARRAY) {
         TypeArray* array_type = (TypeArray*)expr_type;
         if (array_type && array_type->nested && (uintptr_t)array_type->nested > 0x1000) {
             ast_node->type = array_type->nested;

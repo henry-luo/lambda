@@ -384,8 +384,11 @@ typedef enum SysFunc {
     // statistical functions
     SYSFUNC_MEAN,
     SYSFUNC_MEDIAN,
+    SYSFUNC_MEDIAN2,
     SYSFUNC_VARIANCE,
+    SYSFUNC_VARIANCE2,
     SYSFUNC_DEVIATION,
+    SYSFUNC_DEVIATION2,
     // element-wise math functions
     SYSFUNC_SQRT,
     SYSFUNC_LOG,
@@ -431,6 +434,7 @@ typedef enum SysFunc {
     SYSFUNC_ZIP,
     SYSFUNC_RANGE3,
     SYSFUNC_QUANTILE,
+    SYSFUNC_QUANTILE3,
     SYSFUNC_REDUCE,         // reduce(collection, fn) - fold/accumulate
     // parse string functions
     SYSFUNC_PARSE1,         // parse(str) - parse string, auto-detect format
@@ -1344,6 +1348,7 @@ extern "C" {
     Item fn_max2(Item a, Item b);
     Item fn_sum(Item a);
     Item fn_avg(Item a);
+    Item fn_avg_skip_null(Item a, bool skip_null);
     Item fn_pos(Item a);
     Item fn_neg(Item a);
 
@@ -1370,6 +1375,7 @@ extern "C" {
     Bool fn_is(Item a, Item b);
     Bool fn_is_nan(Item a);  // IEEE NaN check: expr is nan
     Bool fn_in(Item a, Item b);
+    Bool fn_at(Item a, Item b);
 
     // query operations: search data for items matching a type
     Item fn_query(Item data, Item type_val, int direct);
@@ -1399,9 +1405,13 @@ extern "C" {
     Item fn_math_norm(Item a);
     // statistical functions (math module)
     Item fn_math_mean(Item a);
+    Item fn_math_mean_skip_null(Item a, bool skip_null);
     Item fn_math_median(Item a);
+    Item fn_math_median_skip_null(Item a, bool skip_null);
     Item fn_math_variance(Item a);
+    Item fn_math_variance_skip_null(Item a, bool skip_null);
     Item fn_math_deviation(Item a);
+    Item fn_math_deviation_skip_null(Item a, bool skip_null);
     // element-wise math functions (math module)
     Item fn_math_sqrt(Item a);
     Item fn_math_log(Item a);
@@ -1579,6 +1589,7 @@ extern "C" {
     Item fn_zip(Item a, Item b);
     Item fn_range3(Item start, Item end, Item step);
     Item fn_math_quantile(Item a, Item p);
+    Item fn_math_quantile_skip_null(Item a, Item p, bool skip_null);
     Item fn_reduce(Item collection, Item func);
 
     Range* fn_to(Item a, Item b);
@@ -1628,6 +1639,14 @@ extern "C" {
     Item fn_avg1(Item arr);            Item fn_avg2(Item arr, Item axis);
     Item fn_math_prod1(Item arr);      Item fn_math_prod2(Item arr, Item axis);
     Item fn_math_mean1(Item arr);      Item fn_math_mean2(Item arr, Item axis);
+    Item fn_math_median1(Item arr);
+    Item fn_math_median2(Item arr, Item option);
+    Item fn_math_variance1(Item arr);
+    Item fn_math_variance2(Item arr, Item option);
+    Item fn_math_deviation1(Item arr);
+    Item fn_math_deviation2(Item arr, Item option);
+    Item fn_math_quantile2(Item arr, Item p);
+    Item fn_math_quantile3(Item arr, Item p, Item option);
     Item fn_math_cumsum1(Item arr);    Item fn_math_cumsum2(Item arr, Item axis);
     Item fn_math_cumprod1(Item arr);   Item fn_math_cumprod2(Item arr, Item axis);
     Item fn_split2(Item str, Item sep);  // overloaded alias for fn_split
@@ -1725,7 +1744,7 @@ extern "C" {
     Item fn_shr_item(Item a, Item b);
 
     // compound assignment support (procedural only)
-    void fn_array_set(Array* arr, int64_t index, Item value);
+    Item fn_array_set(Array* arr, int64_t index, Item value);
     void fn_map_set(Item map, Item key, Item value);
 
     // runtime type coercion for typed array annotations (int[], float[], etc.)

@@ -1110,6 +1110,23 @@ Item vec_pow(Item a, Item b) {
 // Vector System Functions
 //==============================================================================
 
+static bool is_skip_null_option(Item option) {
+    return get_type_id(option) == LMD_TYPE_BOOL && option.bool_val;
+}
+
+static bool vector_number_or_null(Item item, double* out, bool* is_null) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_NULL) {
+        *is_null = true;
+        return true;
+    }
+    *is_null = false;
+    double val = item_to_double(item);
+    if (std::isnan(val)) return false;
+    *out = val;
+    return true;
+}
+
 // prod(vec) - product of all elements
 Item fn_math_prod(Item item) {
     GUARD_ERROR1(item);
@@ -1155,11 +1172,14 @@ Item fn_math_prod(Item item) {
         bool has_float = false;
         for (int64_t i = 0; i < lst->length; i++) {
             Item elem = lst->items[i];
-            double val = item_to_double(elem);
-            if (std::isnan(val)) {
+            double val = 0.0;
+            bool is_null = false;
+            if (!vector_number_or_null(elem, &val, &is_null)) {
                 log_error("fn_math_prod: non-numeric element at index %ld", i);
                 return ItemError;
             }
+            // null in aggregate inputs is an unknown value; propagate it in strict aggregates.
+            if (is_null) return ItemNull;
             prod *= val;
             if (get_type_id(elem) == LMD_TYPE_FLOAT) has_float = true;
         }
@@ -1474,65 +1494,102 @@ Item fn_math_mean(Item item) {
     return fn_avg(item);
 }
 
+Item fn_math_mean_skip_null(Item item, bool skip_null) {
+    GUARD_ERROR1(item);
+    extern Item fn_avg_skip_null(Item, bool);
+    return fn_avg_skip_null(item, skip_null);
+}
+
 // median(vec) - median value
-Item fn_math_median(Item item) {
+Item fn_math_median_skip_null(Item item, bool skip_null) {
     GUARD_ERROR1(item);
     int64_t len = vector_length(item);
-    if (len == 0) return ItemNull;
+    if (len <= 0) return ItemNull;
 
     // Copy values to sortable array
     ArrayNum* sorted = array_float_new(len);
+    int64_t count = 0;
     for (int64_t i = 0; i < len; i++) {
-        double val = item_to_double(vector_get(item, i));
-        if (std::isnan(val)) {
+        double val = 0.0;
+        bool is_null = false;
+        if (!vector_number_or_null(vector_get(item, i), &val, &is_null)) {
             log_error("fn_math_median: non-numeric element at index %ld", i);
             return ItemError;
         }
-        sorted->float_items[i] = val;
+        // null is an absence marker; strict aggregates propagate it, skip_null removes it.
+        if (is_null) {
+            if (skip_null) continue;
+            return ItemNull;
+        }
+        sorted->float_items[count++] = val;
     }
+    if (count == 0) return ItemNull;
 
-    insertion_sort(sorted->float_items, (size_t)len, sizeof(double), cmp_double_asc, NULL);
+    insertion_sort(sorted->float_items, (size_t)count, sizeof(double), cmp_double_asc, NULL);
 
-    if (len % 2 == 1) {
-        return push_d(sorted->float_items[len / 2]);
+    if (count % 2 == 1) {
+        return push_d(sorted->float_items[count / 2]);
     } else {
-        return push_d((sorted->float_items[len / 2 - 1] + sorted->float_items[len / 2]) / 2.0);
+        return push_d((sorted->float_items[count / 2 - 1] + sorted->float_items[count / 2]) / 2.0);
     }
 }
 
+Item fn_math_median(Item item) {
+    return fn_math_median_skip_null(item, false);
+}
+
 // variance(vec) - population variance
-Item fn_math_variance(Item item) {
+Item fn_math_variance_skip_null(Item item, bool skip_null) {
     GUARD_ERROR1(item);
     int64_t len = vector_length(item);
-    if (len == 0) return ItemNull;
+    if (len <= 0) return ItemNull;
 
     // Calculate mean
     double sum = 0.0;
+    int64_t count = 0;
     for (int64_t i = 0; i < len; i++) {
-        double val = item_to_double(vector_get(item, i));
-        if (std::isnan(val)) {
+        double val = 0.0;
+        bool is_null = false;
+        if (!vector_number_or_null(vector_get(item, i), &val, &is_null)) {
             log_error("fn_math_variance: non-numeric element at index %ld", i);
             return ItemError;
         }
+        // null is an absence marker; strict aggregates propagate it, skip_null removes it.
+        if (is_null) {
+            if (skip_null) continue;
+            return ItemNull;
+        }
         sum += val;
+        count++;
     }
-    double mean = sum / len;
+    if (count == 0) return ItemNull;
+    double mean = sum / count;
 
     // Calculate variance
     double var_sum = 0.0;
     for (int64_t i = 0; i < len; i++) {
-        double val = item_to_double(vector_get(item, i));
+        double val = 0.0;
+        bool is_null = false;
+        if (!vector_number_or_null(vector_get(item, i), &val, &is_null)) {
+            log_error("fn_math_variance: non-numeric element at index %ld", i);
+            return ItemError;
+        }
+        if (is_null) continue;
         double diff = val - mean;
         var_sum += diff * diff;
     }
 
-    return push_d(var_sum / len);
+    return push_d(var_sum / count);
+}
+
+Item fn_math_variance(Item item) {
+    return fn_math_variance_skip_null(item, false);
 }
 
 // deviation(vec) - population standard deviation
-Item fn_math_deviation(Item item) {
+Item fn_math_deviation_skip_null(Item item, bool skip_null) {
     GUARD_ERROR1(item);
-    Item var_result = fn_math_variance(item);
+    Item var_result = fn_math_variance_skip_null(item, skip_null);
     if (get_type_id(var_result) == LMD_TYPE_ERROR) return var_result;
     if (get_type_id(var_result) == LMD_TYPE_NULL) return var_result;
 
@@ -1540,8 +1597,12 @@ Item fn_math_deviation(Item item) {
     return push_d(sqrt(variance));
 }
 
+Item fn_math_deviation(Item item) {
+    return fn_math_deviation_skip_null(item, false);
+}
+
 // quantile(vec, p) - p-th quantile (0 <= p <= 1)
-Item fn_math_quantile(Item item, Item p_item) {
+Item fn_math_quantile_skip_null(Item item, Item p_item, bool skip_null) {
     GUARD_ERROR2(item, p_item);
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
@@ -1555,18 +1616,26 @@ Item fn_math_quantile(Item item, Item p_item) {
 
     // Copy values to sortable array
     ArrayNum* sorted = array_float_new(len);
+    int64_t count = 0;
     for (int64_t i = 0; i < len; i++) {
-        double val = item_to_double(vector_get(item, i));
-        if (std::isnan(val)) {
+        double val = 0.0;
+        bool is_null = false;
+        if (!vector_number_or_null(vector_get(item, i), &val, &is_null)) {
             log_error("fn_math_quantile: non-numeric element at index %ld", i);
             return ItemError;
         }
-        sorted->float_items[i] = val;
+        // null is an absence marker; strict aggregates propagate it, skip_null removes it.
+        if (is_null) {
+            if (skip_null) continue;
+            return ItemNull;
+        }
+        sorted->float_items[count++] = val;
     }
+    if (count == 0) return ItemNull;
 
     // Sort
-    for (int64_t i = 0; i < len - 1; i++) {
-        for (int64_t j = 0; j < len - i - 1; j++) {
+    for (int64_t i = 0; i < count - 1; i++) {
+        for (int64_t j = 0; j < count - i - 1; j++) {
             if (sorted->float_items[j] > sorted->float_items[j + 1]) {
                 double tmp = sorted->float_items[j];
                 sorted->float_items[j] = sorted->float_items[j + 1];
@@ -1576,16 +1645,20 @@ Item fn_math_quantile(Item item, Item p_item) {
     }
 
     // Linear interpolation method (same as NumPy's default)
-    double idx = p * (len - 1);
+    double idx = p * (count - 1);
     int64_t lo = (int64_t)floor(idx);
     int64_t hi = (int64_t)ceil(idx);
 
-    if (lo == hi || hi >= len) {
+    if (lo == hi || hi >= count) {
         return push_d(sorted->float_items[lo]);
     }
 
     double frac = idx - lo;
     return push_d(sorted->float_items[lo] * (1.0 - frac) + sorted->float_items[hi] * frac);
+}
+
+Item fn_math_quantile(Item item, Item p_item) {
+    return fn_math_quantile_skip_null(item, p_item, false);
 }
 
 //==============================================================================
@@ -4497,11 +4570,19 @@ Item fn_affine_warp(Item img, Item m_item) {
 Item fn_sum1(Item arr)            { return fn_sum(arr); }
 Item fn_sum2(Item arr, Item ax)   { return fn_sum_axis(arr, ax); }
 Item fn_avg1(Item arr)            { return fn_avg(arr); }
-Item fn_avg2(Item arr, Item ax)   { return fn_avg_axis(arr, ax); }
+Item fn_avg2(Item arr, Item ax)   { return get_type_id(ax) == LMD_TYPE_BOOL ? fn_avg_skip_null(arr, ax.bool_val) : fn_avg_axis(arr, ax); }
 Item fn_math_prod1(Item arr)      { return fn_math_prod(arr); }
 Item fn_math_prod2(Item arr, Item ax)   { return fn_prod_axis(arr, ax); }
 Item fn_math_mean1(Item arr)      { return fn_math_mean(arr); }
-Item fn_math_mean2(Item arr, Item ax)   { return fn_avg_axis(arr, ax); }
+Item fn_math_mean2(Item arr, Item ax)   { return get_type_id(ax) == LMD_TYPE_BOOL ? fn_math_mean_skip_null(arr, ax.bool_val) : fn_avg_axis(arr, ax); }
+Item fn_math_median1(Item arr)    { return fn_math_median(arr); }
+Item fn_math_median2(Item arr, Item option)    { return fn_math_median_skip_null(arr, is_skip_null_option(option)); }
+Item fn_math_variance1(Item arr)  { return fn_math_variance(arr); }
+Item fn_math_variance2(Item arr, Item option)  { return fn_math_variance_skip_null(arr, is_skip_null_option(option)); }
+Item fn_math_deviation1(Item arr) { return fn_math_deviation(arr); }
+Item fn_math_deviation2(Item arr, Item option) { return fn_math_deviation_skip_null(arr, is_skip_null_option(option)); }
+Item fn_math_quantile2(Item arr, Item p) { return fn_math_quantile(arr, p); }
+Item fn_math_quantile3(Item arr, Item p, Item option) { return fn_math_quantile_skip_null(arr, p, is_skip_null_option(option)); }
 Item fn_math_cumsum1(Item arr)    { return fn_math_cumsum(arr); }
 Item fn_math_cumsum2(Item arr, Item ax) { return fn_cumsum_axis(arr, ax); }
 Item fn_math_cumprod1(Item arr)   { return fn_math_cumprod(arr); }

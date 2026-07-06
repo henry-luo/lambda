@@ -497,6 +497,10 @@
             "named": false
           },
           {
+            "type": "at",
+            "named": false
+          },
+          {
             "type": "div",
             "named": false
           },
@@ -2369,6 +2373,20 @@
           {
             "type": "identifier",
             "named": true
+          }
+        ]
+      },
+      "op": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "at",
+            "named": false
+          },
+          {
+            "type": "in",
+            "named": false
           }
         ]
       }
@@ -4442,11 +4460,11 @@
   },
   {
     "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "symbol",
-    "named": false
+    "named": true
   },
   {
     "type": "that",

@@ -70,6 +70,7 @@ function binary_expr($, in_attr) {
     ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
     ['is', 'is_in'],
     ['in', 'is_in'],
+    [$._at, 'is_in'],
   ];
   return ops.map(([operator, precedence, associativity]) =>
     (associativity === 'right' ? prec.right : prec.left)(precedence, seq(
@@ -503,6 +504,8 @@ module.exports = grammar({
     // Current item (~) or key/index (~#) reference in pipe context
     current_expr: _ => token(choice('~#', '~')),
 
+    _at: _ => token(prec(2, 'at')),
+
     // Unary expression: includes not, !, -, +, ^, * (spread)
     unary_expr: $ => prec.left(seq(
       field('operator', choice('not', '!', '-', '+', '^', '*')),
@@ -744,7 +747,7 @@ module.exports = grammar({
     loop_expr: $ => choice(
       // for value in expr
       seq(
-        field('name', $.identifier), 'in', field('as', $._expr)
+        field('name', $.identifier), field('op', choice('in', $._at)), field('as', $._expr)
       ),
       // for key, value in expr (with optional type annotation on key)
       seq(

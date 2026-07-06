@@ -349,13 +349,60 @@ An out-of-bounds write is a **raised error** — not null, not a silent no-op.
 Reads ask a question; writes issue a command, and a command that silently does
 nothing hides bugs. Growth is explicit (`push`/`splice`). [C5]
 
-### 7.3 The error invariant
+### 7.3 The two error channels: fn return, pn raise
 
-**Error values originate only from `raise` inside a declared `T^E` context.**
-Builtins that genuinely fail (`div 0`, failed conversions, I/O) carry declared
-`T^` signatures and participate in compile-time enforcement. No operation ever
-emits a naked, unchecked error value. Errors are falsy; `T^E` with `^`
-propagation and `let v^err` destructuring is the single error channel. [C5]
+**The general rule of Lambda error design: `fn` return error; `pn` raise
+error.**
+
+- **`pn` failures raise**: `T^E` signatures, `^` propagation, `let v^err`
+  destructuring, compile-enforced call sites. Commands halt on failure
+  (`output`, `io.*`, `cmd`).
+- **System `fn` failures are values** — fns never raise, keeping them chainable
+  and set-friendly (a raise aborts a whole set operation; a value flows
+  per-item). The channel is declared in the signature — `T?` or `T | error`,
+  never `T^E` on a system fn — and chosen by one principle:
+  *absence in / no answer → `null`* (`int(null)`, `avg([])`, lookups);
+  *present but invalid → `error()`* (`int("abc")`, `1 div 0`) — loud poison
+  with a diagnostic. Both are falsy, so `f(x) or default` rescues both
+  uniformly.
+- **`input`/`fetch` are effectful readers — pn-family, and they raise**
+  (`T^E`, compile-enforced), though permitted in expression position. This is
+  classification, not exception: reading the filesystem/network is an effect,
+  so these were never computational fns; the rule stays absolute while the
+  taxonomy tells the truth. Rationale: batch input that "hopes it goes
+  through" is too optimistic — I/O failure must be consciously handled, and it
+  strikes at the *head* of a pipeline (loading the set), where aborting loses
+  nothing and unacknowledged poison would surface far from its cause.
+  *Boundary → raise; interior → return.* Set-oriented input is a deliberate
+  opt-in via the **wrapper idiom** — `let d^err = input(f)` inside a user fn
+  converts the raised channel to a returned value
+  (`fn my_input(f) { let d^err = input(f); if (^err) err else d }`), then map
+  over the wrapper. No `try` construct exists or is needed.
+- **System/resource faults are unchecked exceptions**: stack overflow, memory
+  exhaustion, the `==` depth limit raise from anywhere — including inside
+  `fn` — but are invisible to fn signatures, propagate transparently through
+  fn frames, and are handled at an enclosing `pn`'s `^err` boundary or a
+  global handler; unhandled, the script aborts with a report. (Java's
+  `Error`-class split; the type `T | error ^ E` cannot arise, by design.)
+- **The channels in one line**: *raised errors are control flow; returned
+  errors are data.* `^err` binds only raised errors; returned `error()` is
+  caught by falsiness or `is error`.
+- **The error invariant: every error value is deliberate** — constructed by
+  `error()`, returned by a declared `T | error` builtin, or raised in a
+  `T^E` context. Accidental emission is a bug. System exceptions never appear
+  as values in fn results.
+- User fns *may* declare `T^E` and `raise`; the documented style follows the
+  system rule (fns return, pns raise).
+
+*Rationale.* C5's read/write asymmetry lifted to functions: fn is the query
+world (failures are data), pn is the command world (failures halt). IEEE is the
+precedent — float ops return poison (`nan`) rather than trapping so pipelines
+continue; `error()` is the universal nan, and the poison machinery (§5.1
+never-equal, §3 falsy, §6.2 sorts-last, arithmetic tainting) was built for it.
+Accepted cost: poison-returning fns forgo compile-time handling enforcement —
+the price of chainability, softened by poison being loud rather than silent.
+Note: resource-fault timing is exempt from P6 — when a stack limit fires may
+differ across execution tiers. [C5, C14]
 
 ### 7.4 Aggregation: strict null propagation
 
@@ -579,8 +626,11 @@ a semantics change:
    `desc` is exact reversal.
 6. **Printer injectivity** — distinct floats print distinctly; print→parse is
    exact; two numbers print the same iff equal.
-7. **Error containment** — no error value exists that did not originate from a
-   declared `raise`.
+7. **Error containment** — every error value is deliberate: constructed by
+   `error()`, returned by a declared `T | error` signature, or raised in a
+   `T^E` context. No accidental emission; system exceptions never appear as
+   values in `fn` results. (Resource-fault *timing* is exempt from invariant 3
+   — when a stack limit fires may differ across tiers.)
 
 ---
 
@@ -595,7 +645,7 @@ a semantics change:
 | §4.5–4.6 float↔decimal, printing | C8.5a | ibid. |
 | §5 equality | C8, C8.5, C8.6, C8.6-R, C8.7 | ibid. |
 | §6 total order | C11 | ibid. |
-| §7 absence, errors, aggregation | C5, C5.3 | ibid. |
+| §7 absence, errors, aggregation | C5, C5.3, C14 | ibid. |
 | §8 in/at | C5.3a | ibid. |
 | §9 mutability, covariance | C4, C4.2a, C12 | both |
 | §10 operators | C6, C10 | `Lambda_Semantics_Formal2.md` |

@@ -1899,6 +1899,83 @@ Bool fn_in(Item a_item, Item b_item) {
     return false;
 }
 
+static bool item_to_possession_index(Item item, int64_t* out) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT) {
+        *out = item.get_int56();
+        return true;
+    }
+    if (type == LMD_TYPE_INT64) {
+        *out = item.get_int64();
+        return true;
+    }
+    if (type == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = item.get_num_type();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) return false;
+        *out = item.get_num_sized_as_int64();
+        return true;
+    }
+    if (type == LMD_TYPE_UINT64) {
+        uint64_t u = item.get_uint64();
+        if (u > (uint64_t)INT64_MAX) return false;
+        *out = (int64_t)u;
+        return true;
+    }
+    return false;
+}
+
+static bool shape_has_named_key(TypeMap* map_type, Item key_item) {
+    TypeId key_type = get_type_id(key_item);
+    if (key_type != LMD_TYPE_STRING && key_type != LMD_TYPE_SYMBOL) return false;
+    const char* key = key_item.get_chars();
+    uint32_t key_len = key_item.get_len();
+    if (!key) return false;
+
+    ShapeEntry* hit = typemap_hash_lookup(map_type, key, (int)key_len);
+    if (hit && hit->name && hit->name->length == key_len &&
+        memcmp(hit->name->str, key, key_len) == 0) {
+        return true;
+    }
+
+    ShapeEntry* field = map_type ? map_type->shape : NULL;
+    while (field) {
+        if (field->name && field->name->length == key_len &&
+            memcmp(field->name->str, key, key_len) == 0) {
+            return true;
+        }
+        field = field->next;
+    }
+    return false;
+}
+
+Bool fn_at(Item a_item, Item b_item) {
+    TypeId b_type = get_type_id(b_item);
+    if (b_type == LMD_TYPE_ARRAY || b_type == LMD_TYPE_ARRAY_NUM ||
+        b_type == LMD_TYPE_RANGE) {
+        int64_t idx = 0;
+        if (!item_to_possession_index(a_item, &idx)) return BOOL_FALSE;
+        // possession is bounds-based; negative indices are absent even though writes may diagnose separately.
+        return (idx >= 0 && idx < fn_len(b_item)) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    if (b_type == LMD_TYPE_MAP || b_type == LMD_TYPE_OBJECT) {
+        return shape_has_named_key((TypeMap*)b_item.map->type, a_item) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    if (b_type == LMD_TYPE_ELEMENT) {
+        return shape_has_named_key((TypeMap*)b_item.element->type, a_item) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    if (b_type == LMD_TYPE_VMAP) {
+        VMap* vm = b_item.vmap;
+        if (!vm || !vm->vtable) return BOOL_FALSE;
+        int64_t count = vm->vtable->count(vm->data);
+        for (int64_t i = 0; i < count; i++) {
+            if (fn_eq(vm->vtable->key_at(vm->data, i), a_item) == BOOL_TRUE) {
+                return BOOL_TRUE;
+            }
+        }
+    }
+    return BOOL_FALSE;
+}
+
 // use struct overlays for static String with flexible array member
 static struct { uint32_t len; uint8_t is_ascii; char chars[5]; } _str_null  = {4, 1, "null"};
 static struct { uint32_t len; uint8_t is_ascii; char chars[5]; } _str_true  = {4, 1, "true"};
@@ -5071,7 +5148,7 @@ static void convert_specialized_to_generic(Array* arr) {
 
 // array indexed assignment: arr[i] = val
 // Handles Array, ArrayInt, ArrayInt64, ArrayFloat
-void fn_array_set(Array* arr, int64_t index, Item value) {
+Item fn_array_set(Array* arr, int64_t index, Item value) {
     if (!arr || ((uintptr_t)arr >> 56)) {
         static int _err_count = 0;
         _err_count++;
@@ -5079,20 +5156,23 @@ void fn_array_set(Array* arr, int64_t index, Item value) {
             log_error("fn_array_set: null or invalid array pointer (ptr=%p, idx=%lld, val_type=%d, count=%d)",
                       (void*)arr, (long long)index, get_type_id(value), _err_count);
         }
-        return;
+        return ItemError;
     }
     TypeId arr_type = arr->type_id;
     if (arr->is_static) {
         log_error("fn_array_set: cannot mutate static array");
-        return;
+        return ItemError;
     }
 
     // support negative indexing
     int64_t len = arr->length;
     if (index < 0) index = len + index;
     if (index < 0 || index >= len) {
-        log_error("fn_array_set: index %lld out of bounds (length %lld)", (long long)index, len);
-        return;
+        // indexed writes must be fail-stop; silent log-and-continue hid mutation bugs from pn callers.
+        set_runtime_error(ERR_INDEX_OUT_OF_BOUNDS,
+            "fn_array_set: index %lld out of bounds (length %lld)",
+            (long long)index, (long long)len);
+        return ItemError;
     }
 
     switch (arr_type) {
@@ -5106,7 +5186,7 @@ void fn_array_set(Array* arr, int64_t index, Item value) {
         if (num_arr->is_view) {
             if (!num_arr->is_mutable_view) {
                 log_error("fn_array_set: cannot mutate a read-only view; copy() first");
-                return;
+                return ItemError;
             }
             // mutable view: write through via the element setter, which coerces to
             // the element type, handles every compact type, and never detaches the
@@ -5162,8 +5242,9 @@ void fn_array_set(Array* arr, int64_t index, Item value) {
     }
     default:
         log_error("fn_array_set: unsupported array type %d", arr_type);
-        break;
+        return ItemError;
     }
+    return ItemNull;
 }
 
 // helper: decrement ref count of the value stored at a field pointer

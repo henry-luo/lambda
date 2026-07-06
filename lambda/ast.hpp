@@ -405,6 +405,7 @@ typedef struct AstLoopNode : AstNode {
     String* index_name;         // optional index variable (k in 'for k, v in expr'), NULL if not present
     AstNode *as;                // collection expression
     LoopKeyFilter key_filter;   // key type filter (ALL, INT, SYMBOL)
+    bool key_only;              // for k at expr: bind primary variable to keys, not values
 } AstLoopNode;
 
 // for AST_NODE_ASSIGN with decomposition (let a, b = expr / let a, b at expr)
