@@ -1343,6 +1343,30 @@ extern "C" bool js_dom_get_checkedness(void* dom_elem) {
 extern "C" void js_dom_set_checkedness(void* dom_elem, bool v) {
     _set_checkedness((DomElement*)dom_elem, v);
 }
+extern "C" void js_dom_after_default_checked_set(void* dom_elem, bool checked) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem) return;
+    Item exp = expando_get_map((DomNode*)elem);
+    bool dirty = false;
+    if (exp.item != ITEM_NULL) {
+        Item v = js_property_get(exp,
+            (Item){.item = s2it(heap_create_name("__chkDirty"))});
+        dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
+    }
+    // defaultChecked only syncs live checkedness before the user/API dirty flag.
+    if (!dirty) _set_checkedness(elem, checked);
+}
+extern "C" void js_dom_set_checked_dirty(void* dom_elem, bool checked) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem) return;
+    _set_checkedness(elem, checked);
+    Item exp = expando_get_or_create_map((DomNode*)elem);
+    if (exp.item != ITEM_NULL) {
+        js_property_set(exp,
+            (Item){.item = s2it(heap_create_name("__chkDirty"))},
+            (Item){.item = b2it(true)});
+    }
+}
 extern "C" const char* js_dom_input_type_lower(void* dom_elem) {
     return _input_type_lower((DomElement*)dom_elem);
 }
@@ -6710,6 +6734,77 @@ static void _select_ask_for_reset(DomElement* sel) {
             }
         }
     }
+}
+
+extern "C" void js_dom_after_default_selected_set(void* dom_elem, bool selected) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem) return;
+    Item exp = expando_get_map((DomNode*)elem);
+    bool dirty = false;
+    if (exp.item != ITEM_NULL) {
+        Item v = js_property_get(exp,
+            (Item){.item = s2it(heap_create_name("__optDirty"))});
+        dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
+    }
+    if (dirty) return;
+    // defaultSelected only drives live selectedness while the option is clean.
+    _set_selectedness(elem, selected);
+    DomElement* sel = _option_owner_select(elem);
+    if (sel) _select_ask_for_reset(sel);
+}
+
+extern "C" void js_dom_after_select_multiple_removed(void* dom_elem) {
+    _select_ask_for_reset((DomElement*)dom_elem);
+}
+
+extern "C" void js_dom_select_set_value_bridge(void* dom_elem, const char* value) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem) return;
+    const char* sv = value ? value : "";
+    Item arr = js_array_new(0);
+    _collect_options(elem->first_child, arr);
+    int64_t n = js_array_length(arr);
+    int found = -1;
+    for (int64_t i = 0; i < n; i++) {
+        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+        if (!opt) continue;
+        char* v = _option_value(opt);
+        bool match = v && strcmp(v, sv) == 0;
+        mem_free(v);
+        if (match) { found = (int)i; break; } // INT_CAST_OK: option index
+    }
+    // select.value writes selectedness for every option and dirties the select.
+    for (int64_t i = 0; i < n; i++) {
+        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+        if (!opt) continue;
+        _set_selectedness(opt, found >= 0 && (int)i == found); // INT_CAST_OK: option index
+    }
+    _select_mark_dirty(elem);
+}
+
+extern "C" void js_dom_select_set_selected_index_bridge(void* dom_elem, Item value) {
+    _select_set_selected_index((DomElement*)dom_elem, _select_index_from_item(value));
+}
+
+extern "C" void js_dom_set_option_selected_dirty(void* dom_elem, bool selected) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem) return;
+    _set_selectedness(elem, selected);
+    Item exp = expando_get_or_create_map((DomNode*)elem);
+    if (exp.item != ITEM_NULL) {
+        js_property_set(exp,
+            (Item){.item = s2it(heap_create_name("__optDirty"))},
+            (Item){.item = b2it(true)});
+    }
+    // Explicit option.selected wins in non-multiple selects, then refreshes
+    // cached selectedOptions exactly as the fallback setter did.
+    DomElement* sel = _option_owner_select(elem);
+    if (sel && selected && !dom_element_has_attribute(sel, "multiple")) {
+        _select_select_only_option(sel, elem);
+    } else if (sel) {
+        _select_ask_for_reset(sel);
+    }
+    _select_refresh_cached_selected_options(sel);
 }
 
 // For a <select required> element, returns true iff no <option> is
