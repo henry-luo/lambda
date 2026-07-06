@@ -56,7 +56,8 @@ fn attr_value(node, key) => attr_value_at(node.attrs, key, 0, len(node.attrs))
 
 fn text_has_mark_at(marks, mark, i, n) {
   if (i >= n) { false }
-  else if (marks[i] == mark) { true }
+  // marks are {name,value} records; command-applied marks must render by name.
+  else if (marks[i].name == mark) { true }
   else { text_has_mark_at(marks, mark, i + 1, n) }
 }
 fn text_has_mark(marks, mark) => text_has_mark_at(marks, mark, 0, len(marks))
@@ -338,15 +339,15 @@ on rte_cmd(evt) {
     markdown_output = doc_text(editor.doc)
     status = "saved"
   } else if (cmd == "btn-bold") {
-    editor = edit_exec(editor, edit_cmd_toggle_mark('strong'))
+    editor = edit_exec(editor, edit_cmd_toggle_mark('strong', true))
     set_selection(editor.selection)
     status = cmd
   } else if (cmd == "btn-italic") {
-    editor = edit_exec(editor, edit_cmd_toggle_mark('em'))
+    editor = edit_exec(editor, edit_cmd_toggle_mark('em', true))
     set_selection(editor.selection)
     status = cmd
   } else if (cmd == "btn-underline") {
-    editor = edit_exec(editor, edit_cmd_toggle_mark('u'))
+    editor = edit_exec(editor, edit_cmd_toggle_mark('u', true))
     set_selection(editor.selection)
     status = cmd
   } else if (cmd == "btn-ul") {

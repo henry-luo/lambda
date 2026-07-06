@@ -34,6 +34,15 @@ extern "C" Item js_dom_text_substring_data_bridge(void* text, Item offset, Item 
 extern "C" Item js_dom_append_child_bridge(void* parent, Item child);
 extern "C" Item js_dom_remove_child_bridge(void* parent, Item child);
 extern "C" Item js_dom_insert_before_bridge(void* parent, Item new_child, Item ref_child);
+extern "C" Item js_dom_remove_bridge(void* node);
+extern "C" Item js_dom_normalize_bridge(void* elem);
+extern "C" Item js_dom_clone_node_bridge(void* elem, Item deep, bool has_deep);
+extern "C" Item js_dom_replace_child_bridge(void* parent, Item new_child, Item old_child);
+extern "C" Item js_dom_replace_with_bridge(void* node, Item* args, int argc);
+extern "C" Item js_dom_insert_adjacent_element_bridge(void* elem, Item position, Item new_node);
+extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem, Item position, Item html);
+extern "C" Item js_dom_append_variadic_bridge(void* elem, Item* args, int argc);
+extern "C" Item js_dom_prepend_variadic_bridge(void* elem, Item* args, int argc);
 extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
 extern "C" Item radiant_dom_wrap_node(void* dom_elem);
 extern "C" Item js_new_object(void);
@@ -883,6 +892,16 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
+    if (strcmp(method, "remove") == 0) {
+        *out = js_dom_remove_bridge((void*)node);
+        return true;
+    }
+
+    if (strcmp(method, "replaceWith") == 0) {
+        *out = js_dom_replace_with_bridge((void*)node, args, argc);
+        return true;
+    }
+
     if (node->is_text()) {
         DomText* text = node->as_text();
         if (strcmp(method, "replaceData") == 0) {
@@ -1128,6 +1147,54 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             return true;
         }
         *out = js_dom_insert_before_bridge((void*)elem, args[0], args[1]);
+        return true;
+    }
+
+    if (strcmp(method, "normalize") == 0) {
+        *out = js_dom_normalize_bridge((void*)elem);
+        return true;
+    }
+
+    if (strcmp(method, "cloneNode") == 0) {
+        *out = js_dom_clone_node_bridge((void*)elem,
+            argc >= 1 ? args[0] : radiant_dom_undefined_item(), argc >= 1);
+        return true;
+    }
+
+    if (strcmp(method, "replaceChild") == 0) {
+        if (argc < 2) {
+            *out = ItemNull;
+            return true;
+        }
+        *out = js_dom_replace_child_bridge((void*)elem, args[0], args[1]);
+        return true;
+    }
+
+    if (strcmp(method, "insertAdjacentElement") == 0) {
+        if (argc < 2) {
+            *out = ItemNull;
+            return true;
+        }
+        *out = js_dom_insert_adjacent_element_bridge((void*)elem, args[0], args[1]);
+        return true;
+    }
+
+    if (strcmp(method, "insertAdjacentHTML") == 0) {
+        if (argc < 2) {
+            *out = ItemNull;
+            return true;
+        }
+        *out = js_dom_insert_adjacent_html_bridge((void*)elem, args[0], args[1]);
+        return true;
+    }
+
+    if (strcmp(method, "append") == 0) {
+        *out = js_dom_append_variadic_bridge((void*)elem, args, argc);
+        return true;
+    }
+
+    if (strcmp(method, "prepend") == 0) {
+        *out = js_dom_prepend_variadic_bridge((void*)elem, args, argc);
         return true;
     }
 

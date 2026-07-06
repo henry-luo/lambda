@@ -10745,6 +10745,345 @@ extern "C" Item js_dom_insert_before_bridge(void* parent_ptr, Item new_child_arg
     return new_child_arg;
 }
 
+extern "C" Item js_dom_remove_bridge(void* node_ptr) {
+    DomNode* node = (DomNode*)node_ptr;
+    if (!node) return ItemNull;
+    if (node->parent) {
+        DomElement* owner_select = nullptr;
+        if (node->is_element() && node->as_element()->tag() == HTM_TAG_OPTION) {
+            owner_select = _option_owner_select(node->as_element());
+        }
+        // removal must notify live ranges before native sibling links change.
+        dom_pre_remove(node);
+        node->parent->remove_child(node);
+        if (owner_select) _select_ask_for_reset(owner_select);
+        js_dom_mutation_notify();
+    }
+    return ItemNull;
+}
+
+extern "C" Item js_dom_normalize_bridge(void* elem_ptr) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    if (!elem) return ItemNull;
+    DomNode* child = elem->first_child;
+    while (child) {
+        if (child->is_text()) {
+            DomText* text = child->as_text();
+            while (child->next_sibling && child->next_sibling->is_text()) {
+                DomText* next_text = child->next_sibling->as_text();
+                uint32_t head_u16  = dom_text_utf16_length(text);
+                uint32_t tail_u16  = dom_text_utf16_length(next_text);
+                size_t new_len = text->length + next_text->length;
+                char* combined = (char*)pool_alloc(elem->doc->pool, new_len + 1);
+                if (text->text && text->length > 0)
+                    memcpy(combined, text->text, text->length);
+                if (next_text->text && next_text->length > 0)
+                    memcpy(combined + text->length, next_text->text, next_text->length);
+                combined[new_len] = '\0';
+                String* s = js_dom_create_document_string(elem->doc, combined, new_len);
+                if (!s) break;
+                text->native_string = s;
+                text->text = s->chars;
+                text->length = new_len;
+                DocState* st = js_dom_current_state();
+                if (st) {
+                    dom_mutation_text_replace_data(st, text, head_u16, 0, tail_u16);
+                    dom_mutation_text_merge(st, text, next_text, head_u16);
+                }
+                DomNode* remove_node = child->next_sibling;
+                dom_pre_remove(remove_node);
+                ((DomNode*)elem)->remove_child(remove_node);
+            }
+        }
+        child = child->next_sibling;
+    }
+    return ItemNull;
+}
+
+extern "C" Item js_dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has_deep) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    if (!elem) return ItemNull;
+    bool deep = has_deep ? js_is_truthy(deep_arg) : false;
+    // clones need a fresh native element; sharing the source buffer makes later
+    // attribute removal on the clone dangle the original's native attribute data.
+    MarkBuilder _clone_builder(elem->doc->input);
+    Item _clean_elem = _clone_builder.element(elem->tag_name).final();
+    DomElement* clone = dom_element_create(elem->doc, elem->tag_name, _clean_elem.element);
+    if (!clone) return ItemNull;
+    if (elem->native_element) {
+        int attr_count = 0;
+        const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+        for (int _ai = 0; _ai < attr_count; _ai++) {
+            const char* aname = attr_names[_ai];
+            const char* aval  = dom_element_get_attribute(elem, aname);
+            if (aval) dom_element_set_attribute(clone, aname, aval);
+        }
+    }
+    Item orig_expando = expando_get_map((DomNode*)elem);
+    if (orig_expando.item != ITEM_NULL) {
+        Item clone_expando = expando_get_or_create_map((DomNode*)clone);
+        if (clone_expando.item != ITEM_NULL) {
+            Map* em = orig_expando.map;
+            if (em && em->type) {
+                TypeMap* em_type = (TypeMap*)em->type;
+                ShapeEntry* se = em_type->shape;
+                while (se) {
+                    if (se->name && se->name->str) {
+                        const char* ek = se->name->str;
+                        Item ev = js_property_get(orig_expando,
+                            (Item){.item = s2it(heap_create_name(ek))});
+                        if (!is_js_undefined(ev)) {
+                            js_property_set(clone_expando,
+                                (Item){.item = s2it(heap_create_name(ek))}, ev);
+                        }
+                    }
+                    se = se->next;
+                }
+            }
+        }
+    }
+    clone->id = elem->id;
+    clone->class_names = elem->class_names;
+    clone->class_count = elem->class_count;
+    clone->tag_id = elem->tag_id;
+    if (deep) {
+        DomNode* child = elem->first_child;
+        while (child) {
+            if (child->is_element()) {
+                Item child_clone = js_dom_clone_node_bridge(child->as_element(), deep_arg, has_deep);
+                DomNode* cloned_child = (DomNode*)js_dom_unwrap_element(child_clone);
+                if (cloned_child) {
+                    ((DomNode*)clone)->append_child(cloned_child);
+                }
+            } else if (child->is_text()) {
+                DomText* text = child->as_text();
+                String* s = text->native_string;
+                DomText* text_clone = dom_text_create(s, clone);
+                if (text_clone) {
+                    ((DomNode*)clone)->append_child((DomNode*)text_clone);
+                }
+            }
+            child = child->next_sibling;
+        }
+    }
+    return js_dom_wrap_element(clone);
+}
+
+extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
+                                            Item old_child_arg) {
+    DomElement* elem = (DomElement*)parent_ptr;
+    if (!elem) return ItemNull;
+    DomNode* new_child = (DomNode*)js_dom_unwrap_element(new_child_arg);
+    DomNode* old_child = (DomNode*)js_dom_unwrap_element(old_child_arg);
+    if (!new_child || !old_child) return ItemNull;
+    if (old_child->parent != (DomNode*)elem) return ItemNull;
+    if (new_child == old_child) {
+        // self-replace is tree-stable, but live ranges still observe the remove step.
+        dom_pre_remove(old_child);
+        return old_child_arg;
+    }
+    if (new_child->parent) {
+        dom_pre_remove(new_child);
+        new_child->parent->remove_child(new_child);
+    }
+    ((DomNode*)elem)->insert_before(new_child, old_child);
+    dom_post_insert((DomNode*)elem, new_child);
+    dom_pre_remove(old_child);
+    ((DomNode*)elem)->remove_child(old_child);
+    js_dom_mutation_notify();
+    return old_child_arg;
+}
+
+extern "C" Item js_dom_replace_with_bridge(void* node_ptr, Item* args, int argc) {
+    DomNode* node = (DomNode*)node_ptr;
+    if (!node) return ItemNull;
+    DomNode* parent = node->parent;
+    if (!parent) return ItemNull;
+    DomNode* viable_next = node->next_sibling;
+    for (;;) {
+        bool in_args = false;
+        if (!viable_next) break;
+        for (int i = 0; i < argc; i++) {
+            if ((DomNode*)js_dom_unwrap_element(args[i]) == viable_next) {
+                in_args = true;
+                break;
+            }
+        }
+        if (!in_args) break;
+        viable_next = viable_next->next_sibling;
+    }
+    // replaceWith first removes the receiver so ranges anchored inside it
+    // collapse to the original parent/index before replacements are inserted.
+    dom_pre_remove(node);
+    parent->remove_child(node);
+    for (int i = 0; i < argc; i++) {
+        DomNode* a = (DomNode*)js_dom_unwrap_element(args[i]);
+        if (!a) continue;
+        if (a->parent) {
+            dom_pre_remove(a);
+            a->parent->remove_child(a);
+        }
+        if (viable_next && viable_next->parent == parent) {
+            parent->insert_before(a, viable_next);
+        } else {
+            parent->append_child(a);
+        }
+        dom_post_insert(parent, a);
+    }
+    js_dom_mutation_notify();
+    return ItemNull;
+}
+
+extern "C" Item js_dom_insert_adjacent_element_bridge(void* elem_ptr, Item position_arg,
+                                                      Item new_node_arg) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    if (!elem) return ItemNull;
+    const char* position = fn_to_cstr(position_arg);
+    DomNode* new_node = (DomNode*)js_dom_unwrap_element(new_node_arg);
+    if (!position || !new_node) return ItemNull;
+    if (new_node->parent) {
+        dom_pre_remove(new_node);
+        new_node->parent->remove_child(new_node);
+    }
+    DomNode* new_parent = nullptr;
+    if (strcasecmp(position, "beforebegin") == 0) {
+        if (elem->parent && elem->parent->is_element()) {
+            elem->parent->insert_before(new_node, (DomNode*)elem);
+            new_parent = elem->parent;
+        }
+    } else if (strcasecmp(position, "afterbegin") == 0) {
+        ((DomNode*)elem)->insert_before(new_node, elem->first_child);
+        new_parent = (DomNode*)elem;
+    } else if (strcasecmp(position, "beforeend") == 0) {
+        ((DomNode*)elem)->append_child(new_node);
+        new_parent = (DomNode*)elem;
+    } else if (strcasecmp(position, "afterend") == 0) {
+        if (elem->parent && elem->parent->is_element()) {
+            elem->parent->insert_before(new_node, elem->next_sibling);
+            new_parent = elem->parent;
+        }
+    }
+    if (new_parent) {
+        dom_post_insert(new_parent, new_node);
+        js_dom_mutation_notify();
+    }
+    return new_node_arg;
+}
+
+extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem_ptr, Item position_arg,
+                                                   Item html_arg) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    if (!elem) return ItemNull;
+    const char* position = fn_to_cstr(position_arg);
+    const char* html_str = fn_to_cstr(html_arg);
+    if (!position || !html_str || !elem->doc) return ItemNull;
+    DomDocument* doc = elem->doc;
+    if (!doc->input) return ItemNull;
+    Html5Parser* parser = html5_fragment_parser_create(doc->pool, doc->arena, doc->input);
+    if (!parser) return ItemNull;
+    html5_fragment_parse(parser, html_str);
+    Element* body_elem = html5_fragment_get_body(parser);
+    if (!body_elem) return ItemNull;
+
+    DomElement* target_parent = nullptr;
+    DomNode* ref_node = nullptr;
+    if (strcasecmp(position, "beforebegin") == 0) {
+        if (!elem->parent || !elem->parent->is_element()) return ItemNull;
+        target_parent = elem->parent->as_element();
+        ref_node = (DomNode*)elem;
+    } else if (strcasecmp(position, "afterbegin") == 0) {
+        target_parent = elem;
+        ref_node = elem->first_child;
+    } else if (strcasecmp(position, "beforeend") == 0) {
+        target_parent = elem;
+        ref_node = nullptr;
+    } else if (strcasecmp(position, "afterend") == 0) {
+        if (!elem->parent || !elem->parent->is_element()) return ItemNull;
+        target_parent = elem->parent->as_element();
+        ref_node = elem->next_sibling;
+    } else {
+        log_error("js_dom_insert_adjacent_html_bridge: invalid position '%s'", position);
+        return ItemNull;
+    }
+
+    for (int64_t i = 0; i < body_elem->length; i++) {
+        TypeId type = get_type_id(body_elem->items[i]);
+        if (type == LMD_TYPE_ELEMENT) {
+            DomElement* child_dom = build_dom_tree_from_element(
+                body_elem->items[i].element, doc, nullptr);
+            if (child_dom) {
+                if (ref_node)
+                    ((DomNode*)target_parent)->insert_before((DomNode*)child_dom, ref_node);
+                else
+                    ((DomNode*)target_parent)->append_child((DomNode*)child_dom);
+            }
+        } else if (type == LMD_TYPE_STRING) {
+            String* s = it2s(body_elem->items[i]);
+            DomText* text_node = dom_text_create_detached(s, doc);
+            if (text_node) {
+                if (ref_node)
+                    ((DomNode*)target_parent)->insert_before((DomNode*)text_node, ref_node);
+                else
+                    ((DomNode*)target_parent)->append_child((DomNode*)text_node);
+            }
+        }
+    }
+    return ItemNull;
+}
+
+extern "C" Item js_dom_append_variadic_bridge(void* elem_ptr, Item* args, int argc) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    if (!elem) return (Item){.item = ITEM_JS_UNDEFINED};
+    for (int i = 0; i < argc; i++) {
+        DomNode* child_node = (DomNode*)js_dom_unwrap_element(args[i]);
+        if (child_node) {
+            if (child_node->parent) child_node->parent->remove_child(child_node);
+            ((DomNode*)elem)->append_child(child_node);
+        } else {
+            const char* text = fn_to_cstr(args[i]);
+            if (text) {
+                String* s = js_dom_create_document_string(elem->doc, text, strlen(text));
+                DomText* tn = dom_text_create(s, elem);
+                if (tn) ((DomNode*)elem)->append_child(tn);
+            }
+        }
+    }
+    js_dom_mutation_notify();
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+extern "C" Item js_dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int argc) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    if (!elem) return (Item){.item = ITEM_JS_UNDEFINED};
+    DomNode* ref = elem->first_child;
+    for (int i = 0; i < argc; i++) {
+        DomNode* child_node = (DomNode*)js_dom_unwrap_element(args[i]);
+        if (child_node) {
+            if (child_node->parent) child_node->parent->remove_child(child_node);
+            ((DomNode*)elem)->insert_before(child_node, ref);
+            if (elem->tag() == HTM_TAG_SELECT && child_node->is_element() &&
+                child_node->as_element()->tag() == HTM_TAG_OPTION) {
+                DomElement* child_elem = child_node->as_element();
+                if (_get_selectedness(child_elem) && !dom_element_has_attribute(elem, "multiple")) {
+                    _select_select_only_option(elem, child_elem);
+                } else {
+                    _select_ask_for_reset(elem);
+                }
+            }
+        } else {
+            const char* text = fn_to_cstr(args[i]);
+            if (text) {
+                String* s = js_dom_create_document_string(elem->doc, text, strlen(text));
+                DomText* tn = dom_text_create(s, elem);
+                if (tn) ((DomNode*)elem)->insert_before(tn, ref);
+            }
+        }
+    }
+    _select_refresh_cached_selected_options_for_node((DomNode*)elem);
+    js_dom_mutation_notify();
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
 extern "C" Item radiant_dom_element_method(Item elem_item, Item method_name, Item* args, int argc);
 
 extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* args, int argc) {
