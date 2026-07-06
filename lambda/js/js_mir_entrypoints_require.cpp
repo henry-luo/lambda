@@ -32,10 +32,6 @@ int js_dynamic_import_suppress_module_drain = 0;
 extern "C" int js_batch_execution_mode = 0;
 extern "C" bool js_dom_is_host_driven_loop(void);
 extern "C" int js_process_current_exit_code(void);
-extern "C" bool js_process_exit_requested(void);
-extern "C" void js_process_mark_fatal_exit(int code);
-extern "C" bool js_process_dispatch_uncaught_exception(Item error, Item origin);
-extern "C" void js_report_uncaught_exception(Item error);
 extern "C" void js_async_hooks_drain_destroy_queue(void);
 extern "C" bool js_event_loop_has_refed_handles(void);
 extern "C" void js_trace_flush(void);
@@ -985,38 +981,6 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     log_debug("js-mir: JIT execution returned (type=%d)", get_type_id(result));
     log_mem_stage("js-core: js_main_done");
 
-    bool fatal_exception = (result.item == ITEM_ERROR || js_check_exception());
-    if (!js_batch_execution_mode && js_check_exception()) {
-        Item error = js_clear_exception();
-        Item origin = (Item){.item = s2it(heap_create_name("uncaughtException", 17))};
-        bool handled = js_process_dispatch_uncaught_exception(error, origin);
-        // Top-level throws must pass through process hooks before the CLI marks
-        // them fatal; otherwise capture callbacks and monitors never run.
-        if (handled && !js_check_exception()) {
-            fatal_exception = false;
-            result = (Item){.item = ITEM_JS_UNDEFINED};
-        } else {
-            if (js_check_exception()) {
-                Item handler_error = js_clear_exception();
-                js_report_uncaught_exception(handler_error);
-            } else {
-                js_report_uncaught_exception(error);
-            }
-            fatal_exception = true;
-        }
-    }
-    bool fatal_exit_cleanup_ran = false;
-    if (!js_batch_execution_mode && fatal_exception) {
-        int fatal_code = js_process_current_exit_code();
-        if (fatal_code == 0) fatal_code = 1;
-        // Uncaught handler failures set process.exitCode before cleanup; do
-        // not collapse Node's code 7 path back to a generic fatal 1.
-        js_async_hooks_drain_destroy_queue();
-        js_process_emit_exit(fatal_code);
-        js_process_mark_fatal_exit(fatal_code);
-        fatal_exit_cleanup_ran = true;
-    }
-
     // v14: drain the event loop while JIT module is still alive
     // (MIR_finish below destroys compiled code, so timers must fire here).
     // Dynamic import loads modules from inside an already-running script; if the
@@ -1040,45 +1004,25 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
             js_animation_frame_drain(64);
         }
     }
-    if (!fatal_exception && js_check_exception()) {
-        fatal_exception = true;
-    }
-    if (!js_batch_execution_mode && fatal_exception && !fatal_exit_cleanup_ran) {
-        int fatal_code = js_process_current_exit_code();
-        if (fatal_code == 0) fatal_code = 1;
-        // Preserve process-level fatal status chosen by uncaught hooks.
-        js_async_hooks_drain_destroy_queue();
-        js_process_emit_exit(fatal_code);
-        js_process_mark_fatal_exit(fatal_code);
-        fatal_exit_cleanup_ran = true;
-    }
     log_debug("js-mir: event loop drained");
-    if (js_process_exit_requested()) {
-        // async fatal errors request hard process exit during event-loop drain;
-        // normal beforeExit draining would otherwise wait on worker handles.
-        fatal_exception = true;
-    }
 
     // Fire process lifecycle listeners for Node.js compatibility.  test262
     // batch workers intentionally run many isolated ECMAScript tests in one
     // process; process lifecycle events are a CLI/Node boundary, not a
     // per-test boundary, and running them here pollutes hot-reload batches.
     if (!js_batch_execution_mode) {
-        int exit_code = fatal_exception ? js_process_current_exit_code() : js_process_current_exit_code();
-        if (fatal_exception && exit_code == 0) exit_code = 1;
-        if (!fatal_exception) {
-            js_async_hooks_drain_destroy_queue();
-            js_process_emit_before_exit(exit_code);
-            bool before_exit_threw = js_check_exception();
-            if (js_event_loop_has_refed_handles()) {
-                js_event_loop_drain();
-            } else {
-                js_microtask_flush();
-            }
-            js_process_emit_exit(exit_code);
-            if (before_exit_threw && js_process_current_exit_code() == 0) {
-                js_clear_exception();
-            }
+        int exit_code = (result.item == ITEM_ERROR || js_check_exception()) ? 1 : js_process_current_exit_code();
+        js_async_hooks_drain_destroy_queue();
+        js_process_emit_before_exit(exit_code);
+        bool before_exit_threw = js_check_exception();
+        if (js_event_loop_has_refed_handles()) {
+            js_event_loop_drain();
+        } else {
+            js_microtask_flush();
+        }
+        js_process_emit_exit(exit_code);
+        if (before_exit_threw && js_process_current_exit_code() == 0) {
+            js_clear_exception();
         }
         js_trace_flush();
         js_process_current_exit_code();

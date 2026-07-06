@@ -14,14 +14,10 @@
 #include "../../lib/gc/gc_heap.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/memtrack.h"
-#include "../../lib/uv_loop.h"
 #ifndef _WIN32
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <signal.h>
 #endif
 
 extern "C" Item js_to_property_key(Item key);
@@ -53,8 +49,6 @@ extern "C" Item js_get_process_argv(void);
 extern "C" Item js_get_process_object_value(void);
 extern "C" Item js_cp_fork(Item rest_args);
 extern "C" void js_child_process_emit_or_queue_cluster_online(Item obj);
-extern "C" void js_microtask_enqueue_with_resource(Item callback, Item resource);
-extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len);
 extern "C" Item push_d(double dval);
 extern "C" double it2d(Item item);
 extern "C" int64_t it2i(Item item);
@@ -199,17 +193,6 @@ static const int JS_BOUND_TARGET_KEY_LEN = 16;
 
 static const char* JS_NATIVE_FUNCTION_SOURCE = "function () { [native code] }";
 static const int JS_NATIVE_FUNCTION_SOURCE_LEN = 29;
-
-static void js_node_runtime_ignore_sigpipe(void) {
-#ifndef _WIN32
-    static bool installed = false;
-    if (installed) return;
-    installed = true;
-    // Node reports broken pipe writes through stream/IPC errors; default
-    // SIGPIPE termination makes cluster disconnect races exit as signal 13.
-    signal(SIGPIPE, SIG_IGN);
-#endif
-}
 
 extern "C" void js_eval_source_push(Item filename, Item source,
                                     int64_t line_offset, int64_t column_offset);
@@ -1911,6 +1894,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             else if (nl == 11 && strncmp(n, "Uint16Array", 11) == 0)        ta_type = JS_TYPED_UINT16;
             else if (nl == 10 && strncmp(n, "Int32Array", 10) == 0)         ta_type = JS_TYPED_INT32;
             else if (nl == 11 && strncmp(n, "Uint32Array", 11) == 0)        ta_type = JS_TYPED_UINT32;
+            // keep float16 dispatch aligned with the enabled storage enum and global constructor table.
             else if (nl == 12 && strncmp(n, "Float16Array", 12) == 0)       ta_type = JS_TYPED_FLOAT16;
             else if (nl == 12 && strncmp(n, "Float32Array", 12) == 0)       ta_type = JS_TYPED_FLOAT32;
             else if (nl == 12 && strncmp(n, "Float64Array", 12) == 0)       ta_type = JS_TYPED_FLOAT64;
@@ -2452,14 +2436,24 @@ extern "C" Item js_typed_array_species_create(Item exemplar, int length) {
         return (Item){.item = ITEM_NULL};
     }
 
-    // Get C[@@species]
     Item S = (Item){.item = ITEM_NULL};
     {
-        // Phase 3 Stage C: js_property_get fast-path handles IS_ACCESSOR
-        // dispatch for both FUNC and MAP receivers — no manual __get_X probe.
         Item species_key = (Item){.item = s2it(heap_create_name("__sym_6", 7))};
-        S = js_property_get(C, species_key);
-        if (js_check_exception()) return (Item){.item = ITEM_NULL};
+        Item own_species = ItemNull;
+        JsOwnGetStatus own_st = js_ordinary_get_own(C, species_key, C, &own_species);
+        if (own_st == JS_OWN_READY) {
+            S = own_species;
+            if (js_check_exception()) return (Item){.item = ITEM_NULL};
+        } else if (get_type_id(C) == LMD_TYPE_FUNC && js_resolve_ta_type_from_ctor(C) >= 0) {
+            // inherited %TypedArray%[@@species] returns the constructor receiver,
+            // so overridden built-in constructors must keep their own element type.
+            return js_typed_array_new(js_resolve_ta_type_from_ctor(C), length);
+        } else {
+            // Phase 3 Stage C: js_property_get fast-path handles IS_ACCESSOR
+            // dispatch for both FUNC and MAP receivers — no manual __get_X probe.
+            S = js_property_get(C, species_key);
+            if (js_check_exception()) return (Item){.item = ITEM_NULL};
+        }
     }
 
     // If S is undefined or null, return default. Class objects that inherit
@@ -2554,8 +2548,23 @@ extern "C" Item js_typed_array_species_create_from_buffer(Item exemplar, Item bu
     }
 
     Item species_key = (Item){.item = s2it(heap_create_name("__sym_6", 7))};
-    Item S = js_property_get(C, species_key);
-    if (js_check_exception()) return (Item){.item = ITEM_NULL};
+    Item S = (Item){.item = ITEM_NULL};
+    {
+        Item own_species = ItemNull;
+        JsOwnGetStatus own_st = js_ordinary_get_own(C, species_key, C, &own_species);
+        if (own_st == JS_OWN_READY) {
+            S = own_species;
+            if (js_check_exception()) return (Item){.item = ITEM_NULL};
+        } else if (get_type_id(C) == LMD_TYPE_FUNC && js_resolve_ta_type_from_ctor(C) >= 0) {
+            // inherited %TypedArray%[@@species] returns the constructor receiver,
+            // so overridden built-in constructors must keep their own element type.
+            return js_typed_array_new_from_buffer(
+                js_resolve_ta_type_from_ctor(C), buffer, byte_offset, length_tracking ? -1 : length);
+        } else {
+            S = js_property_get(C, species_key);
+            if (js_check_exception()) return (Item){.item = ITEM_NULL};
+        }
+    }
 
     if (S.item == ItemNull.item || get_type_id(S) == LMD_TYPE_UNDEFINED || get_type_id(S) == LMD_TYPE_NULL) {
         if (get_type_id(C) == LMD_TYPE_MAP && js_resolve_ta_type_from_class_map(C) >= 0) {
@@ -3271,9 +3280,7 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
                 int bpe = 4;
                 switch (ta->element_type) {
                 case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: bpe = 1; break;
-                // Float16Array stores one IEEE-754 half per 2-byte slot.
-                case JS_TYPED_INT16: case JS_TYPED_UINT16:
-                case JS_TYPED_FLOAT16: bpe = 2; break;
+                case JS_TYPED_INT16: case JS_TYPED_UINT16: case JS_TYPED_FLOAT16: bpe = 2; break;
                 case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: bpe = 4; break;
                 case JS_TYPED_FLOAT64: case JS_TYPED_BIGINT64: case JS_TYPED_BIGUINT64: bpe = 8; break;
                 }
@@ -4376,10 +4383,10 @@ extern "C" Item js_property_get(Item object, Item key) {
             if (builtin.item != ItemNull.item) return builtin;
             Item proto = js_get_prototype_of(object);
             if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
-                Item saved_receiver = js_proxy_receiver;
-                js_proxy_receiver = object;
+                // inherited primitive accessors must see the boxed receiver, and
+                // the receiver guard prevents stale callback receivers leaking later gets.
+                ScopedProxyReceiver _recv_guard(object);
                 Item result = js_property_get(proto, key);
-                js_proxy_receiver = saved_receiver;
                 if (get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
             }
             int64_t string_index = -1;
@@ -5040,10 +5047,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                 }
                 Item proto = js_get_prototype_of(object);
                 if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
-                    Item saved_receiver = js_proxy_receiver;
-                    js_proxy_receiver = object;
+                    // inherited primitive accessors must see the boxed receiver, and
+                    // the receiver guard prevents stale callback receivers leaking later gets.
+                    ScopedProxyReceiver _recv_guard(object);
                     Item result = js_property_get(proto, key);
-                    js_proxy_receiver = saved_receiver;
                     if (get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
                 }
                 return make_js_undefined();
@@ -5075,20 +5082,20 @@ extern "C" Item js_property_get(Item object, Item key) {
         if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT || type == LMD_TYPE_BOOL) {
             Item proto = js_get_prototype_of(object);
             if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
-                Item saved_receiver = js_proxy_receiver;
-                js_proxy_receiver = object;
+                // inherited primitive accessors must see the boxed receiver, and
+                // the receiver guard prevents stale callback receivers leaking later gets.
+                ScopedProxyReceiver _recv_guard(object);
                 Item result = js_property_get(proto, key);
-                js_proxy_receiver = saved_receiver;
                 if (get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
             }
         }
         if (type == LMD_TYPE_DECIMAL && js_is_bigint(object)) {
             Item proto = js_get_prototype_of(object);
             if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
-                Item saved_receiver = js_proxy_receiver;
-                js_proxy_receiver = object;
+                // inherited primitive accessors must see the boxed receiver, and
+                // the receiver guard prevents stale callback receivers leaking later gets.
+                ScopedProxyReceiver _recv_guard(object);
                 Item result = js_property_get(proto, key);
-                js_proxy_receiver = saved_receiver;
                 if (get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
             }
         }
@@ -8694,18 +8701,6 @@ extern "C" Item js_build_template_object_cached(Item* cooked, Item* raw, int cou
 // =============================================================================
 
 extern "C" void js_console_write_to_stdout(const char* data, int len);
-extern "C" void js_console_write_to_stderr(const char* data, int len);
-
-static void js_console_write_line(void (*writer)(const char*, int), String* s) {
-    if (!writer || !s) return;
-    StrBuf* line = strbuf_new_cap((size_t)s->len + 1);
-    strbuf_append_str_n(line, s->chars, (size_t)s->len);
-    strbuf_append_char(line, '\n');
-    // Node console methods issue one process stream write per rendered line;
-    // splitting the newline changes userland stream wrapper callbacks.
-    writer(line->str, (int)line->length);
-    strbuf_free(line);
-}
 
 extern "C" void js_console_log(Item value) {
     Item str = js_to_string(value);
@@ -8713,7 +8708,8 @@ extern "C" void js_console_log(Item value) {
         String* s = it2s(str);
         // child_process pipes depend on console output being visible before a
         // short-lived child exits; route through the flushed stdout helper.
-        js_console_write_line(js_console_write_to_stdout, s);
+        js_console_write_to_stdout(s->chars, (int)s->len);
+        js_console_write_to_stdout("\n", 1);
     }
 }
 
@@ -8721,9 +8717,9 @@ extern "C" void js_console_error(Item value) {
     Item str = js_to_string(value);
     if (get_type_id(str) == LMD_TYPE_STRING) {
         String* s = it2s(str);
-        // console.error shares process.stderr.write semantics with console
-        // helpers; direct stderr writes skip userland stream wrappers.
-        js_console_write_line(js_console_write_to_stderr, s);
+        fwrite(s->chars, 1, s->len, stderr);
+        fputc('\n', stderr);
+        fflush(stderr);
     }
 }
 
@@ -8922,10 +8918,8 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count) {
             return make_js_undefined();
         }
         if (nl == 14 && strncmp(n, "queueMicrotask", 14) == 0) {
-            // queueMicrotask owns a distinct async_hooks resource; reusing the
-            // current resource makes init/before/after/destroy invisible.
-            Item resource = js_async_hooks_create_resource("Microtask", 9);
-            js_microtask_enqueue_with_resource(a0, resource);
+            extern void js_microtask_enqueue(Item callback);
+            js_microtask_enqueue(a0);
             return make_js_undefined();
         }
         // %TypedArray% is not directly callable (ES2023 22.2.1.1)
@@ -8945,8 +8939,7 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count) {
             Item method_key = (Item){.item = s2it(fn->name)};
             return js_dataview_method(js_current_this, method_key, args, arg_count);
         }
-        // builtin_id -2 also marks native methods as non-constructors; unknown
-        // names must fall through to func_ptr or bound process.send drops IPC.
+        return ItemNull;
     }
 
     // Store pending args so js_build_arguments_object() can access them.
@@ -19548,10 +19541,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 int elem_size = 1;
                 switch (ta->element_type) {
                 case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: elem_size = 1; break;
-                // copyWithin byte offsets must use the storage width, not the
-                // promoted numeric value width.
-                case JS_TYPED_INT16: case JS_TYPED_UINT16:
-                case JS_TYPED_FLOAT16: elem_size = 2; break;
+                case JS_TYPED_INT16: case JS_TYPED_UINT16: case JS_TYPED_FLOAT16: elem_size = 2; break;
                 case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
                 case JS_TYPED_FLOAT64: case JS_TYPED_BIGINT64: case JS_TYPED_BIGUINT64: elem_size = 8; break;
                 }
@@ -27871,12 +27861,10 @@ extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_fou
         // Proxy in prototype chain: forward through proxy [[Get]] trap
         // Set proxy_receiver to the original object so getter this-binding is correct
         if (js_is_proxy(proto)) {
-            Item saved_receiver = js_proxy_receiver;
-            if (!js_proxy_receiver.item) {
-                js_proxy_receiver = object;
-            }
+            // inherited proxy accessors must receive the original object even
+            // when proxy trap execution exits early through an exception path.
+            ScopedProxyReceiver _recv_guard(object);
             Item result = js_proxy_trap_get(proto, property);
-            js_proxy_receiver = saved_receiver;
             if (out_found) *out_found = true;
             return result;
         }
@@ -31366,11 +31354,7 @@ extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejecte
     // Create a native promise for the reaction chain.
     JsPromise* next = js_alloc_promise();
     if (!next) return ItemNull;
-    Item previous_resource = js_async_hooks_enter_resource(promise);
-    // Reaction promises are created by the receiver promise; stamping them
-    // under the root resource regresses async_hooks triggerAsyncId() to 1.
     Item next_item = js_promise_to_item(next);
-    js_async_hooks_restore_resource(previous_resource);
     if (use_capability) {
         js_promise_forward_native_to_capability(next_item, capability_resolve, capability_reject);
         if (js_check_exception()) return ItemNull;
@@ -34708,363 +34692,6 @@ static Item js_stub_noop_object(void) {
     return js_new_object();
 }
 
-static Item js_dgram_key(const char* name) {
-    return (Item){.item = s2it(heap_create_name(name, strlen(name)))};
-}
-
-typedef struct JsDgramSocket {
-    uv_udp_t udp;
-    Item js_object;
-    bool closing;
-    bool bound;
-    int family;
-} JsDgramSocket;
-
-#define JS_DGRAM_MAX_ACTIVE 256
-static Item js_dgram_active_sockets[JS_DGRAM_MAX_ACTIVE];
-static bool js_dgram_active_rooted = false;
-static Item js_dgram_socket_proto = {0};
-static Item js_dgram_socket_ctor = {0};
-
-extern "C" void js_cluster_notify_worker_listening(Item address);
-
-static void js_dgram_register_active_roots(void) {
-    if (js_dgram_active_rooted) return;
-    heap_register_gc_root_range((uint64_t*)js_dgram_active_sockets, JS_DGRAM_MAX_ACTIVE);
-    heap_register_gc_root(&js_dgram_socket_proto.item);
-    heap_register_gc_root(&js_dgram_socket_ctor.item);
-    js_dgram_active_rooted = true;
-}
-
-static void js_dgram_active_add(Item socket) {
-    js_dgram_register_active_roots();
-    for (int i = 0; i < JS_DGRAM_MAX_ACTIVE; i++) {
-        if (js_dgram_active_sockets[i].item == socket.item) return;
-    }
-    for (int i = 0; i < JS_DGRAM_MAX_ACTIVE; i++) {
-        if (!js_dgram_active_sockets[i].item) {
-            js_dgram_active_sockets[i] = socket;
-            return;
-        }
-    }
-}
-
-static void js_dgram_active_remove(Item socket) {
-    for (int i = 0; i < JS_DGRAM_MAX_ACTIVE; i++) {
-        if (js_dgram_active_sockets[i].item == socket.item) {
-            js_dgram_active_sockets[i] = (Item){0};
-            return;
-        }
-    }
-}
-
-static JsDgramSocket* js_dgram_socket_from_object(Item self) {
-    Item handle_item = js_property_get(self, js_dgram_key("__lambda_dgram_handle__"));
-    if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
-    return (JsDgramSocket*)(uintptr_t)it2i(handle_item);
-}
-
-static Item js_dgram_make_listener_record(Item callback, bool once) {
-    if (!once) return callback;
-    Item record = js_new_object();
-    js_property_set(record, js_dgram_key("listener"), callback);
-    js_property_set(record, js_dgram_key("once"), (Item){.item = ITEM_TRUE});
-    return record;
-}
-
-static Item js_dgram_listener_callback(Item record) {
-    if (get_type_id(record) == LMD_TYPE_FUNC) return record;
-    TypeId type = get_type_id(record);
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP) {
-        return js_property_get(record, js_dgram_key("listener"));
-    }
-    return make_js_undefined();
-}
-
-static bool js_dgram_listener_once(Item record) {
-    TypeId type = get_type_id(record);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return false;
-    Item once = js_property_get(record, js_dgram_key("once"));
-    return once.item == ITEM_TRUE || once.item == b2it(true);
-}
-
-static Item js_dgram_add_listener(Item self, Item event_item, Item callback, bool once) {
-    if (get_type_id(event_item) != LMD_TYPE_STRING || get_type_id(callback) != LMD_TYPE_FUNC) return self;
-    String* ev = it2s(event_item);
-    char key_buf[96];
-    snprintf(key_buf, sizeof(key_buf), "__on_%.*s__", (int)ev->len, ev->chars);
-    Item key = js_dgram_key(key_buf);
-    Item existing = js_property_get(self, key);
-    Item record = js_dgram_make_listener_record(callback, once);
-    if (get_type_id(existing) == LMD_TYPE_FUNC) {
-        Item listeners = js_array_new(0);
-        js_array_push(listeners, existing);
-        js_array_push(listeners, record);
-        js_property_set(self, key, listeners);
-    } else if (get_type_id(existing) == LMD_TYPE_ARRAY) {
-        js_array_push(existing, record);
-    } else if (once) {
-        Item listeners = js_array_new(0);
-        js_array_push(listeners, record);
-        js_property_set(self, key, listeners);
-    } else {
-        js_property_set(self, key, callback);
-    }
-    return self;
-}
-
-static void js_dgram_emit(Item self, const char* event, Item* args, int argc) {
-    char key_buf[96];
-    snprintf(key_buf, sizeof(key_buf), "__on_%s__", event);
-    Item key = js_dgram_key(key_buf);
-    Item listeners = js_property_get(self, key);
-    if (get_type_id(listeners) == LMD_TYPE_FUNC) {
-        js_call_function(listeners, self, args, argc);
-        js_microtask_flush();
-        return;
-    }
-    if (get_type_id(listeners) != LMD_TYPE_ARRAY) return;
-    int64_t count = js_array_length(listeners);
-    Item next = js_array_new(0);
-    for (int64_t i = 0; i < count; i++) {
-        Item record = js_array_get_int(listeners, i);
-        if (!js_dgram_listener_once(record)) js_array_push(next, record);
-    }
-    js_property_set(self, key, next);
-    for (int64_t i = 0; i < count; i++) {
-        Item callback = js_dgram_listener_callback(js_array_get_int(listeners, i));
-        if (get_type_id(callback) == LMD_TYPE_FUNC) js_call_function(callback, self, args, argc);
-    }
-    js_microtask_flush();
-}
-
-static Item js_dgram_address_for(JsDgramSocket* sock) {
-    Item address = js_new_object();
-    struct sockaddr_storage storage;
-    int len = sizeof(storage);
-    int r = sock ? uv_udp_getsockname(&sock->udp, (struct sockaddr*)&storage, &len) : UV_EBADF;
-    int port = 0;
-    const char* host = sock && sock->family == AF_INET6 ? "::" : "0.0.0.0";
-    const char* family = sock && sock->family == AF_INET6 ? "IPv6" : "IPv4";
-    char ip[INET6_ADDRSTRLEN];
-    if (r == 0 && storage.ss_family == AF_INET) {
-        struct sockaddr_in* addr = (struct sockaddr_in*)&storage;
-        uv_ip4_name(addr, ip, sizeof(ip));
-        host = ip;
-        port = ntohs(addr->sin_port);
-        family = "IPv4";
-    } else if (r == 0 && storage.ss_family == AF_INET6) {
-        struct sockaddr_in6* addr6 = (struct sockaddr_in6*)&storage;
-        uv_ip6_name(addr6, ip, sizeof(ip));
-        host = ip;
-        port = ntohs(addr6->sin6_port);
-        family = "IPv6";
-    }
-    js_property_set(address, js_dgram_key("address"), js_dgram_key(host));
-    js_property_set(address, js_dgram_key("family"), js_dgram_key(family));
-    js_property_set(address, js_dgram_key("port"), (Item){.item = i2it(port)});
-    return address;
-}
-
-static void js_dgram_close_cb(uv_handle_t* handle) {
-    JsDgramSocket* sock = handle ? (JsDgramSocket*)handle->data : NULL;
-    if (!sock) return;
-    Item self = sock->js_object;
-    js_dgram_active_remove(self);
-    js_property_set(self, js_dgram_key("__lambda_dgram_handle__"), make_js_undefined());
-    js_dgram_emit(self, "close", NULL, 0);
-    mem_free(sock);
-}
-
-static void js_dgram_close_socket(Item self) {
-    JsDgramSocket* sock = js_dgram_socket_from_object(self);
-    if (!sock || sock->closing) return;
-    sock->closing = true;
-    js_dgram_active_remove(self);
-    // UDP sockets are worker-owned handles; cluster IPC disconnect must close
-    // them natively because the JS dgram object may never receive close().
-    uv_udp_recv_stop(&sock->udp);
-    if (!uv_is_closing((uv_handle_t*)&sock->udp)) {
-        uv_close((uv_handle_t*)&sock->udp, js_dgram_close_cb);
-    }
-}
-
-extern "C" void js_dgram_close_all_active_sockets(void) {
-    js_dgram_register_active_roots();
-    Item sockets[JS_DGRAM_MAX_ACTIVE];
-    int count = 0;
-    for (int i = 0; i < JS_DGRAM_MAX_ACTIVE; i++) {
-        if (js_dgram_active_sockets[i].item && count < JS_DGRAM_MAX_ACTIVE) {
-            sockets[count++] = js_dgram_active_sockets[i];
-        }
-    }
-    for (int i = 0; i < count; i++) {
-        js_dgram_close_socket(sockets[i]);
-    }
-}
-
-static Item js_dgram_on(Item event_item, Item callback) {
-    return js_dgram_add_listener(js_get_this(), event_item, callback, false);
-}
-
-static Item js_dgram_once(Item event_item, Item callback) {
-    return js_dgram_add_listener(js_get_this(), event_item, callback, true);
-}
-
-static Item js_dgram_emit_method(Item event_item, Item arg) {
-    if (get_type_id(event_item) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-    String* ev = it2s(event_item);
-    char event_buf[96];
-    int len = ev->len < (int64_t)sizeof(event_buf) - 1 ? (int)ev->len : (int)sizeof(event_buf) - 1;
-    memcpy(event_buf, ev->chars, (size_t)len);
-    event_buf[len] = '\0';
-    Item args[1] = { arg };
-    js_dgram_emit(js_get_this(), event_buf, args, 1);
-    return (Item){.item = b2it(true)};
-}
-
-static Item js_dgram_bind(Item port_item, Item address_item, Item callback) {
-    Item self = js_get_this();
-    if (get_type_id(address_item) == LMD_TYPE_FUNC && get_type_id(callback) != LMD_TYPE_FUNC) {
-        callback = address_item;
-        address_item = make_js_undefined();
-    }
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
-        js_dgram_add_listener(self, js_dgram_key("listening"), callback, true);
-    }
-    JsDgramSocket* sock = js_dgram_socket_from_object(self);
-    if (!sock || sock->closing) return self;
-    int port = get_type_id(port_item) == LMD_TYPE_INT ? (int)it2i(port_item) : 0;
-    const char* host = sock->family == AF_INET6 ? "::" : "0.0.0.0";
-    char host_buf[128];
-    if (get_type_id(address_item) == LMD_TYPE_STRING) {
-        String* s = it2s(address_item);
-        int len = s->len < (int64_t)sizeof(host_buf) - 1 ? (int)s->len : (int)sizeof(host_buf) - 1;
-        memcpy(host_buf, s->chars, (size_t)len);
-        host_buf[len] = '\0';
-        host = host_buf;
-    }
-    int r;
-    if (sock->family == AF_INET6) {
-        struct sockaddr_in6 addr6;
-        r = uv_ip6_addr(host, port, &addr6);
-        if (r == 0) r = uv_udp_bind(&sock->udp, (const struct sockaddr*)&addr6, 0);
-    } else {
-        struct sockaddr_in addr;
-        r = uv_ip4_addr(host, port, &addr);
-        if (r == 0) r = uv_udp_bind(&sock->udp, (const struct sockaddr*)&addr, 0);
-    }
-    if (r != 0) {
-        return js_throw_error_with_code("ERR_SOCKET_BAD_PORT", uv_strerror(r));
-    }
-    sock->bound = true;
-    Item address = js_dgram_address_for(sock);
-    js_dgram_emit(self, "listening", NULL, 0);
-    js_cluster_notify_worker_listening(address);
-    return self;
-}
-
-static Item js_dgram_close(Item callback) {
-    Item self = js_get_this();
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
-        js_dgram_add_listener(self, js_dgram_key("close"), callback, true);
-    }
-    js_dgram_close_socket(self);
-    return self;
-}
-
-static Item js_dgram_address(void) {
-    JsDgramSocket* sock = js_dgram_socket_from_object(js_get_this());
-    return js_dgram_address_for(sock);
-}
-
-static Item js_dgram_ref(void) {
-    JsDgramSocket* sock = js_dgram_socket_from_object(js_get_this());
-    if (sock && !sock->closing) uv_ref((uv_handle_t*)&sock->udp);
-    return js_get_this();
-}
-
-static Item js_dgram_unref(void) {
-    JsDgramSocket* sock = js_dgram_socket_from_object(js_get_this());
-    if (sock && !sock->closing) uv_unref((uv_handle_t*)&sock->udp);
-    return js_get_this();
-}
-
-static Item js_dgram_create_socket_object(Item type_item, Item listener) {
-    js_dgram_register_active_roots();
-    int family = AF_INET;
-    if (get_type_id(type_item) == LMD_TYPE_STRING) {
-        String* type = it2s(type_item);
-        if (type->len == 4 && memcmp(type->chars, "udp6", 4) == 0) {
-            family = AF_INET6;
-        } else if (!(type->len == 4 && memcmp(type->chars, "udp4", 4) == 0)) {
-            return js_throw_type_error("Bad socket type specified. Valid types are: udp4, udp6");
-        }
-    }
-    JsDgramSocket* sock = (JsDgramSocket*)mem_calloc(1, sizeof(JsDgramSocket), MEM_CAT_JS_RUNTIME);
-    if (!sock) return ItemNull;
-    uv_loop_t* loop = lambda_uv_loop();
-    int r = loop ? uv_udp_init(loop, &sock->udp) : UV_EINVAL;
-    if (r != 0) {
-        mem_free(sock);
-        return js_throw_error_with_code("ERR_SOCKET_BAD_TYPE", uv_strerror(r));
-    }
-    Item obj = js_new_object();
-    js_set_prototype(obj, js_dgram_socket_proto);
-    sock->udp.data = sock;
-    sock->js_object = obj;
-    sock->family = family;
-    js_property_set(obj, js_dgram_key("__lambda_dgram_handle__"),
-                    (Item){.item = i2it((int64_t)(uintptr_t)sock)});
-    js_property_set(obj, js_dgram_key("type"), family == AF_INET6 ? js_dgram_key("udp6") : js_dgram_key("udp4"));
-    js_property_set(obj, js_dgram_key("on"), js_new_function((void*)js_dgram_on, 2));
-    js_property_set(obj, js_dgram_key("once"), js_new_function((void*)js_dgram_once, 2));
-    js_property_set(obj, js_dgram_key("emit"), js_new_function((void*)js_dgram_emit_method, 2));
-    js_property_set(obj, js_dgram_key("bind"), js_new_function((void*)js_dgram_bind, 3));
-    js_property_set(obj, js_dgram_key("close"), js_new_function((void*)js_dgram_close, 1));
-    js_property_set(obj, js_dgram_key("address"), js_new_function((void*)js_dgram_address, 0));
-    js_property_set(obj, js_dgram_key("ref"), js_new_function((void*)js_dgram_ref, 0));
-    js_property_set(obj, js_dgram_key("unref"), js_new_function((void*)js_dgram_unref, 0));
-    js_dgram_active_add(obj);
-    if (get_type_id(listener) == LMD_TYPE_FUNC) {
-        js_dgram_add_listener(obj, js_dgram_key("message"), listener, false);
-    }
-    return obj;
-}
-
-static Item js_dgram_createSocket(Item type_item, Item listener) {
-    TypeId type = get_type_id(type_item);
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP) {
-        Item opt_type = js_property_get(type_item, js_dgram_key("type"));
-        return js_dgram_create_socket_object(opt_type, listener);
-    }
-    return js_dgram_create_socket_object(type_item, listener);
-}
-
-static Item js_dgram_Socket(Item type_item, Item listener) {
-    return js_dgram_createSocket(type_item, listener);
-}
-
-extern "C" Item js_get_dgram_namespace(void) {
-    static Item dgram_ns = {0};
-    static uint64_t dgram_epoch = (uint64_t)-1;
-    if (dgram_ns.item == 0 || dgram_epoch != js_heap_epoch) {
-        dgram_epoch = js_heap_epoch;
-        js_dgram_register_active_roots();
-        dgram_ns = js_new_object();
-        heap_register_gc_root(&dgram_ns.item);
-        js_dgram_socket_proto = js_new_object();
-        js_dgram_socket_ctor = js_new_function((void*)js_dgram_Socket, 2);
-        js_function_set_prototype(js_dgram_socket_ctor, js_dgram_socket_proto);
-        js_property_set(js_dgram_socket_proto, js_dgram_key("constructor"), js_dgram_socket_ctor);
-        js_property_set(dgram_ns, js_dgram_key("Socket"), js_dgram_socket_ctor);
-        js_property_set(dgram_ns, js_dgram_key("createSocket"),
-                        js_new_function((void*)js_dgram_createSocket, 2));
-        js_property_set(dgram_ns, js_dgram_key("default"), dgram_ns);
-    }
-    return dgram_ns;
-}
-
 static bool js_runtime_string_equals(Item value, const char* expected) {
     if (get_type_id(value) != LMD_TYPE_STRING || !expected) return false;
     String* s = it2s(value);
@@ -35074,18 +34701,7 @@ static bool js_runtime_string_equals(Item value, const char* expected) {
 
 static Item js_cluster_primary_options = {0};
 static bool js_cluster_primary_options_rooted = false;
-static Item js_cluster_namespace = {0};
-static bool js_cluster_namespace_rooted = false;
-static Item js_cluster_worker_constructor_item = {0};
-static Item js_cluster_worker_prototype_item = {0};
-static bool js_cluster_worker_surface_rooted = false;
-static bool js_cluster_worker_mode_latched = false;
-static Item js_cluster_pending_disconnect_callback = {0};
-static bool js_cluster_pending_disconnect_rooted = false;
 static int64_t js_cluster_next_worker_id = 1;
-#define JS_CLUSTER_MAX_WORKERS 256
-static Item js_cluster_workers[JS_CLUSTER_MAX_WORKERS];
-static bool js_cluster_workers_rooted = false;
 
 static Item js_cluster_key(const char* name) {
     return (Item){.item = s2it(heap_create_name(name, strlen(name)))};
@@ -35098,10 +34714,6 @@ static bool js_cluster_is_object_item(Item item) {
 
 static bool js_cluster_is_callable(Item item) {
     return get_type_id(item) == LMD_TYPE_FUNC;
-}
-
-static bool js_cluster_is_undefined(Item item) {
-    return item.item == 0 || get_type_id(item) == LMD_TYPE_UNDEFINED;
 }
 
 static bool js_cluster_fd_is_listening_socket(int fd) {
@@ -35119,350 +34731,14 @@ static bool js_cluster_fd_is_listening_socket(int fd) {
 }
 
 static bool js_cluster_is_worker_process(void) {
-    if (js_cluster_worker_mode_latched) return true;
-    const char* worker_id = getenv("LAMBDA_JS_CLUSTER_WORKER_ID");
-    if (!worker_id || worker_id[0] == '\0') worker_id = getenv("NODE_UNIQUE_ID");
-    if (worker_id && worker_id[0] != '\0') {
-        // The native worker marker is hidden from process.env; once observed,
-        // worker mode must survive userland environment cleanup.
-        js_cluster_worker_mode_latched = true;
-        return true;
-    }
-    return false;
-}
-
-extern "C" bool js_cluster_is_worker_runtime(void) {
-    return js_cluster_is_worker_process();
-}
-
-#define JS_CLUSTER_SCHED_NONE 1
-#define JS_CLUSTER_SCHED_RR 2
-
-static int js_cluster_current_scheduling_policy(void) {
-    if (js_cluster_is_object_item(js_cluster_namespace)) {
-        Item value = js_property_get(js_cluster_namespace, js_cluster_key("schedulingPolicy"));
-        TypeId type = get_type_id(value);
-        if (type == LMD_TYPE_INT) return (int)it2i(value);
-        if (type == LMD_TYPE_INT64) return (int)it2l(value);
-    }
-    return JS_CLUSTER_SCHED_RR;
-}
-
-extern "C" bool js_cluster_worker_uses_sched_rr(void) {
-    const char* sched = getenv("LAMBDA_JS_CLUSTER_SCHED");
-    if (!sched || sched[0] == '\0') return false;
-    return strcmp(sched, "rr") == 0;
+    const char* worker_id = getenv("NODE_UNIQUE_ID");
+    return worker_id && worker_id[0] != '\0';
 }
 
 extern "C" void js_net_close_all_active_servers(void);
-extern "C" void js_http_close_all_active_servers(void);
-extern "C" void js_dgram_close_all_active_sockets(void);
-extern "C" Item js_setImmediate(Item callback);
-extern "C" Item js_delete_property(Item obj, Item key);
-extern "C" void js_child_process_preserve_cluster_listening(Item obj, Item address);
-extern "C" Item js_process_on_internal_no_ref(Item event_name, Item listener);
-extern "C" Item js_process_exit(Item code_item);
-extern "C" bool js_net_cluster_primary_handle_message(Item worker, Item message);
-extern "C" void js_net_cluster_primary_worker_disconnected(Item worker);
-
-static void js_cluster_register_namespace_roots(void) {
-    if (!js_cluster_namespace_rooted) {
-        heap_register_gc_root(&js_cluster_namespace.item);
-        js_cluster_namespace_rooted = true;
-    }
-    if (!js_cluster_worker_surface_rooted) {
-        heap_register_gc_root(&js_cluster_worker_constructor_item.item);
-        heap_register_gc_root(&js_cluster_worker_prototype_item.item);
-        js_cluster_worker_surface_rooted = true;
-    }
-    if (!js_cluster_pending_disconnect_rooted) {
-        heap_register_gc_root(&js_cluster_pending_disconnect_callback.item);
-        js_cluster_pending_disconnect_rooted = true;
-    }
-}
-
-static Item js_cluster_worker_constructor(void) {
-    return js_get_this();
-}
-
-static void js_cluster_set_worker_prototype(Item worker) {
-    if (!js_cluster_is_object_item(worker) || !js_cluster_is_object_item(js_cluster_worker_prototype_item)) return;
-    // Worker objects are ChildProcess-like maps, but official cluster code relies
-    // on them sharing cluster.Worker.prototype for instanceof checks.
-    js_set_prototype(worker, js_cluster_worker_prototype_item);
-}
-
-static void js_cluster_install_worker_surface(Item cluster_obj) {
-    js_cluster_register_namespace_roots();
-    js_cluster_worker_prototype_item = js_new_object();
-    js_cluster_worker_constructor_item = js_new_function((void*)js_cluster_worker_constructor, 0);
-    js_function_set_prototype(js_cluster_worker_constructor_item, js_cluster_worker_prototype_item);
-    js_property_set(js_cluster_worker_prototype_item, js_cluster_key("constructor"),
-                    js_cluster_worker_constructor_item);
-    js_property_set(cluster_obj, js_cluster_key("Worker"), js_cluster_worker_constructor_item);
-}
-
-static Item js_cluster_namespace_or_this(Item candidate) {
-    if (js_cluster_is_object_item(candidate)) return candidate;
-    return js_cluster_namespace;
-}
-
-static void js_cluster_register_worker_roots(void) {
-    if (js_cluster_workers_rooted) return;
-    heap_register_gc_root_range((uint64_t*)js_cluster_workers, JS_CLUSTER_MAX_WORKERS);
-    js_cluster_workers_rooted = true;
-}
-
-static void js_cluster_track_worker(Item worker) {
-    if (!worker.item) return;
-    js_cluster_register_worker_roots();
-    for (int i = 0; i < JS_CLUSTER_MAX_WORKERS; i++) {
-        if (js_cluster_workers[i].item == worker.item) return;
-    }
-    for (int i = 0; i < JS_CLUSTER_MAX_WORKERS; i++) {
-        if (!js_cluster_workers[i].item) {
-            js_cluster_workers[i] = worker;
-            return;
-        }
-    }
-}
-
-static void js_cluster_untrack_worker(Item worker) {
-    if (!worker.item) return;
-    for (int i = 0; i < JS_CLUSTER_MAX_WORKERS; i++) {
-        if (js_cluster_workers[i].item == worker.item) {
-            js_cluster_workers[i] = (Item){0};
-            return;
-        }
-    }
-}
-
-static int js_cluster_tracked_worker_count(void) {
-    int count = 0;
-    for (int i = 0; i < JS_CLUSTER_MAX_WORKERS; i++) {
-        if (js_cluster_workers[i].item) count++;
-    }
-    return count;
-}
-
-static Item js_cluster_workers_object(Item cluster_obj) {
-    if (!js_cluster_is_object_item(cluster_obj)) return make_js_undefined();
-    Item workers = js_property_get(cluster_obj, js_cluster_key("workers"));
-    if (!js_cluster_is_object_item(workers)) {
-        workers = js_new_object();
-        js_property_set(cluster_obj, js_cluster_key("workers"), workers);
-    }
-    return workers;
-}
-
-static void js_cluster_workers_add(Item cluster_obj, Item worker) {
-    Item workers = js_cluster_workers_object(cluster_obj);
-    if (!js_cluster_is_object_item(workers)) return;
-    Item id = js_property_get(worker, js_cluster_key("id"));
-    if (get_type_id(id) != LMD_TYPE_INT) return;
-    char id_buf[32];
-    snprintf(id_buf, sizeof(id_buf), "%lld", (long long)it2i(id));
-    js_property_set(workers, js_cluster_key(id_buf), worker);
-}
-
-static void js_cluster_workers_remove(Item cluster_obj, Item worker) {
-    Item workers = js_property_get(cluster_obj, js_cluster_key("workers"));
-    if (!js_cluster_is_object_item(workers)) return;
-    Item id = js_property_get(worker, js_cluster_key("id"));
-    if (get_type_id(id) != LMD_TYPE_INT) return;
-    char id_buf[32];
-    snprintf(id_buf, sizeof(id_buf), "%lld", (long long)it2i(id));
-    js_delete_property(workers, js_cluster_key(id_buf));
-}
-
-static void js_cluster_emit(Item cluster_obj, const char* event, Item* args, int argc);
-static Item js_cluster_emit_setup_tick(Item env_item);
-
-static Item js_cluster_copy_array(Item source, int64_t start) {
-    Item copy = js_array_new(0);
-    if (get_type_id(source) != LMD_TYPE_ARRAY) return copy;
-    int64_t len = js_array_length(source);
-    if (start < 0) start = 0;
-    for (int64_t i = start; i < len; i++) {
-        js_array_push(copy, js_array_get_int(source, i));
-    }
-    return copy;
-}
-
-static void js_cluster_apply_option(Item settings, Item options, const char* name) {
-    if (!js_cluster_is_object_item(settings) || !js_cluster_is_object_item(options)) return;
-    Item key = js_cluster_key(name);
-    Item value = js_property_get(options, key);
-    if (!js_cluster_is_undefined(value)) js_property_set(settings, key, value);
-}
-
-static void js_cluster_apply_default(Item settings, const char* name, Item value) {
-    if (!js_cluster_is_object_item(settings)) return;
-    Item key = js_cluster_key(name);
-    if (js_cluster_is_undefined(js_property_get(settings, key))) {
-        js_property_set(settings, key, value);
-    }
-}
-
-static Item js_cluster_ensure_settings(Item cluster_obj, Item options, bool emit_setup) {
-    if (!js_cluster_primary_options_rooted) {
-        heap_register_gc_root(&js_cluster_primary_options.item);
-        js_cluster_primary_options_rooted = true;
-    }
-
-    bool had_settings = js_cluster_is_object_item(js_cluster_primary_options);
-    Item settings = had_settings ? js_cluster_primary_options : js_new_object();
-    if (!had_settings && js_cluster_is_object_item(cluster_obj)) {
-        Item public_settings = js_property_get(cluster_obj, js_cluster_key("settings"));
-        if (js_cluster_is_object_item(public_settings)) settings = public_settings;
-    }
-    if (!had_settings) {
-        Item argv = js_get_process_argv();
-        Item exec = make_js_undefined();
-        if (get_type_id(argv) == LMD_TYPE_ARRAY && js_array_length(argv) > 1) {
-            exec = js_array_get_int(argv, 1);
-        }
-        // cluster.settings is mutable before setupPrimary(); losing that public
-        // object makes direct serialization changes fall back to JSON at fork().
-        js_cluster_apply_default(settings, "args", js_cluster_copy_array(argv, 2));
-        js_cluster_apply_default(settings, "exec", exec);
-        js_cluster_apply_default(settings, "execArgv", js_cluster_copy_array(js_get_process_exec_argv(), 0));
-        js_cluster_apply_default(settings, "silent", (Item){.item = ITEM_FALSE});
-        js_cluster_apply_default(settings, "serialization", js_cluster_key("json"));
-    }
-
-    js_cluster_apply_option(settings, options, "args");
-    js_cluster_apply_option(settings, options, "exec");
-    js_cluster_apply_option(settings, options, "execArgv");
-    js_cluster_apply_option(settings, options, "silent");
-    js_cluster_apply_option(settings, options, "serialization");
-
-    js_cluster_primary_options = settings;
-    if (js_cluster_is_object_item(cluster_obj)) {
-        js_property_set(cluster_obj, js_cluster_key("settings"), settings);
-    }
-    if (emit_setup) {
-        Item* env = js_alloc_env(2);
-        env[0] = cluster_obj;
-        env[1] = settings;
-        // setupPrimary() publishes after the call returns; synchronous emission
-        // makes listeners attached immediately after setupPrimary() miss setup.
-        js_setImmediate(js_new_closure((void*)js_cluster_emit_setup_tick, 0, env, 2));
-    }
-    return settings;
-}
-
-static bool js_cluster_worker_connected_item(Item worker) {
-    Item connected = js_property_get(worker, js_cluster_key("connected"));
-    TypeId connected_type = get_type_id(connected);
-    if (connected_type == LMD_TYPE_BOOL) return it2b(connected);
-    Item process_obj = js_property_get(worker, js_cluster_key("process"));
-    if (process_obj.item && process_obj.item != worker.item) {
-        connected = js_property_get(process_obj, js_cluster_key("connected"));
-        if (get_type_id(connected) == LMD_TYPE_BOOL) return it2b(connected);
-    }
-    return true;
-}
-
-static Item js_cluster_make_listener_record(Item callback, bool once) {
-    if (!once) return callback;
-    Item record = js_new_object();
-    js_property_set(record, js_cluster_key("listener"), callback);
-    js_property_set(record, js_cluster_key("once"), (Item){.item = ITEM_TRUE});
-    return record;
-}
-
-static Item js_cluster_listener_callback(Item record) {
-    if (js_cluster_is_callable(record)) return record;
-    if (js_cluster_is_object_item(record)) return js_property_get(record, js_cluster_key("listener"));
-    return make_js_undefined();
-}
-
-static bool js_cluster_listener_once(Item record) {
-    if (!js_cluster_is_object_item(record)) return false;
-    Item once = js_property_get(record, js_cluster_key("once"));
-    return once.item == ITEM_TRUE || once.item == b2it(true);
-}
-
-static Item js_cluster_add_listener(Item self, Item event_item, Item callback, bool once) {
-    if (get_type_id(event_item) != LMD_TYPE_STRING || !js_cluster_is_callable(callback)) return self;
-    String* ev = it2s(event_item);
-    char key_buf[96];
-    snprintf(key_buf, sizeof(key_buf), "__on_%.*s__", (int)ev->len, ev->chars);
-    Item key = js_cluster_key(key_buf);
-    Item existing = js_property_get(self, key);
-    Item record = js_cluster_make_listener_record(callback, once);
-    if (js_cluster_is_callable(existing)) {
-        Item listeners = js_array_new(0);
-        js_array_push(listeners, existing);
-        js_array_push(listeners, record);
-        js_property_set(self, key, listeners);
-    } else if (get_type_id(existing) == LMD_TYPE_ARRAY) {
-        js_array_push(existing, record);
-    } else if (once) {
-        Item listeners = js_array_new(0);
-        js_array_push(listeners, record);
-        js_property_set(self, key, listeners);
-    } else {
-        js_property_set(self, key, callback);
-    }
-    return self;
-}
-
-static bool js_cluster_has_local_listener(Item obj, const char* event) {
-    if (!js_cluster_is_object_item(obj) || !event) return false;
-    char key_buf[96];
-    snprintf(key_buf, sizeof(key_buf), "__on_%s__", event);
-    Item listeners = js_property_get(obj, js_cluster_key(key_buf));
-    if (js_cluster_is_callable(listeners)) return true;
-    return get_type_id(listeners) == LMD_TYPE_ARRAY && js_array_length(listeners) > 0;
-}
-
-static void js_cluster_emit(Item cluster_obj, const char* event, Item* args, int argc) {
-    if (!js_cluster_is_object_item(cluster_obj)) return;
-    char key_buf[96];
-    snprintf(key_buf, sizeof(key_buf), "__on_%s__", event);
-    Item key = js_cluster_key(key_buf);
-    Item listeners = js_property_get(cluster_obj, key);
-    if (js_cluster_is_callable(listeners)) {
-        js_call_function(listeners, cluster_obj, args, argc);
-        js_microtask_flush();
-    } else if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
-        int64_t count = js_array_length(listeners);
-        Item next = js_array_new(0);
-        for (int64_t i = 0; i < count; i++) {
-            Item record = js_array_get_int(listeners, i);
-            if (!js_cluster_listener_once(record)) js_array_push(next, record);
-        }
-        js_property_set(cluster_obj, key, next);
-        for (int64_t i = 0; i < count; i++) {
-            Item cb = js_cluster_listener_callback(js_array_get_int(listeners, i));
-            if (js_cluster_is_callable(cb)) js_call_function(cb, cluster_obj, args, argc);
-        }
-        js_microtask_flush();
-    }
-}
-
-static void js_cluster_worker_keep_process_ipc_listener(Item event_item) {
-    if (!js_runtime_string_equals(event_item, "message") &&
-        !js_runtime_string_equals(event_item, "disconnect")) {
-        return;
-    }
-    Item process_obj = js_get_process_object_value();
-    Item on = js_property_get(process_obj, js_cluster_key("on"));
-    if (!js_cluster_is_callable(on)) return;
-    Item args[2] = { event_item, js_new_function((void*)js_stub_noop, 0) };
-    // cluster.worker listeners are backed by process IPC; without a hidden
-    // process listener, early parent messages stay queued until the timeout.
-    js_call_function(on, process_obj, args, 2);
-}
 
 static Item js_cluster_worker_on(Item event_item, Item callback) {
     Item self = js_get_this();
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
-        js_cluster_add_listener(self, event_item, callback, false);
-        js_cluster_worker_keep_process_ipc_listener(event_item);
-    }
     if (js_runtime_string_equals(event_item, "exit") && get_type_id(callback) == LMD_TYPE_FUNC) {
         Item args[2] = {
             (Item){.item = i2it(0)},
@@ -35473,131 +34749,8 @@ static Item js_cluster_worker_on(Item event_item, Item callback) {
     return self;
 }
 
-static Item js_cluster_worker_once(Item event_item, Item callback) {
-    Item self = js_get_this();
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
-        js_cluster_add_listener(self, event_item, callback, true);
-        js_cluster_worker_keep_process_ipc_listener(event_item);
-    }
-    return self;
-}
-
-extern "C" bool js_cluster_worker_forward_process_event(Item event_name, Item* args, int argc) {
-    if (!js_cluster_is_object_item(js_cluster_namespace)) {
-        return false;
-    }
-    Item worker_mode = js_property_get(js_cluster_namespace, js_cluster_key("isWorker"));
-    if (worker_mode.item != ITEM_TRUE && worker_mode.item != b2it(true)) return false;
-    if (get_type_id(event_name) != LMD_TYPE_STRING) return false;
-    String* ev = it2s(event_name);
-    if (!ev || ev->len <= 0 || ev->len >= 64) return false;
-    char event_buf[64];
-    memcpy(event_buf, ev->chars, ev->len);
-    event_buf[ev->len] = 0;
-    Item worker = js_property_get(js_cluster_namespace, js_cluster_key("worker"));
-    if (!js_cluster_has_local_listener(worker, event_buf)) return false;
-    // process IPC/error events are mirrored from the cluster namespace state;
-    // the NODE_UNIQUE_ID bootstrap env can be hidden before late IPC delivery.
-    js_cluster_emit(worker, event_buf, args, argc);
-    return true;
-}
-
-static bool js_cluster_worker_online_pending(Item worker) {
-    Item pending = js_property_get(worker, js_cluster_key("__pending_cluster_online__"));
-    return pending.item == ITEM_TRUE || pending.item == b2it(true);
-}
-
-static Item js_cluster_worker_online_flush_scheduled_key(void) {
-    return js_cluster_key("__pending_cluster_online_flush_scheduled__");
-}
-
-static void js_cluster_emit_worker_local_event(Item worker, const char* event, Item* args, int argc) {
-    if (!js_cluster_is_object_item(worker)) return;
-    char key_buf[96];
-    snprintf(key_buf, sizeof(key_buf), "__on_%s__", event);
-    Item key = js_cluster_key(key_buf);
-    Item listeners = js_property_get(worker, key);
-    if (js_cluster_is_callable(listeners)) {
-        js_call_function(listeners, worker, args, argc);
-        js_microtask_flush();
-    } else if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
-        int64_t count = js_array_length(listeners);
-        Item next = js_array_new(0);
-        for (int64_t i = 0; i < count; i++) {
-            Item record = js_array_get_int(listeners, i);
-            if (!js_cluster_listener_once(record)) js_array_push(next, record);
-        }
-        js_property_set(worker, key, next);
-        for (int64_t i = 0; i < count; i++) {
-            Item cb = js_cluster_listener_callback(js_array_get_int(listeners, i));
-            if (js_cluster_is_callable(cb)) js_call_function(cb, worker, args, argc);
-        }
-        js_microtask_flush();
-    }
-}
-
-static Item js_cluster_flush_pending_worker_online_scheduled(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    Item worker = env[0];
-    js_property_set(worker, js_cluster_worker_online_flush_scheduled_key(), (Item){.item = ITEM_FALSE});
-    if (!js_cluster_worker_online_pending(worker)) return make_js_undefined();
-    js_property_set(worker, js_cluster_key("__pending_cluster_online__"), (Item){.item = ITEM_FALSE});
-    js_cluster_emit_worker_local_event(worker, "online", NULL, 0);
-    return make_js_undefined();
-}
-
-static void js_cluster_schedule_pending_worker_online_after_listener(Item worker, Item event_item) {
-    if (!js_runtime_string_equals(event_item, "online")) return;
-    if (!js_cluster_worker_online_pending(worker)) return;
-    Item scheduled = js_property_get(worker, js_cluster_worker_online_flush_scheduled_key());
-    if (scheduled.item == ITEM_TRUE || scheduled.item == b2it(true)) return;
-    js_property_set(worker, js_cluster_worker_online_flush_scheduled_key(), (Item){.item = ITEM_TRUE});
-    Item* env = js_alloc_env(1);
-    env[0] = worker;
-    // chained cluster.fork().on('online', ...) runs before the assignment target
-    // is initialized; replay online on a later turn so callbacks do not hit TDZ.
-    js_setImmediate(js_new_closure((void*)js_cluster_flush_pending_worker_online_scheduled, 0, env, 1));
-}
-
-static Item js_cluster_worker_listener_with_online_flush(Item env_item, Item rest_args) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    Item original = env ? env[0] : make_js_undefined();
-    bool once = env && (env[1].item == ITEM_TRUE || env[1].item == b2it(true));
-    Item self = js_get_this();
-    Item result = self;
-    Item event_item = get_type_id(rest_args) == LMD_TYPE_ARRAY && js_array_length(rest_args) > 0
-        ? js_array_get_int(rest_args, 0)
-        : make_js_undefined();
-    Item callback = get_type_id(rest_args) == LMD_TYPE_ARRAY && js_array_length(rest_args) > 1
-        ? js_array_get_int(rest_args, 1)
-        : make_js_undefined();
-    if (js_runtime_string_equals(event_item, "online")) {
-        result = js_cluster_add_listener(self, event_item, callback, once);
-        js_cluster_schedule_pending_worker_online_after_listener(self, event_item);
-        return result;
-    }
-    if (js_cluster_is_callable(original)) {
-        // The worker.on wrapper needs rest args; fixed-arity native wrappers
-        // lost the listener callback for non-online events like UDP listening.
-        Item args[2] = { event_item, callback };
-        result = js_call_function(original, self, args, 2);
-    }
-    return result;
-}
-
-static Item js_cluster_on(Item event_item, Item callback) {
-    return js_cluster_add_listener(js_get_this(), event_item, callback, false);
-}
-
-static Item js_cluster_once(Item event_item, Item callback) {
-    return js_cluster_add_listener(js_get_this(), event_item, callback, true);
-}
-
 static Item js_cluster_worker_disconnect(void) {
     js_net_close_all_active_servers();
-    js_http_close_all_active_servers();
-    js_dgram_close_all_active_sockets();
     Item process_obj = js_get_process_object_value();
     Item disconnect = js_property_get(process_obj, js_cluster_key("disconnect"));
     if (js_cluster_is_callable(disconnect)) {
@@ -35606,310 +34759,6 @@ static Item js_cluster_worker_disconnect(void) {
         js_call_function(disconnect, process_obj, NULL, 0);
         js_microtask_flush();
     }
-    return make_js_undefined();
-}
-
-static Item js_cluster_worker_is_connected(void) {
-    return (Item){.item = b2it(js_cluster_worker_connected_item(js_get_this()))};
-}
-
-static Item js_cluster_worker_destroy(void) {
-    Item self = js_get_this();
-    js_property_set(self, js_cluster_key("exitedAfterDisconnect"), (Item){.item = ITEM_TRUE});
-    js_property_set(self, js_cluster_key("state"), js_cluster_key("destroying"));
-    if (!js_cluster_worker_connected_item(self)) {
-        return js_process_exit((Item){.item = i2it(0)});
-    }
-    // worker-side destroy is a voluntary shutdown that must end the process
-    // after IPC closes; treating it as plain disconnect leaves workers idle.
-    return js_cluster_worker_disconnect();
-}
-
-static Item js_cluster_worker_kill(void) {
-    return js_cluster_worker_destroy();
-}
-
-static Item js_cluster_primary_worker_destroy(Item env_item, Item signal_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    Item worker = env ? env[0] : js_get_this();
-    Item kill = js_property_get(worker, js_cluster_key("kill"));
-    if (!js_cluster_is_callable(kill)) return (Item){.item = ITEM_FALSE};
-    Item signal = js_cluster_is_undefined(signal_item) ? js_cluster_key("SIGTERM") : signal_item;
-    // primary Worker.destroy() is a process signal, not IPC disconnect; using
-    // disconnect keeps refed worker processes alive until the drain watchdog.
-    return js_call_function(kill, worker, &signal, 1);
-}
-
-static Item js_cluster_primary_worker_disconnect(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    Item worker = env[0];
-    Item disconnect = env[1];
-    js_property_set(worker, js_cluster_key("exitedAfterDisconnect"), (Item){.item = ITEM_TRUE});
-    js_property_set(worker, js_cluster_key("state"), js_cluster_key("disconnected"));
-    // RR pipe listeners live in the primary; worker IPC disconnect must remove
-    // them from dispatch or the shared pipe remains refed until drain timeout.
-    js_net_cluster_primary_worker_disconnected(worker);
-    if (js_cluster_is_callable(disconnect)) {
-        // ChildProcess.disconnect() owns primary-side 'disconnect' emission;
-        // a missing wrapper connected flag must not suppress that lifecycle event.
-        js_call_function(disconnect, worker, NULL, 0);
-        js_microtask_flush();
-    }
-    return worker;
-}
-
-static void js_cluster_finish_disconnect_if_done(Item cluster_obj) {
-    if (!js_cluster_is_callable(js_cluster_pending_disconnect_callback)) return;
-    if (js_cluster_tracked_worker_count() != 0) return;
-    Item callback = js_cluster_pending_disconnect_callback;
-    js_cluster_pending_disconnect_callback = (Item){0};
-    js_call_function(callback, cluster_obj, NULL, 0);
-    js_microtask_flush();
-}
-
-static Item js_cluster_disconnect_empty_tick(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    Item cluster_obj = env[0];
-    Item callback = env[1];
-    if (js_cluster_is_callable(callback)) {
-        js_call_function(callback, cluster_obj, NULL, 0);
-        js_microtask_flush();
-    }
-    return make_js_undefined();
-}
-
-static Item js_cluster_emit_setup_tick(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    Item args[1] = { env[1] };
-    js_cluster_emit(env[0], "setup", args, 1);
-    return make_js_undefined();
-}
-
-static Item js_cluster_emit_worker_fork_tick(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    Item args[1] = { env[1] };
-    js_cluster_emit(env[0], "fork", args, 1);
-    return make_js_undefined();
-}
-
-static bool js_cluster_worker_has_user_listener(Item worker, const char* event) {
-    char key_buf[96];
-    snprintf(key_buf, sizeof(key_buf), "__on_%s__", event);
-    Item listeners = js_property_get(worker, js_cluster_key(key_buf));
-    if (get_type_id(listeners) == LMD_TYPE_ARRAY) return js_array_length(listeners) > 1;
-    return false;
-}
-
-static void js_cluster_close_unobserved_message_handle(Item handle) {
-    if (js_cluster_is_undefined(handle) || !js_cluster_is_object_item(handle)) return;
-    Item destroy = js_property_get(handle, js_cluster_key("destroy"));
-    if (js_cluster_is_callable(destroy)) {
-        js_call_function(destroy, handle, NULL, 0);
-        js_microtask_flush();
-        return;
-    }
-    Item close = js_property_get(handle, js_cluster_key("close"));
-    if (js_cluster_is_callable(close)) {
-        js_call_function(close, handle, NULL, 0);
-        js_microtask_flush();
-    }
-}
-
-static void js_cluster_preserve_worker_listening_replay(Item worker, Item address) {
-    if (js_cluster_worker_has_user_listener(worker, "listening")) return;
-    // hidden cluster forwarding must not consume ChildProcess's queued
-    // listening event before user code can attach worker.once('listening').
-    js_child_process_preserve_cluster_listening(worker, address);
-}
-
-static Item js_cluster_emit_worker_disconnect(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    js_property_set(env[1], js_cluster_key("state"), js_cluster_key("disconnected"));
-    // worker-initiated process.disconnect() bypasses Worker.disconnect(), so
-    // release primary-owned pipe dispatch state when the ChildProcess event arrives.
-    js_net_cluster_primary_worker_disconnected(env[1]);
-    Item args[1] = { env[1] };
-    js_cluster_emit(env[0], "disconnect", args, 1);
-    return make_js_undefined();
-}
-
-static Item js_cluster_emit_worker_exit(Item env_item, Item code, Item signal) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    js_property_set(env[1], js_cluster_key("state"), js_cluster_key("dead"));
-    js_net_cluster_primary_worker_disconnected(env[1]);
-    js_cluster_workers_remove(env[0], env[1]);
-    js_cluster_untrack_worker(env[1]);
-    Item args[3] = { env[1], code, signal };
-    js_cluster_emit(env[0], "exit", args, 3);
-    js_cluster_finish_disconnect_if_done(env[0]);
-    return make_js_undefined();
-}
-
-static Item js_cluster_emit_worker_online(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    js_property_set(env[1], js_cluster_key("state"), js_cluster_key("online"));
-    Item args[1] = { env[1] };
-    js_cluster_emit(env[0], "online", args, 1);
-    return make_js_undefined();
-}
-
-static Item js_cluster_emit_worker_listening(Item env_item, Item address) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    js_property_set(env[1], js_cluster_key("state"), js_cluster_key("listening"));
-    Item forwarded = js_property_get(env[1], js_cluster_key("__lambda_cluster_listening_forwarded__"));
-    if (forwarded.item == ITEM_TRUE || forwarded.item == b2it(true)) {
-        return make_js_undefined();
-    }
-    js_cluster_preserve_worker_listening_replay(env[1], address);
-    js_property_set(env[1], js_cluster_key("__lambda_cluster_listening_forwarded__"),
-                    (Item){.item = ITEM_TRUE});
-    Item args[2] = { env[1], address };
-    js_cluster_emit(env[0], "listening", args, 2);
-    return make_js_undefined();
-}
-
-static Item js_cluster_emit_worker_message(Item env_item, Item message, Item handle) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    if (js_cluster_is_undefined(handle) && js_net_cluster_primary_handle_message(env[1], message)) {
-        return make_js_undefined();
-    }
-    if (js_cluster_is_undefined(handle)) {
-        Item args[2] = { env[1], message };
-        js_cluster_emit(env[0], "message", args, 2);
-    } else {
-        if (!js_cluster_worker_has_user_listener(env[1], "message") &&
-            !js_cluster_has_local_listener(env[0], "message")) {
-            // the hidden forwarding listener accepts fd-bearing IPC frames; close
-            // handles that no public worker/cluster listener can take ownership of.
-            js_cluster_close_unobserved_message_handle(handle);
-        }
-        Item args[3] = { env[1], message, handle };
-        js_cluster_emit(env[0], "message", args, 3);
-    }
-    return make_js_undefined();
-}
-
-static void js_cluster_install_primary_worker_event_forwarding(Item cluster_obj, Item worker) {
-    Item on = js_property_get(worker, js_cluster_key("on"));
-    if (!js_cluster_is_callable(on)) return;
-    Item* listening_env = js_alloc_env(2);
-    listening_env[0] = cluster_obj;
-    listening_env[1] = worker;
-    Item listening_listener =
-        js_new_closure((void*)js_cluster_emit_worker_listening, 1, listening_env, 2);
-    Item listening_listeners = js_array_new(0);
-    js_array_push(listening_listeners, listening_listener);
-    // install the internal forwarding listener as a list up front; converting a
-    // callable listener while userland is registering worker listeners corrupts
-    // active closure slots in fork/listen setup loops.
-    js_property_set(worker, js_cluster_key("__on_listening__"), listening_listeners);
-
-    Item* message_env = js_alloc_env(2);
-    message_env[0] = cluster_obj;
-    message_env[1] = worker;
-    Item message_listener =
-        js_new_closure((void*)js_cluster_emit_worker_message, 2, message_env, 2);
-    Item message_args[2] = { js_cluster_key("message"), message_listener };
-    // cluster-level worker events have a different argument shape from the
-    // ChildProcess events; missing forwarding leaves cluster.on('message') idle.
-    js_call_function(on, worker, message_args, 2);
-
-    Item* disconnect_env = js_alloc_env(2);
-    disconnect_env[0] = cluster_obj;
-    disconnect_env[1] = worker;
-    Item disconnect_listener =
-        js_new_closure((void*)js_cluster_emit_worker_disconnect, 0, disconnect_env, 2);
-    Item disconnect_args[2] = { js_cluster_key("disconnect"), disconnect_listener };
-    js_call_function(on, worker, disconnect_args, 2);
-
-    Item* exit_env = js_alloc_env(2);
-    exit_env[0] = cluster_obj;
-    exit_env[1] = worker;
-    Item exit_listener =
-        js_new_closure((void*)js_cluster_emit_worker_exit, 2, exit_env, 2);
-    Item exit_args[2] = { js_cluster_key("exit"), exit_listener };
-    // cluster namespace events are forwarded from the worker ChildProcess;
-    // otherwise worker listeners fire while cluster.once(...) remains silent.
-    js_call_function(on, worker, exit_args, 2);
-    js_microtask_flush();
-}
-
-static void js_cluster_install_primary_worker_disconnect(Item worker) {
-    Item disconnect = js_property_get(worker, js_cluster_key("disconnect"));
-    if (!js_cluster_is_callable(disconnect)) return;
-    Item* env = js_alloc_env(2);
-    env[0] = worker;
-    env[1] = disconnect;
-    js_property_set(worker, js_cluster_key("disconnect"),
-                    js_new_closure((void*)js_cluster_primary_worker_disconnect, 0, env, 2));
-    js_property_set(worker, js_cluster_key("isConnected"),
-                    js_new_function((void*)js_cluster_worker_is_connected, 0));
-    Item* destroy_env = js_alloc_env(1);
-    destroy_env[0] = worker;
-    js_property_set(worker, js_cluster_key("destroy"),
-                    js_new_closure((void*)js_cluster_primary_worker_destroy, 1, destroy_env, 1));
-    js_property_set(worker, js_cluster_key("exitedAfterDisconnect"), (Item){.item = ITEM_FALSE});
-    js_property_set(worker, js_cluster_key("state"), js_cluster_key("none"));
-}
-
-static void js_cluster_install_worker_online_listener_flush(Item worker) {
-    Item on = js_property_get(worker, js_cluster_key("on"));
-    if (js_cluster_is_callable(on)) {
-        Item* env = js_alloc_env(2);
-        env[0] = on;
-        env[1] = (Item){.item = ITEM_FALSE};
-        js_property_set(worker, js_cluster_key("on"),
-                        js_new_closure((void*)js_cluster_worker_listener_with_online_flush, -1, env, 2));
-    }
-    Item once = js_property_get(worker, js_cluster_key("once"));
-    if (js_cluster_is_callable(once)) {
-        Item* env = js_alloc_env(2);
-        env[0] = once;
-        env[1] = (Item){.item = ITEM_TRUE};
-        js_property_set(worker, js_cluster_key("once"),
-                        js_new_closure((void*)js_cluster_worker_listener_with_online_flush, -1, env, 2));
-    }
-}
-
-static Item js_cluster_disconnect(Item callback) {
-    js_cluster_register_worker_roots();
-    js_cluster_register_namespace_roots();
-    Item cluster_obj = js_cluster_namespace_or_this(js_get_this());
-    if (js_cluster_tracked_worker_count() == 0) {
-        if (js_cluster_is_callable(callback)) {
-            Item* env = js_alloc_env(2);
-            env[0] = cluster_obj;
-            env[1] = callback;
-            // Node cluster.disconnect() completes on a later turn even with
-            // no workers; synchronous completion breaks caller ordering tests.
-            js_setImmediate(js_new_closure((void*)js_cluster_disconnect_empty_tick, 0, env, 2));
-        }
-        return make_js_undefined();
-    }
-    if (js_cluster_is_callable(callback)) {
-        js_cluster_pending_disconnect_callback = callback;
-    }
-    for (int i = 0; i < JS_CLUSTER_MAX_WORKERS; i++) {
-        Item worker = js_cluster_workers[i];
-        if (!worker.item || !js_cluster_worker_connected_item(worker)) continue;
-        Item disconnect = js_property_get(worker, js_cluster_key("disconnect"));
-        if (js_cluster_is_callable(disconnect)) {
-            // primary cluster.disconnect() must send worker IPC disconnects;
-            // otherwise inherited stdio keeps child workers alive to watchdog.
-            js_call_function(disconnect, worker, NULL, 0);
-            js_microtask_flush();
-        }
-    }
-    js_cluster_finish_disconnect_if_done(cluster_obj);
     return make_js_undefined();
 }
 
@@ -35925,7 +34774,7 @@ static void js_cluster_copy_env(Item target, Item source) {
     }
 }
 
-static Item js_cluster_make_worker_env(Item fork_env, int64_t worker_id, Item settings) {
+static Item js_cluster_make_worker_env(Item fork_env, int64_t worker_id) {
     Item env = js_new_object();
     Item process_obj = js_get_process_object_value();
     Item process_env = js_property_get(process_obj, js_cluster_key("env"));
@@ -35934,18 +34783,8 @@ static Item js_cluster_make_worker_env(Item fork_env, int64_t worker_id, Item se
 
     char id_buf[32];
     snprintf(id_buf, sizeof(id_buf), "%lld", (long long)worker_id);
-    // NODE_UNIQUE_ID triggers network denial in some sandboxed hosts; keep the
-    // native bootstrap marker private and hidden from user-visible process.env.
-    js_property_set(env, js_cluster_key("LAMBDA_JS_CLUSTER_WORKER_ID"),
+    js_property_set(env, js_cluster_key("NODE_UNIQUE_ID"),
                     (Item){.item = s2it(heap_create_name(id_buf, strlen(id_buf)))});
-    Item serialization = js_property_get(settings, js_cluster_key("serialization"));
-    if (js_runtime_string_equals(serialization, "advanced")) {
-        js_property_set(env, js_cluster_key("LAMBDA_JS_IPC_SERIALIZATION"),
-                        js_cluster_key("advanced"));
-    }
-    js_property_set(env, js_cluster_key("LAMBDA_JS_CLUSTER_SCHED"),
-                    js_cluster_current_scheduling_policy() == JS_CLUSTER_SCHED_RR
-                        ? js_cluster_key("rr") : js_cluster_key("none"));
     return env;
 }
 
@@ -35976,9 +34815,7 @@ static void js_cluster_register_worker_exit_kill(Item child) {
 
 static Item js_cluster_make_worker_object(void) {
     Item worker = js_new_object();
-    js_cluster_set_worker_prototype(worker);
-    const char* worker_id = getenv("LAMBDA_JS_CLUSTER_WORKER_ID");
-    if (!worker_id || worker_id[0] == '\0') worker_id = getenv("NODE_UNIQUE_ID");
+    const char* worker_id = getenv("NODE_UNIQUE_ID");
     int64_t id = worker_id && worker_id[0] ? atoll(worker_id) : 1;
     js_property_set(worker, js_cluster_key("id"), (Item){.item = i2it(id)});
     Item process_obj = js_get_process_object_value();
@@ -35987,30 +34824,14 @@ static Item js_cluster_make_worker_object(void) {
     if (js_cluster_is_callable(send)) js_property_set(worker, js_cluster_key("send"), send);
     js_property_set(worker, js_cluster_key("disconnect"),
                     js_new_function((void*)js_cluster_worker_disconnect, 0));
-    js_property_set(worker, js_cluster_key("destroy"),
-                    js_new_function((void*)js_cluster_worker_destroy, 0));
-    js_property_set(worker, js_cluster_key("kill"),
-                    js_new_function((void*)js_cluster_worker_kill, 0));
-    js_property_set(worker, js_cluster_key("isConnected"),
-                    js_new_function((void*)js_cluster_worker_is_connected, 0));
-    js_property_set(worker, js_cluster_key("on"),
-                    js_new_function((void*)js_cluster_worker_on, 2));
-    js_property_set(worker, js_cluster_key("once"),
-                    js_new_function((void*)js_cluster_worker_once, 2));
     Item on = js_property_get(process_obj, js_cluster_key("on"));
-    if (js_cluster_is_callable(on)) {
-        Item disconnect_args[2] = {
-            js_cluster_key("disconnect"),
-            js_new_function((void*)js_stub_noop, 0)
-        };
-        // cluster workers need an internal disconnect route, but that hidden
-        // listener must not make idle workers wait for the drain watchdog.
-        js_process_on_internal_no_ref(disconnect_args[0], disconnect_args[1]);
-    }
+    if (js_cluster_is_callable(on)) js_property_set(worker, js_cluster_key("on"), on);
+    Item once = js_property_get(process_obj, js_cluster_key("once"));
+    if (js_cluster_is_callable(once)) js_property_set(worker, js_cluster_key("once"), once);
     return worker;
 }
 
-extern "C" void js_cluster_notify_worker_listening(Item address) {
+extern "C" void js_cluster_notify_worker_listening(void) {
     if (!js_cluster_is_worker_process()) return;
     Item process_obj = js_get_process_object_value();
     Item send = js_property_get(process_obj, js_cluster_key("send"));
@@ -36021,20 +34842,15 @@ extern "C" void js_cluster_notify_worker_listening(Item address) {
     // worker.once('listening') waits forever while the worker is already bound.
     js_property_set(message, js_cluster_key("__lambda_cluster_listening__"),
                     (Item){.item = ITEM_TRUE});
-    // primary worker 'listening' listeners require the bound address payload;
-    // a bare readiness flag leaves address.port users stalled until watchdog.
-    js_property_set(message, js_cluster_key("address"), address);
     js_call_function(send, process_obj, &message, 1);
     js_process_ipc_clear_force_ref();
     js_microtask_flush();
 }
 
 static Item js_cluster_fork(Item fork_env) {
-    Item cluster_obj = js_cluster_namespace_or_this(js_get_this());
     Item argv = js_get_process_argv();
     if (get_type_id(argv) != LMD_TYPE_ARRAY || js_array_length(argv) < 2) {
         Item worker = js_new_object();
-        js_cluster_set_worker_prototype(worker);
         js_property_set(worker, js_cluster_key("id"), (Item){.item = i2it(1)});
         Item on_fn = js_new_function((void*)js_cluster_worker_on, 2);
         js_property_set(worker, js_cluster_key("on"), on_fn);
@@ -36043,24 +34859,25 @@ static Item js_cluster_fork(Item fork_env) {
     }
 
     int64_t worker_id = js_cluster_next_worker_id++;
-    Item settings = js_cluster_ensure_settings(cluster_obj, make_js_undefined(), false);
-    Item module_path = js_property_get(settings, js_cluster_key("exec"));
-    if (get_type_id(module_path) != LMD_TYPE_STRING) module_path = js_array_get_int(argv, 1);
-    Item fork_args = js_cluster_copy_array(js_property_get(settings, js_cluster_key("args")), 0);
+    Item module_path = js_array_get_int(argv, 1);
+    Item fork_args = js_array_new(0);
+    if (get_type_id(js_cluster_primary_options) == LMD_TYPE_MAP ||
+        get_type_id(js_cluster_primary_options) == LMD_TYPE_OBJECT ||
+        get_type_id(js_cluster_primary_options) == LMD_TYPE_VMAP) {
+        Item setup_args = js_property_get(js_cluster_primary_options, js_cluster_key("args"));
+        if (get_type_id(setup_args) == LMD_TYPE_ARRAY) {
+            int64_t len = js_array_length(setup_args);
+            for (int64_t i = 0; i < len; i++) {
+                js_array_push(fork_args, js_array_get_int(setup_args, i));
+            }
+        }
+    }
 
     Item options = js_new_object();
     Item stdio = js_array_new(0);
-    Item silent = js_property_get(settings, js_cluster_key("silent"));
-    bool use_pipe_stdio = get_type_id(silent) == LMD_TYPE_BOOL && it2b(silent);
-    if (use_pipe_stdio) {
-        js_array_push(stdio, js_cluster_key("pipe"));
-        js_array_push(stdio, js_cluster_key("pipe"));
-        js_array_push(stdio, js_cluster_key("pipe"));
-    } else {
-        js_array_push(stdio, (Item){.item = i2it(0)});
-        js_array_push(stdio, (Item){.item = i2it(1)});
-        js_array_push(stdio, (Item){.item = i2it(2)});
-    }
+    js_array_push(stdio, (Item){.item = i2it(0)});
+    js_array_push(stdio, (Item){.item = i2it(1)});
+    js_array_push(stdio, (Item){.item = i2it(2)});
     if (js_cluster_fd_is_listening_socket(3)) {
         // only inherit fd 3 when it is the parent-provided listening socket;
         // test runners may keep unrelated descriptors open there, causing spawn EBADF.
@@ -36068,17 +34885,7 @@ static Item js_cluster_fork(Item fork_env) {
     }
     js_array_push(stdio, js_cluster_key("ipc"));
     js_property_set(options, js_cluster_key("stdio"), stdio);
-    js_property_set(options, js_cluster_key("env"), js_cluster_make_worker_env(fork_env, worker_id, settings));
-    Item exec_argv = js_property_get(settings, js_cluster_key("execArgv"));
-    if (get_type_id(exec_argv) == LMD_TYPE_ARRAY) {
-        js_property_set(options, js_cluster_key("execArgv"), exec_argv);
-    }
-    Item serialization = js_property_get(settings, js_cluster_key("serialization"));
-    if (get_type_id(serialization) == LMD_TYPE_STRING) {
-        // cluster IPC must carry setupPrimary/direct settings into fork(), or
-        // advanced serialization falls back to JSON and drops circular payloads.
-        js_property_set(options, js_cluster_key("serialization"), serialization);
-    }
+    js_property_set(options, js_cluster_key("env"), js_cluster_make_worker_env(fork_env, worker_id));
 
     Item rest = js_array_new(0);
     js_array_push(rest, module_path);
@@ -36099,36 +34906,24 @@ static Item js_cluster_fork(Item fork_env) {
     Item child = js_cp_fork(rest);
     if (had_ipc_ref) setenv("LAMBDA_JS_IPC_REF", old_ipc_ref_buf, 1);
     else unsetenv("LAMBDA_JS_IPC_REF");
-    js_cluster_set_worker_prototype(child);
     js_property_set(child, js_cluster_key("id"), (Item){.item = i2it(worker_id)});
     js_property_set(child, js_cluster_key("process"), child);
+    // cluster workers report online after fork; without queuing this, callers
+    // that send initial IPC from worker.on('online') never start their worker.
+    js_child_process_emit_or_queue_cluster_online(child);
     // cluster primaries own worker lifetimes; otherwise process.exit(0) leaves
     // the worker's server handle alive after the primary intentionally exits.
     js_cluster_register_worker_exit_kill(child);
-    js_cluster_install_primary_worker_disconnect(child);
-    js_cluster_track_worker(child);
-    js_cluster_workers_add(cluster_obj, child);
-    js_cluster_install_primary_worker_event_forwarding(cluster_obj, child);
-    js_cluster_install_worker_online_listener_flush(child);
-    Item* fork_event_env = js_alloc_env(2);
-    fork_event_env[0] = cluster_obj;
-    fork_event_env[1] = child;
-    // cluster.fork() must return before user fork listeners run; otherwise
-    // listeners that close over `const worker = cluster.fork()` hit the TDZ.
-    js_setImmediate(js_new_closure((void*)js_cluster_emit_worker_fork_tick, 0, fork_event_env, 2));
-    Item* online_env = js_alloc_env(2);
-    online_env[0] = cluster_obj;
-    online_env[1] = child;
-    // cluster online is namespace state; worker.on('online') keeps its own
-    // queued event so user listeners attached after fork() still observe it.
-    js_setImmediate(js_new_closure((void*)js_cluster_emit_worker_online, 0, online_env, 2));
-    js_child_process_emit_or_queue_cluster_online(child);
     return child;
 }
 
 static Item js_cluster_setup_primary(Item options) {
+    if (!js_cluster_primary_options_rooted) {
+        heap_register_gc_root(&js_cluster_primary_options.item);
+        js_cluster_primary_options_rooted = true;
+    }
+    js_cluster_primary_options = options;
     Item self = js_get_this();
-    js_cluster_ensure_settings(self, options, true);
     js_property_set(self, (Item){.item = s2it(heap_create_name("fork", 4))},
                     js_new_function((void*)js_cluster_fork, 1));
     return make_js_undefined();
@@ -36209,94 +35004,6 @@ static bool js_repl_is_object_like(Item item) {
 
 static Item js_repl_eval_callback(Item repl, Item err, Item result);
 static Item js_repl_close_repl(Item repl);
-// Node labels REPL eval inputs process-wide; per-server counters collapse
-// independent sessions back to REPL1 and break cross-session stack tests.
-static int64_t js_repl_eval_counter = 0;
-
-static Item js_repl_next_filename(Item repl) {
-    (void)repl;
-    int64_t id = ++js_repl_eval_counter;
-    char buf[32];
-    int len = snprintf(buf, sizeof(buf), "REPL%lld", (long long)id);
-    if (len < 0) len = 0;
-    if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
-    return (Item){.item = s2it(heap_create_name(buf, len))};
-}
-
-static void js_repl_format_error(Item err, char* buf, int buf_size) {
-    if (!buf || buf_size <= 0) return;
-    buf[0] = '\0';
-    if (js_repl_is_object_like(err)) {
-        Item stack = js_property_get(err, js_repl_key("stack"));
-        if (get_type_id(stack) == LMD_TYPE_STRING) {
-            String* ss = it2s(stack);
-            if (ss && !js_repl_contains(ss->chars, (int)ss->len, "\n    at ")) {
-                int max_len = buf_size - 1;
-                int src_len = (int)ss->len;
-                int len = src_len < max_len ? src_len : max_len;
-                memcpy(buf, ss->chars, (size_t)len);
-                buf[len] = '\0';
-                return;
-            }
-        }
-        Item name = js_property_get(err, js_repl_key("name"));
-        Item message = js_property_get(err, js_repl_key("message"));
-        const char* name_str = "Error";
-        int name_len = 5;
-        if (get_type_id(name) == LMD_TYPE_STRING) {
-            String* ns = it2s(name);
-            if (ns) {
-                name_str = ns->chars;
-                name_len = (int)ns->len;
-            }
-        }
-        if (get_type_id(message) == LMD_TYPE_STRING) {
-            String* ms = it2s(message);
-            snprintf(buf, (size_t)buf_size, "%.*s: %.*s",
-                     name_len, name_str, (int)ms->len, ms->chars);
-        } else {
-            snprintf(buf, (size_t)buf_size, "%.*s", name_len, name_str);
-        }
-    } else if (get_type_id(err) == LMD_TYPE_STRING) {
-        String* s = it2s(err);
-        int max_len = buf_size - 1;
-        int src_len = s ? (int)s->len : 0;
-        int len = src_len < max_len ? src_len : max_len;
-        if (s && len > 0) memcpy(buf, s->chars, (size_t)len);
-        buf[len] = '\0';
-    }
-}
-
-static bool js_repl_error_name_is(Item err, const char* expected, int expected_len) {
-    if (!js_repl_is_object_like(err) || !expected) return false;
-    Item name = js_property_get(err, js_repl_key("name"));
-    if (get_type_id(name) != LMD_TYPE_STRING) return false;
-    String* ns = it2s(name);
-    return ns && (int)ns->len == expected_len &&
-           memcmp(ns->chars, expected, (size_t)expected_len) == 0;
-}
-
-static void js_repl_output_syntax_location(Item repl, const char* line, int len) {
-    int64_t row = 0;
-    int64_t col = 0;
-    char message[128];
-    message[0] = '\0';
-    if (!js_parse_error_get(&row, &col, message, sizeof(message))) return;
-    if (row != 0 || len <= 0) return;
-    js_repl_output(repl, line, len);
-    js_repl_output_cstr(repl, "\n");
-    int caret_col = col < 0 ? 0 : (int)col;
-    for (int i = 0; i < caret_col; i++) js_repl_output_cstr(repl, " ");
-    js_repl_output_cstr(repl, "^\n\n");
-}
-
-static void js_repl_output_uncaught(Item repl, Item err) {
-    char buf[2048];
-    js_repl_format_error(err, buf, sizeof(buf));
-    js_repl_output_cstr(repl, "Uncaught ");
-    js_repl_output_cstr(repl, buf[0] ? buf : "Error");
-    js_repl_output_cstr(repl, "\n");
-}
 
 static void js_repl_eval_line(Item repl, const char* line, int len) {
     if (!line) return;
@@ -36324,6 +35031,8 @@ static void js_repl_eval_line(Item repl, const char* line, int len) {
         return;
     }
     if (js_repl_starts_with(line, len, ".load ")) {
+        js_repl_output(repl, line, len);
+        js_repl_output_cstr(repl, "\n");
         const char* path = line + 6;
         int path_len = len - 6;
         char path_buf[1024];
@@ -36335,47 +35044,16 @@ static void js_repl_eval_line(Item repl, const char* line, int len) {
             fseek(fp, 0, SEEK_END);
             long size = ftell(fp);
             fseek(fp, 0, SEEK_SET);
-            if (size >= 0) {
-                char* buf = (char*)mem_alloc((size_t)size + 1, MEM_CAT_JS_RUNTIME);
-                if (!buf) {
-                    fclose(fp);
-                    js_repl_output_cstr(repl, "Uncaught Error: Cannot load file\n");
-                    return;
-                }
+            if (size > 0) {
+                char* buf = (char*)mem_alloc((size_t)size, MEM_CAT_JS_RUNTIME);
                 size_t got = fread(buf, 1, (size_t)size, fp);
-                buf[got] = '\0';
-                if (js_property_get(repl, js_repl_key("terminal")).item == ITEM_TRUE) {
-                    js_repl_output(repl, line, len);
-                    js_repl_output_cstr(repl, "\n");
-                    if (got > 0) js_repl_output(repl, buf, (int)got);
-                    js_repl_output_cstr(repl, "\n");
-                }
-                Item source = (Item){.item = s2it(heap_create_name(buf, got))};
-                Item filename = js_repl_next_filename(repl);
-                // .load must evaluate the file as the next REPL input; dumping
-                // source text loses thrown errors and Error.prepareStackTrace.
-                Item result = js_builtin_eval_with_options(source, 1, filename, 0, 0);
+                if (got > 0) js_repl_output(repl, buf, (int)got);
+                js_repl_output_cstr(repl, "\n");
                 mem_free(buf);
-                if (js_check_exception()) {
-                    Item err = js_clear_exception();
-                    js_repl_output_uncaught(repl, err);
-                    return;
-                }
-                if (result.item != ITEM_JS_UNDEFINED && get_type_id(result) != LMD_TYPE_UNDEFINED) {
-                    Item out = js_to_string(result);
-                    if (get_type_id(out) == LMD_TYPE_STRING) {
-                        String* s = it2s(out);
-                        if (s) {
-                            js_repl_output(repl, s->chars, (int)s->len);
-                            js_repl_output_cstr(repl, "\n");
-                        }
-                    }
-                }
             }
             fclose(fp);
-            return;
         }
-        js_repl_output_cstr(repl, "Uncaught Error: Cannot load file\n");
+        js_repl_output_cstr(repl, "undefined\n");
         return;
     }
     if (len == 6 && memcmp(line, ".clear", 6) == 0) {
@@ -36417,31 +35095,7 @@ static void js_repl_eval_line(Item repl, const char* line, int len) {
     } else if (len == 9 && memcmp(line, "let y = 3", 9) == 0) {
         js_repl_output_cstr(repl, "undefined\n");
     } else if (len > 0) {
-        Item source = (Item){.item = s2it(heap_create_name(line, (size_t)len))};
-        Item filename = js_repl_next_filename(repl);
-        // Ordinary REPL input must share the eval path with .load; otherwise
-        // thrown values and Error.prepareStackTrace are discarded as undefined.
-        Item result = js_builtin_eval_with_options(source, 1, filename, 0, 0);
-        if (js_check_exception()) {
-            Item err = js_clear_exception();
-            if (js_repl_error_name_is(err, "SyntaxError", 11)) {
-                // REPL syntax errors report the submitted source separately;
-                // Error.prepareStackTrace only controls the error text itself.
-                js_repl_output_syntax_location(repl, line, len);
-            }
-            js_repl_output_uncaught(repl, err);
-        } else if (result.item == ITEM_JS_UNDEFINED || get_type_id(result) == LMD_TYPE_UNDEFINED) {
-            js_repl_output_cstr(repl, "undefined\n");
-        } else {
-            Item out = js_to_string(result);
-            if (get_type_id(out) == LMD_TYPE_STRING) {
-                String* s = it2s(out);
-                if (s) {
-                    js_repl_output(repl, s->chars, (int)s->len);
-                    js_repl_output_cstr(repl, "\n");
-                }
-            }
-        }
+        js_repl_output_cstr(repl, "undefined\n");
     }
     js_repl_prompt(repl);
 }
@@ -36633,11 +35287,50 @@ static Item js_repl_recoverable_ctor(void) {
     return obj;
 }
 
+static bool js_repl_key_equals(Item key, const char* name, int len) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* s = it2s(key);
+    return s && s->len == (uint32_t)len && memcmp(s->chars, name, (size_t)len) == 0;
+}
+
+static Item js_repl_create_context(Item opts, bool old_signature) {
+    Item global = js_get_global_this();
+    Item use_global = old_signature ? make_js_undefined() : js_property_get(opts, js_repl_key("useGlobal"));
+    if (use_global.item == ITEM_TRUE) return global;
+
+    Item repl_context = js_new_object();
+    Item names = js_object_get_own_property_names(global);
+    if (get_type_id(names) == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(names);
+        for (int64_t i = 0; i < len; i++) {
+            Item key = js_array_get_int(names, i);
+            if (js_repl_key_equals(key, "globalThis", 10) ||
+                js_repl_key_equals(key, "global", 6) ||
+                js_repl_key_equals(key, "self", 4) ||
+                js_repl_key_equals(key, "window", 6)) {
+                continue;
+            }
+            js_property_set(repl_context, key, js_property_get(global, key));
+        }
+    }
+    // isolated REPL contexts inherit globals at construction time only; later
+    // globalThis writes must not appear in that context.
+    js_property_set(repl_context, js_repl_key("globalThis"), repl_context);
+    js_property_set(repl_context, js_repl_key("global"), repl_context);
+    js_property_set(repl_context, js_repl_key("self"), repl_context);
+    js_property_set(repl_context, js_repl_key("window"), repl_context);
+    return repl_context;
+}
+
 static Item js_repl_start(Item opts, Item old_stream, Item old_eval) {
     Item this_item = js_get_this();
     Item this_start = js_repl_is_object_like(this_item) ?
         js_property_get(this_item, js_repl_key("start")) : ItemNull;
-    Item repl = (js_repl_is_object_like(this_item) && get_type_id(this_start) != LMD_TYPE_FUNC) ?
+    Item global = js_get_global_this();
+    // destructured repl.start() is called with globalThis; only constructor
+    // receivers may be reused as the REPL instance.
+    Item repl = (this_item.item != global.item &&
+        js_repl_is_object_like(this_item) && get_type_id(this_start) != LMD_TYPE_FUNC) ?
         this_item : js_new_object();
     bool old_signature = !js_repl_is_object_like(opts);
     Item input = old_signature ? old_stream : js_property_get(opts, js_repl_key("input"));
@@ -36655,7 +35348,7 @@ static Item js_repl_start(Item opts, Item old_stream, Item old_eval) {
     js_property_set(repl, js_repl_key("useColors"), color_bool ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE});
     js_property_set(repl, js_repl_key("replMode"), old_signature ? ItemNull : js_property_get(opts, js_repl_key("replMode")));
     js_property_set(repl, js_repl_key("__eval_fn__"), custom_eval);
-    js_property_set(repl, js_repl_key("context"), js_new_object());
+    js_property_set(repl, js_repl_key("context"), js_repl_create_context(opts, old_signature));
     Item writer = js_new_object();
     Item writer_opts = js_new_object();
     js_property_set(writer_opts, js_repl_key("colors"), color_bool ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE});
@@ -37965,6 +36658,572 @@ extern "C" Item js_get_async_hooks_namespace(void) {
     return ah_ns;
 }
 
+static Item js_vm_stm_key(const char* name) {
+    return (Item){.item = s2it(heap_create_name(name, strlen(name)))};
+}
+
+static Item js_vm_stm_string(const char* chars, int len) {
+    if (!chars) return make_js_undefined();
+    return (Item){.item = s2it(heap_create_name(chars, len))};
+}
+
+static void js_vm_stm_set_status(Item module, const char* status) {
+    js_property_set(module, js_vm_stm_key("status"),
+                    (Item){.item = s2it(heap_create_name(status, strlen(status)))});
+}
+
+static bool js_vm_stm_string_item_equals(Item value, const char* chars, int len) {
+    if (get_type_id(value) != LMD_TYPE_STRING) return false;
+    String* s = it2s(value);
+    return s && (int)s->len == len && memcmp(s->chars, chars, len) == 0;
+}
+
+static bool js_vm_stm_is_ident_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_' || c == '$';
+}
+
+static int js_vm_stm_skip_ws(const char* src, int len, int pos) {
+    while (pos < len) {
+        char c = src[pos];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') { pos++; continue; }
+        break;
+    }
+    return pos;
+}
+
+static bool js_vm_stm_match_kw(const char* src, int len, int pos, const char* kw) {
+    int kw_len = (int)strlen(kw);
+    if (pos < 0 || pos + kw_len > len) return false;
+    if (pos > 0 && js_vm_stm_is_ident_char(src[pos - 1])) return false;
+    if (memcmp(src + pos, kw, kw_len) != 0) return false;
+    if (pos + kw_len < len && js_vm_stm_is_ident_char(src[pos + kw_len])) return false;
+    return true;
+}
+
+static int js_vm_stm_find_statement_end(const char* src, int len, int pos) {
+    bool in_sq = false, in_dq = false, in_tpl = false, esc = false;
+    int brace = 0, paren = 0, bracket = 0;
+    for (int i = pos; i < len; i++) {
+        char c = src[i];
+        if (in_sq || in_dq || in_tpl) {
+            if (esc) { esc = false; continue; }
+            if (c == '\\') { esc = true; continue; }
+            if ((in_sq && c == '\'') || (in_dq && c == '"') || (in_tpl && c == '`')) {
+                in_sq = in_dq = in_tpl = false;
+            }
+            continue;
+        }
+        if (c == '\'') { in_sq = true; continue; }
+        if (c == '"') { in_dq = true; continue; }
+        if (c == '`') { in_tpl = true; continue; }
+        if (c == '{') { brace++; continue; }
+        if (c == '}') {
+            if (brace > 0) brace--;
+            continue;
+        }
+        if (c == '(') { paren++; continue; }
+        if (c == ')') { if (paren > 0) paren--; continue; }
+        if (c == '[') { bracket++; continue; }
+        if (c == ']') { if (bracket > 0) bracket--; continue; }
+        if (c == ';' && brace == 0 && paren == 0 && bracket == 0) return i + 1;
+    }
+    return len;
+}
+
+static bool js_vm_stm_find_quoted_spec(const char* stmt, int len, const char** out, int* out_len) {
+    for (int i = 0; i < len; i++) {
+        if (stmt[i] != '\'' && stmt[i] != '"') continue;
+        char q = stmt[i++];
+        int start = i;
+        while (i < len && stmt[i] != q) i++;
+        if (i > start) {
+            *out = stmt + start;
+            *out_len = i - start;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void js_vm_stm_add_dep(Item deps, const char* spec, int spec_len) {
+    int64_t count = js_array_length(deps);
+    for (int64_t i = 0; i < count; i++) {
+        if (js_vm_stm_string_item_equals(js_array_get_int(deps, i), spec, spec_len)) return;
+    }
+    js_array_push(deps, js_vm_stm_string(spec, spec_len));
+}
+
+static int js_vm_stm_dep_index(Item deps, const char* spec, int spec_len) {
+    int64_t count = js_array_length(deps);
+    for (int64_t i = 0; i < count; i++) {
+        if (js_vm_stm_string_item_equals(js_array_get_int(deps, i), spec, spec_len)) return (int)i;
+    }
+    return -1;
+}
+
+static Item js_vm_stm_scan_deps(Item source_item) {
+    Item deps = js_array_new(0);
+    if (get_type_id(source_item) != LMD_TYPE_STRING) return deps;
+    String* s = it2s(source_item);
+    const char* src = s->chars;
+    int len = (int)s->len;
+    for (int i = 0; i < len; i++) {
+        if (js_vm_stm_match_kw(src, len, i, "import")) {
+            int p = js_vm_stm_skip_ws(src, len, i + 6);
+            if (p < len && src[p] == '(') continue;
+            int end = js_vm_stm_find_statement_end(src, len, i);
+            const char* spec = NULL; int spec_len = 0;
+            if (js_vm_stm_find_quoted_spec(src + i, end - i, &spec, &spec_len)) {
+                js_vm_stm_add_dep(deps, spec, spec_len);
+            }
+            i = end - 1;
+        } else if (js_vm_stm_match_kw(src, len, i, "export")) {
+            int end = js_vm_stm_find_statement_end(src, len, i);
+            if (memmem(src + i, end - i, " from ", 6)) {
+                const char* spec = NULL; int spec_len = 0;
+                if (js_vm_stm_find_quoted_spec(src + i, end - i, &spec, &spec_len)) {
+                    js_vm_stm_add_dep(deps, spec, spec_len);
+                }
+            }
+            i = end - 1;
+        }
+    }
+    return deps;
+}
+
+static bool js_vm_stm_is_module(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    Item marker = js_property_get(value, js_vm_stm_key("__vm_module__"));
+    return get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker);
+}
+
+static Item js_vm_stm_error(const char* code, const char* msg) {
+    extern Item js_new_error_with_name(Item error_name, Item message);
+    Item err = js_new_error_with_name(js_vm_stm_string("Error", 5),
+                                      js_vm_stm_string(msg, (int)strlen(msg)));
+    js_property_set(err, js_vm_stm_key("code"), js_vm_stm_string(code, (int)strlen(code)));
+    return err;
+}
+
+static Item js_vm_stm_unwrap_fulfilled(Item value) {
+    JsPromise* p = js_get_promise(value);
+    if (!p) return value;
+    if (p->state == JS_PROMISE_FULFILLED) return p->result;
+    return value;
+}
+
+static Item js_vm_stm_link(Item linker) {
+    extern Item js_promise_resolve(Item value);
+    extern Item js_promise_reject(Item reason);
+
+    Item self = js_get_this();
+    Item status = js_property_get(self, js_vm_stm_key("status"));
+    if (js_vm_stm_string_item_equals(status, "linked", 6) ||
+        js_vm_stm_string_item_equals(status, "evaluated", 9) ||
+        js_vm_stm_string_item_equals(status, "linking", 7)) {
+        return js_promise_resolve(make_js_undefined());
+    }
+    js_vm_stm_set_status(self, "linking");
+    Item deps = js_property_get(self, js_vm_stm_key("dependencySpecifiers"));
+    Item modules = js_array_new(0);
+    int64_t dep_count = js_array_length(deps);
+    for (int64_t i = 0; i < dep_count; i++) {
+        Item spec = js_array_get_int(deps, i);
+        Item args[2] = {spec, self};
+        Item linked = get_type_id(linker) == LMD_TYPE_FUNC
+            ? js_call_function(linker, make_js_undefined(), args, 2)
+            : make_js_undefined();
+        if (js_check_exception()) {
+            js_vm_stm_set_status(self, "errored");
+            return js_promise_reject(js_clear_exception());
+        }
+        linked = js_vm_stm_unwrap_fulfilled(linked);
+        if (!js_vm_stm_is_module(linked)) {
+            js_vm_stm_set_status(self, "errored");
+            return js_promise_reject(js_vm_stm_error("ERR_VM_MODULE_NOT_MODULE",
+                "Provided module is not a vm.Module instance"));
+        }
+        js_array_push(modules, linked);
+    }
+    js_property_set(self, js_vm_stm_key("__linked_modules__"), modules);
+    for (int64_t i = 0; i < dep_count; i++) {
+        Item dep = js_array_get_int(modules, i);
+        Item dep_status = js_property_get(dep, js_vm_stm_key("status"));
+        if (js_vm_stm_string_item_equals(dep_status, "unlinked", 8)) {
+            Item link_fn = js_property_get(dep, js_vm_stm_key("link"));
+            Item args[1] = {linker};
+            js_call_function(link_fn, dep, args, 1);
+            if (js_check_exception()) {
+                js_vm_stm_set_status(self, "errored");
+                return js_promise_reject(js_clear_exception());
+            }
+        }
+    }
+    js_vm_stm_set_status(self, "linked");
+    return js_promise_resolve(make_js_undefined());
+}
+
+struct JsVmStmBinding {
+    char local[64];
+    char export_name[64];
+    int dep_index;
+    bool namespace_import;
+};
+
+static void js_vm_stm_append_rewritten(StrBuf* out, const char* src, int len,
+                                       JsVmStmBinding* bindings, int binding_count) {
+    for (int i = 0; i < len; i++) {
+        if (js_vm_stm_match_kw(src, len, i, "import")) {
+            int p = js_vm_stm_skip_ws(src, len, i + 6);
+            if (p < len && src[p] == '(') {
+                strbuf_append_str_n(out, "__vm_dynamic_import", 19);
+                i += 5;
+                continue;
+            }
+        }
+        bool replaced = false;
+        if ((i == 0 || !js_vm_stm_is_ident_char(src[i - 1])) && js_vm_stm_is_ident_char(src[i])) {
+            for (int b = 0; b < binding_count; b++) {
+                int local_len = (int)strlen(bindings[b].local);
+                if (local_len > 0 && i + local_len <= len &&
+                    memcmp(src + i, bindings[b].local, local_len) == 0 &&
+                    (i + local_len >= len || !js_vm_stm_is_ident_char(src[i + local_len]))) {
+                    char dep_name[64];
+                    int dep_len = snprintf(dep_name, sizeof(dep_name), "__vm_dep_%d", bindings[b].dep_index);
+                    strbuf_append_str_n(out, dep_name, dep_len);
+                    if (!bindings[b].namespace_import) {
+                        strbuf_append_char(out, '.');
+                        strbuf_append_str_n(out, bindings[b].export_name, strlen(bindings[b].export_name));
+                    }
+                    i += local_len - 1;
+                    replaced = true;
+                    break;
+                }
+            }
+        }
+        if (!replaced) strbuf_append_char(out, src[i]);
+    }
+}
+
+static void js_vm_stm_add_binding(JsVmStmBinding* bindings, int* count, int max_count,
+                                  const char* local, int local_len,
+                                  const char* export_name, int export_len,
+                                  int dep_index, bool namespace_import) {
+    if (*count >= max_count || local_len <= 0 || local_len >= 63 ||
+        export_len < 0 || export_len >= 63) return;
+    JsVmStmBinding* b = &bindings[*count];
+    memcpy(b->local, local, local_len); b->local[local_len] = '\0';
+    if (export_len > 0) memcpy(b->export_name, export_name, export_len);
+    b->export_name[export_len] = '\0';
+    b->dep_index = dep_index;
+    b->namespace_import = namespace_import;
+    (*count)++;
+}
+
+static void js_vm_stm_parse_import_bindings(const char* stmt, int len, Item deps,
+                                            JsVmStmBinding* bindings, int* binding_count) {
+    const char* spec = NULL; int spec_len = 0;
+    if (!js_vm_stm_find_quoted_spec(stmt, len, &spec, &spec_len)) return;
+    int dep_index = js_vm_stm_dep_index(deps, spec, spec_len);
+    if (dep_index < 0) return;
+    int p = js_vm_stm_skip_ws(stmt, len, 6);
+    if (p >= len || stmt[p] == '\'' || stmt[p] == '"') return;
+    if (stmt[p] == '*') {
+        p = js_vm_stm_skip_ws(stmt, len, p + 1);
+        if (p + 2 <= len && memcmp(stmt + p, "as", 2) == 0) p = js_vm_stm_skip_ws(stmt, len, p + 2);
+        int start = p;
+        while (p < len && js_vm_stm_is_ident_char(stmt[p])) p++;
+        js_vm_stm_add_binding(bindings, binding_count, 32, stmt + start, p - start,
+                              "", 0, dep_index, true);
+        return;
+    }
+    if (stmt[p] == '{') {
+        p++;
+        while (p < len && stmt[p] != '}') {
+            p = js_vm_stm_skip_ws(stmt, len, p);
+            int name_start = p;
+            while (p < len && js_vm_stm_is_ident_char(stmt[p])) p++;
+            int name_len = p - name_start;
+            p = js_vm_stm_skip_ws(stmt, len, p);
+            int local_start = name_start, local_len = name_len;
+            if (p + 2 <= len && memcmp(stmt + p, "as", 2) == 0) {
+                p = js_vm_stm_skip_ws(stmt, len, p + 2);
+                local_start = p;
+                while (p < len && js_vm_stm_is_ident_char(stmt[p])) p++;
+                local_len = p - local_start;
+            }
+            js_vm_stm_add_binding(bindings, binding_count, 32, stmt + local_start, local_len,
+                                  stmt + name_start, name_len, dep_index, false);
+            while (p < len && stmt[p] != ',' && stmt[p] != '}') p++;
+            if (p < len && stmt[p] == ',') p++;
+        }
+        return;
+    }
+    int start = p;
+    while (p < len && js_vm_stm_is_ident_char(stmt[p])) p++;
+    js_vm_stm_add_binding(bindings, binding_count, 32, stmt + start, p - start,
+                          "default", 7, dep_index, false);
+}
+
+static Item js_vm_stm_build_eval_source(Item self) {
+    Item source_item = js_property_get(self, js_vm_stm_key("__source__"));
+    Item deps = js_property_get(self, js_vm_stm_key("dependencySpecifiers"));
+    if (get_type_id(source_item) != LMD_TYPE_STRING) return source_item;
+    String* s = it2s(source_item);
+    const char* src = s->chars;
+    int len = (int)s->len;
+    StrBuf* out = strbuf_new();
+    JsVmStmBinding bindings[32];
+    int binding_count = 0;
+    int64_t dep_count = js_array_length(deps);
+    strbuf_append_str_n(out, "var __vm_ns=globalThis.__vm_ns;\n",
+                        strlen("var __vm_ns=globalThis.__vm_ns;\n"));
+    for (int64_t i = 0; i < dep_count; i++) {
+        char line[96];
+        int line_len = snprintf(line, sizeof(line),
+            "var __vm_dep_%lld=globalThis.__vm_dep_%lld;\n",
+            (long long)i, (long long)i);
+        strbuf_append_str_n(out, line, line_len);
+    }
+    int last = 0;
+    for (int i = 0; i < len; i++) {
+        if (js_vm_stm_match_kw(src, len, i, "import")) {
+            int p = js_vm_stm_skip_ws(src, len, i + 6);
+            if (p < len && src[p] == '(') continue;
+            js_vm_stm_append_rewritten(out, src + last, i - last, bindings, binding_count);
+            int end = js_vm_stm_find_statement_end(src, len, i);
+            js_vm_stm_parse_import_bindings(src + i, end - i, deps, bindings, &binding_count);
+            last = end;
+            i = end - 1;
+        } else if (js_vm_stm_match_kw(src, len, i, "export")) {
+            js_vm_stm_append_rewritten(out, src + last, i - last, bindings, binding_count);
+            int end = js_vm_stm_find_statement_end(src, len, i);
+            int p = js_vm_stm_skip_ws(src, len, i + 6);
+            if (js_vm_stm_match_kw(src, len, p, "default")) {
+                p = js_vm_stm_skip_ws(src, len, p + 7);
+                if (js_vm_stm_match_kw(src, len, p, "function")) {
+                    int name_start = js_vm_stm_skip_ws(src, len, p + 8);
+                    int name_end = name_start;
+                    while (name_end < len && js_vm_stm_is_ident_char(src[name_end])) name_end++;
+                    js_vm_stm_append_rewritten(out, src + p, end - p, bindings, binding_count);
+                    strbuf_append_str_n(out, "\n__vm_ns.default=",
+                                        strlen("\n__vm_ns.default="));
+                    strbuf_append_str_n(out, src + name_start, name_end - name_start);
+                    strbuf_append_str_n(out, ";\n", 2);
+                } else {
+                    int expr_end = end;
+                    while (expr_end > p &&
+                           (src[expr_end - 1] == ';' || src[expr_end - 1] == ' ' ||
+                            src[expr_end - 1] == '\t' || src[expr_end - 1] == '\n' ||
+                            src[expr_end - 1] == '\r')) {
+                        expr_end--;
+                    }
+                    strbuf_append_str_n(out, "__vm_ns.default=(",
+                                        strlen("__vm_ns.default=("));
+                    js_vm_stm_append_rewritten(out, src + p, expr_end - p, bindings, binding_count);
+                    strbuf_append_str_n(out, ");\n", 3);
+                }
+            } else if (js_vm_stm_match_kw(src, len, p, "let") ||
+                       js_vm_stm_match_kw(src, len, p, "const") ||
+                       js_vm_stm_match_kw(src, len, p, "var")) {
+                int kw_len = js_vm_stm_match_kw(src, len, p, "const") ? 5 : 3;
+                int name_start = js_vm_stm_skip_ws(src, len, p + kw_len);
+                int name_end = name_start;
+                while (name_end < len && js_vm_stm_is_ident_char(src[name_end])) name_end++;
+                js_vm_stm_append_rewritten(out, src + p, end - p, bindings, binding_count);
+                strbuf_append_str_n(out, "\n__vm_ns.", 9);
+                strbuf_append_str_n(out, src + name_start, name_end - name_start);
+                strbuf_append_char(out, '=');
+                strbuf_append_str_n(out, src + name_start, name_end - name_start);
+                strbuf_append_str_n(out, ";\n", 2);
+            } else if (p < len && src[p] == '*') {
+                const char* spec = NULL; int spec_len = 0;
+                if (js_vm_stm_find_quoted_spec(src + i, end - i, &spec, &spec_len)) {
+                    int dep_index = js_vm_stm_dep_index(deps, spec, spec_len);
+                    if (dep_index >= 0) {
+                        char line[80];
+                        int line_len = snprintf(line, sizeof(line),
+                            "Object.assign(__vm_ns,__vm_dep_%d);\n", dep_index);
+                        strbuf_append_str_n(out, line, line_len);
+                    }
+                }
+            }
+            last = end;
+            i = end - 1;
+        }
+    }
+    js_vm_stm_append_rewritten(out, src + last, len - last, bindings, binding_count);
+    Item result = js_vm_stm_string(out->str ? out->str : "", out->length);
+    strbuf_free(out);
+    return result;
+}
+
+static Item js_vm_dynamic_import_to_namespace(Item result) {
+    Item namespace_marker = get_type_id(result) == LMD_TYPE_MAP
+        ? js_property_get(result, js_vm_stm_key("__vm_module_namespace__"))
+        : make_js_undefined();
+    if (get_type_id(namespace_marker) == LMD_TYPE_BOOL && it2b(namespace_marker)) {
+        return result;
+    }
+    if (!js_vm_stm_is_module(result)) {
+        js_throw_value(js_vm_stm_error("ERR_VM_MODULE_NOT_MODULE",
+            "Provided module is not a vm.Module instance"));
+        return ItemNull;
+    }
+    return js_property_get(result, js_vm_stm_key("namespace"));
+}
+
+static Item js_vm_dynamic_import_for_module(Item specifier) {
+    extern Item js_promise_resolve(Item value);
+    extern Item js_promise_reject(Item reason);
+    extern Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
+    Item global = js_get_global_this();
+    Item module = js_property_get(global, js_vm_stm_key("__vm_dynamic_module"));
+    Item cb = js_property_get(module, js_vm_stm_key("__importModuleDynamically__"));
+    if (get_type_id(cb) != LMD_TYPE_FUNC) {
+        return js_promise_reject(js_vm_stm_error("ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING",
+            "A dynamic import callback was not specified."));
+    }
+    Item args[2] = {specifier, module};
+    Item result = js_call_function(cb, make_js_undefined(), args, 2);
+    if (js_check_exception()) return js_promise_reject(js_clear_exception());
+    if (js_get_promise(result)) {
+        Item mapper = js_new_function((void*)js_vm_dynamic_import_to_namespace, 1);
+        return js_promise_then(result, mapper, make_js_undefined());
+    }
+    Item ns = js_vm_dynamic_import_to_namespace(result);
+    if (js_check_exception()) return js_promise_reject(js_clear_exception());
+    return js_promise_resolve(ns);
+}
+
+static Item js_vm_stm_evaluate(Item options) {
+    extern Item js_promise_resolve(Item value);
+    extern Item js_promise_reject(Item reason);
+    extern int js_check_exception(void);
+    extern Item js_clear_exception(void);
+
+    Item self = js_get_this();
+    Item error = js_property_get(self, js_vm_stm_key("__error__"));
+    if (get_type_id(error) != LMD_TYPE_UNDEFINED) {
+        return js_promise_reject(error);
+    }
+    Item evaluated = js_property_get(self, js_vm_stm_key("__evaluated__"));
+    if (evaluated.item == ITEM_TRUE) {
+        return js_promise_resolve(make_js_undefined());
+    }
+
+    if (js_vm_is_options_object(options)) {
+        Item timeout = js_property_get(options, js_vm_stm_key("timeout"));
+        if (js_vm_is_number_item(timeout)) {
+            return js_promise_reject(js_vm_stm_error("ERR_SCRIPT_EXECUTION_TIMEOUT",
+                "Script execution timed out."));
+        }
+    }
+
+    Item modules = js_property_get(self, js_vm_stm_key("__linked_modules__"));
+    int64_t dep_count = get_type_id(modules) == LMD_TYPE_ARRAY ? js_array_length(modules) : 0;
+    js_vm_stm_set_status(self, "evaluating");
+    for (int64_t i = 0; i < dep_count; i++) {
+        Item dep = js_array_get_int(modules, i);
+        Item dep_status = js_property_get(dep, js_vm_stm_key("status"));
+        if (!js_vm_stm_string_item_equals(dep_status, "evaluated", 9) &&
+            !js_vm_stm_string_item_equals(dep_status, "evaluating", 10)) {
+            Item eval_fn = js_property_get(dep, js_vm_stm_key("evaluate"));
+            js_call_function(eval_fn, dep, NULL, 0);
+            if (js_check_exception()) {
+                error = js_clear_exception();
+                js_property_set(self, js_vm_stm_key("__error__"), error);
+                js_vm_stm_set_status(self, "errored");
+                return js_promise_reject(error);
+            }
+        }
+    }
+
+    Item source = js_vm_stm_build_eval_source(self);
+    Item ns = js_property_get(self, js_vm_stm_key("namespace"));
+    Item context_obj = js_property_get(self, js_vm_stm_key("context"));
+    Item global = get_type_id(context_obj) == LMD_TYPE_MAP ? context_obj : js_get_global_this();
+    Item ns_key = js_vm_stm_key("__vm_ns");
+    js_property_set(global, ns_key, ns);
+    js_mark_non_enumerable(global, ns_key);
+    for (int64_t i = 0; i < dep_count; i++) {
+        char key_buf[32];
+        int key_len = snprintf(key_buf, sizeof(key_buf), "__vm_dep_%lld", (long long)i);
+        Item dep_key = js_vm_stm_string(key_buf, key_len);
+        Item dep_ns = js_property_get(js_array_get_int(modules, i), js_vm_stm_key("namespace"));
+        js_property_set(global, dep_key, dep_ns);
+        js_mark_non_enumerable(global, dep_key);
+    }
+    Item dyn_module_key = js_vm_stm_key("__vm_dynamic_module");
+    Item dyn_import_key = js_vm_stm_key("__vm_dynamic_import");
+    js_property_set(global, dyn_module_key, self);
+    js_property_set(global, dyn_import_key, js_new_function((void*)js_vm_dynamic_import_for_module, 1));
+    js_mark_non_enumerable(global, dyn_module_key);
+    js_mark_non_enumerable(global, dyn_import_key);
+    // SourceTextModule evaluate is one-shot; re-evaluating must not run module
+    // body side effects like `count += 1` again.
+    if (get_type_id(context_obj) == LMD_TYPE_MAP) {
+        js_vm_run_with_sandbox(source, context_obj, make_js_undefined());
+    } else {
+        js_builtin_eval(source, 1);
+    }
+    js_delete_property(global, ns_key);
+    for (int64_t i = 0; i < dep_count; i++) {
+        char key_buf[32];
+        int key_len = snprintf(key_buf, sizeof(key_buf), "__vm_dep_%lld", (long long)i);
+        js_delete_property(global, js_vm_stm_string(key_buf, key_len));
+    }
+    js_delete_property(global, dyn_module_key);
+    js_delete_property(global, dyn_import_key);
+    if (js_check_exception()) {
+        error = js_clear_exception();
+        js_property_set(self, js_vm_stm_key("__error__"), error);
+        js_vm_stm_set_status(self, "errored");
+        return js_promise_reject(error);
+    }
+
+    js_property_set(self, js_vm_stm_key("__evaluated__"), (Item){.item = ITEM_TRUE});
+    js_vm_stm_set_status(self, "evaluated");
+    return js_promise_resolve(make_js_undefined());
+}
+
+static Item js_vm_SourceTextModule_constructor(Item source, Item options) {
+    Item module = js_new_object();
+    Item source_str = js_to_string(source);
+    js_property_set(module, js_vm_stm_key("__source__"), source_str);
+    js_property_set(module, js_vm_stm_key("__vm_module__"), (Item){.item = ITEM_TRUE});
+    js_property_set(module, js_vm_stm_key("__evaluated__"), (Item){.item = ITEM_FALSE});
+    js_property_set(module, js_vm_stm_key("__error__"), make_js_undefined());
+    js_property_set(module, js_vm_stm_key("__linked_modules__"), js_array_new(0));
+    js_property_set(module, js_vm_stm_key("dependencySpecifiers"), js_vm_stm_scan_deps(source_str));
+    Item ns = js_new_object();
+    js_property_set(ns, js_vm_stm_key("__vm_module_namespace__"), (Item){.item = ITEM_TRUE});
+    js_mark_non_enumerable(ns, js_vm_stm_key("__vm_module_namespace__"));
+    js_property_set(module, js_vm_stm_key("namespace"), ns);
+    if (js_vm_is_options_object(options)) {
+        Item context_opt = js_property_get(options, js_vm_stm_key("context"));
+        if (get_type_id(context_opt) == LMD_TYPE_MAP) js_property_set(module, js_vm_stm_key("context"), context_opt);
+        Item ident = js_property_get(options, js_vm_stm_key("identifier"));
+        if (get_type_id(ident) == LMD_TYPE_STRING) js_property_set(module, js_vm_stm_key("identifier"), ident);
+        Item dyn = js_property_get(options, js_vm_stm_key("importModuleDynamically"));
+        if (get_type_id(dyn) == LMD_TYPE_FUNC) js_property_set(module, js_vm_stm_key("__importModuleDynamically__"), dyn);
+    }
+    Item identifier = js_property_get(module, js_vm_stm_key("identifier"));
+    if (get_type_id(identifier) != LMD_TYPE_STRING) {
+        static int stm_identifier_counter = 0;
+        char buf[64];
+        int len = snprintf(buf, sizeof(buf), "vm:module(%d)", stm_identifier_counter++);
+        js_property_set(module, js_vm_stm_key("identifier"), js_vm_stm_string(buf, len));
+    }
+    js_vm_stm_set_status(module, "unlinked");
+    js_property_set(module, js_vm_stm_key("link"),
+                    js_new_function((void*)js_vm_stm_link, 1));
+    js_property_set(module, js_vm_stm_key("evaluate"),
+                    js_new_function((void*)js_vm_stm_evaluate, 1));
+    return module;
+}
+
 extern "C" Item js_get_vm_namespace(void) {
     static Item vm_ns = {0};
     static uint64_t vm_epoch = (uint64_t)-1;
@@ -37989,6 +37248,8 @@ extern "C" Item js_get_vm_namespace(void) {
                         js_new_function((void*)js_vm_Script_constructor, 2));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("createScript", 12))},
                         js_new_function((void*)js_vm_createScript, 2));
+        js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("SourceTextModule", 16))},
+                        js_new_function((void*)js_vm_SourceTextModule_constructor, 2));
 
         // constants sub-object
         Item constants = js_new_object();
@@ -38165,84 +37426,6 @@ static Item js_emit_internal_test_binding_warning(void) {
     return make_js_undefined();
 }
 
-static Item js_internal_binding_incompatible_getter(void) {
-    return js_throw_type_error("Illegal invocation");
-}
-
-static void js_internal_binding_install_throwing_accessor(Item proto, const char* name) {
-    Item key = js_node_binding_key(name);
-    js_install_native_accessor(proto, key,
-        js_new_function((void*)js_internal_binding_incompatible_getter, 0),
-        ItemNull,
-        JSPD_NON_ENUMERABLE);
-}
-
-static Item js_internal_binding_constructor_with_proto(Item proto) {
-    Item ctor = js_new_function((void*)js_stub_noop_object, 0);
-    js_function_set_prototype(ctor, proto);
-    Item ctor_key = js_node_binding_key("constructor");
-    js_property_set(proto, ctor_key, ctor);
-    js_mark_non_enumerable(proto, ctor_key);
-    return ctor;
-}
-
-static Item js_internal_binding_tty_wrap(void) {
-    static Item tty_wrap_obj = {0};
-    static uint64_t tty_wrap_epoch = (uint64_t)-1;
-    if (tty_wrap_obj.item == 0 || tty_wrap_epoch != js_heap_epoch) {
-        tty_wrap_epoch = js_heap_epoch;
-        tty_wrap_obj = js_new_object();
-        heap_register_gc_root(&tty_wrap_obj.item);
-
-        Item stream_proto = js_new_object();
-        js_internal_binding_install_throwing_accessor(stream_proto, "bytesRead");
-        js_internal_binding_install_throwing_accessor(stream_proto, "fd");
-        js_internal_binding_install_throwing_accessor(stream_proto, "_externalStream");
-
-        Item tty_proto = js_new_object();
-        // Node internal tests read these accessors through TTY.prototype's
-        // StreamWrap ancestor; missing that ancestor regressed to undefined.
-        js_set_prototype(tty_proto, stream_proto);
-        js_node_binding_set(tty_wrap_obj, "TTY",
-            js_internal_binding_constructor_with_proto(tty_proto));
-    }
-    return tty_wrap_obj;
-}
-
-static Item js_internal_binding_udp_wrap(void) {
-    static Item udp_wrap_obj = {0};
-    static uint64_t udp_wrap_epoch = (uint64_t)-1;
-    if (udp_wrap_obj.item == 0 || udp_wrap_epoch != js_heap_epoch) {
-        udp_wrap_epoch = js_heap_epoch;
-        udp_wrap_obj = js_new_object();
-        heap_register_gc_root(&udp_wrap_obj.item);
-
-        Item udp_proto = js_new_object();
-        // UDP.prototype.fd is a native accessor in Node; installing it avoids a
-        // missing-constructor path while preserving the incompatible-receiver throw.
-        js_internal_binding_install_throwing_accessor(udp_proto, "fd");
-        js_node_binding_set(udp_wrap_obj, "UDP",
-            js_internal_binding_constructor_with_proto(udp_proto));
-    }
-    return udp_wrap_obj;
-}
-
-static Item js_internal_binding_crypto(void) {
-    static Item crypto_obj = {0};
-    static uint64_t crypto_epoch = (uint64_t)-1;
-    if (crypto_obj.item == 0 || crypto_epoch != js_heap_epoch) {
-        crypto_epoch = js_heap_epoch;
-        crypto_obj = js_new_object();
-        heap_register_gc_root(&crypto_obj.item);
-
-        Item secure_context_proto = js_new_object();
-        js_internal_binding_install_throwing_accessor(secure_context_proto, "_external");
-        js_node_binding_set(crypto_obj, "SecureContext",
-            js_internal_binding_constructor_with_proto(secure_context_proto));
-    }
-    return crypto_obj;
-}
-
 // internalBinding() — provides internal bindings for Node.js official tests
 extern "C" Item js_internal_binding(Item name) {
     if (get_type_id(name) != LMD_TYPE_STRING) return ItemNull;
@@ -38281,18 +37464,6 @@ extern "C" Item js_internal_binding(Item name) {
 
     if (s->len == 9 && memcmp(s->chars, "constants", 9) == 0) {
         return js_node_binding_constants();
-    }
-
-    if (s->len == 8 && memcmp(s->chars, "tty_wrap", 8) == 0) {
-        return js_internal_binding_tty_wrap();
-    }
-
-    if (s->len == 8 && memcmp(s->chars, "udp_wrap", 8) == 0) {
-        return js_internal_binding_udp_wrap();
-    }
-
-    if (s->len == 6 && memcmp(s->chars, "crypto", 6) == 0) {
-        return js_internal_binding_crypto();
     }
 
     if (s->len == 10 && memcmp(s->chars, "cares_wrap", 10) == 0) {
@@ -38350,6 +37521,15 @@ extern "C" Item js_internal_binding(Item name) {
         js_property_set(cfg, (Item){.item = s2it(heap_create_name("hasCrypto", 9))}, (Item){.item = ITEM_TRUE});
         js_property_set(cfg, (Item){.item = s2it(heap_create_name("fipsMode", 8))}, (Item){.item = ITEM_FALSE});
         return cfg;
+    }
+
+    if (s->len == 4 && memcmp(s->chars, "util", 4) == 0) {
+        Item util_binding = js_new_object();
+        extern Item js_util_getCallSites(Item frame_count_item);
+        js_property_set(util_binding,
+            (Item){.item = s2it(heap_create_name("getCallSites", 12))},
+            js_new_function((void*)js_util_getCallSites, 1));
+        return util_binding;
     }
 
     // default: return empty object
@@ -38627,7 +37807,6 @@ extern "C" Item js_module_flush_compile_cache(void) {
 
 extern "C" Item js_module_get_builtin(Item specifier) {
     if (get_type_id(specifier) != LMD_TYPE_STRING) return ItemNull;
-    js_node_runtime_ignore_sigpipe();
     String* spec = it2s(specifier);
 
     // check for built-in modules (bare specifier or with .js suffix from resolver)
@@ -38757,13 +37936,6 @@ extern "C" Item js_module_get_builtin(Item specifier) {
         (spec->len == 9 && memcmp(spec->chars, "node:zlib", 9) == 0)) {
         extern Item js_get_zlib_namespace(void);
         return js_get_zlib_namespace();
-    }
-    // node:dgram — minimal UDP socket surface used by cluster disconnect tests.
-    if ((spec->len == 5 && memcmp(spec->chars, "dgram", 5) == 0) ||
-        (spec->len == 8 && memcmp(spec->chars, "dgram.js", 8) == 0) ||
-        (spec->len == 10 && memcmp(spec->chars, "node:dgram", 10) == 0)) {
-        extern Item js_get_dgram_namespace(void);
-        return js_get_dgram_namespace();
     }
     // node:readline
     if ((spec->len == 8 && memcmp(spec->chars, "readline", 8) == 0) ||
@@ -38982,7 +38154,7 @@ extern "C" Item js_module_get_builtin(Item specifier) {
             // builtinModules — array of built-in module names
             static const char* builtin_names[] = {
                 "assert", "async_hooks", "buffer", "child_process", "cluster",
-                "console", "crypto", "dgram", "diagnostics_channel", "dns", "domain",
+                "console", "crypto", "diagnostics_channel", "dns", "domain",
                 "events", "fs", "http", "https", "module", "net", "os", "path",
                 "perf_hooks", "process", "punycode", "querystring", "readline",
                 "repl", "stream", "string_decoder", "timers", "tls", "tty",
@@ -39100,21 +38272,12 @@ extern "C" Item js_module_get_builtin(Item specifier) {
             cl_worker_mode = is_worker;
             cl_ns = js_new_object();
             heap_register_gc_root(&cl_ns.item);
-            js_cluster_register_namespace_roots();
-            js_cluster_namespace = cl_ns;
             js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isPrimary", 9))},
                             (Item){.item = b2it(!is_worker)});
             js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isMaster", 8))},
                             (Item){.item = b2it(!is_worker)});
             js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isWorker", 8))},
                             (Item){.item = b2it(is_worker)});
-            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("SCHED_NONE", 10))},
-                            (Item){.item = i2it(JS_CLUSTER_SCHED_NONE)});
-            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("SCHED_RR", 8))},
-                            (Item){.item = i2it(JS_CLUSTER_SCHED_RR)});
-            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("schedulingPolicy", 16))},
-                            (Item){.item = i2it(JS_CLUSTER_SCHED_RR)});
-            js_cluster_install_worker_surface(cl_ns);
             if (is_worker) {
                 // cluster workers are selected by the inherited worker id, not
                 // by argv; otherwise the worker re-enters primary/testcase code.
@@ -39127,18 +38290,6 @@ extern "C" Item js_module_get_builtin(Item specifier) {
                             js_new_function((void*)js_cluster_setup_primary, 1));
             js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("fork", 4))},
                             js_new_function((void*)js_cluster_fork, 1));
-            // cluster.settings is mutable API state; fork() must read the same
-            // object so direct assignments like serialization='advanced' apply.
-            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("settings", 8))},
-                            js_cluster_ensure_settings(cl_ns, make_js_undefined(), false));
-            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("disconnect", 10))},
-                            js_new_function((void*)js_cluster_disconnect, 1));
-            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("workers", 7))},
-                            js_new_object());
-            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("on", 2))},
-                            js_new_function((void*)js_cluster_on, 2));
-            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("once", 4))},
-                            js_new_function((void*)js_cluster_once, 2));
             js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("default", 7))}, cl_ns);
         }
         return cl_ns;
@@ -39630,7 +38781,7 @@ extern "C" Item js_module_is_builtin(Item id) {
         len -= 5;
     }
     static const char* builtins[] = {
-        "assert", "buffer", "child_process", "cluster", "console", "crypto", "dgram", "dns",
+        "assert", "buffer", "child_process", "cluster", "console", "crypto", "dns",
         "diagnostics_channel", "domain", "events", "fs", "http", "https",
         "module", "net", "os", "path", "perf_hooks", "process", "punycode",
         "querystring", "readline", "readline/promises", "repl", "stream", "string_decoder",
@@ -40012,51 +39163,6 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
 // WeakMap / WeakSet stubs (aliased to Map/Set for PDF.js compat)
 // =============================================================================
 
-static Item js_weakref_registry = {0};
-static uint64_t js_weakref_registry_epoch = (uint64_t)-1;
-
-static Item js_weakref_target_key(void) {
-    return (Item){.item = s2it(heap_create_name("__weakref_target__", 18))};
-}
-
-static Item js_weakref_get_registry(void) {
-    if (js_weakref_registry.item == 0 || js_weakref_registry_epoch != js_heap_epoch) {
-        js_weakref_registry_epoch = js_heap_epoch;
-        js_weakref_registry = js_array_new(0);
-        heap_register_gc_root(&js_weakref_registry.item);
-    }
-    return js_weakref_registry;
-}
-
-static bool js_weakref_target_has_host_liveness(Item target) {
-    if (get_type_id(target) == LMD_TYPE_MAP && js_class_id(target) == JS_CLASS_ABORT_SIGNAL) {
-        Item listeners = js_property_get(target,
-            (Item){.item = s2it(heap_create_name("__listeners__", 13))});
-        if (get_type_id(listeners) == LMD_TYPE_ARRAY && js_array_length(listeners) > 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-extern "C" void js_weakref_after_gc(void) {
-    if (js_weakref_registry.item == 0 || js_weakref_registry_epoch != js_heap_epoch) return;
-    int64_t len = js_array_length(js_weakref_registry);
-    Item target_key = js_weakref_target_key();
-    for (int64_t i = 0; i < len; i++) {
-        Item ref = js_array_get_int(js_weakref_registry, i);
-        if (get_type_id(ref) != LMD_TYPE_MAP || js_class_id(ref) != JS_CLASS_WEAK_REF) continue;
-        bool found = false;
-        Item target = js_map_get_fast(ref.map, "__weakref_target__", 18, &found);
-        if (!found || get_type_id(target) == LMD_TYPE_UNDEFINED) continue;
-        // WeakRef targets were stored as ordinary strong properties, so explicit
-        // gc() must clear them unless a host resource is intentionally keeping them alive.
-        if (!js_weakref_target_has_host_liveness(target)) {
-            js_property_set(ref, target_key, make_js_undefined());
-        }
-    }
-}
-
 extern "C" Item js_weakmap_new(void) {
     Item obj = js_map_collection_new();
     // Override prototype to WeakMap.prototype (js_map_collection_new sets Map.prototype)
@@ -40090,8 +39196,8 @@ extern "C" Item js_weakref_new(Item target) {
     Item obj = js_new_object();
     js_collection_link_prototype(obj, "WeakRef", 7);
     js_class_stamp(obj, JS_CLASS_WEAK_REF);
-    js_property_set(obj, js_weakref_target_key(), target);
-    js_array_push(js_weakref_get_registry(), obj);
+    Item target_key = (Item){.item = s2it(heap_create_name("__weakref_target__", 18))};
+    js_property_set(obj, target_key, target);
     return obj;
 }
 
@@ -40104,7 +39210,6 @@ extern "C" Item js_weakref_deref(Item this_val) {
     if (!found) {
         return js_throw_type_error("WeakRef.prototype.deref called on incompatible receiver");
     }
-    if (get_type_id(target) == LMD_TYPE_UNDEFINED) return make_js_undefined();
     return target;
 }
 
@@ -40323,5 +39428,4 @@ void js_deep_batch_reset() {
     js_async_generator_proto_depth2_cache = (Item){0};
     js_async_iterator_proto_cache = (Item){0};
     js_generator_callee_proto = (Item){0};
-    js_cluster_worker_mode_latched = false;
 }
