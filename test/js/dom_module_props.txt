@@ -10,7 +10,37 @@ alpha beta
 Alpha
 Alpha
 5
+true
+true
+true
+0
+true
+false
 8
 #comment
 note
 4
+true
+true
+true
+true
+true
+2
+true
+true
+true
+true
+1
+true
+true
+true
+2
+true
+true
+true
+true
+main-updated
+main-updated
+true
+gamma delta
+gamma delta

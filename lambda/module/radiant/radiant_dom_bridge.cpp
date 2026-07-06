@@ -16,6 +16,8 @@ extern "C" void* js_dom_unwrap_element_impl(Item item);
 extern "C" bool js_is_dom_node_impl(Item item);
 extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name);
 extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item value);
+extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
+extern "C" Item radiant_dom_wrap_node(void* dom_elem);
 
 static const int RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE = 4096;
 
@@ -40,6 +42,19 @@ static Item radiant_dom_string_item(const char* value) {
 
 static Item radiant_dom_int_item(int64_t value) {
     return (Item){.item = i2it(value)};
+}
+
+static Item radiant_dom_node_item(DomNode* node) {
+    return node ? radiant_dom_wrap_node((void*)node) : ItemNull;
+}
+
+static Item radiant_dom_empty_node_list() {
+    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+    arr->type_id = LMD_TYPE_ARRAY;
+    arr->items = nullptr;
+    arr->length = 0;
+    arr->capacity = 0;
+    return (Item){.array = arr};
 }
 
 static Item radiant_dom_class_name_item(DomElement* elem) {
@@ -95,6 +110,136 @@ static int64_t radiant_dom_utf16_length(const char* text) {
     return units;
 }
 
+static bool radiant_dom_is_generated_pseudo_node(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    DomElement* elem = node->as_element();
+    return elem->tag_name && elem->tag_name[0] == ':' && elem->tag_name[1] == ':';
+}
+
+static bool radiant_dom_is_anonymous_table_wrapper(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    DomElement* elem = node->as_element();
+    return elem->tag_name && strncmp(elem->tag_name, "::anon-", 7) == 0;
+}
+
+static DomNode* radiant_dom_first_script_visible_child(DomElement* elem);
+static DomNode* radiant_dom_last_script_visible_child(DomElement* elem);
+
+static DomNode* radiant_dom_next_script_visible_sibling(DomNode* node) {
+    DomNode* sibling = node ? node->next_sibling : nullptr;
+    while (sibling) {
+        if (!radiant_dom_is_generated_pseudo_node(sibling)) return sibling;
+        if (radiant_dom_is_anonymous_table_wrapper(sibling)) {
+            DomNode* child = radiant_dom_first_script_visible_child(sibling->as_element());
+            if (child) return child;
+        }
+        sibling = sibling->next_sibling;
+    }
+    DomNode* parent = node ? node->parent : nullptr;
+    while (radiant_dom_is_anonymous_table_wrapper(parent)) {
+        sibling = parent->next_sibling;
+        while (sibling) {
+            if (!radiant_dom_is_generated_pseudo_node(sibling)) return sibling;
+            if (radiant_dom_is_anonymous_table_wrapper(sibling)) {
+                DomNode* child = radiant_dom_first_script_visible_child(sibling->as_element());
+                if (child) return child;
+            }
+            sibling = sibling->next_sibling;
+        }
+        parent = parent->parent;
+    }
+    return nullptr;
+}
+
+static DomNode* radiant_dom_prev_script_visible_sibling(DomNode* node) {
+    DomNode* sibling = node ? node->prev_sibling : nullptr;
+    while (sibling) {
+        if (!radiant_dom_is_generated_pseudo_node(sibling)) return sibling;
+        if (radiant_dom_is_anonymous_table_wrapper(sibling)) {
+            DomNode* child = radiant_dom_last_script_visible_child(sibling->as_element());
+            if (child) return child;
+        }
+        sibling = sibling->prev_sibling;
+    }
+    DomNode* parent = node ? node->parent : nullptr;
+    while (radiant_dom_is_anonymous_table_wrapper(parent)) {
+        sibling = parent->prev_sibling;
+        while (sibling) {
+            if (!radiant_dom_is_generated_pseudo_node(sibling)) return sibling;
+            if (radiant_dom_is_anonymous_table_wrapper(sibling)) {
+                DomNode* child = radiant_dom_last_script_visible_child(sibling->as_element());
+                if (child) return child;
+            }
+            sibling = sibling->prev_sibling;
+        }
+        parent = parent->parent;
+    }
+    return nullptr;
+}
+
+static DomNode* radiant_dom_first_script_visible_child(DomElement* elem) {
+    DomNode* child = elem ? elem->first_child : nullptr;
+    while (child) {
+        if (!radiant_dom_is_generated_pseudo_node(child)) return child;
+        if (radiant_dom_is_anonymous_table_wrapper(child)) {
+            // layout-only anonymous wrappers must stay transparent to DOM scripts.
+            DomNode* nested = radiant_dom_first_script_visible_child(child->as_element());
+            if (nested) return nested;
+        }
+        child = child->next_sibling;
+    }
+    return nullptr;
+}
+
+static DomNode* radiant_dom_last_script_visible_child(DomElement* elem) {
+    DomNode* child = elem ? elem->last_child : nullptr;
+    while (child) {
+        if (!radiant_dom_is_generated_pseudo_node(child)) return child;
+        if (radiant_dom_is_anonymous_table_wrapper(child)) {
+            DomNode* nested = radiant_dom_last_script_visible_child(child->as_element());
+            if (nested) return nested;
+        }
+        child = child->prev_sibling;
+    }
+    return nullptr;
+}
+
+static DomNode* radiant_dom_first_script_visible_element_child(DomElement* elem) {
+    DomNode* child = radiant_dom_first_script_visible_child(elem);
+    while (child) {
+        if (child->is_element()) return child;
+        child = radiant_dom_next_script_visible_sibling(child);
+    }
+    return nullptr;
+}
+
+static DomNode* radiant_dom_last_script_visible_element_child(DomElement* elem) {
+    DomNode* child = radiant_dom_last_script_visible_child(elem);
+    while (child) {
+        if (child->is_element()) return child;
+        child = radiant_dom_prev_script_visible_sibling(child);
+    }
+    return nullptr;
+}
+
+static DomNode* radiant_dom_next_script_visible_element_sibling(DomNode* node) {
+    DomNode* sibling = radiant_dom_next_script_visible_sibling(node);
+    while (sibling) {
+        if (sibling->is_element()) return sibling;
+        sibling = radiant_dom_next_script_visible_sibling(sibling);
+    }
+    return nullptr;
+}
+
+static DomNode* radiant_dom_prev_script_visible_element_sibling(DomNode* node) {
+    DomNode* sibling = radiant_dom_prev_script_visible_sibling(node);
+    while (sibling) {
+        if (sibling->is_element()) return sibling;
+        sibling = radiant_dom_prev_script_visible_sibling(sibling);
+    }
+    return nullptr;
+}
+
 static DomDocument* radiant_dom_node_document(DomNode* node, bool active_fallback) {
     DomNode* current = node;
     while (current) {
@@ -108,6 +253,15 @@ static DomDocument* radiant_dom_node_document(DomNode* node, bool active_fallbac
         return (DomDocument*)js_dom_get_document();
     }
     return nullptr;
+}
+
+static bool radiant_dom_node_is_connected(DomNode* node) {
+    DomDocument* doc = radiant_dom_node_document(node, false);
+    if (!node || !doc || !doc->root) return false;
+    for (DomNode* current = node; current; current = current->parent) {
+        if (current == (DomNode*)doc->root) return true;
+    }
+    return false;
 }
 
 static Item radiant_dom_lookup_wrapper(DomNode* node) {
@@ -229,6 +383,31 @@ static bool radiant_dom_get_text_property(DomText* text_node, const char* prop, 
         *out = radiant_dom_string_item("#text");
         return true;
     }
+    if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
+        DomNode* parent = text_node->parent;
+        *out = (parent && parent->is_element()) ? radiant_dom_node_item(parent) : ItemNull;
+        return true;
+    }
+    if (strcmp(prop, "isConnected") == 0) {
+        *out = (Item){.item = b2it(radiant_dom_node_is_connected((DomNode*)text_node) ? 1 : 0)};
+        return true;
+    }
+    if (strcmp(prop, "nextSibling") == 0) {
+        *out = radiant_dom_node_item(radiant_dom_next_script_visible_sibling((DomNode*)text_node));
+        return true;
+    }
+    if (strcmp(prop, "previousSibling") == 0) {
+        *out = radiant_dom_node_item(radiant_dom_prev_script_visible_sibling((DomNode*)text_node));
+        return true;
+    }
+    if (strcmp(prop, "childNodes") == 0) {
+        *out = radiant_dom_empty_node_list();
+        return true;
+    }
+    if (strcmp(prop, "firstChild") == 0 || strcmp(prop, "lastChild") == 0) {
+        *out = ItemNull;
+        return true;
+    }
     return false;
 }
 
@@ -249,6 +428,31 @@ static bool radiant_dom_get_comment_property(DomComment* comment_node, const cha
     }
     if (strcmp(prop, "length") == 0) {
         *out = radiant_dom_int_item((int64_t)comment_node->length);
+        return true;
+    }
+    if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
+        DomNode* parent = comment_node->parent;
+        *out = (parent && parent->is_element()) ? radiant_dom_node_item(parent) : ItemNull;
+        return true;
+    }
+    if (strcmp(prop, "isConnected") == 0) {
+        *out = (Item){.item = b2it(radiant_dom_node_is_connected((DomNode*)comment_node) ? 1 : 0)};
+        return true;
+    }
+    if (strcmp(prop, "nextSibling") == 0) {
+        *out = radiant_dom_node_item(radiant_dom_next_script_visible_sibling((DomNode*)comment_node));
+        return true;
+    }
+    if (strcmp(prop, "previousSibling") == 0) {
+        *out = radiant_dom_node_item(radiant_dom_prev_script_visible_sibling((DomNode*)comment_node));
+        return true;
+    }
+    if (strcmp(prop, "childNodes") == 0) {
+        *out = radiant_dom_empty_node_list();
+        return true;
+    }
+    if (strcmp(prop, "firstChild") == 0 || strcmp(prop, "lastChild") == 0) {
+        *out = ItemNull;
         return true;
     }
     return false;
@@ -285,6 +489,71 @@ static bool radiant_dom_get_element_property(DomElement* elem, const char* prop,
         *out = radiant_dom_int_item((int64_t)elem->node_type);
         return true;
     }
+    if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
+        DomNode* parent = elem->parent;
+        *out = (parent && parent->is_element()) ? radiant_dom_node_item(parent) : ItemNull;
+        return true;
+    }
+    if (strcmp(prop, "isConnected") == 0) {
+        *out = (Item){.item = b2it(radiant_dom_node_is_connected((DomNode*)elem) ? 1 : 0)};
+        return true;
+    }
+    if (strcmp(prop, "childElementCount") == 0) {
+        int64_t count = 0;
+        DomNode* child = radiant_dom_first_script_visible_child(elem);
+        while (child) {
+            if (child->is_element()) count++;
+            child = radiant_dom_next_script_visible_sibling(child);
+        }
+        *out = radiant_dom_int_item(count);
+        return true;
+    }
+    if (strcmp(prop, "firstChild") == 0) {
+        *out = radiant_dom_node_item(radiant_dom_first_script_visible_child(elem));
+        return true;
+    }
+    if (strcmp(prop, "lastChild") == 0) {
+        *out = radiant_dom_node_item(radiant_dom_last_script_visible_child(elem));
+        return true;
+    }
+    if (strcmp(prop, "nextSibling") == 0) {
+        *out = radiant_dom_node_item(radiant_dom_next_script_visible_sibling((DomNode*)elem));
+        return true;
+    }
+    if (strcmp(prop, "previousSibling") == 0) {
+        *out = radiant_dom_node_item(radiant_dom_prev_script_visible_sibling((DomNode*)elem));
+        return true;
+    }
+    if (strcmp(prop, "firstElementChild") == 0) {
+        *out = radiant_dom_node_item(radiant_dom_first_script_visible_element_child(elem));
+        return true;
+    }
+    if (strcmp(prop, "lastElementChild") == 0) {
+        *out = radiant_dom_node_item(radiant_dom_last_script_visible_element_child(elem));
+        return true;
+    }
+    if (strcmp(prop, "nextElementSibling") == 0) {
+        *out = radiant_dom_node_item(radiant_dom_next_script_visible_element_sibling((DomNode*)elem));
+        return true;
+    }
+    if (strcmp(prop, "previousElementSibling") == 0) {
+        *out = radiant_dom_node_item(radiant_dom_prev_script_visible_element_sibling((DomNode*)elem));
+        return true;
+    }
+    if (strcmp(prop, "childNodes") == 0) {
+        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+        arr->type_id = LMD_TYPE_ARRAY;
+        arr->items = nullptr;
+        arr->length = 0;
+        arr->capacity = 0;
+        DomNode* child = radiant_dom_first_script_visible_child(elem);
+        while (child) {
+            array_push(arr, radiant_dom_node_item(child));
+            child = radiant_dom_next_script_visible_sibling(child);
+        }
+        *out = (Item){.array = arr};
+        return true;
+    }
     return false;
 }
 
@@ -307,6 +576,34 @@ static bool radiant_dom_get_basic_property(Item elem_item, Item prop_name, Item*
     return false;
 }
 
+static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item value, Item* out) {
+    if (!out) return false;
+    const char* prop = fn_to_cstr(prop_name);
+    if (!prop) return false;
+
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
+    if (!node || !node->is_element()) return false;
+
+    DomElement* elem = node->as_element();
+    if (strcmp(prop, "id") == 0) {
+        const char* id_str = fn_to_cstr(value);
+        if (id_str && dom_element_set_attribute(elem, "id", id_str)) {
+            js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        }
+        *out = value;
+        return true;
+    }
+    if (strcmp(prop, "className") == 0) {
+        const char* class_str = fn_to_cstr(value);
+        if (class_str && dom_element_set_attribute(elem, "class", class_str)) {
+            js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        }
+        *out = value;
+        return true;
+    }
+    return false;
+}
+
 extern "C" Item radiant_dom_get_property(Item elem_item, Item prop_name) {
     Item result = ItemNull;
     if (radiant_dom_get_basic_property(elem_item, prop_name, &result)) {
@@ -316,5 +613,9 @@ extern "C" Item radiant_dom_get_property(Item elem_item, Item prop_name) {
 }
 
 extern "C" Item radiant_dom_set_property(Item elem_item, Item prop_name, Item value) {
+    Item result = ItemNull;
+    if (radiant_dom_set_basic_property(elem_item, prop_name, value, &result)) {
+        return result;
+    }
     return js_dom_set_property_impl(elem_item, prop_name, value);
 }

@@ -392,6 +392,11 @@ static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATI
     }
 }
 
+extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent) {
+    // Module-owned DOM setters must still publish mutations through the JS DOM ledger.
+    js_dom_mutation_notify(kind, (DomNode*)target, (DomNode*)parent);
+}
+
 static void js_dom_reset_mutation_records(DomDocument* doc) {
     if (!doc) return;
     doc->js_mutation_count = 0;
