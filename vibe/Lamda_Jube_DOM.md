@@ -14,6 +14,8 @@ Implementation status:
 - 2026-07-06 verification: `make build` passed. Runtime smoke `./lambda.exe --no-log test/lambda/value.ls` passed.
 - 2026-07-06: Phase 2 compatibility bridge started. Public `js_dom_get_property()` / `js_dom_set_property()` now route through `radiant_dom_get_property()` / `radiant_dom_set_property()`, which delegate to the preserved JS DOM implementation bodies. This moves the call boundary without changing wrapper representation or per-property behavior.
 - 2026-07-06 bridge verification: `make build` passed. DOM smokes `./lambda.exe js test/js/dom_style.js --document test/js/dom_style.html --no-log` and `./lambda.exe js test/js/dom_mutation.js --document test/js/dom_mutation.html --no-log` passed.
+- 2026-07-06: Phase 3 compatibility bridge started. Public `js_dom_wrap_element()`, `js_dom_unwrap_element()`, and `js_is_dom_node()` now route through `radiant_dom_wrap_node()`, `radiant_dom_unwrap_node()`, and `radiant_dom_is_node()`. The physical cache/rooting implementation is still in `js_dom.cpp`, but the module boundary now owns the wrapper factory surface.
+- 2026-07-06 wrapper verification: `make build` passed. Added `test/js/dom_identity.js` / `.html` / `.txt` and verified repeated Radiant node access preserves strict JS identity through the module bridge.
 
 The first deliverable is intentionally conservative:
 
@@ -168,6 +170,12 @@ Acceptance:
 ### Phase 3: Module/Host Wrapper Cache
 
 Purpose: prepare for VMap wrappers without changing wrapper representation yet.
+
+Status:
+
+- Started 2026-07-06. The JS ABI entry points now delegate to module-owned wrapper, unwrap, and type-test functions.
+- Current checkpoint preserves `MAP_KIND_DOM` wrappers and the existing thread-local cache implementation. The next slice should move lookup/cache/root/unroot storage behind module-owned functions without changing cache semantics.
+- Added `test/js/dom_identity.js` to cover repeated access identity for element and text nodes.
 
 Tasks:
 

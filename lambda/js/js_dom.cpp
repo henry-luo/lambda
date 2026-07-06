@@ -1567,7 +1567,15 @@ static void reset_dom_wrapper_cache() {
     s_dom_wrapper_cache_tail = nullptr;
 }
 
+extern "C" Item radiant_dom_wrap_node(void* dom_elem);
+
 extern "C" Item js_dom_wrap_element(void* dom_elem) {
+    // Jube POC: keep existing JS callers stable while wrapper identity moves
+    // behind the radiant module boundary.
+    return radiant_dom_wrap_node(dom_elem);
+}
+
+extern "C" Item js_dom_wrap_element_impl(void* dom_elem) {
     if (!dom_elem) return ItemNull;
 
     DomNode* node = (DomNode*)dom_elem;
@@ -1611,7 +1619,15 @@ extern "C" Item js_dom_wrap_element(void* dom_elem) {
     return wrapped;
 }
 
+extern "C" void* radiant_dom_unwrap_node(Item item);
+
 extern "C" void* js_dom_unwrap_element(Item item) {
+    // Jube POC: unwrap/type policy is exposed through the radiant module before
+    // the wrapper representation changes from MAP_KIND_DOM to native VMap.
+    return radiant_dom_unwrap_node(item);
+}
+
+extern "C" void* js_dom_unwrap_element_impl(Item item) {
     TypeId tid = get_type_id(item);
     if (tid != LMD_TYPE_MAP) return nullptr;
 
@@ -1632,7 +1648,15 @@ extern "C" void* js_dom_unwrap_element(Item item) {
     return nullptr;
 }
 
+extern "C" bool radiant_dom_is_node(Item item);
+
 extern "C" bool js_is_dom_node(Item item) {
+    // Jube POC: use the module-owned type test so later native wrappers do not
+    // need every caller to know the concrete carrier representation.
+    return radiant_dom_is_node(item);
+}
+
+extern "C" bool js_is_dom_node_impl(Item item) {
     TypeId tid = get_type_id(item);
     if (tid != LMD_TYPE_MAP) return false;
     Map* m = item.map;
