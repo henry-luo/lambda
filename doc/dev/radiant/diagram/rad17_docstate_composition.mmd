@@ -13,7 +13,7 @@ flowchart TB
     subgraph Interaction[Interaction sub-states]
         FOCUS[focus hover active]
         SEL[dom_selection and EditingSelection canonical]
-        LEG[CaretState SelectionState FocusState legacy projections]
+        LEG[CaretState SelectionState FocusState projection caches]
         IME[IME composition drag-drop]
         OVL[dropdown and context-menu overlays]
         FORM[form values scroll]

@@ -1541,9 +1541,9 @@ static bool state_store_ensure_projection_storage(DocState* state) {
     return state->caret != NULL && state->selection != NULL;
 }
 
-// View* in the legacy API IS a DomNode* (typedef in dom_node.hpp).
-// Convert (View*, byte_offset) → DomBoundary.
-static DomBoundary boundary_from_legacy(View* view, int byte_offset) {
+// View* in the projection adapters IS a DomNode* (typedef in dom_node.hpp).
+// Convert (View*, byte_offset) into the canonical DomBoundary.
+static DomBoundary boundary_from_view_offset(View* view, int byte_offset) {
     DomBoundary b = { NULL, 0 };
     if (!view) return b;
     DomNode* n = static_cast<DomNode*>(view);
@@ -1654,7 +1654,7 @@ static bool selection_sync_rebind_boundary(DomNode* root,
     source_pos_free(&source_pos);
     if (!ok || !rebound.node) return false;
     *out = rebound;
-    log_debug("[DOM-SYNC REBIND] rebound legacy endpoint %p to current %p offset=%u",
+    log_debug("[DOM-SYNC REBIND] rebound selection endpoint %p to current %p offset=%u",
         (void*)boundary->node, (void*)rebound.node, rebound.offset);
     return true;
 }
@@ -1689,11 +1689,11 @@ static bool selection_extend_dom_to_focus(DomSelection* selection,
     return state_store_set_selection(selection->state, &anchor, focus, out_exception);
 }
 
-extern "C" void dom_selection_sync_from_legacy_selection(DocState* state) {
+extern "C" void dom_selection_sync_from_selection_projection(DocState* state) {
     if (!state || !state->selection) return;
     SelectionState* sel = state->selection;
-    DomBoundary anc = boundary_from_legacy(sel->anchor_view, sel->anchor_offset);
-    DomBoundary foc = boundary_from_legacy(sel->focus_view,  sel->focus_offset);
+    DomBoundary anc = boundary_from_view_offset(sel->anchor_view, sel->anchor_offset);
+    DomBoundary foc = boundary_from_view_offset(sel->focus_view,  sel->focus_offset);
     if (!anc.node || !foc.node) return;
 
     DomNode* current_root = selection_sync_root_from_boundary(&foc);
@@ -1703,7 +1703,7 @@ extern "C" void dom_selection_sync_from_legacy_selection(DocState* state) {
         DomBoundary rebound_foc = foc;
         if (!selection_sync_rebind_boundary(current_root, &anc, &rebound_anc) ||
             !selection_sync_rebind_boundary(current_root, &foc, &rebound_foc)) {
-            log_debug("[DOM-SYNC REBIND] skipped legacy selection sync; endpoint cannot resolve in current tree");
+            log_debug("[DOM-SYNC REBIND] skipped selection projection sync; endpoint cannot resolve in current tree");
             return;
         }
         anc = rebound_anc;
@@ -1717,15 +1717,15 @@ extern "C" void dom_selection_sync_from_legacy_selection(DocState* state) {
     state->selection_layout_dirty = true;
 }
 
-extern "C" void dom_selection_sync_from_legacy_caret(DocState* state) {
+extern "C" void dom_selection_sync_from_caret_projection(DocState* state) {
     if (!state || !state->caret) return;
     DomSelection* ds = sync_ensure_selection(state);
     if (!ds) return;
     // During an active drag-selection (or any non-collapsed projection
-    // whose focus matches the caret), the state_store_legacy_caret_set() call is just
+    // whose focus matches the caret), the state_store_caret_collapse_to_view_offset() call is just
     // moving the focus end of the selection — NOT collapsing it. Mirroring
     // it as `collapse(...)` here would wipe out the selection that
-    // `state_store_legacy_selection_extend()` just synced into DomSelection a moment ago.
+    // `state_store_selection_extend_to_offset()` just synced into DomSelection a moment ago.
     // In that case skip the sync; the projection-to-DomSelection
     // mirror in selection_extend already updated the focus boundary.
     SelectionState* sel = state->selection;
@@ -1737,7 +1737,7 @@ extern "C" void dom_selection_sync_from_legacy_caret(DocState* state) {
     bool preserve_pointer_selection = sel && sel->is_selecting;
     View* preserve_anchor_view = sel ? sel->anchor_view : NULL;
     int preserve_anchor_offset = sel ? sel->anchor_offset : 0;
-    DomBoundary b = boundary_from_legacy(state->caret->view, state->caret->char_offset);
+    DomBoundary b = boundary_from_view_offset(state->caret->view, state->caret->char_offset);
     if (!b.node) return;
     const char* exc = NULL;
     if (!state_store_set_selection(state, &b, &b, &exc)) {
@@ -1776,7 +1776,7 @@ static void caret_local_from_absolute(View* view, float abs_x, float abs_y,
     if (out_y) *out_y = y;
 }
 
-// Mirror of state_machine.cpp's legacy_view_offset_limit: the maximum caret
+// Mirror of state_machine.cpp's projection_view_offset_limit: the maximum caret
 // char_offset a view can legally hold. Used to reject a geometry-resolved caret
 // target that would violate the DocState interaction invariant (e.g. a void/
 // atomic element like <br> whose boundary length is 0).
@@ -1802,7 +1802,7 @@ static bool caret_target_offset_valid(View* view, int offset) {
     return (uint32_t)offset <= limit;
 }
 
-static void dom_boundary_to_legacy_projection(const DomBoundary& boundary,
+static void dom_boundary_to_projection(const DomBoundary& boundary,
                                               View** out_view, int* out_offset) {
     DomNode* node = boundary.node;
     if (!node) {
@@ -1822,11 +1822,11 @@ static void dom_boundary_to_legacy_projection(const DomBoundary& boundary,
 }
 
 // ---------------------------------------------------------------------------
-// Canonical selection → legacy projection refresh.
+// Canonical selection → projection refresh.
 //
-// The StateStore selection mutation sequence is authoritative. Legacy
-// CaretState/SelectionState are cache projections for render/debug/event
-// compatibility and are rebuilt when their projection stamp falls behind.
+// The StateStore selection mutation sequence is authoritative. CaretState and
+// SelectionState are cache projections for render/debug/event compatibility and
+// are rebuilt when their projection stamp falls behind.
 // Layout cache fields (caret x/y/height) are derived via the resolver.
 // View* IS DomNode*, so node→view conversion is just a cast; UTF-16→UTF-8 for
 // text offsets.
@@ -1888,37 +1888,37 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
 
         uint32_t start_byte = text_control_u16_offset_to_byte(form, start_u16);
         uint32_t end_byte = text_control_u16_offset_to_byte(form, end_u16);
-        int start_offset = static_cast<int>(start_byte); // INT_CAST_OK: legacy projection stores text-control byte offsets as int.
-        int end_offset = static_cast<int>(end_byte); // INT_CAST_OK: legacy projection stores text-control byte offsets as int.
+        int start_offset = static_cast<int>(start_byte); // INT_CAST_OK: projection cache stores text-control byte offsets as int.
+        int end_offset = static_cast<int>(end_byte); // INT_CAST_OK: projection cache stores text-control byte offsets as int.
         bool backward = current->direction == DOM_SEL_DIR_BACKWARD;
         int anchor_offset = backward ? end_offset : start_offset;
         int focus_offset = backward ? start_offset : end_offset;
         View* view = static_cast<View*>(control);
 
-        SelectionState* legacy = state->selection;
+        SelectionState* projection = state->selection;
         bool collapsed = start_u16 == end_u16;
         bool control_focused = state->focus && state->focus->current == view;
         bool caret_visible = collapsed && control_focused;
         CaretState* caret = state->caret;
         bool projection_changed =
-            legacy->anchor_view != view ||
-            legacy->focus_view != view ||
-            legacy->view != view ||
-            legacy->anchor_offset != anchor_offset ||
-            legacy->focus_offset != focus_offset ||
-            legacy->is_collapsed != collapsed ||
+            projection->anchor_view != view ||
+            projection->focus_view != view ||
+            projection->view != view ||
+            projection->anchor_offset != anchor_offset ||
+            projection->focus_offset != focus_offset ||
+            projection->is_collapsed != collapsed ||
             caret->view != view ||
             caret->char_offset != focus_offset ||
             caret->visible != caret_visible;
 
-        bool was_selecting = legacy->is_selecting;
-        legacy->anchor_view = view;
-        legacy->focus_view = view;
-        legacy->view = view;
-        legacy->anchor_offset = anchor_offset;
-        legacy->focus_offset = focus_offset;
-        legacy->is_collapsed = collapsed;
-        legacy->is_selecting = was_selecting;
+        bool was_selecting = projection->is_selecting;
+        projection->anchor_view = view;
+        projection->focus_view = view;
+        projection->view = view;
+        projection->anchor_offset = anchor_offset;
+        projection->focus_offset = focus_offset;
+        projection->is_collapsed = collapsed;
+        projection->is_selecting = was_selecting;
 
         caret->view = view;
         caret->char_offset = focus_offset;
@@ -1929,7 +1929,7 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
         state->selection_projection_seq = state->selection_mutation_seq;
         if (projection_changed) state->needs_repaint = true;
         log_debug("[SEL-PROJECT] text-control projection view=%p anchor=%d focus=%d collapsed=%d",
-            (void*)view, anchor_offset, focus_offset, legacy->is_collapsed);
+            (void*)view, anchor_offset, focus_offset, projection->is_collapsed);
         return;
     }
 
@@ -1964,8 +1964,8 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
     // Convert DomBoundary (node, utf16-or-child-offset) → (View*, byte_offset).
     View* anc_view = NULL; int anc_off = 0;
     View* foc_view = NULL; int foc_off = 0;
-    dom_boundary_to_legacy_projection(anchor, &anc_view, &anc_off);
-    dom_boundary_to_legacy_projection(focus,  &foc_view, &foc_off);
+    dom_boundary_to_projection(anchor, &anc_view, &anc_off);
+    dom_boundary_to_projection(focus,  &foc_view, &foc_off);
 
     if (!state_store_ensure_projection_storage(state)) {
         return;
@@ -5587,14 +5587,15 @@ bool visited_links_check(VisitedLinks* visited, const char* url) {
 }
 
 // ============================================================================
-// Legacy caret/selection write API
+// Selection/caret canonical write API
 // ============================================================================
 //
-// These wrappers preserve view + byte-offset callers while routing through the
-// canonical selection writer. Keep new rich editing mutations on
-// state_store_set_selection() / editing transactions instead.
+// These adapters preserve view + byte-offset callers while converting to
+// DomSelection / EditingSelection before refreshing render/debug projections.
+// Keep new rich editing mutations on state_store_set_selection() or editing
+// transactions so boundary ownership stays canonical.
 
-void state_store_legacy_caret_set(DocState* state, View* view, int char_offset) {
+void state_store_caret_collapse_to_view_offset(DocState* state, View* view, int char_offset) {
     log_debug("CARET_SET called: state=%p view=%p offset=%d", state, view, char_offset);
     if (!state) return;
 
@@ -5659,7 +5660,7 @@ void state_store_legacy_caret_set(DocState* state, View* view, int char_offset) 
         return;
     }
 
-    DomBoundary boundary = boundary_from_legacy(view, char_offset);
+    DomBoundary boundary = boundary_from_view_offset(view, char_offset);
     if (!boundary.node) return;
 
     const char* exc = NULL;
@@ -5683,25 +5684,6 @@ void state_store_legacy_caret_set(DocState* state, View* view, int char_offset) 
     selection_log_transition(state, "collapse_to_boundary", view, char_offset, view, char_offset);
 
     log_debug("caret_set: view=%p, offset=%d", view, char_offset);
-}
-
-void state_store_legacy_caret_set_position(DocState* state, View* view, int line, int column) {
-    if (!state) return;
-
-    if (!sync_ensure_selection(state) || !state->caret) return;
-
-    CaretState* caret = state->caret;
-    caret->view = view;
-    caret->line = line;
-    caret->column = column;
-    caret->visible = true;
-    caret->blink_time = 0;
-
-    // Convert line/column to char_offset (caller should do this based on text content)
-    // For now, this is a placeholder
-    state->needs_repaint = true;
-
-    log_debug("caret_set_position: view=%p, line=%d, col=%d", view, line, column);
 }
 
 // ============================================================================
@@ -6060,7 +6042,7 @@ static bool state_store_commit_collapsed_caret(DocState* state,
         state->needs_repaint = true;
         return true;
     }
-    DomBoundary boundary = boundary_from_legacy(view, char_offset);
+    DomBoundary boundary = boundary_from_view_offset(view, char_offset);
     if (!boundary.node) return false;
     const char* exc = NULL;
     if (!state_store_set_selection(state, &boundary, &boundary, &exc)) {
@@ -6078,7 +6060,7 @@ static bool state_store_commit_collapsed_caret(DocState* state,
     return true;
 }
 
-void state_store_legacy_caret_move(DocState* state, int delta) {
+void state_store_caret_move(DocState* state, int delta) {
     if (!state || !state->caret || !state->caret->view) {
         log_debug("caret_move: early return - state=%p, caret=%p, view=%p",
             state, state ? state->caret : nullptr,
@@ -6269,7 +6251,7 @@ void state_store_legacy_caret_move(DocState* state, int delta) {
         delta, caret->view, caret->char_offset);
 }
 
-void state_store_legacy_caret_move_to(DocState* state, int where) {
+void state_store_caret_move_to_boundary(DocState* state, int where) {
     if (!state || !state->caret || !state->caret->view) return;
 
     CaretState* caret = state->caret;
@@ -6669,7 +6651,7 @@ done_down: ;
     return best_view;
 }
 
-void state_store_legacy_caret_move_line(DocState* state, int delta, struct UiContext* uicon) {
+void state_store_caret_move_line(DocState* state, int delta, struct UiContext* uicon) {
     if (!state || !state->caret || !state->caret->view) return;
 
     CaretState* caret = state->caret;
@@ -6712,7 +6694,7 @@ void state_store_legacy_caret_move_line(DocState* state, int delta, struct UiCon
         "caret_move_line");
 }
 
-void state_store_legacy_caret_clear(DocState* state) {
+void state_store_caret_clear(DocState* state) {
     if (!state) return;
 
     const char* exc = NULL;
@@ -6796,7 +6778,7 @@ void selection_project_focus_visual(DocState* state, float x, float y, float hei
 void selection_begin_non_pointer_extend(DocState* state, View* view, int offset) {
     if (!state || !view) return;
     if (!selection_has(state)) {
-        state_store_legacy_selection_set(state, view, offset, offset);
+        state_store_selection_set_view_offsets(state, view, offset, offset);
     }
     if (state->selection) {
         state->selection->is_selecting = true;
@@ -6874,7 +6856,7 @@ bool caret_get_position(DocState* state, View** out_view, int* out_offset) {
             uint32_t focus_byte = text_control_u16_offset_to_byte(form, focus_u16);
             if (out_view) *out_view = static_cast<View*>(control);
             if (out_offset) {
-                *out_offset = static_cast<int>(focus_byte); // INT_CAST_OK: legacy caret API exposes text-control byte offsets as int.
+                *out_offset = static_cast<int>(focus_byte); // INT_CAST_OK: caret projection exposes text-control byte offsets as int.
             }
             return true;
         }
@@ -6882,7 +6864,7 @@ bool caret_get_position(DocState* state, View** out_view, int* out_offset) {
     DomBoundary focus = dom_selection_focus_boundary(state ? state->dom_selection : NULL);
     if (state && state->dom_selection && state->dom_selection->range_count > 0 &&
         focus.node) {
-        dom_boundary_to_legacy_projection(focus, out_view, out_offset);
+        dom_boundary_to_projection(focus, out_view, out_offset);
         return out_view ? *out_view != NULL : true;
     }
     if (!state || !state->caret || !state->caret->view) return false;
@@ -6903,7 +6885,7 @@ bool caret_get_offset(DocState* state, int* out_offset) {
                 state->sel.start_u16 : state->sel.end_u16;
             uint32_t focus_byte = text_control_u16_offset_to_byte(form, focus_u16);
             if (out_offset) {
-                *out_offset = static_cast<int>(focus_byte); // INT_CAST_OK: legacy caret API exposes text-control byte offsets as int.
+                *out_offset = static_cast<int>(focus_byte); // INT_CAST_OK: caret projection exposes text-control byte offsets as int.
             }
             return true;
         }
@@ -6911,7 +6893,7 @@ bool caret_get_offset(DocState* state, int* out_offset) {
     DomBoundary focus = dom_selection_focus_boundary(state ? state->dom_selection : NULL);
     if (state && state->dom_selection && state->dom_selection->range_count > 0 &&
         focus.node) {
-        dom_boundary_to_legacy_projection(focus, NULL, out_offset);
+        dom_boundary_to_projection(focus, NULL, out_offset);
         return true;
     }
     if (!state || !state->caret) return false;
@@ -6928,7 +6910,7 @@ View* caret_get_view(DocState* state) {
     if (state && state->dom_selection && state->dom_selection->range_count > 0 &&
         focus.node) {
         View* view = NULL;
-        dom_boundary_to_legacy_projection(focus, &view, NULL);
+        dom_boundary_to_projection(focus, &view, NULL);
         return view;
     }
     if (!state || !state->caret) return NULL;
@@ -7046,7 +7028,7 @@ void caret_toggle_blink(DocState* state) {
 // Selection compatibility writes
 // ============================================================================
 
-void state_store_legacy_selection_start(DocState* state, View* view, int char_offset) {
+void state_store_selection_start_pointer(DocState* state, View* view, int char_offset) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -7084,7 +7066,7 @@ void state_store_legacy_selection_start(DocState* state, View* view, int char_of
         return;
     }
 
-    DomBoundary boundary = boundary_from_legacy(view, char_offset);
+    DomBoundary boundary = boundary_from_view_offset(view, char_offset);
     if (!boundary.node) return;
 
     const char* exc = NULL;
@@ -7106,7 +7088,7 @@ void state_store_legacy_selection_start(DocState* state, View* view, int char_of
     log_debug("selection_start: view=%p, offset=%d", view, char_offset);
 }
 
-void state_store_legacy_selection_extend(DocState* state, int char_offset) {
+void state_store_selection_extend_to_offset(DocState* state, int char_offset) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -7141,7 +7123,7 @@ void state_store_legacy_selection_extend(DocState* state, int char_offset) {
         log_debug("selection_extend: text-control focus=%d", char_offset);
         return;
     }
-    DomBoundary focus = boundary_from_legacy(focus_view, char_offset);
+    DomBoundary focus = boundary_from_view_offset(focus_view, char_offset);
     if (!focus.node) return;
 
     const char* exc = NULL;
@@ -7160,7 +7142,7 @@ void state_store_legacy_selection_extend(DocState* state, int char_offset) {
     log_debug("selection_extend: focus=%d, collapsed=%d", char_offset, sel->is_collapsed);
 }
 
-void state_store_legacy_selection_extend_to_view(DocState* state, View* view, int char_offset) {
+void state_store_selection_extend_to_view(DocState* state, View* view, int char_offset) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -7196,7 +7178,7 @@ void state_store_legacy_selection_extend_to_view(DocState* state, View* view, in
         return;
     }
 
-    DomBoundary focus = boundary_from_legacy(view, char_offset);
+    DomBoundary focus = boundary_from_view_offset(view, char_offset);
     if (!focus.node) return;
 
     const char* exc = NULL;
@@ -7216,7 +7198,7 @@ void state_store_legacy_selection_extend_to_view(DocState* state, View* view, in
         view, char_offset, state->selection->anchor_view, state->selection->is_collapsed);
 }
 
-void state_store_legacy_selection_set(DocState* state, View* view, int anchor_offset, int focus_offset) {
+void state_store_selection_set_view_offsets(DocState* state, View* view, int anchor_offset, int focus_offset) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -7246,8 +7228,8 @@ void state_store_legacy_selection_set(DocState* state, View* view, int anchor_of
         return;
     }
 
-    DomBoundary anchor = boundary_from_legacy(view, anchor_offset);
-    DomBoundary focus = boundary_from_legacy(view, focus_offset);
+    DomBoundary anchor = boundary_from_view_offset(view, anchor_offset);
+    DomBoundary focus = boundary_from_view_offset(view, focus_offset);
     if (!anchor.node || !focus.node) return;
 
     const char* exc = NULL;
@@ -7265,7 +7247,7 @@ void state_store_legacy_selection_set(DocState* state, View* view, int anchor_of
     log_debug("selection_set: anchor=%d, focus=%d", anchor_offset, focus_offset);
 }
 
-void state_store_legacy_selection_select_all(DocState* state) {
+void state_store_selection_select_all(DocState* state) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -7335,7 +7317,7 @@ void state_store_legacy_selection_select_all(DocState* state) {
     log_debug("selection_select_all");
 }
 
-void state_store_legacy_selection_collapse(DocState* state, bool to_start) {
+void state_store_selection_collapse_to_edge(DocState* state, bool to_start) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -7390,7 +7372,7 @@ void state_store_legacy_selection_collapse(DocState* state, bool to_start) {
     log_debug("selection_collapse: to_start=%d", to_start);
 }
 
-void state_store_legacy_selection_clear(DocState* state) {
+void state_store_selection_clear(DocState* state) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -7422,7 +7404,7 @@ void state_store_legacy_selection_clear(DocState* state) {
         return;
     }
 
-    DomBoundary boundary = boundary_from_legacy(caret_view, caret_offset);
+    DomBoundary boundary = boundary_from_view_offset(caret_view, caret_offset);
     const char* exc = NULL;
     if (boundary.node) {
         if (!state_store_set_selection(state, &boundary, &boundary, &exc)) {
@@ -7551,7 +7533,7 @@ bool selection_get_anchor_range(DocState* state, View* anchor_view,
         !dom_selection_is_collapsed(state->dom_selection) && anchor_view) {
         View* anchor_projection = NULL;
         DomBoundary anchor = dom_selection_anchor_boundary(state->dom_selection);
-        dom_boundary_to_legacy_projection(anchor, &anchor_projection, NULL);
+        dom_boundary_to_projection(anchor, &anchor_projection, NULL);
         if (anchor_projection != anchor_view) return false;
         selection_get_range(state, out_start, out_end);
         return true;
@@ -7613,8 +7595,8 @@ bool selection_get_extent_views(DocState* state, View** out_anchor_view,
         !dom_selection_is_collapsed(state->dom_selection)) {
         DomBoundary anchor = dom_selection_anchor_boundary(state->dom_selection);
         DomBoundary focus = dom_selection_focus_boundary(state->dom_selection);
-        dom_boundary_to_legacy_projection(anchor, out_anchor_view, NULL);
-        dom_boundary_to_legacy_projection(focus, out_focus_view, NULL);
+        dom_boundary_to_projection(anchor, out_anchor_view, NULL);
+        dom_boundary_to_projection(focus, out_focus_view, NULL);
         return (!out_anchor_view || *out_anchor_view) &&
                (!out_focus_view || *out_focus_view);
     }
@@ -7648,8 +7630,8 @@ void selection_get_range(DocState* state, int* start, int* end) {
         int focus_offset = 0;
         DomBoundary anchor = dom_selection_anchor_boundary(state->dom_selection);
         DomBoundary focus = dom_selection_focus_boundary(state->dom_selection);
-        dom_boundary_to_legacy_projection(anchor, NULL, &anchor_offset);
-        dom_boundary_to_legacy_projection(focus, NULL, &focus_offset);
+        dom_boundary_to_projection(anchor, NULL, &anchor_offset);
+        dom_boundary_to_projection(focus, NULL, &focus_offset);
         DomBoundaryOrder order = dom_boundary_compare(&anchor, &focus);
         if (order == DOM_BOUNDARY_AFTER) {
             *start = focus_offset;
@@ -7902,8 +7884,8 @@ static void focus_clear_internal(DocState* state, bool preserve_selection) {
     bool preserve_text_control_selection = state->sel.kind == EDIT_SEL_TEXT_CONTROL;
     if (!preserve_selection && !preserve_rich_editing && !preserve_text_control_selection) {
         // Also clear caret and selection
-        state_store_legacy_caret_clear(state);
-        state_store_legacy_selection_clear(state);
+        state_store_caret_clear(state);
+        state_store_selection_clear(state);
     } else if (preserve_text_control_selection) {
         state_store_refresh_caret_projection(state);
     }

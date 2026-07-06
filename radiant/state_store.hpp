@@ -381,7 +381,7 @@ typedef struct DocState {
     struct DomRange*     live_ranges;       // doubly-linked list head
     uint32_t             next_range_id;     // monotonic id (debug)
     bool                 selection_layout_dirty;
-    uint32_t             selection_projection_seq; // last seq reflected by legacy projections
+    uint32_t             selection_projection_seq; // last selection seq reflected by projection caches
     // Phase 8D: selectionchange event coalescing. `selection_mutation_seq`
     // is bumped by the StateStore canonical selection writer/mutation hook;
     // `selection_event_seq` is the last seq we already enqueued a
@@ -679,13 +679,13 @@ void state_store_set_text_control_selection(DocState* state,
 #endif
 
 // ============================================================================
-// Legacy caret/selection write API
+// Selection/caret canonical write API
 // ============================================================================
 //
 // Compatibility surface for controller, state-machine, form, and event-sim
-// paths that still speak view + byte-offset selections. New rich/editable DOM
-// mutation code should use state_store_set_selection() or editing transactions
-// directly so boundary ownership stays canonical and grep-able.
+// paths that still speak view + byte-offset selections. These functions convert
+// to DomSelection / EditingSelection first; CaretState and SelectionState are
+// refreshed projection caches for rendering and diagnostics.
 
 /**
  * Set caret position in an editable element
@@ -693,27 +693,22 @@ void state_store_set_text_control_selection(DocState* state,
  * @param view Target view (input, textarea, or contenteditable)
  * @param char_offset Character offset from start of text
  */
-void state_store_legacy_caret_set(DocState* state, View* view, int char_offset);
-
-/**
- * Set caret position with line/column (for multiline elements)
- */
-void state_store_legacy_caret_set_position(DocState* state, View* view, int line, int column);
+void state_store_caret_collapse_to_view_offset(DocState* state, View* view, int char_offset);
 
 /**
  * Move caret by character offset (positive = forward, negative = backward)
  */
-void state_store_legacy_caret_move(DocState* state, int delta);
+void state_store_caret_move(DocState* state, int delta);
 
 /**
  * Move caret to start/end of line or document
  */
-void state_store_legacy_caret_move_to(DocState* state, int where);  // 0=line start, 1=line end, 2=doc start, 3=doc end
+void state_store_caret_move_to_boundary(DocState* state, int where);  // 0=line start, 1=line end, 2=doc start, 3=doc end
 
 /**
  * Move caret up/down by lines
  */
-void state_store_legacy_caret_move_line(DocState* state, int delta, struct UiContext* uicon);
+void state_store_caret_move_line(DocState* state, int delta, struct UiContext* uicon);
 
 /**
  * Calculate UTF-8 aware byte offset by moving delta characters
@@ -727,10 +722,10 @@ int utf8_offset_by_chars(unsigned char* text_data, int current_offset, int delta
 /**
  * Clear caret (no element focused for text input)
  */
-void state_store_legacy_caret_clear(DocState* state);
+void state_store_caret_clear(DocState* state);
 
 /**
- * Project visual caret geometry for legacy render paths.
+ * Project visual caret geometry for render paths.
  */
 void caret_project_visual(DocState* state, float x, float y, float height);
 
@@ -747,7 +742,7 @@ void caret_project_visual_from_block(DocState* state, View* view,
 void caret_project_visual_from_selection(DocState* state, float x, float y, float height);
 
 /**
- * Project visual selection anchor/focus geometry for legacy render paths.
+ * Project visual selection anchor/focus geometry for render paths.
  */
 void selection_project_anchor_visual_from_caret(DocState* state, float x, float y, float height);
 void selection_project_focus_visual(DocState* state, float x, float y, float height);
@@ -768,7 +763,7 @@ bool selection_press_in_range_pending(DocState* state, View** out_view, int* out
 bool caret_prepare_selective_repaint(DocState* state);
 
 /**
- * Read the legacy-projection caret view/offset as a query-only snapshot.
+ * Read the caret projection view/offset as a query-only snapshot.
  */
 bool caret_get_position(DocState* state, View** out_view, int* out_offset);
 bool caret_get_offset(DocState* state, int* out_offset);
@@ -796,37 +791,37 @@ void caret_toggle_blink(DocState* state);
 /**
  * Start a new selection at the given position
  */
-void state_store_legacy_selection_start(DocState* state, View* view, int char_offset);
+void state_store_selection_start_pointer(DocState* state, View* view, int char_offset);
 
 /**
  * Extend selection to the given position (during drag)
  */
-void state_store_legacy_selection_extend(DocState* state, int char_offset);
+void state_store_selection_extend_to_offset(DocState* state, int char_offset);
 
 /**
  * Extend selection to a different view (for cross-view selection)
  */
-void state_store_legacy_selection_extend_to_view(DocState* state, View* view, int char_offset);
+void state_store_selection_extend_to_view(DocState* state, View* view, int char_offset);
 
 /**
  * Set selection range explicitly
  */
-void state_store_legacy_selection_set(DocState* state, View* view, int anchor_offset, int focus_offset);
+void state_store_selection_set_view_offsets(DocState* state, View* view, int anchor_offset, int focus_offset);
 
 /**
  * Select all text in the focused element
  */
-void state_store_legacy_selection_select_all(DocState* state);
+void state_store_selection_select_all(DocState* state);
 
 /**
  * Collapse selection to caret (at anchor or focus)
  */
-void state_store_legacy_selection_collapse(DocState* state, bool to_start);
+void state_store_selection_collapse_to_edge(DocState* state, bool to_start);
 
 /**
  * Clear selection (no text selected)
  */
-void state_store_legacy_selection_clear(DocState* state);
+void state_store_selection_clear(DocState* state);
 
 /**
  * Check if there is an active selection
@@ -1245,7 +1240,7 @@ char* extract_html_from_view(View* view, Arena* arena);
 
 /**
  * Extract the canonical StateStore editing selection as plain text / HTML.
- * These do not fall back to legacy caret/selection projections.
+ * These do not fall back to caret/selection projection caches.
  */
 char* state_store_extract_selection_text(DocState* state, Arena* arena);
 char* state_store_extract_selection_html(DocState* state, Arena* arena);

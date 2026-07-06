@@ -153,7 +153,7 @@ bool caret_transition(DocState* state,
     transition_enter(state);
     switch (kind) {
         case CARET_TRANSITION_COLLAPSE_TO_BOUNDARY:
-            state_store_legacy_caret_set(state, args->target, args->offset);
+            state_store_caret_collapse_to_view_offset(state, args->target, args->offset);
             break;
         default:
             transition_leave(state);
@@ -180,7 +180,7 @@ bool selection_transition(DocState* state,
     switch (kind) {
         case SELECTION_TRANSITION_START_POINTER_SELECTION:
             if (!args) { transition_leave(state); return false; }
-            state_store_legacy_selection_start(state, args->target, args->focus_offset);
+            state_store_selection_start_pointer(state, args->target, args->focus_offset);
             if (state->selection && state->editing.drag_anchor_view) {
                 state->selection->is_selecting = true;
             }
@@ -190,27 +190,27 @@ bool selection_transition(DocState* state,
             break;
         case SELECTION_TRANSITION_EXTEND_TO_BOUNDARY:
             if (!args) { transition_leave(state); return false; }
-            state_store_legacy_selection_extend(state, args->focus_offset);
+            state_store_selection_extend_to_offset(state, args->focus_offset);
             break;
         case SELECTION_TRANSITION_EXTEND_TO_VIEW:
             if (!args) { transition_leave(state); return false; }
-            state_store_legacy_selection_extend_to_view(state, args->target, args->focus_offset);
+            state_store_selection_extend_to_view(state, args->target, args->focus_offset);
             break;
         case SELECTION_TRANSITION_SET_BASE_AND_EXTENT:
             if (!args) { transition_leave(state); return false; }
-            state_store_legacy_selection_set(state, args->target, args->anchor_offset, args->focus_offset);
+            state_store_selection_set_view_offsets(state, args->target, args->anchor_offset, args->focus_offset);
             break;
         case SELECTION_TRANSITION_SELECT_ALL:
-            state_store_legacy_selection_select_all(state);
+            state_store_selection_select_all(state);
             break;
         case SELECTION_TRANSITION_COLLAPSE_TO_START:
-            state_store_legacy_selection_collapse(state, true);
+            state_store_selection_collapse_to_edge(state, true);
             break;
         case SELECTION_TRANSITION_COLLAPSE_TO_END:
-            state_store_legacy_selection_collapse(state, false);
+            state_store_selection_collapse_to_edge(state, false);
             break;
         case SELECTION_TRANSITION_CLEAR_SELECTION:
-            state_store_legacy_selection_clear(state);
+            state_store_selection_clear(state);
             break;
         default:
             transition_leave(state);
@@ -411,7 +411,7 @@ static DomNode* boundary_root(const DomBoundary* boundary) {
     return root;
 }
 
-static int boundary_legacy_offset(const DomBoundary* boundary) {
+static int boundary_projection_offset(const DomBoundary* boundary) {
     if (!boundary || !boundary->node) return 0;
     if (boundary->node->is_text()) {
         return (int)dom_text_utf16_to_utf8(lam::dom_require_text(boundary->node), boundary->offset);
@@ -419,14 +419,14 @@ static int boundary_legacy_offset(const DomBoundary* boundary) {
     return (int)boundary->offset;
 }
 
-static uint32_t legacy_view_offset_limit(View* view);
+static uint32_t projection_view_offset_limit(View* view);
 
-static void expected_legacy_caret_projection(DomSelection* selection,
+static void expected_caret_projection(DomSelection* selection,
                                              const DomBoundary* focus,
                                              View** out_view,
                                              int* out_offset) {
     View* view = focus && focus->node ? static_cast<View*>(focus->node) : NULL;
-    int offset = boundary_legacy_offset(focus);
+    int offset = boundary_projection_offset(focus);
 
     if (selection && selection->range_count > 0 &&
         dom_selection_is_collapsed(selection)) {
@@ -445,7 +445,7 @@ static void expected_legacy_caret_projection(DomSelection* selection,
             // projection vs. the offset-limit invariant. Mirrors the same guard
             // in state_store's state_store_refresh_caret_projection.
             if (resolved_view &&
-                (uint32_t)resolved_off <= legacy_view_offset_limit(resolved_view)) {
+                (uint32_t)resolved_off <= projection_view_offset_limit(resolved_view)) {
                 view = resolved_view;
                 offset = resolved_off;
             }
@@ -488,7 +488,7 @@ static bool view_has_document_root(View* view) {
     return root != NULL;
 }
 
-static uint32_t legacy_view_offset_limit(View* view) {
+static uint32_t projection_view_offset_limit(View* view) {
     if (!view) return 0;
     DomNode* node = static_cast<DomNode*>(view);
     if (node->is_text()) {
@@ -839,7 +839,7 @@ static void validate_editing_interaction_invariants(DocState* state,
         report_fail(report, "editing drag anchor offset is negative");
     }
     if (editing->drag_anchor_view &&
-        (uint32_t)editing->drag_anchor_offset > legacy_view_offset_limit(editing->drag_anchor_view)) {
+        (uint32_t)editing->drag_anchor_offset > projection_view_offset_limit(editing->drag_anchor_view)) {
         report_fail(report, "editing drag anchor offset exceeds target length");
     }
 }
@@ -881,8 +881,8 @@ static void validate_selection_invariants(DocState* state,
             form->current_value ? form->current_value : "",
             form->current_value ? form->current_value_len : 0,
             state->sel.end_u16);
-        int start_offset = static_cast<int>(start_byte); // INT_CAST_OK: legacy projection stores text-control byte offsets as int.
-        int end_offset = static_cast<int>(end_byte); // INT_CAST_OK: legacy projection stores text-control byte offsets as int.
+        int start_offset = static_cast<int>(start_byte); // INT_CAST_OK: projection cache stores text-control byte offsets as int.
+        int end_offset = static_cast<int>(end_byte); // INT_CAST_OK: projection cache stores text-control byte offsets as int.
         bool backward = state->sel.direction == DOM_SEL_DIR_BACKWARD;
         int anchor_offset = backward ? end_offset : start_offset;
         int focus_offset = backward ? start_offset : end_offset;
@@ -890,23 +890,23 @@ static void validate_selection_invariants(DocState* state,
         View* view = static_cast<View*>(control);
 
         if (!state->selection) {
-            report_fail(report, "legacy text control selection projection is missing");
+            report_fail(report, "text control selection projection is missing");
         } else {
-            SelectionState* legacy = state->selection;
-            if (legacy->anchor_view != view ||
-                legacy->focus_view != view ||
-                legacy->view != view ||
-                legacy->anchor_offset != anchor_offset ||
-                legacy->focus_offset != focus_offset ||
-                legacy->is_collapsed != collapsed) {
-                report_fail(report, "legacy text control selection projection is stale");
+            SelectionState* projection = state->selection;
+            if (projection->anchor_view != view ||
+                projection->focus_view != view ||
+                projection->view != view ||
+                projection->anchor_offset != anchor_offset ||
+                projection->focus_offset != focus_offset ||
+                projection->is_collapsed != collapsed) {
+                report_fail(report, "text control selection projection is stale");
             }
         }
 
         if (state->caret && collapsed) {
             if (state->caret->view != view ||
                 state->caret->char_offset != focus_offset) {
-                report_fail(report, "legacy text control caret projection is stale");
+                report_fail(report, "text control caret projection is stale");
             }
         }
         return;
@@ -983,27 +983,27 @@ static void validate_selection_invariants(DocState* state,
     }
 
     if (state->selection) {
-        SelectionState* legacy = state->selection;
-        if (static_cast<DomNode*>(legacy->anchor_view) != anchor.node ||
-            static_cast<DomNode*>(legacy->focus_view) != focus.node ||
-            legacy->anchor_offset != boundary_legacy_offset(&anchor) ||
-            legacy->focus_offset != boundary_legacy_offset(&focus) ||
-            legacy->is_collapsed != selection_collapsed) {
-            report_fail(report, "legacy selection projection is stale");
+        SelectionState* projection = state->selection;
+        if (static_cast<DomNode*>(projection->anchor_view) != anchor.node ||
+            static_cast<DomNode*>(projection->focus_view) != focus.node ||
+            projection->anchor_offset != boundary_projection_offset(&anchor) ||
+            projection->focus_offset != boundary_projection_offset(&focus) ||
+            projection->is_collapsed != selection_collapsed) {
+            report_fail(report, "selection projection is stale");
         }
-        if (legacy->is_selecting && selection->range_count == 0) {
-            report_fail(report, "active legacy selection has no DOM range");
+        if (projection->is_selecting && selection->range_count == 0) {
+            report_fail(report, "active selection projection has no DOM range");
         }
     }
 
     if (state->caret && selection_collapsed) {
         View* expected_caret_view = NULL;
         int expected_caret_offset = 0;
-        expected_legacy_caret_projection(selection, &focus,
+        expected_caret_projection(selection, &focus,
             &expected_caret_view, &expected_caret_offset);
         if (state->caret->view != expected_caret_view ||
             state->caret->char_offset != expected_caret_offset) {
-            report_fail(report, "legacy caret projection is stale");
+            report_fail(report, "caret projection is stale");
         }
     }
 }
@@ -1122,7 +1122,7 @@ static void validate_caret_projection_state(DocState* state,
         report_fail(report, "caret offset is negative");
     }
     if (state->caret->view &&
-        (uint32_t)state->caret->char_offset > legacy_view_offset_limit(state->caret->view)) {
+        (uint32_t)state->caret->char_offset > projection_view_offset_limit(state->caret->view)) {
         report_fail(report, "caret offset exceeds target length");
     }
     bool composition_active = state->editing.composition.active;
@@ -1148,11 +1148,11 @@ static void validate_selection_projection_state(DocState* state,
         report_fail(report, "selection offset is negative");
     }
     if (sel->anchor_view &&
-        (uint32_t)sel->anchor_offset > legacy_view_offset_limit(sel->anchor_view)) {
+        (uint32_t)sel->anchor_offset > projection_view_offset_limit(sel->anchor_view)) {
         report_fail(report, "selection anchor offset exceeds target length");
     }
     if (sel->focus_view &&
-        (uint32_t)sel->focus_offset > legacy_view_offset_limit(sel->focus_view)) {
+        (uint32_t)sel->focus_offset > projection_view_offset_limit(sel->focus_view)) {
         report_fail(report, "selection focus offset exceeds target length");
     }
     if (!sel->is_collapsed && (!sel->anchor_view || !sel->focus_view)) {
@@ -1454,7 +1454,7 @@ static void validate_dom_selection_cache_invariant(DocState* state,
     }
 }
 
-static void validate_legacy_selection_projection_invariant(
+static void validate_selection_projection_cache_invariant(
         DocState* state,
         StateValidationReport* report) {
     validate_caret_projection_state(state, report);
@@ -1607,8 +1607,8 @@ static void validate_schema_invariant_primitive(DocState* state,
         case SM_INV_DOM_SELECTION_CACHE:
             validate_dom_selection_cache_invariant(state, report);
             break;
-        case SM_INV_LEGACY_SELECTION_PROJECTION:
-            validate_legacy_selection_projection_invariant(state, report);
+        case SM_INV_SELECTION_PROJECTION_CACHE:
+            validate_selection_projection_cache_invariant(state, report);
             break;
         case SM_INV_INPUT_EVENT_ORDER:
             validate_input_event_order_invariant(state, report);

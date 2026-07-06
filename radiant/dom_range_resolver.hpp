@@ -93,7 +93,7 @@ void dom_range_for_each_rect_in_text_rect(struct DomRange* range,
     struct UiContext* uicon, DomRangeRectCb cb, void* userdata);
 
 // ---------------------------------------------------------------------------
-// Legacy → DOM mirroring
+// Projection → DOM mirroring
 // ---------------------------------------------------------------------------
 
 // Compatibility direction for older projection entry points. Most callers now
@@ -102,13 +102,12 @@ void dom_range_for_each_rect_in_text_rect(struct DomRange* range,
 //
 // Both functions are no-ops when `state->dom_selection` is null. They
 // allocate it lazily on first call so JS reads match what the user sees.
-void dom_selection_sync_from_legacy_selection(struct DocState* state);
-void dom_selection_sync_from_legacy_caret    (struct DocState* state);
+void dom_selection_sync_from_selection_projection(struct DocState* state);
+void dom_selection_sync_from_caret_projection    (struct DocState* state);
 
 // Canonical direction. Reads StateStore's EditingSelection/DomSelection facade
-// and refreshes the legacy projection structs with anchor/focus/caret
-// boundaries plus resolved layout x/y/height when the selection mutation seq
-// has advanced.
+// and refreshes the projection structs with anchor/focus/caret boundaries plus
+// resolved layout x/y/height when the selection mutation seq has advanced.
 void state_store_refresh_caret_projection(struct DocState* state);
 
 // Register a glyph-precise X resolver. When set, `dom_range_for_each_rect()`

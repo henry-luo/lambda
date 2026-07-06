@@ -57,10 +57,10 @@ void tc_notify_selection_changed(DomElement* elem);
 // StateStore projection fields preserve existing renderer and event helper
 // contracts.
 
-// Publish the active text-control selection into StateStore. Older event paths
-// can still call this after legacy caret/selection projection changes; when
-// state->sel already targets the control, it is treated as source of truth.
-void tc_sync_legacy_to_form(DomElement* elem, DocState* state);
+// Publish the active text-control selection into the form mirror. Older event
+// paths can still call this after projection-cache changes; when state->sel
+// already targets the control, it is treated as source of truth.
+void tc_sync_selection_to_form(DomElement* elem, DocState* state);
 
 // Selection accessor for Selection.toString() integration ----------------
 

@@ -32,7 +32,7 @@ graph TB
 
     subgraph TextEdit native path
         TE[text_edit te_replace_byte_range and te_paste and te_ime and te_validate and te_history]
-        TC[text_control tc_set_value and tc_set_selection_range and tc_sync_legacy_to_form]
+        TC[text_control tc_set_value and tc_set_selection_range and tc_sync_selection_to_form]
         TE --> TC
     end
 

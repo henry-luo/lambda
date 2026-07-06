@@ -202,9 +202,9 @@ bool te_apply_byte_range(DocState* state, void* target,
     if (!state || !target) return false;
     if (end < start) { uint32_t t = start; start = end; end = t; }
     View* view = (View*)target;
-    state_store_legacy_selection_start(state, view, (int)start);
-    state_store_legacy_selection_extend(state, (int)end);
-    state_store_legacy_caret_set(state, view, (int)end);
+    state_store_selection_start_pointer(state, view, (int)start);
+    state_store_selection_extend_to_offset(state, (int)end);
+    state_store_caret_collapse_to_view_offset(state, view, (int)end);
     selection_finish_active_gesture(state);
     log_debug("text_edit: applied selection bytes=[%u..%u] view=%p",
               start, end, view);
@@ -320,11 +320,11 @@ bool te_replace_byte_range_no_events(DomElement* elem, DocState* state, void* ta
 
     // Place caret at end of inserted text and clear any selection.
     uint32_t new_caret = start + repl_len;
-    if (selection_has_projection(state)) state_store_legacy_selection_clear(state);
-    state_store_legacy_caret_set(state, (View*)target, (int)new_caret);
+    if (selection_has_projection(state)) state_store_selection_clear(state);
+    state_store_caret_collapse_to_view_offset(state, (View*)target, (int)new_caret);
     // tc_set_value() temporarily collapses text controls at value-end; publish
     // the replacement caret afterward so fallback reflow keeps the live cursor.
-    tc_sync_legacy_to_form(elem, state);
+    tc_sync_selection_to_form(elem, state);
 
     // tc_set_value already pushed an undo entry; just notify selection
     // observers and we're done.

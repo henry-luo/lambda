@@ -383,7 +383,7 @@ static void editing_controller_extend_selection_after_scroll(
 
     View* focus_view = static_cast<View*>(hit_boundary.dom.node);
     int focus_offset = (int)hit_boundary.offset; // INT_CAST_OK: editor selection offsets are byte-index ints.
-    state_store_legacy_selection_extend_to_view(state, focus_view, focus_offset);
+    state_store_selection_extend_to_view(state, focus_view, focus_offset);
     update_caret_visual_position(evcon->ui_context, state);
     editing_controller_selection_snapshot(evcon, state, hooks, focus_view,
                                           "autoscrollExtend");
@@ -734,7 +734,7 @@ static void editing_controller_extend_to_moved_caret(
     caret_get_render_snapshot(state, &new_caret_view, caret_offset,
                               nullptr, nullptr, nullptr, nullptr, nullptr,
                               nullptr);
-    state_store_legacy_selection_extend_to_view(state, new_caret_view, *caret_offset);
+    state_store_selection_extend_to_view(state, new_caret_view, *caret_offset);
     editing_controller_selection_snapshot(evcon, state, hooks, new_caret_view,
                                           operation);
 }
@@ -772,14 +772,14 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
                 int new_offset = text_data
                     ? utf8_offset_by_chars(text_data, caret_offset, -1)
                     : caret_offset - 1;
-                state_store_legacy_selection_extend(state, new_offset);
+                state_store_selection_extend_to_offset(state, new_offset);
                 editing_controller_selection_snapshot(evcon, state, hooks,
                                                       caret_view,
                                                       "extendBackward");
                 selection_finish_active_gesture(state);
             } else {
-                state_store_legacy_selection_clear(state);
-                state_store_legacy_caret_move(state, ctrl ? -10 : -1);
+                state_store_selection_clear(state);
+                state_store_caret_move(state, ctrl ? -10 : -1);
                 editing_controller_selection_snapshot(evcon, state, hooks,
                                                       caret_view,
                                                       ctrl ? "moveWordBackward"
@@ -793,14 +793,14 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
                 int new_offset = text_data
                     ? utf8_offset_by_chars(text_data, caret_offset, 1)
                     : caret_offset + 1;
-                state_store_legacy_selection_extend(state, new_offset);
+                state_store_selection_extend_to_offset(state, new_offset);
                 editing_controller_selection_snapshot(evcon, state, hooks,
                                                       caret_view,
                                                       "extendForward");
                 selection_finish_active_gesture(state);
             } else {
-                state_store_legacy_selection_clear(state);
-                state_store_legacy_caret_move(state, ctrl ? 10 : 1);
+                state_store_selection_clear(state);
+                state_store_caret_move(state, ctrl ? 10 : 1);
                 editing_controller_selection_snapshot(evcon, state, hooks,
                                                       caret_view,
                                                       ctrl ? "moveWordForward"
@@ -811,14 +811,14 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
         case RDT_KEY_UP:
             if (shift) {
                 selection_begin_non_pointer_extend(state, caret_view, caret_offset);
-                state_store_legacy_caret_move_line(state, -1, evcon->ui_context);
+                state_store_caret_move_line(state, -1, evcon->ui_context);
                 editing_controller_extend_to_moved_caret(evcon, state, caret_view,
                                                          &caret_offset, hooks,
                                                          "extendLineBackward");
                 selection_finish_active_gesture(state);
             } else {
-                state_store_legacy_selection_clear(state);
-                state_store_legacy_caret_move_line(state, -1, evcon->ui_context);
+                state_store_selection_clear(state);
+                state_store_caret_move_line(state, -1, evcon->ui_context);
                 editing_controller_selection_snapshot(evcon, state, hooks,
                                                       caret_view,
                                                       "moveLineBackward");
@@ -828,14 +828,14 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
         case RDT_KEY_DOWN:
             if (shift) {
                 selection_begin_non_pointer_extend(state, caret_view, caret_offset);
-                state_store_legacy_caret_move_line(state, 1, evcon->ui_context);
+                state_store_caret_move_line(state, 1, evcon->ui_context);
                 editing_controller_extend_to_moved_caret(evcon, state, caret_view,
                                                          &caret_offset, hooks,
                                                          "extendLineForward");
                 selection_finish_active_gesture(state);
             } else {
-                state_store_legacy_selection_clear(state);
-                state_store_legacy_caret_move_line(state, 1, evcon->ui_context);
+                state_store_selection_clear(state);
+                state_store_caret_move_line(state, 1, evcon->ui_context);
                 editing_controller_selection_snapshot(evcon, state, hooks,
                                                       caret_view,
                                                       "moveLineForward");
@@ -845,15 +845,15 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
         case RDT_KEY_HOME:
             if (shift) {
                 selection_begin_non_pointer_extend(state, caret_view, caret_offset);
-                state_store_legacy_caret_move_to(state, cmd ? 2 : 0);
+                state_store_caret_move_to_boundary(state, cmd ? 2 : 0);
                 editing_controller_extend_to_moved_caret(evcon, state, caret_view,
                                                          &caret_offset, hooks,
                                                          cmd ? "extendDocumentStart"
                                                              : "extendLineStart");
                 selection_finish_active_gesture(state);
             } else {
-                state_store_legacy_selection_clear(state);
-                state_store_legacy_caret_move_to(state, cmd ? 2 : 0);
+                state_store_selection_clear(state);
+                state_store_caret_move_to_boundary(state, cmd ? 2 : 0);
                 editing_controller_selection_snapshot(evcon, state, hooks,
                                                       caret_view,
                                                       cmd ? "moveDocumentStart"
@@ -864,15 +864,15 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
         case RDT_KEY_END:
             if (shift) {
                 selection_begin_non_pointer_extend(state, caret_view, caret_offset);
-                state_store_legacy_caret_move_to(state, cmd ? 3 : 1);
+                state_store_caret_move_to_boundary(state, cmd ? 3 : 1);
                 editing_controller_extend_to_moved_caret(evcon, state, caret_view,
                                                          &caret_offset, hooks,
                                                          cmd ? "extendDocumentEnd"
                                                              : "extendLineEnd");
                 selection_finish_active_gesture(state);
             } else {
-                state_store_legacy_selection_clear(state);
-                state_store_legacy_caret_move_to(state, cmd ? 3 : 1);
+                state_store_selection_clear(state);
+                state_store_caret_move_to_boundary(state, cmd ? 3 : 1);
                 editing_controller_selection_snapshot(evcon, state, hooks,
                                                       caret_view,
                                                       cmd ? "moveDocumentEnd"

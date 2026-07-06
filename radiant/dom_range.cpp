@@ -31,7 +31,7 @@
 #include <limits.h>
 
 // Selection mutations are noted in StateStore so the DOM-facing selection,
-// shadow EditingSelection, legacy projection cache, and selectionchange
+// shadow EditingSelection, projection caches, and selectionchange
 // coalescing all share one mutation sequence. Weak defaults let DOM-only
 // range tests link without the full StateStore/render stack.
 extern "C" void state_store_note_selection_mutation(struct DocState* state);
