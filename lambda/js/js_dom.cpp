@@ -869,36 +869,92 @@ static bool js_dom_is_generated_pseudo_node(DomNode* node) {
     return elem->tag_name && elem->tag_name[0] == ':' && elem->tag_name[1] == ':';
 }
 
+static bool js_dom_is_anonymous_table_wrapper(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    DomElement* elem = node->as_element();
+    return elem->tag_name && strncmp(elem->tag_name, "::anon-", 7) == 0;
+}
+
+static DomNode* js_dom_first_script_visible_child(DomElement* elem);
+static DomNode* js_dom_last_script_visible_child(DomElement* elem);
+
 static DomNode* js_dom_next_script_visible_sibling(DomNode* node) {
     DomNode* sibling = node ? node->next_sibling : nullptr;
-    while (js_dom_is_generated_pseudo_node(sibling)) {
+    while (sibling) {
+        if (!js_dom_is_generated_pseudo_node(sibling)) return sibling;
+        if (js_dom_is_anonymous_table_wrapper(sibling)) {
+            DomNode* child = js_dom_first_script_visible_child(sibling->as_element());
+            if (child) return child;
+        }
         sibling = sibling->next_sibling;
     }
-    return sibling;
+    DomNode* parent = node ? node->parent : nullptr;
+    while (js_dom_is_anonymous_table_wrapper(parent)) {
+        sibling = parent->next_sibling;
+        while (sibling) {
+            if (!js_dom_is_generated_pseudo_node(sibling)) return sibling;
+            if (js_dom_is_anonymous_table_wrapper(sibling)) {
+                DomNode* child = js_dom_first_script_visible_child(sibling->as_element());
+                if (child) return child;
+            }
+            sibling = sibling->next_sibling;
+        }
+        parent = parent->parent;
+    }
+    return nullptr;
 }
 
 static DomNode* js_dom_prev_script_visible_sibling(DomNode* node) {
     DomNode* sibling = node ? node->prev_sibling : nullptr;
-    while (js_dom_is_generated_pseudo_node(sibling)) {
+    while (sibling) {
+        if (!js_dom_is_generated_pseudo_node(sibling)) return sibling;
+        if (js_dom_is_anonymous_table_wrapper(sibling)) {
+            DomNode* child = js_dom_last_script_visible_child(sibling->as_element());
+            if (child) return child;
+        }
         sibling = sibling->prev_sibling;
     }
-    return sibling;
+    DomNode* parent = node ? node->parent : nullptr;
+    while (js_dom_is_anonymous_table_wrapper(parent)) {
+        sibling = parent->prev_sibling;
+        while (sibling) {
+            if (!js_dom_is_generated_pseudo_node(sibling)) return sibling;
+            if (js_dom_is_anonymous_table_wrapper(sibling)) {
+                DomNode* child = js_dom_last_script_visible_child(sibling->as_element());
+                if (child) return child;
+            }
+            sibling = sibling->prev_sibling;
+        }
+        parent = parent->parent;
+    }
+    return nullptr;
 }
 
 static DomNode* js_dom_first_script_visible_child(DomElement* elem) {
     DomNode* child = elem ? elem->first_child : nullptr;
-    while (js_dom_is_generated_pseudo_node(child)) {
+    while (child) {
+        if (!js_dom_is_generated_pseudo_node(child)) return child;
+        if (js_dom_is_anonymous_table_wrapper(child)) {
+            // layout-only table wrappers must be transparent to script-visible child lists.
+            DomNode* nested = js_dom_first_script_visible_child(child->as_element());
+            if (nested) return nested;
+        }
         child = child->next_sibling;
     }
-    return child;
+    return nullptr;
 }
 
 static DomNode* js_dom_last_script_visible_child(DomElement* elem) {
     DomNode* child = elem ? elem->last_child : nullptr;
-    while (js_dom_is_generated_pseudo_node(child)) {
+    while (child) {
+        if (!js_dom_is_generated_pseudo_node(child)) return child;
+        if (js_dom_is_anonymous_table_wrapper(child)) {
+            DomNode* nested = js_dom_last_script_visible_child(child->as_element());
+            if (nested) return nested;
+        }
         child = child->prev_sibling;
     }
-    return child;
+    return nullptr;
 }
 
 static inline void dom_text_replace_data(DomText* text, uint32_t off,
@@ -10850,6 +10906,10 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         DomNode* ref_child = (DomNode*)js_dom_unwrap_element(args[1]);
         if (!new_child) return ItemNull;
         DomNode* parent_node = (DomNode*)elem;
+        if (new_child == ref_child) {
+            // insertBefore(node, node) is a DOM no-op; detaching first drops keyed reconciler children.
+            return args[0];
+        }
         if (ref_child && ref_child->parent != parent_node) {
             log_error("js_dom insertBefore guard: reference node is not a child of target parent");
             return ItemNull;

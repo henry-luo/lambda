@@ -1,15 +1,14 @@
-# Radiant Issue 5 — `cmdSetColumnWidth` empties the table under `lambda.exe view`
+# Radiant Issue 5 — table column resize lost table rows under `lambda.exe view`
 
-Status: **OPEN** (blocks the table column-resize gesture end-to-end)
+Status: **CLOSED** (fixed; regression fixture landed)
 
 This document captures a bug discovered while fixing the Stage-4C editor's table
 column-resize gesture under `lambda.exe view`. The *reported* problem
 (getBoundingClientRect returning zero geometry for table cells) is **FIXED** — see
 [§1](#1-fixed-getboundingclientrect-returned-zero-geometry-in-view-mode). While
-verifying that fix, a **separate, downstream** bug surfaced: once the drag is
-actually delivered, `cmdSetColumnWidth`'s result empties the table's rows/cells
-from the doc model under `view` mode. That second bug is the subject of this
-issue.
+verifying that fix, a **separate, downstream** bug surfaced: once the drag was
+delivered, the reconciled DOM appeared to lose the table rows/cells under
+`view` mode. That second bug is fixed in [§2](#2-fixed-anonymous-table-wrappers-were-hidden-from-js-child-traversal).
 
 ---
 
@@ -57,11 +56,11 @@ editor Phase-B fixtures still pass (no regression).
 
 ---
 
-## 2. OPEN: `cmdSetColumnWidth` empties the table's rows/cells (doc model) under `view`
+## 2. FIXED: anonymous table wrappers were hidden from JS child traversal
 
 ### Symptom
 
-Running the column-resize fixture (see [§4](#4-repro)):
+Running the column-resize fixture (see [§4](#4-regression-fixture)):
 
 - **Before** the drag: `.rdt-surface table` = 1, `.rdt-surface tr td` = 6 (2×3),
   first-row `td` = 3, `.rdt-col-resizer` = 3. All correct.
@@ -69,8 +68,11 @@ Running the column-resize fixture (see [§4](#4-repro)):
   `.rdt-surface table *` = 0 (the `<table>` has **no descendants at all**), and
   global `td[width]` = 0. The final assertion (`td[width] ≥ 1`) fails.
 
-The rows/cells are **removed**, not merely mis-styled or moved (`td` anywhere in
-the document = 0).
+The original diagnosis said the rows/cells were removed from the editor doc
+model. That was incorrect. Temporary breadcrumbs showed the doc model stayed
+intact through `cmdSetColumnWidth`, `editorReducer`, and `renderDoc`
+(`table/tr/td = 1/2/6`), and the command correctly set a `width` attr on the
+resized column's cells.
 
 ### The gesture *is* delivered (this is not a getBoundingClientRect problem)
 
@@ -82,69 +84,59 @@ Instrumented `radiant/event.cpp`:
   bubbles to the `window`-level `mouseup` listener registered by
   `startColResize`, so `onUp`→`runCmd(cmdSetColumnWidth)` runs.
 
-### It is the doc model that ends up empty, not a transient render glitch
+### Root cause
 
-Performing the drag and then a **second, unrelated re-render** (clicking a
-paragraph) still shows `td` = 0. If only the DOM had been mis-reconciled, the
-next `reconcileDoc(surface, renderDoc(doc))` would repaint the cells from an
-intact doc model. It does not — so `state.doc`'s table content is genuinely empty
-after the command is applied.
+Radiant table layout generates anonymous table wrappers (`::anon-*`) for
+layout. Those wrappers are stored in the real `DomNode` child chain; for example,
+direct table rows can become children of an anonymous table section wrapper.
 
-### What it is NOT (ruled out)
+The JS DOM bridge already hid generated pseudo nodes from script-visible child
+APIs, but it treated every generated node the same way: skip the generated node
+and continue to its next sibling. For table layout wrappers this is wrong. They
+are transparent wrappers, so script-visible traversal must flatten through them.
 
-- **Not the command's transaction logic.** `test/commands/table-cells.test.ts`
-  (which exercises `cmdSetColumnWidth`) is vitest-green, and Stage-4C Phase A runs
-  that suite under `lambda.exe js` (green) — so the transaction is correct even
-  under the MIR JIT *in isolation*.
-- **Not the transaction/reducer primitives.** `applySetAttr` preserves
-  `content` (`test/editor-js/src/model/step.ts`), and `replaceNodeAt` /
-  `replaceAtStep` / `listSet` / `txStep` (`.../model/doc.ts`,
-  `.../model/transaction.ts`) are plain immutable array/tree updates, shared with
-  the **passing** image-resize gesture (which also sets `width`/`height` attrs via
-  `stepSetAttr`+`applySetAttr`).
-- **Not Radiant `setAttribute`.** A static page whose inline script calls
-  `td.setAttribute('width','200')` keeps all 6 cells (before=6, after=6). So the
-  DOM-API attribute write on a table cell is harmless.
-- **Not general reconcile.** A normal click re-render (which reconciles the whole
-  `<doc>`, table included) keeps the cells. Reconcile handles the table fine on an
-  ordinary edit.
+That mismatch made DOM APIs internally inconsistent:
 
-### Where it must live
+- `querySelectorAll('td')` could still find the original descendants.
+- `table.childNodes` / `firstChild` made the same table appear childless.
 
-The bug is specific to the **full view-mode command→`editorReducer`→render flow**
-for `cmdSetColumnWidth` — i.e. something that runs in that path but *not* in the
-isolated vitest command test:
+The keyed editor reconciler uses `parent.childNodes` to build its reuse map. When
+it patched the `<table>`, it saw `existing.length = 0` even though the real rows
+still existed behind `::anon-*` wrappers, so it created new rows/cells instead of
+reusing the existing ones. The final view-tree/selector state then failed to
+observe `td[width]`.
 
-- `cmdSetColumnWidth` returns `txSetSelection(tx, state.selection ??
-  nodeSelection(anchorCellPath))` — a **node selection on the resized cell**. The
-  isolated command test doesn't run `editorReducer` + selection projection +
-  `renderDoc` + `reconcileDoc`; the view flow does.
-- Candidates to bisect next:
-  1. `selMap(step, sel)` (`.../model/transaction.ts` → mapping) for a `set_attr`
-     step against a **node** selection — does it corrupt the selection or, via a
-     shared mutation, the doc?
-  2. `editorReducer` `apply` handling (`.../view/editor-state.ts`) under the MIR
-     JIT for this specific transaction shape (multiple `set_attr` steps on
-     sibling paths `[t,0,c]` and `[t,1,c]`).
-  3. `renderDoc(doc_after)` for a table whose cells carry a `width` attr and whose
-     selection is a node selection on a cell (does selection projection /
-     `syncCellHighlight` mutate the rendered tree?).
-- A JS→MIR codegen difference in the full-flow path (vs the isolated command) has
-  not been excluded. `temp/mir_dump.txt` on a debug build is the place to inspect
-  the transpiled transaction/reducer code if the JS-level bisect above comes up
-  clean.
+### Fix
 
-### Suggested bisection recipe
+`lambda/js/js_dom.cpp` now treats anonymous table wrappers as transparent in
+script-visible child/sibling traversal:
 
-1. Reproduce with the fixture in [§4](#4-repro).
-2. Add a temporary `log_error` (or a `data-*` attribute breadcrumb from JS) that
-   dumps `state.doc`'s table row/cell counts (a) immediately after
-   `cmdSetColumnWidth` returns its transaction, (b) after `editorReducer` applies
-   it, and (c) after `renderDoc`. Whichever stage first shows 0 rows localizes the
-   bug to command-result vs reducer vs render.
-3. If all three show intact rows, the loss is in `reconcileDoc`/Radiant DOM for
-   this specific attr change; if (a) or (b) shows 0, it's the reducer/selMap/JS-MIR
-   path.
+- `js_dom_first_script_visible_child()` and `js_dom_last_script_visible_child()`
+  descend through `::anon-*` wrappers.
+- `js_dom_next_script_visible_sibling()` and
+  `js_dom_prev_script_visible_sibling()` continue out of anonymous wrappers when
+  needed.
+- `insertBefore(node, node)` is guarded as a DOM no-op; detaching first can drop
+  keyed reconciler children during ordering passes.
+
+With the fix, the reconciler reuses the existing table rows/cells:
+
+- table patch: `existing=2`, `vChildren=2`, `matched=2`, `created=0`.
+- row patch: `existing=3`, `vChildren=3`, `matched=3`, `created=0`.
+- after reconcile, `td[width] = 2` for the resized column.
+
+### Verified
+
+The repro fixture now passes:
+
+```bash
+./lambda.exe view test/html/editor-table.html \
+  --event-file test/ui/editor4c/table-col-resize.json --headless
+```
+
+Result: `2 passed, 0 failed`.
+
+`make build` also passes.
 
 ---
 
@@ -158,16 +150,17 @@ gesture still works because event_sim targets the element's *actual* laid-out
 box, but it suggests the CSS cascade may not apply `position:absolute` to elements
 created via JS `appendChild` **after** the initial load (the post-commit pump),
 unlike load-time-created elements. This does not block the gesture and is noted
-here only as a lead; it is **not** the cause of §2 (the cells vanish from the doc
-model, independent of overlay positioning).
+here only as a lead; it is **not** the cause of §2 (the failed assertion came from
+script-visible table traversal, independent of overlay positioning).
 
 ---
 
-## 4. Repro
+## 4. Regression fixture
 
-The repro harness landed with the §1 fix (kept, since it is benign and needed to
-reproduce §2). The **fixture itself is intentionally kept OUT of
-`test/ui/editor4c/`** so `make editor-4c-view` stays green; it is embedded below.
+The repro harness landed with the §1 fix and the fixture is now checked in as a
+regression:
+
+- `test/ui/editor4c/table-col-resize.json`
 
 Harness pieces already in the tree:
 - `test/editor-js/demo/main-dom.ts` — adds a `TABLE_DOC` seed selected via
@@ -177,13 +170,12 @@ Harness pieces already in the tree:
   before the bundle. Regenerate with `node tools/build-dom-page.mjs` from
   `test/editor-js/`.
 
-Save the following as `test/ui/editor4c/table-col-resize.json` to run the repro
-(and delete it again to keep the baseline green):
+Fixture:
 
 ```json
 {
   "name": "editor4c: dragging a column resizer sets an explicit width on the column's cells",
-  "_note": "Phase B — table column-resize gesture. syncColResizers() places absolute .rdt-col-resizer handles at each first-row cell's right border using getBoundingClientRect() on the table + cells. mousedown on a handle starts startColResize(); the drag's mouseup runs cmdSetColumnWidth(), which writes a width attr on every cell in the dragged column. Exercises getBoundingClientRect for table-internal (table/td) elements in the JS->Radiant path. Seed page editor-table.html sets window.__RDT_SEED='table'. BLOCKED by Radiant_Issue5 §2: the drag now delivers but cmdSetColumnWidth empties the table's rows/cells from the doc model under view.",
+  "_note": "Phase B table column-resize gesture. syncColResizers() places absolute .rdt-col-resizer handles at each first-row cell's right border using getBoundingClientRect() on the table + cells. mousedown on a handle starts startColResize(); the drag's mouseup runs cmdSetColumnWidth(), which writes a width attr on every cell in the dragged column.",
   "html": "test/html/editor-table.html",
   "viewport": {"width": 900, "height": 700},
   "events": [
@@ -203,6 +195,5 @@ Run:
   --event-file test/ui/editor4c/table-col-resize.json --headless
 ```
 
-Current outcome: `.rdt-col-resizer` assertion passes; the final `td[width] ≥ 1`
-assertion fails because the drag delivers `cmdSetColumnWidth`, which empties the
-table (§2).
+Current outcome: `.rdt-col-resizer` assertion passes and the final
+`td[width] ≥ 1` assertion passes.

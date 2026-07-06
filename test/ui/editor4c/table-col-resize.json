@@ -1,0 +1,13 @@
+{
+  "name": "editor4c: dragging a column resizer sets an explicit width on the column's cells",
+  "_note": "Phase B table column-resize gesture. syncColResizers() places absolute .rdt-col-resizer handles at each first-row cell's right border using getBoundingClientRect() on the table + cells. mousedown on a handle starts startColResize(); the drag's mouseup runs cmdSetColumnWidth(), which writes a width attr on every cell in the dragged column.",
+  "html": "test/html/editor-table.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 300},
+    {"type": "assert_count", "target": {"selector": ".rdt-col-resizer"}, "min": 1},
+    {"type": "mouse_drag", "target": {"selector": ".rdt-col-resizer", "index": 1}, "dx": 60, "dy": 0},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface td[width]"}, "min": 1}
+  ]
+}
