@@ -4,6 +4,7 @@
 #include "../../input/css/css_tokenizer.hpp"
 #include "../../input/css/selector_matcher.hpp"
 #include "../../../radiant/form_control.hpp"
+#include "../../../radiant/text_control.hpp"
 #include "../../../lib/mem.h"
 #include "../../../lib/strbuf.h"
 #include <ctype.h>
@@ -34,9 +35,17 @@ extern "C" void js_dom_after_select_multiple_removed(void* elem);
 extern "C" void js_dom_set_checked_dirty(void* elem, bool checked);
 extern "C" void js_dom_select_set_value_bridge(void* elem, const char* value);
 extern "C" void js_dom_select_set_selected_index_bridge(void* elem, Item value);
+extern "C" void js_dom_select_set_length_bridge(void* elem, Item value);
 extern "C" void js_dom_set_option_selected_dirty(void* elem, bool selected);
+extern "C" void js_dom_set_option_text_bridge(void* elem, const char* value);
+extern "C" void js_dom_after_srcdoc_set(void* elem);
 extern "C" void js_dom_throw_contenteditable_syntax_error(void);
 extern "C" Item js_dom_set_text_data_property(void* text, Item value);
+extern "C" Item js_dom_text_control_set_value_bridge(void* elem, Item value);
+extern "C" Item js_dom_text_control_set_selection_start_bridge(void* elem, Item value);
+extern "C" Item js_dom_text_control_set_selection_end_bridge(void* elem, Item value);
+extern "C" Item js_dom_text_control_set_selection_direction_bridge(void* elem, Item value);
+extern "C" Item js_dom_text_control_set_default_value_bridge(void* elem, Item value);
 extern "C" Item js_dom_text_replace_data_bridge(void* text, Item offset, Item count, Item data);
 extern "C" Item js_dom_text_insert_data_bridge(void* text, Item offset, Item data);
 extern "C" Item js_dom_text_append_data_bridge(void* text, Item data);
@@ -256,6 +265,15 @@ static bool radiant_dom_live_bool_setter(DomElement* elem, const char* prop, con
         return true;
     }
     return false;
+}
+
+static const char* radiant_dom_item_to_html_bool_string(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) {
+        const char* text = js_dom_to_attribute_cstr(value);
+        return text ? text : "";
+    }
+    return js_is_truthy(value) ? "true" : "false";
 }
 
 static bool radiant_dom_int_reflected(DomElement* elem, const char* prop,
@@ -1270,6 +1288,39 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
         *out = value;
         return true;
     }
+    if (strcmp(prop, "srcdoc") == 0 && radiant_dom_is_tag(elem, "iframe")) {
+        const char* text = fn_to_cstr(value);
+        dom_element_set_attribute(elem, "srcdoc", text ? text : "");
+        js_dom_after_srcdoc_set((void*)elem);
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        *out = value;
+        return true;
+    }
+    if (strcmp(prop, "autocapitalize") == 0) {
+        const char* text = js_dom_to_attribute_cstr(value);
+        dom_element_set_attribute(elem, "autocapitalize", text ? text : "");
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        *out = value;
+        return true;
+    }
+    if (strcmp(prop, "autocorrect") == 0) {
+        dom_element_set_attribute(elem, "autocorrect", js_is_truthy(value) ? "on" : "off");
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        *out = value;
+        return true;
+    }
+    if (strcmp(prop, "spellcheck") == 0) {
+        dom_element_set_attribute(elem, "spellcheck", radiant_dom_item_to_html_bool_string(value));
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        *out = value;
+        return true;
+    }
+    if (strcmp(prop, "writingSuggestions") == 0) {
+        dom_element_set_attribute(elem, "writingsuggestions", radiant_dom_item_to_html_bool_string(value));
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        *out = value;
+        return true;
+    }
     const char* disabled_attr = nullptr;
     if (radiant_dom_disabled_setter(elem, prop, &disabled_attr)) {
         if (js_is_truthy(value)) {
@@ -1322,9 +1373,59 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
             *out = value;
             return true;
         }
+        if (strcmp(prop, "length") == 0) {
+            js_dom_select_set_length_bridge((void*)elem, value);
+            *out = value;
+            return true;
+        }
     }
     if (strcmp(prop, "selected") == 0 && radiant_dom_is_tag(elem, "option")) {
         js_dom_set_option_selected_dirty((void*)elem, js_is_truthy(value));
+        *out = value;
+        return true;
+    }
+    if (strcmp(prop, "value") == 0 && radiant_dom_is_tag(elem, "option")) {
+        const char* text = fn_to_cstr(value);
+        dom_element_set_attribute(elem, "value", text ? text : "");
+        *out = value;
+        return true;
+    }
+    if (strcmp(prop, "text") == 0 && radiant_dom_is_tag(elem, "option")) {
+        const char* text = fn_to_cstr(value);
+        js_dom_set_option_text_bridge((void*)elem, text ? text : "");
+        *out = value;
+        return true;
+    }
+    if (tc_is_text_control(elem)) {
+        if (strcmp(prop, "value") == 0) {
+            *out = js_dom_text_control_set_value_bridge((void*)elem, value);
+            return true;
+        }
+        if (strcmp(prop, "selectionStart") == 0) {
+            *out = js_dom_text_control_set_selection_start_bridge((void*)elem, value);
+            return true;
+        }
+        if (strcmp(prop, "selectionEnd") == 0) {
+            *out = js_dom_text_control_set_selection_end_bridge((void*)elem, value);
+            return true;
+        }
+        if (strcmp(prop, "selectionDirection") == 0) {
+            *out = js_dom_text_control_set_selection_direction_bridge((void*)elem, value);
+            return true;
+        }
+        if (strcmp(prop, "defaultValue") == 0) {
+            *out = js_dom_text_control_set_default_value_bridge((void*)elem, value);
+            return true;
+        }
+    }
+    if (strcmp(prop, "value") == 0 && radiant_dom_is_tag(elem, "input") &&
+        !tc_is_text_control(elem)) {
+        const char* text = fn_to_cstr(value);
+        dom_element_set_attribute(elem, "value", text ? text : "");
+        if (elem->form) {
+            elem->form->value = dom_element_get_attribute(elem, "value");
+        }
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
         *out = value;
         return true;
     }

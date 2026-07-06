@@ -2471,6 +2471,11 @@ static void _schedule_iframe_load(DomElement* iframe) {
     }
 }
 
+extern "C" void js_dom_after_srcdoc_set(void* dom_elem) {
+    // srcdoc writes mutate an iframe's nested document asynchronously.
+    _schedule_iframe_load((DomElement*)dom_elem);
+}
+
 static Url* js_dom_resolve_navigation_url(DomDocument* doc,
                                           const char* next_url) {
     if (!next_url || !next_url[0]) return nullptr;
@@ -6477,6 +6482,133 @@ static void _value_clear_dirty(DomElement* elem) {
         (Item){.item = ITEM_NULL});
 }
 
+extern "C" Item js_dom_text_control_set_value_bridge(void* dom_elem, Item value) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem || !tc_is_text_control_elem(elem)) return value;
+    const char* s = fn_to_cstr(value);
+    if (!s) s = "";
+    if (elem->tag_name && strcasecmp(elem->tag_name, "input") == 0) {
+        const char* itype = _input_type_lower(elem);
+        bool single_line = strcmp(itype, "text") == 0 || strcmp(itype, "search") == 0 ||
+                           strcmp(itype, "tel") == 0 || strcmp(itype, "url") == 0 ||
+                           strcmp(itype, "email") == 0 || strcmp(itype, "password") == 0;
+        if (single_line) {
+            size_t slen = strlen(s);
+            bool has_newline = false;
+            for (size_t k = 0; k < slen; k++) {
+                if (s[k] == '\r' || s[k] == '\n') { has_newline = true; break; }
+            }
+            if (has_newline) {
+                char* stripped = (char*)mem_alloc(slen + 1, MEM_CAT_JS_RUNTIME);
+                if (stripped) {
+                    size_t out = 0;
+                    for (size_t k = 0; k < slen; k++) {
+                        if (s[k] != '\r' && s[k] != '\n') stripped[out++] = s[k];
+                    }
+                    stripped[out] = '\0';
+                    tc_set_value(elem, stripped, out);
+                    mem_free(stripped);
+                    _value_mark_dirty(elem);
+                    return value;
+                }
+            }
+        }
+    }
+    // text-control value writes dirty live state without changing the default attribute.
+    tc_set_value(elem, s, strlen(s));
+    _value_mark_dirty(elem);
+    return value;
+}
+
+extern "C" Item js_dom_text_control_set_selection_start_bridge(void* dom_elem, Item value) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem || !tc_is_text_control_elem(elem)) return value;
+    tc_ensure_init(elem);
+    int64_t v = it2i(value);
+    if (v < 0) v = 0;
+    uint32_t start = (uint32_t)v;
+    uint32_t end = 0;
+    uint8_t direction = 0;
+    DocState* state = js_dom_current_state();
+    form_control_get_selection(state, (View*)elem, NULL, &end, &direction);
+    if (start > end) end = start;
+    form_control_set_selection(state, (View*)elem, start, end, direction);
+    return value;
+}
+
+extern "C" Item js_dom_text_control_set_selection_end_bridge(void* dom_elem, Item value) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem || !tc_is_text_control_elem(elem)) return value;
+    tc_ensure_init(elem);
+    int64_t v = it2i(value);
+    if (v < 0) v = 0;
+    uint32_t end = (uint32_t)v;
+    uint32_t start = 0;
+    uint8_t direction = 0;
+    DocState* state = js_dom_current_state();
+    form_control_get_selection(state, (View*)elem, &start, NULL, &direction);
+    if (start > end) start = end;
+    form_control_set_selection(state, (View*)elem, start, end, direction);
+    return value;
+}
+
+extern "C" Item js_dom_text_control_set_selection_direction_bridge(void* dom_elem, Item value) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem || !tc_is_text_control_elem(elem)) return value;
+    tc_ensure_init(elem);
+    uint8_t d = text_control_direction_from_item(value);
+    uint32_t start = 0;
+    uint32_t end = 0;
+    DocState* state = js_dom_current_state();
+    form_control_get_selection(state, (View*)elem, &start, &end, NULL);
+    form_control_set_selection(state, (View*)elem, start, end, d);
+    return value;
+}
+
+extern "C" Item js_dom_text_control_set_default_value_bridge(void* dom_elem, Item value) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem || !tc_is_text_control_elem(elem)) return value;
+    const char* s = fn_to_cstr(value);
+    if (!s) s = "";
+    if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
+        bool dom_children_changed = elem->first_child != nullptr || *s;
+        DomNode* child = elem->first_child;
+        while (child) {
+            DomNode* next = child->next_sibling;
+            dom_pre_remove(child);
+            child->parent = nullptr;
+            child->next_sibling = nullptr;
+            child->prev_sibling = nullptr;
+            child = next;
+        }
+        elem->first_child = nullptr;
+        elem->last_child = nullptr;
+        if (*s) {
+            String* str = js_dom_create_document_string(elem->doc, s, strlen(s));
+            DomText* tn = dom_text_create(str, elem);
+            if (tn) {
+                tn->parent = elem;
+                elem->first_child = tn;
+                elem->last_child = tn;
+                dom_post_insert((DomNode*)elem, (DomNode*)tn);
+            }
+        }
+        // defaultValue only updates the live value until script dirties value.
+        if (!_value_is_dirty(elem)) {
+            tc_set_value(elem, s, strlen(s));
+        }
+        if (dom_children_changed) {
+            js_dom_mutation_notify();
+        }
+        return value;
+    }
+    dom_element_set_attribute(elem, "value", s);
+    if (!_value_is_dirty(elem)) {
+        tc_set_value(elem, s, strlen(s));
+    }
+    return value;
+}
+
 static void _set_selectedness(DomElement* opt, bool v) {
     if (!opt) return;
     Item exp = expando_get_or_create_map((DomNode*)opt);
@@ -6786,6 +6918,62 @@ extern "C" void js_dom_select_set_selected_index_bridge(void* dom_elem, Item val
     _select_set_selected_index((DomElement*)dom_elem, _select_index_from_item(value));
 }
 
+extern "C" void js_dom_select_set_length_bridge(void* dom_elem, Item value) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem) return;
+    int new_len = 0;
+    TypeId t = get_type_id(value);
+    if (t == LMD_TYPE_INT) new_len = (int)it2i(value); // INT_CAST_OK: option count
+    else if (t == LMD_TYPE_FLOAT) {
+        double* d = (double*)(value.item & 0x00FFFFFFFFFFFFFF);
+        if (d) new_len = (int)*d; // INT_CAST_OK: option count
+    }
+    if (new_len < 0) new_len = 0;
+    Item arr = js_array_new(0);
+    _collect_options(elem->first_child, arr);
+    int64_t cur = js_array_length(arr);
+    if (new_len > cur) {
+        int to_add = new_len - (int)cur; // INT_CAST_OK: option count
+        DomDocument* doc = elem->doc;
+        for (int i = 0; i < to_add; i++) {
+            if (!doc || !doc->input) break;
+            MarkBuilder builder(doc->input);
+            Item nat_item = builder.element("option").final();
+            Element* nat = nat_item.element;
+            DomElement* opt = dom_element_create(doc, "option", nat);
+            if (!opt) break;
+            opt->parent = elem;
+            if (!elem->first_child) {
+                elem->first_child = opt;
+                elem->last_child = opt;
+            } else {
+                DomNode* last = elem->last_child;
+                last->next_sibling = opt;
+                opt->prev_sibling = last;
+                elem->last_child = opt;
+            }
+        }
+    } else if (new_len < cur) {
+        for (int64_t i = cur - 1; i >= new_len; i--) {
+            DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+            if (!opt) continue;
+            DomNode* on = (DomNode*)opt;
+            DomNode* parent = on->parent;
+            if (!parent) continue;
+            DomElement* pe = (DomElement*)parent;
+            if (on->prev_sibling) on->prev_sibling->next_sibling = on->next_sibling;
+            else pe->first_child = on->next_sibling;
+            if (on->next_sibling) on->next_sibling->prev_sibling = on->prev_sibling;
+            else pe->last_child = on->prev_sibling;
+            on->parent = nullptr;
+            on->next_sibling = nullptr;
+            on->prev_sibling = nullptr;
+        }
+    }
+    // select.length mutates the option subtree, so keep the JS mutation ledger authoritative.
+    js_dom_mutation_notify();
+}
+
 extern "C" void js_dom_set_option_selected_dirty(void* dom_elem, bool selected) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return;
@@ -6805,6 +6993,31 @@ extern "C" void js_dom_set_option_selected_dirty(void* dom_elem, bool selected) 
         _select_ask_for_reset(sel);
     }
     _select_refresh_cached_selected_options(sel);
+}
+
+extern "C" void js_dom_set_option_text_bridge(void* dom_elem, const char* value) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem) return;
+    const char* sv = value ? value : "";
+    DomNode* child = elem->first_child;
+    while (child) {
+        DomNode* next = child->next_sibling;
+        child->parent = nullptr;
+        child->next_sibling = nullptr;
+        child->prev_sibling = nullptr;
+        child = next;
+    }
+    elem->first_child = nullptr;
+    elem->last_child = nullptr;
+    String* str = js_dom_create_document_string(elem->doc, sv, strlen(sv));
+    DomText* tn = dom_text_create(str, elem);
+    if (tn) {
+        tn->parent = elem;
+        elem->first_child = tn;
+        elem->last_child = tn;
+    }
+    // option.text replaces children, so publish a structural mutation instead of an attribute record.
+    js_dom_mutation_notify();
 }
 
 // For a <select required> element, returns true iff no <option> is
@@ -9638,63 +9851,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             return value;
         }
         if (strcmp(prop, "length") == 0) {
-            // Setting length adjusts the option list. Increase: append
-            // empty <option> children. Decrease: remove trailing options.
-            int new_len = 0;
-            { TypeId t = get_type_id(value);
-              if (t == LMD_TYPE_INT) new_len = (int)it2i(value); // INT_CAST_OK: count
-              else if (t == LMD_TYPE_FLOAT) {
-                  double* d = (double*)(value.item & 0x00FFFFFFFFFFFFFF);
-                  if (d) new_len = (int)*d; // INT_CAST_OK: count
-              }
-            }
-            if (new_len < 0) new_len = 0;
-            Item arr = js_array_new(0);
-            _collect_options(elem->first_child, arr);
-            int64_t cur = js_array_length(arr);
-            if (new_len > cur) {
-                int to_add = new_len - (int)cur; // INT_CAST_OK: count
-                DomDocument* doc = elem->doc;
-                for (int i = 0; i < to_add; i++) {
-                    // Create a proper Lambda Element + DomElement so
-                    // it has a backing native_element for attributes.
-                    if (!doc || !doc->input) break;
-                    MarkBuilder builder(doc->input);
-                    Item nat_item = builder.element("option").final();
-                    Element* nat = nat_item.element;
-                    DomElement* opt = dom_element_create(doc, "option", nat);
-                    if (!opt) break;
-                    // append to elem
-                    opt->parent = elem;
-                    if (!elem->first_child) {
-                        elem->first_child = opt;
-                        elem->last_child = opt;
-                    } else {
-                        DomNode* last = elem->last_child;
-                        last->next_sibling = opt;
-                        opt->prev_sibling = last;
-                        elem->last_child = opt;
-                    }
-                }
-            } else if (new_len < cur) {
-                // remove trailing options
-                for (int64_t i = cur - 1; i >= new_len; i--) {
-                    DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
-                    if (!opt) continue;
-                    DomNode* on = (DomNode*)opt;
-                    DomNode* parent = on->parent;
-                    if (!parent) continue;
-                    DomElement* pe = (DomElement*)parent;
-                    if (on->prev_sibling) on->prev_sibling->next_sibling = on->next_sibling;
-                    else pe->first_child = on->next_sibling;
-                    if (on->next_sibling) on->next_sibling->prev_sibling = on->prev_sibling;
-                    else pe->last_child = on->prev_sibling;
-                    on->parent = nullptr;
-                    on->next_sibling = nullptr;
-                    on->prev_sibling = nullptr;
-                }
-            }
-            js_dom_mutation_notify();
+            js_dom_select_set_length_bridge((void*)elem, value);
             return value;
         }
     }
@@ -9747,28 +9904,8 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             return value;
         }
         if (strcmp(prop, "text") == 0) {
-            // Setting text replaces the children with a single text node.
             const char* sv = fn_to_cstr(value);
-            if (!sv) sv = "";
-            // Detach existing children
-            DomNode* child = elem->first_child;
-            while (child) {
-                DomNode* next = child->next_sibling;
-                child->parent = nullptr;
-                child->next_sibling = nullptr;
-                child->prev_sibling = nullptr;
-                child = next;
-            }
-            elem->first_child = nullptr;
-            elem->last_child = nullptr;
-            String* str = js_dom_create_document_string(elem->doc, sv, strlen(sv));
-            DomText* tn = dom_text_create(str, elem);
-            if (tn) {
-                tn->parent = elem;
-                elem->first_child = tn;
-                elem->last_child = tn;
-            }
-            js_dom_mutation_notify();
+            js_dom_set_option_text_bridge((void*)elem, sv ? sv : "");
             return value;
         }
         if (strcmp(prop, "defaultSelected") == 0) {
@@ -9793,125 +9930,20 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     // expando/attribute fallback. Per HTML §4.10.6.
     // ------------------------------------------------------------------
     if (tc_is_text_control_elem(elem)) {
-        DocState* tc_st = js_dom_current_state();
         if (strcmp(prop, "value") == 0) {
-            const char* s = fn_to_cstr(value);
-            if (!s) s = "";
-            // Per HTML spec §4.10.6: for single-line text controls (not textarea),
-            // strip CR and LF from the value before storing.
-            if (elem->tag_name && strcasecmp(elem->tag_name, "input") == 0) {
-                const char* itype = _input_type_lower(elem);
-                bool single_line = strcmp(itype, "text") == 0 || strcmp(itype, "search") == 0 ||
-                                   strcmp(itype, "tel") == 0 || strcmp(itype, "url") == 0 ||
-                                   strcmp(itype, "email") == 0 || strcmp(itype, "password") == 0;
-                if (single_line) {
-                    // strip CR and LF
-                    size_t slen = strlen(s);
-                    bool has_newline = false;
-                    for (size_t k = 0; k < slen; k++) { if (s[k] == '\r' || s[k] == '\n') { has_newline = true; break; } }
-                    if (has_newline) {
-                        char* stripped = (char*)mem_alloc(slen + 1, MEM_CAT_JS_RUNTIME);
-                        if (stripped) {
-                            size_t out = 0;
-                            for (size_t k = 0; k < slen; k++) {
-                                if (s[k] != '\r' && s[k] != '\n') stripped[out++] = s[k];
-                            }
-                            stripped[out] = '\0';
-                            tc_set_value(elem, stripped, out);
-                            mem_free(stripped);
-                            _value_mark_dirty(elem);
-                            return value;
-                        }
-                    }
-                }
-            }
-            tc_set_value(elem, s, strlen(s));
-            _value_mark_dirty(elem);
-            return value;
+            return js_dom_text_control_set_value_bridge((void*)elem, value);
         }
         if (strcmp(prop, "selectionStart") == 0) {
-            tc_ensure_init(elem);
-            int64_t v = it2i(value);
-            if (v < 0) v = 0;
-            uint32_t start = (uint32_t)v;
-            uint32_t end = 0;
-            uint8_t direction = 0;
-            form_control_get_selection(tc_st, (View*)elem, NULL, &end, &direction);
-            if (start > end) end = start;
-            form_control_set_selection(tc_st, (View*)elem, start, end, direction);
-            return value;
+            return js_dom_text_control_set_selection_start_bridge((void*)elem, value);
         }
         if (strcmp(prop, "selectionEnd") == 0) {
-            tc_ensure_init(elem);
-            int64_t v = it2i(value);
-            if (v < 0) v = 0;
-            uint32_t end = (uint32_t)v;
-            uint32_t start = 0;
-            uint8_t direction = 0;
-            form_control_get_selection(tc_st, (View*)elem, &start, NULL, &direction);
-            if (start > end) start = end;
-            form_control_set_selection(tc_st, (View*)elem, start, end, direction);
-            return value;
+            return js_dom_text_control_set_selection_end_bridge((void*)elem, value);
         }
         if (strcmp(prop, "selectionDirection") == 0) {
-            tc_ensure_init(elem);
-            const char* s = fn_to_cstr(value);
-            uint8_t d = 0;
-            if (s) {
-                if (strcmp(s, "forward") == 0) d = 1;
-                else if (strcmp(s, "backward") == 0) d = 2;
-            }
-            uint32_t start = 0;
-            uint32_t end = 0;
-            form_control_get_selection(tc_st, (View*)elem, &start, &end, NULL);
-            form_control_set_selection(tc_st, (View*)elem, start, end, d);
-            return value;
+            return js_dom_text_control_set_selection_direction_bridge((void*)elem, value);
         }
         if (strcmp(prop, "defaultValue") == 0) {
-            const char* s = fn_to_cstr(value);
-            if (!s) s = "";
-            if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
-                // textarea.defaultValue setter: replace descendant text
-                // content with a single text node holding the new value.
-                bool dom_children_changed = elem->first_child != nullptr || *s;
-                DomNode* child = elem->first_child;
-                while (child) {
-                    DomNode* next = child->next_sibling;
-                    dom_pre_remove(child);
-                    child->parent = nullptr;
-                    child->next_sibling = nullptr;
-                    child->prev_sibling = nullptr;
-                    child = next;
-                }
-                elem->first_child = nullptr;
-                elem->last_child = nullptr;
-                if (*s) {
-                    String* str = js_dom_create_document_string(elem->doc, s, strlen(s));
-                    DomText* tn = dom_text_create(str, elem);
-                    if (tn) {
-                        tn->parent = elem;
-                        elem->first_child = tn;
-                        elem->last_child = tn;
-                        dom_post_insert((DomNode*)elem, (DomNode*)tn);
-                    }
-                }
-                // Per spec: API value updates only when dirty flag is false.
-                if (!_value_is_dirty(elem)) {
-                    tc_set_value(elem, s, strlen(s));
-                }
-                if (dom_children_changed) {
-                    // textarea.defaultValue is a local child replacement; keeping
-                    // remove/insert records avoids broad TREE_REPLACE fallback.
-                    js_dom_mutation_notify();
-                }
-                return value;
-            }
-            // input.defaultValue setter: reflects "value" attribute.
-            dom_element_set_attribute(elem, "value", s);
-            if (!_value_is_dirty(elem)) {
-                tc_set_value(elem, s, strlen(s));
-            }
-            return value;
+            return js_dom_text_control_set_default_value_bridge((void*)elem, value);
         }
     }
 
