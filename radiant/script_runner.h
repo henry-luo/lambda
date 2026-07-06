@@ -2,8 +2,9 @@
  * Script Runner for Radiant Layout Engine
  *
  * Extracts and executes <script> elements (both inline and external) and
- * onload handlers from HTML documents during the layout pipeline. Scripts
- * run after DOM tree construction but before CSS cascade and layout.
+ * onload handlers from HTML documents during the layout pipeline. The HTML
+ * loader now performs the initial CSS cascade before calling this runner; if
+ * scripts mutate DOM/style state, the loader performs a post-script recascade.
  *
  * External scripts (<script src="..."> ) are downloaded or read from disk
  * using the same URL resolution and HTTP infrastructure as CSS/image loading.

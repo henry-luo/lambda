@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>JS load cascade before scripts</title>
+<style>
+  body { margin: 10px; font: 16px sans-serif; }
+  #box { color: red; width: 41px; height: 20px; background: rgb(230, 230, 230); }
+</style>
+<script>
+  var box = document.getElementById('box');
+  var before = getComputedStyle(box).color + '|' + getComputedStyle(box).width;
+  document.getElementById('readout').textContent = before;
+
+  var dynamicStyle = document.createElement('style');
+  dynamicStyle.textContent = '#box.after { color: rgb(0, 128, 0); height: 45px; }';
+  document.head.appendChild(dynamicStyle);
+
+  box.className = 'after';
+  box.style.width = '123px';
+</script>
+</head>
+<body>
+  <div id="box">Box</div>
+  <div id="readout">pending</div>
+</body>
+</html>

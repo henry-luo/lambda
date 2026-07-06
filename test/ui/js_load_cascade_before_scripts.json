@@ -1,0 +1,12 @@
+{
+  "name": "JS load cascade before scripts",
+  "html": "test/ui/js_load_cascade_before_scripts.html",
+  "description": "Load-time scripts read cascaded style after the initial cascade, then DOM/style mutations trigger a post-script recascade.",
+  "events": [
+    {"type": "log", "message": "=== js_load_cascade_before_scripts ==="},
+    {"type": "assert_text", "target": {"selector": "#readout"}, "equals": "rgb(255, 0, 0)|41px", "assert_timeout": 1000},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "color", "equals": "rgb(0, 128, 0)"},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "width", "equals": "123px"},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "height", "equals": "45px"}
+  ]
+}

@@ -9,8 +9,8 @@
  * URL resolution infrastructure as CSS and image loading.
  *
  * Pipeline position:
- *   HTML parse → Element* tree → DomElement* tree → execute_document_scripts()
- *   → CSS cascade → layout
+ *   HTML parse → Element* tree → DomElement* tree → CSS cascade
+ *   → execute_document_scripts() → optional post-script recascade → layout
  */
 #include "../lib/memtrack.h"
 
