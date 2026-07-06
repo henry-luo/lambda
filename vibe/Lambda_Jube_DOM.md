@@ -13,8 +13,10 @@ Current checkpoint:
 - POC 1A is now implemented as a compatibility checkpoint. `radiant` is statically registered, JS DOM get/set/wrapper entry points cross the module boundary, the DOM wrapper cache lives under `lambda/module/radiant`, and a tiny Lambda script imports `radiant` and mutates a real Radiant DOM node.
 - The current wrapper representation is still `MAP_KIND_DOM`. This is intentional: the module now owns more policy, but the VMap/native-object representation switch is deferred until the host-object semantics are specified and tested.
 - Module-owned JS DOM reads currently cover the safe first cluster: element `tagName`, `nodeName`, `localName`, `namespaceURI`, `prefix`, `id`, `className`, `nodeType`; text `data`, `nodeValue`, `textContent`, `length`, `nodeType`, `nodeName`; comment `data`, `nodeValue`, `textContent`, `length`, `nodeType`, `nodeName`.
-- Remaining JS fallback areas are deliberate: setters, style/CSSOM, Range/Selection, methods, collections, layout geometry, document proxy cases, navigation reads, and anything depending on mutation notification or script-visible traversal helpers.
-- Latest gate: `make build`, focused DOM smokes, the Lambda `radiant_poc` sample, and full `./test/test_js_gtest.exe` passed `305/305`.
+- Narrow navigation reads have also moved into the module bridge: `parentNode`, `parentElement`, `firstChild`, `lastChild`, `nextSibling`, `previousSibling`, and `childNodes` for element/text/comment wrappers.
+- Module-owned JS DOM setters now cover writable element `id` and `className`, using the central DOM attribute writer plus the JS mutation ledger hook.
+- Remaining JS fallback areas are deliberate: other setters, style/CSSOM, Range/Selection, methods, live collections, layout geometry, and document proxy cases.
+- Latest gate: `make build`, direct `dom_module_props` expected-output diff, filtered `dom_module_props` gtest, focused DOM smokes, the Lambda `radiant_poc` sample, and full `./test/test_js_gtest.exe` passed `305/305`.
 
 Implementation log:
 
@@ -36,11 +38,15 @@ Implementation log:
 - 2026-07-06 API cluster verification: `make build` passed. The upgraded `./lambda.exe --no-log test/lambda/radiant_poc.ls` returned `"ok"` and forces `radiant.free(doc)` through the final expression. Focused JS DOM identity/style/mutation smokes passed. `make test-lambda-baseline` reached 3233/3234 with one `child_process_detached_kill` miss; direct rerun of that case and the full `test_node_prelim_gtest.exe` binary passed.
 - 2026-07-06: Phase 2 class-name read moved. Element `className` now joins Radiant's parsed class list inside `radiant_dom_bridge.cpp`, and `test/js/dom_module_props` covers the module-owned read from a static HTML `class` attribute. Writable `id` / `className` and navigation reads still remain on the JS fallback path because mutation notifications and script-visible traversal helpers are still JS-local.
 - 2026-07-06 class-name verification: `make build` passed. Direct `dom_module_props` run matched the expected output, filtered gtest `JavaScriptTests/JsFileTest.Run/dom_module_props` passed, identity/style/mutation/Radiant sample smokes passed, and full `./test/test_js_gtest.exe` passed `305/305`.
+- 2026-07-06: Phase 2 narrow navigation reads moved. `radiant_dom_bridge.cpp` now owns script-visible `parentNode`, `parentElement`, `firstChild`, `lastChild`, `nextSibling`, `previousSibling`, and `childNodes` reads for element/text/comment DOM wrappers, including the pseudo-node and anonymous-table-wrapper visibility rules previously local to `js_dom.cpp`. Setters, methods, style/CSSOM, document proxy cases, live collections, Range/Selection, and geometry stay on fallback.
+- 2026-07-06 navigation verification: `make build` passed. `test/js/dom_module_props` now covers the moved navigation cluster and matched its expected output; filtered gtest `JavaScriptTests/JsFileTest.Run/dom_module_props` passed; identity/style/mutation JS smokes passed; `./lambda.exe --no-log test/lambda/radiant_poc.ls` returned `"ok"`.
+- 2026-07-06: Phase 2 writable `id` / `className` moved. `radiant_dom_set_property()` now handles those two element setters in module-owned code, delegates cache maintenance to `dom_element_set_attribute()`, and publishes attribute mutations through a narrow `js_dom_notify_mutation()` hook so existing reflow/mutation bookkeeping remains authoritative. Other setters remain on fallback.
+- 2026-07-06 setter verification: `make build` passed. `test/js/dom_module_props` now covers property writes, `getAttribute()` reflection, and `getElementById()` cache visibility; direct expected-output diff and filtered gtest passed. Identity/style/mutation JS smokes passed, `./lambda.exe --no-log test/lambda/radiant_poc.ls` returned `"ok"`, and full `./test/test_js_gtest.exe` passed `305/305`.
 
 POC 1A deliverable status:
 
 1. Done: add a statically linked `radiant` Jube module.
-2. In progress: move DOM property and method resolution tables into module-owned code. The first safe read cluster has moved; broad methods and mutation-sensitive paths remain on JS fallback.
+2. In progress: move DOM property and method resolution tables into module-owned code. The safe read clusters now include basic identity/value reads plus narrow navigation reads; broad methods and mutation-sensitive paths remain on JS fallback.
 3. Done for checkpoint: keep existing `MAP_KIND_DOM` wrappers, but make their get/set and wrapper factory surface delegate through the module-owned bridge.
 4. Done: add the host/module DOM wrapper cache required by the native-module design, without scoping it per `DomDocument`.
 5. Done: add one tiny Lambda-facing sample early so the POC proves cross-front-end access, not only JS compatibility.
@@ -179,10 +185,11 @@ Purpose: move DOM policy into the module while preserving wrappers.
 Status:
 
 - Started 2026-07-06 with the compatibility bridge: public JS DOM get/set entry points route through `radiant_dom_get_property()` / `radiant_dom_set_property()`.
-- First read cluster moved 2026-07-06. The module now owns simple identity/name/value reads for elements, text nodes, and comment nodes, including element `className`, then falls back to the old JS implementation for everything else.
-- Added `test/js/dom_module_props.js` / `.html` / `.txt` to pin the moved cluster through the normal JS DOM harness.
+- First read cluster moved 2026-07-06. The module now owns simple identity/name/value reads for elements, text nodes, and comment nodes, including element `className`, plus narrow navigation reads.
+- Writable element `id` and `className` moved 2026-07-06. The module uses `dom_element_set_attribute()` for native cache maintenance and a narrow JS mutation hook for the existing mutation ledger.
+- Added `test/js/dom_module_props.js` / `.html` / `.txt` to pin the moved clusters through the normal JS DOM harness.
 - Current verification: direct `dom_module_props`, filtered gtest `JavaScriptTests/JsFileTest.Run/dom_module_props`, identity/style/mutation smokes, Lambda `radiant_poc`, and full JS gtest passed.
-- Remaining Phase 2 work: move writable `id` / `className` and narrow navigation reads (`parentNode`, `firstChild`, sibling reads, `childNodes`) once mutation notification and script-visible traversal dependencies are cleanly exposed or duplicated in module-owned form.
+- Remaining Phase 2 work: methods, style/CSSOM, document proxy cases, live collections, Range/Selection, geometry, and broader setters remain on JS fallback.
 
 Tasks:
 
