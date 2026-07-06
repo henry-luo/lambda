@@ -150,6 +150,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import = false);
 void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
+void preserve_context_last_error(EvalContext* ctx, Item result);
 Input* execute_script_and_create_output(Runner* runner, bool run_main);
 Input* run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only = false);
 Input* run_script_at(Runtime *runtime, char* script_path, bool transpile_only = false);

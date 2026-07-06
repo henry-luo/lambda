@@ -13274,6 +13274,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
             result = runner.context.result = runner.script->main_func(&runner.context);
             _lambda_recovery_armed = 0;
         }
+        preserve_context_last_error(&runner.context, result);
 
         // Create output
         Pool* output_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
