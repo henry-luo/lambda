@@ -2104,10 +2104,20 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
 
                     return fn_obj;
                 } else {
-                    // Plain function: Create Function* via to_fn_n(fn_ptr, arity)
-                    MIR_reg_t fn_obj = emit_call_2(mt, "to_fn_n", MIR_T_P,
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_addr),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
+                    MIR_reg_t fn_obj;
+                    if (fn_node->name && fn_node->name->len > 0) {
+                        // identifier-style first-class refs must carry the declared name for name(fn).
+                        MIR_reg_t name_reg = emit_load_string_literal(mt, fn_node->name->chars);
+                        fn_obj = emit_call_3(mt, "to_fn_named", MIR_T_P,
+                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_addr),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, arity),
+                            MIR_T_P, MIR_new_reg_op(mt->ctx, name_reg));
+                    } else {
+                        // plain anonymous function: create Function* via to_fn_n(fn_ptr, arity)
+                        fn_obj = emit_call_2(mt, "to_fn_n", MIR_T_P,
+                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_addr),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
+                    }
 
                     strbuf_free(nm_buf);
                     return fn_obj;  // Function* is a container
@@ -9811,10 +9821,20 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
 
                 return fn_obj;
             } else {
-                // Plain function: call to_fn_n(fn_ptr, arity) -> Function*
-                MIR_reg_t fn_obj = emit_call_2(mt, "to_fn_n", MIR_T_P,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, fn_addr),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
+                MIR_reg_t fn_obj;
+                if (fn_node->name && fn_node->name->len > 0) {
+                    // first-class declarations must carry their source name so name(fn) is stable.
+                    MIR_reg_t name_reg = emit_load_string_literal(mt, fn_node->name->chars);
+                    fn_obj = emit_call_3(mt, "to_fn_named", MIR_T_P,
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_addr),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, arity),
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, name_reg));
+                } else {
+                    // plain anonymous function: call to_fn_n(fn_ptr, arity) -> Function*
+                    fn_obj = emit_call_2(mt, "to_fn_n", MIR_T_P,
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_addr),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
+                }
 
                 strbuf_free(name_buf);
                 return fn_obj;  // Function* is a container - type_id in first byte

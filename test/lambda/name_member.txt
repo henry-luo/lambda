@@ -8,7 +8,17 @@
 'int'
 'user-defined name takes precedence:'
 "custom"
+'name accessor ignores user-defined name:'
+'div'
+'name on object:'
+'Person'
+'name on object type:'
+'Person'
+'name on function:'
+'name_member_target'
 'name on null returns null:'
+"yes"
+'name on anonymous function returns null:'
 "yes"
 'error code:'
 318

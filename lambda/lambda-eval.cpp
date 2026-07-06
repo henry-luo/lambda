@@ -2023,6 +2023,25 @@ Type* fn_type(Item item) {
     TypeType *type = (TypeType *)heap_calloc(sizeof(TypeType) + sizeof(Type), LMD_TYPE_TYPE);
     Type *item_type = (Type *)((uint8_t *)type + sizeof(TypeType));
     type->type = item_type;  type->type_id = LMD_TYPE_TYPE;
+    TypeId resolved_type = get_type_id(item);
+    if (resolved_type == LMD_TYPE_OBJECT && item.object && item.object->type) {
+        // preserve nominal object metadata so name(type(obj)) can report the declared type.
+        type->type = (Type*)item.object->type;
+        return (Type*)type;
+    }
+    if (resolved_type == LMD_TYPE_ELEMENT && item.element && item.element->type) {
+        // preserve tag metadata for element type values instead of collapsing to generic element.
+        type->type = (Type*)item.element->type;
+        return (Type*)type;
+    }
+    if (resolved_type == LMD_TYPE_MAP && item.map && item.map->type) {
+        TypeMap* map_type = (TypeMap*)item.map->type;
+        if (map_type->struct_name) {
+            // keep named map aliases visible while anonymous maps still collapse to generic map.
+            type->type = (Type*)map_type;
+            return (Type*)type;
+        }
+    }
     if (item._type_id) {
         item_type->type_id = item._type_id;
     }
@@ -2052,6 +2071,47 @@ Type* fn_type(Item item) {
     return (Type*)type;
 }
 
+static Symbol* fn_name_symbol_from_chars(const char* name, size_t len) {
+    if (!name || len == 0) return nullptr;
+    return heap_create_symbol(name, len);
+}
+
+static Symbol* fn_name_symbol_from_strview(StrView name) {
+    return fn_name_symbol_from_chars(name.str, name.length);
+}
+
+static Symbol* fn_name_from_type(Type* type) {
+    if (!type) return nullptr;
+    switch (type->type_id) {
+    case LMD_TYPE_OBJECT: {
+        TypeObject* obj_type = (TypeObject*)type;
+        Symbol* obj_name = fn_name_symbol_from_strview(obj_type->type_name);
+        if (obj_name) return obj_name;
+        return obj_type->struct_name
+            ? fn_name_symbol_from_chars(obj_type->struct_name, strlen(obj_type->struct_name))
+            : nullptr;
+    }
+    case LMD_TYPE_ELEMENT: {
+        TypeElmt* elmt_type = (TypeElmt*)type;
+        Symbol* elmt_name = fn_name_symbol_from_strview(elmt_type->name);
+        if (elmt_name) return elmt_name;
+        const char* fallback = get_type_name(type->type_id);
+        return fn_name_symbol_from_chars(fallback, fallback ? strlen(fallback) : 0);
+    }
+    case LMD_TYPE_MAP: {
+        TypeMap* map_type = (TypeMap*)type;
+        if (map_type->struct_name) {
+            return fn_name_symbol_from_chars(map_type->struct_name, strlen(map_type->struct_name));
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    const char* name = get_type_name(type->type_id);
+    return fn_name_symbol_from_chars(name, name ? strlen(name) : 0);
+}
+
 /**
  * fn_name(item) - return the (local) name of an element, function, or type
  * Returns the name as a symbol, or nullptr if the item doesn't have a name.
@@ -2064,36 +2124,30 @@ Symbol* fn_name(Item item) {
     case LMD_TYPE_ERROR:
         return nullptr;
     case LMD_TYPE_ELEMENT: {
-        // return the element's tag name as a symbol
+        // name() reads intrinsic tag metadata; user attrs like name: must only affect .name.
         Element* elmt = item.element;
         if (!elmt || !elmt->type) return nullptr;
-        TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-        if (elmt_type->name.str && elmt_type->name.length > 0) {
-            return heap_create_symbol(elmt_type->name.str, elmt_type->name.length);
-        }
-        return nullptr;
+        return fn_name_from_type((Type*)elmt->type);
+    }
+    case LMD_TYPE_OBJECT: {
+        // name() reads nominal object metadata instead of the object's user field named "name".
+        Object* obj = item.object;
+        if (!obj || !obj->type) return nullptr;
+        return fn_name_from_type((Type*)obj->type);
     }
     case LMD_TYPE_FUNC: {
         // return the function's name as a symbol
         Function* fn = item.function;
         if (!fn) return nullptr;
         // function name is stored in the name field
-        if (fn->name && strlen(fn->name) > 0) {
-            return heap_create_symbol(fn->name, strlen(fn->name));
-        }
+        if (fn->name && strlen(fn->name) > 0) return fn_name_symbol_from_chars(fn->name, strlen(fn->name));
         // We return null for anonymous functions
         return nullptr;
     }
     case LMD_TYPE_TYPE: {
-        // return the type's name as a symbol (e.g., "int", "string", "User")
-        // For built-in types, use the type name
         TypeType* type_type = (TypeType*)item.type;
         if (!type_type || !type_type->type) return nullptr;
-        const char* name = get_type_name(type_type->type->type_id);
-        if (name) {
-            return heap_create_symbol(name, strlen(name));
-        }
-        return nullptr;
+        return fn_name_from_type(type_type->type);
     }
     case LMD_TYPE_SYMBOL: {
         // for symbols, just return the symbol itself (it's already a name)
