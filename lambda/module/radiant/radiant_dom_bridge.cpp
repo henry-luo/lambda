@@ -9,6 +9,7 @@
 #include "../../../lib/mem.h"
 #include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
+#include "../../../lib/url.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +21,8 @@ extern "C" void heap_unregister_gc_root(uint64_t* slot);
 extern "C" void* js_dom_get_document(void);
 extern "C" Item js_get_document_object_value(void);
 extern "C" Item js_get_global_this(void);
+extern "C" void* js_dom_get_or_create_doc_node(void* doc);
+extern "C" Item js_dom_document_proxy_for_doc_bridge(void* doc);
 extern "C" Item js_dom_create_wrapper_impl(void* dom_elem);
 extern "C" void* js_dom_unwrap_element_impl(Item item);
 extern "C" bool js_is_dom_node_impl(Item item);
@@ -31,6 +34,11 @@ extern "C" bool js_is_rule_style_decl(Item item);
 extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name);
 extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item value);
 extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Item* args, int argc);
+extern "C" bool js_dom_item_is_range(Item item);
+extern "C" bool js_dom_item_is_selection(Item item);
+extern "C" Item js_dom_range_get_property(Item obj, Item key);
+extern "C" Item js_dom_selection_get_property(Item obj, Item key);
+extern "C" Item js_dom_selection_set_property(Item obj, Item key, Item value);
 extern "C" Item js_css_namespace_method(Item obj, Item method_name, Item* args, int argc);
 extern "C" Item js_cssom_stylesheet_method(Item sheet_item, Item method_name, Item* args, int argc);
 extern "C" Item js_cssom_rule_decl_method(Item decl_item, Item method_name, Item* args, int argc);
@@ -61,6 +69,9 @@ extern "C" Item js_dom_text_control_set_default_value_bridge(void* elem, Item va
 extern "C" Item js_dom_text_control_set_selection_range_bridge(void* elem, Item start, Item end, Item dir);
 extern "C" Item js_dom_text_control_set_range_text_bridge(void* elem, Item replacement, Item start, Item end, Item mode);
 extern "C" Item js_dom_text_control_select_bridge(void* elem);
+extern "C" Item js_dom_form_reset_bridge(Item form_item);
+extern "C" Item js_dom_check_validity_bridge(Item elem_item);
+extern "C" Item js_dom_report_validity_bridge(Item elem_item);
 extern "C" Item js_dom_focus_method_bridge(void* elem, bool focus);
 extern "C" Item js_dom_click_method_bridge(Item elem_item);
 extern "C" Item js_dom_add_event_listener_bridge(Item target_item, Item type, Item callback, Item opts);
@@ -70,6 +81,9 @@ extern "C" Item js_dom_get_bounding_client_rect_bridge(void* elem);
 extern "C" Item js_dom_get_client_rects_bridge(void* elem);
 extern "C" Item js_dom_scroll_into_view_bridge(void* elem);
 extern "C" Item js_dom_scroll_method_bridge(Item elem_item, Item method_name, Item* args, int argc);
+extern "C" Item js_dom_text_control_caret_bounds_bridge(void* elem);
+extern "C" Item js_dom_text_control_boundary_from_point_bridge(void* elem, Item x, Item y);
+extern "C" Item js_dom_boundary_from_point_bridge(void* elem, Item x, Item y, Item behavior);
 extern "C" Item js_dom_style_set_property_bridge(void* elem, Item prop, Item value, Item priority, bool has_priority);
 extern "C" Item js_dom_style_remove_property_bridge(void* elem, Item prop);
 extern "C" Item js_dom_text_replace_data_bridge(void* text, Item offset, Item count, Item data);
@@ -82,6 +96,14 @@ extern "C" Item js_dom_remove_child_bridge(void* parent, Item child);
 extern "C" Item js_dom_insert_before_bridge(void* parent, Item new_child, Item ref_child);
 extern "C" Item js_dom_remove_bridge(void* node);
 extern "C" Item js_dom_adopt_node_bridge(Item node);
+extern "C" Item js_dom_location_method_bridge(void* doc, Item method_name, Item* args, int argc);
+extern "C" Item js_dom_document_open_bridge(void* doc);
+extern "C" Item js_dom_document_write_bridge(void* doc, Item text);
+extern "C" Item js_dom_document_element_from_point_bridge(void* doc, Item x, Item y);
+extern "C" Item js_dom_create_range(void);
+extern "C" Item js_dom_get_selection(void);
+extern "C" Item js_dom_get_selection_function_for_document(void* doc);
+extern "C" bool js_doc_has_browsing_context(void* doc);
 extern "C" Item js_dom_normalize_bridge(void* elem);
 extern "C" Item js_dom_clone_node_bridge(void* elem, Item deep, bool has_deep);
 extern "C" Item js_dom_replace_child_bridge(void* parent, Item new_child, Item old_child);
@@ -149,6 +171,15 @@ static Item radiant_dom_empty_node_list() {
 }
 
 static Item radiant_dom_empty_array_item() {
+    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+    arr->type_id = LMD_TYPE_ARRAY;
+    arr->items = nullptr;
+    arr->length = 0;
+    arr->capacity = 0;
+    return (Item){.array = arr};
+}
+
+static Item radiant_dom_array_item() {
     Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
     arr->type_id = LMD_TYPE_ARRAY;
     arr->items = nullptr;
@@ -736,6 +767,94 @@ static Item radiant_dom_attributes_item(DomElement* elem) {
     return arr_item;
 }
 
+static bool radiant_dom_is_listed_form_control(DomElement* elem) {
+    if (!elem || !elem->tag_name) return false;
+    if (radiant_dom_is_tag(elem, "input")) {
+        const char* type = dom_element_get_attribute(elem, "type");
+        return !type || strcasecmp(type, "image") != 0;
+    }
+    return radiant_dom_is_tag(elem, "button") ||
+           radiant_dom_is_tag(elem, "select") ||
+           radiant_dom_is_tag(elem, "textarea") ||
+           radiant_dom_is_tag(elem, "fieldset") ||
+           radiant_dom_is_tag(elem, "object") ||
+           radiant_dom_is_tag(elem, "output");
+}
+
+static void radiant_dom_collect_form_controls(DomNode* node, Array* arr) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            if (radiant_dom_is_listed_form_control(elem)) {
+                array_push(arr, radiant_dom_node_item((DomNode*)elem));
+            }
+            radiant_dom_collect_form_controls(elem->first_child, arr);
+        }
+        node = node->next_sibling;
+    }
+}
+
+static Item radiant_dom_form_controls_item(DomElement* form) {
+    Item controls = radiant_dom_array_item();
+    if (form) {
+        radiant_dom_collect_form_controls(form->first_child, controls.array);
+    }
+    return controls;
+}
+
+static const char* radiant_dom_form_control_name_or_id(DomElement* elem) {
+    const char* name = dom_element_get_attribute(elem, "name");
+    if (name && name[0] != '\0') return name;
+    return elem && elem->id && elem->id[0] != '\0' ? elem->id : nullptr;
+}
+
+static bool radiant_dom_is_form_named_getter_reserved(const char* prop) {
+    static const char* reserved[] = {
+        "elements", "length", "action", "method", "enctype", "encoding",
+        "acceptCharset", "target", "noValidate", "autocomplete", "name",
+        "submit", "reset", "checkValidity", "reportValidity", "requestSubmit",
+        nullptr
+    };
+    for (int i = 0; reserved[i]; i++) {
+        if (strcmp(prop, reserved[i]) == 0) return true;
+    }
+    return false;
+}
+
+static void radiant_dom_collect_form_named(DomNode* node, const char* key, Array* arr) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            if (radiant_dom_is_listed_form_control(elem)) {
+                const char* control_key = radiant_dom_form_control_name_or_id(elem);
+                if (control_key && strcmp(control_key, key) == 0) {
+                    array_push(arr, radiant_dom_node_item((DomNode*)elem));
+                }
+            }
+            radiant_dom_collect_form_named(elem->first_child, key, arr);
+        }
+        node = node->next_sibling;
+    }
+}
+
+static bool radiant_dom_form_named_getter(DomElement* form, const char* prop, Item* out) {
+    if (!radiant_dom_is_tag(form, "form") || !prop || prop[0] == '\0' ||
+        !out || radiant_dom_is_form_named_getter_reserved(prop)) {
+        return false;
+    }
+    Item matches = radiant_dom_array_item();
+    radiant_dom_collect_form_named(form->first_child, prop, matches.array);
+    if (matches.array->length == 1) {
+        *out = matches.array->items[0];
+        return true;
+    }
+    if (matches.array->length > 1) {
+        *out = matches;
+        return true;
+    }
+    return false;
+}
+
 static DomDocument* radiant_dom_node_document(DomNode* node, bool active_fallback) {
     DomNode* current = node;
     while (current) {
@@ -1189,6 +1308,15 @@ static bool radiant_dom_get_element_property(DomElement* elem, const char* prop,
         *out = (Item){.item = b2it(radiant_dom_node_is_connected((DomNode*)elem) ? 1 : 0)};
         return true;
     }
+    if (radiant_dom_is_tag(elem, "form") && strcmp(prop, "elements") == 0) {
+        *out = radiant_dom_form_controls_item(elem);
+        return true;
+    }
+    if (radiant_dom_is_tag(elem, "form") && strcmp(prop, "length") == 0) {
+        Item controls = radiant_dom_form_controls_item(elem);
+        *out = radiant_dom_int_item(controls.array ? controls.array->length : 0);
+        return true;
+    }
     if (strcmp(prop, "childElementCount") == 0) {
         *out = radiant_dom_int_item(radiant_dom_script_visible_element_child_count(elem));
         return true;
@@ -1253,6 +1381,9 @@ static bool radiant_dom_get_element_property(DomElement* elem, const char* prop,
             child = radiant_dom_next_script_visible_sibling(child);
         }
         *out = (Item){.array = arr};
+        return true;
+    }
+    if (radiant_dom_form_named_getter(elem, prop, out)) {
         return true;
     }
     return false;
@@ -1912,6 +2043,26 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
+    if (strcmp(method, "__lambdaTextControlCaretBounds") == 0) {
+        *out = js_dom_text_control_caret_bounds_bridge((void*)elem);
+        return true;
+    }
+
+    if (strcmp(method, "__lambdaTextControlBoundaryFromPoint") == 0) {
+        *out = js_dom_text_control_boundary_from_point_bridge((void*)elem,
+            argc >= 1 ? args[0] : radiant_dom_undefined_item(),
+            argc >= 2 ? args[1] : radiant_dom_undefined_item());
+        return true;
+    }
+
+    if (strcmp(method, "__lambdaBoundaryFromPoint") == 0) {
+        *out = js_dom_boundary_from_point_bridge((void*)elem,
+            argc >= 1 ? args[0] : radiant_dom_undefined_item(),
+            argc >= 2 ? args[1] : radiant_dom_undefined_item(),
+            argc >= 3 ? args[2] : radiant_dom_undefined_item());
+        return true;
+    }
+
     if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
         *out = js_dom_focus_method_bridge((void*)elem, strcmp(method, "focus") == 0);
         return true;
@@ -1920,6 +2071,21 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
     if (strcmp(method, "click") == 0) {
         *out = js_dom_click_method_bridge(elem_item);
         return true;
+    }
+
+    if (radiant_dom_is_tag(elem, "form")) {
+        if (strcmp(method, "reset") == 0) {
+            *out = js_dom_form_reset_bridge(elem_item);
+            return true;
+        }
+        if (strcmp(method, "checkValidity") == 0) {
+            *out = js_dom_check_validity_bridge(elem_item);
+            return true;
+        }
+        if (strcmp(method, "reportValidity") == 0) {
+            *out = js_dom_report_validity_bridge(elem_item);
+            return true;
+        }
     }
 
     if (tc_is_text_control(elem)) {
@@ -2018,6 +2184,12 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
 }
 
 extern "C" Item radiant_dom_get_property(Item elem_item, Item prop_name) {
+    if (js_dom_item_is_range(elem_item)) {
+        return js_dom_range_get_property(elem_item, prop_name);
+    }
+    if (js_dom_item_is_selection(elem_item)) {
+        return js_dom_selection_get_property(elem_item, prop_name);
+    }
     Item result = ItemNull;
     if (radiant_dom_get_basic_property(elem_item, prop_name, &result)) {
         return result;
@@ -2026,6 +2198,12 @@ extern "C" Item radiant_dom_get_property(Item elem_item, Item prop_name) {
 }
 
 extern "C" Item radiant_dom_set_property(Item elem_item, Item prop_name, Item value) {
+    if (js_dom_item_is_range(elem_item)) {
+        return value;
+    }
+    if (js_dom_item_is_selection(elem_item)) {
+        return js_dom_selection_set_property(elem_item, prop_name, value);
+    }
     Item result = ItemNull;
     if (radiant_dom_set_basic_property(elem_item, prop_name, value, &result)) {
         return result;
@@ -2041,12 +2219,308 @@ extern "C" Item radiant_dom_element_method(Item elem_item, Item method_name, Ite
     return js_dom_element_method_impl(elem_item, method_name, args, argc);
 }
 
+static DomElement* radiant_dom_document_child_by_tag(DomDocument* doc, const char* tag) {
+    if (!doc || !doc->root || !tag) return nullptr;
+    DomNode* child = doc->root->first_child;
+    while (child) {
+        if (child->is_element()) {
+            DomElement* elem = child->as_element();
+            if (elem->tag_name && strcasecmp(elem->tag_name, tag) == 0) {
+                return elem;
+            }
+        }
+        child = child->next_sibling;
+    }
+    return nullptr;
+}
+
+static void radiant_dom_collect_text_content(DomNode* node, StrBuf* sb) {
+    if (!node || !sb || radiant_dom_is_generated_pseudo_node(node)) return;
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        if (text->text && text->length > 0) {
+            strbuf_append_str_n(sb, text->text, text->length);
+        }
+        return;
+    }
+    if (node->is_element()) {
+        DomNode* child = radiant_dom_first_script_visible_child(node->as_element());
+        while (child) {
+            radiant_dom_collect_text_content(child, sb);
+            child = radiant_dom_next_script_visible_sibling(child);
+        }
+    }
+}
+
+static Item radiant_dom_document_title_item(DomDocument* doc) {
+    DomElement* head = radiant_dom_document_child_by_tag(doc, "head");
+    DomNode* child = head ? head->first_child : nullptr;
+    while (child) {
+        if (child->is_element()) {
+            DomElement* elem = child->as_element();
+            if (elem->tag_name && strcasecmp(elem->tag_name, "title") == 0) {
+                StrBuf* sb = strbuf_new_cap(64);
+                if (!sb) return radiant_dom_string_item("");
+                radiant_dom_collect_text_content((DomNode*)elem, sb);
+                Item result = radiant_dom_string_item(sb->str ? sb->str : "");
+                strbuf_free(sb);
+                return result;
+            }
+        }
+        child = child->next_sibling;
+    }
+    return radiant_dom_string_item("");
+}
+
+static const char* radiant_dom_url_component(DomDocument* doc, const char* prop) {
+    if (!doc || !doc->url || !prop) return "";
+    if (strcmp(prop, "URL") == 0 || strcmp(prop, "href") == 0) {
+        const char* value = url_get_href(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "protocol") == 0) {
+        const char* value = url_get_protocol(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "hostname") == 0) {
+        const char* value = url_get_hostname(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "port") == 0) {
+        const char* value = url_get_port(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "pathname") == 0) {
+        const char* value = url_get_pathname(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "search") == 0) {
+        const char* value = url_get_search(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "hash") == 0) {
+        const char* value = url_get_hash(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "host") == 0) {
+        const char* value = url_get_host(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "origin") == 0) {
+        const char* value = url_get_origin(doc->url);
+        return value ? value : "";
+    }
+    return "";
+}
+
+static Item radiant_dom_document_child_nodes_item(DomDocument* doc) {
+    void* stub_v = js_dom_get_or_create_doc_node((void*)doc);
+    if (!stub_v) return ItemNull;
+    DomElement* stub = (DomElement*)stub_v;
+    Item arr_item = radiant_dom_array_item();
+    DomNode* child = stub->first_child;
+    while (child) {
+        array_push(arr_item.array, radiant_dom_node_item(child));
+        child = child->next_sibling;
+    }
+    return arr_item;
+}
+
+static Item radiant_dom_document_doctype_item(DomDocument* doc) {
+    void* stub_v = js_dom_get_or_create_doc_node((void*)doc);
+    if (!stub_v) return ItemNull;
+    DomElement* stub = (DomElement*)stub_v;
+    DomNode* first = stub->first_child;
+    return (first && first->is_comment()) ? radiant_dom_node_item(first) : ItemNull;
+}
+
+static void radiant_dom_collect_document_forms(DomNode* node, Item forms) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
+                Item form_item = radiant_dom_node_item((DomNode*)elem);
+                array_push(forms.array, form_item);
+
+                const char* name = dom_element_get_attribute(elem, "name");
+                if (name && name[0] != '\0') {
+                    js_property_set(forms, radiant_dom_string_item(name), form_item);
+                }
+                const char* id = dom_element_get_attribute(elem, "id");
+                if (id && id[0] != '\0' && (!name || strcmp(id, name) != 0)) {
+                    js_property_set(forms, radiant_dom_string_item(id), form_item);
+                }
+            }
+            radiant_dom_collect_document_forms(elem->first_child, forms);
+        }
+        node = node->next_sibling;
+    }
+}
+
+static Item radiant_dom_document_forms_item(DomDocument* doc) {
+    Item forms = radiant_dom_array_item();
+    if (doc && doc->root) {
+        radiant_dom_collect_document_forms((DomNode*)doc->root, forms);
+    }
+    return forms;
+}
+
+extern "C" int radiant_dom_document_get_property(Item prop_name, Item* out) {
+    const char* prop = fn_to_cstr(prop_name);
+    if (!prop || !out) return 0;
+
+    DomDocument* doc = (DomDocument*)js_dom_get_document();
+    if (!doc) {
+        *out = ItemNull;
+        return 1;
+    }
+
+    if (strcmp(prop, "documentElement") == 0) {
+        *out = doc->root ? radiant_dom_node_item((DomNode*)doc->root) : ItemNull;
+        return 1;
+    }
+    if (strcmp(prop, "body") == 0) {
+        DomElement* body = radiant_dom_document_child_by_tag(doc, "body");
+        *out = body ? radiant_dom_node_item((DomNode*)body) : ItemNull;
+        return 1;
+    }
+    if (strcmp(prop, "head") == 0) {
+        DomElement* head = radiant_dom_document_child_by_tag(doc, "head");
+        *out = head ? radiant_dom_node_item((DomNode*)head) : ItemNull;
+        return 1;
+    }
+    if (strcmp(prop, "title") == 0) {
+        *out = radiant_dom_document_title_item(doc);
+        return 1;
+    }
+    if (strcmp(prop, "URL") == 0 || strcmp(prop, "href") == 0 ||
+        strcmp(prop, "protocol") == 0 || strcmp(prop, "hostname") == 0 ||
+        strcmp(prop, "port") == 0 || strcmp(prop, "pathname") == 0 ||
+        strcmp(prop, "search") == 0 || strcmp(prop, "hash") == 0 ||
+        strcmp(prop, "host") == 0 || strcmp(prop, "origin") == 0) {
+        *out = radiant_dom_string_item(radiant_dom_url_component(doc, prop));
+        return 1;
+    }
+    if (strcmp(prop, "location") == 0 || strcmp(prop, "document") == 0) {
+        *out = js_dom_document_proxy_for_doc_bridge((void*)doc);
+        return 1;
+    }
+    if (strcmp(prop, "readyState") == 0) {
+        *out = radiant_dom_string_item(doc->js_ready_state ? doc->js_ready_state : "complete");
+        return 1;
+    }
+    if (strcmp(prop, "compatMode") == 0) {
+        *out = radiant_dom_string_item("CSS1Compat");
+        return 1;
+    }
+    if (strcmp(prop, "characterSet") == 0 || strcmp(prop, "charset") == 0) {
+        *out = radiant_dom_string_item("UTF-8");
+        return 1;
+    }
+    if (strcmp(prop, "contentType") == 0) {
+        *out = radiant_dom_string_item("text/html");
+        return 1;
+    }
+    if (strcmp(prop, "nodeType") == 0) {
+        *out = radiant_dom_int_item(9);
+        return 1;
+    }
+    if (strcmp(prop, "nodeName") == 0) {
+        *out = radiant_dom_string_item("#document");
+        return 1;
+    }
+    if (strcmp(prop, "ownerDocument") == 0) {
+        *out = ItemNull;
+        return 1;
+    }
+    if (strcmp(prop, "childNodes") == 0) {
+        *out = radiant_dom_document_child_nodes_item(doc);
+        return 1;
+    }
+    if (strcmp(prop, "doctype") == 0) {
+        *out = radiant_dom_document_doctype_item(doc);
+        return 1;
+    }
+    if (strcmp(prop, "forms") == 0) {
+        *out = radiant_dom_document_forms_item(doc);
+        return 1;
+    }
+    if (strcmp(prop, "getSelection") == 0) {
+        *out = js_dom_get_selection_function_for_document((void*)doc);
+        return 1;
+    }
+
+    return 0;
+}
+
 extern "C" int radiant_dom_document_method(Item method_name, Item* args, int argc, Item* out) {
     const char* method = fn_to_cstr(method_name);
     if (!method || !out) return 0;
 
     DomDocument* doc = (DomDocument*)js_dom_get_document();
     DomElement* root = doc ? doc->root : nullptr;
+
+    if (strcmp(method, "assign") == 0 ||
+        strcmp(method, "replace") == 0 ||
+        strcmp(method, "reload") == 0) {
+        *out = js_dom_location_method_bridge((void*)doc, method_name, args, argc);
+        return 1;
+    }
+
+    if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
+        *out = radiant_dom_undefined_item();
+        return 1;
+    }
+
+    if (strcmp(method, "open") == 0) {
+        *out = js_dom_document_open_bridge((void*)doc);
+        return 1;
+    }
+
+    if (strcmp(method, "close") == 0) {
+        *out = radiant_dom_undefined_item();
+        return 1;
+    }
+
+    if (strcmp(method, "write") == 0 || strcmp(method, "writeln") == 0) {
+        if (argc < 1) {
+            *out = ItemNull;
+            return 1;
+        }
+        *out = js_dom_document_write_bridge((void*)doc, args[0]);
+        return 1;
+    }
+
+    if (strcmp(method, "elementFromPoint") == 0) {
+        Item x_arg = argc >= 1 ? args[0] : radiant_dom_int_item(0);
+        Item y_arg = argc >= 2 ? args[1] : radiant_dom_int_item(0);
+        *out = js_dom_document_element_from_point_bridge((void*)doc, x_arg, y_arg);
+        return 1;
+    }
+
+    if (strcmp(method, "execCommand") == 0 ||
+        strcmp(method, "queryCommandSupported") == 0 ||
+        strcmp(method, "queryCommandEnabled") == 0 ||
+        strcmp(method, "queryCommandIndeterm") == 0 ||
+        strcmp(method, "queryCommandState") == 0) {
+        *out = (Item){.item = b2it(0)};
+        return 1;
+    }
+
+    if (strcmp(method, "queryCommandValue") == 0) {
+        *out = radiant_dom_string_item("");
+        return 1;
+    }
+
+    if (strcmp(method, "createRange") == 0) {
+        *out = js_dom_create_range();
+        return 1;
+    }
+
+    if (strcmp(method, "getSelection") == 0) {
+        *out = js_doc_has_browsing_context((void*)doc) ? js_dom_get_selection() : ItemNull;
+        return 1;
+    }
 
     if (strcmp(method, "getElementById") == 0) {
         if (argc < 1) {

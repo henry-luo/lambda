@@ -96,6 +96,7 @@ extern "C" Item js_dom_remove_event_listener_bridge(Item target_item, Item type,
                                                     Item callback, Item opts);
 extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
 extern "C" int radiant_dom_document_method(Item method_name, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_document_get_property(Item prop_name, Item* out);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
 extern "C" void js_throw_value(Item error);
 extern "C" Item js_dom_get_selection_function_for_document(void* doc);
@@ -1588,6 +1589,10 @@ static Item doc_to_proxy_item(DomDocument* doc) {
     return lookup_foreign_doc_wrapper(doc);
 }
 
+extern "C" Item js_dom_document_proxy_for_doc_bridge(void* doc_v) {
+    return doc_to_proxy_item((DomDocument*)doc_v);
+}
+
 // ============================================================================
 // DOM Wrapping / Unwrapping
 // ============================================================================
@@ -1973,6 +1978,10 @@ extern "C" Item js_document_proxy_method(Item method_name, Item* args, int argc)
 // Dispatch property access on the document proxy object.
 // Routes to js_document_get_property which handles body, documentElement, etc.
 extern "C" Item js_document_proxy_get_property(Item prop_name) {
+    Item module_result = ItemNull;
+    if (radiant_dom_document_get_property(prop_name, &module_result)) {
+        return module_result;
+    }
     return js_document_get_property(prop_name);
 }
 
@@ -7781,6 +7790,101 @@ static Item _build_validity_state(DomElement* elem) {
     return vs;
 }
 
+static bool js_dom_validity_item_is_valid(Item flag) {
+    return ((flag.item & 0xFF) != 0 && flag.item != ITEM_NULL);
+}
+
+static bool js_dom_is_constraint_control(DomElement* elem) {
+    if (!elem || !elem->tag_name || _elem_is_barred(elem)) return false;
+    return strcasecmp(elem->tag_name, "input") == 0 ||
+           strcasecmp(elem->tag_name, "select") == 0 ||
+           strcasecmp(elem->tag_name, "textarea") == 0 ||
+           strcasecmp(elem->tag_name, "button") == 0;
+}
+
+static void js_dom_dispatch_invalid_event(Item target_item, bool include_bubbles) {
+    Item ev_obj = js_new_object();
+    js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("type"))},
+                    (Item){.item = s2it(heap_create_name("invalid"))});
+    if (include_bubbles) {
+        js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("bubbles"))},
+                        (Item){.item = ITEM_FALSE});
+    }
+    js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("cancelable"))},
+                    (Item){.item = ITEM_TRUE});
+    js_dom_dispatch_event(target_item, ev_obj);
+}
+
+static void js_dom_check_form_control_descendants(DomNode* node, bool* all_valid) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            if (js_dom_is_constraint_control(elem)) {
+                Item vs = _build_validity_state(elem);
+                Item vf = js_property_get(vs, (Item){.item = s2it(heap_create_name("valid"))});
+                if (!js_dom_validity_item_is_valid(vf)) {
+                    if (all_valid) *all_valid = false;
+                    js_dom_dispatch_invalid_event(js_dom_wrap_element(elem), false);
+                }
+            }
+            js_dom_check_form_control_descendants(elem->first_child, all_valid);
+        }
+        node = node->next_sibling;
+    }
+}
+
+extern "C" Item js_dom_form_reset_bridge(Item form_item) {
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(form_item);
+    if (!elem || !elem->tag_name || strcasecmp(elem->tag_name, "form") != 0) {
+        return make_js_undefined();
+    }
+    Item ev = js_create_event("reset", /*bubbles=*/true, /*cancelable=*/true);
+    js_property_set(ev, (Item){.item = s2it(heap_create_name("isTrusted"))},
+                    (Item){.item = ITEM_TRUE});
+    Item dispatched = js_dom_dispatch_event(form_item, ev);
+    if (dispatched.item == ITEM_FALSE) return make_js_undefined();
+    _run_form_reset(elem);
+    return make_js_undefined();
+}
+
+extern "C" Item js_dom_check_validity_bridge(Item elem_item) {
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    if (!elem || !elem->tag_name) return (Item){.item = ITEM_TRUE};
+
+    if (strcasecmp(elem->tag_name, "form") == 0) {
+        bool all_valid = true;
+        js_dom_check_form_control_descendants(elem->first_child, &all_valid);
+        return (Item){.item = b2it(all_valid)};
+    }
+
+    if (_elem_is_barred(elem)) return (Item){.item = ITEM_TRUE};
+    Item vs = _build_validity_state(elem);
+    Item valid_flag = js_property_get(vs, (Item){.item = s2it(heap_create_name("valid"))});
+    bool is_valid = js_dom_validity_item_is_valid(valid_flag);
+    if (!is_valid) {
+        js_dom_dispatch_invalid_event(elem_item, true);
+    }
+    return (Item){.item = b2it(is_valid)};
+}
+
+extern "C" Item js_dom_report_validity_bridge(Item elem_item) {
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    if (!elem || !elem->tag_name) return (Item){.item = ITEM_TRUE};
+
+    if (strcasecmp(elem->tag_name, "form") == 0) {
+        return js_dom_check_validity_bridge(elem_item);
+    }
+
+    if (_elem_is_barred(elem)) return (Item){.item = ITEM_TRUE};
+    Item vs = _build_validity_state(elem);
+    Item valid_flag = js_property_get(vs, (Item){.item = s2it(heap_create_name("valid"))});
+    bool is_valid = js_dom_validity_item_is_valid(valid_flag);
+    if (!is_valid) {
+        js_dom_dispatch_invalid_event(elem_item, false);
+    }
+    return (Item){.item = b2it(is_valid)};
+}
+
 // ----------------------------------------------------------------------
 // F-0: IDL-name → HTML-attribute-name mapping for reflected attributes.
 // Returns nullptr when no mapping exists (caller uses prop name verbatim).
@@ -10802,6 +10906,12 @@ static Item js_dom_document_element_from_point(DomDocument* doc,
     return hit ? js_dom_wrap_element(hit) : ItemNull;
 }
 
+extern "C" Item js_dom_document_element_from_point_bridge(void* doc_ptr,
+                                                          Item x_arg,
+                                                          Item y_arg) {
+    return js_dom_document_element_from_point((DomDocument*)doc_ptr, x_arg, y_arg);
+}
+
 static Item js_dom_text_control_caret_bounds(DomElement* elem) {
     if (!elem || !tc_is_text_control_elem(elem) || !_js_current_ui_context) {
         return ItemNull;
@@ -10871,6 +10981,23 @@ static Item js_dom_text_control_boundary_from_point(DomElement* elem,
     js_property_set(out, js_string_key("byteOffset"),
         (Item){.item = i2it((int64_t)hit.offset)});
     return out;
+}
+
+extern "C" Item js_dom_text_control_caret_bounds_bridge(void* elem) {
+    return js_dom_text_control_caret_bounds((DomElement*)elem);
+}
+
+extern "C" Item js_dom_text_control_boundary_from_point_bridge(void* elem,
+                                                               Item x_arg,
+                                                               Item y_arg) {
+    return js_dom_text_control_boundary_from_point((DomElement*)elem, x_arg, y_arg);
+}
+
+extern "C" Item js_dom_boundary_from_point_bridge(void* elem,
+                                                  Item x_arg,
+                                                  Item y_arg,
+                                                  Item behavior_arg) {
+    return js_dom_boundary_from_point((DomElement*)elem, x_arg, y_arg, behavior_arg);
 }
 
 extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem) {
@@ -11097,6 +11224,94 @@ extern "C" Item js_dom_adopt_node_bridge(Item node_arg) {
     // adoptNode detaches through remove() bookkeeping so live ranges/focus see the original parent.
     js_dom_remove_bridge((void*)node);
     return node_arg;
+}
+
+extern "C" Item js_dom_location_method_bridge(void* doc_ptr, Item method_name,
+                                              Item* args, int argc) {
+    DomDocument* doc = (DomDocument*)doc_ptr;
+    const char* method = fn_to_cstr(method_name);
+    if (!method) return make_js_undefined();
+    if (strcmp(method, "assign") == 0 || strcmp(method, "replace") == 0) {
+        if (argc < 1) return make_js_undefined();
+        const char* next_url = fn_to_cstr(args[0]);
+        if (doc && next_url && next_url[0]) {
+            if (doc->pending_navigation_url) {
+                mem_free(doc->pending_navigation_url);
+            }
+            doc->pending_navigation_url = mem_strdup(next_url, MEM_CAT_DOM);
+            log_info("js_location_%s: pending navigation to %s", method, next_url);
+        }
+    }
+    return make_js_undefined();
+}
+
+extern "C" Item js_dom_document_open_bridge(void* doc_ptr) {
+    DomDocument* doc = (DomDocument*)doc_ptr;
+    if (!doc) return js_get_document_object_value();
+    DocState* state = doc->state ? doc->state : js_dom_current_state();
+    if (state) {
+        const char* exc = nullptr;
+        if (!state_store_set_selection(state, NULL, NULL, &exc)) {
+            log_debug("js_document_open: selection clear rejected: %s",
+                      exc ? exc : "?");
+        }
+    }
+    DomElement* body = document_body_element(doc);
+    if (body) {
+        clear_element_children_for_navigation(body);
+        js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
+                               (DomNode*)body,
+                               (DomNode*)body->parent);
+    }
+    return js_get_document_object_value();
+}
+
+extern "C" Item js_dom_document_write_bridge(void* doc_ptr, Item text_arg) {
+    DomDocument* doc = (DomDocument*)doc_ptr;
+    if (!doc || !doc->root) return ItemNull;
+    const char* text = fn_to_cstr(text_arg);
+    if (!text) return ItemNull;
+
+    DomElement* body = document_body_element(doc);
+    if (!body) {
+        log_debug("js_document_write_bridge: no body element found");
+        return ItemNull;
+    }
+
+    const char* cursor = text;
+    while (*cursor) {
+        const char* br = nullptr;
+        for (const char* scan = cursor; *scan; scan++) {
+            if (*scan == '<' && strncasecmp(scan, "<br", 3) == 0) {
+                const char* end = strchr(scan, '>');
+                if (end) {
+                    br = scan;
+                    break;
+                }
+            }
+        }
+        size_t text_len = br ? (size_t)(br - cursor) : strlen(cursor);
+        if (text_len > 0) {
+            String* str = js_dom_create_document_string(doc, cursor, text_len);
+            DomText* text_node = dom_text_create_detached(str, doc);
+            if (text_node) {
+                ((DomNode*)body)->append_child((DomNode*)text_node);
+                dom_post_insert((DomNode*)body, (DomNode*)text_node);
+            }
+        }
+        if (!br) break;
+        const char* br_end = strchr(br, '>');
+        MarkBuilder builder(doc->input);
+        Item br_item = builder.element("br").final();
+        DomElement* br_elem = dom_element_create(doc, "br", br_item.element);
+        if (br_elem) {
+            ((DomNode*)body)->append_child((DomNode*)br_elem);
+            dom_post_insert((DomNode*)body, (DomNode*)br_elem);
+        }
+        cursor = br_end ? br_end + 1 : br + 3;
+    }
+    log_debug("js_document_write_bridge: appended '%s' to body", text);
+    return ItemNull;
 }
 
 extern "C" Item js_dom_normalize_bridge(void* elem_ptr) {
@@ -12403,90 +12618,17 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // algorithm on all listed form controls.
     // ----------------------------------------------------------------
     if (strcmp(method, "reset") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
-        // Per HTML §4.10.21.4: fire `reset` event (bubbles, cancelable);
-        // if not cancelled, run reset algorithm on each listed control.
-        Item ev = js_create_event("reset", /*bubbles=*/true, /*cancelable=*/true);
-        // form.reset() fires a trusted event per spec.
-        js_property_set(ev, (Item){.item = s2it(heap_create_name("isTrusted"))},
-                        (Item){.item = ITEM_TRUE});
-        Item dispatched = js_dom_dispatch_event(elem_item, ev);
-        if (dispatched.item == (ITEM_FALSE)) return make_js_undefined();
-        _run_form_reset(elem);
-        return make_js_undefined();
+        return js_dom_form_reset_bridge(elem_item);
     }
 
     // checkValidity(): fire invalid event if not valid, return bool
     if (strcmp(method, "checkValidity") == 0) {
-        // form.checkValidity(): check all listed form controls
-        if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
-            bool all_valid = true;
-            std::function<void(DomNode*)> check_all = [&](DomNode* node) {
-                while (node) {
-                    if (node->is_element()) {
-                        DomElement* ce = (DomElement*)node;
-                        if (ce->tag_name && !_elem_is_barred(ce) &&
-                            (strcasecmp(ce->tag_name, "input") == 0 ||
-                             strcasecmp(ce->tag_name, "select") == 0 ||
-                             strcasecmp(ce->tag_name, "textarea") == 0 ||
-                             strcasecmp(ce->tag_name, "button") == 0)) {
-                            Item vs = _build_validity_state(ce);
-                            Item vf = js_property_get(vs, (Item){.item = s2it(heap_create_name("valid"))});
-                            if (!((vf.item & 0xFF) != 0 && vf.item != ITEM_NULL)) {
-                                all_valid = false;
-                                Item cev = js_new_object();
-                                js_property_set(cev, (Item){.item = s2it(heap_create_name("type"))},
-                                                (Item){.item = s2it(heap_create_name("invalid"))});
-                                js_property_set(cev, (Item){.item = s2it(heap_create_name("cancelable"))},
-                                                (Item){.item = ITEM_TRUE});
-                                js_dom_dispatch_event(js_dom_wrap_element(ce), cev);
-                            }
-                        }
-                        check_all(ce->first_child);
-                    }
-                    node = node->next_sibling;
-                }
-            };
-            check_all(elem->first_child);
-            return (Item){.item = b2it(all_valid)};
-        }
-        // barred elements are always valid
-        if (_elem_is_barred(elem)) return (Item){.item = ITEM_TRUE};
-        Item vs = _build_validity_state(elem);
-        Item valid_flag = js_property_get(vs, (Item){.item = s2it(heap_create_name("valid"))});
-        bool is_valid = ((valid_flag.item & 0xFF) != 0 && valid_flag.item != ITEM_NULL);
-        if (!is_valid) {
-            // fire "invalid" event (not bubbles, but cancelable per spec)
-            Item ev_obj = js_new_object();
-            js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("type"))},
-                            (Item){.item = s2it(heap_create_name("invalid"))});
-            js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("bubbles"))},
-                            (Item){.item = ITEM_FALSE});
-            js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("cancelable"))},
-                            (Item){.item = ITEM_TRUE});
-            js_dom_dispatch_event(elem_item, ev_obj);
-        }
-        return (Item){.item = b2it(is_valid)};
+        return js_dom_check_validity_bridge(elem_item);
     }
 
     // reportValidity(): same as checkValidity() in headless (no UI feedback)
     if (strcmp(method, "reportValidity") == 0) {
-        if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
-            // delegate to checkValidity for forms
-            return js_dom_element_method(elem_item, (Item){.item = s2it(heap_create_name("checkValidity"))}, nullptr, 0);
-        }
-        if (_elem_is_barred(elem)) return (Item){.item = ITEM_TRUE};
-        Item vs = _build_validity_state(elem);
-        Item valid_flag = js_property_get(vs, (Item){.item = s2it(heap_create_name("valid"))});
-        bool is_valid = ((valid_flag.item & 0xFF) != 0 && valid_flag.item != ITEM_NULL);
-        if (!is_valid) {
-            Item ev_obj = js_new_object();
-            js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("type"))},
-                            (Item){.item = s2it(heap_create_name("invalid"))});
-            js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("cancelable"))},
-                            (Item){.item = ITEM_TRUE});
-            js_dom_dispatch_event(elem_item, ev_obj);
-        }
-        return (Item){.item = b2it(is_valid)};
+        return js_dom_report_validity_bridge(elem_item);
     }
 
     // HTMLSelectElement.namedItem(name) — search options by id/name.
