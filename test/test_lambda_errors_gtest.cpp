@@ -692,6 +692,16 @@ TEST_F(NegativeScriptTest, SemanticError_ImmutableAssignment) {
     ExpectErrorWithoutCrash("test/lambda/negative/semantic/immutable_assignment.ls");
 }
 
+TEST_F(NegativeScriptTest, SemanticError_ImmutableInteriorAssignment) {
+    ExpectErrorMessage("test/lambda/negative/semantic/immutable_interior_assignment.ls",
+        "cannot mutate through immutable binding");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_CaptureMutation) {
+    ExpectErrorMessage("test/lambda/negative/semantic/capture_mutation.ls",
+        "cannot mutate captured binding");
+}
+
 TEST_F(NegativeScriptTest, SemanticError_VarTypeMismatch) {
     ExpectErrorWithoutCrash("test/lambda/negative/semantic/var_type_mismatch.ls");
 }

@@ -322,6 +322,108 @@ static MIR_type_t type_to_mir(TypeId type_id) {
     }
 }
 
+static bool mir_type_needs_mutable_clone(TypeId type_id) {
+    return type_id == LMD_TYPE_ANY || type_id == LMD_TYPE_ARRAY ||
+           type_id == LMD_TYPE_ARRAY_NUM || type_id == LMD_TYPE_MAP ||
+           type_id == LMD_TYPE_ELEMENT || type_id == LMD_TYPE_OBJECT;
+}
+
+static AstNode* mir_unwrap_primary(AstNode* node);
+
+static bool mir_expr_may_return_container(AstNode* expr, TypeId expr_tid, TypeId target_tid) {
+    if (mir_type_needs_mutable_clone(expr_tid) && expr_tid != LMD_TYPE_ANY) return true;
+    if (expr_tid != LMD_TYPE_ANY && target_tid != LMD_TYPE_ANY) return false;
+
+    AstNode* root_expr = mir_unwrap_primary(expr);
+    if (!root_expr) return target_tid == LMD_TYPE_ANY;
+    switch (root_expr->node_type) {
+    case AST_NODE_ARRAY:
+    case AST_NODE_MAP:
+    case AST_NODE_ELEMENT:
+    case AST_NODE_LIST:
+    case AST_NODE_IDENT:
+    case AST_NODE_INDEX_EXPR:
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_CALL_EXPR:
+    case AST_NODE_IF_EXPR:
+    case AST_NODE_MATCH_EXPR:
+    case AST_NODE_FOR_EXPR:
+    case AST_NODE_FOR_STAM:
+        return true;
+    default:
+        // `any` arithmetic/comparison paths are scalar in practice; cloning
+        // their boxed result turns tight integer loops into runtime calls.
+        return false;
+    }
+}
+
+static AstNode* mir_unwrap_primary(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        node = primary->expr;
+    }
+    return node;
+}
+
+static AstIdentNode* mir_compound_root_ident(AstNode* node) {
+    node = mir_unwrap_primary(node);
+    if (!node) return NULL;
+    if (node->node_type == AST_NODE_IDENT) return (AstIdentNode*)node;
+    if (node->node_type == AST_NODE_INDEX_EXPR || node->node_type == AST_NODE_MEMBER_EXPR) {
+        AstFieldNode* field = (AstFieldNode*)node;
+        return mir_compound_root_ident(field->object);
+    }
+    return NULL;
+}
+
+static bool mir_call_has_var_param(AstCallNode* call) {
+    if (!call) return false;
+    AstNode* fn_expr = mir_unwrap_primary(call->function);
+    if (!fn_expr || fn_expr->node_type != AST_NODE_IDENT) return false;
+    AstIdentNode* ident = (AstIdentNode*)fn_expr;
+    AstNode* fn_node_raw = ident->entry ? ident->entry->node : NULL;
+    if (!fn_node_raw || (fn_node_raw->node_type != AST_NODE_FUNC &&
+        fn_node_raw->node_type != AST_NODE_FUNC_EXPR &&
+        fn_node_raw->node_type != AST_NODE_PROC)) {
+        return false;
+    }
+    if (fn_node_raw->node_type == AST_NODE_PROC) {
+        // Procedural helpers are the mutable layer: constructors and accessors
+        // often return freshly-owned or borrowed containers. Re-cloning their
+        // result at every `var` binding makes graph algorithms pathological.
+        return true;
+    }
+    AstFuncNode* fn_node = (AstFuncNode*)fn_node_raw;
+    if (!fn_node->type || fn_node->type->type_id != LMD_TYPE_FUNC) return false;
+    TypeParam* param = ((TypeFunc*)fn_node->type)->param;
+    while (param) {
+        if (param->is_var_param) return true;
+        param = param->next;
+    }
+    return false;
+}
+
+static bool mir_var_rhs_keeps_mutable_alias(AstNode* rhs) {
+    AstNode* root_expr = mir_unwrap_primary(rhs);
+    if (!root_expr) {
+        return false;
+    }
+    if (root_expr->node_type == AST_NODE_CALL_EXPR) {
+        // Calls that accept explicit `var` parameters are already in the
+        // borrowed-mutation channel; their result may intentionally expose a
+        // mutable subvalue, so cloning here breaks that alias contract.
+        return mir_call_has_var_param((AstCallNode*)root_expr);
+    }
+    if (root_expr->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)root_expr;
+        return ident->entry && ident->entry->is_mutable;
+    }
+    if (root_expr->node_type != AST_NODE_INDEX_EXPR &&
+        root_expr->node_type != AST_NODE_MEMBER_EXPR) return false;
+    AstIdentNode* root = mir_compound_root_ident(root_expr);
+    return root && root->entry && root->entry->is_mutable;
+}
+
 // Convert type for MIR register allocation (no MIR_T_P allowed for registers)
 static MIR_type_t reg_type(MIR_type_t t) {
     return (t == MIR_T_P || t == MIR_T_F) ? MIR_T_I64 : t;
@@ -4065,6 +4167,24 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     val = ival;
                 }
 
+                bool keep_mutable_alias = let_node->node_type == AST_NODE_VAR_STAM &&
+                    mir_var_rhs_keeps_mutable_alias(asn->as);
+                if (let_node->node_type == AST_NODE_VAR_STAM &&
+                    mir_expr_may_return_container(asn->as, expr_tid, var_tid) &&
+                    !keep_mutable_alias) {
+                    // Phase 5 COW anchor: a var binding receives its own mutable
+                    // container so later interior writes cannot mutate a let alias.
+                    // Field/index aliases from mutable roots keep their source
+                    // identity; detaching them would break intentional write-back.
+                    MIR_reg_t boxed = emit_box(mt, val, var_tid);
+                    val = emit_call_1(mt, "fn_mutable_value", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+                    // fn_mutable_value returns a boxed Item; keep the tracked
+                    // storage type aligned so later reads/calls use the Item ABI.
+                    var_tid = LMD_TYPE_ANY;
+                    expr_tid = LMD_TYPE_ANY;
+                }
+
                 MIR_type_t mtype = type_to_mir(var_tid);
 
                 // Copy value to a new register so the let binding has its own
@@ -6887,7 +7007,9 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         // that take native pointers and return int64_t directly (no boxing overhead).
         if (info->fn == SYSFUNC_LEN && arg_count == 1) {
             arg = call_node->argument;
-            TypeId arg_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
+            // State variables and other boxed locals may retain a narrower AST
+            // type; native len_* helpers require the actual MIR raw-pointer form.
+            TypeId arg_tid = get_effective_type(mt, arg);
             if (arg_tid == LMD_TYPE_ARRAY) {
                 MIR_reg_t a1 = emit_unbox_container(mt, transpile_expr(mt, arg));
                 return emit_call_1(mt, "fn_len_l", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
@@ -6913,8 +7035,8 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         if (info->fn == SYSFUNC_STARTS_WITH && arg_count == 2) {
             arg = call_node->argument;
             AstNode* arg2 = arg->next;
-            TypeId a1_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
-            TypeId a2_tid = arg2 && arg2->type ? arg2->type->type_id : LMD_TYPE_ANY;
+            TypeId a1_tid = get_effective_type(mt, arg);
+            TypeId a2_tid = arg2 ? get_effective_type(mt, arg2) : LMD_TYPE_ANY;
             if (a1_tid == LMD_TYPE_STRING && a2_tid == LMD_TYPE_STRING) {
                 MIR_reg_t a1 = transpile_expr(mt, arg);
                 MIR_reg_t a2 = transpile_expr(mt, arg2);
@@ -6926,8 +7048,8 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         if (info->fn == SYSFUNC_ENDS_WITH && arg_count == 2) {
             arg = call_node->argument;
             AstNode* arg2 = arg->next;
-            TypeId a1_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
-            TypeId a2_tid = arg2 && arg2->type ? arg2->type->type_id : LMD_TYPE_ANY;
+            TypeId a1_tid = get_effective_type(mt, arg);
+            TypeId a2_tid = arg2 ? get_effective_type(mt, arg2) : LMD_TYPE_ANY;
             if (a1_tid == LMD_TYPE_STRING && a2_tid == LMD_TYPE_STRING) {
                 MIR_reg_t a1 = transpile_expr(mt, arg);
                 MIR_reg_t a2 = transpile_expr(mt, arg2);
@@ -6940,7 +7062,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         // ==== Native ord() for typed strings ====
         if (info->fn == SYSFUNC_ORD && arg_count == 1) {
             arg = call_node->argument;
-            TypeId a1_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
+            TypeId a1_tid = get_effective_type(mt, arg);
             if (a1_tid == LMD_TYPE_STRING) {
                 MIR_reg_t a1 = transpile_expr(mt, arg);
                 return emit_call_1(mt, "fn_ord_str", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
@@ -8380,6 +8502,19 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
     MirVarEntry* var = find_var(mt, name_buf);
     if (var) {
         TypeId var_tid = var->type_id;
+
+        bool keep_mutable_alias = mir_var_rhs_keeps_mutable_alias(assign->value);
+        if (mir_expr_may_return_container(assign->value, val_tid, var_tid) && !keep_mutable_alias) {
+            // Phase 5 COW anchor for reassignment: storing a container into a
+            // var slot must detach it before later interior writes. Direct
+            // aliases from mutable roots and borrowed-var calls keep identity.
+            MIR_reg_t boxed = emit_box(mt, val, val_tid);
+            val = emit_call_1(mt, "fn_mutable_value", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+            // fn_mutable_value returns a boxed Item; assignment widening and
+            // follow-up boxing must see the actual register representation.
+            val_tid = LMD_TYPE_ANY;
+        }
 
         // Check if the new value type matches the variable's tracked type.
         // INT and INT64 are both raw int64 in MIR registers (MIR_T_I64) —

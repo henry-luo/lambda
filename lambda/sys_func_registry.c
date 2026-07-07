@@ -1490,6 +1490,7 @@ JitImport jit_runtime_imports[] = {
     // Array/map mutation (procedural)
     // ========================================================================
     {"fn_array_set", FPTR(fn_array_set)},
+    {"fn_mutable_value", FPTR(fn_mutable_value)},
     {"fn_map_set", FPTR(fn_map_set)},
 
     // ========================================================================

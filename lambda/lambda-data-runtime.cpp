@@ -2143,6 +2143,20 @@ Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
 void* ensure_typed_array(Item item, TypeId element_type_id) {
     TypeId item_tid = get_type_id(item);
 
+    if (element_type_id == LMD_TYPE_ANY) {
+        if (item_tid == LMD_TYPE_ARRAY) return (void*)item.array;
+        if (item_tid == LMD_TYPE_ARRAY_NUM) {
+            ArrayNum* src = item.array_num;
+            Array* boxed = array();
+            // any[] is a boxed value array; ARRAY_NUM annotations must widen
+            // at the boundary instead of leaving a packed numeric layout behind.
+            for (int64_t i = 0; i < src->length; i++) {
+                array_push(boxed, array_num_get(src, i));
+            }
+            return (void*)boxed;
+        }
+    }
+
     // already the correct typed array — pass through (container types are direct pointers)
     // already the correct typed array — pass through
     if (item_tid == LMD_TYPE_ARRAY_NUM) {

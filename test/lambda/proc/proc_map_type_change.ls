@@ -3,7 +3,7 @@
 
 // Test 1: int → string
 pn test_int_to_string() {
-    let obj = {x: 10, y: 20}
+    var obj = {x: 10, y: 20}
     obj.x = "hello"
     print(obj.x)
     print(" ")
@@ -13,7 +13,7 @@ pn test_int_to_string() {
 
 // Test 2: int → float
 pn test_int_to_float() {
-    let obj = {val: 42}
+    var obj = {val: 42}
     obj.val = 3.14
     print(obj.val)
     print("\n")
@@ -21,7 +21,7 @@ pn test_int_to_float() {
 
 // Test 3: string → int
 pn test_string_to_int() {
-    let obj = {name: "alice", age: 30}
+    var obj = {name: "alice", age: 30}
     obj.name = 999
     print(obj.name)
     print(" ")
@@ -31,7 +31,7 @@ pn test_string_to_int() {
 
 // Test 4: null → container (array)
 pn test_null_to_array() {
-    let obj = {data: null, tag: "ok"}
+    var obj = {data: null, tag: "ok"}
     obj.data = [1, 2, 3]
     print(len(obj.data))
     print(" ")
@@ -41,7 +41,7 @@ pn test_null_to_array() {
 
 // Test 5: container → null
 pn test_array_to_null() {
-    let obj = {items: [10, 20], count: 2}
+    var obj = {items: [10, 20], count: 2}
     obj.items = null
     print(obj.items)
     print(" ")
@@ -51,7 +51,7 @@ pn test_array_to_null() {
 
 // Test 6: multiple type changes on same map
 pn test_multiple_type_changes() {
-    let obj = {val: 1}
+    var obj = {val: 1}
     print(obj.val)
     obj.val = "two"
     print(" ")
@@ -64,7 +64,7 @@ pn test_multiple_type_changes() {
 
 // Test 7: type change preserves other fields
 pn test_preserves_fields() {
-    let obj = {a: 1, b: "hello", c: true}
+    var obj = {a: 1, b: "hello", c: true}
     obj.b = 42
     print(obj.a)
     print(" ")
@@ -76,7 +76,7 @@ pn test_preserves_fields() {
 
 // Test 8: type change in loop
 pn test_type_change_in_loop() {
-    let obj = {state: 0}
+    var obj = {state: 0}
     var i = 0
     while (i < 3) {
         if (i == 1) {
@@ -92,7 +92,7 @@ pn test_type_change_in_loop() {
 
 // Test 9: null → int (scalar)
 pn test_null_to_int() {
-    let obj = {val: null, name: "test"}
+    var obj = {val: null, name: "test"}
     obj.val = 42
     print(obj.val)
     print(" ")
@@ -102,7 +102,7 @@ pn test_null_to_int() {
 
 // Test 10: bool → string
 pn test_bool_to_string() {
-    let obj = {flag: true, count: 5}
+    var obj = {flag: true, count: 5}
     obj.flag = "yes"
     print(obj.flag)
     print(" ")

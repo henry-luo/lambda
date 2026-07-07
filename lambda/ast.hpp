@@ -148,6 +148,7 @@ extern "C" {
 #define FIELD_DEFAULT field_default
 #define FIELD_VALUE field_value
 #define FIELD_VARIADIC field_variadic
+#define FIELD_VAR field_var
 #define FIELD_TARGET field_target
 #define FIELD_PREFIX field_prefix
 #define FIELD_URI field_uri
@@ -208,6 +209,7 @@ typedef struct NameEntry {
     AstImportNode* import;      // the module that the name is imported from, if any
     struct NameScope* scope;    // the scope where this entry was defined
     bool is_mutable;            // true for var declarations, false for let/param
+    bool is_var_param;          // true for pn `var` parameters
     bool has_type_annotation;   // true if explicit type annotation was provided
     bool type_widened;          // true if type was widened to Item due to inconsistent assignments
 } NameEntry;
