@@ -122,6 +122,10 @@ avg([1, 2, 3, 4])       // 2.5
 |----------|-------------|-------|
 | `math.pi` | Pi (π) | `3.1415926536` |
 | `math.e` | Euler's number (e) | `2.7182818285` |
+| `math.max_int` | Largest compact `int` with exact float64 round-trip | `9007199254740991` |
+
+Compact `int` is bounded to ±(2^53 - 1). Start with decimal literals (`n`/`N`)
+when precise arithmetic beyond this compact boundary is required.
 
 #### Trigonometric
 
@@ -1133,6 +1137,7 @@ if (result is error) {
 | `math.atanh` | 1 | Inverse hyp. tangent |
 | `math.pi` | - | Pi (π) constant |
 | `math.e` | - | Euler's number constant |
+| `math.max_int` | - | Maximum compact `int` constant |
 
 ### Aggregation Functions (Global)
 | Function | Args | Description |

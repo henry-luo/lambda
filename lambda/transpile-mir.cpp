@@ -1775,7 +1775,17 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
     if (node->type->is_literal) {
         switch (tid) {
         case LMD_TYPE_INT: {
-            int64_t val = parse_int_literal(mt->source, node->node);
+            int64_t val;
+            if (node->type == &LIT_INT || ts_node_symbol(node->node) == SYM_INT) {
+                val = parse_int_literal(mt->source, node->node);
+            } else {
+                TypeConst* tc = (TypeConst*)node->type;
+                MIR_reg_t ptr = emit_load_const(mt, tc->const_index, MIR_T_P);
+                MIR_reg_t r = new_reg(mt, "intc", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, ptr, 0, 1)));
+                return r;
+            }
             MIR_reg_t r = new_reg(mt, "int", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_int_op(mt->ctx, val)));
@@ -2341,6 +2351,13 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         TypeId lt = get_effective_type(mt, bi->left);
         TypeId rt = get_effective_type(mt, bi->right);
 
+        if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT &&
+            (bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB || bi->op == OPERATOR_MUL)) {
+            // The AST's int result type is too narrow after 53-bit overflow
+            // promotion; MIR must treat the runtime result as a boxed Item.
+            return LMD_TYPE_ANY;
+        }
+
         // Comparison result type — must mirror transpile_binary's native-vs-fallback
         // decision (which uses these same lt/rt), so consumers read the result with
         // the right representation:
@@ -2398,7 +2415,7 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
 
             if (both_int) {
                 if (op == OPERATOR_ADD || op == OPERATOR_SUB || op == OPERATOR_MUL)
-                    return LMD_TYPE_INT;
+                    return LMD_TYPE_ANY;
                 if (op == OPERATOR_DIV)
                     return LMD_TYPE_FLOAT;
                 // IDIV/MOD with both_int handled above via native fn_idiv_i/fn_mod_i
@@ -2586,6 +2603,18 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
     // but boxed Items from generic binary fallback). All INT64 ops go through
     // the generic boxed path, and emit_box_int64 uses push_l_safe to handle
     // both raw and already-boxed values safely.
+
+    if (both_int && (bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB || bi->op == OPERATOR_MUL)) {
+        // Compact-int arithmetic can promote to boxed float at the 53-bit boundary;
+        // the native MIR op would silently create an out-of-model tagged int.
+        MIR_reg_t boxl = transpile_box_item(mt, bi->left);
+        MIR_reg_t boxr = transpile_box_item(mt, bi->right);
+        const char* fn_name = (bi->op == OPERATOR_ADD) ? "fn_add" :
+                              (bi->op == OPERATOR_SUB) ? "fn_sub" : "fn_mul";
+        return emit_call_2(mt, fn_name, MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
+    }
 
     // Arithmetic ops with native types
     if (both_int || both_float || int_float) {

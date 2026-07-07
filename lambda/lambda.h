@@ -883,9 +883,10 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define ITEM_TRUE           (((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)1)
 #define ITEM_FALSE          (((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)0)
 
-// int56 limits: signed 56-bit integer range
-#define INT56_MAX  ((int64_t)0x007FFFFFFFFFFFFF)   // +36,028,797,018,963,967
-#define INT56_MIN  ((int64_t)0xFF80000000000000LL) // -36,028,797,018,963,968
+// Lambda compact int is capped to the IEEE float64 safe-integer band; the
+// payload is wider, so every packing/overflow check must enforce this bound.
+#define INT56_MAX  ((int64_t)9007199254740991LL)   // +(2^53 - 1)
+#define INT56_MIN  ((int64_t)-9007199254740991LL)  // -(2^53 - 1)
 
 inline uint64_t b2it(uint8_t bool_val) {
     return bool_val >= BOOL_ERROR ? ITEM_ERROR : ((((uint64_t)LMD_TYPE_BOOL)<<56) | bool_val);

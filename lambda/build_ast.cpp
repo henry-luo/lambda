@@ -1370,6 +1370,16 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                 StrView ns_view = {ns_ident->name->chars, (size_t)ns_ident->name->len};
                 const char* ns_resolved = resolve_builtin_module(tp, &ns_view);
                 if (ns_resolved && strcmp(ns_resolved, "math") == 0) {
+                    if (id_node->name->len == 7 && memcmp(id_node->name->chars, "max_int", 7) == 0) {
+                        TypeInt64* it = (TypeInt64*)alloc_type(tp->pool, LMD_TYPE_INT, sizeof(TypeInt64));
+                        it->int64_val = INT56_MAX;
+                        arraylist_append(tp->const_list, &it->int64_val);
+                        it->const_index = tp->const_list->length - 1;
+                        it->is_const = 1;  it->is_literal = 1;
+                        AstPrimaryNode* pn = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, array_node, sizeof(AstPrimaryNode));
+                        pn->type = (Type*)it;
+                        return (AstNode*)pn;
+                    }
                     double const_val = 0.0;
                     bool is_math_const = false;
                     if (id_node->name->len == 2 && memcmp(id_node->name->chars, "pi", 2) == 0) {
