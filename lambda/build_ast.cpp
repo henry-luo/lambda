@@ -2210,7 +2210,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
 }
 
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
-    // Empty strings ("" or '') map to null in Lambda
+    // Phase 3: empty strings are values; empty symbol/binary values remain absent.
     // With single-token strings/symbols, we parse the raw token text directly
     // Binary is now a single token: b'content'
     String* str;
@@ -2266,10 +2266,12 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     const char* content_start = raw + 1;
     int content_len = raw_len - 2;  // exclude both quotes
 
-    // Handle empty string/symbol case
+    // Empty symbol literals are rejected by grammar; keep a null fallback for generated/stale parsers.
     if (content_len == 0) {
-        log_debug("build_lit_string: empty string/symbol literal, returning null type");
-        return &LIT_NULL;
+        if (symbol == SYM_SYMBOL) {
+            log_debug("build_lit_string: empty symbol literal, returning null type");
+            return &LIT_NULL;
+        }
     }
 
     TypeString* str_type = (TypeString*)alloc_type(tp->pool,
@@ -2484,9 +2486,9 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         str->is_ascii = str_is_ascii(str->chars, str->len) ? 1 : 0;
         log_debug("final string: %.*s", str->len, str->chars);
 
-        // Check if the processed string is empty - return null type
-        if (str->len == 0) {
-            log_debug("build_lit_string: empty string after escape processing, returning null type");
+        // Escapes can only produce empty solid values through generated/stale parsers.
+        if (str->len == 0 && symbol == SYM_SYMBOL) {
+            log_debug("build_lit_string: empty symbol after escape processing, returning null type");
             return &LIT_NULL;
         }
 

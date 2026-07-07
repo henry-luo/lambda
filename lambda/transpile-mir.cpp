@@ -4666,6 +4666,13 @@ static bool is_side_effect_stam(int node_type) {
     }
 }
 
+static bool is_proc_flow_side_effect_node(AstNode* node, AstNode* last_value) {
+    return node && node != last_value &&
+           (node->node_type == AST_NODE_IF_EXPR ||
+            node->node_type == AST_NODE_WHILE_STAM ||
+            node->node_type == AST_NODE_FOR_STAM);
+}
+
 static bool side_effect_result_can_error(int node_type) {
     switch (node_type) {
     case AST_NODE_ASSIGN_STAM:
@@ -4713,16 +4720,41 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
             decl_count++;
         } else if (is_side_effect_stam(scan->node_type)) {
             stam_count++;
-        } else if (is_proc &&
-                   (scan->node_type == AST_NODE_WHILE_STAM ||
-                    scan->node_type == AST_NODE_FOR_STAM)) {
-            // In proc context, these are side-effect statements
-            stam_count++;
         } else {
             value_count++;
             last_value = scan;
         }
         scan = scan->next;
+    }
+
+    if (is_proc) {
+        // Non-final proc control blocks are statements; preserving their null
+        // result used to be masked by empty-string-as-null concat behavior.
+        decl_count = 0; stam_count = 0; value_count = 0; last_value = nullptr;
+        scan = list_node->item;
+        AstNode* last_executable = nullptr;
+        while (scan) {
+            if (!is_declaration_node(scan->node_type)) {
+                last_executable = scan;
+            }
+            scan = scan->next;
+        }
+        scan = list_node->item;
+        while (scan) {
+            if (is_declaration_node(scan->node_type)) {
+                decl_count++;
+            } else if (is_side_effect_stam(scan->node_type) ||
+                       is_proc_flow_side_effect_node(scan, last_executable)) {
+                stam_count++;
+            } else if (scan->node_type == AST_NODE_WHILE_STAM ||
+                       scan->node_type == AST_NODE_FOR_STAM) {
+                stam_count++;
+            } else {
+                value_count++;
+                last_value = scan;
+            }
+            scan = scan->next;
+        }
     }
 
     // In proc context with multiple values, only the LAST value expression
@@ -4742,6 +4774,8 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 }
             } else if (is_side_effect_stam(item->node_type)) {
                 transpile_proc_side_effect(mt, item);
+            } else if (is_proc_flow_side_effect_node(item, last_value)) {
+                transpile_expr(mt, item);
             } else if (item == last_value) {
                 // Last value expression: this is the return value
                 result = transpile_box_item(mt, item);
@@ -4779,6 +4813,8 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 // Func defs handled in module-level pre-pass
             } else if (is_side_effect_stam(item->node_type)) {
                 transpile_proc_side_effect(mt, item); // execute for side effects
+            } else if (is_proc_flow_side_effect_node(item, last_value)) {
+                transpile_expr(mt, item);
             } else if (item == last_value) {
                 // This is the single value expression
                 result = transpile_box_item(mt, item);
@@ -4812,6 +4848,8 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 }
             } else if (is_side_effect_stam(item->node_type)) {
                 transpile_proc_side_effect(mt, item);
+            } else if (is_proc_flow_side_effect_node(item, last_value)) {
+                transpile_expr(mt, item);
             } else if (is_proc &&
                        (item->node_type == AST_NODE_WHILE_STAM ||
                         item->node_type == AST_NODE_FOR_STAM)) {
@@ -8342,12 +8380,15 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
             }
         } else if (val_tid == LMD_TYPE_ANY &&
                    (var_tid == LMD_TYPE_INT || var_tid == LMD_TYPE_INT64 ||
-                    var_tid == LMD_TYPE_FLOAT || var_tid == LMD_TYPE_BOOL)) {
+                    var_tid == LMD_TYPE_FLOAT || var_tid == LMD_TYPE_BOOL ||
+                    var_tid == LMD_TYPE_STRING)) {
             // Value is boxed (e.g., from IDIV/MOD runtime call) but variable
             // is native. Unbox to maintain type consistency — critical for loops
             // where the condition code is emitted once with native types.
             // INT64 included: len() and similar functions return raw int64 values
             // stored in INT64 variables; boxed fallback results must be unboxed.
+            // String included: boxed fn_join results in branch assignments must
+            // not widen empty-string accumulators to branch-local ANY registers.
             // Error items (div-by-zero) get silently converted to 0/0.0/false.
             MIR_reg_t unboxed = emit_unbox(mt, val, var_tid);
             if (var->mir_type == MIR_T_D) {

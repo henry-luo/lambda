@@ -497,7 +497,7 @@ ord("é")             // 233
 ord("😀")            // 128512
 ord('A')             // 65 (symbol input)
 ord("hello")         // 104 (first character 'h')
-ord("")              // 0 ("" normalizes to null)
+ord("")              // 0 (empty string has no first character)
 ```
 
 ### chr(int)

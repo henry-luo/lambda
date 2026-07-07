@@ -229,7 +229,7 @@ module.exports = grammar({
     // Symbols don't allow newlines within them
     symbol: _ => token(seq(
       "'",
-      repeat(choice(
+      repeat1(choice(
         /[^'\\\n]+/,  // any chars except ', \, and newline
         /\\['\\\/bfnrt]/,  // simple escapes
         /\\u[0-9a-fA-F]{4}/,  // \uXXXX
@@ -240,7 +240,7 @@ module.exports = grammar({
 
     // binary token: b'...' containing hex or base64 data
     // Actual parsing done by AST builder
-    binary: _ => token(seq("b'", repeat(/[^']/), "'")),
+    binary: _ => token(seq("b'", repeat1(/[^']/), "'")),
 
     _number: $ => choice($.integer, $.float, $.decimal, $.sized_integer, $.sized_float),
 

@@ -10,8 +10,7 @@ if (1) "truthy" else "falsy"
 // ===== Negative integer truthy =====
 if (-1) "truthy" else "falsy"
 
-// ===== Empty string is falsy / null =====
-// (empty string "" is null in Lambda)
+// ===== Empty string is a real falsy string =====
 if ("") "truthy" else "falsy"
 
 // ===== Non-empty string truthy =====

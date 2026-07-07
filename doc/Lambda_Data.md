@@ -89,10 +89,8 @@ false
 null
 ```
 
-Lambda also treats empty text identifiers as null: the empty string literal
-`""` and the empty symbol literal `''` are normalized to `null`. For user data,
-treat `string` and `symbol` values as non-empty, with `null` representing the
-empty case.
+Lambda treats empty strings as real `string` values. The empty symbol literal
+`''` is not valid syntax; use `null` for absence.
 
 ### Numeric Literals
 
@@ -148,15 +146,15 @@ nan
 
 String literals use double quotes. Single quotes do not create strings in
 Lambda; they create `symbol` values (see [Symbol Literals](#symbol-literals)).
-The empty string literal `""` is normalized to `null`; for user data, use
-`null` to represent the empty case.
+The empty string literal `""` is a real string with length 0. It is falsy, but
+it is not `null`.
 
 ```lambda
 // Basic strings
 "hello world"
 "multiline strings
 can span multiple lines"
-""                  // null
+""                  // empty string
 
 // Escape sequences
 "line 1\nline 2"
@@ -210,11 +208,11 @@ Symbols are interned identifiers, often used as keys or tags:
 'CamelCase'
 'json'
 'markdown'
-''                  // null
 ```
 
-The empty symbol literal `''` is normalized to `null`; for user data, use
-`null` to represent the empty case.
+The empty symbol literal `''` is not valid syntax. Symbols are solid identifier
+values with length at least 1; runtime operations that would produce an empty
+symbol return `null`.
 
 **Symbol vs String**:
 - Symbols are interned (only one copy exists in memory)

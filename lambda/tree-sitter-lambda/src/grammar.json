@@ -185,7 +185,7 @@
             "value": "'"
           },
           {
-            "type": "REPEAT",
+            "type": "REPEAT1",
             "content": {
               "type": "CHOICE",
               "members": [
@@ -225,7 +225,7 @@
             "value": "b'"
           },
           {
-            "type": "REPEAT",
+            "type": "REPEAT1",
             "content": {
               "type": "PATTERN",
               "value": "[^']"

@@ -31,14 +31,13 @@ let bad_phone1 = "1234567890"      // missing dashes
 let bad_phone2 = "12-456-7890"    // wrong digit count
 let bad_phone3 = "123-45-7890"    // wrong middle section
 let bad_phone4 = "abc-def-ghij"   // letters instead of digits
-// Note: Empty string "" is null in Lambda, so we test with single space
-let bad_phone5 = " "              // single space
+let bad_phone5 = ""               // empty string
 
 "2.1 - phone no dashes"; (not (bad_phone1 is phone))
 "2.2 - phone wrong first"; (not (bad_phone2 is phone))
 "2.3 - phone wrong middle"; (not (bad_phone3 is phone))
 "2.4 - phone letters"; (not (bad_phone4 is phone))
-"2.5 - phone space"; (not (bad_phone5 is phone))
+"2.5 - phone empty"; (not (bad_phone5 is phone))
 
 let bad_email1 = "not-an-email"   // no @ symbol
 let bad_email2 = "@example.com"   // no local part

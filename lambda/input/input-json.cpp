@@ -203,15 +203,8 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
             tracker.advance(1);
         }
 
-        // Create key as a name (always pooled)
-        // Special case: empty key "" in JSON becomes "''" in Lambda
-        String* key;
-        if (sb->length == 0) {
-            // Empty JSON key maps to the literal string "''" (two single quotes)
-            key = ctx.builder.createName("''", 2);
-        } else {
-            key = ctx.builder.createName(sb->str->chars, sb->length);
-        }
+        // JSON keys are strings; preserve empty/non-identifier keys instead of symbol spelling.
+        String* key = ctx.builder.createName(sb->str->chars, sb->length);
         if (!key) {
             // Error recovery: skip to next comma or closing brace
             while (**json && **json != ',' && **json != '}') {
@@ -305,19 +298,8 @@ static Item parse_value(InputContext& ctx, const char **json, int depth) {
         case '[':
             return parse_array(ctx, json, depth);
         case '"': {
-            const char* before = *json;
             String* str = parse_string(ctx, json);
             if (!str) {
-                // distinguish empty string "" from error: if pointer advanced past closing quote, it's empty string
-                if (*json > before + 1) {
-                    // allocate a zero-length String from arena
-                    Arena* arena = ctx.builder.arena();
-                    String* empty = (String*)arena_alloc(arena, sizeof(String) + 1);
-                    empty->len = 0;
-                    empty->is_ascii = 1;
-                    empty->chars[0] = '\0';
-                    return (Item){.item = s2it(empty)};
-                }
                 return ctx.builder.createNull();  // actual parse error
             }
             return (Item){.item = s2it(str)};

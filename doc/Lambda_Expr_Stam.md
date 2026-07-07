@@ -307,12 +307,12 @@ Lambda has simple truthiness rules:
 | `null`       |                                                                      |
 | `false`      |                                                                      |
 | `error`      | error is falsy, which allows idiom like: `err or fallback`           |
-| `""`, `''`   | Empty string and empty symbol literals are normalized to `null`      |
+| `""`         | Empty string is a real string value with length 0                    |
 
 | Truthy Values (Everything Else)                          |
 | -------------------------------------------------------- |
 | `true`, all numbers (including `0`)                      |
-| All non-empty string and symbol values                   |
+| All non-empty strings and all symbol values              |
 | All collections (including `[]`, `{}`)                   |
 | All functions                                            |
 **Important**: Unlike many languages, `0` and empty collections are **truthy** in Lambda.
@@ -322,8 +322,7 @@ if (0) "yes" else "no"           // "yes" - 0 is truthy
 if ([]) "yes" else "no"          // "yes" - empty array is truthy
 if (null) "yes" else "no"        // "no" - null is falsy
 if (false) "yes" else "no"       // "no" - false is falsy
-if ("") "yes" else "no"          // "no" - "" is normalized to null
-if ('') "yes" else "no"          // "no" - '' is normalized to null
+if ("") "yes" else "no"          // "no" - empty string is falsy
 ```
 
 ---

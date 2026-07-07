@@ -182,6 +182,11 @@ Bool is_truthy(Item item) {
         return BOOL_FALSE;  // errors are falsy — use `if (^e)` to check for errors
     case LMD_TYPE_BOOL:
         return item.bool_val ? BOOL_TRUE : BOOL_FALSE;
+    case LMD_TYPE_STRING: {
+        String* str = item.get_safe_string();
+        // Empty string is a real value, but it is in the language's falsy set.
+        return (str && str->len > 0) ? BOOL_TRUE : BOOL_FALSE;
+    }
     default: // all other value considered truthy
         return item.item ? BOOL_TRUE : BOOL_FALSE;  // should null be considered ERROR?
     }
@@ -3732,8 +3737,10 @@ Item fn_trim(Item str_item) {
     }
 
     if (start >= end) {
-        // empty result normalized to null
-        return ItemNull;
+        // Trimming can legitimately produce an empty string; only solid symbols collapse to null.
+        if (str_type == LMD_TYPE_SYMBOL) return ItemNull;
+        String* empty = heap_strcpy("", 0);
+        return {.item = s2it(empty)};
     }
 
     size_t result_len = end - start;
@@ -3780,7 +3787,10 @@ Item fn_trim_start(Item str_item) {
 
     size_t result_len = len - start;
     if (result_len == 0) {
-        return ItemNull;
+        // Trimming can legitimately produce an empty string; only solid symbols collapse to null.
+        if (str_type == LMD_TYPE_SYMBOL) return ItemNull;
+        String* empty = heap_strcpy("", 0);
+        return {.item = s2it(empty)};
     }
     if (str_type == LMD_TYPE_SYMBOL) {
         return {.item = y2it(heap_create_symbol(chars + start, result_len))};
@@ -3824,8 +3834,10 @@ Item fn_trim_end(Item str_item) {
     }
 
     if (end == 0) {
-        // empty result normalized to null
-        return ItemNull;
+        // Trimming can legitimately produce an empty string; only solid symbols collapse to null.
+        if (str_type == LMD_TYPE_SYMBOL) return ItemNull;
+        String* empty = heap_strcpy("", 0);
+        return {.item = s2it(empty)};
     }
 
     if (str_type == LMD_TYPE_SYMBOL) {

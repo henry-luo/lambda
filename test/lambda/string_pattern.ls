@@ -108,7 +108,7 @@ type one_or_more_digits = \d+
 
 "8.1"; ("1" is one_or_more_digits)   // true - one digit
 "8.2"; ("12345" is one_or_more_digits) // true - many digits
-// Note: empty string is typed as null in Lambda, so pattern match returns error
+"8.3"; ("" is one_or_more_digits)    // false - empty string has no digits
 
 // ============================================================
 // Test 9: Zero or More (*)
@@ -119,7 +119,7 @@ type zero_or_more_a = "a"*
 
 "9.1"; ("aaa" is zero_or_more_a)     // true - multiple a's
 "9.2"; ("a" is zero_or_more_a)       // true - one a
-// Note: empty string test skipped (typed as null)
+"9.3"; ("" is zero_or_more_a)        // true - zero occurrences
 
 // ============================================================
 // Test 10: Exact Count [n]

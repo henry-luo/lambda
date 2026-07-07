@@ -1214,6 +1214,22 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
         }
     }
 
+    // --- Pattern 6a: removed empty symbol/binary literals ---
+    // Phase 3 makes "" a real string, so the visually similar solid literals must fail clearly.
+    if (end_byte > start_byte && source[start_byte] == '\'' && source[start_byte + 1] == '\'') {
+        bool is_binary = start_byte > 0 && source[start_byte - 1] == 'b';
+        if (is_binary) {
+            snprintf(msg, sizeof(msg), "Empty binary literal does not exist");
+            help = "Use null for absence; binary values must contain at least one byte.";
+        } else {
+            snprintf(msg, sizeof(msg), "Empty symbol literal does not exist");
+            help = "Use null for absence; symbol values must contain at least one character.";
+        }
+        LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
+        error->help = mem_strdup(help, MEM_CAT_TEMP);
+        return error;
+    }
+
     // --- Pattern 6: Unterminated symbol literal ---
     // A bare "'" token as a child of the ERROR node, possibly followed by an identifier.
     // e.g. 'symbol  is missing the closing '
