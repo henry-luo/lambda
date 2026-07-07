@@ -204,12 +204,12 @@ The most instructive comparison: Nushell *is* "set-oriented scripting over struc
 
 ### 3.1 Structural gaps (multiple languages converge; Lambda has none of each)
 
-| Gap | Pointed at by | Notes |
-|---|---|---|
-| **Concurrency / parallelism** — no spawn, async, channels, or parallel pipes at all | Python, Clojure, Nushell, Bash | The biggest architectural absence. Good news: C4 value semantics is the *ideal* substrate — no shared mutable state to race on (the Clojure lesson). Coherent minimal design: a `par` pipe variant + Clojure-style atoms as the deferred ref cells. The runtime-level model is now recorded as J4 (Part 1): BEAM-style isolated heaps over immutable values; full design in `Lambda_Concurrency_Design.md` (levels 0–3, ledger K1–K9). |
-| **Lazy / streaming sequences** | Clojure (lazy seqs), Python (generators), Nushell (streaming pipes) | Three independent designs converge. Natural fit for set-oriented, document-scale processing; pipes are the obvious surface. Design care needed with `pn` effects and C4. |
-| **Resource cleanup** — no `finally` / `defer` / `with` | Python + every systems language | `T^E` + `^` propagation leaks resources on the error path. Genuinely missing, not stylistic. |
-| **`group by`** | XQuery 3.0, R (dplyr), SQL heritage | Confirmed absent. The glaring hole in an otherwise-complete FLWOR clause set, and prerequisite for the data-frame verbs. |
+| Gap                                                                                 | Pointed at by                                                       | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Concurrency / parallelism** — no spawn, async, channels, or parallel pipes at all | Python, Clojure, Nushell, Bash                                      | The biggest architectural absence. Good news: C4 value semantics is the *ideal* substrate — no shared mutable state to race on (the Clojure lesson). Coherent minimal design: a `par` pipe variant + Clojure-style atoms as the deferred ref cells. The runtime-level model is now recorded as J4 (Part 1): BEAM-style isolated heaps over immutable values; full design in `Lambda_Concurrency_Design.md` (levels 0–3, ledger K1–K9). |
+| **Lazy / streaming sequences**                                                      | Clojure (lazy seqs), Python (generators), Nushell (streaming pipes) | Three independent designs converge. Natural fit for set-oriented, document-scale processing; pipes are the obvious surface. Design care needed with `pn` effects and C4.                                                                                                                                                                                                                                                               |
+| **Resource cleanup** — no `finally` / `defer` / `with`                              | Python + every systems language                                     | `T^E` + `^` propagation leaks resources on the error path. Genuinely missing, not stylistic. **Design now decided — §3.5 (R1–R5): `open()` scoped resources, block-exit auto-close, typed escape; GC backstop only.**                                                                                                                                                                                                                  |
+| **`group by`**                                                                      | XQuery 3.0, R (dplyr), SQL heritage                                 | Confirmed absent. The glaring hole in an otherwise-complete FLWOR clause set, and prerequisite for the data-frame verbs.                                                                                                                                                                                                                                                                                                               |
 
 ### 3.2 Ergonomic gaps (surface-level, individually small, collectively the "feels incomplete" layer)
 
@@ -228,12 +228,86 @@ The most instructive comparison: Nushell *is* "set-oriented scripting over struc
 | Clojure | **Atoms** as the future ref-cell design | the C4-compatible concurrency/identity primitive |
 | XQuery | `group by` for-clause | completes FLWOR; unlocks the R verbs |
 | Nushell | Streaming pipes + structured command output | the set-oriented identity, made scalable + shell-capable |
-| Python | `with`/`defer` resource management | closes the `^`-propagation leak |
+| Python | `with`/`defer` resource management | superseded by §3.5: auto-close beats both (`with` without the `with`) |
 | Bash | (only the lesson Nushell already learned) | typed pipes over text pipes — Lambda already has it |
 
 ### 3.4 What Lambda has that none of the six have
 
 For fairness and morale: the document-native element model with multi-format I/O (13+ input formats, validator, formatters); schema validation in the same type language as the runtime; `T^E` compile-enforced error values; mutable value semantics in a scripting language (only Swift-family compiled languages otherwise); type/value pattern composition (`[1, int, "str"]` — only TypeScript comes close); a JIT; a CSS layout/rendering engine attached; and — after C1–C12 — a semantic core with a written decision ledger, which none of the six possesses (Python has PEPs; nobody has the losing arguments recorded).
+
+### 3.5 Resource cleanup — design decided (2026-07-07, ledger R1–R5)
+
+Closes the §3.1 "resource cleanup" structural gap. The governing insight: **Lambda has no unwinding** — errors are values and `^` propagation is an early return, so every exit path is an explicit edge in the transpiler's codegen. Cleanup therefore needs **no runtime machinery** (no unwind tables, no finally-block bookkeeping); any cleanup construct is a pure compiler lowering.
+
+#### 3.5.1 The four options considered
+
+**(1) `finally`** — rejected.
+```lambda
+try { var f = open("data.txt")^ ... } finally { close(f) }   // NOT adopted
+```
+`finally` is an appendage to a protected *block*, but Lambda has no `try` because nothing unwinds. Importing the block imports its warts: `f` declared inside but needed in the handler, cleanup far from acquisition, nesting pyramids. Exception-shaped structure in a language that deliberately has no exceptions.
+
+**(2) `defer` (+ Zig's `errdefer`)** — kept, but demoted from primitive to manual hook (R5).
+```lambda
+pn process(path) { var f = open(path)^; defer close(f); ... }   // runs on every exit
+```
+Fits errors-as-values exactly (Zig's error unions ≈ `T^E`; Go pairs defer with error returns); block-scoped + LIFO; trivially lowered. But for the dominant case — close what you opened — it is boilerplate the compiler can supply (option 4b below). `errdefer` is subsumed entirely (see the escape rule).
+
+**(3) `with` (Python context manager)** — rejected as redundant.
+```lambda
+with open(path) as f { process(f)^ }   // NOT adopted
+```
+Strictly sugar for `var f = open(path)^; defer close(f)` — and once resources auto-close at scope exit (4b), the block adds ceremony without adding safety. Auto-close is `with` without the `with`.
+
+**(4) Auto-GC as the closer** — **rejected for I/O resources; correct for `input()`** (R4). This distinction is load-bearing:
+
+`input()` never was a resource: it reads, parses, **closes the fd inside the call**, and returns a pure value. Parsed documents are just data — GC frees the memory when unreferenced; session-level caching is an orthogonal performance policy on values. Auto-GC is exactly right here.
+
+For live I/O resources (file handles, sockets, DB connections), GC-as-closer fails for three reasons — the pattern every GC'd ecosystem tried and retracted (Java deprecated finalizers, JEP 421 → try-with-resources; Python's refcount-close idiom broke on Jython → `with`; Go ships `SetFinalizer` but the culture uses `defer`):
+
+1. **GC runs on memory pressure, not resource pressure.** A loop opening files makes 10,000 dead handles but kilobytes of garbage — the collector never fires and the fd table overflows. Unclosed file locks block delete/rename (hard failure on Windows) until an unrelated allocation triggers a sweep. Nondeterministic, unreproducible — the worst bug class.
+2. **Close is not just release — it is the last write.** Buffered output flushes on close; a transaction commits or aborts on close. "Sometime later, maybe" is not a semantics for the operation that decides whether the data exists.
+3. **The structural conflict with `T^E`:** close can *fail* (flush error, network close). At GC time there is no caller — a close error during sweep has nowhere to surface. GC-close silently swallows exactly the errors the error model exists to make unignorable. In an errors-as-values language, deterministic close is the only way close errors remain values.
+
+GC's correct role: **backstop and leak detector** — the finalizer closes whatever leaked anyway and logs a warning; never the mechanism.
+
+#### 3.5.2 The adopted design: scoped resources with auto-close
+
+- **R1 — `open()` is the resource acquisition, `pn`-only.** `open(src)` returns a *scoped resource*; the eager/lazy/value/resource split is completed by `input()` (eager value) and `stream()` (lazy; D9/D10 in `Lambda_Data_Processing.md`). Precedent: C#'s `using var` declaration + Rust's drop-at-scope-exit, minus the keyword.
+- **R2 — auto-close at end of the enclosing *block*, not the `pn`.** The refinement that makes long-running procedures safe: a server loop opening a file per iteration releases per-iteration —
+  ```lambda
+  pn serve() {
+      for (req in requests) {
+          let f = open(req.path)^
+          respond(req, read(f)^)
+      }                              // f closes HERE, every iteration — not at pn end
+  }
+  ```
+  pn-end close would rebuild fd exhaustion with extra steps.
+- **R3 — escape by return, declared in the return type.** A resource whose ownership leaves the block must do so **by being returned, and the escape must be visible in the `pn`'s return type** (a resource-typed or resource-carrying return, e.g. `-> file^`, `-> index^` where `index` owns a file). This pairs the escape analysis with the type system: the analysis doesn't chase arbitrary aliases — it checks returns against the declared type, and any other escape route is a compile-time error (v1-strict; relax later if real programs demand it). Resource-ness propagates through carrying types (a value wrapping a resource is itself resource-typed) — the containment rules are the one sub-item still to spec.
+  The payoff — **`errdefer` for free**: 
+  ```lambda
+  pn open_indexed(path: string) -> index^ {
+      let f = open(path)^
+      let idx = build_index(f)^   // error exit: f never escaped → auto-closed. correct.
+      idx                          // success: f escaped inside the returned idx → ownership moved. correct.
+  }
+  ```
+  Clean-up-on-failure / transfer-on-success — the pattern Zig needs a keyword for — falls out of scoping + typed escape.
+- **R4 — GC finalizer = backstop only** (closes leaks, logs a leak warning), per 3.5.1(4).
+- **R5 — `defer` survives as the manual hook** for cleanup that isn't closing an owned resource: release a lock, `chdir` back, delete a temp file, decrement a counter. `pn`-only, block-scoped, LIFO, closure semantics (body reads current bindings at exit). Auto-close *lowers to* an implicit defer — one mechanism, two faces. `with`, `finally`, and `errdefer` are not adopted.
+- **Open decision — close-error routing (double fault):** proposed rule: auto-close/defer failure on a *normal* exit becomes the `pn`'s error result; on an *error* exit the original error wins and the close error is attached as suppressed + logged. To confirm.
+
+#### 3.5.3 The lifetime taxonomy
+
+| | Kind | Lifetime | Mechanism |
+|---|---|---|---|
+| `input(src)` | value (parsed document; fd closed inside the call) | until unreferenced | GC (plain memory); optional session cache |
+| `open(src)` | scoped resource | enclosing block, unless ownership escapes via typed return (R3) | auto-close (compiler) + GC backstop |
+| `stream(src)` live-I/O | scoped resource | same rules; forcing / `on error` may release earlier | auto-close + GC backstop |
+| `stream(x)` value-backed | value (re-forcible plan) | until unreferenced | GC |
+
+Composition with the rest of the ledger: auto-close/defer run innermost-out as an error propagates, *before* the `pn`-boundary `on error(e)` handler (D12) observes it; a cancelled `await` (concurrency O2) is an error-shaped exit, so **cancellation safety falls out of R2 for free**; task scopes (O1) are "defer cancel-and-join at block exit" — the same lowering. Nothing crosses the C ABI (J3): each language runs its own cleanup in its own frames.
 
 ---
 
@@ -253,7 +327,7 @@ The key strategic observation: **none of the four structural gaps conflicts with
 
 1. **Prioritize the four structural gaps** — suggested order: `group by` (small, unlocks data frames) → resource cleanup (`defer` vs `with` vs error-path hooks on `^`) → streaming pipes (design: lazy `|>` by default vs explicit `stream` source vs generator functions) → concurrency (a `par` pipe + atoms; scope: data parallelism first, async I/O later?). Note the runtime-side ordering from Part 1: G1 (GC rooting precision) precedes all of these.
 2. **`group by` syntax sketch** to react to: `for (x in sales group by x.region into g) {region: g.key, total: sum(g |> ~.amount)}` — or the XQuery style with implicit grouping variables.
-3. **Cleanup construct**: `defer expr` (Go-style, pn-only) vs `with resource as r { ... }` (Python-style, auto-close protocol) — interaction with `^` propagation and `T^E` must be specified either way.
+3. **Cleanup construct** — ~~resolved~~ decided in §3.5 (R1–R5): `open()` + block-exit auto-close + typed escape; `defer` as manual hook. Remaining: the close-error double-fault rule and resource-carrying-type containment rules.
 4. **Streaming vs C4**: lazy values crossing `var` mutation boundaries; are streams values (COW-able?) or a distinct non-value resource type?
 5. **String interpolation syntax**: `$"..."` vs `` `...` `` vs `"...{}"` — grammar-conflict check needed (`$` is also the proposed quote-splice marker from C9a — same sigil, two contexts, decide compatibility).
 6. **Set type**: distinct container rank (C11 order impact!) vs map-with-unit-values; literal syntax or constructor-only.
