@@ -562,6 +562,16 @@ protected:
         EXPECT_TRUE(has_error) << "Expected error for: " << script_path
                                << "\nOutput: " << result.output;
     }
+
+    void ExpectErrorMessage(const char* script_path, const char* expected_message) {
+        ScriptResult result = run_lambda_script(script_path);
+
+        EXPECT_NE(result.exit_code, 0) << "Expected script to fail: " << script_path;
+        EXPECT_NE(strstr(result.output.c_str(), expected_message), nullptr)
+            << "Expected diagnostic text for: " << script_path
+            << "\nExpected: " << expected_message
+            << "\nOutput: " << result.output;
+    }
 };
 
 // Syntax error tests
@@ -629,6 +639,11 @@ TEST_F(NegativeScriptTest, SyntaxError_Decimal128Overflow) {
 
 TEST_F(NegativeScriptTest, SyntaxError_UnexpectedToken) {
     ExpectErrorWithoutCrash("test/lambda/negative/syntax/unexpected_token.ls");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_StatementComparisonAmbiguousWithElement) {
+    ExpectErrorMessage("test/lambda/negative/syntax/statement_comparison_ambiguous.ls",
+        "'<' and '>' are ambiguous with element syntax at statement level");
 }
 
 TEST_F(NegativeScriptTest, SyntaxError_UnexpectedEOF) {

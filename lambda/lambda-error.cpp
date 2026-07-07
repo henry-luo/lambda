@@ -1306,6 +1306,24 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
         }
     }
 
+    // --- Pattern 8: statement-level comparison parsed as element ambiguity ---
+    // relational delimiters share the element syntax surface, so a bare
+    // statement-level comparison recovers as a one-token ERROR node.
+    if (end_byte > start_byte) {
+        char op = source[start_byte];
+        bool is_relation = (op == '<' || op == '>');
+        bool is_short_token = (end_byte == start_byte + 1) ||
+            (end_byte == start_byte + 2 && source[start_byte + 1] == '=');
+        if (is_relation && is_short_token) {
+            snprintf(msg, sizeof(msg),
+                "'<' and '>' are ambiguous with element syntax at statement level");
+            help = "Use parentheses to group the comparison expression, e.g. (\"a\" < \"b\").";
+            LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
+            error->help = mem_strdup(help, MEM_CAT_TEMP);
+            return error;
+        }
+    }
+
     // --- Default: generic error with context about what was found ---
     {
         uint32_t child_count = ts_node_child_count(error_node);

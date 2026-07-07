@@ -352,6 +352,16 @@ TEST(LambdaReplTests, test_syntax_error_discarded) {
     free_test_result(&result);
 }
 
+TEST(LambdaReplTests, test_statement_comparison_error_has_grouping_hint) {
+    test_result result = run_lambda_repl("\"a\" < \"b\"\nquit");
+    ASSERT_NE(result.output, nullptr) << "Expected output after syntax error";
+    ASSERT_TRUE(strstr(result.output, "'<' and '>' are ambiguous with element syntax at statement level") != nullptr)
+        << "Expected statement-level comparison ambiguity hint.\nOutput: " << result.output;
+    ASSERT_TRUE(strstr(result.output, "Use parentheses to group the comparison expression") != nullptr)
+        << "Expected grouping help text.\nOutput: " << result.output;
+    free_test_result(&result);
+}
+
 TEST(LambdaReplTests, test_syntax_error_does_not_corrupt_state) {
     // After syntax error, previous valid definitions should still work
     test_result result = run_lambda_repl("let x = 100\n@invalid@\nx * 2\nquit");

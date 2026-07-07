@@ -562,6 +562,7 @@ enum StatementStatus {
     STMT_ERROR          // statement has a syntax error
 };
 StatementStatus check_statement_completeness(TSParser* parser, const char* source);
+void print_repl_syntax_error(TSParser* parser, const char* source);
 
 // Linux-specific compatibility functions
 #ifdef NATIVE_LINUX_BUILD
@@ -676,7 +677,8 @@ void run_repl(Runtime *runtime, bool use_mir) {
 
         if (status == STMT_ERROR) {
             // Syntax error - discard the pending input and let user retry
-            printf("Syntax error. Input discarded.\n");
+            print_repl_syntax_error(runtime->parser, pending_input->str);
+            printf("Input discarded.\n");
             strbuf_reset(pending_input);
             continue;
         }
