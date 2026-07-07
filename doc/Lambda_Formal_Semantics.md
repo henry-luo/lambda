@@ -135,7 +135,9 @@ number mistakes removed. Consequence to teach: `if (results)` does **not** ask
   are total.
 - **Machine ints** (`i8`…`i64`, `u8`…`u64`): Go-aligned — runtime overflow
   **wraps** (two's complement); constant/literal overflow is a **compile
-  error**; division by zero raises; `MinInt / -1` wraps.
+  error**; division by zero returns `error()` (a deliberate divergence from
+  Go's panic — the §7.3 fn-return rule overrides the Go alignment on this
+  corner); `MinInt / -1` wraps.
 
 *Rationale.* `int ⊂ float64` makes int↔float conversion always lossless, kills
 the mixed-arithmetic precision-loss class, and lets the JIT hold ints in double
@@ -209,10 +211,27 @@ equality holds literally: **two numbers are equal iff they print the same.**
 
 ### 4.7 Division and modulo
 
-`/` is float-producing true division and follows IEEE (`1/0` → `inf`,
-`0.0/0.0` → `nan`). `div` is integer division, truncating toward zero, and
-raises on zero. `%` takes the dividend's sign (C convention; contrast Python's
-flooring — relevant when modeling guest languages). [A2, C3]
+Division by zero never raises, at any width or tier:
+
+- **A literal zero divisor is a compile error** (`x div 0`, `x % 0`) —
+  statically-visible nonsense, caught early like the other literal-strictness
+  rules (Go's constant layer). The rules below govern *computed* zeros.
+- `/` is float-producing true division and follows IEEE: `1/0` → `inf`,
+  `0.0/0.0` → `nan`.
+- `div` and `%` are integer operations; integers have no `inf`/`nan`, so a zero
+  divisor **returns `error()`** (§7.3 poison — flows through pipelines,
+  rescued by `or`, never aborts). Applies to flex `int` and machine ints alike.
+- Vectorized integer division over numeric arrays: a zero divisor poisons the
+  **whole operation's result with a single `error`** (carrying the first
+  offending index), never per-lane `[error, …]` — a fixed-width lane cannot
+  hold poison, a boxed escape would make the result's type depend on runtime
+  data (P6/type stability), and one operation has one failure. Partial-result
+  salvage is explicit: pre-mask divisors with `b eq 0`, substitute or filter,
+  then divide.
+
+`div` truncates toward zero; `%` takes the dividend's sign (C convention;
+contrast Python's flooring — relevant when modeling guest languages).
+[A2, C3, C14b]
 
 ---
 
@@ -228,7 +247,11 @@ flooring — relevant when modeling guest languages). [A2, C3]
   (§5.3).
 - **Two designed poison carve-outs**: `nan` and `error` values never equal
   anything, including themselves. These are the only exceptions to
-  reflexivity.
+  reflexivity. **Poison is unequal, not untypeable**: classification is a
+  different relation — `err is error` → true, `nan is float` → true, and
+  `match` type arms (which dispatch via `is`) catch them:
+  `match int(s) { case error: fallback  case int: ~ * 2 }`. Errors reach
+  `default` only when no `error` arm exists.
 - `!=` is the exact negation.
 - Structural recursion is depth-limited; exceeding the limit **raises** (a
   wrong `false` would be silent; a hang would be worse).
@@ -295,11 +318,26 @@ representations (`1`, `1.0`, `1n` hash equal). [C8.6-R, C8.5a]
 
 ### 6.1 Two relations, by design
 
-The comparison **operators** (`< <= > >=`) keep strict scalar semantics: poison
-values are incomparable (`nan < x` is false both ways), cross-family ordered
-comparison is an error. `sort` and `order by` use a separate **total order**
-(the same split as IEEE `totalOrder` vs `<`, Java `compare` vs `<`, SQL
-`ORDER BY` vs `WHERE NULL`). [C11]
+**The total order says where things go on a shelf; `<` says which is
+smaller.** Every value has a shelf position — everything sorts (§6.2) — but
+only some families have *magnitude*, and the comparison operators
+(`< <= > >=`) answer only magnitude questions:
+
+- **Comparable**: numbers (magnitude is their essence), strings (dictionary
+  order is a domain concept), datetimes (before/after is the natural semantics
+  of time; same-kind by instant, `date` vs `datetime` via day-start coercion,
+  `time` vs the others → `error()`).
+- **Not comparable — `error()`**: symbols and binaries (identifiers and blobs
+  have places, not sizes; `'a' < 'b'` and `hash1 < hash2` are filing needs the
+  shelf already serves), booleans, containers, and all cross-family pairs.
+  Statically-visible invalid comparisons are compile errors (the two-layer
+  pattern); dynamic ones return `error()`.
+- Poison stays incomparable (`nan < x` false both ways, IEEE; `error` operands
+  taint); `null < x` → `null` (absorption, one rule with `null + 1` → null).
+
+`sort` and `order by` use the separate **total order** of §6.2 — the same
+two-relation split as IEEE `totalOrder` vs `<`, Java `compare` vs `<`, and SQL
+`ORDER BY` vs `WHERE NULL`. [C11, C11.5]
 
 ### 6.2 The Lambda total order
 
@@ -404,7 +442,55 @@ the price of chainability, softened by poison being loud rather than silent.
 Note: resource-fault timing is exempt from P6 — when a stack limit fires may
 differ across execution tiers. [C5, C14]
 
-### 7.4 Aggregation: strict null propagation
+### 7.4 Array indexing and the `last` keyword
+
+Indexing is **0-based**, and an index is a *position, not a direction*:
+
+- **Negative indices carry no meaning.** `a[-1]` is an out-of-range read →
+  `null`, exactly like `a[len]`. Both failure directions of a computed index
+  are symmetric absence.
+- **Reaching from the end is a named operation**: within a subscript, the
+  reserved word **`last`** denotes `len(container) − 1` of the innermost
+  enclosing subscript's container (innermost-wins, like `~`). Ordinary
+  arithmetic applies: `a[last]`, `a[last - 1]`, `a[5 to last]`,
+  `a[last div 2]` — on arrays, lists, ranges, and strings. Outside a
+  subscript, `last` is a syntax error. There is no `last()` function, `.last`
+  property, or `first` keyword — one concept, one spelling (P7); `0` is the
+  first index.
+- On an empty sequence `last = −1`, so `a[last]` → null (absence, no special
+  case) and `a[last] = v` raises (§7.2).
+- **The two-homes rule**: `last` has exactly two grammatical homes — the
+  subscript expression above, and a **modifier inside `limit` clauses**
+  (`for (x in xs limit last 10) x` — the last 10, in original order; the
+  `desc` precedent: clause syntax, not an expression). It is never a value and
+  never a range (`last N` as a first-class "relative range" is rejected — it
+  would have no container to anchor to), and it is a syntax error everywhere
+  else. There is no `first` keyword or `limit first` — plain `limit N` and
+  `[0 to N-1]` already *are* first-N; front-anchored is the default direction.
+- Corollaries: functions never take the `last` *keyword* (no anchor in call
+  position) and never accept *signed counts* (`take`/`drop`, `find`/`replace`
+  limits — sign-punning through the back door). The blessed API-level mirror
+  of the clause pair is the **named-option pair**, and it is **the standard
+  convention for every function that takes a limit/range option**:
+  `{limit: n}` = first n, `{last: n}` = last n (e.g.
+  `replace(s, ",", " and", {last: 1})`); both together = error; `{limit: 0}`
+  means zero (a count counts — no Python-style zero-sentinel); unlimited is
+  expressed by *absence* (option omitted or `null`), never by `-1` or `0`. No
+  function invents its own limit spelling. On N-D numeric arrays, `last`
+  resolves against the leading axis (`img[last]` = last row), matching
+  iteration. [C15b]
+
+*Rationale.* Negative indexing rewards an underflow bug (`a[i-1]` at `i = 0`)
+with a plausible wrong answer while C5 forgives overflow as visible null — an
+incoherent asymmetry, amplified because Lambda indices are typically computed
+from data. Negative indices are not even a universal idiom (R's `x[-1]` means
+*exclusion*). Julia's explicit end-marker is the adopted precedent —
+JavaScript's ES2022 `.at(-1)` confirms the need while also refusing to touch
+`[]`. `last` is chosen over `end` because `end` is ambiguous between
+last-valid-index and one-past-the-end — doubly loaded against Lambda's
+inclusive ranges. [C15]
+
+### 7.5 Aggregation: strict null propagation
 
 A `null` in an aggregation input makes the aggregate `null` — uniformly
 (`sum`, `avg`, `min`, `max`, statistics). Skipping is always **explicit**:
@@ -555,7 +641,37 @@ error whose message teaches ("did you mean `int[]`?"); a lint hints on bare
 `[T]` occurrences that `[T]` is an exact-one pattern and `T[]` is the
 homogeneous-array spelling. [C7]
 
-### 11.2 Structural `is`, nominal objects
+### 11.2 Match dispatch
+
+**Lambda's `match` is a type match, not a mere value match** — unlike
+C/Java-family `switch`/`case`, which compare values. Arms are tried in order;
+first match wins:
+
+- **Type arms dispatch via `is`** (`case int:`, `case error:`, `case Circle:`)
+  — classification, not equality.
+- **Literal arms dispatch via `==`** (`case 200:`, `case "hello":`).
+- **Constrained arms** combine both: `is` then the predicate
+  (`case int that (~ > 0):`, `case error that (~.code == 304):`).
+- Consequence of the split: **poison is unequal, not untypeable** — `nan` and
+  `error` match their type arms (`case float:` catches nan; `case error:`
+  catches errors) even though they `==` nothing (§5.1). Errors reach
+  `default` only when no `error` arm exists.
+- **The `type(x)` trap** (documented deliberately): `match type(err)
+  { case error: … }` falls to `default` — the scrutinee is a *type value*,
+  and `type(err) is error` is false even though `type(err) == error` is true
+  (type-value equality is a different relation from classification). There is
+  no `==` fallback for type-valued scrutinees — that would make arm meaning
+  depend on the scrutinee's runtime type. The rule: **`match x` already is
+  Lambda's typeof-switch** — match the value, not its type; `match type(x)` is
+  a habit imported from JS's `switch (typeof x)`, and in Lambda a type value
+  matches only `case type:`.
+- **The `error` name duality**: the bare keyword `error` denotes the error
+  *type* — `type(error)` → `type` — which is what appears in `case error:`
+  arms and `is error` checks; the *constructor* `error("…")` creates an error
+  **value** — `type(error("…"))` → `error`. Same name, two roles, split along
+  the same classification/value axis.
+
+### 11.3 Structural `is`, nominal objects
 
 `is` checks are structural for maps/arrays/elements (extra fields permitted;
 key lookup by name — order-insensitive) and nominal for object types. Type
@@ -645,7 +761,7 @@ a semantics change:
 | §4.5–4.6 float↔decimal, printing | C8.5a | ibid. |
 | §5 equality | C8, C8.5, C8.6, C8.6-R, C8.7 | ibid. |
 | §6 total order | C11 | ibid. |
-| §7 absence, errors, aggregation | C5, C5.3, C14 | ibid. |
+| §7 absence, errors, indexing, aggregation | C5, C5.3, C14, C15 | ibid. |
 | §8 in/at | C5.3a | ibid. |
 | §9 mutability, covariance | C4, C4.2a, C12 | both |
 | §10 operators | C6, C10 | `Lambda_Semantics_Formal2.md` |

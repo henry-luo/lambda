@@ -1484,3 +1484,278 @@ consciously chosen, never the silent default).
 | Effectful readers | **pn-family: raise, `T^E`, enforced** | `input`, `fetch` |
 | Effectful writers/commands | pn: raise, `T^E`, enforced | `output`, `io.*`, `cmd` |
 | System/resource faults | unchecked exception → pn/global handler | stack, memory, `==` depth |
+
+### C15. Array indexing: negative indices rejected; the `last` keyword (2026-07-06) — RESOLVED
+
+**Decision (designer-approved):**
+
+1. **Negative indexing is ruled out** ("negative index is messy"). `a[-1]` is an
+   out-of-range read → null, identical to `a[len]` — both failure directions of
+   a computed index are treated symmetrically as absence (C5).
+2. **Julia's approach is adopted, with the keyword `last`**: within a subscript,
+   `last` denotes `len(container) − 1` of the **innermost enclosing subscript's
+   container** (the same innermost-wins discipline as `~`). Ordinary arithmetic
+   applies: `a[last]`, `a[last - 1]`, `a[5 to last]`, `a[last div 2]`. Applies
+   to all indexable sequences (arrays, lists, ranges, strings).
+3. **`last` is a fully reserved word** — not contextual (a contextual keyword
+   would make `let last = 3; a[last]` silently change meaning). Outside a
+   subscript it is a syntax error. Identifier sweep required.
+4. **No `last(...)` function, no `.last` property, no `first` keyword.** The
+   keyword is the single spelling (P7): pipes use `arrays |> ~[last]`; the
+   property form would reintroduce the `.name` shadowing footgun on
+   elements/maps; `0` is already the first index (Julia's `begin` exists only
+   for its offset arrays).
+
+**The argument against negative indexing (review, accepted):** under C5, the two
+failure directions of a computed index must be symmetric — overflow is forgiven
+as null (visible absence), but negative indexing would *reward underflow with
+the last element*: a valid-looking, plausible, wrong answer. Python's most
+notorious silent-bug family (`a[i-1]` wrapping at `i=0`), amplified in Lambda
+because indices are disproportionately *computed* (argmin, offsets, data-driven)
+rather than literal. Prior art splits three ways: Python/Ruby wrap;
+**R means the opposite** (`x[-1]` = exclusion — negative indices are not a
+universal idiom, and R users are Lambda's data audience); **Julia rejected
+sign-punning for the explicit `end` marker, and JavaScript confirmed the need
+is real but kept `[]` clean** (ES2022 added `.at(-1)` as a method rather than
+touch subscript semantics).
+
+**`last` over `end` (review recommendation, adopted):** `end` is ambiguous
+between last-valid-index (Julia) and one-past-the-end (C++/Python slices) —
+doubly loaded since Lambda ranges are inclusive; `last` has one reading and
+self-documents (`a[last - 1]`, `a[5 to last]`); `end` is better saved as a
+likely range property name.
+
+**Elegant consequence (recorded):** on an empty sequence `last = −1`, so
+`a[last]` → null by C5 (absence, zero special-casing) and `a[last] = v` raises
+by C5-4.
+
+**Mitigation for Python-habituated users:** a *literal* negative index is
+statically detectable — lint: "negative indices are not supported; use
+`a[last]`".
+
+#### C15a Extension (2026-07-06): `limit last N`; the two-homes rule; ArrayNum audit
+
+**The containment rule (designer requirement "preserve `last` as a true
+keyword", made precise): `last` has exactly two grammatical homes** —
+(1) an int-denoting expression inside subscripts (C15), and (2) a **modifier
+keyword inside `limit` clauses** — and is a syntax error everywhere else. It is
+never a value and never a range; **`last N` as a first-class "relative range"
+is rejected** (it would have no container to resolve against — a
+context-dependent value is exactly the leak the designer flagged).
+
+**`limit last N` (review recommendation, adopted): the `desc` precedent.**
+Like `order by x desc`, `last` here is clause syntax, not an expression:
+`limit ['last'] count-expr` — the count is an ordinary expression; `last` flips
+which end the limit takes. Semantics: applies at the limit stage (after
+`where`/`order by`/`offset`); the selected tail keeps its **original order**
+(`for (x in 1 to 100 limit last 10) x` → 91…100); the count is mandatory.
+Need is real: tail-of-ordered-data is a top pattern in Lambda's domain
+(logs, events, time series); SQL's lack of it (`ORDER BY … DESC LIMIT` +
+re-sort) is a famous annoyance; Nushell ships `first N`/`last N` as core
+commands.
+
+**No `first` keyword — foreclosed structurally** (designer lean, confirmed):
+plain `limit 10` and `xs[0 to 9]` already *are* first-N — front-anchored is the
+default direction, so `first` would be a keyword meaning "do the default."
+Symmetric coverage: first-N = `limit N` / `[0 to N-1]`; last-N =
+`limit last N` / `[last-(N-1) to last]`.
+
+**Functions never take last-ness** (corollary of the two-homes rule): function
+arguments are general expressions with no anchor — the keyword cannot appear
+there by construction, and APIs must not smuggle direction in as parameters;
+callers slice. Same principle: **`take(v, n)`/`drop(v, n)` must not accept
+negative counts** (NumPy-style signed counts = sign-punning through the back
+door, the exact C15 disease).
+
+**ArrayNum audit (designer note, recorded):** the Typed Array 4 implementation
+is NumPy-inspired and **may honor negative indices NumPy-style — if so it is
+nonconforming** (C15: negative read → null; negative write → raise) and must be
+corrected, including on views. `last` on N-D ArrayNum resolves against the
+**leading axis** (`img[last]` = last row), matching the established
+`seq_get_length` iteration convention.
+
+#### C15b Alignment (2026-07-06): find()/replace() `limit` options vs C15/C15a
+
+**Finding (code read, `select_match_window`, lambda-eval.cpp:~4501):** the
+recently-added `limit` option implements `limit > 0` = first N matches,
+**`limit < 0` = last |N| matches** (a true tail window — correct semantics,
+wrong spelling: the C15 sign-punning disease, freshly minted), and
+**`limit == 0`/absent = all** (Python's `re.sub(count=0)` in-band sentinel — a
+computed limit legitimately reaching 0 silently means *everything* instead of
+*nothing*).
+
+**Alignment ruling — same two words across three surfaces:**
+
+| Meaning | for-clause | subscript | find/replace option |
+|---|---|---|---|
+| first N | `limit N` | `[0 to N-1]` | `{limit: N}` |
+| last N | `limit last N` | `[last-(N-1) to last]` | **`{last: N}`** |
+| all | *(no clause)* | — | *(omit, or `{limit: null}`)* |
+
+1. `{limit: n}`, n ≥ 1 → first n matches, document order (same anchoring
+   default as the for-clause).
+2. **`{limit: 0}` → zero matches** (`find` → `[]`; `replace` → unchanged):
+   a count counts; the zero-sentinel dies.
+3. **Unlimited = absence**: option omitted or `null` (C5 — no magic value;
+   matches the documented replace-all default).
+4. **Negative limit → `error()`** (C14 invalid input) + the C15 literal-negative
+   lint.
+5. **`{last: n}` — the named-option mirror of the clause modifier**:
+   `replace(s, ",", " and", {last: 1})`. Both `limit` and `last` together →
+   error. `find` gets `{last: n}` via the same options parser (post-slicing
+   `find(s,p)[last-(n-1) to last]` also works; `replace` is the case slicing
+   cannot serve — the common "replace the last occurrence" need is why the
+   `-1` spelling appeared).
+
+**C15a corollary refined (recorded honestly):** "functions never take direction
+parameters" was too broad. Precise rule: functions never take the `last`
+*keyword* (no anchor in call position) and never accept *signed counts*
+(sign-punning) — but the named-option pair **`{limit:}`/`{last:}` is the
+blessed API-level mirror** of the clause pair, with an explicit anchor (the
+function's own match sequence).
+
+**Implementation notes:** the `select_match_window` tail logic is kept —
+only the spelling moves from the sign to the `{last:}` option. Grammar check
+required: `last` as a *map key* (`{last: 3}`) must remain legal after the
+keyword is reserved (key position is not expression position; fallback is the
+quoted form `{'last': 3}`).
+
+**C15b elevation (designer ruling, 2026-07-06): `{limit: n}` / `{last: n}` is
+the standard convention** for *any* function that takes a limit/range as a
+parameter or option — not just `find`/`replace`. All future (and existing)
+limit-taking builtins follow the same contract: `{limit: n}` = first n,
+`{last: n}` = last n, both together = error, `{limit: 0}` = zero, unlimited =
+absence (omit/`null`), negative counts = `error()`. No function invents its own
+limit spelling.
+
+#### C14b Application (designer + review, 2026-07-06): division by zero never raises
+
+Designer challenge to the stale impl-plan line "machine-tier div-by-zero
+raises": **division by zero must not abort**. Resolution — the C3-era "raises"
+wording was already superseded by C14; the precise table:
+
+| Operation | Zero divisor | Why |
+|---|---|---|
+| `/` (all float widths) | `inf` / `nan` per IEEE | already ruled (§4.7); the designer's examples `1/0 = inf`, `0/0 = nan` are law |
+| `div`, `%` (flex int) | **returns `error()`** | integers have no inf/nan; C14 poison flows set-friendly, never aborts, `or`-rescuable |
+| `div`, `%` (machine ints) | **returns `error()`** | same — **deliberate divergence from Go** (which panics): the C14 fn-return philosophy overrides the C3 Go-alignment on this corner |
+| vectorized integer div (ArrayNum) | **whole operation returns `error()`** | a fixed-width lane cannot hold poison — poison the result, not a lane |
+
+C3's machine-tier corner list and the spec's §4.1/§4.7 wording are corrected
+accordingly ("raises on zero" → "returns `error()`"). `MinInt / -1` wrapping is
+unchanged.
+
+**C14b prior-art note — NumPy integer div-by-zero (2026-07-06):** the cautionary
+precedent for the whole-op-poisons rule. NumPy: `/` on int arrays silently
+promotes to float64 → IEEE `inf`/`nan` lanes + RuntimeWarning; **`//` and `%`
+by zero stay integer and yield `0` in the offending lanes** — plausible garbage
+(the negative-index-wrap disease class) signaled only by a once-emitted stderr
+warning invisible to program logic; and the behavior is *globally configurable*
+via `np.seterr(divide=...)` — mutable global state controlling arithmetic
+semantics, the C13-condemned context disease. Lambda's whole-op `error()` is
+the only value-level, deterministic, no-fabricated-data option. The idiom for
+salvaging good lanes is explicit pre-masking with the C10 operators: test
+`b eq 0`, filter or substitute divisors, then divide.
+
+**C14b completion (designer rulings, 2026-07-06):**
+
+1. **Go-style compile-time layer adopted**: a *literal* zero divisor in integer
+   division (`x div 0`, `x % 0`) is a **compile error** — statically-visible
+   nonsense caught early, joining the C3 literal-strictness family (the >2⁵³
+   literal, the >34-digit `n` literal). Runtime-computed zeros return
+   `error()` per C14b. Note: the motivating example `[1i8,2i8,3i8] div 0` is
+   therefore caught at *compile time* — the runtime question only arises for
+   computed zeros.
+2. **Runtime confirmed**: returned `error()` is the right Lambda semantic for
+   integer division by zero.
+3. **Vectorized detail resolved: whole-op single `error`, never
+   `[error, error, …]`.** The designer's representability argument
+   (`[error × n]` is not representable as an i8 array), sharpened: a boxed
+   representation *could* hold it, but then the result's observable type would
+   depend on runtime data — type instability, the B7/JIT minefield, P6
+   dragged into observable territory. Plus: one operation = one failure = one
+   error (scalar consistency; a broadcast zero fails every lane identically —
+   `[error × n]` adds no information); per-lane poison in the mixed-divisor
+   case (`a div [1,0,3]`) collapses to `error` at the next aggregation anyway
+   while putting naked poison inside a container (the A6 pattern); and a
+   single error carries *better* diagnostics — the first offending index
+   (`"vectorized div by zero at index 1"`). Partial-result salvage stays
+   explicit: pre-mask with `b eq 0`, substitute/filter, then divide.
+
+#### C8.5c Clarification (2026-07-06): poison is unequal, not untypeable
+
+Designer question: should `case error:` match an error value, given
+`error == error` → false? **Yes — and it is not a variance from the equality
+rule**, because match type-arms dispatch via `is` (classification), not `==`
+(value identity). The two relations answer different questions: `==` asks "the
+same value?" — for poison, deliberately never; `is` asks "of this kind?" — of
+course an error is an error (`err is error` is already the documented
+equivalent of the `^err` check). **The proof it is existing law, not a special
+case: nan already behaves identically** — `nan == nan` false, yet
+`nan is float` true and `case float:` catches nan; error was modeled after nan
+(C2 discussion) and inherits the same split. One-line doc rule: **poison
+values equal nothing but classify normally.**
+
+Consequences: `match` becomes the natural companion to C14's returned errors —
+`match int(s) { case error: fallback  case int: ~ * 2 }`, including
+constrained arms (`case error that (~.code == 304)`); errors reach `default`
+only when no `error` arm exists (which is what `default` is for). Note: the
+idiomatic scrutinee is the value itself (`match err`), not `match type(err)` —
+though the latter also works post the `type(error_value)` fix (C3.3-4), via
+representational type-value comparison.
+
+**C8.5c correction (designer catch, 2026-07-06):** the note above claiming
+`match type(err)` "also works" was **wrong** — `type(err)` yields a *type
+value*, and type arms dispatch via `is`: `type(err) is error` → false (a type
+value is a type, not an error), so `case error:` misses and the match falls to
+`default`. The three relations, precisely: `type(err) == error` → **true**
+(type-value equality); `type(err) is error` → **false** (classification);
+`match type(err) { case error: }` → **default**; `match err { case error: }` →
+**matches** (the idiomatic form). No special case is added — a `==` fallback
+for type-valued scrutinees would make arm meaning depend on the scrutinee's
+runtime type, the context-dependence C8.5c exists to prevent. **User-guide
+trap to document explicitly** (designer): `match type(x)` is the
+JS-`switch(typeof x)` / Python-`match type(x)` habit imported wrongly —
+**`match x` already IS Lambda's typeof-switch**; a type value matches only
+`case type:`. Match the value, not its type.
+
+**C8.5c addendum — the `error` name duality (designer, 2026-07-06, for the
+user guide):** the bare keyword `error` denotes the error **type** —
+`type(error)` → `type` (it is a type value, usable in `case error:` arms and
+`is error` checks); the **constructor `error("…")`** creates an error
+**value** — `type(error("…"))` → `error`. The same name, two roles, split
+exactly along the classification/value axis of this section — highlight in the
+user guide alongside the `type(x)` trap.
+
+#### C11.5 Operator comparability (2026-07-06) — which families have magnitude
+
+**The teaching sentence (designer-adopted, now normative): "the total order
+says where things go on a shelf; `<` says which is smaller."** Every value has
+a shelf position (C11.4 — everything sorts); only some families have
+*magnitude*:
+
+| Family | `< <= > >=` | Rationale |
+|---|---|---|
+| numbers | ✓ | magnitude is their essence (cross-representation per C8.5a) |
+| strings | ✓ | dictionary order is a domain concept (codepoint/bytewise) |
+| datetime | ✓ | before/after is the natural semantics of time — the strongest magnitude outside numbers |
+| symbol | **✗ → `error()`** (designer ruling) | identifiers name things; names have places, not sizes |
+| binary | **✗ → `error()`** (review recommendation, adopted with symbols' logic) | blobs have no domain "smaller"; `hash1 < hash2` is almost always a bug; ordering blobs is a shelf need, already covered |
+| bool | ✗ (unchanged) | `true < false` is not a magnitude claim (shelf: `false < true`) |
+| containers | ✗ (unchanged) | shelf only |
+
+Details pinned:
+
+- **Datetime cross-kind**: same-kind by instant; `date` vs `datetime`
+  comparable via day-start coercion; `time` vs `date`/`datetime` → `error()`
+  (no common axis).
+- **Behavior change**: `fn_lt` currently accepts symbols (shared `strcmp`
+  path, C8.7 side-find) — symbol `<` becomes `error()`.
+- **`null < x` → `null` (recommended)**: one uniform absorption rule with C5's
+  scalar algebra (`null + 1` → null); observably near-identical in conditions
+  (both falsy). `nan` comparisons stay `false` (IEEE); `error` operands taint.
+- **Two-layer treatment** (the div-by-zero pattern, C14b): statically-known
+  invalid comparisons (cross-family, or excluded families with literal
+  operands) = **compile error** with the teaching message ("no magnitude —
+  `sort`/`order by` use the total order"); dynamically-arising = returned
+  `error()`.
