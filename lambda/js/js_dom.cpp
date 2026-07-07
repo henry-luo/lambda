@@ -11099,6 +11099,94 @@ extern "C" Item js_dom_adopt_node_bridge(Item node_arg) {
     return node_arg;
 }
 
+extern "C" Item js_dom_location_method_bridge(void* doc_ptr, Item method_name,
+                                              Item* args, int argc) {
+    DomDocument* doc = (DomDocument*)doc_ptr;
+    const char* method = fn_to_cstr(method_name);
+    if (!method) return make_js_undefined();
+    if (strcmp(method, "assign") == 0 || strcmp(method, "replace") == 0) {
+        if (argc < 1) return make_js_undefined();
+        const char* next_url = fn_to_cstr(args[0]);
+        if (doc && next_url && next_url[0]) {
+            if (doc->pending_navigation_url) {
+                mem_free(doc->pending_navigation_url);
+            }
+            doc->pending_navigation_url = mem_strdup(next_url, MEM_CAT_DOM);
+            log_info("js_location_%s: pending navigation to %s", method, next_url);
+        }
+    }
+    return make_js_undefined();
+}
+
+extern "C" Item js_dom_document_open_bridge(void* doc_ptr) {
+    DomDocument* doc = (DomDocument*)doc_ptr;
+    if (!doc) return js_get_document_object_value();
+    DocState* state = doc->state ? doc->state : js_dom_current_state();
+    if (state) {
+        const char* exc = nullptr;
+        if (!state_store_set_selection(state, NULL, NULL, &exc)) {
+            log_debug("js_document_open: selection clear rejected: %s",
+                      exc ? exc : "?");
+        }
+    }
+    DomElement* body = document_body_element(doc);
+    if (body) {
+        clear_element_children_for_navigation(body);
+        js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
+                               (DomNode*)body,
+                               (DomNode*)body->parent);
+    }
+    return js_get_document_object_value();
+}
+
+extern "C" Item js_dom_document_write_bridge(void* doc_ptr, Item text_arg) {
+    DomDocument* doc = (DomDocument*)doc_ptr;
+    if (!doc || !doc->root) return ItemNull;
+    const char* text = fn_to_cstr(text_arg);
+    if (!text) return ItemNull;
+
+    DomElement* body = document_body_element(doc);
+    if (!body) {
+        log_debug("js_document_write_bridge: no body element found");
+        return ItemNull;
+    }
+
+    const char* cursor = text;
+    while (*cursor) {
+        const char* br = nullptr;
+        for (const char* scan = cursor; *scan; scan++) {
+            if (*scan == '<' && strncasecmp(scan, "<br", 3) == 0) {
+                const char* end = strchr(scan, '>');
+                if (end) {
+                    br = scan;
+                    break;
+                }
+            }
+        }
+        size_t text_len = br ? (size_t)(br - cursor) : strlen(cursor);
+        if (text_len > 0) {
+            String* str = js_dom_create_document_string(doc, cursor, text_len);
+            DomText* text_node = dom_text_create_detached(str, doc);
+            if (text_node) {
+                ((DomNode*)body)->append_child((DomNode*)text_node);
+                dom_post_insert((DomNode*)body, (DomNode*)text_node);
+            }
+        }
+        if (!br) break;
+        const char* br_end = strchr(br, '>');
+        MarkBuilder builder(doc->input);
+        Item br_item = builder.element("br").final();
+        DomElement* br_elem = dom_element_create(doc, "br", br_item.element);
+        if (br_elem) {
+            ((DomNode*)body)->append_child((DomNode*)br_elem);
+            dom_post_insert((DomNode*)body, (DomNode*)br_elem);
+        }
+        cursor = br_end ? br_end + 1 : br + 3;
+    }
+    log_debug("js_document_write_bridge: appended '%s' to body", text);
+    return ItemNull;
+}
+
 extern "C" Item js_dom_normalize_bridge(void* elem_ptr) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem) return ItemNull;

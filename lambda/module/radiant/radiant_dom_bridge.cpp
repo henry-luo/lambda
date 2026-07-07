@@ -82,6 +82,9 @@ extern "C" Item js_dom_remove_child_bridge(void* parent, Item child);
 extern "C" Item js_dom_insert_before_bridge(void* parent, Item new_child, Item ref_child);
 extern "C" Item js_dom_remove_bridge(void* node);
 extern "C" Item js_dom_adopt_node_bridge(Item node);
+extern "C" Item js_dom_location_method_bridge(void* doc, Item method_name, Item* args, int argc);
+extern "C" Item js_dom_document_open_bridge(void* doc);
+extern "C" Item js_dom_document_write_bridge(void* doc, Item text);
 extern "C" Item js_dom_normalize_bridge(void* elem);
 extern "C" Item js_dom_clone_node_bridge(void* elem, Item deep, bool has_deep);
 extern "C" Item js_dom_replace_child_bridge(void* parent, Item new_child, Item old_child);
@@ -2047,6 +2050,37 @@ extern "C" int radiant_dom_document_method(Item method_name, Item* args, int arg
 
     DomDocument* doc = (DomDocument*)js_dom_get_document();
     DomElement* root = doc ? doc->root : nullptr;
+
+    if (strcmp(method, "assign") == 0 ||
+        strcmp(method, "replace") == 0 ||
+        strcmp(method, "reload") == 0) {
+        *out = js_dom_location_method_bridge((void*)doc, method_name, args, argc);
+        return 1;
+    }
+
+    if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
+        *out = radiant_dom_undefined_item();
+        return 1;
+    }
+
+    if (strcmp(method, "open") == 0) {
+        *out = js_dom_document_open_bridge((void*)doc);
+        return 1;
+    }
+
+    if (strcmp(method, "close") == 0) {
+        *out = radiant_dom_undefined_item();
+        return 1;
+    }
+
+    if (strcmp(method, "write") == 0 || strcmp(method, "writeln") == 0) {
+        if (argc < 1) {
+            *out = ItemNull;
+            return 1;
+        }
+        *out = js_dom_document_write_bridge((void*)doc, args[0]);
+        return 1;
+    }
 
     if (strcmp(method, "getElementById") == 0) {
         if (argc < 1) {
