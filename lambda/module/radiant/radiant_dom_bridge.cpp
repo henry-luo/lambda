@@ -21,6 +21,8 @@ extern "C" Item js_get_global_this(void);
 extern "C" Item js_dom_create_wrapper_impl(void* dom_elem);
 extern "C" void* js_dom_unwrap_element_impl(Item item);
 extern "C" bool js_is_dom_node_impl(Item item);
+extern "C" Item js_new_error_with_name(Item error_name, Item message);
+extern "C" void js_throw_value(Item error);
 extern "C" bool js_is_css_namespace(Item item);
 extern "C" bool js_is_stylesheet(Item item);
 extern "C" bool js_is_rule_style_decl(Item item);
@@ -825,6 +827,21 @@ static void radiant_dom_find_by_tag(DomElement* root, const char* tag, Array* ar
     while (child) {
         if (child->is_element()) {
             radiant_dom_find_by_tag(child->as_element(), tag, arr);
+        }
+        child = child->next_sibling;
+    }
+}
+
+static void radiant_dom_find_by_name(DomElement* root, const char* name, Array* arr) {
+    if (!root || !name || !arr) return;
+    const char* attr = dom_element_get_attribute(root, "name");
+    if (attr && strcmp(attr, name) == 0) {
+        array_push(arr, radiant_dom_node_item((DomNode*)root));
+    }
+    DomNode* child = root->first_child;
+    while (child) {
+        if (child->is_element()) {
+            radiant_dom_find_by_name(child->as_element(), name, arr);
         }
         child = child->next_sibling;
     }
@@ -2010,35 +2027,171 @@ extern "C" Item radiant_dom_element_method(Item elem_item, Item method_name, Ite
     return js_dom_element_method_impl(elem_item, method_name, args, argc);
 }
 
-extern "C" Item radiant_dom_document_method(Item method_name, Item* args, int argc) {
+extern "C" int radiant_dom_document_method(Item method_name, Item* args, int argc, Item* out) {
     const char* method = fn_to_cstr(method_name);
-    if (!method) return ItemNull;
+    if (!method || !out) return 0;
+
+    DomDocument* doc = (DomDocument*)js_dom_get_document();
+    DomElement* root = doc ? doc->root : nullptr;
+
+    if (strcmp(method, "getElementById") == 0) {
+        if (argc < 1) {
+            *out = ItemNull;
+            return 1;
+        }
+        const char* id = fn_to_cstr(args[0]);
+        if (!id) {
+            *out = ItemNull;
+            return 1;
+        }
+        // handled flag preserves valid null lookup results without JS fallback.
+        *out = radiant_dom_node_item((DomNode*)radiant_dom_find_by_id(root, id));
+        return 1;
+    }
+
+    if (strcmp(method, "getElementsByClassName") == 0) {
+        if (argc < 1) {
+            *out = ItemNull;
+            return 1;
+        }
+        const char* cls = fn_to_cstr(args[0]);
+        if (!cls) {
+            *out = ItemNull;
+            return 1;
+        }
+        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+        arr->type_id = LMD_TYPE_ARRAY;
+        arr->items = nullptr;
+        arr->length = 0;
+        arr->capacity = 0;
+        radiant_dom_find_by_class(root, cls, arr);
+        *out = (Item){.array = arr};
+        return 1;
+    }
+
+    if (strcmp(method, "getElementsByTagName") == 0) {
+        if (argc < 1) {
+            *out = ItemNull;
+            return 1;
+        }
+        const char* tag = fn_to_cstr(args[0]);
+        if (!tag) {
+            *out = ItemNull;
+            return 1;
+        }
+        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+        arr->type_id = LMD_TYPE_ARRAY;
+        arr->items = nullptr;
+        arr->length = 0;
+        arr->capacity = 0;
+        radiant_dom_find_by_tag(root, tag, arr);
+        *out = (Item){.array = arr};
+        return 1;
+    }
+
+    if (strcmp(method, "getElementsByName") == 0) {
+        if (argc < 1) {
+            *out = ItemNull;
+            return 1;
+        }
+        const char* name = fn_to_cstr(args[0]);
+        if (!name) {
+            *out = ItemNull;
+            return 1;
+        }
+        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+        arr->type_id = LMD_TYPE_ARRAY;
+        arr->items = nullptr;
+        arr->length = 0;
+        arr->capacity = 0;
+        radiant_dom_find_by_name(root, name, arr);
+        *out = (Item){.array = arr};
+        return 1;
+    }
+
+    if (strcmp(method, "querySelector") == 0) {
+        if (argc < 1) {
+            *out = ItemNull;
+            return 1;
+        }
+        const char* sel_text = fn_to_cstr(args[0]);
+        if (!sel_text || !doc || !doc->pool) {
+            *out = ItemNull;
+            return 1;
+        }
+        CssSelector* selector = radiant_dom_parse_css_selector(sel_text, doc->pool);
+        if (!selector) {
+            Item err_name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
+            Item err_msg = (Item){.item = s2it(heap_create_name("is not a valid selector"))};
+            js_throw_value(js_new_error_with_name(err_name, err_msg));
+            *out = ItemNull;
+            return 1;
+        }
+        SelectorMatcher* matcher = selector_matcher_create(doc->pool);
+        DomElement* found = selector_matcher_find_first(matcher, selector, root);
+        *out = radiant_dom_node_item((DomNode*)found);
+        return 1;
+    }
+
+    if (strcmp(method, "querySelectorAll") == 0) {
+        if (argc < 1) {
+            *out = ItemNull;
+            return 1;
+        }
+        const char* sel_text = fn_to_cstr(args[0]);
+        if (!sel_text || !doc || !doc->pool) {
+            *out = radiant_dom_empty_array_item();
+            return 1;
+        }
+        CssSelector* selector = radiant_dom_parse_css_selector(sel_text, doc->pool);
+        if (!selector) {
+            *out = radiant_dom_empty_array_item();
+            return 1;
+        }
+        SelectorMatcher* matcher = selector_matcher_create(doc->pool);
+        DomElement** results = nullptr;
+        int count = 0;
+        selector_matcher_find_all(matcher, selector, root, &results, &count);
+        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+        arr->type_id = LMD_TYPE_ARRAY;
+        arr->items = nullptr;
+        arr->length = 0;
+        arr->capacity = 0;
+        for (int i = 0; i < count; i++) {
+            array_push(arr, radiant_dom_node_item((DomNode*)results[i]));
+        }
+        *out = (Item){.array = arr};
+        return 1;
+    }
 
     Item doc_item = js_get_document_object_value();
     if (strcmp(method, "addEventListener") == 0) {
         // document EventTarget storage is keyed by the singleton document wrapper.
-        return argc >= 2
+        *out = argc >= 2
             ? js_dom_add_event_listener_bridge(doc_item, args[0], args[1],
                 argc >= 3 ? args[2] : ItemNull)
             : radiant_dom_undefined_item();
+        return 1;
     }
 
     if (strcmp(method, "removeEventListener") == 0) {
         // document EventTarget storage is keyed by the singleton document wrapper.
-        return argc >= 2
+        *out = argc >= 2
             ? js_dom_remove_event_listener_bridge(doc_item, args[0], args[1],
                 argc >= 3 ? args[2] : ItemNull)
             : radiant_dom_undefined_item();
+        return 1;
     }
 
     if (strcmp(method, "dispatchEvent") == 0) {
         // dispatch must use the same wrapper identity listeners were registered with.
-        return argc >= 1
+        *out = argc >= 1
             ? js_dom_dispatch_event_bridge(doc_item, args[0])
             : (Item){.item = b2it(0)};
+        return 1;
     }
 
-    return ItemNull;
+    return 0;
 }
 
 extern "C" Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts) {

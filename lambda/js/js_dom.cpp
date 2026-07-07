@@ -95,7 +95,7 @@ extern "C" Item js_dom_add_event_listener_bridge(Item target_item, Item type,
 extern "C" Item js_dom_remove_event_listener_bridge(Item target_item, Item type,
                                                     Item callback, Item opts);
 extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
-extern "C" Item radiant_dom_document_method(Item method_name, Item* args, int argc);
+extern "C" int radiant_dom_document_method(Item method_name, Item* args, int argc, Item* out);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
 extern "C" void js_throw_value(Item error);
 extern "C" Item js_dom_get_selection_function_for_document(void* doc);
@@ -1958,8 +1958,8 @@ extern "C" Item js_get_document_object_value() {
 extern "C" Item js_document_proxy_method(Item method_name, Item* args, int argc) {
     const char* method = fn_to_cstr(method_name);
     if (method) {
-        Item module_result = radiant_dom_document_method(method_name, args, argc);
-        if (module_result.item != ITEM_NULL) {
+        Item module_result = ItemNull;
+        if (radiant_dom_document_method(method_name, args, argc, &module_result)) {
             return module_result;
         }
         Item fn = js_document_get_property(method_name);
