@@ -120,6 +120,9 @@ extern "C" Item js_dom_document_implementation_bridge(void);
 extern "C" Item js_dom_document_design_mode_bridge(void);
 extern "C" Item js_dom_document_active_element_bridge(void* doc);
 extern "C" Item js_dom_normalize_bridge(void* elem);
+extern "C" Item js_dom_live_child_collection_bridge(void* elem, bool elements_only);
+extern "C" Item js_dom_live_document_forms_bridge(void* doc);
+extern "C" Item js_dom_live_form_elements_bridge(void* elem);
 extern "C" Item js_dom_clone_node_bridge(void* elem, Item deep, bool has_deep);
 extern "C" Item js_dom_replace_child_bridge(void* parent, Item new_child, Item old_child);
 extern "C" Item js_dom_replace_with_bridge(void* node, Item* args, int argc);
@@ -743,22 +746,6 @@ static int64_t radiant_dom_script_visible_element_child_count(DomElement* elem) 
     return count;
 }
 
-static Item radiant_dom_children_item(DomElement* elem) {
-    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-    arr->type_id = LMD_TYPE_ARRAY;
-    arr->items = nullptr;
-    arr->length = 0;
-    arr->capacity = 0;
-    DomNode* child = radiant_dom_first_script_visible_child(elem);
-    while (child) {
-        if (child->is_element()) {
-            array_push(arr, radiant_dom_node_item(child));
-        }
-        child = radiant_dom_next_script_visible_sibling(child);
-    }
-    return (Item){.array = arr};
-}
-
 static Item radiant_dom_attributes_item(DomElement* elem) {
     Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
     arr->type_id = LMD_TYPE_ARRAY;
@@ -1367,7 +1354,7 @@ static bool radiant_dom_get_element_property(DomElement* elem, const char* prop,
         return true;
     }
     if (radiant_dom_is_tag(elem, "form") && strcmp(prop, "elements") == 0) {
-        *out = radiant_dom_form_controls_item(elem);
+        *out = js_dom_live_form_elements_bridge((void*)elem);
         return true;
     }
     if (radiant_dom_is_tag(elem, "form") && strcmp(prop, "length") == 0) {
@@ -1384,7 +1371,7 @@ static bool radiant_dom_get_element_property(DomElement* elem, const char* prop,
         return true;
     }
     if (strcmp(prop, "children") == 0) {
-        *out = radiant_dom_children_item(elem);
+        *out = js_dom_live_child_collection_bridge((void*)elem, true);
         return true;
     }
     if (strcmp(prop, "attributes") == 0) {
@@ -1428,17 +1415,7 @@ static bool radiant_dom_get_element_property(DomElement* elem, const char* prop,
         return true;
     }
     if (strcmp(prop, "childNodes") == 0) {
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        DomNode* child = radiant_dom_first_script_visible_child(elem);
-        while (child) {
-            array_push(arr, radiant_dom_node_item(child));
-            child = radiant_dom_next_script_visible_sibling(child);
-        }
-        *out = (Item){.array = arr};
+        *out = js_dom_live_child_collection_bridge((void*)elem, false);
         return true;
     }
     if (radiant_dom_form_named_getter(elem, prop, out)) {
@@ -2513,37 +2490,6 @@ static Item radiant_dom_document_doctype_item(DomDocument* doc) {
     return (first && first->is_comment()) ? radiant_dom_node_item(first) : ItemNull;
 }
 
-static void radiant_dom_collect_document_forms(DomNode* node, Item forms) {
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = node->as_element();
-            if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
-                Item form_item = radiant_dom_node_item((DomNode*)elem);
-                array_push(forms.array, form_item);
-
-                const char* name = dom_element_get_attribute(elem, "name");
-                if (name && name[0] != '\0') {
-                    js_property_set(forms, radiant_dom_string_item(name), form_item);
-                }
-                const char* id = dom_element_get_attribute(elem, "id");
-                if (id && id[0] != '\0' && (!name || strcmp(id, name) != 0)) {
-                    js_property_set(forms, radiant_dom_string_item(id), form_item);
-                }
-            }
-            radiant_dom_collect_document_forms(elem->first_child, forms);
-        }
-        node = node->next_sibling;
-    }
-}
-
-static Item radiant_dom_document_forms_item(DomDocument* doc) {
-    Item forms = radiant_dom_array_item();
-    if (doc && doc->root) {
-        radiant_dom_collect_document_forms((DomNode*)doc->root, forms);
-    }
-    return forms;
-}
-
 extern "C" int radiant_dom_document_get_property(Item prop_name, Item* out) {
     const char* prop = fn_to_cstr(prop_name);
     if (!prop || !out) return 0;
@@ -2645,7 +2591,7 @@ extern "C" int radiant_dom_document_get_property(Item prop_name, Item* out) {
         return 1;
     }
     if (strcmp(prop, "forms") == 0) {
-        *out = radiant_dom_document_forms_item(doc);
+        *out = js_dom_live_document_forms_bridge((void*)doc);
         return 1;
     }
     if (strcmp(prop, "getSelection") == 0) {

@@ -73,6 +73,14 @@ static inline Item js_string_key(const char* s) {
     return (Item){.item = s2it(heap_create_name(s))};
 }
 
+static void js_dom_refresh_live_child_collections_for_mutation(DomNode* target,
+                                                               DomNode* parent);
+static void js_dom_refresh_live_form_collections_for_mutation(DomNode* target,
+                                                              DomNode* parent,
+                                                              DomDocument* doc);
+static void _collect_document_forms_rec(DomNode* node, Item forms);
+static void _collect_form_controls_rec(DomNode* node, Item arr);
+
 static const char* js_dom_to_attr_cstr(Item value) {
     Item str_value = js_to_string(value);
     const char* s = fn_to_cstr(str_value);
@@ -392,6 +400,8 @@ static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATI
     if (!has_pending_structural_record) {
         js_dom_record_mutation_detail(kind, target, parent, doc->js_mutation_sequence);
     }
+    js_dom_refresh_live_child_collections_for_mutation(target, parent);
+    js_dom_refresh_live_form_collections_for_mutation(target, parent, doc);
 
     DocState* st = doc->state;
     if (st) {
@@ -1701,11 +1711,36 @@ struct SelectOptionsOwnerEntry {
     int kind;
 };
 
+struct LiveChildCollectionEntry {
+    Array* array;
+    DomElement* owner;
+    int kind;
+};
+
+struct LiveFormCollectionEntry {
+    Array* array;
+    DomDocument* doc;
+    DomElement* owner;
+    int kind;
+};
+
 static const int SELECT_COLLECTION_OPTIONS = 1;
 static const int SELECT_COLLECTION_SELECTED_OPTIONS = 2;
 static const int SELECT_OPTIONS_OWNER_CACHE_SIZE = 4096;
 static __thread SelectOptionsOwnerEntry s_select_options_owners[SELECT_OPTIONS_OWNER_CACHE_SIZE] = {};
 static __thread int s_select_options_owner_count = 0;
+
+static const int LIVE_CHILD_COLLECTION_CHILDREN = 1;
+static const int LIVE_CHILD_COLLECTION_CHILD_NODES = 2;
+static const int LIVE_CHILD_COLLECTION_CACHE_SIZE = 4096;
+static __thread LiveChildCollectionEntry s_live_child_collections[LIVE_CHILD_COLLECTION_CACHE_SIZE] = {};
+static __thread int s_live_child_collection_count = 0;
+
+static const int LIVE_FORM_COLLECTION_DOCUMENT_FORMS = 1;
+static const int LIVE_FORM_COLLECTION_FORM_ELEMENTS = 2;
+static const int LIVE_FORM_COLLECTION_CACHE_SIZE = 4096;
+static __thread LiveFormCollectionEntry s_live_form_collections[LIVE_FORM_COLLECTION_CACHE_SIZE] = {};
+static __thread int s_live_form_collection_count = 0;
 
 static void _register_select_options_owner(Item collection, DomElement* owner, int kind) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !owner) return;
@@ -1729,6 +1764,64 @@ static DomElement* _select_options_owner(Item collection, int* out_kind) {
         if (s_select_options_owners[i].array == collection.array) {
             if (out_kind) *out_kind = s_select_options_owners[i].kind;
             return s_select_options_owners[i].owner;
+        }
+    }
+    return nullptr;
+}
+
+static void _register_live_child_collection(Item collection, DomElement* owner, int kind) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !owner) return;
+    for (int i = 0; i < s_live_child_collection_count; i++) {
+        if (s_live_child_collections[i].array == collection.array) {
+            s_live_child_collections[i].owner = owner;
+            s_live_child_collections[i].kind = kind;
+            return;
+        }
+    }
+    if (s_live_child_collection_count >= LIVE_CHILD_COLLECTION_CACHE_SIZE) return;
+    s_live_child_collections[s_live_child_collection_count].array = collection.array;
+    s_live_child_collections[s_live_child_collection_count].owner = owner;
+    s_live_child_collections[s_live_child_collection_count].kind = kind;
+    s_live_child_collection_count++;
+}
+
+static DomElement* _live_child_collection_owner(Item collection, int* out_kind) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
+    for (int i = 0; i < s_live_child_collection_count; i++) {
+        if (s_live_child_collections[i].array == collection.array) {
+            if (out_kind) *out_kind = s_live_child_collections[i].kind;
+            return s_live_child_collections[i].owner;
+        }
+    }
+    return nullptr;
+}
+
+static void _register_live_form_collection(Item collection, DomDocument* doc,
+                                           DomElement* owner, int kind) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return;
+    if (!doc && owner) doc = owner->doc;
+    if (!doc && !owner) return;
+    for (int i = 0; i < s_live_form_collection_count; i++) {
+        if (s_live_form_collections[i].array == collection.array) {
+            s_live_form_collections[i].doc = doc;
+            s_live_form_collections[i].owner = owner;
+            s_live_form_collections[i].kind = kind;
+            return;
+        }
+    }
+    if (s_live_form_collection_count >= LIVE_FORM_COLLECTION_CACHE_SIZE) return;
+    s_live_form_collections[s_live_form_collection_count].array = collection.array;
+    s_live_form_collections[s_live_form_collection_count].doc = doc;
+    s_live_form_collections[s_live_form_collection_count].owner = owner;
+    s_live_form_collections[s_live_form_collection_count].kind = kind;
+    s_live_form_collection_count++;
+}
+
+static LiveFormCollectionEntry* _live_form_collection_entry(Item collection) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
+    for (int i = 0; i < s_live_form_collection_count; i++) {
+        if (s_live_form_collections[i].array == collection.array) {
+            return &s_live_form_collections[i];
         }
     }
     return nullptr;
@@ -1781,6 +1874,117 @@ static void _decorate_dom_collection(Item collection, const char* ctor_name) {
         (Item){.item = s2it(heap_create_name(ctor_name))});
     if (get_type_id(ctor) == LMD_TYPE_FUNC) {
         js_property_set(collection, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
+    }
+}
+
+static void _refresh_live_child_collection(Item collection, DomElement* owner, int kind) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !owner) return;
+    // live collection refresh owns the dense backing array; routing through
+    // JS length assignment can leave companion-map collection properties stale.
+    collection.array->length = 0;
+    DomNode* child = js_dom_first_script_visible_child(owner);
+    while (child) {
+        if (kind == LIVE_CHILD_COLLECTION_CHILD_NODES || child->is_element()) {
+            if (child->is_element()) {
+                js_array_push(collection, js_dom_wrap_element(child->as_element()));
+            } else {
+                js_array_push(collection, js_dom_wrap_element((DomElement*)(void*)child));
+            }
+        }
+        child = js_dom_next_script_visible_sibling(child);
+    }
+    if (collection.array->extra != 0) {
+        // decorated collections have a companion map; keep its length in sync
+        // because array property reads consult it before the dense length, and
+        // normal JS writes can be rejected once the slot is descriptor-backed.
+        Map* props = (Map*)(uintptr_t)collection.array->extra;
+        Item props_item = (Item){.map = props};
+        fn_map_set(props_item, (Item){.item = s2it(heap_create_name("length"))},
+                   (Item){.item = i2it(collection.array->length)});
+    }
+}
+
+static void _refresh_live_form_collection(Item collection, LiveFormCollectionEntry* entry) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !entry) return;
+    // live form collections own their dense array; setting length through JS
+    // leaves old numeric slots and companion-map length visible to optimized reads.
+    collection.array->length = 0;
+    if (entry->kind == LIVE_FORM_COLLECTION_DOCUMENT_FORMS) {
+        DomDocument* doc = entry->doc;
+        if (doc && doc->root) {
+            _collect_document_forms_rec((DomNode*)doc->root, collection);
+        }
+    } else if (entry->kind == LIVE_FORM_COLLECTION_FORM_ELEMENTS) {
+        DomElement* form = entry->owner;
+        if (form) {
+            _collect_form_controls_rec(form->first_child, collection);
+        }
+    }
+    if (collection.array->extra != 0) {
+        Map* props = (Map*)(uintptr_t)collection.array->extra;
+        Item props_item = (Item){.map = props};
+        fn_map_set(props_item, (Item){.item = s2it(heap_create_name("length"))},
+                   (Item){.item = i2it(collection.array->length)});
+    }
+}
+
+extern "C" Item js_dom_live_child_collection_bridge(void* elem_ptr, bool elements_only) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    Item collection = js_array_new(0);
+    if (!elem) return collection;
+    int kind = elements_only ? LIVE_CHILD_COLLECTION_CHILDREN : LIVE_CHILD_COLLECTION_CHILD_NODES;
+    _register_live_child_collection(collection, elem, kind);
+    _refresh_live_child_collection(collection, elem, kind);
+    // DOM child collections are live; registering the owner lets the array
+    // refresh before script reads instead of freezing a stale mutation snapshot.
+    if (elements_only) _decorate_dom_collection(collection, "HTMLCollection");
+    return collection;
+}
+
+extern "C" Item js_dom_live_document_forms_bridge(void* doc_ptr) {
+    DomDocument* doc = (DomDocument*)doc_ptr;
+    Item collection = js_array_new(0);
+    if (!doc) return collection;
+    _register_live_form_collection(collection, doc, nullptr, LIVE_FORM_COLLECTION_DOCUMENT_FORMS);
+    LiveFormCollectionEntry* entry = _live_form_collection_entry(collection);
+    _refresh_live_form_collection(collection, entry);
+    _decorate_dom_collection(collection, "HTMLCollection");
+    return collection;
+}
+
+extern "C" Item js_dom_live_form_elements_bridge(void* elem_ptr) {
+    DomElement* form = (DomElement*)elem_ptr;
+    Item collection = js_array_new(0);
+    if (!form) return collection;
+    _register_live_form_collection(collection, form->doc, form, LIVE_FORM_COLLECTION_FORM_ELEMENTS);
+    LiveFormCollectionEntry* entry = _live_form_collection_entry(collection);
+    _refresh_live_form_collection(collection, entry);
+    _decorate_dom_collection(collection, "HTMLFormControlsCollection");
+    return collection;
+}
+
+static void js_dom_refresh_live_child_collections_for_mutation(DomNode* target,
+                                                               DomNode* parent) {
+    for (int i = 0; i < s_live_child_collection_count; i++) {
+        DomElement* owner = s_live_child_collections[i].owner;
+        if (!owner) continue;
+        if ((DomNode*)owner != target && (DomNode*)owner != parent) continue;
+        Item collection = (Item){.array = s_live_child_collections[i].array};
+        _refresh_live_child_collection(collection, owner, s_live_child_collections[i].kind);
+    }
+}
+
+static void js_dom_refresh_live_form_collections_for_mutation(DomNode* target,
+                                                              DomNode* parent,
+                                                              DomDocument* doc) {
+    (void)target;
+    (void)parent;
+    for (int i = 0; i < s_live_form_collection_count; i++) {
+        LiveFormCollectionEntry* entry = &s_live_form_collections[i];
+        DomDocument* owner_doc = entry->doc ? entry->doc : (entry->owner ? entry->owner->doc : nullptr);
+        if (doc && owner_doc && owner_doc != doc) continue;
+        Item collection = (Item){.array = entry->array};
+        _refresh_live_form_collection(collection, entry);
     }
 }
 
@@ -5730,39 +5934,8 @@ extern "C" Item js_document_get_property(Item prop_name) {
 
     // F-1: document.forms — array of all <form> elements in the document.
     if (strcmp(prop, "forms") == 0) {
-        Item arr = js_array_new(0);
         DomDocument* doc = _js_current_document;
-        if (doc && doc->root) {
-            std::function<void(DomNode*)> walk = [&](DomNode* n) {
-                while (n) {
-                    if (n->is_element()) {
-                        DomElement* ce = (DomElement*)n;
-                        if (ce->tag_name && strcasecmp(ce->tag_name, "form") == 0) {
-                            Item fitem = js_dom_wrap_element(ce);
-                            js_array_push(arr, fitem);
-                            // Named access: forms[name] / forms[id] per HTML
-                            // §HTMLCollection-namedItem semantics.
-                            const char* nm = dom_element_get_attribute(ce, "name");
-                            if (nm && *nm) {
-                                js_property_set(arr,
-                                    (Item){.item = s2it(heap_create_name(nm))},
-                                    fitem);
-                            }
-                            const char* id = dom_element_get_attribute(ce, "id");
-                            if (id && *id && (!nm || strcmp(id, nm) != 0)) {
-                                js_property_set(arr,
-                                    (Item){.item = s2it(heap_create_name(id))},
-                                    fitem);
-                            }
-                        }
-                        walk(ce->first_child);
-                    }
-                    n = n->next_sibling;
-                }
-            };
-            walk((DomNode*)doc->root);
-        }
-        return arr;
+        return js_dom_live_document_forms_bridge((void*)doc);
     }
 
     // characterSet / charset
@@ -6902,6 +7075,63 @@ static void _select_refresh_cached_selected_options_for_node(DomNode* node) {
 
 extern "C" void js_dom_collection_before_property_get(Item object, Item key) {
     if (get_type_id(object) != LMD_TYPE_ARRAY) return;
+    int child_kind = 0;
+    DomElement* child_owner = _live_child_collection_owner(object, &child_kind);
+    if (child_owner) {
+        _refresh_live_child_collection(object, child_owner, child_kind);
+        return;
+    }
+    LiveFormCollectionEntry* form_entry = _live_form_collection_entry(object);
+    if (form_entry) {
+        _refresh_live_form_collection(object, form_entry);
+        if (get_type_id(key) != LMD_TYPE_STRING) return;
+        String* sk = it2s(key);
+        if (!sk || sk->len == 0) return;
+        if ((sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) ||
+            (sk->len == 9 && strncmp(sk->chars, "namedItem", 9) == 0) ||
+            (sk->len == 11 && strncmp(sk->chars, "constructor", 11) == 0)) {
+            return;
+        }
+        bool numeric = true;
+        for (int64_t i = 0; i < sk->len; i++) {
+            if (sk->chars[i] < '0' || sk->chars[i] > '9') {
+                numeric = false;
+                break;
+            }
+        }
+        if (numeric) return;
+
+        Item matched = ItemNull;
+        for (int64_t i = 0; i < object.array->length; i++) {
+            Item candidate = js_array_get_int(object, i);
+            DomElement* elem = (DomElement*)js_dom_unwrap_element(candidate);
+            if (!elem) continue;
+            const char* name = dom_element_get_attribute(elem, "name");
+            const char* id = dom_element_get_attribute(elem, "id");
+            if ((name && strlen(name) == (size_t)sk->len &&
+                 strncmp(name, sk->chars, (size_t)sk->len) == 0) ||
+                (id && strlen(id) == (size_t)sk->len &&
+                 strncmp(id, sk->chars, (size_t)sk->len) == 0)) {
+                matched = candidate;
+                break;
+            }
+        }
+
+        Item prop_key = (Item){.item = s2it(heap_strcpy(sk->chars, sk->len))};
+        if (matched.item != ItemNull.item) {
+            js_property_set(object, prop_key, matched);
+        } else if (object.array->extra != 0) {
+            Map* props = (Map*)(uintptr_t)object.array->extra;
+            bool found = false;
+            Item existing = js_map_get_fast_ext(props, sk->chars, (int)sk->len, &found);
+            if (found && js_dom_unwrap_element(existing)) {
+                // dynamic named properties can become stale after DOM renames;
+                // tombstone only old DOM-backed slots and leave user expandos alone.
+                js_delete_property(object, prop_key);
+            }
+        }
+        return;
+    }
     int kind = 0;
     DomElement* owner = _select_options_owner(object, &kind);
     if (!owner || kind != SELECT_COLLECTION_SELECTED_OPTIONS) return;
@@ -8151,6 +8381,19 @@ static void _collect_form_controls_rec(DomNode* node, Item arr) {
     }
 }
 
+static void _collect_document_forms_rec(DomNode* node, Item forms) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
+                js_array_push(forms, js_dom_wrap_element(elem));
+            }
+            _collect_document_forms_rec(elem->first_child, forms);
+        }
+        node = node->next_sibling;
+    }
+}
+
 // Return the lowercased name/id key used to look up a form control by name.
 // Returns nullptr if the element has neither.
 static const char* _form_control_name_or_id(DomElement* e) {
@@ -9071,9 +9314,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // F-1: HTMLFormElement.elements — snapshot array of listed form controls
     if (_is_tag(elem, "form") && strcmp(prop, "elements") == 0) {
-        Item arr = js_array_new(0);
-        _collect_form_controls_rec(elem->first_child, arr);
-        return arr;
+        return js_dom_live_form_elements_bridge((void*)elem);
     }
     // F-1: HTMLFormElement.length → number of listed controls
     if (_is_tag(elem, "form") && strcmp(prop, "length") == 0) {
@@ -11170,7 +11411,7 @@ extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
                 dom_post_insert((DomNode*)elem, frag_child);
                 frag_child = next;
             }
-            js_dom_mutation_notify();
+            js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, (DomNode*)elem, (DomNode*)elem);
             return child_arg;
         }
     }
@@ -11188,7 +11429,7 @@ extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         _select_ask_for_reset(elem);
     }
     _select_refresh_cached_selected_options_for_node((DomNode*)elem);
-    js_dom_mutation_notify();
+    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child_node, (DomNode*)elem);
     if (child_node->is_element()) {
         DomElement* ce = child_node->as_element();
         if (ce->tag_name && strcmp(ce->tag_name, "iframe") == 0) {
@@ -11212,7 +11453,7 @@ extern "C" Item js_dom_remove_child_bridge(void* parent_ptr, Item child_arg) {
         elem->tag() == HTM_TAG_SELECT) {
         _select_ask_for_reset(elem);
     }
-    js_dom_mutation_notify();
+    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_REMOVE, child_node, (DomNode*)elem);
     return child_arg;
 }
 
@@ -11248,7 +11489,7 @@ extern "C" Item js_dom_insert_before_bridge(void* parent_ptr, Item new_child_arg
                 }
                 frag_child = next;
             }
-            if (mutated) js_dom_mutation_notify();
+            if (mutated) js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, (DomNode*)elem, (DomNode*)elem);
             return new_child_arg;
         }
     }
@@ -11260,7 +11501,7 @@ extern "C" Item js_dom_insert_before_bridge(void* parent_ptr, Item new_child_arg
         return ItemNull;
     }
     dom_post_insert(parent_node, new_child);
-    js_dom_mutation_notify();
+    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, new_child, parent_node);
     return new_child_arg;
 }
 
@@ -12058,7 +12299,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                     dom_post_insert((DomNode*)elem, frag_child);
                     frag_child = next;
                 }
-                js_dom_mutation_notify();
+                js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, (DomNode*)elem, (DomNode*)elem);
                 return args[0];
             }
         }
@@ -12078,7 +12319,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
             _select_ask_for_reset(elem);
         }
         _select_refresh_cached_selected_options_for_node((DomNode*)elem);
-        js_dom_mutation_notify();
+        js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child_node, (DomNode*)elem);
         // If we just inserted an <iframe>, queue its synthetic load event.
         if (child_node->is_element()) {
             DomElement* ce = child_node->as_element();
@@ -12103,7 +12344,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
             elem->tag() == HTM_TAG_SELECT) {
             _select_ask_for_reset(elem);
         }
-        js_dom_mutation_notify();
+        js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_REMOVE, child_node, (DomNode*)elem);
         return args[0];  // return the removed child
     }
 
@@ -12138,7 +12379,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                     }
                     frag_child = next;
                 }
-                if (mutated) js_dom_mutation_notify();
+                if (mutated) js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, (DomNode*)elem, (DomNode*)elem);
                 return args[0];
             }
         }
@@ -12151,7 +12392,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
             return ItemNull;
         }
         dom_post_insert(parent_node, new_child);
-        js_dom_mutation_notify();
+        js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, new_child, parent_node);
         return args[0];
     }
 
@@ -12318,7 +12559,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         ((DomNode*)elem)->remove_child(old_child);
         // replaceChild pre-records insert/remove details above; it still must
         // publish one mutation so the handler requests reflow for the new tree.
-        js_dom_mutation_notify();
+        js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE, new_child, (DomNode*)elem);
         return args[1]; // return removed old child
     }
 
