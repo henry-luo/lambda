@@ -506,7 +506,15 @@ function allowGlobals() {
 function checkGlobals() {
   if (process.env.NODE_TEST_KNOWN_GLOBALS === '0') return;
   const leaked = Object.getOwnPropertyNames(globalThis).filter((name) => {
-    return !_knownGlobals.has(name) && !_allowedGlobals.has(name);
+    let value;
+    try {
+      value = globalThis[name];
+    } catch {
+      value = undefined;
+    }
+    // Node's common.allowGlobals() accepts global values; Lambda's snapshot
+    // scanner compares names, so check both forms to preserve that contract.
+    return !_knownGlobals.has(name) && !_allowedGlobals.has(name) && !_allowedGlobals.has(value);
   });
   if (leaked.length > 0) {
     // Snapshot-at-require keeps Lambda's host globals legal while still making
