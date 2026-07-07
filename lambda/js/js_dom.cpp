@@ -5000,6 +5000,12 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
 
     log_debug("js_document_method: '%s' with %d args", method, argc);
 
+    Item module_result = ItemNull;
+    // MIR lowers direct document.method() calls here, bypassing the proxy entry.
+    if (radiant_dom_document_method(method_name, args, argc, &module_result)) {
+        return module_result;
+    }
+
     // Location methods on document.location/window.location proxy.
     if (strcmp(method, "assign") == 0 || strcmp(method, "replace") == 0) {
         if (argc < 1) return make_js_undefined();
@@ -11083,6 +11089,14 @@ extern "C" Item js_dom_remove_bridge(void* node_ptr) {
         js_dom_mutation_notify();
     }
     return ItemNull;
+}
+
+extern "C" Item js_dom_adopt_node_bridge(Item node_arg) {
+    DomNode* node = (DomNode*)js_dom_unwrap_element(node_arg);
+    if (!node) return ItemNull;
+    // adoptNode detaches through remove() bookkeeping so live ranges/focus see the original parent.
+    js_dom_remove_bridge((void*)node);
+    return node_arg;
 }
 
 extern "C" Item js_dom_normalize_bridge(void* elem_ptr) {

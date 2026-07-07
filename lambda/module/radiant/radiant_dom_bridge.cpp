@@ -1,4 +1,5 @@
 #include "../../lambda-data.hpp"
+#include "../../mark_builder.hpp"
 #include "../../input/css/dom_node.hpp"
 #include "../../input/css/dom_element.hpp"
 #include "../../input/css/css_tokenizer.hpp"
@@ -6,6 +7,7 @@
 #include "../../../radiant/form_control.hpp"
 #include "../../../radiant/text_control.hpp"
 #include "../../../lib/mem.h"
+#include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -79,6 +81,7 @@ extern "C" Item js_dom_append_child_bridge(void* parent, Item child);
 extern "C" Item js_dom_remove_child_bridge(void* parent, Item child);
 extern "C" Item js_dom_insert_before_bridge(void* parent, Item new_child, Item ref_child);
 extern "C" Item js_dom_remove_bridge(void* node);
+extern "C" Item js_dom_adopt_node_bridge(Item node);
 extern "C" Item js_dom_normalize_bridge(void* elem);
 extern "C" Item js_dom_clone_node_bridge(void* elem, Item deep, bool has_deep);
 extern "C" Item js_dom_replace_child_bridge(void* parent, Item new_child, Item old_child);
@@ -119,6 +122,17 @@ static Item radiant_dom_int_item(int64_t value) {
 
 static Item radiant_dom_undefined_item() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+}
+
+static String* radiant_dom_document_string(DomDocument* doc, const char* str, size_t len) {
+    if (!doc || !doc->arena || !str) return nullptr;
+    String* s = (String*)arena_alloc(doc->arena, sizeof(String) + len + 1);
+    if (!s) return nullptr;
+    s->len = (uint32_t)len;
+    s->is_ascii = str_is_ascii(str, len) ? 1 : 0;
+    if (len > 0) memcpy(s->chars, str, len);
+    s->chars[len] = '\0';
+    return s;
 }
 
 static Item radiant_dom_node_item(DomNode* node) {
@@ -2161,6 +2175,167 @@ extern "C" int radiant_dom_document_method(Item method_name, Item* args, int arg
             array_push(arr, radiant_dom_node_item((DomNode*)results[i]));
         }
         *out = (Item){.array = arr};
+        return 1;
+    }
+
+    if (strcmp(method, "createElement") == 0) {
+        if (argc < 1 || !doc || !doc->input) {
+            *out = ItemNull;
+            return 1;
+        }
+        const char* tag = fn_to_cstr(args[0]);
+        if (!tag) {
+            *out = ItemNull;
+            return 1;
+        }
+        MarkBuilder builder(doc->input);
+        Item elem_item = builder.element(tag).final();
+        DomElement* elem = dom_element_create(doc, tag, elem_item.element);
+        *out = radiant_dom_node_item((DomNode*)elem);
+        return 1;
+    }
+
+    if (strcmp(method, "createElementNS") == 0) {
+        if (argc < 2 || !doc || !doc->input) {
+            *out = ItemNull;
+            return 1;
+        }
+        const char* ns = fn_to_cstr(args[0]);
+        const char* tag = fn_to_cstr(args[1]);
+        if (!tag) {
+            *out = ItemNull;
+            return 1;
+        }
+        MarkBuilder builder(doc->input);
+        Item elem_item = builder.element(tag).final();
+        DomElement* elem = dom_element_create(doc, tag, elem_item.element);
+        if (elem && ns && ns[0] != '\0') {
+            // namespace reflection is stored as an internal attribute, hidden from scripts.
+            dom_element_set_attribute(elem, "__lambda_ns_uri", ns);
+        }
+        *out = radiant_dom_node_item((DomNode*)elem);
+        return 1;
+    }
+
+    if (strcmp(method, "createTextNode") == 0) {
+        if (argc < 1 || !doc) {
+            *out = ItemNull;
+            return 1;
+        }
+        const char* text = fn_to_cstr(args[0]);
+        if (!text) {
+            *out = ItemNull;
+            return 1;
+        }
+        String* str = radiant_dom_document_string(doc, text, strlen(text));
+        DomText* text_node = dom_text_create_detached(str, doc);
+        *out = radiant_dom_node_item((DomNode*)text_node);
+        return 1;
+    }
+
+    if (strcmp(method, "createDocumentFragment") == 0) {
+        if (!doc || !doc->input) {
+            *out = ItemNull;
+            return 1;
+        }
+        MarkBuilder builder(doc->input);
+        Item frag_item = builder.element("#document-fragment").final();
+        DomElement* frag = dom_element_create(doc, "#document-fragment", frag_item.element);
+        *out = radiant_dom_node_item((DomNode*)frag);
+        return 1;
+    }
+
+    if (strcmp(method, "createComment") == 0) {
+        if (!doc || !doc->input) {
+            *out = ItemNull;
+            return 1;
+        }
+        const char* text = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        if (!text) text = "";
+        MarkBuilder builder(doc->input);
+        Item comment_item = builder.element("!--").text(text).final();
+        DomComment* comment = dom_comment_create_detached(comment_item.element, doc);
+        *out = radiant_dom_node_item((DomNode*)comment);
+        return 1;
+    }
+
+    if (strcmp(method, "createProcessingInstruction") == 0) {
+        if (!doc || !doc->input) {
+            *out = ItemNull;
+            return 1;
+        }
+        const char* target = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        const char* data = (argc >= 2) ? fn_to_cstr(args[1]) : "";
+        if (!target) target = "";
+        if (!data) data = "";
+        MarkBuilder builder(doc->input);
+        Item pi_item = builder.element("?").text(data).final();
+        DomElement* pi = dom_element_create(doc, target, pi_item.element);
+        *out = radiant_dom_node_item((DomNode*)pi);
+        return 1;
+    }
+
+    if (strcmp(method, "importNode") == 0) {
+        if (argc < 1) {
+            *out = ItemNull;
+            return 1;
+        }
+        DomNode* source = (DomNode*)js_dom_unwrap_element_impl(args[0]);
+        if (!source || !source->is_element()) {
+            *out = ItemNull;
+            return 1;
+        }
+        Item source_item = radiant_dom_node_item(source);
+        Item deep_arg = (Item){.item = b2it((argc >= 2 && js_is_truthy(args[1])) ? 1 : 0)};
+        Item clone_method = (Item){.item = s2it(heap_create_name("cloneNode"))};
+        *out = radiant_dom_element_method(source_item, clone_method, &deep_arg, 1);
+        return 1;
+    }
+
+    if (strcmp(method, "normalize") == 0) {
+        if (root) {
+            Item root_item = radiant_dom_node_item((DomNode*)root);
+            Item normalize_method = (Item){.item = s2it(heap_create_name("normalize"))};
+            *out = radiant_dom_element_method(root_item, normalize_method, nullptr, 0);
+        } else {
+            *out = ItemNull;
+        }
+        return 1;
+    }
+
+    if (strcmp(method, "adoptNode") == 0) {
+        if (argc < 1) {
+            *out = ItemNull;
+            return 1;
+        }
+        *out = js_dom_adopt_node_bridge(args[0]);
+        return 1;
+    }
+
+    if (strcmp(method, "appendChild") == 0) {
+        if (argc < 1 || !doc) {
+            *out = ItemNull;
+            return 1;
+        }
+        DomNode* child = (DomNode*)js_dom_unwrap_element_impl(args[0]);
+        if (!child) {
+            *out = ItemNull;
+            return 1;
+        }
+        if (!doc->root && child->is_element()) {
+            if (child->parent) {
+                // document root bootstrap must detach through adoptNode bookkeeping before re-rooting.
+                js_dom_adopt_node_bridge(args[0]);
+            }
+            doc->root = child->as_element();
+            *out = args[0];
+            return 1;
+        }
+        if (doc->root) {
+            *out = js_dom_append_child_bridge((void*)doc->root, args[0]);
+            return 1;
+        }
+        *out = args[0];
         return 1;
     }
 
