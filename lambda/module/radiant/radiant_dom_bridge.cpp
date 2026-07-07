@@ -9,6 +9,7 @@
 #include "../../../lib/mem.h"
 #include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
+#include "../../../lib/url.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +21,8 @@ extern "C" void heap_unregister_gc_root(uint64_t* slot);
 extern "C" void* js_dom_get_document(void);
 extern "C" Item js_get_document_object_value(void);
 extern "C" Item js_get_global_this(void);
+extern "C" void* js_dom_get_or_create_doc_node(void* doc);
+extern "C" Item js_dom_document_proxy_for_doc_bridge(void* doc);
 extern "C" Item js_dom_create_wrapper_impl(void* dom_elem);
 extern "C" void* js_dom_unwrap_element_impl(Item item);
 extern "C" bool js_is_dom_node_impl(Item item);
@@ -152,6 +155,15 @@ static Item radiant_dom_empty_node_list() {
 }
 
 static Item radiant_dom_empty_array_item() {
+    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+    arr->type_id = LMD_TYPE_ARRAY;
+    arr->items = nullptr;
+    arr->length = 0;
+    arr->capacity = 0;
+    return (Item){.array = arr};
+}
+
+static Item radiant_dom_array_item() {
     Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
     arr->type_id = LMD_TYPE_ARRAY;
     arr->items = nullptr;
@@ -2042,6 +2054,201 @@ extern "C" Item radiant_dom_element_method(Item elem_item, Item method_name, Ite
         return result;
     }
     return js_dom_element_method_impl(elem_item, method_name, args, argc);
+}
+
+static DomElement* radiant_dom_document_child_by_tag(DomDocument* doc, const char* tag) {
+    if (!doc || !doc->root || !tag) return nullptr;
+    DomNode* child = doc->root->first_child;
+    while (child) {
+        if (child->is_element()) {
+            DomElement* elem = child->as_element();
+            if (elem->tag_name && strcasecmp(elem->tag_name, tag) == 0) {
+                return elem;
+            }
+        }
+        child = child->next_sibling;
+    }
+    return nullptr;
+}
+
+static void radiant_dom_collect_text_content(DomNode* node, StrBuf* sb) {
+    if (!node || !sb || radiant_dom_is_generated_pseudo_node(node)) return;
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        if (text->text && text->length > 0) {
+            strbuf_append_str_n(sb, text->text, text->length);
+        }
+        return;
+    }
+    if (node->is_element()) {
+        DomNode* child = radiant_dom_first_script_visible_child(node->as_element());
+        while (child) {
+            radiant_dom_collect_text_content(child, sb);
+            child = radiant_dom_next_script_visible_sibling(child);
+        }
+    }
+}
+
+static Item radiant_dom_document_title_item(DomDocument* doc) {
+    DomElement* head = radiant_dom_document_child_by_tag(doc, "head");
+    DomNode* child = head ? head->first_child : nullptr;
+    while (child) {
+        if (child->is_element()) {
+            DomElement* elem = child->as_element();
+            if (elem->tag_name && strcasecmp(elem->tag_name, "title") == 0) {
+                StrBuf* sb = strbuf_new_cap(64);
+                if (!sb) return radiant_dom_string_item("");
+                radiant_dom_collect_text_content((DomNode*)elem, sb);
+                Item result = radiant_dom_string_item(sb->str ? sb->str : "");
+                strbuf_free(sb);
+                return result;
+            }
+        }
+        child = child->next_sibling;
+    }
+    return radiant_dom_string_item("");
+}
+
+static const char* radiant_dom_url_component(DomDocument* doc, const char* prop) {
+    if (!doc || !doc->url || !prop) return "";
+    if (strcmp(prop, "URL") == 0 || strcmp(prop, "href") == 0) {
+        const char* value = url_get_href(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "protocol") == 0) {
+        const char* value = url_get_protocol(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "hostname") == 0) {
+        const char* value = url_get_hostname(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "port") == 0) {
+        const char* value = url_get_port(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "pathname") == 0) {
+        const char* value = url_get_pathname(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "search") == 0) {
+        const char* value = url_get_search(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "hash") == 0) {
+        const char* value = url_get_hash(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "host") == 0) {
+        const char* value = url_get_host(doc->url);
+        return value ? value : "";
+    }
+    if (strcmp(prop, "origin") == 0) {
+        const char* value = url_get_origin(doc->url);
+        return value ? value : "";
+    }
+    return "";
+}
+
+static Item radiant_dom_document_child_nodes_item(DomDocument* doc) {
+    void* stub_v = js_dom_get_or_create_doc_node((void*)doc);
+    if (!stub_v) return ItemNull;
+    DomElement* stub = (DomElement*)stub_v;
+    Item arr_item = radiant_dom_array_item();
+    DomNode* child = stub->first_child;
+    while (child) {
+        array_push(arr_item.array, radiant_dom_node_item(child));
+        child = child->next_sibling;
+    }
+    return arr_item;
+}
+
+static Item radiant_dom_document_doctype_item(DomDocument* doc) {
+    void* stub_v = js_dom_get_or_create_doc_node((void*)doc);
+    if (!stub_v) return ItemNull;
+    DomElement* stub = (DomElement*)stub_v;
+    DomNode* first = stub->first_child;
+    return (first && first->is_comment()) ? radiant_dom_node_item(first) : ItemNull;
+}
+
+extern "C" int radiant_dom_document_get_property(Item prop_name, Item* out) {
+    const char* prop = fn_to_cstr(prop_name);
+    if (!prop || !out) return 0;
+
+    DomDocument* doc = (DomDocument*)js_dom_get_document();
+    if (!doc) {
+        *out = ItemNull;
+        return 1;
+    }
+
+    if (strcmp(prop, "documentElement") == 0) {
+        *out = doc->root ? radiant_dom_node_item((DomNode*)doc->root) : ItemNull;
+        return 1;
+    }
+    if (strcmp(prop, "body") == 0) {
+        DomElement* body = radiant_dom_document_child_by_tag(doc, "body");
+        *out = body ? radiant_dom_node_item((DomNode*)body) : ItemNull;
+        return 1;
+    }
+    if (strcmp(prop, "head") == 0) {
+        DomElement* head = radiant_dom_document_child_by_tag(doc, "head");
+        *out = head ? radiant_dom_node_item((DomNode*)head) : ItemNull;
+        return 1;
+    }
+    if (strcmp(prop, "title") == 0) {
+        *out = radiant_dom_document_title_item(doc);
+        return 1;
+    }
+    if (strcmp(prop, "URL") == 0 || strcmp(prop, "href") == 0 ||
+        strcmp(prop, "protocol") == 0 || strcmp(prop, "hostname") == 0 ||
+        strcmp(prop, "port") == 0 || strcmp(prop, "pathname") == 0 ||
+        strcmp(prop, "search") == 0 || strcmp(prop, "hash") == 0 ||
+        strcmp(prop, "host") == 0 || strcmp(prop, "origin") == 0) {
+        *out = radiant_dom_string_item(radiant_dom_url_component(doc, prop));
+        return 1;
+    }
+    if (strcmp(prop, "location") == 0 || strcmp(prop, "document") == 0) {
+        *out = js_dom_document_proxy_for_doc_bridge((void*)doc);
+        return 1;
+    }
+    if (strcmp(prop, "readyState") == 0) {
+        *out = radiant_dom_string_item(doc->js_ready_state ? doc->js_ready_state : "complete");
+        return 1;
+    }
+    if (strcmp(prop, "compatMode") == 0) {
+        *out = radiant_dom_string_item("CSS1Compat");
+        return 1;
+    }
+    if (strcmp(prop, "characterSet") == 0 || strcmp(prop, "charset") == 0) {
+        *out = radiant_dom_string_item("UTF-8");
+        return 1;
+    }
+    if (strcmp(prop, "contentType") == 0) {
+        *out = radiant_dom_string_item("text/html");
+        return 1;
+    }
+    if (strcmp(prop, "nodeType") == 0) {
+        *out = radiant_dom_int_item(9);
+        return 1;
+    }
+    if (strcmp(prop, "nodeName") == 0) {
+        *out = radiant_dom_string_item("#document");
+        return 1;
+    }
+    if (strcmp(prop, "ownerDocument") == 0) {
+        *out = ItemNull;
+        return 1;
+    }
+    if (strcmp(prop, "childNodes") == 0) {
+        *out = radiant_dom_document_child_nodes_item(doc);
+        return 1;
+    }
+    if (strcmp(prop, "doctype") == 0) {
+        *out = radiant_dom_document_doctype_item(doc);
+        return 1;
+    }
+
+    return 0;
 }
 
 extern "C" int radiant_dom_document_method(Item method_name, Item* args, int argc, Item* out) {

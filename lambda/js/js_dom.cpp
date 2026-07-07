@@ -96,6 +96,7 @@ extern "C" Item js_dom_remove_event_listener_bridge(Item target_item, Item type,
                                                     Item callback, Item opts);
 extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
 extern "C" int radiant_dom_document_method(Item method_name, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_document_get_property(Item prop_name, Item* out);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
 extern "C" void js_throw_value(Item error);
 extern "C" Item js_dom_get_selection_function_for_document(void* doc);
@@ -1588,6 +1589,10 @@ static Item doc_to_proxy_item(DomDocument* doc) {
     return lookup_foreign_doc_wrapper(doc);
 }
 
+extern "C" Item js_dom_document_proxy_for_doc_bridge(void* doc_v) {
+    return doc_to_proxy_item((DomDocument*)doc_v);
+}
+
 // ============================================================================
 // DOM Wrapping / Unwrapping
 // ============================================================================
@@ -1973,6 +1978,10 @@ extern "C" Item js_document_proxy_method(Item method_name, Item* args, int argc)
 // Dispatch property access on the document proxy object.
 // Routes to js_document_get_property which handles body, documentElement, etc.
 extern "C" Item js_document_proxy_get_property(Item prop_name) {
+    Item module_result = ItemNull;
+    if (radiant_dom_document_get_property(prop_name, &module_result)) {
+        return module_result;
+    }
     return js_document_get_property(prop_name);
 }
 

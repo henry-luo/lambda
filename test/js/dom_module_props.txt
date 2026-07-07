@@ -5,6 +5,25 @@ true
 main
 alpha beta
 1
+HTML
+BODY
+HEAD
+DOM Module Property Test
+true
+true
+true
+string
+complete
+CSS1Compat
+UTF-8
+UTF-8
+text/html
+9
+#document
+true
+2
+true
+true
 1
 true
 true
