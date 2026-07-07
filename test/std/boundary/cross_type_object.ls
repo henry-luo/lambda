@@ -62,9 +62,9 @@ x == y
 x == z
 
 // ===== Object in filter =====
-let filtered = items | filter((item) => item.id > 1)
+let filtered = items |> filter((item) => item.id > 1)
 len(filtered)
 filtered[0].name
 
 // ===== Object in map transform =====
-items | map((item) => item.name)
+items |> map((item) => item.name)

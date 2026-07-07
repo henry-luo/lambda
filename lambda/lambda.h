@@ -1350,6 +1350,7 @@ extern "C" {
     Item fn_sum(Item a);
     Item fn_avg(Item a);
     Item fn_avg_skip_null(Item a, bool skip_null);
+    Item fn_union(Item a, Item b);
     Item fn_pos(Item a);
     Item fn_neg(Item a);
 

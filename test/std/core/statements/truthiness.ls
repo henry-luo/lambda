@@ -56,7 +56,7 @@ false and "unreached"
 null and "unreached"
 
 // ===== Truthiness in filter =====
-[null, 1, "", "hello", false, true, 0] | filter((x) => x)
+[null, 1, "", "hello", false, true, 0] |> filter((x) => x)
 
 // ===== Nested or =====
 null or false or "" or "found"

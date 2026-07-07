@@ -67,7 +67,7 @@ let data = <catalog>
     <product name: "A"> <price> "10"
     <product name: "B"> <price> "20"
     <product name: "C"> <price> "30"
-data?product | map((p) => p.name)
+data?product |> map((p) => p.name)
 
 // ===== Nested query chain =====
 let doc = <html>

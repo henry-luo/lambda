@@ -39,7 +39,7 @@ apply(null)
 apply(7)
 
 // Test 7: Pipe syntax with apply
-99 | apply()
+99 |> apply()
 
 // Test 8: User function doesn't conflict with sys apply
 fn my_apply(f, x) => f(x)

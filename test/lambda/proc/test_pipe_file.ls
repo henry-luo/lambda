@@ -1,17 +1,16 @@
-// Test pipe-to-file operators |> and |>>
-// These operators are only allowed in procedural code (pn functions)
+// Test explicit output() file writes from procedural code
 
 pn main() {
-    // Test 1: |> with map data (formatted as Lambda/Mark)
+    // Test 1: output() with map data (formatted as Lambda/Mark)
     let data = {name: "Lambda", version: 1, features: ["pipe", "file"]};
-    let result1 = data |> "./temp/lambda_test_pipe.mk";
+    let result1 = output(data, "./temp/lambda_test_pipe.mk")^;
     print("Test 1 - write map bytes: ");
     print(result1);
     print("\n");
     
-    // Test 2: |>> (append to file)  
+    // Test 2: append mode
     let more_data = {timestamp: t'2026-02-06', count: 42};
-    let result2 = more_data |>> "./temp/lambda_test_pipe.mk";
+    let result2 = output(more_data, "./temp/lambda_test_pipe.mk", {mode: "append"})^;
     print("Test 2 - append map bytes: ");
     print(result2);
     print("\n");
@@ -23,7 +22,7 @@ pn main() {
     
     // Test 3: string data (output as text, no Mark formatting)
     let text = "Hello, world!";
-    let result3 = text |> "./temp/lambda_test_text.txt";
+    let result3 = output(text, "./temp/lambda_test_text.txt")^;
     print("Test 3 - text bytes: ");
     print(result3);
     print("\n");
@@ -34,13 +33,13 @@ pn main() {
     
     // Test 4: with symbol as target filename (write to cwd)
     let simple = {test: "symbol target"};
-    simple |> 'lambda_test_symbol.mk';
+    output(simple, 'lambda_test_symbol.mk')^;
     let symbol_content = input("./lambda_test_symbol.mk", "text")^;
     print("Symbol target content:\n");
     print(symbol_content);
     
     // Test 5: scalar formatted as Mark
-    42 |> "./temp/lambda_test_scalar.mk";
+    output(42, "./temp/lambda_test_scalar.mk")^;
     let scalar_content = input("./temp/lambda_test_scalar.mk", "text")^;
     print("Scalar file content:\n");
     print(scalar_content);

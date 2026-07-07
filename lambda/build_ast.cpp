@@ -3540,6 +3540,102 @@ static void normalize_is_array_type_rhs(Transpiler* tp, AstBinaryNode* ast_node)
     rhs->type = (Type*)node_type;
 }
 
+static bool pipe_rhs_is_legacy_file_target(TSNode node) {
+    TSSymbol sym = ts_node_symbol(node);
+    if (sym == SYM_EXPR || sym == SYM_PRIMARY_EXPR) {
+        TSNode child = ts_node_named_child(node, 0);
+        if (!ts_node_is_null(child)) sym = ts_node_symbol(child);
+    }
+    return sym == SYM_STRING || sym == SYM_PATH_EXPR;
+}
+
+static bool promote_type_union_expr(Transpiler* tp, AstBinaryNode* ast_node) {
+    if (!ast_node || ast_node->op != OPERATOR_UNION ||
+        !ast_node->left || !ast_node->right ||
+        !ast_node->left->type || !ast_node->right->type ||
+        ast_node->left->type->type_id != LMD_TYPE_TYPE ||
+        ast_node->right->type->type_id != LMD_TYPE_TYPE) {
+        return false;
+    }
+
+    // Phase 6 makes `|` union in expression position too; type-valued operands
+    // must build a first-class binary type instead of falling into runtime ops.
+    ast_node->node_type = AST_NODE_BINARY_TYPE;
+    TypeType* node_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
+    node_type->type = (Type*)type;
+    type->left = ((TypeType*)ast_node->left->type)->type;
+    type->right = ((TypeType*)ast_node->right->type)->type;
+    type->op = OPERATOR_UNION;
+    ast_node->type = (Type*)node_type;
+    arraylist_append(tp->type_list, ast_node->type);
+    type->type_index = tp->type_list->length - 1;
+    return true;
+}
+
+static AstNode* promote_bare_pipe_sysfunc(Transpiler* tp, TSNode right_node, AstNode* built_right) {
+    AstNode* target = built_right;
+    if (target && target->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)target;
+        if (primary->expr) target = primary->expr;
+    }
+
+    StrView func_name = {0};
+    if (target && target->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)target;
+        if (ident->entry) return NULL;
+        func_name.str = ident->name->chars;
+        func_name.length = ident->name->len;
+    } else if (target && target->node_type == AST_NODE_SYS_FUNC) {
+        AstSysFuncNode* sys = (AstSysFuncNode*)target;
+        if (!sys->fn_info) return NULL;
+        func_name = strview_from_cstr(sys->fn_info->name);
+    } else {
+        return NULL;
+    }
+
+    NameEntry* user_name = lookup_name(tp, func_name);
+    if (user_name && user_name->node && user_name->node->node_type == AST_NODE_FUNC) {
+        return NULL;
+    }
+
+    SysFuncInfo* sys_func_info = get_sys_func_info(&func_name, 1);
+    if (!sys_func_info) {
+        const char* modules[] = { NULL, NULL, NULL };
+        int mod_count = 0;
+        if (tp->builtin_import_math)    modules[mod_count++] = "math";
+        if (tp->builtin_import_io)      modules[mod_count++] = "io";
+        if (tp->builtin_import_radiant) modules[mod_count++] = "radiant";
+        for (int mi = 0; mi < mod_count && !sys_func_info; mi++) {
+            char prefixed[128];
+            snprintf(prefixed, sizeof(prefixed), "%s_%.*s",
+                modules[mi], (int)func_name.length, func_name.str);
+            StrView prefixed_view = strview_from_cstr(prefixed);
+            sys_func_info = get_sys_func_info(&prefixed_view, 1);
+        }
+    }
+    if (!sys_func_info) return NULL;
+
+    if (sys_func_info->is_proc && (!tp->current_scope || !tp->current_scope->is_proc)) {
+        record_semantic_error(tp, right_node, ERR_PROC_IN_FN,
+            "procedure '%.*s' cannot be called in a function",
+            (int)func_name.length, func_name.str);
+    }
+
+    AstCallNode* call = (AstCallNode*)alloc_ast_node(tp, AST_NODE_CALL_EXPR, right_node, sizeof(AstCallNode));
+    AstSysFuncNode* fn_node = (AstSysFuncNode*)alloc_ast_node(tp, AST_NODE_SYS_FUNC, right_node, sizeof(AstSysFuncNode));
+    fn_node->fn_info = sys_func_info;
+    fn_node->type = sys_func_info->return_type;
+    call->function = (AstNode*)fn_node;
+    call->argument = NULL;
+    // Bare sysfunc pipe RHS has no call node, so inject before lowering sees an undefined identifier.
+    call->pipe_inject = true;
+    call->propagate = false;
+    call->can_raise = sys_func_info->can_raise;
+    call->type = sys_func_info->can_raise ? &TYPE_ANY : sys_func_info->return_type;
+    return (AstNode*)call;
+}
+
 AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     log_debug("build binary expr");
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp, AST_NODE_BINARY, bi_node, sizeof(AstBinaryNode));
@@ -3574,11 +3670,10 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, ">")) { ast_node->op = OPERATOR_GT; }
     else if (strview_equal(&op, ">=")) { ast_node->op = OPERATOR_GE; }
     else if (strview_equal(&op, "to")) { ast_node->op = OPERATOR_TO; }
-    else if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_PIPE; }
+    else if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_UNION; }
+    else if (strview_equal(&op, "|>")) { ast_node->op = OPERATOR_PIPE; }
     else if (strview_equal(&op, "where")) { ast_node->op = OPERATOR_WHERE; }
     else if (strview_equal(&op, "that")) { ast_node->op = OPERATOR_WHERE; }  // 'that' is filter like 'where'
-    else if (strview_equal(&op, "|>")) { ast_node->op = OPERATOR_PIPE_FILE; }
-    else if (strview_equal(&op, "|>>")) { ast_node->op = OPERATOR_PIPE_APPEND; }
     else if (strview_equal(&op, "&")) { ast_node->op = OPERATOR_INTERSECT; }
     else if (strview_equal(&op, "!")) { ast_node->op = OPERATOR_EXCLUDE; }
     else if (strview_equal(&op, "is")) { ast_node->op = OPERATOR_IS; }
@@ -3595,6 +3690,11 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     bool pipe_inject = false;
     if (ast_node->op == OPERATOR_PIPE) {
         if (!tsnode_has_current_item_ref(tp, right_node)) {
+            if (pipe_rhs_is_legacy_file_target(right_node)) {
+                // `|>` is now the pipe operator; file output is explicit.
+                record_semantic_error(tp, right_node, ERR_INVALID_OPERATION,
+                    "file output has moved; use output(data, file)");
+            }
             tp->pipe_inject_args = 1;
             pipe_inject = true;
             log_debug("pipe without ~: will inject first arg");
@@ -3622,7 +3722,15 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         return (AstNode*)ast_node;
     }
 
+    if (pipe_inject && ast_node->op == OPERATOR_PIPE) {
+        AstNode* pipe_call = promote_bare_pipe_sysfunc(tp, right_node, ast_node->right);
+        if (pipe_call) ast_node->right = pipe_call;
+    }
+
     normalize_is_array_type_rhs(tp, ast_node);
+    if (promote_type_union_expr(tp, ast_node)) {
+        return (AstNode*)ast_node;
+    }
 
     // Special case: 'expr is nan' — IEEE NaN check
     // nan is a float value, not a type, so 'is' type-check doesn't work.
@@ -3803,17 +3911,6 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
                 type_id = right_type;
             }
         }
-    }
-    else if (ast_node->op == OPERATOR_PIPE_FILE || ast_node->op == OPERATOR_PIPE_APPEND) {
-        // pipe-to-file operators (procedural only): change node type to AST_NODE_PIPE_FILE_STAM
-        ast_node->node_type = AST_NODE_PIPE_FILE_STAM;
-        // Check that we're in procedural context
-        if (!tp->current_scope || !tp->current_scope->is_proc) {
-            log_error("Error: pipe-to-file operators (|> and |>>) are only allowed in procedural code (pn functions)");
-            tp->error_count++;
-        }
-        // result type is Item (true on success, error on failure)
-        type_id = LMD_TYPE_ANY;
     }
     else {  // OPERATOR_JOIN, etc.
         type_id = LMD_TYPE_ANY;

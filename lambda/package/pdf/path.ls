@@ -367,7 +367,7 @@ fn _seg_str(s) {
 
 fn _segments_to_d(segments) {
     let parts = (for (s in segments) _seg_str(s))
-    parts | join(" ")
+    parts |> join(" ")
 }
 
 // Public: render the *current* path's segments as an SVG `d` string.
@@ -411,7 +411,7 @@ fn _format_dash(arr) {
     else if (len(arr) == 0) { "none" }
     else {
         let parts = (for (n in arr) util.fmt_num(n))
-        parts | join(",")
+        parts |> join(",")
     }
 }
 

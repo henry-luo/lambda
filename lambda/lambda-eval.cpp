@@ -361,6 +361,32 @@ Item fn_join(Item left, Item right) {
     }
 }
 
+static bool array_has_item(Array* arr, Item item) {
+    if (!arr) return false;
+    for (int64_t i = 0; i < (int64_t)arr->length; i++) {
+        if (fn_eq(arr->items[i], item) == BOOL_TRUE) return true;
+    }
+    return false;
+}
+
+Item fn_union(Item left, Item right) {
+    GUARD_ERROR2(left, right);
+    Array* result = array();
+    int64_t left_len = fn_len(left);
+    int64_t right_len = fn_len(right);
+
+    // Phase 6 routes value-level `|` here; preserve set order while removing duplicates.
+    for (int64_t i = 0; i < left_len; i++) {
+        Item item = item_at(left, i);
+        if (!array_has_item(result, item)) array_push(result, item);
+    }
+    for (int64_t i = 0; i < right_len; i++) {
+        Item item = item_at(right, i);
+        if (!array_has_item(result, item)) array_push(result, item);
+    }
+    return { .array = result };
+}
+
 String *str_repeat(String *str, int64_t times) {
     if (times <= 0) {
         // Return empty string

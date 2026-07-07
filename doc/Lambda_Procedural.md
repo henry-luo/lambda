@@ -47,7 +47,7 @@ Procedural-only features:
 | While loop | `while (cond) { ... }` | Conditional looping |
 | Break/Continue | `break`, `continue` | Loop control |
 | Early return | `return expr` | Exit function early |
-| File output | `\|>`, `\|>>`, `output()` | Write data to files |
+| File output | `output()` | Write data to files |
 
 ### Running Procedural Scripts
 
@@ -268,24 +268,24 @@ pn add_one(x: int) {
 
 ---
 
-## File Output Operators
+## File Output
 
-The pipe output operators `|>` and `|>>` write data to files. They are only available in `pn` functions.
+The `output(...)` function writes data to files. It is only available in `pn` functions.
 
-| Operator | Description | Mode |
+| Function | Description | Mode |
 |----------|-------------|------|
-| `\|>` | Pipe to file | Write (truncate) |
-| `\|>>` | Pipe append | Append |
+| `output(data, target)` | Write data to a file or URL | Write (truncate) |
+| `output(data, target, {mode: "append"})` | Append data to a file or URL | Append |
 
 ```lambda
 pn save_report(data) {
     // Write to file (creates or overwrites)
-    data |> "./temp/report.json"
+    output(data, "./temp/report.json")
 
     // Append to log
-    {event: "saved", time: now()} |>> "./temp/events.log"
+    output({event: "saved", time: now()}, "./temp/events.log", {mode: "append"})
 
-    // Using output function for more control
+    // Use options for more control
     output(data, "./temp/backup.json", {atomic: true})
 }
 ```
@@ -334,7 +334,7 @@ Available only in `pn` functions:
 pn setup_project() {
     io.mkdir("./output/reports")
     io.copy("https://example.com/template.json", "./config.json")
-    {initialized: true} |> "./output/.ready"
+    output({initialized: true}, "./output/.ready")
 }
 ```
 
@@ -436,13 +436,13 @@ A functional script evaluates top-level expressions and prints results. A proced
 `pn` functions can call `fn` functions and vice versa. A common pattern is to define pure logic in `fn` and orchestrate I/O in `pn`:
 
 ```lambda
-fn transform(data) => data | ~ * 2
+fn transform(data) => data |> ~ * 2
 
 pn main() {
     let input = [1, 2, 3, 4, 5]
     let result = transform(input)
     print(result)                    // [2, 4, 6, 8, 10]
-    result |> "./temp/output.json"   // write to file
+    output(result, "./temp/output.json") // write to file
 }
 ```
 
@@ -507,7 +507,7 @@ For full object type documentation (inheritance, defaults, constraints, composit
 | While loops | No | Yes |
 | Break/Continue | No | Yes |
 | Early return | No | Yes (`return`) |
-| File output | No | Yes (`\|>`, `\|>>`) |
+| File output | No | Yes (`output()`) |
 | Side effects | No | Allowed |
 | Expression body | Yes | Yes |
 | Block body | Yes | Yes |

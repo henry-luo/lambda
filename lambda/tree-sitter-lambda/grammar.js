@@ -37,7 +37,7 @@ const sized_int_suffix = choice('i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', '
 const sized_float_suffix = choice('f16', 'f32', 'f64');
 
 // need to exclude relational exprs in attr (to avoid conflicts with element tags)
-// pipe operators are always included
+// pipe/filter operators are always included
 function binary_expr($, in_attr) {
   let operand = in_attr ? choice($.primary_expr, $.unary_expr, alias($.attr_binary_expr, $.binary_expr))
                         : $._expr;
@@ -61,11 +61,10 @@ function binary_expr($, in_attr) {
     ['and', 'logical_and'],
     ['or', 'logical_or'],
     ['to', 'range_to'],
-    // Pipe operators - always included (even in attr context)
-    ['|', 'pipe'],
+    ['|', 'set_union'],
+    // Pipe/filter operators - always included (even in attr context)
+    ['|>', 'pipe'],
     ['that', 'pipe'],  // filter operator: items that ~ > 0
-    ['|>', 'pipe_file'],
-    ['|>>', 'pipe_file'],
     ['&', 'set_intersect'],
     ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
     ['is', 'is_in'],
@@ -165,7 +164,6 @@ module.exports = grammar({
     'logical_or',    
     // pipe operators (low precedence, just above control flow)
     'pipe',
-    'pipe_file',  // |> and |>> - lowest binary precedence
     $.if_expr,
     $.match_expr,
     $.for_expr,

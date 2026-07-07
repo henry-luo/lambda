@@ -375,7 +375,7 @@ if (err != null) {
 let data = input("sales.json", 'json');
 
 // Calculate total sales
-let total = data.sales | ~.amount | sum;
+let total = data.sales |> ~.amount |> sum;
 
 // Filter high-value sales
 let high_value = data.sales where ~.amount > 1000;
@@ -456,7 +456,7 @@ pn main() {
     }
 
     // Save results
-    {processed: count, time: now()} |> "./output/summary.json"
+    output({processed: count, time: now()}, "./output/summary.json")
 
     print("Done! Processed", count, "items")
 }

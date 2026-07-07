@@ -114,7 +114,7 @@ ctr.value()
 type Builder {
     parts: list = ()
     fn add(part: string) => <Builder parts: (*~.parts, part)>
-    fn build() => ~.parts | join(", ")
+    fn build() => ~.parts |> join(", ")
 }
 let b = <Builder>
     .add("A")

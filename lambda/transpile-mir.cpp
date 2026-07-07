@@ -3077,6 +3077,7 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
     case OPERATOR_IDIV: fn_name = "fn_idiv"; break;
     case OPERATOR_MOD: fn_name = "fn_mod"; break;
     case OPERATOR_POW: fn_name = "fn_pow"; break;
+    case OPERATOR_UNION: fn_name = "fn_union"; break;
     case OPERATOR_EQ: fn_name = "fn_eq"; break;
     case OPERATOR_NE: fn_name = "fn_ne"; break;
     case OPERATOR_LT: fn_name = "fn_lt"; break;

@@ -20,36 +20,36 @@ let products = [
 ]
 
 // ===== Pipeline: filter expensive =====
-let expensive = products | filter((p) => p.is_expensive())
+let expensive = products |> filter((p) => p.is_expensive())
 len(expensive)
-expensive | map((p) => p.name)
+expensive |> map((p) => p.name)
 
 // ===== Pipeline: group by category =====
-let electronics = products | filter((p) => p.category == "electronics")
+let electronics = products |> filter((p) => p.category == "electronics")
 len(electronics)
-electronics | map((p) => p.name)
+electronics |> map((p) => p.name)
 
 // ===== Pipeline: calculate stats =====
-let prices = products | map((p) => p.price)
-prices | sum()
-prices | avg()
-prices | min()
-prices | max()
+let prices = products |> map((p) => p.price)
+prices |> sum()
+prices |> avg()
+prices |> min()
+prices |> max()
 
 // ===== Pipeline: sort by price =====
-products | sort((a, b) => a.price - b.price) | map((p) => p.name)
+products |> sort((a, b) => a.price - b.price) |> map((p) => p.name)
 
 // ===== Pipeline: transform to element tree =====
 let catalog = <catalog>
     for (p in products)
         <product name: p.name, price: str(p.price)> p.category
-catalog?product | map((p) => p.name)
+catalog?product |> map((p) => p.name)
 len(catalog?product)
 
 // ===== Pipeline: find specific product =====
-products | filter((p) => p.name == "Laptop") | map((p) => p.price)
+products |> filter((p) => p.name == "Laptop") |> map((p) => p.price)
 
 // ===== Combined transform =====
 products
-    | filter((p) => p.price < 100.0)
-    | map((p) => p.name & ": $" & str(p.price))
+    |> filter((p) => p.price < 100.0)
+    |> map((p) => p.name & ": $" & str(p.price))

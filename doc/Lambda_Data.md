@@ -916,15 +916,15 @@ The pipe operator enables fluent data transformation:
 
 ```lambda
 // Map over collection
-[1, 2, 3] | ~ * 2           // [2, 4, 6]
+[1, 2, 3] |> ~ * 2          // [2, 4, 6]
 
 // Extract field from each item
-users | ~.name              // ["Alice", "Bob", ...]
+users |> ~.name             // ["Alice", "Bob", ...]
 
 // Chained transformations
 [1, 2, 3, 4, 5]
-    | ~ ** 2                 // square each
-    | ~ + 1                 // add 1
+    |> ~ ** 2                // square each
+    |> ~ + 1                 // add 1
 // Result: [2, 5, 10, 17, 26]
 
 // Filter with where

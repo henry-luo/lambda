@@ -3,22 +3,22 @@
 // shape()/reshape() are typed-only ops, so they confirm the result is an ArrayNum.
 
 // ============================================================
-// PIPE MAP — arr | ~ * 2
+// PIPE MAP — arr |> ~ * 2
 // ============================================================
 '=== pipe map (int) ==='
 let a = [1, 2, 3, 4, 5]
-let m = a | ~ * 2
+let m = a |> ~ * 2
 m                              // [2, 4, 6, 8, 10]
 shape(m)                       // [5] — confirms typed
 sum(m)                         // 30
 
 '=== pipe map (to float) ==='
-let mf = a | ~ * 1.5
+let mf = a |> ~ * 1.5
 mf                             // [1.5, 3, 4.5, 6, 7.5]
 shape(mf)                      // [5]
 
 '=== pipe map with index ==='
-a | ~ + ~#                     // element + index: [1, 3, 5, 7, 9]
+a |> ~ + ~#                     // element + index: [1, 3, 5, 7, 9]
 
 // ============================================================
 // BRACKETED COMPREHENSION — [for (x in arr) body]
@@ -61,7 +61,7 @@ reshape([for (x in a) x * 10], [5])    // [10, 20, 30, 40, 50]
 matmul([for (x in [1,2,3]) x], [for (x in [4,5,6]) x])   // dot: 32
 
 '=== map then reduce ==='
-sum(a | ~ * 2)                          // 30
+sum(a |> ~ * 2)                          // 30
 max([for (x in a) x * x])               // 25
 
 // ============================================================

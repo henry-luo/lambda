@@ -221,7 +221,7 @@ fn check_array(schema_obj, value, all_schemas, path) {
 fn check_enum(allowed, value, path) {
     if (util.list_contains(allowed, value)) []
     else [{path: path, message: "value not in enum",
-           expected: join(allowed | string(~), " | "),
+           expected: join(allowed |> string(~), " | "),
            actual: string(value)}]
 }
 

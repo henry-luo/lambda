@@ -72,16 +72,16 @@ fn apply_sort(data, sort_el) {
 
 pub fn compute_agg(data, op, field) {
     if (op == "count") len(data)
-    else if (op == "sum") sum(data | float(~[field]))
-    else if (op == "mean" or op == "average") avg(data | float(~[field]))
-    else if (op == "median") math.median(data | float(~[field]))
-    else if (op == "min") min(data | float(~[field]))
-    else if (op == "max") max(data | float(~[field]))
-    else if (op == "distinct") len(util.unique_vals(data | ~[field]))
-    else if (op == "q1") math.quantile(data | float(~[field]), 0.25)
-    else if (op == "q3") math.quantile(data | float(~[field]), 0.75)
-    else if (op == "stdev") math.sqrt(math.variance(data | float(~[field])))
-    else if (op == "variance") math.variance(data | float(~[field]))
+    else if (op == "sum") sum(data |> float(~[field]))
+    else if (op == "mean" or op == "average") avg(data |> float(~[field]))
+    else if (op == "median") math.median(data |> float(~[field]))
+    else if (op == "min") min(data |> float(~[field]))
+    else if (op == "max") max(data |> float(~[field]))
+    else if (op == "distinct") len(util.unique_vals(data |> ~[field]))
+    else if (op == "q1") math.quantile(data |> float(~[field]), 0.25)
+    else if (op == "q3") math.quantile(data |> float(~[field]), 0.75)
+    else if (op == "stdev") math.sqrt(math.variance(data |> float(~[field])))
+    else if (op == "variance") math.variance(data |> float(~[field]))
     else 0
 }
 
@@ -105,7 +105,7 @@ fn do_aggregate(data, group_fields, agg_specs) {
     if len(group_fields) == 0 {
         [build_agg_row(data, [], agg_specs)]
     } else {
-        let gkeys = util.unique_vals(data | group_key_str(~, group_fields));
+        let gkeys = util.unique_vals(data |> group_key_str(~, group_fields));
         for (gk in gkeys) (
             let items = data that group_key_str(~, group_fields) == gk,
             build_agg_row(items, group_fields, agg_specs)
@@ -163,7 +163,7 @@ fn apply_bin(data, bin_el) {
     if not field or len(data) == 0 {
         data
     } else {
-        let values = data | float(~[field]);
+        let values = data |> float(~[field]);
         let vmin = min(values);
         let vmax = max(values);
         let range_span = vmax - vmin;

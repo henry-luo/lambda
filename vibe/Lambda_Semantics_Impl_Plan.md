@@ -180,19 +180,30 @@ VMap key hashing path now has the required numeric canonicalization.
 
 ## Phase 6 — Operator syntax migrations (C6 + C10; mechanical but wide)
 
-**⚠ Decision gate: C6a (file write/append syntax) must be ruled before 6.2.**
+**C6a decision:** no special file-output syntax in the current Lambda version;
+use explicit `output(...)` calls.
 
 | # | Item | Ruling | Code target | Acceptance |
 |---|------|--------|-------------|------------|
-| 6.1 | **`|` = union everywhere; `|>` = pipe**: grammar swap; pipe dual-mode on **free `~`** (parse-time: no free `~` → whole-value application, `~`-free non-callable body → type error); transition guard: `~`-free bare string/path-literal pipe body = compile error ("file output has moved"). | C6 | `grammar.js`, `build_ast.cpp`, transpilers | `let T = int \| string` in expr position; `data \|> sum`; `data \|> ~ * 2`; guard fires |
-| 6.2 | **File output: C6a syntax DEFERRED to future** (designer, 2026-07-04). Interim: migrate the 8 `|>`/`|>>` sites to the **existing `output(data, file)` function** (append variant needed — add an options arg or `output_append`); `|>`/`|>>` freed for the pipe with no dangling dependency. Keyword syntax (`into`/`onto` candidates) revisited later. | C6a (deferred) | the one fixture file; sys-func for append | 8 sites migrated; `\|>>` freed |
-| 6.3 | **Pipe migration**: ~140 sites / 38 fixture files + docs + stdlib — scripted rewrite `|` → `|>` in pipe position, hand-review union-adjacent cases. | C6.3 | test/lambda, doc/ | baseline green |
+| 6.1 ✅ | **`\|` = union everywhere; `\|>` = pipe**: grammar swap; pipe dual-mode on **free `~`** (parse-time: no free `~` → whole-value application, `~`-free non-callable body → type error); transition guard: `~`-free bare string/path-literal pipe body = compile error ("file output has moved"). | C6 | `grammar.js`, `build_ast.cpp`, transpilers | `let T = int \| string` in expr position; `data \|> sum`; `data \|> ~ * 2`; guard fires |
+| 6.2 ✅ | **File output uses `output(...)`** (designer, 2026-07-07): migrate current `\|>`/`\|>>` file-output sites to `output(data, file)` and append as `output(data, file, {mode: "append"})`; no dedicated file-output syntax in the current Lambda version. | C6a | proc/std fixtures, docs | file-output sites migrated; `\|>>` freed |
+| 6.3 ✅ | **Pipe migration**: ~140 sites / 38 fixture files + docs + stdlib — scripted rewrite `\|` → `\|>` in pipe position, hand-review union-adjacent cases. | C6.3 | test/lambda, doc/ | focused Phase 6 tests green |
 | 6.4 | **Revert comparison vectorization**: remove `vec_cmp` dispatch from `fn_lt/fn_gt/fn_le/fn_ge` (bare `< <= > >=` scalar-only again). | C10 | `lambda-eval.cpp` ~1414+ | `[1,2,3] > 1` is a type error/scalar rule; `if ([1,2,3] > 99)` impossible |
 | 6.5 | **Keyword elementwise family `eq ne lt le gt ge`**: grammar (comparison precedence); semantics = per-element scalar compare (nan → false entries); broadcasting identical to arithmetic; retarget `vec_cmp` kernel. Identifier-collision sweep first. | C10 | `grammar.js`, eval/MIR, `vec_cmp` | `img gt t` masks; `[1,nan] eq [1,nan]` → `[true,false]` |
 | 6.6 | **Mask consumption spec** (with image-toolkit migration): `sum(mask)` counts trues; decide mask indexing `a[mask]`; mask combination via `and`/`or` or vec ops. Migrate image toolkit + `numpy_props`/`image_props` bare-`>` masks. | C10.3 | image toolkit `.ls` files | toolkit tests green |
 | 6.7 | **Lints**: elementwise-comparison result in condition position; container-always-true condition hint (C2.3). | C10.2/C2.3 | lint infra (`make lint` rules) | lint tests |
 
 **Fixture pack 6**: `pipe_dual_mode.ls`, `union_expr.ls`, `elementwise_ops.ls`, migration-guard compile-error tests.
+
+**Status (2026-07-07):** 6.1-6.3 are implemented. Grammar now parses `|` as
+union and `|>` as pipe; expression-position type unions are promoted back to
+type-union AST nodes; value-level union lowers through `fn_union`; bare sysfunc
+pipe RHS forms such as `data |> sum` inject a call before lowering. File output
+syntax is removed for the current version; existing file writes now use
+`output(...)`, with append represented by `{mode: "append"}`. Added
+`test/lambda/phase6_pipe_union.ls` and updated structured set/operator goldens.
+Verification: focused Lambda pipe tests and focused structured pipe/set tests
+pass.
 
 ---
 

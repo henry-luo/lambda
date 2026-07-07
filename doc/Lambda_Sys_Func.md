@@ -822,8 +822,7 @@ Functions that have side effects (I/O, state changes). These are only available 
 |----------|-------------|---------|
 | `print(args...)` | Print values to console | `print("x =", x)` |
 | `output(data, target)` | Write data to file/URL | `output(data, /.'out.json')` |
-| `data \|> target` | Pipe output (write/truncate) | `data \|> /.'result.json'` |
-| `data \|>> target` | Pipe output (append) | `line \|>> /.'log.txt'` |
+| `output(data, target, {mode: "append"})` | Append data to file/URL | `output(line, /.'log.txt', {mode: "append"})` |
 | `io.copy(src, dst)` | Copy file or directory | `io.copy(/.'a.txt', /.'b.txt')` |
 | `io.move(src, dst)` | Move/rename file or directory | `io.move(/.old, /.new)` |
 | `io.delete(target)` | Delete file or directory | `io.delete(/.'temp.txt')` |
@@ -883,37 +882,34 @@ pn save_data() {
 | `toml` | `.toml` | TOML format |
 | `ini` | `.ini` | INI configuration format |
 
-#### Pipe Output Operators: |> and |>>
+#### Output Function
 
-Lambda provides pipe output operators for convenient file writing in procedural functions.
+Lambda uses `output(...)` for file writing in procedural functions.
 
-##### |> (Write/Truncate)
+##### Write/Truncate
 
-The `|>` operator writes data to a target, truncating existing content:
+`output(data, target)` writes data to a target, truncating existing content:
 
 ```lambda
 pn generate_report() {
     let report = {title: "Monthly Report", date: today(), items: [...]}
-    report |> /.reports.'monthly.json'
-
-    // Equivalent to:
     output(report, /.reports.'monthly.json')
 }
 ```
 
-##### |>> (Append)
+##### Append
 
-The `|>>` operator appends data to a target:
+Pass `{mode: "append"}` as the third argument to append:
 
 ```lambda
 pn log_event(event) {
     let entry = format({time: now(), event: event}, 'json')
-    entry |>> /.logs.'events.jsonl'
+    output(entry, /.logs.'events.jsonl', {mode: "append"})
 }
 
 pn process_items(items) {
     for item in items {
-        process(item) |>> /.'output.txt'
+        output(process(item), /.'output.txt', {mode: "append"})
     }
 }
 ```
@@ -1229,8 +1225,6 @@ if (result is error) {
 |----------|------|-------------|
 | `print` | 0+ | Print values to console |
 | `output` | 2-3 | Write to file/URL |
-| `\|>` | 2 | Pipe write (truncate) |
-| `\|>>` | 2 | Pipe write (append) |
 | `io.copy` | 2 | Copy file/directory |
 | `io.move` | 2 | Move file/directory |
 | `io.delete` | 1 | Delete file/directory |

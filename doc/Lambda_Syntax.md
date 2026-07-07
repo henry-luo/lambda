@@ -102,7 +102,7 @@ for item in items { transform(item) }
 // Only allowed in pn (procedural functions)
 var counter = 0
 counter = counter + 1
-data |> "/tmp/output.json"
+output(data, "./temp/output.json")
 io.mkdir("./output")
 ```
 

@@ -32,7 +32,7 @@ let arr = [10i8, 20i8, 30i8, 40i8, 50i8]
 len(arr)
 
 // map over sized array: promotes to standard int
-arr | ~ * 2
+arr |> ~ * 2
 
 // filter sized array
 arr that ~ == 30
