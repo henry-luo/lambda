@@ -21,9 +21,15 @@ extern "C" Item js_get_global_this(void);
 extern "C" Item js_dom_create_wrapper_impl(void* dom_elem);
 extern "C" void* js_dom_unwrap_element_impl(Item item);
 extern "C" bool js_is_dom_node_impl(Item item);
+extern "C" bool js_is_css_namespace(Item item);
+extern "C" bool js_is_stylesheet(Item item);
+extern "C" bool js_is_rule_style_decl(Item item);
 extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name);
 extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item value);
 extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Item* args, int argc);
+extern "C" Item js_css_namespace_method(Item obj, Item method_name, Item* args, int argc);
+extern "C" Item js_cssom_stylesheet_method(Item sheet_item, Item method_name, Item* args, int argc);
+extern "C" Item js_cssom_rule_decl_method(Item decl_item, Item method_name, Item* args, int argc);
 extern "C" Item js_dom_owner_document_for_node(void* node);
 extern "C" const char* js_dom_to_attribute_cstr(Item value);
 extern "C" bool js_is_truthy(Item value);
@@ -2071,6 +2077,30 @@ extern "C" int radiant_dom_style_method(Item elem_item, Item method_name, Item* 
         *out = argc >= 1
             ? js_dom_style_remove_property_bridge((void*)elem, args[0])
             : radiant_dom_string_item("");
+        return 1;
+    }
+
+    return 0;
+}
+
+extern "C" int radiant_dom_cssom_method(Item obj, Item method_name, Item* args, int argc, Item* out) {
+    if (!out) return 0;
+
+    if (js_is_css_namespace(obj)) {
+        // CSSOM parsing and mutation internals remain in js_cssom.cpp.
+        *out = js_css_namespace_method(obj, method_name, args, argc);
+        return 1;
+    }
+
+    if (js_is_stylesheet(obj)) {
+        // CSSOM parsing and mutation internals remain in js_cssom.cpp.
+        *out = js_cssom_stylesheet_method(obj, method_name, args, argc);
+        return 1;
+    }
+
+    if (js_is_rule_style_decl(obj)) {
+        // CSSOM parsing and mutation internals remain in js_cssom.cpp.
+        *out = js_cssom_rule_decl_method(obj, method_name, args, argc);
         return 1;
     }
 

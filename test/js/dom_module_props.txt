@@ -21,6 +21,15 @@ blue
 blue
 true
 10px
+true
+\31 a
+1
+number
+green
+4px
+green
+true
+1
 /docs
 hero.png
 Hero
