@@ -51,6 +51,7 @@ extern "C" bool js_dom_is_disabled(void* dom_elem);
 extern "C" bool js_dom_is_connected(void* dom_elem);
 extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);
 extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url);
+extern "C" Item js_dom_check_validity_bridge(Item elem_item);
 extern "C" int64_t js_array_length(Item array);
 extern "C" Item js_array_get_int(Item array, int64_t index);
 static inline Item event_make_double(double v) {
@@ -240,6 +241,132 @@ static void report_exception_to_window_onerror(Item err, const char* type) {
 
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+}
+
+static DomElement* js_dom_find_element_by_id(DomNode* node, const char* id) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            const char* elem_id = dom_element_get_attribute(elem, "id");
+            if (elem_id && strcmp(elem_id, id) == 0) return elem;
+            DomElement* found = js_dom_find_element_by_id(elem->first_child, id);
+            if (found) return found;
+        }
+        node = node->next_sibling;
+    }
+    return nullptr;
+}
+
+static DomElement* js_dom_find_form_owner(DomElement* control) {
+    if (!control) return nullptr;
+    const char* form_id = dom_element_get_attribute(control, "form");
+    if (form_id && *form_id) {
+        DomDocument* doc = control->doc;
+        if (doc && doc->root) return js_dom_find_element_by_id((DomNode*)doc->root, form_id);
+        return nullptr;
+    }
+
+    DomNode* p = control->parent;
+    while (p && p->is_element()) {
+        DomElement* elem = p->as_element();
+        if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) return elem;
+        p = p->parent;
+    }
+    return nullptr;
+}
+
+static bool js_dom_is_submit_button(DomElement* elem) {
+    if (!elem || !elem->tag_name) return false;
+    if (strcasecmp(elem->tag_name, "input") == 0) {
+        const char* type = js_dom_input_type_lower(elem);
+        return strcmp(type, "submit") == 0 || strcmp(type, "image") == 0;
+    }
+    if (strcasecmp(elem->tag_name, "button") == 0) {
+        const char* type = js_dom_input_type_lower(elem);
+        return strcmp(type, "text") == 0 || strcmp(type, "submit") == 0;
+    }
+    return false;
+}
+
+static Item js_dom_throw_named_error(const char* name, const char* message) {
+    Item error_name = (Item){.item = s2it(heap_create_name(name ? name : "Error"))};
+    Item error_message = (Item){.item = s2it(heap_create_name(message ? message : ""))};
+    js_throw_value(js_new_error_with_name(error_name, error_message));
+    return make_js_undefined();
+}
+
+static DomElement* js_dom_resolve_request_submitter(DomElement* form,
+                                                    Item submitter_item,
+                                                    bool* has_submitter) {
+    if (has_submitter) *has_submitter = false;
+    TypeId st = get_type_id(submitter_item);
+    if (submitter_item.item == 0 || st == LMD_TYPE_UNDEFINED) {
+        return nullptr;
+    }
+
+    if (has_submitter) *has_submitter = true;
+    DomNode* node = (DomNode*)js_dom_unwrap_element(submitter_item);
+    DomElement* submitter = (node && node->is_element()) ? node->as_element() : nullptr;
+    if (!js_dom_is_submit_button(submitter)) {
+        js_throw_type_error("requestSubmit submitter must be a submit button");
+        return nullptr;
+    }
+
+    DomElement* owner = js_dom_find_form_owner(submitter);
+    if (owner != form) {
+        js_dom_throw_named_error("NotFoundError",
+            "requestSubmit submitter is not owned by this form");
+        return nullptr;
+    }
+    return submitter;
+}
+
+static bool js_dom_should_validate_submit(DomElement* form, DomElement* submitter) {
+    if (form && dom_element_has_attribute(form, "novalidate")) return false;
+    if (submitter && dom_element_has_attribute(submitter, "formnovalidate")) return false;
+    return true;
+}
+
+extern "C" Item js_dom_form_submit_bridge(Item form_item) {
+    DomNode* node = (DomNode*)js_dom_unwrap_element(form_item);
+    DomElement* form = (node && node->is_element()) ? node->as_element() : nullptr;
+    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+        return make_js_undefined();
+    }
+
+    // submit() intentionally bypasses validation and the cancelable submit event;
+    // requestSubmit() below keeps those checks before entering this shared navigation path.
+    js_dom_run_form_submit_navigation(form, nullptr);
+    return make_js_undefined();
+}
+
+extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter_item) {
+    DomNode* node = (DomNode*)js_dom_unwrap_element(form_item);
+    DomElement* form = (node && node->is_element()) ? node->as_element() : nullptr;
+    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+        return make_js_undefined();
+    }
+
+    bool has_submitter = false;
+    DomElement* submitter = js_dom_resolve_request_submitter(form, submitter_item, &has_submitter);
+    if (js_check_exception()) return make_js_undefined();
+    if (has_submitter && !submitter) return make_js_undefined();
+
+    if (js_dom_should_validate_submit(form, submitter)) {
+        Item valid = js_dom_check_validity_bridge(form_item);
+        if (!js_is_truthy(valid)) return make_js_undefined();
+    }
+
+    Item submit_event = js_create_event("submit", true, true);
+    js_property_set(submit_event, (Item){.item = s2it(heap_create_name("isTrusted"))},
+                    (Item){.item = ITEM_TRUE});
+    js_property_set(submit_event, (Item){.item = s2it(heap_create_name("submitter"))},
+                    submitter ? js_dom_wrap_element(submitter) : ItemNull);
+    Item submit_ok = js_dom_dispatch_event(form_item, submit_event);
+    if (submit_ok.item == ITEM_FALSE) return make_js_undefined();
+
+    js_dom_run_form_submit_navigation(form, submitter);
+    return make_js_undefined();
 }
 
 // ============================================================================
@@ -2039,9 +2166,8 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
             js_dom_dispatch_event(self_item, change_ev);
         }
     } else if (act_kind == 2 && act_target && !prevented && !act_disabled) {
-        // Submit-button activation: walk up to the owning <form> and
-        // dispatch a `submit` event (bubbles, cancelable). Headless mode
-        // performs no navigation regardless of cancel state.
+        // Submit-button activation and requestSubmit(submitter) share one path
+        // so constraint validation, cancelable submit events, and navigation agree.
         // Re-check disabled in case the click listener disabled us.
         if (js_dom_is_disabled(act_target)) {
             // listener disabled the control mid-flight — skip submit.
@@ -2049,19 +2175,10 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
             // disconnected forms must not submit (HTML §4.10.21.3).
         } else {
             DomElement* el = (DomElement*)act_target;
-            DomNode* p = el->parent;
-            while (p && p->is_element()) {
-                DomElement* pe = (DomElement*)p;
-                if (pe->tag_name && strcasecmp(pe->tag_name, "form") == 0) {
-                    Item form_item = js_dom_wrap_element(pe);
-                    Item submit_ev = js_create_event("submit", true, true);
-                    Item submit_ok = js_dom_dispatch_event(form_item, submit_ev);
-                    if (submit_ok.item != ITEM_FALSE) {
-                        js_dom_run_form_submit_navigation(pe, el);
-                    }
-                    break;
-                }
-                p = p->parent;
+            DomElement* owner = js_dom_find_form_owner(el);
+            if (owner) {
+                js_dom_form_request_submit_bridge(js_dom_wrap_element(owner),
+                    js_dom_wrap_element(el));
             }
         }
     } else if (act_kind == 3 && act_target && !prevented && !act_disabled) {
