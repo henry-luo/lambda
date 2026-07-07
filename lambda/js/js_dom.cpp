@@ -2669,6 +2669,43 @@ extern "C" void js_dom_restore_active_document(void* prev_doc) {
 // document.implementation Singleton
 // ============================================================================
 
+extern "C" bool js_dom_implementation_method(Item method_name, Item* args, int argc, Item* out);
+
+static Item js_dom_impl_create_html_document_method(Item title) {
+    Item method = (Item){.item = s2it(heap_create_name("createHTMLDocument"))};
+    Item args[1] = { title };
+    Item out = ItemNull;
+    return js_dom_implementation_method(method, args, 1, &out) ? out : ItemNull;
+}
+
+static Item js_dom_impl_create_document_method(Item namespace_uri, Item qualified_name, Item doctype) {
+    Item method = (Item){.item = s2it(heap_create_name("createDocument"))};
+    Item args[3] = { namespace_uri, qualified_name, doctype };
+    Item out = ItemNull;
+    return js_dom_implementation_method(method, args, 3, &out) ? out : ItemNull;
+}
+
+static Item js_dom_impl_create_document_type_method(Item name, Item public_id, Item system_id) {
+    Item method = (Item){.item = s2it(heap_create_name("createDocumentType"))};
+    Item args[3] = { name, public_id, system_id };
+    Item out = ItemNull;
+    return js_dom_implementation_method(method, args, 3, &out) ? out : ItemNull;
+}
+
+static Item js_dom_impl_has_feature_method(Item feature, Item version) {
+    Item method = (Item){.item = s2it(heap_create_name("hasFeature"))};
+    Item args[2] = { feature, version };
+    Item out = ItemNull;
+    return js_dom_implementation_method(method, args, 2, &out) ? out : ItemNull;
+}
+
+static void js_dom_set_implementation_method(Item implementation, const char* name,
+                                             void* func_ptr, int param_count) {
+    Item key = (Item){.item = s2it(heap_create_name(name))};
+    js_property_set(implementation, key, js_new_function(func_ptr, param_count));
+    js_mark_non_enumerable(implementation, key);
+}
+
 extern "C" Item js_get_dom_implementation(void) {
     if (js_dom_implementation_item.item != ITEM_NULL) {
         return js_dom_implementation_item;
@@ -2680,6 +2717,16 @@ extern "C" Item js_get_dom_implementation(void) {
     wrapper->data = nullptr;
     wrapper->data_cap = 0;
     js_dom_implementation_item = (Item){.map = wrapper};
+    // DOMImplementation is a plain sentinel map, so property reads cannot
+    // reach the native method-call dispatcher unless callable members exist.
+    js_dom_set_implementation_method(js_dom_implementation_item, "createHTMLDocument",
+        (void*)js_dom_impl_create_html_document_method, 1);
+    js_dom_set_implementation_method(js_dom_implementation_item, "createDocument",
+        (void*)js_dom_impl_create_document_method, 3);
+    js_dom_set_implementation_method(js_dom_implementation_item, "createDocumentType",
+        (void*)js_dom_impl_create_document_type_method, 3);
+    js_dom_set_implementation_method(js_dom_implementation_item, "hasFeature",
+        (void*)js_dom_impl_has_feature_method, 2);
     heap_register_gc_root(&js_dom_implementation_item.item);
     return js_dom_implementation_item;
 }
@@ -5480,6 +5527,62 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
 // Document Property Access
 // ============================================================================
 
+extern "C" Item js_dom_document_fonts_bridge(void) {
+    if (js_document_fonts_value.item == ITEM_NULL) {
+        js_document_fonts_value = js_create_document_fonts_object();
+    }
+    return js_document_fonts_value;
+}
+
+extern "C" Item js_dom_document_stylesheets_bridge(void) {
+    return js_cssom_get_document_stylesheets();
+}
+
+extern "C" Item js_dom_document_default_view_bridge(void* doc_ptr) {
+    DomDocument* doc = (DomDocument*)doc_ptr;
+    if (!js_doc_has_browsing_context(doc)) {
+        return ItemNull;
+    }
+    if (doc && doc != _js_main_document) {
+        Item w = lookup_foreign_doc_wrapper(doc);
+        return w.item ? w : ItemNull;
+    }
+    if (js_document_default_view.item != ITEM_NULL) {
+        return js_document_default_view;
+    }
+    return ItemNull;
+}
+
+extern "C" Item js_dom_document_implementation_bridge(void) {
+    return js_get_dom_implementation();
+}
+
+extern "C" Item js_dom_document_design_mode_bridge(void) {
+    return (Item){.item = s2it(heap_create_name(js_document_design_mode ? "on" : "off"))};
+}
+
+extern "C" Item js_dom_document_active_element_bridge(void* doc_ptr) {
+    DomDocument* doc = (DomDocument*)doc_ptr;
+    DomElement* root = doc ? doc->root : nullptr;
+    DocState* state = js_dom_current_state();
+    View* focused = focus_get(state);
+    if (focused && focused->is_element()) {
+        return js_dom_wrap_element(((DomNode*)focused)->as_element());
+    }
+    DomElement* active_element = tc_get_active_element(state);
+    if (active_element && active_element->doc == doc) {
+        return js_dom_wrap_element(active_element);
+    }
+    if (js_document_active_element &&
+        js_document_active_element->doc == doc &&
+        js_dom_node_is_connected((DomNode*)js_document_active_element)) {
+        return js_dom_wrap_element(js_document_active_element);
+    }
+    DomElement* body = document_body_element(doc);
+    if (body) return js_dom_wrap_element(body);
+    return root ? js_dom_wrap_element(root) : ItemNull;
+}
+
 extern "C" Item js_document_get_property(Item prop_name) {
     if (!_js_current_document) {
         log_debug("js_document_get_property: no document set");
@@ -5617,10 +5720,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     }
 
     if (strcmp(prop, "fonts") == 0) {
-        if (js_document_fonts_value.item == ITEM_NULL) {
-            js_document_fonts_value = js_create_document_fonts_object();
-        }
-        return js_document_fonts_value;
+        return js_dom_document_fonts_bridge();
     }
 
     // compatMode
@@ -5709,7 +5809,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
 
     // styleSheets — collection of parsed CSSStyleSheet objects
     if (strcmp(prop, "styleSheets") == 0) {
-        return js_cssom_get_document_stylesheets();
+        return js_dom_document_stylesheets_bridge();
     }
 
     // ownerDocument — the document itself has no owner (returns null)
@@ -5722,22 +5822,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     // Foreign documents (created via document.implementation.create*Document)
     // never have a browsing context, so defaultView must be null per HTML spec.
     if (strcmp(prop, "defaultView") == 0) {
-        if (!js_doc_has_browsing_context(_js_current_document)) {
-            return ItemNull;
-        }
-        // For iframe content docs (foreign with browsing context), the
-        // "window" is modeled as the same wrapper object — so identity
-        // checks like `iframe.contentDocument.defaultView === iframe.contentWindow`
-        // hold (both resolve to wrap_foreign_doc(doc)).
-        if (_js_current_document != _js_main_document) {
-            Item w = lookup_foreign_doc_wrapper(_js_current_document);
-            return w.item ? w : ItemNull;
-        }
-        // Return stored window object if set by preamble (document.defaultView = window)
-        if (js_document_default_view.item != ITEM_NULL) {
-            return js_document_default_view;
-        }
-        return ItemNull;
+        return js_dom_document_default_view_bridge((void*)_js_current_document);
     }
 
     // For iframe content docs, expose Window-like properties on the same
@@ -5759,7 +5844,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
 
     // implementation — DOMImplementation (createHTMLDocument, createDocument, ...)
     if (strcmp(prop, "implementation") == 0) {
-        return js_get_dom_implementation();
+        return js_dom_document_implementation_bridge();
     }
 
     // doctype — DocumentType node (or null if document has none).
@@ -5831,34 +5916,12 @@ extern "C" Item js_document_get_property(Item prop_name) {
     // exposes the IDL state; editing-host default actions still land in the
     // command engine phases.
     if (strcmp(prop, "designMode") == 0) {
-        return (Item){.item = s2it(heap_create_name(js_document_design_mode ? "on" : "off"))};
+        return js_dom_document_design_mode_bridge();
     }
 
     // activeElement — currently focused element, or <body> as default per spec.
     if (strcmp(prop, "activeElement") == 0) {
-        DocState* state = js_dom_current_state();
-        View* focused = focus_get(state);
-        if (focused && focused->is_element()) {
-            return js_dom_wrap_element(((DomNode*)focused)->as_element());
-        }
-        DomElement* active_element = tc_get_active_element(state);
-        if (active_element && active_element->doc == doc) return js_dom_wrap_element(active_element);
-        if (js_document_active_element &&
-            js_document_active_element->doc == doc &&
-            js_dom_node_is_connected((DomNode*)js_document_active_element)) {
-            return js_dom_wrap_element(js_document_active_element);
-        }
-        // default to <body> if available
-        DomNode* child = root ? root->first_child : nullptr;
-        while (child) {
-            if (child->is_element()) {
-                DomElement* e = child->as_element();
-                if (e->tag_name && strcasecmp(e->tag_name, "body") == 0)
-                    return js_dom_wrap_element(e);
-            }
-            child = child->next_sibling;
-        }
-        return root ? js_dom_wrap_element(root) : ItemNull;
+        return js_dom_document_active_element_bridge((void*)doc);
     }
 
     expando_doc = _js_current_document ? _js_current_document : _js_main_document;
@@ -11661,6 +11724,38 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     log_debug("js_dom_element_method: '%s' on <%s>", method,
               node->node_name() ? node->node_name() : "?");
 
+    // HTMLSelectElement.remove(index) must be tested before generic
+    // ChildNode.remove(); otherwise the select overload is shadowed and
+    // remove(index) silently becomes node self-removal.
+    if (strcmp(method, "remove") == 0 && elem && elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
+        // remove() with no args: spec calls ChildNode.remove(); but
+        // HTMLSelectElement overrides — with no arg, do nothing per WPT.
+        if (argc < 1) return ItemNull;
+        TypeId t = get_type_id(args[0]);
+        int idx = -1;
+        if (t == LMD_TYPE_INT) idx = (int)it2i(args[0]); // INT_CAST_OK: index
+        else if (t == LMD_TYPE_FLOAT) {
+            double* d = (double*)(args[0].item & 0x00FFFFFFFFFFFFFF);
+            if (d) idx = (int)*d; // INT_CAST_OK: index
+        }
+        if (idx < 0) return ItemNull;
+        Item arr = js_array_new(0);
+        _collect_options(elem->first_child, arr);
+        if (idx >= js_array_length(arr)) return ItemNull;
+        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, idx));
+        if (!opt || !opt->parent) return ItemNull;
+        DomElement* parent = (DomElement*)opt->parent;
+        DomNode* on = (DomNode*)opt;
+        dom_pre_remove(on);
+        if (on->prev_sibling) on->prev_sibling->next_sibling = on->next_sibling;
+        else parent->first_child = on->next_sibling;
+        if (on->next_sibling) on->next_sibling->prev_sibling = on->prev_sibling;
+        else parent->last_child = on->prev_sibling;
+        on->parent = nullptr; on->next_sibling = nullptr; on->prev_sibling = nullptr;
+        js_dom_mutation_notify();
+        return ItemNull;
+    }
+
     // v12b: remove() — self-removal from parent (works on any node type)
     if (strcmp(method, "remove") == 0) {
         if (node->parent) {
@@ -12746,35 +12841,6 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                 anchor->prev_sibling = new_opt;
             }
         }
-        js_dom_mutation_notify();
-        return ItemNull;
-    }
-    // HTMLSelectElement.remove(index) — remove option at index.
-    if (strcmp(method, "remove") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
-        // remove() with no args: spec calls ChildNode.remove(); but
-        // HTMLSelectElement overrides — with no arg, do nothing per WPT.
-        if (argc < 1) return ItemNull;
-        TypeId t = get_type_id(args[0]);
-        int idx = -1;
-        if (t == LMD_TYPE_INT) idx = (int)it2i(args[0]); // INT_CAST_OK: index
-        else if (t == LMD_TYPE_FLOAT) {
-            double* d = (double*)(args[0].item & 0x00FFFFFFFFFFFFFF);
-            if (d) idx = (int)*d; // INT_CAST_OK: index
-        }
-        if (idx < 0) return ItemNull;
-        Item arr = js_array_new(0);
-        _collect_options(elem->first_child, arr);
-        if (idx >= js_array_length(arr)) return ItemNull;
-        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, idx));
-        if (!opt || !opt->parent) return ItemNull;
-        DomElement* parent = (DomElement*)opt->parent;
-        DomNode* on = (DomNode*)opt;
-        dom_pre_remove(on);
-        if (on->prev_sibling) on->prev_sibling->next_sibling = on->next_sibling;
-        else parent->first_child = on->next_sibling;
-        if (on->next_sibling) on->next_sibling->prev_sibling = on->prev_sibling;
-        else parent->last_child = on->prev_sibling;
-        on->parent = nullptr; on->next_sibling = nullptr; on->prev_sibling = nullptr;
         js_dom_mutation_notify();
         return ItemNull;
     }

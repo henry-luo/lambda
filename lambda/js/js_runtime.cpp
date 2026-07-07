@@ -69,8 +69,9 @@ extern "C" Item js_get_fs_namespace(void);
 extern "C" Item js_get_fs_promises_namespace(void);
 extern "C" Item js_get_internal_fs_promises_namespace(void);
 extern "C" Item js_get_os_namespace(void);
-extern "C" bool js_doc_has_browsing_context(void* doc);
-extern "C" Item js_dom_get_selection_function_for_document(void* doc);
+extern "C" int radiant_dom_foreign_document_get_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_foreign_document_set_property(Item object, Item key, Item value, Item* out);
+extern "C" int radiant_dom_foreign_document_method(Item object, Item method_name, Item* args, int argc, Item* out);
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
@@ -3186,13 +3187,6 @@ static bool js_upgrade_native_backed_map_for_properties(Map* m, const char* tag_
     return true;
 }
 
-static bool js_property_key_equals(Item key, const char* name, uint32_t name_len) {
-    if (get_type_id(key) != LMD_TYPE_STRING) return false;
-    String* str_key = it2s(key);
-    return str_key && str_key->len == name_len &&
-        strncmp(str_key->chars, name, name_len) == 0;
-}
-
 static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) {
     Map* m = object.map;
     switch (m->map_kind) {
@@ -3470,25 +3464,7 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
         *out_result = js_document_proxy_get_property(key);
         return true;
     case MAP_KIND_FOREIGN_DOC: {
-        void* foreign_doc = js_get_foreign_doc(object);
-        if (foreign_doc && js_doc_has_browsing_context(foreign_doc)) {
-            if (js_property_key_equals(key, "defaultView", 11) ||
-                js_property_key_equals(key, "document", 8) ||
-                js_property_key_equals(key, "window", 6) ||
-                js_property_key_equals(key, "self", 4)) {
-                *out_result = object;
-                return true;
-            }
-            if (js_property_key_equals(key, "getSelection", 12)) {
-                *out_result = js_dom_get_selection_function_for_document(foreign_doc);
-                return true;
-            }
-        }
-        void* prev = js_dom_swap_active_document(foreign_doc);
-        Item r = js_document_proxy_get_property(key);
-        js_dom_restore_active_document(prev);
-        *out_result = r;
-        return true;
+        return radiant_dom_foreign_document_get_property(object, key, out_result) != 0;
     }
     case MAP_KIND_DOM:
         *out_result = js_is_computed_style_item(object)
@@ -3527,10 +3503,7 @@ static bool js_try_exotic_property_set(Item object, Item key, Item* value, Item*
         *out_result = js_document_proxy_set_property(key, *value);
         return true;
     case MAP_KIND_FOREIGN_DOC: {
-        void* prev = js_dom_swap_active_document(js_get_foreign_doc(object));
-        *out_result = js_document_proxy_set_property(key, *value);
-        js_dom_restore_active_document(prev);
-        return true;
+        return radiant_dom_foreign_document_set_property(object, key, *value, out_result) != 0;
     }
     case MAP_KIND_ITERATOR:
         *out_result = *value;
@@ -18591,26 +18564,6 @@ extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" Item js_dom_range_get_prototype_value(void);
 extern "C" Item js_dom_selection_get_prototype_value(void);
-extern "C" bool js_doc_has_browsing_context(void* doc);
-
-static Item js_call_foreign_window_global_method(Item obj, void* foreign,
-                                                 Item method_name, Item* args, int argc) {
-    if (!foreign) return ItemNull;
-    if (!js_doc_has_browsing_context(foreign)) return ItemNull;
-    Item fn = js_get_global_property(method_name);
-    if (get_type_id(fn) != LMD_TYPE_FUNC) return ItemNull;
-
-    Item global = js_get_global_this();
-    Item window_key = (Item){.item = s2it(heap_create_name("window", 6))};
-    Item old_window = js_property_get(global, window_key);
-
-    void* prev_doc = js_dom_swap_active_document(foreign);
-    js_property_set(global, window_key, obj);
-    Item result = js_call_function(fn, obj, args, argc);
-    js_property_set(global, window_key, old_window);
-    js_dom_restore_active_document(prev_doc);
-    return result;
-}
 
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
     // Document proxy methods (getElementById, querySelector, createElement, ...).
@@ -18619,14 +18572,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     if (js_is_document_proxy(obj)) {
         void* foreign = js_get_foreign_doc(obj);
         if (foreign) {
-            void* prev = js_dom_swap_active_document(foreign);
-            Item r = js_document_proxy_method(method_name, args, argc);
-            js_dom_restore_active_document(prev);
-            if (r.item == ItemNull.item && !js_check_exception()) {
-                Item fallback = js_call_foreign_window_global_method(obj, foreign, method_name, args, argc);
-                if (fallback.item != ItemNull.item || js_check_exception()) return fallback;
+            Item result = ItemNull;
+            if (radiant_dom_foreign_document_method(obj, method_name, args, argc, &result)) {
+                return result;
             }
-            return r;
         }
         return js_document_proxy_method(method_name, args, argc);
     }
@@ -18668,14 +18617,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     if (js_is_document_proxy(obj)) {
         void* foreign = js_get_foreign_doc(obj);
         if (foreign) {
-            void* prev = js_dom_swap_active_document(foreign);
-            Item r = js_document_proxy_method(method_name, args, argc);
-            js_dom_restore_active_document(prev);
-            if (r.item == ItemNull.item && !js_check_exception()) {
-                Item fallback = js_call_foreign_window_global_method(obj, foreign, method_name, args, argc);
-                if (fallback.item != ItemNull.item || js_check_exception()) return fallback;
+            Item result = ItemNull;
+            if (radiant_dom_foreign_document_method(obj, method_name, args, argc, &result)) {
+                return result;
             }
-            return r;
         }
         return js_document_proxy_method(method_name, args, argc);
     }
