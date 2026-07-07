@@ -1,7 +1,7 @@
 # Lambda Concurrency Design — Colorless Async, Isolates, and the Four-Level Model
 
 **Status:** approved direction — design doc for discussion & refinement
-**Date:** 2026-07-06
+**Date:** 2026-07-06; **revised 2026-07-08** — level-1 implementation redesigned (**K2-R**, §4.2): declared-`async` leaves + may-await state-machine compilation replaces stackful fibers as the adopted mechanism; the fiber design is retained in §4.2.4 as the reference alternative
 **Context:** realizes decision **J4** (BEAM-style concurrency, stated explicitly) from the Jube runtime ledger — Part 1 of `Lambda_Semantics_Features.md`. Addresses the #1 structural gap from the six-language feature comparison (Part 3 of the same doc). Decisions confirmed by the user in the 2026-07-06 foundation discussion are marked in the ledger (§8) as K1–K10; open points as O1–O10.
 
 ---
@@ -13,14 +13,14 @@ Lambda concurrency is layered in four levels. Levels 1–3 are the core design; 
 | Level | Name | Unit | Isolation | Communication | Parallel? | Nearest precedent |
 |---|---|---|---|---|---|---|
 | **0** | Data parallelism | none (implicit) | n/a — pure `fn` only | n/a | yes | pure parallel map |
-| **1** | Colorless async | fiber (task) | shared context | awaitables | no (concurrent, single-threaded) | Java Loom / Go netpoller |
+| **1** | Colorless async | task (parked state machine; fibers = reference alt.) | shared context | awaitables | no (concurrent, single-threaded) | Kotlin mechanics / Koka inference / Go netpoller surface |
 | **2** | Worker thread | isolate | own heap, own context | messages + read-only shared flats | yes | JS Workers / Ruby Ractors |
 | **3** | Child process | isolate | OS process | messages + read-only shared flats | yes | BEAM |
 
 **Governing principles:**
 
 1. **`fn` never suspends, never observes concurrency.** Async, tasks, messages — all of it is effectful, therefore `pn`-territory. The purity color is the *only* color in the language (K1).
-2. **Colorless among `pn`s.** A `pn` that awaits is indistinguishable, to its callers, from one that doesn't. No `async` keyword, no signature change, no third color. Async coloring collapses into the purity coloring Lambda already has (K2).
+2. **Colorless among callers.** `async pn` declares a suspension *source* at the leaf (K2-R); but a `pn` that merely awaits is indistinguishable, to its callers, from one that doesn't — no marker propagates, no signature change, no third color spreading through the call graph. Async coloring collapses into the purity coloring Lambda already has, plus one keyword at the leaves.
 3. **Nondeterminism stays confined to `pn`.** Task interleaving, message arrival order, isolate scheduling — all only observable from `pn`. The C1–C12 semantic core survives concurrency untouched.
 4. **Levels 2 and 3 are one API, not two features.** Same primitives (`spawn`/`send`/`receive`), same semantics; the isolation level is a spawn option. Code written against workers moves to processes without rewriting (K4).
 5. **No shared mutable state, at any level.** Sharing is read-only and restricted to flat values (§5.2). This is what makes the whole design safe on C4 value semantics — the BEAM/Clojure lesson.
@@ -46,7 +46,9 @@ Virtual threads (JDK 21, 2023) deliver exactly "colorless async" on a 30-year-ol
 
 ### 2.3 Zig — the cautionary tale: don't do colorless halfway
 
-Zig attempted colorless async via compile-time dual compilation: every potentially-async function compiled in both sync and async (CPS-transformed) variants, with the compiler propagating "async-ness" through the call graph. The complexity cascaded — indirect calls, function pointers, the C ABI boundary, doubled compile artifacts — and the feature was **removed from the language** (gone since 0.11, still absent). The lesson is not "colorless is wrong" (Loom proves it's right); it's that **compiler-transform colorlessness is coloring with extra steps**, and it collapses at exactly the places Lambda has in abundance: closures, HOFs, JIT'd code, and a C ABI. Stackful or nothing — hence K2's fiber commitment.
+Zig attempted colorless async via compile-time dual compilation: every potentially-async function compiled in both sync and async (CPS-transformed) variants, with the compiler propagating "async-ness" through the call graph — *inferred*, with no declaration anywhere. The complexity cascaded — indirect calls, function pointers, the C ABI boundary, doubled compile artifacts — and the feature was **removed from the language** (gone since 0.11, still absent).
+
+The lesson as originally drawn here ("compiler-transform colorlessness is coloring with extra steps — stackful or nothing") motivated the v1 fiber commitment. The **refined lesson** (2026-07-08, see §2.6 and §4.2): what actually failed was the *unselective, ABI-exposed* transform in an **AOT systems language** — stable calling conventions to preserve, function pointers whose async-ness is unknowable across compilation units, generics dual-compiled into artifact explosions. §4.2.3 examines which of those preconditions Lambda has (almost none), and K2-R adopts a *selective* transform where Zig's failure factors are absent; the fiber design remains the reference alternative (§4.2.4).
 
 ### 2.4 BEAM — the semantic model for levels 2/3
 
@@ -57,6 +59,24 @@ Per-process heaps and stacks; messages **copied** between processes — with one
 ### 2.5 JS Workers / Node — the level-2 surface and the interop constraint
 
 Web Workers are the proven *surface* for isolate-style threading (isolated heap, `postMessage`, structured clone ≈ Item copy). Node's mistake is the one K4 avoids: `Worker` and `child_process` are unrelated APIs for the same semantic idea. The binding constraint JS imposes on level 1: **run-to-completion** — a JS frame may only yield at its own `await`/job boundaries, never because Lambda's scheduler decided to. This forces (and justifies) the one-loop-per-context design in §4.2. Ruby's Ractors independently confirm the sharing rule: only deep-frozen (immutable) objects are shareable across Ractors.
+
+### 2.6 Async-v2 prior art — who else declared at the leaf and hid the callers? (added 2026-07-08)
+
+No mainstream language ships the K2-R combination — **leaf-declared `async`, unmarked awaiting callers, compiler state-machine transform** — but it has three close relatives:
+
+| Language | Callers marked? | Parked state lives in | Fate |
+|---|---|---|---|
+| **Zig 0.5–0.10** | no — asyncness *inferred*, even at the leaves | compiler-generated frames (CPS-ish) | **withdrawn** — the closest shipped attempt |
+| **Koka / Eff / Links / Unison** (algebraic effects) | no — effect *inferred in types*, invisible in syntax | selective CPS / evidence-passing translation, heap | shipped, research-tier; the theoretically mature version |
+| **Kotlin** | **yes** — `suspend` must propagate to every caller | compiler state machines | thriving; the *inverse* of K2-R |
+| OCaml 5, Java Loom, Go, Lua/Ruby/PHP fibers | no marking at all | **runtime stacks/segments** | thriving — every production colorless language chose stacks |
+| JS / C# / Rust / Swift / Python | yes (full coloring) | compiler state machines | thriving, but the ergonomics being escaped |
+
+Three observations:
+
+1. **Zig is K2-R minus the leaf declaration** — it went further (pure inference, no keyword) and collapsed on AOT-specific problems: stable calling conventions, async-unknown function pointers, generics dual-compiled into artifact explosions. Lambda differs on every axis: closed-world whole-program JIT, no stable ABI to preserve, `await` only at Lambda statement positions (never inside C frames), and the `fn`/`pn` split exempting most of the call graph and most HOF indirection. The leaf declaration also removes Zig's inference-surprise: the may-await closure is *seeded explicitly*.
+2. **Koka proves the idea sound — and Lambda is accidentally close to it.** In effect-system languages, "can suspend" is an inferred effect row, never written at call sites; the compiler does a **selective CPS transform over exactly the effectful closure** (Leijen's *Structured Asynchrony with Algebraic Effects* did async precisely this way). K2-R is that design, pragmatized: `async` at the leaf ≈ declaring the effect, O9 propagation ≈ effect inference, the state-machine transform ≈ selective CPS. Lambda already *has* a coarse effect system — `fn`/`pn` is a one-bit effect row; may-await is the second bit. Caveat: no mass-market language has taken this road; Lambda would be first-to-production, not following.
+3. **The two production camps split exactly on this question.** Everyone wanting unmarked callers at scale (OCaml 5, Loom, Go, fibers) paid with runtime stacks; everyone choosing compiler state machines paid with visible color. Kotlin is the sharp data point: JetBrains *could* have inferred `suspend` and deliberately refused, arguing suspension points must be visible at call sites. Two things blunt that argument for Lambda: Loom then hid suspension completely and the Java ecosystem accepted it; and Lambda readers of an `fn` know *statically* that nothing suspends — more guarantee than Kotlin readers ever had. Positioning line: **inferred-transitive suspension à la Koka's effect inference, compiled à la Kotlin, declared à la neither — enabled by the `fn`/`pn` split doing the visibility work that Kotlin's `suspend` keyword does.**
 
 ---
 
@@ -77,38 +97,96 @@ let thumbs = images |par> ~ |> resize(~, 128, 128)     // syntax TBD (O7)
 
 ## 4. Level 1 — colorless async
 
-### 4.1 Language surface
+### 4.1 Language surface (revised 2026-07-08 — K2-R)
 
-- **`await expr` is a `pn`-only operation.** Using it in an `fn` is a compile error (K1). No `async` marker exists anywhere in the grammar.
-- A `pn` that awaits is **invisible to its callers** — same type, same call syntax, same ABI. Colorless among `pn`s (K2).
-- Awaitable things: async host operations (`io.*`, timers, net), spawned isolates' results and `receive` (levels 2/3), JS Promises (§4.5), and level-1 task-scope children (O1).
+```lambda
+async pn fetch(url: string) -> response^ { ... }   // declared suspension source (leaf)
+
+pn handle(req) -> page^ {                          // NOT marked — and never needs to be
+    let r = await fetch(req.url)^                  // awaiting does not color handle
+    render(r)
+}
+// handle's callers are equally unmarked; suspension propagates invisibly (may-await closure)
+```
+
+- **`async pn` declares a suspension source** — a `pn` built on asynchronous host operations, whose call site yields an awaitable. This is the *only* place the keyword appears.
+- **`await expr` is a `pn`-only operation.** Using it in an `fn` is a compile error (K1). A `pn` that awaits does **not** become `async` — it stays invisible to its callers: same declaration, same call syntax. Colorless among callers (K2-R); the color exists only inside the compiler (§4.2.3).
+- Awaitable things: `async pn` calls, async host operations (`io.*`, timers, net), spawned isolates' results and `receive` (levels 2/3), JS Promises (§4.5), and level-1 task-scope children (O1). Typing of an *unawaited* `async pn` call (a task/handle value) is O6.
 - Error integration: awaiting a failed operation yields the error as a value — `await` composes with `T^E` and `^`-propagation exactly like any other `pn` call. No new error channel (extends J3).
 - Structured scopes (task groups with scope-bound children, cancellation on scope exit — the Trio/Kotlin/Swift consensus) are the intended surface for spawning *within* level 1; syntax and semantics are open (O1, O2). Note the design adjacency to the `defer`/`with` resource-cleanup gap (features doc §3.1) — same construct family, design together.
 
-### 4.2 Runtime design (confirmed — K2)
+### 4.2 Implementation — the suspension problem and the adopted design (K2-R)
 
-The implementation is the cheap slice of Go/Loom: **fixed mmap'd fiber stacks, a ~30-line context switch, one event loop per context, park/resume at `pn` await points.**
+#### 4.2.1 The problem lives in the awaiter, not the declared source
 
-- **Fiber stacks:** reserve ~1 MB of virtual address space per fiber via `mmap`, lazily committed, with a guard page for overflow detection. A parked fiber typically holds a few KB of committed pages. **No growth, no copying, no pointer rewriting** — this deliberately sidesteps the precise-stack-map machinery Go's relocation requires (and which Lambda lacks until G1 lands). The cost — thousands of fibers, not millions — matches the domain: documents, pipelines, a Radiant desktop app, never 1M concurrent connections.
-- **Context switch:** hand-rolled save/restore of callee-saved registers + SP, per architecture (x86-64 SysV, AArch64). Explicitly **not** `ucontext`/`swapcontext` (sigmask syscall per switch). This is the libco/Boost.Context design.
-- **One event loop per context, and it is the SAME loop as the JS event loop.** One reactor (kqueue/epoll; IOCP on Windows) per context; JS jobs, timers, and fiber resumes interleave on it. `await` = register continuation with the loop + park the fiber; the scheduler runs the next runnable fiber or polls. This is Go's netpoller pattern, single-threaded per context. JS run-to-completion is preserved: JS frames yield only at their own await/job boundaries (K3).
-- **The MIR JIT needs zero changes.** JIT'd frames are ordinary native frames on the fiber's stack; the JIT never knows a switch happened. No compiler transform, no dual compilation (the anti-Zig property). This is the decisive argument for stackful over CPS.
-- **Cooperative scheduling only (v1).** Suspension happens at explicit points: `await`, `receive`, channel/mailbox ops. No preemption — Lambda scripts aren't adversarial, and BEAM ran on cooperative reduction-counting for decades. Loop-back-edge safepoints can be added later if runaway-`pn` starvation becomes real.
-- **`fn` call trees are suspension-free regions.** Since only `pn` chains can park, the runtime needs no safepoints, no reentrancy caution, and no rooting discipline inside pure code — the purity color does implementation work here too.
+At the moment `handle()` awaits, 40 frames deep in `main → serve → handle → …`, the thing that must survive is the **awaiter's call chain**: every frame's locals, spilled registers, and return addresses, laid out contiguously on the native stack. "Resume later" means all of it still exists at valid addresses. Declaring `async` on the *leaf* changes nothing about this — the frames needing preservation belong to the **unmarked awaiters** all the way up.
 
-### 4.3 GC interaction — the G1 dependency
+Two suspended call chains cannot interleave on one contiguous stack (stacks are LIFO: task B's frames pushed above parked task A's bury A until B fully unwinds). So parked state must live somewhere, and there are exactly three exits:
 
-- Parked fiber stacks are GC roots. **v1: conservatively scan the committed portion** of each parked stack (fixed, non-moving stacks make this sound; Go itself shipped conservative scanning before 1.4). **Precise scanning arrives with G1.**
-- Dependency direction, stated bluntly: **level 1 cannot ship before G1 is resolved** (`Lambda_GC_Root_Issue.md` — the blanket `MIR_T_I64` rooting that is simultaneously load-bearing and wrong). More live stacks make the blanket-rooting problem worse, not merely concurrent. Fibers *raise* G1's priority.
+1. **Compile the frames away** — rewrite suspendable functions so locals live in heap objects with numbered resume points (state machines). The rewrite is traditionally the color (JS/Rust/Kotlin/C#) — *unless it is hidden in the compiler* (K2-R, §4.2.3).
+2. **Evacuate the frames** — copy the suspended stack segment to the heap and back (Loom). Requires complete frame knowledge: C and MIR frames legitimately hold *interior pointers into the stack* (`&local` passed to a callee); copying without Go-grade precise maps + pointer rewriting is UB. Not available to Lambda.
+3. **Give each task its own stack** — fibers (§4.2.4). Park = save SP + registers; frames never move.
+
+#### 4.2.2 Rejected: blocking and nested-loop awaits
+
+- **Thread-blocking `await` self-deadlocks under K3**: the awaiter blocks the context's only thread — but the awaited operation's completion is *delivered by the loop on that thread*. The loop can never run; the await never completes.
+- **Nested-drain `await`** (run the loop recursively inside the await) is the infamous recursive-event-loop footgun: tasks resume in LIFO burial order (a completed task can't resume while later arrivals sit above it on the stack), stack depth grows unboundedly under load, and JS jobs run mid-`pn` in violation of run-to-completion.
+
+#### 4.2.3 ADOPTED (2026-07-08, K2-R): may-await state-machine compilation
+
+The color goes **into the compiler**, along exactly the calls that need it:
+
+- **The may-await closure**: seeded by `async` declarations and `await` expressions, propagated along call edges (a `pn` calling a may-await `pn` is itself may-await). Indirect `pn` calls (through closures/HOFs) are conservatively may-await; **`fn`s are exempt by construction** — and Lambda's idiomatic HOF surface (pipes, `map`, `where`) takes `fn` arguments, so the conservative case is rare in practice. This is O9, upgraded from inference to declared-and-checked.
+- **The transform**: every `pn` in the closure is compiled as a resumable state machine — split at each `await` and at each call to a may-await `pn`; live locals hoisted to a heap frame — the same lowering LambdaJS Phase 6 already performs for JS `async` functions (`js_mir_function_class_lowering.cpp`).
+- **The calling convention**: calls *to* may-await `pn`s return `value | suspended`; callers in the closure propagate suspension by parking their own state machine. Calls to sync `pn`s and all `fn`s are completely unchanged.
+- **Scheduling**: unchanged from v1 — one loop per context (libuv, K3/K10), cooperative suspension at explicit points, `fn` call trees are suspension-free regions.
+
+Why this beats fibers *for Lambda specifically* (the four factors):
+
+1. **Closed world.** Each script is whole-program at JIT time — the transitive transform that broke Zig (stable ABIs, dual-compiled generics) is just another whole-program analysis here, next to purity inference.
+2. **Awaits never occur inside C frames.** `await` is a Lambda statement position; a C runtime helper or native-module frame never spans one. The case where fibers were uniquely capable — suspending with foreign frames mid-stack — is *already forbidden* by §4.4 and the JS membrane rule. Fibers' superpower is one the design had already renounced.
+3. **The machinery half-exists.** Phase-6 state-machine lowering is the same transform, already debugged against the JS suites.
+4. **It decouples level 1 from G1.** A parked fiber is a native stack GC must scan; a parked state machine is an **ordinary heap object** — rooted and traced like any value, no stack scanning, no new GC surface. The scariest dependency in the plan dissolves (§4.3).
+
+Honest costs: two `pn` calling conventions (suspendable vs plain) and a suspension-check branch at may-await call sites; conservative transformation at indirect `pn` calls; transform complexity lands in `transpile-mir`; debugging shows chopped stacks (like JS async today) instead of real ones.
+
+#### 4.2.4 Reference: the stackful-fiber design (v1, superseded but viable)
+
+Kept as the documented alternative — it would be revived if the transform proves worse than expected, and levels 2/3 are unaffected either way. The design was the cheap slice of Go/Loom: **fixed mmap'd fiber stacks, a ~30-line context switch, park/resume at `pn` await points.**
+
+- **Fiber stacks:** reserve ~1 MB virtual per fiber via `mmap`, lazily committed, guard page for overflow. A parked fiber holds a few KB of committed pages. No growth, no copying, no pointer rewriting — deliberately sidesteps Go's precise-map relocation machinery. Cost ceiling: thousands of fibers, not millions — which matches the domain.
+- **Context switch:** hand-rolled callee-saved registers + SP per architecture (x86-64 SysV, AArch64); explicitly **not** `ucontext` (sigmask syscall per switch). The libco/Boost.Context design.
+- **MIR JIT unchanged**; JIT'd frames are ordinary frames on the fiber's stack — the "zero compiler transform" property that was the original decisive argument, before factors 2–4 above outweighed it.
+- **Its GC cost (why it lost):** parked fiber stacks are GC roots — v1 would conservatively scan committed portions (Go pre-1.4 precedent), precise scanning arriving only with G1; level 1 would be **gated on G1**, and more live stacks worsen the blanket-rooting issue (`Lambda_GC_Root_Issue.md`).
+
+#### 4.2.5 The head-to-head that decided it
+
+| | Fibers (§4.2.4, superseded K2) | May-await state machines (K2-R, adopted) |
+|---|---|---|
+| Compiler work | none | transform over may-await set in `transpile-mir`; two `pn` call conventions |
+| Runtime work | per-arch asm switch, mmap stacks, scheduler | scheduler only |
+| Parked-state memory | committed stack pages (few KB each) | heap frames ∝ live locals (smaller) |
+| GC interaction | **parked-stack scanning; level 1 gated on G1** | **none new — ordinary heap objects** |
+| Indirect `pn` calls | free | conservatively transformed |
+| Native frames across await | forbidden by rule (§4.4) | impossible by construction |
+| Debugging | real stacks in a debugger | chopped stacks (like JS async today) |
+| Surface colorlessness | full | full (color hidden in compiler; `async` at leaves only) |
+
+The decisive rows are GC interaction (factor 4 — G1 was the scariest dependency in the plan) and native-frames (fibers' unique capability was already renounced by §4.4 and the membrane rule). Fibers keep two real advantages — debugger-friendly stacks and free `pn` indirection — judged worth less than de-risking G1 and skipping runtime assembly.
+
+### 4.3 GC interaction (revised under K2-R)
+
+- Parked state = **ordinary heap objects** (state-machine frames holding boxed Items). They are rooted, traced, and collected like any other value — **no parked-stack scanning exists, and level 1 is no longer gated on G1**.
+- G1 (`Lambda_GC_Root_Issue.md`) remains the top runtime-honesty work item for the *running* frame's rooting — unchanged by this design, neither worsened nor gated. The fiber alternative (§4.2.4) would reinstate the gate; that asymmetry was decision-relevant (factor 4).
 
 ### 4.4 Native frames — the module-ABI clause (unretrofittable; write into JubeHostAPI v1)
 
-- A fiber **must not park while a `JubeHostAPI` frame is on its stack**, unless the module declares that entry point await-safe. (This is Loom's pinning problem and Go's cgo case, met head-on.)
+- A task **must not suspend while a `JubeHostAPI` frame is on the stack**, unless the module declares that entry point await-safe. Under K2-R this is *impossible by construction* (a state machine can only suspend at Lambda-level await points, never inside a C frame) — under the fiber alternative it was a rule to enforce (Loom's pinning problem, Go's cgo case). Either way the clause stays in the ABI: it documents the invariant modules may rely on.
 - A host call that genuinely blocks (sync file I/O in a module, a C library call) **detaches the OS thread** Go-style: the context's loop continues on another thread, the blocking call completes on the detached one. v1 may simplify to "blocking host calls pin the context" with a documented list, but the ABI *clause* — modules must declare blocking/await-safety — goes in v1, because it cannot be retrofitted once modules exist.
 
 ### 4.5 JS bridge
 
-- Lambda `pn` awaiting a **JS Promise**: park the fiber; resume on settlement. Rejection surfaces as an **error value** (`T^E`) — no exception crosses the boundary (J3).
+- Lambda `pn` awaiting a **JS Promise**: park the task (suspend its state machine); resume on settlement. Rejection surfaces as an **error value** (`T^E`) — no exception crosses the boundary (J3).
 - Lambda async operations surface to JS as ordinary **Promises**; a JS `await` of a Lambda operation is just a promise await.
 - One loop (K3) makes the bridge mechanical: promise settlement and fiber resume are entries on the same queue. No cross-loop marshalling exists because there is no second loop.
 
@@ -123,15 +201,15 @@ The question "should JS async migrate to fibers, or keep libuv?" dissolves into 
 2. **The mechanism is built and green** (editor JS suite, node baseline). Rewriting a working spec-compliant lowering for internal uniformity is negative-value work.
 3. **Cost profile:** JS allocates promises in huge numbers; a state machine is a small heap object, a fiber is a mapped stack. Fiber-per-async-call is strictly heavier for the language that awaits the most.
 
-Asymmetry is not incoherence: each language gets the mechanism its semantics demand, on one shared reactor.
+Asymmetry is not incoherence: each language gets the mechanism its semantics demand, on one shared reactor. *(K2-R postscript: with Lambda also on state machines, the two languages now share one mechanism family — the Phase-6 lineage — differing only in that JS's color is spec-visible and Lambda's is compiler-internal. The layer-2 reasons for not touching JS's own lowering stand unchanged.)*
 
-**Layer 3 — the membrane rule.** What happens when JS synchronously calls a Lambda `pn` that awaits? The `pn`'s frames sit above JS frames on the same fiber stack; parking would suspend a JS job mid-execution while other jobs run — other JS code would observe state mid-job, violating run-to-completion. Mechanically possible, semantically forbidden. The rule:
+**Layer 3 — the membrane rule.** What happens when JS synchronously calls a Lambda `pn` that awaits? Suspending it would pause a JS job mid-execution while other jobs run — other JS code would observe state mid-job, violating run-to-completion. The rule:
 
-> **A may-await `pn` invoked from JS is dispatched onto a fresh fiber and returns a Promise to JS immediately.** Colorlessness is a Lambda-internal property; at the JS membrane, awaiting `pn`s *appear* colored (promise-returning). The boundary adapter does the coloring — never the Lambda source.
+> **A may-await `pn` invoked from JS is dispatched as a fresh task and returns a Promise to JS immediately.** Colorlessness is a Lambda-internal property; at the JS membrane, awaiting `pn`s *appear* colored (promise-returning). The boundary adapter does the coloring — never the Lambda source.
 
 Two supporting obligations (open items):
-- **May-await analysis (O9):** the compiler must know, transitively, which `pn`s can await — a static effect bit in the same analysis family as the existing purity analysis. Invisible in Lambda source; consumed only by JS-facing wrapper generation (and usable by the runtime as a park-legality assertion).
-- **Resume ordering (O10):** when a settled promise resumes a Lambda fiber, the resume is enqueued **after the current job's microtask drain** (macrotask-position), so JS job-queue invariants hold. The precise interleaving of fiber resumes vs. uv callbacks vs. microtask flushes must be specified once, in the loop.
+- **May-await closure (O9):** under K2-R this is no longer a side analysis but the transform set itself — seeded by `async` declarations + `await` expressions, propagated along call edges, conservative at indirect `pn` calls. The JS-facing wrapper generation consumes the same set.
+- **Resume ordering (O10):** when a settled promise resumes a Lambda task, the resume is enqueued **after the current job's microtask drain** (macrotask-position), so JS job-queue invariants hold. The precise interleaving of task resumes vs. uv callbacks vs. microtask flushes must be specified once, in the loop.
 
 ---
 
@@ -148,7 +226,7 @@ let result = await receive(w)        // or: await w — isolate's final result, 
 
 (Syntax is a sketch — grammar is O7. The invariant is not the syntax; it is that **`spawn`/`send`/`receive` have identical semantics at both levels** and migration between levels is a one-option change.)
 
-- An isolate = its own Lambda context: own heap, own fiber scheduler, own event loop (a level-2/3 isolate is "a context on its own thread/process" — the level-1 substrate, replicated).
+- An isolate = its own Lambda context: own heap, own task scheduler, own event loop (a level-2/3 isolate is "a context on its own thread/process" — the level-1 substrate, replicated).
 - `spawn` returns a handle. Handles are awaitable (final result), receivable (message stream), and monitorable (§5.3).
 - Level 2 = OS thread in the same address space. Level 3 = child process. Nothing else differs semantically.
 
@@ -171,9 +249,9 @@ let result = await receive(w)        // or: await w — isolate's final result, 
 - **Bounded mailboxes by default** (BEAM's unbounded mailboxes are its best-known production footgun). The `send` policy when full — block, error-value, or drop-with-notification — is an open decision (O3); leaning: block with optional timeout, since blocking a fiber is cheap under level 1.
 - **`select` is a required primitive**: wait on the first of several sources — multiple handles/receive arms, a timeout arm, a JS Promise. This is the one piece of Go's surface that survives (K8); BEAM's `receive ... after` and JS `Promise.race` are the same necessity. Syntax open (O4).
 
-### 5.5 Scheduling topology — no fiber migration, ever (K7)
+### 5.5 Scheduling topology — no task migration, ever (K7)
 
-- Each isolate owns exactly one OS thread (level 2) or process (level 3), running its own fiber scheduler + event loop. **Fibers never migrate between threads.** Parallelism comes from having many isolates, not from work-stealing within one.
+- Each isolate owns exactly one OS thread (level 2) or process (level 3), running its own task scheduler + event loop. **Tasks never migrate between threads** (true for state machines and for the fiber alternative alike). Parallelism comes from having many isolates, not from work-stealing within one.
 - This discards the hardest part of Go's runtime (cross-thread migration: TLS, stack aliasing, cross-thread scanning) while keeping its throughput shape: N isolates × M fibers each.
 - It is also *required*, not merely convenient: JS run-to-completion demands single-threaded contexts (K3).
 - **The main context owns Radiant/UI.** The Electron-replacement story (J5) is: main context runs Radiant + UI logic; workers run compute or a guest-language backend (e.g., Python via Jube); the UI thread never blocks because level 1 makes all its I/O awaitable.
@@ -188,9 +266,10 @@ let result = await receive(w)        // or: await w — isolate's final result, 
 | Channels as first-class values, unbuffered rendezvous | mailbox + select covers the actual use cases | `send`/`receive`/`select` |
 | Fiber migration / work stealing | hardest part of Go's runtime; JS run-to-completion forbids it anyway | isolate topology (§5.5) |
 | Preemptive scheduling (v1) | scripts aren't adversarial; BEAM-style cooperative sufficed for decades | cooperative parks; loop safepoints later if needed |
-| Growable/relocatable stacks | requires precise-map + pointer-rewrite machinery (the hard 40% of Go) for a scale (1M fibers) the domain doesn't need | fixed mmap'd stacks, lazy commit |
+| Growable/relocatable stacks | requires precise-map + pointer-rewrite machinery (the hard 40% of Go) for a scale (1M tasks) the domain doesn't need | heap state machines (K2-R); fixed mmap'd stacks in the fiber alternative |
 | Shared mutable memory (incl. JS `SharedArrayBuffer`/`Atomics`) | the entire design rests on immutable sharing; C4 | flat read-only sharing + messages |
-| Whole-program CPS / compiler-transform async | the Zig lesson: coloring with extra steps; breaks at closures, HOFs, JIT, C ABI | stackful fibers |
+| *Unselective* whole-program CPS with an exposed dual ABI | Zig's actual failure mode (§2.3, §2.6): AOT stable conventions, async-unknown function pointers, dual-compiled generics | the **selective** may-await transform (K2-R) — confined to the may-await closure, invisible at the surface, closed-world |
+| Blocking / nested-loop `await` | self-deadlock under K3 (completion needs the loop the awaiter blocks); recursive-drain = LIFO burial + unbounded stack + run-to-completion violations (§4.2.2) | suspendable state machines on one loop |
 
 ---
 
@@ -207,7 +286,8 @@ let result = await receive(w)        // or: await w — isolate's final result, 
 **Confirmed (K):**
 
 - **K1** — `fn` never suspends, never observes concurrency; `await` is `pn`-only. No third color: async coloring collapses into the existing purity color. *(user-confirmed)*
-- **K2** — Colorless-among-`pn`s is implemented by **stackful fibers**, not compiler transform: fixed mmap'd lazily-committed fiber stacks with guard pages, hand-rolled ~30-line context switch (no `ucontext`), park/resume at `pn` await points. MIR JIT unchanged. *(user-confirmed)*
+- **K2** *(2026-07-06 — superseded by K2-R below)* — original commitment: colorless-among-`pn`s via **stackful fibers** (fixed mmap'd stacks, ~30-line switch, MIR JIT unchanged). Retained as the documented reference alternative (§4.2.4); would be revived only if the K2-R transform underdelivers.
+- **K2-R** *(2026-07-08)* — Level-1 async is **declared at the leaves, colorless at the callers, compiled selectively**: `async pn` declares suspension sources; `await` is legal in any `pn` without marking it or its callers; the compiler computes the **may-await closure** (seeded by `async` declarations + `await` expressions, propagated along call edges, conservative at indirect `pn` calls, `fn` exempt) and compiles exactly that set into resumable state machines (Phase-6 family) with a `value | suspended` calling convention. Parked state = ordinary heap objects → **no parked-stack scanning; level 1 decoupled from G1** (§4.2.3 factors 1–4). *(user-confirmed)*
 - **K3** — One event loop per context, **shared with the JS event loop**; JS run-to-completion preserved; promise settlement and fiber resume are the same queue.
 - **K4** — Levels 2 and 3 are **one API** (`spawn`/`send`/`receive` + handles); isolation level is a spawn option; migration is a one-option change. *(user-confirmed)*
 - **K5** — Copy messages by default; share **only flat pointer-free immutable values** (typed arrays, strings, binaries); frozen-graph sharing deferred indefinitely; **Mark is the level-3 wire format**.
@@ -227,14 +307,14 @@ let result = await receive(w)        // or: await w — isolate's final result, 
 - **O6** — Typing of unawaited results: is a handle a `task(T^E)`-like value? How do handles interact with C4 value semantics (they are identities, like the deferred ref cells — same family as Clojure atoms)?
 - **O7** — Grammar: `await`, `spawn`, `send`/`receive`, `select`, `|par>` — all surface syntax TBD; must not collide with C9a quote-splice or existing sigils.
 - **O8** — Async host-API surface: which `io.*`/net/timer operations become awaitable in v1 (implemented over the shared uv services, K10).
-- **O9** — **May-await analysis**: transitive static effect bit on `pn`s (same family as purity analysis); consumed by JS-facing wrapper generation (§4.6) and as a runtime park-legality assertion. Must handle indirect calls through closures/HOFs conservatively.
+- **O9** — **May-await closure** *(upgraded by K2-R from side-analysis to the transform set itself)*: seeded by `async` declarations and `await` expressions, propagated along call edges, conservative at indirect `pn` calls (`fn` exempt by construction). Consumed by the K2-R transform, JS-facing wrapper generation (§4.6), and diagnostics ("this `pn` suspends because it calls …"). Remaining to spec: typing of an unawaited `async pn` call (ties to O6) and the exact conservatism rule for `pn`-valued closures.
 - **O10** — **Loop ordering spec**: fiber resumes enqueue at macrotask position (after the current job's microtask drain); one written spec for the interleaving of uv callbacks, microtask flushes, and fiber resumes.
 
 ---
 
 ## 9. Dependencies & sequencing
 
-1. **G1 (GC rooting precision) gates level 1.** Conservative scanning of parked fiber stacks is the sanctioned interim, but the blanket-rooting issue (`Lambda_GC_Root_Issue.md`) worsens with more live stacks — fix G1 first or in lockstep.
+1. **G1 no longer gates level 1** (K2-R): parked state machines are ordinary heap objects — level 1 adds no new GC surface. G1 (`Lambda_GC_Root_Issue.md`) remains the top runtime-honesty work item in its own right, and would return as a level-1 gate only if the fiber alternative (§4.2.4) were revived.
 2. **JubeHostAPI v1 must include** the §4.4 native-frame clause (blocking/await-safety declaration) and the G2 rooting-across-ABI clause **before modules proliferate** — both are unretrofittable.
-3. Suggested build order: **level 0** (small, isolated, immediately useful for the typed-array/image workloads) → **fiber substrate + level 1** (the big one; unblocks async I/O and the Radiant UI story) → **level 2** (isolate = context-on-a-thread; level 0 then migrates onto it) → **level 3** (same API over processes + Mark wire).
+3. Suggested build order: **level 0** (small, isolated, immediately useful for the typed-array/image workloads) → **level 1** (compiler track: may-await closure + state-machine lowering in `transpile-mir` + suspendable `pn` convention; runtime track: scheduler + uv integration — unblocks async I/O and the Radiant UI story) → **level 2** (isolate = context-on-a-thread; level 0 then migrates onto it) → **level 3** (same API over processes + Mark wire).
 4. The per-guest concurrency mapping tables (§7) join the G3 error-mapping tables as module/ABI-spec work items.
