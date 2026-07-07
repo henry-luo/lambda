@@ -53,12 +53,6 @@ static bool item_to_integral_index(Item item, int64_t* out) {
     return false;
 }
 
-static int cmp_int64_asc(const void* a, const void* b, void* udata) {
-    (void)udata;
-    int64_t va = *(const int64_t*)a, vb = *(const int64_t*)b;
-    return (va > vb) - (va < vb);
-}
-
 extern __thread EvalContext* context;
 
 // Forward declarations from lambda-eval-num.cpp
@@ -134,6 +128,33 @@ static Item vector_get(Item item, int64_t index) {
             return { .item = i2it(item.range->start + index) };
         default:
             return ItemError;
+    }
+}
+
+static Array* vector_to_plain_array(Item item, int64_t len) {
+    Array* result = array();
+    result->capacity = len;
+    result->length = len;
+    result->items = (Item*)heap_data_calloc(len * sizeof(Item));
+    for (int64_t i = 0; i < len; i++) {
+        result->items[i] = vector_get(item, i);
+    }
+    result->is_spreadable = false;
+    return result;
+}
+
+static void stable_sort_items_by_total_order(Item* items, int64_t len, bool descending) {
+    for (int64_t i = 1; i < len; i++) {
+        Item value = items[i];
+        int64_t j = i - 1;
+        while (j >= 0) {
+            int cmp = total_cmp(items[j], value);
+            bool move = descending ? (cmp < 0) : (cmp > 0);
+            if (!move) break;
+            items[j + 1] = items[j];
+            j--;
+        }
+        items[j + 1] = value;
     }
 }
 
@@ -2335,11 +2356,15 @@ Item fn_reverse(Item item) {
         }
     }
     else {
+        bool preserve_array = type == LMD_TYPE_ARRAY && !item.array->is_spreadable;
         List* result = list();
         for (int64_t i = len - 1; i >= 0; i--) {
             list_push(result, vector_get(item, i));
         }
-        result->is_content = 1;
+        // sort() returns a plain non-spreadable array; reverse() must preserve that
+        // container mode so method chains keep bracketed array output.
+        if (preserve_array) result->is_spreadable = false;
+        else result->is_content = 1;
         return { .array = result };
     }
 }
@@ -2358,29 +2383,9 @@ Item fn_sort1(Item item) {
         return { .array = result };
     }
 
-    if (type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = item.array_num;
-        if (arr->get_elem_type() == ELEM_FLOAT) {
-            ArrayNum* result = array_float_new(len);
-            for (int64_t i = 0; i < len; i++) result->float_items[i] = arr->float_items[i];
-            insertion_sort(result->float_items, (size_t)len, sizeof(double), cmp_double_asc, NULL);
-            return { .array_num = result };
-        } else {
-            ArrayNum* result = array_int64_new(len);
-            for (int64_t i = 0; i < len; i++) result->items[i] = arr->items[i];
-            insertion_sort(result->items, (size_t)len, sizeof(int64_t), cmp_int64_asc, NULL);
-            return { .array_num = result };
-        }
-    }
-    else {
-        // For mixed types, convert to float and sort
-        ArrayNum* result = array_float_new(len);
-        for (int64_t i = 0; i < len; i++) {
-            result->float_items[i] = item_to_double(vector_get(item, i));
-        }
-        insertion_sort(result->float_items, (size_t)len, sizeof(double), cmp_double_asc, NULL);
-        return { .array_num = result };
-    }
+    Array* result = vector_to_plain_array(item, len);
+    stable_sort_items_by_total_order(result->items, len, false);
+    return { .array = result };
 }
 
 // sort_by_keys(values, keys, descending) - sort values array in-place by corresponding keys
@@ -2396,19 +2401,17 @@ void fn_sort_by_keys(Item values, Item keys, int64_t descending) {
         return;
     }
 
-    // build index permutation array and extract key doubles
+    // build index permutation array; keys stay as Items so sort/order by share total order.
     int64_t* indices = (int64_t*)mem_calloc(len, sizeof(int64_t), MEM_CAT_EVAL);
-    double*  key_vals = (double*)mem_calloc(len, sizeof(double), MEM_CAT_EVAL);
     for (int64_t i = 0; i < len; i++) {
         indices[i] = i;
-        key_vals[i] = item_to_double(vector_get(keys, i));
     }
 
-    // bubble sort indices by key_vals
+    // stable bubble sort indices by total key order
     for (int64_t i = 0; i < len - 1; i++) {
         for (int64_t j = 0; j < len - i - 1; j++) {
-            bool swap = descending ? (key_vals[indices[j]] < key_vals[indices[j + 1]])
-                                   : (key_vals[indices[j]] > key_vals[indices[j + 1]]);
+            int cmp = total_cmp(vector_get(keys, indices[j]), vector_get(keys, indices[j + 1]));
+            bool swap = descending ? (cmp < 0) : (cmp > 0);
             if (swap) {
                 int64_t tmp = indices[j];
                 indices[j] = indices[j + 1];
@@ -2427,7 +2430,6 @@ void fn_sort_by_keys(Item values, Item keys, int64_t descending) {
     memcpy(arr->items, temp, len * sizeof(Item));
     mem_free(temp);
     mem_free(indices);
-    mem_free(key_vals);
 
     // mark as non-spreadable so the sorted result displays as a single array
     // (without this, list_push_spread would spread individual items)
@@ -2524,10 +2526,9 @@ Item fn_sort2(Item item, Item dir_item) {
         // sort indices by key values using generic comparison (fn_lt/fn_gt)
         for (int64_t i = 0; i < len - 1; i++) {
             for (int64_t j = 0; j < len - i - 1; j++) {
-                // sort keys are scalars — use the raw 3-state scalar comparison
-                Bool cmp = descending ? fn_lt_scalar(key_vals[indices[j]], key_vals[indices[j + 1]])
-                                      : fn_gt_scalar(key_vals[indices[j]], key_vals[indices[j + 1]]);
-                if (cmp == BOOL_TRUE) {
+                int cmp = total_cmp(key_vals[indices[j]], key_vals[indices[j + 1]]);
+                bool swap = descending ? (cmp < 0) : (cmp > 0);
+                if (swap) {
                     int64_t tmp = indices[j];
                     indices[j] = indices[j + 1];
                     indices[j + 1] = tmp;
@@ -2549,59 +2550,9 @@ Item fn_sort2(Item item, Item dir_item) {
         return { .array = result };
     }
 
-    // No key function - sort by value with direction (original behavior)
-    if (type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = item.array_num;
-        if (arr->get_elem_type() == ELEM_FLOAT) {
-            ArrayNum* result = array_float_new(len);
-            for (int64_t i = 0; i < len; i++) result->float_items[i] = arr->float_items[i];
-            for (int64_t i = 0; i < len - 1; i++) {
-                for (int64_t j = 0; j < len - i - 1; j++) {
-                    bool swap = descending ? (result->float_items[j] < result->float_items[j + 1])
-                                           : (result->float_items[j] > result->float_items[j + 1]);
-                    if (swap) {
-                        double tmp = result->float_items[j];
-                        result->float_items[j] = result->float_items[j + 1];
-                        result->float_items[j + 1] = tmp;
-                    }
-                }
-            }
-            return { .array_num = result };
-        } else {
-            ArrayNum* result = array_int64_new(len);
-            for (int64_t i = 0; i < len; i++) result->items[i] = arr->items[i];
-            for (int64_t i = 0; i < len - 1; i++) {
-                for (int64_t j = 0; j < len - i - 1; j++) {
-                    bool swap = descending ? (result->items[j] < result->items[j + 1])
-                                           : (result->items[j] > result->items[j + 1]);
-                    if (swap) {
-                        int64_t tmp = result->items[j];
-                        result->items[j] = result->items[j + 1];
-                        result->items[j + 1] = tmp;
-                    }
-                }
-            }
-            return { .array_num = result };
-        }
-    }
-    else {
-        ArrayNum* result = array_float_new(len);
-        for (int64_t i = 0; i < len; i++) {
-            result->float_items[i] = item_to_double(vector_get(item, i));
-        }
-        for (int64_t i = 0; i < len - 1; i++) {
-            for (int64_t j = 0; j < len - i - 1; j++) {
-                bool swap = descending ? (result->float_items[j] < result->float_items[j + 1])
-                                       : (result->float_items[j] > result->float_items[j + 1]);
-                if (swap) {
-                    double tmp = result->float_items[j];
-                    result->float_items[j] = result->float_items[j + 1];
-                    result->float_items[j + 1] = tmp;
-                }
-            }
-        }
-        return { .array_num = result };
-    }
+    Array* result = vector_to_plain_array(item, len);
+    stable_sort_items_by_total_order(result->items, len, descending);
+    return { .array = result };
 }
 
 // reduce(collection, fn) - fold/accumulate a collection using a binary function

@@ -222,7 +222,7 @@ pn test_null_var_map_pack() {
     {x: x}
 }
 
-// Test 21: empty string initializer is null-shaped but still widens on assignment
+// Test 21: empty string initializer widens on assignment
 pn test_empty_string_var_map_pack() {
     var s = ""
     s = "hello"

@@ -619,6 +619,14 @@ TEST_F(NegativeScriptTest, SyntaxError_InvalidNumber) {
     ExpectErrorWithoutCrash("test/lambda/negative/syntax/invalid_number.ls");
 }
 
+TEST_F(NegativeScriptTest, SyntaxError_OversizedIntegerLiteral) {
+    ExpectErrorCode("test/lambda/negative/syntax/oversized_integer_literal.ls", "error[E108]");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_Decimal128Overflow) {
+    ExpectErrorCode("test/lambda/negative/syntax/decimal128_overflow.ls", "error[E108]");
+}
+
 TEST_F(NegativeScriptTest, SyntaxError_UnexpectedToken) {
     ExpectErrorWithoutCrash("test/lambda/negative/syntax/unexpected_token.ls");
 }
@@ -671,6 +679,14 @@ TEST_F(NegativeScriptTest, SemanticError_ImmutableAssignment) {
 
 TEST_F(NegativeScriptTest, SemanticError_VarTypeMismatch) {
     ExpectErrorWithoutCrash("test/lambda/negative/semantic/var_type_mismatch.ls");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_SizedIntegerOverflow) {
+    ExpectErrorCode("test/lambda/negative/semantic/sized_integer_overflow.ls", "error[E108]");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_LiteralZeroDivisor) {
+    ExpectErrorCode("test/lambda/negative/semantic/literal_zero_divisor.ls", "error[E312]");
 }
 
 // --- Runtime Error Tests (3xx) ---

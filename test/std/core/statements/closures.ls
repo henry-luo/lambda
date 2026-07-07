@@ -46,7 +46,7 @@ i(3)
 // ===== Closure in collection pipeline =====
 fn make_multiplier(factor: int) => fn(x: int) => x * factor
 let times3 = make_multiplier(3)
-[1, 2, 3, 4, 5] | map(times3)
+[1, 2, 3, 4, 5] |> map(times3)
 
 // ===== Closure with captured collection =====
 fn make_lookup(data: map) => fn(key: string) => data.(key)
@@ -56,7 +56,7 @@ lookup("age")
 
 // ===== Closure as predicate =====
 fn greater_than(threshold: int) => fn(x: int) => x > threshold
-[1, 5, 10, 15, 20] | filter(greater_than(8))
+[1, 5, 10, 15, 20] |> filter(greater_than(8))
 
 // ===== Function factory =====
 fn make_formatter(prefix: string, suffix: string) =>

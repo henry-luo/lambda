@@ -1,0 +1,24 @@
+'=== literal empty string ==='
+false
+true
+true
+true
+string
+0
+true
+"fallback"
+'=== non-empty contrast ==='
+false
+true
+false
+"xrhs"
+'=== match and filters ==='
+"stringotherAliceCharlieBob"
+'=== data-derived empty string ==='
+true
+false
+true
+0
+'=== string pattern ==='
+true
+true

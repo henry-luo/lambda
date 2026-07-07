@@ -102,7 +102,7 @@ for item in items { transform(item) }
 // Only allowed in pn (procedural functions)
 var counter = 0
 counter = counter + 1
-data |> "/tmp/output.json"
+output(data, "./temp/output.json")
 io.mkdir("./output")
 ```
 
@@ -186,11 +186,11 @@ Strings are UTF-8 text values enclosed in double quotes:
 "hello world"
 "line1\nline2"        // with escape sequences
 "unicode: 你好"       // Unicode supported
-""                    // null
+""                    // empty string
 ```
 
-The empty string literal `""` is normalized to `null`. For user data, treat
-`string` values as non-empty and use `null` for the empty case.
+The empty string literal `""` is a real string value with length 0. It is falsy,
+but it is not `null`.
 
 ### Symbols
 
@@ -204,22 +204,20 @@ Symbols are interned identifiers enclosed in single quotes. They are used for:
 'hello'
 'json'
 'content-type'
-''                    // null
-
 // Common uses
 let format = 'json'
 let tag = 'div'
 {name: "Alice", type: 'user'}
 ```
 
-The empty symbol literal `''` is normalized to `null`. For user data, treat
-`symbol` values as non-empty and use `null` for the empty case.
+The empty symbol literal `''` is invalid syntax. Symbols are solid identifiers;
+runtime operations that would produce an empty symbol return `null`.
 
 **Key differences from strings:**
 - Symbols are interned (only one copy exists in memory)
 - Faster equality comparison (pointer comparison)
 - Used for structural identifiers, not arbitrary text
-- Empty symbol literal `''` is `null`
+- Empty symbol literal `''` is invalid; use `null` for absence
 
 ### Symbol Operations
 

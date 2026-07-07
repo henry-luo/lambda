@@ -10,24 +10,24 @@ let data = [
 ]
 
 // Extract names
-data | ~.name
+data |> ~.name
 
 // Filter by age
-data that (~.age >= 30) | ~.name
+data that (~.age >= 30) |> ~.name
 
 // Count
 len(data)
 len(data that (~.dept == "eng"))
 
 // Average age
-avg(data | ~.age)
+avg(data |> ~.age)
 
 // Transform to new structure
-data | {person: ~.name, years: ~.age}
+data |> {person: ~.name, years: ~.age}
 
 // Sum ages
-sum(data | ~.age)
+sum(data |> ~.age)
 
 // Youngest and oldest
-min(data | ~.age)
-max(data | ~.age)
+min(data |> ~.age)
+max(data |> ~.age)

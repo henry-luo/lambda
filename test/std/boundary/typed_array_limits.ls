@@ -36,7 +36,7 @@ let big_int: int[] = for (i in 1 to 1000) i
 len(big_int)
 big_int[0]
 big_int[999]
-big_int | sum()
+big_int |> sum()
 
 // ===== Large typed float array =====
 let big_float: float[] = for (i in 1 to 100) float(i) * 0.1
@@ -45,26 +45,26 @@ big_float[0]
 big_float[99]
 
 // ===== Typed array operations =====
-ia | sum()
-ia | avg()
-ia | min()
-ia | max()
+ia |> sum()
+ia |> avg()
+ia |> min()
+ia |> max()
 
-fa | sum()
-fa | avg()
+fa |> sum()
+fa |> avg()
 
 // ===== Typed array sort =====
 let unsorted: int[] = [5, 3, 1, 4, 2]
-unsorted | sort()
+unsorted |> sort()
 
 // ===== Typed array reverse =====
-ia | reverse()
+ia |> reverse()
 
 // ===== Typed array filter (returns regular array) =====
-ia | filter((x) => x > 2)
+ia |> filter((x) => x > 2)
 
 // ===== Typed array map =====
-ia | map((x) => x * x)
+ia |> map((x) => x * x)
 
 // ===== Empty typed array =====
 let empty_ia: int[] = []

@@ -243,9 +243,15 @@ fn get_child_text(child) {
 pub fn parse_kv_options(text) {
     if (text == null) { {} }
     else {
-        let parts = split(trim(text), ",")
-        let pairs = build_kv_pairs(parts, 0, len(parts), [])
-        map(pairs)
+        let trimmed = trim(text)
+        if (trimmed == "") {
+            // empty option text is a present-but-empty option list, not absence.
+            {}
+        } else {
+            let parts = split(trimmed, ",")
+            let pairs = build_kv_pairs(parts, 0, len(parts), [])
+            map(pairs)
+        }
     }
 }
 

@@ -136,12 +136,12 @@ pub fn unique_vals(arr) {
 
 // extract unique values from an array by a key function
 pub fn unique_by(arr, key_fn) {
-    unique_vals(arr | key_fn(~))
+    unique_vals(arr |> key_fn(~))
 }
 
 // group an array by a field name, returns list of {key, items} maps
 pub fn group_by(arr, field: string) {
-    let all_keys = unique_vals(arr | ~[field]);
+    let all_keys = unique_vals(arr |> ~[field]);
     (for (k in all_keys)
         {key: k, items: (arr that ~[field] == k)})
 }
@@ -153,11 +153,11 @@ pub fn extent(arr) {
 
 // find extent of a field in an array of maps
 pub fn field_extent(arr, field: string) {
-    let vals = arr | ~[field];
+    let vals = arr |> ~[field];
     [min(vals), max(vals)]
 }
 
 // get unique values of a field
 pub fn field_values(arr, field: string) {
-    unique_vals(arr | ~[field])
+    unique_vals(arr |> ~[field])
 }

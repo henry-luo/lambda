@@ -30,19 +30,19 @@ let operations = [
     <SquareOp value: 6>,
     <AddOp a: 10, b: 20>
 ]
-let results = operations | map(evaluate)
+let results = operations |> map(evaluate)
 results
 
 // ===== Accumulate results =====
-results | sum()
+results |> sum()
 
 // ===== Filter by type =====
-operations | filter((op) => op is AddOp) | map(evaluate)
-operations | filter((op) => op is MulOp) | map(evaluate)
+operations |> filter((op) => op is AddOp) |> map(evaluate)
+operations |> filter((op) => op is MulOp) |> map(evaluate)
 
 // ===== Chain operations =====
 fn chain_ops(value: int, ops: list) {
-    ops | reduce(fn(acc, op) => match op {
+    ops |> reduce(fn(acc, op) => match op {
         case 'add': acc + 1
         case 'double': acc * 2
         case 'negate': -acc

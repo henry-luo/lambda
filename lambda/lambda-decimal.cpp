@@ -18,7 +18,7 @@
 // Global Contexts
 // ─────────────────────────────────────────────────────────────────────
 
-static mpd_context_t g_fixed_ctx;      // 38-digit precision
+static mpd_context_t g_fixed_ctx;      // 34-digit decimal128 precision
 static mpd_context_t g_unlimited_ctx;  // Max precision
 static bool g_initialized = false;
 
@@ -29,8 +29,9 @@ static bool g_initialized = false;
 void decimal_init() {
     if (g_initialized) return;
     
-    // Initialize fixed-precision context (38 digits, matches Python default)
+    // Initialize fixed-precision context (decimal128 precision)
     mpd_defaultcontext(&g_fixed_ctx);
+    g_fixed_ctx.prec = DECIMAL_FIXED_PRECISION;
     
     // Initialize unlimited-precision context (high but practical precision)
     // mpd_maxcontext has absurdly high precision (10^18) which crashes mpd_pow.
@@ -355,6 +356,35 @@ Item decimal_from_string_arena(const char* str, void* arena_ptr) {
     dec->unlimited = 0;
     dec->dec_val = dec_val;
     
+    Item result;
+    result.item = c2it(dec);
+    return result;
+}
+
+Item decimal_from_integer_string_arena(const char* str, void* arena_ptr) {
+    if (!str || !arena_ptr) return ItemNull;
+
+    Arena* arena = (Arena*)arena_ptr;
+    mpd_context_t* ctx = decimal_unlimited_context();
+    mpd_t* dec_val = mpd_new(ctx);
+    if (!dec_val) return ItemNull;
+
+    uint32_t status = 0;
+    mpd_qset_string(dec_val, str, ctx, &status);
+    if (status != 0 || mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
+        mpd_del(dec_val);
+        return ItemNull;
+    }
+
+    Decimal* dec = (Decimal*)arena_alloc(arena, sizeof(Decimal));
+    if (!dec) {
+        mpd_del(dec_val);
+        return ItemNull;
+    }
+
+    dec->unlimited = 1;
+    dec->dec_val = dec_val;
+
     Item result;
     result.item = c2it(dec);
     return result;

@@ -35,7 +35,7 @@ str(/hello/world)
 
 // ===== Path in filter =====
 let all_paths = [/api/users, /api/posts, /web/home, /web/about]
-all_paths | filter((p) => str(p) | starts_with("/api"))
+all_paths |> filter((p) => str(p) |> starts_with("/api"))
 
 // ===== Path in element =====
 let link = <a href: /about/us> "About Us"

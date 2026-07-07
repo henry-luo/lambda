@@ -34,7 +34,7 @@ let data = <data>
     <item status: "active"> "one"
     <item status: "inactive"> "two"
     <item status: "active"> "three"
-data?item | filter((e) => e.status == "active") | map((e) => str(e[0]))
+data?item |> filter((e) => e.status == "active") |> map((e) => str(e[0]))
 
 // ===== Query on complex tree =====
 let html = <html>
@@ -46,7 +46,7 @@ let html = <html>
             <p> "World"
         <div>
             <p> "More"
-html?p | map((e) => str(e[0]))
+html?p |> map((e) => str(e[0]))
 
 // ===== Multiple child types =====
 let mix = <container>

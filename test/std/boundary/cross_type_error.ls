@@ -64,4 +64,4 @@ m.ok
 m.fail is error
 
 // ===== Filter out errors =====
-[1, error("a"), 2, error("b"), 3] | filter((x) => x is int)
+[1, error("a"), 2, error("b"), 3] |> filter((x) => x is int)

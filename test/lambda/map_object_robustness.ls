@@ -142,8 +142,8 @@ z.b
 z.s == ""
 
 // 5c: large int values
-type BigVal = {val: int}
-let big: BigVal = {val: 9007199254740992}
+type BigVal = {val: int64}
+let big: BigVal = {val: 9007199254740992i64}
 '=5c='
 big.val
 

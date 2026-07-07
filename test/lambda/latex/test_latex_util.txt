@@ -5,7 +5,7 @@ false
 "24. parbreak other:"
 false
 "25. ws empty:"
-false
+true
 "26. ws spaces:"
 true
 "27. ws text:"

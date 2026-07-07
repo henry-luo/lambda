@@ -578,6 +578,10 @@ Symbol* heap_create_symbol(const char* symbol, size_t len) {
         log_error("heap_create_symbol called with invalid context or null symbol");
         return nullptr;
     }
+    if (len == 0) {
+        // Symbols are solid identifiers; runtime producers return null for zero-length results.
+        return nullptr;
+    }
     Symbol* sym = (Symbol*)heap_alloc(sizeof(Symbol) + len + 1, LMD_TYPE_SYMBOL);
     sym->len = len;
     sym->ns = nullptr;

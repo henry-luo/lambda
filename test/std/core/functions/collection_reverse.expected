@@ -2,6 +2,5 @@
 2
 1
 1
-"cba"
-false
-true
+["cba"]
+[false, true]

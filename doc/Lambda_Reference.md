@@ -108,9 +108,8 @@ The Lambda language documentation is organized into focused sub-documents for ea
 types, so `'json' == "json"` is `false`; convert explicitly with `string(...)`
 or `symbol(...)` when needed.
 
-Empty text identifiers normalize to `null`: `"" == null` and `'' == null` are
-both `true`. For user data, treat strings and symbols as non-empty and use
-`null` for the empty case.
+The empty string `""` is a real string value with length 0 and is falsy.
+The empty symbol literal `''` is invalid; use `null` for absence.
 
 #### Type System (see [Lambda_Type.md](Lambda_Type.md))
 
@@ -376,7 +375,7 @@ if (err != null) {
 let data = input("sales.json", 'json');
 
 // Calculate total sales
-let total = data.sales | ~.amount | sum;
+let total = data.sales |> ~.amount |> sum;
 
 // Filter high-value sales
 let high_value = data.sales where ~.amount > 1000;
@@ -457,7 +456,7 @@ pn main() {
     }
 
     // Save results
-    {processed: count, time: now()} |> "./output/summary.json"
+    output({processed: count, time: now()}, "./output/summary.json")
 
     print("Done! Processed", count, "items")
 }

@@ -5,10 +5,12 @@
 
 #include "input-utils.hpp"
 #include "../lambda-data.hpp"
+#include "../lambda-decimal.hpp"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
 #include "../../lib/utf.h"
 #include <ctype.h>
+#include <errno.h>
 #include "../../lib/mem.h"
 #include <string.h>
 
@@ -84,6 +86,36 @@ int input_strncasecmp(const char* s1, const char* s2, size_t n) {
 
 namespace lambda {
 
+Item parse_integer_token_exact(InputContext& ctx, const char* str, size_t len) {
+    if (!str || len == 0) return ItemNull;
+
+    char stack_buf[128];
+    char* num_str = stack_buf;
+    bool heap_buf = false;
+    if (len >= sizeof(stack_buf)) {
+        num_str = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_OTHER);
+        if (!num_str) return ItemNull;
+        heap_buf = true;
+    }
+    memcpy(num_str, str, len);
+    num_str[len] = '\0';
+
+    char* end;
+    errno = 0;
+    int64_t int_value = strtoll(num_str, &end, 10);
+    if (errno == 0 && end == num_str + len) {
+        // integer input climbs int -> int64 before decimal; avoid double as an intermediate.
+        Item result = (int_value >= INT56_MIN && int_value <= INT56_MAX) ?
+            ctx.builder.createInt(int_value) : ctx.builder.createLong(int_value);
+        if (heap_buf) mem_free(num_str);
+        return result;
+    }
+
+    Item decimal_item = decimal_from_integer_string_arena(num_str, ctx.builder.arena());
+    if (heap_buf) mem_free(num_str);
+    return decimal_item;
+}
+
 Item parse_typed_value(InputContext& ctx, const char* str, size_t len) {
     if (!str || len == 0) {
         return {.item = ITEM_NULL};
@@ -137,13 +169,9 @@ Item parse_typed_value(InputContext& ctx, const char* str, size_t len) {
                 }
             }
         } else {
-            int64_t lval;
-            if (try_parse_int64(str, len, &lval)) {
-                int64_t* lval_ptr = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
-                if (lval_ptr) {
-                    *lval_ptr = lval;
-                    return {.item = l2it(lval_ptr)};
-                }
+            Item int_item = parse_integer_token_exact(ctx, str, len);
+            if (int_item.item != ITEM_NULL) {
+                return int_item;
             }
         }
     }

@@ -552,8 +552,8 @@ types freely:
 `[int]` = exactly-one is forced by compositionality (banning it would break
 composition at n = 1) and is enforced: `let xs: [int] = [1,2,3]` is a compile
 error whose message teaches ("did you mean `int[]`?"); a lint hints on bare
-`[T]` in annotation position only — never in pattern positions, where the
-composition is the point. [C7]
+`[T]` occurrences that `[T]` is an exact-one pattern and `T[]` is the
+homogeneous-array spelling. [C7]
 
 ### 11.2 Structural `is`, nominal objects
 

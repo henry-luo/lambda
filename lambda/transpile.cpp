@@ -1997,6 +1997,13 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         transpile_box_item(tp, bi_node->right);
         strbuf_append_char(tp->code_buf, ')');
     }
+    else if (bi_node->op == OPERATOR_UNION) {
+        strbuf_append_str(tp->code_buf, "fn_union(");
+        transpile_box_item(tp, bi_node->left);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_box_item(tp, bi_node->right);
+        strbuf_append_char(tp->code_buf, ')');
+    }
     else {
         log_error("Error: unknown binary operator %d", bi_node->op);
         strbuf_append_str(tp->code_buf, "null");  // should be error

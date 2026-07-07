@@ -16,7 +16,7 @@ triple_fn(5)
 
 // Pipeline chain
 let evens = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] that (~ % 2 == 0)
-let squares = evens | ~ * ~
+let squares = evens |> ~ * ~
 sum(squares)
 
 // Nested for with let

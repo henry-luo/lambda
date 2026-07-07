@@ -23,13 +23,13 @@ MathModule.radians_to_degrees(MathModule.PI)
 
 // "String utils module"
 let StringUtils = {
-    capitalize: fn(s: string) => upper(s | slice(0, 1)) & (s | slice(1)),
+    capitalize: fn(s: string) => upper(s |> slice(0, 1)) & (s |> slice(1)),
     repeat_str: fn(s: string, n: int) {
         for (i in 1 to n) s
-        | join("")
+        |> join("")
     },
     is_blank: fn(s: string) => s == "" or s == null,
-    word_count: fn(s: string) => len(s | split(" "))
+    word_count: fn(s: string) => len(s |> split(" "))
 }
 StringUtils.capitalize("hello")
 StringUtils.repeat_str("ab", 3)
@@ -41,7 +41,7 @@ StringUtils.word_count("the quick brown fox")
 let CollectionUtils = {
     chunk: fn(arr, size: int) {
         for (i in 0 to len(arr) - 1 where i % size == 0)
-            arr | slice(i, min(i + size, len(arr)))
+            arr |> slice(i, min(i + size, len(arr)))
     },
     zip: fn(a, b) {
         for (i in 0 to min(len(a), len(b)) - 1) [a[i], b[i]]

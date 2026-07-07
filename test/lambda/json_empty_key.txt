@@ -1,0 +1,12 @@
+'=== json empty key ==='
+1
+2
+true
+true
+'=== round trip ==='
+"{
+  "": 1,
+  "regular": 2
+}"
+true
+true

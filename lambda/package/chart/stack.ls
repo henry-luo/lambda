@@ -7,7 +7,7 @@ import util: .util
 // Returns data with added _y0 and _y1 fields
 // mode: "zero" | "normalize" | "center"
 pub fn apply_stack(data, y_field, group_field, x_field, mode) {
-    let groups = util.unique_vals(data | ~[group_field])
+    let groups = util.unique_vals(data |> ~[group_field])
     let stacked = for (d in data) (
         let g_idx = find_index(groups, d[group_field]),
         let y0 = sum_preceding(data, x_field, d[x_field], group_field, groups, y_field, g_idx),
@@ -44,7 +44,7 @@ fn add_stack_fields(row, y0, y1) {
 
 fn get_x_max_y1(stacked, x_field, x_val) {
     let by_x = stacked that (~[x_field] == x_val)
-    let y1_vals = by_x | float(~["_y1"])
+    let y1_vals = by_x |> float(~["_y1"])
     if (len(y1_vals) > 0) max(y1_vals) else 0.0
 }
 
