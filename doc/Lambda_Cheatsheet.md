@@ -131,8 +131,9 @@ string"
 'symbol'          // Symbol
 symbol            // Unquoted symbol
 'name' == "name"  // false: symbol != string
-"" == null        // true: empty string is null
-'' == null        // true: empty symbol is null
+"" == null        // false: empty string is a string value
+not ""            // true: empty string is falsy
+// '' is invalid: empty symbols do not exist
 ```
 
 **Binary:**
@@ -273,25 +274,25 @@ Use `++` for list/array concat: `[1,2] ++ [3,4] = [1,2,3,4]`.
 
 ## Pipe Expressions
 
-**Pipe `|` with current item `~`:**
+**Pipe `|>` with current item `~`:**
 ```lambda
-[1,2,3] | ~ * 2          // [2,4,6] - map over items
-[1,2,3] | sum            // 6 - aggregate (no ~)
-users | ~.age            // [12,20,62] - extract field
-['a','b'] | {i:~#, v:~}  // ~# = index/key
+[1,2,3] |> ~ * 2          // [2,4,6] - map over items
+[1,2,3] |> sum            // 6 - aggregate (no ~)
+users |> ~.age            // [12,20,62] - extract field
+['a','b'] |> {i:~#, v:~}  // ~# = index/key
 ```
 
 **Filter with `that`:**
 ```lambda
 [1,2,3,4,5] that (~ > 3)         // [4,5]
-users that (age >= 18) | ~.name  // filter then map
-[1,2,3] | ~ ** 2 that (~ > 5) | sum // 13 (4+9)
+users that (age >= 18) |> ~.name  // filter then map
+[1,2,3] |> ~ ** 2 that (~ > 5) |> sum // 13 (4+9)
 ```
 
 **Spreading in Array Literals:** pipe and filter results flatten
 ```lambda
-[1, [2,3] | ~, 4, 5]           // [1, 2, 3, 4, 5]
-[0, [1,2,3] | ~ * 10, 99]      // [0, 10, 20, 30, 99]
+[1, [2,3] |> ~, 4, 5]          // [1, 2, 3, 4, 5]
+[0, [1,2,3] |> ~ * 10, 99]     // [0, 10, 20, 30, 99]
 [1, [3,5,7] that (~ > 4), 9]   // [1, 5, 7, 9]
 ```
 
@@ -324,13 +325,13 @@ el[element]     // direct child elements only
 el[string]      // attr values + text children
 ```
 
-## Pipe to File (procedural only)
+## File Output (procedural only)
 ```lambda
 // Target can be string, symbol, or path
-data |> 'output.txt'        // file under CWD
-data |> /tmp.'output.txt'   // output at full path
-data |>> "output.txt"       // append to file
-data | format('json') |> "output.json"
+output(data, 'output.txt')       // file under CWD
+output(data, "./temp/output.txt") // output at a relative path
+output(data, "output.txt", {mode: "append"})
+output(data |> format('json'), "output.json")
 ```
 Data type determines output format:
 

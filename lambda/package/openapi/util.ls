@@ -32,7 +32,7 @@ pub fn get_or(m, key, fallback) {
 // check if a value is in an array
 pub fn list_contains(arr, val) {
     if (arr == null) false
-    else any(arr | ~ == val)
+    else any(arr |> ~ == val)
 }
 
 // ============================================================

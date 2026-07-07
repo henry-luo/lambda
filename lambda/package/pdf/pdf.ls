@@ -240,7 +240,7 @@ fn _collect_font_face_loop(pdf, i, n, seen, rules) {
 fn _collect_font_face_rules(pdf, limit) {
     let total = resolve.page_count(pdf)
     let n = _bounded_count(total, limit)
-    _collect_font_face_loop(pdf, 0, n, [], []) | join("")
+    _collect_font_face_loop(pdf, 0, n, [], []) |> join("")
 }
 
 fn _bounded_count(total, limit) {

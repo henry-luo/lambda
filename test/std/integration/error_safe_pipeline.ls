@@ -66,4 +66,4 @@ we.source.message
 
 // ===== Batch processing with error handling =====
 let inputs = [("10", "2"), ("abc", "1"), ("20", "0"), ("15", "3")]
-inputs | map((pair) => process(pair[0], pair[1]) or "ERROR")
+inputs |> map((pair) => process(pair[0], pair[1]) or "ERROR")

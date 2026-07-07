@@ -41,11 +41,11 @@ events.end.month
 
 // ===== DateTime sorting =====
 let unsorted = [t'2024-12-01', t'2024-01-15', t'2024-06-30']
-unsorted | sort()
+unsorted |> sort()
 
 // ===== DateTime filter =====
 let year_dates = [t'2023-06-01', t'2024-03-15', t'2024-09-01', t'2025-01-01']
-year_dates | filter((d) => d.year == 2024)
+year_dates |> filter((d) => d.year == 2024)
 
 // ===== Time comparison =====
 let t1 = t'08:00:00'

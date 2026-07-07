@@ -195,6 +195,8 @@ typedef struct TypeArray : Type {
     Type* nested;  // nested item type for the array
     int64_t length;  // no. of items in the array/map
     int type_index;  // index of the type in the type list
+    Item* item_patterns;  // exact per-slot pattern values for tuple-style [T, v]
+    uint8_t* item_is_type_pattern;  // slot uses fn_is instead of fn_eq
 } TypeArray;
 
 typedef TypeArray TypeList;

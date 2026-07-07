@@ -1,0 +1,7 @@
+"type union expression:"
+[true, true, false]
+"whole-value pipe:"
+6
+"mapping pipe:"
+[2, 4, 6]
+"call pipe chain:a-b-c"

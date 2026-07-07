@@ -62,4 +62,4 @@ len(page?<div>?<p>)    // 1 (<p> inside inner div)
 
 // === 9. Query with pipe ===
 "--- query + pipe ---"
-page?<p> | len(~)      // content length of each <p>
+page?<p> |> len(~)      // content length of each <p>

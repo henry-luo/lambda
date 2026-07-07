@@ -119,7 +119,7 @@ e_approx ** 2
 golden_ratio**2 - golden_ratio - 1
 
 "===== BOUNDARY VALUES ====="
-let max_precision = 1.23456789012345678901234567890123456789n
+let max_precision = 1.234567890123456789012345678901234n
 let min_nonzero = 0.00000000000000000000000000000000000001n
 max_precision
 min_nonzero

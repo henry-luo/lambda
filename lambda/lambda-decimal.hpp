@@ -1,7 +1,7 @@
 // lambda/lambda-decimal.hpp - Centralized decimal handling for Lambda
 // =====================================================================
 // This module handles all decimal operations including:
-// - Fixed-precision decimals (38 digits, suffix 'n')
+// - Fixed-precision decimals (34 digits, suffix 'n')
 // - Unlimited-precision decimals (arbitrary precision, suffix 'N')
 #pragma once
 
@@ -24,8 +24,8 @@ typedef uint8_t TypeId;
 // Constants
 // ─────────────────────────────────────────────────────────────────────
 
-// Fixed decimal precision (38 digits - matches mpd_defaultcontext)
-#define DECIMAL_FIXED_PRECISION 38
+// Fixed decimal precision (decimal128)
+#define DECIMAL_FIXED_PRECISION 34
 
 // ─────────────────────────────────────────────────────────────────────
 // Context Management
@@ -37,7 +37,7 @@ void decimal_init();
 // Cleanup decimal subsystem (call at shutdown)
 void decimal_cleanup();
 
-// Get the fixed-precision context (38 digits)
+// Get the fixed-precision context (34 digits)
 mpd_context_t* decimal_fixed_context();
 
 // Get the unlimited-precision context
@@ -88,6 +88,9 @@ Item decimal_deep_copy(Item item, void* arena, bool is_unlimited);
 // Use this in input parsers where GC-heap allocation is not safe.
 // Returns ItemNull if str is null or parse fails.
 Item decimal_from_string_arena(const char* str, void* arena_ptr);
+
+// Create an exact extended decimal Item from an oversized integer token.
+Item decimal_from_integer_string_arena(const char* str, void* arena_ptr);
 
 // Create a fixed decimal Item from a double, with Decimal struct arena-allocated.
 Item decimal_from_double_arena(double val, void* arena_ptr);

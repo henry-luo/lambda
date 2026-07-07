@@ -19,7 +19,7 @@
 
 // 5. Replace NaN with 0
 "5. Replace NaN"
-[1, 2, nan, 4, nan] | (if (~ is nan) 0 else ~)
+[1, 2, nan, 4, nan] |> (if (~ is nan) 0 else ~)
 
 // 6. Value equality via 'is'
 "6. Value equality"

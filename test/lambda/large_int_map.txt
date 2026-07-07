@@ -84,7 +84,7 @@
     null_value: null
   },
   str_section: {
-    empty_str: null,
+    empty_str: "",
     short: "abc",
     longer: "This is a longer string",
     another: "More text here",

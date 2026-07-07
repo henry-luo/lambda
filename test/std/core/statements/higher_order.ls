@@ -27,22 +27,22 @@ double_inc(10)
 
 // ===== Pipeline of functions =====
 fn pipeline(fns: list, value) {
-    fns | reduce(fn(acc, f) => f(acc), value)
+    fns |> reduce(fn(acc, f) => f(acc), value)
 }
 pipeline([fn(x) => x + 1, fn(x) => x * 2, fn(x) => x - 3], 5)
 
 // ===== Map with function =====
-fn transform_all(items, f) => items | map(f)
+fn transform_all(items, f) => items |> map(f)
 transform_all([1, 2, 3], fn(x) => x * 10)
 transform_all(["a", "b", "c"], fn(s) => s & s)
 
 // ===== Filter with predicate =====
-fn select_where(items, predicate) => items | filter(predicate)
+fn select_where(items, predicate) => items |> filter(predicate)
 select_where([1, 2, 3, 4, 5, 6], fn(x) => x > 3)
 select_where(["hello", "hi", "hey", "h"], fn(s) => len(s) > 2)
 
 // ===== Fold/reduce with custom function =====
-fn fold(items, f, init) => items | reduce(f, init)
+fn fold(items, f, init) => items |> reduce(f, init)
 fold([1, 2, 3, 4], fn(acc, x) => acc + x, 0)
 fold([1, 2, 3, 4], fn(acc, x) => acc * x, 1)
 

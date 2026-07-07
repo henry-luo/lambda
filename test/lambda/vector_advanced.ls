@@ -118,7 +118,8 @@ for (x in [1, 2, 3]) x * 2
 [6, 8, 10] / [2, 0, 2]
 
 // Modulo by zero
-[5, 10, 15] % 0
+let zero_divisor = 0
+[5, 10, 15] % zero_divisor
 [10, 20] % [5, 0]
 
 "=== Vector Comparisons ==="

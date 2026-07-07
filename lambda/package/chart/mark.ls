@@ -125,7 +125,7 @@ pub fn line_mark(data, ctx, mark_config) {
     // group by detail field first, then color field
     let group_field = if (detail_field) detail_field else color_field;
     let series = if (group_field)
-        (let groups = util.unique_vals(data | ~[group_field]),
+        (let groups = util.unique_vals(data |> ~[group_field]),
         (for (g in groups) (
             let group_items = data that ~[group_field] == g,
             {
@@ -179,7 +179,7 @@ pub fn area_mark(data, ctx, mark_config) {
     // group by detail field first, then color field
     let group_field = if (detail_field) detail_field else color_field;
     let series = if (group_field)
-        (let groups = util.unique_vals(data | ~[group_field]),
+        (let groups = util.unique_vals(data |> ~[group_field]),
         (for (g in groups) (
             let group_items = data that ~[group_field] == g,
             {
@@ -281,7 +281,7 @@ pub fn arc_mark(data, ctx, mark_config) {
     let pad = if (mark_config and mark_config.pad_angle) mark_config.pad_angle else 0.0;
 
     // compute total
-    let total = sum(data | float(~[theta_field]));
+    let total = sum(data |> float(~[theta_field]));
 
     // build cumulative angle array
     let angle_data = (for (i in 0 to (len(data) - 1)) (
@@ -421,7 +421,7 @@ pub fn boxplot_mark(data, ctx, mark_config) {
     let box_w = if (x_scale.bandwidth) x_scale.bandwidth * 0.6 else 20.0;
 
     // group data by x field
-    let groups = util.unique_vals(data | ~[x_field]);
+    let groups = util.unique_vals(data |> ~[x_field]);
     let elements = (for (g in groups) (
         let items = data that ~[x_field] == g,
         let vals = (for (d in items) float(d[y_field])),

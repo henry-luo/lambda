@@ -100,12 +100,13 @@ String* MarkBuilder::createName(const char* name) {
 }
 
 String* MarkBuilder::createName(const char* name, size_t len) {
-    if (!name || len == 0) return nullptr;
+    if (!name) return nullptr;
+    // JSON and similar formats can carry an empty object key; preserve it as a structural name.
     return name_pool_create_len(name_pool_, name, len);
 }
 
 String* MarkBuilder::createNameFromStrView(StrView name) {
-    if (!name.str || name.length == 0) return nullptr;
+    if (!name.str) return nullptr;
     return name_pool_create_strview(name_pool_, name);
 }
 
@@ -142,9 +143,9 @@ String* MarkBuilder::createString(const char* str) {
 }
 
 String* MarkBuilder::createString(const char* str, size_t len) {
-    if (!str || len == 0) return nullptr;
+    if (!str) return nullptr;
 
-    // Allocate from arena (fast sequential allocation, no deduplication)
+    // Empty strings are values in Phase 3, so content producers must not collapse them to null.
     String* s = (String*)arena_alloc(arena_, sizeof(String) + len + 1);
     s->len = len;
     s->is_ascii = str_is_ascii(str, len) ? 1 : 0;
@@ -154,7 +155,7 @@ String* MarkBuilder::createString(const char* str, size_t len) {
 }
 
 String* MarkBuilder::createStringFromBuf(StringBuf* sb) {
-    if (!sb || sb->length == 0) return nullptr;
+    if (!sb) return nullptr;
     return createString(sb->str->chars, sb->length);
 }
 

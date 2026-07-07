@@ -267,7 +267,7 @@ fn _implicit_encoding(stripped: string, explicit) {
 fn _strip_subset(name: string) {
     if (len(name) > 7 and name[6] == "+") {
         let parts = (for (k in 7 to (len(name) - 1)) name[k])
-        parts | join("")
+        parts |> join("")
     }
     else { name }
 }
@@ -388,9 +388,9 @@ fn _strip_quoted_prefix(family: string, name: string) {
     if (flen <= plen) { family }
     else {
         // build the leading slice as a string and compare
-        let head = (for (i in 0 to (plen - 1)) family[i]) | join("")
+        let head = (for (i in 0 to (plen - 1)) family[i]) |> join("")
         if (head == prefix) {
-            (for (i in plen to (flen - 1)) family[i]) | join("")
+            (for (i in plen to (flen - 1)) family[i]) |> join("")
         }
         else { family }
     }
@@ -635,7 +635,7 @@ pub fn decode_hex(hex: string, to_unicode) {
     else {
         let codes = _hex_to_codes(clean)
         let parts = (for (c in codes) _decode_code(c, null))
-        parts | join("")
+        parts |> join("")
     }
 }
 
@@ -647,7 +647,7 @@ pub fn decode_hex_with_font(hex: string, font_info) {
     else {
         let codes = _hex_to_codes(clean)
         let parts = (for (c in codes) _decode_code_with_encoding(c, null, enc))
-        parts | join("")
+        parts |> join("")
     }
 }
 
@@ -659,7 +659,7 @@ pub fn decode_literal(s: string, to_unicode) {
     else {
         let n = len(s)
         let parts = (for (i in 0 to (n - 1)) _decode_code(ord(s[i]), to_unicode))
-        parts | join("")
+        parts |> join("")
     }
 }
 
@@ -670,6 +670,6 @@ pub fn decode_literal_with_font(s: string, font_info) {
     if (n == 0) { "" }
     else {
         let parts = (for (i in 0 to (n - 1)) _decode_code_with_encoding(ord(s[i]), cmap, enc))
-        parts | join("")
+        parts |> join("")
     }
 }

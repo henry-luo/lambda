@@ -1,5 +1,5 @@
-type.null
-true
+string
+false
 1
 "hello
 worldtab	herequote"inside"

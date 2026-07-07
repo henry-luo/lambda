@@ -307,12 +307,12 @@ Lambda has simple truthiness rules:
 | `null`       |                                                                      |
 | `false`      |                                                                      |
 | `error`      | error is falsy, which allows idiom like: `err or fallback`           |
-| `""`, `''`   | Empty string and empty symbol literals are normalized to `null`      |
+| `""`         | Empty string is a real string value with length 0                    |
 
 | Truthy Values (Everything Else)                          |
 | -------------------------------------------------------- |
 | `true`, all numbers (including `0`)                      |
-| All non-empty string and symbol values                   |
+| All non-empty strings and all symbol values              |
 | All collections (including `[]`, `{}`)                   |
 | All functions                                            |
 **Important**: Unlike many languages, `0` and empty collections are **truthy** in Lambda.
@@ -322,8 +322,7 @@ if (0) "yes" else "no"           // "yes" - 0 is truthy
 if ([]) "yes" else "no"          // "yes" - empty array is truthy
 if (null) "yes" else "no"        // "no" - null is falsy
 if (false) "yes" else "no"       // "no" - false is falsy
-if ("") "yes" else "no"          // "no" - "" is normalized to null
-if ('') "yes" else "no"          // "no" - '' is normalized to null
+if ("") "yes" else "no"          // "no" - empty string is falsy
 ```
 
 ---
@@ -394,15 +393,15 @@ items.reverse()    // null
 
 ## Pipe Expressions
 
-The pipe operator (`|`) enables fluent, left-to-right data transformation.
+The pipe operator (`|>`) enables fluent, left-to-right data transformation.
 
 ### Basic Pipe Syntax
 
 ```lambda
-<collection> | <expression-with-~>
+<collection> |> <expression-with-~>
 ```
 
-- **`|`** — Set-oriented pipe operator
+- **`|>`** — Pipe operator
 - **`~`** — Current item reference
 
 ### Auto-Mapping Over Collections
@@ -411,15 +410,15 @@ When the left side is a collection, `~` binds to each item:
 
 ```lambda
 // Double each number
-[1, 2, 3] | ~ * 2
+[1, 2, 3] |> ~ * 2
 // Result: [2, 4, 6]
 
 // Extract field from each item
-users | ~.name
+users |> ~.name
 // Result: ["Alice", "Bob", "Charlie"]
 
 // Transform each item
-["hello", "world"] | ~ ++ "!"
+["hello", "world"] |> ~ ++ "!"
 // Result: ["hello!", "world!"]
 ```
 
@@ -428,10 +427,10 @@ users | ~.name
 When the left side is a scalar, `~` binds to the whole value:
 
 ```lambda
-42 | ~ * 2
+42 |> ~ * 2
 // Result: 84
 
-"hello" | ~ ++ " world"
+"hello" |> ~ ++ " world"
 // Result: "hello world"
 ```
 
@@ -439,8 +438,8 @@ When the left side is a scalar, `~` binds to the whole value:
 
 ```lambda
 [1, 2, 3, 4, 5]
-    | ~ ** 2           // square: [1, 4, 9, 16, 25]
-    | ~ + 1           // add 1: [2, 5, 10, 17, 26]
+    |> ~ ** 2          // square: [1, 4, 9, 16, 25]
+    |> ~ + 1           // add 1: [2, 5, 10, 17, 26]
 // Result: [2, 5, 10, 17, 26]
 ```
 
@@ -448,11 +447,11 @@ When the left side is a scalar, `~` binds to the whole value:
 
 ```lambda
 // Arrays — ~# is index (0-based)
-['a', 'b', 'c'] | {index: ~#, value: ~}
+['a', 'b', 'c'] |> {index: ~#, value: ~}
 // [{index: 0, value: 'a'}, {index: 1, value: 'b'}, {index: 2, value: 'c'}]
 
 // Maps — ~ is value, ~# is key
-{a: 1, b: 2} | {key: ~#, val: ~}
+{a: 1, b: 2} |> {key: ~#, val: ~}
 // [{key: 'a', val: 1}, {key: 'b', val: 2}]
 ```
 
@@ -461,9 +460,9 @@ When the left side is a scalar, `~` binds to the whole value:
 When `~` is not used, the pipe passes the entire collection/data on left side to right side:
 
 ```lambda
-[3, 1, 4, 1, 5] | sum        // 14
-[3, 1, 4, 1, 5] | sort       // [1, 1, 3, 4, 5]
-[1, 2, 3, 4, 5] | take(3)    // [1, 2, 3]
+[3, 1, 4, 1, 5] |> sum        // 14
+[3, 1, 4, 1, 5] |> sort       // [1, 1, 3, 4, 5]
+[1, 2, 3, 4, 5] |> take(3)    // [1, 2, 3]
 ```
 
 ### That Clause (Filtering)
@@ -1234,17 +1233,13 @@ From highest to lowest:
 
 | Operator | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `\|` | Pipe (transform) | `[1, 2, 3] \| ~ * 2` | `[2, 4, 6]` |
+| `\|` | Union | `[1, 2] \| [2, 3]` | `[1, 2, 3]` |
+| `\|>` | Pipe (transform) | `[1, 2, 3] \|> ~ * 2` | `[2, 4, 6]` |
 | `that` | Filter | `[1, 2, 3, 4] that (~ > 2)` | `[3, 4]` |
 
-### Pipe Output Operators
+### File Output
 
-Available only in procedural (`pn`) functions. See [Lambda Procedural Programming](Lambda_Procedural.md#file-output-operators).
-
-| Operator | Description | Mode |
-|----------|-------------|------|
-| `\|>` | Pipe to file | Write (truncate) |
-| `\|>>` | Pipe append | Append |
+File writes use the procedural `output(...)` function. See [Lambda Procedural Programming](Lambda_Procedural.md#file-output).
 
 ### String/Collection Operators
 

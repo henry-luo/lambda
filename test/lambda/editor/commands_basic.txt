@@ -493,7 +493,7 @@ true
 "split empty block count:"
 true
 "split empty block left:"
-true
+false
 "split empty block right:"
 true
 "split empty block caret:"

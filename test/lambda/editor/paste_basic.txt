@@ -13,7 +13,7 @@ true
 "atomic attrs preserved:"
 true
 "atomic unknown attr stripped:"
-true
+false
 "attr default string:"
 true
 "attr default int:"
