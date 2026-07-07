@@ -382,6 +382,62 @@ static bool is_global_simple_type(const Type* type) {
            type == &TYPE_UINT64;
 }
 
+static bool numeric_literal_text_is_zero(Transpiler* tp, TSNode node) {
+    StrView source = ts_node_source(tp, node);
+    bool saw_digit = false;
+    for (uint32_t i = 0; i < source.length; i++) {
+        char ch = source.str[i];
+        if (ch == 'e' || ch == 'E' || ch == 'n' || ch == 'N') break;
+        if (ch >= '1' && ch <= '9') return false;
+        if (ch == '0') saw_digit = true;
+    }
+    return saw_digit;
+}
+
+static bool ast_primary_numeric_literal_node(AstNode* node, TSNode* lit_node) {
+    if (!node || node->node_type != AST_NODE_PRIMARY) return false;
+    TSNode check = node->node;
+    TSSymbol symbol = ts_node_symbol(check);
+    if (symbol == SYM_PRIMARY_EXPR) {
+        check = ts_node_named_child(check, 0);
+        if (ts_node_is_null(check)) return false;
+        symbol = ts_node_symbol(check);
+        if (symbol == SYM_EXPR) {
+            check = ts_node_named_child(check, 0);
+            if (ts_node_is_null(check)) return false;
+            symbol = ts_node_symbol(check);
+        }
+    }
+    if (symbol != SYM_INT && symbol != SYM_FLOAT && symbol != SYM_DECIMAL &&
+        symbol != SYM_SIZED_INT && symbol != SYM_SIZED_FLOAT) {
+        return false;
+    }
+    *lit_node = check;
+    return true;
+}
+
+static bool ast_numeric_literal_is_zero(Transpiler* tp, AstNode* node) {
+    if (!node || node->node_type != AST_NODE_PRIMARY || !node->type) return false;
+    TSNode lit_node;
+    if (!ast_primary_numeric_literal_node(node, &lit_node)) return false;
+    switch (node->type->type_id) {
+        case LMD_TYPE_INT:
+            return numeric_literal_text_is_zero(tp, lit_node);
+        case LMD_TYPE_INT64:
+            return ((TypeInt64*)node->type)->int64_val == 0;
+        case LMD_TYPE_UINT64:
+            return ((TypeUint64*)node->type)->uint64_val == 0;
+        case LMD_TYPE_FLOAT:
+            return ((TypeFloat*)node->type)->double_val == 0.0;
+        case LMD_TYPE_DECIMAL:
+            return numeric_literal_text_is_zero(tp, lit_node);
+        case LMD_TYPE_NUM_SIZED:
+            return ((TypeNumSized*)node->type)->raw_bits == 0;
+        default:
+            return false;
+    }
+}
+
 static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* param_full_type) {
     if (!arg_type || !param_type) return true;  // unknown types are compatible
     if (param_type->type_id == LMD_TYPE_ANY) return true;  // any accepts all
@@ -2574,6 +2630,8 @@ Type* build_lit_int64(Transpiler* tp, TSNode node) {
     return (Type*)item_type;
 }
 
+static int decimal_literal_significant_digits(const char* str);
+
 Type* build_lit_float(Transpiler* tp, TSNode node) {
     TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
     // C supports inf and nan
@@ -2610,25 +2668,31 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     TypeDecimal* item_type = (TypeDecimal*)alloc_type(tp->pool, LMD_TYPE_DECIMAL, sizeof(TypeDecimal));
     StrView num_sv = ts_node_source(tp, node);
     char* num_str = strview_to_cstr(&num_sv);
+    char suffix_char = num_sv.str[num_sv.length - 1];
     // num_str may not end with 'n' or 'N'
-    if (num_str[num_sv.length - 1] == 'n' || num_str[num_sv.length - 1] == 'N') {
+    if (suffix_char == 'n' || suffix_char == 'N') {
         num_str[num_sv.length - 1] = '\0';  // clear suffix 'n'/'N'
     }
     log_debug("build lit decimal: %s", num_str);
+
+    if (suffix_char == 'n' && decimal_literal_significant_digits(num_str) > DECIMAL_FIXED_PRECISION) {
+        record_semantic_error(tp, node, ERR_INVALID_NUMBER,
+            "fixed decimal literal exceeds decimal128 precision (%d significant digits)", DECIMAL_FIXED_PRECISION);
+        mem_free(num_str);
+        return &TYPE_ERROR;
+    }
 
     // Allocate heap-allocated Decimal structure
     Decimal* decimal;
     decimal = (Decimal*)pool_alloc(tp->pool, sizeof(Decimal));
     item_type->decimal = decimal;
 
-    // Set unlimited flag based on suffix case: 'N' = unlimited, 'n' = fixed
-    // Note: suffix character was already stripped above, but we check the original
-    char suffix_char = num_sv.str[num_sv.length - 1];
+    // Set unlimited flag based on suffix case: 'N' = extended precision, 'n' = decimal128.
     decimal->unlimited = (suffix_char == 'N') ? 1 : 0;
 
-    // Initialize the decimal with libmpdec
-    // Use transpiler's decimal context via centralized function
-    decimal->dec_val = decimal_parse_str(num_str, tp->decimal_ctx);
+    // n literals must round in decimal128 context; N literals keep the extended 200-digit context.
+    decimal->dec_val = decimal_parse_str(num_str,
+        decimal->unlimited ? decimal_unlimited_context() : decimal_fixed_context());
     if (!decimal->dec_val) {
         log_error("Error: Failed to parse decimal: %s", num_str);
         mem_free(num_str);
@@ -2664,6 +2728,41 @@ static int parse_sized_int_suffix(const char* str, int len, NumSizedType* out_nu
     return -1;
 }
 
+static int decimal_literal_significant_digits(const char* str) {
+    bool seen_nonzero = false;
+    bool saw_digit = false;
+    int digits = 0;
+    for (const char* p = str; *p; p++) {
+        char ch = *p;
+        if (ch == 'e' || ch == 'E') break;
+        if (ch < '0' || ch > '9') continue;
+        saw_digit = true;
+        if (ch != '0') seen_nonzero = true;
+        if (seen_nonzero) digits++;
+    }
+    return saw_digit ? (digits > 0 ? digits : 1) : 0;
+}
+
+static bool sized_literal_is_decimal(const char* str) {
+    const char* p = str;
+    if (*p == '+' || *p == '-') p++;
+    return !(p[0] == '0' && (p[1] == 'x' || p[1] == 'X' ||
+                             p[1] == 'o' || p[1] == 'O' ||
+                             p[1] == 'b' || p[1] == 'B'));
+}
+
+static uint64_t sized_literal_limit(NumSizedType num_type, bool decimal_literal) {
+    switch (num_type) {
+        case NUM_INT8:   return decimal_literal ? 128ULL : 0xFFULL;
+        case NUM_INT16:  return decimal_literal ? 32768ULL : 0xFFFFULL;
+        case NUM_INT32:  return decimal_literal ? 2147483648ULL : 0xFFFFFFFFULL;
+        case NUM_UINT8:  return 0xFFULL;
+        case NUM_UINT16: return 0xFFFFULL;
+        case NUM_UINT32: return 0xFFFFFFFFULL;
+        default:         return UINT64_MAX;
+    }
+}
+
 // Build AST type for sized integer literal (e.g., 42i8, 255u16, 100i64)
 Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
     StrView source = ts_node_source(tp, node);
@@ -2683,8 +2782,23 @@ Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
     char* endptr;
     errno = 0;
     uint64_t raw_value = strtoull(num_str, &endptr, 0);
-    // sized integer literals are fixed-width, so hex input must be parsed as
-    // unsigned bits first and then wrapped/truncated by the target annotation.
+    if (errno == ERANGE || endptr == num_str || *endptr != '\0') {
+        record_semantic_error(tp, node, ERR_INVALID_NUMBER,
+            "invalid sized integer literal '%s'", num_str);
+        mem_free(num_str);
+        return &TYPE_ERROR;
+    }
+    bool decimal_literal = sized_literal_is_decimal(num_str);
+    uint64_t limit = sized_literal_limit(num_type, decimal_literal);
+    if (raw_value > limit) {
+        // sized constants are checked before packing so invalid source cannot silently truncate.
+        record_semantic_error(tp, node, ERR_INVALID_NUMBER,
+            "sized integer literal '%s' overflows %s", num_str, get_num_sized_type_name(num_type));
+        mem_free(num_str);
+        return &TYPE_ERROR;
+    }
+    // sized integer literals are fixed-width, so non-decimal input may still
+    // denote raw bits, but decimal input is range-checked before packing.
     int64_t value;
     __builtin_memcpy(&value, &raw_value, sizeof(value));
     mem_free(num_str);
@@ -2939,11 +3053,10 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         mem_free(num_str);
 
         log_debug("build_primary_expr SYM_INT: parsed value %lld", value);
-        // Check if the value fits in 56-bit signed integer range
         if (errno == ERANGE || value < INT56_MIN || value > INT56_MAX) {
-            // promote to float for values outside int56 range
-            log_debug("promote int to float (value outside int56 range)");
-            ast_node->type = build_lit_float(tp, child);
+            record_semantic_error(tp, child, ERR_INVALID_NUMBER,
+                "integer literal is outside compact int range; use an explicit suffix or decimal literal");
+            ast_node->type = &TYPE_ERROR;
         }
         else {
             ast_node->type = &LIT_INT;
@@ -3465,6 +3578,15 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     // Additional validation: ensure both operands have valid types
     if (!ast_node->left->type || !ast_node->right->type) {
         log_error("Error: build_binary_expr operands missing type information");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    if ((ast_node->op == OPERATOR_IDIV || ast_node->op == OPERATOR_MOD) &&
+        ast_numeric_literal_is_zero(tp, ast_node->right)) {
+        // literal zero divisors are rejected before lowering so constant mistakes do not depend on runtime evaluation.
+        record_semantic_error(tp, right_node, ERR_INVALID_OPERATION,
+            "literal zero divisor is not allowed for integer division or modulo");
         ast_node->type = &TYPE_ERROR;
         return (AstNode*)ast_node;
     }

@@ -2246,6 +2246,45 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         (tid == LMD_TYPE_NULL || tid == LMD_TYPE_RAW_POINTER || tid == LMD_TYPE_ANY)) {
         return LMD_TYPE_ARRAY;
     }
+    if (node->node_type == AST_NODE_LIST) {
+        AstListNode* list = (AstListNode*)node;
+        if (list->declare) {
+            AstNode* scan = list->item;
+            AstNode* last_value = NULL;
+            int value_count = 0;
+            while (scan) {
+                value_count++;
+                last_value = scan;
+                scan = scan->next;
+            }
+            if (value_count == 1 && last_value) {
+                AstNode* unwrapped = last_value;
+                while (unwrapped && unwrapped->node_type == AST_NODE_PRIMARY) {
+                    unwrapped = ((AstPrimaryNode*)unwrapped)->expr;
+                }
+                if (unwrapped && unwrapped->node_type == AST_NODE_IDENT) {
+                    AstIdentNode* ident = (AstIdentNode*)unwrapped;
+                    AstNode* declare = list->declare;
+                    while (declare) {
+                        if (declare->node_type == AST_NODE_ASSIGN) {
+                            AstNamedNode* asn = (AstNamedNode*)declare;
+                            if (asn->as && ident->name && asn->name &&
+                                ident->name->len == asn->name->len &&
+                                memcmp(ident->name->chars, asn->name->chars, ident->name->len) == 0) {
+                                // final local identifiers are not in MIR scope yet
+                                // during type probing; resolve them through this block's declarations.
+                                return get_effective_type(mt, asn->as);
+                            }
+                        }
+                        declare = declare->next;
+                    }
+                }
+                // let-blocks return the last expression directly; callers must
+                // use that expression's actual representation, not the stale block type.
+                return get_effective_type(mt, last_value);
+            }
+        }
+    }
     // P4-3.1: For index expressions (subscripts), check if the object variable
     // has a known element type from fill() narrowing. This enables native bool
     // paths in AND/OR/NOT for bool array elements.
@@ -3663,7 +3702,9 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
                 MIR_reg_t val = transpile_expr(mt, let_node->as);
                 char lc_name[128];
                 snprintf(lc_name, sizeof(lc_name), "%.*s", (int)let_node->name->len, let_node->name->chars);
-                TypeId lc_tid = let_node->as->type ? let_node->as->type->type_id : LMD_TYPE_ANY;
+                // for-let values may be boxed by numeric overflow-safe helpers;
+                // track the emitted representation so later uses do not unbox the wrong shape.
+                TypeId lc_tid = get_effective_type(mt, let_node->as);
                 MIR_type_t lc_mtype = type_to_mir(lc_tid);
                 set_var(mt, lc_name, val, lc_mtype, lc_tid);
             }
@@ -8667,11 +8708,13 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             return emit_box_bool(mt, val);
         }
 
-        // 3. both_int arithmetic: ADD,SUB,MUL,IDIV,MOD → native int; DIV → native float
+        // 3. both_int arithmetic: ADD/SUB/MUL now use boxed helpers so compact-int
+        // overflow can promote safely; IDIV/MOD remain native int, DIV native float.
         //    POW falls through to boxed runtime (AST type is ANY)
         if (both_int) {
             switch (op) {
             case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
+                return val;
             case OPERATOR_IDIV: case OPERATOR_MOD:
                 return emit_box_int(mt, val);
             case OPERATOR_DIV:

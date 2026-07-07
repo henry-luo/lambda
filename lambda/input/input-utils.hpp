@@ -29,6 +29,11 @@ namespace lambda {
 Item parse_typed_value(InputContext& ctx, const char* str, size_t len);
 
 /**
+ * Parse an integer token into the smallest exact numeric home: int → int64 → decimal.
+ */
+Item parse_integer_token_exact(InputContext& ctx, const char* str, size_t len);
+
+/**
  * Encode a codepoint as UTF-8 and append to a StringBuf.
  * Convenience wrapper around codepoint_to_utf8().
  */

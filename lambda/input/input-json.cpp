@@ -66,6 +66,7 @@ static Item parse_number(InputContext& ctx, const char **json) {
     SourceTracker& tracker = ctx.tracker;
 
     char* end;
+    const char* start = *json;
     double value = strtod(*json, &end);
 
     if (end == *json) {
@@ -77,14 +78,21 @@ static Item parse_number(InputContext& ctx, const char **json) {
     *json = end;
     tracker.advance(len);
 
-    // Check if it's an integer (but preserve -0 as float)
-    if (value == (int64_t)value && !(value == 0.0 && signbit(value))) {
-        int64_t int_value = (int64_t)value;
-        log_debug("parse_number: creating INT from double=%g, int64=%lld (0x%llx)",
-                  value, (long long)int_value, (unsigned long long)int_value);
-        Item result = ctx.builder.createInt(int_value);
-        log_debug("parse_number: result.item=0x%llx", (unsigned long long)result.item);
-        return result;
+    bool has_float_marker = false;
+    for (size_t i = 0; i < len; i++) {
+        if (start[i] == '.' || start[i] == 'e' || start[i] == 'E') {
+            has_float_marker = true;
+            break;
+        }
+    }
+
+    if (!has_float_marker && !(value == 0.0 && signbit(value))) {
+        Item integer_item = parse_integer_token_exact(ctx, start, len);
+        if (integer_item.item == ITEM_NULL) {
+            ctx.addError(tracker.location(), "Invalid integer decimal value");
+            return ctx.builder.createNull();
+        }
+        return integer_item;
     } else {
         return ctx.builder.createFloat(value);
     }

@@ -7,4 +7,5 @@
 7 % 2
 0 % 5
 -7 % 3
-5 % 0
+let zero_divisor = 0
+5 % zero_divisor

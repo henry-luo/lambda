@@ -7,7 +7,8 @@ error("test") is error
 if (error("x")) 1 else 0
 error("x") or 42
 1 + "string"
-5 % 0
+let zero_divisor = 0
+5 % zero_divisor
 fn may_fail(x) int^ {
     if (x == 0) raise error("zero")
     else x * 2

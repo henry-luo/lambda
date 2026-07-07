@@ -5,9 +5,9 @@
 
 '=== Basic Int64 Literals and Type Inference ==='
 
-// Test 1: large int literals promoted to double
-9223372036854775807
--9223372036854775808
+// Test 1: explicit int64 values
+9223372036854775807i64
+int64('-9223372036854775808')
 
 // Test 2: int64 conversion from int32
 int64(42)
@@ -99,7 +99,7 @@ let empty64 = []
 len(empty64)
 
 // Test 21: Single element ArrayInt64
-let single64 = [int64(9223372000000000000)]
+let single64 = [9223372000000000000i64]
 len(single64)
 sum(single64)
 min(single64)
