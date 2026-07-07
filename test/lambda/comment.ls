@@ -63,7 +63,7 @@ fn add(x, y) {
 add(3, 4)
 
 "13. Comment after pipe"
-[1, 2, 3] | ~ + 10 // comment after pipe
+[1, 2, 3] |> ~ + 10 // comment after pipe
 
 "14. Comment no space before //"
 42// no space before comment

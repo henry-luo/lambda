@@ -41,7 +41,7 @@ fn double(x: int) => x * 2
 
 // Procedural function — can have side effects
 pn save_result(data) {
-    data |> "/tmp/output.json"
+    output(data, "./temp/output.json")
 }
 ```
 
@@ -379,38 +379,39 @@ let counter = make_counter(5)
 counter(3)   // 13 (5*2 + 3)
 ```
 
-### Mutable Captures in Procedural Closures
+### Closure Captures Are Immutable Snapshots
 
-When a closure defined inside a `pn` function assigns to a captured `var`, the captured variable becomes a **writable copy**. Each closure instance gets its own independent mutable copy in its environment — writes persist across calls to that closure but do not affect the outer scope or other closures.
+Closures capture values by snapshot. A nested `fn` or `pn` may read a captured binding, but it cannot assign to the captured binding or mutate through it with an interior write such as `xs[0] = value`. Mutable state that must be updated by a helper should be passed explicitly as a `var` parameter, or returned as a new value.
 
 ```lambda
 pn main() {
-    var count = 0
-    let counter = fn() {
-        count = count + 1    // writes to closure's own copy
-        count
+    var base = 40
+    pn add_two() {
+        base + 2       // read-only capture
     }
-    print(counter())   // 1
-    print(counter())   // 2
-    print(count)       // 0 — outer variable unchanged
+    let f = add_two
+    print(f())         // 42
 }
 ```
 
 ```lambda
+pn bump_first(var xs: any[]) {
+    xs[0] = 42
+}
+
 pn main() {
-    var x = 0
-    let inc1 = fn() { x = x + 1; x }
-    let inc10 = fn() { x = x + 10; x }
-    print(inc1())    // 1  — inc1's copy: 0 → 1
-    print(inc10())   // 10 — inc10's copy: 0 → 10 (independent)
+    var xs: any[] = [1, 2, 3]
+    bump_first(xs)
+    print(xs[0])       // 42
 }
 ```
 
-**Capture semantics:**
-- Captures are **by value** — each closure gets a snapshot at creation time
-- `var` captures are mutable (writable copy); `let` captures are read-only
-- Writes inside a closure do **not** propagate back to the outer scope
-- Named closures must be called through a variable (`let f = name; f()`) to pass the environment
+**Capture and mutability semantics:**
+- Captures are by value: each closure gets a snapshot at creation time.
+- Captured bindings are read-only, including interior writes through arrays, maps, elements, and objects.
+- `var` parameters are explicit inout parameters; callers must pass a mutable `var` binding.
+- A `var` parameter is invariant: the argument type must match the parameter type exactly. For covariant array assignment, declare the local binding with the wider type, such as `var xs: any[] = [1, 2, 3]`.
+- Named closures must be called through a variable (`let f = name; f()`) to pass the environment.
 
 ---
 

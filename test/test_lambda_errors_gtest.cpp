@@ -562,6 +562,16 @@ protected:
         EXPECT_TRUE(has_error) << "Expected error for: " << script_path
                                << "\nOutput: " << result.output;
     }
+
+    void ExpectErrorMessage(const char* script_path, const char* expected_message) {
+        ScriptResult result = run_lambda_script(script_path);
+
+        EXPECT_NE(result.exit_code, 0) << "Expected script to fail: " << script_path;
+        EXPECT_NE(strstr(result.output.c_str(), expected_message), nullptr)
+            << "Expected diagnostic text for: " << script_path
+            << "\nExpected: " << expected_message
+            << "\nOutput: " << result.output;
+    }
 };
 
 // Syntax error tests
@@ -619,8 +629,21 @@ TEST_F(NegativeScriptTest, SyntaxError_InvalidNumber) {
     ExpectErrorWithoutCrash("test/lambda/negative/syntax/invalid_number.ls");
 }
 
+TEST_F(NegativeScriptTest, SyntaxError_OversizedIntegerLiteral) {
+    ExpectErrorCode("test/lambda/negative/syntax/oversized_integer_literal.ls", "error[E108]");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_Decimal128Overflow) {
+    ExpectErrorCode("test/lambda/negative/syntax/decimal128_overflow.ls", "error[E108]");
+}
+
 TEST_F(NegativeScriptTest, SyntaxError_UnexpectedToken) {
     ExpectErrorWithoutCrash("test/lambda/negative/syntax/unexpected_token.ls");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_StatementComparisonAmbiguousWithElement) {
+    ExpectErrorMessage("test/lambda/negative/syntax/statement_comparison_ambiguous.ls",
+        "'<' and '>' are ambiguous with element syntax at statement level");
 }
 
 TEST_F(NegativeScriptTest, SyntaxError_UnexpectedEOF) {
@@ -669,8 +692,26 @@ TEST_F(NegativeScriptTest, SemanticError_ImmutableAssignment) {
     ExpectErrorWithoutCrash("test/lambda/negative/semantic/immutable_assignment.ls");
 }
 
+TEST_F(NegativeScriptTest, SemanticError_ImmutableInteriorAssignment) {
+    ExpectErrorMessage("test/lambda/negative/semantic/immutable_interior_assignment.ls",
+        "cannot mutate through immutable binding");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_CaptureMutation) {
+    ExpectErrorMessage("test/lambda/negative/semantic/capture_mutation.ls",
+        "cannot mutate captured binding");
+}
+
 TEST_F(NegativeScriptTest, SemanticError_VarTypeMismatch) {
     ExpectErrorWithoutCrash("test/lambda/negative/semantic/var_type_mismatch.ls");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_SizedIntegerOverflow) {
+    ExpectErrorCode("test/lambda/negative/semantic/sized_integer_overflow.ls", "error[E108]");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_LiteralZeroDivisor) {
+    ExpectErrorCode("test/lambda/negative/semantic/literal_zero_divisor.ls", "error[E312]");
 }
 
 // --- Runtime Error Tests (3xx) ---

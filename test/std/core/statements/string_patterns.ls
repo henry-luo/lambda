@@ -61,4 +61,4 @@ type three_chars = ^...$
 
 // ===== Used in filter =====
 type upper_pat = ^[A-Z]+$
-["HELLO", "world", "FOO", "bar", "BAZ"] | filter((s) => s is upper_pat)
+["HELLO", "world", "FOO", "bar", "BAZ"] |> filter((s) => s is upper_pat)

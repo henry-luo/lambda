@@ -269,12 +269,12 @@ public:
     static void SetUpTestSuite() {
         if (batch_executed) return;
 
-        char gtest_filter[512];
-        snprintf(gtest_filter, sizeof(gtest_filter), "%s", ::testing::GTEST_FLAG(filter).c_str());
+        // keep the full gtest filter; truncating long colon-separated filters drops scripts from the batch.
+        std::string gtest_filter = ::testing::GTEST_FLAG(filter);
         std::vector<std::string> scripts;
         std::vector<bool> procs;
         for (const auto& test : g_lambda_tests) {
-            if (!lambda_script_matches_gtest_filter(test, gtest_filter)) continue;
+            if (!lambda_script_matches_gtest_filter(test, gtest_filter.c_str())) continue;
             scripts.push_back(test.script_path);
             procs.push_back(test.is_procedural);
         }

@@ -1320,6 +1320,8 @@ JitImport jit_runtime_imports[] = {
     {"fn_idiv", FPTR(fn_idiv)},
     {"fn_mod", FPTR(fn_mod)},
     {"fn_pow", FPTR(fn_pow)},
+    // value-level union lowers through the generic runtime helper in MIR.
+    {"fn_union", FPTR(fn_union)},
     {"fn_pos", FPTR(fn_pos)},
     {"fn_neg", FPTR(fn_neg)},
     {"fn_eq", FPTR(fn_eq)},
@@ -1488,6 +1490,7 @@ JitImport jit_runtime_imports[] = {
     // Array/map mutation (procedural)
     // ========================================================================
     {"fn_array_set", FPTR(fn_array_set)},
+    {"fn_mutable_value", FPTR(fn_mutable_value)},
     {"fn_map_set", FPTR(fn_map_set)},
 
     // ========================================================================

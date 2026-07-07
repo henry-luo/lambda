@@ -66,6 +66,7 @@ static Item parse_number(InputContext& ctx, const char **json) {
     SourceTracker& tracker = ctx.tracker;
 
     char* end;
+    const char* start = *json;
     double value = strtod(*json, &end);
 
     if (end == *json) {
@@ -77,14 +78,21 @@ static Item parse_number(InputContext& ctx, const char **json) {
     *json = end;
     tracker.advance(len);
 
-    // Check if it's an integer (but preserve -0 as float)
-    if (value == (int64_t)value && !(value == 0.0 && signbit(value))) {
-        int64_t int_value = (int64_t)value;
-        log_debug("parse_number: creating INT from double=%g, int64=%lld (0x%llx)",
-                  value, (long long)int_value, (unsigned long long)int_value);
-        Item result = ctx.builder.createInt(int_value);
-        log_debug("parse_number: result.item=0x%llx", (unsigned long long)result.item);
-        return result;
+    bool has_float_marker = false;
+    for (size_t i = 0; i < len; i++) {
+        if (start[i] == '.' || start[i] == 'e' || start[i] == 'E') {
+            has_float_marker = true;
+            break;
+        }
+    }
+
+    if (!has_float_marker && !(value == 0.0 && signbit(value))) {
+        Item integer_item = parse_integer_token_exact(ctx, start, len);
+        if (integer_item.item == ITEM_NULL) {
+            ctx.addError(tracker.location(), "Invalid integer decimal value");
+            return ctx.builder.createNull();
+        }
+        return integer_item;
     } else {
         return ctx.builder.createFloat(value);
     }
@@ -203,15 +211,8 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
             tracker.advance(1);
         }
 
-        // Create key as a name (always pooled)
-        // Special case: empty key "" in JSON becomes "''" in Lambda
-        String* key;
-        if (sb->length == 0) {
-            // Empty JSON key maps to the literal string "''" (two single quotes)
-            key = ctx.builder.createName("''", 2);
-        } else {
-            key = ctx.builder.createName(sb->str->chars, sb->length);
-        }
+        // JSON keys are strings; preserve empty/non-identifier keys instead of symbol spelling.
+        String* key = ctx.builder.createName(sb->str->chars, sb->length);
         if (!key) {
             // Error recovery: skip to next comma or closing brace
             while (**json && **json != ',' && **json != '}') {
@@ -305,19 +306,8 @@ static Item parse_value(InputContext& ctx, const char **json, int depth) {
         case '[':
             return parse_array(ctx, json, depth);
         case '"': {
-            const char* before = *json;
             String* str = parse_string(ctx, json);
             if (!str) {
-                // distinguish empty string "" from error: if pointer advanced past closing quote, it's empty string
-                if (*json > before + 1) {
-                    // allocate a zero-length String from arena
-                    Arena* arena = ctx.builder.arena();
-                    String* empty = (String*)arena_alloc(arena, sizeof(String) + 1);
-                    empty->len = 0;
-                    empty->is_ascii = 1;
-                    empty->chars[0] = '\0';
-                    return (Item){.item = s2it(empty)};
-                }
                 return ctx.builder.createNull();  // actual parse error
             }
             return (Item){.item = s2it(str)};

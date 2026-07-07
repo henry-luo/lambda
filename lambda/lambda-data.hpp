@@ -195,6 +195,8 @@ typedef struct TypeArray : Type {
     Type* nested;  // nested item type for the array
     int64_t length;  // no. of items in the array/map
     int type_index;  // index of the type in the type list
+    Item* item_patterns;  // exact per-slot pattern values for tuple-style [T, v]
+    uint8_t* item_is_type_pattern;  // slot uses fn_is instead of fn_eq
 } TypeArray;
 
 typedef TypeArray TypeList;
@@ -603,6 +605,7 @@ typedef struct TypeConstrained : Type {
 typedef struct TypeParam : Type {
     struct TypeParam* next;
     bool is_optional;           // whether parameter is optional (? marker or default value)
+    bool is_var_param;          // whether this is an inout `var` parameter
     struct AstNode* default_value;  // default value expression (NULL if none)
     Type* full_type;            // for complex types (TypeBinary etc), points to full type; NULL for simple types
 } TypeParam;

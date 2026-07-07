@@ -382,6 +382,62 @@ static bool is_global_simple_type(const Type* type) {
            type == &TYPE_UINT64;
 }
 
+static bool numeric_literal_text_is_zero(Transpiler* tp, TSNode node) {
+    StrView source = ts_node_source(tp, node);
+    bool saw_digit = false;
+    for (uint32_t i = 0; i < source.length; i++) {
+        char ch = source.str[i];
+        if (ch == 'e' || ch == 'E' || ch == 'n' || ch == 'N') break;
+        if (ch >= '1' && ch <= '9') return false;
+        if (ch == '0') saw_digit = true;
+    }
+    return saw_digit;
+}
+
+static bool ast_primary_numeric_literal_node(AstNode* node, TSNode* lit_node) {
+    if (!node || node->node_type != AST_NODE_PRIMARY) return false;
+    TSNode check = node->node;
+    TSSymbol symbol = ts_node_symbol(check);
+    if (symbol == SYM_PRIMARY_EXPR) {
+        check = ts_node_named_child(check, 0);
+        if (ts_node_is_null(check)) return false;
+        symbol = ts_node_symbol(check);
+        if (symbol == SYM_EXPR) {
+            check = ts_node_named_child(check, 0);
+            if (ts_node_is_null(check)) return false;
+            symbol = ts_node_symbol(check);
+        }
+    }
+    if (symbol != SYM_INT && symbol != SYM_FLOAT && symbol != SYM_DECIMAL &&
+        symbol != SYM_SIZED_INT && symbol != SYM_SIZED_FLOAT) {
+        return false;
+    }
+    *lit_node = check;
+    return true;
+}
+
+static bool ast_numeric_literal_is_zero(Transpiler* tp, AstNode* node) {
+    if (!node || node->node_type != AST_NODE_PRIMARY || !node->type) return false;
+    TSNode lit_node;
+    if (!ast_primary_numeric_literal_node(node, &lit_node)) return false;
+    switch (node->type->type_id) {
+        case LMD_TYPE_INT:
+            return numeric_literal_text_is_zero(tp, lit_node);
+        case LMD_TYPE_INT64:
+            return ((TypeInt64*)node->type)->int64_val == 0;
+        case LMD_TYPE_UINT64:
+            return ((TypeUint64*)node->type)->uint64_val == 0;
+        case LMD_TYPE_FLOAT:
+            return ((TypeFloat*)node->type)->double_val == 0.0;
+        case LMD_TYPE_DECIMAL:
+            return numeric_literal_text_is_zero(tp, lit_node);
+        case LMD_TYPE_NUM_SIZED:
+            return ((TypeNumSized*)node->type)->raw_bits == 0;
+        default:
+            return false;
+    }
+}
+
 static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* param_full_type) {
     if (!arg_type || !param_type) return true;  // unknown types are compatible
     if (param_type->type_id == LMD_TYPE_ANY) return true;  // any accepts all
@@ -451,6 +507,84 @@ static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* p
     }
 
     return false;
+}
+
+static bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
+    if (!tp || !node || !out) return false;
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        if (!primary->expr) break;
+        node = primary->expr;
+    }
+    if (!node || !node->type || !node->type->is_literal) return false;
+
+    switch (node->type->type_id) {
+    case LMD_TYPE_NULL:
+        *out = ItemNull;
+        return true;
+    case LMD_TYPE_BOOL: {
+        StrView text = ts_node_source(tp, node->node);
+        out->item = b2it(strview_equal(&text, "true") ? BOOL_TRUE : BOOL_FALSE);
+        return true;
+    }
+    case LMD_TYPE_INT: {
+        StrView source = ts_node_source(tp, node->node);
+        char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
+        memcpy(num_str, source.str, source.length);
+        num_str[source.length] = '\0';
+        int64_t value = strtoll(num_str, NULL, 0);
+        mem_free(num_str);
+        out->item = i2it(value);
+        return true;
+    }
+    case LMD_TYPE_INT64: {
+        TypeInt64* t = (TypeInt64*)node->type;
+        out->item = l2it(&t->int64_val);
+        return true;
+    }
+    case LMD_TYPE_FLOAT: {
+        TypeFloat* t = (TypeFloat*)node->type;
+        out->item = d2it(&t->double_val);
+        return true;
+    }
+    case LMD_TYPE_DTIME: {
+        TypeDateTime* t = (TypeDateTime*)node->type;
+        out->item = k2it(&t->datetime);
+        return true;
+    }
+    case LMD_TYPE_DECIMAL: {
+        TypeDecimal* t = (TypeDecimal*)node->type;
+        out->item = c2it(t->decimal);
+        return true;
+    }
+    case LMD_TYPE_STRING: {
+        TypeString* t = (TypeString*)node->type;
+        out->item = s2it(t->string);
+        return true;
+    }
+    case LMD_TYPE_SYMBOL: {
+        TypeString* t = (TypeString*)node->type;
+        out->item = y2it((Symbol*)t->string);
+        return true;
+    }
+    case LMD_TYPE_BINARY: {
+        TypeString* t = (TypeString*)node->type;
+        out->item = x2it(t->string);
+        return true;
+    }
+    case LMD_TYPE_NUM_SIZED: {
+        TypeNumSized* t = (TypeNumSized*)node->type;
+        out->item = NUM_SIZED_PACK(t->num_type, t->raw_bits);
+        return true;
+    }
+    case LMD_TYPE_UINT64: {
+        TypeUint64* t = (TypeUint64*)node->type;
+        out->item = u2it(&t->uint64_val);
+        return true;
+    }
+    default:
+        return false;
+    }
 }
 
 // check if arg_type is compatible with param_type for function calls
@@ -678,6 +812,62 @@ bool is_global_entry(NameEntry* entry, NameScope* global_scope) {
     return false;
 }
 
+static bool is_object_field_entry(NameEntry* entry) {
+    return entry && entry->node && entry->node->node_type == AST_NODE_KEY_EXPR;
+}
+
+static AstNode* unwrap_primary_node(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        node = primary->expr;
+    }
+    return node;
+}
+
+static AstIdentNode* compound_root_ident(AstNode* node) {
+    node = unwrap_primary_node(node);
+    if (!node) return NULL;
+    if (node->node_type == AST_NODE_IDENT) return (AstIdentNode*)node;
+    if (node->node_type == AST_NODE_INDEX_EXPR || node->node_type == AST_NODE_MEMBER_EXPR) {
+        AstFieldNode* field = (AstFieldNode*)node;
+        return compound_root_ident(field->object);
+    }
+    return NULL;
+}
+
+static bool same_name_string(String* a, String* b) {
+    return a == b || (a && b && a->len == b->len && memcmp(a->chars, b->chars, a->len) == 0);
+}
+
+static bool type_exact_match(Type* left, TypeParam* right) {
+    if (!left || !right) return true;
+    Type* right_full = right->full_type ? right->full_type : (Type*)right;
+    if (!right_full) return true;
+    if (left->type_id != right_full->type_id) return false;
+    if (left->kind != right_full->kind) return false;
+    if (left->kind == TYPE_KIND_UNARY) {
+        TypeUnary* lu = (TypeUnary*)left;
+        TypeUnary* ru = (TypeUnary*)right_full;
+        Type* lo = lu->operand;
+        Type* ro = ru->operand;
+        if (lo && lo->type_id == LMD_TYPE_TYPE && lo->kind == TYPE_KIND_SIMPLE) lo = ((TypeType*)lo)->type;
+        if (ro && ro->type_id == LMD_TYPE_TYPE && ro->kind == TYPE_KIND_SIMPLE) ro = ((TypeType*)ro)->type;
+        return lo && ro && lo->type_id == ro->type_id;
+    }
+    return true;
+}
+
+static void validate_compound_mutable_root(Transpiler* tp, TSNode assign_node, AstNode* object) {
+    AstIdentNode* root = compound_root_ident(object);
+    if (!root || !root->entry) return;
+    if (root->entry->is_mutable) return;
+    // Interior writes are writes to the root binding for Lambda's mutability
+    // model; allowing them through a let root makes aliases observe mutation.
+    record_semantic_error(tp, assign_node, ERR_IMMUTABLE_ASSIGNMENT,
+        "cannot mutate through immutable binding '%.*s'. declare it with `var` or pass it as `var`.",
+        (int)root->name->len, root->name->chars);
+}
+
 // Add a capture to the list if not already present
 void add_capture(Transpiler* tp, CaptureInfo** captures, String* name, NameEntry* entry) {
     // Check if already captured
@@ -725,6 +915,9 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
     case AST_NODE_IDENT: {
         AstIdentNode* ident = (AstIdentNode*)node;
         if (ident->entry && ident->entry->node) {
+            // Object fields in method scope are implicit receiver slots, not
+            // closure captures; method write-back owns their mutation rules.
+            if (is_object_field_entry(ident->entry)) break;
             // Check if this identifier refers to a variable from an enclosing scope
             // (not local to fn_scope, not global, not an import)
             if (!ident->entry->import &&
@@ -839,6 +1032,10 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
     case AST_NODE_ASSIGN_STAM: {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         // check if the assignment target is a captured variable from an enclosing scope
+        if (is_object_field_entry(assign->target_entry)) {
+            collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
+            break;
+        }
         if (assign->target_entry && !assign->target_entry->import &&
             !is_local_to_scope(assign->target_entry, fn_scope) &&
             !is_global_entry(assign->target_entry, global_scope)) {
@@ -846,6 +1043,26 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
             mark_capture_mutable(captures, assign->target);
         }
         // also collect captures from the value expression
+        collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM: {
+        AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
+        AstIdentNode* root = compound_root_ident(assign->object);
+        if (root && is_object_field_entry(root->entry)) {
+            collect_captures_from_node(tp, assign->key, fn_scope, global_scope, captures);
+            collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
+            break;
+        }
+        if (root && root->entry && !root->entry->import &&
+            !is_local_to_scope(root->entry, fn_scope) &&
+            !is_global_entry(root->entry, global_scope)) {
+            add_capture(tp, captures, root->name, root->entry);
+            mark_capture_mutable(captures, root->name);
+        }
+        collect_captures_from_node(tp, assign->object, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, assign->key, fn_scope, global_scope, captures);
         collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
         break;
     }
@@ -905,6 +1122,11 @@ void analyze_captures(Transpiler* tp, AstFuncNode* fn_node, NameScope* global_sc
         CaptureInfo* c = fn_node->captures;
         while (c) {
             log_debug("  - %.*s", (int)c->name->len, c->name->chars);
+            if (c->is_mutable) {
+                record_semantic_error(tp, fn_node->node, ERR_IMMUTABLE_ASSIGNMENT,
+                    "cannot mutate captured binding '%.*s'. pass it as `var` to a pn or return a new value.",
+                    (int)c->name->len, c->name->chars);
+            }
             c = c->next;
         }
     }
@@ -1370,6 +1592,16 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                 StrView ns_view = {ns_ident->name->chars, (size_t)ns_ident->name->len};
                 const char* ns_resolved = resolve_builtin_module(tp, &ns_view);
                 if (ns_resolved && strcmp(ns_resolved, "math") == 0) {
+                    if (id_node->name->len == 7 && memcmp(id_node->name->chars, "max_int", 7) == 0) {
+                        TypeInt64* it = (TypeInt64*)alloc_type(tp->pool, LMD_TYPE_INT, sizeof(TypeInt64));
+                        it->int64_val = INT56_MAX;
+                        arraylist_append(tp->const_list, &it->int64_val);
+                        it->const_index = tp->const_list->length - 1;
+                        it->is_const = 1;  it->is_literal = 1;
+                        AstPrimaryNode* pn = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, array_node, sizeof(AstPrimaryNode));
+                        pn->type = (Type*)it;
+                        return (AstNode*)pn;
+                    }
                     double const_val = 0.0;
                     bool is_math_const = false;
                     if (id_node->name->len == 2 && memcmp(id_node->name->chars, "pi", 2) == 0) {
@@ -1972,8 +2204,46 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         AstNode* arg = ast_node->argument;
         int arg_index = 0;
         int line = ts_node_start_point(call_node).row + 1;
+        String* var_arg_roots[64];
+        int var_arg_root_count = 0;
 
         while (arg && expected_param) {
+            if (expected_param->is_var_param) {
+                AstIdentNode* root = compound_root_ident(arg);
+                if (!root || !root->entry || !root->entry->is_mutable) {
+                    record_semantic_error(tp, call_node, ERR_IMMUTABLE_ASSIGNMENT,
+                        "argument %d for `var` parameter must be a mutable `var` binding",
+                        arg_index + 1);
+                    if (!should_continue_transpiling(tp)) {
+                        ast_node->type = &TYPE_ERROR;
+                        return (AstNode*)ast_node;
+                    }
+                } else {
+                    for (int i = 0; i < var_arg_root_count; i++) {
+                        if (same_name_string(var_arg_roots[i], root->name)) {
+                            record_semantic_error(tp, call_node, ERR_IMMUTABLE_ASSIGNMENT,
+                                "argument %d overlaps another `var` parameter; pass distinct mutable bindings",
+                                arg_index + 1);
+                            break;
+                        }
+                    }
+                    if (var_arg_root_count < 64) {
+                        var_arg_roots[var_arg_root_count++] = root->name;
+                    }
+                }
+                if (!type_exact_match(arg->type, expected_param)) {
+                    Type* full_type = expected_param->full_type ? expected_param->full_type : (Type*)expected_param;
+                    record_type_error(tp, line,
+                        "argument %d for `var` parameter must match exactly: expected %s, got %s; declare as any[] or use a value parameter",
+                        arg_index + 1,
+                        get_type_name(full_type->type_id),
+                        arg->type ? get_type_name(arg->type->type_id) : "unknown");
+                    if (!should_continue_transpiling(tp)) {
+                        ast_node->type = &TYPE_ERROR;
+                        return (AstNode*)ast_node;
+                    }
+                }
+            }
             bool compatible = types_compatible_with_full(arg->type, (Type*)expected_param, expected_param->full_type);
             if (!compatible) {
                 Type* full_type = expected_param->full_type ? expected_param->full_type : (Type*)expected_param;
@@ -2210,7 +2480,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
 }
 
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
-    // Empty strings ("" or '') map to null in Lambda
+    // Phase 3: empty strings are values; empty symbol/binary values remain absent.
     // With single-token strings/symbols, we parse the raw token text directly
     // Binary is now a single token: b'content'
     String* str;
@@ -2266,10 +2536,12 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     const char* content_start = raw + 1;
     int content_len = raw_len - 2;  // exclude both quotes
 
-    // Handle empty string/symbol case
+    // Empty symbol literals are rejected by grammar; keep a null fallback for generated/stale parsers.
     if (content_len == 0) {
-        log_debug("build_lit_string: empty string/symbol literal, returning null type");
-        return &LIT_NULL;
+        if (symbol == SYM_SYMBOL) {
+            log_debug("build_lit_string: empty symbol literal, returning null type");
+            return &LIT_NULL;
+        }
     }
 
     TypeString* str_type = (TypeString*)alloc_type(tp->pool,
@@ -2484,9 +2756,9 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         str->is_ascii = str_is_ascii(str->chars, str->len) ? 1 : 0;
         log_debug("final string: %.*s", str->len, str->chars);
 
-        // Check if the processed string is empty - return null type
-        if (str->len == 0) {
-            log_debug("build_lit_string: empty string after escape processing, returning null type");
+        // Escapes can only produce empty solid values through generated/stale parsers.
+        if (str->len == 0 && symbol == SYM_SYMBOL) {
+            log_debug("build_lit_string: empty symbol after escape processing, returning null type");
             return &LIT_NULL;
         }
 
@@ -2562,6 +2834,8 @@ Type* build_lit_int64(Transpiler* tp, TSNode node) {
     return (Type*)item_type;
 }
 
+static int decimal_literal_significant_digits(const char* str);
+
 Type* build_lit_float(Transpiler* tp, TSNode node) {
     TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
     // C supports inf and nan
@@ -2598,25 +2872,31 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     TypeDecimal* item_type = (TypeDecimal*)alloc_type(tp->pool, LMD_TYPE_DECIMAL, sizeof(TypeDecimal));
     StrView num_sv = ts_node_source(tp, node);
     char* num_str = strview_to_cstr(&num_sv);
+    char suffix_char = num_sv.str[num_sv.length - 1];
     // num_str may not end with 'n' or 'N'
-    if (num_str[num_sv.length - 1] == 'n' || num_str[num_sv.length - 1] == 'N') {
+    if (suffix_char == 'n' || suffix_char == 'N') {
         num_str[num_sv.length - 1] = '\0';  // clear suffix 'n'/'N'
     }
     log_debug("build lit decimal: %s", num_str);
+
+    if (suffix_char == 'n' && decimal_literal_significant_digits(num_str) > DECIMAL_FIXED_PRECISION) {
+        record_semantic_error(tp, node, ERR_INVALID_NUMBER,
+            "fixed decimal literal exceeds decimal128 precision (%d significant digits)", DECIMAL_FIXED_PRECISION);
+        mem_free(num_str);
+        return &TYPE_ERROR;
+    }
 
     // Allocate heap-allocated Decimal structure
     Decimal* decimal;
     decimal = (Decimal*)pool_alloc(tp->pool, sizeof(Decimal));
     item_type->decimal = decimal;
 
-    // Set unlimited flag based on suffix case: 'N' = unlimited, 'n' = fixed
-    // Note: suffix character was already stripped above, but we check the original
-    char suffix_char = num_sv.str[num_sv.length - 1];
+    // Set unlimited flag based on suffix case: 'N' = extended precision, 'n' = decimal128.
     decimal->unlimited = (suffix_char == 'N') ? 1 : 0;
 
-    // Initialize the decimal with libmpdec
-    // Use transpiler's decimal context via centralized function
-    decimal->dec_val = decimal_parse_str(num_str, tp->decimal_ctx);
+    // n literals must round in decimal128 context; N literals keep the extended 200-digit context.
+    decimal->dec_val = decimal_parse_str(num_str,
+        decimal->unlimited ? decimal_unlimited_context() : decimal_fixed_context());
     if (!decimal->dec_val) {
         log_error("Error: Failed to parse decimal: %s", num_str);
         mem_free(num_str);
@@ -2652,6 +2932,41 @@ static int parse_sized_int_suffix(const char* str, int len, NumSizedType* out_nu
     return -1;
 }
 
+static int decimal_literal_significant_digits(const char* str) {
+    bool seen_nonzero = false;
+    bool saw_digit = false;
+    int digits = 0;
+    for (const char* p = str; *p; p++) {
+        char ch = *p;
+        if (ch == 'e' || ch == 'E') break;
+        if (ch < '0' || ch > '9') continue;
+        saw_digit = true;
+        if (ch != '0') seen_nonzero = true;
+        if (seen_nonzero) digits++;
+    }
+    return saw_digit ? (digits > 0 ? digits : 1) : 0;
+}
+
+static bool sized_literal_is_decimal(const char* str) {
+    const char* p = str;
+    if (*p == '+' || *p == '-') p++;
+    return !(p[0] == '0' && (p[1] == 'x' || p[1] == 'X' ||
+                             p[1] == 'o' || p[1] == 'O' ||
+                             p[1] == 'b' || p[1] == 'B'));
+}
+
+static uint64_t sized_literal_limit(NumSizedType num_type, bool decimal_literal) {
+    switch (num_type) {
+        case NUM_INT8:   return decimal_literal ? 128ULL : 0xFFULL;
+        case NUM_INT16:  return decimal_literal ? 32768ULL : 0xFFFFULL;
+        case NUM_INT32:  return decimal_literal ? 2147483648ULL : 0xFFFFFFFFULL;
+        case NUM_UINT8:  return 0xFFULL;
+        case NUM_UINT16: return 0xFFFFULL;
+        case NUM_UINT32: return 0xFFFFFFFFULL;
+        default:         return UINT64_MAX;
+    }
+}
+
 // Build AST type for sized integer literal (e.g., 42i8, 255u16, 100i64)
 Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
     StrView source = ts_node_source(tp, node);
@@ -2671,8 +2986,23 @@ Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
     char* endptr;
     errno = 0;
     uint64_t raw_value = strtoull(num_str, &endptr, 0);
-    // sized integer literals are fixed-width, so hex input must be parsed as
-    // unsigned bits first and then wrapped/truncated by the target annotation.
+    if (errno == ERANGE || endptr == num_str || *endptr != '\0') {
+        record_semantic_error(tp, node, ERR_INVALID_NUMBER,
+            "invalid sized integer literal '%s'", num_str);
+        mem_free(num_str);
+        return &TYPE_ERROR;
+    }
+    bool decimal_literal = sized_literal_is_decimal(num_str);
+    uint64_t limit = sized_literal_limit(num_type, decimal_literal);
+    if (raw_value > limit) {
+        // sized constants are checked before packing so invalid source cannot silently truncate.
+        record_semantic_error(tp, node, ERR_INVALID_NUMBER,
+            "sized integer literal '%s' overflows %s", num_str, get_num_sized_type_name(num_type));
+        mem_free(num_str);
+        return &TYPE_ERROR;
+    }
+    // sized integer literals are fixed-width, so non-decimal input may still
+    // denote raw bits, but decimal input is range-checked before packing.
     int64_t value;
     __builtin_memcpy(&value, &raw_value, sizeof(value));
     mem_free(num_str);
@@ -2927,11 +3257,10 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         mem_free(num_str);
 
         log_debug("build_primary_expr SYM_INT: parsed value %lld", value);
-        // Check if the value fits in 56-bit signed integer range
         if (errno == ERANGE || value < INT56_MIN || value > INT56_MAX) {
-            // promote to float for values outside int56 range
-            log_debug("promote int to float (value outside int56 range)");
-            ast_node->type = build_lit_float(tp, child);
+            record_semantic_error(tp, child, ERR_INVALID_NUMBER,
+                "integer literal is outside compact int range; use an explicit suffix or decimal literal");
+            ast_node->type = &TYPE_ERROR;
         }
         else {
             ast_node->type = &LIT_INT;
@@ -3297,9 +3626,10 @@ static void normalize_is_array_type_rhs(Transpiler* tp, AstBinaryNode* ast_node)
     Type* nested_type = NULL;
     int64_t length = 0;
     for (AstNode* item = arr->item; item; item = item->next) {
-        if (!item->type || item->type->type_id != LMD_TYPE_TYPE) return;
-        TypeType* item_type = (TypeType*)item->type;
-        Type* actual_type = item_type->type;
+        if (!item->type) return;
+        Type* actual_type = item->type;
+        if (item->type->type_id == LMD_TYPE_TYPE) actual_type = ((TypeType*)item->type)->type;
+        else if (!item->type->is_literal) return;
         if (!actual_type) return;
         if (!nested_type) nested_type = actual_type;
         else if (nested_type->type_id != actual_type->type_id) nested_type = NULL;
@@ -3307,16 +3637,129 @@ static void normalize_is_array_type_rhs(Transpiler* tp, AstBinaryNode* ast_node)
     }
     if (length == 0) return;
 
-    // `is [T]` parses as an array literal; reinterpret type-valued items as an array type pattern.
+    // `is [T]` parses as an array literal; reinterpret literal/type-valued items as tuple patterns.
     TypeType* node_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeArray* type = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
     node_type->type = (Type*)type;
     type->nested = nested_type;
     type->length = length;
+    type->item_patterns = (Item*)pool_calloc(tp->pool, sizeof(Item) * (size_t)length);
+    type->item_is_type_pattern = (uint8_t*)pool_calloc(tp->pool, sizeof(uint8_t) * (size_t)length);
+    int64_t index = 0;
+    for (AstNode* item = arr->item; item; item = item->next) {
+        if (item->type->type_id == LMD_TYPE_TYPE) {
+            type->item_patterns[index].type = item->type;
+            type->item_is_type_pattern[index] = 1;
+        }
+        else {
+            Item literal = ItemNull;
+            if (ast_static_literal_item(tp, item, &literal)) type->item_patterns[index] = literal;
+        }
+        index++;
+    }
+    if (type->length == 1 && type->item_is_type_pattern[0]) {
+        log_warn("lambda_array_pattern_hint: bare [T] is an exact one-item pattern; use T[] for homogeneous arrays");
+    }
     arraylist_append(tp->type_list, node_type);
     type->type_index = tp->type_list->length - 1;
     rhs->node_type = AST_NODE_ARRAY_TYPE;
     rhs->type = (Type*)node_type;
+}
+
+static bool pipe_rhs_is_legacy_file_target(TSNode node) {
+    TSSymbol sym = ts_node_symbol(node);
+    if (sym == SYM_EXPR || sym == SYM_PRIMARY_EXPR) {
+        TSNode child = ts_node_named_child(node, 0);
+        if (!ts_node_is_null(child)) sym = ts_node_symbol(child);
+    }
+    return sym == SYM_STRING || sym == SYM_PATH_EXPR;
+}
+
+static bool promote_type_union_expr(Transpiler* tp, AstBinaryNode* ast_node) {
+    if (!ast_node || ast_node->op != OPERATOR_UNION ||
+        !ast_node->left || !ast_node->right ||
+        !ast_node->left->type || !ast_node->right->type ||
+        ast_node->left->type->type_id != LMD_TYPE_TYPE ||
+        ast_node->right->type->type_id != LMD_TYPE_TYPE) {
+        return false;
+    }
+
+    // Phase 6 makes `|` union in expression position too; type-valued operands
+    // must build a first-class binary type instead of falling into runtime ops.
+    ast_node->node_type = AST_NODE_BINARY_TYPE;
+    TypeType* node_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
+    node_type->type = (Type*)type;
+    type->left = ((TypeType*)ast_node->left->type)->type;
+    type->right = ((TypeType*)ast_node->right->type)->type;
+    type->op = OPERATOR_UNION;
+    ast_node->type = (Type*)node_type;
+    arraylist_append(tp->type_list, ast_node->type);
+    type->type_index = tp->type_list->length - 1;
+    return true;
+}
+
+static AstNode* promote_bare_pipe_sysfunc(Transpiler* tp, TSNode right_node, AstNode* built_right) {
+    AstNode* target = built_right;
+    if (target && target->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)target;
+        if (primary->expr) target = primary->expr;
+    }
+
+    StrView func_name = {0};
+    if (target && target->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)target;
+        if (ident->entry) return NULL;
+        func_name.str = ident->name->chars;
+        func_name.length = ident->name->len;
+    } else if (target && target->node_type == AST_NODE_SYS_FUNC) {
+        AstSysFuncNode* sys = (AstSysFuncNode*)target;
+        if (!sys->fn_info) return NULL;
+        func_name = strview_from_cstr(sys->fn_info->name);
+    } else {
+        return NULL;
+    }
+
+    NameEntry* user_name = lookup_name(tp, func_name);
+    if (user_name && user_name->node && user_name->node->node_type == AST_NODE_FUNC) {
+        return NULL;
+    }
+
+    SysFuncInfo* sys_func_info = get_sys_func_info(&func_name, 1);
+    if (!sys_func_info) {
+        const char* modules[] = { NULL, NULL, NULL };
+        int mod_count = 0;
+        if (tp->builtin_import_math)    modules[mod_count++] = "math";
+        if (tp->builtin_import_io)      modules[mod_count++] = "io";
+        if (tp->builtin_import_radiant) modules[mod_count++] = "radiant";
+        for (int mi = 0; mi < mod_count && !sys_func_info; mi++) {
+            char prefixed[128];
+            snprintf(prefixed, sizeof(prefixed), "%s_%.*s",
+                modules[mi], (int)func_name.length, func_name.str);
+            StrView prefixed_view = strview_from_cstr(prefixed);
+            sys_func_info = get_sys_func_info(&prefixed_view, 1);
+        }
+    }
+    if (!sys_func_info) return NULL;
+
+    if (sys_func_info->is_proc && (!tp->current_scope || !tp->current_scope->is_proc)) {
+        record_semantic_error(tp, right_node, ERR_PROC_IN_FN,
+            "procedure '%.*s' cannot be called in a function",
+            (int)func_name.length, func_name.str);
+    }
+
+    AstCallNode* call = (AstCallNode*)alloc_ast_node(tp, AST_NODE_CALL_EXPR, right_node, sizeof(AstCallNode));
+    AstSysFuncNode* fn_node = (AstSysFuncNode*)alloc_ast_node(tp, AST_NODE_SYS_FUNC, right_node, sizeof(AstSysFuncNode));
+    fn_node->fn_info = sys_func_info;
+    fn_node->type = sys_func_info->return_type;
+    call->function = (AstNode*)fn_node;
+    call->argument = NULL;
+    // Bare sysfunc pipe RHS has no call node, so inject before lowering sees an undefined identifier.
+    call->pipe_inject = true;
+    call->propagate = false;
+    call->can_raise = sys_func_info->can_raise;
+    call->type = sys_func_info->can_raise ? &TYPE_ANY : sys_func_info->return_type;
+    return (AstNode*)call;
 }
 
 AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
@@ -3353,11 +3796,10 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, ">")) { ast_node->op = OPERATOR_GT; }
     else if (strview_equal(&op, ">=")) { ast_node->op = OPERATOR_GE; }
     else if (strview_equal(&op, "to")) { ast_node->op = OPERATOR_TO; }
-    else if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_PIPE; }
+    else if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_UNION; }
+    else if (strview_equal(&op, "|>")) { ast_node->op = OPERATOR_PIPE; }
     else if (strview_equal(&op, "where")) { ast_node->op = OPERATOR_WHERE; }
     else if (strview_equal(&op, "that")) { ast_node->op = OPERATOR_WHERE; }  // 'that' is filter like 'where'
-    else if (strview_equal(&op, "|>")) { ast_node->op = OPERATOR_PIPE_FILE; }
-    else if (strview_equal(&op, "|>>")) { ast_node->op = OPERATOR_PIPE_APPEND; }
     else if (strview_equal(&op, "&")) { ast_node->op = OPERATOR_INTERSECT; }
     else if (strview_equal(&op, "!")) { ast_node->op = OPERATOR_EXCLUDE; }
     else if (strview_equal(&op, "is")) { ast_node->op = OPERATOR_IS; }
@@ -3374,6 +3816,11 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     bool pipe_inject = false;
     if (ast_node->op == OPERATOR_PIPE) {
         if (!tsnode_has_current_item_ref(tp, right_node)) {
+            if (pipe_rhs_is_legacy_file_target(right_node)) {
+                // `|>` is now the pipe operator; file output is explicit.
+                record_semantic_error(tp, right_node, ERR_INVALID_OPERATION,
+                    "file output has moved; use output(data, file)");
+            }
             tp->pipe_inject_args = 1;
             pipe_inject = true;
             log_debug("pipe without ~: will inject first arg");
@@ -3401,7 +3848,15 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         return (AstNode*)ast_node;
     }
 
+    if (pipe_inject && ast_node->op == OPERATOR_PIPE) {
+        AstNode* pipe_call = promote_bare_pipe_sysfunc(tp, right_node, ast_node->right);
+        if (pipe_call) ast_node->right = pipe_call;
+    }
+
     normalize_is_array_type_rhs(tp, ast_node);
+    if (promote_type_union_expr(tp, ast_node)) {
+        return (AstNode*)ast_node;
+    }
 
     // Special case: 'expr is nan' — IEEE NaN check
     // nan is a float value, not a type, so 'is' type-check doesn't work.
@@ -3453,6 +3908,15 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     // Additional validation: ensure both operands have valid types
     if (!ast_node->left->type || !ast_node->right->type) {
         log_error("Error: build_binary_expr operands missing type information");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    if ((ast_node->op == OPERATOR_IDIV || ast_node->op == OPERATOR_MOD) &&
+        ast_numeric_literal_is_zero(tp, ast_node->right)) {
+        // literal zero divisors are rejected before lowering so constant mistakes do not depend on runtime evaluation.
+        record_semantic_error(tp, right_node, ERR_INVALID_OPERATION,
+            "literal zero divisor is not allowed for integer division or modulo");
         ast_node->type = &TYPE_ERROR;
         return (AstNode*)ast_node;
     }
@@ -3573,17 +4037,6 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
                 type_id = right_type;
             }
         }
-    }
-    else if (ast_node->op == OPERATOR_PIPE_FILE || ast_node->op == OPERATOR_PIPE_APPEND) {
-        // pipe-to-file operators (procedural only): change node type to AST_NODE_PIPE_FILE_STAM
-        ast_node->node_type = AST_NODE_PIPE_FILE_STAM;
-        // Check that we're in procedural context
-        if (!tp->current_scope || !tp->current_scope->is_proc) {
-            log_error("Error: pipe-to-file operators (|> and |>>) are only allowed in procedural code (pn functions)");
-            tp->error_count++;
-        }
-        // result type is Item (true on success, error on failure)
-        type_id = LMD_TYPE_ANY;
     }
     else {  // OPERATOR_JOIN, etc.
         type_id = LMD_TYPE_ANY;
@@ -4103,6 +4556,22 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                     // and the RHS is a literal array with known element types, verify compatibility
                     Type* ann_type = ast_node->type;
                     Type* rhs_type = ast_node->as ? ast_node->as->type : nullptr;
+                    if (ann_type && ann_type->type_id == LMD_TYPE_ARRAY) {
+                        TypeArray* ann_arr = (TypeArray*)ann_type;
+                        if (ann_arr->item_patterns && ann_arr->length == 1) {
+                            Type* ann_elem = ann_arr->nested;
+                            if (ann_elem && ann_elem->type_id == LMD_TYPE_TYPE) ann_elem = ((TypeType*)ann_elem)->type;
+                            if (rhs_type && rhs_type->type_id == LMD_TYPE_ARRAY) {
+                                TypeArray* rhs_arr = (TypeArray*)rhs_type;
+                                if (rhs_arr->length != 1) {
+                                    int line = ts_node_start_point(asn_node).row + 1;
+                                    record_type_error(tp, line,
+                                        "array annotation [T] expects exactly one item; did you mean `%s[]`?",
+                                        ann_elem ? get_type_name(ann_elem->type_id) : "T");
+                                }
+                            }
+                        }
+                    }
                     if (ann_type && !is_global_simple_type(ann_type) &&
                         ann_type->kind == TYPE_KIND_UNARY && rhs_type) {
                         TypeUnary* unary = (TypeUnary*)ann_type;
@@ -4763,8 +5232,14 @@ AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
     TypeArray* type = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
     ((TypeType*)ast_node->type)->type = (Type*)type;
 
+    uint32_t child_count = ts_node_named_child_count(array_node);
+    if (child_count > 0) {
+        type->item_patterns = (Item*)pool_calloc(tp->pool, sizeof(Item) * child_count);
+        type->item_is_type_pattern = (uint8_t*)pool_calloc(tp->pool, sizeof(uint8_t) * child_count);
+    }
     TSNode child = ts_node_named_child(array_node, 0);
     AstNode* prev_item = NULL;  Type* nested_type = NULL;
+    int64_t index = 0;
     while (!ts_node_is_null(child)) {
         AstNode* item = build_expr(tp, child);
         if (item) {
@@ -4778,11 +5253,23 @@ AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
                 }
             }
             prev_item = item;
+            if (item->type && item->type->type_id == LMD_TYPE_TYPE) {
+                type->item_patterns[index].type = item->type;
+                type->item_is_type_pattern[index] = 1;
+            }
+            else {
+                Item literal = ItemNull;
+                if (ast_static_literal_item(tp, item, &literal)) type->item_patterns[index] = literal;
+            }
             type->length++;
+            index++;
         }
         child = ts_node_next_named_sibling(child);
     }
     type->nested = nested_type;
+    if (type->length == 1 && type->item_is_type_pattern && type->item_is_type_pattern[0]) {
+        log_warn("lambda_array_pattern_hint: bare [T] is an exact one-item pattern; use T[] for homogeneous arrays");
+    }
 
     arraylist_append(tp->type_list, ast_node->type);
     type->type_index = tp->type_list->length - 1;
@@ -6622,6 +7109,7 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         // build object (the array/container)
         TSNode obj_node = ts_node_child_by_field_id(target_node, FIELD_OBJECT);
         ast_node->object = build_expr(tp, obj_node);
+        validate_compound_mutable_root(tp, assign_node, ast_node->object);
 
         // build index expression(s) — multi-dim arr[i, j, k] = v chains keys via ->next
         TSNode idx_node = ts_node_child_by_field_id(target_node, FIELD_FIELD);
@@ -6661,6 +7149,7 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         // build object (the map/element)
         TSNode obj_node = ts_node_child_by_field_id(target_node, FIELD_OBJECT);
         ast_node->object = build_expr(tp, obj_node);
+        validate_compound_mutable_root(tp, assign_node, ast_node->object);
 
         // build field name as identifier node
         TSNode field_node = ts_node_child_by_field_id(target_node, FIELD_FIELD);
@@ -6785,6 +7274,9 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
     TypeParam* param_type = (TypeParam*)alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(TypeParam));
     ast_node->type = (Type*)param_type;
 
+    TSNode var_node = ts_node_child_by_field_id(param_node, FIELD_VAR);
+    param_type->is_var_param = !ts_node_is_null(var_node);
+
     // check optional marker (?)
     TSNode optional_node = ts_node_child_by_field_id(param_node, FIELD_OPTIONAL);
     param_type->is_optional = !ts_node_is_null(optional_node);
@@ -6804,8 +7296,14 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
         if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
             TypeType* type_type = (TypeType*)type_expr->type;
             if (type_type->type) {
+                bool was_optional = param_type->is_optional;
+                bool was_var_param = param_type->is_var_param;
+                AstNode* default_value = param_type->default_value;
                 // Copy base Type fields
                 *(Type*)param_type = *type_type->type;
+                param_type->is_optional = was_optional;
+                param_type->is_var_param = was_var_param;
+                param_type->default_value = default_value;
                 // For complex types (TypeBinary, TypeUnary) and named map/object types,
                 // store pointer to full type so that downstream code can access
                 // extended fields (shape, struct_name, methods, etc.)
@@ -6842,10 +7340,14 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
 
     if (!is_type) {
         push_name(tp, ast_node, NULL);
-        // In pn (procedural) functions, parameters are mutable
+        // Legacy pn parameters remain locally mutable; explicit `var` marks
+        // inout intent for Phase 5 call-site checks.
         if (tp->current_scope && tp->current_scope->is_proc) {
             NameEntry* entry = lookup_name_in_current_scope(tp, ast_node->name);
-            if (entry) entry->is_mutable = true;
+            if (entry) {
+                entry->is_mutable = true;
+                entry->is_var_param = param_type->is_var_param;
+            }
         }
     }
     return ast_node;

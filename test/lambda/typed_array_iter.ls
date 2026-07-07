@@ -37,28 +37,28 @@ for (x in [1, 2, 3, 4, 5] where x > 2) (x * 10)
 // pipe operator over ArrayNum (Lambda's `|` syntax)
 // ============================================================
 '=== pipe sum ==='
-[1, 2, 3, 4, 5] | sum()
-[1.5, 2.5, 3.5] | sum()
-1 to 10 | sum()
+[1, 2, 3, 4, 5] |> sum()
+[1.5, 2.5, 3.5] |> sum()
+1 to 10 |> sum()
 
 '=== pipe avg ==='
-[1, 2, 3, 4, 5] | avg()
-[1.0, 2.0, 3.0, 4.0] | avg()
+[1, 2, 3, 4, 5] |> avg()
+[1.0, 2.0, 3.0, 4.0] |> avg()
 
 '=== pipe min/max ==='
-[5, 2, 8, 1, 9] | min()
-[5, 2, 8, 1, 9] | max()
+[5, 2, 8, 1, 9] |> min()
+[5, 2, 8, 1, 9] |> max()
 
 '=== pipe all/any (bool array) ==='
-[true, true, true] | all()
-[true, false, true] | all()
-[false, false, false] | any()
-[false, true, false] | any()
+[true, true, true] |> all()
+[true, false, true] |> all()
+[false, false, false] |> any()
+[false, true, false] |> any()
 
 '=== pipe len ==='
-[1, 2, 3, 4, 5] | len()
-[true, false] | len()
-[] | len()
+[1, 2, 3, 4, 5] |> len()
+[true, false] |> len()
+[] |> len()
 
 // ============================================================
 // Chained operations

@@ -531,10 +531,6 @@
           {
             "type": "|>",
             "named": false
-          },
-          {
-            "type": "|>>",
-            "named": false
           }
         ]
       },
@@ -3086,6 +3082,16 @@
           }
         ]
       },
+      "var": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "var_param_marker",
+            "named": true
+          }
+        ]
+      },
       "variadic": {
         "multiple": false,
         "required": false,
@@ -4460,11 +4466,11 @@
   },
   {
     "type": "symbol",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "that",
@@ -4481,6 +4487,10 @@
   {
     "type": "var",
     "named": false
+  },
+  {
+    "type": "var_param_marker",
+    "named": true
   },
   {
     "type": "variadic",
@@ -4508,10 +4518,6 @@
   },
   {
     "type": "|>",
-    "named": false
-  },
-  {
-    "type": "|>>",
     "named": false
   },
   {

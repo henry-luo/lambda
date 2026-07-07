@@ -34,6 +34,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
 extern "C" Item js_symbol_well_known(Item name);
 extern "C" Item js_util_custom_promisify_args_symbol(void);
+extern "C" int radiant_dom_cssom_method(Item obj, Item method_name, Item* args, int argc, Item* out);
 extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
                                              Item filename_item,
                                              int64_t line_offset,
@@ -17092,7 +17093,9 @@ static bool js_regex_set_lastindex_item_strict(Item regex, Item li_key, Item val
 }
 
 static bool js_regex_set_lastindex_strict(Item regex, Item li_key, int64_t value) {
-    return js_regex_set_lastindex_item_strict(regex, li_key, (Item){.item = i2it(value)});
+    // AdvanceStringIndex can produce 2^53, which is a valid JS Number but outside
+    // Lambda's compact-int range; route through js_make_number to avoid ITEM_ERROR.
+    return js_regex_set_lastindex_item_strict(regex, li_key, js_make_number((double)value));
 }
 
 static int64_t js_regex_advance_string_index_bytes(String* s, int64_t index, bool full_unicode) {
@@ -18683,14 +18686,11 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         return ItemNull;
     }
     // CSSOM wrapper methods
-    if (js_is_css_namespace(obj)) {
-        return js_css_namespace_method(obj, method_name, args, argc);
-    }
-    if (js_is_stylesheet(obj)) {
-        return js_cssom_stylesheet_method(obj, method_name, args, argc);
-    }
-    if (js_is_rule_style_decl(obj)) {
-        return js_cssom_rule_decl_method(obj, method_name, args, argc);
+    {
+        Item cssom_result = ItemNull;
+        if (radiant_dom_cssom_method(obj, method_name, args, argc, &cssom_result)) {
+            return cssom_result;
+        }
     }
     // DataView methods
     if (js_is_dataview(obj)) {

@@ -44,7 +44,7 @@
 [null]
 [0]
 [false]
-[null]
+[""]
 "=== Integration Stress Tests ==="
 60
 120

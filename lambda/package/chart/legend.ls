@@ -131,7 +131,7 @@ pub fn gradient_legend(sc, title_text, config) {
 pub fn legend_width(categories, config) {
     let cfg = merge_config(config);
     let max_len = if (len(categories) > 0)
-        max(categories | len(string(~)))
+        max(categories |> len(string(~)))
     else 5;
     float(cfg.symbol_size) + cfg.symbol_padding + float(max_len) * 7.0 + 10.0
 }

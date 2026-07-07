@@ -25,7 +25,7 @@ let title    = if (dashboard.title)    dashboard.title    else "Chart Dashboard"
 let subtitle = if (dashboard.subtitle) dashboard.subtitle else ""
 let cols     = if (dashboard.columns)  string(int(dashboard.columns)) else "3"
 
-let cards_html = (dashboard.charts | make_card(~)) | join("")
+let cards_html = (dashboard.charts |> make_card(~)) |> join("")
 
 let css =
     "*{box-sizing:border-box;margin:0;padding:0}" ++

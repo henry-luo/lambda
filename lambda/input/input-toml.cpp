@@ -617,22 +617,36 @@ static Item parse_number(InputContext& ctx, const char **toml) {
         tracker.advance(consumed);
         return {.item = d2it(dval)};
     } else {
-        int64_t val = strtol(start, &end, 10);
-        if (end == start) {
+        const char* token_end = temp;
+        size_t token_len = (size_t)(token_end - start);
+        char stack_buf[128];
+        char* clean = stack_buf;
+        bool heap_buf = false;
+        if (token_len >= sizeof(stack_buf)) {
+            clean = (char*)mem_alloc(token_len + 1, MEM_CAT_INPUT_TOML);
+            if (!clean) {
+                ctx.addError(num_loc, "Memory allocation failed for integer");
+                return {.item = ITEM_ERROR};
+            }
+            heap_buf = true;
+        }
+        size_t clean_len = 0;
+        for (size_t i = 0; i < token_len; i++) {
+            if (start[i] != '_') clean[clean_len++] = start[i];
+        }
+        clean[clean_len] = '\0';
+
+        Item int_item = parse_integer_token_exact(ctx, clean, clean_len);
+        if (heap_buf) mem_free(clean);
+        if (int_item.item == ITEM_NULL) {
             ctx.addError(num_loc, "Invalid integer number format");
             return {.item = ITEM_ERROR};
         }
-        int64_t *lval;
-        lval = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
-        if (lval == NULL) {
-            ctx.addError(num_loc, "Memory allocation failed for integer");
-            return {.item = ITEM_ERROR};
-        }
-        *lval = val;
-        size_t consumed = end - *toml;
-        *toml = end;
+        // decimal TOML integers use the shared exact path so large IDs never pass through double.
+        size_t consumed = token_end - *toml;
+        *toml = token_end;
         tracker.advance(consumed);
-        return {.item = l2it(lval)};
+        return int_item;
     }
 }
 

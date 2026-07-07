@@ -268,9 +268,8 @@ static Item make_scalar(YamlParser* p, const char* str, bool quoted) {
         return p->ctx->builder.createStringItem(str);
     }
     if (tag == TAG_INT) {
-        char* end;
-        int64_t val = strtoll(str, &end, 10);
-        if (*end == '\0') return p->ctx->builder.createInt(val);
+        Item int_item = parse_integer_token_exact(*p->ctx, str, strlen(str));
+        if (int_item.item != ITEM_NULL) return int_item;
         return p->ctx->builder.createStringItem(str);
     }
     if (tag == TAG_FLOAT) {
@@ -347,7 +346,11 @@ static Item make_scalar(YamlParser* p, const char* str, bool quoted) {
         if (*end == '\0') return p->ctx->builder.createInt(val);
     } else {
         int64_t int_val = strtoll(buf, &end, 10);
-        if (*end == '\0') return p->ctx->builder.createInt(int_val);
+        if (*end == '\0') {
+            Item int_item = parse_integer_token_exact(*p->ctx, buf, slen);
+            if (int_item.item != ITEM_NULL) return int_item;
+            return p->ctx->builder.createInt(int_val);
+        }
     }
 
     double float_val = strtod(buf, &end);

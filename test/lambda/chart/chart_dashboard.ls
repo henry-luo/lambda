@@ -39,7 +39,7 @@ let subtitle = if (dashboard.subtitle) dashboard.subtitle else ""
 let cols     = if (dashboard.columns)  string(int(dashboard.columns)) else "3"
 
 // ── Render all charts ───────────────────────────────────────────────────────
-let cards_html = (dashboard.charts | make_card(~)) | join("")
+let cards_html = (dashboard.charts |> make_card(~)) |> join("")
 
 // ── CSS ─────────────────────────────────────────────────────────────────────
 let css =

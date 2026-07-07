@@ -79,10 +79,14 @@ false
 true
 "8.2"
 true
+"8.3"
+false
 'Test 9: Zero or More (*)'
 "9.1"
 true
 "9.2"
+true
+"9.3"
 true
 'Test 10: Exact Count [n]'
 "10.1"

@@ -717,6 +717,8 @@ void list_push(List *list, Item item) {
         if (nest_list && (uintptr_t)nest_list >= 0x1000 && nest_list->is_content) {
             // content list: flatten by copying over the items
             if (nest_list->items == NULL) {
+                // empty content lists are valid no-op results from vector helpers.
+                if (nest_list->length == 0) return;
                 log_error("list_push: nested list has NULL items array! length=%ld, list=%p", nest_list->length, (void*)nest_list);
                 return;
             }

@@ -1,9 +1,9 @@
-// Test math constants: math.pi, math.e
+// Test math constants: math.pi, math.e, math.max_int
 // Test new math functions: trunc, math.hypot, math.log1p
 
 // Section 1: Math constants
 "1. Math constants"
-[math.pi, math.e]
+[math.pi, math.e, math.max_int, type(math.max_int)]
 
 // Section 2: trunc - truncate toward zero
 "2. trunc"

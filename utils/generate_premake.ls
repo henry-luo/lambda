@@ -1835,7 +1835,7 @@ pn main() {
         }
     }
 
-    out |> outpath
+    output(out, outpath)^
 
     print("Output: " ++ outpath)
     print("Size: " ++ (len(out)) ++ " chars")

@@ -25,13 +25,13 @@ let greet = (name: string) => "Hi, " & name
 greet("Lambda")
 
 // ===== Inline in map =====
-[1, 2, 3, 4, 5] | map((x) => x * x)
+[1, 2, 3, 4, 5] |> map((x) => x * x)
 
 // ===== Inline in filter =====
-[1, 2, 3, 4, 5, 6] | filter((x) => x % 2 == 0)
+[1, 2, 3, 4, 5, 6] |> filter((x) => x % 2 == 0)
 
 // ===== Inline in reduce =====
-[1, 2, 3, 4] | reduce((acc, x) => acc + x)
+[1, 2, 3, 4] |> reduce((acc, x) => acc + x)
 
 // ===== Arrow as argument =====
 fn apply(f, x) => f(x)
@@ -58,7 +58,7 @@ double_then_inc(5)
 double_then_inc(3)
 
 // ===== Arrow in let =====
-let transform = [1, 2, 3] | map((x) => x + 10)
+let transform = [1, 2, 3] |> map((x) => x + 10)
 transform
 
 // ===== Arrow with boolean =====

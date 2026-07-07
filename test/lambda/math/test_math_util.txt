@@ -11,7 +11,7 @@ true
 "24. starts hello world:"
 false
 "25. starts empty:"
-false
+true
 "26. starts short:"
 false
 "27. attr_or has:test28. attr_or miss:default29. text_of string:hello30. text_of element:content31. PT_PER_EM:"

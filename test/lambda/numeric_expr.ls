@@ -46,9 +46,10 @@
 1234567890 % 123
 
 "Modulo by Zero (errors):"
-5 % 0
-0 % 0
-17 % 0
+let zero_divisor = 0
+5 % zero_divisor
+zero_divisor % zero_divisor
+17 % zero_divisor
 
 "Modulo with Float (errors):"
 5.5 % 3
@@ -115,8 +116,8 @@ let null_val = null
 "Division by Zero:"
 5 / 0
 0 / 0
-5 div 0
-0 div 0
+5 div zero_divisor
+zero_divisor div zero_divisor
 
 "Boolean Arithmetic (errors):"
 true + false
@@ -169,8 +170,8 @@ true div false
 
 "Edge Cases:"
 0.000000001 / 1000000
-999999999999999999 + 1
--999999999999999999 - 1
+999999999999999999.0 + 1
+-999999999999999999.0 - 1
 
 "More Edge Cases:"
 1e-10 * 1e10
@@ -182,7 +183,7 @@ true div false
 -2.0 / 0.0
 0.0 / 0.0
 1.0 / (-0.0)
-1000000000000000000 * 1000000000000000000
+1000000000000000000.0 * 1000000000000000000.0
 
 "Power Operations:"
 2 ** 0
@@ -215,8 +216,8 @@ true div false
 1.0 / 3.0 * 3.0
 
 "Large Numbers:"
-9223372036854775807 + 1
--9223302036854775808 - 1
+9223372036854775807.0 + 1
+-9223302036854775808.0 - 1
 
 "Concatenation: "
 "hello" ++ " world"

@@ -185,7 +185,7 @@
             "value": "'"
           },
           {
-            "type": "REPEAT",
+            "type": "REPEAT1",
             "content": {
               "type": "CHOICE",
               "members": [
@@ -225,7 +225,7 @@
             "value": "b'"
           },
           {
-            "type": "REPEAT",
+            "type": "REPEAT1",
             "content": {
               "type": "PATTERN",
               "value": "[^']"
@@ -2233,7 +2233,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": "pipe",
+          "value": "set_union",
           "content": {
             "type": "SEQ",
             "members": [
@@ -2337,75 +2337,6 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
-                  "value": "that"
-                }
-              },
-              {
-                "type": "FIELD",
-                "name": "right",
-                "content": {
-                  "type": "CHOICE",
-                  "members": [
-                    {
-                      "type": "SYMBOL",
-                      "name": "primary_expr"
-                    },
-                    {
-                      "type": "SYMBOL",
-                      "name": "unary_expr"
-                    },
-                    {
-                      "type": "ALIAS",
-                      "content": {
-                        "type": "SYMBOL",
-                        "name": "attr_binary_expr"
-                      },
-                      "named": true,
-                      "value": "binary_expr"
-                    }
-                  ]
-                }
-              }
-            ]
-          }
-        },
-        {
-          "type": "PREC_LEFT",
-          "value": "pipe_file",
-          "content": {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "FIELD",
-                "name": "left",
-                "content": {
-                  "type": "CHOICE",
-                  "members": [
-                    {
-                      "type": "SYMBOL",
-                      "name": "primary_expr"
-                    },
-                    {
-                      "type": "SYMBOL",
-                      "name": "unary_expr"
-                    },
-                    {
-                      "type": "ALIAS",
-                      "content": {
-                        "type": "SYMBOL",
-                        "name": "attr_binary_expr"
-                      },
-                      "named": true,
-                      "value": "binary_expr"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "FIELD",
-                "name": "operator",
-                "content": {
-                  "type": "STRING",
                   "value": "|>"
                 }
               },
@@ -2440,7 +2371,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": "pipe_file",
+          "value": "pipe",
           "content": {
             "type": "SEQ",
             "members": [
@@ -2475,7 +2406,7 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
-                  "value": "|>>"
+                  "value": "that"
                 }
               },
               {
@@ -3510,6 +3441,17 @@
         }
       }
     },
+    "var_param_marker": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 3,
+        "content": {
+          "type": "STRING",
+          "value": "var"
+        }
+      }
+    },
     "path_parent": {
       "type": "STRING",
       "value": ".."
@@ -4229,7 +4171,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": "pipe",
+          "value": "set_union",
           "content": {
             "type": "SEQ",
             "members": [
@@ -4279,39 +4221,6 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
-                  "value": "that"
-                }
-              },
-              {
-                "type": "FIELD",
-                "name": "right",
-                "content": {
-                  "type": "SYMBOL",
-                  "name": "_expr"
-                }
-              }
-            ]
-          }
-        },
-        {
-          "type": "PREC_LEFT",
-          "value": "pipe_file",
-          "content": {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "FIELD",
-                "name": "left",
-                "content": {
-                  "type": "SYMBOL",
-                  "name": "_expr"
-                }
-              },
-              {
-                "type": "FIELD",
-                "name": "operator",
-                "content": {
-                  "type": "STRING",
                   "value": "|>"
                 }
               },
@@ -4328,7 +4237,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": "pipe_file",
+          "value": "pipe",
           "content": {
             "type": "SEQ",
             "members": [
@@ -4345,7 +4254,7 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
-                  "value": "|>>"
+                  "value": "that"
                 }
               },
               {
@@ -4625,6 +4534,102 @@
     "parameter": {
       "type": "CHOICE",
       "members": [
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "var",
+              "content": {
+                "type": "SYMBOL",
+                "name": "var_param_marker"
+              }
+            },
+            {
+              "type": "FIELD",
+              "name": "name",
+              "content": {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "identifier"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "symbol"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "FIELD",
+                  "name": "optional",
+                  "content": {
+                    "type": "STRING",
+                    "value": "?"
+                  }
+                },
+                {
+                  "type": "BLANK"
+                }
+              ]
+            },
+            {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SEQ",
+                  "members": [
+                    {
+                      "type": "STRING",
+                      "value": ":"
+                    },
+                    {
+                      "type": "FIELD",
+                      "name": "type",
+                      "content": {
+                        "type": "SYMBOL",
+                        "name": "_type_expr"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "BLANK"
+                }
+              ]
+            },
+            {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SEQ",
+                  "members": [
+                    {
+                      "type": "STRING",
+                      "value": "="
+                    },
+                    {
+                      "type": "FIELD",
+                      "name": "default",
+                      "content": {
+                        "type": "SYMBOL",
+                        "name": "_expr"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "BLANK"
+                }
+              ]
+            }
+          ]
+        },
         {
           "type": "SEQ",
           "members": [
@@ -9074,10 +9079,6 @@
       {
         "type": "STRING",
         "value": "pipe"
-      },
-      {
-        "type": "STRING",
-        "value": "pipe_file"
       },
       {
         "type": "SYMBOL",

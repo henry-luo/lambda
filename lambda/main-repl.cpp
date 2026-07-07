@@ -1,5 +1,6 @@
 
 #include "../lib/strbuf.h"
+#include "lambda-error.h"
 #include <tree_sitter/api.h>
 #ifndef _WIN32
 #include <unistd.h>  // for isatty()
@@ -161,6 +162,36 @@ StatementStatus check_statement_completeness(TSParser* parser, const char* sourc
     // ERROR nodes without MISSING nodes = syntax error
     ts_tree_delete(tree);
     return STMT_ERROR;
+}
+
+void print_repl_syntax_error(TSParser* parser, const char* source) {
+    if (!parser || !source) {
+        fputs("Syntax error.\n", stderr);
+        return;
+    }
+
+    TSTree* tree = lambda_parse_source(parser, source);
+    if (!tree) {
+        fputs("Syntax error.\n", stderr);
+        return;
+    }
+
+    TSNode root = ts_tree_root_node(tree);
+    ArrayList* errors = arraylist_new(4);
+    if (errors) {
+        // REPL completeness checks only return a status; reuse structured parse
+        // diagnostics here so ambiguous statement syntax gets the same hint as files.
+        find_errors(root, source, "<repl>", errors);
+        for (int i = 0; i < errors->length; i++) {
+            LambdaError* error = (LambdaError*)errors->data[i];
+            err_print(error);
+            err_free(error);
+        }
+        arraylist_free(errors);
+    } else {
+        fputs("Syntax error.\n", stderr);
+    }
+    ts_tree_delete(tree);
 }
 
 // Get the continuation prompt for multi-line input

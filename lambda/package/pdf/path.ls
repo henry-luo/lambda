@@ -15,7 +15,7 @@
 //
 // We follow the same Lambda-script discipline used in text.ls / interp.ls:
 //   - No `var x = null` (locks the var to null forever).
-//   - No `var s = ""` (locks s as null-string).
+//   - Empty strings are real strings; use explicit null checks for absence.
 //   - Multi-line `++` chains are wrapped in parens.
 //   - State manipulations stay inside `fn` (no `pn` here at all).
 //
@@ -367,7 +367,7 @@ fn _seg_str(s) {
 
 fn _segments_to_d(segments) {
     let parts = (for (s in segments) _seg_str(s))
-    parts | join(" ")
+    parts |> join(" ")
 }
 
 // Public: render the *current* path's segments as an SVG `d` string.
@@ -411,7 +411,7 @@ fn _format_dash(arr) {
     else if (len(arr) == 0) { "none" }
     else {
         let parts = (for (n in arr) util.fmt_num(n))
-        parts | join(",")
+        parts |> join(",")
     }
 }
 

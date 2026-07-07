@@ -87,7 +87,7 @@ pub fn page_content_bytes(pdf, page) {
             // array of refs → concat each stream's data with "\n"
             let parts = (for (r in cref)
                 (let s = deref(pdf, r), _stream_bytes(s)));
-            parts | join("\n")
+            parts |> join("\n")
         }
         else {
             let s = deref(pdf, cref);

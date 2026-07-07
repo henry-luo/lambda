@@ -47,7 +47,7 @@ pct.value
 pct.normalized()
 
 // ===== That in type definition (filter-like) =====
-let positives = [1, -2, 3, -4, 5] | filter((x) => x > 0)
+let positives = [1, -2, 3, -4, 5] |> filter((x) => x > 0)
 positives
 
 // ===== Constraint inheritance =====

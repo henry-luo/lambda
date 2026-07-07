@@ -90,6 +90,15 @@ static inline Item push_u64(uint64_t value) {
     return (Item){ .item = u2it(heap_val) };
 }
 
+static inline Item pack_compact_int_or_float(__int128 value) {
+    // The Item payload can hold more bits than Lambda's semantic int; overflow
+    // crosses into float instead of becoming a wider tagged int or an error.
+    if (value <= INT56_MAX && value >= INT56_MIN) {
+        return (Item){ .item = i2it((int64_t)value) };
+    }
+    return push_d((double)value);
+}
+
 static bool read_sized_integer(Item item, TypeId type, SizedIntegerValue* out) {
     if (type == LMD_TYPE_NUM_SIZED) {
         NumSizedType st = item.get_num_type();
@@ -441,21 +450,7 @@ Item fn_add(Item item_a, Item item_b) {
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t a = item_a.get_int56();
         int64_t b = item_b.get_int56();
-        // use __builtin_add_overflow for efficient overflow detection
-#if defined(__GNUC__) || defined(__clang__)
-        int64_t result;
-        if (__builtin_add_overflow(a, b, &result) || result > INT56_MAX || result < INT56_MIN) {
-            log_error("integer overflow in addition");
-            return ItemError;
-        }
-#else
-        int64_t result = a + b;
-        if (result > INT56_MAX || result < INT56_MIN) {
-            log_error("integer overflow in addition");
-            return ItemError;
-        }
-#endif
-        return { .item = i2it(result) };
+        return pack_compact_int_or_float((__int128)a + (__int128)b);
     }
     else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT64) {
         return push_l(item_a.get_int64() + item_b.get_int64());
@@ -543,23 +538,7 @@ Item fn_mul(Item item_a, Item item_b) {
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t a = item_a.get_int56();
         int64_t b = item_b.get_int56();
-        // use __builtin_mul_overflow for efficient overflow detection
-#if defined(__GNUC__) || defined(__clang__)
-        int64_t result;
-        if (__builtin_mul_overflow(a, b, &result) || result > INT56_MAX || result < INT56_MIN) {
-            log_error("integer overflow in multiplication");
-            return ItemError;
-        }
-#else
-        // fallback: use __int128 for precise overflow detection
-        __int128 wide_result = (__int128)a * (__int128)b;
-        if (wide_result > INT56_MAX || wide_result < INT56_MIN) {
-            log_error("integer overflow in multiplication");
-            return ItemError;
-        }
-        int64_t result = (int64_t)wide_result;
-#endif
-        return { .item = i2it(result) };
+        return pack_compact_int_or_float((__int128)a * (__int128)b);
     }
     else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT64) {
         return push_l(item_a.get_int64() * item_b.get_int64());
@@ -652,21 +631,7 @@ Item fn_sub(Item item_a, Item item_b) {
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t a = item_a.get_int56();
         int64_t b = item_b.get_int56();
-        // use __builtin_sub_overflow for efficient overflow detection
-#if defined(__GNUC__) || defined(__clang__)
-        int64_t result;
-        if (__builtin_sub_overflow(a, b, &result) || result > INT56_MAX || result < INT56_MIN) {
-            log_error("integer overflow in subtraction");
-            return ItemError;
-        }
-#else
-        int64_t result = a - b;
-        if (result > INT56_MAX || result < INT56_MIN) {
-            log_error("integer overflow in subtraction");
-            return ItemError;
-        }
-#endif
-        return { .item = i2it(result) };
+        return pack_compact_int_or_float((__int128)a - (__int128)b);
     }
     else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT64) {
         return push_l(item_a.get_int64() - item_b.get_int64());

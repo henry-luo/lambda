@@ -1,6 +1,7 @@
 #include "validator_internal.hpp"
 #include "../mark_reader.hpp"  // MarkReader API for type-safe traversal
 #include "../re2_wrapper.hpp"  // for pattern_full_match
+#include "../lambda-decimal.hpp"  // for decimal literal comparison
 
 // Note: Helper functions (should_stop_for_timeout, should_stop_for_max_errors,
 // init_validation_session) are now in validate_helpers.cpp
@@ -55,6 +56,75 @@ ValidationResult* validate_against_pattern_type(SchemaValidator* validator, Cons
     }
 
     return result;
+}
+
+static bool array_pattern_simple_type_matches(Item item, Type* type_pattern, bool* handled) {
+    *handled = false;
+    if (!type_pattern || type_pattern->type_id != LMD_TYPE_TYPE) return false;
+    Type* expected = ((TypeType*)type_pattern)->type;
+    if (!expected || expected->type_id == LMD_TYPE_NUM_SIZED || expected->kind != TYPE_KIND_SIMPLE) return false;
+    *handled = true;
+    TypeId actual = get_type_id(item);
+    if (expected->type_id == LMD_TYPE_ANY) return actual != LMD_TYPE_ERROR;
+    if (expected->type_id == LMD_TYPE_NUMBER) return IS_NUMERIC_ID(actual);
+    if (expected->type_id == LMD_TYPE_ARRAY) {
+        return actual == LMD_TYPE_ARRAY || actual == LMD_TYPE_ARRAY_NUM || actual == LMD_TYPE_RANGE;
+    }
+    return actual == expected->type_id;
+}
+
+static bool array_pattern_literal_matches(Item item, Item pattern) {
+    TypeId item_type = get_type_id(item);
+    TypeId pattern_type = get_type_id(pattern);
+    if (item_type != pattern_type) {
+        if (IS_NUMERIC_ID(item_type) && IS_NUMERIC_ID(pattern_type)) {
+            if (item_type == LMD_TYPE_DECIMAL || pattern_type == LMD_TYPE_DECIMAL) {
+                return decimal_cmp_items(item, pattern) == 0;
+            }
+            double item_val = item_type == LMD_TYPE_NUM_SIZED ? item.get_num_sized_as_double() : it2d(item);
+            double pattern_val = pattern_type == LMD_TYPE_NUM_SIZED ? pattern.get_num_sized_as_double() : it2d(pattern);
+            return item_val == pattern_val;
+        }
+        return false;
+    }
+
+    switch (item_type) {
+    case LMD_TYPE_NULL:
+        return true;
+    case LMD_TYPE_BOOL:
+        return item.bool_val == pattern.bool_val;
+    case LMD_TYPE_INT:
+        return item.get_int56() == pattern.get_int56();
+    case LMD_TYPE_INT64:
+        return item.get_int64() == pattern.get_int64();
+    case LMD_TYPE_UINT64:
+        return item.get_uint64() == pattern.get_uint64();
+    case LMD_TYPE_FLOAT:
+        return item.get_double() == pattern.get_double();
+    case LMD_TYPE_NUM_SIZED:
+        return item.num_type == pattern.num_type && item.num_value == pattern.num_value;
+    case LMD_TYPE_DECIMAL:
+        return decimal_cmp_items(item, pattern) == 0;
+    case LMD_TYPE_DTIME: {
+        DateTime item_dt = item.get_datetime();
+        DateTime pattern_dt = pattern.get_datetime();
+        return datetime_compare(&item_dt, &pattern_dt) == 0;
+    }
+    case LMD_TYPE_STRING:
+    case LMD_TYPE_BINARY:
+        if (item.string_ptr == pattern.string_ptr) return true;
+        if (item.get_len() != pattern.get_len()) return false;
+        return item.get_len() == 0 || memcmp(item.get_chars(), pattern.get_chars(), item.get_len()) == 0;
+    case LMD_TYPE_SYMBOL: {
+        Symbol* item_sym = (Symbol*)item.symbol_ptr;
+        Symbol* pattern_sym = (Symbol*)pattern.symbol_ptr;
+        if (item_sym == pattern_sym) return true;
+        if (!item_sym || !pattern_sym || item_sym->ns != pattern_sym->ns || item_sym->len != pattern_sym->len) return false;
+        return item_sym->len == 0 || memcmp(item_sym->chars, pattern_sym->chars, item_sym->len) == 0;
+    }
+    default:
+        return item.item == pattern.item;
+    }
 }
 
 ValidationResult* validate_against_primitive_type(SchemaValidator* validator, ConstItem item, Type* type) {
@@ -215,6 +285,45 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
     int64_t length = array.length();
 
     log_debug("Validating array with length: %ld", length);
+
+    if (array_type->item_patterns) {
+        if (length != array_type->length) {
+            char error_msg[256];
+            snprintf(error_msg, sizeof(error_msg),
+                    "Array length mismatch: expected %lld, got %lld",
+                    (long long)array_type->length, (long long)length);
+            add_validation_error(result, create_validation_error(
+                AST_VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, validator->get_current_path(), validator->get_pool()));
+            return result;
+        }
+
+        auto iter = array.items();
+        ItemReader child;
+        int64_t index = 0;
+        while (iter.next(&child)) {
+            PathScope scope(validator, index);
+            Item child_item = child.item();
+            if (array_type->item_is_type_pattern && array_type->item_is_type_pattern[index]) {
+                bool handled = false;
+                bool matched = array_pattern_simple_type_matches(
+                    child_item, array_type->item_patterns[index].type, &handled);
+                if (handled) {
+                    if (!matched) add_constraint_error(result, validator, "Array item does not match positional type pattern");
+                } else {
+                    ValidationResult* item_result = validate_against_type(
+                        validator, child_item.to_const(), array_type->item_patterns[index].type);
+                    if (item_result && !item_result->valid) merge_errors(result, item_result, validator);
+                }
+            }
+            else if (!array_pattern_literal_matches(child_item, array_type->item_patterns[index])) {
+                // validator DLLs do not link the evaluator; exact tuple literals must compare locally.
+                add_constraint_error(result, validator, "Array item does not match positional pattern");
+            }
+            index++;
+        }
+        if (result->error_count == 0) result->valid = true;
+        return result;
+    }
 
     // Check for occurrence operators on nested type
     // Nested type is TypeType* wrapping the actual type (which could be TypeUnary for occurrence operators)

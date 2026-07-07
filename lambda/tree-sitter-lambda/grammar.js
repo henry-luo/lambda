@@ -37,7 +37,7 @@ const sized_int_suffix = choice('i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', '
 const sized_float_suffix = choice('f16', 'f32', 'f64');
 
 // need to exclude relational exprs in attr (to avoid conflicts with element tags)
-// pipe operators are always included
+// pipe/filter operators are always included
 function binary_expr($, in_attr) {
   let operand = in_attr ? choice($.primary_expr, $.unary_expr, alias($.attr_binary_expr, $.binary_expr))
                         : $._expr;
@@ -61,11 +61,10 @@ function binary_expr($, in_attr) {
     ['and', 'logical_and'],
     ['or', 'logical_or'],
     ['to', 'range_to'],
-    // Pipe operators - always included (even in attr context)
-    ['|', 'pipe'],
+    ['|', 'set_union'],
+    // Pipe/filter operators - always included (even in attr context)
+    ['|>', 'pipe'],
     ['that', 'pipe'],  // filter operator: items that ~ > 0
-    ['|>', 'pipe_file'],
-    ['|>>', 'pipe_file'],
     ['&', 'set_intersect'],
     ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
     ['is', 'is_in'],
@@ -165,7 +164,6 @@ module.exports = grammar({
     'logical_or',    
     // pipe operators (low precedence, just above control flow)
     'pipe',
-    'pipe_file',  // |> and |>> - lowest binary precedence
     $.if_expr,
     $.match_expr,
     $.for_expr,
@@ -229,7 +227,7 @@ module.exports = grammar({
     // Symbols don't allow newlines within them
     symbol: _ => token(seq(
       "'",
-      repeat(choice(
+      repeat1(choice(
         /[^'\\\n]+/,  // any chars except ', \, and newline
         /\\['\\\/bfnrt]/,  // simple escapes
         /\\u[0-9a-fA-F]{4}/,  // \uXXXX
@@ -240,7 +238,7 @@ module.exports = grammar({
 
     // binary token: b'...' containing hex or base64 data
     // Actual parsing done by AST builder
-    binary: _ => token(seq("b'", repeat(/[^']/), "'")),
+    binary: _ => token(seq("b'", repeat1(/[^']/), "'")),
 
     _number: $ => choice($.integer, $.float, $.decimal, $.sized_integer, $.sized_float),
 
@@ -469,6 +467,7 @@ module.exports = grammar({
 
     // Variadic marker: ... (higher priority than path_parent)
     variadic: _ => token(prec(2, '...')),
+    var_param_marker: _ => token(prec(3, 'var')),
 
     // Path parent: .. for parent directory (kept separate for parent_expr)
     path_parent: _ => '..',
@@ -526,6 +525,13 @@ module.exports = grammar({
     // JS Fn Parameter : Identifier | ObjectBinding | ArrayBinding, Initializer_opt
     // Supports: name, name?, name: type, name?: type, name = default, name: type = default
     parameter: $ => choice(
+      seq(
+        field('var', $.var_param_marker),
+        field('name', choice($.identifier, $.symbol)),
+        optional(field('optional', '?')),  // optional marker BEFORE type
+        optional(seq(':', field('type', $._type_expr))),
+        optional(seq('=', field('default', $._expr))),
+      ),
       seq(
         field('name', choice($.identifier, $.symbol)),
         optional(field('optional', '?')),  // optional marker BEFORE type
@@ -743,7 +749,7 @@ module.exports = grammar({
     // Loop variable binding with optional index and type-annotated key
     // Single variable: for v in expr
     // Two variables: for k, v in expr (k = index for arrays, key for maps)
-    // Type-filtered: for k:int, v in expr (indexed only) / for k:symbol, v in expr (keyed only)
+    // Type-filtered: for k:int, v in expr (indexed key only) / for k:symbol, v in expr (named key only)
     loop_expr: $ => choice(
       // for value in expr
       seq(

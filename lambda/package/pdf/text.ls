@@ -40,7 +40,7 @@ fn _decode_tj_array(items, font_info) {
     let parts = (for (it in items
                       where (it is map and (it.kind == "string" or it.kind == "hex")))
                  _decode_operand(it, font_info))
-    parts | join("")
+    parts |> join("")
 }
 
 // ============================================================
@@ -563,7 +563,7 @@ fn _text_width_units(fi, txt) {
     if (n == 0) { 0.0 }
     else {
         let parts = for (i in 0 to (n - 1)) _glyph_width_units(fi, ord(txt[i]))
-        parts | sum()
+        parts |> sum()
     }
 }
 
@@ -571,7 +571,7 @@ fn _codes_width_units(fi, codes) {
     if (len(codes) == 0) { 0.0 }
     else {
         let parts = for (c in codes) _glyph_width_units(fi, c)
-        parts | sum()
+        parts |> sum()
     }
 }
 

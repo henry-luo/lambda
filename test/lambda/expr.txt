@@ -104,7 +104,7 @@ t'2025-01-04'
 true
 true
 "Test empty string/symbol keys (no crash):"
-[null]
+["empty string key"]
 "a valueTest invalid indexing (non-indexable types return null):"
 [null]
 [null]

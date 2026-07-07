@@ -28,4 +28,4 @@ let tree = <root>
     <item type: "a"> "first"
     <item type: "b"> "second"
     <item type: "a"> "third"
-tree?item | map(fn(e) => str(e[0]))
+tree?item |> map(fn(e) => str(e[0]))

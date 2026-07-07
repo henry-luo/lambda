@@ -98,7 +98,7 @@ pub fn clean_hex(hex: string) {
     if (len(hex) == 0) { "" }
     else {
         let parts = for (i in 0 to (len(hex) - 1) where is_hex_digit(hex[i])) hex[i]
-        parts | join("")
+        parts |> join("")
     }
 }
 

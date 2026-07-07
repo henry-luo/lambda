@@ -31,7 +31,7 @@ len(paragraphs)
 // ===== Query for all links =====
 let links = doc?a
 len(links)
-links | map((a) => a.href)
+links |> map((a) => a.href)
 
 // ===== Query for articles =====
 let articles = doc?article
@@ -39,12 +39,12 @@ len(articles)
 
 // ===== Extract headings =====
 let h2s = doc?h2
-h2s | map((h) => str(h[0]))
+h2s |> map((h) => str(h[0]))
 
 // ===== Query specific div =====
 let divs = doc?div
 len(divs)
-divs | map((d) => d.class)
+divs |> map((d) => d.class)
 
 // ===== Nested element construction =====
 let table = <table>
@@ -63,7 +63,7 @@ len(table?td)
 len(table?th)
 
 // ===== Transform document =====
-let link_list = doc?a | map((a) => {
+let link_list = doc?a |> map((a) => {
     url: a.href,
     text: str(a[0])
 })

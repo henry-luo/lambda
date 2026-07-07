@@ -53,7 +53,7 @@ pub fn ordinal_scale(categories, range_values) {
 
 // temporal scale: linear over unix milliseconds with temporal metadata
 pub fn temporal_scale(values, rlo, rhi) {
-    let unix_vals = values | float(datetime(~).unix);
+    let unix_vals = values |> float(datetime(~).unix);
     let lo = float(min(unix_vals));
     let hi = float(max(unix_vals));
     let nice = util.nice_domain(lo, hi);
@@ -174,7 +174,7 @@ pub fn scale_invert(sc, pixel) {
 pub fn infer_scale(channel, data, rlo, rhi) {
     let field_name = channel.field;
     let data_type = channel.dtype;
-    let values = data | ~[field_name];
+    let values = data |> ~[field_name];
 
     if data_type == "quantitative" {
         let include_zero = if (channel.stack) true
@@ -192,7 +192,7 @@ pub fn infer_scale(channel, data, rlo, rhi) {
 pub fn infer_color_scale(channel, data) {
     let field_name = channel.field;
     let data_type = channel.dtype;
-    let values = data | ~[field_name];
+    let values = data |> ~[field_name];
     let scheme_name = if (channel.scale and channel.scale.scheme) channel.scale.scheme
         else null;
     let explicit_domain = if (channel.scale and channel.scale.domain) channel.scale.domain

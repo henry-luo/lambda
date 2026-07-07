@@ -121,7 +121,7 @@ fn render_single(spec) {
 
     // x_offset categories for grouped bars
     let x_offset_cats = if (x_offset_field)
-        util.unique_vals(data | ~[x_offset_field])
+        util.unique_vals(data |> ~[x_offset_field])
     else null;
 
     // build color scale (skip for conditional colors)
@@ -129,7 +129,7 @@ fn render_single(spec) {
         else if (color_ch and color_ch.field) scale.infer_color_scale(color_ch, data)
         else null;
     let color_categories = if (not has_condition and color_ch and (color_ch.dtype == "nominal" or color_ch.dtype == "ordinal"))
-        util.unique_vals(data | ~[color_field])
+        util.unique_vals(data |> ~[color_field])
     else null;
     let has_legend = color_categories != null and len(color_categories) > 0;
 
@@ -148,13 +148,13 @@ fn render_single(spec) {
 
     // build size scale if needed
     let size_scale = if (size_ch and size_ch.field)
-        (let size_values = data | float(~[size_ch.field]),
+        (let size_values = data |> float(~[size_ch.field]),
          scale.linear_scale_nice(size_values, 20.0, 200.0, false))
     else null;
 
     // build opacity scale if needed
     let opacity_scale = if (opacity_ch and opacity_ch.field)
-        (let op_values = data | float(~[opacity_ch.field]),
+        (let op_values = data |> float(~[opacity_ch.field]),
          scale.linear_scale_nice(op_values, 0.2, 1.0, false))
     else null;
 
@@ -249,7 +249,7 @@ fn render_layered(spec) {
 
     let color_scale = if (color_ch) scale.infer_color_scale(color_ch, all_data) else null;
     let color_categories = if (color_ch and (color_ch.dtype == "nominal" or color_ch.dtype == "ordinal"))
-        util.unique_vals(all_data | ~[color_field])
+        util.unique_vals(all_data |> ~[color_field])
     else null;
     let has_legend = color_categories != null and len(color_categories) > 0;
 
@@ -267,8 +267,8 @@ fn render_layered(spec) {
                             let l_y2_ch = parse.get_channel(l_enc, "y2"),
                             let ly_f = if (l_y_ch) l_y_ch.field else null,
                             let ly2_f = if (l_y2_ch) l_y2_ch.field else null,
-                            let y_vals = if (ly_f) (all_data | float(~[ly_f])) else [0.0],
-                            let y2_vals = if (ly2_f) (all_data | float(~[ly2_f])) else y_vals)
+                            let y_vals = if (ly_f) (all_data |> float(~[ly_f])) else [0.0],
+                            let y2_vals = if (ly2_f) (all_data |> float(~[ly2_f])) else y_vals)
         min([min(y_vals), min(y2_vals)]);
     let layer_y_maxs = for (ls in layer_specs,
                             let l_enc = ls.encoding,
@@ -276,8 +276,8 @@ fn render_layered(spec) {
                             let l_y2_ch = parse.get_channel(l_enc, "y2"),
                             let ly_f = if (l_y_ch) l_y_ch.field else null,
                             let ly2_f = if (l_y2_ch) l_y2_ch.field else null,
-                            let y_vals = if (ly_f) (all_data | float(~[ly_f])) else [0.0],
-                            let y2_vals = if (ly2_f) (all_data | float(~[ly2_f])) else y_vals)
+                            let y_vals = if (ly_f) (all_data |> float(~[ly_f])) else [0.0],
+                            let y2_vals = if (ly2_f) (all_data |> float(~[ly2_f])) else y_vals)
         max([max(y_vals), max(y2_vals)]);
 
     let temp_y_scale = if (use_combined_y)
@@ -358,7 +358,7 @@ fn render_arc(spec) {
     // color scale
     let color_scale = if (color_ch) scale.infer_color_scale(color_ch, data) else null;
     let color_categories = if (color_ch)
-        util.unique_vals(data | ~[color_field])
+        util.unique_vals(data |> ~[color_field])
     else null;
     let has_legend = color_categories != null and len(color_categories) > 0;
 
@@ -425,7 +425,7 @@ fn build_position_scale(channel, data, rlo, rhi, mark_type: string, is_x: bool) 
         if not field_name {
             null
         } else {
-            let values = data | ~[field_name]
+            let values = data |> ~[field_name]
             if data_type == "quantitative" {
                 let include_zero = if (mark_type == "bar") true
                     else if (channel.zero) channel.zero
@@ -462,7 +462,7 @@ fn apply_histogram_transform(data, x_ch, y_ch) {
         let bin_end = bin_field ++ "_end";
         let maxbins = if (x_ch.bin != true and x_ch.bin.maxbins) x_ch.bin.maxbins else 10;
         // apply binning
-        let values = data | float(~[field]);
+        let values = data |> float(~[field]);
         let vmin = min(values);
         let vmax = max(values);
         let range_span = vmax - vmin;
@@ -476,7 +476,7 @@ fn apply_histogram_transform(data, x_ch, y_ch) {
             map([*pairs, bin_field, bs, bin_end, be])
         );
         // aggregate: count per bin
-        let bin_keys = util.unique_vals(binned | string(~[bin_field]));
+        let bin_keys = util.unique_vals(binned |> string(~[bin_field]));
         let counted = for (bk in bin_keys) (
             let items = binned that string(~[bin_field]) == bk,
             map([bin_field, items[0][bin_field], bin_end, items[0][bin_end], "_count", len(items)])
@@ -501,8 +501,8 @@ fn detect_stack_mode(mark_type, y_ch, color_field, x_offset_field) {
 }
 
 fn build_stacked_y_scale(data, rlo, rhi, mode) {
-    let y0_vals = data | float(~["_y0"])
-    let y1_vals = data | float(~["_y1"])
+    let y0_vals = data |> float(~["_y0"])
+    let y1_vals = data |> float(~["_y1"])
     let all_vals = [*y0_vals, *y1_vals]
     let include_zero = mode != "center"
     scale.linear_scale_nice(all_vals, rlo, rhi, include_zero)
@@ -516,8 +516,8 @@ fn build_position_scale_y2(y_ch, data, rlo, rhi, mark_type, y2_field) {
         let field_name = y_ch.field
         if not field_name { null }
         else {
-            let y_vals = data | float(~[field_name])
-            let y2_vals = data | float(~[y2_field])
+            let y_vals = data |> float(~[field_name])
+            let y2_vals = data |> float(~[y2_field])
             let all_vals = [*y_vals, *y2_vals]
             let include_zero = if (mark_type == "bar") true
                 else if (y_ch.zero != null) y_ch.zero
@@ -613,7 +613,7 @@ fn render_faceted(spec) {
     let columns = if (facet.columns) facet.columns else 3;
 
     // partition data by facet field
-    let facet_keys = util.unique_vals(data | ~[facet_field]);
+    let facet_keys = util.unique_vals(data |> ~[facet_field]);
     let n = len(facet_keys);
 
     // compute facet grid layout

@@ -1214,6 +1214,22 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
         }
     }
 
+    // --- Pattern 6a: removed empty symbol/binary literals ---
+    // Phase 3 makes "" a real string, so the visually similar solid literals must fail clearly.
+    if (end_byte > start_byte && source[start_byte] == '\'' && source[start_byte + 1] == '\'') {
+        bool is_binary = start_byte > 0 && source[start_byte - 1] == 'b';
+        if (is_binary) {
+            snprintf(msg, sizeof(msg), "Empty binary literal does not exist");
+            help = "Use null for absence; binary values must contain at least one byte.";
+        } else {
+            snprintf(msg, sizeof(msg), "Empty symbol literal does not exist");
+            help = "Use null for absence; symbol values must contain at least one character.";
+        }
+        LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
+        error->help = mem_strdup(help, MEM_CAT_TEMP);
+        return error;
+    }
+
     // --- Pattern 6: Unterminated symbol literal ---
     // A bare "'" token as a child of the ERROR node, possibly followed by an identifier.
     // e.g. 'symbol  is missing the closing '
@@ -1286,6 +1302,24 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
         if (has_while && !has_brace) {
             snprintf(msg, sizeof(msg), "Missing { } for while-statement");
             LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
+            return error;
+        }
+    }
+
+    // --- Pattern 8: statement-level comparison parsed as element ambiguity ---
+    // relational delimiters share the element syntax surface, so a bare
+    // statement-level comparison recovers as a one-token ERROR node.
+    if (end_byte > start_byte) {
+        char op = source[start_byte];
+        bool is_relation = (op == '<' || op == '>');
+        bool is_short_token = (end_byte == start_byte + 1) ||
+            (end_byte == start_byte + 2 && source[start_byte + 1] == '=');
+        if (is_relation && is_short_token) {
+            snprintf(msg, sizeof(msg),
+                "'<' and '>' are ambiguous with element syntax at statement level");
+            help = "Use parentheses to group the comparison expression, e.g. (\"a\" < \"b\").";
+            LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
+            error->help = mem_strdup(help, MEM_CAT_TEMP);
             return error;
         }
     }

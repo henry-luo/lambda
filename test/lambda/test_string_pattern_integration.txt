@@ -14,7 +14,7 @@ true
 true
 "2.4 - phone letters"
 true
-"2.5 - phone space"
+"2.5 - phone empty"
 true
 "2.6 - email no at"
 true
