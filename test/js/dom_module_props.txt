@@ -16,6 +16,11 @@ number
 0
 7
 true
+blue
+10px
+blue
+true
+10px
 /docs
 hero.png
 Hero

@@ -13019,7 +13019,85 @@ extern "C" Item js_dom_contains(Item elem_item, Item other_item) {
 // style.setProperty() / style.removeProperty() (v12b)
 // ============================================================================
 
+static Item js_dom_style_set_property_for_elem(DomElement* elem, Item prop_arg,
+                                               Item value_arg, Item priority_arg,
+                                               bool has_priority) {
+    if (!elem) return ItemNull;
+    const char* css_prop = fn_to_cstr(prop_arg);
+    const char* val_str = fn_to_cstr(value_arg);
+    if (!css_prop || !val_str) return ItemNull;
+
+    char style_decl[256];
+    if (has_priority) {
+        const char* priority = fn_to_cstr(priority_arg);
+        if (priority && strcasecmp(priority, "important") == 0) {
+            snprintf(style_decl, sizeof(style_decl), "%s: %s !important", css_prop, val_str);
+        } else {
+            snprintf(style_decl, sizeof(style_decl), "%s: %s", css_prop, val_str);
+        }
+    } else {
+        snprintf(style_decl, sizeof(style_decl), "%s: %s", css_prop, val_str);
+    }
+    int applied = dom_element_apply_inline_style(elem, style_decl);
+    elem->styles_resolved = false;
+    if (applied) {
+        CssPropertyId prop_id = css_property_id_from_name(css_prop);
+        js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
+                               (DomNode*)elem, elem->parent);
+    }
+    log_debug("js_dom_style_method: setProperty '%s: %s' on <%s>",
+              css_prop, val_str, elem->tag_name ? elem->tag_name : "?");
+    return ItemNull;
+}
+
+extern "C" Item js_dom_style_set_property_bridge(void* dom_elem, Item prop_arg,
+                                                 Item value_arg, Item priority_arg,
+                                                 bool has_priority) {
+    // inline style parsing and mutation invalidation remain centralized here.
+    return js_dom_style_set_property_for_elem((DomElement*)dom_elem, prop_arg,
+        value_arg, priority_arg, has_priority);
+}
+
+static Item js_dom_style_remove_property_for_elem(DomElement* elem, Item prop_arg) {
+    if (!elem) return (Item){.item = s2it(heap_create_name(""))};
+    const char* css_prop = fn_to_cstr(prop_arg);
+    if (!css_prop) return (Item){.item = s2it(heap_create_name(""))};
+
+    // get old value before removing
+    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    Item old_val = (Item){.item = s2it(heap_create_name(""))};
+    if (prop_id != CSS_PROPERTY_UNKNOWN && elem->specified_style) {
+        CssDeclaration* decl = dom_element_get_specified_value(elem, prop_id);
+        if (decl && decl->specificity.inline_style) {
+            // serialize old value via the getter
+            Item owner_item = js_dom_wrap_element(elem);
+            Item prop_item = (Item){.item = s2it(heap_create_name(css_prop))};
+            old_val = js_dom_get_style_property(owner_item, prop_item);
+        }
+        // remove the declaration from the style tree
+        style_tree_remove_property(elem->specified_style, prop_id);
+        js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
+                               (DomNode*)elem, elem->parent);
+    }
+    elem->styles_resolved = false;
+    log_debug("js_dom_style_method: removeProperty '%s' on <%s>",
+              css_prop, elem->tag_name ? elem->tag_name : "?");
+    return old_val;
+}
+
+extern "C" Item js_dom_style_remove_property_bridge(void* dom_elem, Item prop_arg) {
+    // old-value serialization and mutation invalidation remain centralized here.
+    return js_dom_style_remove_property_for_elem((DomElement*)dom_elem, prop_arg);
+}
+
+extern "C" int radiant_dom_style_method(Item elem_item, Item method_name, Item* args, int argc, Item* out);
+
 extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args, int argc) {
+    Item module_result = ItemNull;
+    if (radiant_dom_style_method(elem_item, method_name, args, argc, &module_result)) {
+        return module_result;
+    }
+
     DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
     if (!elem) {
         // check if this is a CSSOM rule — transpiler routes rule.style.setProperty() here too
@@ -13036,63 +13114,6 @@ extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args
 
     const char* method = fn_to_cstr(method_name);
     if (!method) return ItemNull;
-
-    // setProperty(property, value [, priority])
-    if (strcmp(method, "setProperty") == 0) {
-        if (argc < 2) return ItemNull;
-        const char* css_prop = fn_to_cstr(args[0]);
-        const char* val_str = fn_to_cstr(args[1]);
-        if (!css_prop || !val_str) return ItemNull;
-
-        char style_decl[256];
-        if (argc >= 3) {
-            const char* priority = fn_to_cstr(args[2]);
-            if (priority && strcasecmp(priority, "important") == 0) {
-                snprintf(style_decl, sizeof(style_decl), "%s: %s !important", css_prop, val_str);
-            } else {
-                snprintf(style_decl, sizeof(style_decl), "%s: %s", css_prop, val_str);
-            }
-        } else {
-            snprintf(style_decl, sizeof(style_decl), "%s: %s", css_prop, val_str);
-        }
-        int applied = dom_element_apply_inline_style(elem, style_decl);
-        elem->styles_resolved = false;
-        if (applied) {
-            CssPropertyId prop_id = css_property_id_from_name(css_prop);
-            js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
-                                   (DomNode*)elem, elem->parent);
-        }
-        log_debug("js_dom_style_method: setProperty '%s: %s' on <%s>",
-                  css_prop, val_str, elem->tag_name ? elem->tag_name : "?");
-        return ItemNull;
-    }
-
-    // removeProperty(property) — returns old value
-    if (strcmp(method, "removeProperty") == 0) {
-        if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
-        const char* css_prop = fn_to_cstr(args[0]);
-        if (!css_prop) return (Item){.item = s2it(heap_create_name(""))};
-
-        // get old value before removing
-        CssPropertyId prop_id = css_property_id_from_name(css_prop);
-        Item old_val = (Item){.item = s2it(heap_create_name(""))};
-        if (prop_id != CSS_PROPERTY_UNKNOWN && elem->specified_style) {
-            CssDeclaration* decl = dom_element_get_specified_value(elem, prop_id);
-            if (decl && decl->specificity.inline_style) {
-                // serialize old value via the getter
-                Item prop_item = (Item){.item = s2it(heap_create_name(css_prop))};
-                old_val = js_dom_get_style_property(elem_item, prop_item);
-            }
-            // remove the declaration from the style tree
-            style_tree_remove_property(elem->specified_style, prop_id);
-            js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
-                                   (DomNode*)elem, elem->parent);
-        }
-        elem->styles_resolved = false;
-        log_debug("js_dom_style_method: removeProperty '%s' on <%s>",
-                  css_prop, elem->tag_name ? elem->tag_name : "?");
-        return old_val;
-    }
 
     log_debug("js_dom_style_method: unknown method '%s'", method);
     return ItemNull;

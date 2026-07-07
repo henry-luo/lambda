@@ -60,6 +60,8 @@ extern "C" Item js_dom_get_bounding_client_rect_bridge(void* elem);
 extern "C" Item js_dom_get_client_rects_bridge(void* elem);
 extern "C" Item js_dom_scroll_into_view_bridge(void* elem);
 extern "C" Item js_dom_scroll_method_bridge(Item elem_item, Item method_name, Item* args, int argc);
+extern "C" Item js_dom_style_set_property_bridge(void* elem, Item prop, Item value, Item priority, bool has_priority);
+extern "C" Item js_dom_style_remove_property_bridge(void* elem, Item prop);
 extern "C" Item js_dom_text_replace_data_bridge(void* text, Item offset, Item count, Item data);
 extern "C" Item js_dom_text_insert_data_bridge(void* text, Item offset, Item data);
 extern "C" Item js_dom_text_append_data_bridge(void* text, Item data);
@@ -2046,4 +2048,31 @@ extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callbac
 extern "C" Item radiant_dom_window_dispatch_event(Item event_item) {
     // dispatch must use the same global-object key that listener registration uses.
     return js_dom_dispatch_event_bridge(js_get_global_this(), event_item);
+}
+
+extern "C" int radiant_dom_style_method(Item elem_item, Item method_name, Item* args, int argc, Item* out) {
+    DomElement* elem = (DomElement*)js_dom_unwrap_element_impl(elem_item);
+    if (!elem || !out) return 0;
+
+    const char* method = fn_to_cstr(method_name);
+    if (!method) return 0;
+
+    if (strcmp(method, "setProperty") == 0) {
+        // CSS rule style declarations are not DOM elements and stay on CSSOM fallback.
+        *out = argc >= 2
+            ? js_dom_style_set_property_bridge((void*)elem, args[0], args[1],
+                argc >= 3 ? args[2] : radiant_dom_undefined_item(), argc >= 3)
+            : ItemNull;
+        return 1;
+    }
+
+    if (strcmp(method, "removeProperty") == 0) {
+        // CSS rule style declarations are not DOM elements and stay on CSSOM fallback.
+        *out = argc >= 1
+            ? js_dom_style_remove_property_bridge((void*)elem, args[0])
+            : radiant_dom_string_item("");
+        return 1;
+    }
+
+    return 0;
 }

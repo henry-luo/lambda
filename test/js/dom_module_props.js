@@ -25,6 +25,14 @@ console.log(main.scrollLeft);
 console.log(main.scrollTop);
 main.scrollIntoView();
 console.log(true);
+var styleProbe = document.createElement("div");
+styleProbe.style.setProperty("color", "blue");
+console.log(styleProbe.style.color);
+styleProbe.style.setProperty("margin-top", "10px");
+console.log(styleProbe.style.marginTop);
+console.log(styleProbe.style.removeProperty("color"));
+console.log(styleProbe.style.color === "");
+console.log(styleProbe.style.marginTop);
 
 var link = document.createElement("a");
 link.setAttribute("href", "/docs");
