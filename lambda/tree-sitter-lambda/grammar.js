@@ -743,7 +743,7 @@ module.exports = grammar({
     // Loop variable binding with optional index and type-annotated key
     // Single variable: for v in expr
     // Two variables: for k, v in expr (k = index for arrays, key for maps)
-    // Type-filtered: for k:int, v in expr (indexed only) / for k:symbol, v in expr (keyed only)
+    // Type-filtered: for k:int, v in expr (indexed key only) / for k:symbol, v in expr (named key only)
     loop_expr: $ => choice(
       // for value in expr
       seq(

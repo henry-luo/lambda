@@ -509,6 +509,84 @@ static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* p
     return false;
 }
 
+static bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
+    if (!tp || !node || !out) return false;
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        if (!primary->expr) break;
+        node = primary->expr;
+    }
+    if (!node || !node->type || !node->type->is_literal) return false;
+
+    switch (node->type->type_id) {
+    case LMD_TYPE_NULL:
+        *out = ItemNull;
+        return true;
+    case LMD_TYPE_BOOL: {
+        StrView text = ts_node_source(tp, node->node);
+        out->item = b2it(strview_equal(&text, "true") ? BOOL_TRUE : BOOL_FALSE);
+        return true;
+    }
+    case LMD_TYPE_INT: {
+        StrView source = ts_node_source(tp, node->node);
+        char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
+        memcpy(num_str, source.str, source.length);
+        num_str[source.length] = '\0';
+        int64_t value = strtoll(num_str, NULL, 0);
+        mem_free(num_str);
+        out->item = i2it(value);
+        return true;
+    }
+    case LMD_TYPE_INT64: {
+        TypeInt64* t = (TypeInt64*)node->type;
+        out->item = l2it(&t->int64_val);
+        return true;
+    }
+    case LMD_TYPE_FLOAT: {
+        TypeFloat* t = (TypeFloat*)node->type;
+        out->item = d2it(&t->double_val);
+        return true;
+    }
+    case LMD_TYPE_DTIME: {
+        TypeDateTime* t = (TypeDateTime*)node->type;
+        out->item = k2it(&t->datetime);
+        return true;
+    }
+    case LMD_TYPE_DECIMAL: {
+        TypeDecimal* t = (TypeDecimal*)node->type;
+        out->item = c2it(t->decimal);
+        return true;
+    }
+    case LMD_TYPE_STRING: {
+        TypeString* t = (TypeString*)node->type;
+        out->item = s2it(t->string);
+        return true;
+    }
+    case LMD_TYPE_SYMBOL: {
+        TypeString* t = (TypeString*)node->type;
+        out->item = y2it((Symbol*)t->string);
+        return true;
+    }
+    case LMD_TYPE_BINARY: {
+        TypeString* t = (TypeString*)node->type;
+        out->item = x2it(t->string);
+        return true;
+    }
+    case LMD_TYPE_NUM_SIZED: {
+        TypeNumSized* t = (TypeNumSized*)node->type;
+        out->item = NUM_SIZED_PACK(t->num_type, t->raw_bits);
+        return true;
+    }
+    case LMD_TYPE_UINT64: {
+        TypeUint64* t = (TypeUint64*)node->type;
+        out->item = u2it(&t->uint64_val);
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
 // check if arg_type is compatible with param_type for function calls
 bool types_compatible(Type* arg_type, Type* param_type) {
     return types_compatible_with_full(arg_type, param_type, NULL);
@@ -3422,9 +3500,10 @@ static void normalize_is_array_type_rhs(Transpiler* tp, AstBinaryNode* ast_node)
     Type* nested_type = NULL;
     int64_t length = 0;
     for (AstNode* item = arr->item; item; item = item->next) {
-        if (!item->type || item->type->type_id != LMD_TYPE_TYPE) return;
-        TypeType* item_type = (TypeType*)item->type;
-        Type* actual_type = item_type->type;
+        if (!item->type) return;
+        Type* actual_type = item->type;
+        if (item->type->type_id == LMD_TYPE_TYPE) actual_type = ((TypeType*)item->type)->type;
+        else if (!item->type->is_literal) return;
         if (!actual_type) return;
         if (!nested_type) nested_type = actual_type;
         else if (nested_type->type_id != actual_type->type_id) nested_type = NULL;
@@ -3432,12 +3511,29 @@ static void normalize_is_array_type_rhs(Transpiler* tp, AstBinaryNode* ast_node)
     }
     if (length == 0) return;
 
-    // `is [T]` parses as an array literal; reinterpret type-valued items as an array type pattern.
+    // `is [T]` parses as an array literal; reinterpret literal/type-valued items as tuple patterns.
     TypeType* node_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeArray* type = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
     node_type->type = (Type*)type;
     type->nested = nested_type;
     type->length = length;
+    type->item_patterns = (Item*)pool_calloc(tp->pool, sizeof(Item) * (size_t)length);
+    type->item_is_type_pattern = (uint8_t*)pool_calloc(tp->pool, sizeof(uint8_t) * (size_t)length);
+    int64_t index = 0;
+    for (AstNode* item = arr->item; item; item = item->next) {
+        if (item->type->type_id == LMD_TYPE_TYPE) {
+            type->item_patterns[index].type = item->type;
+            type->item_is_type_pattern[index] = 1;
+        }
+        else {
+            Item literal = ItemNull;
+            if (ast_static_literal_item(tp, item, &literal)) type->item_patterns[index] = literal;
+        }
+        index++;
+    }
+    if (type->length == 1 && type->item_is_type_pattern[0]) {
+        log_warn("lambda_array_pattern_hint: bare [T] is an exact one-item pattern; use T[] for homogeneous arrays");
+    }
     arraylist_append(tp->type_list, node_type);
     type->type_index = tp->type_list->length - 1;
     rhs->node_type = AST_NODE_ARRAY_TYPE;
@@ -4237,6 +4333,22 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                     // and the RHS is a literal array with known element types, verify compatibility
                     Type* ann_type = ast_node->type;
                     Type* rhs_type = ast_node->as ? ast_node->as->type : nullptr;
+                    if (ann_type && ann_type->type_id == LMD_TYPE_ARRAY) {
+                        TypeArray* ann_arr = (TypeArray*)ann_type;
+                        if (ann_arr->item_patterns && ann_arr->length == 1) {
+                            Type* ann_elem = ann_arr->nested;
+                            if (ann_elem && ann_elem->type_id == LMD_TYPE_TYPE) ann_elem = ((TypeType*)ann_elem)->type;
+                            if (rhs_type && rhs_type->type_id == LMD_TYPE_ARRAY) {
+                                TypeArray* rhs_arr = (TypeArray*)rhs_type;
+                                if (rhs_arr->length != 1) {
+                                    int line = ts_node_start_point(asn_node).row + 1;
+                                    record_type_error(tp, line,
+                                        "array annotation [T] expects exactly one item; did you mean `%s[]`?",
+                                        ann_elem ? get_type_name(ann_elem->type_id) : "T");
+                                }
+                            }
+                        }
+                    }
                     if (ann_type && !is_global_simple_type(ann_type) &&
                         ann_type->kind == TYPE_KIND_UNARY && rhs_type) {
                         TypeUnary* unary = (TypeUnary*)ann_type;
@@ -4897,8 +5009,14 @@ AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
     TypeArray* type = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
     ((TypeType*)ast_node->type)->type = (Type*)type;
 
+    uint32_t child_count = ts_node_named_child_count(array_node);
+    if (child_count > 0) {
+        type->item_patterns = (Item*)pool_calloc(tp->pool, sizeof(Item) * child_count);
+        type->item_is_type_pattern = (uint8_t*)pool_calloc(tp->pool, sizeof(uint8_t) * child_count);
+    }
     TSNode child = ts_node_named_child(array_node, 0);
     AstNode* prev_item = NULL;  Type* nested_type = NULL;
+    int64_t index = 0;
     while (!ts_node_is_null(child)) {
         AstNode* item = build_expr(tp, child);
         if (item) {
@@ -4912,11 +5030,23 @@ AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
                 }
             }
             prev_item = item;
+            if (item->type && item->type->type_id == LMD_TYPE_TYPE) {
+                type->item_patterns[index].type = item->type;
+                type->item_is_type_pattern[index] = 1;
+            }
+            else {
+                Item literal = ItemNull;
+                if (ast_static_literal_item(tp, item, &literal)) type->item_patterns[index] = literal;
+            }
             type->length++;
+            index++;
         }
         child = ts_node_next_named_sibling(child);
     }
     type->nested = nested_type;
+    if (type->length == 1 && type->item_is_type_pattern && type->item_is_type_pattern[0]) {
+        log_warn("lambda_array_pattern_hint: bare [T] is an exact one-item pattern; use T[] for homogeneous arrays");
+    }
 
     arraylist_append(tp->type_list, ast_node->type);
     type->type_index = tp->type_list->length - 1;

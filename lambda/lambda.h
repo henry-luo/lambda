@@ -1368,6 +1368,7 @@ extern "C" {
     // the raw 3-state scalar comparison for callers that only compare scalars.
     Bool fn_lt_scalar(Item a, Item b);
     Bool fn_gt_scalar(Item a, Item b);
+    int total_cmp(Item a, Item b);
     Item fn_lt(Item a, Item b);
     Item fn_gt(Item a, Item b);
     Item fn_le(Item a, Item b);

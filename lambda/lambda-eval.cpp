@@ -1413,6 +1413,186 @@ Bool fn_ne(Item a_item, Item b_item) {
     return !result;
 }
 
+static int total_type_rank(Item item) {
+    TypeId tid = get_type_id(item);
+    if (tid == LMD_TYPE_FLOAT && isnan(item.get_double())) return 14;
+    switch (tid) {
+    case LMD_TYPE_NULL: return 0;
+    case LMD_TYPE_BOOL: return item.bool_val ? 2 : 1;
+    case LMD_TYPE_INT: case LMD_TYPE_INT64: case LMD_TYPE_FLOAT:
+    case LMD_TYPE_DECIMAL: case LMD_TYPE_NUM_SIZED: case LMD_TYPE_UINT64:
+        return 3;
+    case LMD_TYPE_DTIME: return 4;
+    case LMD_TYPE_SYMBOL: return 5;
+    case LMD_TYPE_STRING: return 6;
+    case LMD_TYPE_BINARY: return 7;
+    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
+        return 8;
+    case LMD_TYPE_MAP: case LMD_TYPE_VMAP:
+        return 9;
+    case LMD_TYPE_OBJECT:
+        return 10;
+    case LMD_TYPE_ELEMENT:
+        return 11;
+    case LMD_TYPE_TYPE:
+        return 12;
+    case LMD_TYPE_FUNC:
+        return 13;
+    case LMD_TYPE_ERROR:
+        return 15;
+    default:
+        return 16;
+    }
+}
+
+static int total_byte_cmp(Item a_item, Item b_item) {
+    const char* chars_a = a_item.get_chars();
+    const char* chars_b = b_item.get_chars();
+    uint32_t len_a = a_item.get_len();
+    uint32_t len_b = b_item.get_len();
+    uint32_t min_len = len_a < len_b ? len_a : len_b;
+    int cmp = min_len ? memcmp(chars_a, chars_b, min_len) : 0;
+    if (cmp != 0) return cmp < 0 ? -1 : 1;
+    return (len_a > len_b) - (len_a < len_b);
+}
+
+static int shape_entry_name_cmp(ShapeEntry* a, ShapeEntry* b) {
+    if (!a && !b) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+    int ns_cmp = (a->ns > b->ns) - (a->ns < b->ns);
+    if (ns_cmp != 0) return ns_cmp;
+    const char* a_chars = a->name ? a->name->str : "";
+    const char* b_chars = b->name ? b->name->str : "";
+    int a_len = a->name ? (int)a->name->length : 0;
+    int b_len = b->name ? (int)b->name->length : 0;
+    int min_len = a_len < b_len ? a_len : b_len;
+    int cmp = min_len ? memcmp(a_chars, b_chars, (size_t)min_len) : 0;
+    if (cmp != 0) return cmp < 0 ? -1 : 1;
+    return (a_len > b_len) - (a_len < b_len);
+}
+
+static int strview_total_cmp(StrView a, StrView b) {
+    size_t min_len = a.length < b.length ? a.length : b.length;
+    int cmp = min_len ? memcmp(a.str, b.str, min_len) : 0;
+    if (cmp != 0) return cmp < 0 ? -1 : 1;
+    return (a.length > b.length) - (a.length < b.length);
+}
+
+static ShapeEntry* map_next_sorted_field(TypeMap* type, ShapeEntry* previous) {
+    ShapeEntry* best = NULL;
+    for (ShapeEntry* field = type ? type->shape : NULL; field; field = field->next) {
+        if (previous && shape_entry_name_cmp(field, previous) <= 0) continue;
+        if (!best || shape_entry_name_cmp(field, best) < 0) best = field;
+    }
+    return best;
+}
+
+static int map_data_total_cmp(TypeMap* type_a, void* data_a, TypeMap* type_b, void* data_b) {
+    int64_t len_a = type_a ? type_a->length : 0;
+    int64_t len_b = type_b ? type_b->length : 0;
+    int len_cmp = (len_a > len_b) - (len_a < len_b);
+    if (len_cmp != 0) return len_cmp;
+
+    ShapeEntry* prev_a = NULL;
+    ShapeEntry* prev_b = NULL;
+    for (int64_t i = 0; i < len_a; i++) {
+        ShapeEntry* field_a = map_next_sorted_field(type_a, prev_a);
+        ShapeEntry* field_b = map_next_sorted_field(type_b, prev_b);
+        int key_cmp = shape_entry_name_cmp(field_a, field_b);
+        if (key_cmp != 0) return key_cmp;
+        int val_cmp = total_cmp(_map_field_value(type_a, data_a, field_a),
+                                _map_field_value(type_b, data_b, field_b));
+        if (val_cmp != 0) return val_cmp;
+        prev_a = field_a;
+        prev_b = field_b;
+    }
+    return 0;
+}
+
+int total_cmp(Item a_item, Item b_item) {
+    int rank_a = total_type_rank(a_item);
+    int rank_b = total_type_rank(b_item);
+    if (rank_a != rank_b) return (rank_a > rank_b) - (rank_a < rank_b);
+
+    TypeId a_tid = get_type_id(a_item);
+    TypeId b_tid = get_type_id(b_item);
+    if (rank_a == 3) {
+        if (a_tid == LMD_TYPE_DECIMAL || b_tid == LMD_TYPE_DECIMAL) {
+            int cmp = decimal_cmp_items(a_item, b_item);
+            return (cmp > 0) - (cmp < 0);
+        }
+        double av = it2d(a_item);
+        double bv = it2d(b_item);
+        return (av > bv) - (av < bv);
+    }
+    if (a_tid == LMD_TYPE_DTIME) {
+        DateTime dt_a = a_item.get_datetime();
+        DateTime dt_b = b_item.get_datetime();
+        return datetime_compare(&dt_a, &dt_b);
+    }
+    if (a_tid == LMD_TYPE_SYMBOL) {
+        Symbol* sym_a = a_item.get_symbol();
+        Symbol* sym_b = b_item.get_symbol();
+        int ns_cmp = (sym_a->ns > sym_b->ns) - (sym_a->ns < sym_b->ns);
+        if (ns_cmp != 0) return ns_cmp;
+        return total_byte_cmp(a_item, b_item);
+    }
+    if (a_tid == LMD_TYPE_STRING || a_tid == LMD_TYPE_BINARY) {
+        return total_byte_cmp(a_item, b_item);
+    }
+    if (rank_a == 8) {
+        int64_t len_a = seq_get_length(a_item, a_tid);
+        int64_t len_b = seq_get_length(b_item, b_tid);
+        int64_t min_len = len_a < len_b ? len_a : len_b;
+        for (int64_t i = 0; i < min_len; i++) {
+            int cmp = total_cmp(seq_get_element(a_item, a_tid, i), seq_get_element(b_item, b_tid, i));
+            if (cmp != 0) return cmp;
+        }
+        return (len_a > len_b) - (len_a < len_b);
+    }
+    if (rank_a == 9) {
+        if (a_tid == LMD_TYPE_VMAP || b_tid == LMD_TYPE_VMAP) {
+            int64_t len_a = a_tid == LMD_TYPE_VMAP ? a_item.vmap->vtable->count(a_item.vmap->data)
+                                                   : ((TypeMap*)a_item.map->type)->length;
+            int64_t len_b = b_tid == LMD_TYPE_VMAP ? b_item.vmap->vtable->count(b_item.vmap->data)
+                                                   : ((TypeMap*)b_item.map->type)->length;
+            return (len_a > len_b) - (len_a < len_b);
+        }
+        return map_data_total_cmp((TypeMap*)a_item.map->type, a_item.map->data,
+                                  (TypeMap*)b_item.map->type, b_item.map->data);
+    }
+    if (a_tid == LMD_TYPE_OBJECT) {
+        return map_data_total_cmp((TypeMap*)a_item.object->type, a_item.object->data,
+                                  (TypeMap*)b_item.object->type, b_item.object->data);
+    }
+    if (a_tid == LMD_TYPE_ELEMENT) {
+        TypeElmt* type_a = (TypeElmt*)a_item.element->type;
+        TypeElmt* type_b = (TypeElmt*)b_item.element->type;
+        int tag_cmp = strview_total_cmp(type_a->name, type_b->name);
+        if (tag_cmp != 0) return tag_cmp;
+        int attr_cmp = map_data_total_cmp((TypeMap*)type_a, a_item.element->data,
+                                          (TypeMap*)type_b, b_item.element->data);
+        if (attr_cmp != 0) return attr_cmp;
+        int64_t len_a = a_item.element->length;
+        int64_t len_b = b_item.element->length;
+        int64_t min_len = len_a < len_b ? len_a : len_b;
+        for (int64_t i = 0; i < min_len; i++) {
+            int child_cmp = total_cmp(a_item.element->items[i], b_item.element->items[i]);
+            if (child_cmp != 0) return child_cmp;
+        }
+        return (len_a > len_b) - (len_a < len_b);
+    }
+    if (a_tid == LMD_TYPE_TYPE) {
+        TypeType* at = (TypeType*)a_item.type;
+        TypeType* bt = (TypeType*)b_item.type;
+        TypeId aid = at && at->type ? at->type->type_id : LMD_TYPE_NULL;
+        TypeId bid = bt && bt->type ? bt->type->type_id : LMD_TYPE_NULL;
+        return (aid > bid) - (aid < bid);
+    }
+    return (a_item.item > b_item.item) - (a_item.item < b_item.item);
+}
+
 // 3-state value/ordered comparison
 // Scalar 3-state ordered comparison (BOOL_TRUE/BOOL_FALSE/BOOL_ERROR).  The
 // public fn_lt/fn_gt/fn_le/fn_ge wrappers add vectorized array dispatch on top.
