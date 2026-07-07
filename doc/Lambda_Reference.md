@@ -212,11 +212,15 @@ pn advance(pos: float[], vel: float[], dt: float) {
     }
 }
 
-// Closures with mutable captures
+// Closures capture read-only snapshots; use var params for inout mutation
+pn bump_first(var xs: any[]) {
+    xs[0] = 42
+}
+
 pn main() {
-    var count = 0
-    let inc = fn() { count = count + 1; count }
-    print(inc())   // 1 (closure's own copy)
+    var xs: any[] = [1, 2, 3]
+    bump_first(xs)
+    print(xs[0])   // 42
 }
 ```
 

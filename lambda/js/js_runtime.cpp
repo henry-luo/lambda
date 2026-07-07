@@ -17066,7 +17066,9 @@ static bool js_regex_set_lastindex_item_strict(Item regex, Item li_key, Item val
 }
 
 static bool js_regex_set_lastindex_strict(Item regex, Item li_key, int64_t value) {
-    return js_regex_set_lastindex_item_strict(regex, li_key, (Item){.item = i2it(value)});
+    // AdvanceStringIndex can produce 2^53, which is a valid JS Number but outside
+    // Lambda's compact-int range; route through js_make_number to avoid ITEM_ERROR.
+    return js_regex_set_lastindex_item_strict(regex, li_key, js_make_number((double)value));
 }
 
 static int64_t js_regex_advance_string_index_bytes(String* s, int64_t index, bool full_unicode) {

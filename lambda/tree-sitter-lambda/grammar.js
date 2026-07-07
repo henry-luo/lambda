@@ -467,6 +467,7 @@ module.exports = grammar({
 
     // Variadic marker: ... (higher priority than path_parent)
     variadic: _ => token(prec(2, '...')),
+    var_param_marker: _ => token(prec(3, 'var')),
 
     // Path parent: .. for parent directory (kept separate for parent_expr)
     path_parent: _ => '..',
@@ -524,6 +525,13 @@ module.exports = grammar({
     // JS Fn Parameter : Identifier | ObjectBinding | ArrayBinding, Initializer_opt
     // Supports: name, name?, name: type, name?: type, name = default, name: type = default
     parameter: $ => choice(
+      seq(
+        field('var', $.var_param_marker),
+        field('name', choice($.identifier, $.symbol)),
+        optional(field('optional', '?')),  // optional marker BEFORE type
+        optional(seq(':', field('type', $._type_expr))),
+        optional(seq('=', field('default', $._expr))),
+      ),
       seq(
         field('name', choice($.identifier, $.symbol)),
         optional(field('optional', '?')),  // optional marker BEFORE type

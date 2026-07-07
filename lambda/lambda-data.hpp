@@ -605,6 +605,7 @@ typedef struct TypeConstrained : Type {
 typedef struct TypeParam : Type {
     struct TypeParam* next;
     bool is_optional;           // whether parameter is optional (? marker or default value)
+    bool is_var_param;          // whether this is an inout `var` parameter
     struct AstNode* default_value;  // default value expression (NULL if none)
     Type* full_type;            // for complex types (TypeBinary etc), points to full type; NULL for simple types
 } TypeParam;

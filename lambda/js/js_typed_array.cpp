@@ -850,7 +850,13 @@ static bool js_to_index_int(Item value, int* out_index, const char* error_messag
         return true;
     }
     dval = std::trunc(dval);
-    if (dval < 0 || !std::isfinite(dval) || dval > 1073741824.0) {
+    // ToIndex rejects values above Number.MAX_SAFE_INTEGER before any host allocation cap;
+    // large JS Numbers may arrive as boxed floats and must not wrap through int storage.
+    if (dval < 0 || !std::isfinite(dval) || dval > 9007199254740991.0) {
+        js_throw_range_error(error_message);
+        return false;
+    }
+    if (dval > 1073741824.0) {
         js_throw_range_error(error_message);
         return false;
     }

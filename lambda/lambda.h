@@ -1747,6 +1747,7 @@ extern "C" {
     Item fn_shr_item(Item a, Item b);
 
     // compound assignment support (procedural only)
+    Item fn_mutable_value(Item value);
     Item fn_array_set(Array* arr, int64_t index, Item value);
     void fn_map_set(Item map, Item key, Item value);
 

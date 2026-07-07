@@ -812,6 +812,62 @@ bool is_global_entry(NameEntry* entry, NameScope* global_scope) {
     return false;
 }
 
+static bool is_object_field_entry(NameEntry* entry) {
+    return entry && entry->node && entry->node->node_type == AST_NODE_KEY_EXPR;
+}
+
+static AstNode* unwrap_primary_node(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        node = primary->expr;
+    }
+    return node;
+}
+
+static AstIdentNode* compound_root_ident(AstNode* node) {
+    node = unwrap_primary_node(node);
+    if (!node) return NULL;
+    if (node->node_type == AST_NODE_IDENT) return (AstIdentNode*)node;
+    if (node->node_type == AST_NODE_INDEX_EXPR || node->node_type == AST_NODE_MEMBER_EXPR) {
+        AstFieldNode* field = (AstFieldNode*)node;
+        return compound_root_ident(field->object);
+    }
+    return NULL;
+}
+
+static bool same_name_string(String* a, String* b) {
+    return a == b || (a && b && a->len == b->len && memcmp(a->chars, b->chars, a->len) == 0);
+}
+
+static bool type_exact_match(Type* left, TypeParam* right) {
+    if (!left || !right) return true;
+    Type* right_full = right->full_type ? right->full_type : (Type*)right;
+    if (!right_full) return true;
+    if (left->type_id != right_full->type_id) return false;
+    if (left->kind != right_full->kind) return false;
+    if (left->kind == TYPE_KIND_UNARY) {
+        TypeUnary* lu = (TypeUnary*)left;
+        TypeUnary* ru = (TypeUnary*)right_full;
+        Type* lo = lu->operand;
+        Type* ro = ru->operand;
+        if (lo && lo->type_id == LMD_TYPE_TYPE && lo->kind == TYPE_KIND_SIMPLE) lo = ((TypeType*)lo)->type;
+        if (ro && ro->type_id == LMD_TYPE_TYPE && ro->kind == TYPE_KIND_SIMPLE) ro = ((TypeType*)ro)->type;
+        return lo && ro && lo->type_id == ro->type_id;
+    }
+    return true;
+}
+
+static void validate_compound_mutable_root(Transpiler* tp, TSNode assign_node, AstNode* object) {
+    AstIdentNode* root = compound_root_ident(object);
+    if (!root || !root->entry) return;
+    if (root->entry->is_mutable) return;
+    // Interior writes are writes to the root binding for Lambda's mutability
+    // model; allowing them through a let root makes aliases observe mutation.
+    record_semantic_error(tp, assign_node, ERR_IMMUTABLE_ASSIGNMENT,
+        "cannot mutate through immutable binding '%.*s'. declare it with `var` or pass it as `var`.",
+        (int)root->name->len, root->name->chars);
+}
+
 // Add a capture to the list if not already present
 void add_capture(Transpiler* tp, CaptureInfo** captures, String* name, NameEntry* entry) {
     // Check if already captured
@@ -859,6 +915,9 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
     case AST_NODE_IDENT: {
         AstIdentNode* ident = (AstIdentNode*)node;
         if (ident->entry && ident->entry->node) {
+            // Object fields in method scope are implicit receiver slots, not
+            // closure captures; method write-back owns their mutation rules.
+            if (is_object_field_entry(ident->entry)) break;
             // Check if this identifier refers to a variable from an enclosing scope
             // (not local to fn_scope, not global, not an import)
             if (!ident->entry->import &&
@@ -973,6 +1032,10 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
     case AST_NODE_ASSIGN_STAM: {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         // check if the assignment target is a captured variable from an enclosing scope
+        if (is_object_field_entry(assign->target_entry)) {
+            collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
+            break;
+        }
         if (assign->target_entry && !assign->target_entry->import &&
             !is_local_to_scope(assign->target_entry, fn_scope) &&
             !is_global_entry(assign->target_entry, global_scope)) {
@@ -980,6 +1043,26 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
             mark_capture_mutable(captures, assign->target);
         }
         // also collect captures from the value expression
+        collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM: {
+        AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
+        AstIdentNode* root = compound_root_ident(assign->object);
+        if (root && is_object_field_entry(root->entry)) {
+            collect_captures_from_node(tp, assign->key, fn_scope, global_scope, captures);
+            collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
+            break;
+        }
+        if (root && root->entry && !root->entry->import &&
+            !is_local_to_scope(root->entry, fn_scope) &&
+            !is_global_entry(root->entry, global_scope)) {
+            add_capture(tp, captures, root->name, root->entry);
+            mark_capture_mutable(captures, root->name);
+        }
+        collect_captures_from_node(tp, assign->object, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, assign->key, fn_scope, global_scope, captures);
         collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
         break;
     }
@@ -1039,6 +1122,11 @@ void analyze_captures(Transpiler* tp, AstFuncNode* fn_node, NameScope* global_sc
         CaptureInfo* c = fn_node->captures;
         while (c) {
             log_debug("  - %.*s", (int)c->name->len, c->name->chars);
+            if (c->is_mutable) {
+                record_semantic_error(tp, fn_node->node, ERR_IMMUTABLE_ASSIGNMENT,
+                    "cannot mutate captured binding '%.*s'. pass it as `var` to a pn or return a new value.",
+                    (int)c->name->len, c->name->chars);
+            }
             c = c->next;
         }
     }
@@ -2116,8 +2204,46 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         AstNode* arg = ast_node->argument;
         int arg_index = 0;
         int line = ts_node_start_point(call_node).row + 1;
+        String* var_arg_roots[64];
+        int var_arg_root_count = 0;
 
         while (arg && expected_param) {
+            if (expected_param->is_var_param) {
+                AstIdentNode* root = compound_root_ident(arg);
+                if (!root || !root->entry || !root->entry->is_mutable) {
+                    record_semantic_error(tp, call_node, ERR_IMMUTABLE_ASSIGNMENT,
+                        "argument %d for `var` parameter must be a mutable `var` binding",
+                        arg_index + 1);
+                    if (!should_continue_transpiling(tp)) {
+                        ast_node->type = &TYPE_ERROR;
+                        return (AstNode*)ast_node;
+                    }
+                } else {
+                    for (int i = 0; i < var_arg_root_count; i++) {
+                        if (same_name_string(var_arg_roots[i], root->name)) {
+                            record_semantic_error(tp, call_node, ERR_IMMUTABLE_ASSIGNMENT,
+                                "argument %d overlaps another `var` parameter; pass distinct mutable bindings",
+                                arg_index + 1);
+                            break;
+                        }
+                    }
+                    if (var_arg_root_count < 64) {
+                        var_arg_roots[var_arg_root_count++] = root->name;
+                    }
+                }
+                if (!type_exact_match(arg->type, expected_param)) {
+                    Type* full_type = expected_param->full_type ? expected_param->full_type : (Type*)expected_param;
+                    record_type_error(tp, line,
+                        "argument %d for `var` parameter must match exactly: expected %s, got %s; declare as any[] or use a value parameter",
+                        arg_index + 1,
+                        get_type_name(full_type->type_id),
+                        arg->type ? get_type_name(arg->type->type_id) : "unknown");
+                    if (!should_continue_transpiling(tp)) {
+                        ast_node->type = &TYPE_ERROR;
+                        return (AstNode*)ast_node;
+                    }
+                }
+            }
             bool compatible = types_compatible_with_full(arg->type, (Type*)expected_param, expected_param->full_type);
             if (!compatible) {
                 Type* full_type = expected_param->full_type ? expected_param->full_type : (Type*)expected_param;
@@ -6983,6 +7109,7 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         // build object (the array/container)
         TSNode obj_node = ts_node_child_by_field_id(target_node, FIELD_OBJECT);
         ast_node->object = build_expr(tp, obj_node);
+        validate_compound_mutable_root(tp, assign_node, ast_node->object);
 
         // build index expression(s) — multi-dim arr[i, j, k] = v chains keys via ->next
         TSNode idx_node = ts_node_child_by_field_id(target_node, FIELD_FIELD);
@@ -7022,6 +7149,7 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         // build object (the map/element)
         TSNode obj_node = ts_node_child_by_field_id(target_node, FIELD_OBJECT);
         ast_node->object = build_expr(tp, obj_node);
+        validate_compound_mutable_root(tp, assign_node, ast_node->object);
 
         // build field name as identifier node
         TSNode field_node = ts_node_child_by_field_id(target_node, FIELD_FIELD);
@@ -7146,6 +7274,9 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
     TypeParam* param_type = (TypeParam*)alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(TypeParam));
     ast_node->type = (Type*)param_type;
 
+    TSNode var_node = ts_node_child_by_field_id(param_node, FIELD_VAR);
+    param_type->is_var_param = !ts_node_is_null(var_node);
+
     // check optional marker (?)
     TSNode optional_node = ts_node_child_by_field_id(param_node, FIELD_OPTIONAL);
     param_type->is_optional = !ts_node_is_null(optional_node);
@@ -7165,8 +7296,14 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
         if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
             TypeType* type_type = (TypeType*)type_expr->type;
             if (type_type->type) {
+                bool was_optional = param_type->is_optional;
+                bool was_var_param = param_type->is_var_param;
+                AstNode* default_value = param_type->default_value;
                 // Copy base Type fields
                 *(Type*)param_type = *type_type->type;
+                param_type->is_optional = was_optional;
+                param_type->is_var_param = was_var_param;
+                param_type->default_value = default_value;
                 // For complex types (TypeBinary, TypeUnary) and named map/object types,
                 // store pointer to full type so that downstream code can access
                 // extended fields (shape, struct_name, methods, etc.)
@@ -7203,10 +7340,14 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
 
     if (!is_type) {
         push_name(tp, ast_node, NULL);
-        // In pn (procedural) functions, parameters are mutable
+        // Legacy pn parameters remain locally mutable; explicit `var` marks
+        // inout intent for Phase 5 call-site checks.
         if (tp->current_scope && tp->current_scope->is_proc) {
             NameEntry* entry = lookup_name_in_current_scope(tp, ast_node->name);
-            if (entry) entry->is_mutable = true;
+            if (entry) {
+                entry->is_mutable = true;
+                entry->is_var_param = param_type->is_var_param;
+            }
         }
     }
     return ast_node;

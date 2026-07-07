@@ -3,7 +3,7 @@
 
 // Test 1: Basic attribute update (same type)
 pn test_attr_same_type() {
-    let el = <div class: "old", id: "main">
+    var el = <div class: "old", id: "main">
     el.class = "new"
     print(el.class)
     print(" ")
@@ -13,7 +13,7 @@ pn test_attr_same_type() {
 
 // Test 2: Attribute type change (int → string)
 pn test_attr_type_change() {
-    let el = <span count: 42, label: "ok">
+    var el = <span count: 42, label: "ok">
     el.count = "many"
     print(el.count)
     print(" ")
@@ -23,7 +23,7 @@ pn test_attr_type_change() {
 
 // Test 3: Child assignment with child elements
 pn test_child_assign() {
-    let el = <ul; <li; "A">; <li; "B">; <li; "C">>
+    var el = <ul; <li; "A">; <li; "B">; <li; "C">>
     el[1] = <li; "X">
     print(el[0][0])
     print(" ")
@@ -35,7 +35,7 @@ pn test_child_assign() {
 
 // Test 4: Element attribute with null → container
 pn test_attr_null_to_container() {
-    let el = <div data: null, name: "box">
+    var el = <div data: null, name: "box">
     el.data = [1, 2, 3]
     print(len(el.data))
     print(" ")
@@ -45,7 +45,7 @@ pn test_attr_null_to_container() {
 
 // Test 5: Multiple attribute updates
 pn test_multiple_attr_updates() {
-    let el = <p x: 1, y: 2, z: 3>
+    var el = <p x: 1, y: 2, z: 3>
     el.x = 10
     el.y = 20
     el.z = 30
@@ -59,7 +59,7 @@ pn test_multiple_attr_updates() {
 
 // Test 6: Attribute update preserves children
 pn test_attr_preserves_children() {
-    let el = <div class: "old"; <span; "inner">>
+    var el = <div class: "old"; <span; "inner">>
     el.class = "new"
     print(el.class)
     print(" ")
@@ -69,7 +69,7 @@ pn test_attr_preserves_children() {
 
 // Test 7: Child update preserves attributes
 pn test_child_preserves_attrs() {
-    let el = <div id: "box"; "original content">
+    var el = <div id: "box"; "original content">
     el[0] = "updated"
     print(el.id)
     print(" ")
@@ -79,7 +79,7 @@ pn test_child_preserves_attrs() {
 
 // Test 8: Attribute mutation in loop
 pn test_attr_in_loop() {
-    let el = <span value: 0>
+    var el = <span value: 0>
     var i = 0
     while (i < 5) {
         el.value = el.value + 1

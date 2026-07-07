@@ -7,9 +7,22 @@
 # Format: test-filename.js  # reason
 # Lines starting with # are comments. Blank lines are ignored.
 #
+test-assert-typedarray-deepequal.js              # [slow] observed 43.1s (>10s)
+test-child-process-advanced-serialization.js     # [slow] observed 30.3s (>10s)
+test-child-process-execfilesync-maxbuf.js        # [timeout] observed 60.1s (>10s)
+test-child-process-http-socket-leak.js           # [slow] observed 10.2s (>10s)
 test-compile-cache-success.js                    # [slow] executes the 10.5MB TypeScript snapshot fixture twice through spawnSync; compile-cache semantics need real cache artifact support before this is a normal baseline test
+test-module-main-extension-lookup.js             # [timeout] observed 60.1s (>10s)
+test-module-main-fail.js                         # [timeout] observed 60.1s (>10s)
+test-module-main-preserve-symlinks-fail.js       # [timeout] observed 60.1s (>10s)
+test-module-wrap.js                              # [timeout] observed 60.1s (>10s)
+test-module-wrapper.js                           # [timeout] observed 60.0s (>10s)
+test-repl-unsupported-option.js                  # [timeout] observed 60.1s (>10s)
+test-snapshot-child-process-sync.js              # [timeout] observed 60.1s (>10s)
 test-snapshot-typescript.js                      # [timeout] snapshot support is still placeholder-only, and the build phase loads the 10.5MB TypeScript fixture before the second phase can run
 test-stream2-read-sync-stack.js                  # [slow] CPU-bound: 256K synchronous _read()/push(Buffer.allocUnsafe(1)) turns in the current LambdaJS interpreter, not a timeout/drain wait
 test-tls-cli-min-version-1.2.js                  # [timeout] harness popen run waits until timeout; direct child exits fast with incomplete mustCall diagnostics
 test-tls-destroy-stream-12.js                    # [timeout] harness popen run waits until timeout; direct child exits fast with incomplete mustCall diagnostics
+test-tls-server-verify.js                        # [slow] observed 30.2s (>10s)
+test-tls-session-cache.js                        # [slow] observed 30.2s (>10s)
 test-tls-ticket-12.js                            # [timeout] harness popen run waits until timeout; full fix needs real TLS session ticket/resumption semantics

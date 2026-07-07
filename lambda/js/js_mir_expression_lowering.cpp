@@ -1206,8 +1206,9 @@ MIR_reg_t jm_transpile_literal(JsMirTranspiler* mt, JsLiteralNode* lit) {
                 MIR_new_double_op(mt->ctx, val)));
             return jm_box_float(mt, d);
         }
-        // check if value is an integer
-        if (val == (double)(int64_t)val && val >= -36028797018963968.0 && val <= 36028797018963967.0) {
+        // JS numeric literals outside Lambda's compact-int safe range must stay boxed floats;
+        // i2it(2^53) is ITEM_ERROR, which used to leak into property/typed-array paths.
+        if (val == (double)(int64_t)val && val >= (double)INT56_MIN && val <= (double)INT56_MAX) {
             return jm_box_int_const(mt, (int64_t)val);
         } else {
             MIR_reg_t d = jm_new_reg(mt, "dbl", MIR_T_D);
@@ -1977,9 +1978,9 @@ bool jm_try_fold_const(JsAstNode* node, JsFoldVal* out) {
             if (!isfinite(v)) return false;
             out->kind = JS_FOLD_NUM;
             out->num = v;
-            // mirror jm_get_effective_type's int/float classification for a number literal
+            // Mirror literal lowering: values outside INT56 cannot be emitted through i2it.
             out->is_float = lit->has_decimal ||
-                !(v == (double)(int64_t)v && v >= -36028797018963968.0 && v <= 36028797018963967.0);
+                !(v == (double)(int64_t)v && v >= (double)INT56_MIN && v <= (double)INT56_MAX);
             return true;
         }
         if (lit->literal_type == JS_LITERAL_BOOLEAN) {
@@ -2024,7 +2025,7 @@ bool jm_try_fold_const(JsAstNode* node, JsFoldVal* out) {
             if (!isfinite(r)) return false;
             if (both_int) {
                 // int arithmetic must round-trip exactly to match the runtime's int64 path
-                if (r != (double)(int64_t)r || fabs(r) > 9007199254740992.0) return false;
+                if (r != (double)(int64_t)r || r < (double)INT56_MIN || r > (double)INT56_MAX) return false;
                 out->is_float = false;
             } else {
                 out->is_float = true;
@@ -2109,7 +2110,7 @@ static bool jm_emit_folded_at_value_site(JsMirTranspiler* mt, const JsFoldVal* f
     }
     double val = fv->num;
     if (!fv->is_float && val == (double)(int64_t)val &&
-        val >= -36028797018963968.0 && val <= 36028797018963967.0) {
+        val >= (double)INT56_MIN && val <= (double)INT56_MAX) {
         *out = jm_box_int_const(mt, (int64_t)val); return true;
     }
     MIR_reg_t d = jm_new_reg(mt, "fdbl", MIR_T_D);
@@ -13575,7 +13576,8 @@ MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)s->len));
             }
             double val = lit->value.number_value;
-            if (!lit->has_decimal && val == (double)(int64_t)val && val >= -36028797018963968.0 && val <= 36028797018963967.0) {
+            if (!lit->has_decimal && val == (double)(int64_t)val &&
+                    val >= (double)INT56_MIN && val <= (double)INT56_MAX) {
                 return jm_box_int_const(mt, (int64_t)val);
             }
             MIR_reg_t d = jm_new_reg(mt, "dbl", MIR_T_D);

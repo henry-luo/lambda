@@ -66,6 +66,7 @@ extern "C" Item path_resolve_for_iteration(Path* path);
 
 // forward declaration from lambda-data.cpp
 void array_set(Array* arr, int64_t index, Item itm);
+extern Item _map_read_field(ShapeEntry* field, void* map_data);
 
 // External path functions for path ++ operation
 extern "C" Pool* eval_context_get_pool(EvalContext* ctx);
@@ -5515,6 +5516,59 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
         *(Container**)field_ptr = c;
         break;
     }
+    case LMD_TYPE_ANY: {
+        TypeId actual_type = get_type_id(value);
+        TypedItem titem = {.type_id = actual_type, .item = value.item};
+        switch (actual_type) {
+        case LMD_TYPE_NULL:
+        case LMD_TYPE_ERROR:
+        case LMD_TYPE_UNDEFINED:
+            break;
+        case LMD_TYPE_BOOL:
+            titem.bool_val = value.bool_val;
+            break;
+        case LMD_TYPE_INT:
+            titem.int_val = value.int_val;
+            break;
+        case LMD_TYPE_INT64:
+            titem.long_val = value.get_int64();
+            break;
+        case LMD_TYPE_FLOAT:
+            titem.double_val = value.get_double();
+            break;
+        case LMD_TYPE_DTIME:
+            titem.datetime_val = value.get_datetime();
+            break;
+        case LMD_TYPE_STRING:
+            titem.string = value.get_safe_string();
+            break;
+        case LMD_TYPE_BINARY:
+            titem.string = value.get_safe_binary();
+            break;
+        case LMD_TYPE_SYMBOL:
+            titem.symbol = value.get_safe_symbol();
+            break;
+        case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_RANGE:
+        case LMD_TYPE_MAP: case LMD_TYPE_VMAP:
+        case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
+            titem.container = value.container;
+            break;
+        case LMD_TYPE_TYPE:
+            titem.type = value.type;
+            break;
+        case LMD_TYPE_FUNC:
+            titem.function = value.function;
+            break;
+        case LMD_TYPE_PATH:
+            titem.path = value.path;
+            break;
+        default:
+            titem = {.type_id = LMD_TYPE_ERROR};
+            break;
+        }
+        *(TypedItem*)field_ptr = titem;
+        break;
+    }
     case LMD_TYPE_FUNC: case LMD_TYPE_VMAP: case LMD_TYPE_DECIMAL:
     case LMD_TYPE_TYPE: {
         // store as opaque pointer (low 56 bits)
@@ -5529,6 +5583,237 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
         log_error("map_field_store: unsupported type %d", value_type);
         break;
     }
+}
+
+struct MutableCloneEntry {
+    void* src;
+    Item dst;
+};
+
+struct MutableCloneContext {
+    HashMap* visited;
+};
+
+static uint64_t mutable_clone_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    uintptr_t ptr = (uintptr_t)((const MutableCloneEntry*)item)->src;
+    return hashmap_sip(&ptr, sizeof(ptr), seed0, seed1);
+}
+
+static int mutable_clone_entry_cmp(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const MutableCloneEntry* ea = (const MutableCloneEntry*)a;
+    const MutableCloneEntry* eb = (const MutableCloneEntry*)b;
+    if (ea->src == eb->src) return 0;
+    return ea->src < eb->src ? -1 : 1;
+}
+
+static MutableCloneContext mutable_clone_context_new() {
+    MutableCloneContext clone_ctx = {0};
+    clone_ctx.visited = hashmap_new(sizeof(MutableCloneEntry), 16, 0, 0,
+        mutable_clone_entry_hash, mutable_clone_entry_cmp, NULL, NULL);
+    return clone_ctx;
+}
+
+static void mutable_clone_context_free(MutableCloneContext* clone_ctx) {
+    if (clone_ctx && clone_ctx->visited) {
+        hashmap_free(clone_ctx->visited);
+        clone_ctx->visited = NULL;
+    }
+}
+
+static bool mutable_clone_lookup(MutableCloneContext* clone_ctx, void* src, Item* dst) {
+    if (!clone_ctx || !clone_ctx->visited || !src) return false;
+    MutableCloneEntry probe = {.src = src};
+    const MutableCloneEntry* found = (const MutableCloneEntry*)hashmap_get(clone_ctx->visited, &probe);
+    if (!found) return false;
+    if (dst) *dst = found->dst;
+    return true;
+}
+
+static void mutable_clone_register(MutableCloneContext* clone_ctx, void* src, Item dst) {
+    if (!clone_ctx || !clone_ctx->visited || !src) return;
+    MutableCloneEntry entry = {.src = src, .dst = dst};
+    hashmap_set(clone_ctx->visited, &entry);
+}
+
+static Item clone_mutable_item(Item value, MutableCloneContext* clone_ctx);
+
+static void clone_mutable_shape_data(TypeMap* map_type, void* dst_data, void* src_data,
+                                     MutableCloneContext* clone_ctx) {
+    if (!map_type || !dst_data || !src_data) return;
+    ShapeEntry* entry = map_type->shape;
+    while (entry) {
+        void* dst_field = (char*)dst_data + entry->byte_offset;
+        if (!entry->name) {
+            // Map spread slots are recursive raw Map* links, not normal typed
+            // fields; storing a TypedItem here makes _map_get treat tag bytes
+            // as a nested map pointer.
+            Map* nested_src = *(Map**)((char*)src_data + entry->byte_offset);
+            Item field_clone = nested_src ? clone_mutable_item({.map = nested_src}, clone_ctx) : ItemNull;
+            *(Map**)dst_field = get_type_id(field_clone) == LMD_TYPE_MAP ?
+                field_clone.map : NULL;
+        } else {
+            Item field_value = _map_read_field(entry, src_data);
+            Item field_clone = clone_mutable_item(field_value, clone_ctx);
+            // Cloned maps must keep the original slot layout; writing an `any`
+            // field as a raw pointer makes later reads interpret pointer bytes as
+            // a TypedItem tag.
+            map_field_store(dst_field, field_clone, entry->type->type_id);
+        }
+        entry = entry->next;
+    }
+}
+
+static void clone_mutable_container_flags(Container* dst, Container* src) {
+    if (!dst || !src) return;
+    // COW clones must become runtime-owned mutable containers even when the
+    // source was a static literal or input-pool document node.
+    dst->flags = src->flags;
+    dst->is_heap = 1;
+    dst->is_static = 0;
+    dst->is_data_migrated = 0;
+}
+
+static Item clone_mutable_array(Array* src, MutableCloneContext* clone_ctx) {
+    if (!src) return ItemNull;
+    Item existing;
+    if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
+    Array* dst = array_plain();
+    if (!dst) return ItemNull;
+    clone_mutable_container_flags((Container*)dst, (Container*)src);
+    dst->type_id = LMD_TYPE_ARRAY;
+    // Mutable values may contain cycles through arrays/maps; register the
+    // destination before cloning children so back-edges keep object identity.
+    mutable_clone_register(clone_ctx, src, {.array = dst});
+    for (int64_t i = 0; i < src->length; i++) {
+        array_push(dst, clone_mutable_item(src->items[i], clone_ctx));
+    }
+    return {.array = dst};
+}
+
+static Item clone_mutable_array_num(ArrayNum* src, MutableCloneContext* clone_ctx) {
+    if (!src) return ItemNull;
+    if (src->is_view) {
+        // Numeric views are explicit aliases; cloning them during var binding
+        // breaks the write-through contract for mutable subviews.
+        return {.array_num = src};
+    }
+    Item existing;
+    if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
+    ArrayNumElemType elem_type = src->get_elem_type();
+    ArrayNum* dst = array_num_new(elem_type, src->length);
+    if (!dst) return ItemNull;
+    clone_mutable_container_flags((Container*)dst, (Container*)src);
+    dst->type_id = LMD_TYPE_ARRAY_NUM;
+    dst->set_elem_type(elem_type);
+    dst->is_view = 0;
+    dst->is_mutable_view = 0;
+    mutable_clone_register(clone_ctx, src, {.array_num = dst});
+
+    int elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
+    if (src->data && dst->data && elem_size > 0 && src->length > 0) {
+        memcpy(dst->data, src->data, (size_t)src->length * (size_t)elem_size);
+    }
+    if (src->is_ndim && !src->is_view && src->extra) {
+        ArrayNumShape* shape = (ArrayNumShape*)src->extra;
+        size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)shape->ndim * sizeof(int64_t);
+        ArrayNumShape* dst_shape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
+        if (dst_shape) {
+            memcpy(dst_shape, shape, shape_bytes);
+            dst_shape->base = NULL;
+            dst->extra = (int64_t)dst_shape;
+            dst->is_ndim = 1;
+        }
+    }
+    return {.array_num = dst};
+}
+
+static Item clone_mutable_map(Item src_item, MutableCloneContext* clone_ctx) {
+    Map* src = src_item.map;
+    if (!src || !src->type) return ItemNull;
+    Item existing;
+    if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
+    Map* dst = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    if (!dst) return ItemNull;
+    clone_mutable_container_flags((Container*)dst, (Container*)src);
+    dst->type_id = LMD_TYPE_MAP;
+    dst->map_kind = src->map_kind;
+    dst->type = src->type;
+    int data_cap = src->data_cap > 0 ? src->data_cap : ((TypeMap*)src->type)->byte_size;
+    dst->data_cap = data_cap;
+    // Register before descending into fields because map graphs can cycle
+    // through `any` fields or spread-map slots.
+    mutable_clone_register(clone_ctx, src, {.map = dst});
+    if (data_cap > 0) {
+        dst->data = heap_data_calloc((size_t)data_cap);
+        clone_mutable_shape_data((TypeMap*)src->type, dst->data, src->data, clone_ctx);
+    }
+    return {.map = dst};
+}
+
+static Item clone_mutable_object(Item src_item, MutableCloneContext* clone_ctx) {
+    Object* src = src_item.object;
+    if (!src || !src->type) return ItemNull;
+    Item existing;
+    if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
+    Object* dst = (Object*)heap_calloc(sizeof(Object), LMD_TYPE_OBJECT);
+    if (!dst) return ItemNull;
+    clone_mutable_container_flags((Container*)dst, (Container*)src);
+    dst->type_id = LMD_TYPE_OBJECT;
+    dst->map_kind = src->map_kind;
+    dst->type = src->type;
+    int data_cap = src->data_cap > 0 ? src->data_cap : ((TypeObject*)src->type)->byte_size;
+    dst->data_cap = data_cap;
+    mutable_clone_register(clone_ctx, src, {.object = dst});
+    if (data_cap > 0) {
+        dst->data = heap_data_calloc((size_t)data_cap);
+        clone_mutable_shape_data((TypeMap*)src->type, dst->data, src->data, clone_ctx);
+    }
+    return {.object = dst};
+}
+
+static Item clone_mutable_element(Item src_item, MutableCloneContext* clone_ctx) {
+    Element* src = src_item.element;
+    if (!src || !src->type) return ItemNull;
+    Item existing;
+    if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
+    Element* dst = (Element*)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
+    if (!dst) return ItemNull;
+    clone_mutable_container_flags((Container*)dst, (Container*)src);
+    dst->type_id = LMD_TYPE_ELEMENT;
+    dst->map_kind = src->map_kind;
+    dst->type = src->type;
+    mutable_clone_register(clone_ctx, src, {.element = dst});
+
+    for (int64_t i = 0; i < src->length; i++) {
+        array_push((Array*)dst, clone_mutable_item(src->items[i], clone_ctx));
+    }
+
+    int data_cap = src->data_cap > 0 ? src->data_cap : ((TypeElmt*)src->type)->byte_size;
+    dst->data_cap = data_cap;
+    if (data_cap > 0) {
+        dst->data = heap_data_calloc((size_t)data_cap);
+        clone_mutable_shape_data((TypeMap*)src->type, dst->data, src->data, clone_ctx);
+    }
+    return {.element = dst};
+}
+
+static Item clone_mutable_item(Item value, MutableCloneContext* clone_ctx) {
+    switch (get_type_id(value)) {
+    case LMD_TYPE_ARRAY: return clone_mutable_array(value.array, clone_ctx);
+    case LMD_TYPE_ARRAY_NUM: return clone_mutable_array_num(value.array_num, clone_ctx);
+    case LMD_TYPE_MAP: return clone_mutable_map(value, clone_ctx);
+    case LMD_TYPE_OBJECT: return clone_mutable_object(value, clone_ctx);
+    case LMD_TYPE_ELEMENT: return clone_mutable_element(value, clone_ctx);
+    default: return value;
+    }
+}
+
+Item fn_mutable_value(Item value) {
+    MutableCloneContext clone_ctx = mutable_clone_context_new();
+    Item cloned = clone_mutable_item(value, &clone_ctx);
+    mutable_clone_context_free(&clone_ctx);
+    return cloned;
 }
 
 // rebuild a map/element shape when a field's type changes
