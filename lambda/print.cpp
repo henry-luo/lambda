@@ -718,6 +718,10 @@ struct PrintItemVisitor {
 
     void operator()(lam::ItemOf<LMD_TYPE_TYPE> item) const {
         TypeType* type = (TypeType*)item.ptr();
+        if (type->type == &TYPE_NUMBER) {
+            strbuf_append_str(strbuf, "number");
+            return;
+        }
         if (type->type->type_id == LMD_TYPE_NUM_SIZED) {
             strbuf_append_str(strbuf, get_num_sized_type_name((NumSizedType)type->type->kind));
             return;
@@ -753,10 +757,6 @@ struct PrintItemVisitor {
     void operator()(lam::ItemOf<LMD_TYPE_ANY> item) const {
         (void)item;
         strbuf_append_str(strbuf, "any");
-    }
-
-    void operator()(lam::ItemOf<LMD_TYPE_NUMBER> item) const {
-        unknown(item.tag());
     }
 
     void operator()(lam::ItemOf<LMD_TYPE_UNDEFINED> item) const {
@@ -844,6 +844,7 @@ void print_item(Item item, int depth) {
 // print the type of the AST node
 const char* format_type(Type *type) {
     if (!type) { return "null*"; }
+    if (type == &TYPE_NUMBER) { return "number"; }
     TypeId type_id = type->type_id;
     switch (type_id) {
     case LMD_TYPE_NULL:
@@ -866,8 +867,6 @@ const char* format_type(Type *type) {
         return "uint64";
     case LMD_TYPE_DECIMAL:
         return "decimal";
-    case LMD_TYPE_NUMBER:
-        return "number";
     case LMD_TYPE_STRING:
         return "char*";
     case LMD_TYPE_SYMBOL:

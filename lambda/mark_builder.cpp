@@ -709,11 +709,6 @@ bool MarkBuilder::is_in_arena(Item item) const {
         return is_pointer_in_arena_chain(sym);
     }
 
-    case LMD_TYPE_NUMBER: {
-        // NUMBER is a double, check if pointer is in arena
-        return is_pointer_in_arena_chain((void*)item.string_ptr);
-    }
-
     // Container types - check container and all contents
     case LMD_TYPE_RANGE:  case LMD_TYPE_TYPE:
     case LMD_TYPE_ARRAY_NUM:
@@ -848,10 +843,6 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
     } else if constexpr (Tag == LMD_TYPE_DECIMAL) {
         // Use centralized decimal_deep_copy function
         return decimal_deep_copy(item, arena_, false);
-    } else if constexpr (Tag == LMD_TYPE_NUMBER) {
-        // NUMBER type is stored as double
-        double val = item.get_double();
-        return createFloat(val);
     } else if constexpr (Tag == LMD_TYPE_RANGE) {
         Range* src_range = typed.ptr();
         return createRange(src_range->start, src_range->end);
@@ -1002,7 +993,13 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         log_leave();
         return elem_builder.final();
     } else if constexpr (Tag == LMD_TYPE_TYPE) {
-        return createMetaType(((TypeType*)typed.ptr())->type->type_id);
+        TypeType* source_type = (TypeType*)typed.ptr();
+        if (!source_type || !source_type->type) return ItemError;
+        if (source_type->type == &TYPE_NUMBER) {
+            // `number` is an abstract type singleton; copying by TypeId would collapse it to `type`.
+            return typed.raw();
+        }
+        return createMetaType(source_type->type->type_id);
     } else if constexpr (Tag == LMD_TYPE_PATH) {
         // For sys:// paths, resolve and deep-copy the result
         Path* path = typed.ptr();

@@ -829,8 +829,9 @@ Bool fn_is(Item a, Item b) {
             // Base is a primitive type like int, string, etc.
             if (a_type_id != base->type_id) {
                 // Allow numeric coercion: int is valid for int64, float is valid for float64, etc.
-                if (!(LMD_TYPE_INT <= a_type_id && a_type_id <= base->type_id &&
-                      LMD_TYPE_INT <= base->type_id && base->type_id <= LMD_TYPE_NUMBER)) {
+                if (!(base == &TYPE_NUMBER && IS_NUMERIC_ID(a_type_id)) &&
+                    !(IS_NUMERIC_ID(a_type_id) && IS_NUMERIC_ID(base->type_id) &&
+                      LMD_TYPE_INT <= a_type_id && a_type_id <= base->type_id)) {
                     return BOOL_FALSE;
                 }
             }
@@ -894,7 +895,13 @@ Bool fn_is(Item a, Item b) {
     switch (type_b->type->type_id) {
     case LMD_TYPE_ANY:
         return a_type_id == LMD_TYPE_ERROR ? BOOL_FALSE : BOOL_TRUE;
-    case LMD_TYPE_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_DECIMAL:  case LMD_TYPE_NUMBER:
+    case LMD_TYPE_TYPE:
+        if (type_b->type == &TYPE_NUMBER) {
+            // `number` is a type-language union, so match concrete numeric tags explicitly.
+            return IS_NUMERIC_ID(a_type_id) ? BOOL_TRUE : BOOL_FALSE;
+        }
+        return a_type_id == LMD_TYPE_TYPE ? BOOL_TRUE : BOOL_FALSE;
+    case LMD_TYPE_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_DECIMAL:
         // also match NUM_SIZED integer sub-types and UINT64 as numeric
         if (a_type_id == LMD_TYPE_NUM_SIZED || a_type_id == LMD_TYPE_UINT64) return BOOL_TRUE;
         return LMD_TYPE_INT <= a_type_id && a_type_id <= type_b->type->type_id;

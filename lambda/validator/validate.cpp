@@ -66,7 +66,7 @@ static bool array_pattern_simple_type_matches(Item item, Type* type_pattern, boo
     *handled = true;
     TypeId actual = get_type_id(item);
     if (expected->type_id == LMD_TYPE_ANY) return actual != LMD_TYPE_ERROR;
-    if (expected->type_id == LMD_TYPE_NUMBER) return IS_NUMERIC_ID(actual);
+    if (expected == &TYPE_NUMBER) return IS_NUMERIC_ID(actual);
     if (expected->type_id == LMD_TYPE_ARRAY) {
         return actual == LMD_TYPE_ARRAY || actual == LMD_TYPE_ARRAY_NUM || actual == LMD_TYPE_RANGE;
     }
@@ -187,10 +187,18 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         return validate_against_pattern_type(validator, item, (TypePattern*)base_type);
     }
 
+    if (base_type == &TYPE_NUMBER) {
+        // `number` has no runtime tag; validation expands it to all concrete numeric tags.
+        result->valid = IS_NUMERIC_ID(item.type_id());
+        if (!result->valid) add_type_mismatch_error_ex(result, validator, base_type, item);
+        return result;
+    }
+
     // Handle numeric types with promotion
-    if (LMD_TYPE_INT <= base_type->type_id && base_type->type_id <= LMD_TYPE_NUMBER) {
+    if (IS_NUMERIC_ID(base_type->type_id)) {
         // Number promotion - allow int/float/decimal interchangeably
-        if (LMD_TYPE_INT <= item.type_id() && item.type_id() <= base_type->type_id) {
+        if (IS_NUMERIC_ID(item.type_id()) &&
+            LMD_TYPE_INT <= item.type_id() && item.type_id() <= base_type->type_id) {
             result->valid = true;
         } else {
             result->valid = false;
