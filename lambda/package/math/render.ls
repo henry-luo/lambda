@@ -1418,6 +1418,74 @@ fn render_overrightarrow_accent(base_box, context) {
     }
 }
 
+fn render_long_arrow_label_sequence(base_name, label_name, context) {
+    let body = make_padded_svg_body_box(base_name)
+    let label = make_padded_svg_label_box(label_name)
+    let stack = box.ml_vlist_bottom([
+        {box: body, classes: css.CENTER},
+        {kern: 0.1},
+        {box: label, classes: css.CENTER ++ " lm_label_padding", no_wrap: true},
+        {kern: 0.1}
+    ], 0.1, "mrel")
+    {
+        element: stack.element,
+        height: stack.height,
+        depth: stack.depth,
+        width: stack.width,
+        type: "mrel",
+        italic: 0.0,
+        skew: 0.0,
+        max_font_size: stack.height,
+        model: "ml"
+    }
+}
+
+fn make_padded_svg_body_box(svg_name) {
+    let h = svg_body_height(svg_name)
+    let el = raw_html(padded_svg_body_markup(svg_name))
+    {
+        element: el,
+        height: h / 2.0 + 0.166,
+        depth: h / 2.0 - 0.166,
+        width: svg_body_min_width(svg_name) + 0.24,
+        type: "mrel",
+        italic: 0.0,
+        skew: 0.0,
+        max_font_size: h / 2.0 + 0.166,
+        model: "ml",
+        no_pstrut_floor: true
+    }
+}
+
+fn make_padded_svg_label_box(svg_name) {
+    let h = svg_body_height(svg_name)
+    let unscaled_h = h / 2.0 + 0.166
+    let unscaled_d = h / 2.0 - 0.166
+    let scaled_h = unscaled_h * 0.7
+    let scaled_d = unscaled_d * 0.7
+    let el = raw_html("<span style=\"height:" ++ util.fmt_ml_em((unscaled_h + unscaled_d) * 0.7) ++
+        ";display:inline-block;font-size: 70%\"><span style=\"position:relative\">" ++
+        padded_svg_body_markup(svg_name) ++ "</span></span>")
+    {
+        element: el,
+        height: scaled_h,
+        depth: scaled_d,
+        width: (svg_body_min_width(svg_name) + 0.24) * 0.7,
+        type: "mrel",
+        italic: 0.0,
+        skew: 0.0,
+        max_font_size: scaled_h,
+        model: "ml",
+        no_pstrut_floor: true
+    }
+}
+
+fn padded_svg_body_markup(svg_name) {
+    "<span class=\"lm_nulldelimiter lm_open\" style=\"width:0.12em\"></span>" ++
+    "<span >" ++ svg_body_markup(svg_name) ++ "</span>" ++
+    "<span class=\"lm_nulldelimiter lm_close\" style=\"width:0.12em\"></span>"
+}
+
 fn null_delimiter_box(side_class) {
     box.ml_box(<span class: css.classes([css.NULLDELIMITER, side_class]), style: "width:0.12em">,
         0.0, 0.0, 0.12, "mopen")
@@ -2559,6 +2627,9 @@ fn render_children_scan(node, context, i, acc) {
         (let rendered = render_scriptstyle_sibling(node[i + 1], context),
          let spacer = if (has_trailing_radical(acc)) [box.skip_box(0.17)] else [],
          render_children_scan(node, context, i + 2, acc ++ spacer ++ [rendered]))
+    else if (is_long_arrow_label_sequence(node, i))
+        (let rendered = render_long_arrow_label_sequence(command_name(node[i]), command_name(node[i + 1]), context),
+         render_children_scan(node, context, i + 2, acc ++ [rendered]))
     else if (try_sized_delim_word_combine(node, i) != null)
         (let combo = try_sized_delim_word_combine(node, i),
          let rendered = render_combined_big_command(combo, context),
@@ -2592,6 +2663,13 @@ fn is_fraction_like_sequence_node(child) {
             (tag == '_seq' and len(child) > 0 and is_fraction_like_sequence_node(child[0]))
     }
 }
+
+fn is_long_arrow_label_sequence(node, i) =>
+    i + 1 < len(node) and is_long_arrow_command(node[i]) and is_long_arrow_command(node[i + 1])
+
+fn is_long_arrow_command(child) =>
+    child is element and name(child) == 'command' and
+        (command_name(child) == "longrightarrow" or command_name(child) == "longleftarrow")
 
 fn is_malformed_right_fraction_sequence(node) {
     if (len(node) <= 1) false
