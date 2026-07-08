@@ -3283,8 +3283,21 @@ struct JsComputedStyleHost {
     int pseudo_type;
 };
 
+static void format_alpha_component(char* buf, size_t buf_size, uint8_t alpha) {
+    if (!buf || buf_size == 0) return;
+    double value = alpha / 255.0;
+    snprintf(buf, buf_size, "%.2f", value);
+    size_t len = strlen(buf);
+    while (len > 0 && buf[len - 1] == '0') {
+        buf[--len] = '\0';
+    }
+    if (len > 0 && buf[len - 1] == '.') {
+        buf[--len] = '\0';
+    }
+}
+
 // Helper: serialize a CssValue to a string Item
-static Item css_value_to_string_item(CssValue* val) {
+static Item css_value_to_string_item(CssValue* val, Pool* pool) {
     if (!val) return (Item){.item = s2it(heap_create_name(""))};
 
     switch (val->type) {
@@ -3360,16 +3373,139 @@ static Item css_value_to_string_item(CssValue* val) {
             break;
         case CSS_VALUE_TYPE_COLOR: {
             char buf[64];
-            snprintf(buf, sizeof(buf), "rgb(%d, %d, %d)",
-                     val->data.color.data.rgba.r,
-                     val->data.color.data.rgba.g,
-                     val->data.color.data.rgba.b);
+            uint8_t r = val->data.color.data.rgba.r;
+            uint8_t g = val->data.color.data.rgba.g;
+            uint8_t b = val->data.color.data.rgba.b;
+            uint8_t a = val->data.color.data.rgba.a;
+            if (a < 255) {
+                char alpha[32];
+                format_alpha_component(alpha, sizeof(alpha), a);
+                snprintf(buf, sizeof(buf), "rgba(%d, %d, %d, %s)", r, g, b, alpha);
+            } else {
+                snprintf(buf, sizeof(buf), "rgb(%d, %d, %d)", r, g, b);
+            }
             return (Item){.item = s2it(heap_create_name(buf))};
         }
         default:
             break;
     }
+    if (pool) {
+        CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+        if (fmt) {
+            css_format_value(fmt, val);
+            String* result = stringbuf_to_string(fmt->output);
+            if (result) {
+                return (Item){.item = s2it(heap_create_name(result->chars))};
+            }
+        }
+    }
     return (Item){.item = s2it(heap_create_name(""))};
+}
+
+static Item js_css_string_item(const char* value) {
+    return (Item){.item = s2it(heap_create_name(value ? value : ""))};
+}
+
+static bool css_value_is_keyword(CssValue* value, CssEnum keyword) {
+    return value && value->type == CSS_VALUE_TYPE_KEYWORD &&
+           value->data.keyword == keyword;
+}
+
+static DomElement* js_parent_element(DomElement* elem) {
+    if (!elem || !elem->parent || !elem->parent->is_element()) return nullptr;
+    return static_cast<DomElement*>(elem->parent);
+}
+
+static CssDeclaration* js_computed_style_find_decl(DomElement* elem,
+                                                   CssPropertyId prop_id,
+                                                   int pseudo_type) {
+    if (!elem) return nullptr;
+    CssDeclaration* decl = nullptr;
+    if (pseudo_type == 1) {
+        decl = dom_element_get_pseudo_element_value(elem, prop_id, 1); // ::before
+    } else if (pseudo_type == 2) {
+        decl = dom_element_get_pseudo_element_value(elem, prop_id, 2); // ::after
+    } else {
+        decl = dom_element_get_specified_value(elem, prop_id);
+    }
+    if (!decl) {
+        decl = js_match_element_property(elem, prop_id, pseudo_type);
+    }
+    return decl;
+}
+
+static Item js_computed_style_resolve_property(DomElement* elem,
+                                               CssPropertyId prop_id,
+                                               int pseudo_type,
+                                               int depth);
+
+static Item js_computed_style_initial_value(DomElement* elem,
+                                            CssPropertyId prop_id,
+                                            int pseudo_type,
+                                            int depth) {
+    if (prop_id == CSS_PROPERTY_CONTENT) {
+        return js_css_string_item((pseudo_type == 1 || pseudo_type == 2) ? "none" : "normal");
+    }
+
+    const CssProperty* prop = css_property_get_by_id(prop_id);
+    const char* initial = prop && prop->initial_value ? prop->initial_value : "";
+    if (strcmp(initial, "currentColor") == 0 && depth < 16) {
+        return js_computed_style_resolve_property(elem, CSS_PROPERTY_COLOR, 0, depth + 1);
+    }
+    return js_css_string_item(initial);
+}
+
+static Item js_computed_style_inherited_value(DomElement* elem,
+                                              CssPropertyId prop_id,
+                                              int depth) {
+    DomElement* parent = js_parent_element(elem);
+    if (parent && depth < 16) {
+        return js_computed_style_resolve_property(parent, prop_id, 0, depth + 1);
+    }
+    return js_computed_style_initial_value(elem, prop_id, 0, depth + 1);
+}
+
+static Item js_computed_style_resolve_property(DomElement* elem,
+                                               CssPropertyId prop_id,
+                                               int pseudo_type,
+                                               int depth) {
+    if (!elem || depth > 16) return js_css_string_item("");
+
+    CssDeclaration* decl = js_computed_style_find_decl(elem, prop_id, pseudo_type);
+    if (!decl || !decl->value) {
+        if (css_property_is_inherited(prop_id)) {
+            return js_computed_style_inherited_value(elem, prop_id, depth);
+        }
+        return js_computed_style_initial_value(elem, prop_id, pseudo_type, depth);
+    }
+
+    CssValue* value = decl->value;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = value->data.keyword;
+        // CSS-wide keywords are specified values; getComputedStyle must resolve
+        // them or WPT assertion failures can leave inline mutations behind.
+        if (keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_REVERT) {
+            return js_computed_style_initial_value(elem, prop_id, pseudo_type, depth);
+        }
+        if (keyword == CSS_VALUE_INHERIT) {
+            return js_computed_style_inherited_value(elem, prop_id, depth);
+        }
+        if (keyword == CSS_VALUE_UNSET) {
+            if (css_property_is_inherited(prop_id)) {
+                return js_computed_style_inherited_value(elem, prop_id, depth);
+            }
+            return js_computed_style_initial_value(elem, prop_id, pseudo_type, depth);
+        }
+    }
+
+    // CSS spec: for ::before/::after, content 'normal' computes to 'none'
+    if (prop_id == CSS_PROPERTY_CONTENT && (pseudo_type == 1 || pseudo_type == 2) &&
+        css_value_is_keyword(value, CSS_VALUE_NORMAL)) {
+        return js_css_string_item("none");
+    }
+
+    Pool* pool = elem->doc ? elem->doc->pool : nullptr;
+    return css_value_to_string_item(value, pool);
 }
 
 extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
@@ -3954,63 +4090,7 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
         return (Item){.item = s2it(heap_create_name(""))};
     }
 
-    // get the specified (cascaded) value for this property
-    CssDeclaration* decl = nullptr;
-    if (pseudo_type == 1) {
-        decl = dom_element_get_pseudo_element_value(elem, prop_id, 1); // ::before
-    } else if (pseudo_type == 2) {
-        decl = dom_element_get_pseudo_element_value(elem, prop_id, 2); // ::after
-    } else {
-        decl = dom_element_get_specified_value(elem, prop_id);
-    }
-
-    if (!decl || !decl->value) {
-        // return CSS initial/default value for the property
-        // CSS spec: 'content' initial value is 'normal'
-        //   - on regular elements: computed value is 'normal'
-        //   - on ::before/::after pseudo-elements: 'normal' computes to 'none'
-        if (prop_id == CSS_PROPERTY_CONTENT) {
-            if (pseudo_type == 1 || pseudo_type == 2) {
-                return (Item){.item = s2it(heap_create_name("none"))};
-            }
-            return (Item){.item = s2it(heap_create_name("normal"))};
-        }
-
-        // if cascade hasn't happened yet, try on-demand matching
-        if (!decl) {
-            decl = js_match_element_property(elem, prop_id, pseudo_type);
-        }
-
-        if (!decl || !decl->value) {
-            // return CSS initial values for common properties
-            switch (prop_id) {
-                case CSS_PROPERTY_VISIBILITY:
-                    return (Item){.item = s2it(heap_create_name("visible"))};
-                case CSS_PROPERTY_DISPLAY:
-                    return (Item){.item = s2it(heap_create_name("inline"))};
-                case CSS_PROPERTY_POSITION:
-                    return (Item){.item = s2it(heap_create_name("static"))};
-                case CSS_PROPERTY_FLOAT:
-                    return (Item){.item = s2it(heap_create_name("none"))};
-                case CSS_PROPERTY_OVERFLOW:
-                case CSS_PROPERTY_OVERFLOW_X:
-                case CSS_PROPERTY_OVERFLOW_Y:
-                    return (Item){.item = s2it(heap_create_name("visible"))};
-                default:
-                    return (Item){.item = s2it(heap_create_name(""))};
-            }
-        }
-    }
-
-    // CSS spec: for ::before/::after, content 'normal' computes to 'none'
-    if (prop_id == CSS_PROPERTY_CONTENT && (pseudo_type == 1 || pseudo_type == 2)) {
-        if (decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-            decl->value->data.keyword == CSS_VALUE_NORMAL) {
-            return (Item){.item = s2it(heap_create_name("none"))};
-        }
-    }
-
-    return css_value_to_string_item(decl->value);
+    return js_computed_style_resolve_property(elem, prop_id, pseudo_type, 0);
 }
 
 // ============================================================================

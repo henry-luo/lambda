@@ -1,0 +1,20 @@
+{
+  "name": "editor4c-phase-c: markdown horizontal-rule autoformat (---) creates an hr",
+  "html": "test/html/editor-dom.html",
+  "_note": "Lane-B expansion — promotes input-rules horizontal-rule coverage. Convert the heading to a paragraph, clear it, type '---' so the third dash fires hrRule, then assert an <hr> block is inserted.",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 60},
+    {"type": "select_option", "target": {"selector": "select.rdt-block"}, "value": "p"},
+    {"type": "wait", "ms": 120},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "wait", "ms": 80},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "wait", "ms": 100},
+    {"type": "type", "target": {"selector": ".rdt-surface"}, "text": "---"},
+    {"type": "wait", "ms": 160},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface hr"}, "equals": 1}
+  ]
+}
