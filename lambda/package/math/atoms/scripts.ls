@@ -644,10 +644,14 @@ fn script_pair(base_box, script_box) {
         max(base_box.depth, script_box.render_depth) else null
     // Propagate raw values when BOTH boxes expose them. Use the max for
     // each (the outer extent visible to the strut wrapper).
-    let h_raw_pair = if (base_box.height_raw != null and script_box.height_raw != null)
-        max(base_box.height_raw, script_box.height_raw) else null
-    let d_raw_pair = if (base_box.depth_raw != null and script_box.depth_raw != null)
-        max(base_box.depth_raw, script_box.depth_raw) else null
+    let base_h_raw = script_metric_h(base_box)
+    let script_h_raw = script_metric_h(script_box)
+    let base_d_raw = script_metric_d(base_box)
+    let script_d_raw = script_metric_d(script_box)
+    let h_raw_pair = if (base_h_raw != null and script_h_raw != null)
+        max(base_h_raw, script_h_raw) else null
+    let d_raw_pair = if (base_d_raw != null and script_d_raw != null)
+        max(base_d_raw, script_d_raw) else null
     {
         element: box.hbox([base_box, script_box]).element,
         elements: [base_box.element, script_box.element],
@@ -661,8 +665,23 @@ fn script_pair(base_box, script_box) {
         width: base_box.width + script_box.width,
         type: "mord",
         italic: 0.0,
-        skew: 0.0
+        skew: 0.0,
+        max_font_size: if (script_box.max_font_size != null)
+            max(base_box.height, script_box.max_font_size) else null,
+        model: if (box.is_ml_box(base_box) and box.is_ml_box(script_box)) "ml" else null
     }
+}
+
+fn script_metric_h(bx) {
+    if (box.is_ml_box(bx)) bx.height
+    else if (bx.height_raw != null) bx.height_raw
+    else null
+}
+
+fn script_metric_d(bx) {
+    if (box.is_ml_box(bx)) bx.depth
+    else if (bx.depth_raw != null) bx.depth_raw
+    else null
 }
 
 // ============================================================
@@ -672,7 +691,8 @@ fn script_pair(base_box, script_box) {
 // Rule 18e (both sub + sup), emitted via MathLive's makeVList (vlist-t2) —
 // NOT the legacy inline-block stack. The corpus is display-rooted, so the min
 // sup shift uses sup1. Child metrics are scaled into the parent frame; the box
-// exposes full-precision height_raw/depth_raw so the outer strut rounds once.
+// returns an ML box whose height/depth are full precision, so the outer strut
+// can round once without duplicate height_raw/depth_raw fields.
 fn render_both(base_box, sup_box, sub_box, init_sup, init_sub,
                min_sup, x_height, rule_width, si,
                sup_font_scale, sub_font_scale) {
@@ -736,17 +756,9 @@ fn render_both(base_box, sup_box, sub_box, init_sup, init_sub,
             <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(0.0 - min_pos)>
         >
     >
-    {
-        element: el,
-        height: max_pos,
-        depth: 0.0 - min_pos,
-        height_raw: max_pos,
-        depth_raw: 0.0 - min_pos,
-        width: max(sup_box.width * sup_font_scale, sub_box.width * sub_font_scale),
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(el, max_pos, 0.0 - min_pos,
+        max(sup_box.width * sup_font_scale, sub_box.width * sub_font_scale),
+        "ord", 0.0, 0.0, max_pos)
 }
 
 // ============================================================
@@ -794,19 +806,8 @@ fn render_sub_only(base_box, sub_box, init_sub, x_height, si, is_char, font_scal
             <span class: css.VLIST, style: "height:" ++ util.fmt_em(depth_holder)>
         >
     >
-    {
-        element: el,
-        // depth is the CEIL@2 projection (non-raw strut consumers); depth_raw
-        // keeps full precision for the single-rounding use_raw path.
-        height: 0.0,
-        depth: ceil_em2(depth_holder_raw),
-        height_raw: 0.0,
-        depth_raw: depth_holder_raw,
-        width: sub_box.width * font_scale,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(el, 0.0, depth_holder_raw,
+        sub_box.width * font_scale, "ord", 0.0, 0.0, 0.0)
 }
 
 // ============================================================
@@ -865,21 +866,8 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font
                 >
             >
         >
-    {
-        element: el,
-        // height/depth are the CEIL@2 projections (consumed by the non-raw
-        // strut path, e.g. next to a \left..\right base that lacks depth_raw);
-        // height_raw/depth_raw carry full precision for the single-rounding
-        // use_raw path (sibling descenders, x^n + y^n).
-        height: ceil_em2(max_pos),
-        depth: ceil_em2(depth_out),
-        height_raw: max_pos,
-        depth_raw: depth_out,
-        width: sup_box.width * font_scale,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(el, max_pos, depth_out,
+        sup_box.width * font_scale, "ord", 0.0, 0.0, max_pos)
 }
 
 // Format a font-size percentage the way MathLive does: integer when whole

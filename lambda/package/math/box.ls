@@ -22,6 +22,43 @@ pub fn make_box(el, height, depth, width, box_type) => {
     skew: 0.0
 }
 
+// create a MathLive-model box. Its height/depth are full-precision layout
+// dimensions; visual CSS extents must live in the element tree, not in render_*
+// side channels. The `model` marker lets Phase A migrate producers one by one.
+pub fn ml_box(el, height, depth, width, box_type) => {
+    element: el,
+    height: height,
+    depth: depth,
+    width: width,
+    type: box_type,
+    italic: 0.0,
+    skew: 0.0,
+    max_font_size: height,
+    model: "ml"
+}
+
+pub fn ml_box_full(el, height, depth, width, box_type, italic, skew, max_font_size) => {
+    element: el,
+    height: height,
+    depth: depth,
+    width: width,
+    type: box_type,
+    italic: italic,
+    skew: skew,
+    max_font_size: max_font_size,
+    model: "ml"
+}
+
+pub fn is_ml_box(bx) {
+    bx != null and bx.model == "ml"
+}
+
+fn all_ml_boxes(items, i) {
+    if (i >= len(items)) true
+    else if (not is_ml_box(items[i])) false
+    else all_ml_boxes(items, i + 1)
+}
+
 // create a box with a <span class=cls> element (constructed internally)
 pub fn box_cls(cls, height, depth, width, box_type) => {
     element: <span class: cls>,
@@ -455,6 +492,10 @@ pub fn hbox(boxes) {
     let total_width = sum((for (v in valid) v.width))
     let suppress_text_depth = has_suppress_hbox_text_depth(valid, 0)
     let suppress_operator_height = has_suppress_hbox_operator_render_height(valid, 0)
+    if (len(valid) > 0 and all_ml_boxes(valid, 0) and
+        not suppress_text_depth and not suppress_operator_height)
+        ml_hbox_valid(valid, children, total_width)
+    else {
     let max_height = if (len(valid) == 0) 0.0
         else max((for (v in valid) v.height))
     let max_depth = if (len(valid) == 0) 0.0
@@ -508,6 +549,34 @@ pub fn hbox(boxes) {
         skew: 0.0,
         is_fraction: if (len(valid) == 1) valid[0].is_fraction else null,
         is_script_radical: has_script_radical(valid, 0)
+    }
+    }
+}
+
+// Combine MathLive-model boxes without reintroducing legacy render/raw side
+// channels. This is the horizontal propagation point for the Phase A migration:
+// once every child in an hbox is one-box-field, the parent remains one too.
+fn ml_hbox_valid(valid, children, total_width) {
+    ml_box_full(
+        <span class: css.BASE;
+            for (child in children) child
+        >,
+        max((for (v in valid) v.height)),
+        max((for (v in valid) v.depth)),
+        total_width,
+        "ord",
+        0.0,
+        0.0,
+        ml_hbox_max_font_size(valid, 0, 0.0)
+    )
+}
+
+fn ml_hbox_max_font_size(valid, i, acc) {
+    if (i >= len(valid)) acc
+    else {
+        let bx = valid[i]
+        let mf = if (bx.max_font_size != null) bx.max_font_size else bx.height
+        ml_hbox_max_font_size(valid, i + 1, max(acc, mf))
     }
 }
 
@@ -665,6 +734,141 @@ pub fn vbox(children) {
 }
 
 // ============================================================
+// MathLive-style VList — migration helper
+// ============================================================
+
+// Build a MathLive-compatible VBox from individually shifted children.
+// Each child is `{box, shift}` plus optional `classes`, `style`,
+// `margin_left`, and `margin_right`. The shift convention matches MathLive:
+// positive shift moves the child down; negative shift moves it up.
+pub fn ml_vlist_individual(children, box_type) {
+    if (len(children) == 0) ml_box(<span>, 0.0, 0.0, 0.0, box_type)
+    else {
+        let metrics = ml_vlist_individual_metrics(children)
+        let el = ml_vlist_element(metrics.items, metrics.pstrut, metrics.max_pos, metrics.min_pos)
+        ml_box_full(el, metrics.height, metrics.depth, metrics.width, box_type, 0.0, 0.0, metrics.height)
+    }
+}
+
+// Shared makeVList geometry for shadow checks and future producer migration.
+// Keeping this separate from element construction lets atoms compare computed
+// positions before switching their HTML emission to the generic helper.
+pub fn ml_vlist_individual_metrics(children) {
+    if (len(children) == 0) {
+        {items: [], pstrut: 0.0, min_pos: 0.0, max_pos: 0.0,
+         height: 0.0, depth: 0.0, width: 0.0}
+    } else {
+        let items = ml_vlist_positioned(children, 0, [])
+        let pstrut = ml_vlist_pstrut(children, 0, 0.0) + 2.0
+        let ext = ml_vlist_extents(items, 0, items[0].pos, items[0].pos)
+        let width = ml_vlist_width(children, 0, 0.0)
+        {items: items, pstrut: pstrut, min_pos: ext.min_pos, max_pos: ext.max_pos,
+         height: ext.max_pos, depth: 0.0 - ext.min_pos, width: width}
+    }
+}
+
+fn ml_vlist_positioned(children, i, acc) {
+    if (i >= len(children)) acc
+    else {
+        let child = children[i]
+        let pos = 0.0 - child.shift - child.box.depth
+        ml_vlist_positioned(children, i + 1, acc ++ [{
+            box: child.box,
+            pos: pos,
+            classes: child.classes,
+            style: child.style,
+            margin_left: child.margin_left,
+            margin_right: child.margin_right
+        }])
+    }
+}
+
+fn ml_vlist_pstrut(children, i, acc) {
+    if (i >= len(children)) acc
+    else {
+        let bx = children[i].box
+        let mf = if (bx.max_font_size != null) bx.max_font_size else bx.height
+        ml_vlist_pstrut(children, i + 1, max(acc, max(mf, bx.height)))
+    }
+}
+
+fn ml_vlist_width(children, i, acc) {
+    if (i >= len(children)) acc
+    else ml_vlist_width(children, i + 1, max(acc, children[i].box.width))
+}
+
+fn ml_vlist_extents(items, i, mn, mx) {
+    if (i >= len(items)) {
+        let r = {min_pos: mn, max_pos: mx}
+        r
+    }
+    else {
+        let bx = items[i].box
+        let p0 = items[i].pos
+        let p1 = p0 + (bx.height + bx.depth)
+        ml_vlist_extents(items, i + 1, min(mn, min(p0, p1)), max(mx, max(p0, p1)))
+    }
+}
+
+fn ml_vlist_element(items, pstrut, max_pos, min_pos) {
+    if (min_pos >= 0.0) {
+        let el = <span class: css.VLIST_T;
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:" ++ util.fmt_ml_em(max_pos);
+                    for (it in items) ml_vlist_child_wrap(it, pstrut)
+                >
+            >
+        >
+        el
+    }
+    else {
+        let el = <span class: css.VLIST_T2;
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:" ++ util.fmt_ml_em(max_pos);
+                    for (it in items) ml_vlist_child_wrap(it, pstrut)
+                >
+                <span class: css.VLIST_S; "​">
+            >
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:" ++ util.fmt_ml_em(0.0 - min_pos)>
+            >
+        >
+        el
+    }
+}
+
+fn ml_vlist_child_wrap(it, pstrut) {
+    let style = ml_vlist_wrap_style(it, pstrut)
+    if (it.classes != null) {
+        let el = <span class: it.classes, style: style;
+            <span class: css.PSTRUT, style: "height:" ++ util.fmt_ml_em(pstrut)>
+            ml_vlist_child_body(it.box)
+        >
+        el
+    }
+    else {
+        let el = <span style: style;
+            <span class: css.PSTRUT, style: "height:" ++ util.fmt_ml_em(pstrut)>
+            ml_vlist_child_body(it.box)
+        >
+        el
+    }
+}
+
+fn ml_vlist_wrap_style(it, pstrut) {
+    "top:" ++ util.fmt_ml_em(0.0 - pstrut - it.pos - it.box.depth) ++
+    (if (it.style != null) ";" ++ it.style else "") ++
+    (if (it.margin_left != null) ";margin-left:" ++ util.fmt_ml_em(it.margin_left) else "") ++
+    (if (it.margin_right != null) ";margin-right:" ++ util.fmt_ml_em(it.margin_right) else "")
+}
+
+fn ml_vlist_child_body(bx) {
+    <span style: "height:" ++ util.fmt_ml_em(bx.height + bx.depth) ++ ";display:inline-block";
+        bx.element
+    >
+}
+
+// ============================================================
 // Struts — browser vertical space reservation
 // ============================================================
 
@@ -711,7 +915,9 @@ pub fn with_class(bx, cls) => {
     width: bx.width,
     type: bx.type,
     italic: bx.italic,
-    skew: bx.skew
+    skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    model: bx.model
 }
 
 // wrap a box with inline style string
@@ -721,10 +927,17 @@ pub fn with_style(bx, style_str) => {
     depth: bx.depth,
     height_raw: bx.height_raw,
     depth_raw: bx.depth_raw,
+    render_height: bx.render_height,
+    render_depth: bx.render_depth,
+    render_total: bx.render_total,
+    left_right_render_depth: bx.left_right_render_depth,
+    left_right_render_total: bx.left_right_render_total,
     width: bx.width,
     type: bx.type,
     italic: bx.italic,
-    skew: bx.skew
+    skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    model: bx.model
 }
 
 // wrap a box with inline styles (font-size scaling)
@@ -738,10 +951,17 @@ pub fn with_scale(bx, scale) {
             depth: bx.depth * scale,
             height_raw: if (bx.height_raw != null) bx.height_raw * scale else null,
             depth_raw: if (bx.depth_raw != null) bx.depth_raw * scale else null,
+            render_height: if (bx.render_height != null) bx.render_height * scale else null,
+            render_depth: if (bx.render_depth != null) bx.render_depth * scale else null,
+            render_total: if (bx.render_total != null) bx.render_total * scale else null,
+            left_right_render_depth: if (bx.left_right_render_depth != null) bx.left_right_render_depth * scale else null,
+            left_right_render_total: if (bx.left_right_render_total != null) bx.left_right_render_total * scale else null,
             width: bx.width * scale,
             type: bx.type,
             italic: bx.italic * scale,
-            skew: bx.skew * scale
+            skew: bx.skew * scale,
+            max_font_size: if (bx.max_font_size != null) bx.max_font_size * scale else null,
+            model: bx.model
          })
 }
 
@@ -761,10 +981,14 @@ pub fn with_color(bx, color) {
         render_height: bx.render_height,
         render_depth: bx.render_depth,
         render_total: bx.render_total,
+        left_right_render_depth: bx.left_right_render_depth,
+        left_right_render_total: bx.left_right_render_total,
         width: bx.width,
         type: bx.type,
         italic: bx.italic,
         skew: bx.skew,
+        max_font_size: bx.max_font_size,
+        model: bx.model,
         suppress_hbox_text_depth: bx.suppress_hbox_text_depth,
         is_middle_delim: bx.is_middle_delim
     })

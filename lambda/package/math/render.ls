@@ -2752,10 +2752,14 @@ fn style_wrap_box(bx, style_text) {
         render_height: bx.render_height,
         render_depth: 0.0,
         render_total: rt,
+        left_right_render_depth: if (bx.left_right_render_depth != null) 0.0 else null,
+        left_right_render_total: if (bx.left_right_render_total != null) rt else null,
         width: bx.width,
         type: bx.type,
         italic: bx.italic,
         skew: bx.skew,
+        max_font_size: bx.max_font_size,
+        model: bx.model,
         suppress_hbox_text_depth: true,
         is_middle_delim: bx.is_middle_delim,
         is_colorbox: bx.is_colorbox
@@ -2830,10 +2834,19 @@ fn render_textcolor_sequence(node, context, i) {
         >,
         height: hb.height,
         depth: hb.depth,
+        height_raw: hb.height_raw,
+        depth_raw: hb.depth_raw,
+        render_height: hb.render_height,
+        render_depth: hb.render_depth,
+        render_total: hb.render_total,
+        left_right_render_depth: hb.left_right_render_depth,
+        left_right_render_total: hb.left_right_render_total,
         width: hb.width,
         type: hb.type,
         italic: hb.italic,
-        skew: hb.skew
+        skew: hb.skew,
+        max_font_size: hb.max_font_size,
+        model: hb.model
     })
 }
 
@@ -2854,13 +2867,20 @@ fn box_with_suppress_depth(bx) {
         element: bx.element,
         height: bx.height,
         depth: 0.0,
+        height_raw: bx.height_raw,
+        depth_raw: if (bx.depth_raw != null) 0.0 else null,
         render_height: bx.render_height,
         render_depth: 0.0,
         render_total: if (bx.render_height != null) bx.render_height else bx.height,
+        left_right_render_depth: if (bx.left_right_render_depth != null) 0.0 else null,
+        left_right_render_total: if (bx.left_right_render_total != null)
+            (if (bx.render_height != null) bx.render_height else bx.height) else null,
         width: bx.width,
         type: bx.type,
         italic: bx.italic,
         skew: bx.skew,
+        max_font_size: bx.max_font_size,
+        model: bx.model,
         suppress_hbox_text_depth: true,
         is_middle_delim: bx.is_middle_delim,
         is_script_radical: bx.is_script_radical
@@ -2937,6 +2957,8 @@ fn box_with_type(bx, atom_type) => {
     type: atom_type,
     italic: bx.italic,
     skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    model: bx.model,
     is_fraction: bx.is_fraction,
     is_script_radical: bx.is_script_radical
 }

@@ -31,6 +31,41 @@ pub fn render_math(ast, options) {
     let result_box = opt.coalesce(raw_box)
 
     // wrap with struts and lm_latex class
+    let latex_el = if (box.is_ml_box(result_box)) emit_ml_latex(result_box)
+        else emit_legacy_latex(result_box)
+
+    // optionally wrap with stylesheet for standalone HTML
+    if (is_standalone) css.wrap_standalone(latex_el, options)
+    else latex_el
+}
+
+// MathLive-model root emission: public height/depth are already full precision,
+// so this path has exactly one CEIL@2 stringification site for root struts.
+fn emit_ml_latex(result_box) {
+    let h = result_box.height
+    let d = result_box.depth
+    let h_em = util.fmt_ml_em(h)
+    if (d == 0.0) {
+        <span class: css.LATEX;
+            <span class: css.STRUT, style: "height:" ++ h_em>
+            result_box.element
+        >
+    } else {
+        let total_em = util.fmt_ml_em(h + d)
+        let depth_em = util.fmt_ml_em(0.0 - d)
+        let strut_bottom_style = "height:" ++ total_em ++ ";vertical-align:" ++ depth_em
+        <span class: css.LATEX;
+            <span class: css.STRUT, style: "height:" ++ h_em>
+            <span class: css.STRUT_BOTTOM, style: strut_bottom_style>
+            result_box.element
+        >
+    }
+}
+
+// Legacy emission is kept byte-for-byte during the Phase A migration. Producers
+// can opt into emit_ml_latex only after their visual extents are represented in
+// the element tree rather than render_* / *_raw side channels.
+fn emit_legacy_latex(result_box) {
     let h = if (result_box.render_height != null) result_box.render_height else result_box.height
     let d = if (result_box.render_depth != null) result_box.render_depth else result_box.depth
     let raw_total = if (result_box.render_total != null) result_box.render_total else h + d
@@ -43,7 +78,7 @@ pub fn render_math(ast, options) {
     let d_raw = result_box.depth_raw
     let use_raw = h_raw != null and d_raw != null
     let h_em = if (use_raw) util.fmt_em_ceil2(h_raw) else util.fmt_em(h)
-    let latex_el = if (d == 0.0) {
+    if (d == 0.0) {
         <span class: css.LATEX;
             <span class: css.STRUT, style: "height:" ++ h_em>
             result_box.element
@@ -66,10 +101,6 @@ pub fn render_math(ast, options) {
             result_box.element
         >
     }
-
-    // optionally wrap with stylesheet for standalone HTML
-    if (is_standalone) css.wrap_standalone(latex_el, options)
-    else latex_el
 }
 
 // convenience: render in display mode

@@ -85,6 +85,8 @@ pub fn coalesce(bx) {
         width: bx.width,
         type: bx.type,
         italic: bx.italic,
-        skew: bx.skew
+        skew: bx.skew,
+        max_font_size: bx.max_font_size,
+        model: bx.model
     }
 }
