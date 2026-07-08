@@ -1,0 +1,19 @@
+{
+  "name": "editor4c-phase-c2: multi-paragraph plain-text paste preserves both paragraphs",
+  "_note": "Phase C C2 - paste matrix. Mirrors the Phase A user-visible assertion for blank-line plain-text paste: both paragraphs survive the paste through the UI event path.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 60},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "wait", "ms": 80},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "wait", "ms": 100},
+    {"type": "paste_text", "text": "one\n\ntwo"},
+    {"type": "wait", "ms": 180},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface"}, "contains": "one"},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface"}, "contains": "two"}
+  ]
+}

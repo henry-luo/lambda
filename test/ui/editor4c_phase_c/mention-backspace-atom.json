@@ -1,0 +1,18 @@
+{
+  "name": "editor4c-phase-c2: Backspace after an inserted mention deletes it as one atom",
+  "_note": "Phase C C2 - inline atom deletion. Insert a mention through prompt-backed toolbar UI, then Backspace at the post-atom caret removes the whole mention node.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface p"}},
+    {"type": "wait", "ms": 80},
+    {"type": "set_prompt", "response": "casey"},
+    {"type": "click", "target": {"selector": "button.rdt-btn[title=\"Insert mention\"]"}},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface .rdt-mention"}, "equals": 1},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface .rdt-mention"}, "equals": 0}
+  ]
+}

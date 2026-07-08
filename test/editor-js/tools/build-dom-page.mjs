@@ -58,3 +58,13 @@ const tableHtml = template.replace(
 )
 writeFileSync(tableFile, tableHtml)
 console.log(`wrote ${tableFile} (table seed, ${(tableHtml.length / 1024).toFixed(1)} kB)`)
+
+// Seeded variant for gap-cursor fixtures. The HR is present at load time so the
+// tests focus on gap selection/editing instead of also depending on autoformat.
+const gapFile = resolve(root, '../html/editor-gap.html')
+const gapHtml = template.replace(
+  marker,
+  `<script>window.__RDT_SEED='gap'</script>\n<script>\n${chunk.code}\n</script>`
+)
+writeFileSync(gapFile, gapHtml)
+console.log(`wrote ${gapFile} (gap seed, ${(gapHtml.length / 1024).toFixed(1)} kB)`)

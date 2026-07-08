@@ -1,0 +1,18 @@
+{
+  "name": "editor4c-phase-c2: typing at an hr gap inserts a paragraph before the atom",
+  "_note": "Phase C C2 - gap-cursor insertion. Start from an HR-seeded document, click the atom gap, type a character, and assert the editor inserts a paragraph before the hr.",
+  "html": "test/html/editor-gap.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface hr"}, "equals": 1},
+    {"type": "click", "target": {"selector": ".rdt-surface hr"}},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_count", "target": {"selector": ".rdt-gap-caret"}, "equals": 1},
+    {"type": "type", "target": {"selector": ".rdt-surface"}, "text": "X"},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface hr"}, "equals": 1},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface p"}, "equals": 3},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface p", "index": 1}, "equals": "X"}
+  ]
+}
