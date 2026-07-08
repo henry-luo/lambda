@@ -375,62 +375,6 @@ static bool is_global_simple_type(const Type* type) {
            type == &TYPE_UINT64;
 }
 
-static bool numeric_literal_text_is_zero(Transpiler* tp, TSNode node) {
-    StrView source = ts_node_source(tp, node);
-    bool saw_digit = false;
-    for (uint32_t i = 0; i < source.length; i++) {
-        char ch = source.str[i];
-        if (ch == 'e' || ch == 'E' || ch == 'n' || ch == 'N') break;
-        if (ch >= '1' && ch <= '9') return false;
-        if (ch == '0') saw_digit = true;
-    }
-    return saw_digit;
-}
-
-static bool ast_primary_numeric_literal_node(AstNode* node, TSNode* lit_node) {
-    if (!node || node->node_type != AST_NODE_PRIMARY) return false;
-    TSNode check = node->node;
-    TSSymbol symbol = ts_node_symbol(check);
-    if (symbol == SYM_PRIMARY_EXPR) {
-        check = ts_node_named_child(check, 0);
-        if (ts_node_is_null(check)) return false;
-        symbol = ts_node_symbol(check);
-        if (symbol == SYM_EXPR) {
-            check = ts_node_named_child(check, 0);
-            if (ts_node_is_null(check)) return false;
-            symbol = ts_node_symbol(check);
-        }
-    }
-    if (symbol != SYM_INT && symbol != SYM_FLOAT && symbol != SYM_DECIMAL &&
-        symbol != SYM_SIZED_INT && symbol != SYM_SIZED_FLOAT) {
-        return false;
-    }
-    *lit_node = check;
-    return true;
-}
-
-static bool ast_numeric_literal_is_zero(Transpiler* tp, AstNode* node) {
-    if (!node || node->node_type != AST_NODE_PRIMARY || !node->type) return false;
-    TSNode lit_node;
-    if (!ast_primary_numeric_literal_node(node, &lit_node)) return false;
-    switch (node->type->type_id) {
-        case LMD_TYPE_INT:
-            return numeric_literal_text_is_zero(tp, lit_node);
-        case LMD_TYPE_INT64:
-            return ((TypeInt64*)node->type)->int64_val == 0;
-        case LMD_TYPE_UINT64:
-            return ((TypeUint64*)node->type)->uint64_val == 0;
-        case LMD_TYPE_FLOAT:
-            return ((TypeFloat*)node->type)->double_val == 0.0;
-        case LMD_TYPE_DECIMAL:
-            return numeric_literal_text_is_zero(tp, lit_node);
-        case LMD_TYPE_NUM_SIZED:
-            return ((TypeNumSized*)node->type)->raw_bits == 0;
-        default:
-            return false;
-    }
-}
-
 static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* param_full_type) {
     if (!arg_type || !param_type) return true;  // unknown types are compatible
     if (param_type->type_id == LMD_TYPE_ANY) return true;  // any accepts all
@@ -468,6 +412,15 @@ static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* p
     if (param_type->type_id == LMD_TYPE_FLOAT) {
         if (arg_type->type_id == LMD_TYPE_INT ||
             arg_type->type_id == LMD_TYPE_INT64 ||
+            arg_type->type_id == LMD_TYPE_FLOAT64 ||
+            arg_type->type_id == LMD_TYPE_NUM_SIZED ||
+            arg_type->type_id == LMD_TYPE_UINT64) return true;
+    }
+    if (param_type->type_id == LMD_TYPE_FLOAT64) {
+        if (arg_type->type_id == LMD_TYPE_INT ||
+            arg_type->type_id == LMD_TYPE_INT64 ||
+            arg_type->type_id == LMD_TYPE_FLOAT ||
+            arg_type->type_id == LMD_TYPE_FLOAT64 ||
             arg_type->type_id == LMD_TYPE_NUM_SIZED ||
             arg_type->type_id == LMD_TYPE_UINT64) return true;
     }
@@ -479,6 +432,12 @@ static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* p
     if (param_type == &TYPE_NUMBER) {
         // `number` is an abstract type keyword; no runtime TypeId carries it.
         if (IS_NUMERIC_ID(arg_type->type_id)) return true;
+    }
+    if (param_type == &TYPE_INTEGER) {
+        if (arg_type->type_id == LMD_TYPE_INT ||
+            arg_type->type_id == LMD_TYPE_INT64 ||
+            arg_type->type_id == LMD_TYPE_UINT64 ||
+            arg_type->type_id == LMD_TYPE_NUM_SIZED) return true;
     }
     // Sized numeric coercion: NUM_SIZED and UINT64 are compatible with each other
     // and with standard numeric types for parameter passing
@@ -536,6 +495,11 @@ static bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
         out->item = d2it(&t->double_val);
         return true;
     }
+    case LMD_TYPE_FLOAT64: {
+        TypeFloat* t = (TypeFloat*)node->type;
+        out->item = f642it(&t->double_val);
+        return true;
+    }
     case LMD_TYPE_DTIME: {
         TypeDateTime* t = (TypeDateTime*)node->type;
         out->item = k2it(&t->datetime);
@@ -573,6 +537,66 @@ static bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
     }
     default:
         return false;
+    }
+}
+
+static Type* ast_called_type_target(AstNode* function) {
+    while (function && function->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)function;
+        if (!primary->expr) break;
+        function = primary->expr;
+    }
+    if (!function || !function->type || function->type->type_id != LMD_TYPE_TYPE) return NULL;
+    TypeType* type_type = (TypeType*)function->type;
+    return type_type->type;
+}
+
+static bool ast_constant_integer_value(Transpiler* tp, AstNode* node, int64_t* out) {
+    bool negate = false;
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        if (!primary->expr) break;
+        node = primary->expr;
+    }
+    if (node && node->node_type == AST_NODE_UNARY) {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        if (unary->op == OPERATOR_NEG || unary->op == OPERATOR_POS) {
+            negate = (unary->op == OPERATOR_NEG);
+            node = unary->operand;
+        }
+    }
+    Item item;
+    if (!ast_static_literal_item(tp, node, &item)) return false;
+    TypeId type_id = get_type_id(item);
+    int64_t value = 0;
+    if (type_id == LMD_TYPE_INT) {
+        value = item.get_int56();
+    } else if (type_id == LMD_TYPE_INT64) {
+        value = item.get_int64();
+    } else if (type_id == LMD_TYPE_UINT64) {
+        uint64_t u = item.get_uint64();
+        if (u > (uint64_t)INT64_MAX) return false;
+        value = (int64_t)u;
+    } else if (type_id == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = item.get_num_type();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) return false;
+        value = item.get_num_sized_as_int64();
+    } else {
+        return false;
+    }
+    *out = negate ? -value : value;
+    return true;
+}
+
+static bool constant_fits_sized_integer(NumSizedType num_type, int64_t value) {
+    switch (num_type) {
+    case NUM_INT8:   return value >= INT8_MIN && value <= INT8_MAX;
+    case NUM_INT16:  return value >= INT16_MIN && value <= INT16_MAX;
+    case NUM_INT32:  return value >= INT32_MIN && value <= INT32_MAX;
+    case NUM_UINT8:  return value >= 0 && value <= UINT8_MAX;
+    case NUM_UINT16: return value >= 0 && value <= UINT16_MAX;
+    case NUM_UINT32: return value >= 0 && (uint64_t)value <= UINT32_MAX;
+    default:         return true;
     }
 }
 
@@ -1159,10 +1183,10 @@ static StrView node_name_text(Transpiler* tp, TSNode node) {
 // check if a name is a reserved type keyword
 bool is_type_keyword(StrView name) {
     static const char* type_keywords[] = {
-        "null", "any", "error", "bool", "int", "int64", "float", "decimal", "number",
+        "null", "any", "error", "bool", "int", "int64", "float", "f64", "decimal", "integer", "number",
         "date", "time", "datetime", "symbol", "string", "binary",
         "list", "array", "map", "element", "entity", "object", "type", "function",
-        "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32"
+        "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32", "f64"
     };
     for (size_t i = 0; i < sizeof(type_keywords) / sizeof(type_keywords[0]); i++) {
         if (strview_equal(&name, type_keywords[i])) {
@@ -2200,6 +2224,28 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     }
     ts_tree_cursor_delete(&cursor);
 
+    if (!sys_func_info && ast_node->function && arg_count == 1) {
+        Type* target_type = ast_called_type_target(ast_node->function);
+        if (target_type && (target_type->type_id == LMD_TYPE_NUM_SIZED ||
+                target_type->type_id == LMD_TYPE_UINT64 || target_type->type_id == LMD_TYPE_FLOAT64)) {
+            ast_node->type = target_type;
+            if (target_type->type_id == LMD_TYPE_NUM_SIZED) {
+                NumSizedType num_type = type_num_sized_kind(target_type);
+                if (num_type != NUM_FLOAT16 && num_type != NUM_FLOAT32) {
+                    int64_t const_value = 0;
+                    if (ast_constant_integer_value(tp, ast_node->argument, &const_value) &&
+                            !constant_fits_sized_integer(num_type, const_value)) {
+                        // Constant conversions follow Go: invalid constants are rejected before truncating.
+                        record_semantic_error(tp, call_node, ERR_INVALID_NUMBER,
+                            "constant conversion to %s overflows", get_num_sized_type_name(num_type));
+                        ast_node->type = &TYPE_ERROR;
+                        return (AstNode*)ast_node;
+                    }
+                }
+            }
+        }
+    }
+
     if (sys_func_info) {
         AstNode* first_arg = ast_node->argument;
         AstNode* second_arg = first_arg ? first_arg->next : NULL;
@@ -3083,11 +3129,10 @@ Type* build_lit_sized_float(Transpiler* tp, TSNode node) {
         } else if (suffix[0] == 'f' && suffix[1] == '3' && suffix[2] == '2') {
             num_type = NUM_FLOAT32;
         } else if (suffix[0] == 'f' && suffix[1] == '6' && suffix[2] == '4') {
-            // f64 → use existing FLOAT type
             num_str[source.length - 3] = '\0';
             double dval = strtod(num_str, NULL);
             mem_free(num_str);
-            TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
+            TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT64, sizeof(TypeFloat));
             item_type->double_val = dval;
             double* heap_val = (double*)pool_alloc(tp->pool, sizeof(double));
             *heap_val = dval;
@@ -3133,8 +3178,14 @@ Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
     else if (strview_equal(&type_name, "float")) {
         return (Type*)&LIT_TYPE_FLOAT;
     }
+    else if (strview_equal(&type_name, "f64")) {
+        return (Type*)&LIT_TYPE_F64;
+    }
     else if (strview_equal(&type_name, "decimal")) {
         return (Type*)&LIT_TYPE_DECIMAL;
+    }
+    else if (strview_equal(&type_name, "integer")) {
+        return (Type*)&LIT_TYPE_INTEGER;
     }
     else if (strview_equal(&type_name, "number")) {
         return (Type*)&LIT_TYPE_NUMBER;
@@ -3214,6 +3265,9 @@ Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
     }
     else if (strview_equal(&type_name, "f32")) {
         return (Type*)&LIT_TYPE_F32;
+    }
+    else if (strview_equal(&type_name, "f64")) {
+        return (Type*)&LIT_TYPE_F64;
     }
     else {
         log_error("Unknown base type: %.*s", (int)type_name.length, type_name.str);
@@ -3986,15 +4040,6 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     // Additional validation: ensure both operands have valid types
     if (!ast_node->left->type || !ast_node->right->type) {
         log_error("Error: build_binary_expr operands missing type information");
-        ast_node->type = &TYPE_ERROR;
-        return (AstNode*)ast_node;
-    }
-
-    if ((ast_node->op == OPERATOR_IDIV || ast_node->op == OPERATOR_MOD) &&
-        ast_numeric_literal_is_zero(tp, ast_node->right)) {
-        // literal zero divisors are rejected before lowering so constant mistakes do not depend on runtime evaluation.
-        record_semantic_error(tp, right_node, ERR_INVALID_OPERATION,
-            "literal zero divisor is not allowed for integer division or modulo");
         ast_node->type = &TYPE_ERROR;
         return (AstNode*)ast_node;
     }
@@ -5176,8 +5221,14 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     else if (strview_equal(&type_name, "float")) {
         ast_node->type = (Type*)&LIT_TYPE_FLOAT;
     }
+    else if (strview_equal(&type_name, "f64")) {
+        ast_node->type = (Type*)&LIT_TYPE_F64;
+    }
     else if (strview_equal(&type_name, "decimal")) {
         ast_node->type = (Type*)&LIT_TYPE_DECIMAL;
+    }
+    else if (strview_equal(&type_name, "integer")) {
+        ast_node->type = (Type*)&LIT_TYPE_INTEGER;
     }
     else if (strview_equal(&type_name, "number")) {
         ast_node->type = (Type*)&LIT_TYPE_NUMBER;
@@ -5257,6 +5308,9 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     }
     else if (strview_equal(&type_name, "f32")) {
         ast_node->type = (Type*)&LIT_TYPE_F32;
+    }
+    else if (strview_equal(&type_name, "f64")) {
+        ast_node->type = (Type*)&LIT_TYPE_F64;
     }
     else {
         log_debug("unknown base type %.*s", (int)type_name.length, type_name.str);

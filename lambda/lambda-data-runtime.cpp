@@ -143,8 +143,14 @@ Item array_get(Array *array, int64_t index) {
         int64_t lval = item.get_int64();
         return push_l(lval); // need to push to num_stack, as long values are not ref counted
     }
-    case LMD_TYPE_FLOAT: {
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64: {
         double dval = item.get_double();
+        if (item._type_id == LMD_TYPE_FLOAT64) {
+            double* ptr = (double*)heap_calloc(sizeof(double), LMD_TYPE_FLOAT64);
+            *ptr = dval;
+            return (Item){.item = f642it(ptr)};
+        }
         return push_d(dval); // need to push to num_stack, as float values are not ref counted
     }
     case LMD_TYPE_DTIME: {
@@ -639,6 +645,7 @@ void array_float_set_item(ArrayNum *arr, int64_t index, Item value) {
     // Convert item to double based on its type
     switch (type_id) {
         case LMD_TYPE_FLOAT:
+        case LMD_TYPE_FLOAT64:
             dval = value.get_double();
             break;
         case LMD_TYPE_INT64:
@@ -664,7 +671,8 @@ static int64_t item_to_int_value(Item value) {
     switch (tid) {
     case LMD_TYPE_INT:       return value.get_int56();
     case LMD_TYPE_INT64:     return value.get_int64();
-    case LMD_TYPE_FLOAT:     return (int64_t)value.get_double();
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64:   return (int64_t)value.get_double();
     case LMD_TYPE_NUM_SIZED: {
         NumSizedType st = (NumSizedType)NUM_SIZED_SUBTYPE(value.item);
         switch (st) {
@@ -688,7 +696,8 @@ static int64_t item_to_int_value(Item value) {
 static double item_to_float_value(Item value) {
     TypeId tid = get_type_id(value);
     switch (tid) {
-    case LMD_TYPE_FLOAT:     return value.get_double();
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64:   return value.get_double();
     case LMD_TYPE_INT:       return (double)value.get_int56();
     case LMD_TYPE_INT64:     return (double)value.get_int64();
     case LMD_TYPE_NUM_SIZED: {
@@ -1388,8 +1397,14 @@ Item list_get(List *list, int64_t index) {
         int64_t lval = item.get_int64();
         return push_l(lval);
     }
-    case LMD_TYPE_FLOAT: {
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64: {
         double dval = item.get_double();
+        if (item._type_id == LMD_TYPE_FLOAT64) {
+            double* ptr = (double*)heap_calloc(sizeof(double), LMD_TYPE_FLOAT64);
+            *ptr = dval;
+            return (Item){.item = f642it(ptr)};
+        }
         return push_d(dval);
     }
     default:
