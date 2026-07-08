@@ -211,17 +211,7 @@ fn render_prime_script(context) {
             >
         >
     >
-    {
-        element: el,
-        height: vlist_h,
-        depth: 0.0,
-        height_raw: vlist_h,
-        depth_raw: 0.0,
-        width: 0.4,
-        type: "mord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(el, vlist_h, 0.0, 0.4, "mord", 0.0, 0.0, vlist_h)
 }
 
 fn operator_display_text(text) {
@@ -319,17 +309,16 @@ fn render_command(node, context) {
 fn render_unknown_command_node(node, name_str, context) {
     // The leading `\` (cmr backslash: height 0.75, depth 0.25) governs the
     // error token's vertical extent.
-    let err_box = {
-        element: <span class: css.classes([css.ERROR, css.CMR]); "\\" ++ name_str>,
-        height: 0.75,
-        depth: 0.25,
-        height_raw: 0.75,
-        depth_raw: 0.25,
-        width: 0.4 * float(len(name_str) + 1),
-        type: "mord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    let err_box = box.ml_box_full(
+        <span class: css.classes([css.ERROR, css.CMR]); "\\" ++ name_str>,
+        0.75,
+        0.25,
+        0.4 * float(len(name_str) + 1),
+        "mord",
+        0.0,
+        0.0,
+        0.75
+    )
     // Render only the brace/bracket-group arguments as math (skip the bare
     // command-name string). MathLive puts a thin space (0.17em) between the
     // error token and the following argument content.
@@ -356,22 +345,18 @@ fn render_limit_operator_symbol(text, context) {
     let op_el = if (metrics.italic > 0.0)
         <span class: op_cls, style: "margin-right:" ++ util.fmt_em_ceil2(metrics.italic); text>
         else <span class: op_cls; text>
-    {
-        element: <span class: css.OP_GROUP;
+    box.ml_box_full(
+        <span class: css.OP_GROUP;
             op_el
         >,
-        height: metrics.h,
-        depth: metrics.d,
-        height_raw: metrics.h_raw,
-        depth_raw: metrics.d_raw,
-        render_height: metrics.h,
-        render_depth: metrics.d,
-        render_total: metrics.h + metrics.d,
-        width: metrics.width,
-        type: "mop",
-        italic: 0.0,
-        skew: 0.0
-    }
+        metrics.h_raw,
+        metrics.d_raw,
+        metrics.width,
+        "mop",
+        0.0,
+        0.0,
+        metrics.h_raw
+    )
 }
 
 // Per-symbol Size2 (large-op) metrics ported from MathLive's
@@ -413,22 +398,13 @@ fn render_class_command(node, context) {
         let class_name = arg_raw_text(node[0])
         let content_box = render_node(node[1], context)
         let children = box.elements_of(content_box)
-        {
-            element: <span class: class_name;
+        wrap_content_element(
+            <span class: class_name;
                 for (el in children) el
             >,
-            height: content_box.height,
-            depth: content_box.depth,
-            render_height: content_box.render_height,
-            render_depth: content_box.render_depth,
-            render_total: content_box.render_total,
-            left_right_render_depth: content_box.left_right_render_depth,
-            left_right_render_total: content_box.left_right_render_total,
-            width: content_box.width,
-            type: content_box.type,
-            italic: content_box.italic,
-            skew: content_box.skew
-        }
+            content_box,
+            content_box.type
+        )
     } else box.text_box("class", css.ERROR, "mord")
 }
 
@@ -437,22 +413,13 @@ fn render_css_id_command(node, context) {
         let id_name = normalize_css_id(arg_raw_text(node[0]))
         let content_box = render_node(node[1], context)
         let children = box.elements_of(content_box)
-        {
-            element: <span id: id_name;
+        wrap_content_element(
+            <span id: id_name;
                 for (el in children) el
             >,
-            height: content_box.height,
-            depth: content_box.depth,
-            render_height: content_box.render_height,
-            render_depth: content_box.render_depth,
-            render_total: content_box.render_total,
-            left_right_render_depth: content_box.left_right_render_depth,
-            left_right_render_total: content_box.left_right_render_total,
-            width: content_box.width,
-            type: content_box.type,
-            italic: content_box.italic,
-            skew: content_box.skew
-        }
+            content_box,
+            content_box.type
+        )
     } else box.text_box("cssId", css.ERROR, "mord")
 }
 
@@ -461,27 +428,47 @@ fn render_html_data_command(node, context) {
         let attrs = parse_html_data_attrs(arg_raw_text(node[0]))
         let content_box = render_node(node[1], context)
         let children = box.elements_of(content_box)
-        {
-            element: <span math_data_attrs: attrs;
+        wrap_content_element(
+            <span math_data_attrs: attrs;
                 for (el in children) el
             >,
-            height: content_box.height,
-            depth: content_box.depth,
-            render_height: content_box.render_height,
-            render_depth: content_box.render_depth,
-            render_total: content_box.render_total,
-            left_right_render_depth: content_box.left_right_render_depth,
-            left_right_render_total: content_box.left_right_render_total,
-            width: content_box.width,
-            type: content_box.type,
-            italic: content_box.italic,
-            skew: content_box.skew
-        }
+            content_box,
+            content_box.type
+        )
     } else box.text_box("htmlData", css.ERROR, "mord")
 }
 
 fn parse_html_data_attrs(raw) {
     parse_html_data_attr_parts(split(raw, ","), 0, [])
+}
+
+fn wrap_content_element(el, content_box, atom_type) {
+    if (box.is_ml_box(content_box))
+        box.ml_box_full(
+            el,
+            content_box.height,
+            content_box.depth,
+            content_box.width,
+            atom_type,
+            content_box.italic,
+            content_box.skew,
+            if (content_box.max_font_size != null)
+                content_box.max_font_size else content_box.height
+        )
+    else {
+        element: el,
+        height: content_box.height,
+        depth: content_box.depth,
+        render_height: content_box.render_height,
+        render_depth: content_box.render_depth,
+        render_total: content_box.render_total,
+        left_right_render_depth: content_box.left_right_render_depth,
+        left_right_render_total: content_box.left_right_render_total,
+        width: content_box.width,
+        type: atom_type,
+        italic: content_box.italic,
+        skew: content_box.skew
+    }
 }
 
 fn parse_html_data_attr_parts(parts, i, acc) {
@@ -569,18 +556,8 @@ fn render_not_overlay_group_text(base_text) {
 }
 
 fn render_not_slash() {
-    {
-        element: <span class: css.CMR; "\uE020">,
-        height: 0.7,
-        depth: 0.19,
-        render_height: 0.7,
-        render_depth: 0.19,
-        render_total: 0.89,
-        width: 0.5,
-        type: "mrel",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(<span class: css.CMR; "\uE020">,
+        0.7, 0.19, 0.5, "mrel", 0.0, 0.0, 0.7)
 }
 
 fn render_not_overlay(base_text) {
@@ -598,18 +575,7 @@ fn render_not_overlay_text(base_text, cls, atom_type) {
         >
         <span class: cls; base_text>
     >
-    {
-        element: overlay_el,
-        height: 0.7,
-        depth: 0.19,
-        render_height: 0.7,
-        render_depth: 0.19,
-        render_total: 0.89,
-        width: base_box.width,
-        type: atom_type,
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(overlay_el, 0.7, 0.19, base_box.width, atom_type, 0.0, 0.0, 0.7)
 }
 
 fn is_alpha_text(text) {
@@ -636,15 +602,9 @@ fn render_generic_rule_command(node, context) {
     enclose.render_rule({width: width, height: height, shift: shift}, context, render_node)
 }
 
-fn render_placeholder(context) => {
-    element: <span style: "height:0;display:inline-block;font-size: 50%"; "\u00A0">,
-    height: 0.0,
-    depth: 0.0,
-    width: 0.0,
-    type: "mord",
-    italic: 0.0,
-    skew: 0.0
-}
+fn render_placeholder(context) =>
+    box.ml_box(<span style: "height:0;display:inline-block;font-size: 50%"; "\u00A0">,
+        0.0, 0.0, 0.0, "mord")
 
 fn is_generic_box_command(name_str) {
     name_str == "bbox" or name_str == "boxed" or name_str == "fbox" or
@@ -763,17 +723,8 @@ fn render_colorbox_content(content_arg, context) {
 // \pdiff golden) but carrying full-precision metrics from the cmr table so the
 // \pdiff fraction's children expose height_raw/depth_raw and can take the
 // metric path. cmr ∂ = height 0.69444, depth 0 (no descender).
-fn partial_box() => {
-    element: "∂",
-    height: 0.7,
-    depth: 0.0,
-    height_raw: 0.69444,
-    depth_raw: 0.0,
-    width: 0.45,
-    type: "mord",
-    italic: 0.0,
-    skew: 0.0
-}
+fn partial_box() =>
+    box.ml_box_full("∂", 0.69444, 0.0, 0.45, "mord", 0.0, 0.0, 0.69444)
 
 // ============================================================
 // Text command (\text{...})
@@ -2005,7 +1956,27 @@ fn render_radical(node, context) {
     let el = <span class: css.BASE;
         for (child in child_elements) child
     >
-    {
+    if (spec.height_raw != null and spec.depth_raw != null)
+        ml_radical_box(el, spec, body_box.width + 0.52, context)
+    else
+        legacy_radical_box(el, spec, body_box.width + 0.52, context)
+}
+
+fn ml_radical_box(el, spec, width, context) => {
+        element: el,
+        height: spec.height_raw,
+        depth: spec.depth_raw,
+        width: width,
+        type: "mord",
+        italic: 0.0,
+        skew: 0.0,
+        max_font_size: spec.height_raw,
+        model: "ml",
+        is_radical: true,
+        is_script_radical: context.style == "script" or context.style == "scriptscript"
+}
+
+fn legacy_radical_box(el, spec, width, context) => {
         element: el,
         height: spec.height,
         depth: spec.depth,
@@ -2017,13 +1988,12 @@ fn render_radical(node, context) {
         render_height: spec.height,
         render_depth: spec.depth,
         render_total: spec.render_total,
-        width: body_box.width + 0.52,
+        width: width,
         type: "mord",
         italic: 0.0,
         skew: 0.0,
         is_radical: true,
         is_script_radical: context.style == "script" or context.style == "scriptscript"
-    }
 }
 
 fn sqrt_unindexed_element(spec, body_elements) {
@@ -2741,11 +2711,32 @@ fn has_trailing_radical(items) {
 }
 
 fn style_wrap_box(bx, style_text) {
+    if (box.is_ml_box(bx)) ml_style_wrap_box(bx, style_text)
+    else legacy_style_wrap_box(bx, style_text)
+}
+
+fn ml_style_wrap_box(bx, style_text) => {
+    element: <span style: style_text;
+        for (el in box.elements_of(bx)) el
+    >,
+    height: bx.height,
+    depth: 0.0,
+    width: bx.width,
+    type: bx.type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    model: "ml",
+    suppress_hbox_text_depth: true,
+    is_middle_delim: bx.is_middle_delim,
+    is_colorbox: bx.is_colorbox
+}
+
+fn legacy_style_wrap_box(bx, style_text) {
     let rt = if (bx.render_height != null) bx.render_height else bx.height
-    let elements = box.elements_of(bx)
     {
         element: <span style: style_text;
-            for (el in elements) el
+            for (el in box.elements_of(bx)) el
         >,
         height: bx.height,
         depth: 0.0,
@@ -2863,28 +2854,46 @@ fn render_dollar_math_group(content_arg, context) {
 }
 
 fn box_with_suppress_depth(bx) {
-    {
-        element: bx.element,
-        height: bx.height,
-        depth: 0.0,
-        height_raw: bx.height_raw,
-        depth_raw: if (bx.depth_raw != null) 0.0 else null,
-        render_height: bx.render_height,
-        render_depth: 0.0,
-        render_total: if (bx.render_height != null) bx.render_height else bx.height,
-        left_right_render_depth: if (bx.left_right_render_depth != null) 0.0 else null,
-        left_right_render_total: if (bx.left_right_render_total != null)
-            (if (bx.render_height != null) bx.render_height else bx.height) else null,
-        width: bx.width,
-        type: bx.type,
-        italic: bx.italic,
-        skew: bx.skew,
-        max_font_size: bx.max_font_size,
-        model: bx.model,
-        suppress_hbox_text_depth: true,
-        is_middle_delim: bx.is_middle_delim,
-        is_script_radical: bx.is_script_radical
-    }
+    if (box.is_ml_box(bx)) ml_box_with_suppress_depth(bx)
+    else legacy_box_with_suppress_depth(bx)
+}
+
+fn ml_box_with_suppress_depth(bx) => {
+    element: bx.element,
+    height: bx.height,
+    depth: 0.0,
+    width: bx.width,
+    type: bx.type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    model: "ml",
+    suppress_hbox_text_depth: true,
+    is_middle_delim: bx.is_middle_delim,
+    is_script_radical: bx.is_script_radical
+}
+
+fn legacy_box_with_suppress_depth(bx) => {
+    element: bx.element,
+    height: bx.height,
+    depth: 0.0,
+    height_raw: bx.height_raw,
+    depth_raw: if (bx.depth_raw != null) 0.0 else null,
+    render_height: bx.render_height,
+    render_depth: 0.0,
+    render_total: if (bx.render_height != null) bx.render_height else bx.height,
+    left_right_render_depth: if (bx.left_right_render_depth != null) 0.0 else null,
+    left_right_render_total: if (bx.left_right_render_total != null)
+        (if (bx.render_height != null) bx.render_height else bx.height) else null,
+    width: bx.width,
+    type: bx.type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    model: bx.model,
+    suppress_hbox_text_depth: true,
+    is_middle_delim: bx.is_middle_delim,
+    is_script_radical: bx.is_script_radical
 }
 
 fn plain_text(node) {
@@ -2942,7 +2951,26 @@ fn bin_as_ord_after(prev_type) {
     prev_type == "mrel" or prev_type == "mpunct" or prev_type == "mop"
 }
 
-fn box_with_type(bx, atom_type) => {
+fn box_with_type(bx, atom_type) {
+    if (box.is_ml_box(bx)) ml_box_with_type(bx, atom_type)
+    else legacy_box_with_type(bx, atom_type)
+}
+
+fn ml_box_with_type(bx, atom_type) => {
+    element: bx.element,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: atom_type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    model: "ml",
+    is_fraction: bx.is_fraction,
+    is_script_radical: bx.is_script_radical
+}
+
+fn legacy_box_with_type(bx, atom_type) => {
     element: bx.element,
     height: bx.height,
     depth: bx.depth,

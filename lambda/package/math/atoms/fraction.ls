@@ -115,11 +115,29 @@ pub fn render(node, context, render_fn) {
 }
 
 fn wrap_cfrac_fraction(frac_box) {
-    {
-        element: <span class: css.MFRAC;
+    let el = <span class: css.MFRAC;
             null_delim_el(css.OPEN)
             frac_box.element
-        >,
+        >
+    if (box.is_ml_box(frac_box)) ml_fraction_wrapper(el, frac_box, frac_box.width + 0.12)
+    else legacy_cfrac_wrapper(el, frac_box)
+}
+
+fn ml_fraction_wrapper(el, frac_box, width) => {
+        element: el,
+        height: frac_box.height,
+        depth: frac_box.depth,
+        width: width,
+        type: "minner",
+        italic: 0.0,
+        skew: 0.0,
+        max_font_size: frac_box.max_font_size,
+        model: "ml",
+        is_fraction: true
+}
+
+fn legacy_cfrac_wrapper(el, frac_box) => {
+        element: el,
         height: frac_box.height,
         depth: frac_box.depth,
         height_raw: frac_box.height_raw,
@@ -134,7 +152,6 @@ fn wrap_cfrac_fraction(frac_box) {
         italic: 0.0,
         skew: 0.0,
         is_fraction: true
-    }
 }
 
 pub fn render_boxes(numer_box, denom_box, context) {
@@ -298,31 +315,19 @@ fn build_frac_bar_rule15(numer_box, denom_box, geom) {
             <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(geom.depth_holder)>
         >
     >
-    // Phase A (box-model collapse), applied where it's safe — a metric-driven
-    // box. height/depth ARE the layout values (CEIL projections for a non-raw
-    // consumer); full precision lives in *_raw for the single-rounding strut.
-    // render_height/render_depth are NOT set: they would just equal height/
-    // depth, and every consumer null-coalesces render_height -> height. Only
-    // render_total survives because CEIL(h+d) != CEIL(h)+CEIL(d) (the §1.4
-    // asymmetry); it goes when the whole tree carries full precision.
-    let h_em = util.ceil_em2(geom.frac_height)             // strut height
-    let d_em = 0.0 - util.ceil_em2(0.0 - geom.frac_depth)  // va depth (ceil toward 0)
-    let total_em = util.ceil_em2(geom.frac_height + geom.frac_depth)
+    // Phase A: this producer is now a MathLive one-box-field box. The visual
+    // CSS dimensions above are CEIL@2 strings, while height/depth remain the
+    // full-precision makeVList extents for the single root strut emit site.
     {
         element: el,
-        height: h_em,
-        depth: d_em,
-        height_raw: if (geom.expose_raw) geom.frac_height else null,
-        depth_raw: if (geom.expose_raw) geom.frac_depth else null,
-        render_total: total_em,
-        // full-precision content extent for \left..\right delimiter sizing
-        // (stretchy delimiters size against the unrounded content, not CEIL@2).
-        left_right_render_depth: geom.frac_depth,
-        left_right_render_total: geom.frac_height + geom.frac_depth,
+        height: geom.frac_height,
+        depth: geom.frac_depth,
         width: max(numer_box.width, denom_box.width),
         type: "mord",
         italic: 0.0,
         skew: 0.0,
+        max_font_size: geom.frac_height,
+        model: "ml",
         is_fraction: true
     }
 }
@@ -358,15 +363,14 @@ fn build_frac_nobar_vlist(numer_box, denom_box, frac_ctx, cmd, unbraced_numeric)
     >
     {
         element: el,
-        height: spec.height,
-        depth: spec.depth,
-        render_height: spec.render_height,
-        render_depth: spec.render_depth,
-        render_total: spec.render_total,
+        height: spec.render_height,
+        depth: spec.render_depth,
         width: max(numer_box.width, denom_box.width),
         type: "mord",
         italic: 0.0,
         skew: 0.0,
+        max_font_size: spec.render_height,
+        model: "ml",
         no_bar: true,
         is_fraction: true,
         delim_level: spec.delim_level,
@@ -469,12 +473,17 @@ fn null_delim_el(cls) {
 }
 
 fn wrap_default_fraction(frac_box) {
-    {
-        element: <span class: css.MFRAC;
+    let el = <span class: css.MFRAC;
             null_delim_el(css.OPEN)
             frac_box.element
             null_delim_el(css.CLOSE)
-        >,
+        >
+    if (box.is_ml_box(frac_box)) ml_fraction_wrapper(el, frac_box, frac_box.width + 0.24)
+    else legacy_default_fraction_wrapper(el, frac_box)
+}
+
+fn legacy_default_fraction_wrapper(el, frac_box) => {
+        element: el,
         height: frac_box.height,
         depth: frac_box.depth,
         height_raw: frac_box.height_raw,
@@ -489,7 +498,6 @@ fn wrap_default_fraction(frac_box) {
         italic: 0.0,
         skew: 0.0,
         is_fraction: true
-    }
 }
 
 fn wrap_delimited_fraction(frac_box, left_delim, right_delim) {
@@ -500,10 +508,28 @@ fn wrap_delimited_fraction(frac_box, left_delim, right_delim) {
     let content_boxes = (for (p in [left_box, frac_box, right_box] where p != null) p)
     let elements = box.child_elements(content_boxes)
     let combined = box.hbox(content_boxes)
-    {
-        element: <span class: css.MFRAC;
+    let el = <span class: css.MFRAC;
             for (el in elements) el
-        >,
+        >
+    if (box.is_ml_box(combined)) ml_delimited_fraction_wrapper(el, combined)
+    else legacy_delimited_fraction_wrapper(el, combined)
+}
+
+fn ml_delimited_fraction_wrapper(el, combined) => {
+        element: el,
+        height: combined.height,
+        depth: combined.depth,
+        width: combined.width,
+        type: "minner",
+        italic: 0.0,
+        skew: 0.0,
+        max_font_size: combined.max_font_size,
+        model: "ml",
+        is_fraction: true
+}
+
+fn legacy_delimited_fraction_wrapper(el, combined) => {
+        element: el,
         height: combined.height,
         depth: combined.depth,
         render_height: combined.render_height,
@@ -514,7 +540,6 @@ fn wrap_delimited_fraction(frac_box, left_delim, right_delim) {
         italic: 0.0,
         skew: 0.0,
         is_fraction: true
-    }
 }
 
 fn delimiter_box(delim, frac_box, atom_type) {
@@ -529,12 +554,11 @@ fn delimiter_box(delim, frac_box, atom_type) {
         element: <span class: cls; delim>,
         height: h,
         depth: d,
-        render_height: h,
-        render_depth: d,
-        render_total: h + d,
         width: 0.4,
         type: atom_type,
         italic: 0.0,
-        skew: 0.0
+        skew: 0.0,
+        max_font_size: h,
+        model: "ml"
     }
 }

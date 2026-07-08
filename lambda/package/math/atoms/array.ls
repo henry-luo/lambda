@@ -122,7 +122,25 @@ fn bin_as_ord_after(prev_type) {
     prev_type == "mrel" or prev_type == "mpunct" or prev_type == "mop"
 }
 
-fn box_with_type(bx, atom_type) => {
+fn box_with_type(bx, atom_type) {
+    if (box.is_ml_box(bx)) ml_box_with_type(bx, atom_type)
+    else legacy_box_with_type(bx, atom_type)
+}
+
+fn ml_box_with_type(bx, atom_type) => {
+    element: bx.element,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: atom_type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    model: "ml",
+    is_fraction: bx.is_fraction
+}
+
+fn legacy_box_with_type(bx, atom_type) => {
     element: bx.element,
     height: bx.height,
     depth: bx.depth,
@@ -183,15 +201,8 @@ fn apply_spacing(boxes, context) {
          build_spaced(normalized, 1, normalized[0].type, [normalized[0]], context))
 }
 
-fn blank_cell_box() => {
-    element: "\u00A0",
-    height: 0.0,
-    depth: 0.0,
-    width: 0.5,
-    type: "mord",
-    italic: 0.0,
-    skew: 0.0
-}
+fn blank_cell_box() =>
+    box.ml_box("\u00A0", 0.0, 0.0, 0.5, "mord")
 
 // ============================================================
 // Separator detection
@@ -223,22 +234,42 @@ fn build_table(row_boxes, ncols, nrows, aligns, env_name) {
         else table_metrics(env_name, nrows)
     let total_w = compute_table_width(row_boxes, ncols, env_name)
     let children = build_table_children(row_boxes, ncols, aligns, metrics, env_name, 0, [])
-    {
-        element: <span class: css.MTABLE;
-            for el in children { el }
-        >,
-        height: metrics.height,
-        depth: metrics.depth,
-        height_raw: metrics.height_raw,
-        depth_raw: metrics.depth_raw,
-        render_height: metrics.height,
-        render_depth: metrics.depth,
-        render_total: metrics.render_total,
-        width: total_w,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    let el = <span class: css.MTABLE;
+        for el in children { el }
+    >
+    if (array_has_delimiters(env_name)) legacy_table_box(el, metrics, total_w)
+    else ml_table_box(el, metrics, total_w)
+}
+
+fn array_has_delimiters(env_name) {
+    get_left_delim(env_name) != null or get_right_delim(env_name) != null
+}
+
+fn ml_table_box(el, metrics, total_w) =>
+    box.ml_box_full(
+        el,
+        if (metrics.height_raw != null) metrics.height_raw else metrics.height,
+        if (metrics.depth_raw != null) metrics.depth_raw else metrics.depth,
+        total_w,
+        "ord",
+        0.0,
+        0.0,
+        if (metrics.height_raw != null) metrics.height_raw else metrics.height
+    )
+
+fn legacy_table_box(el, metrics, total_w) => {
+    element: el,
+    height: metrics.height,
+    depth: metrics.depth,
+    height_raw: metrics.height_raw,
+    depth_raw: metrics.depth_raw,
+    render_height: metrics.height,
+    render_depth: metrics.depth,
+    render_total: metrics.render_total,
+    width: total_w,
+    type: "ord",
+    italic: 0.0,
+    skew: 0.0
 }
 
 fn build_table_children(row_boxes, ncols, aligns, metrics, env_name, col, acc) {
@@ -636,45 +667,43 @@ fn wrap_with_delimiters(table_box, ld, rd) {
     // rounded ceil2(h+d) that a single sized glyph (cases/Bmatrix) gives.
     // Expose the pre-rounded extent as *_raw so the use_raw strut sums them
     // without re-tipping (dcases 3.46 + 2.95 = 6.41, not ceil2(6.41001) = 6.42).
-    let stacked_brace = ld == "{" and table_box.render_total != null and table_box.render_total > 4.0
+    let table_total = table_delim_total(table_box)
+    let stacked_brace = ld == "{" and table_total > 4.0
     let h_raw = if (stacked_brace) util.ceil_em2(box_h) else box_h
     let d_raw = if (stacked_brace) 0.0 - util.ceil_em2(0.0 - box_d) else box_d
-    {
-        element: <span style: "display:inline-block";
+    box.ml_box_full(
+        <span style: "display:inline-block";
             for child in children { child }
         >,
-        height: util.ceil_em2(box_h),
-        depth: 0.0 - util.ceil_em2(0.0 - box_d),
-        height_raw: h_raw,
-        depth_raw: d_raw,
-        render_total: util.ceil_em2(h_raw + d_raw),
-        width: total_width,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+        h_raw,
+        d_raw,
+        total_width,
+        "ord",
+        0.0,
+        0.0,
+        h_raw
+    )
 }
 
 fn delim_ext_h(b) { if (b == null) 0.0 else if (b.height_raw != null) b.height_raw else b.height }
 fn delim_ext_d(b) { if (b == null) 0.0 else if (b.depth_raw != null) b.depth_raw else b.depth }
 
+fn table_delim_total(table_box) {
+    if (table_box.render_total != null) table_box.render_total
+    else util.ceil_em2(table_box.height + table_box.depth)
+}
+
 fn render_null_right_delim() {
-    {
-        element: <span class: css.NULLDELIMITER, style: "width:0.12em">,
-        height: 0.0,
-        depth: 0.0,
-        width: 0.12,
-        type: "mclose",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box(<span class: css.NULLDELIMITER, style: "width:0.12em">,
+        0.0, 0.0, 0.12, "mclose")
 }
 
 fn render_matrix_delim(ch, table_box) {
-    let nrows = int(round((table_box.render_total - 1.21) / 1.2)) + 1
+    let table_total = table_delim_total(table_box)
+    let nrows = int(round((table_total - 1.21) / 1.2)) + 1
     if (nrows >= 3 and (ch == "[" or ch == "]")) render_square_mult_delim(ch)
-    else if (ch == "{" and table_box.render_total > 4.0) render_brace_mult_delim()
-    else render_plain_sized_delim(ch, matrix_delim_level(table_box.render_total))
+    else if (ch == "{" and table_total > 4.0) render_brace_mult_delim()
+    else render_plain_sized_delim(ch, matrix_delim_level(table_total))
 }
 
 fn matrix_delim_level(render_total) {
@@ -690,17 +719,7 @@ fn render_plain_sized_delim(ch, level) {
         else if (level == 3) css.DELIM_SIZE3
         else css.DELIM_SIZE4
     let raw = matrix_sized_raw(level)
-    {
-        element: <span class: cls; ch>,
-        height: 0.6 * float(level),
-        depth: 0.3 * float(level),
-        height_raw: raw.h,
-        depth_raw: raw.d,
-        width: 0.4,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(<span class: cls; ch>, raw.h, raw.d, 0.4, "ord", 0.0, 0.0, raw.h)
 }
 
 // full-precision Size1–4 delimiter glyph extent (axis-centred U+0028 metrics,
@@ -716,8 +735,8 @@ fn matrix_sized_raw(level) {
 fn render_square_mult_delim(ch) {
     let pieces = if (ch == "[") ["⎣", "⎡"] else ["⎦", "⎤"]
     let tops = [0.0 - 2.25, 0.0 - 4.03]
-    {
-        element: <span class: "lm_delim-mult";
+    box.ml_box_full(
+        <span class: "lm_delim-mult";
             <span class: "delim-size4 lm_vlist-t lm_vlist-t2";
                 <span class: css.VLIST_R;
                     <span class: css.VLIST, style: "height:2.04em";
@@ -735,15 +754,14 @@ fn render_square_mult_delim(ch) {
                 >
             >
         >,
-        height: 2.05,
-        depth: 1.55,
-        height_raw: 2.05,
-        depth_raw: 1.55003,
-        width: 0.4,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+        2.05,
+        1.55003,
+        0.4,
+        "ord",
+        0.0,
+        0.0,
+        2.05
+    )
 }
 
 fn render_brace_mult_delim() {
@@ -754,8 +772,8 @@ fn render_brace_mult_delim() {
         0.0 - 5.46
     ]
     let heights = [0.91, 0.3, 0.3, 0.3, 0.3, 1.81, 0.3, 0.3, 0.3, 0.3, 0.91]
-    {
-        element: <span class: "lm_delim-mult";
+    box.ml_box_full(
+        <span class: "lm_delim-mult";
             <span class: "delim-size4 lm_vlist-t lm_vlist-t2";
                 <span class: css.VLIST_R;
                     <span class: css.VLIST, style: "height:3.22em";
@@ -773,13 +791,14 @@ fn render_brace_mult_delim() {
                 >
             >
         >,
-        height: 3.46,
-        depth: 2.95,
-        width: 0.4,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+        3.46,
+        2.95,
+        0.4,
+        "ord",
+        0.0,
+        0.0,
+        3.46
+    )
 }
 
 // ============================================================

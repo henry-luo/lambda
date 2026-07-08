@@ -60,21 +60,8 @@ fn all_ml_boxes(items, i) {
 }
 
 // create a box with a <span class=cls> element (constructed internally)
-pub fn box_cls(cls, height, depth, width, box_type) => {
-    element: <span class: cls>,
-    height: height,
-    depth: depth,
-    // Carry raw height/depth so strut raw-propagation continues through
-    // spacing boxes (quad/qquad/thinspace etc are all 0/0). Without these,
-    // a spacer between two atoms aborts raw propagation, forcing the rounded
-    // strut path (e.g. `i\qquad j` emitted 0.85 instead of 0.86).
-    height_raw: height,
-    depth_raw: depth,
-    width: width,
-    type: box_type,
-    italic: 0.0,
-    skew: 0.0
-}
+pub fn box_cls(cls, height, depth, width, box_type) =>
+    ml_box_full(<span class: cls>, height, depth, width, box_type, 0.0, 0.0, height)
 
 // create a box with <span class=cls style=style> element
 pub fn box_styled(cls, style, height, depth, width, box_type) => {
@@ -91,16 +78,23 @@ pub fn box_styled(cls, style, height, depth, width, box_type) => {
 // verbatim (which may carry the U+E000/U+E001 `<`/`>` raw-emit sentinels),
 // while metric lookups use the de-sentinelized form so heights/widths come
 // from the real `<`/`>` glyph metrics.
-pub fn text_box(text, cls, box_type) => {
-    element: text_element(text, cls),
-    height: text_height_for(metric_text(text), cls),
-    depth: text_depth_for(metric_text(text), cls),
-    height_raw: text_height_raw_for(metric_text(text), cls),
-    depth_raw: text_depth_raw_for(metric_text(text), cls),
-    width: met.DEFAULT_CHAR_WIDTH * float(len(text)),
-    type: box_type,
-    italic: 0.0,
-    skew: 0.0
+pub fn text_box(text, cls, box_type) {
+    let mt = metric_text(text)
+    let h = text_height_for(mt, cls)
+    let d = text_depth_for(mt, cls)
+    let h_raw = text_height_raw_for(mt, cls)
+    let d_raw = text_depth_raw_for(mt, cls)
+    {
+        element: text_element(text, cls),
+        height: if (h_raw != null) h_raw else h,
+        depth: if (d_raw != null) d_raw else d,
+        width: met.DEFAULT_CHAR_WIDTH * float(len(text)),
+        type: box_type,
+        italic: 0.0,
+        skew: 0.0,
+        max_font_size: if (h_raw != null) h_raw else h,
+        model: "ml"
+    }
 }
 
 // Map the raw-emit sentinels back to their real glyphs for metric lookup.
@@ -460,12 +454,12 @@ pub fn skip_box(width_em) => {
     element: <span style: "display:inline-block;width:" ++ util.fmt_em(width_em)>,
     height: 0.0,
     depth: 0.0,
-    height_raw: 0.0,
-    depth_raw: 0.0,
     width: width_em,
     type: "skip",
     italic: 0.0,
-    skew: 0.0
+    skew: 0.0,
+    max_font_size: 0.0,
+    model: "ml"
 }
 
 // create a null delimiter box (invisible spacer with fixed width)
@@ -477,7 +471,9 @@ pub fn null_delim() {
         width: 0.12,
         type: "mopen",
         italic: 0.0,
-        skew: 0.0
+        skew: 0.0,
+        max_font_size: 0.0,
+        model: "ml"
     }
 }
 

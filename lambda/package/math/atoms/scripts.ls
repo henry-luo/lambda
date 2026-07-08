@@ -46,9 +46,13 @@ pub fn render(node, context, render_fn) {
 // dips below the baseline, e.g. the minus sign in `\int_{-\infty}` (depth
 // 0.08333 → 0.47 instead of 0.41). Falls back to 0.46 without raw metrics.
 fn sub_height_for(sub_box) {
-    let raw = if (sub_box != null) sub_box.height_raw else null
-    let draw = if (sub_box != null and sub_box.depth_raw != null and sub_box.depth_raw > 0.0)
-        sub_box.depth_raw else 0.0
+    let raw = if (sub_box != null and box.is_ml_box(sub_box)) sub_box.height
+        else if (sub_box != null) sub_box.height_raw
+        else null
+    let draw = if (sub_box != null and box.is_ml_box(sub_box) and sub_box.depth > 0.0)
+        sub_box.depth
+        else if (sub_box != null and sub_box.depth_raw != null and sub_box.depth_raw > 0.0)
+            sub_box.depth_raw else 0.0
     if (raw != null) ceil_em2((raw + draw) * 0.7)
     else 0.46
 }
@@ -96,12 +100,12 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
     // Full-precision script extents (scaled ×0.7) — used for the box's true
     // height/depth so the single-rounding strut sums them ONCE.
     let sup_raw_h = if (has_sup)
-        (if (sup_box.height_raw != null) sup_box.height_raw else sup_box.height) * s
+        ls_raw_h(sup_box) * s
         else 0.0
-    let sub_raw_d = if (has_sub and sub_box.depth_raw != null and sub_box.depth_raw > 0.0)
-        sub_box.depth_raw * s else 0.0
-    let sup_raw_d = if (has_sup and sup_box.depth_raw != null and sup_box.depth_raw > 0.0)
-        sup_box.depth_raw * s else 0.0
+    let sub_raw_d = if (has_sub and ls_raw_d(sub_box) > 0.0)
+        ls_raw_d(sub_box) * s else 0.0
+    let sup_raw_d = if (has_sup and ls_raw_d(sup_box) > 0.0)
+        ls_raw_d(sup_box) * s else 0.0
     // box extent (full precision): sup raises the top to sup_shift+sup_h, the
     // sub drops the bottom to sub_shift(+descender).
     let box_h_raw = if (has_sup) (sup_shift + sup_raw_h) else int_h
@@ -154,24 +158,9 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
             >
         >
     >
-    // height/depth are the CEIL@2 projections of the full-precision extents
-    // (box_h_raw/box_d_raw computed above).
-    let box_h = util.ceil_em2(box_h_raw)
-    let box_d = 0.0 - util.ceil_em2(0.0 - box_d_raw)
-    {
-        element: el,
-        height: box_h,
-        depth: box_d,
-        height_raw: box_h_raw,
-        depth_raw: box_d_raw,
-        // Phase A: render_height/render_depth omitted (== height/depth, consumers
-        // null-coalesce). render_total kept until delimiters (task 5) convert.
-        render_total: util.ceil_em2(box_h_raw + box_d_raw),
-        width: 0.55556,
-        type: "mop",
-        italic: 0.0,
-        skew: 0.0
-    }
+    // The integral side-limit box's visual height/depth already live in the
+    // vlist element tree, so Phase A must not leak legacy render_* channels.
+    box.ml_box_full(el, box_h_raw, box_d_raw, 0.55556, "mop", 0.0, 0.0, box_h_raw)
 }
 
 fn render_inline_big_op_scripts(base, node, context, render_fn) {
@@ -347,24 +336,19 @@ fn make_limits_stack(op_box, sub_box, sup_box, is_centered) {
     // that lacks raw forces the rounded path — e.g. the \prod in a sum of
     // fractions).
     let full_depth = 0.0 - r.minp
-    let h_num = ceil_em2(r.maxp)
-    let d_num = 0.0 - ceil_em2(0.0 - full_depth)
-    // Phase A: a metric-driven box carries one height/depth (CEIL projections;
-    // full precision in *_raw). render_height/render_depth are omitted — they
-    // would equal height/depth and every consumer null-coalesces to those.
-    {
-        element: el,
-        height: h_num,
-        depth: d_num,
-        height_raw: r.maxp,
-        depth_raw: full_depth,
-        render_total: ceil_em2(r.maxp + full_depth),
-        width: max(op_box.width, max(if (has_sub) sub_box.width * fs else 0.0,
-                                     if (has_sup) sup_box.width * fs else 0.0)),
-        type: "mop",
-        italic: 0.0,
-        skew: 0.0
-    }
+    // makeLimitsStack already emits visual rows into the vlist tree; exporting
+    // render_* here reintroduced a second public vertical model.
+    box.ml_box_full(
+        el,
+        r.maxp,
+        full_depth,
+        max(op_box.width, max(if (has_sub) sub_box.width * fs else 0.0,
+                              if (has_sup) sup_box.width * fs else 0.0)),
+        "mop",
+        0.0,
+        0.0,
+        r.maxp
+    )
 }
 
 // render a big operator with limits above/below (display mode)
@@ -638,6 +622,27 @@ fn render_scripts(node, context, render_fn) {
 }
 
 fn script_pair(base_box, script_box) {
+    if (box.is_ml_box(base_box) and box.is_ml_box(script_box))
+        ml_script_pair(base_box, script_box)
+    else legacy_script_pair(base_box, script_box)
+}
+
+fn ml_script_pair(base_box, script_box) {
+    let hb = box.hbox([base_box, script_box])
+    box.ml_box_full(
+        hb.element,
+        max(base_box.height, script_box.height),
+        max(base_box.depth, script_box.depth),
+        base_box.width + script_box.width,
+        "mord",
+        0.0,
+        0.0,
+        max(if (base_box.max_font_size != null) base_box.max_font_size else base_box.height,
+            if (script_box.max_font_size != null) script_box.max_font_size else script_box.height)
+    )
+}
+
+fn legacy_script_pair(base_box, script_box) {
     let render_h = if (script_box.render_height != null)
         max(base_box.height, script_box.render_height) else null
     let render_d = if (script_box.render_depth != null)
