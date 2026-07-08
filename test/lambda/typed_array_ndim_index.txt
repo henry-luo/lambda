@@ -18,10 +18,11 @@
 7
 8
 '=== negative indices ==='
-6
-1
-1
-5
+true
+true
+true
+true
+[4, 5, 6]
 '=== float matrix ==='
 1.5
 2.5
@@ -32,7 +33,7 @@
 10
 30
 50
-60
+true
 10
 60
 '=== composition ==='

@@ -1183,6 +1183,10 @@ bool is_type_keyword(StrView name) {
     return false;
 }
 
+bool is_reserved_identifier_keyword(StrView name) {
+    return strview_equal(&name, "last");
+}
+
 // lookup a name in the current scope only (not in parent scopes)
 // returns the existing entry if found, NULL otherwise
 NameEntry* lookup_name_in_current_scope(Transpiler* tp, String* name) {
@@ -1200,6 +1204,14 @@ NameEntry* lookup_name_in_current_scope(Transpiler* tp, String* name) {
 
 void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     log_debug("pushing name %.*s, %p", (int)node->name->len, node->name->chars, node->type);
+
+    StrView name_view = {node->name->chars, node->name->len};
+    if (is_reserved_identifier_keyword(name_view)) {
+        int line = ts_node_start_point(node->node).row + 1;
+        // c15 reserves last globally so it cannot escape its two grammar homes via declarations.
+        record_type_error(tp, line, "Error: '%.*s' is a reserved keyword and cannot be used as a name",
+            (int)name_view.length, name_view.str);
+    }
 
     // check for duplicate definition in current scope
     NameEntry* existing = lookup_name_in_current_scope(tp, node->name);
@@ -1671,7 +1683,16 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
         }
     }
     else {
+        AstNode* old_last_object = tp->last_index_object;
+        if (node_type == AST_NODE_INDEX_EXPR) {
+            tp->subscript_depth++;
+            tp->last_index_object = ast_node->object;
+        }
         ast_node->field = build_expr(tp, field_node);
+        if (node_type == AST_NODE_INDEX_EXPR) {
+            tp->subscript_depth--;
+            tp->last_index_object = old_last_object;
+        }
     }
 
     // For index_expr, collect additional comma-separated field children into a
@@ -1688,7 +1709,12 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                     seen_first = true;  // first FIELD_FIELD was already built above
                 } else {
                     TSNode extra_field = ts_tree_cursor_current_node(&cur);
+                    AstNode* old_last_object = tp->last_index_object;
+                    tp->subscript_depth++;
+                    tp->last_index_object = ast_node->object;
                     AstNode* next_idx = build_expr(tp, extra_field);
+                    tp->subscript_depth--;
+                    tp->last_index_object = old_last_object;
                     if (next_idx) {
                         tail->next = next_idx;
                         tail = next_idx;
@@ -3294,6 +3320,16 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
             ast_node->type = ast_node->expr->type;
         }
     }
+    else if (symbol == SYM_LAST_INDEX) {
+        if (tp->subscript_depth <= 0) {
+            record_semantic_error(tp, child, ERR_SYNTAX_ERROR,
+                "`last` is only valid inside subscripts and `limit last` clauses");
+        }
+        AstNode* last_node = alloc_ast_node(tp, AST_NODE_LAST_INDEX, child, sizeof(AstNode));
+        last_node->type = &TYPE_INT;
+        ast_node->expr = last_node;
+        ast_node->type = &TYPE_INT;
+    }
     else if (symbol == SYM_ARRAY) {
         ast_node->expr = build_array(tp, child);
         ast_node->type = ast_node->expr->type;
@@ -3613,6 +3649,23 @@ static inline bool is_relational_op(Operator op) {
     return op == OPERATOR_LT || op == OPERATOR_LE || op == OPERATOR_GT || op == OPERATOR_GE;
 }
 
+static bool is_magnitude_numeric_type(TypeId type_id) {
+    return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 ||
+           type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_DECIMAL ||
+           type_id == LMD_TYPE_NUM_SIZED || type_id == LMD_TYPE_UINT64;
+}
+
+static bool known_magnitude_comparable(TypeId left_type, TypeId right_type) {
+    if (left_type == LMD_TYPE_ANY || right_type == LMD_TYPE_ANY) return true;
+    if (left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) return true;
+    if (left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_ARRAY_NUM ||
+        right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_ARRAY_NUM) return true;
+    if (is_magnitude_numeric_type(left_type) && is_magnitude_numeric_type(right_type)) return true;
+    if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) return true;
+    if (left_type == LMD_TYPE_DTIME && right_type == LMD_TYPE_DTIME) return true;
+    return false;
+}
+
 static void normalize_is_array_type_rhs(Transpiler* tp, AstBinaryNode* ast_node) {
     if (!ast_node || ast_node->op != OPERATOR_IS || !ast_node->right) return;
     AstNode* rhs = ast_node->right;
@@ -3923,6 +3976,12 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
 
     TypeId left_type = ast_node->left->type->type_id, right_type = ast_node->right->type->type_id;
     log_debug("left type: %d, right type: %d", left_type, right_type);
+    if (is_relational_op(ast_node->op) && !known_magnitude_comparable(left_type, right_type)) {
+        record_semantic_error(tp, bi_node, ERR_INVALID_OPERATION,
+            "ordered comparison has no magnitude for these types; use sort() for total ordering");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
     TypeId type_id;
     if (ast_node->op == OPERATOR_DIV) {
         if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
@@ -3993,6 +4052,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
             bool r_native = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 || right_type == LMD_TYPE_FLOAT);
             if (l_arr || r_arr)            type_id = LMD_TYPE_ARRAY_NUM;
             else if (l_native && r_native) type_id = LMD_TYPE_BOOL;
+            else if (left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) type_id = LMD_TYPE_ANY;
             else                           type_id = LMD_TYPE_ANY;
         }
 
@@ -4992,7 +5052,8 @@ StrView build_key_string(Transpiler* tp, TSNode key_node) {
         return (StrView) { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
     }
     case SYM_IDENT:
-    case SYM_BASE_TYPE: {
+    case SYM_BASE_TYPE:
+    case SYM_LAST_INDEX: {
         return (StrView)ts_node_source(tp, key_node);
     }
     case anon_sym_STAR: {
@@ -6747,6 +6808,8 @@ void build_for_clauses(Transpiler* tp, TSNode for_node, AstForNode* ast_node) {
         }
         else if (field_id == FIELD_LIMIT) {
             // Limit clause
+            TSNode last_node = ts_node_child_by_field_id(child, FIELD_LAST);
+            ast_node->limit_from_end = !ts_node_is_null(last_node);
             TSNode count_node = ts_node_child_by_field_id(child, FIELD_COUNT);
             ast_node->limit = build_expr(tp, count_node);
         }

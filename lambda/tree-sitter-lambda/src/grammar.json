@@ -1192,6 +1192,10 @@
           "name": "base_type"
         },
         {
+          "type": "SYMBOL",
+          "name": "last_index"
+        },
+        {
           "type": "STRING",
           "value": "*"
         }
@@ -3112,6 +3116,10 @@
           },
           {
             "type": "SYMBOL",
+            "name": "last_index"
+          },
+          {
+            "type": "SYMBOL",
             "name": "_number"
           },
           {
@@ -3370,6 +3378,17 @@
             "value": "]"
           }
         ]
+      }
+    },
+    "last_index": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 2,
+        "content": {
+          "type": "STRING",
+          "value": "last"
+        }
       }
     },
     "query_expr": {
@@ -6522,6 +6541,22 @@
         {
           "type": "STRING",
           "value": "limit"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "last",
+              "content": {
+                "type": "SYMBOL",
+                "name": "last_index"
+              }
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
         },
         {
           "type": "FIELD",

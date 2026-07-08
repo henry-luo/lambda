@@ -336,7 +336,8 @@ let arr: u8[] = [10u8, 20u8, 30u8, 40u8, 50u8]
 
 // Single element access — returns sized scalar
 arr[0]              // 10u8 (returns u8, not boxed Item)
-arr[-1]             // 50u8
+arr[last]           // 50u8
+arr[-1]             // null
 
 // Range slicing — returns new typed array of same type
 arr[1 to 3]         // u8[]: [20, 30, 40]

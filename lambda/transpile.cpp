@@ -2654,7 +2654,9 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
             strbuf_append_str(tp->code_buf, " & 0x00FFFFFFFFFFFFFF);\n");
         }
         if (has_limit) {
-            strbuf_append_str(tp->code_buf, " array_limit_inplace(arr_out, ");
+            strbuf_append_str(tp->code_buf, for_node->limit_from_end
+                ? " array_limit_last_inplace(arr_out, "
+                : " array_limit_inplace(arr_out, ");
             transpile_box_item(tp, for_node->limit);
             strbuf_append_str(tp->code_buf, " & 0x00FFFFFFFFFFFFFF);\n");
         }
@@ -2673,9 +2675,13 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
         // Apply LIMIT if present
         if (has_limit) {
             if (has_offset) {
-                strbuf_append_str(tp->code_buf, " Item limited_v = fn_take(offset_v, ");
+                strbuf_append_str(tp->code_buf, for_node->limit_from_end
+                    ? " Item limited_v = fn_take_last(offset_v, "
+                    : " Item limited_v = fn_take(offset_v, ");
             } else {
-                strbuf_append_str(tp->code_buf, " Item limited_v = fn_take((Item)arr_out, ");
+                strbuf_append_str(tp->code_buf, for_node->limit_from_end
+                    ? " Item limited_v = fn_take_last((Item)arr_out, "
+                    : " Item limited_v = fn_take((Item)arr_out, ");
             }
             transpile_box_item(tp, for_node->limit);
             strbuf_append_str(tp->code_buf, ");\n");
@@ -5490,6 +5496,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
 
     TypeId object_type = field_node->object->type->type_id;
     TypeId field_type = field_node->field->type->type_id;
+    tp->last_index_object = field_node->object;
 
     // resolve TypeUnary (int[], float[] annotations) to effective array type
     if (object_type == LMD_TYPE_TYPE && field_node->object->type->kind == TYPE_KIND_UNARY) {
@@ -7072,6 +7079,17 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_CURRENT_INDEX:
         // ~# references the current pipe context key/index
         strbuf_append_str(tp->code_buf, "pipe_index");
+        break;
+    case AST_NODE_LAST_INDEX:
+        if (tp->last_index_object) {
+            // C15 binds `last` to the innermost subscript object currently being lowered.
+            strbuf_append_str(tp->code_buf, "(fn_len(");
+            transpile_box_item(tp, tp->last_index_object);
+            strbuf_append_str(tp->code_buf, ")-1)");
+        } else {
+            log_error("transpile_expr: `last` used outside subscript");
+            strbuf_append_str(tp->code_buf, "0");
+        }
         break;
     case AST_NODE_IF_EXPR:
         transpile_if(tp, (AstIfNode*)expr_node);

@@ -181,8 +181,8 @@ pub fn route_to_curved_svg_path(points, radius) {
     let head = points[0]
     let body = curved_at(points, radius, 1, len(points) - 1,
                          "M " ++ (head.x) ++ " " ++ (head.y))
-    let last = points[len(points) - 1]
-    body ++ " L " ++ (last.x) ++ " " ++ (last.y)
+    let tail = points[len(points) - 1]
+    body ++ " L " ++ (tail.x) ++ " " ++ (tail.y)
   }
 }
 

@@ -329,7 +329,7 @@ module.exports = grammar({
       $.named_value,
     ),
 
-    _key: $ => choice($.dotted_name, $.symbol, $.identifier, $.base_type, '*'),
+    _key: $ => choice($.dotted_name, $.symbol, $.identifier, $.base_type, $.last_index, '*'),
 
     map_item: $ => seq( field('name', $._key), ':', field('as', $._expr) ),
 
@@ -409,6 +409,7 @@ module.exports = grammar({
     // prec(50) to make primary_expr higher priority than content
     primary_expr: $ => prec(50, choice(
       $.named_value,
+      $.last_index,
       $._number,
       $.datetime,
       $.string,
@@ -453,6 +454,8 @@ module.exports = grammar({
       repeat(seq(',', field('field', $._expr))),
       ']',
     )),
+
+    last_index: _ => token(prec(2, 'last')),
 
     // Query expression: expr?T (recursive) or expr.?T (direct)
     query_expr: $ => seq(
@@ -793,9 +796,11 @@ module.exports = grammar({
       'as', field('name', $.identifier)
     ),
 
-    // limit clause: limit expr
+    // limit clause: limit expr or limit last expr
     for_limit_clause: $ => seq(
-      'limit', field('count', $._expr)
+      'limit',
+      optional(field('last', $.last_index)),
+      field('count', $._expr)
     ),
 
     // offset clause: offset expr

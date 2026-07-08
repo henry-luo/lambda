@@ -465,7 +465,7 @@ This differs from JavaScript, where `str.replace(string, string)` only replaces 
 ```lambda
 replace("aBcBdB", "B", "X")  // "aXcXdX" — all replaced
 replace("aBcBdB", "B", "X", {limit: 1})   // "aXcBdB" — first only
-replace("aBcBdB", "B", "X", {limit: -1})  // "aBcBdX" — last only
+replace("aBcBdB", "B", "X", {last: 1})    // "aBcBdX" — last only
 ```
 
 **Former workaround**: Implement `replace_first()` manually using `find()` and `slice()`:
@@ -486,8 +486,8 @@ That workaround is no longer needed. `test/benchmark/jetstream/regex_dna.ls` now
 
 **Fix notes**:
 - `limit: 1` replaces the first match; `limit: 5` replaces the first five matches.
-- `limit: -1` replaces the last match; `limit: -5` replaces the last five matches.
-- `limit: 0` or an omitted limit keeps the existing replace-all behavior.
+- `last: 1` replaces the last match; `last: 5` replaces the last five matches.
+- `limit: 0` replaces zero matches; an omitted limit keeps the replace-all behavior.
 - `test/lambda/find_replace_options.ls` covers first/last limited replacement and no-match behavior.
 
 ---

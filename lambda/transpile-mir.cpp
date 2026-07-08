@@ -190,6 +190,7 @@ struct MirTranspiler {
     MIR_reg_t pipe_item_reg;
     MIR_reg_t pipe_index_reg;
     bool in_pipe;
+    AstNode* last_index_object;
 
     // TCO
     AstFuncNode* tco_func;
@@ -3915,7 +3916,9 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
                 lim_raw = emit_unbox(mt, emit_box(mt, lim_val, lim_tid), LMD_TYPE_INT);
             }
             MIR_reg_t lim_masked = emit_unbox_int_mask(mt, lim_raw);
-            emit_call_void_2(mt, "array_limit_inplace",
+            emit_call_void_2(mt, for_node->limit_from_end
+                    ? "array_limit_last_inplace"
+                    : "array_limit_inplace",
                 MIR_T_P, MIR_new_reg_op(mt->ctx, output),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lim_masked));
         }
@@ -3937,7 +3940,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
             MIR_reg_t lim_val = transpile_expr(mt, for_node->limit);
             TypeId lim_tid = get_effective_type(mt, for_node->limit);
             MIR_reg_t lim_boxed = emit_box(mt, lim_val, lim_tid);
-            cur_result = emit_call_2(mt, "fn_take", MIR_T_I64,
+            cur_result = emit_call_2(mt, for_node->limit_from_end ? "fn_take_last" : "fn_take", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_result),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lim_boxed));
         }
@@ -5923,6 +5926,7 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
 }
 
 static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
+    mt->last_index_object = field_node->object;
     // Multi-dim path: arr[i, j, k] — when there's more than one index, dispatch
     // to the runtime array_num_at_nd helper.  Indices are stored into a small
     // heap-data buffer and the helper computes the stride-walking offset.
@@ -9843,6 +9847,22 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         MIR_reg_t r = new_reg(mt, "pipe_idx", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
             MIR_new_int_op(mt->ctx, 0)));
+        return r;
+    }
+    case AST_NODE_LAST_INDEX: {
+        MIR_reg_t r = new_reg(mt, "last_idx", MIR_T_I64);
+        if (!mt->last_index_object) {
+            log_error("mir: `last` used outside subscript");
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_int_op(mt->ctx, 0)));
+            return r;
+        }
+        MIR_reg_t boxed_obj = transpile_box_item(mt, mt->last_index_object);
+        MIR_reg_t len = emit_call_1(mt, "fn_len", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj));
+        // C15 defines `last` as len(container) - 1; empty containers naturally produce -1.
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_SUB, MIR_new_reg_op(mt->ctx, r),
+            MIR_new_reg_op(mt->ctx, len), MIR_new_int_op(mt->ctx, 1)));
         return r;
     }
     case AST_NODE_TYPE:

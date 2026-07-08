@@ -208,8 +208,8 @@ fn _cid_width_array(first, widths, acc) {
     acc ++ [{ first: first, widths: widths }]
 }
 
-fn _cid_width_range(first, last, width, acc) {
-    acc ++ [{ first: first, last: last, width: width }]
+fn _cid_width_range(first, final_code, width, acc) {
+    acc ++ [{ first: first, last: final_code, width: width }]
 }
 
 fn _cid_width_pairs_loop(w, i, n, acc) {

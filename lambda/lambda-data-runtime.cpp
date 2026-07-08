@@ -261,7 +261,6 @@ static Item array_num_read_scalar_at(ArrayNum* array, int64_t offset) {
 
 // Multi-dim scalar access: arr[i, j, k] on N-D ArrayNum.
 // Walks strides to compute a flat offset, then reads the scalar at that offset.
-// Negative indices are interpreted relative to the corresponding axis length.
 // On any out-of-range index or dim mismatch, returns ItemNull.
 Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices) {
     if (!arr || ndim < 1) return ItemNull;
@@ -269,7 +268,7 @@ Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices) {
     if (!arr->is_ndim) {
         if (ndim != 1) return ItemNull;  // can't multi-dim a 1-D array
         int64_t i = indices[0];
-        if (i < 0) i += arr->length;
+        // c15 keeps negative indexes absent for ArrayNum; use last for tail-relative reads.
         if (i < 0 || i >= arr->length) return ItemNull;
         return array_num_read_scalar_at(arr, i);
     }
@@ -281,7 +280,7 @@ Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices) {
     int64_t offset = 0;
     for (int ax = 0; ax < ndim; ax++) {
         int64_t i = indices[ax];
-        if (i < 0) i += shp[ax];
+        // c15 keeps each axis bounds-based; negative coordinates are absent.
         if (i < 0 || i >= shp[ax]) return ItemNull;
         offset += i * str[ax];
     }
@@ -301,7 +300,7 @@ void array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value) {
     if (!arr->is_ndim) {
         if (ndim != 1) return;
         int64_t i = indices[0];
-        if (i < 0) i += arr->length;
+        // c15 forbids hidden tail-relative writes through negative indexes.
         if (i < 0 || i >= arr->length) return;
         array_num_set_item(arr, i, value);
         return;
@@ -313,7 +312,7 @@ void array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value) {
     int64_t offset = 0;
     for (int ax = 0; ax < ndim; ax++) {
         int64_t i = indices[ax];
-        if (i < 0) i += shp[ax];
+        // c15 forbids hidden tail-relative writes through negative coordinates.
         if (i < 0 || i >= shp[ax]) return;
         offset += i * str[ax];
     }
@@ -1067,6 +1066,19 @@ void array_drop_inplace(Array* arr, int64_t n) {
 void array_limit_inplace(Array* arr, int64_t n) {
     if (n < 0) n = 0;
     if (n < arr->length) arr->length = n;
+}
+
+// limit array to last n items in-place, preserving original order
+void array_limit_last_inplace(Array* arr, int64_t n) {
+    if (!arr) return;
+    if (n < 0) n = 0;
+    if (n >= arr->length) return;
+    int64_t drop = arr->length - n;
+    // C15 `limit last N` is a tail window, not reversed order.
+    for (int64_t i = 0; i < n; i++) {
+        arr->items[i] = arr->items[i + drop];
+    }
+    arr->length = n;
 }
 
 // create a spreadable array for for-expression results

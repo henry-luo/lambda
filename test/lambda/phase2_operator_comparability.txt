@@ -1,0 +1,8 @@
+{
+  numeric_lt: true,
+  string_lt: true,
+  string_ge: true,
+  null_lt_is_null: true,
+  date_lt: true,
+  sort_symbols_still_total: ['a', 'b']
+}

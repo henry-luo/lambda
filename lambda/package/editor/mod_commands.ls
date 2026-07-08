@@ -439,8 +439,8 @@ fn apply_cross_block_edges(blocks, prefix, suffix) {
   else if (len(blocks) == 1) { [append_content_to_block(prepend_content_to_block(blocks[0], prefix), suffix)] }
   else {
     let first = prepend_content_to_block(blocks[0], prefix)
-    let last = append_content_to_block(blocks[len(blocks) - 1], suffix)
-    [first, *list_slice(blocks, 1, len(blocks) - 1), last]
+    let tail_block = append_content_to_block(blocks[len(blocks) - 1], suffix)
+    [first, *list_slice(blocks, 1, len(blocks) - 1), tail_block]
   }
 }
 
@@ -582,8 +582,8 @@ fn selected_inline_content(span, label, fallback_marks) {
   } else {
     let first = nonempty_text_leaf(slice(span.lo_leaf.text, span.lo.offset, len(span.lo_leaf.text)), span.lo_leaf.marks)
     let middle = list_slice(span.parent.content, span.lo_index + 1, span.hi_index)
-    let last = nonempty_text_leaf(slice(span.hi_leaf.text, 0, span.hi.offset), span.hi_leaf.marks)
-    let selected = list_concat(list_concat(first, middle), last)
+    let tail = nonempty_text_leaf(slice(span.hi_leaf.text, 0, span.hi.offset), span.hi_leaf.marks)
+    let selected = list_concat(list_concat(first, middle), tail)
     if (len(selected) == 0) { [text_leaf_with_marks(label, fallback_marks)] } else { selected }
   }
 }
@@ -706,10 +706,10 @@ pub fn cmd_paste_fragment(state, fragment) {
           let head_inline = list_concat(list_slice(block.content, 0, top_index), before)
           let tail_inline = list_concat(after, list_slice(block.content, top_index + 1, len(block.content)))
           let first = blocks[0]
-          let last = blocks[len(blocks) - 1]
+          let tail_block = blocks[len(blocks) - 1]
           let blk_inl = block_allows_inline(state, block.tag)
           let merge_first = blk_inl and block_allows_inline(state, first.tag)
-          let merge_last = (len(blocks) > 1) and blk_inl and block_allows_inline(state, last.tag)
+          let merge_last = (len(blocks) > 1) and blk_inl and block_allows_inline(state, tail_block.tag)
           if (len(blocks) == 1 and merge_first) {
             // single inline-content block (p/h/li) merges inline — no split
             let content0 = list_concat(list_concat(head_inline, first.content), tail_inline)
@@ -732,7 +732,7 @@ pub fn cmd_paste_fragment(state, fragment) {
             let middle = list_slice(blocks, mstart, mend)
             let repl_head = if (len(head_content) > 0) { [node_attrs(block.tag, block.attrs, head_content)] } else { [] }
             let repl_mid = list_concat(repl_head, middle)
-            let repl = if (merge_last) { list_concat(repl_mid, [node_attrs(block.tag, block.attrs, merge_adjacent_text(list_concat(last.content, tail_inline)))]) }
+            let repl = if (merge_last) { list_concat(repl_mid, [node_attrs(block.tag, block.attrs, merge_adjacent_text(list_concat(tail_block.content, tail_inline)))]) }
               else if (len(tail_inline) > 0) { list_concat(repl_mid, [node_attrs(block.tag, block.attrs, tail_inline)]) }
               else { repl_mid }
             if (len(repl) == 0) { null }
@@ -915,9 +915,9 @@ fn merge_adjacent_text_at(content, i, n, acc) {
   if (i >= n) { acc }
   else {
     let c = content[i]
-    let last = if (len(acc) > 0) { acc[len(acc) - 1] } else { null }
-    if (last != null and is_text(last) and is_text(c) and marks_equal(last.marks, c.marks)) {
-      merge_adjacent_text_at(content, i + 1, n, list_set(acc, len(acc) - 1, {kind: 'text', text: last.text ++ c.text, marks: last.marks}))
+    let tail = if (len(acc) > 0) { acc[len(acc) - 1] } else { null }
+    if (tail != null and is_text(tail) and is_text(c) and marks_equal(tail.marks, c.marks)) {
+      merge_adjacent_text_at(content, i + 1, n, list_set(acc, len(acc) - 1, {kind: 'text', text: tail.text ++ c.text, marks: tail.marks}))
     } else {
       merge_adjacent_text_at(content, i + 1, n, [*acc, c])
     }
@@ -1451,8 +1451,8 @@ fn marked_same_parent_slice(span, mark, adding) {
   else {
     let first = mark_text_leaf_range(span.lo_leaf, span.lo.offset, len(span.lo_leaf.text), mark, adding)
     let middle = mark_selected_children(span.parent.content, mark, adding, span.lo_index + 1, span.hi_index - 1, [])
-    let last = mark_text_leaf_range(span.hi_leaf, 0, span.hi.offset, mark, adding)
-    list_concat(list_concat(first, middle), last)
+    let tail = mark_text_leaf_range(span.hi_leaf, 0, span.hi.offset, mark, adding)
+    list_concat(list_concat(first, middle), tail)
   }
 }
 

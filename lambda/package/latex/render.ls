@@ -1294,15 +1294,15 @@ fn append_to_last_cell(cells, content) {
 
 fn set_last_cell(cells, content) {
     let last_idx = len(cells) - 1
-    let last = cells[last_idx]
-    let new_val = compute_new_cell(last, content)
+    let last_cell = cells[last_idx]
+    let new_val = compute_new_cell(last_cell, content)
     slice(cells, 0, last_idx) ++ [new_val]
 }
 
-fn compute_new_cell(last, content) {
-    if (last == null) wrap_content(content)
-    else if (last is array) last ++ [content]
-    else [last, content]
+fn compute_new_cell(last_cell, content) {
+    if (last_cell == null) wrap_content(content)
+    else if (last_cell is array) last_cell ++ [content]
+    else [last_cell, content]
 }
 
 fn wrap_content(content) {
