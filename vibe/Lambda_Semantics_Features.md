@@ -247,7 +247,7 @@ try { var f = open("data.txt")^ ... } finally { close(f) }   // NOT adopted
 ```
 `finally` is an appendage to a protected *block*, but Lambda has no `try` because nothing unwinds. Importing the block imports its warts: `f` declared inside but needed in the handler, cleanup far from acquisition, nesting pyramids. Exception-shaped structure in a language that deliberately has no exceptions.
 
-**(2) `defer` (+ Zig's `errdefer`)** — kept, but demoted from primitive to manual hook (R5).
+**(2) `defer` (+ Zig's `errdefer`)** — sound design, but **not introduced initially** (R5-R): auto-close covers the resource cases; the keyword waits for a pressing need.
 ```lambda
 pn process(path) { var f = open(path)^; defer close(f); ... }   // runs on every exit
 ```
@@ -295,7 +295,7 @@ GC's correct role: **backstop and leak detector** — the finalizer closes whate
   ```
   Clean-up-on-failure / transfer-on-success — the pattern Zig needs a keyword for — falls out of scoping + typed escape.
 - **R4 — GC finalizer = backstop only** (closes leaks, logs a leak warning), per 3.5.1(4).
-- **R5 — `defer` survives as the manual hook** for cleanup that isn't closing an owned resource: release a lock, `chdir` back, delete a temp file, decrement a counter. `pn`-only, block-scoped, LIFO, closure semantics (body reads current bindings at exit). Auto-close *lowers to* an implicit defer — one mechanism, two faces. `with`, `finally`, and `errdefer` are not adopted.
+- **R5 (revised 2026-07-08) — no `defer` keyword in the initial design.** **Auto-close is the default and the only user-facing cleanup mechanism initially.** The exit-edge lowering machinery exists internally regardless (auto-close compiles to implicit deferred cleanup at block exits — one mechanism), but the `defer` keyword is **introduced only when a pressing need emerges**. The classic non-close cases (release a lock, `chdir` back, delete a temp file) are largely coverable without it: model them as scoped resources with a `close` capability (a lock guard whose close is unlock, a cwd guard whose close is restore — the RAII move), which auto-close then handles uniformly. If real usage produces cleanup that resists resource-modeling, `defer` returns as specified here (`pn`-only, block-scoped, LIFO, closure semantics). `with`, `finally`, and `errdefer` remain not adopted (`errdefer`'s pattern is covered by R3's escape analysis; `with` by auto-close itself).
 - **Open decision — close-error routing (double fault):** proposed rule: auto-close/defer failure on a *normal* exit becomes the `pn`'s error result; on an *error* exit the original error wins and the close error is attached as suppressed + logged. To confirm.
 
 #### 3.5.3 The lifetime taxonomy
@@ -307,7 +307,42 @@ GC's correct role: **backstop and leak detector** — the finalizer closes whate
 | `stream(src)` live-I/O | scoped resource | same rules; forcing / `on error` may release earlier | auto-close + GC backstop |
 | `stream(x)` value-backed | value (re-forcible plan) | until unreferenced | GC |
 
-Composition with the rest of the ledger: auto-close/defer run innermost-out as an error propagates, *before* the `pn`-boundary `on error(e)` handler (D12) observes it; a cancelled `await` (concurrency O2) is an error-shaped exit, so **cancellation safety falls out of R2 for free**; task scopes (O1) are "defer cancel-and-join at block exit" — the same lowering. Nothing crosses the C ABI (J3): each language runs its own cleanup in its own frames.
+Composition with the rest of the ledger: auto-close cleanup runs innermost-out as an error propagates, *before* the `pn`-boundary `on error(e)` handler (D12) observes it; a cancelled `await` (concurrency O2/K30) is an error-shaped exit, so **cancellation safety falls out of R2 for free**; task scoping (K30) is "cancel-and-join at block exit" — the same exit-edge lowering. Nothing crosses the C ABI (J3): each language runs its own cleanup in its own frames.
+
+### 3.6 The `fn`/`pn` split vs. monadic effect systems (review, 2026-07-08)
+
+Full essay: `doc/The_Unbundled_Monad.md`. The condensed findings:
+
+**What it is.** A **one-bit, declared, compiler-checked effect system** — purity is the tracked property, callability is one-directional (`fn` cannot call `pn`). Honest precedents are D's `pure`, Fortran's `PURE`, Nim's `func` — *not* Haskell — but where those treat the bit as an optimization annotation, Lambda made it the load-bearing wall. Formally: **Haskell with exactly one monad (IO) where the compiler writes the do-notation** — Lambda sits between ML/Python (nothing tracked, all guarantees forfeited) and Haskell (everything tracked, composition taxed).
+
+**The empirical case — what one bit funded in the 2026-07 design campaign:** `await` legality (K1, no async color needed) · statically-safe deterministic parallelism (K9/K15 — no scripting peer can claim it) · provable stream fusion/pushdown (D11 — Polars/DuckDB must *trust* UDFs; Lambda verifies) · pipeline segmentation (K23) · reduction legality (K19) · suspension-free `fn` regions (no safepoints in pure code) · the one-line `start` capture rule (K13) · a computable JS membrane set (K16/O9). Eight load-bearing uses of one bit of syntax is a system priced correctly.
+
+**The unbundled monad.** Lambda distributed the monad's job description across orthogonal direct-style features: effect gating → `fn`/`pn` · error channel → `T^E` + `^` · sequencing → statements · laziness → `stream()` values (D9) · resource bracket → scoped `open()`/auto-close (R1–R3) · async → colorless `start` (K2-R/K12) · structured concurrency + cancellation → K30, *derived from* the resource ledger. The features compose by construction where monad transformers compose by effort. The one real price: **no reified effects** — a `pn` call executes; there is no held, unexecuted effect value, so the mock-interpreter testing story (ZIO/cats-effect) is unavailable. Mitigations: streams-as-plans reify the pipeline domain; `pn` mocking, if ever, arrives via module swapping, not effect values.
+
+**Against the peers.** *Haskell*: fine granularity bought reasoning + reification, paid the transformer/composition tax two decades of ecosystem churn never fixed — the pure/impure bit is the part of the tradition that paid. *Effect-TS*: the same feature list (`Effect<R,E,A>` ≈ `T^E` + K30 + R-ledger + streams) rebuilt as a TypeScript library at wrapper-world prices — the strongest available proof of demand *and* of the library route's cost. *Koka/Unison/Flix* (effect rows): theoretically complete, and the source of the one capability a 1-bit system lacks — **effect polymorphism** (pure-iff-argument-pure HOFs); Lambda dodges by convention (pipes take `fn`), and Flix's Boolean effect polymorphism is the recorded minimal fix if pressure ever materializes.
+
+**The delivery doctrine** (the design-space point no surveyed language occupies): **color what changes the caller's contract; infer what doesn't; put must-respond channels in types.** Purity = declared keyword (callers must know: re-run? parallelize? cache?); errors + resource ownership = in return types (callers must respond); may-suspend = inferred and invisible (implementation detail, O9). This is the resolution of the coloring wars in one rule — async coloring failed industry-wide because it colored an implementation property; Haskell over-colored; ML colors nothing.
+
+**Weaknesses on record:** migration virality (a deep `fn` needing an effect flips its whole caller chain — D's history predicts logging/caching/instrumentation as the first escape-hatch demands; ⚠️ **pre-decision recommended: is debug logging inside `fn` permitted as a non-observable effect?** — one semantics-ledger line, best written before users ask) · no reified effects · no effect polymorphism · one-bit opacity within `pn` (local-mutation vs. launch-missiles look identical to callers — the unbundled typed channels recover the actionable distinctions; deliberate until proven otherwise).
+
+### 3.7 The reactive `view`/`edit` template design (review, 2026-07-08)
+
+Reviewed against `doc/Reactive_UI.md` + the five implementation-phase notes (`vibe/Reactive_UI*.md` — through incremental reflow, no-op elision, drag-and-drop, rich text: a mature subsystem, not a sketch).
+
+**Strengths:**
+1. **The `fn`/`pn` split does the reactive heavy lifting.** Template body = pure transformation (model → element tree); mutation exists only in `on` handlers (`pn` semantics). That is the Elm architecture *enforced by the effect system rather than by convention* — React needs lint rules and StrictMode double-rendering to *detect* impure renders; Lambda makes them uncompilable. Load-bearing consequence: dirty-tracked re-execution is **sound by construction** (re-running a body is always safe). The ninth entry for §3.6's dividend table.
+2. **Pattern-matched dispatch is the distinctive move.** No mainstream reactive framework has it — React/Vue/Svelte/Solid name components at use sites; `apply()` dispatches on data *shape* (XSLT's one great idea, kept alive). Exactly right for the document-native identity: heterogeneous documents render without switch statements; the drawing-editor work already exploits it.
+3. **The closest relative is SwiftUI, not React** — the only other shipped system on *value-semantic views*: pure body recomputation + identity-keyed external state + framework invalidation. Lambda's `(source_item, template_ref)` state key is the same architecture with a better identity story (the data's intrinsic identity, vs. hand-written `key=`/`Identifiable`). The `view`/`edit` read-write capability split at template level has no peer anywhere.
+4. **JIT-compiled templates** (bodies → native code once) — and note the main doc's "full DOM rebuild" caveat is stale: Phase 4 (incremental reflow, no-op elision) addressed it; `doc/Reactive_UI.md` needs a refresh.
+
+**The structural open question — write-keyed dirty tracking.** Invalidation marks `(source_item, template_ref)` dirty *at the write site*. Correct for self-contained instances; **no answer for transitive readers** — if item A's handler mutates shared model data that item B's body *reads* (a summary counter, a filter), nothing marks B dirty. Industry answer: runtime read-tracking (signals — Solid, Vue Vapor, Svelte 5 runes). Lambda has a cheaper option nobody else has: **static read-set analysis** — bodies are pure and JIT-compiled from a known AST, so the compiler can approximate each body's reads (model paths, state vars) at compile time and register precise invalidation edges with zero runtime subscription machinery. "Svelte's compile-time reactivity made rigorous by verified purity" — signals without signals. The natural Phase 6, and D11's optimizer license wearing a UI hat.
+
+**Three integration seams with the 2026-07 designs:**
+1. **The reactive loop predates the concurrency design** — a handler is `pn`, so post-level-1 it can `start` a task whose resume mutates template state. Undesigned: retransform's slot in the page-scheduler priorities (Radiant RO1 — it is rAF-adjacent render work); dirty-mark batching per tick; whether task-resume writes trigger the same dirty path. One page in `vibe/radiant/Radiant_Design_Concurrency.md`, next to RO1/RO2.
+2. **Two event vocabularies now coexist**: `emit()` bubbling the template ancestry vs. K20 `send`/mailboxes. Different scopes (intra-page component tree vs. tasks/processes) — defensible, but the boundary should be *stated*, and the tempting unification (template instance as addressable endpoint) explicitly considered-and-deferred.
+3. **`edit`'s in-place model mutation is where the design touches C4's sharpest edge** — the known `proc_view_mutable` failure lives exactly there. The mutation surface (via MarkEditor) deserves an explicit invariant statement rather than emergent behavior.
+
+**Verdict:** the "unique position" claim is earned — XSLT dispatch + SwiftUI value-semantics architecture + type-system-enforced purity + JIT is a combination existing nowhere else, with implementation depth to back it. The gaps are small relative to the foundation and nameable: read-dependency invalidation (with the static-read-set direction as the uniquely-Lambda solution), the concurrency-loop integration note, the `emit`/mailbox boundary statement, and the doc refresh.
 
 ---
 
@@ -327,7 +362,7 @@ The key strategic observation: **none of the four structural gaps conflicts with
 
 1. **Prioritize the four structural gaps** — suggested order: `group by` (small, unlocks data frames) → resource cleanup (`defer` vs `with` vs error-path hooks on `^`) → streaming pipes (design: lazy `|>` by default vs explicit `stream` source vs generator functions) → concurrency (a `par` pipe + atoms; scope: data parallelism first, async I/O later?). Note the runtime-side ordering from Part 1: G1 (GC rooting precision) precedes all of these.
 2. **`group by` syntax sketch** to react to: `for (x in sales group by x.region into g) {region: g.key, total: sum(g |> ~.amount)}` — or the XQuery style with implicit grouping variables.
-3. **Cleanup construct** — ~~resolved~~ decided in §3.5 (R1–R5): `open()` + block-exit auto-close + typed escape; `defer` as manual hook. Remaining: the close-error double-fault rule and resource-carrying-type containment rules.
+3. **Cleanup construct** — ~~resolved~~ decided in §3.5 (R1–R5): `open()` + block-exit auto-close + typed escape; **auto-close only initially — no `defer` keyword until a pressing need (R5-R)**. Remaining: the close-error double-fault rule and resource-carrying-type containment rules.
 4. **Streaming vs C4**: lazy values crossing `var` mutation boundaries; are streams values (COW-able?) or a distinct non-value resource type?
 5. **String interpolation syntax**: `$"..."` vs `` `...` `` vs `"...{}"` — grammar-conflict check needed (`$` is also the proposed quote-splice marker from C9a — same sigil, two contexts, decide compatibility).
 6. **Set type**: distinct container rank (C11 order impact!) vs map-with-unit-values; literal syntax or constructor-only.

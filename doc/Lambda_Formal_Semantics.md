@@ -614,6 +614,20 @@ grammar. `|>` is the world-standard pipe spelling. [C6]
   Note the deliberate inversion: in XPath these keywords are the scalar forms;
   in Lambda they are the element-wise forms — nobody types `gt` by accident,
   which is the point. [C10]
+- **Mask consumption is explicit and non-magical.** `sum(mask)` counts true
+  lanes; `a[mask]` is boolean indexing, with a full-shape mask selecting
+  matching elements in row-major order and a 1-D mask on an N-D array selecting
+  leading-axis slices. `and`/`or` remain scalar short-circuit truth operators,
+  not element-wise mask combinators. Dedicated mask-combination functions such
+  as `mask_and`/`mask_or` are deferred; until then, mask-producing code should
+  stay readable by naming intermediate masks or using explicit selection.
+  [C10.3]
+- **Condition-position lints protect the truthiness boundary.** A direct
+  element-wise comparison in `if`/`while`/`where` condition position warns and
+  suggests `any(...)`, `all(...)`, `sum(mask)`, or `a[mask]`. A statically-known
+  container condition also warns because every container is truthy under §3;
+  the warning asks for an explicit scalar predicate such as `len(...)` or
+  `any(...)`. These diagnostics are hints, not semantic errors. [C10.2/C2.3]
 
 ### 10.3 Keyword-operator inventory
 
