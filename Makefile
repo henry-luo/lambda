@@ -1535,15 +1535,16 @@ editor-4c-js: build
 	@cd test/editor-js && node tools/run-phase-a.mjs
 	@echo "=============================================================="
 
-# Stage 4C Phase B — editor event-driven UI automation under lambda.exe view + event_sim.
-# Runs the 4B baseline set (test/ui/editor4b/*.json) + the 4C set
-# (test/ui/editor4c/*.json). Each fixture may name its own harness page via the
-# "html" field (default test/html/editor-dom.html).
+# Stage 4C Phase B/C — editor event-driven UI automation under lambda.exe view + event_sim.
+# Runs the 4B baseline set (test/ui/editor4b/*.json), the 4C Phase-B set
+# (test/ui/editor4c/*.json), and the Phase-C expansion set
+# (test/ui/editor4c_phase_c/*.json). Each fixture may name its own harness page
+# via the "html" field (default test/html/editor-dom.html).
 editor-4c-view: build
-	@echo "Running Stage 4C Phase B editor UI test suite..."
+	@echo "Running Stage 4C Phase B/C editor UI test suite..."
 	@echo "=============================================================="
 	@PASS=0; FAIL=0; TOTAL=0; \
-	for json in test/ui/editor4b/*.json test/ui/editor4c/*.json; do \
+	for json in test/ui/editor4b/*.json test/ui/editor4c/*.json test/ui/editor4c_phase_c/*.json; do \
 		[ -f "$$json" ] || continue; \
 		name=$$(basename $$json .json); \
 		TOTAL=$$((TOTAL + 1)); \

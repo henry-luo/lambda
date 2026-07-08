@@ -73,6 +73,14 @@ static void sim_input_turn_yield() {
 // Forward declarations for callbacks (defined in window.cpp)
 extern void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 extern bool radiant_editing_animation_tick(UiContext* uicon, double timestamp);
+extern "C" bool radiant_dispatch_event_sim_simple_event(UiContext* uicon,
+                                                        View* target,
+                                                        const char* type,
+                                                        bool bubbles,
+                                                        bool cancelable);
+extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
+                                                         View* target,
+                                                         int selected_index);
 extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
                                                          View* source,
                                                          uint32_t source_start,
@@ -4141,6 +4149,10 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             DocState* state = (DocState*)doc->state;
             form_control_set_selected_index(state, static_cast<View*>(select), match_index);
+            // user-like select changes must notify JS with selectedness already
+            // mirrored into js_dom; otherwise onchange sees the stale value.
+            radiant_dispatch_event_sim_select_change(uicon, static_cast<View*>(select),
+                                                     match_index);
             if (state) {
                 // Close dropdown if open
                 if (state->open_dropdown == select_view) {

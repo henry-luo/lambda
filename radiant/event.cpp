@@ -4980,6 +4980,70 @@ static bool radiant_dispatch_simple_event(EventContext* evcon, View* target,
     return prevented;
 }
 
+void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event);
+void event_context_cleanup(EventContext* evcon);
+extern "C" void js_dom_select_set_selected_index_bridge(void* dom_elem, Item value);
+
+extern "C" bool radiant_dispatch_event_sim_simple_event(UiContext* uicon,
+                                                        View* target,
+                                                        const char* type,
+                                                        bool bubbles,
+                                                        bool cancelable)
+{
+    if (!uicon || !target || !type) return false;
+    RdtEvent event;
+    memset(&event, 0, sizeof(event));
+    event.type = RDT_EVENT_NIL;
+    event.timestamp = 0;
+    EventContext evcon;
+    event_context_init(&evcon, uicon, &event);
+    evcon.target = target;
+    // event_sim mutates form controls directly; dispatch the browser-observed
+    // notification so script-owned controls see the same change a user made.
+    bool prevented = radiant_dispatch_simple_event(&evcon, target, type,
+                                                   bubbles, cancelable);
+    event_context_cleanup(&evcon);
+    return prevented;
+}
+
+extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
+                                                         View* target,
+                                                         int selected_index)
+{
+    if (!uicon || !target) return false;
+    RdtEvent event;
+    memset(&event, 0, sizeof(event));
+    event.type = RDT_EVENT_NIL;
+    event.timestamp = 0;
+    EventContext evcon;
+    event_context_init(&evcon, uicon, &event);
+    evcon.target = target;
+    DomElement* dom_target = radiant_view_to_dom_element(target);
+    if (!dom_target) {
+        event_context_cleanup(&evcon);
+        return false;
+    }
+    JsCtxScope scope;
+    if (!radiant_js_ctx_enter(&scope, &evcon)) {
+        event_context_cleanup(&evcon);
+        return false;
+    }
+    auto t_start = std::chrono::high_resolution_clock::now();
+    // event_sim selected the native form control; mirror that into JS DOM
+    // selectedness before firing change so handlers reading target.value see it.
+    js_dom_select_set_selected_index_bridge((void*)dom_target,
+                                            (Item){.item = i2it(selected_index)});
+    Item target_item = js_dom_wrap_element(dom_target);
+    Item input_ev = js_create_event("input", true, false);
+    js_dom_dispatch_event(target_item, input_ev);
+    Item change_ev = js_create_event("change", true, false);
+    js_dom_dispatch_event(target_item, change_ev);
+    bool prevented = js_event_is_default_prevented(change_ev);
+    radiant_js_ctx_exit(&scope, &evcon, t_start);
+    event_context_cleanup(&evcon);
+    return prevented;
+}
+
 // Stage 4C Phase B: dispatch a JS clipboard event (paste/copy/cut) with a
 // store-backed clipboardData to a rich/contenteditable surface, so script-owned
 // editors that use addEventListener('paste'|'copy') work under `lambda.exe view`
