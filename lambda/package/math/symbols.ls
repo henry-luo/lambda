@@ -54,7 +54,7 @@ let relations = {
     supseteq: "⊇", sqsubseteq: "⊑", sqsupseteq: "⊒",
     'in': "∈", ni: "∋", notin: "∉",
     vdash: "⊢", dashv: "⊣", models: "⊨",
-    mid: "∣", parallel: "∥", perp: "⊥",
+    mid: "∣", parallel: "∥", perp: "⟂",
     propto: "∝", asymp: "≍", bowtie: "⋈",
     ll: "≪", gg: "≫", doteq: "≐",
     trianglelefteq: "⊴", trianglerighteq: "⊵",
@@ -196,7 +196,8 @@ pub fn lookup_symbol(cmd) {
 pub fn classify_symbol(cmd) {
     let name = if (len(cmd) > 0 and slice(cmd, 0, 1) == "\\") slice(cmd, 1, len(cmd)) else cmd
 
-    if (bin_operators[name]) "mbin"
+    if (name == "neg" or name == "lnot") "mrel"
+    else if (bin_operators[name]) "mbin"
     else if (relations[name]) "mrel"
     else if (arrows[name]) "mrel"
     else if (big_operators[name]) "mop"

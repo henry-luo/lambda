@@ -129,10 +129,23 @@ fn render_symbol_command(node, context) {
     let display_text = if (unicode != null) unicode else cmd_text
     let atom_type = sym.classify_symbol(cmd_text)
     let cls = symbol_font_class(cmd_text, context)
-    if (unicode != null and sym.is_limit_op(cmd_text))
+    if (cmd_text == "\\iff")
+        render_iff_symbol(display_text, cls)
+    else if (cmd_text == "\\perp")
+        render_perp_symbol(display_text)
+    else if (unicode != null and sym.is_limit_op(cmd_text))
         render_limit_operator_symbol(display_text, context)
     else
         box.text_box(display_text, cls, atom_type)
+}
+
+fn render_iff_symbol(display_text, cls) {
+    let thick_l = box.box_cls(css.THICK, 0.0, 0.0, 0.0, "skip")
+    let glyph = box.text_box(display_text, cls, "mrel")
+    let thick_r = box.box_cls(css.THICK, 0.0, 0.0, 0.0, "skip")
+    // MathLive treats \iff as a relation glyph with explicit inner thickspaces;
+    // outer relation spacing is still supplied by the normal atom spacing table.
+    box_with_type(box.hbox([thick_l, glyph, thick_r]), "mrel")
 }
 
 fn render_number(node, context) {
@@ -167,10 +180,21 @@ fn render_relation(node, context) {
     let display = if (raw_lt_gt and display0 == "<") "\u{E000}"
         else if (raw_lt_gt and display0 == ">") "\u{E001}"
         else display0
+    if (text == "\\iff") render_iff_symbol(display, css.CMR)
+    else if (text == "\\perp") render_perp_symbol(display)
+    else {
     // ASCII `!` is mclose in TeX math, not mrel — `n!` should typeset
     // without thickspace between the letter and the factorial.
     let atom_type = if (text == "!") "mclose" else "mrel"
     box.text_box(display, css.CMR, atom_type)
+    }
+}
+
+fn render_perp_symbol(display) {
+    // MathLive's U+27C2 relation carries Main-Regular descent; without it the
+    // root hbox omits the bottom strut for `EF \perp GH`.
+    box.ml_box_full(<span class: css.CMR; display>, 0.7, 0.19444, 0.8,
+        "mrel", 0.0, 0.0, 0.7)
 }
 
 fn render_punct(node, context) {
@@ -253,6 +277,10 @@ fn render_command(node, context) {
          slice(cmd_text, 1, len(cmd_text)) else cmd_text
     if (name_str == "ne" or name_str == "neq") {
         render_not_overlay("=")
+    } else if (name_str == "iff") {
+        render_iff_symbol(sym.lookup_symbol(cmd_text), css.CMR)
+    } else if (name_str == "perp") {
+        render_perp_symbol(sym.lookup_symbol(cmd_text))
     } else if (name_str == "not") {
         render_not_command(node)
     } else if (name_str == "class") {
@@ -314,7 +342,7 @@ fn render_unknown_command_node(node, name_str, context) {
         0.75,
         0.25,
         0.4 * float(len(name_str) + 1),
-        "mord",
+        "mpunct",
         0.0,
         0.0,
         0.75
@@ -638,10 +666,11 @@ fn render_pmod_command(node, context) {
 // without surrounding parens or quad spacing.
 fn render_bmod_command(node, context) {
     let mod_box = box.with_class(box.text_box("mod", css.CMR, "mop"), css.OP_GROUP)
+    let thick_l = box.box_cls(css.THICK, 0.0, 0.0, 0.0, "skip")
     if (len(node) > 0) {
         let arg_box = render_node(node[0], context)
-        box.hbox([mod_box, box.skip_box(0.17), arg_box])
-    } else mod_box
+        box_with_type(box.hbox([thick_l, mod_box, box.skip_box(0.23), arg_box]), "mbin")
+    } else box_with_type(box.hbox([thick_l, mod_box]), "mbin")
 }
 
 // `\boldsymbol{...}` renders the body in mathbf font — handle by deriving a
@@ -1064,7 +1093,7 @@ fn render_line_accent(node, context, accent_key) {
     } else {
         if (tall) render_overline_tall(base_box)
         else if (base_box.width <= 0.8) render_overline_simple(base_box)
-        else render_overline_wide(base_box)
+        else render_overline_wide(base_box, context)
     }
 }
 
@@ -1091,31 +1120,24 @@ fn render_overline_simple(base_box) {
     line_accent_box(el, 0.64, 0.0, base_box.width, 0.0, 0.64, true)
 }
 
-fn render_overline_wide(base_box) {
-    let base_elements = box.elements_of(base_box)
+fn render_overline_wide(base_box, context) {
+    let rule = ctx.rule_thickness(context)
+    let line_box = box.ml_box_full(
+        <span class: "overline-line", style: "height:" ++ util.fmt_em(rule) ++ ";display:inline-block">,
+        rule, 0.0, 0.0, "ord", 0.0, 0.0, rule * 1.125)
+    let stack = box.ml_vlist_shift([
+        {box: base_box},
+        {kern: 3.0 * rule},
+        {box: line_box, no_wrap: true},
+        {kern: rule}
+    ], 0.0, "ord")
     let el = <span class: "overline";
-        <span class: css.VLIST_T2;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:0.64em";
-                    <span style: "top:-3em";
-                        <span class: css.PSTRUT, style: "height:3em">
-                        <span style: "height:0.63em;display:inline-block";
-                            for (el in base_elements) el
-                        >
-                    >
-                    <span style: "top:-3.55em";
-                        <span class: css.PSTRUT, style: "height:3em">
-                        <span class: "overline-line", style: "height:0.04em;display:inline-block">
-                    >
-                >
-                <span class: css.VLIST_S; "\u200B">
-            >
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:0.2em">
-            >
-        >
+        stack.element
     >
-    line_accent_box(el, 0.64, 0.2, base_box.width, 0.2, 0.84, false)
+    // MathLive's overline uses VBox({shift:0}) with [inner, 3*rule, line, rule];
+    // VList derives top positions, pstruts, height, and depth from that sequence.
+    line_accent_box(el, stack.height, stack.depth, base_box.width, stack.depth,
+        util.ceil_em2(stack.height + stack.depth), false)
 }
 
 fn render_overline_tall(base_box) {
