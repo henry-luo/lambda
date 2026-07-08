@@ -1,0 +1,15 @@
+{
+  "name": "editor4c-phase-c: image click exposes source-path node selection",
+  "html": "test/html/editor-dom.html",
+  "_note": "Lane-B expansion — covers DOM bridge/source-path observability. Clicking the rendered image should dispatch a node selection for source path [6,0], expose it through the demo harness, and show resize handles.",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface img"}, "attribute": "data-source-path", "contains": "6,0"},
+    {"type": "click", "target": {"selector": ".rdt-surface img"}},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface"}, "attribute": "data-rdt-selection", "contains": "\"kind\":\"node\""},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface"}, "attribute": "data-rdt-selection", "contains": "\"path\":[6,0]"},
+    {"type": "assert_count", "target": {"selector": ".rdt-img-handle"}, "equals": 4}
+  ]
+}

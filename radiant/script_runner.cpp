@@ -358,6 +358,78 @@ static void append_browser_global_sync(StrBuf* buf) {
         "}\n");
 }
 
+static char* try_join_script_resource(const char* root, const char* abs_path) {
+    if (!root || !abs_path || abs_path[0] != '/') return nullptr;
+    size_t root_len = strlen(root);
+    size_t path_len = strlen(abs_path);
+    char* candidate = (char*)mem_alloc(root_len + path_len + 1, MEM_CAT_JS_RUNTIME);
+    if (!candidate) return nullptr;
+    memcpy(candidate, root, root_len);
+    memcpy(candidate + root_len, abs_path, path_len);
+    candidate[root_len + path_len] = '\0';
+    if (file_exists(candidate)) return candidate;
+    mem_free(candidate);
+    return nullptr;
+}
+
+static char* try_layout_support_script_resource(const char* support_root, const char* src) {
+    if (!support_root || !src) return nullptr;
+
+    char* resolved = try_join_script_resource(support_root, src);
+    if (resolved) return resolved;
+
+    const char* css_support_prefix = "/css/support";
+    size_t css_support_prefix_len = strlen(css_support_prefix);
+    if (strncmp(src, css_support_prefix, css_support_prefix_len) == 0 &&
+        src[css_support_prefix_len] == '/') {
+        return try_join_script_resource(support_root, src + css_support_prefix_len);
+    }
+    return nullptr;
+}
+
+static char* resolve_wpt_absolute_script_path(const char* src, Url* base_url) {
+    if (!src || src[0] != '/' || src[1] == '/') return nullptr;
+
+    if (strcmp(src, "/resources/testharness.js") == 0) {
+        return mem_strdup("builtin:wpt-testharness.js", MEM_CAT_JS_RUNTIME);
+    }
+    if (strcmp(src, "/resources/testharnessreport.js") == 0) {
+        return mem_strdup("builtin:wpt-testharnessreport.js", MEM_CAT_JS_RUNTIME);
+    }
+
+    if (base_url) {
+        char* base_local = url_to_local_path(base_url);
+        if (base_local) {
+            const char* marker = strstr(base_local, "/test/layout/data/");
+            size_t marker_len = strlen("/test/layout/data");
+            if (!marker) {
+                marker = strstr(base_local, "/layout/data/");
+                marker_len = strlen("/layout/data");
+            }
+            if (marker) {
+                size_t root_len = (size_t)(marker - base_local) + marker_len;
+                char* support_root = (char*)mem_alloc(root_len + strlen("/support") + 1,
+                                                      MEM_CAT_JS_RUNTIME);
+                if (support_root) {
+                    memcpy(support_root, base_local, root_len);
+                    memcpy(support_root + root_len, "/support", strlen("/support") + 1);
+                    char* resolved = try_layout_support_script_resource(support_root, src);
+                    mem_free(support_root);
+                    if (resolved) {
+                        mem_free(base_local);
+                        return resolved;
+                    }
+                }
+            }
+            mem_free(base_local);
+        }
+    }
+
+    char* resolved = try_layout_support_script_resource("test/layout/data/support", src);
+    if (resolved) return resolved;
+    return try_join_script_resource("ref/wpt", src);
+}
+
 /**
  * Resolve a script src attribute to a loadable path/URL, following the same
  * URL resolution logic as CSS stylesheet loading in collect_linked_stylesheets.
@@ -387,6 +459,13 @@ static char* resolve_script_url(const char* src, Url* base_url, bool* out_is_htt
             return mem_strdup(src, MEM_CAT_JS_RUNTIME);
         }
     } else if (src[0] == '/' && src[1] != '/') {
+        char* wpt_path = resolve_wpt_absolute_script_path(src, base_url);
+        if (wpt_path) {
+            // WPT fixtures use server-root URLs while layout tests run from
+            // local files, so resolve known support scripts before falling
+            // back to the host filesystem root.
+            return wpt_path;
+        }
         // absolute local path
         return mem_strdup(src, MEM_CAT_JS_RUNTIME);
     } else if (strstr(src, "://") != nullptr) {
@@ -558,6 +637,21 @@ static void script_source_cache_store(const char* resolved_path, bool is_http,
 
 static char* load_script_content(const char* resolved_path, bool is_http) {
     char* content = nullptr;
+    if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharness.js") == 0) {
+        // CSS WPT layout fixtures only need synchronous assertion helpers; the
+        // full harness exceeds the pre-layout script budget and skips mutations.
+        return mem_strdup(
+            "function test(fn, name) { try { fn(); } catch (e) { if (typeof console !== 'undefined' && console.log) console.log('FAIL: ' + name + ' - ' + (e && e.message ? e.message : e)); } }\n"
+            "function assert_true(value, desc) { if (value !== true) throw new Error(desc || 'assert_true failed'); }\n"
+            "function assert_equals(actual, expected, desc) { if (actual !== expected) throw new Error(desc || ('assert_equals: ' + actual + ' !== ' + expected)); }\n"
+            "function assert_not_equals(actual, expected, desc) { if (actual === expected) throw new Error(desc || ('assert_not_equals: ' + actual)); }\n"
+            "function assert_in_array(actual, expected, desc) { for (var i = 0; i < expected.length; i++) { if (actual === expected[i]) return; } throw new Error(desc || ('assert_in_array: ' + actual)); }\n"
+            "window.test = test; window.assert_true = assert_true; window.assert_equals = assert_equals; window.assert_not_equals = assert_not_equals; window.assert_in_array = assert_in_array;\n",
+            MEM_CAT_JS_RUNTIME);
+    }
+    if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharnessreport.js") == 0) {
+        return mem_strdup("", MEM_CAT_JS_RUNTIME);
+    }
     if (is_http) {
         size_t content_size = 0;
         content = download_http_content_cached(resolved_path, &content_size, "./temp/cache");
@@ -1088,7 +1182,7 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
         "window.addEventListener = function(type, fn, opts) { document.addEventListener(type, fn, opts); };\n"
         "window.removeEventListener = function(type, fn, opts) { document.removeEventListener(type, fn, opts); };\n"
         "window.dispatchEvent = function(ev) { return document.dispatchEvent(ev); };\n"
-        "window.getComputedStyle = function(elem, pseudo) { return getComputedStyle(elem, pseudo); };\n"
+        "// getComputedStyle is installed natively; wrapping it here recurses through global lookup.\n"
         "window.matchMedia = function(q) { return {matches: false, media: q, addEventListener: function(){}, removeEventListener: function(){}}; };\n"
         "window.scrollTo = function(x, y) {\n"
         "  if (typeof x === 'object' && x !== null) {\n"
