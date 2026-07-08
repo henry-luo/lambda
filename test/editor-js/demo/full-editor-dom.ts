@@ -75,6 +75,16 @@ function h(tag: string, props: Props = {}, children: (Node | string)[] = []): HT
   return e
 }
 
+function cellPathFromSelection(doc: Doc, sel: Selection | null): SourcePath | null {
+  if (sel === null || sel.kind !== 'text') return null
+  for (let i = sel.anchor.path.length; i >= 0; i--) {
+    const path = sel.anchor.path.slice(0, i)
+    const n = nodeAt(doc, path)
+    if (n !== null && isNode(n) && (n.tag === 'td' || n.tag === 'th')) return path
+  }
+  return null
+}
+
 // ---------------------------------------------------------------------------
 // Framework-free helpers (copied verbatim from full-editor.tsx).
 // ---------------------------------------------------------------------------
@@ -490,6 +500,11 @@ export class FullEditorDom {
         const key = clicked.join(',')
         const cur = this.state.selection
         const paths = cur?.kind === 'multi-node' ? [...cur.paths] : []
+        if (paths.length === 0) {
+          const stateAnchor = cellPathFromSelection(this.state.doc, cur)
+          // Radiant syncs table clicks through editor state before DOM Selection is reliable.
+          if (stateAnchor !== null && stateAnchor.join(',') !== key) paths.push(stateAnchor)
+        }
         if (paths.length === 0) {
           const dom = window.getSelection()
           const anchorEl = dom?.anchorNode != null
