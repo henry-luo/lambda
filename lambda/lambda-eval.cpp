@@ -1622,7 +1622,8 @@ int total_cmp(Item a_item, Item b_item) {
 
 // 3-state value/ordered comparison
 // Scalar 3-state ordered comparison (BOOL_TRUE/BOOL_FALSE/BOOL_ERROR).  The
-// public fn_lt/fn_gt/fn_le/fn_ge wrappers add vectorized array dispatch on top.
+// public fn_lt/fn_gt/fn_le/fn_ge wrappers keep symbolic comparisons scalar-only;
+// explicit keyword operators route vector masks through vec_cmp.
 static bool datetime_magnitude_comparable(DateTime* a, DateTime* b) {
     bool a_time = a->precision == DATETIME_PRECISION_TIME_ONLY;
     bool b_time = b->precision == DATETIME_PRECISION_TIME_ONLY;
@@ -1747,13 +1748,7 @@ Bool fn_gt_scalar(Item a_item, Item b_item) {
     return BOOL_ERROR;
 }
 
-// Ordered comparisons now return Item (Any): an ARRAY_NUM operand yields an
-// element-wise boolean mask via vec_cmp (mirroring fn_add → vec_add), otherwise
-// the scalar comparison boxed as a bool Item.  vec_cmp op codes are the operator
-// minus OPERATOR_EQ: LT=2, LE=3, GT=4, GE=5.  (fn_eq/fn_ne stay Bool — not vectorized.)
 Item fn_lt(Item a_item, Item b_item) {
-    if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
-        return vec_cmp(a_item, b_item, 2);
     if (get_type_id(a_item) == LMD_TYPE_NULL || get_type_id(b_item) == LMD_TYPE_NULL)
         return ItemNull;
     Bool r = fn_lt_scalar(a_item, b_item);
@@ -1761,8 +1756,6 @@ Item fn_lt(Item a_item, Item b_item) {
 }
 
 Item fn_gt(Item a_item, Item b_item) {
-    if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
-        return vec_cmp(a_item, b_item, 4);
     if (get_type_id(a_item) == LMD_TYPE_NULL || get_type_id(b_item) == LMD_TYPE_NULL)
         return ItemNull;
     Bool r = fn_gt_scalar(a_item, b_item);
@@ -1770,8 +1763,6 @@ Item fn_gt(Item a_item, Item b_item) {
 }
 
 Item fn_le(Item a_item, Item b_item) {
-    if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
-        return vec_cmp(a_item, b_item, 3);
     if (get_type_id(a_item) == LMD_TYPE_NULL || get_type_id(b_item) == LMD_TYPE_NULL)
         return ItemNull;
     Bool r = fn_gt_scalar(a_item, b_item);   // a <= b  ==  !(a > b)
@@ -1779,8 +1770,6 @@ Item fn_le(Item a_item, Item b_item) {
 }
 
 Item fn_ge(Item a_item, Item b_item) {
-    if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
-        return vec_cmp(a_item, b_item, 5);
     if (get_type_id(a_item) == LMD_TYPE_NULL || get_type_id(b_item) == LMD_TYPE_NULL)
         return ItemNull;
     Bool r = fn_lt_scalar(a_item, b_item);   // a >= b  ==  !(a < b)

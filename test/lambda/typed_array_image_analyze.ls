@@ -7,7 +7,7 @@
 
 // --- Otsu threshold on a bimodal image, then segment with it ---
 "otsu:";          otsu([[50, 50], [200, 200]])          // plateau centre -> 124
-"otsu segments:"; ([[50, 50], [200, 200]] > otsu([[50, 50], [200, 200]]))
+"otsu segments:"; ([[50, 50], [200, 200]] gt otsu([[50, 50], [200, 200]]))
 
 // --- connected components (4-connectivity); count = max, areas = histogram ---
 let mask = [[1, 1, 0, 1], [1, 0, 0, 1], [0, 0, 1, 1]]

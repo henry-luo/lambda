@@ -1,0 +1,14 @@
+'=== keyword comparisons ==='
+[false, true, true]
+[true, false, false]
+[true, false, true]
+[true, true, false]
+'=== equality masks ==='
+[true, false, true]
+[false, true, false]
+[true, false]
+[false, false]
+'=== scalar keywords ==='
+true
+true
+false

@@ -52,6 +52,12 @@ function binary_expr($, in_attr) {
     ['**', 'binary_pow', 'right'],
     ['==', 'binary_eq'],
     ['!=', 'binary_eq'],
+    ['eq', 'binary_eq'],
+    ['ne', 'binary_eq'],
+    ['lt', 'binary_relation'],
+    ['le', 'binary_relation'],
+    ['ge', 'binary_relation'],
+    ['gt', 'binary_relation'],
     // Relational operators - excluded in attr to avoid element tag conflicts
     ...(in_attr ? [] :
       [['<', 'binary_relation'],

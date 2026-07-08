@@ -713,11 +713,12 @@ static Item vec_broadcast_op(ArrayNum* a, ArrayNum* b, int op) {
 }
 
 // ============================================================================
-// Vectorized comparisons: a OP b (a > 0, a == b, …) → ELEM_BOOL mask array.
+// Element-wise keyword comparisons: a OP b (a gt 0, a eq b, …) → ELEM_BOOL mask array.
 // op codes are (operator - OPERATOR_EQ): 0=EQ 1=NE 2=LT 3=LE 4=GT 5=GE.
 // Used to produce boolean masks for arr[mask] indexing.
 // ============================================================================
 static inline bool cmp_apply(double a, double b, int op) {
+    if (isnan(a) || isnan(b)) return false;
     switch (op) {
         case 0: return a == b;
         case 1: return a != b;
@@ -727,6 +728,24 @@ static inline bool cmp_apply(double a, double b, int op) {
         case 5: return a >= b;
     }
     return false;
+}
+
+static Item cmp_scalar_item(Item a, Item b, int op) {
+    if (op == 0) return (Item){ .item = b2it(fn_eq(a, b)) };
+    if (op == 1) return (Item){ .item = b2it(fn_ne(a, b)) };
+    if (get_type_id(a) == LMD_TYPE_NULL || get_type_id(b) == LMD_TYPE_NULL) return ItemNull;
+    Bool r = BOOL_ERROR;
+    if (op == 2) r = fn_lt_scalar(a, b);
+    else if (op == 3) {
+        r = fn_gt_scalar(a, b);
+        if (r != BOOL_ERROR) r = r ? BOOL_FALSE : BOOL_TRUE;
+    }
+    else if (op == 4) r = fn_gt_scalar(a, b);
+    else if (op == 5) {
+        r = fn_lt_scalar(a, b);
+        if (r != BOOL_ERROR) r = r ? BOOL_FALSE : BOOL_TRUE;
+    }
+    return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r) };
 }
 
 // element-wise comparison of two typed arrays (NumPy broadcast) → ELEM_BOOL array
@@ -753,7 +772,7 @@ static Item vec_cmp_broadcast(ArrayNum* a, ArrayNum* b, int op) {
     return { .array_num = result };
 }
 
-// a OP b where at least one operand is a typed numeric array → bool mask.
+// keyword a OP b: typed numeric arrays broadcast to a mask; scalar-scalar returns bool.
 Item vec_cmp(Item a, Item b, int op) {
     GUARD_ERROR2(a, b);
     bool a_arr = (get_type_id(a) == LMD_TYPE_ARRAY_NUM);
@@ -775,7 +794,8 @@ Item vec_cmp(Item a, Item b, int op) {
         return a_arr ? vec_cmp_broadcast(a.array_num, sw, op)
                      : vec_cmp_broadcast(sw, b.array_num, op);
     }
-    return ItemError;  // neither operand is an array (transpiler should not route here)
+    // Scalar keyword comparisons share the same scalar rules as symbolic comparisons.
+    return cmp_scalar_item(a, b, op);
 }
 
 // True iff either ArrayNum carries n-d shape metadata.
