@@ -191,12 +191,12 @@ fn render_punct(node, context) {
 // This produces visual parity with MathLive's `\prime` shortcut and lets
 // the outer strut wrap include the prime's height.
 fn render_prime_script(context) {
-    // In display style the superscript shift is slightly smaller: top -3.36
-    // and vlist height 0.76 (vs inline -3.41 / 0.81). Matches MathLive's
-    // mathstyle-dependent script positioning for `'`.
-    let is_disp = ctx.is_display(context)
-    let vlist_h = if (is_disp) 0.76 else 0.81
-    let top_em = if (is_disp) "-3.36em" else "-3.41em"
+    // Prime stacks are compact only in table/fraction child frames. Root
+    // display math still uses the taller inline prime stack in MathLive.
+    let compact = context.compact_prime == true
+    let cramped = context.cramped == true
+    let vlist_h = if (compact and cramped) 0.68 else if (compact) 0.76 else 0.81
+    let top_em = if (compact and cramped) "-3.28em" else if (compact) "-3.36em" else "-3.41em"
     let el = <span class: css.MSUBSUP;
         <span class: css.VLIST_T;
             <span class: css.VLIST_R;

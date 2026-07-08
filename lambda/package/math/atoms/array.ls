@@ -39,8 +39,10 @@ pub fn render_matrix(node, context, render_fn) {
 // ============================================================
 
 fn render_body(body, context, render_fn, env_name, columns) {
-    let cell_ctx = if (env_name == "smallmatrix" or env_name == "cases" or env_name == "rcases")
+    let cell_ctx = if (env_name == "smallmatrix")
         ctx.derive(context, {style: "script"})
+    else if (env_name == "cases" or env_name == "rcases")
+        ctx.derive(context, {style: "script", array_text_scripts: true})
     else if (env_name == "dcases")
         ctx.derive(context, {style: "display"})
     else context
@@ -55,7 +57,10 @@ fn render_body(body, context, render_fn, env_name, columns) {
     let aligns = if (declared_cols > 0) declared_alignment(columns)
         else get_alignment(env_name, ncols)
     let spacing_ctx = cell_spacing_context(env_name, context, cell_ctx)
-    let row_boxes = render_row_groups(row_groups, cell_ctx, spacing_ctx, render_fn)
+    let render_ctx = if (env_compact_prime(env_name))
+        ctx.derive(cell_ctx, {compact_prime: true})
+        else cell_ctx
+    let row_boxes = render_row_groups(row_groups, render_ctx, spacing_ctx, render_fn)
     let table = build_table(row_boxes, ncols, nrows, aligns, env_name)
     wrap_delimiters(table, env_name)
 }
@@ -102,6 +107,10 @@ fn cell_spacing_context(env_name, context, cell_ctx) {
     if (env_name == "cases" or env_name == "rcases")
         ctx.derive(context, {style: "text"})
     else cell_ctx
+}
+
+fn env_compact_prime(env_name) {
+    not (env_name == "aligned" or env_name == "align" or env_name == "equation")
 }
 
 fn render_row_groups(rows, cell_ctx, spacing_ctx, render_fn) {
@@ -300,8 +309,7 @@ fn cell_at(row_boxes, row, col) {
     else blank_cell_box()
 }
 
-// only smallmatrix still uses a hardcoded table (scriptstyle-cell model not
-// yet ported); everything else is metric-driven via compute_dyn_metrics.
+// environments not needing the dynamic row walk use the fixed matrix estimate.
 fn table_metrics(env_name, nrows) {
     matrix_table_metrics(nrows)
 }
@@ -315,26 +323,27 @@ fn table_metrics(env_name, nrows) {
 // vlist tops, and depth-holder all fall out of the centering offset.
 // ============================================================
 
-// scale-1.0 envs (cells render at the ambient/display style): matrix family,
-// array, dcases (display cells; adds inter-row `jot`). cases/rcases/smallmatrix
-// scale cells to scriptstyle and keep their legacy tables; equation has its own
-// centering.
+// Dynamic envs use the MathLive row walk. `smallmatrix` uses the same walk with
+// compact scriptstyle arstruts; `equation` has its own single-row centering.
 fn uses_dyn_metrics(env_name) {
-    not (env_name == "smallmatrix" or env_name == "equation")
+    not (env_name == "equation")
 }
 
 // TeX \jot (3pt = 0.3em): extra depth added to every non-last row in dcases/
 // rcases/aligned-style environments (NOT matrices, cases, or array).
 fn env_jot(env_name) {
     if (env_name == "dcases" or env_name == "rcases" or
-        env_name == "aligned" or env_name == "align") 0.3
+        env_name == "aligned" or env_name == "align" or
+        env_name == "smallmatrix") 0.3
     else 0.0
 }
 
-// \arraystretch: cases/rcases reserve taller rows (1.2 → arstrut 1.008/0.432,
-// so short script cells get a fixed row height); everything else uses 1.0.
+// \arraystretch: cases/rcases reserve taller rows (1.2 -> arstrut 1.008/0.432).
+// MathLive smallmatrix uses compact scriptstyle arstruts: half of the normal
+// 0.84/0.36 row strut, with the ordinary 0.3em row gap.
 fn env_arraystretch(env_name) {
     if (env_name == "cases" or env_name == "rcases") 1.2
+    else if (env_name == "smallmatrix") 0.5
     else 1.0
 }
 

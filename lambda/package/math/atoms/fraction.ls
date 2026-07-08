@@ -82,8 +82,8 @@ pub fn render(node, context, render_fn) {
     }
 
     // create numerator and denominator contexts (carry the child geometry)
-    let num_ctx = ctx.derive(ctx.numer_context(frac_ctx), {frac_gstyle: child_gstyle})
-    let den_ctx = ctx.derive(ctx.denom_context(frac_ctx), {frac_gstyle: child_gstyle})
+    let num_ctx = ctx.derive(ctx.numer_context(frac_ctx), {frac_gstyle: child_gstyle, compact_prime: true})
+    let den_ctx = ctx.derive(ctx.denom_context(frac_ctx), {frac_gstyle: child_gstyle, compact_prime: true})
 
     // render numerator and denominator
     let numer_box = if (node.numer != null) render_fn(node.numer, num_ctx)

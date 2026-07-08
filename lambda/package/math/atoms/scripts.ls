@@ -546,7 +546,11 @@ fn render_scripts(node, context, render_fn) {
          let sub_ctx_ = ctx.sub_context(context),
          let sup_box = if (has_sup) render_fn(node.sup, sup_ctx) else null,
          let sub_box = if (has_sub) render_fn(node.sub, sub_ctx_) else null,
-         let si = met.style_index(context.style),
+         // MathLive's compact cases body keeps operators in scriptstyle, but
+         // ordinary adjacent scripts use textstyle fontdimen slots and a 70%
+         // child wrapper; otherwise x^2 in cases drifts to 5/7 sizing.
+         let use_array_text_scripts = context.array_text_scripts == true and context.style == "script",
+         let si = if (use_array_text_scripts) 0 else met.style_index(context.style),
          let scriptspace = util.SCRIPT_SPACE,
          let x_height = met.X_HEIGHT,
          let rule_width = met.at(met.defaultRuleThickness, si),
@@ -558,8 +562,12 @@ fn render_scripts(node, context, render_fn) {
              else if (context.cramped) met.at(met.sup3, si)
              else met.at(met.sup2, si),
          let parent_scale = met.style_scale(context.style),
-         let sup_font_scale = if (has_sup) met.style_scale(sup_ctx.style) / parent_scale else 1.0,
-         let sub_font_scale = if (has_sub) met.style_scale(sub_ctx_.style) / parent_scale else 1.0,
+         let sup_font_scale = if (has_sup and use_array_text_scripts) 0.7
+             else if (has_sup) met.style_scale(sup_ctx.style) / parent_scale
+             else 1.0,
+         let sub_font_scale = if (has_sub and use_array_text_scripts) 0.7
+             else if (has_sub) met.style_scale(sub_ctx_.style) / parent_scale
+             else 1.0,
          let supsub_box = if (has_sup and has_sub)
              render_both(base_box, sup_box, sub_box, init_sup_shift, init_sub_shift,
                          min_sup_shift, x_height, rule_width, si,
