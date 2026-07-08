@@ -142,9 +142,9 @@ pub fn render_at_scale(delim, scale, atom_type) {
         else (
             let h = scale * 0.5,
             let d = if (level == 1) 0.345 else scale * 0.3,
-            box.make_box(
+            box.ml_box_full(
                 sized_delim_el(cls, display_char, atom_type),
-                h, d, 0.4 * scale, atom_type
+                h, d, 0.4 * scale, atom_type, 0.0, 0.0, h
             )
         )
     }
@@ -181,17 +181,8 @@ fn sized_delim_raw(level) {
     r
 }
 
-fn delim_box(el, h, d, w, atom_type, h_raw, d_raw) => {
-    element: el,
-    height: h,
-    depth: d,
-    height_raw: h_raw,
-    depth_raw: d_raw,
-    width: w,
-    type: atom_type,
-    italic: 0.0,
-    skew: 0.0
-}
+fn delim_box(el, h, d, w, atom_type, h_raw, d_raw) =>
+    box.ml_box_full(el, h_raw, d_raw, w, atom_type, 0.0, 0.0, h_raw)
 
 fn sized_delim_el(cls, ch, atom_type) {
     let side = side_class(atom_type)
@@ -202,15 +193,7 @@ fn sized_delim_el(cls, ch, atom_type) {
 fn render_null_delim(atom_type) {
     let side = side_class(atom_type)
     let cls = css.classes([css.NULLDELIMITER, side])
-    {
-        element: <span class: cls, style: "width:0.12em">,
-        height: 0.0,
-        depth: 0.0,
-        width: 0.12,
-        type: atom_type,
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box(<span class: cls, style: "width:0.12em">, 0.0, 0.0, 0.12, atom_type)
 }
 
 fn side_class(atom_type) {
@@ -262,18 +245,8 @@ pub fn is_surd_delim(ch) {
 pub fn render_corner(ch, atom_type) {
     let side = side_class(atom_type)
     let cls = css.classes([css.SMALL_DELIM, side])
-    {
-        element: <span class: cls, style: "top:0.08em;font-size: 70%"; ch>,
-        height: 0.65,
-        depth: 0.15,
-        render_height: 0.65,
-        render_depth: 0.15,
-        render_total: 0.8,
-        width: 0.4,
-        type: atom_type,
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(<span class: cls, style: "top:0.08em;font-size: 70%"; ch>,
+        0.65, 0.15, 0.4, atom_type, 0.0, 0.0, 0.65)
 }
 
 fn render_vertical_mult(ch, level, atom_type) {
@@ -286,8 +259,8 @@ fn render_vertical_mult(ch, level, atom_type) {
     let pieces = stk_pieces(spec, ch, 0, [])
     let raw = sized_delim_raw(level)
     let cls = css.classes([side_class(atom_type), "lm_delim-mult"])
-    {
-        element: <span class: cls;
+    box.ml_box_full(
+        <span class: cls;
             <span class: "delim-size1 lm_vlist-t lm_vlist-t2";
                 <span class: css.VLIST_R;
                     <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(spec.vlist_h);
@@ -300,18 +273,14 @@ fn render_vertical_mult(ch, level, atom_type) {
                 >
             >
         >,
-        height: raw.h,
-        depth: vertical_mult_box_depth(level),
-        height_raw: raw.h,
-        depth_raw: raw.d,
-        render_height: raw.h,
-        render_depth: vertical_mult_box_depth(level),
-        render_total: util.ceil_em2(spec.real_h),
-        width: 0.4,
-        type: atom_type,
-        italic: 0.0,
-        skew: 0.0
-    }
+        raw.h,
+        raw.d,
+        0.4,
+        atom_type,
+        0.0,
+        0.0,
+        raw.h
+    )
 }
 
 fn is_mult_left_right_delim(delim) {
@@ -326,8 +295,8 @@ fn render_mult_left_right_delim(delim, atom_type) {
     let spec = mult_left_right_spec(delim)
     let pieces = mult_left_right_pieces(spec, 0, [])
     let cls = css.classes([side_class(atom_type), "lm_delim-mult"])
-    {
-        element: <span class: cls;
+    box.ml_box_full(
+        <span class: cls;
             <span class: spec.inner_class;
                 <span class: css.VLIST_R;
                     <span class: css.VLIST, style: "height:1.44em";
@@ -340,18 +309,14 @@ fn render_mult_left_right_delim(delim, atom_type) {
                 >
             >
         >,
-        height: 1.45,
-        depth: 0.95,
-        height_raw: 1.45,
-        depth_raw: 0.95003,
-        render_height: 1.45,
-        render_depth: 0.95,
-        render_total: 2.41,
-        width: 0.4,
-        type: atom_type,
-        italic: 0.0,
-        skew: 0.0
-    }
+        1.45,
+        0.95003,
+        0.4,
+        atom_type,
+        0.0,
+        0.0,
+        1.45
+    )
 }
 
 fn mult_left_right_pieces(spec, i, acc) {
@@ -428,7 +393,7 @@ fn brace_group_spec(chars) => {
 // (∣ U+2223 / ∥ U+2225 share metrics), centred on the math axis, then
 // lays them out with the makeVList "bottom" walk. Every emitted dimension
 // is CEIL@2 (math.ls util / MathLive Box.toString). This replaces the old
-// per-level lookup tables (tops/height/depth_holder/render_total + the
+// per-level lookup tables (tops/height/depth_holder/visual_total + the
 // hardcoded 2.61 pstrut / 0.61 glyph) with the computation that produced
 // them.
 // ============================================================

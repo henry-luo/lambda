@@ -3,13 +3,13 @@
 // test/lambda/mathlive/generate_metrics_data.mjs — do not edit by hand.
 //
 // Each entry is keyed by character (string) and has value
-// [depth, height, italic, skew, width, height_raw, depth_raw] in em units.
+// [depth, height, italic, skew, width, height_exact, depth_exact] in em units.
 //   depth      — round-toward-baseline rounded to 2dp (used by layout math)
 //   height     — CEIL@2 (matches MathLive's emit-side rounding)
 //   italic     — CEIL@2 (margin-right emission)
 //   skew, width— half-up to 2dp (consumed by layout, not direct emission)
-//   height_raw — 5dp (used by strut emission: max(h_raw) → CEIL@2 at emit)
-//   depth_raw  — 5dp (used by strut emission: max(d_raw) → CEIL@2 at emit)
+//   height_exact — precise metric for root strut emission
+//   depth_exact  — precise metric for root strut emission
 
 // ============================================================
 // Main-Regular (cmr) — upright Roman / non-italic
@@ -1348,6 +1348,6 @@ pub fn italic_of(metrics) { if (metrics == null) null else metrics[2] }
 pub fn skew_of(metrics)   { if (metrics == null) null else metrics[3] }
 pub fn width_of(metrics)  { if (metrics == null) null else metrics[4] }
 // Full-precision (5dp) values — for strut emission and accent centering.
-pub fn height_raw_of(metrics) { if (metrics == null) null else metrics[5] }
-pub fn depth_raw_of(metrics)  { if (metrics == null) null else metrics[6] }
+pub fn height_exact_of(metrics) { if (metrics == null) null else metrics[5] }
+pub fn depth_exact_of(metrics)  { if (metrics == null) null else metrics[6] }
 pub fn width_raw_of(metrics)  { if (metrics == null) null else metrics[7] }

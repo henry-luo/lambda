@@ -443,32 +443,17 @@ fn parse_html_data_attrs(raw) {
 }
 
 fn wrap_content_element(el, content_box, atom_type) {
-    if (box.is_ml_box(content_box))
-        box.ml_box_full(
-            el,
-            content_box.height,
-            content_box.depth,
-            content_box.width,
-            atom_type,
-            content_box.italic,
-            content_box.skew,
-            if (content_box.max_font_size != null)
-                content_box.max_font_size else content_box.height
-        )
-    else {
-        element: el,
-        height: content_box.height,
-        depth: content_box.depth,
-        render_height: content_box.render_height,
-        render_depth: content_box.render_depth,
-        render_total: content_box.render_total,
-        left_right_render_depth: content_box.left_right_render_depth,
-        left_right_render_total: content_box.left_right_render_total,
-        width: content_box.width,
-        type: atom_type,
-        italic: content_box.italic,
-        skew: content_box.skew
-    }
+    box.ml_box_full(
+        el,
+        content_box.height,
+        content_box.depth,
+        content_box.width,
+        atom_type,
+        content_box.italic,
+        content_box.skew,
+        if (content_box.max_font_size != null)
+            content_box.max_font_size else content_box.height
+    )
 }
 
 fn parse_html_data_attr_parts(parts, i, acc) {
@@ -719,10 +704,8 @@ fn render_colorbox_content(content_arg, context) {
          transparent_hbox(spaced))
 }
 
-// The ∂ glyph as a BARE element (no class span / italic margin — matches the
-// \pdiff golden) but carrying full-precision metrics from the cmr table so the
-// \pdiff fraction's children expose height_raw/depth_raw and can take the
-// metric path. cmr ∂ = height 0.69444, depth 0 (no descender).
+// The partial glyph is a bare element (no class span / italic margin), while
+// still carrying the full cmr metrics needed by the fraction path.
 fn partial_box() =>
     box.ml_box_full("∂", 0.69444, 0.0, 0.45, "mord", 0.0, 0.0, 0.69444)
 
@@ -770,22 +753,18 @@ fn render_ensuremath_text(content) {
     } else {
         let inner_box = render_node(ast, ctx.text_context())
         let children = box.elements_of(inner_box)
-        {
-            element: <span class: css.TEXT;
+        box.ml_box_full(
+            <span class: css.TEXT;
                 for (el in children) el
             >,
-            height: inner_box.height,
-            depth: inner_box.depth,
-            render_height: inner_box.render_height,
-            render_depth: inner_box.render_depth,
-            render_total: inner_box.render_total,
-            left_right_render_depth: inner_box.left_right_render_depth,
-            left_right_render_total: inner_box.left_right_render_total,
-            width: inner_box.width,
-            type: "mord",
-            italic: 0.0,
-            skew: 0.0
-        }
+            inner_box.height,
+            inner_box.depth,
+            inner_box.width,
+            "mord",
+            0.0,
+            0.0,
+            if (inner_box.max_font_size != null) inner_box.max_font_size else inner_box.height
+        )
     }
 }
 
@@ -848,23 +827,14 @@ fn render_text_textcolor_content(content) {
         let before_box = if (before != "") box.text_box(before, css.TEXT, "mord") else null
         let color_box = text_color_box(body, color.resolve_raw(color_name))
         let elems = text_content_elements(before_box, color_box)
-        {
-            element: <span class: css.BASE;
+        text_content_special_box(
+            <span class: css.BASE;
                 for (el in elems) el
             >,
-            height: 0.65,
-            depth: 0.08,
-            render_height: 0.65,
-            render_depth: 0.08,
-            render_total: 0.73,
-            width: text_content_width(before_box, color_box),
-            type: "mord",
-            italic: 0.0,
-            skew: 0.0,
-            suppress_hbox_text_depth: true,
-            suppress_hbox_operator_render_height: true,
-            no_left_bin_space: true
-        }
+            0.65,
+            0.08,
+            text_content_width(before_box, color_box)
+        )
     }
 }
 
@@ -874,15 +844,14 @@ fn text_color_box(text, color_value) => {
     >,
     height: 0.65,
     depth: 0.08,
-    render_height: 0.65,
-    render_depth: 0.08,
-    render_total: 0.73,
     width: 0.5 * float(len(text)),
     type: "mord",
     italic: 0.0,
     skew: 0.0,
+    max_font_size: 0.65,
+    model: "ml",
     suppress_hbox_text_depth: true,
-    suppress_hbox_operator_render_height: true,
+    suppress_hbox_operator_height: true,
     no_left_bin_space: true
 }
 
@@ -892,20 +861,33 @@ fn render_tiny_text_content(content, tiny_idx) {
     let before_box = if (before != "") box.text_box(before, css.TEXT, "mord") else null
     let after_box = if (after != "") tiny_text_box(after) else null
     let elems = text_content_elements(before_box, after_box)
-    {
-        element: <span class: css.BASE;
+    box.ml_box_full(
+        <span class: css.BASE;
             for (el in elems) el
         >,
-        height: 0.7,
-        depth: 0.09,
-        render_height: 0.7,
-        render_depth: 0.09,
-        render_total: 0.8,
-        width: text_content_width(before_box, after_box),
-        type: "mord",
-        italic: 0.0,
-        skew: 0.0
-    }
+        0.7,
+        0.09,
+        text_content_width(before_box, after_box),
+        "mord",
+        0.0,
+        0.0,
+        0.7
+    )
+}
+
+fn text_content_special_box(el, h, d, w) => {
+    element: el,
+    height: h,
+    depth: d,
+    width: w,
+    type: "mord",
+    italic: 0.0,
+    skew: 0.0,
+    max_font_size: h,
+    model: "ml",
+    suppress_hbox_text_depth: true,
+    suppress_hbox_operator_height: true,
+    no_left_bin_space: true
 }
 
 fn tiny_text_box(text) => {
@@ -1217,24 +1199,21 @@ fn render_underline_tall(base_box) {
     line_accent_box(el, 1.15, 0.89, base_box.width, 0.88, 2.24, false)
 }
 
-fn line_accent_box(el, h, d, w, render_d, render_total_value, suppress_text_depth) => {
+fn line_accent_box(el, h, d, w, visual_d, visual_total, suppress_text_depth) => {
     element: el,
     height: h,
     depth: d,
-    render_height: h,
-    render_depth: render_d,
-    render_total: render_total_value,
     width: w,
     type: "mord",
     italic: 0.0,
     skew: 0.0,
+    max_font_size: h,
+    model: "ml",
     suppress_hbox_text_depth: suppress_text_depth
 }
 
 fn line_accent_is_tall(base_box) {
-    let total = if (base_box.render_total != null) base_box.render_total
-        else ((if (base_box.render_height != null) base_box.render_height else base_box.height) +
-              (if (base_box.render_depth != null) base_box.render_depth else base_box.depth))
+    let total = base_box.height + base_box.depth
     (total > 1.0)
 }
 
@@ -1298,10 +1277,10 @@ fn render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_he
     //   clearance = min(base.height, X_HEIGHT=0.43056)
     // For short bases (a/x, height ≤ X_HEIGHT) this reduces to accent.height;
     // for tall bases (b/d/A/F) the base lifts the accent by its overshoot.
-    let base_h_raw = if (base_box.height_raw != null) base_box.height_raw else base_box.height
-    let clearance = if (base_h_raw < 0.43056) base_h_raw else 0.43056
-    let accent_h_raw = accent_body_height_raw(accent_key)
-    let vlist_h = util.ceil_em2(base_h_raw - clearance + accent_h_raw)
+    let base_h = base_box.height
+    let clearance = if (base_h < 0.43056) base_h else 0.43056
+    let accent_h = accent_body_height_precise(accent_key)
+    let vlist_h = util.ceil_em2(base_h - clearance + accent_h)
     // Centering margin per MathLive: (base.width - accent.width)/2.
     let margin_left = accent_margin_left(accent_key, base_node, base_box)
     let el = <span class: css.VLIST_T;
@@ -1323,23 +1302,18 @@ fn render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_he
     accent_box_raw(el, vlist_h, base_box.width)
 }
 
-// A simple accent sits entirely above the baseline (depth 0) and its vlist
-// height is already CEIL@2, so it can carry raw metrics safely: with depth 0
-// there is no cross-term to overshoot the single-rounding strut. (Wide and
-// missing-base accents have depth and stay on the non-raw accent_box.)
+// A simple accent sits entirely above the baseline, so its vlist height can be
+// used directly by the root strut.
 fn accent_box_raw(el, h, w) => {
     element: el,
     height: h,
     depth: 0.0,
-    height_raw: h,
-    depth_raw: 0.0,
-    render_height: h,
-    render_depth: 0.0,
-    render_total: h,
     width: w,
     type: "mord",
     italic: 0.0,
     skew: 0.0,
+    max_font_size: h,
+    model: "ml",
     no_left_bin_space: true
 }
 
@@ -1410,13 +1384,12 @@ fn accent_box(el, h, d, w) => {
     element: el,
     height: h,
     depth: d,
-    render_height: h,
-    render_depth: d,
-    render_total: h + d,
     width: w,
     type: "mord",
     italic: 0.0,
     skew: 0.0,
+    max_font_size: h,
+    model: "ml",
     no_left_bin_space: true
 }
 
@@ -1447,9 +1420,9 @@ fn accent_body_height(key) {
     else 0.7
 }
 
-// Raw (5dp) accent glyph height in Main-Regular (from MathLive
-// font-metrics-data.ts). Used to compute the accent VBox height precisely.
-fn accent_body_height_raw(key) {
+// Precise accent glyph height in Main-Regular (from MathLive
+// font-metrics-data.ts). Used to compute the accent VBox height.
+fn accent_body_height_precise(key) {
     if (key == "vec" or key == "overrightarrow") 0.71444
     else if (key == "dot") 0.66786
     else if (key == "ddot") 0.66786
@@ -1506,19 +1479,20 @@ fn render_small_delimiter_group(left_text, right_text, spaced, content) {
         else if (has_corner) 0.15
         else if (is_shallow_small_delim(left_char) or is_shallow_small_delim(right_char))
         0.24 else 0.25
-    {
-        element: <span class: css.LEFT_RIGHT, style: style_attr;
+    box.ml_box_full(
+        <span class: css.LEFT_RIGHT, style: style_attr;
             left_el
             for (el in content_elements) el
             right_el
         >,
-        height: small_height,
-        depth: if (both_null) content.depth else small_depth,
-        width: content.width + 0.8,
-        type: "minner",
-        italic: 0.0,
-        skew: 0.0
-    }
+        small_height,
+        if (both_null) content.depth else small_depth,
+        content.width + 0.8,
+        "minner",
+        0.0,
+        0.0,
+        small_height
+    )
 }
 
 fn small_left_right_char(delim_text) {
@@ -1567,68 +1541,44 @@ fn render_stretchy_delimiter_group(left_text, right_text, content) {
     let parts = [left_box, content, right_box]
     let elements = box.child_elements(parts)
     let style_attr = stretchy_left_right_style(content)
-    let box_height = max(content.height, max(left_box.height, right_box.height))
-    let box_depth = max(content.depth, max(left_box.depth, right_box.depth))
-    // Full-precision box extent: the content's raw height/depth maxed with the
-    // delimiter glyph raw. Exposing these lets the outer strut round h+d ONCE
-    // (the use_raw path) — replacing the strut_total override entirely.
-    let content_h = if (content.height_raw != null) content.height_raw else content.height
-    let content_d = if (content.left_right_render_depth != null) content.left_right_render_depth
-        else if (content.depth_raw != null) content.depth_raw else content.depth
-    let box_h_raw = max(content_h, max(delim_raw_h(left_box), delim_raw_h(right_box)))
-    let box_d_raw = max(content_d, max(delim_raw_d(left_box), delim_raw_d(right_box)))
-    let strut = stretchy_left_right_render_total(content, left_box, right_box)
-    {
-        element: <span class: css.LEFT_RIGHT, style: style_attr;
+    let content_h = content.height
+    let content_d = content.depth
+    let box_h = max(content_h, max(delim_extent_h(left_box), delim_extent_h(right_box)))
+    let box_d = max(content_d, max(delim_extent_d(left_box), delim_extent_d(right_box)))
+    box.ml_box_full(
+        <span class: css.LEFT_RIGHT, style: style_attr;
             for (el in elements) el
         >,
-        height: box_height,
-        depth: box_depth,
-        height_raw: box_h_raw,
-        depth_raw: box_d_raw,
-        render_height: box_height,
-        render_depth: box_depth,
-        render_total: strut,
-        width: sum((for (p in parts where p != null) p.width)),
-        type: "minner",
-        italic: 0.0,
-        skew: 0.0
-    }
+        box_h,
+        box_d,
+        sum((for (p in parts where p != null) p.width)),
+        "minner",
+        0.0,
+        0.0,
+        box_h
+    )
 }
 
 fn stretchy_left_right_style(content) {
-    let render_depth = if (content.left_right_render_depth != null) content.left_right_render_depth
-        else if (content.render_depth != null) content.render_depth
-        else content.depth
-    let render_total = if (content.left_right_render_total != null) content.left_right_render_total
-        else if (content.render_total != null) content.render_total
-        else content.height + content.depth
-    "margin-top:" ++ fmt_delim_em(0.0 - render_depth) ++ ";height:" ++ fmt_delim_em(render_total)
+    let visual_depth = content.depth
+    let visual_total = content.height + content.depth
+    "margin-top:" ++ fmt_delim_em(0.0 - visual_depth) ++ ";height:" ++ fmt_delim_em(visual_total)
 }
 
-fn left_right_content_total(content) {
-    if (content.left_right_render_total != null) round(content.left_right_render_total * 100.0) / 100.0
-    else if (content.render_total != null) round(content.render_total * 100.0) / 100.0
-    else null
-}
-
-fn delim_raw_h(b) { if (b.height_raw != null) b.height_raw else b.height }
-fn delim_raw_d(b) { if (b.depth_raw != null) b.depth_raw else b.depth }
+fn delim_extent_h(b) { b.height }
+fn delim_extent_d(b) { b.depth }
 
 // \left..\right strut height = CEIL@2 of the box's full-precision height+depth,
 // computed ONCE (mirrors MathLive box.ts toString). The delimiter glyphs carry
-// raw extent (delimiters.ls sized_delim_raw) so a Size3 pair sums to 2.40003
+// precise extent (delimiters.ls sized_delim_metrics) so a Size3 pair sums to 2.40003
 // and rounds to 2.41 naturally — no special-casing.
-fn stretchy_left_right_render_total(content, left_box, right_box) {
-    let content_total = left_right_content_total(content)
-    let content_h = if (content.height_raw != null) content.height_raw else content.height
-    let content_d = if (content.left_right_render_depth != null) content.left_right_render_depth
-        else if (content.depth_raw != null) content.depth_raw else content.depth
-    let box_h = max(content_h, max(delim_raw_h(left_box), delim_raw_h(right_box)))
-    let box_d = max(content_d, max(delim_raw_d(left_box), delim_raw_d(right_box)))
+fn stretchy_left_right_total(content, left_box, right_box) {
+    let content_h = content.height
+    let content_d = content.depth
+    let box_h = max(content_h, max(delim_extent_h(left_box), delim_extent_h(right_box)))
+    let box_d = max(content_d, max(delim_extent_d(left_box), delim_extent_d(right_box)))
     let box_total = util.ceil_em2(box_h + box_d)
-    if (content_total == null) box_total
-    else max(content_total, box_total)
+    max(util.ceil_em2(content_h + content_d), box_total)
 }
 
 // \left..\right margin-top/height: MathLive emits these at full precision
@@ -1888,16 +1838,22 @@ fn is_single_alpha_delim(text) {
 }
 
 fn render_unknown_command(cmd) {
-    {
-        element: <span class: css.classes([css.ERROR, css.CMR]); cmd>,
-        height: 0.7,
-        depth: 0.0,
-        width: 0.4 * float(len(cmd)),
-        type: "mord",
-        italic: 0.0,
-        skew: 0.0,
-        mathlive_error: "unknown-command"
-    }
+    let bx = box.ml_box_full(<span class: css.classes([css.ERROR, css.CMR]); cmd>,
+        0.7, 0.0, 0.4 * float(len(cmd)), "mord", 0.0, 0.0, 0.7)
+    box_with_error(bx, "unknown-command")
+}
+
+fn box_with_error(bx, err) => {
+    element: bx.element,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: bx.type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    model: "ml",
+    mathlive_error: err
 }
 
 // ============================================================
@@ -1914,6 +1870,8 @@ fn render_middle_delim(node, context) {
             type: "mord",
             italic: 0.0,
             skew: 0.0,
+            max_font_size: 0.0,
+            model: "ml",
             suppress_hbox_text_depth: true
         }
     } else {
@@ -1928,6 +1886,8 @@ fn render_middle_delim(node, context) {
             type: bx.type,
             italic: bx.italic,
             skew: bx.skew,
+            max_font_size: bx.max_font_size,
+            model: "ml",
             is_middle_delim: true
         }
     }
@@ -1956,48 +1916,25 @@ fn render_radical(node, context) {
     let el = <span class: css.BASE;
         for (child in child_elements) child
     >
-    if (spec.height_raw != null and spec.depth_raw != null)
-        ml_radical_box(el, spec, body_box.width + 0.52, context)
-    else
-        legacy_radical_box(el, spec, body_box.width + 0.52, context)
+    radical_box(el, spec, body_box.width + 0.52, context)
 }
 
-fn ml_radical_box(el, spec, width, context) => {
+fn radical_box(el, spec, width, context) => {
         element: el,
-        height: spec.height_raw,
-        depth: spec.depth_raw,
+        height: if (spec.box_height != null) spec.box_height else spec.height,
+        depth: if (spec.box_depth != null) spec.box_depth else spec.depth,
         width: width,
         type: "mord",
         italic: 0.0,
         skew: 0.0,
-        max_font_size: spec.height_raw,
+        max_font_size: if (spec.box_height != null) spec.box_height else spec.height,
         model: "ml",
         is_radical: true,
         is_script_radical: context.style == "script" or context.style == "scriptscript"
 }
 
-fn legacy_radical_box(el, spec, width, context) => {
-        element: el,
-        height: spec.height,
-        depth: spec.depth,
-        // metric-driven specs (display/text) carry full-precision raw extent so
-        // the outer strut and raw-aware parents (fractions) round once; the
-        // legacy script specs leave these null and fall back to render_*.
-        height_raw: spec.height_raw,
-        depth_raw: spec.depth_raw,
-        render_height: spec.height,
-        render_depth: spec.depth,
-        render_total: spec.render_total,
-        width: width,
-        type: "mord",
-        italic: 0.0,
-        skew: 0.0,
-        is_radical: true,
-        is_script_radical: context.style == "script" or context.style == "scriptscript"
-}
-
 fn sqrt_unindexed_element(spec, body_elements) {
-    <span style: "display:inline-block;height:" ++ util.fmt_em(spec.render_total);
+    <span style: "display:inline-block;height:" ++ util.fmt_em(spec.visual_total);
         sqrt_sign_element(spec)
         sqrt_vlist_element(spec, body_elements)
     >
@@ -2088,8 +2025,8 @@ fn render_sqrt_index(index_box, context, compact_index) {
     // content-wrapper height is the index glyph's metric height × 0.5 (CEIL@2)
     // — e.g. `n` (0.43056) → 0.22, not the old hardcoded 0.33. The vlist
     // height follows as -top - 3 + child_h.
-    let idx_h_raw = if (index_box.height_raw != null) index_box.height_raw else index_box.height
-    let derived_child = util.ceil_em2(idx_h_raw * 0.5)
+    let idx_h = index_box.height
+    let derived_child = util.ceil_em2(idx_h * 0.5)
     let top = if (is_script and is_empty) -3.26
         else if (is_empty) -3.32
         else if (is_compact) -3.32
@@ -2143,12 +2080,12 @@ fn sqrt_spec(body_box, context, has_index) {
 // Covers display & text styles (scalingFactor 1.0); script/scriptscript stay
 // on the legacy specs above. Every dimension derives from the body's
 // full-precision height/depth plus the surd font metrics — no bucket dispatch.
-fn sqrt_raw_h(b) { if (b.height_raw != null) b.height_raw else b.height }
-fn sqrt_raw_d(b) { if (b.depth_raw != null) b.depth_raw else b.depth }
+fn sqrt_metric_h(b) { b.height }
+fn sqrt_metric_d(b) { b.depth }
 
 fn sqrt_geom(body_box, context) {
-    let inner_h = sqrt_raw_h(body_box)
-    let inner_d = sqrt_raw_d(body_box)
+    let inner_h = sqrt_metric_h(body_box)
+    let inner_d = sqrt_metric_d(body_box)
     let is_empty = inner_h == 0.0 and inner_d == 0.0
     let is_display = context.style == "display"
     let si = met.style_index(context.style)
@@ -2182,12 +2119,11 @@ fn sqrt_geom(body_box, context) {
     {
         height: util.ceil_em2(result_h),
         // depth projection rounds toward zero so the negated vertical-align
-        // matches MathLive's per-emission ceil (used only on the non-raw
-        // fallback path; the raw path reads depth_raw directly)
+        // matches MathLive's per-emission ceil.
         depth: 0.0 - util.ceil_em2(0.0 - result_d),
-        height_raw: result_h,
-        depth_raw: result_d,
-        render_total: util.ceil_em2(result_h + result_d),
+        box_height: result_h,
+        box_depth: result_d,
+        visual_total: util.ceil_em2(result_h + result_d),
         vlist_height: util.ceil_em2(body_h),
         body_height: util.ceil_em2(inner_h + inner_d),
         body_top: util.ceil_em2(0.0 - pstrut),
@@ -2227,9 +2163,7 @@ fn surd_metrics(min_delim) {
 fn make_sqrt_spec(h, d, body_h, body_top, line_top, sign_top, pstrut, line_h, sign_class) => {
     height: h,
     depth: d,
-    height_raw: null,
-    depth_raw: null,
-    render_total: if (h + d < 1.21) 1.21 else h + d,
+    visual_total: if (h + d < 1.21) 1.21 else h + d,
     body_height: body_h,
     body_top: body_top,
     line_top: line_top,
@@ -2242,9 +2176,7 @@ fn make_sqrt_spec(h, d, body_h, body_top, line_top, sign_top, pstrut, line_h, si
 fn make_script_sqrt_spec(body_box) => {
     height: 0.84,
     depth: 0.09,
-    height_raw: null,
-    depth_raw: null,
-    render_total: 1.0,
+    visual_total: 1.0,
     body_height: max(body_box.height, 0.83),
     body_top: -3.0,
     line_top: -3.75,
@@ -2489,18 +2421,7 @@ fn collect_empty_not_targets(node, i, text) {
 
 fn render_empty_not_targets(text) {
     let bx = box.text_box(text, css.CMR, "mrel")
-    {
-        element: bx.element,
-        height: 0.7,
-        depth: 0.19,
-        render_height: 0.7,
-        render_depth: 0.19,
-        render_total: 0.89,
-        width: bx.width,
-        type: "mrel",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(bx.element, 0.7, 0.19, bx.width, "mrel", 0.0, 0.0, 0.7)
 }
 
 fn is_not_target_sequence(node, i) {
@@ -2590,13 +2511,12 @@ fn render_color_switch_tail(node, context, i) {
         >,
         height: hb.height,
         depth: hb.depth,
-        render_height: hb.render_height,
-        render_depth: hb.render_depth,
-        render_total: hb.render_total,
         width: hb.width,
         type: hb.type,
         italic: hb.italic,
         skew: hb.skew,
+        max_font_size: hb.max_font_size,
+        model: hb.model,
         is_middle_delim: has_middle_delim(spaced, 0)
     })
 }
@@ -2649,35 +2569,20 @@ fn render_size_switch_tail(node, context, i) {
     let pct = (round(scale * 1000.0) / 10.0) ++ "%"
     let scaled_height = hb.height * scale
     let scaled_depth = hb.depth * scale
-    let scaled_render_height = if (hb.render_height != null) hb.render_height * scale else null
-    let scaled_render_depth = if (hb.render_depth != null) hb.render_depth * scale else null
-    let scaled_render_total = if (hb.render_total != null) hb.render_total * scale else null
     let report_height = if (scale > 2.0) round(scaled_height * 100.0) / 100.0 else scaled_height
     let report_depth = if (scale > 2.0) round(scaled_depth * 100.0) / 100.0 else scaled_depth
-    let report_render_height = if (scaled_render_height == null) null
-        else if (scale > 2.0) round(scaled_render_height * 100.0) / 100.0
-        else scaled_render_height
-    let report_render_depth = if (scaled_render_depth == null) null
-        else if (scale > 2.0) round(scaled_render_depth * 100.0) / 100.0
-        else scaled_render_depth
-    let report_render_total = if (scaled_render_total == null) null
-        else if (scale > 2.0) round((report_height + report_depth + 0.01) * 100.0) / 100.0
-        else scaled_render_total
     {
         element: <span style: "font-size: " ++ pct;
             for (el in elements) el
         >,
         height: report_height,
         depth: report_depth,
-        render_height: report_render_height,
-        render_depth: report_render_depth,
-        render_total: report_render_total,
-        left_right_render_depth: if (hb.left_right_render_depth != null) hb.left_right_render_depth * scale else null,
-        left_right_render_total: if (hb.left_right_render_total != null) hb.left_right_render_total * scale else null,
         width: hb.width * scale,
         type: hb.type,
         italic: hb.italic * scale,
         skew: hb.skew * scale,
+        max_font_size: if (hb.max_font_size != null) hb.max_font_size * scale else report_height,
+        model: "ml",
         is_middle_delim: has_middle_delim(spaced, 0)
     }
 }
@@ -2711,8 +2616,7 @@ fn has_trailing_radical(items) {
 }
 
 fn style_wrap_box(bx, style_text) {
-    if (box.is_ml_box(bx)) ml_style_wrap_box(bx, style_text)
-    else legacy_style_wrap_box(bx, style_text)
+    ml_style_wrap_box(bx, style_text)
 }
 
 fn ml_style_wrap_box(bx, style_text) => {
@@ -2730,31 +2634,6 @@ fn ml_style_wrap_box(bx, style_text) => {
     suppress_hbox_text_depth: true,
     is_middle_delim: bx.is_middle_delim,
     is_colorbox: bx.is_colorbox
-}
-
-fn legacy_style_wrap_box(bx, style_text) {
-    let rt = if (bx.render_height != null) bx.render_height else bx.height
-    {
-        element: <span style: style_text;
-            for (el in box.elements_of(bx)) el
-        >,
-        height: bx.height,
-        depth: 0.0,
-        render_height: bx.render_height,
-        render_depth: 0.0,
-        render_total: rt,
-        left_right_render_depth: if (bx.left_right_render_depth != null) 0.0 else null,
-        left_right_render_total: if (bx.left_right_render_total != null) rt else null,
-        width: bx.width,
-        type: bx.type,
-        italic: bx.italic,
-        skew: bx.skew,
-        max_font_size: bx.max_font_size,
-        model: bx.model,
-        suppress_hbox_text_depth: true,
-        is_middle_delim: bx.is_middle_delim,
-        is_colorbox: bx.is_colorbox
-    }
 }
 
 fn last_box_is_colorbox(items) {
@@ -2825,13 +2704,6 @@ fn render_textcolor_sequence(node, context, i) {
         >,
         height: hb.height,
         depth: hb.depth,
-        height_raw: hb.height_raw,
-        depth_raw: hb.depth_raw,
-        render_height: hb.render_height,
-        render_depth: hb.render_depth,
-        render_total: hb.render_total,
-        left_right_render_depth: hb.left_right_render_depth,
-        left_right_render_total: hb.left_right_render_total,
         width: hb.width,
         type: hb.type,
         italic: hb.italic,
@@ -2854,8 +2726,7 @@ fn render_dollar_math_group(content_arg, context) {
 }
 
 fn box_with_suppress_depth(bx) {
-    if (box.is_ml_box(bx)) ml_box_with_suppress_depth(bx)
-    else legacy_box_with_suppress_depth(bx)
+    ml_box_with_suppress_depth(bx)
 }
 
 fn ml_box_with_suppress_depth(bx) => {
@@ -2868,29 +2739,6 @@ fn ml_box_with_suppress_depth(bx) => {
     skew: bx.skew,
     max_font_size: bx.max_font_size,
     model: "ml",
-    suppress_hbox_text_depth: true,
-    is_middle_delim: bx.is_middle_delim,
-    is_script_radical: bx.is_script_radical
-}
-
-fn legacy_box_with_suppress_depth(bx) => {
-    element: bx.element,
-    height: bx.height,
-    depth: 0.0,
-    height_raw: bx.height_raw,
-    depth_raw: if (bx.depth_raw != null) 0.0 else null,
-    render_height: bx.render_height,
-    render_depth: 0.0,
-    render_total: if (bx.render_height != null) bx.render_height else bx.height,
-    left_right_render_depth: if (bx.left_right_render_depth != null) 0.0 else null,
-    left_right_render_total: if (bx.left_right_render_total != null)
-        (if (bx.render_height != null) bx.render_height else bx.height) else null,
-    width: bx.width,
-    type: bx.type,
-    italic: bx.italic,
-    skew: bx.skew,
-    max_font_size: bx.max_font_size,
-    model: bx.model,
     suppress_hbox_text_depth: true,
     is_middle_delim: bx.is_middle_delim,
     is_script_radical: bx.is_script_radical
@@ -2952,8 +2800,7 @@ fn bin_as_ord_after(prev_type) {
 }
 
 fn box_with_type(bx, atom_type) {
-    if (box.is_ml_box(bx)) ml_box_with_type(bx, atom_type)
-    else legacy_box_with_type(bx, atom_type)
+    ml_box_with_type(bx, atom_type)
 }
 
 fn ml_box_with_type(bx, atom_type) => {
@@ -2966,27 +2813,6 @@ fn ml_box_with_type(bx, atom_type) => {
     skew: bx.skew,
     max_font_size: bx.max_font_size,
     model: "ml",
-    is_fraction: bx.is_fraction,
-    is_script_radical: bx.is_script_radical
-}
-
-fn legacy_box_with_type(bx, atom_type) => {
-    element: bx.element,
-    height: bx.height,
-    depth: bx.depth,
-    height_raw: bx.height_raw,
-    depth_raw: bx.depth_raw,
-    render_height: bx.render_height,
-    render_depth: bx.render_depth,
-    render_total: bx.render_total,
-    left_right_render_depth: bx.left_right_render_depth,
-    left_right_render_total: bx.left_right_render_total,
-    width: bx.width,
-    type: atom_type,
-    italic: bx.italic,
-    skew: bx.skew,
-    max_font_size: bx.max_font_size,
-    model: bx.model,
     is_fraction: bx.is_fraction,
     is_script_radical: bx.is_script_radical
 }

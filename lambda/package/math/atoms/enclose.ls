@@ -25,15 +25,16 @@ pub fn render_box(node, context, render_fn) {
 
 // bordered box (\boxed, \fbox, \bbox)
 fn render_bordered(content_box) {
-    {
-        element: <span style: "border:1px solid;padding:0.1em"; content_box.element>,
-        height: content_box.height + 0.15,
-        depth: content_box.depth + 0.15,
-        width: content_box.width + 0.3,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(
+        <span style: "border:1px solid;padding:0.1em"; content_box.element>,
+        content_box.height + 0.15,
+        content_box.depth + 0.15,
+        content_box.width + 0.3,
+        "ord",
+        0.0,
+        0.0,
+        content_box.height + 0.15
+    )
 }
 
 fn render_bbox(content_box, node) {
@@ -47,8 +48,8 @@ fn render_bbox(content_box, node) {
         ";vertical-align:" ++ util.fmt_em(spec.vertical_align)
     let overlay_style = "box-sizing:border-box;position:absolute;top:" ++ fmt_bbox_dim(spec.overlay_top) ++
         ";left:0;height:" ++ util.fmt_em(spec.overlay_height) ++ ";width:100%" ++ spec.box_style
-    {
-        element: <span style: outer_style;
+    box.ml_box_full(
+        <span style: outer_style;
             <span class: "lm_box", style: overlay_style>
             <span style: "display:inline-block;position:relative;height:" ++
                 util.fmt_em(content_box.height) ++ ";vertical-align:" ++
@@ -56,16 +57,14 @@ fn render_bbox(content_box, node) {
                 for (child in children) child
             >
         >,
-        height: spec.height,
-        depth: spec.depth,
-        render_height: spec.height,
-        render_depth: spec.depth,
-        render_total: spec.overlay_height,
-        width: content_box.width + spec.padding * 2.0,
-        type: "minner",
-        italic: 0.0,
-        skew: 0.0
-    }
+        spec.height,
+        spec.depth,
+        content_box.width + spec.padding * 2.0,
+        "minner",
+        0.0,
+        0.0,
+        spec.height
+    )
 }
 
 fn fmt_bbox_dim(v) {
@@ -123,20 +122,21 @@ fn render_lap(content_box, align) {
         else if (align == "left") "lm_rlap"
         else "lm_clap"
     let children = box.elements_of(content_box)
-    {
-        element: <span class: cls;
+    box.ml_box_full(
+        <span class: cls;
             <span class: "lm_inner";
                 for (child in children) child
             >
             <span class: "lm_fix">
         >,
-        height: content_box.height,
-        depth: content_box.depth,
-        width: 0.0,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+        content_box.height,
+        content_box.depth,
+        0.0,
+        "ord",
+        0.0,
+        0.0,
+        if (content_box.max_font_size != null) content_box.max_font_size else content_box.height
+    )
 }
 
 // ============================================================
@@ -157,41 +157,41 @@ pub fn render_phantom(node, context, render_fn) {
 
 // full phantom — invisible but takes up full space
 fn render_full_phantom(content_box) {
-    {
-        element: <span style: "visibility:hidden;display:inline-block"; content_box.element>,
-        height: content_box.height,
-        depth: content_box.depth,
-        width: content_box.width,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(
+        <span style: "visibility:hidden;display:inline-block"; content_box.element>,
+        content_box.height,
+        content_box.depth,
+        content_box.width,
+        "ord",
+        0.0,
+        0.0,
+        if (content_box.max_font_size != null) content_box.max_font_size else content_box.height
+    )
 }
 
 // hphantom — invisible, zero height/depth, keeps width
 fn render_hphantom(content_box) {
-    {
-        element: <span style: "visibility:hidden;display:inline-block;height:0"; content_box.element>,
-        height: 0.0,
-        depth: 0.0,
-        width: content_box.width,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box(
+        <span style: "visibility:hidden;display:inline-block;height:0"; content_box.element>,
+        0.0,
+        0.0,
+        content_box.width,
+        "ord"
+    )
 }
 
 // vphantom — invisible, zero width, keeps height/depth
 fn render_vphantom(content_box) {
-    {
-        element: <span style: "visibility:hidden;display:inline-block;width:0"; content_box.element>,
-        height: content_box.height,
-        depth: content_box.depth,
-        width: 0.0,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(
+        <span style: "visibility:hidden;display:inline-block;width:0"; content_box.element>,
+        content_box.height,
+        content_box.depth,
+        0.0,
+        "ord",
+        0.0,
+        0.0,
+        if (content_box.max_font_size != null) content_box.max_font_size else content_box.height
+    )
 }
 
 // smash — visible, zero height and/or depth
@@ -199,15 +199,17 @@ fn render_smash(content_box, node) {
     let opts = if (node.options != null) string(node.options) else ""
     let zero_h = if (opts == "b") false else true
     let zero_d = if (opts == "t") false else true
-    {
-        element: <span style: "display:inline-block"; content_box.element>,
-        height: if (zero_h) 0.0 else content_box.height,
-        depth: if (zero_d) 0.0 else content_box.depth,
-        width: content_box.width,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(
+        <span style: "display:inline-block"; content_box.element>,
+        if (zero_h) 0.0 else content_box.height,
+        if (zero_d) 0.0 else content_box.depth,
+        content_box.width,
+        "ord",
+        0.0,
+        0.0,
+        if (zero_h) 0.0 else if (content_box.max_font_size != null)
+            content_box.max_font_size else content_box.height
+    )
 }
 
 // ============================================================

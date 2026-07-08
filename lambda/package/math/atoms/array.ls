@@ -123,8 +123,7 @@ fn bin_as_ord_after(prev_type) {
 }
 
 fn box_with_type(bx, atom_type) {
-    if (box.is_ml_box(bx)) ml_box_with_type(bx, atom_type)
-    else legacy_box_with_type(bx, atom_type)
+    ml_box_with_type(bx, atom_type)
 }
 
 fn ml_box_with_type(bx, atom_type) => {
@@ -137,29 +136,6 @@ fn ml_box_with_type(bx, atom_type) => {
     skew: bx.skew,
     max_font_size: bx.max_font_size,
     model: "ml",
-    is_fraction: bx.is_fraction
-}
-
-fn legacy_box_with_type(bx, atom_type) => {
-    element: bx.element,
-    height: bx.height,
-    depth: bx.depth,
-    // preserve full-precision raw extent through the bin->ord reclassification:
-    // dropping it poisons the cell hbox's raw propagation, forcing the array's
-    // per-row height/depth onto the already-rounded values and double-rounding
-    // the cell (e.g. dcases row jot: 1.81+1.25+0.3 ceil2-tips to 3.37 vs the
-    // single-rounded 1.805+1.25001+0.3 -> 3.36).
-    height_raw: bx.height_raw,
-    depth_raw: bx.depth_raw,
-    render_height: bx.render_height,
-    render_depth: bx.render_depth,
-    render_total: bx.render_total,
-    left_right_render_depth: bx.left_right_render_depth,
-    left_right_render_total: bx.left_right_render_total,
-    width: bx.width,
-    type: atom_type,
-    italic: bx.italic,
-    skew: bx.skew,
     is_fraction: bx.is_fraction
 }
 
@@ -237,39 +213,24 @@ fn build_table(row_boxes, ncols, nrows, aligns, env_name) {
     let el = <span class: css.MTABLE;
         for el in children { el }
     >
-    if (array_has_delimiters(env_name)) legacy_table_box(el, metrics, total_w)
-    else ml_table_box(el, metrics, total_w)
+    ml_table_box(el, metrics, total_w)
 }
 
 fn array_has_delimiters(env_name) {
     get_left_delim(env_name) != null or get_right_delim(env_name) != null
 }
 
-fn ml_table_box(el, metrics, total_w) =>
-    box.ml_box_full(
-        el,
-        if (metrics.height_raw != null) metrics.height_raw else metrics.height,
-        if (metrics.depth_raw != null) metrics.depth_raw else metrics.depth,
-        total_w,
-        "ord",
-        0.0,
-        0.0,
-        if (metrics.height_raw != null) metrics.height_raw else metrics.height
-    )
-
-fn legacy_table_box(el, metrics, total_w) => {
+fn ml_table_box(el, metrics, total_w) => {
     element: el,
-    height: metrics.height,
-    depth: metrics.depth,
-    height_raw: metrics.height_raw,
-    depth_raw: metrics.depth_raw,
-    render_height: metrics.height,
-    render_depth: metrics.depth,
-    render_total: metrics.render_total,
+    height: if (metrics.box_height != null) metrics.box_height else metrics.height,
+    depth: if (metrics.box_depth != null) metrics.box_depth else metrics.depth,
     width: total_w,
     type: "ord",
     italic: 0.0,
-    skew: 0.0
+    skew: 0.0,
+    max_font_size: if (metrics.box_height != null) metrics.box_height else metrics.height,
+    model: "ml",
+    delim_total: metrics.box_total
 }
 
 fn build_table_children(row_boxes, ncols, aligns, metrics, env_name, col, acc) {
@@ -377,8 +338,8 @@ fn env_arraystretch(env_name) {
     else 1.0
 }
 
-fn dyn_cell_h(b) { if (b != null and b.height_raw != null) b.height_raw else if (b != null) b.height else 0.0 }
-fn dyn_cell_d(b) { if (b != null and b.depth_raw != null) b.depth_raw else if (b != null) b.depth else 0.0 }
+fn dyn_cell_h(b) { if (b != null) b.height else 0.0 }
+fn dyn_cell_d(b) { if (b != null) b.depth else 0.0 }
 
 fn dyn_row_max_h(row_boxes, r, ncols, col, acc) {
     if (col >= ncols) acc
@@ -468,9 +429,9 @@ fn compute_dyn_metrics(row_boxes, ncols, nrows, env_name) {
     let m = {
         height: util.ceil_em2(box_h),
         depth: util.ceil_em2(box_d),
-        height_raw: box_h,
-        depth_raw: box_d,
-        render_total: util.ceil_em2(box_h + box_d),
+        box_height: box_h,
+        box_depth: box_d,
+        box_total: util.ceil_em2(box_h + box_d),
         vlist_height: util.ceil_em2(box_h),
         depth_holder: util.ceil_em2(box_d),
         pstrut: util.ceil_em2(pstrut),
@@ -487,8 +448,8 @@ fn compute_dyn_metrics(row_boxes, ncols, nrows, env_name) {
 // rather than the fixed matrix estimates, so `E = mc^2` (content h=0.87) emits
 // strut 0.87 / strut-bottom 1.23 instead of the generic 0.85 / 1.21.
 fn equation_table_metrics(content_box) {
-    let ch = if (content_box.render_height != null) content_box.render_height else content_box.height
-    let cd = if (content_box.render_depth != null) content_box.render_depth else content_box.depth
+    let ch = content_box.height
+    let cd = content_box.depth
     // Centered on the axis: the symmetric half-extent is the larger of the
     // above-axis and below-axis reach; height/depth straddle the axis.
     let axis = 0.255
@@ -502,7 +463,7 @@ fn equation_table_metrics(content_box) {
     {
         height: h,
         depth: d,
-        render_total: util.ceil_em2(h + d),
+        box_total: util.ceil_em2(h + d),
         vlist_height: h,
         depth_holder: dh,
         pstrut: 3.0,
@@ -515,7 +476,7 @@ fn equation_table_metrics(content_box) {
 fn matrix_table_metrics(nrows) => {
     height: 0.85 + 0.6 * float(nrows - 1),
     depth: 0.35 + 0.6 * float(nrows - 1),
-    render_total: 1.21 + 1.2 * float(nrows - 1),
+    box_total: 1.21 + 1.2 * float(nrows - 1),
     vlist_height: 0.85 + 0.6 * float(nrows - 1),
     depth_holder: if (nrows == 1) 0.35
         else if (nrows == 2) 0.96
@@ -538,7 +499,7 @@ fn row_cell_height(metrics, row) {
 
 
 fn matrix_row_top(metrics, row) {
-    let nrows = int(round((metrics.render_total - 1.21) / 1.2)) + 1
+    let nrows = int(round((metrics.box_total - 1.21) / 1.2)) + 1
     if (nrows == 1) 0.0 - 3.01
     else if (nrows == 2) {
         if (row == 0) 0.0 - 3.61 else 0.0 - 2.4
@@ -654,19 +615,19 @@ fn wrap_with_delimiters(table_box, ld, rd) {
     let children = (for (p in parts) p.element)
     let total_width = sum((for (p in parts) p.width))
     // The strut spans the taller of the content and the (axis-centred)
-    // delimiter glyphs — exactly like \left..\right. Exposing raw lets the
-    // outer strut round h+d ONCE so a Size3 bracket pair emits 2.41.
-    let ch = if (table_box.height_raw != null) table_box.height_raw else table_box.height
-    let cd = if (table_box.depth_raw != null) table_box.depth_raw else table_box.depth
+    // delimiter glyphs — exactly like \left..\right. The result stores the
+    // full extent in the primary fields so the outer strut rounds once.
+    let ch = table_box.height
+    let cd = table_box.depth
     let box_h = max(ch, max(delim_ext_h(left_box), delim_ext_h(right_box)))
     let box_d = max(cd, max(delim_ext_d(left_box), delim_ext_d(right_box)))
-    // A tall `{` brace (render_total > 4.0) is built as a STACKED multi-piece
+    // A tall `{` brace (visual total > 4.0) is built as a STACKED multi-piece
     // delimiter (render_brace_mult_delim) whose segments are laid out with
     // CEIL@2 CSS tops, so its bounding box spans the SEPARATELY-rounded content
     // extent: the surrounding strut emits ceil2(h)+ceil2(-d), not the once-
     // rounded ceil2(h+d) that a single sized glyph (cases/Bmatrix) gives.
-    // Expose the pre-rounded extent as *_raw so the use_raw strut sums them
-    // without re-tipping (dcases 3.46 + 2.95 = 6.41, not ceil2(6.41001) = 6.42).
+    // Store the pre-rounded extent in the public fields so the root strut does
+    // not re-tip dcases from 6.41 to 6.42.
     let table_total = table_delim_total(table_box)
     let stacked_brace = ld == "{" and table_total > 4.0
     let h_raw = if (stacked_brace) util.ceil_em2(box_h) else box_h
@@ -685,11 +646,11 @@ fn wrap_with_delimiters(table_box, ld, rd) {
     )
 }
 
-fn delim_ext_h(b) { if (b == null) 0.0 else if (b.height_raw != null) b.height_raw else b.height }
-fn delim_ext_d(b) { if (b == null) 0.0 else if (b.depth_raw != null) b.depth_raw else b.depth }
+fn delim_ext_h(b) { if (b == null) 0.0 else b.height }
+fn delim_ext_d(b) { if (b == null) 0.0 else b.depth }
 
 fn table_delim_total(table_box) {
-    if (table_box.render_total != null) table_box.render_total
+    if (table_box.delim_total != null) table_box.delim_total
     else util.ceil_em2(table_box.height + table_box.depth)
 }
 
@@ -706,10 +667,10 @@ fn render_matrix_delim(ch, table_box) {
     else render_plain_sized_delim(ch, matrix_delim_level(table_total))
 }
 
-fn matrix_delim_level(render_total) {
-    if (render_total <= 1.21) 1
-    else if (render_total <= 1.81) 2
-    else if (render_total <= 2.41) 3
+fn matrix_delim_level(visual_total) {
+    if (visual_total <= 1.21) 1
+    else if (visual_total <= 1.81) 2
+    else if (visual_total <= 2.41) 3
     else 4
 }
 
