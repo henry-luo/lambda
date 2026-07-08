@@ -20,9 +20,12 @@ import fs from 'node:fs'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')  // test/editor-js
 const args = process.argv.slice(2)
 let tier = null, outFile = null
+let caseStart = 1, caseEnd = 0
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--tier') tier = args[++i]
   else if (args[i] === '--out') outFile = path.resolve(args[++i])
+  else if (args[i] === '--case-start') caseStart = Number(args[++i])
+  else if (args[i] === '--case-end') caseEnd = Number(args[++i])
 }
 if (!tier || !outFile) { console.error('usage: --tier <name> --out <file.js>'); process.exit(2) }
 
@@ -111,6 +114,9 @@ await build({
   outfile: outFile,
   alias: { vitest: path.resolve(root, 'harness/inengine.ts') },
   plugins: [vfsPlugin],
+  banner: caseEnd > 0 ? {
+    js: `globalThis.__LAMBDA_TIER_CASE_START=${caseStart};globalThis.__LAMBDA_TIER_CASE_END=${caseEnd};`
+  } : undefined,
   define: { 'import.meta.url': JSON.stringify('file://' + entryTs) },
   logLevel: 'warning'
 })
