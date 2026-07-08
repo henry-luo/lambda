@@ -33,7 +33,8 @@ Item push_c(int64_t cval) {
                            (t) == LMD_TYPE_ARRAY || (t) == LMD_TYPE_RANGE)
 
 #define IS_SCALAR_NUMERIC(t) ((t) == LMD_TYPE_INT || (t) == LMD_TYPE_INT64 || \
-                              (t) == LMD_TYPE_FLOAT || (t) == LMD_TYPE_DECIMAL || \
+                              (t) == LMD_TYPE_FLOAT || (t) == LMD_TYPE_FLOAT64 || \
+                              (t) == LMD_TYPE_DECIMAL || \
                               (t) == LMD_TYPE_NUM_SIZED || (t) == LMD_TYPE_UINT64)
 
 // promote NUM_SIZED / UINT64 to native integer values for ordinary arithmetic
@@ -50,6 +51,8 @@ static inline void normalize_sized(Item &item, TypeId &type) {
     } else if (type == LMD_TYPE_UINT64) {
         item = push_l((int64_t)item.get_uint64());
         type = LMD_TYPE_INT64;
+    } else if (type == LMD_TYPE_FLOAT64) {
+        type = LMD_TYPE_FLOAT;
     }
 }
 
@@ -66,6 +69,13 @@ enum SizedIntegerOp {
     SIZED_INTEGER_MUL,
     SIZED_INTEGER_DIV,
     SIZED_INTEGER_MOD,
+};
+
+enum SizedFloatOp {
+    SIZED_FLOAT_ADD,
+    SIZED_FLOAT_SUB,
+    SIZED_FLOAT_MUL,
+    SIZED_FLOAT_DIV,
 };
 
 enum SizedBitwiseOp {
@@ -246,6 +256,37 @@ static bool sized_integer_arithmetic(Item item_a, TypeId type_a, Item item_b, Ty
     return true;
 }
 
+static bool sized_float_arithmetic(Item item_a, TypeId type_a, Item item_b, TypeId type_b,
+        SizedFloatOp op, Item* result) {
+    if (type_a != LMD_TYPE_NUM_SIZED || type_b != LMD_TYPE_NUM_SIZED) return false;
+    NumSizedType st_a = item_a.get_num_type();
+    NumSizedType st_b = item_b.get_num_type();
+    bool a_float = (st_a == NUM_FLOAT16 || st_a == NUM_FLOAT32);
+    bool b_float = (st_b == NUM_FLOAT16 || st_b == NUM_FLOAT32);
+    if (!a_float || !b_float) return false;
+
+    double a = item_a.get_num_sized_as_double();
+    double b = item_b.get_num_sized_as_double();
+    double value = 0.0;
+    if (op == SIZED_FLOAT_ADD) value = a + b;
+    else if (op == SIZED_FLOAT_SUB) value = a - b;
+    else if (op == SIZED_FLOAT_MUL) value = a * b;
+    else {
+        if (b == 0.0) {
+            log_error("sized float division by zero error");
+            *result = ItemError;
+            return true;
+        }
+        value = a / b;
+    }
+
+    // Mixed sized-float lanes keep the smallest explicit lane that contains both operands.
+    *result = (st_a == NUM_FLOAT32 || st_b == NUM_FLOAT32)
+        ? (Item){ .item = f32_to_item((float)value) }
+        : (Item){ .item = f16_to_item((float)value) };
+    return true;
+}
+
 static bool sized_integer_neg(Item item, TypeId type, Item* result) {
     SizedIntegerValue value;
     if (!read_sized_integer(item, type, &value)) return false;
@@ -277,6 +318,7 @@ static bool read_bitwise_integer(Item item, BitwiseIntegerValue* out) {
         out->value.raw = (uint64_t)out->value.sval;
         return true;
     case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64:
         out->value.sval = (int64_t)item.get_double();
         out->value.raw = (uint64_t)out->value.sval;
         return true;
@@ -417,7 +459,7 @@ static bool aggregate_number_value(Item item, double* out, bool* is_float) {
         *out = (double)item.get_int64();
         return true;
     }
-    if (type == LMD_TYPE_FLOAT) {
+    if (type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64) {
         *out = item.get_double();
         *is_float = true;
         return true;
@@ -441,6 +483,9 @@ Item fn_add(Item item_a, Item item_b) {
 
     Item sized_result;
     if (sized_integer_arithmetic(item_a, type_a, item_b, type_b, SIZED_INTEGER_ADD, &sized_result)) {
+        return sized_result;
+    }
+    if (sized_float_arithmetic(item_a, type_a, item_b, type_b, SIZED_FLOAT_ADD, &sized_result)) {
         return sized_result;
     }
 
@@ -529,6 +574,9 @@ Item fn_mul(Item item_a, Item item_b) {
 
     Item sized_result;
     if (sized_integer_arithmetic(item_a, type_a, item_b, type_b, SIZED_INTEGER_MUL, &sized_result)) {
+        return sized_result;
+    }
+    if (sized_float_arithmetic(item_a, type_a, item_b, type_b, SIZED_FLOAT_MUL, &sized_result)) {
         return sized_result;
     }
 
@@ -624,6 +672,9 @@ Item fn_sub(Item item_a, Item item_b) {
     if (sized_integer_arithmetic(item_a, type_a, item_b, type_b, SIZED_INTEGER_SUB, &sized_result)) {
         return sized_result;
     }
+    if (sized_float_arithmetic(item_a, type_a, item_b, type_b, SIZED_FLOAT_SUB, &sized_result)) {
+        return sized_result;
+    }
 
     normalize_sized(item_a, type_a);
     normalize_sized(item_b, type_b);
@@ -701,6 +752,11 @@ Item fn_div(Item item_a, Item item_b) {
         (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_div(item_a, item_b);
+    }
+
+    Item sized_result;
+    if (sized_float_arithmetic(item_a, type_a, item_b, type_b, SIZED_FLOAT_DIV, &sized_result)) {
+        return sized_result;
     }
 
     normalize_sized(item_a, type_a);
@@ -2791,23 +2847,39 @@ extern "C" Item fn_bnot_item(Item a) {
 }
 
 extern "C" int64_t fn_shl(int64_t a, int64_t b) {
-    if (b < 0 || b >= 64) return 0;
+    if (b < 0) {
+        log_error("integer negative shift count");
+        return INT64_ERROR;
+    }
+    if (b >= 64) return 0;
     return a << b;
 }
 
 extern "C" Item fn_shl_item(Item a, Item b) {
     Item result;
     if (sized_shift(a, b, true, &result)) return result;
+    if (_barg(b) < 0) {
+        log_error("integer negative shift count");
+        return ItemError;
+    }
     return push_l(fn_shl(_barg(a), _barg(b)));
 }
 
 extern "C" int64_t fn_shr(int64_t a, int64_t b) {
-    if (b < 0 || b >= 64) return 0;
+    if (b < 0) {
+        log_error("integer negative shift count");
+        return INT64_ERROR;
+    }
+    if (b >= 64) return 0;
     return a >> b;  // arithmetic right shift (sign-extending)
 }
 
 extern "C" Item fn_shr_item(Item a, Item b) {
     Item result;
     if (sized_shift(a, b, false, &result)) return result;
+    if (_barg(b) < 0) {
+        log_error("integer negative shift count");
+        return ItemError;
+    }
     return push_l(fn_shr(_barg(a), _barg(b)));
 }

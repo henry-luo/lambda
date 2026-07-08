@@ -94,6 +94,7 @@ enum EnumTypeId {
     LMD_TYPE_INT64,  // int literal, 64-bit
     LMD_TYPE_UINT64, // unsigned 64-bit integer (heap-allocated pointer)
     LMD_TYPE_FLOAT,  // float literal, 64-bit
+    LMD_TYPE_FLOAT64, // explicit f64 literal/type, binary64 payload
     LMD_TYPE_DECIMAL,
     LMD_TYPE_DTIME,
     LMD_TYPE_SYMBOL,
@@ -880,7 +881,8 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 static inline bool is_numeric_type_id(TypeId type_id) {
     return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 ||
            type_id == LMD_TYPE_UINT64 || type_id == LMD_TYPE_FLOAT ||
-           type_id == LMD_TYPE_DECIMAL || type_id == LMD_TYPE_NUM_SIZED;
+           type_id == LMD_TYPE_FLOAT64 || type_id == LMD_TYPE_DECIMAL ||
+           type_id == LMD_TYPE_NUM_SIZED;
 }
 
 #define IS_NUMERIC_ID(t) is_numeric_type_id((TypeId)(t))
@@ -906,6 +908,7 @@ inline uint64_t b2it(uint8_t bool_val) {
 #define bi2it(decimal_ptr)   c2it(decimal_ptr)
 #define l2it(long_ptr)       ((long_ptr)? ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr)): ITEM_NULL)
 #define d2it(double_ptr)     ((double_ptr)? ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr)): ITEM_NULL)
+#define f642it(double_ptr)   ((double_ptr)? ((((uint64_t)LMD_TYPE_FLOAT64)<<56) | (uint64_t)(double_ptr)): ITEM_NULL)
 #define c2it(decimal_ptr)    ((decimal_ptr)? ((((uint64_t)LMD_TYPE_DECIMAL)<<56) | (uint64_t)(decimal_ptr)): ITEM_NULL)
 #define s2it(str_ptr)        ((str_ptr)? ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr)): ITEM_NULL)
 #define y2it(sym_ptr)        ((sym_ptr)? ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr)): ITEM_NULL)

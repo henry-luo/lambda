@@ -667,7 +667,9 @@ extern Type TYPE_BOOL;
 extern Type TYPE_INT;
 extern Type TYPE_INT64;
 extern Type TYPE_FLOAT;
+extern Type TYPE_FLOAT64;
 extern Type TYPE_DECIMAL;
+extern Type TYPE_INTEGER;
 extern Type TYPE_NUMBER;
 extern Type TYPE_STRING;
 extern Type TYPE_BINARY;
@@ -684,6 +686,7 @@ extern Type TYPE_U16;
 extern Type TYPE_U32;
 extern Type TYPE_F16;
 extern Type TYPE_F32;
+extern Type TYPE_F64;
 extern Type TYPE_DTIME;
 extern Type TYPE_DATE;   // sub-type of datetime (precision: DATE_ONLY or YEAR_ONLY)
 extern Type TYPE_TIME;   // sub-type of datetime (precision: TIME_ONLY)
@@ -720,7 +723,9 @@ extern TypeType LIT_TYPE_BOOL;
 extern TypeType LIT_TYPE_INT;
 extern TypeType LIT_TYPE_INT64;
 extern TypeType LIT_TYPE_FLOAT;
+extern TypeType LIT_TYPE_FLOAT64;
 extern TypeType LIT_TYPE_DECIMAL;
+extern TypeType LIT_TYPE_INTEGER;
 extern TypeType LIT_TYPE_NUMBER;
 extern TypeType LIT_TYPE_STRING;
 extern TypeType LIT_TYPE_BINARY;
@@ -749,6 +754,7 @@ extern TypeType LIT_TYPE_U32;
 extern TypeType LIT_TYPE_U64;
 extern TypeType LIT_TYPE_F16;
 extern TypeType LIT_TYPE_F32;
+extern TypeType LIT_TYPE_F64;
 
 extern TypeMap EmptyMap;
 extern TypeElmt EmptyElmt;

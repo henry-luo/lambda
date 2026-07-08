@@ -141,6 +141,7 @@ Postfix type suffixes on numeric literals:
 |--------|------|---------|-------|
 | `f16` | float16 | `0.5f16` | IEEE 754 half-precision |
 | `f32` | float32 | `3.14f32` | IEEE 754 single-precision |
+| `f64` | float64 | `3.14f64` | alias/same type as `float` |
 
 #### Negative Literals
 
@@ -157,13 +158,13 @@ sized_integer: _ => token(seq(
     choice('i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64')
 )),
 
-// Sized float: float literal followed by f16/f32
+// Sized float: float literal followed by f16/f32/f64
 sized_float: _ => token(seq(
     choice(
         seq(choice('0', seq(/[1-9]/, optional(/\d+/))), '.', /\d+/),
         seq('.', /\d+/)
     ),
-    choice('f16', 'f32')
+    choice('f16', 'f32', 'f64')
 )),
 
 // Update _number to include sized variants
@@ -186,6 +187,7 @@ Add the following as built-in type identifiers, usable in type annotations and `
 | `u64` | `LMD_TYPE_UINT64` |
 | `f16` | `LMD_TYPE_NUM_SIZED` + `NUM_FLOAT16` |
 | `f32` | `LMD_TYPE_NUM_SIZED` + `NUM_FLOAT32` |
+| `f64` | `LMD_TYPE_FLOAT` (alias/same type as `float`) |
 
 These participate in the type system the same way `int`, `float`, and `int64` do:
 
@@ -194,7 +196,11 @@ let x: i8 = 42i8
 let y = 255u8
 type(y)          // => u8
 y is u8          // => true
-y is int         // => true (sized ints widen to int)
+y is u16         // => false (sized targets are exact)
+y is int         // => true
+y is integer     // => true
+y is decimal     // => true
+type(1.0f64)     // => f64
 ```
 
 #### `get_type_name()` Extension
@@ -222,41 +228,106 @@ Note: `get_type_name()` currently takes only `TypeId`. For `LMD_TYPE_NUM_SIZED`,
 
 ### 5. Type Coercion & Arithmetic
 
-#### Implicit Widening (lossless, automatic)
+#### Numeric Subtype Lattice
 
-```
-i8  → i16 → i32 → int (int56) → int64 → float
-u8  → u16 → u32 → int (int56) → int64 → float  (if value fits)
-u8  → u16 → u32 → u64                            (unsigned chain)
-f16 → f32 → float
-```
+Sized storage types remain exact when named directly, but they also sit inside
+Lambda's semantic numeric domains for `is`, matching, and mixed arithmetic joins:
+
+| Source type | Semantic supertypes |
+|---|---|
+| `i8`, `i16`, `i32` | `int`, `float`, `integer`, `decimal`, `number` |
+| `u8`, `u16`, `u32` | `int`, `float`, `integer`, `decimal`, `number` |
+| `i64`, `u64` | `integer`, `decimal`, `number` |
+| `f16`, `f32` | `float`, `decimal`, `number` |
+| `f64` | `f64`, `float`, `decimal`, `number` |
+
+Storage-width types are not subtypes of one another for direct type tests. For
+example, `1u8 is u8` is true but `1u8 is u16` is false; `1.0f64 is f64`
+and `1.0f64 is float` are true, but `1.0f64 is f32` is false.
+
+Canonical `int` is the int53 band and remains a subtype of `float` because every
+canonical int is exactly representable as binary64. Safe sized integer lanes
+inherit that abstract `float` membership through `int`. `i64` and `u64` do not
+subtype `int` or `float`, even when a particular value is small, because `is` is
+not value-dependent.
 
 #### Mixed Arithmetic Rules
 
 When two sized numerics appear in an arithmetic expression:
 
-1. **Same signedness, different widths:** widen to larger type.
-2. **Signed + unsigned, same width:** promote to next wider signed type.
-   - e.g., `i8 + u8` → `i16`; `i32 + u32` → `int` (int56)
-3. **Sized + regular `int`/`float`:** promote the sized type to `int`/`float`.
-4. **Integer + float sized:** promote integer to float type.
-   - e.g., `i32 + f32` → `f32`; `u16 + f16` → `f16`
+1. **Same exact sized type:** preserve the sized result and use the Go-style
+   fixed-width arithmetic rule.
+   - `127i8 + 1i8` → `-128i8`
+   - `255u8 + 1u8` → `0u8`
+2. **Different sized integer types:** leave the storage lane and promote through
+   the semantic integer tower (`int` when both operand domains fit int53,
+   otherwise `integer`; decimal participation promotes to `decimal`).
+   - `i8 + u8` → `int`
+   - `i32 + u32` → `int`
+   - `i64 + u8` → `integer`
+   - `u64 + i32` → `integer`
+3. **Sized + regular `int`/`integer`/`float`/`decimal`:** promote to the smallest
+   semantic common supertype selected by the numeric tower, not by inspecting
+   the current value.
+   - `u8 + int` → `int`
+   - `u64 + int` → `integer`
+   - `f32 + float` → `float`
+   - `f32 + decimal` → `decimal`
+4. **Mixed sized floats:** promote to the wider sized float when one lane exactly
+   contains the other.
+   - `f16 + f32` → `f32`
+5. **Integer-sized + float-sized:** promote through `float` unless a decimal
+   operand is already present.
+   - `i32 + f32` → `float`
+   - `u16 + f16` → `float`
+   - `f32 + int` → `float`
 
-**Overflow behavior:** Sized arithmetic wraps by default (modular arithmetic), matching hardware behavior:
+**Overflow behavior:** Same-lane sized integer arithmetic follows Go: unsigned
+operations wrap modulo `2^n`; signed operations produce deterministic
+two's-complement results without undefined behavior or overflow panic.
 ```lambda
 let x = 127i8 + 1i8    // => -128i8 (wraps)
 let y = 255u8 + 1u8    // => 0u8 (wraps)
 ```
 
+**Division/remainder by zero:** integer `div` and `%` by zero return `error()`
+for flex integers and sized integers alike.
+
+```lambda
+1u8 div 0u8    // => error()
+1u8 % 0u8      // => error()
+```
+
+**Shift behavior:** negative shift counts return `error()`. Non-negative shifts
+compute the mathematical shift first; same-lane sized results are then truncated
+back to the lane width.
+
+```lambda
+1u8 << 8       // => 0u8
+1u8 << 9       // => 0u8
+1u8 << -1      // => error()
+```
+
 #### Explicit Conversion Functions
 
 ```lambda
-i8(val)    // convert to i8 (truncate or error on out-of-range)
-u32(val)   // convert to u32
-f16(val)   // convert to f16 (lossy precision reduction)
+i8(val)    // non-constant: truncate to 8 bits; constant: must fit
+u32(val)   // non-constant: truncate to 32 bits; constant: must fit
+f16(val)   // round to IEEE binary16
 ```
 
-These follow the same pattern as existing `int()`, `float()`, `decimal()` conversion functions.
+Constant conversions must be representable and fail at compile/AST-build time
+when they are not. Non-constant integer-to-integer conversions follow Go:
+sign/zero extend conceptually, then truncate to the destination width, with no
+overflow signal.
+
+```lambda
+u8(-1)          // compile/AST-build error: constant -1 is not representable as u8
+let x = -1
+u8(x)           // => 255u8: non-constant conversion truncates to 8 bits
+```
+
+Float-sized conversions round to the destination IEEE format.
 
 ### 6. Comparison with Existing Types
 
@@ -267,6 +338,17 @@ These follow the same pattern as existing `int()`, `float()`, `decimal()` conver
 | Signed | Yes | Yes | Both | No |
 | Bit width | 56 | 64 | 8/16/32 | 64 |
 | Arithmetic | Full | Full | Wrapping | Wrapping |
+
+### 6.1 JavaScript Egress
+
+Sized scalar egress follows the numeric model's type-directed rule. The JS type
+never depends on the current magnitude.
+
+| Lambda type | JS type | Reason |
+|---|---|---|
+| `i8`, `i16`, `i32`, `u8`, `u16`, `u32` | `number` | all values are exactly inside the JS safe-integer band |
+| `f16`, `f32`, `f64` | `number` | JS `number` is binary64; `f16`/`f32` widen exactly to their stored value |
+| `i64`, `u64` | `BigInt` | lossless and predictable; no value-dependent split |
 
 ### 7. MIR JIT Considerations
 
@@ -331,9 +413,13 @@ let weights: f32[] = [0.5f32, 0.3f32, 0.2f32]
 
 ### Q1: Should sized arithmetic wrap or error?
 
-The proposal specifies **wrapping** (modular arithmetic) for sized types, matching C/Rust behavior and hardware semantics. Alternative: **saturating** arithmetic (clamp to min/max), or **error on overflow** (safer, more functional style). Lambda is a functional language — silent wrapping may be surprising.
+**Resolved:** same-lane sized integer arithmetic follows Go. Unsigned operations
+wrap modulo the lane width; signed overflow is deterministic two's-complement
+behavior; neither panics nor becomes undefined. Constant literals and constant
+conversions remain strict and must fit their declared type.
 
-**Suggestion:** Wrap by default (performance, hardware alignment), but provide a `checked_add(a, b)` family or an annotation `@checked` for opt-in overflow detection.
+Alternative saturating or checked arithmetic can be added later as explicit
+functions, but it is not the default semantics.
 
 ### Q2: `i64` alias vs. separate literal path
 
@@ -343,9 +429,19 @@ The proposal makes `i64` an alias for the existing `LMD_TYPE_INT64`. But `123i64
 
 ### Q3: `f64` suffix for symmetry?
 
-Should we add `f64` as an alias for the existing `float` (64-bit double)? It would complete the set: `f16`, `f32`, `f64`. Without it, users must write `3.14` (no suffix) for float64 but `3.14f32` for float32 — asymmetric.
+**Resolved:** add `f64` as the explicit float64 surface type, backed by the same
+binary64 payload as existing `float`. It completes the set `f16`, `f32`, `f64`
+and keeps the subtype rules intuitive:
 
-**Suggestion:** Yes, add `f64` as an alias for `float`. No new runtime type needed — just a grammar alias.
+```lambda
+type(1.0f64)     // => f64
+1.0f64 is f64    // true
+1.0f64 is float  // true
+1.0f64 is f32    // false
+```
+
+No new runtime payload width is needed, but the type layer must preserve/report
+the explicit `f64` name for `type()`.
 
 ### Q4: `get_type_name()` signature
 
@@ -358,9 +454,20 @@ Currently `get_type_name(TypeId)` takes only the top-level type ID. For `LMD_TYP
 
 ### Q5: Interaction with `decimal` type
 
-Should sized floats (`f16`, `f32`) be convertible to/from `decimal`? Decimal is arbitrary precision — converting `f16` → `decimal` is lossless, but `decimal` → `f16` is extremely lossy.
+**Resolved:** sized numeric values participate in the semantic numeric subtype
+lattice. Sized integer lanes are subtypes of `integer` and `decimal`; sized float
+lanes are subtypes of `float` and `decimal`; `f64` is the same/subtype as
+`float`. This makes the `is` behavior simple:
 
-**Suggestion:** Allow it with explicit conversion only: `f16(some_decimal)` truncates; `decimal(some_f16)` is lossless.
+```lambda
+1u8 is integer     // true
+1u8 is decimal     // true
+1.0f32 is float    // true
+1.0f32 is decimal  // true
+```
+
+Explicit narrowing conversions such as `f16(some_decimal)` are lossy and round or
+truncate according to the destination type.
 
 ### Q6: Pattern matching on sized types
 
@@ -373,7 +480,11 @@ match value
     x: int => "regular int"
 ```
 
-**Suggestion:** Yes — the sub-type byte is available at runtime, so pattern matching can discriminate. Sized types should be matchable independently. A plain `int` pattern should NOT match sized ints (they are distinct types). Use `number` to match all numeric types.
+**Resolved:** sized targets are exact; non-sized numeric targets use the subtype
+lattice. Therefore `x: u8` matches only `u8`, while `x: int` matches `i8`,
+`i16`, `i32`, `u8`, `u16`, and `u32` because those storage domains fit
+canonical int53. `x: integer`, `x: decimal`, and `x: number` are broader
+semantic-domain patterns.
 
 ### Q7: Literal range validation at parse time vs. runtime
 

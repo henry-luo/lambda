@@ -570,7 +570,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 
         // ==== Bitwise binary functions — inline as C operators ====
         // band/bor/bxor: always safe to inline (no UB).
-        // shl/shr: use guarded ternary to handle shift amounts outside [0,63].
+        // shl/shr: negative count is error; counts >= 64 produce zero.
         if (sys_fn_node->fn_info->c_arg_conv == C_ARG_NATIVE &&
             sys_fn_node->fn_info->arg_count == 2 &&
             first_arg && second_arg && !second_arg->next) {
@@ -602,17 +602,17 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                     }
                 }
                 if (is_shift) {
-                    // emit: (((b) >= 0 && (b) < 64) ? ((a) OP (b)) : 0)
+                    // emit: ((b) < 0 ? INT64_ERROR : ((b) < 64 ? ((a) OP (b)) : 0))
                     // b is evaluated twice, but shift amounts are typically literals
                     strbuf_append_str(tp->code_buf, "((");
                     emit_bitwise_arg(tp, second_arg);
-                    strbuf_append_str(tp->code_buf, ">=0&&");
+                    strbuf_append_str(tp->code_buf, "<0)?INT64_ERROR:((");
                     emit_bitwise_arg(tp, second_arg);
                     strbuf_append_str(tp->code_buf, "<64)?(");
                     emit_bitwise_arg(tp, first_arg);
                     strbuf_append_str(tp->code_buf, c_op);
                     emit_bitwise_arg(tp, second_arg);
-                    strbuf_append_str(tp->code_buf, "):0)");
+                    strbuf_append_str(tp->code_buf, "):0))");
                 } else {
                     // emit: ((a) OP (b))
                     strbuf_append_str(tp->code_buf, "(");

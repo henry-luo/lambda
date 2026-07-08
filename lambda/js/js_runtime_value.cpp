@@ -32,6 +32,7 @@ extern "C" Item js_to_number(Item value) {
     }
 
     case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64:
         return value;
 
     case LMD_TYPE_STRING: {
@@ -733,7 +734,7 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
     case 'n':
         if (type_str[1] == 'u') {
             // "number"
-            if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) {
+            if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64) {
                 return js_key_is_symbol(value) ? 0 : 1;
             }
             return 0;
@@ -742,7 +743,7 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
     case 's':
         if (type_str[1] == 't') return (type == LMD_TYPE_STRING) ? 1 : 0;  // "string"
         if (type_str[1] == 'y') return (type == LMD_TYPE_SYMBOL ||         // "symbol"
-            ((type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) && js_key_is_symbol(value))) ? 1 : 0;
+            ((type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64) && js_key_is_symbol(value))) ? 1 : 0;
         return 0;
     case 'b':
         if (type_str[1] == 'o') return (type == LMD_TYPE_BOOL) ? 1 : 0;      // "boolean"
@@ -777,7 +778,7 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
         if (type == LMD_TYPE_FUNC || type == LMD_TYPE_UNDEFINED ||
             type == LMD_TYPE_BOOL || type == LMD_TYPE_STRING ||
             type == LMD_TYPE_SYMBOL) return 0;
-        if ((type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) && !js_key_is_symbol(value)) return 0;
+        if ((type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64) && !js_key_is_symbol(value)) return 0;
         return 1;  // arrays, elements, etc. are "object"
     case 'f':
         // "function"
@@ -821,8 +822,8 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
 static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst = true); // forward declaration
 extern "C" int64_t js_cmp_raw(int64_t op, Item left, Item right) {
     TypeId lt = get_type_id(left), rt = get_type_id(right);
-    bool l_num = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
-    bool r_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+    bool l_num = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_FLOAT64);
+    bool r_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT64);
     if (l_num && r_num) {
         double l = (lt == LMD_TYPE_INT) ? (double)it2i(left) : it2d(left);
         double r = (rt == LMD_TYPE_INT) ? (double)it2i(right) : it2d(right);
@@ -866,7 +867,7 @@ extern "C" int64_t js_cmp_raw(int64_t op, Item left, Item right) {
 extern "C" int64_t js_eq_raw(Item left, Item right) {
     if (left.item == right.item) {
         TypeId type = get_type_id(left);
-        if (type == LMD_TYPE_FLOAT && isnan(it2d(left))) return 0;
+        if ((type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64) && isnan(it2d(left))) return 0;
         return 1;
     }
     if (get_type_id(left) == LMD_TYPE_STRING && get_type_id(right) == LMD_TYPE_STRING) {
@@ -900,7 +901,7 @@ bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negat
         if (numeric_index) *numeric_index = (double)iv;
         return true;
     }
-    if (key_type == LMD_TYPE_FLOAT) {
+    if (key_type == LMD_TYPE_FLOAT || key_type == LMD_TYPE_FLOAT64) {
         if (numeric_index) *numeric_index = it2d(key);
         return true;
     }
@@ -1034,6 +1035,7 @@ double js_get_number(Item value) {
     case LMD_TYPE_INT:
         return (double)it2i(value);
     case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64:
         return it2d(value);
     case LMD_TYPE_BOOL:
         return it2b(value) ? 1.0 : 0.0;
@@ -1047,7 +1049,7 @@ double js_get_number(Item value) {
         TypeId num_type = get_type_id(num);
         if (num_type == LMD_TYPE_INT) return (double)it2i(num);
         if (num_type == LMD_TYPE_INT64) return (double)it2l(num);
-        if (num_type == LMD_TYPE_FLOAT) return it2d(num);
+        if (num_type == LMD_TYPE_FLOAT || num_type == LMD_TYPE_FLOAT64) return it2d(num);
         return NAN;
     }
     case LMD_TYPE_MAP:
@@ -2090,6 +2092,7 @@ extern "C" Item js_typeof(Item value) {
         break;
     case LMD_TYPE_INT:
     case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64:
         result = js_key_is_symbol(value) ? "symbol" : "number";
         break;
     case LMD_TYPE_DECIMAL:
