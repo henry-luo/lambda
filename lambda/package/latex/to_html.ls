@@ -65,7 +65,10 @@ fn serialize_element(el) {
         "<" ++ tag ++ serialize_attrs(el) ++ ">"
     } else {
         let children_html = serialize_children(el)
-        "<" ++ tag ++ serialize_attrs(el) ++ ">" ++ children_html ++ "</" ++ tag ++ ">"
+        let close = if (tag == "svg" and el.preserveAspectRatio == "none") " >" else ">"
+        // MathLive's SVG accent serializer leaves a space before `>` for
+        // preserveAspectRatio="none"; keep it so stretchy accent snapshots compare exactly.
+        "<" ++ tag ++ serialize_attrs(el) ++ close ++ children_html ++ "</" ++ tag ++ ">"
     }
 }
 
