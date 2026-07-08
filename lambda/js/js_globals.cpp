@@ -11847,7 +11847,8 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
         js_throw_type_error("Cannot convert undefined or null to object");
         return ItemNull;
     }
-    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_FUNC) {
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_FUNC && tid != LMD_TYPE_VMAP) {
+        // native host VMAPs expose setters; boxing them would strand Object.assign(elem.style, ...).
         target = js_to_object(target);
         if (js_check_exception()) return ItemNull;
     }
