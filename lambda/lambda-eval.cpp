@@ -6217,11 +6217,13 @@ void fn_map_set(Item map_item, Item key, Item value) {
             //     break JIT-compiled code that uses hardcoded byte_offset = slot*8.
             {
                 bool old_is_ptr = (field_type == LMD_TYPE_NULL || field_type == LMD_TYPE_MAP ||
+                    field_type == LMD_TYPE_VMAP ||
                     field_type == LMD_TYPE_ELEMENT || field_type == LMD_TYPE_OBJECT ||
                     field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_ARRAY_NUM ||
                     field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_RANGE ||
                     field_type == LMD_TYPE_UNDEFINED || field_type == LMD_TYPE_BOOL);
                 bool new_is_ptr = (value_type == LMD_TYPE_NULL || value_type == LMD_TYPE_MAP ||
+                    value_type == LMD_TYPE_VMAP ||
                     value_type == LMD_TYPE_ELEMENT || value_type == LMD_TYPE_OBJECT ||
                     value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_NUM ||
                     value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_RANGE ||

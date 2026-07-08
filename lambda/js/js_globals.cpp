@@ -40,6 +40,8 @@ extern "C" int radiant_dom_host_has_property(Item object, Item key, Item* out);
 extern "C" int radiant_dom_host_delete_property(Item object, Item key, Item* out);
 extern "C" int radiant_dom_host_own_property_descriptor(Item object, Item key, Item* out);
 extern "C" int radiant_dom_host_own_property_names(Item object, Item* out);
+extern "C" bool radiant_dom_is_node(Item item);
+extern "C" Item js_dom_get_prototype_value(Item item);
 extern "C" Item js_internal_binding(Item name);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
@@ -982,6 +984,9 @@ static bool js_require_object_type(Item arg, const char* method_name) {
 }
 
 static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item* out_result) {
+    if (type == LMD_TYPE_VMAP && radiant_dom_is_node(object)) {
+        if (radiant_dom_host_has_property(object, key, out_result)) return true;
+    }
     if (type == LMD_TYPE_MAP &&
         object.map->map_kind == MAP_KIND_DOM) {
         if (radiant_dom_host_has_property(object, key, out_result)) return true;
@@ -1045,6 +1050,10 @@ static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item*
 }
 
 static bool js_try_exotic_delete_property(Item obj, Item key, Item* out_result) {
+    if (get_type_id(obj) == LMD_TYPE_VMAP && radiant_dom_is_node(obj) &&
+        radiant_dom_host_delete_property(obj, key, out_result)) {
+        return true;
+    }
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
         obj.map->map_kind == MAP_KIND_DOM &&
         radiant_dom_host_delete_property(obj, key, out_result)) {
@@ -1085,6 +1094,10 @@ static bool js_hide_legacy_dunder_own_name(const char* name, int name_len) {
 }
 
 static bool js_try_exotic_own_property_names(Item object, Item* out_result) {
+    if (get_type_id(object) == LMD_TYPE_VMAP && radiant_dom_is_node(object) &&
+        radiant_dom_host_own_property_names(object, out_result)) {
+        return true;
+    }
     if (get_type_id(object) == LMD_TYPE_MAP && object.map &&
         object.map->map_kind == MAP_KIND_DOM &&
         radiant_dom_host_own_property_names(object, out_result)) {
@@ -1133,6 +1146,10 @@ static bool js_try_exotic_own_property_descriptor(Item obj, Item name,
                                                   Item* out_result) {
     if (js_is_proxy(obj)) {
         *out_result = js_proxy_trap_get_own_property_descriptor(obj, name);
+        return true;
+    }
+    if (type == LMD_TYPE_VMAP && radiant_dom_is_node(obj) &&
+        radiant_dom_host_own_property_descriptor(obj, name, out_result)) {
         return true;
     }
     if (type == LMD_TYPE_MAP && obj.map && obj.map->map_kind == MAP_KIND_DOM &&
@@ -7039,6 +7056,10 @@ extern "C" Item js_get_prototype_of(Item object) {
         return js_get_intrinsic_prototype_for_class(JS_CLASS_BIGINT);
     }
     if (!js_require_object_type(object, "getPrototypeOf")) return ItemNull;
+    if (ot == LMD_TYPE_VMAP && radiant_dom_is_node(object)) {
+        Item dom_proto = js_dom_get_prototype_value(object);
+        return get_type_id(dom_proto) == LMD_TYPE_MAP ? dom_proto : ItemNull;
+    }
     if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
     if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
     // v18g: Arrays → return Array.prototype (or custom if set via Object.setPrototypeOf)
@@ -9771,7 +9792,8 @@ extern "C" Item js_object_keys(Item object) {
     if (!js_require_object_type(object, "keys")) return js_array_new(0);
     TypeId type = get_type_id(object);
 
-    if (type == LMD_TYPE_MAP && object.map && object.map->map_kind == MAP_KIND_DOM) {
+    if ((type == LMD_TYPE_VMAP && radiant_dom_is_node(object)) ||
+        (type == LMD_TYPE_MAP && object.map && object.map->map_kind == MAP_KIND_DOM)) {
         Item all_keys = ItemNull;
         if (radiant_dom_host_own_property_names(object, &all_keys) &&
             get_type_id(all_keys) == LMD_TYPE_ARRAY && all_keys.array) {

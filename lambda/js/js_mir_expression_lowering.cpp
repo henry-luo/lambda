@@ -9512,6 +9512,17 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_emit_exc_propagate_check(mt);
                 return result;
             }
+            if (recv_type == LMD_TYPE_VMAP) {
+                // Phase 6 DOM wrappers are branded VMaps; method calls must use
+                // host dispatch instead of calling the boolean method sentinel.
+                MIR_reg_t r = jm_call_4(mt, "js_map_method", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
+                    MIR_T_I64, args_op,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                jm_readback_closure_env(mt);
+                return r;
+            }
 
             // Runtime type dispatch cascade (when receiver type unknown)
             MIR_reg_t rtype = jm_emit_uext8(mt, jm_call_1(mt, "item_type_id", MIR_T_I64,
@@ -9538,6 +9549,14 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_new_reg_op(mt->ctx, rtype), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY)));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_array),
                 MIR_new_reg_op(mt->ctx, is_arr)));
+
+            // Phase 6 DOM wrappers use LMD_TYPE_VMAP; route them through the
+            // same runtime method dispatcher that recognizes branded host maps.
+            MIR_reg_t is_vmap = jm_new_reg(mt, "isvmap", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_vmap),
+                MIR_new_reg_op(mt->ctx, rtype), MIR_new_int_op(mt->ctx, LMD_TYPE_VMAP)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_map),
+                MIR_new_reg_op(mt->ctx, is_vmap)));
 
             // if type == INT or FLOAT or BIGINT -> number method
             MIR_label_t l_number = jm_new_label(mt);

@@ -1690,6 +1690,19 @@ static void js_dom_set_wrapper_prototype(Item obj, const char* ctor_name) {
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(obj, proto);
 }
 
+extern "C" void js_dom_initialize_node_wrapper(void* dom_elem) {
+    DomNode* node = (DomNode*)dom_elem;
+    if (!node || !node->is_element()) return;
+    DomElement* elem = node->as_element();
+    int attr_count = 0;
+    const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+    for (int i = 0; attr_names && i < attr_count; i++) {
+        const char* name = attr_names[i];
+        const char* value = dom_element_get_attribute(elem, name);
+        js_dom_compile_event_attr_to_expando(elem, name, value);
+    }
+}
+
 extern "C" Item js_dom_get_prototype_value(Item obj) {
     DomNode* node = (DomNode*)js_dom_unwrap_element(obj);
     const char* ctor_name = (node && node->is_element()) ? "Element" : "Node";
@@ -1731,13 +1744,7 @@ extern "C" Item js_dom_create_wrapper_impl(void* dom_elem) {
 
     if (node->is_element()) {
         DomElement* elem = node->as_element();
-        int attr_count = 0;
-        const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
-        for (int i = 0; attr_names && i < attr_count; i++) {
-            const char* name = attr_names[i];
-            const char* value = dom_element_get_attribute(elem, name);
-            js_dom_compile_event_attr_to_expando(elem, name, value);
-        }
+        js_dom_initialize_node_wrapper(dom_elem);
         log_debug("js_dom_wrap_element: wrapped DomElement tag='%s' as Map=%p",
                   elem->tag_name ? elem->tag_name : "(null)", (void*)wrapper);
     } else if (node->is_text()) {
@@ -1759,6 +1766,11 @@ extern "C" void* js_dom_unwrap_element(Item item) {
 
 extern "C" void* js_dom_unwrap_element_impl(Item item) {
     TypeId tid = get_type_id(item);
+    if (tid == LMD_TYPE_VMAP) {
+        // Phase 6: some module bridge paths call the legacy impl helper
+        // directly for arguments, so branded DOM VMaps must unwrap here too.
+        return radiant_dom_unwrap_node(item);
+    }
     if (tid != LMD_TYPE_MAP) return nullptr;
 
     Map* m = item.map;
@@ -1788,6 +1800,7 @@ extern "C" bool js_is_dom_node(Item item) {
 
 extern "C" bool js_is_dom_node_impl(Item item) {
     TypeId tid = get_type_id(item);
+    if (tid == LMD_TYPE_VMAP) return radiant_dom_is_node(item);
     if (tid != LMD_TYPE_MAP) return false;
     Map* m = item.map;
     return m->type == (void*)&js_dom_type_marker;

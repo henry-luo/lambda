@@ -27,6 +27,8 @@ extern "C" Item js_dom_document_proxy_for_doc_bridge(void* doc);
 extern "C" Item js_dom_create_wrapper_impl(void* dom_elem);
 extern "C" void* js_dom_unwrap_element_impl(Item item);
 extern "C" bool js_is_dom_node_impl(Item item);
+extern "C" void js_dom_initialize_node_wrapper(void* dom_elem);
+extern "C" Item vmap_new(void);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
 extern "C" void js_throw_value(Item error);
 extern "C" bool js_is_css_namespace(Item item);
@@ -162,6 +164,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
 extern "C" int js_check_exception(void);
 
 static const int RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE = 4096;
+static const char s_radiant_dom_vmap_type_marker = 0;
 
 struct RadiantDomWrapperCacheEntry {
     DomNode* node;
@@ -1054,21 +1057,46 @@ extern "C" Item radiant_dom_wrap_node(void* dom_elem) {
     if (!dom_elem) return ItemNull;
 
     DomNode* node = (DomNode*)dom_elem;
+    if (node->is_element()) {
+        DomElement* e = node->as_element();
+        if (e->doc && e->doc->js_doc_node == (void*)e) {
+            Item proxy = js_dom_document_proxy_for_doc_bridge(e->doc);
+            if (proxy.item != ITEM_NULL) return proxy;
+        }
+    }
+
     Item cached = radiant_dom_lookup_wrapper(node);
     if (cached.item != ITEM_NULL) return cached;
 
-    Item wrapper = js_dom_create_wrapper_impl(dom_elem);
-    if (js_is_dom_node_impl(wrapper)) {
+    Item wrapper = vmap_new();
+    if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) {
+        wrapper.vmap->host_type = (const void*)&s_radiant_dom_vmap_type_marker;
+        wrapper.vmap->host_data = dom_elem;
+        js_dom_initialize_node_wrapper(dom_elem);
         radiant_dom_cache_wrapper(node, wrapper);
+        return wrapper;
     }
-    return wrapper;
+    // VMap allocation can fail only under severe runtime allocation failure;
+    // keep the legacy shell as a compatibility fallback rather than returning
+    // null for an otherwise live Radiant node.
+    Item legacy_wrapper = js_dom_create_wrapper_impl(dom_elem);
+    if (js_is_dom_node_impl(legacy_wrapper)) radiant_dom_cache_wrapper(node, legacy_wrapper);
+    return legacy_wrapper;
 }
 
 extern "C" void* radiant_dom_unwrap_node(Item item) {
+    if (get_type_id(item) == LMD_TYPE_VMAP && item.vmap &&
+        item.vmap->host_type == (const void*)&s_radiant_dom_vmap_type_marker) {
+        return item.vmap->host_data;
+    }
     return js_dom_unwrap_element_impl(item);
 }
 
 extern "C" bool radiant_dom_is_node(Item item) {
+    if (get_type_id(item) == LMD_TYPE_VMAP && item.vmap &&
+        item.vmap->host_type == (const void*)&s_radiant_dom_vmap_type_marker) {
+        return item.vmap->host_data != nullptr;
+    }
     return js_is_dom_node_impl(item);
 }
 

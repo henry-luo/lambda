@@ -261,6 +261,10 @@ void init_type_info() {
     type_info[LMD_TYPE_ARRAY] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
     type_info[LMD_TYPE_ARRAY_NUM] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
     type_info[LMD_TYPE_MAP] = {sizeof(void*), "map", &TYPE_MAP, (Type*)&LIT_TYPE_MAP};
+    // VMap values are container pointers even though they present as Lambda maps;
+    // shape fields need pointer-sized metadata or later map rebuilds pack them as
+    // zero-byte unknown fields and corrupt ordinary maps that store VMaps.
+    type_info[LMD_TYPE_VMAP] = {sizeof(void*), "map", &TYPE_MAP, (Type*)&LIT_TYPE_MAP};
     type_info[LMD_TYPE_ELEMENT] = {sizeof(void*), "element", &TYPE_ELMT, (Type*)&LIT_TYPE_ELMT};
     type_info[LMD_TYPE_OBJECT] = {sizeof(void*), "object", &TYPE_OBJECT, (Type*)&LIT_TYPE_OBJECT};
     type_info[LMD_TYPE_TYPE] = {sizeof(void*), "type", &TYPE_TYPE, (Type*)&LIT_TYPE_TYPE};
@@ -1204,6 +1208,12 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
         if (result.container && result.container->type_id == LMD_TYPE_RAW_POINTER) {
             result.container->type_id = type_id;
         }
+        break;
+    case LMD_TYPE_VMAP:
+        // VMap is a host-object pointer, not a Container; reading it through
+        // the generic container arm turns named DOM collection slots into null.
+        memcpy(&ptr_val, field_ptr, sizeof(void*));
+        result.vmap = (VMap*)ptr_val;
         break;
     case LMD_TYPE_ANY: {
         result = typeditem_to_item((TypedItem*)field_ptr);

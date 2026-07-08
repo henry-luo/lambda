@@ -149,6 +149,10 @@ Implementation log:
 - 2026-07-08: Phase 5 VMap readiness started. The migration contract is now written down for native host objects before changing DOM wrappers away from `MAP_KIND_DOM`: vtable projection wins, wrapper expandos fill misses, prototype chain resolves last, DOM nodes use non-owning native wrappers, owned module resources keep finalizers, and JS host-object ops must grow `has`, `delete`, descriptor, enumeration, and prototype hooks. `test/js/dom_module_props` now pins basic DOM element expando reads and `in` visibility as the first executable readiness check.
 - 2026-07-08: Phase 5 executable readiness completed for the current carrier. `JubeTypeDef` now has ownership flags plus host-object ops slots, the Radiant DOM bridge provides host `has`, `delete`, own descriptor, own-key, and prototype behavior for DOM wrappers, DOM element/Range/Selection expandos delete from their side-table stores instead of stale wrapper maps, projected host properties synthesize non-configurable descriptors, own keys enumerate projected names before expandos, and `Element` / `Range` / `Selection` prototype patching and `instanceof` behavior are pinned before the Phase 6 carrier switch.
 - 2026-07-08 Phase 5 readiness verification: direct `dom_module_props` expected-output refresh matched, focused `JavaScriptTests/JsFileTest.Run/dom_module_props` passed, filtered `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery_lib` + `js_document_exit_context` passed, `git diff --check` passed, and full `./test/test_js_gtest.exe` passed `305/305`.
+- 2026-07-08: Phase 6 DOM wrapper carrier switch completed. `radiant_dom_wrap_node()` now returns branded, non-owning DOM VMaps; DOM unwrap/identity/prototype/property/method dispatch paths accept the branded carrier; VMap values have pointer-sized map metadata and shaped map read/write/first-insert support so globals and live collection named properties can store DOM wrappers without corrupting or nulling them.
+- 2026-07-08 Phase 6 verification: `make build` passed, direct `test/js/dom_module_props.js --document test/js/dom_module_props.html --no-log` matched `test/js/dom_module_props.txt`, focused `JavaScriptTests/JsFileTest.Run/dom_module_props` passed, and `./lambda.exe --no-log test/lambda/radiant_poc.ls` returned `"ok"`.
+- 2026-07-08 Phase 6 broad Radiant gate: `make test-radiant-baseline` was attempted and remained non-green in existing broad baseline buckets. Summary: `6154` passed, `49` failed, `358` skipped. Failing buckets were Layout Baseline (`wpt-css-inline` regression), UI Automation (`197` passed, `39` failed), and Render Visual (`197/212` passed, `13` expected failures, `1` skipped, `9` baseline regressions including `form_buttons_01`).
+- 2026-07-08 Phase 6 UI Automation fix: the VMap carrier switch initially skipped `on<type>` IDL/inline handlers because event dispatch only recognized MAP/ELEMENT targets for handler lookup. `fire_listeners()` now treats branded DOM VMaps as DOM targets for that lookup, and standalone `./test/test_ui_automation_gtest.exe` passed `236` tests with `2` skipped.
 - 2026-07-07 editor geometry helper verification: `make build` passed. `test/js/dom_module_props` covers callability and the headless null-return path for the moved helper dispatch; direct `dom_module_props`, `dom_basic`, `dom_mutation`, and `dom_v12b` expected-output diffs passed; filtered `JavaScriptTests/JsFileTest.Run/dom_module_props` + `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery_lib` + `js_document_exit_context`, `git diff --check`, Lambda `radiant_poc`, and full `./test/test_js_gtest.exe` passed 305/305.
 
 POC 1A deliverable status:
@@ -469,17 +473,17 @@ Purpose: make DOM a real native module object.
 
 Tasks:
 
-- Change `radiant_dom_wrap_node()` to return branded VMap wrappers.
-- Make `js_dom_unwrap_element()` accept the branded VMap representation.
-- Route JS property access for `LMD_TYPE_VMAP` host objects through the generic JS native-type adapter.
-- Keep temporary compatibility for old `MAP_KIND_DOM` only if required for staged rollout.
+- Done: change `radiant_dom_wrap_node()` to return branded VMap wrappers.
+- Done: make `js_dom_unwrap_element()` accept the branded VMap representation.
+- Done: route JS property access for `LMD_TYPE_VMAP` host objects through the generic JS native-type adapter.
+- Done: keep temporary compatibility for old `MAP_KIND_DOM` only where required for staged rollout.
 
 Acceptance:
 
-- JS DOM tests pass through the VMap path.
-- Lambda sample still passes.
-- The wrapper cache still preserves identity.
-- DOM node finalizers are non-owning.
+- Done: JS DOM tests pass through the VMap path.
+- Done: Lambda sample still passes.
+- Done: the wrapper cache still preserves identity.
+- Done: DOM node finalizers are non-owning.
 
 ### Phase 7: Delete DOM MapKind Path
 
@@ -511,7 +515,7 @@ The first visible POC deliverable is complete when:
 - Done: focused JS DOM/Radiant regression gates have no behavior delta.
 - Done: full `./test/test_js_gtest.exe` passed `305/305` at the current checkpoint.
 
-The POC 1A deliverable is therefore complete as a compatibility checkpoint, and the POC 1B VMap readiness checkpoint is complete for the current carrier. The next work is Phase 6: switch DOM wrappers to VMap using the pinned host-object semantics.
+The POC 1A deliverable is therefore complete as a compatibility checkpoint. POC 1B is complete through Phase 6: DOM wrappers now use branded VMap carriers with the pinned host-object semantics. The next work is Phase 7: delete the remaining `MAP_KIND_DOM` compatibility path.
 
 ## 8. Test Gates
 

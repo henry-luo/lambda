@@ -1819,7 +1819,10 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
     if (phase != 1) {
         target_item = wrap_path_key(key);
         TypeId tt = get_type_id(target_item);
-        if (tt == LMD_TYPE_MAP || tt == LMD_TYPE_ELEMENT) {
+        if (tt == LMD_TYPE_MAP || tt == LMD_TYPE_ELEMENT ||
+                (tt == LMD_TYPE_VMAP && js_dom_unwrap_element(target_item))) {
+            // Phase 6 DOM nodes arrive here as branded VMaps; excluding them
+            // skips IDL/inline handlers such as onclick during UI dispatch.
             char on_name[64];
             snprintf(on_name, sizeof(on_name), "on%s", type);
             Item on_key = (Item){.item = s2it(heap_create_name(on_name))};

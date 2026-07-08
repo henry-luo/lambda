@@ -72,6 +72,9 @@ extern "C" Item js_get_os_namespace(void);
 extern "C" int radiant_dom_foreign_document_get_property(Item object, Item key, Item* out);
 extern "C" int radiant_dom_foreign_document_set_property(Item object, Item key, Item value, Item* out);
 extern "C" int radiant_dom_foreign_document_method(Item object, Item method_name, Item* args, int argc, Item* out);
+extern "C" bool radiant_dom_is_node(Item item);
+extern "C" Item js_dom_get_property(Item elem_item, Item prop_name);
+extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value);
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
@@ -4117,6 +4120,10 @@ extern "C" Item js_property_get(Item object, Item key) {
             }
         }
         return make_js_undefined();
+    } else if (type == LMD_TYPE_VMAP && radiant_dom_is_node(object)) {
+        // Phase 6: DOM nodes are branded native VMaps; route them through the
+        // same host adapter that backed the old MAP_KIND_DOM shell.
+        return js_dom_get_property(object, key);
     } else if (type == LMD_TYPE_ELEMENT) {
         return elmt_get(object.element, key);
     } else if (type == LMD_TYPE_ARRAY) {
@@ -6535,6 +6542,11 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     if (type == LMD_TYPE_ARRAY) {
         JS_PROPERTY_SET_BRANCH("top_array");
         return js_property_set_array(object, key, value);
+    }
+
+    if (type == LMD_TYPE_VMAP && radiant_dom_is_node(object)) {
+        JS_PROPERTY_SET_BRANCH("top_dom_vmap");
+        return js_dom_set_property(object, key, value);
     }
 
     // Typed array: ta[i] = val (use map_kind for fast check)
@@ -18597,6 +18609,11 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         }
     }
 
+    if (get_type_id(obj) == LMD_TYPE_VMAP && radiant_dom_is_node(obj)) {
+        extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
+        return js_dom_element_method(obj, method_name, args, argc);
+    }
+
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
         (obj.map->map_kind == MAP_KIND_DOM || obj.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
         if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
@@ -20281,6 +20298,11 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     // DOM host objects expose native methods through the DOM dispatcher, but
     // explicit JS overrides (for example document.createRange = wrapper) must
     // win before the native fallback.
+    if (get_type_id(obj) == LMD_TYPE_VMAP && radiant_dom_is_node(obj)) {
+        extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
+        return js_dom_element_method(obj, method_name, args, argc);
+    }
+
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
         (obj.map->map_kind == MAP_KIND_DOM || obj.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
         String* dom_method = it2s(method_name);
@@ -27581,6 +27603,11 @@ extern "C" void js_link_base_prototype(Item proto_marker, Item base_ctor) {
 // Get the prototype of an object (read __proto__ property)
 // P10d: uses interned key + first-match lookup (no heap allocation per call)
 extern "C" Item js_get_prototype(Item object) {
+    if (get_type_id(object) == LMD_TYPE_VMAP && radiant_dom_is_node(object)) {
+        Item dom_proto = js_dom_get_prototype_value(object);
+        if (get_type_id(dom_proto) == LMD_TYPE_MAP) return dom_proto;
+        return ItemNull;
+    }
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
     if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
     if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
@@ -27642,6 +27669,11 @@ extern "C" Item js_get_prototype(Item object) {
 // Returns ItemNull only at the top of the chain (Object.prototype itself, or
 // when the explicit `__proto__` slot holds the null sentinel).
 static Item js_get_implicit_proto(Item object) {
+    if (get_type_id(object) == LMD_TYPE_VMAP && radiant_dom_is_node(object)) {
+        // DOM VMaps have no ordinary __proto__ slot; prototype-chain reads must
+        // start from the module-supplied host prototype instead of stopping.
+        return js_get_prototype(object);
+    }
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
     Map* m = object.map;
     Item raw = js_get_prototype(object);
