@@ -165,6 +165,7 @@ fn font_from_class(cls) {
     else if (cls == css.CAL) "cal"
     else if (cls == css.SANS) "sans"
     else if (cls == "lcGreek lm_mathit") "mathit"
+    else if (cls == "lcGreek lm_mathbf") "mathbf"
     else if (cls == "lm_cmr lm_it") "mathit"
     else null
 }
@@ -259,7 +260,11 @@ fn max_char_height_loop(text, font, i, acc, fallback) {
 }
 
 fn text_depth_for(text, cls) {
-    if (len(text) == 1) {
+    if (len(text) == 1 and cls == "lcGreek lm_mathbf") {
+        // MathLive's \boldsymbol Greek uses bold metrics with a descent, but
+        // Lambda's generated Main-Bold table does not include Greek glyphs.
+        0.2
+    } else if (len(text) == 1) {
         let font = font_from_class(cls)
         let m = if (font != null) metrics_data.lookup(text, font) else null
         let d = if (m != null) metrics_data.depth_of(m) else null
@@ -786,9 +791,11 @@ fn ml_vlist_pstrut(children, i, acc) {
         else {
             let bx = child.box
             let mf = if (bx.max_font_size != null) bx.max_font_size else bx.height
-            // MathLive tracks the current font size on boxes; Lambda leaf metrics
-            // only know glyph height, so the normal-style pstrut needs a 1em floor.
-            ml_vlist_pstrut(children, i + 1, max(acc, max(1.0, max(mf, bx.height))))
+            // MathLive SVG arrow boxes carry their own small maxFontSize; forcing
+            // Lambda's normal 1em floor makes extensible-arrow stacks too tall.
+            let base = if (bx.no_pstrut_floor == true) max(mf, bx.height)
+                else max(1.0, max(mf, bx.height))
+            ml_vlist_pstrut(children, i + 1, max(acc, base))
         }
     }
 }
