@@ -649,6 +649,28 @@ pub fn ml_vlist_individual(children, box_type) {
     }
 }
 
+pub fn ml_vlist_shift(children, shift, box_type) {
+    let first = ml_vlist_first_box(children, 0)
+    if (first == null) ml_box(<span>, 0.0, 0.0, 0.0, box_type)
+    else ml_vlist_from_children(children, 0.0 - first.box.depth - shift, box_type)
+}
+
+pub fn ml_vlist_top(children, top, box_type) {
+    if (len(children) == 0) ml_box(<span>, 0.0, 0.0, 0.0, box_type)
+    else ml_vlist_from_children(children, ml_vlist_top_depth(children, 0, top), box_type)
+}
+
+pub fn ml_vlist_bottom(children, bottom, box_type) {
+    if (len(children) == 0) ml_box(<span>, 0.0, 0.0, 0.0, box_type)
+    else ml_vlist_from_children(children, 0.0 - bottom, box_type)
+}
+
+pub fn ml_vlist_first_baseline(children, box_type) {
+    let first = ml_vlist_first_box(children, 0)
+    if (first == null) ml_box(<span>, 0.0, 0.0, 0.0, box_type)
+    else ml_vlist_from_children(children, 0.0 - first.box.depth, box_type)
+}
+
 // Shared makeVList geometry for shadow checks and future producer migration.
 // Keeping this separate from element construction lets atoms compare computed
 // positions before switching their HTML emission to the generic helper.
@@ -657,55 +679,126 @@ pub fn ml_vlist_individual_metrics(children) {
         {items: [], pstrut: 0.0, min_pos: 0.0, max_pos: 0.0,
          height: 0.0, depth: 0.0, width: 0.0}
     } else {
-        let items = ml_vlist_positioned(children, 0, [])
-        let pstrut = ml_vlist_pstrut(children, 0, 0.0) + 2.0
-        let ext = ml_vlist_extents(items, 0, items[0].pos, items[0].pos)
-        let width = ml_vlist_width(children, 0, 0.0)
-        {items: items, pstrut: pstrut, min_pos: ext.min_pos, max_pos: ext.max_pos,
-         height: ext.max_pos, depth: 0.0 - ext.min_pos, width: width}
+        let prepared = ml_vlist_individual_children(children)
+        ml_vlist_metrics_from_children(prepared.children, prepared.depth)
     }
 }
 
-fn ml_vlist_positioned(children, i, acc) {
+pub fn ml_vlist_metrics_from_children(children, depth) {
+    if (len(children) == 0) {
+        {items: [], pstrut: 0.0, min_pos: depth, max_pos: depth,
+         height: depth, depth: 0.0 - depth, width: 0.0}
+    } else {
+        let positioned = ml_vlist_positioned(children, 0, depth, depth, depth, [])
+        let pstrut = ml_vlist_pstrut(children, 0, 0.0) + 2.0
+        let width = ml_vlist_width(children, 0, 0.0)
+        {items: positioned.items, pstrut: pstrut,
+         min_pos: positioned.min_pos, max_pos: positioned.max_pos,
+         height: positioned.max_pos, depth: 0.0 - positioned.min_pos,
+         width: width}
+    }
+}
+
+fn ml_vlist_from_children(children, depth, box_type) {
+    let metrics = ml_vlist_metrics_from_children(children, depth)
+    let el = ml_vlist_element(metrics.items, metrics.pstrut, metrics.max_pos, metrics.min_pos)
+    ml_box_full(el, metrics.height, metrics.depth, metrics.width, box_type, 0.0, 0.0, metrics.height)
+}
+
+fn ml_vlist_individual_children(children) {
+    let first = children[0]
+    let depth = 0.0 - first.shift - first.box.depth
+    let first_child = ml_vlist_box_child(first)
+    let converted = ml_vlist_individual_tail(children, 1, first, depth, [first_child])
+    {children: converted, depth: depth}
+}
+
+fn ml_vlist_individual_tail(children, i, prev, curr_pos, acc) {
     if (i >= len(children)) acc
     else {
         let child = children[i]
-        let pos = 0.0 - child.shift - child.box.depth
-        ml_vlist_positioned(children, i + 1, acc ++ [{
-            box: child.box,
-            pos: pos,
-            classes: child.classes,
-            style: child.style,
-            margin_left: child.margin_left,
-            margin_right: child.margin_right
-        }])
+        let diff = 0.0 - child.shift - curr_pos - child.box.depth
+        let kern = diff - (prev.box.height + prev.box.depth)
+        ml_vlist_individual_tail(children, i + 1, child, curr_pos + diff,
+            acc ++ [{kern: kern}, ml_vlist_box_child(child)])
+    }
+}
+
+fn ml_vlist_box_child(child) => {
+    box: child.box,
+    classes: child.classes,
+    style: child.style,
+    margin_left: child.margin_left,
+    margin_right: child.margin_right,
+    no_wrap: child.no_wrap
+}
+
+fn ml_vlist_first_box(children, i) {
+    if (i >= len(children)) null
+    else if (children[i].box != null) children[i]
+    else ml_vlist_first_box(children, i + 1)
+}
+
+fn ml_vlist_top_depth(children, i, bottom) {
+    if (i >= len(children)) bottom
+    else {
+        let child = children[i]
+        let amount = if (child.kern != null) child.kern
+            else child.box.height + child.box.depth
+        ml_vlist_top_depth(children, i + 1, bottom - amount)
+    }
+}
+
+fn ml_vlist_positioned(children, i, curr_pos, mn, mx, acc) {
+    if (i >= len(children)) {
+        {items: acc, min_pos: mn, max_pos: mx}
+    }
+    else {
+        let child = children[i]
+        if (child.kern != null) {
+            let next_pos = curr_pos + child.kern
+            ml_vlist_positioned(children, i + 1, next_pos,
+                min(mn, next_pos), max(mx, next_pos), acc)
+        } else {
+            let bx = child.box
+            let item = {
+                box: bx,
+                pos: curr_pos,
+                classes: child.classes,
+                style: child.style,
+                margin_left: child.margin_left,
+                margin_right: child.margin_right,
+                no_wrap: child.no_wrap
+            }
+            let next_pos = curr_pos + bx.height + bx.depth
+            ml_vlist_positioned(children, i + 1, next_pos,
+                min(mn, min(curr_pos, next_pos)), max(mx, max(curr_pos, next_pos)),
+                acc ++ [item])
+        }
     }
 }
 
 fn ml_vlist_pstrut(children, i, acc) {
     if (i >= len(children)) acc
     else {
-        let bx = children[i].box
-        let mf = if (bx.max_font_size != null) bx.max_font_size else bx.height
-        ml_vlist_pstrut(children, i + 1, max(acc, max(mf, bx.height)))
+        let child = children[i]
+        if (child.kern != null) ml_vlist_pstrut(children, i + 1, acc)
+        else {
+            let bx = child.box
+            let mf = if (bx.max_font_size != null) bx.max_font_size else bx.height
+            // MathLive tracks the current font size on boxes; Lambda leaf metrics
+            // only know glyph height, so the normal-style pstrut needs a 1em floor.
+            ml_vlist_pstrut(children, i + 1, max(acc, max(1.0, max(mf, bx.height))))
+        }
     }
 }
 
 fn ml_vlist_width(children, i, acc) {
     if (i >= len(children)) acc
-    else ml_vlist_width(children, i + 1, max(acc, children[i].box.width))
-}
-
-fn ml_vlist_extents(items, i, mn, mx) {
-    if (i >= len(items)) {
-        let r = {min_pos: mn, max_pos: mx}
-        r
-    }
     else {
-        let bx = items[i].box
-        let p0 = items[i].pos
-        let p1 = p0 + (bx.height + bx.depth)
-        ml_vlist_extents(items, i + 1, min(mn, min(p0, p1)), max(mx, max(p0, p1)))
+        let child = children[i]
+        if (child.kern != null) ml_vlist_width(children, i + 1, acc)
+        else ml_vlist_width(children, i + 1, max(acc, child.box.width))
     }
 }
 
@@ -741,14 +834,14 @@ fn ml_vlist_child_wrap(it, pstrut) {
     if (it.classes != null) {
         let el = <span class: it.classes, style: style;
             <span class: css.PSTRUT, style: "height:" ++ util.fmt_ml_em(pstrut)>
-            ml_vlist_child_body(it.box)
+            ml_vlist_child_body(it)
         >
         el
     }
     else {
         let el = <span style: style;
             <span class: css.PSTRUT, style: "height:" ++ util.fmt_ml_em(pstrut)>
-            ml_vlist_child_body(it.box)
+            ml_vlist_child_body(it)
         >
         el
     }
@@ -761,10 +854,14 @@ fn ml_vlist_wrap_style(it, pstrut) {
     (if (it.margin_right != null) ";margin-right:" ++ util.fmt_ml_em(it.margin_right) else "")
 }
 
-fn ml_vlist_child_body(bx) {
-    <span style: "height:" ++ util.fmt_ml_em(bx.height + bx.depth) ++ ";display:inline-block";
-        bx.element
-    >
+fn ml_vlist_child_body(it) {
+    if (it.no_wrap == true) it.box.element
+    else {
+        let body_elements = elements_of(it.box)
+        <span style: "height:" ++ util.fmt_ml_em(it.box.height + it.box.depth) ++ ";display:inline-block";
+            for (el in body_elements) el
+        >
+    }
 }
 
 // ============================================================

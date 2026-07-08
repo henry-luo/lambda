@@ -33,7 +33,9 @@ fn merge_list(items) {
 }
 
 fn walk(c) {
-    if (c is element and len(c) > 0) build_merged(c)
+    // non-span nodes such as SVG accents must keep their tag and attributes;
+    // rebuilding them as spans destroys MathLive's stretchy accent markup.
+    if (c is element and len(c) > 0 and name(c) == 'span') build_merged(c)
     else c
 }
 
@@ -65,7 +67,7 @@ fn starts_with_color_style(style) {
 }
 
 fn merge_children(el) {
-    if (len(el) > 0) build_merged(el)
+    if (len(el) > 0 and name(el) == 'span') build_merged(el)
     else el
 }
 
