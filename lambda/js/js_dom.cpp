@@ -1525,6 +1525,7 @@ void js_dom_register_named_elements(DomElement* root) {
 
 static void js_dom_install_window_frames_global(void);
 static void js_dom_install_window_dialog_globals(void);
+static void js_dom_install_window_computed_style_global(void);
 static DomDocument* js_document_proxy_doc_from_item(Item item);
 
 // ============================================================================
@@ -1555,6 +1556,7 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         js_dom_selection_install_globals();
         js_dom_install_window_frames_global();
         js_dom_install_window_dialog_globals();
+        js_dom_install_window_computed_style_global();
         // install FormData constructor
         extern void js_formdata_install_globals(void);
         js_formdata_install_globals();
@@ -1907,6 +1909,7 @@ static LiveLookupCollectionEntry* _live_lookup_collection_entry(Item collection)
 extern "C" Item js_get_this(void);
 extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* args, int argc);
 extern "C" Item js_new_function(void* func_ptr, int param_count);
+extern "C" void js_set_function_name(Item fn_item, Item name_item);
 static Item js_dom_text_replace_data_method(DomText* text_node, Item offset_arg,
                                             Item count_arg, Item data_arg);
 static Item js_dom_text_insert_data_method(DomText* text_node, Item offset_arg,
@@ -3396,6 +3399,22 @@ extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
               elem->tag_name ? elem->tag_name : "?", pseudo_type);
 
     return wrapper;
+}
+
+static Item js_window_get_computed_style(Item elem_item, Item pseudo_item) {
+    return js_get_computed_style(elem_item, pseudo_item);
+}
+
+static void js_dom_install_window_computed_style_global(void) {
+    Item global = js_get_global_this();
+    Item key = js_string_key("getComputedStyle");
+    Item existing = js_property_get(global, key);
+    if (get_type_id(existing) == LMD_TYPE_FUNC) return;
+    Item fn = js_new_function((void*)js_window_get_computed_style, 2);
+    js_set_function_name(fn, key);
+    // getComputedStyle is a Window/global function now; direct MIR DOM shims
+    // were removed so calls resolve through ordinary property dispatch.
+    js_property_set(global, key, fn);
 }
 
 // ============================================================================
