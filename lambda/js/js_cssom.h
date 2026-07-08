@@ -9,7 +9,7 @@
  *   - CSSStyleRule.selectorText (read/write) / .style / .cssText
  *   - CSSStyleDeclaration property access for rule declarations
  *
- * Uses the same sentinel-marker Map wrapping pattern as js_dom.cpp.
+ * Uses branded native VMap wrappers for CSSOM host objects.
  */
 #pragma once
 

@@ -175,19 +175,25 @@ static DocState* get_or_create_state() {
 }
 
 // ============================================================================
-// Range / Selection wrappers — resource-style: Map::data holds the native pointer,
-// Map::type holds a sentinel marker, map_kind=MAP_KIND_WEB_API_RESOURCE dispatches all
-// property reads/writes to js_dom_get_property / js_dom_set_property, which
-// route by marker into js_dom_range_get_property / js_dom_selection_get_property.
+// Range / Selection wrappers — native host VMaps carry the native pointer.
+// Property reads/writes still route through js_dom_get_property /
+// js_dom_set_property, which dispatch by wrapper brand into
+// js_dom_range_get_property / js_dom_selection_get_property.
 // No JS-visible "private" properties; no shape allocations on the wrapper.
 // ============================================================================
 
-// Sentinel TypeMap addresses — only their identity matters.
+extern "C" Item vmap_new(void);
+
+static const char js_dom_range_vmap_type_marker = 0;
+static const char js_dom_selection_vmap_type_marker = 0;
+
+// Legacy map marker addresses — kept so older resource-map callers fail closed
+// through the same unwrap helpers during this migration window.
 TypeMap js_dom_range_marker     = {};
 TypeMap js_dom_selection_marker = {};
 
 struct SelectionExpandoEntry {
-    Map* wrapper;
+    void* wrapper;
     uint64_t props_item;
 };
 
@@ -208,24 +214,38 @@ extern "C" Item js_dom_selection_to_string_value(Item obj);
 // Identity / unwrap ----------------------------------------------------------
 
 extern "C" bool js_dom_item_is_range(Item item) {
-    if (get_type_id(item) != LMD_TYPE_MAP) return false;
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_VMAP) {
+        return item.vmap && item.vmap->host_type == (const void*)&js_dom_range_vmap_type_marker &&
+            item.vmap->host_data != nullptr;
+    }
+    if (type != LMD_TYPE_MAP) return false;
     Map* m = item.map;
     return m && m->map_kind == MAP_KIND_WEB_API_RESOURCE &&
            m->type == (void*)&js_dom_range_marker;
 }
 
 extern "C" bool js_dom_item_is_selection(Item item) {
-    if (get_type_id(item) != LMD_TYPE_MAP) return false;
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_VMAP) {
+        return item.vmap && item.vmap->host_type == (const void*)&js_dom_selection_vmap_type_marker &&
+            item.vmap->host_data != nullptr;
+    }
+    if (type != LMD_TYPE_MAP) return false;
     Map* m = item.map;
     return m && m->map_kind == MAP_KIND_WEB_API_RESOURCE &&
            m->type == (void*)&js_dom_selection_marker;
 }
 
 static inline DomRange* range_from(Item obj) {
-    return js_dom_item_is_range(obj) ? (DomRange*)obj.map->data : nullptr;
+    if (!js_dom_item_is_range(obj)) return nullptr;
+    if (get_type_id(obj) == LMD_TYPE_VMAP) return (DomRange*)obj.vmap->host_data;
+    return (DomRange*)obj.map->data;
 }
 static inline DomSelection* selection_from(Item obj) {
-    return js_dom_item_is_selection(obj) ? (DomSelection*)obj.map->data : nullptr;
+    if (!js_dom_item_is_selection(obj)) return nullptr;
+    if (get_type_id(obj) == LMD_TYPE_VMAP) return (DomSelection*)obj.vmap->host_data;
+    return (DomSelection*)obj.map->data;
 }
 static inline DomRange*     range_from_this()     { return range_from(js_get_this()); }
 static inline DomSelection* selection_from_this() { return selection_from(js_get_this()); }
@@ -302,7 +322,7 @@ static bool selection_is_native_property(const char* p) {
 
 static Item range_expando_map(Item obj, bool create) {
     if (!js_dom_item_is_range(obj)) return ItemNull;
-    Map* wrapper = obj.map;
+    void* wrapper = get_type_id(obj) == LMD_TYPE_VMAP ? (void*)obj.vmap : (void*)obj.map;
     for (int i = 0; i < s_range_expando_count; i++) {
         if (s_range_expandos[i].wrapper == wrapper) {
             return (Item){.item = s_range_expandos[i].props_item};
@@ -322,7 +342,7 @@ static Item range_expando_map(Item obj, bool create) {
 
 static Item selection_expando_map(Item obj, bool create) {
     if (!js_dom_item_is_selection(obj)) return ItemNull;
-    Map* wrapper = obj.map;
+    void* wrapper = get_type_id(obj) == LMD_TYPE_VMAP ? (void*)obj.vmap : (void*)obj.map;
     for (int i = 0; i < s_selection_expando_count; i++) {
         if (s_selection_expandos[i].wrapper == wrapper) {
             return (Item){.item = s_selection_expandos[i].props_item};
@@ -397,16 +417,6 @@ static bool selection_state_clear(DomSelection* s,
     return selection_state_set(s, nullptr, nullptr, out_exception);
 }
 
-static void set_wrapper_prototype(Item obj, const char* ctor_name) {
-    Item global = js_get_global_this();
-    Item ctor = js_property_get(global, make_key(ctor_name));
-    if (get_type_id(ctor) != LMD_TYPE_FUNC) return;
-    Item proto = js_property_get(ctor, make_key("prototype"));
-    if (get_type_id(proto) == LMD_TYPE_MAP) {
-        js_set_prototype(obj, proto);
-    }
-}
-
 static Item get_dom_constructor_prototype(const char* ctor_name) {
     Item global = js_get_global_this();
     Item ctor = js_property_get(global, make_key(ctor_name));
@@ -426,12 +436,12 @@ extern "C" Item js_dom_selection_get_prototype_value(void) {
 // Reuse cached JS wrapper if the native object already has one; else build.
 static Item js_object_for_range(DomRange* r) {
     if (!r) return ItemNull;
-    if (r->host_wrapper) return (Item){ .map = (Map*)r->host_wrapper };
+    if (r->host_wrapper) return (Item){ .vmap = (VMap*)r->host_wrapper };
     return build_range_object(r);
 }
 static Item js_object_for_selection(DomSelection* s) {
     if (!s) return ItemNull;
-    if (s->host_wrapper) return (Item){ .map = (Map*)s->host_wrapper };
+    if (s->host_wrapper) return (Item){ .vmap = (VMap*)s->host_wrapper };
     return build_selection_object(s);
 }
 
@@ -867,15 +877,12 @@ static inline void range_sync_props(Item /*obj*/, DomRange* /*r*/) {}
 
 static Item build_range_object(DomRange* r) {
     if (!r) return ItemNull;
-    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    m->type_id  = LMD_TYPE_MAP;
-    m->map_kind = MAP_KIND_WEB_API_RESOURCE;
-    m->type     = (void*)&js_dom_range_marker;
-    m->data     = r;
-    m->data_cap = 0;
-    Item obj = (Item){ .map = m };
-    set_wrapper_prototype(obj, "Range");
-    r->host_wrapper = m;
+    Item obj = vmap_new();
+    if (get_type_id(obj) != LMD_TYPE_VMAP || !obj.vmap) return ItemNull;
+    // Range wrappers have no Map shell; the host brand is the unwrap invariant.
+    obj.vmap->host_type = (const void*)&js_dom_range_vmap_type_marker;
+    obj.vmap->host_data = r;
+    r->host_wrapper = obj.vmap;
     dom_range_retain(r);  // released in js_dom_selection_reset
     return obj;
 }
@@ -1468,15 +1475,12 @@ static inline void selection_sync_props(Item /*obj*/, DomSelection* /*s*/) {}
 
 static Item build_selection_object(DomSelection* s) {
     if (!s) return ItemNull;
-    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    m->type_id  = LMD_TYPE_MAP;
-    m->map_kind = MAP_KIND_WEB_API_RESOURCE;
-    m->type     = (void*)&js_dom_selection_marker;
-    m->data     = s;
-    m->data_cap = 0;
-    Item obj = (Item){ .map = m };
-    set_wrapper_prototype(obj, "Selection");
-    s->host_wrapper = m;
+    Item obj = vmap_new();
+    if (get_type_id(obj) != LMD_TYPE_VMAP || !obj.vmap) return ItemNull;
+    // Selection wrappers have no Map shell; the host brand is the unwrap invariant.
+    obj.vmap->host_type = (const void*)&js_dom_selection_vmap_type_marker;
+    obj.vmap->host_data = s;
+    s->host_wrapper = obj.vmap;
     return obj;
 }
 

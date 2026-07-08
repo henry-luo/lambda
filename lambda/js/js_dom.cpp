@@ -52,6 +52,7 @@
 #include "../input/html5/html5_parser.h"
 
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
+extern "C" Item vmap_new(void);
 extern void free_document(DomDocument* doc);
 
 #include <cstring>
@@ -186,12 +187,12 @@ static String* js_dom_create_document_string(DomDocument* doc, const char* str, 
 // Unique type markers for DOM-adjacent Maps
 // ============================================================================
 
-// Sentinel used in Map::type to distinguish computed style wrappers.
-// Map::data stores the DomElement*, Map::data_cap stores pseudo-element type (0=none, 1=before, 2=after).
-static TypeMap js_computed_style_marker = {};
+// Sentinels for native style host VMaps.
+static const char js_computed_style_vmap_marker = 0;
+static const char js_inline_style_vmap_marker = 0;
 
-// Sentinel used in Map::type to distinguish element.style wrappers.
-// Map::data stores the owning DomElement*.
+// Legacy map markers are accepted only by type predicates during migration.
+static TypeMap js_computed_style_marker = {};
 static TypeMap js_inline_style_marker = {};
 
 // Sentinel used in Map::type to distinguish document proxy objects.
@@ -1709,6 +1710,7 @@ extern "C" Item js_dom_wrap_element(void* dom_elem) {
 }
 
 extern "C" void* radiant_dom_unwrap_node(Item item);
+extern "C" bool radiant_dom_is_node(Item item);
 
 extern "C" void* js_dom_unwrap_element(Item item) {
     // Jube POC: unwrap/type policy is exposed through the radiant module so DOM
@@ -1718,7 +1720,11 @@ extern "C" void* js_dom_unwrap_element(Item item) {
 
 extern "C" void* js_dom_unwrap_element_impl(Item item) {
     TypeId tid = get_type_id(item);
-    if (tid == LMD_TYPE_VMAP) return radiant_dom_unwrap_node(item);
+    if (tid == LMD_TYPE_VMAP) {
+        // Only Radiant-branded VMaps unwrap as DOM nodes; style/CSSOM VMaps
+        // must stop here or Radiant and DOM unwrap helpers recurse forever.
+        return radiant_dom_is_node(item) ? item.vmap->host_data : nullptr;
+    }
     if (tid != LMD_TYPE_MAP) return nullptr;
 
     Map* m = item.map;
@@ -1734,8 +1740,6 @@ extern "C" void* js_dom_unwrap_element_impl(Item item) {
     }
     return nullptr;
 }
-
-extern "C" bool radiant_dom_is_node(Item item);
 
 extern "C" bool js_is_dom_node(Item item) {
     // Jube POC: use the module-owned type test so later native wrappers do not
@@ -3202,6 +3206,10 @@ extern "C" bool js_dom_implementation_method(Item method_name, Item* args, int a
 
 static bool js_is_computed_style(Item item) {
     TypeId tid = get_type_id(item);
+    if (tid == LMD_TYPE_VMAP) {
+        return item.vmap && item.vmap->host_type == (const void*)&js_computed_style_vmap_marker &&
+            item.vmap->host_data != nullptr;
+    }
     if (tid != LMD_TYPE_MAP) return false;
     Map* m = item.map;
     return m->type == (void*)&js_computed_style_marker;
@@ -3216,13 +3224,22 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
 
 static bool js_is_inline_style(Item item) {
     TypeId tid = get_type_id(item);
+    if (tid == LMD_TYPE_VMAP) {
+        return item.vmap && item.vmap->host_type == (const void*)&js_inline_style_vmap_marker &&
+            item.vmap->host_data != nullptr;
+    }
     if (tid != LMD_TYPE_MAP) return false;
     Map* m = item.map;
     return m->type == (void*)&js_inline_style_marker;
 }
 
+extern "C" bool js_is_inline_style_item(Item item) {
+    return js_is_inline_style(item);
+}
+
 static DomElement* js_inline_style_owner(Item item) {
     if (!js_is_inline_style(item)) return nullptr;
+    if (get_type_id(item) == LMD_TYPE_VMAP) return (DomElement*)item.vmap->host_data;
     return (DomElement*)item.map->data;
 }
 
@@ -3235,20 +3252,23 @@ static Item js_dom_get_inline_style_wrapper(DomElement* elem) {
         if (js_is_inline_style(cached)) return cached;
     }
 
-    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    wrapper->type_id = LMD_TYPE_MAP;
-    wrapper->map_kind = MAP_KIND_WEB_API_RESOURCE;
-    wrapper->type = (void*)&js_inline_style_marker;
-    wrapper->data = elem;
-    wrapper->data_cap = 0;
-
-    Item wrapped = (Item){.map = wrapper};
+    Item wrapped = vmap_new();
+    if (get_type_id(wrapped) != LMD_TYPE_VMAP || !wrapped.vmap) return ItemNull;
+    // Inline style wrappers are native VMaps; the owner element pointer is the
+    // invariant used by style get/set and method dispatch.
+    wrapped.vmap->host_type = (const void*)&js_inline_style_vmap_marker;
+    wrapped.vmap->host_data = elem;
     if (exp_map.item != ITEM_NULL) {
         Item key = (Item){.item = s2it(heap_create_name("__styleWrapper"))};
         js_property_set(exp_map, key, wrapped);
     }
     return wrapped;
 }
+
+struct JsComputedStyleHost {
+    DomElement* elem;
+    int pseudo_type;
+};
 
 // Helper: serialize a CssValue to a string Item
 static Item css_value_to_string_item(CssValue* val) {
@@ -3358,18 +3378,24 @@ extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
         }
     }
 
-    // create a computed style wrapper
-    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    wrapper->type_id = LMD_TYPE_MAP;
-    wrapper->map_kind = MAP_KIND_WEB_API_RESOURCE;
-    wrapper->type = (void*)&js_computed_style_marker;
-    wrapper->data = node->as_element();     // store DomElement*
-    wrapper->data_cap = pseudo_type;        // store pseudo type
+    DomElement* elem = node->as_element();
+    Pool* pool = elem && elem->doc ? elem->doc->pool : nullptr;
+    JsComputedStyleHost* host = pool ? (JsComputedStyleHost*)pool_calloc(pool, sizeof(JsComputedStyleHost)) : nullptr;
+    if (!host) return ItemNull;
+    host->elem = elem;
+    host->pseudo_type = pseudo_type;
+
+    Item wrapper = vmap_new();
+    if (get_type_id(wrapper) != LMD_TYPE_VMAP || !wrapper.vmap) return ItemNull;
+    // Computed style wrappers are native VMaps; pseudo-element state lives in
+    // the document pool instead of overloading Map::data_cap.
+    wrapper.vmap->host_type = (const void*)&js_computed_style_vmap_marker;
+    wrapper.vmap->host_data = host;
 
     log_debug("js_get_computed_style: created wrapper for <%s> pseudo=%d",
-              node->as_element()->tag_name ? node->as_element()->tag_name : "?", pseudo_type);
+              elem->tag_name ? elem->tag_name : "?", pseudo_type);
 
-    return (Item){.map = wrapper};
+    return wrapper;
 }
 
 // ============================================================================
@@ -3810,9 +3836,17 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
         return ItemNull;
     }
 
-    Map* wrapper = style_item.map;
-    DomElement* elem = (DomElement*)wrapper->data;
-    int pseudo_type = (int)wrapper->data_cap;
+    DomElement* elem = nullptr;
+    int pseudo_type = 0;
+    if (get_type_id(style_item) == LMD_TYPE_VMAP) {
+        JsComputedStyleHost* host = (JsComputedStyleHost*)style_item.vmap->host_data;
+        elem = host ? host->elem : nullptr;
+        pseudo_type = host ? host->pseudo_type : 0;
+    } else {
+        Map* wrapper = style_item.map;
+        elem = (DomElement*)wrapper->data;
+        pseudo_type = (int)wrapper->data_cap;
+    }
 
     if (!elem) return (Item){.item = s2it(heap_create_name(""))};
 
@@ -10792,12 +10826,28 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
 }
 
 extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item value) {
+    if (js_is_rule_style_decl(elem_item)) {
+        // CSSOM style declarations are VMaps, not DOM elements; handle them
+        // before DOM unwrapping so nested rule.style.x lowering stays native.
+        return js_cssom_rule_decl_set_property(elem_item, prop_name, value);
+    }
+    if (js_is_css_rule(elem_item)) {
+        Item style_key = (Item){.item = s2it(heap_create_name("style"))};
+        Item style_obj = js_cssom_rule_get_property(elem_item, style_key);
+        if (js_is_rule_style_decl(style_obj)) {
+            return js_cssom_rule_decl_set_property(style_obj, prop_name, value);
+        }
+        return ItemNull;
+    }
+
     DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
     if (!elem) {
         // not a DOM element — fall back to normal property set on obj.style
         Item style_key = (Item){.item = s2it(heap_create_name("style"))};
         Item style_obj = js_property_get(elem_item, style_key);
-        if (style_obj.item != ITEM_NULL && get_type_id(style_obj) == LMD_TYPE_MAP) {
+        TypeId style_type = get_type_id(style_obj);
+        if (style_obj.item != ITEM_NULL &&
+            (style_type == LMD_TYPE_MAP || style_type == LMD_TYPE_VMAP)) {
             return js_property_set(style_obj, prop_name, value);
         }
         return ItemNull;
@@ -10873,12 +10923,28 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
 // ============================================================================
 
 extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
+    if (js_is_rule_style_decl(elem_item)) {
+        // CSSOM style declarations are VMaps, not DOM elements; handle them
+        // before DOM unwrapping so nested rule.style.x lowering stays native.
+        return js_cssom_rule_decl_get_property(elem_item, prop_name);
+    }
+    if (js_is_css_rule(elem_item)) {
+        Item style_key = (Item){.item = s2it(heap_create_name("style"))};
+        Item style_obj = js_cssom_rule_get_property(elem_item, style_key);
+        if (js_is_rule_style_decl(style_obj)) {
+            return js_cssom_rule_decl_get_property(style_obj, prop_name);
+        }
+        return (Item){.item = s2it(heap_create_name(""))};
+    }
+
     DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
     if (!elem) {
         // not a DOM element — fall back to normal property access on obj.style
         Item style_key = (Item){.item = s2it(heap_create_name("style"))};
         Item style_obj = js_property_get(elem_item, style_key);
-        if (style_obj.item != ITEM_NULL && get_type_id(style_obj) == LMD_TYPE_MAP) {
+        TypeId style_type = get_type_id(style_obj);
+        if (style_obj.item != ITEM_NULL &&
+            (style_type == LMD_TYPE_MAP || style_type == LMD_TYPE_VMAP)) {
             return js_property_get(style_obj, prop_name);
         }
         return (Item){.item = s2it(heap_create_name(""))};
@@ -10906,7 +10972,7 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
 
     // get the specified value for this property
     CssDeclaration* decl = dom_element_get_specified_value(elem, prop_id);
-    if (!decl || !decl->value) {
+    if (!decl || (!decl->value && (!decl->value_text || decl->value_text_len == 0))) {
         // shorthand fallback: if the property is a shorthand (e.g. padding, margin),
         // try the first longhand (e.g. padding-top) since shorthands are expanded
         if (css_property_is_shorthand(prop_id)) {
@@ -10917,7 +10983,7 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
                 decl = dom_element_get_specified_value(elem, lh_id);
             }
         }
-        if (!decl || !decl->value) {
+        if (!decl || (!decl->value && (!decl->value_text || decl->value_text_len == 0))) {
             return (Item){.item = s2it(heap_create_name(""))};
         }
     }
@@ -10925,6 +10991,16 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
     // only return values that came from inline styles (element.style.X should
     // only reflect inline styles, not stylesheet rules)
     if (!decl->specificity.inline_style) {
+        return (Item){.item = s2it(heap_create_name(""))};
+    }
+
+    if (decl->value_text && decl->value_text_len > 0) {
+        // JS style writes preserve authored text; return it directly because
+        // parser value graphs may be layout-only and unsafe for CSSOM reads.
+        return (Item){.item = s2it(heap_create_name(decl->value_text))};
+    }
+
+    if (!decl->value) {
         return (Item){.item = s2it(heap_create_name(""))};
     }
 
@@ -10997,6 +11073,30 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
     }
 
     return (Item){.item = s2it(heap_create_name(""))};
+}
+
+extern "C" bool js_dom_style_resource_has_property(Item style_item, Item prop_name) {
+    if (!js_is_inline_style(style_item) && !js_is_computed_style(style_item)) {
+        return false;
+    }
+
+    const char* prop = fn_to_cstr(prop_name);
+    if (!prop || !prop[0]) return false;
+
+    if (strcmp(prop, "cssText") == 0 ||
+        strcmp(prop, "length") == 0 ||
+        strcmp(prop, "getPropertyValue") == 0 ||
+        strcmp(prop, "setProperty") == 0 ||
+        strcmp(prop, "removeProperty") == 0) {
+        return true;
+    }
+
+    char css_prop[128];
+    js_camel_to_css_prop(prop, css_prop, sizeof(css_prop));
+    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    // Style host VMaps have no ordinary shape; `in` must answer from the CSS
+    // property table so vendor probes do not recurse through JS fallbacks.
+    return prop_id != CSS_PROPERTY_UNKNOWN && prop_id != 0;
 }
 
 // ============================================================================
@@ -13754,6 +13854,28 @@ extern "C" Item js_dom_style_remove_property_bridge(void* dom_elem, Item prop_ar
 extern "C" int radiant_dom_style_method(Item elem_item, Item method_name, Item* args, int argc, Item* out);
 
 extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args, int argc) {
+    if (js_is_inline_style(elem_item)) {
+        DomElement* owner = js_inline_style_owner(elem_item);
+        if (!owner) return ItemNull;
+        // Inline style VMaps carry the style owner; method behavior remains
+        // centralized on the owning element's style mutation path.
+        elem_item = js_dom_wrap_element(owner);
+    }
+    if (js_is_rule_style_decl(elem_item)) {
+        // CSSOM rule declarations are VMaps, not DOM elements; route them
+        // before DOM unwrapping to avoid re-entering the generic host bridge.
+        return js_cssom_rule_decl_method(elem_item, method_name, args, argc);
+    }
+    if (js_is_css_rule(elem_item)) {
+        // MIR lowers rule.style.setProperty/removeProperty through this helper
+        // with the CSSRule receiver, so fetch its declaration wrapper first.
+        Item style_prop = (Item){.item = s2it(heap_create_name("style"))};
+        Item style_decl = js_cssom_rule_get_property(elem_item, style_prop);
+        if (js_is_rule_style_decl(style_decl)) {
+            return js_cssom_rule_decl_method(style_decl, method_name, args, argc);
+        }
+        return ItemNull;
+    }
     Item module_result = ItemNull;
     if (radiant_dom_style_method(elem_item, method_name, args, argc, &module_result)) {
         return module_result;
@@ -13761,20 +13883,22 @@ extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args
 
     DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
     if (!elem) {
-        // check if this is a CSSOM rule — transpiler routes rule.style.setProperty() here too
-        if (js_is_css_rule(elem_item)) {
-            // get the .style wrapper from the rule
-            Item style_prop = (Item){.item = s2it(heap_create_name("style"))};
-            Item style_decl = js_cssom_rule_get_property(elem_item, style_prop);
-            if (js_is_rule_style_decl(style_decl)) {
-                return js_cssom_rule_decl_method(style_decl, method_name, args, argc);
-            }
-        }
         return ItemNull;
     }
 
     const char* method = fn_to_cstr(method_name);
     if (!method) return ItemNull;
+
+    if (strcmp(method, "getPropertyValue") == 0) {
+        // CSSStyleDeclaration.getPropertyValue lives on the style host object;
+        // routing through ordinary VMap lookup used to fall through to null.
+        if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
+        Item prop_arg = args[0];
+        const char* css_prop = fn_to_cstr(prop_arg);
+        if (!css_prop) return (Item){.item = s2it(heap_create_name(""))};
+        Item owner_item = js_dom_wrap_element(elem);
+        return js_dom_get_style_property(owner_item, prop_arg);
+    }
 
     log_debug("js_dom_style_method: unknown method '%s'", method);
     return ItemNull;

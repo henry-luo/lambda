@@ -254,6 +254,7 @@ Item js_computed_style_get_property(Item style_item, Item prop_name);
  * @return true if item wraps a computed style
  */
 bool js_is_computed_style_item(Item item);
+bool js_is_inline_style_item(Item item);
 
 // =============================================================================
 // Element Method Dispatcher
