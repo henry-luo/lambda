@@ -15,6 +15,7 @@
 #include "js_xhr.h"
 #include "js_cssom.h"
 #include "js_runtime.h"
+#include "js_props.h"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "../lambda-data.hpp"
@@ -78,8 +79,17 @@ static void js_dom_refresh_live_child_collections_for_mutation(DomNode* target,
 static void js_dom_refresh_live_form_collections_for_mutation(DomNode* target,
                                                               DomNode* parent,
                                                               DomDocument* doc);
+static void js_dom_refresh_select_option_collections_for_mutation(DomNode* target,
+                                                                  DomNode* parent,
+                                                                  DomDocument* doc);
+static void js_dom_refresh_live_lookup_collections_for_mutation(DomNode* target,
+                                                                DomNode* parent,
+                                                                DomDocument* doc);
 static void _collect_document_forms_rec(DomNode* node, Item forms);
 static void _collect_form_controls_rec(DomNode* node, Item arr);
+static void _collect_lookup_by_tag_rec(DomElement* root, const char* tag, Item collection);
+static void _collect_lookup_by_class_rec(DomElement* root, const char* cls, Item collection);
+static void _collect_lookup_by_name_rec(DomElement* root, const char* name, Item collection);
 
 static const char* js_dom_to_attr_cstr(Item value) {
     Item str_value = js_to_string(value);
@@ -402,6 +412,8 @@ static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATI
     }
     js_dom_refresh_live_child_collections_for_mutation(target, parent);
     js_dom_refresh_live_form_collections_for_mutation(target, parent, doc);
+    js_dom_refresh_select_option_collections_for_mutation(target, parent, doc);
+    js_dom_refresh_live_lookup_collections_for_mutation(target, parent, doc);
 
     DocState* st = doc->state;
     if (st) {
@@ -1724,6 +1736,15 @@ struct LiveFormCollectionEntry {
     int kind;
 };
 
+struct LiveLookupCollectionEntry {
+    Array* array;
+    DomDocument* doc;
+    DomElement* root;
+    String* query;
+    int kind;
+    bool include_root;
+};
+
 static const int SELECT_COLLECTION_OPTIONS = 1;
 static const int SELECT_COLLECTION_SELECTED_OPTIONS = 2;
 static const int SELECT_OPTIONS_OWNER_CACHE_SIZE = 4096;
@@ -1741,6 +1762,13 @@ static const int LIVE_FORM_COLLECTION_FORM_ELEMENTS = 2;
 static const int LIVE_FORM_COLLECTION_CACHE_SIZE = 4096;
 static __thread LiveFormCollectionEntry s_live_form_collections[LIVE_FORM_COLLECTION_CACHE_SIZE] = {};
 static __thread int s_live_form_collection_count = 0;
+
+static const int LIVE_LOOKUP_COLLECTION_TAG = 1;
+static const int LIVE_LOOKUP_COLLECTION_CLASS = 2;
+static const int LIVE_LOOKUP_COLLECTION_NAME = 3;
+static const int LIVE_LOOKUP_COLLECTION_CACHE_SIZE = 4096;
+static __thread LiveLookupCollectionEntry s_live_lookup_collections[LIVE_LOOKUP_COLLECTION_CACHE_SIZE] = {};
+static __thread int s_live_lookup_collection_count = 0;
 
 static void _register_select_options_owner(Item collection, DomElement* owner, int kind) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !owner) return;
@@ -1827,6 +1855,43 @@ static LiveFormCollectionEntry* _live_form_collection_entry(Item collection) {
     return nullptr;
 }
 
+static void _register_live_lookup_collection(Item collection, DomDocument* doc,
+                                             DomElement* root, int kind,
+                                             bool include_root, const char* query) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !query) return;
+    if (!doc && root) doc = root->doc;
+    if (!doc && !root) return;
+    String* query_name = heap_create_name(query);
+    for (int i = 0; i < s_live_lookup_collection_count; i++) {
+        if (s_live_lookup_collections[i].array == collection.array) {
+            s_live_lookup_collections[i].doc = doc;
+            s_live_lookup_collections[i].root = root;
+            s_live_lookup_collections[i].query = query_name;
+            s_live_lookup_collections[i].kind = kind;
+            s_live_lookup_collections[i].include_root = include_root;
+            return;
+        }
+    }
+    if (s_live_lookup_collection_count >= LIVE_LOOKUP_COLLECTION_CACHE_SIZE) return;
+    s_live_lookup_collections[s_live_lookup_collection_count].array = collection.array;
+    s_live_lookup_collections[s_live_lookup_collection_count].doc = doc;
+    s_live_lookup_collections[s_live_lookup_collection_count].root = root;
+    s_live_lookup_collections[s_live_lookup_collection_count].query = query_name;
+    s_live_lookup_collections[s_live_lookup_collection_count].kind = kind;
+    s_live_lookup_collections[s_live_lookup_collection_count].include_root = include_root;
+    s_live_lookup_collection_count++;
+}
+
+static LiveLookupCollectionEntry* _live_lookup_collection_entry(Item collection) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
+    for (int i = 0; i < s_live_lookup_collection_count; i++) {
+        if (s_live_lookup_collections[i].array == collection.array) {
+            return &s_live_lookup_collections[i];
+        }
+    }
+    return nullptr;
+}
+
 extern "C" Item js_get_this(void);
 extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* args, int argc);
 extern "C" Item js_new_function(void* func_ptr, int param_count);
@@ -1845,6 +1910,8 @@ static Item js_text_append_data_method(Item data_arg);
 static Item js_text_delete_data_method(Item offset_arg, Item count_arg);
 static Item js_text_substring_data_method(Item offset_arg, Item count_arg);
 static void _value_mark_dirty(DomElement* elem);
+static void _select_refresh_options_collection(Item collection, DomElement* sel);
+static void _select_refresh_selected_options_collection(Item collection, DomElement* sel);
 
 static Item _collection_named_item(Item name_arg) {
     const char* name = fn_to_cstr(name_arg);
@@ -1875,6 +1942,25 @@ static void _decorate_dom_collection(Item collection, const char* ctor_name) {
     if (get_type_id(ctor) == LMD_TYPE_FUNC) {
         js_property_set(collection, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
     }
+}
+
+static bool _array_companion_set_int_slot(Item collection, const char* name,
+                                          int name_len, int64_t value) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array ||
+        collection.array->extra == 0 || !name || name_len <= 0) {
+        return false;
+    }
+    Map* props = (Map*)(uintptr_t)collection.array->extra;
+    if (!props || !map_kind_is_array_props(props->map_kind) || !props->data) return false;
+    Item props_item = (Item){.map = props};
+    ShapeEntry* entry = nullptr;
+    JsShapeSlotStatus status = js_own_shape_slot_status(props_item, name, name_len, nullptr, &entry);
+    if (status != JS_SHAPE_SLOT_DATA || !entry || entry->byte_offset < 0 ||
+        entry->byte_offset + (int64_t)sizeof(int64_t) > (int64_t)props->data_cap) {
+        return false;
+    }
+    *(int64_t*)((char*)props->data + entry->byte_offset) = value;
+    return true;
 }
 
 static void _refresh_live_child_collection(Item collection, DomElement* owner, int kind) {
@@ -1928,6 +2014,59 @@ static void _refresh_live_form_collection(Item collection, LiveFormCollectionEnt
     }
 }
 
+static void _refresh_live_lookup_collection(Item collection, LiveLookupCollectionEntry* entry) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !entry) return;
+    // lookup collections are live; refresh through JS array pushes because
+    // decorated arrays use `extra` for companion properties, not Lambda extras.
+    collection.array->length = 0;
+    DomElement* root = entry->root ? entry->root : (entry->doc ? entry->doc->root : nullptr);
+    const char* query = entry->query ? entry->query->chars : "";
+    if (!root) return;
+    if (entry->include_root) {
+        if (entry->kind == LIVE_LOOKUP_COLLECTION_TAG) {
+            _collect_lookup_by_tag_rec(root, query, collection);
+        } else if (entry->kind == LIVE_LOOKUP_COLLECTION_CLASS) {
+            _collect_lookup_by_class_rec(root, query, collection);
+        } else if (entry->kind == LIVE_LOOKUP_COLLECTION_NAME) {
+            _collect_lookup_by_name_rec(root, query, collection);
+        }
+    } else {
+        DomNode* child = root->first_child;
+        while (child) {
+            if (child->is_element()) {
+                DomElement* elem = child->as_element();
+                if (entry->kind == LIVE_LOOKUP_COLLECTION_TAG) {
+                    _collect_lookup_by_tag_rec(elem, query, collection);
+                } else if (entry->kind == LIVE_LOOKUP_COLLECTION_CLASS) {
+                    _collect_lookup_by_class_rec(elem, query, collection);
+                } else if (entry->kind == LIVE_LOOKUP_COLLECTION_NAME) {
+                    _collect_lookup_by_name_rec(elem, query, collection);
+                }
+            }
+            child = child->next_sibling;
+        }
+    }
+    if (collection.array->extra != 0) {
+        Map* props = (Map*)(uintptr_t)collection.array->extra;
+        Item props_item = (Item){.map = props};
+        fn_map_set(props_item, (Item){.item = s2it(heap_create_name("length"))},
+                   (Item){.item = i2it(collection.array->length)});
+    }
+}
+
+static Item _new_live_lookup_collection(DomDocument* doc, DomElement* root,
+                                        int kind, bool include_root,
+                                        Item query_item, const char* ctor_name) {
+    const char* query = fn_to_cstr(query_item);
+    if (!query) return ItemNull;
+    Item collection = js_array_new(0);
+    _register_live_lookup_collection(collection, doc, root, kind, include_root, query);
+    LiveLookupCollectionEntry* entry = _live_lookup_collection_entry(collection);
+    _refresh_live_lookup_collection(collection, entry);
+    if (ctor_name) _decorate_dom_collection(collection, ctor_name);
+    return collection;
+}
+
 extern "C" Item js_dom_live_child_collection_bridge(void* elem_ptr, bool elements_only) {
     DomElement* elem = (DomElement*)elem_ptr;
     Item collection = js_array_new(0);
@@ -1963,6 +2102,36 @@ extern "C" Item js_dom_live_form_elements_bridge(void* elem_ptr) {
     return collection;
 }
 
+extern "C" Item js_dom_live_document_get_elements_by_tag_name_bridge(void* doc_ptr, Item query) {
+    DomDocument* doc = (DomDocument*)doc_ptr;
+    return _new_live_lookup_collection(doc, doc ? doc->root : nullptr,
+        LIVE_LOOKUP_COLLECTION_TAG, true, query, "HTMLCollection");
+}
+
+extern "C" Item js_dom_live_document_get_elements_by_class_name_bridge(void* doc_ptr, Item query) {
+    DomDocument* doc = (DomDocument*)doc_ptr;
+    return _new_live_lookup_collection(doc, doc ? doc->root : nullptr,
+        LIVE_LOOKUP_COLLECTION_CLASS, true, query, "HTMLCollection");
+}
+
+extern "C" Item js_dom_live_document_get_elements_by_name_bridge(void* doc_ptr, Item query) {
+    DomDocument* doc = (DomDocument*)doc_ptr;
+    return _new_live_lookup_collection(doc, doc ? doc->root : nullptr,
+        LIVE_LOOKUP_COLLECTION_NAME, true, query, nullptr);
+}
+
+extern "C" Item js_dom_live_element_get_elements_by_tag_name_bridge(void* elem_ptr, Item query) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    return _new_live_lookup_collection(elem ? elem->doc : nullptr, elem,
+        LIVE_LOOKUP_COLLECTION_TAG, false, query, "HTMLCollection");
+}
+
+extern "C" Item js_dom_live_element_get_elements_by_class_name_bridge(void* elem_ptr, Item query) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    return _new_live_lookup_collection(elem ? elem->doc : nullptr, elem,
+        LIVE_LOOKUP_COLLECTION_CLASS, false, query, "HTMLCollection");
+}
+
 static void js_dom_refresh_live_child_collections_for_mutation(DomNode* target,
                                                                DomNode* parent) {
     for (int i = 0; i < s_live_child_collection_count; i++) {
@@ -1985,6 +2154,40 @@ static void js_dom_refresh_live_form_collections_for_mutation(DomNode* target,
         if (doc && owner_doc && owner_doc != doc) continue;
         Item collection = (Item){.array = entry->array};
         _refresh_live_form_collection(collection, entry);
+    }
+}
+
+static void js_dom_refresh_select_option_collections_for_mutation(DomNode* target,
+                                                                  DomNode* parent,
+                                                                  DomDocument* doc) {
+    (void)target;
+    (void)parent;
+    for (int i = 0; i < s_select_options_owner_count; i++) {
+        DomElement* owner = s_select_options_owners[i].owner;
+        if (!owner || !_is_tag(owner, "select")) continue;
+        if (doc && owner->doc && owner->doc != doc) continue;
+        Item collection = (Item){.array = s_select_options_owners[i].array};
+        // optimized length/index reads can bypass the property hook, so
+        // structural select changes refresh held option collections here too.
+        if (s_select_options_owners[i].kind == SELECT_COLLECTION_OPTIONS) {
+            _select_refresh_options_collection(collection, owner);
+        } else if (s_select_options_owners[i].kind == SELECT_COLLECTION_SELECTED_OPTIONS) {
+            _select_refresh_selected_options_collection(collection, owner);
+        }
+    }
+}
+
+static void js_dom_refresh_live_lookup_collections_for_mutation(DomNode* target,
+                                                                DomNode* parent,
+                                                                DomDocument* doc) {
+    (void)target;
+    (void)parent;
+    for (int i = 0; i < s_live_lookup_collection_count; i++) {
+        LiveLookupCollectionEntry* entry = &s_live_lookup_collections[i];
+        DomDocument* owner_doc = entry->doc ? entry->doc : (entry->root ? entry->root->doc : nullptr);
+        if (doc && owner_doc && owner_doc != doc) continue;
+        Item collection = (Item){.array = entry->array};
+        _refresh_live_lookup_collection(collection, entry);
     }
 }
 
@@ -4398,79 +4601,48 @@ extern "C" void js_dom_throw_contenteditable_syntax_error(void) {
     js_dom_throw_syntax_error("Invalid contentEditable value");
 }
 
-// ============================================================================
-// Helper: find elements by class name (tree walk, appends to array)
-// ============================================================================
-
-static void dom_find_by_class(DomElement* root, const char* cls, Array* arr) {
+static void _collect_lookup_by_class_rec(DomElement* root, const char* cls, Item collection) {
     if (!root || !cls) return;
     for (int i = 0; i < root->class_count; i++) {
         if (root->class_names[i] && strcmp(root->class_names[i], cls) == 0) {
-            array_push(arr, js_dom_wrap_element(root));
+            js_array_push(collection, js_dom_wrap_element(root));
             break;
         }
     }
     DomNode* child = root->first_child;
     while (child) {
         if (child->is_element()) {
-            dom_find_by_class(child->as_element(), cls, arr);
+            _collect_lookup_by_class_rec(child->as_element(), cls, collection);
         }
         child = child->next_sibling;
     }
 }
 
-// ============================================================================
-// Helper: find elements by tag name (tree walk, appends to array)
-// ============================================================================
-
-static void dom_find_by_tag(DomElement* root, const char* tag, Array* arr) {
+static void _collect_lookup_by_tag_rec(DomElement* root, const char* tag, Item collection) {
     if (!root || !tag) return;
-    // case-insensitive comparison for HTML tags; "*" matches all elements.
     if (root->tag_name && ((tag[0] == '*' && tag[1] == '\0') ||
             strcasecmp(root->tag_name, tag) == 0)) {
-        array_push(arr, js_dom_wrap_element(root));
+        js_array_push(collection, js_dom_wrap_element(root));
     }
     DomNode* child = root->first_child;
     while (child) {
         if (child->is_element()) {
-            dom_find_by_tag(child->as_element(), tag, arr);
+            _collect_lookup_by_tag_rec(child->as_element(), tag, collection);
         }
         child = child->next_sibling;
     }
 }
 
-static void dom_find_descendants_by_tag(DomElement* root, const char* tag, Array* arr) {
-    if (!root || !tag) return;
-    DomNode* child = root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            dom_find_by_tag(child->as_element(), tag, arr);
-        }
-        child = child->next_sibling;
-    }
-}
-
-static void dom_find_descendants_by_class(DomElement* root, const char* cls, Array* arr) {
-    if (!root || !cls) return;
-    DomNode* child = root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            dom_find_by_class(child->as_element(), cls, arr);
-        }
-        child = child->next_sibling;
-    }
-}
-
-static void dom_find_by_name(DomElement* root, const char* name, Array* arr) {
+static void _collect_lookup_by_name_rec(DomElement* root, const char* name, Item collection) {
     if (!root || !name) return;
     const char* attr = dom_element_get_attribute(root, "name");
     if (attr && strcmp(attr, name) == 0) {
-        array_push(arr, js_dom_wrap_element(root));
+        js_array_push(collection, js_dom_wrap_element(root));
     }
     DomNode* child = root->first_child;
     while (child) {
         if (child->is_element()) {
-            dom_find_by_name(child->as_element(), name, arr);
+            _collect_lookup_by_name_rec(child->as_element(), name, collection);
         }
         child = child->next_sibling;
     }
@@ -5326,43 +5498,19 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     // getElementsByClassName(className)
     if (strcmp(method, "getElementsByClassName") == 0) {
         if (argc < 1) return ItemNull;
-        const char* cls = fn_to_cstr(args[0]);
-        if (!cls) return ItemNull;
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        dom_find_by_class(root, cls, arr);
-        return (Item){.array = arr};
+        return js_dom_live_document_get_elements_by_class_name_bridge((void*)doc, args[0]);
     }
 
     // getElementsByTagName(tagName)
     if (strcmp(method, "getElementsByTagName") == 0) {
         if (argc < 1) return ItemNull;
-        const char* tag = fn_to_cstr(args[0]);
-        if (!tag) return ItemNull;
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        dom_find_by_tag(root, tag, arr);
-        return (Item){.array = arr};
+        return js_dom_live_document_get_elements_by_tag_name_bridge((void*)doc, args[0]);
     }
 
     // getElementsByName(name)
     if (strcmp(method, "getElementsByName") == 0) {
         if (argc < 1) return ItemNull;
-        const char* name = fn_to_cstr(args[0]);
-        if (!name) return ItemNull;
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        dom_find_by_name(root, name, arr);
-        return (Item){.array = arr};
+        return js_dom_live_document_get_elements_by_name_bridge((void*)doc, args[0]);
     }
 
     // querySelector(selector)
@@ -7049,6 +7197,52 @@ static void _select_refresh_selected_options_collection(Item collection, DomElem
     }
 }
 
+static int _select_effective_selected_index(DomElement* sel, Item options) {
+    if (!sel || get_type_id(options) != LMD_TYPE_ARRAY) return -1;
+    int64_t n = js_array_length(options);
+    int sel_idx = -1;
+    int first_non_disabled = -1;
+    for (int64_t i = 0; i < n; i++) {
+        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(options, i));
+        if (!opt) continue;
+        if (sel_idx < 0 && _get_selectedness(opt)) sel_idx = (int)i; // INT_CAST_OK: option index
+        if (first_non_disabled < 0 && !dom_element_has_attribute(opt, "disabled")) {
+            first_non_disabled = (int)i; // INT_CAST_OK: option index
+        }
+    }
+    int size = 0;
+    const char* sz = dom_element_get_attribute(sel, "size");
+    if (sz) {
+        char* ep = nullptr;
+        long v = strtol(sz, &ep, 10);
+        if (ep != sz && v > 0) size = (int)v; // INT_CAST_OK: select display size attribute
+    }
+    if (sel_idx < 0 && !dom_element_has_attribute(sel, "multiple") && size <= 1 &&
+        !_select_is_dirty(sel)) {
+        sel_idx = first_non_disabled;
+    }
+    return sel_idx;
+}
+
+static void _select_refresh_options_collection(Item collection, DomElement* sel) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !sel) return;
+    // held select.options objects are live; refresh the dense array directly so
+    // stale option slots do not survive structural mutations through companion props.
+    collection.array->length = 0;
+    _collect_options(sel->first_child, collection);
+    int64_t n = js_array_length(collection);
+    int sel_idx = _select_effective_selected_index(sel, collection);
+    js_property_set(collection, (Item){.item = s2it(heap_create_name("selectedIndex"))},
+                    (Item){.item = i2it(sel_idx)});
+    if (collection.array->extra != 0) {
+        Map* props = (Map*)(uintptr_t)collection.array->extra;
+        Item props_item = (Item){.map = props};
+        js_property_set(props_item, (Item){.item = s2it(heap_create_name("length"))},
+                        (Item){.item = i2it(n)});
+        _array_companion_set_int_slot(collection, "length", 6, n);
+    }
+}
+
 static DomElement* _nearest_select_for_node(DomNode* node) {
     for (DomNode* cur = node; cur; cur = cur->parent) {
         if (!cur->is_element()) continue;
@@ -7132,9 +7326,19 @@ extern "C" void js_dom_collection_before_property_get(Item object, Item key) {
         }
         return;
     }
+    LiveLookupCollectionEntry* lookup_entry = _live_lookup_collection_entry(object);
+    if (lookup_entry) {
+        _refresh_live_lookup_collection(object, lookup_entry);
+        return;
+    }
     int kind = 0;
     DomElement* owner = _select_options_owner(object, &kind);
-    if (!owner || kind != SELECT_COLLECTION_SELECTED_OPTIONS) return;
+    if (!owner) return;
+    if (kind == SELECT_COLLECTION_OPTIONS) {
+        _select_refresh_options_collection(object, owner);
+        return;
+    }
+    if (kind != SELECT_COLLECTION_SELECTED_OPTIONS) return;
     TypeId kt = get_type_id(key);
     if (kt == LMD_TYPE_INT || kt == LMD_TYPE_INT64 || kt == LMD_TYPE_FLOAT) {
         _select_refresh_selected_options_collection(object, owner);
@@ -9055,30 +9259,9 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     if (_is_tag(elem, "select")) {
         if (strcmp(prop, "options") == 0) {
             Item arr = js_array_new(0);
-            _collect_options(elem->first_child, arr);
-            // Compute selectedIndex (with default-reset rule) so the
-            // collection's `selectedIndex` property mirrors the select.
-            int64_t n = js_array_length(arr);
-            int sel_idx = -1, first_non_disabled = -1;
-            for (int64_t i = 0; i < n; i++) {
-                DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
-                if (!opt) continue;
-                if (sel_idx < 0 && _get_selectedness(opt)) sel_idx = (int)i; // INT_CAST_OK
-                if (first_non_disabled < 0 && !dom_element_has_attribute(opt, "disabled"))
-                    first_non_disabled = (int)i; // INT_CAST_OK
-            }
-            int size = 0;
-            const char* sz = dom_element_get_attribute(elem, "size");
-            if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
-            if (sel_idx < 0 && !dom_element_has_attribute(elem, "multiple") && size <= 1
-                && !_select_is_dirty(elem))
-                sel_idx = first_non_disabled;
-            js_property_set(arr, (Item){.item = s2it(heap_create_name("selectedIndex"))},
-                            (Item){.item = i2it(sel_idx)});
-            js_property_set(arr, (Item){.item = s2it(heap_create_name("length"))},
-                            (Item){.item = i2it(n)});
             _decorate_dom_collection(arr, "HTMLOptionsCollection");
             _register_select_options_owner(arr, elem, SELECT_COLLECTION_OPTIONS);
+            _select_refresh_options_collection(arr, elem);
             return arr;
         }
         if (strcmp(prop, "length") == 0) {
@@ -12172,29 +12355,13 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // getElementsByTagName(tagName) — descendants of this element
     if (strcmp(method, "getElementsByTagName") == 0) {
         if (argc < 1) return ItemNull;
-        const char* tag = fn_to_cstr(args[0]);
-        if (!tag) return ItemNull;
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        dom_find_descendants_by_tag(elem, tag, arr);
-        return (Item){.array = arr};
+        return js_dom_live_element_get_elements_by_tag_name_bridge((void*)elem, args[0]);
     }
 
     // getElementsByClassName(className) — descendants of this element
     if (strcmp(method, "getElementsByClassName") == 0) {
         if (argc < 1) return ItemNull;
-        const char* cls = fn_to_cstr(args[0]);
-        if (!cls) return ItemNull;
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        dom_find_descendants_by_class(elem, cls, arr);
-        return (Item){.array = arr};
+        return js_dom_live_element_get_elements_by_class_name_bridge((void*)elem, args[0]);
     }
 
     // querySelector(selector) — from this element

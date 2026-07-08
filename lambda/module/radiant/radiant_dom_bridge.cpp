@@ -123,6 +123,11 @@ extern "C" Item js_dom_normalize_bridge(void* elem);
 extern "C" Item js_dom_live_child_collection_bridge(void* elem, bool elements_only);
 extern "C" Item js_dom_live_document_forms_bridge(void* doc);
 extern "C" Item js_dom_live_form_elements_bridge(void* elem);
+extern "C" Item js_dom_live_document_get_elements_by_tag_name_bridge(void* doc, Item query);
+extern "C" Item js_dom_live_document_get_elements_by_class_name_bridge(void* doc, Item query);
+extern "C" Item js_dom_live_document_get_elements_by_name_bridge(void* doc, Item query);
+extern "C" Item js_dom_live_element_get_elements_by_tag_name_bridge(void* elem, Item query);
+extern "C" Item js_dom_live_element_get_elements_by_class_name_bridge(void* elem, Item query);
 extern "C" Item js_dom_clone_node_bridge(void* elem, Item deep, bool has_deep);
 extern "C" Item js_dom_replace_child_bridge(void* parent, Item new_child, Item old_child);
 extern "C" Item js_dom_replace_with_bridge(void* node, Item* args, int argc);
@@ -936,75 +941,6 @@ static DomElement* radiant_dom_find_by_id(DomElement* root, const char* id) {
         child = child->next_sibling;
     }
     return nullptr;
-}
-
-static void radiant_dom_find_by_class(DomElement* root, const char* cls, Array* arr) {
-    if (!root || !cls || !arr) return;
-    for (int i = 0; i < root->class_count; i++) {
-        if (root->class_names[i] && strcmp(root->class_names[i], cls) == 0) {
-            array_push(arr, radiant_dom_node_item((DomNode*)root));
-            break;
-        }
-    }
-    DomNode* child = root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            radiant_dom_find_by_class(child->as_element(), cls, arr);
-        }
-        child = child->next_sibling;
-    }
-}
-
-static void radiant_dom_find_by_tag(DomElement* root, const char* tag, Array* arr) {
-    if (!root || !tag || !arr) return;
-    if (root->tag_name && ((tag[0] == '*' && tag[1] == '\0') ||
-            strcasecmp(root->tag_name, tag) == 0)) {
-        array_push(arr, radiant_dom_node_item((DomNode*)root));
-    }
-    DomNode* child = root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            radiant_dom_find_by_tag(child->as_element(), tag, arr);
-        }
-        child = child->next_sibling;
-    }
-}
-
-static void radiant_dom_find_by_name(DomElement* root, const char* name, Array* arr) {
-    if (!root || !name || !arr) return;
-    const char* attr = dom_element_get_attribute(root, "name");
-    if (attr && strcmp(attr, name) == 0) {
-        array_push(arr, radiant_dom_node_item((DomNode*)root));
-    }
-    DomNode* child = root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            radiant_dom_find_by_name(child->as_element(), name, arr);
-        }
-        child = child->next_sibling;
-    }
-}
-
-static void radiant_dom_find_descendants_by_tag(DomElement* root, const char* tag, Array* arr) {
-    if (!root || !tag || !arr) return;
-    DomNode* child = root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            radiant_dom_find_by_tag(child->as_element(), tag, arr);
-        }
-        child = child->next_sibling;
-    }
-}
-
-static void radiant_dom_find_descendants_by_class(DomElement* root, const char* cls, Array* arr) {
-    if (!root || !cls || !arr) return;
-    DomNode* child = root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            radiant_dom_find_by_class(child->as_element(), cls, arr);
-        }
-        child = child->next_sibling;
-    }
 }
 
 static CssSelector* radiant_dom_parse_css_selector(const char* sel_text, Pool* pool) {
@@ -1834,14 +1770,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
-        const char* tag = fn_to_cstr(args[0]);
-        if (!tag) {
-            *out = ItemNull;
-            return true;
-        }
-        Item arr_item = radiant_dom_empty_array_item();
-        radiant_dom_find_descendants_by_tag(elem, tag, arr_item.array);
-        *out = arr_item;
+        *out = js_dom_live_element_get_elements_by_tag_name_bridge((void*)elem, args[0]);
         return true;
     }
 
@@ -1850,14 +1779,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
-        const char* cls = fn_to_cstr(args[0]);
-        if (!cls) {
-            *out = ItemNull;
-            return true;
-        }
-        Item arr_item = radiant_dom_empty_array_item();
-        radiant_dom_find_descendants_by_class(elem, cls, arr_item.array);
-        *out = arr_item;
+        *out = js_dom_live_element_get_elements_by_class_name_bridge((void*)elem, args[0]);
         return true;
     }
 
@@ -2691,18 +2613,7 @@ extern "C" int radiant_dom_document_method(Item method_name, Item* args, int arg
             *out = ItemNull;
             return 1;
         }
-        const char* cls = fn_to_cstr(args[0]);
-        if (!cls) {
-            *out = ItemNull;
-            return 1;
-        }
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        radiant_dom_find_by_class(root, cls, arr);
-        *out = (Item){.array = arr};
+        *out = js_dom_live_document_get_elements_by_class_name_bridge((void*)doc, args[0]);
         return 1;
     }
 
@@ -2711,18 +2622,7 @@ extern "C" int radiant_dom_document_method(Item method_name, Item* args, int arg
             *out = ItemNull;
             return 1;
         }
-        const char* tag = fn_to_cstr(args[0]);
-        if (!tag) {
-            *out = ItemNull;
-            return 1;
-        }
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        radiant_dom_find_by_tag(root, tag, arr);
-        *out = (Item){.array = arr};
+        *out = js_dom_live_document_get_elements_by_tag_name_bridge((void*)doc, args[0]);
         return 1;
     }
 
@@ -2731,18 +2631,7 @@ extern "C" int radiant_dom_document_method(Item method_name, Item* args, int arg
             *out = ItemNull;
             return 1;
         }
-        const char* name = fn_to_cstr(args[0]);
-        if (!name) {
-            *out = ItemNull;
-            return 1;
-        }
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        radiant_dom_find_by_name(root, name, arr);
-        *out = (Item){.array = arr};
+        *out = js_dom_live_document_get_elements_by_name_bridge((void*)doc, args[0]);
         return 1;
     }
 
