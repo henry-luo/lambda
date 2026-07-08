@@ -358,6 +358,84 @@ static void append_browser_global_sync(StrBuf* buf) {
         "}\n");
 }
 
+static char* try_join_script_resource(const char* root, const char* abs_path) {
+    if (!root || !abs_path || abs_path[0] != '/') return nullptr;
+    size_t root_len = strlen(root);
+    size_t path_len = strlen(abs_path);
+    char* candidate = (char*)mem_alloc(root_len + path_len + 1, MEM_CAT_JS_RUNTIME);
+    if (!candidate) return nullptr;
+    memcpy(candidate, root, root_len);
+    memcpy(candidate + root_len, abs_path, path_len);
+    candidate[root_len + path_len] = '\0';
+    if (file_exists(candidate)) return candidate;
+    mem_free(candidate);
+    return nullptr;
+}
+
+static char* try_layout_support_script_resource(const char* support_root, const char* src) {
+    if (!support_root || !src) return nullptr;
+
+    char* resolved = try_join_script_resource(support_root, src);
+    if (resolved) return resolved;
+
+    const char* css_support_prefix = "/css/support";
+    size_t css_support_prefix_len = strlen(css_support_prefix);
+    if (strncmp(src, css_support_prefix, css_support_prefix_len) == 0 &&
+        src[css_support_prefix_len] == '/') {
+        return try_join_script_resource(support_root, src + css_support_prefix_len);
+    }
+    return nullptr;
+}
+
+static char* resolve_wpt_absolute_script_path(const char* src, Url* base_url) {
+    if (!src || src[0] != '/' || src[1] == '/') return nullptr;
+
+    if (strcmp(src, "/resources/testharness.js") == 0) {
+        return mem_strdup("builtin:wpt-testharness.js", MEM_CAT_JS_RUNTIME);
+    }
+    if (strcmp(src, "/resources/testharnessreport.js") == 0) {
+        return mem_strdup("builtin:wpt-testharnessreport.js", MEM_CAT_JS_RUNTIME);
+    }
+    if (strcmp(src, "/resources/testdriver.js") == 0) {
+        return mem_strdup("builtin:wpt-testdriver.js", MEM_CAT_JS_RUNTIME);
+    }
+    if (strcmp(src, "/resources/testdriver-vendor.js") == 0) {
+        return mem_strdup("builtin:wpt-testdriver-vendor.js", MEM_CAT_JS_RUNTIME);
+    }
+
+    if (base_url) {
+        char* base_local = url_to_local_path(base_url);
+        if (base_local) {
+            const char* marker = strstr(base_local, "/test/layout/data/");
+            size_t marker_len = strlen("/test/layout/data");
+            if (!marker) {
+                marker = strstr(base_local, "/layout/data/");
+                marker_len = strlen("/layout/data");
+            }
+            if (marker) {
+                size_t root_len = (size_t)(marker - base_local) + marker_len;
+                char* support_root = (char*)mem_alloc(root_len + strlen("/support") + 1,
+                                                      MEM_CAT_JS_RUNTIME);
+                if (support_root) {
+                    memcpy(support_root, base_local, root_len);
+                    memcpy(support_root + root_len, "/support", strlen("/support") + 1);
+                    char* resolved = try_layout_support_script_resource(support_root, src);
+                    mem_free(support_root);
+                    if (resolved) {
+                        mem_free(base_local);
+                        return resolved;
+                    }
+                }
+            }
+            mem_free(base_local);
+        }
+    }
+
+    char* resolved = try_layout_support_script_resource("test/layout/data/support", src);
+    if (resolved) return resolved;
+    return try_join_script_resource("ref/wpt", src);
+}
+
 /**
  * Resolve a script src attribute to a loadable path/URL, following the same
  * URL resolution logic as CSS stylesheet loading in collect_linked_stylesheets.
@@ -387,6 +465,13 @@ static char* resolve_script_url(const char* src, Url* base_url, bool* out_is_htt
             return mem_strdup(src, MEM_CAT_JS_RUNTIME);
         }
     } else if (src[0] == '/' && src[1] != '/') {
+        char* wpt_path = resolve_wpt_absolute_script_path(src, base_url);
+        if (wpt_path) {
+            // WPT fixtures use server-root URLs while layout tests run from
+            // local files, so resolve known support scripts before falling
+            // back to the host filesystem root.
+            return wpt_path;
+        }
         // absolute local path
         return mem_strdup(src, MEM_CAT_JS_RUNTIME);
     } else if (strstr(src, "://") != nullptr) {
@@ -558,6 +643,55 @@ static void script_source_cache_store(const char* resolved_path, bool is_http,
 
 static char* load_script_content(const char* resolved_path, bool is_http) {
     char* content = nullptr;
+    if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharness.js") == 0) {
+        // WPT test callbacks are conformance assertions, not visual setup; running
+        // them during layout capture leaves API-test DOM artifacts that browser
+        // references do not include.
+        return mem_strdup(
+            "(function(){\n"
+            "function noop(){}\n"
+            "function test(fn,name){}\n"
+            "function setup(opts,fn){ if (typeof opts === 'function') return; }\n"
+            "function done(){}\n"
+            "function async_test(fn,name){ return { step:function(fn){ return fn && fn(); }, step_func:function(fn){ return function(){ return fn && fn.apply(this, arguments); }; }, step_func_done:function(fn){ return function(){ return fn && fn.apply(this, arguments); }; }, unreached_func:function(){ return noop; }, add_cleanup:noop, done:noop }; }\n"
+            "function promise_test(fn,name){}\n"
+            "function assert_true(){}\n"
+            "function assert_false(){}\n"
+            "function assert_equals(){}\n"
+            "function assert_not_equals(){}\n"
+            "function assert_array_equals(){}\n"
+            "function assert_in_array(){}\n"
+            "function assert_throws_js(){}\n"
+            "function assert_throws_dom(){}\n"
+            "function assert_unreached(){}\n"
+            "function assert_greater_than(){}\n"
+            "function assert_greater_than_equal(){}\n"
+            "function assert_less_than(){}\n"
+            "function assert_less_than_equal(){}\n"
+            "function assert_class_string(){}\n"
+            "window.test = test; window.async_test = async_test; window.promise_test = promise_test; window.setup = setup; window.done = done;\n"
+            "window.assert_true = assert_true; window.assert_false = assert_false; window.assert_equals = assert_equals; window.assert_not_equals = assert_not_equals;\n"
+            "window.assert_array_equals = assert_array_equals; window.assert_in_array = assert_in_array; window.assert_throws_js = assert_throws_js; window.assert_throws_dom = assert_throws_dom;\n"
+            "window.assert_unreached = assert_unreached; window.assert_greater_than = assert_greater_than; window.assert_greater_than_equal = assert_greater_than_equal;\n"
+            "window.assert_less_than = assert_less_than; window.assert_less_than_equal = assert_less_than_equal; window.assert_class_string = assert_class_string;\n"
+            "})();\n",
+            MEM_CAT_JS_RUNTIME);
+    }
+    if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharnessreport.js") == 0) {
+        return mem_strdup("", MEM_CAT_JS_RUNTIME);
+    }
+    if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testdriver.js") == 0) {
+        return mem_strdup(
+            "(function(){\n"
+            "function resolved(){ return { then:function(resolve){ if (resolve) resolve(); return this; }, catch:function(){ return this; } }; }\n"
+            "function Actions(){ this.pointerMove=function(){return this;}; this.pointerDown=function(){return this;}; this.pointerUp=function(){return this;}; this.keyDown=function(){return this;}; this.keyUp=function(){return this;}; this.send=function(){return resolved();}; }\n"
+            "window.test_driver = window.test_driver || { send_keys:function(){return resolved();}, click:function(){return resolved();}, bless:function(name, fn){ if (fn) fn(); return resolved(); }, Actions:Actions };\n"
+            "})();\n",
+            MEM_CAT_JS_RUNTIME);
+    }
+    if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testdriver-vendor.js") == 0) {
+        return mem_strdup("", MEM_CAT_JS_RUNTIME);
+    }
     if (is_http) {
         size_t content_size = 0;
         content = download_http_content_cached(resolved_path, &content_size, "./temp/cache");
@@ -1088,7 +1222,7 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
         "window.addEventListener = function(type, fn, opts) { document.addEventListener(type, fn, opts); };\n"
         "window.removeEventListener = function(type, fn, opts) { document.removeEventListener(type, fn, opts); };\n"
         "window.dispatchEvent = function(ev) { return document.dispatchEvent(ev); };\n"
-        "window.getComputedStyle = function(elem, pseudo) { return getComputedStyle(elem, pseudo); };\n"
+        "// getComputedStyle is installed natively; wrapping it here recurses through global lookup.\n"
         "window.matchMedia = function(q) { return {matches: false, media: q, addEventListener: function(){}, removeEventListener: function(){}}; };\n"
         "window.scrollTo = function(x, y) {\n"
         "  if (typeof x === 'object' && x !== null) {\n"

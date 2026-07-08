@@ -39,8 +39,10 @@ pub fn render_matrix(node, context, render_fn) {
 // ============================================================
 
 fn render_body(body, context, render_fn, env_name, columns) {
-    let cell_ctx = if (env_name == "smallmatrix" or env_name == "cases" or env_name == "rcases")
+    let cell_ctx = if (env_name == "smallmatrix")
         ctx.derive(context, {style: "script"})
+    else if (env_name == "cases" or env_name == "rcases")
+        ctx.derive(context, {style: "script", array_text_scripts: true})
     else if (env_name == "dcases")
         ctx.derive(context, {style: "display"})
     else context
@@ -55,7 +57,10 @@ fn render_body(body, context, render_fn, env_name, columns) {
     let aligns = if (declared_cols > 0) declared_alignment(columns)
         else get_alignment(env_name, ncols)
     let spacing_ctx = cell_spacing_context(env_name, context, cell_ctx)
-    let row_boxes = render_row_groups(row_groups, cell_ctx, spacing_ctx, render_fn)
+    let render_ctx = if (env_compact_prime(env_name))
+        ctx.derive(cell_ctx, {compact_prime: true})
+        else cell_ctx
+    let row_boxes = render_row_groups(row_groups, render_ctx, spacing_ctx, render_fn)
     let table = build_table(row_boxes, ncols, nrows, aligns, env_name)
     wrap_delimiters(table, env_name)
 }
@@ -104,6 +109,10 @@ fn cell_spacing_context(env_name, context, cell_ctx) {
     else cell_ctx
 }
 
+fn env_compact_prime(env_name) {
+    not (env_name == "aligned" or env_name == "align" or env_name == "equation")
+}
+
 fn render_row_groups(rows, cell_ctx, spacing_ctx, render_fn) {
     [for (row in rows) [for (g in row.cells) render_cell_group(g.items, cell_ctx, spacing_ctx, render_fn)]]
 }
@@ -122,26 +131,20 @@ fn bin_as_ord_after(prev_type) {
     prev_type == "mrel" or prev_type == "mpunct" or prev_type == "mop"
 }
 
-fn box_with_type(bx, atom_type) => {
+fn box_with_type(bx, atom_type) {
+    ml_box_with_type(bx, atom_type)
+}
+
+fn ml_box_with_type(bx, atom_type) => {
     element: bx.element,
     height: bx.height,
     depth: bx.depth,
-    // preserve full-precision raw extent through the bin->ord reclassification:
-    // dropping it poisons the cell hbox's raw propagation, forcing the array's
-    // per-row height/depth onto the already-rounded values and double-rounding
-    // the cell (e.g. dcases row jot: 1.81+1.25+0.3 ceil2-tips to 3.37 vs the
-    // single-rounded 1.805+1.25001+0.3 -> 3.36).
-    height_raw: bx.height_raw,
-    depth_raw: bx.depth_raw,
-    render_height: bx.render_height,
-    render_depth: bx.render_depth,
-    render_total: bx.render_total,
-    left_right_render_depth: bx.left_right_render_depth,
-    left_right_render_total: bx.left_right_render_total,
     width: bx.width,
     type: atom_type,
     italic: bx.italic,
     skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    model: "ml",
     is_fraction: bx.is_fraction
 }
 
@@ -183,15 +186,8 @@ fn apply_spacing(boxes, context) {
          build_spaced(normalized, 1, normalized[0].type, [normalized[0]], context))
 }
 
-fn blank_cell_box() => {
-    element: "\u00A0",
-    height: 0.0,
-    depth: 0.0,
-    width: 0.5,
-    type: "mord",
-    italic: 0.0,
-    skew: 0.0
-}
+fn blank_cell_box() =>
+    box.ml_box("\u00A0", 0.0, 0.0, 0.5, "mord")
 
 // ============================================================
 // Separator detection
@@ -223,22 +219,27 @@ fn build_table(row_boxes, ncols, nrows, aligns, env_name) {
         else table_metrics(env_name, nrows)
     let total_w = compute_table_width(row_boxes, ncols, env_name)
     let children = build_table_children(row_boxes, ncols, aligns, metrics, env_name, 0, [])
-    {
-        element: <span class: css.MTABLE;
-            for el in children { el }
-        >,
-        height: metrics.height,
-        depth: metrics.depth,
-        height_raw: metrics.height_raw,
-        depth_raw: metrics.depth_raw,
-        render_height: metrics.height,
-        render_depth: metrics.depth,
-        render_total: metrics.render_total,
-        width: total_w,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    let el = <span class: css.MTABLE;
+        for el in children { el }
+    >
+    ml_table_box(el, metrics, total_w)
+}
+
+fn array_has_delimiters(env_name) {
+    get_left_delim(env_name) != null or get_right_delim(env_name) != null
+}
+
+fn ml_table_box(el, metrics, total_w) => {
+    element: el,
+    height: if (metrics.box_height != null) metrics.box_height else metrics.height,
+    depth: if (metrics.box_depth != null) metrics.box_depth else metrics.depth,
+    width: total_w,
+    type: "ord",
+    italic: 0.0,
+    skew: 0.0,
+    max_font_size: if (metrics.box_height != null) metrics.box_height else metrics.height,
+    model: "ml",
+    delim_total: metrics.box_total
 }
 
 fn build_table_children(row_boxes, ncols, aligns, metrics, env_name, col, acc) {
@@ -308,8 +309,7 @@ fn cell_at(row_boxes, row, col) {
     else blank_cell_box()
 }
 
-// only smallmatrix still uses a hardcoded table (scriptstyle-cell model not
-// yet ported); everything else is metric-driven via compute_dyn_metrics.
+// environments not needing the dynamic row walk use the fixed matrix estimate.
 fn table_metrics(env_name, nrows) {
     matrix_table_metrics(nrows)
 }
@@ -323,31 +323,32 @@ fn table_metrics(env_name, nrows) {
 // vlist tops, and depth-holder all fall out of the centering offset.
 // ============================================================
 
-// scale-1.0 envs (cells render at the ambient/display style): matrix family,
-// array, dcases (display cells; adds inter-row `jot`). cases/rcases/smallmatrix
-// scale cells to scriptstyle and keep their legacy tables; equation has its own
-// centering.
+// Dynamic envs use the MathLive row walk. `smallmatrix` uses the same walk with
+// compact scriptstyle arstruts; `equation` has its own single-row centering.
 fn uses_dyn_metrics(env_name) {
-    not (env_name == "smallmatrix" or env_name == "equation")
+    not (env_name == "equation")
 }
 
 // TeX \jot (3pt = 0.3em): extra depth added to every non-last row in dcases/
 // rcases/aligned-style environments (NOT matrices, cases, or array).
 fn env_jot(env_name) {
     if (env_name == "dcases" or env_name == "rcases" or
-        env_name == "aligned" or env_name == "align") 0.3
+        env_name == "aligned" or env_name == "align" or
+        env_name == "smallmatrix") 0.3
     else 0.0
 }
 
-// \arraystretch: cases/rcases reserve taller rows (1.2 → arstrut 1.008/0.432,
-// so short script cells get a fixed row height); everything else uses 1.0.
+// \arraystretch: cases/rcases reserve taller rows (1.2 -> arstrut 1.008/0.432).
+// MathLive smallmatrix uses compact scriptstyle arstruts: half of the normal
+// 0.84/0.36 row strut, with the ordinary 0.3em row gap.
 fn env_arraystretch(env_name) {
     if (env_name == "cases" or env_name == "rcases") 1.2
+    else if (env_name == "smallmatrix") 0.5
     else 1.0
 }
 
-fn dyn_cell_h(b) { if (b != null and b.height_raw != null) b.height_raw else if (b != null) b.height else 0.0 }
-fn dyn_cell_d(b) { if (b != null and b.depth_raw != null) b.depth_raw else if (b != null) b.depth else 0.0 }
+fn dyn_cell_h(b) { if (b != null) b.height else 0.0 }
+fn dyn_cell_d(b) { if (b != null) b.depth else 0.0 }
 
 fn dyn_row_max_h(row_boxes, r, ncols, col, acc) {
     if (col >= ncols) acc
@@ -437,9 +438,9 @@ fn compute_dyn_metrics(row_boxes, ncols, nrows, env_name) {
     let m = {
         height: util.ceil_em2(box_h),
         depth: util.ceil_em2(box_d),
-        height_raw: box_h,
-        depth_raw: box_d,
-        render_total: util.ceil_em2(box_h + box_d),
+        box_height: box_h,
+        box_depth: box_d,
+        box_total: util.ceil_em2(box_h + box_d),
         vlist_height: util.ceil_em2(box_h),
         depth_holder: util.ceil_em2(box_d),
         pstrut: util.ceil_em2(pstrut),
@@ -456,8 +457,8 @@ fn compute_dyn_metrics(row_boxes, ncols, nrows, env_name) {
 // rather than the fixed matrix estimates, so `E = mc^2` (content h=0.87) emits
 // strut 0.87 / strut-bottom 1.23 instead of the generic 0.85 / 1.21.
 fn equation_table_metrics(content_box) {
-    let ch = if (content_box.render_height != null) content_box.render_height else content_box.height
-    let cd = if (content_box.render_depth != null) content_box.render_depth else content_box.depth
+    let ch = content_box.height
+    let cd = content_box.depth
     // Centered on the axis: the symmetric half-extent is the larger of the
     // above-axis and below-axis reach; height/depth straddle the axis.
     let axis = 0.255
@@ -471,7 +472,7 @@ fn equation_table_metrics(content_box) {
     {
         height: h,
         depth: d,
-        render_total: util.ceil_em2(h + d),
+        box_total: util.ceil_em2(h + d),
         vlist_height: h,
         depth_holder: dh,
         pstrut: 3.0,
@@ -484,7 +485,7 @@ fn equation_table_metrics(content_box) {
 fn matrix_table_metrics(nrows) => {
     height: 0.85 + 0.6 * float(nrows - 1),
     depth: 0.35 + 0.6 * float(nrows - 1),
-    render_total: 1.21 + 1.2 * float(nrows - 1),
+    box_total: 1.21 + 1.2 * float(nrows - 1),
     vlist_height: 0.85 + 0.6 * float(nrows - 1),
     depth_holder: if (nrows == 1) 0.35
         else if (nrows == 2) 0.96
@@ -507,7 +508,7 @@ fn row_cell_height(metrics, row) {
 
 
 fn matrix_row_top(metrics, row) {
-    let nrows = int(round((metrics.render_total - 1.21) / 1.2)) + 1
+    let nrows = int(round((metrics.box_total - 1.21) / 1.2)) + 1
     if (nrows == 1) 0.0 - 3.01
     else if (nrows == 2) {
         if (row == 0) 0.0 - 3.61 else 0.0 - 2.4
@@ -623,64 +624,62 @@ fn wrap_with_delimiters(table_box, ld, rd) {
     let children = (for (p in parts) p.element)
     let total_width = sum((for (p in parts) p.width))
     // The strut spans the taller of the content and the (axis-centred)
-    // delimiter glyphs — exactly like \left..\right. Exposing raw lets the
-    // outer strut round h+d ONCE so a Size3 bracket pair emits 2.41.
-    let ch = if (table_box.height_raw != null) table_box.height_raw else table_box.height
-    let cd = if (table_box.depth_raw != null) table_box.depth_raw else table_box.depth
+    // delimiter glyphs — exactly like \left..\right. The result stores the
+    // full extent in the primary fields so the outer strut rounds once.
+    let ch = table_box.height
+    let cd = table_box.depth
     let box_h = max(ch, max(delim_ext_h(left_box), delim_ext_h(right_box)))
     let box_d = max(cd, max(delim_ext_d(left_box), delim_ext_d(right_box)))
-    // A tall `{` brace (render_total > 4.0) is built as a STACKED multi-piece
+    // A tall `{` brace (visual total > 4.0) is built as a STACKED multi-piece
     // delimiter (render_brace_mult_delim) whose segments are laid out with
     // CEIL@2 CSS tops, so its bounding box spans the SEPARATELY-rounded content
     // extent: the surrounding strut emits ceil2(h)+ceil2(-d), not the once-
     // rounded ceil2(h+d) that a single sized glyph (cases/Bmatrix) gives.
-    // Expose the pre-rounded extent as *_raw so the use_raw strut sums them
-    // without re-tipping (dcases 3.46 + 2.95 = 6.41, not ceil2(6.41001) = 6.42).
-    let stacked_brace = ld == "{" and table_box.render_total != null and table_box.render_total > 4.0
+    // Store the pre-rounded extent in the public fields so the root strut does
+    // not re-tip dcases from 6.41 to 6.42.
+    let table_total = table_delim_total(table_box)
+    let stacked_brace = ld == "{" and table_total > 4.0
     let h_raw = if (stacked_brace) util.ceil_em2(box_h) else box_h
     let d_raw = if (stacked_brace) 0.0 - util.ceil_em2(0.0 - box_d) else box_d
-    {
-        element: <span style: "display:inline-block";
+    box.ml_box_full(
+        <span style: "display:inline-block";
             for child in children { child }
         >,
-        height: util.ceil_em2(box_h),
-        depth: 0.0 - util.ceil_em2(0.0 - box_d),
-        height_raw: h_raw,
-        depth_raw: d_raw,
-        render_total: util.ceil_em2(h_raw + d_raw),
-        width: total_width,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+        h_raw,
+        d_raw,
+        total_width,
+        "ord",
+        0.0,
+        0.0,
+        h_raw
+    )
 }
 
-fn delim_ext_h(b) { if (b == null) 0.0 else if (b.height_raw != null) b.height_raw else b.height }
-fn delim_ext_d(b) { if (b == null) 0.0 else if (b.depth_raw != null) b.depth_raw else b.depth }
+fn delim_ext_h(b) { if (b == null) 0.0 else b.height }
+fn delim_ext_d(b) { if (b == null) 0.0 else b.depth }
+
+fn table_delim_total(table_box) {
+    if (table_box.delim_total != null) table_box.delim_total
+    else util.ceil_em2(table_box.height + table_box.depth)
+}
 
 fn render_null_right_delim() {
-    {
-        element: <span class: css.NULLDELIMITER, style: "width:0.12em">,
-        height: 0.0,
-        depth: 0.0,
-        width: 0.12,
-        type: "mclose",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box(<span class: css.NULLDELIMITER, style: "width:0.12em">,
+        0.0, 0.0, 0.12, "mclose")
 }
 
 fn render_matrix_delim(ch, table_box) {
-    let nrows = int(round((table_box.render_total - 1.21) / 1.2)) + 1
+    let table_total = table_delim_total(table_box)
+    let nrows = int(round((table_total - 1.21) / 1.2)) + 1
     if (nrows >= 3 and (ch == "[" or ch == "]")) render_square_mult_delim(ch)
-    else if (ch == "{" and table_box.render_total > 4.0) render_brace_mult_delim()
-    else render_plain_sized_delim(ch, matrix_delim_level(table_box.render_total))
+    else if (ch == "{" and table_total > 4.0) render_brace_mult_delim()
+    else render_plain_sized_delim(ch, matrix_delim_level(table_total))
 }
 
-fn matrix_delim_level(render_total) {
-    if (render_total <= 1.21) 1
-    else if (render_total <= 1.81) 2
-    else if (render_total <= 2.41) 3
+fn matrix_delim_level(visual_total) {
+    if (visual_total <= 1.21) 1
+    else if (visual_total <= 1.81) 2
+    else if (visual_total <= 2.41) 3
     else 4
 }
 
@@ -690,17 +689,7 @@ fn render_plain_sized_delim(ch, level) {
         else if (level == 3) css.DELIM_SIZE3
         else css.DELIM_SIZE4
     let raw = matrix_sized_raw(level)
-    {
-        element: <span class: cls; ch>,
-        height: 0.6 * float(level),
-        depth: 0.3 * float(level),
-        height_raw: raw.h,
-        depth_raw: raw.d,
-        width: 0.4,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(<span class: cls; ch>, raw.h, raw.d, 0.4, "ord", 0.0, 0.0, raw.h)
 }
 
 // full-precision Size1–4 delimiter glyph extent (axis-centred U+0028 metrics,
@@ -716,8 +705,8 @@ fn matrix_sized_raw(level) {
 fn render_square_mult_delim(ch) {
     let pieces = if (ch == "[") ["⎣", "⎡"] else ["⎦", "⎤"]
     let tops = [0.0 - 2.25, 0.0 - 4.03]
-    {
-        element: <span class: "lm_delim-mult";
+    box.ml_box_full(
+        <span class: "lm_delim-mult";
             <span class: "delim-size4 lm_vlist-t lm_vlist-t2";
                 <span class: css.VLIST_R;
                     <span class: css.VLIST, style: "height:2.04em";
@@ -735,15 +724,14 @@ fn render_square_mult_delim(ch) {
                 >
             >
         >,
-        height: 2.05,
-        depth: 1.55,
-        height_raw: 2.05,
-        depth_raw: 1.55003,
-        width: 0.4,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+        2.05,
+        1.55003,
+        0.4,
+        "ord",
+        0.0,
+        0.0,
+        2.05
+    )
 }
 
 fn render_brace_mult_delim() {
@@ -754,8 +742,8 @@ fn render_brace_mult_delim() {
         0.0 - 5.46
     ]
     let heights = [0.91, 0.3, 0.3, 0.3, 0.3, 1.81, 0.3, 0.3, 0.3, 0.3, 0.91]
-    {
-        element: <span class: "lm_delim-mult";
+    box.ml_box_full(
+        <span class: "lm_delim-mult";
             <span class: "delim-size4 lm_vlist-t lm_vlist-t2";
                 <span class: css.VLIST_R;
                     <span class: css.VLIST, style: "height:3.22em";
@@ -773,13 +761,14 @@ fn render_brace_mult_delim() {
                 >
             >
         >,
-        height: 3.46,
-        depth: 2.95,
-        width: 0.4,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+        3.46,
+        2.95,
+        0.4,
+        "ord",
+        0.0,
+        0.0,
+        3.46
+    )
 }
 
 // ============================================================

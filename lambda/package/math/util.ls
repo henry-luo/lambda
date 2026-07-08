@@ -41,7 +41,9 @@ pub fn fmt_em(x) {
 // This matches MathLive's `value.toFixed(2)` via the CEIL semantics observed
 // in its emission across hundreds of test cases.
 pub fn fmt_em_ceil2(x) {
-    fmt_num(ceil_em2(x), 2) ++ "em"
+    let v = ceil_em2(x)
+    if (abs(v) >= 100000.0) fmt_large_em(v)
+    else fmt_num(v, 2) ++ "em"
 }
 
 // MathLive box.ts stringifies em dimensions with Math.ceil(v*100)/100.

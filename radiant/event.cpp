@@ -78,6 +78,13 @@ extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 extern "C" int js_check_exception(void);
 extern "C" Item js_clear_exception(void);
 extern "C" const char* js_get_exception_message(void);
+
+// MouseButtonEvent::mods has already been normalized by window/event_sim; JS
+// MouseEvent stamping must read RDT flags so synthetic and native inputs agree.
+static inline bool event_mod_ctrl(int mods) { return (mods & RDT_MOD_CTRL) != 0; }
+static inline bool event_mod_shift(int mods) { return (mods & RDT_MOD_SHIFT) != 0; }
+static inline bool event_mod_alt(int mods) { return (mods & RDT_MOD_ALT) != 0; }
+static inline bool event_mod_super(int mods) { return (mods & RDT_MOD_SUPER) != 0; }
 void to_repaint();
 void update_window_title(const char* title);
 extern "C" void state_store_refresh_caret_projection(DocState* state);
@@ -7303,10 +7310,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
                     "mousedown", btn_event->x, btn_event->y,
                     btn_event->button, 1 << btn_event->button,
-                    (btn_event->mods & GLFW_MOD_CONTROL) != 0,
-                    (btn_event->mods & GLFW_MOD_SHIFT) != 0,
-                    (btn_event->mods & GLFW_MOD_ALT) != 0,
-                    (btn_event->mods & GLFW_MOD_SUPER) != 0,
+                    event_mod_ctrl(btn_event->mods),
+                    event_mod_shift(btn_event->mods),
+                    event_mod_alt(btn_event->mods),
+                    event_mod_super(btn_event->mods),
                     1);
                 if (prevented) evcon.default_prevented = true;
             }
@@ -7727,10 +7734,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 bool up_prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
                     "mouseup", btn_event->x, btn_event->y,
                     btn_event->button, 1 << btn_event->button,
-                    (btn_event->mods & GLFW_MOD_CONTROL) != 0,
-                    (btn_event->mods & GLFW_MOD_SHIFT) != 0,
-                    (btn_event->mods & GLFW_MOD_ALT) != 0,
-                    (btn_event->mods & GLFW_MOD_SUPER) != 0,
+                    event_mod_ctrl(btn_event->mods),
+                    event_mod_shift(btn_event->mods),
+                    event_mod_alt(btn_event->mods),
+                    event_mod_super(btn_event->mods),
                     1);
                 if (up_prevented) evcon.default_prevented = true;
             }
@@ -7891,10 +7898,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
                         "click", mouse_x, mouse_y,
                         btn_event->button, 0,
-                        (btn_event->mods & GLFW_MOD_CONTROL) != 0,
-                        (btn_event->mods & GLFW_MOD_SHIFT) != 0,
-                        (btn_event->mods & GLFW_MOD_ALT) != 0,
-                        (btn_event->mods & GLFW_MOD_SUPER) != 0,
+                        event_mod_ctrl(btn_event->mods),
+                        event_mod_shift(btn_event->mods),
+                        event_mod_alt(btn_event->mods),
+                        event_mod_super(btn_event->mods),
                         1,
                         &js_click_dispatched);
                     if (prevented) evcon.default_prevented = true;

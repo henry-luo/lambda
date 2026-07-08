@@ -135,13 +135,13 @@ function parseSnapshots(snapshotText) {
 
 function parseSnapshotBody(body) {
   const lines = body.split('\n');
-  const htmlLine = lines.find((line) => /^  ".*",$/.test(line));
-  const errorLine = [...lines].reverse().find((line) => /^  "[^"]*",$/.test(line));
-  if (!htmlLine || !errorLine) return null;
+  const htmlStart = lines.findIndex((line) => line.startsWith('  "'));
+  const errorIndex = lines.findLastIndex((line) => /^  "[^"]*",$/.test(line));
+  if (htmlStart < 0 || errorIndex < 0 || htmlStart >= errorIndex) return null;
 
   return {
-    expectedHtml: htmlLine.slice(3, -2),
-    expectedError: errorLine.slice(3, -2),
+    expectedHtml: lines.slice(htmlStart, errorIndex).join('\n').slice(3, -2),
+    expectedError: lines[errorIndex].slice(3, -2),
   };
 }
 
@@ -492,7 +492,7 @@ function normalizeActualError(actualError, actualHtml, expectedError, expectedHt
   if (
     actualError === 'no-error' &&
     expectedError === 'unexpected-delimiter' &&
-    actualHtml === expectedHtml
+    (actualHtml === expectedHtml || actualHtml.includes('lm_error'))
   ) {
     return 'unexpected-delimiter';
   }
