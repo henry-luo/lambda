@@ -1688,9 +1688,19 @@ extern "C" void js_dom_initialize_node_wrapper(void* dom_elem) {
 
 extern "C" Item js_dom_get_prototype_value(Item obj) {
     DomNode* node = (DomNode*)js_dom_unwrap_element(obj);
-    const char* ctor_name = (node && node->is_element()) ? "Element" : "Node";
+    const char* ctor_name = "Node";
+    if (node && node->is_element()) {
+        DomElement* elem = node->as_element();
+        // HTML DOM wrappers need HTMLElement as their immediate prototype so
+        // browser-library instanceof checks walk HTMLElement -> Element -> Node.
+        ctor_name = (elem && elem->tag_name && elem->tag_name[0] != '#')
+            ? "HTMLElement" : "Element";
+    }
     Item global = js_get_global_this();
     Item ctor = js_property_get(global, js_string_key(ctor_name));
+    if (get_type_id(ctor) != LMD_TYPE_FUNC && strcmp(ctor_name, "HTMLElement") == 0) {
+        ctor = js_property_get(global, js_string_key("Element"));
+    }
     if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
     Item proto = js_property_get(ctor, js_string_key("prototype"));
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
@@ -4731,7 +4741,7 @@ static void _collect_lookup_by_name_rec(DomElement* root, const char* name, Item
 // Helper: CSS selector parse + match
 // ============================================================================
 
-static CssSelector* parse_css_selector(const char* sel_text, Pool* pool) {
+static CssSelectorGroup* parse_css_selector_group(const char* sel_text, Pool* pool) {
     if (!sel_text || !pool) return nullptr;
     size_t sel_len = strlen(sel_text);
     if (sel_len == 0) return nullptr;
@@ -4741,8 +4751,57 @@ static CssSelector* parse_css_selector(const char* sel_text, Pool* pool) {
     if (!tokens || token_count == 0) return nullptr;
 
     int pos = 0;
-    CssSelector* selector = css_parse_selector_with_combinators(tokens, &pos, (int)token_count, pool);
-    return selector;
+    // DOM selector APIs take selector lists; parsing only one selector drops comma-separated
+    // alternatives used by editor hit-testing such as closest("td, th").
+    return css_parse_selector_group_from_tokens(tokens, &pos, (int)token_count, pool);
+}
+
+static DomElement* js_dom_selector_group_find_first(SelectorMatcher* matcher,
+                                                    CssSelectorGroup* group,
+                                                    DomElement* element) {
+    if (!matcher || !group || !element) return nullptr;
+
+    if (selector_matcher_matches_group(matcher, group, element, nullptr)) {
+        return element;
+    }
+
+    DomNode* child_node = element->first_child;
+    while (child_node) {
+        if (child_node->is_element()) {
+            DomElement* found = js_dom_selector_group_find_first(matcher, group, child_node->as_element());
+            if (found) return found;
+        }
+        child_node = child_node->next_sibling;
+    }
+    return nullptr;
+}
+
+static bool js_dom_selector_group_result_contains(ArrayList* results, DomElement* element) {
+    if (!results || !element) return false;
+    for (int i = 0; i < results->length; i++) {
+        if ((DomElement*)results->data[i] == element) return true;
+    }
+    return false;
+}
+
+static void js_dom_selector_group_collect_all(SelectorMatcher* matcher,
+                                              CssSelectorGroup* group,
+                                              DomElement* element,
+                                              ArrayList* results) {
+    if (!matcher || !group || !element || !results) return;
+
+    if (selector_matcher_matches_group(matcher, group, element, nullptr) &&
+            !js_dom_selector_group_result_contains(results, element)) {
+        arraylist_append(results, element);
+    }
+
+    DomNode* child_node = element->first_child;
+    while (child_node) {
+        if (child_node->is_element()) {
+            js_dom_selector_group_collect_all(matcher, group, child_node->as_element(), results);
+        }
+        child_node = child_node->next_sibling;
+    }
 }
 
 // ============================================================================
@@ -5599,8 +5658,8 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         if (!sel_text) return ItemNull;
 
         Pool* pool = doc->pool;
-        CssSelector* selector = parse_css_selector(sel_text, pool);
-        if (!selector) {
+        CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
+        if (!selector_group) {
             // per DOM spec, throw SyntaxError for invalid selectors
             Item err_name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
             Item err_msg = (Item){.item = s2it(heap_create_name("is not a valid selector"))};
@@ -5609,7 +5668,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         }
 
         SelectorMatcher* matcher = selector_matcher_create(pool);
-        DomElement* found = selector_matcher_find_first(matcher, selector, root);
+        DomElement* found = js_dom_selector_group_find_first(matcher, selector_group, root);
         return found ? js_dom_wrap_element(found) : ItemNull;
     }
 
@@ -5620,8 +5679,8 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         if (!sel_text) return ItemNull;
 
         Pool* pool = doc->pool;
-        CssSelector* selector = parse_css_selector(sel_text, pool);
-        if (!selector) {
+        CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
+        if (!selector_group) {
             // return empty array
             Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
             arr->type_id = LMD_TYPE_ARRAY;
@@ -5632,18 +5691,19 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         }
 
         SelectorMatcher* matcher = selector_matcher_create(pool);
-        DomElement** results = nullptr;
-        int count = 0;
-        selector_matcher_find_all(matcher, selector, root, &results, &count);
+        ArrayList* results = arraylist_new(16);
+        if (!results) return ItemNull;
+        js_dom_selector_group_collect_all(matcher, selector_group, root, results);
 
         Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
         arr->type_id = LMD_TYPE_ARRAY;
         arr->items = nullptr;
         arr->length = 0;
         arr->capacity = 0;
-        for (int i = 0; i < count; i++) {
-            array_push(arr, js_dom_wrap_element(results[i]));
+        for (int i = 0; i < results->length; i++) {
+            array_push(arr, js_dom_wrap_element((DomElement*)results->data[i]));
         }
+        arraylist_free(results);
         return (Item){.array = arr};
     }
 
@@ -12521,11 +12581,11 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         if (!sel_text || !elem->doc) return ItemNull;
 
         Pool* pool = elem->doc->pool;
-        CssSelector* selector = parse_css_selector(sel_text, pool);
-        if (!selector) return ItemNull;
+        CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
+        if (!selector_group) return ItemNull;
 
         SelectorMatcher* matcher = selector_matcher_create(pool);
-        DomElement* found = selector_matcher_find_first(matcher, selector, elem);
+        DomElement* found = js_dom_selector_group_find_first(matcher, selector_group, elem);
         return found ? js_dom_wrap_element(found) : ItemNull;
     }
 
@@ -12536,7 +12596,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         if (!sel_text || !elem->doc) return ItemNull;
 
         Pool* pool = elem->doc->pool;
-        CssSelector* selector = parse_css_selector(sel_text, pool);
+        CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
 
         Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
         arr->type_id = LMD_TYPE_ARRAY;
@@ -12544,15 +12604,16 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         arr->length = 0;
         arr->capacity = 0;
 
-        if (!selector) return (Item){.array = arr};
+        if (!selector_group) return (Item){.array = arr};
 
         SelectorMatcher* matcher = selector_matcher_create(pool);
-        DomElement** results = nullptr;
-        int count = 0;
-        selector_matcher_find_all(matcher, selector, elem, &results, &count);
-        for (int i = 0; i < count; i++) {
-            array_push(arr, js_dom_wrap_element(results[i]));
+        ArrayList* results = arraylist_new(16);
+        if (!results) return (Item){.array = arr};
+        js_dom_selector_group_collect_all(matcher, selector_group, elem, results);
+        for (int i = 0; i < results->length; i++) {
+            array_push(arr, js_dom_wrap_element((DomElement*)results->data[i]));
         }
+        arraylist_free(results);
         return (Item){.array = arr};
     }
 
@@ -12563,12 +12624,12 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         if (!sel_text || !elem->doc) return (Item){.item = ITEM_FALSE};
 
         Pool* pool = elem->doc->pool;
-        CssSelector* selector = parse_css_selector(sel_text, pool);
-        if (!selector) return (Item){.item = ITEM_FALSE};
+        CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
+        if (!selector_group) return (Item){.item = ITEM_FALSE};
 
         SelectorMatcher* matcher = selector_matcher_create(pool);
         MatchResult result;
-        bool matched = selector_matcher_matches(matcher, selector, elem, &result);
+        bool matched = selector_matcher_matches_group(matcher, selector_group, elem, &result);
         return (Item){.item = b2it(matched ? 1 : 0)};
     }
 
@@ -12579,14 +12640,14 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         if (!sel_text || !elem->doc) return ItemNull;
 
         Pool* pool = elem->doc->pool;
-        CssSelector* selector = parse_css_selector(sel_text, pool);
-        if (!selector) return ItemNull;
+        CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
+        if (!selector_group) return ItemNull;
 
         SelectorMatcher* matcher = selector_matcher_create(pool);
         MatchResult mresult;
         DomElement* current = elem;
         while (current) {
-            if (selector_matcher_matches(matcher, selector, current, &mresult)) {
+            if (selector_matcher_matches_group(matcher, selector_group, current, &mresult)) {
                 return js_dom_wrap_element(current);
             }
             DomNode* parent = current->parent;
@@ -14002,9 +14063,11 @@ extern "C" void js_dom_install_collection_globals(void) {
     Item global = js_get_global_this();
     _install_node_iface(global);
     _install_iface(global, "Element");
+    _link_iface_proto(global, "Element", "Node");
+    _install_iface(global, "HTMLElement");
+    _link_iface_proto(global, "HTMLElement", "Element");
     _install_iface(global, "Range");
     _install_iface(global, "Selection");
-    _link_iface_proto(global, "Element", "Node");
     _install_iface(global, "HTMLCollection");
     _install_iface(global, "HTMLFormControlsCollection");
     _install_iface(global, "HTMLOptionsCollection");

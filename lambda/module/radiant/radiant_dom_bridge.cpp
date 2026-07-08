@@ -963,7 +963,7 @@ static DomElement* radiant_dom_find_by_id(DomElement* root, const char* id) {
     return nullptr;
 }
 
-static CssSelector* radiant_dom_parse_css_selector(const char* sel_text, Pool* pool) {
+static CssSelectorGroup* radiant_dom_parse_css_selector_group(const char* sel_text, Pool* pool) {
     if (!sel_text || !pool) return nullptr;
     size_t sel_len = strlen(sel_text);
     if (sel_len == 0) return nullptr;
@@ -971,7 +971,53 @@ static CssSelector* radiant_dom_parse_css_selector(const char* sel_text, Pool* p
     CssToken* tokens = css_tokenize(sel_text, sel_len, pool, &token_count);
     if (!tokens || token_count == 0) return nullptr;
     int pos = 0;
-    return css_parse_selector_with_combinators(tokens, &pos, (int)token_count, pool);
+    // DOM selector APIs receive selector lists; parsing only the first selector
+    // makes editor hit-tests such as closest("td, th") miss valid cells.
+    return css_parse_selector_group_from_tokens(tokens, &pos, (int)token_count, pool);
+}
+
+static DomElement* radiant_dom_selector_group_find_first(SelectorMatcher* matcher,
+                                                         CssSelectorGroup* group,
+                                                         DomElement* elem) {
+    if (!matcher || !group || !elem) return nullptr;
+    if (selector_matcher_matches_group(matcher, group, elem, nullptr)) return elem;
+
+    DomNode* child = elem->first_child;
+    while (child) {
+        if (child->is_element()) {
+            DomElement* found = radiant_dom_selector_group_find_first(matcher, group, child->as_element());
+            if (found) return found;
+        }
+        child = child->next_sibling;
+    }
+    return nullptr;
+}
+
+static bool radiant_dom_selector_group_result_contains(ArrayList* results, DomElement* elem) {
+    if (!results || !elem) return false;
+    for (int i = 0; i < results->length; i++) {
+        if ((DomElement*)results->data[i] == elem) return true;
+    }
+    return false;
+}
+
+static void radiant_dom_selector_group_collect_all(SelectorMatcher* matcher,
+                                                   CssSelectorGroup* group,
+                                                   DomElement* elem,
+                                                   ArrayList* results) {
+    if (!matcher || !group || !elem || !results) return;
+    if (selector_matcher_matches_group(matcher, group, elem, nullptr) &&
+            !radiant_dom_selector_group_result_contains(results, elem)) {
+        arraylist_append(results, elem);
+    }
+
+    DomNode* child = elem->first_child;
+    while (child) {
+        if (child->is_element()) {
+            radiant_dom_selector_group_collect_all(matcher, group, child->as_element(), results);
+        }
+        child = child->next_sibling;
+    }
 }
 
 static Item radiant_dom_lookup_wrapper(DomNode* node) {
@@ -1835,15 +1881,15 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
-        CssSelector* selector = radiant_dom_parse_css_selector(sel_text, elem->doc->pool);
-        if (!selector) {
+        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->pool);
+        if (!selector_group) {
             *out = ItemNull;
             return true;
         }
         // selector parsing and matching stay on the document pool so returned
         // wrappers are the only GC-managed values created by this read-only path.
         SelectorMatcher* matcher = selector_matcher_create(elem->doc->pool);
-        DomElement* found = selector_matcher_find_first(matcher, selector, elem);
+        DomElement* found = radiant_dom_selector_group_find_first(matcher, selector_group, elem);
         *out = radiant_dom_node_item((DomNode*)found);
         return true;
     }
@@ -1859,18 +1905,22 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             return true;
         }
         Item arr_item = radiant_dom_empty_array_item();
-        CssSelector* selector = radiant_dom_parse_css_selector(sel_text, elem->doc->pool);
-        if (!selector) {
+        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->pool);
+        if (!selector_group) {
             *out = arr_item;
             return true;
         }
         SelectorMatcher* matcher = selector_matcher_create(elem->doc->pool);
-        DomElement** results = nullptr;
-        int count = 0;
-        selector_matcher_find_all(matcher, selector, elem, &results, &count);
-        for (int i = 0; i < count; i++) {
-            array_push(arr_item.array, radiant_dom_node_item((DomNode*)results[i]));
+        ArrayList* results = arraylist_new(16);
+        if (!results) {
+            *out = arr_item;
+            return true;
         }
+        radiant_dom_selector_group_collect_all(matcher, selector_group, elem, results);
+        for (int i = 0; i < results->length; i++) {
+            array_push(arr_item.array, radiant_dom_node_item((DomNode*)results->data[i]));
+        }
+        arraylist_free(results);
         *out = arr_item;
         return true;
     }
@@ -1885,14 +1935,14 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = (Item){.item = b2it(0)};
             return true;
         }
-        CssSelector* selector = radiant_dom_parse_css_selector(sel_text, elem->doc->pool);
-        if (!selector) {
+        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->pool);
+        if (!selector_group) {
             *out = (Item){.item = b2it(0)};
             return true;
         }
         SelectorMatcher* matcher = selector_matcher_create(elem->doc->pool);
         MatchResult result;
-        bool matched = selector_matcher_matches(matcher, selector, elem, &result);
+        bool matched = selector_matcher_matches_group(matcher, selector_group, elem, &result);
         *out = (Item){.item = b2it(matched ? 1 : 0)};
         return true;
     }
@@ -1907,8 +1957,8 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
-        CssSelector* selector = radiant_dom_parse_css_selector(sel_text, elem->doc->pool);
-        if (!selector) {
+        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->pool);
+        if (!selector_group) {
             *out = ItemNull;
             return true;
         }
@@ -1916,7 +1966,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         MatchResult result;
         DomElement* current = elem;
         while (current) {
-            if (selector_matcher_matches(matcher, selector, current, &result)) {
+            if (selector_matcher_matches_group(matcher, selector_group, current, &result)) {
                 *out = radiant_dom_node_item((DomNode*)current);
                 return true;
             }
@@ -2875,8 +2925,8 @@ extern "C" int radiant_dom_document_method(Item method_name, Item* args, int arg
             *out = ItemNull;
             return 1;
         }
-        CssSelector* selector = radiant_dom_parse_css_selector(sel_text, doc->pool);
-        if (!selector) {
+        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, doc->pool);
+        if (!selector_group) {
             Item err_name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
             Item err_msg = (Item){.item = s2it(heap_create_name("is not a valid selector"))};
             js_throw_value(js_new_error_with_name(err_name, err_msg));
@@ -2884,7 +2934,7 @@ extern "C" int radiant_dom_document_method(Item method_name, Item* args, int arg
             return 1;
         }
         SelectorMatcher* matcher = selector_matcher_create(doc->pool);
-        DomElement* found = selector_matcher_find_first(matcher, selector, root);
+        DomElement* found = radiant_dom_selector_group_find_first(matcher, selector_group, root);
         *out = radiant_dom_node_item((DomNode*)found);
         return 1;
     }
@@ -2899,22 +2949,24 @@ extern "C" int radiant_dom_document_method(Item method_name, Item* args, int arg
             *out = radiant_dom_empty_array_item();
             return 1;
         }
-        CssSelector* selector = radiant_dom_parse_css_selector(sel_text, doc->pool);
-        if (!selector) {
+        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, doc->pool);
+        if (!selector_group) {
             *out = radiant_dom_empty_array_item();
             return 1;
         }
         SelectorMatcher* matcher = selector_matcher_create(doc->pool);
-        DomElement** results = nullptr;
-        int count = 0;
-        selector_matcher_find_all(matcher, selector, root, &results, &count);
+        ArrayList* results = arraylist_new(16);
         Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
         arr->type_id = LMD_TYPE_ARRAY;
         arr->items = nullptr;
         arr->length = 0;
         arr->capacity = 0;
-        for (int i = 0; i < count; i++) {
-            array_push(arr, radiant_dom_node_item((DomNode*)results[i]));
+        if (results) {
+            radiant_dom_selector_group_collect_all(matcher, selector_group, root, results);
+            for (int i = 0; i < results->length; i++) {
+                array_push(arr, radiant_dom_node_item((DomNode*)results->data[i]));
+            }
+            arraylist_free(results);
         }
         *out = (Item){.array = arr};
         return 1;

@@ -39,6 +39,11 @@ type(e)
 500u16 is number
 1000u64 is number
 2.5f32 is number
+123 is number
+1.5 is number
+1.5n is number
+"123" is number
+number
 
 // ===== is-check: negative (wrong sub-type) =====
 "=== is negative ==="

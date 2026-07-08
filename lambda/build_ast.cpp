@@ -245,14 +245,7 @@ SysFuncInfo* get_sys_func_for_method(StrView* method_name, int method_arg_count,
     // Check type compatibility with first parameter
     if (info->first_param_type != LMD_TYPE_ANY && obj_type_id != LMD_TYPE_ANY) {
         if (info->first_param_type != obj_type_id) {
-            // Additional check for numeric types
             bool type_compatible = false;
-            if (info->first_param_type == LMD_TYPE_NUMBER) {
-                type_compatible = (obj_type_id == LMD_TYPE_INT ||
-                                  obj_type_id == LMD_TYPE_INT64 ||
-                                  obj_type_id == LMD_TYPE_FLOAT ||
-                                  obj_type_id == LMD_TYPE_DECIMAL);
-            }
             if (!type_compatible) {
                 log_debug("method_call type mismatch for '%.*s': expected %d, got %d",
                     (int)method_name->length, method_name->str,
@@ -483,13 +476,9 @@ static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* p
             arg_type->type_id == LMD_TYPE_NUM_SIZED ||
             arg_type->type_id == LMD_TYPE_UINT64) return true;
     }
-    if (param_type->type_id == LMD_TYPE_NUMBER) {
-        if (arg_type->type_id == LMD_TYPE_INT ||
-            arg_type->type_id == LMD_TYPE_INT64 ||
-            arg_type->type_id == LMD_TYPE_FLOAT ||
-            arg_type->type_id == LMD_TYPE_DECIMAL ||
-            arg_type->type_id == LMD_TYPE_NUM_SIZED ||
-            arg_type->type_id == LMD_TYPE_UINT64) return true;
+    if (param_type == &TYPE_NUMBER) {
+        // `number` is an abstract type keyword; no runtime TypeId carries it.
+        if (IS_NUMERIC_ID(arg_type->type_id)) return true;
     }
     // Sized numeric coercion: NUM_SIZED and UINT64 are compatible with each other
     // and with standard numeric types for parameter passing
@@ -3580,7 +3569,7 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
             log_debug("end build unary expr");
             return (AstNode*)ast_node;
         }
-        if (LMD_TYPE_INT <= operand_type && operand_type <= LMD_TYPE_NUMBER) {
+        if (IS_NUMERIC_ID(operand_type)) {
             type_id = operand_type;  // Preserve the exact numeric type
         }
         else {
@@ -3630,9 +3619,7 @@ AstNode* build_spread_expr(Transpiler* tp, TSNode sp_node) {
         if (op_type && op_type->is_literal) {
             TypeId tid = op_type->type_id;
             if (tid == LMD_TYPE_NULL || tid == LMD_TYPE_BOOL ||
-                tid == LMD_TYPE_INT  || tid == LMD_TYPE_INT64 ||
-                tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_DECIMAL ||
-                tid == LMD_TYPE_NUMBER || tid == LMD_TYPE_DTIME ||
+                IS_NUMERIC_ID(tid) || tid == LMD_TYPE_DTIME ||
                 tid == LMD_TYPE_SYMBOL || tid == LMD_TYPE_STRING) {
                 record_semantic_error(tp, sp_node, ERR_SEMANTIC_ERROR,
                     "Spread operator '*' is redundant on scalar value");
@@ -4096,8 +4083,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         // to false/true instead of becoming a static type error.
     }
     else if (ast_node->op == OPERATOR_IDIV) {
-        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&
-            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_NUMBER) {
+        if (IS_NUMERIC_ID(left_type) && IS_NUMERIC_ID(right_type)) {
             type_id = LMD_TYPE_INT;  // Integer division always produces int result
         }
         else {

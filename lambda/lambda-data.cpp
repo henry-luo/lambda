@@ -43,7 +43,7 @@ Type TYPE_INT = {.type_id = LMD_TYPE_INT};
 Type TYPE_INT64 = {.type_id = LMD_TYPE_INT64};
 Type TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
 Type TYPE_DECIMAL = {.type_id = LMD_TYPE_DECIMAL};
-Type TYPE_NUMBER = {.type_id = LMD_TYPE_NUMBER};
+Type TYPE_NUMBER = {.type_id = LMD_TYPE_TYPE};
 Type TYPE_STRING = {.type_id = LMD_TYPE_STRING};
 Type TYPE_BINARY = {.type_id = LMD_TYPE_BINARY};
 Type TYPE_SYMBOL = {.type_id = LMD_TYPE_SYMBOL};
@@ -102,7 +102,6 @@ extern "C" const char* get_type_name(TypeId type_id) {
         case LMD_TYPE_INT64: return "int64";
         case LMD_TYPE_FLOAT: return "float";
         case LMD_TYPE_DECIMAL: return "decimal";
-        case LMD_TYPE_NUMBER: return "number";
         case LMD_TYPE_DTIME: return "datetime";
         case LMD_TYPE_SYMBOL: return "symbol";
         case LMD_TYPE_STRING: return "string";
@@ -252,7 +251,6 @@ void init_type_info() {
     type_info[LMD_TYPE_INT64] = {sizeof(int64_t), "int64", &TYPE_INT64, (Type*)&LIT_TYPE_INT64};
     type_info[LMD_TYPE_FLOAT] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
     type_info[LMD_TYPE_DECIMAL] = {sizeof(void*), "decimal", &TYPE_DECIMAL, (Type*)&LIT_TYPE_DECIMAL};
-    type_info[LMD_TYPE_NUMBER] = {sizeof(double), "number", &TYPE_NUMBER, (Type*)&LIT_TYPE_NUMBER};
     type_info[LMD_TYPE_DTIME] = {sizeof(DateTime), "datetime", &TYPE_DTIME, (Type*)&LIT_TYPE_DTIME};
     type_info[LMD_TYPE_SYMBOL] = {sizeof(char*), "symbol", &TYPE_SYMBOL, (Type*)&LIT_TYPE_SYMBOL};
     type_info[LMD_TYPE_STRING] = {sizeof(char*), "string", &TYPE_STRING, (Type*)&LIT_TYPE_STRING};

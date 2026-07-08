@@ -212,7 +212,6 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 #define LMD_TYPE_UINT64_      LMD_TYPE_UINT64
 #define LMD_TYPE_FLOAT_       LMD_TYPE_FLOAT
 #define LMD_TYPE_DECIMAL_     LMD_TYPE_DECIMAL
-#define LMD_TYPE_NUMBER_      LMD_TYPE_NUMBER
 #define LMD_TYPE_DTIME_       LMD_TYPE_DTIME
 #define LMD_TYPE_SYMBOL_      LMD_TYPE_SYMBOL
 #define LMD_TYPE_STRING_      LMD_TYPE_STRING

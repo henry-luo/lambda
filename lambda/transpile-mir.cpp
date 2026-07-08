@@ -3348,7 +3348,7 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
              if_tid, then_tid, else_tid, then_mir, else_mir);
 
     // If branches have different MIR types or the node type is ANY, always box to Item (I64)
-    bool need_boxing = (if_tid == LMD_TYPE_ANY || if_tid == LMD_TYPE_NUMBER ||
+    bool need_boxing = (if_tid == LMD_TYPE_ANY ||
                         then_mir != else_mir ||
                         then_mir != type_to_mir(if_tid));
 
@@ -8801,8 +8801,7 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
     // Boxed/unknown expressions already produce Item registers. Do this before
     // binary/unary heuristics so mixed boxed-native arithmetic is not reboxed
     // using a stale scalar expectation.
-    if (tid == LMD_TYPE_ANY || tid == LMD_TYPE_ERROR || tid == LMD_TYPE_NULL ||
-        tid == LMD_TYPE_NUMBER) {
+    if (tid == LMD_TYPE_ANY || tid == LMD_TYPE_ERROR || tid == LMD_TYPE_NULL) {
         return val;
     }
 
@@ -9022,6 +9021,15 @@ static MIR_reg_t transpile_base_type(MirTranspiler* mt, AstTypeNode* type_node) 
                 MIR_reg_t r = new_reg(mt, "tlist", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
                     MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_LIST)));
+                return r;
+            }
+            // `number` has no runtime TypeId; keep its TypeType singleton instead of base_type(LMD_TYPE_TYPE).
+            extern Type TYPE_NUMBER;
+            extern TypeType LIT_TYPE_NUMBER;
+            if (tt->type == &TYPE_NUMBER) {
+                MIR_reg_t r = new_reg(mt, "tnumber", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_NUMBER)));
                 return r;
             }
             // For NUM_SIZED sub-types (i8..f32), load the specific LIT_TYPE_Xxx pointer

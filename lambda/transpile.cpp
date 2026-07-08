@@ -1158,10 +1158,6 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         // literal const boxing, and non-literal boxing via TypeBoxInfo table
         try_box_scalar(tp, item);
         break;
-    case LMD_TYPE_NUMBER:
-        // NUMBER type is a union of int/float - transpile the expression directly
-        transpile_expr(tp, item);
-        break;
     case LMD_TYPE_ARRAY:
         // Single-value CONTENT blocks are handled above (before the switch).
         // Multi-value content/list: list_end() already returns Item.
@@ -7052,6 +7048,11 @@ void transpile_base_type(Transpiler* tp, AstTypeNode* type_node) {
     } else if (type_type->type == &TYPE_LIST) {
         // 'list' bare keyword: preserve &LIT_TYPE_LIST so fn_is returns BOOL_FALSE
         // (LMD_TYPE_LIST no longer exists; list type never matches at runtime)
+        arraylist_append(tp->type_list, (void*)type_type);
+        int type_index = tp->type_list->length - 1;
+        strbuf_append_format(tp->code_buf, "const_type(%d)", type_index);
+    } else if (type_type->type == &TYPE_NUMBER) {
+        // `number` has no runtime TypeId; preserve the singleton instead of base_type(LMD_TYPE_TYPE).
         arraylist_append(tp->type_list, (void*)type_type);
         int type_index = tp->type_list->length - 1;
         strbuf_append_format(tp->code_buf, "const_type(%d)", type_index);

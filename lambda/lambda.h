@@ -95,7 +95,6 @@ enum EnumTypeId {
     LMD_TYPE_UINT64, // unsigned 64-bit integer (heap-allocated pointer)
     LMD_TYPE_FLOAT,  // float literal, 64-bit
     LMD_TYPE_DECIMAL,
-    LMD_TYPE_NUMBER,  // explicit number, which includes decimal
     LMD_TYPE_DTIME,
     LMD_TYPE_SYMBOL,
     LMD_TYPE_STRING,
@@ -877,9 +876,14 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define DECIMAL_BIGINT      2
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
 
-// numeric type range check — includes sized types outside INT..NUMBER range
-#define IS_NUMERIC_ID(t) (((t) >= LMD_TYPE_INT && (t) <= LMD_TYPE_NUMBER) || \
-                          (t) == LMD_TYPE_NUM_SIZED || (t) == LMD_TYPE_UINT64)
+// numeric type check: `number` is a type-language union, not a runtime TypeId.
+static inline bool is_numeric_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 ||
+           type_id == LMD_TYPE_UINT64 || type_id == LMD_TYPE_FLOAT ||
+           type_id == LMD_TYPE_DECIMAL || type_id == LMD_TYPE_NUM_SIZED;
+}
+
+#define IS_NUMERIC_ID(t) is_numeric_type_id((TypeId)(t))
 
 #define ITEM_TRUE           (((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)1)
 #define ITEM_FALSE          (((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)0)

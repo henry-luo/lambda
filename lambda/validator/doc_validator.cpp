@@ -468,6 +468,7 @@ bool is_item_compatible_with_type(ConstItem item, Type* type) {
 
 const char* type_to_string(Type* type) {
     if (!type) return "unknown";
+    if (type == &TYPE_NUMBER) return "number";
 
     switch (type->type_id) {
         case LMD_TYPE_STRING: return "string";
