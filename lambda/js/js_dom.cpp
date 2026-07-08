@@ -4,8 +4,8 @@
  * Bridges Lambda's Element data model and Radiant's DomElement/DomDocument
  * to provide standard DOM manipulation APIs callable from JIT-compiled JavaScript.
  *
- * Wrapping: Radiant DOM nodes are branded native VMaps owned by the radiant
- * module bridge; document proxy maps remain separate compatibility objects.
+ * Wrapping: Radiant DOM nodes and document proxy objects are branded native
+ * VMaps owned by the module bridge.
  */
 
 #include "js_dom.h"
@@ -190,19 +190,12 @@ static String* js_dom_create_document_string(DomDocument* doc, const char* str, 
 // Sentinels for native style host VMaps.
 static const char js_computed_style_vmap_marker = 0;
 static const char js_inline_style_vmap_marker = 0;
+static const char js_document_proxy_vmap_marker = 0;
+static const char js_foreign_doc_vmap_marker = 0;
 
-// Legacy map markers are accepted only by type predicates during migration.
+// Legacy style map markers are accepted only by type predicates during migration.
 static TypeMap js_computed_style_marker = {};
 static TypeMap js_inline_style_marker = {};
-
-// Sentinel used in Map::type to distinguish document proxy objects.
-// Map::data is unused (the document is accessed via _js_current_document).
-static TypeMap js_document_proxy_marker = {};
-
-// Sentinel used in Map::type to distinguish foreign-document wrappers
-// (created via document.implementation.createHTMLDocument / createDocument).
-// Map::data stores the owning DomDocument*. map_kind = MAP_KIND_FOREIGN_DOC.
-static TypeMap js_foreign_doc_marker = {};
 
 // Sentinel used in Map::type to distinguish the document.implementation singleton.
 // Map::data is unused.
@@ -214,8 +207,8 @@ static Item js_dom_implementation_item = {.item = ITEM_NULL};
 // Cached singleton document proxy object
 static Item js_document_proxy_item = {.item = ITEM_NULL};
 
-// Stored document.defaultView value (kept separate to avoid infinite recursion
-// when calling js_property_set on the document proxy map)
+// Stored document.defaultView value (kept separate to avoid recursive
+// document-proxy property writes)
 static Item js_document_default_view = {.item = ITEM_NULL};
 
 // Stored document.title value (same reason as defaultView)
@@ -1532,6 +1525,8 @@ void js_dom_register_named_elements(DomElement* root) {
 
 static void js_dom_install_window_frames_global(void);
 static void js_dom_install_window_dialog_globals(void);
+static void js_dom_install_window_computed_style_global(void);
+static DomDocument* js_document_proxy_doc_from_item(Item item);
 
 // ============================================================================
 // DOM Context Management
@@ -1540,13 +1535,12 @@ static void js_dom_install_window_dialog_globals(void);
 extern "C" void js_dom_set_document(void* dom_doc) {
     _js_current_document = (DomDocument*)dom_doc;
     _js_main_document = (DomDocument*)dom_doc;
-    if (js_document_proxy_item.item != ITEM_NULL &&
-        get_type_id(js_document_proxy_item) == LMD_TYPE_MAP &&
-        js_document_proxy_item.map) {
-        js_document_proxy_item.map->map_kind = MAP_KIND_DOC_PROXY;
-        js_document_proxy_item.map->type = (void*)&js_document_proxy_marker;
-        js_document_proxy_item.map->data = dom_doc;
-        js_document_proxy_item.map->data_cap = 0;
+    if (js_document_proxy_item.item != ITEM_NULL) {
+        TypeId proxy_type = get_type_id(js_document_proxy_item);
+        if (proxy_type == LMD_TYPE_VMAP && js_document_proxy_item.vmap &&
+            js_document_proxy_item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker) {
+            js_document_proxy_item.vmap->host_data = dom_doc;
+        }
     }
     if (dom_doc) {
         js_doc_mark_has_browsing_context(dom_doc);
@@ -1562,6 +1556,7 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         js_dom_selection_install_globals();
         js_dom_install_window_frames_global();
         js_dom_install_window_dialog_globals();
+        js_dom_install_window_computed_style_global();
         // install FormData constructor
         extern void js_formdata_install_globals(void);
         js_formdata_install_globals();
@@ -1723,20 +1718,9 @@ extern "C" void* js_dom_unwrap_element_impl(Item item) {
     if (tid == LMD_TYPE_VMAP) {
         // Only Radiant-branded VMaps unwrap as DOM nodes; style/CSSOM VMaps
         // must stop here or Radiant and DOM unwrap helpers recurse forever.
-        return radiant_dom_is_node(item) ? item.vmap->host_data : nullptr;
-    }
-    if (tid != LMD_TYPE_MAP) return nullptr;
-
-    Map* m = item.map;
-    // document proxy / foreign-doc wrapper → return the doc-stub DomElement
-    // (lazy-create) so JS Range/Selection APIs accept `document` as a container.
-    if (m->map_kind == MAP_KIND_DOC_PROXY) {
-        DomDocument* doc = (DomDocument*)(m->data ? m->data : (void*)_js_main_document);
-        if (!doc) doc = _js_current_document;
-        return js_dom_get_or_create_doc_node(doc);
-    }
-    if (m->map_kind == MAP_KIND_FOREIGN_DOC) {
-        return js_dom_get_or_create_doc_node(m->data);
+        if (radiant_dom_is_node(item)) return item.vmap->host_data;
+        DomDocument* doc = js_document_proxy_doc_from_item(item);
+        return doc ? js_dom_get_or_create_doc_node(doc) : nullptr;
     }
     return nullptr;
 }
@@ -1925,6 +1909,7 @@ static LiveLookupCollectionEntry* _live_lookup_collection_entry(Item collection)
 extern "C" Item js_get_this(void);
 extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* args, int argc);
 extern "C" Item js_new_function(void* func_ptr, int param_count);
+extern "C" void js_set_function_name(Item fn_item, Item name_item);
 static Item js_dom_text_replace_data_method(DomText* text_node, Item offset_arg,
                                             Item count_arg, Item data_arg);
 static Item js_dom_text_insert_data_method(DomText* text_node, Item offset_arg,
@@ -2350,19 +2335,39 @@ static Item js_dom_boundary_from_point_method(Item elem_item, Item x, Item y,
 
 extern "C" bool js_is_document_proxy(Item item) {
     TypeId tid = get_type_id(item);
-    if (tid != LMD_TYPE_MAP) return false;
-    Map* m = item.map;
-    return m->map_kind == MAP_KIND_DOC_PROXY || m->map_kind == MAP_KIND_FOREIGN_DOC;
+    if (tid == LMD_TYPE_VMAP) {
+        return item.vmap &&
+            (item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker ||
+             item.vmap->host_type == (const void*)&js_foreign_doc_vmap_marker);
+    }
+    return false;
+}
+
+static DomDocument* js_document_proxy_doc_from_item(Item item) {
+    TypeId tid = get_type_id(item);
+    if (tid == LMD_TYPE_VMAP && item.vmap) {
+        if (item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker) {
+            DomDocument* doc = (DomDocument*)item.vmap->host_data;
+            return doc ? doc : (_js_main_document ? _js_main_document : _js_current_document);
+        }
+        if (item.vmap->host_type == (const void*)&js_foreign_doc_vmap_marker) {
+            return (DomDocument*)item.vmap->host_data;
+        }
+        return nullptr;
+    }
+    return nullptr;
 }
 
 // Returns the DomDocument* if `item` is a foreign-doc wrapper, else null.
 extern "C" void* js_get_foreign_doc(Item item) {
     TypeId tid = get_type_id(item);
-    if (tid != LMD_TYPE_MAP) return nullptr;
-    Map* m = item.map;
-    if (m->map_kind != MAP_KIND_FOREIGN_DOC) return nullptr;
-    if (m->type != (void*)&js_foreign_doc_marker) return nullptr;
-    return m->data;
+    if (tid == LMD_TYPE_VMAP) {
+        if (item.vmap && item.vmap->host_type == (const void*)&js_foreign_doc_vmap_marker) {
+            return item.vmap->host_data;
+        }
+        return nullptr;
+    }
+    return nullptr;
 }
 
 // Returns true if `item` is the document.implementation singleton.
@@ -2375,22 +2380,21 @@ extern "C" bool js_is_dom_implementation(Item item) {
 
 extern "C" Item js_get_document_object_value() {
     if (js_document_proxy_item.item != ITEM_NULL) {
-        if (get_type_id(js_document_proxy_item) == LMD_TYPE_MAP &&
-            js_document_proxy_item.map) {
-            js_document_proxy_item.map->map_kind = MAP_KIND_DOC_PROXY;
-            js_document_proxy_item.map->type = (void*)&js_document_proxy_marker;
-            js_document_proxy_item.map->data = _js_main_document;
-            js_document_proxy_item.map->data_cap = 0;
+        TypeId proxy_type = get_type_id(js_document_proxy_item);
+        if (proxy_type == LMD_TYPE_VMAP && js_document_proxy_item.vmap &&
+            js_document_proxy_item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker) {
+            js_document_proxy_item.vmap->host_data = _js_main_document;
         }
         return js_document_proxy_item;
     }
-    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    wrapper->type_id = LMD_TYPE_MAP;
-    wrapper->map_kind = MAP_KIND_DOC_PROXY;
-    wrapper->type = (void*)&js_document_proxy_marker;
-    wrapper->data = _js_main_document;
-    wrapper->data_cap = 0;
-    js_document_proxy_item = (Item){.map = wrapper};
+    js_document_proxy_item = vmap_new();
+    if (get_type_id(js_document_proxy_item) != LMD_TYPE_VMAP || !js_document_proxy_item.vmap) {
+        return ItemNull;
+    }
+    // Document proxies are native VMaps; host_data keeps the browsing-context
+    // document current without relying on map-kind compatibility shells.
+    js_document_proxy_item.vmap->host_type = (const void*)&js_document_proxy_vmap_marker;
+    js_document_proxy_item.vmap->host_data = _js_main_document;
     heap_register_gc_root(&js_document_proxy_item.item);
     return js_document_proxy_item;
 }
@@ -2588,13 +2592,12 @@ static Item wrap_foreign_doc_owned(DomDocument* doc, bool owns_doc) {
             return (Item){.item = s_foreign_doc_cache[i].item};
         }
     }
-    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    wrapper->type_id = LMD_TYPE_MAP;
-    wrapper->map_kind = MAP_KIND_FOREIGN_DOC;
-    wrapper->type = (void*)&js_foreign_doc_marker;
-    wrapper->data = doc;
-    wrapper->data_cap = 0;
-    Item it = (Item){.map = wrapper};
+    Item it = vmap_new();
+    if (get_type_id(it) != LMD_TYPE_VMAP || !it.vmap) return ItemNull;
+    // Foreign document wrappers are native VMaps; the cached host_data is the
+    // document selected during active-document swaps.
+    it.vmap->host_type = (const void*)&js_foreign_doc_vmap_marker;
+    it.vmap->host_data = doc;
     if (s_foreign_doc_cache_count < FOREIGN_DOC_CACHE_SIZE) {
         s_foreign_doc_cache[s_foreign_doc_cache_count].doc = doc;
         s_foreign_doc_cache[s_foreign_doc_cache_count].item = it.item;
@@ -3396,6 +3399,22 @@ extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
               elem->tag_name ? elem->tag_name : "?", pseudo_type);
 
     return wrapper;
+}
+
+static Item js_window_get_computed_style(Item elem_item, Item pseudo_item) {
+    return js_get_computed_style(elem_item, pseudo_item);
+}
+
+static void js_dom_install_window_computed_style_global(void) {
+    Item global = js_get_global_this();
+    Item key = js_string_key("getComputedStyle");
+    Item existing = js_property_get(global, key);
+    if (get_type_id(existing) == LMD_TYPE_FUNC) return;
+    Item fn = js_new_function((void*)js_window_get_computed_style, 2);
+    js_set_function_name(fn, key);
+    // getComputedStyle is a Window/global function now; direct MIR DOM shims
+    // were removed so calls resolve through ordinary property dispatch.
+    js_property_set(global, key, fn);
 }
 
 // ============================================================================

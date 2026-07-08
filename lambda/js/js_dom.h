@@ -6,7 +6,7 @@
  *
  * Wrapping strategy:
  *   Radiant DOM nodes are branded native VMaps owned by the radiant bridge.
- *   Document proxy maps are separate compatibility objects for document globals.
+ *   Document and foreign-document proxies are branded native VMaps as well.
  *
  * All functions use extern "C" for MIR JIT compatibility.
  */

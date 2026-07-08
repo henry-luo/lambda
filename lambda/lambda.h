@@ -574,9 +574,9 @@ enum MapKind {
     MAP_KIND_CSSOM       = 5,  // Stylesheet, CSSRule, RuleStyleDeclaration
     MAP_KIND_ITERATOR    = 6,  // Synthetic iterator (array, string, typed array)
     MAP_KIND_PROCESS_ENV = 7,  // process.env — coerces all values to strings on set
-    MAP_KIND_DOC_PROXY   = 8,  // document proxy — JS document object
+    MAP_KIND_RESERVED_8  = 8,  // retired document proxy map carrier
     MAP_KIND_PROXY       = 9,  // ES6 Proxy object
-    MAP_KIND_FOREIGN_DOC = 10, // foreign document (createHTMLDocument/createDocument result)
+    MAP_KIND_RESERVED_10 = 10, // retired foreign-document map carrier
     MAP_KIND_ARRAY_PROPS = 11, // array `extra` companion map: stores literal
                                // legacy markers (__get_N/__set_N/__nw_N/...)
                                // — bypasses Phase 4 accessor-marker intercept.

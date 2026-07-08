@@ -234,7 +234,7 @@ bool js_ordinary_has_property(Item object, const char* name, int name_len);
 // JS_OWN_DELETED at any level still permits the walk to continue (legacy
 // js_property_get top-of-chain semantics). Depth-capped at 32.
 //
-// Excludes: proxies, MAP_KIND_TYPED_ARRAY / DOC_PROXY / DOM / CSSOM exotics,
+// Excludes: proxies, MAP_KIND_TYPED_ARRAY / DOM / CSSOM exotics,
 // String-wrapper indexed access, builtin-method fallbacks. Callers that
 // need any of those must handle them before/around this call.
 bool js_ordinary_get(Item object, const char* name, int name_len,

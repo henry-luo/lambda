@@ -5262,26 +5262,13 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
     if (asgn->left->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         JsMemberNode* member = (JsMemberNode*)asgn->left;
 
-        // Detect chained member: obj.style.prop = val -> js_dom_set_style_property
+        // Detect chained member: obj.dataset.prop = val -> js_dataset_set_property
         if (!member->computed && member->object &&
             member->object->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
             JsMemberNode* outer = (JsMemberNode*)member->object;
             if (!outer->computed && outer->property &&
                 outer->property->node_type == JS_AST_NODE_IDENTIFIER) {
                 JsIdentifierNode* mid_prop = (JsIdentifierNode*)outer->property;
-                if (mid_prop->name && mid_prop->name->len == 5 &&
-                    strncmp(mid_prop->name->chars, "style", 5) == 0 &&
-                    member->property &&
-                    member->property->node_type == JS_AST_NODE_IDENTIFIER) {
-                    JsIdentifierNode* style_prop = (JsIdentifierNode*)member->property;
-                    MIR_reg_t obj = jm_transpile_box_item(mt, outer->object);
-                    MIR_reg_t key = jm_box_string_literal(mt, style_prop->name->chars, style_prop->name->len);
-                    MIR_reg_t val = jm_transpile_box_item(mt, asgn->right);
-                    return jm_call_3(mt, "js_dom_set_style_property", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
-                }
                 // v12: obj.dataset.prop = val → js_dataset_set_property(obj, "prop", val)
                 if (mid_prop->name && mid_prop->name->len == 7 &&
                     strncmp(mid_prop->name->chars, "dataset", 7) == 0 &&
@@ -6579,30 +6566,6 @@ String* jm_get_math_method(JsCallNode* call) {
     return NULL;
 }
 
-bool jm_is_document_call(JsCallNode* call) {
-    if (!call->callee || call->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return false;
-    JsMemberNode* m = (JsMemberNode*)call->callee;
-    if (!m->object || m->object->node_type != JS_AST_NODE_IDENTIFIER) return false;
-    if (m->computed || !m->property || m->property->node_type != JS_AST_NODE_IDENTIFIER) return false;
-    JsIdentifierNode* obj = (JsIdentifierNode*)m->object;
-    JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
-    // The document fast path passes a literal method name to native DOM glue;
-    // computed or malformed member calls must fall back to generic dispatch.
-    if (!prop->name) return false;
-    return obj->name && obj->name->len == 8 && strncmp(obj->name->chars, "document", 8) == 0;
-}
-
-bool jm_is_window_getComputedStyle(JsCallNode* call) {
-    if (!call->callee || call->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return false;
-    JsMemberNode* m = (JsMemberNode*)call->callee;
-    if (!m->object || m->object->node_type != JS_AST_NODE_IDENTIFIER) return false;
-    if (!m->property || m->property->node_type != JS_AST_NODE_IDENTIFIER) return false;
-    JsIdentifierNode* obj = (JsIdentifierNode*)m->object;
-    JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
-    return obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "window", 6) == 0 &&
-           prop->name && prop->name->len == 16 && strncmp(prop->name->chars, "getComputedStyle", 16) == 0;
-}
-
 static void jm_clear_last_closure_tracking(JsMirTranspiler* mt) {
     mt->last_closure_has_env = false;
     mt->last_closure_env_reg = 0;
@@ -7613,22 +7576,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
                 }
-                // v12b: obj.style.setProperty(...) / obj.style.removeProperty(...)
-                if (mid->name && mid->name->len == 5 && strncmp(mid->name->chars, "style", 5) == 0) {
-                    const char* mn = prop->name->chars;
-                    int ml = (int)prop->name->len;
-                    if ((ml == 11 && strncmp(mn, "setProperty", 11) == 0) ||
-                        (ml == 14 && strncmp(mn, "removeProperty", 14) == 0)) {
-                        MIR_reg_t obj = jm_transpile_box_item(mt, inner->object);
-                        MIR_reg_t method_str = jm_box_string_literal(mt, mn, ml);
-                        MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
-                        return jm_call_4(mt, "js_dom_style_method", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, method_str),
-                            MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
-                    }
-                }
             }
             if (!inner->computed &&
                 inner->object && inner->object->node_type == JS_AST_NODE_IDENTIFIER &&
@@ -7652,18 +7599,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             }
         }
-    }
-
-    // document.<method>(args...)
-    if (jm_is_document_call(call)) {
-        JsMemberNode* m = (JsMemberNode*)call->callee;
-        JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
-        MIR_reg_t method_str = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
-        MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
-        return jm_call_3(mt, "js_document_method", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, method_str),
-            MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     }
 
     // Math.<method>(args...) and Math["method"](...) -> Phase 5 resolution.
@@ -8474,20 +8409,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
         }
-    }
-
-    // window.getComputedStyle(elem, pseudo) or bare getComputedStyle(elem, pseudo)
-    if (jm_is_window_getComputedStyle(call) ||
-        (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER &&
-         ((JsIdentifierNode*)call->callee)->name &&
-         ((JsIdentifierNode*)call->callee)->name->len == 16 &&
-         strncmp(((JsIdentifierNode*)call->callee)->name->chars, "getComputedStyle", 16) == 0)) {
-        JsAstNode* arg = call->arguments;
-        MIR_reg_t elem = arg ? jm_transpile_box_item(mt, arg) : jm_emit_null(mt);
-        MIR_reg_t pseudo = (arg && arg->next) ? jm_transpile_box_item(mt, arg->next) : jm_emit_null(mt);
-        return jm_call_2(mt, "js_get_computed_style", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, elem),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, pseudo));
     }
 
     // String.fromCharCode(code1, code2, ...) / String.fromCodePoint(cp1, cp2, ...)
@@ -11251,19 +11172,12 @@ MIR_reg_t jm_transpile_typed_array_length(JsMirTranspiler* mt, MIR_reg_t arr_reg
 
 // Member expression
 MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
-    // document.property
+    // well-known object properties
     if (!mem->computed && mem->object &&
         mem->object->node_type == JS_AST_NODE_IDENTIFIER &&
         mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* obj = (JsIdentifierNode*)mem->object;
         JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
-
-        // document.<prop>
-        if (obj->name && obj->name->len == 8 && strncmp(obj->name->chars, "document", 8) == 0) {
-            MIR_reg_t key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
-            return jm_call_1(mt, "js_document_get_property", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-        }
 
         // Math.<prop>
         if (obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "Math", 4) == 0) {
@@ -11409,7 +11323,7 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         }
     }
 
-    // obj.style.X -> js_dom_get_style_property(obj, "X")
+    // obj.dataset.X -> js_dataset_get_property(obj, "X")
     if (!mem->computed && mem->object &&
         mem->object->node_type == JS_AST_NODE_MEMBER_EXPRESSION &&
         mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
@@ -11417,14 +11331,6 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         if (!outer->computed && outer->property &&
             outer->property->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* mid = (JsIdentifierNode*)outer->property;
-            if (mid->name && mid->name->len == 5 && strncmp(mid->name->chars, "style", 5) == 0) {
-                JsIdentifierNode* sp = (JsIdentifierNode*)mem->property;
-                MIR_reg_t obj = jm_transpile_box_item(mt, outer->object);
-                MIR_reg_t key = jm_box_string_literal(mt, sp->name->chars, sp->name->len);
-                return jm_call_2(mt, "js_dom_get_style_property", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-            }
             // v12: obj.dataset.X → js_dataset_get_property(obj, "X")
             if (mid->name && mid->name->len == 7 && strncmp(mid->name->chars, "dataset", 7) == 0) {
                 JsIdentifierNode* dp = (JsIdentifierNode*)mem->property;

@@ -73,6 +73,11 @@ extern "C" int radiant_dom_foreign_document_get_property(Item object, Item key, 
 extern "C" int radiant_dom_foreign_document_set_property(Item object, Item key, Item value, Item* out);
 extern "C" int radiant_dom_foreign_document_method(Item object, Item method_name, Item* args, int argc, Item* out);
 extern "C" bool radiant_dom_is_node(Item item);
+extern "C" bool js_is_document_proxy(Item item);
+extern "C" void* js_get_foreign_doc(Item item);
+extern "C" Item js_document_proxy_get_property(Item prop_name);
+extern "C" Item js_document_proxy_set_property(Item prop_name, Item value);
+extern "C" Item js_document_proxy_method(Item method_name, Item* args, int argc);
 extern "C" Item js_dom_get_property(Item elem_item, Item prop_name);
 extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value);
 extern "C" bool js_dom_item_is_range(Item item);
@@ -3458,19 +3463,6 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
         *out_result = (Item){.item = ITEM_NULL};
         return true;
     }
-    case MAP_KIND_DOC_PROXY:
-        if (object.map->data_cap > 0) {
-            Item own_result = map_get(object.map, key);
-            if (own_result.item != ITEM_NULL) {
-                *out_result = own_result;
-                return true;
-            }
-        }
-        *out_result = js_document_proxy_get_property(key);
-        return true;
-    case MAP_KIND_FOREIGN_DOC: {
-        return radiant_dom_foreign_document_get_property(object, key, out_result) != 0;
-    }
     case MAP_KIND_WEB_API_RESOURCE:
         *out_result = js_is_computed_style_item(object)
             ? js_computed_style_get_property(object, key)
@@ -3504,12 +3496,6 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
 static bool js_try_exotic_property_set(Item object, Item key, Item* value, Item* out_result) {
     Map* m = object.map;
     switch (m->map_kind) {
-    case MAP_KIND_DOC_PROXY:
-        *out_result = js_document_proxy_set_property(key, *value);
-        return true;
-    case MAP_KIND_FOREIGN_DOC: {
-        return radiant_dom_foreign_document_set_property(object, key, *value, out_result) != 0;
-    }
     case MAP_KIND_ITERATOR:
         *out_result = *value;
         return true;
@@ -4122,6 +4108,16 @@ extern "C" Item js_property_get(Item object, Item key) {
             }
         }
         return make_js_undefined();
+    } else if (type == LMD_TYPE_VMAP &&
+               js_is_document_proxy(object)) {
+        // Document and foreign-document proxies are native VMaps; preserve the
+        // existing active-document swap semantics through the document bridge.
+        Item out = ItemNull;
+        if (js_get_foreign_doc(object) &&
+            radiant_dom_foreign_document_get_property(object, key, &out)) {
+            return out;
+        }
+        return js_document_proxy_get_property(key);
     } else if (type == LMD_TYPE_VMAP &&
                (radiant_dom_is_node(object) ||
                 js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
@@ -6559,6 +6555,17 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     if (type == LMD_TYPE_ARRAY) {
         JS_PROPERTY_SET_BRANCH("top_array");
         return js_property_set_array(object, key, value);
+    }
+
+    if (type == LMD_TYPE_VMAP &&
+        js_is_document_proxy(object)) {
+        JS_PROPERTY_SET_BRANCH("top_document_proxy_vmap");
+        Item out = ItemNull;
+        if (js_get_foreign_doc(object) &&
+            radiant_dom_foreign_document_set_property(object, key, value, &out)) {
+            return out;
+        }
+        return js_document_proxy_set_property(key, value);
     }
 
     if (type == LMD_TYPE_VMAP &&
@@ -18624,8 +18631,8 @@ extern "C" Item js_dom_get_prototype_value(Item item);
 
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
     // Document proxy methods (getElementById, querySelector, createElement, ...).
-    // Foreign documents use MAP_KIND_FOREIGN_DOC, so they must be handled before
-    // the generic DOM host-object dispatch below.
+    // Foreign documents use branded VMaps, so they must be handled before the
+    // generic DOM host-object dispatch below.
     if (js_is_document_proxy(obj)) {
         void* foreign = js_get_foreign_doc(obj);
         if (foreign) {
@@ -18677,12 +18684,6 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             return js_call_function(fn, obj, args, argc);
         }
     }
-    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
-        obj.map->map_kind == MAP_KIND_FOREIGN_DOC) {
-        extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
-        return js_dom_element_method(obj, method_name, args, argc);
-    }
-
     // OffscreenCanvas / CanvasRenderingContext2D methods (js_canvas.cpp)
     {
         Item canvas_result;
@@ -20370,20 +20371,6 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         }
     }
 
-    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
-        obj.map->map_kind == MAP_KIND_FOREIGN_DOC) {
-        String* dom_method = it2s(method_name);
-        if (dom_method) {
-            bool own_dom_method = false;
-            Item dom_fn = js_map_get_fast(obj.map, dom_method->chars,
-                (int)dom_method->len, &own_dom_method);
-            if (own_dom_method && get_type_id(dom_fn) == LMD_TYPE_FUNC) {
-                return js_call_function(dom_fn, obj, args, argc);
-            }
-        }
-        extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
-        return js_dom_element_method(obj, method_name, args, argc);
-    }
     Item fn = js_property_access(obj, method_name);
     // v37: Check for pending exception (e.g., private brand check TypeError)
     if (js_check_exception()) return ItemNull;
@@ -27670,6 +27657,7 @@ extern "C" void js_link_base_prototype(Item proto_marker, Item base_ctor) {
 // Get the prototype of an object (read __proto__ property)
 // P10d: uses interned key + first-match lookup (no heap allocation per call)
 extern "C" Item js_get_prototype(Item object) {
+    if (js_is_document_proxy(object)) return ItemNull;
     if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
     if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
     if (get_type_id(object) == LMD_TYPE_VMAP && radiant_dom_is_node(object)) {
@@ -27732,6 +27720,10 @@ extern "C" Item js_get_prototype(Item object) {
 // Returns ItemNull only at the top of the chain (Object.prototype itself, or
 // when the explicit `__proto__` slot holds the null sentinel).
 static Item js_get_implicit_proto(Item object) {
+    if (js_is_document_proxy(object)) {
+        Item proto = js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
+        return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
+    }
     if (get_type_id(object) == LMD_TYPE_VMAP &&
         (radiant_dom_is_node(object) ||
          js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {

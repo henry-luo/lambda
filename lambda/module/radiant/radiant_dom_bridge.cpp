@@ -22,6 +22,7 @@ extern "C" void* js_dom_get_document(void);
 extern "C" Item js_get_document_object_value(void);
 extern "C" Item js_get_global_this(void);
 extern "C" Item js_get_global_property(Item key);
+extern "C" Item js_new_function(void* func_ptr, int param_count);
 extern "C" void* js_dom_get_or_create_doc_node(void* doc);
 extern "C" Item js_dom_document_proxy_for_doc_bridge(void* doc);
 extern "C" void* js_dom_unwrap_element_impl(Item item);
@@ -2445,6 +2446,11 @@ static Item radiant_dom_call_foreign_window_global_method(Item object,
     return result;
 }
 
+static Item radiant_dom_foreign_get_computed_style(Item elem_item, Item pseudo_item) {
+    (void)elem_item; (void)pseudo_item;
+    return ItemNull;
+}
+
 extern "C" int radiant_dom_foreign_document_get_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     void* foreign_doc = js_get_foreign_doc(object);
@@ -2458,6 +2464,12 @@ extern "C" int radiant_dom_foreign_document_get_property(Item object, Item key, 
         }
         if (radiant_dom_key_equals(key, "getSelection", 12)) {
             *out = js_dom_get_selection_function_for_document(foreign_doc);
+            return 1;
+        }
+        if (radiant_dom_key_equals(key, "getComputedStyle", 16)) {
+            // iframe contentWindow is modeled as a document wrapper; do not let
+            // the main-window getComputedStyle binding leak into foreign docs.
+            *out = js_new_function((void*)radiant_dom_foreign_get_computed_style, 2);
             return 1;
         }
     }
@@ -2495,6 +2507,11 @@ extern "C" int radiant_dom_foreign_document_method(Item object,
 
     // run document methods against the foreign doc first, then fall back to
     // window-global methods for iframe contentWindow compatibility.
+    if (js_doc_has_browsing_context(foreign_doc) &&
+        radiant_dom_key_equals(method_name, "getComputedStyle", 16)) {
+        *out = ItemNull;
+        return 1;
+    }
     void* prev = js_dom_swap_active_document(foreign_doc);
     Item result = js_document_proxy_method(method_name, args, argc);
     js_dom_restore_active_document(prev);

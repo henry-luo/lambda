@@ -32,6 +32,7 @@ extern "C" Item js_reflect_get_with_receiver(Item target, Item key, Item receive
 extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" bool js_dom_style_resource_has_property(Item item, Item key);
+extern "C" bool js_is_document_proxy(Item item);
 extern "C" bool js_is_inline_style_item(Item item);
 extern "C" bool js_is_computed_style_item(Item item);
 extern "C" bool js_cssom_resource_has_property(Item item, Item key);
@@ -996,6 +997,14 @@ static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item*
          js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
         if (radiant_dom_host_has_property(object, key, out_result)) return true;
     }
+    if (type == LMD_TYPE_VMAP && js_is_document_proxy(object)) {
+        Item v = js_property_get(object, key);
+        if (v.item != ItemNull.item && v.item != ITEM_JS_UNDEFINED) {
+            *out_result = (Item){.item = b2it(true)};
+            return true;
+        }
+        return false;
+    }
     if (type == LMD_TYPE_VMAP &&
         (js_is_inline_style_item(object) || js_is_computed_style_item(object))) {
         // Style host objects are native VMaps, so `in` must consult their CSS
@@ -1023,16 +1032,6 @@ static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item*
     if (type == LMD_TYPE_MAP &&
         object.map->map_kind == MAP_KIND_WEB_API_RESOURCE) {
         if (radiant_dom_host_has_property(object, key, out_result)) return true;
-    }
-    if (type == LMD_TYPE_MAP &&
-        (object.map->map_kind == MAP_KIND_DOC_PROXY ||
-         object.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
-        Item v = js_property_get(object, key);
-        if (v.item != ItemNull.item && v.item != ITEM_JS_UNDEFINED) {
-            *out_result = (Item){.item = b2it(true)};
-            return true;
-        }
-        return false;
     }
     if (js_is_proxy(object)) {
         *out_result = js_proxy_trap_has(object, key);
@@ -7095,6 +7094,9 @@ extern "C" Item js_get_prototype_of(Item object) {
         return js_get_intrinsic_prototype_for_class(JS_CLASS_BIGINT);
     }
     if (!js_require_object_type(object, "getPrototypeOf")) return ItemNull;
+    if (js_is_document_proxy(object)) {
+        return js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
+    }
     if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
     if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
     if (ot == LMD_TYPE_VMAP && radiant_dom_is_node(object)) {
@@ -11845,7 +11847,8 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
         js_throw_type_error("Cannot convert undefined or null to object");
         return ItemNull;
     }
-    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_FUNC) {
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_FUNC && tid != LMD_TYPE_VMAP) {
+        // native host VMAPs expose setters; boxing them would strand Object.assign(elem.style, ...).
         target = js_to_object(target);
         if (js_check_exception()) return ItemNull;
     }
