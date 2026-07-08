@@ -149,7 +149,7 @@ static int radiant_module_init(const JubeHostAPI* host) {
 }
 
 static const JubeTypeDef radiant_types[] = {
-    {"dom_node", 0},
+    {"dom_node", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
 };
 
 #pragma clang diagnostic push

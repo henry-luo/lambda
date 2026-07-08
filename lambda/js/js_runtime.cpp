@@ -18564,6 +18564,7 @@ extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" Item js_dom_range_get_prototype_value(void);
 extern "C" Item js_dom_selection_get_prototype_value(void);
+extern "C" Item js_dom_get_prototype_value(Item item);
 
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
     // Document proxy methods (getElementById, querySelector, createElement, ...).
@@ -27584,6 +27585,10 @@ extern "C" Item js_get_prototype(Item object) {
     if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
     if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
     Map* m = object.map;
+    if (m && m->map_kind == MAP_KIND_DOM) {
+        Item dom_proto = js_dom_get_prototype_value(object);
+        if (get_type_id(dom_proto) == LMD_TYPE_MAP) return dom_proto;
+    }
     // Synthetic fast iterators use a 1-byte sentinel as `type`, not a real
     // TypeMap — never walk their (non-existent) shape for a __proto__ slot.
     if (m && m->map_kind == MAP_KIND_ITERATOR) return ItemNull;

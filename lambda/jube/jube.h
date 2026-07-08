@@ -15,6 +15,7 @@ typedef struct JubeTypeDef JubeTypeDef;
 typedef struct JubeFuncDef JubeFuncDef;
 typedef struct JubeNamespaceDef JubeNamespaceDef;
 typedef struct JubeModuleDef JubeModuleDef;
+typedef struct JubeHostObjectOps JubeHostObjectOps;
 
 typedef enum JubeFuncFlags {
     JUBE_FN_NONE = 0,
@@ -22,9 +23,26 @@ typedef enum JubeFuncFlags {
     JUBE_FN_VARARGS = 1u << 1,
 } JubeFuncFlags;
 
+typedef enum JubeTypeFlags {
+    JUBE_TYPE_NONE = 0,
+    JUBE_TYPE_NON_OWNING_HOST = 1u << 0,
+    JUBE_TYPE_OWNING_NATIVE = 1u << 1,
+} JubeTypeFlags;
+
+struct JubeHostObjectOps {
+    int64_t (*has_property)(void* native, Item key);
+    int64_t (*delete_property)(void* native, Item key);
+    int64_t (*get_own_property_descriptor)(void* native, Item key, Item* out_descriptor);
+    Item (*own_property_keys)(void* native);
+    Item (*prototype)(void* native);
+};
+
 struct JubeTypeDef {
     const char* name;
     uint32_t flags;
+    const void* vmap_ops;
+    const JubeHostObjectOps* host_ops;
+    void (*destroy)(void* native);
 };
 
 struct JubeFuncDef {

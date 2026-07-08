@@ -118,6 +118,11 @@ extern "C" int radiant_dom_document_get_property(Item prop_name, Item* out);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
 extern "C" void js_throw_value(Item error);
 extern "C" Item js_dom_get_selection_function_for_document(void* doc);
+extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
+extern "C" Item js_object_get_own_property_names(Item object);
+extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
+extern "C" Item js_get_prototype(Item object);
+extern "C" void js_set_prototype(Item object, Item prototype);
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type);
 static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name);
@@ -1211,9 +1216,61 @@ static bool expando_map_has_key(Item exp_map, Item key) {
     if (get_type_id(key) != LMD_TYPE_STRING) return false;
     String* s = it2s(key);
     if (!s) return false;
-    TypeMap* tm = (TypeMap*)exp_map.map->type;
-    if (!tm) return false;
-    return typemap_hash_lookup(tm, s->chars, (int)s->len) != nullptr;
+    // Deleted expando entries leave shape tombstones behind; presence checks
+    // must use the JS own-slot kernel, not raw shape lookup.
+    return js_ordinary_has_own(exp_map, s->chars, (int)s->len);
+}
+
+static bool expando_key_is_engine_internal(const char* name, int name_len) {
+    return name && name_len >= 2 && name[0] == '_' && name[1] == '_';
+}
+
+extern "C" bool js_dom_expando_has_property(Item obj, Item key) {
+    DomNode* node = (DomNode*)js_dom_unwrap_element(obj);
+    if (!node) return false;
+    Item exp_map = expando_get_map(node);
+    return expando_map_has_key(exp_map, key);
+}
+
+extern "C" Item js_dom_expando_get_own_property_descriptor(Item obj, Item key) {
+    DomNode* node = (DomNode*)js_dom_unwrap_element(obj);
+    if (!node) return make_js_undefined();
+    Item exp_map = expando_get_map(node);
+    if (!expando_map_has_key(exp_map, key)) return make_js_undefined();
+    return js_object_get_own_property_descriptor(exp_map, key);
+}
+
+extern "C" Item js_dom_expando_delete_property(Item obj, Item key) {
+    DomNode* node = (DomNode*)js_dom_unwrap_element(obj);
+    if (!node) return (Item){.item = b2it(true)};
+    Item exp_map = expando_get_map(node);
+    if (!expando_map_has_key(exp_map, key)) return (Item){.item = b2it(true)};
+    if (get_type_id(key) != LMD_TYPE_STRING) return (Item){.item = b2it(true)};
+    String* key_str = it2s(key);
+    if (!key_str) return (Item){.item = b2it(true)};
+    // DOM expandos live in a side table, so ordinary wrapper-map delete cannot
+    // see them; delete must tombstone the side-table map entry directly.
+    bool deleted = js_ordinary_delete(exp_map, key_str->chars, (int)key_str->len);
+    return (Item){.item = b2it(deleted)};
+}
+
+extern "C" Item js_dom_expando_own_property_names(Item obj) {
+    DomNode* node = (DomNode*)js_dom_unwrap_element(obj);
+    Item result = js_array_new(0);
+    if (!node) return result;
+    Item exp_map = expando_get_map(node);
+    if (get_type_id(exp_map) != LMD_TYPE_MAP) return result;
+    Item names = js_object_get_own_property_names(exp_map);
+    if (get_type_id(names) != LMD_TYPE_ARRAY || !names.array) return result;
+    for (int i = 0; i < names.array->length; i++) {
+        Item key = names.array->items[i];
+        if (get_type_id(key) != LMD_TYPE_STRING) continue;
+        String* key_str = it2s(key);
+        if (!key_str) continue;
+        if (expando_key_is_engine_internal(key_str->chars, (int)key_str->len)) continue;
+        js_array_push(result, key);
+    }
+    return result;
 }
 
 static void expando_reset() {
@@ -1625,6 +1682,24 @@ static void reset_dom_wrapper_cache() {
     radiant_dom_reset_wrapper_cache();
 }
 
+static void js_dom_set_wrapper_prototype(Item obj, const char* ctor_name) {
+    Item global = js_get_global_this();
+    Item ctor = js_property_get(global, js_string_key(ctor_name));
+    if (get_type_id(ctor) != LMD_TYPE_FUNC) return;
+    Item proto = js_property_get(ctor, js_string_key("prototype"));
+    if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(obj, proto);
+}
+
+extern "C" Item js_dom_get_prototype_value(Item obj) {
+    DomNode* node = (DomNode*)js_dom_unwrap_element(obj);
+    const char* ctor_name = (node && node->is_element()) ? "Element" : "Node";
+    Item global = js_get_global_this();
+    Item ctor = js_property_get(global, js_string_key(ctor_name));
+    if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
+    Item proto = js_property_get(ctor, js_string_key("prototype"));
+    return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
+}
+
 extern "C" Item radiant_dom_wrap_node(void* dom_elem);
 
 extern "C" Item js_dom_wrap_element(void* dom_elem) {
@@ -1670,6 +1745,7 @@ extern "C" Item js_dom_create_wrapper_impl(void* dom_elem) {
     }
 
     Item wrapped = (Item){.map = wrapper};
+    js_dom_set_wrapper_prototype(wrapped, node->is_element() ? "Element" : "Node");
     return wrapped;
 }
 
@@ -10070,6 +10146,11 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         }
     }
 
+    if (strcmp(prop, "__proto__") == 0) return js_get_prototype(elem_item);
+    bool proto_found = false;
+    Item proto_value = js_prototype_lookup_ex(elem_item, prop_name, &proto_found);
+    if (proto_found) return proto_value;
+
     log_debug("js_dom_get_property: unknown property '%s' on <%s>",
               prop, elem->tag_name ? elem->tag_name : "?");
     return make_js_undefined();
@@ -13772,12 +13853,30 @@ static Item _coll_illegal_constructor(Item /*first*/) {
 }
 
 static void _install_iface(Item global, const char* name) {
+    Item key = (Item){.item = s2it(heap_create_name(name))};
+    Item existing = js_property_get(global, key);
+    if (get_type_id(existing) == LMD_TYPE_FUNC) return;
     Item ctor = js_new_function((void*)_coll_illegal_constructor, 0);
     js_set_function_name(ctor, (Item){.item = s2it(heap_create_name(name))});
     Item proto = js_new_object();
     js_property_set(proto, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
     js_property_set(ctor, (Item){.item = s2it(heap_create_name("prototype"))}, proto);
-    js_property_set(global, (Item){.item = s2it(heap_create_name(name))}, ctor);
+    js_property_set(global, key, ctor);
+}
+
+static Item _iface_proto(Item global, const char* name) {
+    Item ctor = js_property_get(global, (Item){.item = s2it(heap_create_name(name))});
+    if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
+    Item proto = js_property_get(ctor, (Item){.item = s2it(heap_create_name("prototype"))});
+    return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
+}
+
+static void _link_iface_proto(Item global, const char* name, const char* base_name) {
+    Item proto = _iface_proto(global, name);
+    Item base_proto = _iface_proto(global, base_name);
+    if (get_type_id(proto) == LMD_TYPE_MAP && get_type_id(base_proto) == LMD_TYPE_MAP) {
+        js_set_prototype(proto, base_proto);
+    }
 }
 
 static void _set_ctor_int_constant(Item ctor, const char* name, int64_t value) {
@@ -13809,6 +13908,10 @@ static void _install_node_iface(Item global) {
 extern "C" void js_dom_install_collection_globals(void) {
     Item global = js_get_global_this();
     _install_node_iface(global);
+    _install_iface(global, "Element");
+    _install_iface(global, "Range");
+    _install_iface(global, "Selection");
+    _link_iface_proto(global, "Element", "Node");
     _install_iface(global, "HTMLCollection");
     _install_iface(global, "HTMLFormControlsCollection");
     _install_iface(global, "HTMLOptionsCollection");
