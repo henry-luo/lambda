@@ -439,6 +439,8 @@ struct VMapVtable {
 struct VMap : Container {
     void* data;            // opaque pointer to backing implementation (e.g. HashMapData*)
     VMapVtable* vtable;    // dispatch table
+    const void* host_type;  // optional branded native host type; NULL for ordinary VMaps
+    void* host_data;        // optional native payload for host-object adapters
 };
 
 // Object: nominally-typed map with type name and methods

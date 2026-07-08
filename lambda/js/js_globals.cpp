@@ -36,6 +36,12 @@ extern "C" Item js_dom_selection_get_prototype_value(void);
 extern "C" Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_dispatch_event(Item event_item);
+extern "C" int radiant_dom_host_has_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_host_delete_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_host_own_property_descriptor(Item object, Item key, Item* out);
+extern "C" int radiant_dom_host_own_property_names(Item object, Item* out);
+extern "C" bool radiant_dom_is_node(Item item);
+extern "C" Item js_dom_get_prototype_value(Item item);
 extern "C" Item js_internal_binding(Item name);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
@@ -963,7 +969,8 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
 // v18l: helper to throw TypeError if argument is not an object (ES5 §15.2.3.*)
 static bool js_require_object_type(Item arg, const char* method_name) {
     TypeId t = get_type_id(arg);
-    if (t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY || t == LMD_TYPE_FUNC || t == LMD_TYPE_ELEMENT)
+    if (t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY || t == LMD_TYPE_FUNC ||
+        t == LMD_TYPE_ELEMENT || t == LMD_TYPE_VMAP)
         return true;
     extern Item js_new_error_with_name(Item type_name, Item message);
     extern void js_throw_value(Item error);
@@ -977,10 +984,16 @@ static bool js_require_object_type(Item arg, const char* method_name) {
 }
 
 static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item* out_result) {
+    if (type == LMD_TYPE_VMAP && radiant_dom_is_node(object)) {
+        if (radiant_dom_host_has_property(object, key, out_result)) return true;
+    }
+    if (type == LMD_TYPE_MAP &&
+        object.map->map_kind == MAP_KIND_WEB_API_RESOURCE) {
+        if (radiant_dom_host_has_property(object, key, out_result)) return true;
+    }
     if (type == LMD_TYPE_MAP &&
         (object.map->map_kind == MAP_KIND_DOC_PROXY ||
-         object.map->map_kind == MAP_KIND_FOREIGN_DOC ||
-         object.map->map_kind == MAP_KIND_DOM)) {
+         object.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
         Item v = js_property_get(object, key);
         if (v.item != ItemNull.item && v.item != ITEM_JS_UNDEFINED) {
             *out_result = (Item){.item = b2it(true)};
@@ -1037,6 +1050,15 @@ static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item*
 }
 
 static bool js_try_exotic_delete_property(Item obj, Item key, Item* out_result) {
+    if (get_type_id(obj) == LMD_TYPE_VMAP && radiant_dom_is_node(obj) &&
+        radiant_dom_host_delete_property(obj, key, out_result)) {
+        return true;
+    }
+    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
+        obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE &&
+        radiant_dom_host_delete_property(obj, key, out_result)) {
+        return true;
+    }
     if (js_is_proxy(obj)) {
         *out_result = js_proxy_trap_delete(obj, key);
         return true;
@@ -1072,6 +1094,15 @@ static bool js_hide_legacy_dunder_own_name(const char* name, int name_len) {
 }
 
 static bool js_try_exotic_own_property_names(Item object, Item* out_result) {
+    if (get_type_id(object) == LMD_TYPE_VMAP && radiant_dom_is_node(object) &&
+        radiant_dom_host_own_property_names(object, out_result)) {
+        return true;
+    }
+    if (get_type_id(object) == LMD_TYPE_MAP && object.map &&
+        object.map->map_kind == MAP_KIND_WEB_API_RESOURCE &&
+        radiant_dom_host_own_property_names(object, out_result)) {
+        return true;
+    }
     if (js_is_proxy(object)) {
         *out_result = js_proxy_trap_own_keys(object);
         return true;
@@ -1115,6 +1146,14 @@ static bool js_try_exotic_own_property_descriptor(Item obj, Item name,
                                                   Item* out_result) {
     if (js_is_proxy(obj)) {
         *out_result = js_proxy_trap_get_own_property_descriptor(obj, name);
+        return true;
+    }
+    if (type == LMD_TYPE_VMAP && radiant_dom_is_node(obj) &&
+        radiant_dom_host_own_property_descriptor(obj, name, out_result)) {
+        return true;
+    }
+    if (type == LMD_TYPE_MAP && obj.map && obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE &&
+        radiant_dom_host_own_property_descriptor(obj, name, out_result)) {
         return true;
     }
     if (type == LMD_TYPE_MAP && obj.map && obj.map->map_kind == MAP_KIND_TYPED_ARRAY) {
@@ -6400,7 +6439,7 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
     return (Item){.item = b2it(contains_map_proto)};
 }
 
-// Forward decls for DOM identity checks (host objects under MAP_KIND_DOM).
+// Forward decls for DOM resource identity checks.
 extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 
@@ -6415,8 +6454,8 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
     // Check built-in types that don't use __class_name__ prototype chain
     TypeId lt = get_type_id(left);
 
-    // DOM host-object identity checks (Selection/Range wrappers are
-    // MAP_KIND_DOM with no __class_name__ in their property map).
+    // DOM resource identity checks (Selection/Range wrappers have no
+    // __class_name__ in their property map).
     if (rn->len == 9 && strncmp(rn->chars, "Selection", 9) == 0) {
         return (Item){.item = b2it(js_dom_item_is_selection(left))};
     }
@@ -6527,7 +6566,7 @@ extern "C" Item js_in(Item key, Item object) {
     TypeId type = get_type_id(object);
     // ES spec: TypeError if RHS is not an object
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC
-        && type != LMD_TYPE_ELEMENT) {
+        && type != LMD_TYPE_ELEMENT && type != LMD_TYPE_VMAP) {
         return js_throw_type_error("Cannot use 'in' operator to search for a property in a non-object");
     }
     Item exotic_result = ItemNull;
@@ -7017,6 +7056,10 @@ extern "C" Item js_get_prototype_of(Item object) {
         return js_get_intrinsic_prototype_for_class(JS_CLASS_BIGINT);
     }
     if (!js_require_object_type(object, "getPrototypeOf")) return ItemNull;
+    if (ot == LMD_TYPE_VMAP && radiant_dom_is_node(object)) {
+        Item dom_proto = js_dom_get_prototype_value(object);
+        return get_type_id(dom_proto) == LMD_TYPE_MAP ? dom_proto : ItemNull;
+    }
     if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
     if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
     // v18g: Arrays → return Array.prototype (or custom if set via Object.setPrototypeOf)
@@ -9748,6 +9791,26 @@ extern "C" Item js_object_keys(Item object) {
     }
     if (!js_require_object_type(object, "keys")) return js_array_new(0);
     TypeId type = get_type_id(object);
+
+    if ((type == LMD_TYPE_VMAP && radiant_dom_is_node(object)) ||
+        (type == LMD_TYPE_MAP && object.map && object.map->map_kind == MAP_KIND_WEB_API_RESOURCE)) {
+        Item all_keys = ItemNull;
+        if (radiant_dom_host_own_property_names(object, &all_keys) &&
+            get_type_id(all_keys) == LMD_TYPE_ARRAY && all_keys.array) {
+            Item result = js_array_new(0);
+            for (int i = 0; i < all_keys.array->length; i++) {
+                Item key = all_keys.array->items[i];
+                if (get_type_id(key) != LMD_TYPE_STRING) continue;
+                Item desc = js_object_get_own_property_descriptor(object, key);
+                if (js_check_exception()) return result;
+                if (get_type_id(desc) != LMD_TYPE_MAP) continue;
+                bool enum_found = false;
+                Item enum_val = js_map_get_fast_ext(desc.map, "enumerable", 10, &enum_found);
+                if (enum_found && js_is_truthy(enum_val)) js_array_push(result, key);
+            }
+            return result;
+        }
+    }
 
     // Js55 P16: TypedArray integer-indexed properties are enumerable own
     // properties per ES2024 §10.4.5. Enumerate them in numeric order first,

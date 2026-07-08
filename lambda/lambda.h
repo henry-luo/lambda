@@ -570,7 +570,7 @@ enum MapKind {
     MAP_KIND_TYPED_ARRAY = 1,  // Int8Array, Float64Array, etc.
     MAP_KIND_ARRAYBUFFER = 2,  // ArrayBuffer / SharedArrayBuffer
     MAP_KIND_DATAVIEW    = 3,  // DataView
-    MAP_KIND_DOM         = 4,  // DOM nodes, ComputedStyle
+    MAP_KIND_WEB_API_RESOURCE = 4,  // non-node Web API resources: Range, Selection, styles
     MAP_KIND_CSSOM       = 5,  // Stylesheet, CSSRule, RuleStyleDeclaration
     MAP_KIND_ITERATOR    = 6,  // Synthetic iterator (array, string, typed array)
     MAP_KIND_PROCESS_ENV = 7,  // process.env — coerces all values to strings on set
