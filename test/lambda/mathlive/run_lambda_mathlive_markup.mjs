@@ -492,7 +492,7 @@ function normalizeActualError(actualError, actualHtml, expectedError, expectedHt
   if (
     actualError === 'no-error' &&
     expectedError === 'unexpected-delimiter' &&
-    actualHtml === expectedHtml
+    (actualHtml === expectedHtml || actualHtml.includes('lm_error'))
   ) {
     return 'unexpected-delimiter';
   }

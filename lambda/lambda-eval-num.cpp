@@ -1396,7 +1396,7 @@ Item fn_min1(Item item_a) {
         int64_t min_val = (rng->start < rng->end) ? rng->start : rng->end;
         return push_l(min_val);
     }
-    else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
+    else if (IS_NUMERIC_ID(type_id)) {
         // single numeric value, return as-is
         return item_a;
     }
@@ -1576,7 +1576,7 @@ Item fn_max1(Item item_a) {
         int64_t max_val = (rng->start > rng->end) ? rng->start : rng->end;
         return push_l(max_val);
     }
-    else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
+    else if (IS_NUMERIC_ID(type_id)) {
         // single numeric value, return as-is
         return item_a;
     }
@@ -1700,7 +1700,7 @@ Item fn_sum(Item item) {
         int64_t sum = n * (rng->start + rng->end) / 2;
         return push_l(sum);
     }
-    else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
+    else if (IS_NUMERIC_ID(type_id)) {
         // single numeric value, return as-is
         return item;
     }
@@ -1786,7 +1786,7 @@ Item fn_avg_skip_null(Item item, bool skip_null) {
         double avg = (double)(rng->start + rng->end) / 2.0;
         return push_d(avg);
     }
-    else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
+    else if (IS_NUMERIC_ID(type_id)) {
         // single numeric value, return as-is
         return item;
     }

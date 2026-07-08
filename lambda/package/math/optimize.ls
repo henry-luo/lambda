@@ -75,16 +75,11 @@ pub fn coalesce(bx) {
         element: merge_children(bx.element),
         height: bx.height,
         depth: bx.depth,
-        height_raw: bx.height_raw,
-        depth_raw: bx.depth_raw,
-        render_height: bx.render_height,
-        render_depth: bx.render_depth,
-        render_total: bx.render_total,
-        left_right_render_depth: bx.left_right_render_depth,
-        left_right_render_total: bx.left_right_render_total,
         width: bx.width,
         type: bx.type,
         italic: bx.italic,
-        skew: bx.skew
+        skew: bx.skew,
+        max_font_size: bx.max_font_size,
+        model: bx.model
     }
 }

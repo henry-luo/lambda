@@ -40,15 +40,13 @@ pub fn render(node, context, render_fn) {
         render_scripts(node, context, render_fn)
 }
 
-// Compute the height to use for the sub-script wrapper. MathLive uses
-// CEIL@2((sub_box.height_raw + sub_box.depth_raw) * 0.7) — the full glyph
-// extent scaled to script style. The depth term matters for atoms whose box
+// Compute the height to use for the sub-script wrapper. MathLive uses the full
+// glyph extent scaled to script style. The depth term matters for atoms whose box
 // dips below the baseline, e.g. the minus sign in `\int_{-\infty}` (depth
-// 0.08333 → 0.47 instead of 0.41). Falls back to 0.46 without raw metrics.
+// 0.08333 -> 0.47 instead of 0.41).
 fn sub_height_for(sub_box) {
-    let raw = if (sub_box != null) sub_box.height_raw else null
-    let draw = if (sub_box != null and sub_box.depth_raw != null and sub_box.depth_raw > 0.0)
-        sub_box.depth_raw else 0.0
+    let raw = if (sub_box != null) sub_box.height else null
+    let draw = if (sub_box != null and sub_box.depth > 0.0) sub_box.depth else 0.0
     if (raw != null) ceil_em2((raw + draw) * 0.7)
     else 0.46
 }
@@ -96,12 +94,12 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
     // Full-precision script extents (scaled ×0.7) — used for the box's true
     // height/depth so the single-rounding strut sums them ONCE.
     let sup_raw_h = if (has_sup)
-        (if (sup_box.height_raw != null) sup_box.height_raw else sup_box.height) * s
+        ls_metric_h(sup_box) * s
         else 0.0
-    let sub_raw_d = if (has_sub and sub_box.depth_raw != null and sub_box.depth_raw > 0.0)
-        sub_box.depth_raw * s else 0.0
-    let sup_raw_d = if (has_sup and sup_box.depth_raw != null and sup_box.depth_raw > 0.0)
-        sup_box.depth_raw * s else 0.0
+    let sub_raw_d = if (has_sub and ls_metric_d(sub_box) > 0.0)
+        ls_metric_d(sub_box) * s else 0.0
+    let sup_raw_d = if (has_sup and ls_metric_d(sup_box) > 0.0)
+        ls_metric_d(sup_box) * s else 0.0
     // box extent (full precision): sup raises the top to sup_shift+sup_h, the
     // sub drops the bottom to sub_shift(+descender).
     let box_h_raw = if (has_sup) (sup_shift + sup_raw_h) else int_h
@@ -154,24 +152,9 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
             >
         >
     >
-    // height/depth are the CEIL@2 projections of the full-precision extents
-    // (box_h_raw/box_d_raw computed above).
-    let box_h = util.ceil_em2(box_h_raw)
-    let box_d = 0.0 - util.ceil_em2(0.0 - box_d_raw)
-    {
-        element: el,
-        height: box_h,
-        depth: box_d,
-        height_raw: box_h_raw,
-        depth_raw: box_d_raw,
-        // Phase A: render_height/render_depth omitted (== height/depth, consumers
-        // null-coalesce). render_total kept until delimiters (task 5) convert.
-        render_total: util.ceil_em2(box_h_raw + box_d_raw),
-        width: 0.55556,
-        type: "mop",
-        italic: 0.0,
-        skew: 0.0
-    }
+    // The integral side-limit box's visual height/depth already live in the
+    // vlist element tree, so Phase A must not leak legacy render_* channels.
+    box.ml_box_full(el, box_h_raw, box_d_raw, 0.55556, "mop", 0.0, 0.0, box_h_raw)
 }
 
 fn render_inline_big_op_scripts(base, node, context, render_fn) {
@@ -209,23 +192,13 @@ fn render_inline_big_op_scripts(base, node, context, render_fn) {
             >
         >
     >
-    {
-        element: el,
-        height: 0.94,
-        depth: 0.29,
-        render_height: 0.94,
-        render_depth: 0.29,
-        render_total: 1.23,
-        width: max(0.6, max(sub_box.width, sup_box.width)),
-        type: "mop",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(el, 0.94, 0.29, max(0.6, max(sub_box.width, sup_box.width)),
+        "mop", 0.0, 0.0, 0.94)
 }
 
 // full-precision metric accessors for limit boxes
-fn ls_raw_h(b) { if (b.height_raw != null) b.height_raw else b.height }
-fn ls_raw_d(b) { if (b.depth_raw != null) b.depth_raw else b.depth }
+fn ls_metric_h(b) { b.height }
+fn ls_metric_d(b) { b.depth }
 
 fn ls_child_style(hd, fs) {
     "height:" ++ util.fmt_em_ceil2(hd) ++ ";display:inline-block" ++
@@ -284,16 +257,16 @@ fn make_limits_stack(op_box, sub_box, sup_box, is_centered) {
     let bos5 = met.at(met.bigOpSpacing5, 0)
     let fs = 0.7   // display -> script scale for the limits
     // use full-precision op metrics: a symbol op (large_op_box_metric) sets
-    // height directly; a text op (text_box) sets height=CEIL, height_raw=full.
-    let op_h = ls_raw_h(op_box)
-    let op_d = ls_raw_d(op_box)
+    // height directly; a text op carries the full ascent in its primary field.
+    let op_h = ls_metric_h(op_box)
+    let op_d = ls_metric_d(op_box)
     let has_sub = sub_box != null
     let has_sup = sup_box != null
     // limits are rendered unscaled by Lambda; scale into the parent frame
-    let sub_h = if (has_sub) ls_raw_h(sub_box) * fs else 0.0
-    let sub_d = if (has_sub) ls_raw_d(sub_box) * fs else 0.0
-    let sup_h = if (has_sup) ls_raw_h(sup_box) * fs else 0.0
-    let sup_d = if (has_sup) ls_raw_d(sup_box) * fs else 0.0
+    let sub_h = if (has_sub) ls_metric_h(sub_box) * fs else 0.0
+    let sub_d = if (has_sub) ls_metric_d(sub_box) * fs else 0.0
+    let sup_h = if (has_sup) ls_metric_h(sup_box) * fs else 0.0
+    let sup_d = if (has_sup) ls_metric_d(sup_box) * fs else 0.0
     let above_shift = if (has_sup) max(bos1, bos3 - sup_d) else 0.0
     let below_shift = if (has_sub) max(bos2, bos4 - sub_h) else 0.0
     let op_item = {b: op_box, h: op_h, d: op_d, fs: false}
@@ -342,29 +315,20 @@ fn make_limits_stack(op_box, sub_box, sup_box, is_centered) {
             >
         >
     >
-    // full precision in *_raw (single-rounding strut path); height/depth and
-    // render_* are CEIL projections for non-raw consumers (an hbox sibling
-    // that lacks raw forces the rounded path — e.g. the \prod in a sum of
-    // fractions).
+    // makeLimitsStack exports its full precision extent through the primary
+    // height/depth fields; visual row sizes are already in the element tree.
     let full_depth = 0.0 - r.minp
-    let h_num = ceil_em2(r.maxp)
-    let d_num = 0.0 - ceil_em2(0.0 - full_depth)
-    // Phase A: a metric-driven box carries one height/depth (CEIL projections;
-    // full precision in *_raw). render_height/render_depth are omitted — they
-    // would equal height/depth and every consumer null-coalesces to those.
-    {
-        element: el,
-        height: h_num,
-        depth: d_num,
-        height_raw: r.maxp,
-        depth_raw: full_depth,
-        render_total: ceil_em2(r.maxp + full_depth),
-        width: max(op_box.width, max(if (has_sub) sub_box.width * fs else 0.0,
-                                     if (has_sup) sup_box.width * fs else 0.0)),
-        type: "mop",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(
+        el,
+        r.maxp,
+        full_depth,
+        max(op_box.width, max(if (has_sub) sub_box.width * fs else 0.0,
+                              if (has_sup) sup_box.width * fs else 0.0)),
+        "mop",
+        0.0,
+        0.0,
+        r.maxp
+    )
 }
 
 // render a big operator with limits above/below (display mode)
@@ -416,18 +380,8 @@ fn large_op_symbol_box(text) {
     // than sum/prod, so the surrounding depth_holder formula needs to know.
     // h+d typically ~1.61em but split differs.
     let d = large_op_symbol_depth(text)
-    {
-        element: <span class: "lm_op-symbol lm_large-op"; text>,
-        height: 1.61,
-        depth: d,
-        render_height: 1.61,
-        render_depth: d,
-        render_total: 1.61 + d,
-        width: 0.6,
-        type: "mop",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(<span class: "lm_op-symbol lm_large-op"; text>,
+        1.61, d, 0.6, "mop", 0.0, 0.0, 1.61)
 }
 
 fn large_op_symbol_depth(text) {
@@ -471,9 +425,7 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box, is_text_op) {
     // vlist_h = sup_child_h + 1.35 (CEIL@2). The hardcoded 1.66 historically
     // assumed sup_child=0.31 (n/a sized). Taller sups (digits, uppercase,
     // descenders) lift vlist accordingly. Sub-only keeps the 1.06 default.
-    let sup_h_raw_pre = if (has_sup and sup_box.height_raw != null) sup_box.height_raw
-                        else if (has_sup) sup_box.height
-                        else 0.0
+    let sup_h_raw_pre = if (has_sup) sup_box.height else 0.0
     let sup_scaled_pre = ceil_em2(sup_h_raw_pre * 0.7)
     let vlist_height = if (is_text_op and has_sub and has_sup) 0.94
                        else if (is_text_op) 0.7
@@ -481,16 +433,12 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box, is_text_op) {
                        else if (has_sub and has_sup) ceil_em2(sup_scaled_pre + 1.35)
                        else if (has_sup) ceil_em2(sup_scaled_pre + 1.35)
                        else 1.06
-    let sub_h_raw = if (has_sub and sub_box.height_raw != null) sub_box.height_raw
-                    else if (has_sub) sub_box.height
-                    else 0.0
+    let sub_h_raw = if (has_sub) sub_box.height else 0.0
     let sub_scaled = ceil_em2(sub_h_raw * 0.7)
     let sub_child_height = if (compact_limits) 0.31
                            else if (sub_has_descender) 0.6
                            else if (has_sub) sub_scaled else 0.0
-    let sup_h_raw = if (has_sup and sup_box.height_raw != null) sup_box.height_raw
-                    else if (has_sup) sup_box.height
-                    else 0.0
+    let sup_h_raw = if (has_sup) sup_box.height else 0.0
     let sup_scaled = ceil_em2(sup_h_raw * 0.7)
     let sup_child_height = if (compact_limits) 0.46
                            else if (has_sup) sup_scaled else 0.0
@@ -571,27 +519,15 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box, is_text_op) {
             >
         >
     >
-    // Text-op strut height includes the op's natural ascent (0.75 for "lim")
-    // — slightly more than vlist_height (0.7) because the strut covers the
-    // unscaled letter heights. depth_raw is set slightly below the rounded
-    // depth so CEIL@2(-d_raw) emits "-0.71em" not "-0.72em" (matches MathLive).
+    // Text-op strut height includes the op's natural ascent (0.75 for "lim"),
+    // slightly more than vlist_height (0.7) because the strut covers the
+    // unscaled letter heights. Its depth keeps the pre-rounded value used by
+    // MathLive's outer strut emission.
     let out_h = if (is_text_op) 0.75 else vlist_height
     let out_d = if (is_text_op and has_sub) 0.72 else box_depth
     let out_d_raw = if (is_text_op and has_sub) 0.715 else box_depth
-    {
-        element: el,
-        height: out_h,
-        depth: out_d,
-        height_raw: out_h,
-        depth_raw: out_d_raw,
-        render_height: out_h,
-        render_depth: out_d,
-        render_total: out_h + out_d,
-        width: max(max(op_box.width, sub_w), sup_w),
-        type: "mop",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(el, out_h, out_d_raw, max(max(op_box.width, sub_w), sup_w),
+        "mop", 0.0, 0.0, out_h)
 }
 
 // render normal inline subscript/superscript
@@ -638,31 +574,22 @@ fn render_scripts(node, context, render_fn) {
 }
 
 fn script_pair(base_box, script_box) {
-    let render_h = if (script_box.render_height != null)
-        max(base_box.height, script_box.render_height) else null
-    let render_d = if (script_box.render_depth != null)
-        max(base_box.depth, script_box.render_depth) else null
-    // Propagate raw values when BOTH boxes expose them. Use the max for
-    // each (the outer extent visible to the strut wrapper).
-    let h_raw_pair = if (base_box.height_raw != null and script_box.height_raw != null)
-        max(base_box.height_raw, script_box.height_raw) else null
-    let d_raw_pair = if (base_box.depth_raw != null and script_box.depth_raw != null)
-        max(base_box.depth_raw, script_box.depth_raw) else null
-    {
-        element: box.hbox([base_box, script_box]).element,
-        elements: [base_box.element, script_box.element],
-        height: max(base_box.height, script_box.height),
-        depth: max(base_box.depth, script_box.depth),
-        height_raw: h_raw_pair,
-        depth_raw: d_raw_pair,
-        render_height: render_h,
-        render_depth: render_d,
-        render_total: script_box.render_total,
-        width: base_box.width + script_box.width,
-        type: "mord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    ml_script_pair(base_box, script_box)
+}
+
+fn ml_script_pair(base_box, script_box) {
+    let hb = box.hbox([base_box, script_box])
+    box.ml_box_full(
+        hb.element,
+        max(base_box.height, script_box.height),
+        max(base_box.depth, script_box.depth),
+        base_box.width + script_box.width,
+        "mord",
+        0.0,
+        0.0,
+        max(if (base_box.max_font_size != null) base_box.max_font_size else base_box.height,
+            if (script_box.max_font_size != null) script_box.max_font_size else script_box.height)
+    )
 }
 
 // ============================================================
@@ -672,14 +599,15 @@ fn script_pair(base_box, script_box) {
 // Rule 18e (both sub + sup), emitted via MathLive's makeVList (vlist-t2) —
 // NOT the legacy inline-block stack. The corpus is display-rooted, so the min
 // sup shift uses sup1. Child metrics are scaled into the parent frame; the box
-// exposes full-precision height_raw/depth_raw so the outer strut rounds once.
+// returns an ML box whose height/depth are full precision, so the outer strut
+// can round once without duplicate side fields.
 fn render_both(base_box, sup_box, sub_box, init_sup, init_sub,
                min_sup, x_height, rule_width, si,
                sup_font_scale, sub_font_scale) {
-    let sup_h = if (sup_box.height_raw != null) sup_box.height_raw else sup_box.height
-    let sup_d = if (sup_box.depth_raw != null) sup_box.depth_raw else sup_box.depth
-    let sub_h = if (sub_box.height_raw != null) sub_box.height_raw else sub_box.height
-    let sub_d = if (sub_box.depth_raw != null) sub_box.depth_raw else sub_box.depth
+    let sup_h = sup_box.height
+    let sup_d = sup_box.depth
+    let sub_h = sub_box.height
+    let sub_d = sub_box.depth
     let sup_h_s = sup_h * sup_font_scale
     let sup_d_s = sup_d * sup_font_scale
     let sub_h_s = sub_h * sub_font_scale
@@ -736,17 +664,9 @@ fn render_both(base_box, sup_box, sub_box, init_sup, init_sub,
             <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(0.0 - min_pos)>
         >
     >
-    {
-        element: el,
-        height: max_pos,
-        depth: 0.0 - min_pos,
-        height_raw: max_pos,
-        depth_raw: 0.0 - min_pos,
-        width: max(sup_box.width * sup_font_scale, sub_box.width * sub_font_scale),
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(el, max_pos, 0.0 - min_pos,
+        max(sup_box.width * sup_font_scale, sub_box.width * sub_font_scale),
+        "ord", 0.0, 0.0, max_pos)
 }
 
 // ============================================================
@@ -763,8 +683,8 @@ fn render_sub_only(base_box, sub_box, init_sub, x_height, si, is_char, font_scal
     // accommodates descender content like y. CEIL@2 at script-style scale.
     // vlist_height uses the H-ONLY portion (no descent) — the descent is
     // accounted for separately by depth_holder.
-    let sub_h_src = if (sub_box.height_raw != null) sub_box.height_raw else sub_box.height
-    let sub_d_src = if (sub_box.depth_raw != null) sub_box.depth_raw else sub_box.depth
+    let sub_h_src = sub_box.height
+    let sub_d_src = sub_box.depth
     let has_descender = sub_d_src > 0.0
     let child_h_raw = if (has_descender) (sub_h_src + sub_d_src) * font_scale
                      else sub_h_src * font_scale
@@ -794,19 +714,8 @@ fn render_sub_only(base_box, sub_box, init_sub, x_height, si, is_char, font_scal
             <span class: css.VLIST, style: "height:" ++ util.fmt_em(depth_holder)>
         >
     >
-    {
-        element: el,
-        // depth is the CEIL@2 projection (non-raw strut consumers); depth_raw
-        // keeps full precision for the single-rounding use_raw path.
-        height: 0.0,
-        depth: ceil_em2(depth_holder_raw),
-        height_raw: 0.0,
-        depth_raw: depth_holder_raw,
-        width: sub_box.width * font_scale,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(el, 0.0, depth_holder_raw,
+        sub_box.width * font_scale, "ord", 0.0, 0.0, 0.0)
 }
 
 // ============================================================
@@ -819,8 +728,8 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font
     // above the baseline and is laid out with the single-child makeVList
     // (one box + pstrut). Everything is derived from metrics — no hardcoded
     // top offsets, per-shape vlist tables, or tall-base/tall-script gates.
-    let sup_h = if (sup_box.height_raw != null) sup_box.height_raw else sup_box.height
-    let sup_d = if (sup_box.depth_raw != null) sup_box.depth_raw else sup_box.depth
+    let sup_h = sup_box.height
+    let sup_d = sup_box.depth
     let sup_h_s = sup_h * font_scale
     let sup_d_s = sup_d * font_scale
     let sup_shift = max(init_sup, max(min_sup, sup_d_s + 0.25 * x_height))
@@ -865,21 +774,8 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font
                 >
             >
         >
-    {
-        element: el,
-        // height/depth are the CEIL@2 projections (consumed by the non-raw
-        // strut path, e.g. next to a \left..\right base that lacks depth_raw);
-        // height_raw/depth_raw carry full precision for the single-rounding
-        // use_raw path (sibling descenders, x^n + y^n).
-        height: ceil_em2(max_pos),
-        depth: ceil_em2(depth_out),
-        height_raw: max_pos,
-        depth_raw: depth_out,
-        width: sup_box.width * font_scale,
-        type: "ord",
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(el, max_pos, depth_out,
+        sup_box.width * font_scale, "ord", 0.0, 0.0, max_pos)
 }
 
 // Format a font-size percentage the way MathLive does: integer when whole

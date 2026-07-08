@@ -24,6 +24,11 @@ true
 true
 true
 true
+true
+true
+true
+false
+number
 "=== is negative ==="
 false
 false

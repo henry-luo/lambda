@@ -19,7 +19,6 @@ template<> struct ItemTagToType<LMD_TYPE_INT64> { typedef int64_t type; enum { i
 template<> struct ItemTagToType<LMD_TYPE_UINT64> { typedef uint64_t type; enum { is_pointer = true, is_direct_pointer = false }; };
 template<> struct ItemTagToType<LMD_TYPE_FLOAT> { typedef double type; enum { is_pointer = true, is_direct_pointer = false }; };
 template<> struct ItemTagToType<LMD_TYPE_DECIMAL> { typedef Decimal type; enum { is_pointer = true, is_direct_pointer = false }; };
-template<> struct ItemTagToType<LMD_TYPE_NUMBER> { typedef void type; enum { is_pointer = false, is_direct_pointer = false }; };
 template<> struct ItemTagToType<LMD_TYPE_DTIME> { typedef DateTime type; enum { is_pointer = true, is_direct_pointer = false }; };
 template<> struct ItemTagToType<LMD_TYPE_SYMBOL> { typedef Symbol type; enum { is_pointer = true, is_direct_pointer = false }; };
 template<> struct ItemTagToType<LMD_TYPE_STRING> { typedef String type; enum { is_pointer = true, is_direct_pointer = false }; };
@@ -166,7 +165,6 @@ decltype(auto) visit(Item it, F&& f) {
         case LMD_TYPE_UINT64: return f(require<LMD_TYPE_UINT64>(it));
         case LMD_TYPE_FLOAT: return f(require<LMD_TYPE_FLOAT>(it));
         case LMD_TYPE_DECIMAL: return f(require<LMD_TYPE_DECIMAL>(it));
-        case LMD_TYPE_NUMBER: return f(require<LMD_TYPE_NUMBER>(it));
         case LMD_TYPE_DTIME: return f(require<LMD_TYPE_DTIME>(it));
         case LMD_TYPE_SYMBOL: return f(require<LMD_TYPE_SYMBOL>(it));
         case LMD_TYPE_STRING: return f(require<LMD_TYPE_STRING>(it));

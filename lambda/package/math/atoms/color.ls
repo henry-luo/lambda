@@ -55,13 +55,13 @@ pub fn with_background(content_box, bg_color) {
         >,
         height: content_box.height,
         depth: content_box.depth,
-        render_height: content_box.render_height,
-        render_depth: content_box.render_depth,
-        render_total: content_box.render_total,
         width: content_box.width,
         type: "ord",
         italic: 0.0,
         skew: 0.0,
+        max_font_size: if (content_box.max_font_size != null)
+            content_box.max_font_size else content_box.height,
+        model: "ml",
         suppress_hbox_text_depth: content_box.suppress_hbox_text_depth,
         is_colorbox: true
     }

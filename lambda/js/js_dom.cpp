@@ -1688,9 +1688,19 @@ extern "C" void js_dom_initialize_node_wrapper(void* dom_elem) {
 
 extern "C" Item js_dom_get_prototype_value(Item obj) {
     DomNode* node = (DomNode*)js_dom_unwrap_element(obj);
-    const char* ctor_name = (node && node->is_element()) ? "Element" : "Node";
+    const char* ctor_name = "Node";
+    if (node && node->is_element()) {
+        DomElement* elem = node->as_element();
+        // HTML DOM wrappers need HTMLElement as their immediate prototype so
+        // browser-library instanceof checks walk HTMLElement -> Element -> Node.
+        ctor_name = (elem && elem->tag_name && elem->tag_name[0] != '#')
+            ? "HTMLElement" : "Element";
+    }
     Item global = js_get_global_this();
     Item ctor = js_property_get(global, js_string_key(ctor_name));
+    if (get_type_id(ctor) != LMD_TYPE_FUNC && strcmp(ctor_name, "HTMLElement") == 0) {
+        ctor = js_property_get(global, js_string_key("Element"));
+    }
     if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
     Item proto = js_property_get(ctor, js_string_key("prototype"));
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
@@ -14053,9 +14063,11 @@ extern "C" void js_dom_install_collection_globals(void) {
     Item global = js_get_global_this();
     _install_node_iface(global);
     _install_iface(global, "Element");
+    _link_iface_proto(global, "Element", "Node");
+    _install_iface(global, "HTMLElement");
+    _link_iface_proto(global, "HTMLElement", "Element");
     _install_iface(global, "Range");
     _install_iface(global, "Selection");
-    _link_iface_proto(global, "Element", "Node");
     _install_iface(global, "HTMLCollection");
     _install_iface(global, "HTMLFormControlsCollection");
     _install_iface(global, "HTMLOptionsCollection");

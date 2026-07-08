@@ -115,26 +115,24 @@ pub fn render(node, context, render_fn) {
 }
 
 fn wrap_cfrac_fraction(frac_box) {
-    {
-        element: <span class: css.MFRAC;
+    let el = <span class: css.MFRAC;
             null_delim_el(css.OPEN)
             frac_box.element
-        >,
+        >
+    ml_fraction_wrapper(el, frac_box, frac_box.width + 0.12)
+}
+
+fn ml_fraction_wrapper(el, frac_box, width) => {
+        element: el,
         height: frac_box.height,
         depth: frac_box.depth,
-        height_raw: frac_box.height_raw,
-        depth_raw: frac_box.depth_raw,
-        render_height: frac_box.render_height,
-        render_depth: frac_box.render_depth,
-        render_total: frac_box.render_total,
-        left_right_render_depth: frac_box.left_right_render_depth,
-        left_right_render_total: frac_box.left_right_render_total,
-        width: frac_box.width + 0.12,
+        width: width,
         type: "minner",
         italic: 0.0,
         skew: 0.0,
+        max_font_size: frac_box.max_font_size,
+        model: "ml",
         is_fraction: true
-    }
 }
 
 pub fn render_boxes(numer_box, denom_box, context) {
@@ -165,9 +163,9 @@ fn build_frac_bar(numer_box, denom_box, frac_ctx, gstyle, is_fraction_child) {
         frac_bar_geom(frac_ctx, numer_box, denom_box, gstyle, is_fraction_child))
 }
 
-// full-precision metric accessors (fall back to rounded when raw absent)
-fn frac_raw_h(bx) { if (bx.height_raw != null) bx.height_raw else bx.height }
-fn frac_raw_d(bx) { if (bx.depth_raw != null) bx.depth_raw else bx.depth }
+// full-precision metric accessors
+fn frac_metric_h(bx) { bx.height }
+fn frac_metric_d(bx) { bx.depth }
 
 // Rule 15d geometry, computed from font metrics + sigma constants — covers
 // the display/text/script/scriptscript geometry styles (the children are
@@ -177,8 +175,8 @@ fn frac_raw_d(bx) { if (bx.depth_raw != null) bx.depth_raw else bx.depth }
 // (colorbox quirks, or composite children that lack raw metrics).
 // Returns the geom record for ANY bar fraction — display/text/script/
 // scriptscript geometry, colorbox, and composite children alike. Children that
-// lack raw metrics fall back to their rounded height/depth via frac_raw_h /
-// frac_raw_d. (The legacy frac_bar_spec constant table is gone.)
+// carry their full extent in the primary height/depth fields. (The legacy
+// frac_bar_spec constant table is gone.)
 fn frac_bar_geom(frac_ctx, numer_box, denom_box, gstyle, is_fraction_child) {
         // geom_style is the MathLive geometry style threaded/derived in render().
         let geom_style = gstyle
@@ -198,10 +196,10 @@ fn frac_bar_geom(frac_ctx, numer_box, denom_box, gstyle, is_fraction_child) {
         let axis = met.AXIS_HEIGHT
         let clearance = if (is_display) 3.0 * theta else theta
         // scaled child metrics (in the fraction's frame)
-        let n_h = frac_raw_h(numer_box) * s_child
-        let n_d = frac_raw_d(numer_box) * s_child
-        let d_h = frac_raw_h(denom_box) * s_child
-        let d_d = frac_raw_d(denom_box) * s_child
+        let n_h = frac_metric_h(numer_box) * s_child
+        let n_d = frac_metric_d(numer_box) * s_child
+        let d_h = frac_metric_h(denom_box) * s_child
+        let d_d = frac_metric_d(denom_box) * s_child
         // Rule 15d: shift numerator up by u, denominator down by v, keeping
         // each clear of the bar (centred on the axis) by `clearance`.
         let numer_line = axis + theta / 2.0
@@ -240,12 +238,8 @@ fn frac_bar_geom(frac_ctx, numer_box, denom_box, gstyle, is_fraction_child) {
             rule_height: theta,
             pstrut: pstrut,
             font_pct: if (s_child == 1.0) null else font_pct_str(s_child),
-            // Expose height_raw to the single-rounding strut path AND to a
-            // parent's Rule 15/18 (which reads the child's raw metrics). Covers
-            // top-level display fractions, fraction-children, and fractions
-            // reached via a sub/superscript (script_container) — the script
-            // parents (render_sup_only/render_both, now Rule 18-metric-driven)
-            // consume this raw to round their vlist/strut once.
+            // Keep this marker for geometry callers that need to know whether
+            // the fraction is a top-level or nested display-style extent.
             expose_raw: is_display or is_fraction_child or frac_ctx.script_container == true
         }
 }
@@ -262,8 +256,8 @@ fn font_pct_str(s) {
 
 // Emit the bar-fraction vlist from a computed geom record. Every CSS dimension
 // is CEIL@2 of a full-precision value (matching MathLive box.ts toString); the
-// box carries a single full-precision height/depth (mirrored into *_raw so the
-// outer strut rounds once via math.ls).
+    // box carries a single full-precision height/depth so the outer strut rounds
+    // once via math.ls.
 fn build_frac_bar_rule15(numer_box, denom_box, geom) {
     let numer_elements = box.elements_of(numer_box)
     let denom_elements = box.elements_of(denom_box)
@@ -298,31 +292,19 @@ fn build_frac_bar_rule15(numer_box, denom_box, geom) {
             <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(geom.depth_holder)>
         >
     >
-    // Phase A (box-model collapse), applied where it's safe — a metric-driven
-    // box. height/depth ARE the layout values (CEIL projections for a non-raw
-    // consumer); full precision lives in *_raw for the single-rounding strut.
-    // render_height/render_depth are NOT set: they would just equal height/
-    // depth, and every consumer null-coalesces render_height -> height. Only
-    // render_total survives because CEIL(h+d) != CEIL(h)+CEIL(d) (the §1.4
-    // asymmetry); it goes when the whole tree carries full precision.
-    let h_em = util.ceil_em2(geom.frac_height)             // strut height
-    let d_em = 0.0 - util.ceil_em2(0.0 - geom.frac_depth)  // va depth (ceil toward 0)
-    let total_em = util.ceil_em2(geom.frac_height + geom.frac_depth)
+    // Phase A: this producer is now a MathLive one-box-field box. The visual
+    // CSS dimensions above are CEIL@2 strings, while height/depth remain the
+    // full-precision makeVList extents for the single root strut emit site.
     {
         element: el,
-        height: h_em,
-        depth: d_em,
-        height_raw: if (geom.expose_raw) geom.frac_height else null,
-        depth_raw: if (geom.expose_raw) geom.frac_depth else null,
-        render_total: total_em,
-        // full-precision content extent for \left..\right delimiter sizing
-        // (stretchy delimiters size against the unrounded content, not CEIL@2).
-        left_right_render_depth: geom.frac_depth,
-        left_right_render_total: geom.frac_height + geom.frac_depth,
+        height: geom.frac_height,
+        depth: geom.frac_depth,
         width: max(numer_box.width, denom_box.width),
         type: "mord",
         italic: 0.0,
         skew: 0.0,
+        max_font_size: geom.frac_height,
+        model: "ml",
         is_fraction: true
     }
 }
@@ -358,15 +340,14 @@ fn build_frac_nobar_vlist(numer_box, denom_box, frac_ctx, cmd, unbraced_numeric)
     >
     {
         element: el,
-        height: spec.height,
-        depth: spec.depth,
-        render_height: spec.render_height,
-        render_depth: spec.render_depth,
-        render_total: spec.render_total,
+        height: spec.box_height,
+        depth: spec.box_depth,
         width: max(numer_box.width, denom_box.width),
         type: "mord",
         italic: 0.0,
         skew: 0.0,
+        max_font_size: spec.box_height,
+        model: "ml",
         no_bar: true,
         is_fraction: true,
         delim_level: spec.delim_level,
@@ -381,9 +362,9 @@ fn frac_nobar_spec(frac_ctx, cmd, unbraced_numeric) {
         {
             height: 1.15,
             depth: 0.69,
-            render_height: 1.45,
-            render_depth: 0.95,
-            render_total: 2.41,
+            box_height: 1.45,
+            box_depth: 0.95,
+            box_total: 2.41,
             depth_holder: 0.69,
             numer_top: -3.5,
             denom_top: -2.31,
@@ -398,9 +379,9 @@ fn frac_nobar_spec(frac_ctx, cmd, unbraced_numeric) {
         {
             height: 0.78,
             depth: 0.35,
-            render_height: 0.85,
-            render_depth: 0.35,
-            render_total: 1.21,
+            box_height: 0.85,
+            box_depth: 0.35,
+            box_total: 1.21,
             depth_holder: 0.35,
             numer_top: -3.47,
             denom_top: -2.65,
@@ -415,9 +396,9 @@ fn frac_nobar_spec(frac_ctx, cmd, unbraced_numeric) {
         {
             height: 0.94,
             depth: 0.69,
-            render_height: 1.45,
-            render_depth: 0.95,
-            render_total: 2.41,
+            box_height: 1.45,
+            box_depth: 0.95,
+            box_total: 2.41,
             depth_holder: 0.69,
             numer_top: -3.5,
             denom_top: -2.31,
@@ -469,27 +450,12 @@ fn null_delim_el(cls) {
 }
 
 fn wrap_default_fraction(frac_box) {
-    {
-        element: <span class: css.MFRAC;
+    let el = <span class: css.MFRAC;
             null_delim_el(css.OPEN)
             frac_box.element
             null_delim_el(css.CLOSE)
-        >,
-        height: frac_box.height,
-        depth: frac_box.depth,
-        height_raw: frac_box.height_raw,
-        depth_raw: frac_box.depth_raw,
-        render_height: frac_box.render_height,
-        render_depth: frac_box.render_depth,
-        render_total: frac_box.render_total,
-        left_right_render_depth: frac_box.left_right_render_depth,
-        left_right_render_total: frac_box.left_right_render_total,
-        width: frac_box.width + 0.24,
-        type: "minner",
-        italic: 0.0,
-        skew: 0.0,
-        is_fraction: true
-    }
+        >
+    ml_fraction_wrapper(el, frac_box, frac_box.width + 0.24)
 }
 
 fn wrap_delimited_fraction(frac_box, left_delim, right_delim) {
@@ -500,21 +466,23 @@ fn wrap_delimited_fraction(frac_box, left_delim, right_delim) {
     let content_boxes = (for (p in [left_box, frac_box, right_box] where p != null) p)
     let elements = box.child_elements(content_boxes)
     let combined = box.hbox(content_boxes)
-    {
-        element: <span class: css.MFRAC;
+    let el = <span class: css.MFRAC;
             for (el in elements) el
-        >,
+        >
+    ml_delimited_fraction_wrapper(el, combined)
+}
+
+fn ml_delimited_fraction_wrapper(el, combined) => {
+        element: el,
         height: combined.height,
         depth: combined.depth,
-        render_height: combined.render_height,
-        render_depth: combined.render_depth,
-        render_total: combined.render_total,
         width: combined.width,
         type: "minner",
         italic: 0.0,
         skew: 0.0,
+        max_font_size: combined.max_font_size,
+        model: "ml",
         is_fraction: true
-    }
 }
 
 fn delimiter_box(delim, frac_box, atom_type) {
@@ -529,12 +497,11 @@ fn delimiter_box(delim, frac_box, atom_type) {
         element: <span class: cls; delim>,
         height: h,
         depth: d,
-        render_height: h,
-        render_depth: d,
-        render_total: h + d,
         width: 0.4,
         type: atom_type,
         italic: 0.0,
-        skew: 0.0
+        skew: 0.0,
+        max_font_size: h,
+        model: "ml"
     }
 }

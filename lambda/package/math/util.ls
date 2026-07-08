@@ -41,7 +41,16 @@ pub fn fmt_em(x) {
 // This matches MathLive's `value.toFixed(2)` via the CEIL semantics observed
 // in its emission across hundreds of test cases.
 pub fn fmt_em_ceil2(x) {
-    fmt_num(ceil_em2(x), 2) ++ "em"
+    let v = ceil_em2(x)
+    if (abs(v) >= 100000.0) fmt_large_em(v)
+    else fmt_num(v, 2) ++ "em"
+}
+
+// MathLive box.ts stringifies em dimensions with Math.ceil(v*100)/100.
+// Keep this alias separate from legacy call sites so the Phase A migration can
+// make new ML-box emit paths obvious while preserving current behavior.
+pub fn fmt_ml_em(x) {
+    fmt_em_ceil2(x)
 }
 
 // numeric CEIL@2 of a signed em value (MathLive's Math.ceil(v*100)/100).

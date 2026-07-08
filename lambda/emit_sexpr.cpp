@@ -102,7 +102,6 @@ static const char* redex_type_name(TypeId type_id) {
         case LMD_TYPE_INT64:  return "int-type";
         case LMD_TYPE_UINT64: return "int-type";
         case LMD_TYPE_FLOAT:  return "float-type";
-        case LMD_TYPE_NUMBER: return "number-type";
         case LMD_TYPE_DECIMAL:return "number-type";
         case LMD_TYPE_STRING: return "string-type";
         case LMD_TYPE_SYMBOL: return "symbol-type";
@@ -975,7 +974,6 @@ static void emit_expr(const char* source, AstNode* node) {
             break;
         }
         case LMD_TYPE_DECIMAL:
-        case LMD_TYPE_NUMBER:
         case LMD_TYPE_NUM_SIZED:
         case LMD_TYPE_INT64:
         case LMD_TYPE_UINT64: {
