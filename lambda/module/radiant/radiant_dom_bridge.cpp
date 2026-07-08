@@ -24,9 +24,7 @@ extern "C" Item js_get_global_this(void);
 extern "C" Item js_get_global_property(Item key);
 extern "C" void* js_dom_get_or_create_doc_node(void* doc);
 extern "C" Item js_dom_document_proxy_for_doc_bridge(void* doc);
-extern "C" Item js_dom_create_wrapper_impl(void* dom_elem);
 extern "C" void* js_dom_unwrap_element_impl(Item item);
-extern "C" bool js_is_dom_node_impl(Item item);
 extern "C" void js_dom_initialize_node_wrapper(void* dom_elem);
 extern "C" Item vmap_new(void);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
@@ -1076,12 +1074,9 @@ extern "C" Item radiant_dom_wrap_node(void* dom_elem) {
         radiant_dom_cache_wrapper(node, wrapper);
         return wrapper;
     }
-    // VMap allocation can fail only under severe runtime allocation failure;
-    // keep the legacy shell as a compatibility fallback rather than returning
-    // null for an otherwise live Radiant node.
-    Item legacy_wrapper = js_dom_create_wrapper_impl(dom_elem);
-    if (js_is_dom_node_impl(legacy_wrapper)) radiant_dom_cache_wrapper(node, legacy_wrapper);
-    return legacy_wrapper;
+    // Phase 7 removes the DOM-node map shell; a failed VMap allocation must
+    // not recreate the stale compatibility carrier or runtime dispatch diverges.
+    return ItemNull;
 }
 
 extern "C" void* radiant_dom_unwrap_node(Item item) {
@@ -1097,7 +1092,7 @@ extern "C" bool radiant_dom_is_node(Item item) {
         item.vmap->host_type == (const void*)&s_radiant_dom_vmap_type_marker) {
         return item.vmap->host_data != nullptr;
     }
-    return js_is_dom_node_impl(item);
+    return false;
 }
 
 static bool radiant_dom_get_text_property(DomText* text_node, const char* prop, Item* out) {

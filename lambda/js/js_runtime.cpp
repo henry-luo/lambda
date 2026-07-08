@@ -3469,7 +3469,7 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
     case MAP_KIND_FOREIGN_DOC: {
         return radiant_dom_foreign_document_get_property(object, key, out_result) != 0;
     }
-    case MAP_KIND_DOM:
+    case MAP_KIND_WEB_API_RESOURCE:
         *out_result = js_is_computed_style_item(object)
             ? js_computed_style_get_property(object, key)
             : js_dom_get_property(object, key);
@@ -3511,7 +3511,7 @@ static bool js_try_exotic_property_set(Item object, Item key, Item* value, Item*
     case MAP_KIND_ITERATOR:
         *out_result = *value;
         return true;
-    case MAP_KIND_DOM:
+    case MAP_KIND_WEB_API_RESOURCE:
         *out_result = js_dom_set_property(object, key, *value);
         return true;
     case MAP_KIND_CSS_NAMESPACE:
@@ -4121,8 +4121,8 @@ extern "C" Item js_property_get(Item object, Item key) {
         }
         return make_js_undefined();
     } else if (type == LMD_TYPE_VMAP && radiant_dom_is_node(object)) {
-        // Phase 6: DOM nodes are branded native VMaps; route them through the
-        // same host adapter that backed the old MAP_KIND_DOM shell.
+        // Phase 7: DOM nodes are branded native VMaps; map-backed DOM resources
+        // no longer participate in node property dispatch.
         return js_dom_get_property(object, key);
     } else if (type == LMD_TYPE_ELEMENT) {
         return elmt_get(object.element, key);
@@ -18599,8 +18599,8 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         return ItemNull;
     }
 
-    // Computed style wrappers also use MAP_KIND_DOM storage, so dispatch them
-    // before the generic DOM host-object path below.
+    // Computed style wrappers use the DOM resource carrier, so dispatch them
+    // before the generic host-object path below.
     if (js_is_computed_style_item(obj)) {
         String* method = it2s(method_name);
         if (method && method->len == 16 && strncmp(method->chars, "getPropertyValue", 16) == 0) {
@@ -18615,12 +18615,15 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     }
 
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
-        (obj.map->map_kind == MAP_KIND_DOM || obj.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
+        obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE) {
         if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
             Item fn = js_property_access(obj, method_name);
             if (js_check_exception()) return ItemNull;
             return js_call_function(fn, obj, args, argc);
         }
+    }
+    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
+        obj.map->map_kind == MAP_KIND_FOREIGN_DOC) {
         extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
         return js_dom_element_method(obj, method_name, args, argc);
     }
@@ -20287,7 +20290,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     }
 
     // Fallback: property access + call
-    // Range/Selection are MAP_KIND_DOM host objects but not DOM nodes. Dispatch
+    // Range/Selection are DOM resource host objects but not DOM nodes. Dispatch
     // through their property accessors so ordinary range.setStart(...) keeps
     // the Range receiver instead of falling into element-only method dispatch.
     if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
@@ -20304,7 +20307,16 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     }
 
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
-        (obj.map->map_kind == MAP_KIND_DOM || obj.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
+        obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE) {
+        if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
+            Item fn = js_property_access(obj, method_name);
+            if (js_check_exception()) return ItemNull;
+            return js_call_function(fn, obj, args, argc);
+        }
+    }
+
+    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
+        obj.map->map_kind == MAP_KIND_FOREIGN_DOC) {
         String* dom_method = it2s(method_name);
         if (dom_method) {
             bool own_dom_method = false;
@@ -27612,10 +27624,6 @@ extern "C" Item js_get_prototype(Item object) {
     if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
     if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
     Map* m = object.map;
-    if (m && m->map_kind == MAP_KIND_DOM) {
-        Item dom_proto = js_dom_get_prototype_value(object);
-        if (get_type_id(dom_proto) == LMD_TYPE_MAP) return dom_proto;
-    }
     // Synthetic fast iterators use a 1-byte sentinel as `type`, not a real
     // TypeMap — never walk their (non-existent) shape for a __proto__ slot.
     if (m && m->map_kind == MAP_KIND_ITERATOR) return ItemNull;

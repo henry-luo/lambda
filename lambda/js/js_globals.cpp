@@ -988,7 +988,7 @@ static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item*
         if (radiant_dom_host_has_property(object, key, out_result)) return true;
     }
     if (type == LMD_TYPE_MAP &&
-        object.map->map_kind == MAP_KIND_DOM) {
+        object.map->map_kind == MAP_KIND_WEB_API_RESOURCE) {
         if (radiant_dom_host_has_property(object, key, out_result)) return true;
     }
     if (type == LMD_TYPE_MAP &&
@@ -1055,7 +1055,7 @@ static bool js_try_exotic_delete_property(Item obj, Item key, Item* out_result) 
         return true;
     }
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
-        obj.map->map_kind == MAP_KIND_DOM &&
+        obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE &&
         radiant_dom_host_delete_property(obj, key, out_result)) {
         return true;
     }
@@ -1099,7 +1099,7 @@ static bool js_try_exotic_own_property_names(Item object, Item* out_result) {
         return true;
     }
     if (get_type_id(object) == LMD_TYPE_MAP && object.map &&
-        object.map->map_kind == MAP_KIND_DOM &&
+        object.map->map_kind == MAP_KIND_WEB_API_RESOURCE &&
         radiant_dom_host_own_property_names(object, out_result)) {
         return true;
     }
@@ -1152,7 +1152,7 @@ static bool js_try_exotic_own_property_descriptor(Item obj, Item name,
         radiant_dom_host_own_property_descriptor(obj, name, out_result)) {
         return true;
     }
-    if (type == LMD_TYPE_MAP && obj.map && obj.map->map_kind == MAP_KIND_DOM &&
+    if (type == LMD_TYPE_MAP && obj.map && obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE &&
         radiant_dom_host_own_property_descriptor(obj, name, out_result)) {
         return true;
     }
@@ -6439,7 +6439,7 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
     return (Item){.item = b2it(contains_map_proto)};
 }
 
-// Forward decls for DOM identity checks (host objects under MAP_KIND_DOM).
+// Forward decls for DOM resource identity checks.
 extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 
@@ -6454,8 +6454,8 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
     // Check built-in types that don't use __class_name__ prototype chain
     TypeId lt = get_type_id(left);
 
-    // DOM host-object identity checks (Selection/Range wrappers are
-    // MAP_KIND_DOM with no __class_name__ in their property map).
+    // DOM resource identity checks (Selection/Range wrappers have no
+    // __class_name__ in their property map).
     if (rn->len == 9 && strncmp(rn->chars, "Selection", 9) == 0) {
         return (Item){.item = b2it(js_dom_item_is_selection(left))};
     }
@@ -9793,7 +9793,7 @@ extern "C" Item js_object_keys(Item object) {
     TypeId type = get_type_id(object);
 
     if ((type == LMD_TYPE_VMAP && radiant_dom_is_node(object)) ||
-        (type == LMD_TYPE_MAP && object.map && object.map->map_kind == MAP_KIND_DOM)) {
+        (type == LMD_TYPE_MAP && object.map && object.map->map_kind == MAP_KIND_WEB_API_RESOURCE)) {
         Item all_keys = ItemNull;
         if (radiant_dom_host_own_property_names(object, &all_keys) &&
             get_type_id(all_keys) == LMD_TYPE_ARRAY && all_keys.array) {

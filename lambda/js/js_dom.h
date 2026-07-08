@@ -5,9 +5,8 @@
  * to expose standard DOM manipulation APIs from JavaScript.
  *
  * Wrapping strategy:
- *   DomElement* is wrapped in a Map with a distinct type marker
- *   (js_dom_type_marker address) and the DomElement* stored in Map::data.
- *   This allows efficient O(1) wrapping/unwrapping with zero HashMap overhead.
+ *   Radiant DOM nodes are branded native VMaps owned by the radiant bridge.
+ *   Document proxy maps are separate compatibility objects for document globals.
  *
  * All functions use extern "C" for MIR JIT compatibility.
  */

@@ -4,9 +4,8 @@
  * Bridges Lambda's Element data model and Radiant's DomElement/DomDocument
  * to provide standard DOM manipulation APIs callable from JIT-compiled JavaScript.
  *
- * Wrapping: DomElement* is stored in a Map struct with a unique type marker
- * pointer (js_dom_type_marker) in the Map::type field, and DomElement* in
- * Map::data. This gives O(1) wrap/unwrap with zero HashMap allocation per node.
+ * Wrapping: Radiant DOM nodes are branded native VMaps owned by the radiant
+ * module bridge; document proxy maps remain separate compatibility objects.
  */
 
 #include "js_dom.h"
@@ -184,12 +183,8 @@ static String* js_dom_create_document_string(DomDocument* doc, const char* str, 
 }
 
 // ============================================================================
-// Unique type marker for DOM-wrapped Maps
+// Unique type markers for DOM-adjacent Maps
 // ============================================================================
-
-// Sentinel used in Map::type to distinguish DOM wrappers from regular Maps.
-// Address uniqueness is all that matters; the content is unused.
-static TypeMap js_dom_type_marker = {};
 
 // Sentinel used in Map::type to distinguish computed style wrappers.
 // Map::data stores the DomElement*, Map::data_cap stores pseudo-element type (0=none, 1=before, 2=after).
@@ -219,7 +214,7 @@ static Item js_dom_implementation_item = {.item = ITEM_NULL};
 static Item js_document_proxy_item = {.item = ITEM_NULL};
 
 // Stored document.defaultView value (kept separate to avoid infinite recursion
-// when calling js_property_set on the document proxy which is MAP_KIND_DOM)
+// when calling js_property_set on the document proxy map)
 static Item js_document_default_view = {.item = ITEM_NULL};
 
 // Stored document.title value (same reason as defaultView)
@@ -1682,14 +1677,6 @@ static void reset_dom_wrapper_cache() {
     radiant_dom_reset_wrapper_cache();
 }
 
-static void js_dom_set_wrapper_prototype(Item obj, const char* ctor_name) {
-    Item global = js_get_global_this();
-    Item ctor = js_property_get(global, js_string_key(ctor_name));
-    if (get_type_id(ctor) != LMD_TYPE_FUNC) return;
-    Item proto = js_property_get(ctor, js_string_key("prototype"));
-    if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(obj, proto);
-}
-
 extern "C" void js_dom_initialize_node_wrapper(void* dom_elem) {
     DomNode* node = (DomNode*)dom_elem;
     if (!node || !node->is_element()) return;
@@ -1721,62 +1708,20 @@ extern "C" Item js_dom_wrap_element(void* dom_elem) {
     return radiant_dom_wrap_node(dom_elem);
 }
 
-extern "C" Item js_dom_create_wrapper_impl(void* dom_elem) {
-    if (!dom_elem) return ItemNull;
-
-    DomNode* node = (DomNode*)dom_elem;
-    // If this DomNode is a document stub, return the document proxy / foreign
-    // doc wrapper instead so identity comparisons in JS (e.g. `r.startContainer
-    // === document`) work.
-    if (node->is_element()) {
-        DomElement* e = node->as_element();
-        if (e->doc && e->doc->js_doc_node == (void*)e) {
-            Item proxy = doc_to_proxy_item(e->doc);
-            if (proxy.item != ITEM_NULL) return proxy;
-        }
-    }
-    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    wrapper->type_id = LMD_TYPE_MAP;
-    wrapper->map_kind = MAP_KIND_DOM;
-    wrapper->type = (void*)&js_dom_type_marker;  // DOM marker
-    wrapper->data = dom_elem;                     // store DomNode* directly
-    wrapper->data_cap = 0;
-
-    if (node->is_element()) {
-        DomElement* elem = node->as_element();
-        js_dom_initialize_node_wrapper(dom_elem);
-        log_debug("js_dom_wrap_element: wrapped DomElement tag='%s' as Map=%p",
-                  elem->tag_name ? elem->tag_name : "(null)", (void*)wrapper);
-    } else if (node->is_text()) {
-        log_debug("js_dom_wrap_element: wrapped DomText as Map=%p", (void*)wrapper);
-    }
-
-    Item wrapped = (Item){.map = wrapper};
-    js_dom_set_wrapper_prototype(wrapped, node->is_element() ? "Element" : "Node");
-    return wrapped;
-}
-
 extern "C" void* radiant_dom_unwrap_node(Item item);
 
 extern "C" void* js_dom_unwrap_element(Item item) {
-    // Jube POC: unwrap/type policy is exposed through the radiant module before
-    // the wrapper representation changes from MAP_KIND_DOM to native VMap.
+    // Jube POC: unwrap/type policy is exposed through the radiant module so DOM
+    // nodes no longer depend on the retired DOM map wrapper shell.
     return radiant_dom_unwrap_node(item);
 }
 
 extern "C" void* js_dom_unwrap_element_impl(Item item) {
     TypeId tid = get_type_id(item);
-    if (tid == LMD_TYPE_VMAP) {
-        // Phase 6: some module bridge paths call the legacy impl helper
-        // directly for arguments, so branded DOM VMaps must unwrap here too.
-        return radiant_dom_unwrap_node(item);
-    }
+    if (tid == LMD_TYPE_VMAP) return radiant_dom_unwrap_node(item);
     if (tid != LMD_TYPE_MAP) return nullptr;
 
     Map* m = item.map;
-    if (m->type == (void*)&js_dom_type_marker) {
-        return m->data;
-    }
     // document proxy / foreign-doc wrapper → return the doc-stub DomElement
     // (lazy-create) so JS Range/Selection APIs accept `document` as a container.
     if (m->map_kind == MAP_KIND_DOC_PROXY) {
@@ -1796,14 +1741,6 @@ extern "C" bool js_is_dom_node(Item item) {
     // Jube POC: use the module-owned type test so later native wrappers do not
     // need every caller to know the concrete carrier representation.
     return radiant_dom_is_node(item);
-}
-
-extern "C" bool js_is_dom_node_impl(Item item) {
-    TypeId tid = get_type_id(item);
-    if (tid == LMD_TYPE_VMAP) return radiant_dom_is_node(item);
-    if (tid != LMD_TYPE_MAP) return false;
-    Map* m = item.map;
-    return m->type == (void*)&js_dom_type_marker;
 }
 
 struct SelectOptionsOwnerEntry {
@@ -2483,7 +2420,7 @@ extern "C" Item js_document_proxy_get_property(Item prop_name) {
 
 // Dispatch property set on the document proxy object.
 // NOTE: Must use map_put directly instead of js_property_set to avoid
-// infinite recursion (js_property_set dispatches back here for MAP_KIND_DOM).
+// infinite recursion (js_property_set dispatches back here for DOM resources).
 extern "C" Item js_document_proxy_set_property(Item prop_name, Item value) {
     if (get_type_id(prop_name) == LMD_TYPE_STRING) {
         String* s = it2s(prop_name);
@@ -3300,7 +3237,7 @@ static Item js_dom_get_inline_style_wrapper(DomElement* elem) {
 
     Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     wrapper->type_id = LMD_TYPE_MAP;
-    wrapper->map_kind = MAP_KIND_DOM;
+    wrapper->map_kind = MAP_KIND_WEB_API_RESOURCE;
     wrapper->type = (void*)&js_inline_style_marker;
     wrapper->data = elem;
     wrapper->data_cap = 0;
@@ -3424,7 +3361,7 @@ extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
     // create a computed style wrapper
     Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     wrapper->type_id = LMD_TYPE_MAP;
-    wrapper->map_kind = MAP_KIND_DOM;
+    wrapper->map_kind = MAP_KIND_WEB_API_RESOURCE;
     wrapper->type = (void*)&js_computed_style_marker;
     wrapper->data = node->as_element();     // store DomElement*
     wrapper->data_cap = pseudo_type;        // store pseudo type
@@ -8705,7 +8642,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
 }
 
 extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
-    // Range / Selection wrappers also live under MAP_KIND_DOM and route here.
+    // Range / Selection wrappers also live under the DOM resource carrier and route here.
     if (js_dom_item_is_range(elem_item))
         return js_dom_range_get_property(elem_item, prop_name);
     if (js_dom_item_is_selection(elem_item))
@@ -10242,8 +10179,8 @@ static void parse_class_names(DomElement* elem, const char* class_str) {
 extern "C" Item radiant_dom_set_property(Item elem_item, Item prop_name, Item value);
 
 extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) {
-    // Jube POC: preserve MAP_KIND_DOM behavior while the radiant module starts
-    // owning the dispatch surface.
+    // Jube POC: DOM resources and branded DOM VMaps both route through the
+    // module-owned dispatch surface.
     return radiant_dom_set_property(elem_item, prop_name, value);
 }
 

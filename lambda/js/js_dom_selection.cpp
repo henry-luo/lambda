@@ -175,8 +175,8 @@ static DocState* get_or_create_state() {
 }
 
 // ============================================================================
-// Range / Selection wrappers — DOM-style: Map::data holds the native pointer,
-// Map::type holds a sentinel marker, map_kind=MAP_KIND_DOM dispatches all
+// Range / Selection wrappers — resource-style: Map::data holds the native pointer,
+// Map::type holds a sentinel marker, map_kind=MAP_KIND_WEB_API_RESOURCE dispatches all
 // property reads/writes to js_dom_get_property / js_dom_set_property, which
 // route by marker into js_dom_range_get_property / js_dom_selection_get_property.
 // No JS-visible "private" properties; no shape allocations on the wrapper.
@@ -210,14 +210,14 @@ extern "C" Item js_dom_selection_to_string_value(Item obj);
 extern "C" bool js_dom_item_is_range(Item item) {
     if (get_type_id(item) != LMD_TYPE_MAP) return false;
     Map* m = item.map;
-    return m && m->map_kind == MAP_KIND_DOM &&
+    return m && m->map_kind == MAP_KIND_WEB_API_RESOURCE &&
            m->type == (void*)&js_dom_range_marker;
 }
 
 extern "C" bool js_dom_item_is_selection(Item item) {
     if (get_type_id(item) != LMD_TYPE_MAP) return false;
     Map* m = item.map;
-    return m && m->map_kind == MAP_KIND_DOM &&
+    return m && m->map_kind == MAP_KIND_WEB_API_RESOURCE &&
            m->type == (void*)&js_dom_selection_marker;
 }
 
@@ -357,7 +357,7 @@ static Item dom_selection_expando_delete(Item expando, Item key) {
     String* key_str = it2s(key);
     if (!key_str) return make_bool(true);
     // Range/Selection expandos are stored off-wrapper, so delete must target
-    // the side-table map rather than the MAP_KIND_DOM shell.
+    // the side-table map rather than the resource wrapper shell.
     return make_bool(js_ordinary_delete(expando, key_str->chars, (int)key_str->len));
 }
 
@@ -869,7 +869,7 @@ static Item build_range_object(DomRange* r) {
     if (!r) return ItemNull;
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id  = LMD_TYPE_MAP;
-    m->map_kind = MAP_KIND_DOM;
+    m->map_kind = MAP_KIND_WEB_API_RESOURCE;
     m->type     = (void*)&js_dom_range_marker;
     m->data     = r;
     m->data_cap = 0;
@@ -1470,7 +1470,7 @@ static Item build_selection_object(DomSelection* s) {
     if (!s) return ItemNull;
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id  = LMD_TYPE_MAP;
-    m->map_kind = MAP_KIND_DOM;
+    m->map_kind = MAP_KIND_WEB_API_RESOURCE;
     m->type     = (void*)&js_dom_selection_marker;
     m->data     = s;
     m->data_cap = 0;
@@ -1777,7 +1777,7 @@ extern "C" void js_dom_selection_install_globals(void) {
     // Install Selection.prototype and Range.prototype with method stubs so
     // WPT idl checks like `Selection.prototype.deleteFromDocument.length`
     // succeed. The methods themselves are never invoked through the
-    // prototype path (instances are MAP_KIND_DOM and dispatch through their
+    // prototype path (instances are DOM resources and dispatch through their
     // own get_property hooks); these are pure idl shape.
     init_selection_methods();
     init_range_methods();
