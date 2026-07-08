@@ -328,6 +328,14 @@ static inline bool is_numeric_type(TypeId t) {
     return t == LMD_TYPE_INT || t == LMD_TYPE_INT64 || t == LMD_TYPE_FLOAT;
 }
 
+static inline bool is_elementwise_comparison_op(Operator op) {
+    return op >= OPERATOR_ELEM_EQ && op <= OPERATOR_ELEM_GE;
+}
+
+static inline int elementwise_cmp_code(Operator op) {
+    return (int)(op - OPERATOR_ELEM_EQ);
+}
+
 // Check if a direct call to the native function returns a native scalar that
 // the caller can't detect via fn_type->returned (which is still ANY).
 // When true, the call site wraps with i2it() to convert native int64_t → Item.
@@ -1989,6 +1997,15 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             transpile_box_item(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
         }
+    }
+    else if (is_elementwise_comparison_op(bi_node->op)) {
+        strbuf_append_str(tp->code_buf, "vec_cmp(");
+        transpile_box_item(tp, bi_node->left);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_box_item(tp, bi_node->right);
+        strbuf_append_char(tp->code_buf, ',');
+        strbuf_append_format(tp->code_buf, "%d", elementwise_cmp_code(bi_node->op));
+        strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_JOIN) {
         strbuf_append_str(tp->code_buf, "fn_join(");

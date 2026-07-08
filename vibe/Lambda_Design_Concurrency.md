@@ -513,6 +513,8 @@ Notes that make the split principled: Lambda has *more* split points (suspension
 3. **JubeHostAPI v1 clauses unchanged** (§4.4 blocking/await-safety declaration + G2 rooting) — plus the async-ness marker in module signatures (K16).
 4. Build order: **tasks** (compiler track: may-await inference + shared-pattern state-machine lowering in `transpile-mir`; runtime track: scheduler + uv integration + handles/`wait`) → **processes** (`process()` spec, Mark-over-pipe, shm flats — mostly OS plumbing) → **Stage A** parallel-`fn` (arena workers + globals audit; unlocks the typed-array/image workloads) → **Stage B** when demand proves it (semantics already ready).
 5. O-A is decided (K20 — mailbox): the `send`/`receive`/`select` builtins can freeze against K20a–e. O-B is decided (K19); its spec entry + scalar/SIMD pairwise implementation can proceed **independently of and before any concurrency work** — it collects the deferred SIMD float-reduction win today and pre-stabilizes goldens for Stage A.
+6. **Radiant is the first embedder of this design**: pages as isolates, events as mailbox messages, display lists as flat/K29 payloads, same-thread script+layout — see `radiant/Radiant_Design_Concurrency.md` (ledger RC1–RC8).
+7. **Implementation plan**: `Lambda_Concurrency_Impl_Plan.md` — phase-gated plan for the v1 scope (colorless `pn` + `start`/messaging + JS interop); processes, threading, streams, and cancellation are queued follow-ons there.
 
 ---
 

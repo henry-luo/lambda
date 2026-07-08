@@ -10,7 +10,7 @@
 [[false, true], [true, false]]
 '=== float ==='
 [true, true, false]
-'=== canonical idiom a[a > 0] ==='
+'=== canonical idiom a[a gt 0] ==='
 [1, 3, 5]
 [-2, -4]
 [3, 5]

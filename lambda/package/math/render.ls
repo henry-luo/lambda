@@ -496,9 +496,9 @@ fn parse_html_data_attr(part) {
     let text = trim(part)
     if (text == "") null
     else
-        (let eq = index_of(text, "="),
-         let raw_name = if (eq >= 0) trim(slice(text, 0, eq)) else text,
-         let raw_value = if (eq >= 0) trim(slice(text, eq + 1, len(text))) else null,
+        (let eq_pos = index_of(text, "="),
+         let raw_name = if (eq_pos >= 0) trim(slice(text, 0, eq_pos)) else text,
+         let raw_value = if (eq_pos >= 0) trim(slice(text, eq_pos + 1, len(text))) else null,
          let data_name = normalize_data_attr_name(raw_name),
          if (data_name == "data-") null
          else {

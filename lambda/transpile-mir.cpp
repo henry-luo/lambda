@@ -2292,12 +2292,17 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
 // Binary expressions
 // ============================================================================
 
-// True iff a comparison `lt OP rt` should produce a vectorized ELEM_BOOL mask.
-// Only ordering ops (< <= > >=) with an array operand vectorize. ==/!= keep their
-// existing semantics: structural for array-vs-array, cross-type error for
-// array-vs-scalar (so `42 == [42]` stays an error, not a [true] mask).
+static inline bool is_elementwise_comparison_op(int op) {
+    return op >= OPERATOR_ELEM_EQ && op <= OPERATOR_ELEM_GE;
+}
+
+static inline int elementwise_cmp_code(int op) {
+    return op - OPERATOR_ELEM_EQ;
+}
+
+// True iff a keyword comparison `lt OP rt` should produce an ELEM_BOOL mask.
 static inline bool comparison_vectorizes(int op, TypeId lt, TypeId rt) {
-    if (op < OPERATOR_LT || op > OPERATOR_GE) return false;
+    if (!is_elementwise_comparison_op(op)) return false;
     bool l_arr = (lt == LMD_TYPE_ARRAY_NUM || lt == LMD_TYPE_ARRAY);
     bool r_arr = (rt == LMD_TYPE_ARRAY_NUM || rt == LMD_TYPE_ARRAY);
     return l_arr || r_arr;
@@ -2512,7 +2517,10 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         // native cases keep BOOL.)
         {
             int op_ck = bi->op;
-            if (comparison_vectorizes(op_ck, lt, rt)) return LMD_TYPE_ARRAY_NUM;
+            if (is_elementwise_comparison_op(op_ck)) {
+                if (comparison_vectorizes(op_ck, lt, rt)) return LMD_TYPE_ARRAY_NUM;
+                return LMD_TYPE_ANY;
+            }
             if (op_ck == OPERATOR_EQ || op_ck == OPERATOR_NE ||
                 op_ck == OPERATOR_IS || op_ck == OPERATOR_IS_NAN ||
                 op_ck == OPERATOR_IN || op_ck == OPERATOR_AT)
@@ -2567,9 +2575,11 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
                     op == OPERATOR_DIV)
                     return LMD_TYPE_FLOAT;
             }
-            // Comparisons always return bool
+            // Scalar symbolic comparisons always return bool.
             if (op >= OPERATOR_EQ && op <= OPERATOR_GE)
                 return LMD_TYPE_BOOL;
+            if (is_elementwise_comparison_op(op))
+                return LMD_TYPE_ANY;
             if (op == OPERATOR_IS || op == OPERATOR_IS_NAN ||
                 op == OPERATOR_IN || op == OPERATOR_AT)
                 return LMD_TYPE_BOOL;
@@ -2658,19 +2668,15 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
         return emit_bool_const(mt, bi->op == OPERATOR_NE);
     }
 
-    // Vectorized comparison → element-wise ELEM_BOOL mask (boxed Item).
-    // Ordering (< <= > >=): vectorize when any operand is an array.
-    // Equality (== !=): vectorize only array-vs-numeric-scalar — array-vs-array
-    // (and array-vs-ANY) keep structural-equality semantics. (Numeric array
-    // literals are statically ARRAY; ARRAY_NUM is the runtime form. vec_cmp
-    // validates the runtime type and errors on non-numeric arrays.)
-    if (comparison_vectorizes(bi->op, left_tid, right_tid)) {
+    // Keyword comparisons are the only vectorized comparison syntax; symbolic
+    // < <= > >= remain scalar so masks are never implicit truth values.
+    if (is_elementwise_comparison_op(bi->op)) {
         MIR_reg_t boxl = transpile_box_item(mt, bi->left);
         MIR_reg_t boxr = transpile_box_item(mt, bi->right);
         return emit_call_3(mt, "vec_cmp", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(bi->op - OPERATOR_EQ)));
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)elementwise_cmp_code(bi->op)));
     }
 
     // IDIV and MOD: native fast paths when operand types are known
@@ -8825,11 +8831,12 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         //   • LT-GE, both native numeric   → native MIR comparison → box it
         //   • LT-GE, otherwise             → fn_lt/gt/le/ge already returned a boxed
         //                                    Item (boxed bool or mask) → return as-is
-        bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE);
+        bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE) || is_elementwise_comparison_op(op);
         if (is_cmp) {
             if (comparison_vectorizes(op, lt, rt)) {
                 return val;  // already a boxed mask Item from vec_cmp
             }
+            if (is_elementwise_comparison_op(op)) return val;  // scalar keyword compare returns boxed bool
             if (op == OPERATOR_EQ || op == OPERATOR_NE) return emit_box_bool(mt, val);
             bool l_native = (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64 || lt == LMD_TYPE_FLOAT);
             bool r_native = (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64 || rt == LMD_TYPE_FLOAT);
@@ -10391,7 +10398,7 @@ static void gather_evidence(AstNode* node, InferCtx* ctx) {
             bool is_arith = (op == OPERATOR_ADD || op == OPERATOR_SUB || op == OPERATOR_MUL ||
                              op == OPERATOR_DIV || op == OPERATOR_IDIV || op == OPERATOR_MOD ||
                              op == OPERATOR_POW);
-            bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE);
+            bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE) || is_elementwise_comparison_op(op);
 
             if (is_arith || is_cmp) {
                 bool left_is_tracked = is_tracked_ref(bi->left, ctx);
@@ -10635,7 +10642,7 @@ static void gather_evidence_multi(AstNode* node, InferCtx* ctxs, int ctx_count) 
             bool is_arith = (op == OPERATOR_ADD || op == OPERATOR_SUB || op == OPERATOR_MUL ||
                              op == OPERATOR_DIV || op == OPERATOR_IDIV || op == OPERATOR_MOD ||
                              op == OPERATOR_POW);
-            bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE);
+            bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE) || is_elementwise_comparison_op(op);
 
             if (is_arith || is_cmp) {
                 for (int c = 0; c < ctx_count; c++) {

@@ -1,7 +1,7 @@
 // Image-op invariants, referenced against scikit-image semantics.  Exact-valued
 // invariants use flatten(x) == flatten(y); the morphology duality (which differs
 // only at float-ULP level) uses sum(abs(a - b)) == 0 over the ubyte-rounded
-// result; orderings use all(flatten(a) <= flatten(b)).
+// result; orderings use keyword element-wise masks: all(flatten(a) le flatten(b)).
 
 let im  = reshape([10, 40, 70, 100, 130, 160, 190, 220, 25, 55, 85, 115, 145, 175, 205, 235], [4, 4])
 let imf = as_float(im)                                  // same image as float [0,1]
@@ -10,7 +10,7 @@ let cst = reshape([5, 5, 5, 5, 5, 5, 5, 5, 5], [3, 3])
 
 // dtype conversions (skimage img_as_float / img_as_ubyte)
 "ubyte->float->ubyte identity:"; (flatten(as_ubyte(as_float([0, 64, 128, 192, 255]))) == flatten([0, 64, 128, 192, 255]))
-"as_float within [0,1]:";        all(as_float([0, 128, 255]) <= [1.0, 1.0, 1.0])
+"as_float within [0,1]:";        all(as_float([0, 128, 255]) le [1.0, 1.0, 1.0])
 
 // geometric involutions (np.flip / np.rot90 identities)
 "flip vert involution:";   (flatten(flip(flip(im, 0), 0)) == flatten(im))
@@ -21,10 +21,10 @@ let cst = reshape([5, 5, 5, 5, 5, 5, 5, 5, 5], [3, 3])
 "rotate 0 == identity:";   (flatten(rotate(im, 0.0)) == flatten(im))
 
 // morphology (skimage.morphology)
-"erosion <= image:";       all(flatten(erode(im, 3)) <= flatten(im))
-"image <= dilation:";      all(flatten(im) <= flatten(dilate(im, 3)))
-"opening <= image:";       all(flatten(dilate(erode(im, 3), 3)) <= flatten(im))
-"closing >= image:";       all(flatten(im) <= flatten(erode(dilate(im, 3), 3)))
+"erosion <= image:";       all(flatten(erode(im, 3)) le flatten(im))
+"image <= dilation:";      all(flatten(im) le flatten(dilate(im, 3)))
+"opening <= image:";       all(flatten(dilate(erode(im, 3), 3)) le flatten(im))
+"closing >= image:";       all(flatten(im) le flatten(erode(dilate(im, 3), 3)))
 "erode/dilate duality:";   (sum(abs(flatten(as_ubyte(erode(imf, 3))) - flatten(as_ubyte(invert(dilate(invert(imf), 3)))))) == 0)
 "median removes impulse:"; (flatten(median_filter(imp, 3)) == flatten(imp * 0))
 

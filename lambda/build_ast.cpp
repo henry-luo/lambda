@@ -3649,6 +3649,10 @@ static inline bool is_relational_op(Operator op) {
     return op == OPERATOR_LT || op == OPERATOR_LE || op == OPERATOR_GT || op == OPERATOR_GE;
 }
 
+static inline bool is_elementwise_comparison_op(Operator op) {
+    return op >= OPERATOR_ELEM_EQ && op <= OPERATOR_ELEM_GE;
+}
+
 static bool is_magnitude_numeric_type(TypeId type_id) {
     return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 ||
            type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_DECIMAL ||
@@ -3658,8 +3662,6 @@ static bool is_magnitude_numeric_type(TypeId type_id) {
 static bool known_magnitude_comparable(TypeId left_type, TypeId right_type) {
     if (left_type == LMD_TYPE_ANY || right_type == LMD_TYPE_ANY) return true;
     if (left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) return true;
-    if (left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_ARRAY_NUM ||
-        right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_ARRAY_NUM) return true;
     if (is_magnitude_numeric_type(left_type) && is_magnitude_numeric_type(right_type)) return true;
     if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) return true;
     if (left_type == LMD_TYPE_DTIME && right_type == LMD_TYPE_DTIME) return true;
@@ -3848,6 +3850,12 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, "<=")) { ast_node->op = OPERATOR_LE; }
     else if (strview_equal(&op, ">")) { ast_node->op = OPERATOR_GT; }
     else if (strview_equal(&op, ">=")) { ast_node->op = OPERATOR_GE; }
+    else if (strview_equal(&op, "eq")) { ast_node->op = OPERATOR_ELEM_EQ; }
+    else if (strview_equal(&op, "ne")) { ast_node->op = OPERATOR_ELEM_NE; }
+    else if (strview_equal(&op, "lt")) { ast_node->op = OPERATOR_ELEM_LT; }
+    else if (strview_equal(&op, "le")) { ast_node->op = OPERATOR_ELEM_LE; }
+    else if (strview_equal(&op, "gt")) { ast_node->op = OPERATOR_ELEM_GT; }
+    else if (strview_equal(&op, "ge")) { ast_node->op = OPERATOR_ELEM_GE; }
     else if (strview_equal(&op, "to")) { ast_node->op = OPERATOR_TO; }
     else if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_UNION; }
     else if (strview_equal(&op, "|>")) { ast_node->op = OPERATOR_PIPE; }
@@ -4034,26 +4042,24 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (ast_node->op == OPERATOR_EQ || ast_node->op == OPERATOR_NE ||
         ast_node->op == OPERATOR_LT || ast_node->op == OPERATOR_LE ||
         ast_node->op == OPERATOR_GT || ast_node->op == OPERATOR_GE ||
+        is_elementwise_comparison_op(ast_node->op) ||
         ast_node->op == OPERATOR_IS || ast_node->op == OPERATOR_IN ||
         ast_node->op == OPERATOR_AT) {
         type_id = LMD_TYPE_BOOL;
 
-        // Ordering comparisons (< <= > >=) now return Item from fn_lt/gt/le/ge, so
-        // their result representation depends on the operand types — mirror the
-        // transpiler's native-vs-fallback decision so consumers read it correctly:
-        //   • numeric-array operand  → ARRAY_NUM (element-wise mask via vec_cmp)
-        //   • both native numeric    → BOOL      (native MIR comparison → raw bool)
-        //   • anything else (ANY/...) → ANY       (fn_lt fallback → boxed bool / mask Item)
-        // ==/!= keep their Bool (structural / cross-type) semantics.
+        // Keyword comparisons are the explicit element-wise family.  Symbolic
+        // < <= > >= stay scalar so array masks cannot leak into control flow.
         if (ast_node->op >= OPERATOR_LT && ast_node->op <= OPERATOR_GE) {
-            bool l_arr = (left_type == LMD_TYPE_ARRAY_NUM || left_type == LMD_TYPE_ARRAY);
-            bool r_arr = (right_type == LMD_TYPE_ARRAY_NUM || right_type == LMD_TYPE_ARRAY);
             bool l_native = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT);
             bool r_native = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 || right_type == LMD_TYPE_FLOAT);
-            if (l_arr || r_arr)            type_id = LMD_TYPE_ARRAY_NUM;
-            else if (l_native && r_native) type_id = LMD_TYPE_BOOL;
+            if (l_native && r_native) type_id = LMD_TYPE_BOOL;
             else if (left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) type_id = LMD_TYPE_ANY;
             else                           type_id = LMD_TYPE_ANY;
+        }
+        else if (is_elementwise_comparison_op(ast_node->op)) {
+            bool l_arr = (left_type == LMD_TYPE_ARRAY_NUM || left_type == LMD_TYPE_ARRAY);
+            bool r_arr = (right_type == LMD_TYPE_ARRAY_NUM || right_type == LMD_TYPE_ARRAY);
+            type_id = (l_arr || r_arr) ? LMD_TYPE_ARRAY_NUM : LMD_TYPE_ANY;
         }
 
         // equality is total: incompatible concrete families compile and evaluate

@@ -383,6 +383,10 @@ TEST(LambdaNegativeTests, test_func_param_type_errors) {
     test_lambda_script_expects_error("test/lambda/negative/func_param_negative.ls");
 }
 
+TEST(LambdaNegativeTests, test_bare_vector_comparison_error) {
+    test_lambda_script_expects_error("test/lambda/negative/semantic/bare_vector_comparison.ls");
+}
+
 void test_lambda_proc_script_expects_error(const char* script_path) {
     char command[512];
 #ifdef _WIN32
