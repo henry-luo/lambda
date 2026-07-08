@@ -2685,7 +2685,11 @@ Item fn_take(Item vec, Item n_item) {
     }
 
     int64_t n = (n_type == LMD_TYPE_INT) ? n_item.get_int56() : n_item.get_int64();
-    if (n < 0) n = 0;
+    if (n < 0) {
+        // C15 forbids negative counts so callers must spell tail-relative intent with `last`.
+        log_error("fn_take: n must be non-negative");
+        return ItemError;
+    }
     if (n > len) n = len;
 
     if (type == LMD_TYPE_ARRAY_NUM) {
@@ -2714,6 +2718,30 @@ Item fn_take(Item vec, Item n_item) {
     }
 }
 
+// take_last(vec, n) - last n elements, preserving original order
+Item fn_take_last(Item vec, Item n_item) {
+    GUARD_ERROR2(vec, n_item);
+
+    TypeId n_type = get_type_id(n_item);
+    if (n_type != LMD_TYPE_INT && n_type != LMD_TYPE_INT64) {
+        log_error("fn_take_last: n must be integer");
+        return ItemError;
+    }
+
+    int64_t n = (n_type == LMD_TYPE_INT) ? n_item.get_int56() : n_item.get_int64();
+    if (n < 0) {
+        // C15 tail counts are explicit counts, not negative-limit sign puns.
+        log_error("fn_take_last: n must be non-negative");
+        return ItemError;
+    }
+
+    int64_t len = fn_len(vec);
+    if (len < 0) return ItemError;
+    if (n > len) n = len;
+    Item start = {.item = i2it(len - n)};
+    return fn_drop(vec, start);
+}
+
 // drop(vec, n) - drop first n elements
 // string/symbol: delegates to fn_substring(str, n, len)
 Item fn_drop(Item vec, Item n_item) {
@@ -2737,7 +2765,11 @@ Item fn_drop(Item vec, Item n_item) {
     }
 
     int64_t n = (n_type == LMD_TYPE_INT) ? n_item.get_int56() : n_item.get_int64();
-    if (n < 0) n = 0;
+    if (n < 0) {
+        // C15 forbids negative counts so slicing direction is never hidden in the sign.
+        log_error("fn_drop: n must be non-negative");
+        return ItemError;
+    }
     if (n > len) n = len;
 
     int64_t new_len = len - n;
@@ -3803,7 +3835,6 @@ void fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
     // dynamically typed (ANY), e.g. an index variable, that turns out to be an int).
     if (it == LMD_TYPE_INT || it == LMD_TYPE_INT64) {
         int64_t i = (it == LMD_TYPE_INT) ? idx_item.get_int56() : idx_item.get_int64();
-        if (i < 0) i += arr->length;
         if (i >= 0 && i < arr->length) array_num_set_item(arr, i, val_item);
         return;
     }

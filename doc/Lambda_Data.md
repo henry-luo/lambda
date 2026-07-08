@@ -720,8 +720,9 @@ Ordered collections:
 let arr = [10, 20, 30];
 arr[0]     // 10
 arr[1]     // 20
-arr[-1]    // 30 (last element)
-arr[-2]    // 20 (second to last)
+arr[last]  // 30 (last element)
+arr[last - 1]  // 20 (second to last)
+arr[-1]    // null
 ```
 
 #### Array Slicing

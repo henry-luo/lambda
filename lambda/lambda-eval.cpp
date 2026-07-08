@@ -1623,12 +1623,14 @@ int total_cmp(Item a_item, Item b_item) {
 // 3-state value/ordered comparison
 // Scalar 3-state ordered comparison (BOOL_TRUE/BOOL_FALSE/BOOL_ERROR).  The
 // public fn_lt/fn_gt/fn_le/fn_ge wrappers add vectorized array dispatch on top.
+static bool datetime_magnitude_comparable(DateTime* a, DateTime* b) {
+    bool a_time = a->precision == DATETIME_PRECISION_TIME_ONLY;
+    bool b_time = b->precision == DATETIME_PRECISION_TIME_ONLY;
+    return a_time == b_time;
+}
+
 Bool fn_lt_scalar(Item a_item, Item b_item) {
     if (a_item._type_id != b_item._type_id) {
-        // null comparison with any type returns false for ordered comparisons
-        if (a_item._type_id == LMD_TYPE_NULL || b_item._type_id == LMD_TYPE_NULL) {
-            return BOOL_FALSE;
-        }
         // number promotion - only for numeric types
         if (IS_NUMERIC_ID(a_item._type_id) && IS_NUMERIC_ID(b_item._type_id)) {
             if (a_item._type_id == LMD_TYPE_DECIMAL || b_item._type_id == LMD_TYPE_DECIMAL) {
@@ -1644,7 +1646,7 @@ Bool fn_lt_scalar(Item a_item, Item b_item) {
     }
 
     if (a_item._type_id == LMD_TYPE_NULL) {
-        return BOOL_FALSE;  // null < null = false
+        return BOOL_ERROR;  // public wrappers absorb null before scalar comparison
     }
     else if (a_item._type_id == LMD_TYPE_BOOL) {
         return BOOL_ERROR;  // bool does not support <, >, <=, >=
@@ -1670,10 +1672,10 @@ Bool fn_lt_scalar(Item a_item, Item b_item) {
     }
     else if (a_item._type_id == LMD_TYPE_DTIME) {
         DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
+        if (!datetime_magnitude_comparable(&dt_a, &dt_b)) return BOOL_ERROR;
         return (datetime_compare(&dt_a, &dt_b) < 0) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
-        a_item._type_id == LMD_TYPE_BINARY) {
+    else if (a_item._type_id == LMD_TYPE_STRING) {
         const char* chars_a = a_item.get_chars();  const char* chars_b = b_item.get_chars();
         uint32_t len_a = a_item.get_len();  uint32_t len_b = b_item.get_len();
         uint32_t min_len = len_a < len_b ? len_a : len_b;
@@ -1688,10 +1690,6 @@ Bool fn_lt_scalar(Item a_item, Item b_item) {
 
 Bool fn_gt_scalar(Item a_item, Item b_item) {
     if (a_item._type_id != b_item._type_id) {
-        // null comparison with any type returns false for ordered comparisons
-        if (a_item._type_id == LMD_TYPE_NULL || b_item._type_id == LMD_TYPE_NULL) {
-            return BOOL_FALSE;
-        }
         // number promotion - only for numeric types
         if (IS_NUMERIC_ID(a_item._type_id) && IS_NUMERIC_ID(b_item._type_id)) {
             if (a_item._type_id == LMD_TYPE_DECIMAL || b_item._type_id == LMD_TYPE_DECIMAL) {
@@ -1707,7 +1705,7 @@ Bool fn_gt_scalar(Item a_item, Item b_item) {
     }
 
     if (a_item._type_id == LMD_TYPE_NULL) {
-        return BOOL_FALSE;  // null > null = false
+        return BOOL_ERROR;  // public wrappers absorb null before scalar comparison
     }
     else if (a_item._type_id == LMD_TYPE_BOOL) {
         return BOOL_ERROR;  // bool does not support <, >, <=, >=
@@ -1733,10 +1731,10 @@ Bool fn_gt_scalar(Item a_item, Item b_item) {
     }
     else if (a_item._type_id == LMD_TYPE_DTIME) {
         DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
+        if (!datetime_magnitude_comparable(&dt_a, &dt_b)) return BOOL_ERROR;
         return (datetime_compare(&dt_a, &dt_b) > 0) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
-        a_item._type_id == LMD_TYPE_BINARY) {
+    else if (a_item._type_id == LMD_TYPE_STRING) {
         const char* chars_a = a_item.get_chars();  const char* chars_b = b_item.get_chars();
         uint32_t len_a = a_item.get_len();  uint32_t len_b = b_item.get_len();
         uint32_t min_len = len_a < len_b ? len_a : len_b;
@@ -1756,6 +1754,8 @@ Bool fn_gt_scalar(Item a_item, Item b_item) {
 Item fn_lt(Item a_item, Item b_item) {
     if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
         return vec_cmp(a_item, b_item, 2);
+    if (get_type_id(a_item) == LMD_TYPE_NULL || get_type_id(b_item) == LMD_TYPE_NULL)
+        return ItemNull;
     Bool r = fn_lt_scalar(a_item, b_item);
     return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r) };
 }
@@ -1763,6 +1763,8 @@ Item fn_lt(Item a_item, Item b_item) {
 Item fn_gt(Item a_item, Item b_item) {
     if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
         return vec_cmp(a_item, b_item, 4);
+    if (get_type_id(a_item) == LMD_TYPE_NULL || get_type_id(b_item) == LMD_TYPE_NULL)
+        return ItemNull;
     Bool r = fn_gt_scalar(a_item, b_item);
     return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r) };
 }
@@ -1770,6 +1772,8 @@ Item fn_gt(Item a_item, Item b_item) {
 Item fn_le(Item a_item, Item b_item) {
     if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
         return vec_cmp(a_item, b_item, 3);
+    if (get_type_id(a_item) == LMD_TYPE_NULL || get_type_id(b_item) == LMD_TYPE_NULL)
+        return ItemNull;
     Bool r = fn_gt_scalar(a_item, b_item);   // a <= b  ==  !(a > b)
     return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r ? BOOL_FALSE : BOOL_TRUE) };
 }
@@ -1777,6 +1781,8 @@ Item fn_le(Item a_item, Item b_item) {
 Item fn_ge(Item a_item, Item b_item) {
     if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
         return vec_cmp(a_item, b_item, 5);
+    if (get_type_id(a_item) == LMD_TYPE_NULL || get_type_id(b_item) == LMD_TYPE_NULL)
+        return ItemNull;
     Bool r = fn_lt_scalar(a_item, b_item);   // a >= b  ==  !(a < b)
     return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r ? BOOL_FALSE : BOOL_TRUE) };
 }
@@ -4666,11 +4672,17 @@ Item fn_join2(Item list_item, Item sep_item) {
 
 typedef struct FindReplaceOptions {
     int64_t limit;
+    int64_t last;
+    bool has_limit;
+    bool has_last;
     bool ignore_case;
 } FindReplaceOptions;
 
 static bool parse_find_replace_options(Item options_item, FindReplaceOptions* options) {
     options->limit = 0;
+    options->last = 0;
+    options->has_limit = false;
+    options->has_last = false;
     options->ignore_case = false;
     TypeId options_type = get_type_id(options_item);
     if (options_type == LMD_TYPE_NULL) return true;
@@ -4688,7 +4700,32 @@ static bool parse_find_replace_options(Item options_item, FindReplaceOptions* op
             log_debug("parse_find_replace_options: limit must be an integer");
             return false;
         }
+        if (limit < 0) {
+            log_debug("parse_find_replace_options: limit must be non-negative");
+            return false;
+        }
         options->limit = limit;
+        options->has_limit = true;
+    }
+
+    is_found = false;
+    Item last_item = _map_get((TypeMap*)options_map->type, options_map->data, "last", &is_found);
+    if (is_found && get_type_id(last_item) != LMD_TYPE_NULL) {
+        int64_t last = 0;
+        if (!item_to_integral_index(last_item, &last)) {
+            log_debug("parse_find_replace_options: last must be an integer");
+            return false;
+        }
+        if (last < 0) {
+            log_debug("parse_find_replace_options: last must be non-negative");
+            return false;
+        }
+        options->last = last;
+        options->has_last = true;
+    }
+    if (options->has_limit && options->has_last) {
+        log_debug("parse_find_replace_options: limit and last cannot be used together");
+        return false;
     }
 
     is_found = false;
@@ -4717,21 +4754,34 @@ static bool literal_match_at(const char* src, const char* needle, size_t len, bo
     return true;
 }
 
-static void select_match_window(int64_t total, int64_t limit, int64_t* first, int64_t* count) {
+static int64_t options_legacy_pattern_limit(FindReplaceOptions options) {
+    if (options.has_last) return options.last == 0 ? 0 : -options.last;
+    if (options.has_limit) return options.limit;
+    return 0;
+}
+
+static void select_match_window(int64_t total, FindReplaceOptions options, int64_t* first, int64_t* count) {
     *first = 0;
-    *count = total;
     if (total <= 0) {
         *count = 0;
         return;
     }
-    if (limit > 0 && limit < total) {
-        *count = limit;
-    } else if (limit < 0) {
-        int64_t requested = (limit == LLONG_MIN) ? LLONG_MAX : -limit;
+    if (options.has_last) {
+        if (options.last <= 0) {
+            *count = 0;
+            return;
+        }
+        int64_t requested = options.last;
         if (requested < total) {
             *first = total - requested;
             *count = requested;
+        } else {
+            *count = total;
         }
+    } else if (options.has_limit) {
+        *count = options.limit < total ? options.limit : total;
+    } else {
+        *count = total;
     }
 }
 
@@ -4794,12 +4844,15 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
 
             if (!str_chars || str_len == 0) return str_item;
 
-            String* result = (!options.ignore_case && options.limit == 0)
+            if ((options.has_limit && options.limit == 0) ||
+                (options.has_last && options.last == 0)) return str_item;
+            int64_t pattern_limit = options_legacy_pattern_limit(options);
+            String* result = (!options.ignore_case && !options.has_limit && !options.has_last)
                 ? pattern_replace_all(pattern, str_chars, str_len,
                                       repl_chars ? repl_chars : "", repl_chars ? repl_len : 0)
                 : pattern_replace_all_options(pattern, str_chars, str_len,
                                               repl_chars ? repl_chars : "", repl_chars ? repl_len : 0,
-                                              options.limit, options.ignore_case);
+                                              pattern_limit, options.ignore_case);
             if (!result) return str_item;
             return {.item = s2it(result)};
         }
@@ -4825,7 +4878,7 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
     int64_t total = count_literal_matches(str_chars, str_len, old_chars, old_len, options.ignore_case);
     int64_t first = 0, replace_count = 0;
     // Limit is applied before replacement so first/last-N semantics match find().
-    select_match_window(total, options.limit, &first, &replace_count);
+    select_match_window(total, options, &first, &replace_count);
     if (replace_count == 0) return str_item;
 
     size_t replacement_len = new_chars ? new_len_val : 0;
@@ -4880,7 +4933,7 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
 // replace(str, old, new) - replace all occurrences of old with new
 Item fn_replace(Item str_item, Item old_item, Item new_item) {
     GUARD_ERROR3(str_item, old_item, new_item);
-    FindReplaceOptions options = {0, false};
+    FindReplaceOptions options = {0, 0, false, false, false};
     return fn_replace_impl(str_item, old_item, new_item, options);
 }
 
@@ -4918,7 +4971,14 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
         Type* type = (Type*)(pattern_item.item & 0x00FFFFFFFFFFFFFF);
         if (type && type->kind == TYPE_KIND_PATTERN) {
             TypePattern* pattern = (TypePattern*)type;
-            List* r = pattern_find_all_options(pattern, str_chars, str_len, options.limit, options.ignore_case);
+            if ((options.has_limit && options.limit == 0) ||
+                (options.has_last && options.last == 0)) {
+                List* e = list();
+                e->is_content = 1;
+                return {.array = e};
+            }
+            int64_t pattern_limit = options_legacy_pattern_limit(options);
+            List* r = pattern_find_all_options(pattern, str_chars, str_len, pattern_limit, options.ignore_case);
             if (r) r->is_content = 1;
             return {.array = r};
         }
@@ -4940,7 +5000,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     int64_t total = count_literal_matches(str_chars, str_len, needle, needle_len, options.ignore_case);
     int64_t first = 0, selected_count = 0;
     // Limit selects the visible match window; replacement uses the same helper.
-    select_match_window(total, options.limit, &first, &selected_count);
+    select_match_window(total, options, &first, &selected_count);
     if (selected_count == 0) return {.array = result};
 
     const char* p = str_chars;
@@ -4971,7 +5031,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
 // Second argument can be a string literal or a compiled pattern.
 Item fn_find2(Item source_item, Item pattern_item) {
     GUARD_ERROR2(source_item, pattern_item);
-    FindReplaceOptions options = {0, false};
+    FindReplaceOptions options = {0, 0, false, false, false};
     return fn_find_impl(source_item, pattern_item, options);
 }
 
@@ -5383,9 +5443,7 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
         return ItemError;
     }
 
-    // support negative indexing
     int64_t len = arr->length;
-    if (index < 0) index = len + index;
     if (index < 0 || index >= len) {
         // indexed writes must be fail-stop; silent log-and-continue hid mutation bugs from pn callers.
         set_runtime_error(ERR_INDEX_OUT_OF_BOUNDS,

@@ -1218,6 +1218,8 @@ JitImport jit_runtime_imports[] = {
     {"array_plain", FPTR(array_plain)},
     {"array_drop_inplace", FPTR(array_drop_inplace)},
     {"array_limit_inplace", FPTR(array_limit_inplace)},
+    {"array_limit_last_inplace", FPTR(array_limit_last_inplace)},
+    {"fn_take_last", FPTR(fn_take_last)},
     {"array_push", FPTR(array_push)},
     {"array_push_spread", FPTR(array_push_spread)},
     {"array_push_spread_all", FPTR(array_push_spread_all)},

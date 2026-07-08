@@ -751,6 +751,7 @@ Item list_end(List *list);
 Array* array_plain();  // constructs a plain empty array (no frame management)
 void array_drop_inplace(Array* arr, int64_t n);  // drop first n items in-place
 void array_limit_inplace(Array* arr, int64_t n);  // limit to first n items in-place
+void array_limit_last_inplace(Array* arr, int64_t n);  // limit to last n items in-place
 Array* array_spreadable();  // constructs a spreadable empty array
 void array_push(Array* arr, Item item);  // push item to array
 void array_push_spread(Array* arr, Item item);      // push item, spreading if spreadable array
@@ -1529,6 +1530,7 @@ extern "C" {
     void fn_sort_by_keys(Item values, Item keys, int64_t descending);
     Item fn_unique(Item a);
     Item fn_take(Item a, Item n);
+    Item fn_take_last(Item a, Item n);
     Item fn_drop(Item a, Item n);
     Item fn_slice(Item a, Item start, Item end);
     Item fn_slice3(Item a, Item start, Item end);

@@ -1695,9 +1695,9 @@ fn trim_trailing_zeros(s) {
 
 fn trim_tz_loop(s, n) {
     if (n <= 0) s
-    else (let last = slice(s, n - 1, n),
-          if (last == "0") trim_tz_loop(s, n - 1)
-          else if (last == ".") slice(s, 0, n - 1)
+    else (let tail = slice(s, n - 1, n),
+          if (tail == "0") trim_tz_loop(s, n - 1)
+          else if (tail == ".") slice(s, 0, n - 1)
           else slice(s, 0, n))
 }
 
@@ -2365,8 +2365,8 @@ fn transparent_hbox(children) {
     if (len(filtered) == 0) hb
     else
         (let last_idx = len(filtered) - 1,
-         let last = filtered[last_idx],
-         let typed = box_with_type(hb, last.type),
+         let tail = filtered[last_idx],
+         let typed = box_with_type(hb, tail.type),
          if (has_suppressed_text_depth(filtered, 0))
             box_with_suppress_depth(typed)
          else typed)

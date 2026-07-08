@@ -375,6 +375,10 @@
           "named": true
         },
         {
+          "type": "last_index",
+          "named": true
+        },
+        {
           "type": "symbol",
           "named": true
         }
@@ -1695,6 +1699,16 @@
             "named": true
           }
         ]
+      },
+      "last": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "last_index",
+            "named": true
+          }
+        ]
       }
     }
   },
@@ -2463,6 +2477,10 @@
           },
           {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "last_index",
             "named": true
           },
           {
@@ -3236,6 +3254,10 @@
         },
         {
           "type": "integer",
+          "named": true
+        },
+        {
+          "type": "last_index",
           "named": true
         },
         {
@@ -4381,6 +4403,10 @@
     "named": false
   },
   {
+    "type": "last_index",
+    "named": true
+  },
+  {
     "type": "let",
     "named": false
   },
@@ -4458,11 +4484,11 @@
   },
   {
     "type": "string",
-    "named": true
+    "named": false
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",

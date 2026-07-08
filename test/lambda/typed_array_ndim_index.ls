@@ -38,10 +38,11 @@ t[1, 1, 1]                         // 8
 // NEGATIVE INDICES
 // ============================================================
 '=== negative indices ==='
-m[-1, -1]                          // 6 (last row, last col)
-m[-2, 0]                           // 1
-m[0, -3]                           // 1
-m[-1, -2]                          // 5
+m[-1, -1] is null
+m[-2, 0] is null
+m[0, -3] is null
+m[-1, -2] is null
+m[last]                            // last leading-axis row
 
 // ============================================================
 // FLOAT MATRIX
@@ -63,7 +64,7 @@ let r = reshape(arr, [2, 3])
 r[0, 0]                            // 10
 r[0, 2]                            // 30
 r[1, 1]                            // 50
-r[-1, -1]                          // 60
+r[-1, -1] is null
 
 let cube = reshape(arr, [3, 2, 1])
 cube[0, 0, 0]                      // 10

@@ -93,10 +93,11 @@
 
 '===== EDGE CASES AND ERROR HANDLING ====='
 
-// String vs other types (should still error)
-// These operations should return error, not crash
-"hello equals 42 (type error):"; ("hello" == 42)
-"hello less than true (type error):"; ("hello" < true)
+// String equality is total; ordered comparison across non-magnitude types is an error.
+let any_hello: any = "hello"
+let any_true: any = true
+"hello equals 42 (cross-family equality):"; ("hello" == 42)
+"hello less than true (type error):"; (any_hello < any_true)
 
 "Edge case tests completed"
 

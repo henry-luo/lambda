@@ -1,12 +1,16 @@
-# Lambda Concurrency Design — Colorless Async, Isolates, and the Four-Level Model
+# Lambda Concurrency Design — Colorless Concurrency: the Evolution to v3 (One Keyword, Two Tiers)
 
-**Status:** approved direction — design doc for discussion & refinement
-**Date:** 2026-07-06; **revised 2026-07-08** — level-1 implementation redesigned (**K2-R**, §4.2): declared-`async` leaves + may-await state-machine compilation replaces stackful fibers as the adopted mechanism; the fiber design is retained in §4.2.4 as the reference alternative
-**Context:** realizes decision **J4** (BEAM-style concurrency, stated explicitly) from the Jube runtime ledger — Part 1 of `Lambda_Semantics_Features.md`. Addresses the #1 structural gap from the six-language feature comparison (Part 3 of the same doc). Decisions confirmed by the user in the 2026-07-06 foundation discussion are marked in the ledger (§8) as K1–K10; open points as O1–O10.
+**Status:** **v3 adopted** (§10) — v1 and v2 preserved below as design history
+**Date:** v1 2026-07-06 (fibers) · v2 2026-07-08 (declared-`async` + K2-R state machines) · **v3 2026-07-08 (current): one keyword `start`, two tiers, threads on the roadmap**
+**Context:** realizes decision **J4** (BEAM-style concurrency, stated explicitly) from the Jube runtime ledger — Part 1 of `Lambda_Semantics_Features.md`. Addresses the #1 structural gap from the six-language feature comparison (Part 3 of the same doc).
+
+**Reading guide:** §1–§9 document v1 and v2 as they were designed — kept intact because the reasoning is the asset (why fibers, why state machines, what Go/Loom/Zig/BEAM each teach). Neither is the final design. **The adopted design is v3, §10**, which supersedes the four-level model with a two-tier one and records the disposition of every earlier decision in §10.9.
 
 ---
 
 ## 1. The model at a glance
+
+*[v1/v2 — superseded by the two-tier model of v3, §10.3. Kept for reference.]*
 
 Lambda concurrency is layered in four levels. Levels 1–3 are the core design; level 0 is a free win enabled by `fn` purity and included for completeness.
 
@@ -82,6 +86,8 @@ Three observations:
 
 ## 3. Level 0 — deterministic data parallelism
 
+*[v1/v2 — in v3 this generalizes into internal, invisible parallel-`fn` execution (§10.6 Stage A); the determinism principle and `fn`-only rule survive unchanged. The float-reduction caveat is new in v3 (open item O-B).]*
+
 A `par`-variant of pipe/map that applies a **pure `fn`** to collection elements in parallel:
 
 ```
@@ -97,7 +103,9 @@ let thumbs = images |par> ~ |> resize(~, 128, 128)     // syntax TBD (O7)
 
 ## 4. Level 1 — colorless async
 
-### 4.1 Language surface (revised 2026-07-08 — K2-R)
+*[v1 (fibers, §4.2.4) and v2 (declared-`async` + K2-R state machines, §4.1–4.2.3). In v3: the **K2-R state-machine mechanism survives** (§10.5), but the surface changes — the `async` declaration is **removed** (§10.2), `await` becomes the `wait()` builtin, and `run`/spawning becomes the `start` keyword. §4.4–4.6 (native frames, JS bridge, K10 reactor) carry into v3 unchanged except as noted in §10.7.]*
+
+### 4.1 Language surface (v2 — revised 2026-07-08 — K2-R)
 
 ```lambda
 async pn fetch(url: string) -> response^ { ... }   // declared suspension source (leaf)
@@ -215,6 +223,8 @@ Two supporting obligations (open items):
 
 ## 5. Levels 2 & 3 — the unified isolate API
 
+*[v1/v2 — superseded by v3 §10.3: the worker-thread tier (level 2) is dropped as a user-visible concept; processes become simple OS child processes launched by the same `start` keyword. What survives into v3: the uniform-handle idea (awaitable → `T^E`, message target), the memory model (§5.2 — copy messages, share flat immutables, Mark as process wire format), the failure-as-values model (§5.3), bounded delivery (§5.4), and `select`. The mailbox-vs-channel question was reopened in v3 and resolved as mailbox (K20, §10.8).]*
+
 ### 5.1 One primitive set, isolation as an option (K4)
 
 ```
@@ -260,6 +270,8 @@ let result = await receive(w)        // or: await w — isolate's final result, 
 
 ## 6. Deliberately excluded
 
+*[v2-era table. v3 dispositions: the `go`-spawn exclusion softens — v3 adopts a Go-inspired single spawn keyword (`start`) but keeps structured intent; the channels exclusion was reopened and resolved as mailbox (K20) — the original instinct reinstated in evolved form; everything else stands. See §10.9.]*
+
 | Excluded | Why | What covers the need |
 |---|---|---|
 | Go-style unstructured `go` spawn | fire-and-forget is a liability; the industry spent a decade adding structure back (errgroup/context) | structured task scopes (O1) + `spawn` isolates |
@@ -281,7 +293,9 @@ let result = await receive(w)        // or: await w — isolate's final result, 
 
 ---
 
-## 8. Decision ledger
+## 8. Decision ledger (v1/v2)
+
+*[Historical ledger. Every entry's v3 disposition — kept / revised / superseded / reopened — is recorded in §10.9.]*
 
 **Confirmed (K):**
 
@@ -312,9 +326,303 @@ let result = await receive(w)        // or: await w — isolate's final result, 
 
 ---
 
-## 9. Dependencies & sequencing
+## 9. Dependencies & sequencing (v2 — superseded by §10.10)
 
 1. **G1 no longer gates level 1** (K2-R): parked state machines are ordinary heap objects — level 1 adds no new GC surface. G1 (`Lambda_GC_Root_Issue.md`) remains the top runtime-honesty work item in its own right, and would return as a level-1 gate only if the fiber alternative (§4.2.4) were revived.
 2. **JubeHostAPI v1 must include** the §4.4 native-frame clause (blocking/await-safety declaration) and the G2 rooting-across-ABI clause **before modules proliferate** — both are unretrofittable.
 3. Suggested build order: **level 0** (small, isolated, immediately useful for the typed-array/image workloads) → **level 1** (compiler track: may-await closure + state-machine lowering in `transpile-mir` + suspendable `pn` convention; runtime track: scheduler + uv integration — unblocks async I/O and the Radiant UI story) → **level 2** (isolate = context-on-a-thread; level 0 then migrates onto it) → **level 3** (same API over processes + Mark wire).
 4. The per-guest concurrency mapping tables (§7) join the G3 error-mapping tables as module/ABI-spec work items.
+
+---
+
+# v3 — THE ADOPTED DESIGN (2026-07-08)
+
+## 10. One keyword, two tiers, threads in the future
+
+### 10.1 How the design moved: v1 → v2 → v3
+
+- **v1 (fibers):** full colorlessness via stackful fibers — own stacks so unmodified callers can suspend. Decisive argument at the time: zero compiler transform.
+- **v2 (K2-R):** the user lowered the colorlessness requirement (`async` declared at leaves, callers unmarked), which exposed that a *selective* state-machine transform gets the same surface with parked state as ordinary heap objects — **decoupling level 1 from G1** and reusing the JS Phase-6 machinery. Fibers demoted to reference.
+- **v3 (this section):** three further realizations reshaped the model itself:
+  1. **Fibers cannot absorb worker threads.** A fiber has a thread's *anatomy* (own stack) but not its *physiology* (CPU parallelism, heap isolation). All fibers in a context run on one thread; a CPU-bound fiber stalls the whole context. So "fiber ≈ thread" was a false economy — which removed the last argument for fibers and freed the model question from the mechanism question.
+  2. **Go answers "coroutines on threads?" with yes — at a price Lambda shouldn't pay.** Goroutines are M:N across threads because Go built a thread-safe-everything runtime (per-P allocator caches, fully concurrent GC with write barriers, cross-thread stack scanning) and made **shared mutable memory the user contract** (data races are the user's problem). BEAM answers the same question differently: **isolated-heap processes** roam across scheduler threads — no shared-heap GC, no races, messages copy. The v3 growth path is BEAM's, not Go's: if many cheap parallel units are ever needed, schedule *isolates* M:N, never fibers (§10.6).
+  3. **The user's simplification:** one mechanism to rule them all — concurrent `pn`s (Go-goroutine-inspired) + simple child processes; no separate async/worker-thread/green-process taxonomy. Multicore is a **committed goal** ("today's devices are almost all multi-core"), including internal parallel execution of pure `fn`s.
+
+### 10.2 The surface: one keyword + five builtins
+
+```lambda
+pn main() {
+    let h1 = start fetch(a)                      // pn call → concurrent task
+    let h2 = start fetch(b)                      // both in flight
+    let p  = start process("worker.ls", args)    // process spec → OS child process, same keyword
+    let r  = wait(h1)^                           // builtin — T^E surfaces here
+    send(p, job)                                 // handles are the message target
+    let x  = select(h2, p, timeout: 5000)        // first of several (syntax TBD, O4)
+}
+```
+
+**`start` is the only concurrency keyword in the grammar.** Everything else is a builtin `pn`: `wait(h)`, `send(h, msg)`, `receive()`, `select(...)`, `process(...)`. A **direct call stays a plain call** — `fetch(url)` synchronously (colorlessly) yields the value; it is `wait(start fetch(url))` minus the handle ceremony. Concurrency enters a program through exactly one word.
+
+**Keyword selection (deliberation record):**
+
+| Candidate | Verdict | Reason |
+|---|---|---|
+| `go` | rejected (user) | branded by Go |
+| `spawn` | rejected (user) | mentally linked to processes |
+| `run` | rejected | reads synchronous in English ("run this" = do it now); corpus-clean, but the connotation is wrong for fire-and-continue |
+| `fire` | rejected | fire-and-**forget** connotation clashes with returning a handle you `wait` on; collides with "firing events" in Radiant |
+| `launch` | runner-up | zero corpus conflicts, good track-what-you-launched connotation, mild positive Kotlin echo; slightly long for the `let`/`fn`/`pn` house style |
+| **`start`** | **adopted** | exact English semantics ("start the dishwasher" = set in motion, walk away); tier-neutral (start a task / start a process); **must be a contextual keyword** — `start` is a live identifier in the corpus (range params, map keys) |
+
+**`wait`, not `await`** — four stacked reasons: (1) `await`'s *a-* prefix exists to pair with `async`, which v3 removes — orphaned branding; (2) **`start`/`wait` is a natural-language dual** ("start it… wait for it") in the house style; (3) POSIX `wait(2)` means precisely "wait for a child process and collect its status" — forty years of prior art for `wait(p)` on a process handle; (4) **polyglot clarity in Jube**: JS keeps its real `await` (colored keyword, microtask, promise-unwrapping); Lambda's colorless `T^E`-returning builtin deserves a different name so the same word never means two things in one binary. Corpus check: `wait` is unused as an identifier and no `wait`/`sleep` sys func exists — clean.
+
+**`async` is removed from the grammar entirely.** The v2 leaf declaration turned out to have no remaining job:
+1. The true suspension leaves are **builtins** (`wait`, `receive`, `sleep`, async `io.*`) — the compiler knows them without declarations; user `pn`s are only ever *transitively* suspending.
+2. The one place async-ness still needs declaring is the **native-module boundary** (a module `pn` completing via uv callback) — and module functions already declare signatures in Lambda type syntax; the async bit is one more marker in the FFI contract, not in user grammar.
+3. May-await-ness has **no observable consequence inside Lambda** (colorless callers; `fn` cannot call `pn` at all) — so there is no "inference surprise" to protect against (Zig's inference wasn't what failed; its AOT/ABI consequences were).
+4. The single real exposure is the **JS membrane**: value-vs-Promise shape would ride inference. v3 rule: **every Lambda `pn` exposed to JS is Promise-returning, uniformly** (Node-style; stable under any refactor). An opt-in `sync` export annotation can come later if tight DOM-handler interop demands it.
+
+Result: colorless is *total*. Plain calls suspend invisibly; `start` is the only visible concurrency; the surface is smaller than Go's (`go` + `chan` + `<-` + `select` as syntax) with none of its races.
+
+### 10.3 The model: two user tiers + one invisible tier
+
+| Tier | Unit | Created by | Parallel? | Isolation | Failure surface |
+|---|---|---|---|---|---|
+| **Tasks** | concurrent `pn` | `start f(x)` | phase 1: no (one thread/context); Stage B: yes | shared context heap — all immutable values shared free | handle → `T^E` |
+| **Processes** | OS child process | `start process(spec)` | yes | OS-grade | handle → `T^E` on exit |
+| *(internal)* | parallel `fn` | runtime's discretion | yes (Stage A) | invisible by purity | n/a — deterministic |
+
+- **Processes are simple child processes** — deliberately *not* BEAM green processes: no supervision trees, no links, no distribution, no thousand-process swarms. The handle resolving to `T^E` on exit is the **entire v1 failure story** (it replaces the monitoring layer — a dead child is an error value in the parent, composing with `^`). Recorded caveat: this is *less* BEAM-like, not more — BEAM's "processes" are isolated-heap green processes in **one address space** (level-2-shaped); Lambda chooses OS simplicity first and keeps BEAM-style M:N isolates as the documented escape hatch (§10.6).
+- **The worker-thread tier is gone as a user concept.** Compute parallelism comes from internal parallel-`fn` (Stage A) and processes now, and from tasks-on-threads later (Stage B) — never from a user-visible "thread" object.
+- **Handles are uniform across tiers**: awaitable (`wait` → `T^E`), message targets (`send`), selectable. Moving work between tiers is changing the operand of `start`, not the verbs around it (the K4 idea, carried forward).
+- Communication: **messages + read-only flat immutables** (K5 unchanged: typed arrays/strings/binaries by refcount in-address-space, shm across processes; Mark is the process wire format). Whether messaging is mailbox-shaped or channel-shaped is open (O-A).
+
+### 10.4 The soundness rule: thread-agnostic task semantics (the capture rule)
+
+> **A `start` closure must not capture `var`s by reference.** Compile error (or explicit snapshot). Tasks communicate through messages and immutable flats — never through captured mutable state.
+
+Lambda `pn` closures *can* mutate captured vars today (`proc_closure_mutation` tests), so `start` is deliberately stricter than closure creation. Consequences:
+
+- **Thread count becomes semantically unobservable.** No program can distinguish tasks multiplexed on one thread from tasks on eight — so Stage B (threads) is a pure runtime upgrade, zero user-code changes. Without this rule in v1, the first program sharing a `var` between tasks forecloses multicore forever. **Unretrofittable — ships with `start` or never.**
+- **This is what Go couldn't have.** Go's contract *is* shared mutable memory, so it bought M:N with a thread-safe-everything runtime and user-visible data races (plus a race detector as apology). Lambda's contract is values + messages: **Go's ergonomics minus Go's races** — C4 finally paying its concurrency dividend.
+- Nondeterminism remains confined to `pn` (message arrival, task interleaving); `fn` remains deterministic under any schedule. The C1–C12 core survives untouched.
+
+### 10.5 Mechanism: K2-R state machines confirmed — precisely *because* of the threading goal
+
+v3 keeps v2's compilation strategy (may-await closure → resumable state machines, Phase-6 family, `value | suspended` convention), with the closure now seeded by **builtins + native-module declarations only** (no user `async`). The threading goal *strengthens* this choice:
+
+- A parked state machine is a heap object; **resuming it on any pool thread is a function call** — exactly how Kotlin coroutines, C# tasks, and Rust/tokio do M:N today. Proven, boring, portable.
+- M:N over **fibers** is the road only Go and Loom ever completed: live native stacks migrating across threads (TLS discipline, cross-thread stack scanning, pointer pinning). Fibers are the *less* thread-portable mechanism, contrary to first intuition — their own-stack property buys unmodified-caller suspension, not thread mobility.
+- The fiber design (§4.2.4) remains the documented fallback, revivable only if the transform underdelivers — but note it would reinstate both the G1 gate and the harder Stage-B road.
+
+### 10.6 The multicore roadmap: Stage A (fn, fork-join) then Stage B (pn tasks, M:N)
+
+**Committed goal (user): real multi-core utilization, including for pure `fn`s — internal, never user-visible.**
+
+**Stage A — parallel `fn`, fork-join (the cheap 80%).** `fn` is pure and can never suspend (K1), so it fits the Cilk-style fork-join model without touching the GC architecture:
+- Worker threads allocate in **private scratch arenas**; results copied/promoted into the main heap at the join.
+- **GC blackout during a parallel region** (regions are bounded — a par-map batch, a large `ArrayNum` op): no safepoint protocol, no concurrent marking, and the compacting GC can't move inputs mid-region.
+- **The real Stage-A work item is the runtime-globals audit** — "pure at the language level ≠ pure at the runtime level": an `fn` building a map touches the **shape registry**; symbols touch the **namepool**; strings touch interning; boxed numerics touch the allocator. Each needs a lock, a per-thread side table merged at join, or pre-warming. An audit-and-fix list, not an architecture change — but it is where Stage A's effort actually goes.
+- Heavy compute in Lambda *is* `fn` (image ops, math, transforms — the typed-array workloads), so Stage A delivers most of the multicore value at a fraction of the risk. Old level 0 (`par` map) becomes library sugar over this machinery.
+- One semantic caution — **open item O-B**: parallel *map* is always deterministic; parallel *reduction over floats* is not (chunked association ≠ sequential left-fold, and the MathLive corpus work proved float-accumulation order is observable). Policy needed: fixed tree order (deterministic run-to-run, documented ≠ sequential) vs. exact-types-only auto-parallelization (int/decimal parallel, float reductions stay sequential by default).
+
+**Stage B — `pn` tasks M:N over a thread pool (the expensive 20%).** The full bill Go paid: thread-safe allocator (per-thread nurseries), concurrent or stop-the-world-multi GC, atomic COW refcounts (a tax that lands on single-threaded code too — the nogil lesson). Semantics are **already ready** thanks to the capture rule; state-machine frames resume on any thread by construction. No user-visible change when it lands — that's the entire point of §10.4.
+- **Recorded alternative if Stage B stalls:** BEAM's road — many cheap *isolated-heap* units scheduled M:N over scheduler threads (at most one scheduler runs a given isolate at a time; even V8 permits thread migration under that rule). Compatible with C4's economics; requires making contexts cheap rather than making the heap concurrent.
+
+### 10.7 Unifying with JS async at the implementation level (K17)
+
+Both languages' async decomposes into five layers; **three unify, two must not**:
+
+| Layer | JS today (Phase 6) | Lambda v3 | Unify? |
+|---|---|---|---|
+| 1. Function-splitting transform | split at `await`/`yield`, hoist live locals, state dispatch | split at async-builtin calls *and* calls to may-await `pn`s | **Yes — extract a neutral MIR "resumable function" utility** |
+| 2. Resume frame | heap object: state idx + slots (+`this`/`arguments`) | heap object: state idx + Item slots | **Yes — common layout; JS adds fields** |
+| 3. Resumption protocol | promise reactions, microtask, resume-with-**throw** | scheduler resume at macrotask (O10), resume-with-**`T^E` value** | No — thin per-language drivers |
+| 4. Calling convention | always-Promise (allocation per call) | **`value \| suspended`** — zero allocation when nothing suspends | No — Lambda's fast path is the perf edge; don't unify downward |
+| 5. Reactor/loop | libuv + job queue | same loop | **Already unified (K3/K10)** |
+
+Notes that make the split principled: Lambda has *more* split points (suspension flows through calls) but *cheaper* calls (the Kotlin `COROUTINE_SUSPENDED` trick); Lambda's resumption is *simpler* (no abrupt-completion injection — errors are values in a slot, `^` does the rest), so exception-region bookkeeping in the shared skeleton is an optional feature only the JS driver requests. **Interop dividend:** once both park as "heap frame + `resume(state, value)`," the §4.6 membrane is glue — a promise reaction re-enqueues a Lambda frame at macrotask position; a Lambda handle completion resolves a Promise. And Stage B applies to both languages' frames for free.
+
+**Sequencing (protect what's green):** build the Lambda transform in `transpile-mir` *following* Phase 6's pattern as an independent second implementation; extract the common core only after two working clients exist, gated on the JS suites (1931 editor tests, node baseline). Extraction driven by two concrete users, not anticipation. **Third-client bonus:** the same resumable-function machinery is what Lambda generators / lazy stream producers (D9–D12) would need — strengthening the eventual extraction case.
+
+### 10.8 Open items
+
+- **O-A — Mailbox vs. channel: DECIDED (K20, 2026-07-08) — mailbox (actor model), with two refinements.** The essence that framed the choice: *a mailbox belongs to a process; a channel belongs to no one* (actor vs. CSP). Comparison that informed the decision:
+
+  | | Mailbox (BEAM/actor) | Channel (Go/CSP) |
+  |---|---|---|
+  | Addressing | send **to a task/process** (its handle) | send **into a pipe**; receive-end holder gets it |
+  | Cardinality | one per task; all senders merge | many; first-class values, N:M (shared channel = work queue free) |
+  | Typing | heterogeneous; sort at receive | `chan(T)` — typed pipe |
+  | Receive | selective receive (match within queue — powerful, but the O(n²) scan trap) | strict FIFO + `select` *between* channels (can't express the scan trap) |
+  | Send | always async, never blocks (distribution-friendly; unbounded footgun) | bounded — blocks when full (backpressure built in; careless topologies can deadlock) |
+  | Lifecycle | dies with owner; monitors notify | outlives tasks; explicit `close`, end-of-stream |
+  | Distribution | location-transparent (BEAM's superpower) | needs explicit plumbing across processes |
+
+  Channels would have obligated: a close-semantics rule (who closes; multi-sender), dead-peer signaling, and cross-process endpoint plumbing. Mailboxes fit the simplified no-distribution world and the handle model — `send(h, msg)` is mailbox-shaped already. **The decision (K20a–e):**
+
+  - **K20a — Handle = address; no channel type.** One mailbox per task/process; the handle returned by `start` is the send target. One noun in the API — no second messaging concept. Bootstrap details: a `self()` builtin (hand your own address to others) and the parent handle reaching the child (implicitly, or via start arguments); handles are sendable *inside messages* so topologies can form — freely in-context; **cross-process v1 = the pre-wired parent↔child pair only** (forwarding a third process's handle would require OS-level routing — deferred until real demand). *(user)*
+  - **K20b — N:1 by design; N:M is a redesign smell.** One task does one thing well; a would-be N:M topology is split into N:1 stages. The one workload that genuinely wants M receivers — the shared work queue — is expressed as an explicit **dispatcher task** (receive jobs, forward round-robin): one extra task, clearer than Go's implicit competition, and the 30-year BEAM idiom. Documented pattern, not a gap. *(user)*
+  - **K20c — Heterogeneous messages; FIFO-head receive; NO in-queue selective receive.** Messages are any Lambda value (heterogeneity is what Lambda embraces), dispatched with the existing `match`. But `receive()` always yields the **oldest message** — there is no skip-and-leave-in-queue: BEAM's selective receive scans the queue, takes the first match, and leaves the rest, which is the source of its most notorious performance trap (unmatched messages accumulate; every receive re-scans; O(n²) meltdown that Erlang needed a special compiler optimization to mitigate). Under FIFO-head + `match`, unhandled kinds are an explicit user choice (ignore/error), never silent queue residue — **the trap is unrepresentable**. True selective receive = possible future opt-in if RPC-reply patterns demand it. *(user + refinement accepted)*
+  - **K20d — Async bounded send; backpressure as an error value.** `send(h, msg)` **never blocks** and returns `ok^E`: a full mailbox surfaces as an error *value* the sender handles (retry, drop, escalate) — not blocking, not silent unbounded growth. The bounded-delivery non-negotiable holds (the BEAM footgun stays dead), and backpressure becomes visible in the type system — which no other actor runtime offers. **Future opt-in blocking variants, deferred until pressing** (surface TBD when needed): `wait(send(...))` — send returning a delivery handle — or `send(h, msg, sync: true)`. *(user + refinement accepted)*
+  - **K20e — Delivery outlives the sender; ordered end-of-stream (the signal-ordering guarantee).** `send` enqueues into the *receiver's* mailbox, so sent messages survive sender termination automatically; for processes the runtime drains the pipe to EOF. Spec guarantee: **a task/process's termination (observed via `wait(h)` / `select(..., h)`) becomes visible only after all messages it previously sent have been enqueued** — per-sender FIFO, termination last. End-of-stream is therefore just handle completion carrying the final `T^E`: no sentinel messages, no `'done'` conventions, no auto-injected system messages polluting the mailbox. Streaming (select over mailbox + child handle), request-reply (reply-to handle inside the message), and dispatcher pools all work with zero additional machinery. *(user requirement, formalized)*
+
+  Net: the entire messaging layer is `send`/`receive`/`select` + handles + two ordering guarantees (per-sender FIFO; termination-after-sends). K8's original mailbox-plus-select instinct is thereby reinstated in evolved form — bounded, handle-addressed, trap-free.
+- **O-B — Float-reduction policy: DECIDED (K19, 2026-07-08) — pairwise-by-spec.** Builtin numeric reductions (`sum`/`avg`/`prod`/`variance`/dot; `min`/`max` join for NaN consistency) are *defined* as a fixed, size-derived tree order: base blocks of fixed size with a fixed stride pattern (matching SIMD lane layout), blocks combined pairwise in index order; the tree depends **only on n** — never on thread count, timing, or backend. Scalar, SIMD, and Stage-A parallel paths implement the identical tree → bit-identical results across runs, machines, thread counts, and backends.
+  - Rationale: "same everywhere, always" is the valuable property, not "same as the naive left fold"; pairwise error grows O(log n) vs O(n) for left-fold (more accurate AND faster); it unlocks the SIMD float-reduction speedup currently sacrificed on purpose (`lambda-vector.cpp:3442` — "float sum/prod left-fold stays scalar, no reassociation"); and it honors the MathLive float-order lesson correctly — define the order once, freeze it in spec.
+  - Prior art: **NumPy** (`np.sum` = pairwise, 128-block, n-only), **Julia** (`Base.sum` pairwise), **Intel MKL CNR** (bitwise-identical across thread counts as a product feature), **NVIDIA CUB** (run-to-run-deterministic device reductions), **IEEE 754-2019** (recommends reproducible reductions) + **ReproBLAS**. Cautionary counter-examples of free-order: OpenMP `reduction`, Spark float `SUM`, TF atomics — all notorious reproducibility pain; PyTorch had to retrofit `use_deterministic_algorithms()`.
+  - Boundary: user-supplied `reduce`/fold stays **strictly sequential** (purity ≠ associativity); decimal reductions use the same tree (decimal rounding is also non-associative). Accuracy escalations (Kahan/`fsum`-style, `method:'kahan'`) are **future explicit opt-ins, deferred until pressing** (precedent: `math.fsum`, KahanSummation.jl — opt-in everywhere).
+  - Sequencing: semantics-ledger spec entry → scalar+SIMD pairwise implementation (collects the deferred SIMD win immediately, one-time golden migration) → Stage A parallel backend reuses the identical tree.
+- Carried forward: O1/O2 (task scopes + cancellation — design with `defer`/cleanup, R-ledger; **promoted to prerequisite for concurrent streams by K26, §11.4**), O4 (`select` syntax), O6 (handle typing vs C4 — handles are identities, the ref-cell family; now also covers `self()` and handle-in-message semantics per K20a), O7 (grammar: `start` as contextual keyword), O10 (loop ordering spec). O9 becomes pure inference spec (seeds = builtins + module declarations; no user `async`). O3 **resolved by K20d** (bounded + `send → ok^E`). O5 (supervision) is **closed for v1** by K18 — handle-`T^E` is the failure surface; supervision is userland. **With K19 and K20, the v3 design has no undecided design questions — only the carried spec-detail items above.**
+
+### 10.9 v3 decision ledger + disposition of K1–K10
+
+**New decisions (v3):**
+
+- **K11** — Two-tier model: concurrent `pn` tasks + simple OS child processes; the worker-thread tier is dropped as a user concept; internal parallel-`fn` is the invisible third tier. *(user)*
+- **K12** — Surface: `start` is the **only** concurrency keyword (contextual, `pn`-only); `wait`/`send`/`receive`/`select`/`process` are builtins; **no `async`, no `await` keyword**; direct calls stay synchronous/colorless. Naming rationale recorded in §10.2. *(user: `start` over run/fire/spawn/go; `wait` over `await`)*
+- **K13** — **The capture rule**: `start` closures must not capture `var`s by reference (compile error); communication only via messages + read-only flats. Makes task semantics thread-agnostic — ships with `start` in v1, unretrofittable. *(proposed in discussion, unchallenged — treat as adopted; needs grammar/analyzer spec)*
+- **K14** — Mechanism: K2-R state machines confirmed for phase 1 *because of* thread-portability (Kotlin/C#/tokio M:N precedent); fibers (§4.2.4) remain the documented fallback. *(user: "fine with state machines if it goes well with threading")*
+- **K15** — Multicore is committed: **Stage A** fork-join parallel-`fn` (arenas + GC blackout + runtime-globals audit; internal, invisible) → **Stage B** M:N `pn` tasks (thread-safe runtime); BEAM-style M:N isolates recorded as the Stage-B alternative. *(user: "run pn on thread is 100% what I want"; fn too, internal)*
+- **K16** — `async` removed from user grammar; async-ness declared only in native-module signatures; **JS membrane: all exposed `pn`s uniformly Promise-returning** (opt-in `sync` annotation possible later). *(user)*
+- **K17** — JS implementation unification per §10.7: share layers 1/2/5, keep 3/4 per-language; Lambda transform built first, common core extracted after two working clients. *(user)*
+- **K18** — Processes are simple OS child processes: no supervision trees, links, green processes, or distribution in v1; handle-as-`T^E` is the entire failure surface. BEAM-likeness caveat recorded. *(user: "simple child process, not BEAM's kind")*
+- **K19** — **Pairwise-by-spec numeric reductions** (closes O-B): builtin reductions defined as a fixed n-only tree order, identical across scalar/SIMD/parallel backends → bit-identical everywhere; user folds stay sequential; Kahan-style accuracy modes deferred to explicit opt-in. Full rationale + prior art (NumPy/Julia/MKL CNR/CUB/IEEE 754-2019) in §10.8. *(user: "Option 2 should definitely be the policy")*
+- **K20** — **Mailbox messaging, actor-model** (closes O-A): handle = address, no channel type (K20a); N:1 by design, pools via explicit dispatcher (K20b); heterogeneous messages with **FIFO-head receive — no in-queue selective receive**, making BEAM's scan trap unrepresentable (K20c); **async bounded send returning `ok^E`** — backpressure as an error value, blocking variants (`wait(send(...))` / `sync:` option) deferred to explicit opt-in (K20d); **signal-ordering guarantee** — sent messages outlive the sender, termination observable only after all prior sends, end-of-stream = handle completion (K20e). Full reasoning + actor-vs-CSP comparison in §10.8. *(user decision + two accepted refinements)*
+
+**Disposition of the v1/v2 ledger:**
+
+| Entry | v3 status |
+|---|---|
+| K1 (`fn` never suspends; suspension is `pn`-only) | **kept** — unchanged foundation |
+| K2 (fibers) | superseded (was already superseded by K2-R); reference design §4.2.4 |
+| K2-R (state machines) | **kept as mechanism** (K14); its `async`-declaration surface removed by K16 |
+| K3 (one loop per context, shared with JS) | **kept** |
+| K4 (unified isolate API, isolation as option) | revised → K11: two tiers, `start` operand picks the tier; uniform handles survive |
+| K5 (copy messages; share flat immutables; Mark wire) | **kept** |
+| K6 (failures are values; handles → `T^E`) | **kept** — now the *entire* failure model (K18) |
+| K7 (no migration; 1 thread/isolate) | revised: phase-1 true; "never" dropped — Stage B schedules tasks M:N (K15); semantics made migration-safe by K13 |
+| K8 (channels excluded; mailbox + select) | **REOPENED** → O-A; `select` and boundedness survive regardless |
+| K9 (level 0 par-map) | revised → internal parallel-`fn`, Stage A of K15; determinism principle kept, float caveat added (O-B) |
+| K10 (libuv shared reactor; JS async untouched; membrane rule) | **kept**; extended by K17 (shared transform layers) and K16 (uniform-Promise membrane) |
+
+### 10.10 Dependencies & sequencing (v3)
+
+1. **G1 does not gate tasks** (state machines — heap objects). G1 remains the top runtime-honesty item independently; Stage A needs only the GC-blackout discipline, Stage B is where GC work returns at full scale.
+2. **Ships together or never:** `start` + the capture rule (K13) + bounded delivery. These are the unretrofittable trio.
+3. **JubeHostAPI v1 clauses unchanged** (§4.4 blocking/await-safety declaration + G2 rooting) — plus the async-ness marker in module signatures (K16).
+4. Build order: **tasks** (compiler track: may-await inference + shared-pattern state-machine lowering in `transpile-mir`; runtime track: scheduler + uv integration + handles/`wait`) → **processes** (`process()` spec, Mark-over-pipe, shm flats — mostly OS plumbing) → **Stage A** parallel-`fn` (arena workers + globals audit; unlocks the typed-array/image workloads) → **Stage B** when demand proves it (semantics already ready).
+5. O-A is decided (K20 — mailbox): the `send`/`receive`/`select` builtins can freeze against K20a–e. O-B is decided (K19); its spec entry + scalar/SIMD pairwise implementation can proceed **independently of and before any concurrency work** — it collects the deferred SIMD float-reduction win today and pre-stabilizes goldens for Stage A.
+
+---
+
+## 11. Streams × concurrency (added 2026-07-08, ledger K21–K26)
+
+How the v3 concurrency model carries the lazy-stream design (`Lambda_Design_Data_Processing.md` §8, D9–D12; its §8.6 cross-references back here). Conclusion first: **the pieces compose with almost no friction, because each side was designed with properties the other needs** — and the five genuinely new decisions are small and recorded below.
+
+### 11.1 Why the pieces click — four enablers and one convergence
+
+1. **Laziness supplies the plan** (D9/D10): a stream is a *recorded pipeline*, not running code — the executor is free to choose sequential or concurrent execution at forcing time, invisibly.
+2. **The `fn`/`pn` split pre-computes what's safe**: `fn` stages are parallelizable/fusible by *verified* purity (the optimizer's license, D11); `pn` stages are ordered barriers. Pipeline segmentation into parallel-safe and order-anchored sections falls out of the type system.
+3. **K13 + value semantics make items transferable**: an Item crossing between stage tasks has no shared-mutable-state hazard, by construction.
+4. **K19 keeps parallel results deterministic** at the terminals (reductions).
+
+**The convergence:** K20e — "receivers get all messages, per-sender FIFO, then termination carrying the final `T^E`" — is *exactly* D12's stream requirement ("all the messages + a proper end-of-stream signal"), decided independently in the mailbox discussion. The messaging contract and the stream contract are the same contract. That identity is what makes §11.2 an adapter rather than a subsystem.
+
+### 11.2 Mailboxes pipe: handles as stream sources and sinks (K21)
+
+A task or process handle is a natural **stream source**: its messages are the elements; K20e handle-completion is the end-of-stream; a failed task surfaces as `T^E` at the forcing point (D12's error path, unified):
+
+```lambda
+pn main() {
+    let p = start process("scraper.ls", urls)     // child process streams results
+    stream(p) |> where(.status == 'ok') |> group(.domain) |> output("report.json")
+}                                                  // end-of-stream = p's handle completing
+```
+
+- **Source:** `stream(h)` — lazy stream of the handle's messages until completion. In the D10 taxonomy this is cleanly a **live-I/O stream** (one-shot, `pn`-only); no new category.
+- **Sink:** a `send_to(h)` terminal forwards each result as a message — making any pipeline a producer for another task.
+- **Cross-process for free:** messages already ride Mark over the pipe (K5), so `start process(...)` + `stream(p)` composes distributed pipeline segments with zero extra machinery.
+- **Push-pull reconciliation:** file-backed `stream()` sources are pull; mailbox sources are push-fed — and the **bounded mailbox is itself the reconciling buffer**: the producer runs ahead only to capacity, the consumer pulls at its pace, backpressure emerges from boundedness (K20d). No new mechanism.
+
+### 11.3 Execution at forcing time: what parallelizes, and how order survives
+
+- **K22 — Ordered by default.** Streams are ordered sequences; a parallelized `fn` stage must not reorder its output. Workers process chunks; a re-sequencing buffer emits in index order — deterministic, K19's sibling policy (same philosophy: fixed order as spec, parallelism invisible). An `unordered` opt-in may come later for throughput; deferred until pressing.
+- **K23 — `fn` segments auto-parallelize; `pn` stages are sequential anchors.** Stage-A fork-join applies invisibly to `fn` segments only. Auto-pipelining *across* `pn` stages is excluded in v1: it would change effect interleaving relative to sequential forcing (stage 1 on item 2 concurrent with stage 2 on item 1) — `pn`-confined nondeterminism, arguably legal, but not to be sprung on users silently. Users who want pipeline parallelism across effectful stages build it **explicitly** with `start` + mailbox streams (§11.2) — explicit is the right default for effects.
+- **K24 — The executor uses a runtime-internal blocking send.** User-level `send` stays async-`ok^E` (K20d unchanged); but runtime-generated stage plumbing cannot meaningfully "handle" a full-mailbox error — it parks until space. The deferred blocking variant thus found its pressing need early, **as an internal primitive only**; the user surface is untouched.
+- **Granularity (internal note):** message-per-element is too fine for internal plumbing; the executor batches chunks between stage tasks — invisible under K22's ordering guarantee. User-visible mailbox streams stay message-grained (the user controls granularity by what they send).
+
+### 11.4 Lifecycle: resources and cancellation across tasks
+
+- **K25 — Passing a resource into `start` is an ownership escape** (extends R3 of the resource-cleanup ledger, `Lambda_Semantics_Features.md` §3.5). A live source consumed by a spawned stage task is used outside the block that acquired it: the task takes ownership, auto-close moves to the task's end, and a cancelled or failed task runs its cleanup (cancellation is an error-shaped exit, so the R2 defers fire — already designed). One-clause addition to the escape rules.
+- **K26 — A forced pipeline is an implicit task scope.** Early termination (`first(10)` on a concurrent pipeline) must *cancel* upstream tasks and close sources — backpressure alone never terminates an infinite source. Scope exit (normal or error) cancels stage tasks; cancellation runs their cleanup. **Consequence: O1/O2 (task scopes + cancellation) are promoted from carried detail to prerequisite for concurrent stream execution** — and they should be designed jointly with the `defer`/cleanup construct as already planned (R-ledger adjacency).
+
+### 11.5 Cross-reference map
+
+| This section | Composes with |
+|---|---|
+| K21 mailbox streams | K20e (the contract identity) · D10 taxonomy (live-I/O kind) · D12 (`on error` + `T^E` at forcing) · K5/K18 (Mark over pipe) |
+| K22 ordering | K19 (fixed-order philosophy) · D11 (`fn` fusion license) |
+| K23 fn-only auto-parallel | K15 Stage A (the machinery) · K1 (`fn` never suspends) · governing principle 3 (nondeterminism confined to `pn`) |
+| K24 internal blocking send | K20d (user surface unchanged) |
+| K25 resource escape | R3/R2 (`Lambda_Semantics_Features.md` §3.5) · D12 (stream source release on failure) |
+| K26 pipeline scope | O1/O2 (now prerequisites) · R-ledger cleanup adjacency · O2 cancellation semantics |
+
+Open after this section: nothing new — K21–K26 resolve into existing carried items (O1/O2 gain urgency; O4/O6/O7/O10 unchanged).
+
+### 11.6 Streams across languages — the comparison, and the shared core with Node (K27)
+
+#### 11.6.1 The streaming-language landscape
+
+| | Model | Payload | Pipeline is a… | Backpressure | Parallelism | Errors | Early termination |
+|---|---|---|---|---|---|---|---|
+| **Lambda (D9–12, K21–26)** | pull, plan-based | typed Items | **re-forcible value** (plan) | bounded mailboxes/queues | `fn` segments auto (Stage A); explicit tasks/processes | `T^E` at forcing + `on error` | pipeline = task scope (K26) |
+| **Node streams (legacy)** | push w/ pull accommodation, event-driven | bytes first, objectMode bolted on | live wired objects | `highWaterMark` + `write()→false` + `'drain'` | none | `'error'` events; un-propagated through `pipe()` (→ `pipeline()` retrofit) | `destroy()`, premature-close footguns |
+| **WHATWG Web Streams** | **pull, promise-based, credit (`desiredSize`)** | any JS value | wired objects, locked | built-in queuing strategies | none | promise rejection | `cancel()` / `AbortSignal` |
+| **Nushell** | pull (Rust iterators) | structured values | live iterators | implicit via pull | externals = OS processes | `LabeledError` | drop the iterator |
+| **Bash/Unix** | push into kernel buffer | bytes/text | live processes | **kernel pipe buffer — bounded, blocking** | **yes — process per stage** (the original pipeline parallelism) | exit codes; `pipefail` off by default | **SIGPIPE** |
+| **jq** | pull, generator semantics (0..N outputs per input, backtracking) | JSON values | filter expression | n/a (generators) | none | abort | `first`/`limit` short-circuit |
+| **Java Streams** | pull, plan-based | objects | lazy source→ops→terminal | n/a (pull) | `.parallel()`, encounter order kept | exceptions | short-circuit terminals |
+| **GenStage / Akka Streams** | **demand-driven (credit) actor stages** | messages | **blueprint, materialized later** (Akka) | demand protocol | yes — stage per actor | supervision / materialized failure | cancellation flows upstream |
+
+Lessons absorbed (and where):
+- **Unix** got two things right in 1973 that successors lost: the bounded kernel buffer (backpressure by blocking = K24) and **SIGPIPE** (early termination propagating upstream — K26 is its structured descendant). Its failures — untyped bytes, `pipefail` defaulting off — are Lambda's payload and error models inverted.
+- **jq**: the practical subset of its everything-is-a-generator semantics is covered by for-comprehensions; its `--stream` mode carries an implementation note for P8 — **`stream("big.json")` requires the parser itself to be incremental**, not just the pipeline.
+- **Nushell**: the typed-pipes cousin, but its pipeline is live iterators — no plan value, no re-forcing, no optimization.
+- **Java Streams**: the closest *API-shape* precedent (lazy source → fusible ops → forcing terminal; parallel opt-in; encounter order kept) — mainstream validation of the D9/K22 shape. Lambda is stronger where it counts: Java's parallel reduce *trusts* combiner associativity (silently varying results if wrong); Lambda **verifies** purity and **pins** order (K19/K22). No row in the table offers deterministic-under-parallelism as a guarantee; that cell is Lambda's alone.
+- **GenStage/Akka Streams**: the closest *architecture* precedent to §11 — demand-driven stages as actors ≅ mailbox streams; Akka's blueprint/materialization split ≅ plan-value/forcing (their "materialized value" ≅ the handle). Industrial-scale proof of the K21 shape.
+
+**Lambda's distinctive combination** (no single row has all four): pipeline-as-value (re-forcible, optimizable) + *verified*-pure fusion and parallelism + deterministic-by-spec results + errors as `T^E` values with ordered end-of-stream. The accepted trade: no push-based hot sources at the surface — the bounded mailbox absorbs push at the edge (K21), the right call for a data language.
+
+#### 11.6.2 K27 — the shared stream core with Node/WHATWG
+
+Status quo: `js_stream.cpp` (~10k lines) already implements Node's legacy stream classes (Readable/Writable/Duplex/Transform/PassThrough + `pipeline()`) over EventEmitter with a simplified push/pull model — working but incomplete; **streams remain the node-baseline linchpin**. Meanwhile Node itself is migrating to **WHATWG Web Streams** (pull, promise-based, credit via `desiredSize`, `AbortSignal`), shipping `toWeb`/`fromWeb` adapters. That migration is the unification gift: **WHATWG semantics are nearly isomorphic to Lambda's** (pull + bounded queue + promised next + cancel ≅ stream value + mailbox + `wait` + scope-cancel).
+
+**K27 — four-layer shared core** *(user-confirmed)*:
+
+- **Layer 0 — uv sources/sinks, one implementation.** K10's "shared uv services, two thin fronts" extends to streams verbatim: fs/net/http/stdio sources built once; `stream("file")` and `fs.createReadStream` are two faces of one uv reader.
+- **Layer 1 — one C-level primitive: the bounded Item chunk-queue with completion.** Bounded queue of Items + completion state carrying `T^E` + cancel signal. This single object implements: Lambda's inter-stage executor queues (K24), the task mailbox backing `stream(h)` (K21), Node's `_readableState` buffer (`highWaterMark` = the bound), and WHATWG's internal queue (`desiredSize` = remaining capacity). The contracts already align three ways:
+
+  | Lambda (K20e) | Node events | WHATWG |
+  |---|---|---|
+  | message | `'data'` | `{value, done: false}` |
+  | handle completes, ok | `'end'` | `{done: true}` |
+  | handle completes, `T^E` | `'error'` | promise rejection |
+  | scope cancel (K26) | `destroy()` | `cancel()` / abort |
+
+  The payload unification is the part **only Jube can do**: Node Buffers are typed arrays are Items; objectMode values are Items — the queue element is uniformly `Item`, so cross-language streaming is queue-sharing, never serialization.
+- **Layer 2 — surfaces stay separate; legacy Node is a shim.** Lambda stream values keep plan semantics; **Web Streams** get a thin spec-faithful face on the core; **legacy Node streams (`js_stream.cpp`) re-base as a compat shim over the Web-Streams-shaped core** — architecturally what modern Node itself is. Legacy stream *observable semantics* (event timing, flowing/paused switching) are NOT unified — dialect-faithful shim territory, regression-gated by the node baseline. K17's protect-what's-green sequencing applies verbatim: build the core under the Lambda executor first or alongside; re-base `js_stream.cpp` only against a green node baseline.
+- **Layer 3 — cross-language adapters become trivial**: `stream(nodeReadable)` (live-I/O source), `toReadable(stream_or_handle)`, and the Web-Streams pair — each a few dozen lines over the shared queue, because Layer 1 made the contracts identical.
+
+Payoff, mirroring K17's logic: the node-baseline streams linchpin and the P8 stream executor are currently two future efforts; K27 makes them **one core plus faces** — the node suite as the shim's harness, the Rosetta/stream suites as Lambda's.
+
+**K28 — the compat commitment split** *(user-confirmed)*: **WHATWG Web Streams are what Lambda commits to** — designed-for, first-class, **aiming 100% spec conformance**; the core (Layer 1) is shaped for WHATWG semantics by construction. **Legacy Node streams are best-effort only** — supported through the shim, prioritized by what real packages need, with **no 100%-pass promise**: the legacy API's three generational rewrites, mode-switching edge cases, and event-timing folklore are exactly the compat treadmill J5 exists to refuse. This is the first concrete instance of the per-guest supported-subset declarations that gap G8 (`Lambda_Semantics_Features.md` §1.8) calls for — and it bets with Node's own direction of travel (Web Streams are the standard; legacy streams are Node's past). Practical consequence for the node baseline: legacy-stream failures are triaged as "shim gap — fix if a real package needs it," not as conformance bugs.
+
+### 11.7 Message wire format (K29)
+
+Where a wire exists and what runs on it — decided 2026-07-08 *(user-confirmed)*:
+
+- **K29a — Task ↔ task (in-context): no serialization, ever.** Items copy/COW heap-to-heap; big immutable flats share by refcount. Most messaging never touches a wire — this is the performance story, and it is settled.
+- **K29b — Flats across processes: serialized, not pointer-shared (v1).** Pointers never cross a process boundary — that is exactly why sharing was restricted to flat *pointer-free* values (K5): a shared buffer contains only raw element data; pointers exist only in each process's local header. **v1 ships the simple mechanism: a flat's raw buffer is serialized inline into the message** (in binary form: tag + length + `memcpy` — no text encoding of numbers). The zero-copy alternative — a small serialized *descriptor* (shm segment handle + offset + shape), each process mapping the segment locally — is a **deferred optimization** for very large buffers, with BEAM's inline-vs-refc binary threshold (64 bytes) as the precedent for a size-based split when the need arrives.
+- **K29c — Process ↔ process: two encodings of one model, text now, binary later.** Mark remains the single model. **Text Mark** is the working format today and remains first-class forever as the debug/log form (a pipe can run in text; any message is loggable via the existing formatter — you can `cat` the conversation). **Binary Mark** is the eventual production wire: self-describing, schemaless, covering every Item type by construction (elements, symbols, decimal128, datetime, N-D typed arrays as raw buffers), length-prefix framed so the same encoding carries K27 stream chunks. Its detailed encoding design is **explicitly deferred — no further work now**; when designed, it will likely borrow wire techniques from Protobuf and MessagePack (varints, tag-length-value, ext-type conventions) while rejecting what disqualified them as the wire itself: Protobuf's schema-first model and MessagePack's Item-model impedance. Both remain candidates as *conversion formats* (`format(x, 'msgpack')`) — never the IPC wire.
+- Non-goals restated: binary Mark is a streaming encode/decode, **not** the position-independent frozen-arena graph format (deferred indefinitely, K5), and it is value-shaped — columnar interchange stays Arrow's job in the deferred I/O proposal. Three formats, three jobs.

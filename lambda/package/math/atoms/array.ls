@@ -424,8 +424,8 @@ fn compute_dyn_metrics(row_boxes, ncols, nrows, env_name) {
     let ah = 0.7 * arrayskip
     let ad = 0.3 * arrayskip
     let rows = dyn_rows(row_boxes, ncols, nrows, ah, ad, env_jot(env_name), 0, 0.0, [])
-    let last = rows[nrows - 1]
-    let total = last[2] + last[1]
+    let tail_row = rows[nrows - 1]
+    let total = tail_row[2] + tail_row[1]
     // `array` aligns to the first row's baseline; matrices/dcases centre on axis
     let off = if (env_name == "array") rows[0][0] else total / 2.0 + 0.25
     let pstrut = max(1.0, dyn_max_h(rows, 0, 0.0)) + 2.0

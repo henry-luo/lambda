@@ -52,6 +52,7 @@ extern "C" {
 
 // Pipe expression current item references (pipe is now part of binary_expr)
 #define SYM_CURRENT_EXPR sym_current_expr
+#define SYM_LAST_INDEX sym_last_index
 
 #define SYM_ASSIGN_EXPR sym_assign_expr
 #define SYM_IF_EXPR sym_if_expr
@@ -128,6 +129,7 @@ extern "C" {
 #define FIELD_SCRUTINEE field_scrutinee
 #define FIELD_LEFT field_left
 #define FIELD_RIGHT field_right
+#define FIELD_LAST field_last
 #define FIELD_NAME field_name
 #define FIELD_AS field_as
 #define FIELD_TYPE field_type
@@ -231,6 +233,7 @@ typedef enum AstNodeType {
     AST_NODE_PIPE,          // pipe expression (| and where)
     AST_NODE_CURRENT_ITEM,  // ~ current item reference
     AST_NODE_CURRENT_INDEX, // ~# current key/index reference
+    AST_NODE_LAST_INDEX,    // last keyword inside subscripts
     AST_NODE_LIST,
     AST_NODE_CONTENT,
     AST_NODE_ARRAY,
@@ -454,6 +457,7 @@ typedef struct AstForNode : AstNode {
     AstGroupClause *group; // group by clause (or NULL)
     AstNode *order;      // order by specs (linked list of AstOrderSpec, or NULL)
     AstNode *limit;      // limit count expression (or NULL)
+    bool limit_from_end;  // true for `limit last N`
     AstNode *offset;     // offset count expression (or NULL)
     AstNode *then;       // body expression
     NameScope *vars;     // scope for the variables in the loop
@@ -713,6 +717,11 @@ typedef struct Transpiler : Script {
     // 'that' clause context: when true, bare identifiers not found in scope
     // are rewritten to ~.name (member access on current item)
     bool in_that_clause;
+
+    // `last` is legal only while building a subscript field; lowering uses the
+    // current object to turn it into len(object) - 1.
+    int subscript_depth;
+    AstNode* last_index_object;
 
     // Object method transpilation context
     AstObjectTypeNode* method_owner;  // non-null when transpiling a method body

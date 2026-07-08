@@ -214,7 +214,10 @@ The mutation gap is the load-bearing reason to add this syntax. Without `arr[i, 
 Additional ergonomic and forward-looking benefits:
 - **NumPy / Julia / R user familiarity** — Lambda's data-processing audience (per `CLAUDE.md`: *"data processing, document transformation, mathematical computation"*) expects this syntax.
 - **Fancy indexing path** — once the parser accepts multi-arg subscripts, future extensions like boolean mask indexing (`arr[mask]`) or integer-array indexing (`arr[[0, 2, 5]]`) compose naturally on the same grammar form.
-- **Negative indices** — `arr[-1, -1]` becomes a clean shorthand for "last row, last column"; chained `arr[-1][-1]` requires two view allocations to get there.
+- **Tail access remains explicit** — `arr[last]` selects the last leading-axis
+  row. Negative N-D coordinates such as `arr[-1, -1]` are absent/null per C15,
+  so multi-axis tail access should use ordinary length arithmetic or bind the
+  row first and then use `last` in the nested subscript.
 
 #### Implementation plan
 

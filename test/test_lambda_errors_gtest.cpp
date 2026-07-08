@@ -714,6 +714,16 @@ TEST_F(NegativeScriptTest, SemanticError_LiteralZeroDivisor) {
     ExpectErrorCode("test/lambda/negative/semantic/literal_zero_divisor.ls", "error[E312]");
 }
 
+TEST_F(NegativeScriptTest, SemanticError_ReservedLastKeyword) {
+    ExpectErrorMessage("test/lambda/negative/semantic/reserved_last_keyword.ls",
+        "reserved keyword");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_OperatorComparabilitySymbol) {
+    ExpectErrorMessage("test/lambda/negative/semantic/operator_comparability_symbol.ls",
+        "no magnitude");
+}
+
 // --- Runtime Error Tests (3xx) ---
 
 TEST_F(NegativeScriptTest, RuntimeError_NullReference) {
@@ -730,6 +740,10 @@ TEST_F(NegativeScriptTest, RuntimeError_IndexOutOfBounds) {
 
 TEST_F(NegativeScriptTest, RuntimeError_InvalidOperation) {
     ExpectErrorWithoutCrash("test/lambda/negative/runtime/invalid_operation.ls");
+}
+
+TEST_F(NegativeScriptTest, RuntimeError_OperatorComparabilityDynamic) {
+    ExpectErrorWithoutCrash("test/lambda/negative/runtime/operator_comparability_dynamic.ls");
 }
 
 // Stack overflow test - uses Phase 2 signal-based handler (sigaltstack/SEH)

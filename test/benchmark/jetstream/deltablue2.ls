@@ -332,8 +332,8 @@ pn chain_test(n: int) {
         i = i + 1
     }
 
-    var last: Variable = (p.vars)[n]
-    return last.value
+    var tail_var: Variable = (p.vars)[n]
+    return tail_var.value
 }
 
 // --- Projection test ---

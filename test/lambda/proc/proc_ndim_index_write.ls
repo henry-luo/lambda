@@ -43,9 +43,9 @@ pn test_negative_index_write() {
     var m = [[1, 2, 3], [4, 5, 6]]
     m[-1, -1] = 999
     m[-2, 0] = 111
-    print(m[1, 2])       // 999
+    print(m[1, 2])       // 6 — negative writes are absent/no-op
     print(" ")
-    print(m[0, 0])       // 111
+    print(m[0, 0])       // 1 — negative writes are absent/no-op
     print("\n")
 }
 

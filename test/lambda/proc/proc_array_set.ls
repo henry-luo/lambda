@@ -19,7 +19,7 @@ pn test_array_int_set() {
     print("\n")
 }
 
-// Test 2: Negative indexing
+// Test 2: Negative indexes are absent and writes do not tail-write
 pn test_array_negative_index() {
     var arr = [1, 2, 3, 4, 5]
     arr[-1] = 99

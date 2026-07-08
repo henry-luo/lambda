@@ -1,6 +1,13 @@
 // Test: Cross-Type Comparison
 // Layer: 1 | Category: boundary | Covers: <, >, <=, >= across type pairs
 
+let any_int: any = 42
+let any_float: any = 3.14
+let any_string: any = "hello"
+let any_true: any = true
+let any_false: any = false
+let any_null: any = null
+
 // ===== Less Than (<) =====
 // Same-type numeric
 (1 < 2)
@@ -20,20 +27,20 @@
 ("a" < "ab")
 ("" < "a")
 // Invalid cross-type < comparisons
-(42 < "hello")
-("hello" < 42)
-(42 < true)
-(true < 42)
-(42 < null)
-(null < 42)
-(3.14 < "hello")
-("hello" < 3.14)
-(3.14 < true)
-(3.14 < null)
-("hello" < true)
-("hello" < null)
-(true < false)
-(null < null)
+(any_int < any_string)
+(any_string < any_int)
+(any_int < any_true)
+(any_true < any_int)
+(any_int < any_null) is null
+(any_null < any_int) is null
+(any_float < any_string)
+(any_string < any_float)
+(any_float < any_true)
+(any_float < any_null) is null
+(any_string < any_true)
+(any_string < any_null) is null
+(any_true < any_false)
+(any_null < any_null) is null
 
 // ===== Greater Than (>) =====
 // Same-type numeric
@@ -50,12 +57,12 @@
 ("def" > "abc")
 ("abc" > "def")
 // Invalid cross-type >
-(42 > "hello")
-(42 > true)
-(42 > null)
-(3.14 > null)
-(true > false)
-(null > null)
+(any_int > any_string)
+(any_int > any_true)
+(any_int > any_null) is null
+(any_float > any_null) is null
+(any_true > any_false)
+(any_null > any_null) is null
 
 // ===== Less Than or Equal (<=) =====
 (1 <= 2)
@@ -67,9 +74,9 @@
 ("abc" <= "def")
 ("def" <= "abc")
 // Invalid
-(42 <= "hello")
-(42 <= true)
-(42 <= null)
+(any_int <= any_string)
+(any_int <= any_true)
+(any_int <= any_null) is null
 
 // ===== Greater Than or Equal (>=) =====
 (2 >= 1)
@@ -81,6 +88,6 @@
 ("def" >= "abc")
 ("abc" >= "def")
 // Invalid
-(42 >= "hello")
-(42 >= true)
-(42 >= null)
+(any_int >= any_string)
+(any_int >= any_true)
+(any_int >= any_null) is null

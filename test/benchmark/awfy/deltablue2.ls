@@ -889,8 +889,8 @@ pn chain_test(n) {
         j = j + 1
     }
     // StayConstraint on last variable
-    var last: Variable = vec_at(vars, n)
-    var sc = stay_constraint_new(last, S_STRONG_DEFAULT, planner)
+    var tail_var: Variable = vec_at(vars, n)
+    var sc = stay_constraint_new(tail_var, S_STRONG_DEFAULT, planner)
     // EditConstraint on first variable
     var first: Variable = vec_at(vars, 0)
     var editC = edit_constraint_new(first, S_PREFERRED, planner)
@@ -908,7 +908,7 @@ pn chain_test(n) {
             c_execute(pc)
             m = m + 1
         }
-        var lastval = (last.val)
+        var lastval = (tail_var.val)
         if (lastval != k) {
             print("Chain test FAILED at k=")
             print(k)

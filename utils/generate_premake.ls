@@ -1829,8 +1829,8 @@ pn main() {
 
     // trim trailing blank line
     if (len(out) > 1) {
-        var last = slice(out, len(out) - 1, len(out))
-        if (last == "\n") {
+        var tail = slice(out, len(out) - 1, len(out))
+        if (tail == "\n") {
             out = slice(out, 0, len(out) - 1)
         }
     }
