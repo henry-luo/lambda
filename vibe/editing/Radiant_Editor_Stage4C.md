@@ -1,9 +1,10 @@
 # Radiant Rich Editor — Stage 4C: The Editor's Test Suite Green on the Lambda Runtime (two phases)
 
-**Date:** 2026-07-02 · **Status:** **Phase A + Phase B GREEN, integrated under `make editor-4c`** — Phase A **1931/1931** (`make editor-4c-js`, headless `lambda.exe js`), Phase B **38/38** (`make editor-4c-view`, `lambda.exe view` + `event_sim`). All 5 LambdaJS runtime bugs + all 4 Phase-B substrate blockers fixed (arrow-caret nav, selectionchange nested-CE, Shift+Enter state_machine invariant, Tab routing). Gestures include **HTML5 drag-reorder** (JS `DragEvent` dispatch, now riding on the retention-safe native `DragDropState` — Radiant_Issue4 fixed). **Milestone 3 COMPLETE:** `make editor-4c-parity` reconciles Radiant 1931/0 group-for-group against the vitest/jsdom oracle (1960 total − 29 React `.test.tsx` = 1931), **exact parity, zero unexplained divergence** (`vibe/editing/Stage4C_Parity_Report.md`); CI wired via `run-tests-linux.sh`. `make test-radiant-baseline` 5934/5934 (currently blocked from completing by an unrelated Issue4 test-link gap → task_62e8f789). React `.test.tsx` stays out (§1.2).
+**Date:** 2026-07-08 · **Status:** **Phase A + Phase B GREEN, integrated and re-stamped under `make editor-4c`** — Phase A **1931/1931** (`make editor-4c-js`, headless `lambda.exe js`), Phase B **39/39** (`make editor-4c-view`, `lambda.exe view` + `event_sim`). All 5 LambdaJS runtime bugs + all Phase-B substrate blockers fixed (arrow-caret nav, selectionchange nested-CE, Shift+Enter state_machine invariant, Tab routing, table col-resize). Gestures include **HTML5 drag-reorder** (JS `DragEvent` dispatch, now riding on the retention-safe native `DragDropState` — Radiant_Issue4 fixed) and **table column resizing** (`Object.assign(elem.style, ...)` now writes through the inline-style host setter). **Milestone 3 COMPLETE:** `make editor-4c-parity` reconciles Radiant 1931/0 group-for-group against the vitest/jsdom oracle (1960 total − 29 React `.test.tsx` = 1931), **exact parity, zero unexplained divergence** (`vibe/editing/Stage4C_Parity_Report.md`); CI wired via `run-tests-linux.sh`. React `.test.tsx` stays out (§1.2).
 **Scope/goal:** Prove the **plain-DOM JS editor** works on the runtime it ships on, in two phases:
 - **Phase A — `lambda.exe js`:** the **full ~1931-test plain-DOM suite** runs and passes on the headless **LambdaJS** runtime — *does the editor's own test corpus pass at the JS level under Lambda?*
 - **Phase B — `lambda.exe view` + `event_sim`:** a **curated subset** (§4.2) runs as true **end-to-end UI automation** under the full Radiant stack (real layout, event dispatch, caret/selection rendering) — *does real interactive editing work end-to-end?*
+- **Phase C — expanded `event_sim` coverage:** promote the most important remaining Phase-A behaviors into real UI fixtures (§4.3), especially cases whose bugs only appear with Radiant geometry, DOM selection, clipboard, toolbar state, and event routing.
 
 Where the runtime falls short, **enhance DOM fidelity (`js_dom`) and `event_sim`** rather than weaken the tests (CLAUDE.md #1).
 **Builds on:** [Radiant_Editor_Stage4B.md](Radiant_Editor_Stage4B.md) (the plain-DOM editor + common C++ substrate + the `view --event-file` testdriver), [JS_13_Web_DOM.md](../../doc/dev/js/JS_13_Web_DOM.md) (LambdaJS DOM surface + known issues).
@@ -12,10 +13,11 @@ Where the runtime falls short, **enhance DOM fidelity (`js_dom`) and `event_sim`
 
 ## 0. TL;DR
 
-The editor's **1960-test vitest suite is green under `jsdom` (Node)** — a browser-API emulation — but has **never run on LambdaJS/Radiant**, the runtime it ships on; only a **13-fixture smoke subset** (`test/ui/editor4b`) exercises it under Radiant. **Stage 4C** makes the shipping runtime a first-class test target, in two complementary phases:
+The editor's **1960-test vitest suite is green under `jsdom` (Node)** — a browser-API emulation — and **Stage 4C now makes the shipping LambdaJS/Radiant runtime a first-class green test target**. The full non-React plain-DOM corpus runs under LambdaJS, and the high-fidelity interaction lane runs through Radiant's real layout/event/caret stack.
 
-- **Phase A (breadth, cheap, fast):** run the **whole plain-DOM suite (~1931 tests; React excluded)** headless under **`lambda.exe js`** and get it green. Proves the editor's logic + DOM-level behavior are correct on **LambdaJS**. Spikes already show the engine + every DOM API the tests use work (§3); the residual is **harness + fixture-inlining infrastructure** (because `fs`/`require` are absent in-engine).
-- **Phase B (depth, slower, high-fidelity):** run a **curated ~8-file interaction subset** under **`lambda.exe view` + `event_sim`** — real events in, real DOM/selection out — to prove true end-to-end editing (typing, keys, selection, paste, drag, toolbar, indent, caret preservation) through the full Radiant stack. This is where **`js_dom` fidelity + `event_sim`** get enhanced.
+- **Phase A (breadth, cheap, fast):** the **whole plain-DOM suite (1931 tests; React excluded)** is green headless under **`lambda.exe js`**. This proves the editor's logic + DOM-level behavior on **LambdaJS**, with fixture inlining and deterministic tier chunking handled by the Phase A runner.
+- **Phase B (depth, slower, high-fidelity):** the curated interaction subset is green under **`lambda.exe view` + `event_sim`** — real events in, real DOM/selection out — proving true end-to-end editing (typing, keys, selection, paste, drag, toolbar, indent, caret preservation, image resize, table col-resize) through the full Radiant stack.
+- **Phase C (expanded depth):** add a second UI lane over high-value Phase-A cases that Phase B intentionally sampled lightly: table merge/split, gap cursor/block atoms, inline atom deletion, richer paste, advanced caret/selection, source-path/reconcile invariants, and mark/block toolbar breadth.
 
 **Why two vehicles:** `lambda.exe js` is fast and covers breadth (all ~1931) but only exercises the JS engine + a minimal DOM — no layout, no real event routing, no caret rendering. `lambda.exe view` exercises the *full* stack but is slower to set up per case, so it validates a representative **subset** deeply. Together: **breadth on A, depth on B.**
 
@@ -44,7 +46,7 @@ The editor's **1960-test vitest suite is green under `jsdom` (Node)** — a brow
 **Phase A logic + tier bulk — GREEN (2026-07-01).** After the inference fix (#3) + tier fixture-inlining (`tools/build-tier.mjs` — virtual FS shimming `node:fs`/`node:path`/`node:url` + inlined fixtures, run under `--document`), the DOM-independent surface is fully green:
 - commands+model+input **207/209** (2 = `Intl.Segmenter`) · helpers+smoke **8/9** (1 = custom-element parse) · **drawing 50/50** · **all tiers 1601/1601** (Slate 293 · PM 212 · HTML 520 · Chromium 163 · structural 22 · drawing 391).
 
-**Phase A view lane — in progress (the hard part).** The 7 plain-DOM `view/*.ts` files exercise the real mount → event → command → reconcile → DOM/selection loop, which surfaced a **chain of LambdaJS runtime bugs** (all documented with symptom / root-cause / minimal-repro / fix in **[vibe/Lambda_Bug.md](../Lambda_Bug.md)**):
+**Phase A view lane — GREEN (the hard part is closed).** The 7 plain-DOM `view/*.ts` files exercise the real mount → event → command → reconcile → DOM/selection loop, and surfaced a **chain of LambdaJS runtime bugs** (all documented with symptom / root-cause / minimal-repro / fix in **[vibe/Lambda_Bug.md](../Lambda_Bug.md)**):
 
 | # | Bug (JS runtime) | Status | Effect |
 |---|---|---|---|
@@ -57,7 +59,7 @@ The editor's **1960-test vitest suite is green under `jsdom` (Node)** — a brow
 
 Current view-lane tally: `dom-bridge` 7/7 · `render-vnode` 9/9 · `html-parser` 12/12 · `use-editor-state` 5/5 · **`editor-view-dom` 9/9** (Bug 4 fixed; the last case also needed `toHaveBeenCalled*` mock matchers added to the in-engine harness) · **`full-editor-dom` 14/14** (Bug 5 fixed; Shift+Tab outdent unblocked once `Element.attributes` was implemented) · **`reconcile` 6/6** (SVG `createElementNS` namespace + `isConnected` implemented).
 
-**Overall: 1931/1931 green under `lambda.exe js`.** Phase A closed; **Phase B** (view + event_sim) can start.
+**Overall: 1931/1931 green under `lambda.exe js`.** Phase A closed, re-stamped, and reconciled against the jsdom oracle.
 
 **Phase A closing fixes (2026-07-02, all in `lambda/js/js_dom.cpp` + `lambda/js/js_runtime.cpp`):**
 - **SVG `createElementNS` namespace** — the constructed URI was hard-coded xhtml. `createElementNS` now records the requested namespace on the element (as a reserved internal `__lambda_ns_uri` attribute) and `namespaceURI` reads it back. All JS-facing attribute enumeration (`getAttribute`/`hasAttribute`/`getAttributeNames`/`attributes`/inner-html serialization) filters names starting with `__lambda_` so the marker doesn't leak.
@@ -71,7 +73,7 @@ Current view-lane tally: `dom-bridge` 7/7 · `render-vnode` 9/9 · `html-parser`
 
 **Bug 5 fix (2026-07-02):** `full-editor-dom` stack overflow — a deeply-nested closure captured the IIFE-scope import `cmdInsertText`, which was registered as `MCONST_MODVAR` but not distinguished from ordinary wrapper-local decls in capture/shadow analysis. The inner arrow snapshotted the wrapper's callable → self-recursive resolution → stack blows. Fix: new `is_iife_func_decl` marker + `jm_modvar_is_iife_scope_binding()` filter in `js_mir_context.hpp` + `js_mir_module_batch_lowering.cpp`. Full detail in [Lambda_Bug.md](../Lambda_Bug.md) §"Bug 5".
 
-**Phase B — 28/28 (blockers) → 32/32 (gestures), all green (2026-07-02):** `make editor-4c-view` runs the 4B baseline + the Stage-4C fixture set (`test/ui/editor4c/`) under `lambda.exe view --event-file` + `event_sim`. **28/28 pass** (13 baseline + 15 new). No `_open_` blockers remain — all 4 were root-caused and fixed.
+**Phase B — 28/28 (blockers) → 32/32 (gestures) → 39/39 (final re-stamp), all green (2026-07-08):** `make editor-4c-view` runs the 4B baseline + the Stage-4C fixture set (`test/ui/editor4c/`) under `lambda.exe view --event-file` + `event_sim`. **39/39 pass**. No `_open_` blockers remain — all were root-caused and fixed.
 
 New Stage-4C fixtures:
 - typing/editing: `type-in-list`, `delete-forward`, `enter-in-list`, `backspace-join`, `multi-typing`, `select-all-delete`, `replace-then-mark`, `shift-enter-linebreak`
@@ -107,21 +109,21 @@ Structured-model assertion (`assert_editor_doc`) still not needed: existing `ass
 **§4.2 gestures — autoformat + link/mention DONE (2026-07-02):**
 - **markdown autoformat** ✅ — the doc's earlier "not wired" note was **stale**: `onBeforeInput`→`dispatchIntent`→`cmdInputRule` (src/input/intent.ts) already runs on every 1-char insert, so autoformat fires with no editor change. Fixtures: `autoformat-inline.json` (`*hi*`→italic span; delimiters consumed) and `autoformat-heading.json` (`## `→`<h2>`; marker consumed).
 - **link / mention** ✅ — the toolbar handlers call `window.prompt(...)`, which didn't exist under headless `view`. Added **`window.prompt`** with a harness-settable response queue (`lambda/js/js_dom.cpp` `js_window_prompt` + `js_window_dialog_push_response`/`_reset`, installed on global+window in `js_dom_set_document`) and an **`event_sim` `set_prompt` event** (`radiant/event_sim.{hpp,cpp}` SIM_EVENT_SET_PROMPT; `response` absent → Cancel/null). Fixtures: `link-toolbar.json` (dblclick word → seed URL → Link button → `<a href>`) and `mention-insert.json` (seed name → mention button → `.rdt-mention` atom).
-- **table col-resize** ⏸ **blocked (filed)** — the resizer overlays render but `getBoundingClientRect()` returns **zero geometry for table/`td` elements** (works for block-level; that's why drag-reorder's `dropAt` succeeds), so `syncColResizers` lays the handles at ~(0,0) and the mousedown never reaches them. Substrate gap in `js_dom.cpp`, not fixture-authorable — filed for follow-up (repro + harness-recreation steps in the task). `cmdSetColumnWidth` itself is vitest-green (`test/commands/table-cells.test.ts`).
+- **table col-resize** ✅ — the earlier blocker was not table `getBoundingClientRect()` after all. The resizer DOM existed, but `Object.assign(e.style, { left, top, height })` boxed the native inline-style host object, so the style setters never ran and the absolute-positioned handles were laid out at the wrong geometry. Fixed in `Object.assign` target handling: inline-style VMAPs stay native so assignments write through `js_dom_set_style_property`, while ordinary VMAPs keep normal object semantics. Fixture: `table-col-resize.json` drags a column handle and asserts explicit cell width; green both standalone and under `make editor-4c-view`.
 
 **Regression check:** `test_js_gtest` 302/303 (pre-existing `vm_runincontext_cross_unit`; `dom_jquery_lib`+`lib_popper` also pre-existing — verified by stash-rebuild); `test_ui_automation_gtest` 219/219; `test_radiant_view_gtest` 20/20; `make test-radiant-baseline` 5934/5934 (fully green; the DnD changes to the core mouse path in `event.cpp` verified non-regressing).
 
-**Milestone 3 — integration (2026-07-02):** the whole Stage-4C suite is now reproducible via `make`:
-- **`make editor-4c-js`** → `test/editor-js/tools/run-phase-a.mjs` bundles each group (core, view, drawing, and the 6 populated tier corpora) to an IIFE, runs it under `lambda.exe js` (`--document` where DOM is needed), and aggregates the in-engine `HARNESS pass=/fail=/skip=` lines. React `.test.tsx` excluded by construction; the README-only `tier_c_wpt` placeholder is skipped. **PHASE-A TOTAL 1931/1931.**
-- **`make editor-4c-view`** → the Phase-B fixtures under `lambda.exe view` + `event_sim`. **38/38.**
+**Milestone 3 — integration (2026-07-08 re-stamp):** the whole Stage-4C suite is reproducible via `make`:
+- **`make editor-4c-js`** → `test/editor-js/tools/run-phase-a.mjs` bundles each group (core, view, drawing, and the 6 populated tier corpora) to an IIFE, runs it under `lambda.exe js` (`--document` where DOM is needed), and aggregates the in-engine `HARNESS pass=/fail=/skip=` lines. React `.test.tsx` excluded by construction; the README-only `tier_c_wpt` placeholder is skipped. The runner now regenerates its `temp/4c-spikes/{page,dom_page}.html` harness pages and chunks the largest fixture tiers (`tier_e_html`, `tier_0_drawing`) into deterministic sub-bundles, then reports the same logical group totals. **PHASE-A TOTAL 1931/1931.**
+- **`make editor-4c-view`** → the Phase-B fixtures under `lambda.exe view` + `event_sim`. **39/39.**
 - **`make editor-4c-parity`** → `test/editor-js/tools/parity-report.mjs` runs the vitest/jsdom oracle (the editor's own suite under Node) AND Phase A under `lambda.exe js`, then reconciles **per run-phase-a group** (the oracle's per-file counts summed into the same core/view/drawing/tier_* groups vs. Radiant's per-group pass counts). Writes `vibe/editing/Stage4C_Parity_Report.md`; exits non-zero on any unexplained divergence.
 - **`make editor-4c`** → now `editor-4c-parity` + `editor-4c-view` (parity subsumes the Phase-A run); exits non-zero on any failure. Confirmed green end-to-end.
 
-**Milestone 3 COMPLETE (2026-07-02) — parity + CI wired:**
+**Milestone 3 COMPLETE (2026-07-08 re-stamp) — parity + CI wired:**
 - **Parity report ✅ EXACT.** Oracle = **1960** tests (all green under jsdom); of these **29** are React `*.test.tsx` (4 files: editor-view 8, paste-integration 10, render 7, tab-keybinding 4) — excluded from Phase A by construction (§1.2). The remaining **1931** non-React tests reconcile **group-for-group** against Radiant's 1931/0: `core 218 · view 62 · drawing 50 · tier_a 293 · tier_b 212 · tier_d 22 · tier_e 520 · tier_f 163 · tier_0 391`. `1931 + 29 = 1960` — exact, zero unexplained divergence. Report: `vibe/editing/Stage4C_Parity_Report.md`.
 - **CI wired.** `.github/workflows/run-tests-linux.sh` now installs the editor-js npm deps and runs `make editor-4c` after `make test`, folding its exit into the overall result (headless: Phase A/parity need only node + esbuild + `lambda.exe js` + jsdom; Phase B uses `lambda.exe view --headless`).
 
-**Phase B next up:** more Lane-B fixture translations — block-type-select (h1↔p), gap-cursor around images, table cell selection, paste plain text (via `paste_text` event), link toolbar. Then diagnose the 4 `_open_` blockers — the arrow-caret + selectionchange pair are likely the same nested-CE topology issue (§5.3); the shift-enter state_machine invariant + Tab-not-reaching-handler need separate Radiant substrate investigation.
+**Future optional Lane-B expansion:** broader fixture translation remains possible (block-type-select, gap-cursor around images, deeper table cell selection, more command-file cases), but it is no longer blocking Stage 4C acceptance. The original `_open_` blockers have been diagnosed and fixed.
 
 **Bug 4 fix (2026-07-01):** root-caused via `temp/4c-spikes/t3.js` (minimal: nested inline-`new` of a class whose field-arrow captures an IIFE-scope function decl). The hoist of an inner function declaration wrote the closure only to its local reg + shared scope env, never to the **module-var slot** that nested-closure captures resolve through (`js_get_module_var`). Fix: `jm_hoisted_func_modvar_write_through()` mirrors the write-through the non-direct statement path already does. Regression: `test/js/class_field_decl_capture_nested_new.{js,txt}`. Validated: `test_js_gtest` 301/302, lambda baseline 3227/3228 (only pre-existing `vm_runincontext_cross_unit`), zero regression. Full detail in [Lambda_Bug.md](../Lambda_Bug.md) §"Bug 4".
 
@@ -194,14 +196,14 @@ Spikes under `./temp/4c-spikes/` against the current `lambda.exe`. **They substa
 
 ### 4.1 Phase A — full suite under `lambda.exe js` (breadth)
 
-Run the whole ~1931-test plain-DOM suite headless on LambdaJS. Vehicle: **`lambda.exe js <bundle.js>`** (and/or `js --document <page.html>` for the `view/*.ts` DOM tests), the same headless runner `test_js_gtest` already uses.
+Run the whole 1931-test plain-DOM suite headless on LambdaJS. Vehicle: **`lambda.exe js <bundle.js>`** (and/or `js --document <page.html>` for the `view/*.ts` DOM tests), the same headless runner `test_js_gtest` already uses.
 
-**Harness/bundling pipeline** (`tools/build-conformance.mjs`, sibling of `tools/build-dom-page.mjs`):
+**Harness/bundling pipeline** (`tools/build-conformance.mjs`, `tools/build-tier.mjs`, `tools/run-phase-a.mjs`):
 1. **esbuild** compiles `src/` + the vitest `.test.ts` files (**excluding `*.test.tsx`**) to JS.
 2. Swap the vitest imports (`describe`/`it`/`expect`/`vi`) for a **~150-line in-engine shim** that records results and prints `PASS n / FAIL m` + per-failure detail to stdout.
 3. Replace Node **`fs`/`path`** fixture reads with **build-time inlined** data (walk the tier fixture dirs → emit `fixtures.generated.ts`) — the one real infra lift (~1601 tier cases depend on it).
 4. Bundle to **classic IIFE** module(s) (no `type="module"`). For the ~7 `view/*.ts` DOM tests, run under `js --document <minimal.html>` so `js_dom` is present.
-5. `make editor-4c-js`: build → run the bundle(s) → grep the summary → fail on `FAIL != 0`. (May batch via `js-test-batch` for speed; split the corpus across a few bundles if one page strains the retained runtime.)
+5. `make editor-4c-js`: build → run the bundle(s) → parse the `HARNESS pass=/fail=/skip=` summaries → fail on any non-zero fail count. The largest fixture tiers (`tier_e_html`, `tier_0_drawing`) are split into deterministic sub-bundles and aggregated back to the same logical group totals.
 
 **What Phase A proves:** the editor's logic + DOM-level behavior are correct on LambdaJS. The ~7 `view/*.ts` tests will surface any `js_dom` *semantic* gaps (property/attr reflection, `Range`/text-node/live-collection edge cases) — fixed root-cause in `js_dom` here (§5).
 
@@ -211,7 +213,7 @@ Run the whole ~1931-test plain-DOM suite headless on LambdaJS. Vehicle: **`lambd
 
 Run a representative subset as **event-driven UI automation** through the full Radiant stack — the `test/ui/editor4b` path generalized. This validates what `lambda.exe js` cannot: real event routing (`beforeinput` → intent → command → reconcile → caret), layout-driven geometry, coordinate hit-testing, caret/selection rendering, `selectionchange` delivery, clipboard, IME.
 
-**Initial Lane B pick (~8 files, ~117 tests — covers every distinct editing interaction; expand/reduce later):**
+**Lane B coverage target (implemented as representative event fixtures — covers every distinct editing interaction; expand optionally later):**
 
 | File | Tests | Interactions exercised end-to-end |
 |---|---:|---|
@@ -229,6 +231,26 @@ Run a representative subset as **event-driven UI automation** through the full R
 **How the command-file cases become event fixtures:** each command test's *(initial doc, operation, expected model)* is re-expressed as *(load/type initial content, drive the real gesture, assert on DOM/selection)*. A generated fixture per case, or a data-driven harness page that the fixture steps through — decided at Phase-B start. The `view/*.ts` files map most directly (they already mount + dispatch).
 
 **Phase B exit:** the subset green under `lambda.exe view` + `event_sim`; `make test-radiant-baseline` unchanged.
+
+### 4.3 Phase C — expanded Phase-A cases under `lambda.exe view` + `event_sim`
+
+Phase C does **not** attempt to replay the full 1931-test Phase-A corpus through UI automation. Instead, it promotes the highest-risk Phase-A behaviors whose failures are most likely to require the real Radiant stack: geometry, hit testing, DOM selection projection, clipboard payloads, toolbar state, and reconciled DOM identity.
+
+| Priority | Area | Phase A source tests | Phase C coverage |
+|---|---|---|---|
+| P0 | **Tables beyond resize** | `commands/table-cells.test.ts`, `commands/structural-commands.test.ts` | merge contiguous cells, split a colspan cell, retain col-resize, later add row/column buttons if the demo exposes them |
+| P0 | **Gap cursor / block atoms** | `commands/gap-cursor.test.ts` | click/select block atom, show gap caret, type at gap, Enter/Delete/Backspace at gap |
+| P0 | **Inline atom / mention behavior** | `commands/inline-atom.test.ts` | insert mention, delete mention as one unit, caret movement across mention as an atomic stop |
+| P0 | **Paste matrix** | `commands/paste.test.ts`, `view/full-editor-dom.test.ts` | marked inline HTML, paste into empty block, selected-range replacement, multi-paragraph plain text, pasted image HTML |
+| P0 | **Advanced caret movement** | `commands/caret.test.ts` | Shift+Arrow extension, word movement, cross-block movement, document start/end shortcuts where supported |
+| P1 | **Block/mark toolbar breadth** | `commands/text-commands.test.ts`, `commands/set-mark.test.ts`, `commands/input-rules.test.ts` | block type select, blockquote/hr autoformat, code, strikethrough, highlight active state |
+| P1 | **DOM bridge / source-path assertions** | `view/dom-bridge.test.ts` | click/select by `data-source-path`, assert editor selection path/offset once `event_sim` has a model-selection assertion |
+| P1 | **Reconcile + selection preservation** | `view/reconcile.test.ts` | caret survives updates elsewhere, empty-block `<br>` transitions, sibling deletion preserves focused selection |
+| P1 | **History nuance** | `model/history.test.ts` | undo/redo after multi-step paste and toolbar commands; caret-only moves stay out of history |
+
+**Initial C1 implementation:** add `test/ui/editor4c_phase_c/*.json`, wire it into `make editor-4c-view`, and keep it intentionally small/high-signal: table merge/split, gap cursor insertion/deletion, mention atom deletion, richer paste, block type select, code/strikethrough/highlight, and blockquote/hr autoformat. Larger C2 work can add row/column table UI and structured editor-model assertions if needed.
+
+**Phase C exit:** C1 fixtures green under `lambda.exe view --event-file`; `make editor-4c-view` includes Phase B + Phase C and remains green.
 
 ---
 
@@ -277,10 +299,11 @@ APIs exist (§3.1); **semantics** need hardening. Surfaced by Phase A's `view/*.
 | **0 — Harness foundation** | ✅ **done** | `build-conformance.mjs` (bundle + `describe/it/expect` shim + fixture inlining); a **10-test slice** green under `lambda.exe js` | Slice green; exact ~1931 count enumerated; pipeline reproducible |
 | **A1 — Logic/tier bulk under `js`** | ✅ **done** | model/commands/input/drawing + 6 tier corpora green under `lambda.exe js` | ~1866 green (207 core + 8 misc + 50 drawing + 1601 tier); jsdom parity |
 | **A2 — `view/*.ts` under `js`** | ✅ **done** | the 7 plain-DOM view tests green under `js --document`; the JS-runtime bug chain (Bugs 1-5 all fixed) + tail DOM-fidelity & `Intl.Segmenter` fixes | 63/63 across the 7 view files + caret 11/11 + smoke 3/3; Phase A total 1931/1931 |
-| **B0 — event_sim + geometry prerequisites** | ◑ partial | structured-model assertion (§6.1) — DEFERRED (existing `assert_attribute` on `[data-source-path]` + `assert_text` cover the pilot); the JS-subtree geometry fix (§5.2) so chrome clicks land — not needed yet by the pilot fixtures | editor-4c-view 17/17 without it; add when the first non-covered case surfaces |
-| **B1 — Lane B subset** | ✅ **done (initial set)** | `make editor-4c-view` runs `test/ui/editor4b/*.json` (13) + `test/ui/editor4c/*.json` (25, incl. drag-reorder, autoformat, link/mention); all 4 former `_open_` blockers root-caused + fixed in the Radiant substrate (state_machine caret-projection guard, Tab keydown-first routing, `event_sim` Arrow* aliases, per-fixture `html`) | **38/38 pass**; **`make test-radiant-baseline` 5934/5934** (fully green — the substrate fixes also cleared the 3 form-drag + 1 view-cmd pre-existing failures) |
-| **B1 expansion — remaining Lane-B files** | ⬚ not started | convert `commands/{text-commands,structural-commands,caret,paste,input-rules}` cases (~98 tests) + expand `view/{editor-view-dom,full-editor-dom,reconcile}` (~29) as fixtures; investigate the 2 `_open_` blockers | Lane-B subset green under `lambda.exe view` + `event_sim` |
-| **3 — Integration & parity** | ✅ **done** | `make editor-4c-js` (Phase A), `make editor-4c-view` (Phase B), `make editor-4c-parity` (Radiant↔jsdom oracle reconciliation → `Stage4C_Parity_Report.md`), `make editor-4c` (parity + view); CI wired in `run-tests-linux.sh` | **`make editor-4c` green: Phase A 1931/1931 + Phase B 38/38; parity EXACT** (1931 non-React reconcile group-for-group; 29 React `.test.tsx` excluded → 1960 oracle total) |
+| **B0 — event_sim + geometry prerequisites** | ✅ **done for Stage 4C** | structured-model assertion (§6.1) remains DEFERRED (existing `assert_attribute` on `[data-source-path]` + `assert_text` cover the pilot); the suspected JS-subtree geometry blocker was disproven/replaced by concrete fixes for window mouseup and inline-style assignment | editor-4c-view **39/39** without structured-model assertion; add only when a future fixture needs model-level comparison |
+| **B1 — Lane B subset** | ✅ **done** | `make editor-4c-view` runs `test/ui/editor4b/*.json` (13) + `test/ui/editor4c/*.json` (26, incl. drag-reorder, autoformat, link/mention, table col-resize); all former `_open_` blockers root-caused + fixed in the Radiant substrate/runtime (`state_machine` caret-projection guard, Tab keydown-first routing, `event_sim` Arrow* aliases + symbolic `view_type`, per-fixture `html`, inline-style `Object.assign`) | **39/39 pass**; table col-resize green standalone and in-suite |
+| **C1 — Phase-A-to-UI expansion** | ◑ **in progress** | `test/ui/editor4c_phase_c/*.json` promotes high-value Phase-A cases into `event_sim`: table merge/split, gap cursor, mention atom delete, richer paste, block/mark toolbar breadth, blockquote/hr autoformat | C1 fixtures green and included in `make editor-4c-view` |
+| **C2 — optional deeper Lane-B files** | ⬚ optional | add row/column table controls if exposed by the demo, model-selection assertions for `dom-bridge`, and deeper reconcile/history fixtures | Not required for Stage 4C exit; current Lane-B subset is green under `lambda.exe view` + `event_sim` |
+| **3 — Integration & parity** | ✅ **done, re-stamped 2026-07-08** | `make editor-4c-js` (Phase A), `make editor-4c-view` (Phase B), `make editor-4c-parity` (Radiant↔jsdom oracle reconciliation → `Stage4C_Parity_Report.md`), `make editor-4c` (parity + view); CI wired in `run-tests-linux.sh` | **`make editor-4c` green: Phase A 1931/1931 + Phase B 39/39; parity EXACT** (1931 non-React reconcile group-for-group; 29 React `.test.tsx` excluded → 1960 oracle total) |
 
 **Guard (every milestone):** never regress `make test-radiant-baseline` or the jsdom suite; triage every divergence to a cause (LambdaJS/`js_dom`/substrate **or** a legitimate editor difference) before accepting or fixing it.
 
@@ -290,9 +313,9 @@ APIs exist (§3.1); **semantics** need hardening. Surfaced by Phase A's `view/*.
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| Fixture-inlining bloats the bundle / strains the retained runtime | medium | Split the corpus across a few bundles; the tier data is text and compresses; batch via `js-test-batch` |
+| Fixture-inlining bloats the bundle / strains the retained runtime | mitigated | Phase A chunks the largest tier corpora (`tier_e_html`, `tier_0_drawing`) into deterministic sub-bundles and aggregates them back to the same parity groups |
 | `js_dom` semantic gaps deeper than expected (Range/text-node/live-collection) | medium | Surfaced early by Phase A2's `view/*.ts`; fix root-cause; §11 governs the fallback |
-| Geometry/orphaned-subtree (4B follow-up) blocks Phase B chrome clicks | medium | Milestone B0 does the dedicated build+trace before B1 |
+| Geometry/orphaned-subtree (4B follow-up) blocks Phase B chrome clicks | mitigated | §5.2 was re-tested; the real blockers were window mouseup delivery and inline-style assignment, both fixed |
 | Command-test → event-fixture translation is lossy (model assert vs. gesture) | medium | Use structured-model assertion (§6.1); keep those cases' authoritative form in Phase A; Phase B asserts the observable e2e result |
 | Harness drifts from vitest (two sources of truth) | medium | Generate the harness *from* the same `.test.ts` files (compile, don't re-author); parity report is the gate |
 | `selectionchange`-nested-CE limits some Phase B cases | low–med | editor-side just-in-time sync (shipped) or the `DocState` runtime-retention fix |
@@ -310,14 +333,14 @@ APIs exist (§3.1); **semantics** need hardening. Surfaced by Phase A's `view/*.
 
 ---
 
-## 11. Open item (one)
+## 11. Open Items
 
-**DOM-fidelity bar (§5).** Default: **fix `js_dom`/substrate to full fidelity** so tests pass unmodified. Fallback where a faithful C++ fix is disproportionate: a **documented** per-case test-side adaptation (as 4B did for `.title`/`is-active`/selection sync). Confirm the default + whether the fallback is permitted.
+No Stage-4C-blocking open items remain.
 
-*(Settled by directive: Phase A vehicle = `lambda.exe js`; target = ~1931 plain-DOM, React excluded; Phase B vehicle = `view` + `event_sim` on the §4.2 subset, expandable later.)*
+**DOM-fidelity bar (§5).** Settled by implementation: fix `js_dom`/substrate root causes wherever feasible, keep the tests exercising real editor behavior, and reserve documented test-side adaptation only for disproportionate fidelity gaps. The latest re-stamp needed root-cause fixes instead of adaptations: deterministic Phase-A tier chunking, generated DOM harness pages, symbolic `event_sim` view-type assertions, and native inline-style `Object.assign` preservation.
 
 ---
 
 ## 12. Summary
 
-Stage 4C promotes the editor's own suite onto the runtime it ships on, in two phases. **Phase A** runs the **whole ~1931-test plain-DOM suite headless under `lambda.exe js`** — cheap breadth that proves the editor's logic + DOM behavior on LambdaJS; spikes show the engine and DOM APIs already work, so the lift is a **harness + fixture-inlining pipeline** plus targeted `js_dom` fidelity fixes. **Phase B** runs a **curated ~8-file interaction subset under `lambda.exe view` + `event_sim`** — slower, high-fidelity depth that proves real end-to-end editing through the full Radiant stack, and is where DOM fidelity and `event_sim` get hardened. React stays out (the separate deferred path). Done when ~1931 pass under `js` (A) and the interaction subset passes under `view` (B), both at parity with the jsdom oracle.
+Stage 4C has promoted the editor's own suite onto the runtime it ships on. **Phase A** is green: **1931/1931** non-React plain-DOM tests run headless under `lambda.exe js`, with exact group-for-group parity against the jsdom oracle. **Phase B** is green: **39/39** curated interaction fixtures run under `lambda.exe view` + `event_sim`, including paste/copy, toolbar commands, autoformat, image resize, drag-reorder, and table col-resize. React remains explicitly out of scope. `make editor-4c` is the acceptance gate and is green as of the 2026-07-08 re-stamp.
