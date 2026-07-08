@@ -152,6 +152,7 @@ export class FullEditorDom {
   private selectionFromDom = false
   private hoverBlockIdx: number | null = null
   private dragSrcIdx: number | null = null
+  private lastTableCellPath: SourcePath | null = null
 
   private readonly onSelChangeBound: () => void
 
@@ -235,10 +236,16 @@ export class FullEditorDom {
 
   private render(): void {
     reconcileDoc(this.surface, renderDoc(this.state.doc))
+    this.syncHarnessState()
     this.projectSelection()
     this.syncCellHighlight()
     this.syncToolbar()
     this.syncOverlays()
+  }
+
+  private syncHarnessState(): void {
+    this.surface.setAttribute('data-rdt-selection', selKey(this.state.selection))
+    this.surface.setAttribute('data-rdt-last-cell', this.lastTableCellPath?.join(',') ?? '')
   }
 
   // source selection → DOM (skip once when the change came from the DOM)
@@ -505,6 +512,11 @@ export class FullEditorDom {
           // Radiant syncs table clicks through editor state before DOM Selection is reliable.
           if (stateAnchor !== null && stateAnchor.join(',') !== key) paths.push(stateAnchor)
         }
+        if (paths.length === 0 && this.lastTableCellPath !== null && this.lastTableCellPath.join(',') !== key) {
+          // event_sim can dispatch the second click before DOM Selection exposes a
+          // text anchor inside the first cell; keep the UI's last cell anchor.
+          paths.push(this.lastTableCellPath)
+        }
         if (paths.length === 0) {
           const dom = window.getSelection()
           const anchorEl = dom?.anchorNode != null
@@ -517,10 +529,18 @@ export class FullEditorDom {
           }
         }
         if (!paths.some(p => p.join(',') === key)) paths.push(clicked)
+        this.lastTableCellPath = clicked
         this.dispatch({ type: 'set_selection', sel: multiNodeSelection(paths) })
         window.getSelection()?.removeAllRanges()
       }
       return
+    }
+    if (cellEl !== null) {
+      const owner = nearestPathOwner(cellEl)
+      if (owner !== null) {
+        this.lastTableCellPath = pathOf(owner)
+        this.syncHarnessState()
+      }
     }
     if (t.tagName === 'IMG') return   // leave image mousedown alone so native drag can start
     const atomEl = t.tagName === 'HR' ? t : t.closest<HTMLElement>('.rdt-drawing')
