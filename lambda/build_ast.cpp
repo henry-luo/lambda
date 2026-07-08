@@ -3653,6 +3653,36 @@ static inline bool is_elementwise_comparison_op(Operator op) {
     return op >= OPERATOR_ELEM_EQ && op <= OPERATOR_ELEM_GE;
 }
 
+static inline bool is_container_type_id(TypeId type_id) {
+    return type_id >= LMD_TYPE_CONTAINER && type_id < LMD_TYPE_ANY;
+}
+
+static bool is_direct_elementwise_comparison(AstNode* node) {
+    node = unwrap_primary_node(node);
+    return node && node->node_type == AST_NODE_BINARY &&
+        is_elementwise_comparison_op(((AstBinaryNode*)node)->op);
+}
+
+static void lint_condition_expr(Transpiler* tp, TSNode cond_node, AstNode* cond, const char* context) {
+    if (!cond) return;
+    TSPoint point = ts_node_start_point(cond_node);
+    int line = (int)point.row + 1;
+
+    if (is_direct_elementwise_comparison(cond)) {
+        // masks are containers and therefore truthy; condition sites need an explicit scalar reduction.
+        log_warn("lambda_condition_lint: line %d: elementwise comparison used as %s condition; use any(...), all(...), sum(mask), or a[mask] explicitly",
+            line, context);
+        return;
+    }
+
+    TypeId cond_type = cond->type ? cond->type->type_id : LMD_TYPE_ANY;
+    if (is_container_type_id(cond_type)) {
+        // containers are truthy by design, so a container condition is almost always a missing scalar predicate.
+        log_warn("lambda_condition_lint: line %d: %s condition has container type %s, which is always truthy; use len(...), any(...), all(...), or an explicit comparison",
+            line, context, get_type_name(cond_type));
+    }
+}
+
 static bool is_magnitude_numeric_type(TypeId type_id) {
     return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 ||
            type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_DECIMAL ||
@@ -4223,6 +4253,7 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     AstIfNode* ast_node = (AstIfNode*)alloc_ast_node(tp, AST_NODE_IF_EXPR, if_node, sizeof(AstIfNode));
     TSNode cond_node = ts_node_child_by_field_id(if_node, FIELD_COND);
     ast_node->cond = build_expr(tp, cond_node);
+    lint_condition_expr(tp, cond_node, ast_node->cond, "if");
 
     // Defensive validation: ensure condition was built successfully
     if (!ast_node->cond) {
@@ -6776,58 +6807,59 @@ void build_for_clauses(Transpiler* tp, TSNode for_node, AstForNode* ast_node) {
             TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
             TSNode child = ts_tree_cursor_current_node(&cursor);
 
-        if (field_id == FIELD_WHERE) {
-            // Where clause - get the condition expression
-            TSNode cond_node = ts_node_child_by_field_id(child, FIELD_COND);
-            ast_node->where = build_expr(tp, cond_node);
-        }
-        else if (field_id == FIELD_GROUP) {
-            // Group by clause
-            ast_node->group = (AstGroupClause*)build_group_clause(tp, child);
-            // Register group name in scope (as a map with .key and .items)
-            if (ast_node->group && ast_node->group->name) {
-                AstNamedNode* group_var = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, child, sizeof(AstNamedNode));
-                group_var->name = ast_node->group->name;
-                group_var->type = &TYPE_MAP;  // {key: ..., items: [...]}
-                push_name(tp, group_var, NULL);
+            if (field_id == FIELD_WHERE || ts_node_symbol(child) == sym_for_where_clause) {
+                // Where clause - get the condition expression
+                TSNode cond_node = ts_node_child_by_field_id(child, FIELD_COND);
+                ast_node->where = build_expr(tp, cond_node);
+                lint_condition_expr(tp, cond_node, ast_node->where, "where");
             }
-        }
-        else if (field_id == FIELD_ORDER) {
-            // Order by clause - contains multiple order_spec
-            TSTreeCursor order_cursor = ts_tree_cursor_new(child);
-            bool has_spec = ts_tree_cursor_goto_first_child(&order_cursor);
-            while (has_spec) {
-                TSSymbol spec_field = ts_tree_cursor_current_field_id(&order_cursor);
-                if (spec_field == FIELD_SPEC) {
-                    TSNode spec_node = ts_tree_cursor_current_node(&order_cursor);
-                    AstNode* order_spec = build_order_spec(tp, spec_node);
-                    if (prev_order == NULL) {
-                        ast_node->order = order_spec;
-                    } else {
-                        prev_order->next = order_spec;
-                    }
-                    prev_order = order_spec;
+            else if (field_id == FIELD_GROUP) {
+                // Group by clause
+                ast_node->group = (AstGroupClause*)build_group_clause(tp, child);
+                // Register group name in scope (as a map with .key and .items)
+                if (ast_node->group && ast_node->group->name) {
+                    AstNamedNode* group_var = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, child, sizeof(AstNamedNode));
+                    group_var->name = ast_node->group->name;
+                    group_var->type = &TYPE_MAP;  // {key: ..., items: [...]}
+                    push_name(tp, group_var, NULL);
                 }
-                has_spec = ts_tree_cursor_goto_next_sibling(&order_cursor);
             }
-            ts_tree_cursor_delete(&order_cursor);
-        }
-        else if (field_id == FIELD_LIMIT) {
-            // Limit clause
-            TSNode last_node = ts_node_child_by_field_id(child, FIELD_LAST);
-            ast_node->limit_from_end = !ts_node_is_null(last_node);
-            TSNode count_node = ts_node_child_by_field_id(child, FIELD_COUNT);
-            ast_node->limit = build_expr(tp, count_node);
-        }
-        else if (field_id == FIELD_OFFSET) {
-            // Offset clause
-            TSNode count_node = ts_node_child_by_field_id(child, FIELD_COUNT);
-            ast_node->offset = build_expr(tp, count_node);
-        }
+            else if (field_id == FIELD_ORDER) {
+                // Order by clause - contains multiple order_spec
+                TSTreeCursor order_cursor = ts_tree_cursor_new(child);
+                bool has_spec = ts_tree_cursor_goto_first_child(&order_cursor);
+                while (has_spec) {
+                    TSSymbol spec_field = ts_tree_cursor_current_field_id(&order_cursor);
+                    if (spec_field == FIELD_SPEC) {
+                        TSNode spec_node = ts_tree_cursor_current_node(&order_cursor);
+                        AstNode* order_spec = build_order_spec(tp, spec_node);
+                        if (prev_order == NULL) {
+                            ast_node->order = order_spec;
+                        } else {
+                            prev_order->next = order_spec;
+                        }
+                        prev_order = order_spec;
+                    }
+                    has_spec = ts_tree_cursor_goto_next_sibling(&order_cursor);
+                }
+                ts_tree_cursor_delete(&order_cursor);
+            }
+            else if (field_id == FIELD_LIMIT) {
+                // Limit clause
+                TSNode last_node = ts_node_child_by_field_id(child, FIELD_LAST);
+                ast_node->limit_from_end = !ts_node_is_null(last_node);
+                TSNode count_node = ts_node_child_by_field_id(child, FIELD_COUNT);
+                ast_node->limit = build_expr(tp, count_node);
+            }
+            else if (field_id == FIELD_OFFSET) {
+                // Offset clause
+                TSNode count_node = ts_node_child_by_field_id(child, FIELD_COUNT);
+                ast_node->offset = build_expr(tp, count_node);
+            }
 
-        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
-    }
-    ts_tree_cursor_delete(&cursor);
+            has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+        }
+        ts_tree_cursor_delete(&cursor);
     } // end if for_clauses node found
 
     if (!ast_node->loop) {
@@ -6982,6 +7014,7 @@ AstNode* build_while_stam(Transpiler* tp, TSNode while_node) {
     // build condition
     TSNode cond_node = ts_node_child_by_field_id(while_node, FIELD_COND);
     ast_node->cond = build_expr(tp, cond_node);
+    lint_condition_expr(tp, cond_node, ast_node->cond, "while");
     log_debug("got while cond type %d", ast_node->cond ? ast_node->cond->node_type : -1);
 
     // build body

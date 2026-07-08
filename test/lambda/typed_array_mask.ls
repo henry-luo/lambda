@@ -50,8 +50,12 @@ m[ [true, false] ]              // [[1, 5]]
 m[ [false, true] ]              // [[3, 2]]
 
 // ============================================================
-// COMPOSITION — masks reduce/compose
+// MASK CONSUMPTION — masks count/select; combination helpers are deferred
 // ============================================================
+'=== direct mask counts ==='
+sum(a gt 0)                      // 3 true lanes
+sum(m gt 2)                      // 2 true lanes across the full shape
+
 '=== reductions over masked ==='
 sum(a[a gt 0])                  // 9   (1+3+5)
 len(a[a gt 0])                  // 3   (count of positives)

@@ -25,6 +25,9 @@
 '=== 1-D mask on 2-D → row select ==='
 [[1, 5]]
 [[3, 2]]
+'=== direct mask counts ==='
+3
+2
 '=== reductions over masked ==='
 9
 3
