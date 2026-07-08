@@ -15,9 +15,7 @@ extern "C" {
 static inline bool js_map_kind_uses_default_object_to_primitive(uint8_t map_kind) {
     return map_kind == MAP_KIND_WEB_API_RESOURCE ||
            map_kind == MAP_KIND_CSS_NAMESPACE ||
-           map_kind == MAP_KIND_CSSOM ||
-           map_kind == MAP_KIND_DOC_PROXY ||
-           map_kind == MAP_KIND_FOREIGN_DOC;
+           map_kind == MAP_KIND_CSSOM;
 }
 
 static inline bool js_map_kind_is_ordinary_shape(uint8_t map_kind) {

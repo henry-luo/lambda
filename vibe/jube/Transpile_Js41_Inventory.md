@@ -47,9 +47,9 @@ Observed `MAP_KIND_*` values:
 | `MAP_KIND_TYPED_ARRAY` | typed-array internal-slot object |
 | `MAP_KIND_ARRAYBUFFER` | ArrayBuffer object |
 | `MAP_KIND_DATAVIEW` | DataView object |
-| `MAP_KIND_DOM` | Radiant DOM wrapper |
-| `MAP_KIND_DOC_PROXY` | active document proxy |
-| `MAP_KIND_FOREIGN_DOC` | foreign document proxy |
+| value 4, retired from DOM nodes | Radiant DOM wrappers now use branded native VMaps |
+| value 8, reserved | retired active document proxy map carrier |
+| value 10, reserved | retired foreign-document proxy map carrier |
 | `MAP_KIND_CSSOM` | CSSOM wrappers |
 | `MAP_KIND_ITERATOR` | engine-internal iterator objects |
 | `MAP_KIND_PROXY` | Proxy object |
