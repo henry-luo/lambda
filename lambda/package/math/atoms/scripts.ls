@@ -356,10 +356,8 @@ fn render_big_op_limits(base, node, context, render_fn) {
     // makeLimitsStack — only integrals (side-limits, routed earlier) stay off it.
     if (is_text_op == null and unicode != null and (has_sub or has_sup))
         make_limits_stack(large_op_box_metric(unicode), sub_box, sup_box, true)
-    else if (is_text_op != null and (has_sub or has_sup))
-        make_limits_stack(op_box, sub_box, sup_box, false)
     else if (has_sub or has_sup)
-        render_large_op_limits_vlist(op_box, sub_box, sup_box, is_text_op != null)
+        make_limits_stack(op_box, sub_box, sup_box, false)
     else
         (let scaled_op = if (is_text_op != null) op_box else box.with_scale(op_box, 1.5),
          box.vbox([{box: scaled_op, shift: 0.0}]))
@@ -392,142 +390,6 @@ fn large_op_symbol_depth(text) {
         text == "⨄" or text == "⨆" or text == "⋃" or text == "⋂" or
         text == "⋁" or text == "⋀") 0.42
     else 0.0
-}
-
-fn sub_box_has_descender(sub_box) {
-    // Detect if a subscript box contains a descender letter (g/j/p/q/y/f).
-    // Used to pick proper box depth in limit-style big-ops.
-    if (sub_box.depth >= 0.18) true
-    else false
-}
-
-fn render_large_op_limits_vlist(op_box, sub_box, sup_box, is_text_op) {
-    let op_elements = box.elements_of(op_box)
-    let has_sub = sub_box != null
-    let has_sup = sup_box != null
-    let sub_elements = if (has_sub) box.elements_of(sub_box) else []
-    let sup_elements = if (has_sup) box.elements_of(sup_box) else []
-    let sub_w = if (has_sub) sub_box.width else 0.0
-    let sup_w = if (has_sup) sup_box.width else 0.0
-    let compact_limits = has_sub and has_sup and sub_w <= 1.0 and sup_w > 1.0
-    let sub_has_descender = has_sub and sub_box_has_descender(sub_box)
-    // Op-symbol wrapper height: large ops (sym) are at Size3 scale = 1.61em;
-    // text ops (\\lim, \\sup, etc.) emit at the actual letter heights.
-    let op_wrap_h = if (is_text_op) 0.7 else 1.61
-    // vlist_height varies by which limits are present:
-    //   text op + sub+sup:        0.94 (op + sub stacked)
-    //   text op + single limit:   0.7  (op + tiny limit)
-    //   large op + compact:       1.81
-    //   large op + sub+sup:       1.66
-    //   large op + single limit:  1.06
-    // Large-op vlist height: when a sup is present (sub+sup OR sup-only), the
-    // height grows with the sup's scaled height — matches MathLive's emit:
-    // vlist_h = sup_child_h + 1.35 (CEIL@2). The hardcoded 1.66 historically
-    // assumed sup_child=0.31 (n/a sized). Taller sups (digits, uppercase,
-    // descenders) lift vlist accordingly. Sub-only keeps the 1.06 default.
-    let sup_h_raw_pre = if (has_sup) sup_box.height else 0.0
-    let sup_scaled_pre = ceil_em2(sup_h_raw_pre * 0.7)
-    let vlist_height = if (is_text_op and has_sub and has_sup) 0.94
-                       else if (is_text_op) 0.7
-                       else if (compact_limits) 1.81
-                       else if (has_sub and has_sup) ceil_em2(sup_scaled_pre + 1.35)
-                       else if (has_sup) ceil_em2(sup_scaled_pre + 1.35)
-                       else 1.06
-    let sub_h_raw = if (has_sub) sub_box.height else 0.0
-    let sub_scaled = ceil_em2(sub_h_raw * 0.7)
-    let sub_child_height = if (compact_limits) 0.31
-                           else if (sub_has_descender) 0.6
-                           else if (has_sub) sub_scaled else 0.0
-    let sup_h_raw = if (has_sup) sup_box.height else 0.0
-    let sup_scaled = ceil_em2(sup_h_raw * 0.7)
-    let sup_child_height = if (compact_limits) 0.46
-                           else if (has_sup) sup_scaled else 0.0
-    // pstrut & op_top differ by op kind: large-op uses 3.05em pstrut and
-    // top:-3.05em; text-op uses 3em pstrut and top:-3em.
-    let pstrut_em = if (is_text_op) "3em" else "3.05em"
-    let op_top_em = if (is_text_op) "-3em" else "-3.05em"
-    // Offsets for depth_holder and box_depth differ by configuration:
-    //   text-op + sub-only:       offsets 0.26 / 0.25 (small op, tight stack)
-    //   sub+sup with descender:   0.82 / 0.81
-    //   sub+sup (default):        0.81 / 0.80
-    //   sub-only (large-op):      0.95 / 0.94
-    // bigodot/oplus/otimes/etc have shorter descent than sum/prod — their
-    // sub-only depth_holder offset is ~0.13em shorter.
-    let op_short_descent = op_box.depth > 0.0 and op_box.depth < 0.5
-    let dh_offset = if (is_text_op and has_sub) 0.26
-                    else if (sub_has_descender) 0.82
-                    else if (has_sub and has_sup) 0.81
-                    else if (op_short_descent and has_sub) 0.82
-                    else 0.95
-    let bd_offset = if (is_text_op and has_sub) 0.25
-                    else if (sub_has_descender) 0.81
-                    else if (has_sub and has_sup) 0.80
-                    else if (op_short_descent and has_sub) 0.81
-                    else 0.94
-    // For sup-only large ops (no sub), MathLive emits a 0.56em depth_holder
-    // and 0.55em box_depth — the inherent op-symbol descent (Size2 d=0.55).
-    // Text-op sup-only (like `\lim` with sup only) doesn't appear in tests
-    // yet; keep at 0 there.
-    let depth_holder = if (compact_limits) 1.26
-                       else if (has_sub) sub_child_height + dh_offset
-                       else if (has_sup and not is_text_op) 0.56
-                       else 0.0
-    let box_depth = if (compact_limits) 1.26
-                    else if (has_sub) sub_child_height + bd_offset
-                    else if (has_sup and not is_text_op) 0.55
-                    else 0.0
-    // sub_top positioning differs by op kind too. Text-op uses
-    // -(2.38) for sub_child=0.46 (formula: -1.92 - sub_child).
-    let sub_top = if (is_text_op and has_sub) (0.0 - 1.92 - sub_child_height)
-                  else if (compact_limits) 0.0 - 1.89
-                  else if (has_sub and has_sup) 0.0 - 1.87
-                  else 0.0 - 1.89
-    let sub_span = if (has_sub) [
-        <span class: css.CENTER, style: "top:" ++ util.fmt_em(sub_top);
-            <span class: css.PSTRUT, style: "height:" ++ pstrut_em>
-            <span style: "height:" ++ util.fmt_em(sub_child_height) ++ ";display:inline-block;font-size: 70%";
-                for (el in sub_elements) el
-            >
-        >
-    ] else []
-    let sup_top_em = if (is_text_op) "-3.7em" else "-4.3em"
-    let sup_span = if (has_sup) [
-        <span class: css.CENTER, style: "top:" ++ sup_top_em;
-            <span class: css.PSTRUT, style: "height:" ++ pstrut_em>
-            <span style: "height:" ++ util.fmt_em(sup_child_height) ++ ";display:inline-block;font-size: 70%";
-                for (el in sup_elements) el
-            >
-        >
-    ] else []
-    let el = <span class: css.OP_GROUP;
-        <span class: css.VLIST_T2;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_height);
-                    for (el in sub_span) el
-                    <span class: css.CENTER, style: "top:" ++ op_top_em;
-                        <span class: css.PSTRUT, style: "height:" ++ pstrut_em>
-                        <span style: "height:" ++ util.fmt_em(op_wrap_h) ++ ";display:inline-block";
-                            for (el in op_elements) el
-                        >
-                    >
-                    for (el in sup_span) el
-                >
-                <span class: css.VLIST_S; "\u200B">
-            >
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:" ++ util.fmt_em(depth_holder)>
-            >
-        >
-    >
-    // Text-op strut height includes the op's natural ascent (0.75 for "lim"),
-    // slightly more than vlist_height (0.7) because the strut covers the
-    // unscaled letter heights. Its depth keeps the pre-rounded value used by
-    // MathLive's outer strut emission.
-    let out_h = if (is_text_op) 0.75 else vlist_height
-    let out_d = if (is_text_op and has_sub) 0.72 else box_depth
-    let out_d_raw = if (is_text_op and has_sub) 0.715 else box_depth
-    box.ml_box_full(el, out_h, out_d_raw, max(max(op_box.width, sub_w), sup_w),
-        "mop", 0.0, 0.0, out_h)
 }
 
 // render normal inline subscript/superscript

@@ -1121,7 +1121,8 @@ fn render_overline_simple(base_box) {
             >
         >
     >
-    line_accent_box(el, 0.64, 0.0, base_box.width, 0.0, 0.64, true)
+    box_with_suppress_depth(box.ml_box_full(el, 0.64, 0.0, base_box.width,
+        "mord", 0.0, 0.0, 0.64))
 }
 
 fn render_overline_wide(base_box, context) {
@@ -1140,8 +1141,8 @@ fn render_overline_wide(base_box, context) {
     >
     // MathLive's overline uses VBox({shift:0}) with [inner, 3*rule, line, rule];
     // VList derives top positions, pstruts, height, and depth from that sequence.
-    line_accent_box(el, stack.height, stack.depth, base_box.width, stack.depth,
-        util.ceil_em2(stack.height + stack.depth), false)
+    box.ml_box_full(el, stack.height, stack.depth, base_box.width,
+        "mord", 0.0, 0.0, stack.height)
 }
 
 fn render_overline_tall(base_box) {
@@ -1168,7 +1169,7 @@ fn render_overline_tall(base_box) {
             >
         >
     >
-    line_accent_box(el, 1.35, 0.69, base_box.width, 0.69, 2.04, false)
+    box.ml_box_full(el, 1.35, 0.69, base_box.width, "mord", 0.0, 0.0, 1.35)
 }
 
 fn render_underline_simple(base_box) {
@@ -1195,7 +1196,7 @@ fn render_underline_simple(base_box) {
             >
         >
     >
-    line_accent_box(el, 0.7, 0.21, base_box.width, 0.21, 0.91, false)
+    box.ml_box_full(el, 0.7, 0.21, base_box.width, "mord", 0.0, 0.0, 0.7)
 }
 
 fn render_underline_tall(base_box) {
@@ -1222,20 +1223,7 @@ fn render_underline_tall(base_box) {
             >
         >
     >
-    line_accent_box(el, 1.15, 0.89, base_box.width, 0.88, 2.24, false)
-}
-
-fn line_accent_box(el, h, d, w, visual_d, visual_total, suppress_text_depth) => {
-    element: el,
-    height: h,
-    depth: d,
-    width: w,
-    type: "mord",
-    italic: 0.0,
-    skew: 0.0,
-    max_font_size: h,
-    model: "ml",
-    suppress_hbox_text_depth: suppress_text_depth
+    box.ml_box_full(el, 1.15, 0.89, base_box.width, "mord", 0.0, 0.0, 1.15)
 }
 
 fn line_accent_is_tall(base_box) {

@@ -120,14 +120,14 @@ The known Math5 targets are:
 |------|---------------|-----------------------------|
 | `box.ls` hbox | computes `render_*`, `*_raw`, `left_right_render_*` maxima | one `hbox()` over ML boxes; explicit delimiter sizing asks delimiter helpers for extents |
 | `math.ls` emit | chooses `render_*` vs `height_raw/depth_raw` vs `height/depth` | always strut from `height/depth`; legacy adapter only while migration is incomplete |
-| `render.ls` line accents | `line_accent_box(... render_total ...)` constants | port MathLive `AccentAtom` / `OverunderAtom` VBox construction |
+| `render.ls` line accents | `line_accent_box(...)` deleted; simple/tall line-accent callers still carry inline constants | finish porting simple/tall line accents to MathLive `AccentAtom` / `OverunderAtom` VBox construction |
 | `render.ls` wide accents | partial metric path; several hardcoded accent body heights | use stretchy/SVG accent box metrics and VBox, not side-channel total |
 | `atoms/enclose.ls` bbox | `render_total` encodes overlay extent | represent border/overlay as child boxes/styles; public box stays layout h/d |
-| `atoms/array.ls` smallmatrix | still uses `matrix_table_metrics` fallback | port MathLive small array/cell scaling path exactly |
-| `atoms/scripts.ls` large op text limits | `render_large_op_limits_vlist` legacy path remains | route text operators through `make_limits_stack` / VBox model |
+| `atoms/array.ls` smallmatrix | `matrix_table_metrics` fallback deleted; dynamic row walk is the only non-equation path | close remaining matrix extended diffs against MathLive's row/cell operation order |
+| `atoms/scripts.ls` large op text limits | `render_large_op_limits_vlist` deleted; text and symbol limits route through `make_limits_stack` | close remaining large-op/script metric drifts in mixed expressions |
 | `atoms/delimiters.ls` arrows/groups | `render_mult_left_right_delim` table remains | port MathLive `makeStackedDelim`/extensible symbol path for these glyph families |
 | `render.ls` script radicals | `make_script_sqrt_spec` fallback remains | port Rule 11 for script/scriptscript radicals |
-| fixtures | `fraction_branch_fixture.mjs` still references deleted `frac_bar_spec`; no `script_fixture.mjs` | update fixtures to assert geometry/VBox invariants rather than deleted branches |
+| fixtures | `fraction_branch_fixture.mjs` now describes Rule 15 geometry cases; no `script_fixture.mjs` yet | add `script_fixture.mjs` for Rule 18 geometry/VBox invariants |
 
 ## 5. Migration Strategy
 
@@ -486,4 +486,3 @@ text limits, and script radicals are all places where the right answer is not
 another scalar field. The right answer is the same one MathLive uses: build the
 right box tree, keep the box's layout dimensions full precision, and let
 emission stringify once.
-
