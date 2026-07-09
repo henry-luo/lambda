@@ -1841,15 +1841,9 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
             if (mc) continue;  // resolved via module_consts, no capture needed
         }
+        // module-shadowed function bindings are ordinary shared captures; only
+        // per-iteration lexical cells need force_env_capture to avoid aliasing.
         bool force_env_capture = false;
-        if (module_consts && ancestor_func_locals && jm_name_set_has(ancestor_func_locals, ref->name)) {
-            JsModuleConstEntry lookup;
-            snprintf(lookup.name, sizeof(lookup.name), "%s", ref->name);
-            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
-            if (mc && mc->const_type == MCONST_MODVAR) {
-                force_env_capture = true;
-            }
-        }
 
         // This is a capture
         {
