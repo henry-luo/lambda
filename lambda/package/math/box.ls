@@ -58,16 +58,33 @@ pub fn text_box(text, cls, box_type) {
     let d = text_depth_for(mt, cls)
     let h_exact = text_height_exact_for(mt, cls)
     let d_exact = text_depth_exact_for(mt, cls)
-    {
-        element: text_element(text, cls),
-        height: if (h_exact != null) h_exact else h,
-        depth: if (d_exact != null) d_exact else d,
-        width: met.DEFAULT_CHAR_WIDTH * float(len(text)),
-        type: box_type,
-        italic: 0.0,
-        skew: 0.0,
-        max_font_size: if (h_exact != null) h_exact else h
-    }
+    let bx = {
+            element: text_element(text, cls),
+            height: if (h_exact != null) h_exact else h,
+            depth: if (d_exact != null) d_exact else d,
+            width: met.DEFAULT_CHAR_WIDTH * float(len(text)),
+            type: box_type,
+            italic: 0.0,
+            skew: 0.0,
+            max_font_size: if (h_exact != null) h_exact else h
+        }
+    if (is_small_delimiter_text(mt)) with_sup_min_shift(bx) else bx
+}
+
+fn is_small_delimiter_text(text) {
+    text == "∣" or text == "∥"
+}
+
+fn with_sup_min_shift(bx) => {
+    element: bx.element,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: bx.type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    sup_min_shift_base: true
 }
 
 // Map the raw-emit sentinels back to their real glyphs for metric lookup.
@@ -162,7 +179,12 @@ fn text_height_for(text, cls) {
     // were calibrated against Lambda's old 0.69 height. Some symbols (ı, ȷ)
     // are rendered with compound classes that MathLive picks from a font
     // we don't have metrics for. Skip lookup for these.
-    if (text == "+" or text == "−" or text == "-" or
+    if (cls == css.TEXT and text_has_descender(text))
+        // MathLive's lm_text is measured as browser text, slightly below the
+        // generic math fallback; 0.70 makes text limits like `p \text{ prime}`
+        // too tall after script scaling.
+        0.68
+    else if (text == "+" or text == "−" or text == "-" or
         text == "ı" or text == "ȷ") text_height(text)
     else if (len(text) == 1) {
         let font = font_from_class(cls)
@@ -464,16 +486,19 @@ pub fn hbox(boxes) {
     let total_width = sum((for (v in valid) v.width))
     let suppress_text_depth = has_suppress_hbox_text_depth(valid, 0)
     let suppress_operator_height = has_suppress_hbox_operator_height(valid, 0)
+    let sup_min_shift_base = has_sup_min_shift_base(valid, 0)
     if (len(valid) == 0)
         ml_box(<span class: css.BASE>, 0.0, 0.0, 0.0, "ord")
     else
-        ml_hbox_valid(valid, children, total_width, suppress_text_depth, suppress_operator_height)
+        ml_hbox_valid(valid, children, total_width, suppress_text_depth,
+            suppress_operator_height, sup_min_shift_base)
 }
 
 // Combine MathLive-model boxes without reintroducing legacy render/raw side
 // channels. Every child is now one-box-field, so the parent remains one too.
-fn ml_hbox_valid(valid, children, total_width, suppress_text_depth, suppress_operator_height) {
-    ml_box_full(
+fn ml_hbox_valid(valid, children, total_width, suppress_text_depth,
+                 suppress_operator_height, sup_min_shift_base) {
+    let bx = ml_box_full(
         <span class: css.BASE;
             for (child in children) child
         >,
@@ -485,6 +510,7 @@ fn ml_hbox_valid(valid, children, total_width, suppress_text_depth, suppress_ope
         0.0,
         ml_hbox_max_font_size(valid, 0, 0.0, suppress_operator_height)
     )
+    if (sup_min_shift_base) with_sup_min_shift(bx) else bx
 }
 
 fn ml_hbox_max_font_size(valid, i, acc, suppress_operator_height) {
@@ -539,6 +565,12 @@ fn has_suppress_hbox_operator_height(items, i) {
     if (i >= len(items)) false
     else if (items[i].suppress_hbox_operator_height == true) true
     else has_suppress_hbox_operator_height(items, i + 1)
+}
+
+fn has_sup_min_shift_base(items, i) {
+    if (i >= len(items)) false
+    else if (items[i].sup_min_shift_base == true) true
+    else has_sup_min_shift_base(items, i + 1)
 }
 
 fn hbox_depth_of(bx, suppress_text_depth) {

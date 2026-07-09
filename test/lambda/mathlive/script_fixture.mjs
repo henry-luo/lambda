@@ -18,6 +18,7 @@ const CASES = [
   { id: 'sup-only', formula: 'x^2', height: 0.814108, depth: 0.0, width: 1.36 },
   { id: 'sub-only', formula: 'x_2', height: 0.43056, depth: 0.15, width: 1.36 },
   { id: 'both', formula: 'x_2^3', height: 0.864108, depth: 0.247, width: 1.36 },
+  { id: 'delimiter-sup', formula: '|z|^2', height: 0.864108, depth: 0.25, width: 2.96 },
   { id: 'descender-sub', formula: 'x_y', height: 0.43056, depth: 0.286108, width: 1.36 },
   { id: 'nested-sup', formula: 'x^{y^2}', height: 0.98692, depth: 0.0, width: 1.76 },
   { id: 'fraction-sub', formula: 'a_{\\frac{1}{2}}', height: 0.43056, depth: 0.69982, width: 1.528 },
@@ -50,7 +51,7 @@ for (const testCase of CASES) {
     const actual = probe(testCase);
     const ok =
       actual.error === 'no-error' &&
-      actual.is_ml === true &&
+      actual.one_box_fields === true &&
       actual.has_height_raw === false &&
       actual.has_depth_raw === false &&
       actual.has_render_height === false &&

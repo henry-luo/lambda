@@ -108,6 +108,10 @@ pub fn render_stretchy(delim, content_height, atom_type) {
         let level = select_size_level(content_height)
         if (is_corner_delim(display_char))
             render_corner(display_char, atom_type)
+        else if (level == 4 and is_brace_delim(display_char))
+            // MathLive switches stretchy Size4 braces to a stacked recipe;
+            // the single glyph has the wrong box extent for \left..\right.
+            render_brace_level4_mult(display_char, atom_type)
         else if (level == 3 and has_extensible_recipe(delim))
             render_extensible_recipe_delim(delim, atom_type)
         else if (level <= 4)
@@ -148,6 +152,18 @@ pub fn render_at_scale(delim, scale, atom_type) {
             )
         )
     }
+}
+
+pub fn render_stacked_vertical(delim, level, atom_type) {
+    render_vertical_mult(stretchy_char(delim), level, atom_type)
+}
+
+pub fn render_stacked_vertical_to_height(delim, target_height, atom_type) {
+    render_vertical_mult_to_height(stretchy_char(delim), target_height, atom_type)
+}
+
+pub fn render_stacked_brace(delim, atom_type) {
+    render_brace_level4_mult(stretchy_char(delim), atom_type)
 }
 
 // ============================================================
@@ -234,6 +250,10 @@ fn is_vertical_bar(ch) {
     ch == "∣" or ch == "∥"
 }
 
+fn is_brace_delim(ch) {
+    ch == "{" or ch == "}"
+}
+
 pub fn is_corner_delim(ch) {
     ch == "┌" or ch == "┐" or ch == "└" or ch == "┘"
 }
@@ -250,14 +270,18 @@ pub fn render_corner(ch, atom_type) {
 }
 
 fn render_vertical_mult(ch, level, atom_type) {
+    render_vertical_mult_to_height(ch, size_to_max_height(level), atom_type)
+}
+
+fn render_vertical_mult_to_height(ch, target_height, atom_type) {
     // vlist internals (piece tops, container height/depth, pstrut, glyph
     // height, total) are computed by a faithful makeStackedDelim port; the
     // strut box fields (height/depth/raw/total) stay axis-centred via
     // sized_delim_raw so the use_raw emit and the math.ls depth sentinel
     // (total\u22481.21, depth\u22480.345) keep firing.
-    let spec = make_stacked_delim(level)
+    let spec = make_stacked_delim_for_height(target_height)
     let pieces = stk_pieces(spec, ch, 0, [])
-    let raw = sized_delim_raw(level)
+    let raw = sized_delim_raw(target_height_to_level(target_height))
     let cls = css.classes([side_class(atom_type), "lm_delim-mult"])
     box.ml_box_full(
         <span class: cls;
@@ -280,6 +304,40 @@ fn render_vertical_mult(ch, level, atom_type) {
         0.0,
         0.0,
         raw.h
+    )
+}
+
+fn render_brace_level4_mult(ch, atom_type) {
+    let chars = if (ch == "}") ["⎭", "⎬", "⎫"] else ["⎩", "⎨", "⎧"]
+    let tops = [0.0 - 2.49, 0.0 - 3.13, 0.0 - 4.26]
+    let heights = [0.91, 1.81, 0.91]
+    let cls = css.classes([side_class(atom_type), "lm_delim-mult"])
+    box.ml_box_full(
+        <span class: cls;
+            <span class: "delim-size4 lm_vlist-t lm_vlist-t2";
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:2.02em";
+                        for i in 0 to 2 {
+                            <span style: "top:" ++ util.fmt_em(tops[i]);
+                                <span class: css.PSTRUT, style: "height:3.15em">
+                                <span style: "height:" ++ util.fmt_em(heights[i]) ++ ";display:inline-block"; chars[i]>
+                            >
+                        }
+                    >
+                    <span class: css.VLIST_S; "\u200B">
+                >
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:1.56em">
+                >
+            >
+        >,
+        2.02,
+        1.55003,
+        0.4,
+        atom_type,
+        0.0,
+        0.0,
+        2.02
     )
 }
 
@@ -451,9 +509,12 @@ fn stk_walk(entries, i, h, d, pstrut, cur, mx, mn, tops) {
 // (rather than passed in) so the transpiler infers them as float — passing
 // them as params makes the first use `h + d` ambiguous and mis-infer int.
 fn make_stacked_delim(level) {
+    make_stacked_delim_for_height(size_to_max_height(level))
+}
+
+fn make_stacked_delim_for_height(ht) {
     let h = BAR1_H
     let d = BAR1_D
-    let ht = size_to_max_height(level)
     let rht = h + d
     let min_height = 2.0 * rht
     let rc = max(0, ceil_int((ht - min_height) / rht))
@@ -470,6 +531,13 @@ fn make_stacked_delim(level) {
         glyph_h: rht,
         real_h: real_h
     }
+}
+
+fn target_height_to_level(ht) {
+    if (ht <= 1.2) 1
+    else if (ht <= 1.8) 2
+    else if (ht <= 2.4) 3
+    else 4
 }
 
 // emit the vlist pieces (one per stacked glyph) from a computed spec

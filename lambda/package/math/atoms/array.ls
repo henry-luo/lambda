@@ -9,6 +9,7 @@
 import box: lambda.package.math.box
 import ctx: lambda.package.math.context
 import css: lambda.package.math.css
+import delims: lambda.package.math.atoms.delimiters
 import sp_table: lambda.package.math.spacing_table
 import util: lambda.package.math.util
 
@@ -60,9 +61,9 @@ fn render_body(body, context, render_fn, env_name, columns) {
     let render_ctx = if (env_compact_prime(env_name))
         ctx.derive(cell_ctx, {compact_prime: true})
         else cell_ctx
-    let row_boxes = render_row_groups(row_groups, render_ctx, spacing_ctx, render_fn)
+    let row_boxes = render_row_groups(row_groups, render_ctx, spacing_ctx, render_fn, env_name)
     let table = build_table(row_boxes, ncols, nrows, aligns, env_name)
-    wrap_delimiters(table, env_name)
+    wrap_delimiters(table, env_name, len(row_boxes))
 }
 
 // Parse source rows before rendering so ragged matrices do not shift later
@@ -113,17 +114,68 @@ fn env_compact_prime(env_name) {
     not (env_name == "aligned" or env_name == "align" or env_name == "equation")
 }
 
-fn render_row_groups(rows, cell_ctx, spacing_ctx, render_fn) {
-    [for (row in rows) [for (g in row.cells) render_cell_group(g.items, cell_ctx, spacing_ctx, render_fn)]]
+fn render_row_groups(rows, cell_ctx, spacing_ctx, render_fn, env_name) {
+    [for (row in rows) [for (g in row.cells) render_cell_group(g.items, cell_ctx, spacing_ctx, render_fn, env_name)]]
 }
 
-fn render_cell_group(children, cell_ctx, spacing_ctx, render_fn) {
+fn render_cell_group(children, cell_ctx, spacing_ctx, render_fn, env_name) {
     if (len(children) == 0) blank_cell_box()
     else if (len(children) == 1) render_fn(children[0], cell_ctx)
     else {
-        let parts = (for (c in children) render_fn(c, cell_ctx))
+        let parts = if (env_name == "aligned" or env_name == "align")
+            render_aligned_cell_parts(children, cell_ctx, render_fn, 0, [])
+            else (for (c in children) render_fn(c, cell_ctx))
         box.hbox(apply_spacing(parts, spacing_ctx))
     }
+}
+
+fn render_aligned_cell_parts(children, cell_ctx, render_fn, i, acc) {
+    if (i >= len(children)) acc
+    else if (is_prime_child(children[i]) and i + 1 < len(children) and is_prime_child(children[i + 1]))
+        // aligned cells bypass render.ls sequence scanning; fold adjacent
+        // apostrophes here so `f''` emits one double-prime script box.
+        (let count = consecutive_prime_children(children, i, 0),
+         render_aligned_cell_parts(children, cell_ctx, render_fn, i + count,
+            acc ++ [render_prime_script_count(count, cell_ctx)]))
+    else render_aligned_cell_parts(children, cell_ctx, render_fn, i + 1,
+        acc ++ [render_fn(children[i], cell_ctx)])
+}
+
+fn is_prime_child(child) {
+    child is element and name(child) == 'punctuation' and string(child.value) == "'"
+}
+
+fn consecutive_prime_children(children, i, acc) {
+    if (i >= len(children)) acc
+    else if (is_prime_child(children[i])) consecutive_prime_children(children, i + 1, acc + 1)
+    else acc
+}
+
+fn render_prime_script_count(count, context) {
+    let compact = context.compact_prime == true
+    let cramped = context.cramped == true
+    let vlist_h = if (compact and cramped) 0.68 else if (compact) 0.76 else 0.81
+    let top_em = if (compact and cramped) "-3.28em" else if (compact) "-3.36em" else "-3.41em"
+    let prime_text = repeat_prime_text(count, "")
+    let el = <span class: css.MSUBSUP;
+        <span class: css.VLIST_T;
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_h);
+                    <span style: "top:" ++ top_em ++ ";margin-right:0.05em";
+                        <span class: css.PSTRUT, style: "height:3em">
+                        <span style: "height:0.39em;display:inline-block;font-size: 70%";
+                            <span class: css.CMR; prime_text>
+                        >
+                    >
+                >
+            >
+        >
+    >
+    box.ml_box_full(el, vlist_h, 0.0, 0.4 * float(count), "mord", 0.0, 0.0, vlist_h)
+}
+
+fn repeat_prime_text(count, acc) {
+    if (count <= 0) acc else repeat_prime_text(count - 1, acc ++ "′")
 }
 
 fn bin_as_ord_after(prev_type) {
@@ -156,25 +208,38 @@ fn build_normalized(filtered, i, prev_type, acc) {
     if (i >= len(filtered)) acc
     else
         (let current = normalize_bin_atom(filtered[i], prev_type),
-         build_normalized(filtered, i + 1, current.type, acc ++ [current]))
+         build_normalized(filtered, i + 1, next_spacing_prev_type(prev_type, current), acc ++ [current]))
 }
 
 fn normalize_atom_types(filtered) {
     build_normalized(filtered, 0, null, [])
 }
 
-fn build_spaced(normalized, i, prev_type, acc, context) {
+fn build_spaced(normalized, i, prev_type, acc, context, explicit_skip_after_prev) {
     if (i >= len(normalized)) acc
     else
         (let current = normalized[i],
-         let space = if (current.no_left_bin_space == true and prev_type == "mbin")
-             0.0 else if (prev_type == "mpunct" and current.type == "skip")
+         // Explicit spacing commands keep their source position and do not
+         // become the previous atom; otherwise implicit TeX spacing moves to
+         // the wrong side of `\,` inside cells.
+         let space = if (current.type == "skip")
+             0.0 else if (explicit_skip_after_prev and prev_type == "mpunct")
+             // Explicit space after punctuation already accounts for the
+             // separation; adding mpunct->mord spacing double-counts it.
+             0.0 else if (current.no_left_bin_space == true and prev_type == "mbin")
+             0.0 else if (current.no_left_op_space == true and prev_type == "mop")
              0.0 else sp_table.get_spacing(prev_type, current.type, context.style),
          let with_space = if (space != 0.0)
              acc ++ [box.skip_box(space), current]
          else
              acc ++ [current],
-         build_spaced(normalized, i + 1, current.type, with_space, context))
+         let next_prev = next_spacing_prev_type(prev_type, current),
+         build_spaced(normalized, i + 1, next_prev, with_space, context,
+            current.type == "skip" or (explicit_skip_after_prev and next_prev == prev_type)))
+}
+
+fn next_spacing_prev_type(prev_type, current) {
+    if (current.type == "skip") prev_type else current.type
 }
 
 fn apply_spacing(boxes, context) {
@@ -182,7 +247,7 @@ fn apply_spacing(boxes, context) {
     if (len(filtered) <= 1) filtered
     else
         (let normalized = normalize_atom_types(filtered),
-         build_spaced(normalized, 1, normalized[0].type, [normalized[0]], context))
+         build_spaced(normalized, 1, normalized[0].type, [normalized[0]], context, false))
 }
 
 fn blank_cell_box() =>
@@ -219,14 +284,14 @@ fn build_table(row_boxes, ncols, nrows, aligns, env_name) {
     let el = <span class: css.MTABLE;
         for el in children { el }
     >
-    ml_table_box(el, metrics, total_w)
+    ml_table_box(el, metrics, total_w, nrows)
 }
 
 fn array_has_delimiters(env_name) {
     get_left_delim(env_name) != null or get_right_delim(env_name) != null
 }
 
-fn ml_table_box(el, metrics, total_w) => {
+fn ml_table_box(el, metrics, total_w, nrows) => {
     element: el,
     height: if (metrics.box_height != null) metrics.box_height else metrics.height,
     depth: if (metrics.box_depth != null) metrics.box_depth else metrics.depth,
@@ -235,7 +300,10 @@ fn ml_table_box(el, metrics, total_w) => {
     italic: 0.0,
     skew: 0.0,
     max_font_size: if (metrics.box_height != null) metrics.box_height else metrics.height,
-    delim_total: metrics.box_total
+    delim_total: metrics.box_total,
+    delim_visual_total: util.ceil_em2(metrics.vlist_height + metrics.depth_holder),
+    nrows: nrows,
+    is_table: true
 }
 
 fn build_table_children(row_boxes, ncols, aligns, metrics, env_name, col, acc) {
@@ -243,12 +311,16 @@ fn build_table_children(row_boxes, ncols, aligns, metrics, env_name, col, acc) {
     else {
         let with_leading = if (col == 0 and (env_name == "array" or env_name == "equation"))
             acc ++ [array_col_sep(0.5)]
+        else if (col == 0 and (env_name == "aligned" or env_name == "align"))
+            acc ++ [array_col_sep(0.0)]
         else if (col == 0 and env_name == "smallmatrix")
             acc ++ [array_col_sep(0.2)]
         else acc
         let col_el = build_column(row_boxes, col, get_align_char(aligns, col), metrics)
         let with_col = with_leading ++ [col_el]
-        let between_w = if (env_name == "smallmatrix") 0.39 else 1.0
+        let between_w = if (env_name == "smallmatrix") 0.39
+            else if (env_name == "aligned" or env_name == "align") 0.25
+            else 1.0
         let with_sep = if (col < ncols - 1)
             with_col ++ [array_col_sep(between_w)]
         else with_col
@@ -258,6 +330,7 @@ fn build_table_children(row_boxes, ncols, aligns, metrics, env_name, col, acc) {
 
 fn add_trailing_array_sep(acc, env_name) {
     if (env_name == "array" or env_name == "equation") acc ++ [array_col_sep(0.5)]
+    else if (env_name == "aligned" or env_name == "align") acc ++ [array_col_sep(0.0)]
     else if (env_name == "cases" or env_name == "dcases") acc ++ [array_col_sep(1.0)]
     else if (env_name == "smallmatrix") acc ++ [array_col_sep(0.2)]
     else acc
@@ -564,16 +637,16 @@ fn get_right_delim(env_name) {
     else null
 }
 
-fn wrap_delimiters(table_box, env_name) {
+fn wrap_delimiters(table_box, env_name, row_count) {
     let ld = get_left_delim(env_name)
     let rd = get_right_delim(env_name)
     if (ld == null and rd == null) table_box
-    else wrap_with_delimiters(table_box, ld, rd)
+    else wrap_with_delimiters(table_box, ld, rd, row_count)
 }
 
-fn wrap_with_delimiters(table_box, ld, rd) {
-    let left_box = if (ld != null) render_matrix_delim(ld, table_box) else null
-    let right_box = if (rd != null) render_matrix_delim(rd, table_box)
+fn wrap_with_delimiters(table_box, ld, rd, row_count) {
+    let left_box = if (ld != null) render_matrix_delim(ld, table_box, row_count) else null
+    let right_box = if (rd != null) render_matrix_delim(rd, table_box, row_count)
         else if (ld == "{") render_null_right_delim()
         else null
     let parts = (for (p in [left_box, table_box, right_box] where p != null) p)
@@ -624,12 +697,48 @@ fn render_null_right_delim() {
         0.0, 0.0, 0.12, "mclose")
 }
 
-fn render_matrix_delim(ch, table_box) {
+fn render_matrix_delim(ch, table_box, row_count) {
     let table_total = table_delim_total(table_box)
-    let nrows = int(round((table_total - 1.21) / 1.2)) + 1
-    if (nrows >= 3 and (ch == "[" or ch == "]")) render_square_mult_delim(ch)
+    let visual_total = if (table_box.delim_visual_total != null)
+        table_box.delim_visual_total
+    else util.ceil_em2(table_box.height + table_box.depth)
+    let level = matrix_env_delim_level(ch, table_total, visual_total, row_count)
+    if (is_matrix_vertical_delim(ch))
+        // Matrix wrappers have no mopen/mclose side class, but vertical bars
+        // still use MathLive's stacked delimiter recipe at tall sizes.
+        delims.render_stacked_vertical_to_height(ch,
+            matrix_vertical_target_height(row_count, visual_total), "ord")
+    else if (row_count >= 3 and (ch == "[" or ch == "]")) render_square_mult_delim(ch)
     else if (ch == "{" and table_total > 4.0) render_brace_mult_delim()
-    else render_plain_sized_delim(ch, matrix_delim_level(table_total))
+    else render_plain_sized_delim(ch, level)
+}
+
+fn matrix_env_delim_level(ch, table_total, visual_total, row_count) {
+    if (is_matrix_vertical_delim(ch))
+        matrix_vertical_delim_level_for_rows(row_count, max(table_total, visual_total))
+    else matrix_delim_level(table_total)
+}
+
+fn matrix_vertical_delim_level_for_rows(row_count, visual_total) {
+    // Stacked matrix bars use row-count buckets in MathLive matrices: 2-row
+    // determinants use the four-piece stack, 3+ rows use the six-piece stack.
+    if (row_count >= 3) 4
+    else if (row_count == 2) 2
+    else if (visual_total <= 1.21) 1
+    else if (visual_total <= 1.81) 2
+    else 4
+}
+
+fn matrix_vertical_target_height(row_count, visual_total) {
+    max(visual_total, float(row_count) * 1.2)
+}
+
+fn is_matrix_vertical_delim(ch) {
+    ch == "|" or ch == "\u2016"
+}
+
+fn is_matrix_brace_delim(ch) {
+    ch == "{" or ch == "}"
 }
 
 fn matrix_delim_level(visual_total) {
