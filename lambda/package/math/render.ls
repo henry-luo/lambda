@@ -2376,8 +2376,6 @@ fn render_sqrt_index(index_box, context, compact_index) {
 fn sqrt_spec(body_box, context, has_index) {
     if ((context.style == "script" or context.style == "scriptscript") and has_index)
         make_sqrt_spec(0.73, 0.27, body_box.height, -3.0, -3.62, 0.08, 3.0, 0.05, css.SMALL_DELIM)
-    else if (context.style == "script" or context.style == "scriptscript")
-        make_script_sqrt_spec(body_box)
     else
         sqrt_geom(body_box, context)
 }
@@ -2385,9 +2383,9 @@ fn sqrt_spec(body_box, context, has_index) {
 // Metric-driven radical geometry — a faithful port of TeXBook Rule 11 as
 // implemented by MathLive's SurdAtom.render + makeCustomSizedDelim + VBox
 // (ref/mathlive/src/atoms/surd.ts, core/delimiters.ts, core/v-box.ts).
-// Covers display & text styles (scalingFactor 1.0); script/scriptscript stay
-// on the legacy specs above. Every dimension derives from the body's
-// full-precision height/depth plus the surd font metrics — no bucket dispatch.
+// Covers display, text, script, and scriptscript styles. Every dimension
+// derives from the body's full-precision height/depth plus the surd font
+// metrics — no bucket dispatch.
 fn sqrt_metric_h(b) { b.height }
 fn sqrt_metric_d(b) { b.depth }
 
@@ -2479,21 +2477,6 @@ fn make_sqrt_spec(h, d, body_h, body_top, line_top, sign_top, pstrut, line_h, si
     pstrut: pstrut,
     line_height: line_h,
     sign_class: sign_class
-}
-
-fn make_script_sqrt_spec(body_box) => {
-    height: 0.84,
-    depth: 0.09,
-    visual_total: 1.0,
-    body_height: max(body_box.height, 0.83),
-    body_top: -3.0,
-    line_top: -3.75,
-    sign_top: -0.03,
-    pstrut: 3.0,
-    line_height: 0.04,
-    sign_class: css.SMALL_DELIM,
-    is_tall: true,
-    depth_holder: 0.09
 }
 
 // ============================================================

@@ -126,7 +126,7 @@ The known Math5 targets are:
 | `atoms/array.ls` smallmatrix | `matrix_table_metrics` fallback deleted; dynamic row walk is the only non-equation path | close remaining matrix extended diffs against MathLive's row/cell operation order |
 | `atoms/scripts.ls` large op text limits | `render_large_op_limits_vlist` deleted; text and symbol limits route through `make_limits_stack` | close remaining large-op/script metric drifts in mixed expressions |
 | `atoms/delimiters.ls` arrows/groups | old level-3 fallback helper deleted; arrows/groups now route through `render_extensible_recipe_delim` | finish replacing the remaining recipe constants with a fuller MathLive extensible-symbol derivation when available |
-| `render.ls` script radicals | `make_script_sqrt_spec` fallback remains | port Rule 11 for script/scriptscript radicals |
+| `render.ls` script radicals | `make_script_sqrt_spec` deleted; unindexed script/scriptscript radicals route through `sqrt_geom` | port indexed script radicals off the remaining `make_sqrt_spec` special case |
 | fixtures | `fraction_branch_fixture.mjs` describes Rule 15 geometry and `script_fixture.mjs` covers Rule 18 script geometry | expand fixtures only when a newly migrated atom needs a guard |
 
 ## 5. Migration Strategy
@@ -396,10 +396,13 @@ Goal: remove the remaining radical spec fallbacks.
 
 Work:
 
-- extend `sqrt_geom` to script/scriptscript radicals and indexed radicals;
+- done: extend `sqrt_geom` to unindexed script/scriptscript radicals;
+- still open: extend indexed script radicals beyond the remaining `make_sqrt_spec`
+  special case;
 - preserve MathLive's `Box.setTop` threshold behavior;
 - ensure radical index stack uses shared VBox and full-precision dimensions;
-- delete `make_script_sqrt_spec` and legacy `make_sqrt_spec` paths when unused.
+- done: delete `make_script_sqrt_spec`; delete legacy `make_sqrt_spec` paths when
+  unused.
 
 Gate:
 
