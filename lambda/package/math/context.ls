@@ -23,6 +23,7 @@ pub fn display_context() {
         colorbox_content: false,
         array_text_scripts: false,
         compact_prime: false,
+        matrix_cell: false,
         frac_gstyle: null
     }
 }
@@ -41,6 +42,7 @@ pub fn text_context() {
         colorbox_content: false,
         array_text_scripts: false,
         compact_prime: false,
+        matrix_cell: false,
         frac_gstyle: null
     }
 }
@@ -69,6 +71,7 @@ pub fn derive(ctx, overrides) {
         colorbox_content: if (overrides.colorbox_content != null) overrides.colorbox_content else ctx.colorbox_content,
         array_text_scripts: if (overrides.array_text_scripts != null) overrides.array_text_scripts else ctx.array_text_scripts,
         compact_prime: if (overrides.compact_prime != null) overrides.compact_prime else ctx.compact_prime,
+        matrix_cell: if (overrides.matrix_cell != null) overrides.matrix_cell else ctx.matrix_cell,
         text_embedded: if (overrides.text_embedded != null) overrides.text_embedded else ctx.text_embedded,
         // frac_gstyle is ONE-SHOT: a fraction sets the MathLive geometry style
         // (display/text/script/scriptscript) on its numerator/denominator

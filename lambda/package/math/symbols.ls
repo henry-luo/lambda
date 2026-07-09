@@ -21,9 +21,12 @@ let greek_lower = {
 // ============================================================
 
 let greek_upper = {
+    Alpha: "A", Beta: "B",
     Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ",
+    Epsilon: "E", Zeta: "Z", Eta: "H", Iota: "I", Kappa: "K",
     Xi: "Ξ", Pi: "Π", Sigma: "Σ", Upsilon: "Υ",
-    Phi: "Φ", Psi: "Ψ", Omega: "Ω"
+    Phi: "Φ", Psi: "Ψ", Omega: "Ω",
+    Mu: "M", Nu: "N", Omicron: "O", Rho: "P", Tau: "T", Chi: "X"
 }
 
 // ============================================================
@@ -110,7 +113,6 @@ let misc_symbols = {
     flat: "♭", natural: "♮", sharp: "♯",
     clubsuit: "♣", diamondsuit: "♢",
     heartsuit: "♡", spadesuit: "♠",
-    varheartsuit: "♥",
     blacktriangle: "▲", blacksquare: "■",
     checkmark: "✓", maltese: "✠",
     degree: "°", copyright: "©",
@@ -255,9 +257,14 @@ let font_class_map = {
     psi: "lcGreek lm_mathit", omega: "lcGreek lm_mathit",
 
     // -- uppercase Greek: upright (CMR) --
+    Alpha: "lm_cmr", Beta: "lm_cmr",
     Gamma: "lm_cmr", Delta: "lm_cmr", Theta: "lm_cmr", Lambda: "lm_cmr",
+    Epsilon: "lm_cmr", Zeta: "lm_cmr", Eta: "lm_cmr",
+    Iota: "lm_cmr", Kappa: "lm_cmr",
     Xi: "lm_cmr", Pi: "lm_cmr", Sigma: "lm_cmr", Upsilon: "lm_cmr",
     Phi: "lm_cmr", Psi: "lm_cmr", Omega: "lm_cmr",
+    Mu: "lm_cmr", Nu: "lm_cmr", Omicron: "lm_cmr",
+    Rho: "lm_cmr", Tau: "lm_cmr", Chi: "lm_cmr",
 
     // -- upright math symbols (CMR) --
     infty: "lm_cmr", nabla: "lm_cmr", partial: "lm_cmr",
