@@ -73,6 +73,9 @@ pub fn render(node, context, render_fn) {
             (if (frac_ctx.script_container == true) "script" else "text")
         else if (frac_ctx.style == "scriptscript")
             (if (frac_ctx.script_container == true) "scriptscript" else "script")
+        // Matrix cells are textstyle roots, not inline roots; promoting their
+        // ordinary \frac geometry back to display makes rows and delimiters too tall.
+        else if (frac_ctx.matrix_cell == true) "text"
         else "display"
     // numerator/denominator geometry style (one step smaller), threaded so a
     // fraction nested directly in the numer/denom renders correctly.
@@ -149,6 +152,7 @@ pub fn render_boxes(numer_box, denom_box, context) {
             (if (frac_ctx.script_container == true) "script" else "text")
         else if (frac_ctx.style == "scriptscript")
             (if (frac_ctx.script_container == true) "scriptscript" else "script")
+        else if (frac_ctx.matrix_cell == true) "text"
         else "display"
     let frac_box = build_frac_bar(numer_box, denom_box, frac_ctx,
         gstyle, frac_ctx.frac_gstyle != null)

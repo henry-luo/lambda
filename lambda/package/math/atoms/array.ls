@@ -46,6 +46,10 @@ fn render_body(body, context, render_fn, env_name, columns) {
         ctx.derive(context, {style: "script", array_text_scripts: true})
     else if (env_name == "dcases")
         ctx.derive(context, {style: "display"})
+    else if (is_matrix_env(env_name))
+        // Matrix entries are textstyle even when the enclosing math is display;
+        // inheriting displaystyle makes ordinary \frac cells overgrow the row.
+        ctx.derive(context, {style: "text", matrix_cell: true})
     else context
     let n = len(body)
     let declared_cols = declared_column_count(columns)
@@ -64,6 +68,11 @@ fn render_body(body, context, render_fn, env_name, columns) {
     let row_boxes = render_row_groups(row_groups, render_ctx, spacing_ctx, render_fn, env_name)
     let table = build_table(row_boxes, ncols, nrows, aligns, env_name)
     wrap_delimiters(table, env_name, len(row_boxes))
+}
+
+fn is_matrix_env(env_name) {
+    env_name == "matrix" or env_name == "pmatrix" or env_name == "bmatrix" or
+    env_name == "Bmatrix" or env_name == "vmatrix" or env_name == "Vmatrix"
 }
 
 // Parse source rows before rendering so ragged matrices do not shift later
@@ -275,9 +284,7 @@ fn is_col_sep(child) {
 // ============================================================
 
 fn build_table(row_boxes, ncols, nrows, aligns, env_name) {
-    let metrics = if (env_name == "equation" and nrows == 1 and ncols == 1)
-        equation_table_metrics(row_boxes[0][0])
-        else compute_dyn_metrics(row_boxes, ncols, nrows, env_name)
+    let metrics = compute_dyn_metrics(row_boxes, ncols, nrows, env_name)
     let total_w = compute_table_width(row_boxes, ncols, env_name)
     let children = build_table_children(row_boxes, ncols, aligns, metrics, env_name, 0, [])
     let table_class = table_environment_class(env_name)
@@ -516,36 +523,6 @@ fn compute_dyn_metrics(row_boxes, ncols, nrows, env_name) {
 
 
 
-// A single-row `equation` environment centers its content on the math axis
-// (0.25em). Derive the table metrics from the content box's real height/depth
-// rather than the fixed matrix estimates, so `E = mc^2` (content h=0.87) emits
-// strut 0.87 / strut-bottom 1.23 instead of the generic 0.85 / 1.21.
-fn equation_table_metrics(content_box) {
-    let ch = content_box.height
-    let cd = content_box.depth
-    // Centered on the axis: the symmetric half-extent is the larger of the
-    // above-axis and below-axis reach; height/depth straddle the axis.
-    let axis = 0.255
-    let half = max(ch - axis, cd + axis)
-    let h = util.ceil_em2(axis + half)
-    let d = util.ceil_em2(half - axis)
-    // The depth-holder vlist runs one rounding-notch deeper than the emitted
-    // box depth (the vlist-s baseline rule), matching MathLive's 0.37 vs the
-    // 0.36 strut-bottom vertical-align.
-    let dh = util.ceil_em2(half - axis + 0.01)
-    {
-        height: h,
-        depth: d,
-        box_total: util.ceil_em2(h + d),
-        vlist_height: h,
-        depth_holder: dh,
-        pstrut: 3.0,
-        cell_height: util.ceil_em2(h + d),
-        is_equation: true,
-        eq_top: 0.0 - util.ceil_em2(3.0 - (h - 0.86))
-    }
-}
-
 fn row_top(metrics, row) {
     if (metrics.tops != null) metrics.tops[row]
     else metrics.eq_top
@@ -715,7 +692,8 @@ fn render_matrix_delim(ch, table_box, row_count) {
         // still use MathLive's stacked delimiter recipe at tall sizes.
         delims.render_stacked_vertical_to_height(ch,
             matrix_vertical_target_height(row_count, visual_total), "ord")
-    else if (row_count >= 3 and (ch == "[" or ch == "]")) render_square_mult_delim(ch)
+    else if (row_count >= 4 and is_paren_matrix_delim(ch)) render_extensible_matrix_paren_delim(ch, row_count)
+    else if (row_count >= 3 and is_two_piece_matrix_delim(ch)) render_two_piece_matrix_delim(ch)
     else if (ch == "{" and table_total > 4.0) render_brace_mult_delim()
     else render_plain_sized_delim(ch, level)
 }
@@ -737,7 +715,10 @@ fn matrix_vertical_delim_level_for_rows(row_count, visual_total) {
 }
 
 fn matrix_vertical_target_height(row_count, visual_total) {
-    max(visual_total, float(row_count) * 1.2)
+    // Row-count buckets drive matrix bar recipes; feeding the rounded table
+    // extent back into the stack tips a two-row determinant from 2.4 to 2.41
+    // and selects the next raw delimiter size.
+    if (row_count >= 2) float(row_count) * 1.2 else visual_total
 }
 
 fn is_matrix_vertical_delim(ch) {
@@ -774,8 +755,79 @@ fn matrix_sized_raw(level) {
     r
 }
 
-fn render_square_mult_delim(ch) {
-    let pieces = if (ch == "[") ["⎣", "⎡"] else ["⎦", "⎤"]
+fn is_two_piece_matrix_delim(ch) {
+    ch == "(" or ch == ")" or ch == "[" or ch == "]"
+}
+
+fn is_paren_matrix_delim(ch) {
+    ch == "(" or ch == ")"
+}
+
+fn matrix_two_piece_chars(ch) {
+    let pieces = if (ch == "(") (["⎝", "⎛"])
+        else if (ch == ")") (["⎠", "⎞"])
+        else if (ch == "[") (["⎣", "⎡"])
+        else (["⎦", "⎤"])
+    pieces
+}
+
+fn matrix_paren_ext_chars(ch) {
+    let chars = if (ch == "(") (["⎝", "⎜", "⎛"]) else (["⎠", "⎟", "⎞"])
+    chars
+}
+
+fn render_extensible_matrix_paren_delim(ch, row_count) {
+    let chars = matrix_paren_ext_chars(ch)
+    let ext_count = max(0, row_count - 2)
+    // Size4 paren extenders add one 0.61em glyph per extra row, while the
+    // vlist extent advances on the 0.30em row bucket. Keep those two inputs
+    // separate or the first extender tops round one notch too low.
+    let extra = float(ext_count) * 0.3
+    let top_extra = float(ext_count) * 0.305
+    let vlist_h = 2.04 + extra
+    let depth_holder = 1.56 + extra
+    let bottom_top = (0.0 - 2.25) + top_extra
+    let first_ext_top = bottom_top - 1.15
+    let top_top = (0.0 - 4.03) - extra
+    box.ml_box_full(
+        <span class: "lm_delim-mult";
+            <span class: "delim-size4 lm_vlist-t lm_vlist-t2";
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_h);
+                        <span style: "top:" ++ util.fmt_em(bottom_top);
+                            <span class: css.PSTRUT, style: "height:3.16em">
+                            <span style: "height:1.81em;display:inline-block"; chars[0]>
+                        >
+                        for i in 0 to (ext_count - 1) {
+                            <span style: "top:" ++ util.fmt_em(first_ext_top - float(i) * 0.6);
+                                <span class: css.PSTRUT, style: "height:3.16em">
+                                <span style: "height:0.61em;display:inline-block"; chars[1]>
+                            >
+                        }
+                        <span style: "top:" ++ util.fmt_em(top_top);
+                            <span class: css.PSTRUT, style: "height:3.16em">
+                            <span style: "height:1.81em;display:inline-block"; chars[2]>
+                        >
+                    >
+                    <span class: css.VLIST_S; "\u200B">
+                >
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:" ++ util.fmt_em(depth_holder)>
+                >
+            >
+        >,
+        vlist_h + 0.01,
+        depth_holder - 0.01,
+        0.4,
+        "ord",
+        0.0,
+        0.0,
+        vlist_h + 0.01
+    )
+}
+
+fn render_two_piece_matrix_delim(ch) {
+    let pieces = matrix_two_piece_chars(ch)
     let tops = [0.0 - 2.25, 0.0 - 4.03]
     box.ml_box_full(
         <span class: "lm_delim-mult";

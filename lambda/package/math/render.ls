@@ -398,8 +398,12 @@ fn render_command(node, context) {
         let atom_type = sym.classify_symbol(cmd_text)
         if (sym.is_limit_op(cmd_text))
             render_limit_operator_symbol(unicode, context)
-        else
-            box.text_box(unicode, symbol_font_class(cmd_text, context), atom_type)
+        else {
+            let symbol_box = box.text_box(unicode, symbol_font_class(cmd_text, context), atom_type)
+            if (is_ascii_latin_letter(unicode))
+                box_with_serial_boundary(symbol_box, atom_type)
+            else symbol_box
+        }
     } else {
         if (name_str == "pdiff") {
             render_pdiff(node, context)
@@ -441,8 +445,8 @@ fn render_unknown_command_node(node, name_str, context) {
         0.75
     )
     // Render only the brace/bracket-group arguments as math (skip the bare
-    // command-name string). MathLive puts a thin space (0.17em) between the
-    // error token and the following argument content.
+    // command-name string). The grouped atom follows the tail argument's type;
+    // treating it as `minner` adds a spurious thin space before the next token.
     let arg_boxes = (for (child in node
         where child is element and (name(child) == 'group' or name(child) == 'brack_group'))
         render_node(child, context))
@@ -450,8 +454,25 @@ fn render_unknown_command_node(node, name_str, context) {
     else {
         let all_boxes = [err_box, box.skip_box(0.17)] ++ arg_boxes
         let spaced = apply_spacing(all_boxes, context)
-        box_with_type(box.hbox(spaced), "minner")
+        box_with_serial_boundary(box.hbox(spaced), arg_boxes[len(arg_boxes) - 1].type)
     }
+}
+
+fn box_with_serial_boundary(bx, atom_type) => {
+    element: <span class: "lm_boundary";
+        for (el in box.elements_of(bx)) el
+    >,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: atom_type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size
+}
+
+fn is_ascii_latin_letter(text) {
+    len(text) == 1 and contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", text)
 }
 
 fn render_limit_operator_symbol(text, context) {
@@ -1167,10 +1188,34 @@ fn render_accent(node, context) {
     let cmd = if (node.cmd != null) string(node.cmd) else ""
     let accent_key = if (len(cmd) > 0 and slice(cmd, 0, 1) == "\\")
         slice(cmd, 1, len(cmd)) else cmd
-    if (accent_key == "overline" or accent_key == "underline")
+    let combined_symbol = accent_prefix_symbol(accent_key, node.base)
+    if (sym.lookup_symbol("\\" ++ accent_key) != null)
+        // Some longest-match symbol commands (notably \ddots) can still be
+        // shaped as accent nodes by the parser; symbol lookup is authoritative.
+        render_combined_symbol_command(accent_key, context)
+    else if (combined_symbol != null)
+        // The parser can split a longest-match command like \ddots into the
+        // accent prefix \ddot plus a bare base `s`; recover the TeX command.
+        render_combined_symbol_command(combined_symbol, context)
+    else if (accent_key == "overline" or accent_key == "underline")
         render_line_accent(node, context, accent_key)
     else
         render_glyph_accent(node, context, accent_key)
+}
+
+fn accent_prefix_symbol(accent_key, base) {
+    let base_text = bare_letter_of(base)
+    if (base_text == null) null
+    else (let cmd = accent_key ++ base_text,
+        if (sym.lookup_symbol("\\" ++ cmd) != null) cmd else null)
+}
+
+fn render_combined_symbol_command(cmd_name, context) {
+    let unicode = sym.lookup_symbol("\\" ++ cmd_name)
+    if (unicode == null) render_unknown_command("\\\\" ++ cmd_name)
+    else (let atom_type = sym.classify_symbol(cmd_name),
+        if (sym.is_limit_op(cmd_name)) render_limit_operator_symbol(unicode, context)
+        else box.text_box(unicode, symbol_font_class(cmd_name, context), atom_type))
 }
 
 fn render_glyph_accent(node, context, accent_key) {
@@ -2134,6 +2179,18 @@ fn render_combined_big_command(combo, context) {
           scripts.render(synthetic_subsup, context, render_node))
 }
 
+// Recover known commands that the grammar split at a shorter command prefix:
+// `\ddots` can arrive as `\ddot` + `s`; render it as the single symbol.
+fn try_command_prefix_word_combine(node, i) {
+    if (i + 1 >= len(node)) null
+    else (let cur = node[i],
+        if (not (cur is element)) null
+        else if (name(cur) != 'command') null
+        else (let prefix = command_name(cur),
+            if (not is_alpha_text(prefix)) null
+            else attempt_error_prefix_combine(node, i, prefix)))
+}
+
 // Detect an ERROR node carrying a truncated command prefix (e.g., "\left",
 // "\Left", "\right") followed by alpha letters that, when concatenated, form
 // a known relation/symbol/big-op command (\leftarrow, \Leftrightarrow,
@@ -2726,6 +2783,10 @@ fn render_children_scan(node, context, i, acc) {
     else if (is_long_arrow_label_sequence(node, i))
         (let rendered = render_long_arrow_label_sequence(command_name(node[i]), command_name(node[i + 1]), context),
          render_children_scan(node, context, i + 2, acc ++ [rendered]))
+    else if (try_command_prefix_word_combine(node, i) != null)
+        (let combo = try_command_prefix_word_combine(node, i),
+         let rendered = render_combined_error_prefix_command(combo, context),
+         render_children_scan(node, context, i + combo.consumed, acc ++ [rendered]))
     else if (try_sized_delim_word_combine(node, i) != null)
         (let combo = try_sized_delim_word_combine(node, i),
          let rendered = render_combined_big_command(combo, context),
