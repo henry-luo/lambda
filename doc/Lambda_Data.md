@@ -45,6 +45,7 @@ Lambda Script has a rich type system with both primitive and composite types:
 | `null`     | Null/void value             | `null`                |
 | `bool`     | Boolean values              | `true`, `false`       |
 | `int`      | 56-bit signed integers      | `42`, `-123`          |
+| `integer`  | Arbitrary precision integer | `123n`, `1e3n`        |
 | `float`    | 64-bit floating point       | `3.14`, `1.5e-10`     |
 | `i8` `i16` `i32` | Sized signed integers | `42i8`, `1000i16`     |
 | `u8` `u16` `u32` | Sized unsigned integers | `255u8`, `60000u16` |
@@ -52,7 +53,7 @@ Lambda Script has a rich type system with both primitive and composite types:
 | `u64`      | 64-bit unsigned integer     | `1000u64`             |
 | `f16` `f32`| Sized floating point        | `0.5f16`, `3.14f32`   |
 | `f64`      | 64-bit float (alias for `float`) | `2.7f64`         |
-| `decimal`  | Arbitrary precision decimal | `123.456n`,`456.789N` |
+| `decimal`  | Arbitrary precision decimal | `123.456n`, `1e-3n`   |
 | `string`   | UTF-8 text strings          | `"hello"`             |
 | `symbol`   | Interned identifiers        | `'symbol'`            |
 | `binary`   | Binary data                 | `b'\xDEADBEEF'`       |
@@ -109,9 +110,9 @@ inf
 nan
 -inf
 
-// Decimals (arbitrary precision)
-123.456n       // decimal128
--789.012N      // unlimited precision decimal
+// Decimals (exact decimal)
+123.456n       // decimal
+-789.012n      // decimal
 
 // Sized integers (postfix suffix)
 42i8           // 8-bit signed  [-128, 127]

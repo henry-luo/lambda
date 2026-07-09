@@ -633,8 +633,8 @@ TEST_F(NegativeScriptTest, SyntaxError_OversizedIntegerLiteral) {
     ExpectErrorCode("test/lambda/negative/syntax/oversized_integer_literal.ls", "error[E108]");
 }
 
-TEST_F(NegativeScriptTest, SyntaxError_Decimal128Overflow) {
-    ExpectErrorCode("test/lambda/negative/syntax/decimal128_overflow.ls", "error[E108]");
+TEST_F(NegativeScriptTest, SyntaxError_RetiredDecimalSuffix) {
+    ExpectErrorWithoutCrash("test/lambda/negative/syntax/retired_decimal_suffix.ls");
 }
 
 TEST_F(NegativeScriptTest, SyntaxError_UnexpectedToken) {

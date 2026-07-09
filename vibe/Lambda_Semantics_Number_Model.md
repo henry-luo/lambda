@@ -229,7 +229,7 @@ Deliberately informal — a snapshot of divergences found while designing v2, ea
 | 2 | Dual double lane tags `ELEM_FLOAT`/`ELEM_FLOAT64`: the dead-but-armed **truncation landmine** in `print.cpp:23` (`read_compact_elem` FLOAT64 → `i2it`), the JS seam (`Float64Array` → `ELEM_FLOAT64` vs inference → `ELEM_FLOAT`), reductions routing FLOAT64 via the generic slow path (`lambda-eval-num.cpp:1385`), `validate_pattern.cpp:111` collapsing both to one leaf | **Fixed:** `ELEM_FLOAT64` is the single canonical double lane at `0x10`; `ELEM_FLOAT` is only a source-compatibility alias, the retired `0xC0` slot has size `0`, JS `Float64Array` and `[float]` inference produce the same lane, and the duplicate slow/dead branches are removed. | §3.5 |
 | 3 | `LIT_TYPE_F64` as a distinct static type object (`build_ast.cpp:3181`) | **Fixed:** `f64` input canonicalizes to `float` literals/type refs; `TYPE_F64`/`LIT_TYPE_F64` now point at `TYPE_FLOAT`. | §3.2 |
 | 4 | Any `type()` path reporting `"f64"` (the superseded draft direction) | **Fixed for new values:** `type(1.0f64)` reports `float`; the legacy scalar `LMD_TYPE_FLOAT64` compatibility tag remains distinct from the ArrayNum lane merge. | §4 |
-| 5 | Grammar still carries both `n` and `N` suffixes; integer-valued `n` literals still type as `decimal` | Open. | §2.2/§2.4 (W1) |
+| 5 | Grammar still carries both `n` and `N` suffixes; integer-valued `n` literals still type as `decimal` | **Fixed:** grammar accepts only lowercase `n`; integer-like `n` spellings (`1n`, `1e3n`) report `integer`, fractional/negative-exponent spellings report `decimal`, and exact integer `+`/`-`/`*`/`%` preserve `integer` while `/` exits to `decimal`. | §2.2/§2.4 (W1) |
 | 6 | `int64 → JS` silent `(double)` casts (e.g. `js_fs.cpp:217`, `js_child_process.cpp`) | Open. | §5.3 (int64 → BigInt always) |
 | 7 | LambdaJS BigInt scaffolding is int64-leaning (`js_bigint_to_index`) | Open. | §5.2/§2.2 (W2) |
 | 8 | ArrayNum `==` is representation-sensitive (task_38782787) | **Fixed:** N-D shape remains structural, but mixed-lane ArrayNum equality now compares flat elements through exact numeric equality instead of lossy `double` promotion; scalar mixed numeric `==` uses the same comparator for high `i64`/`u64` boundaries. | P3 (`==` must be value-precise) |
@@ -239,7 +239,7 @@ Deliberately informal — a snapshot of divergences found while designing v2, ea
 
 ## 9. Scheduled work & migrations (W)
 
-- **W1** — One-time migrations, scheduled together with the N1 golden run: integer-valued `n` literals retype to `integer`; decimal goldens shift under §2.4 exactness; `N`-suffix removal breaks `N` scripts; the `42i8 is i16` golden flips (false → true) under the final §3.4 lattice.
+- **W1** — Done for literal suffix semantics and affected goldens: integer-valued `n` literals retype to `integer`; decimal goldens shifted under §2.4 exactness; `N`-suffix scripts migrated or now fail at parse time; the `42i8 is i16` golden has flipped under the final §3.4 lattice.
 - **W2** — LambdaJS BigInt re-base onto the mpdec-unlimited backing; BigInt semantic coverage (mix-throws, `asIntN`, …) rides the node baseline under the K28-style best-effort banner.
 - **W3** — `uint64` egress edge: values above `INT64_MAX` route to BigInt via the unsigned path (FFI/lane boundaries only, but the path must exist).
 - **W4** — The §5.1 performance budget: define the acceptable node-baseline/benchmark regression *before* removing compact-int packing; typed-lane storage for number-dense JS arrays is the committed mitigation if exceeded.

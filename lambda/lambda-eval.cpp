@@ -2590,7 +2590,11 @@ String* fn_string(Item itm) {
         TypeType* type_type = (TypeType*)itm.type;
         if (!type_type || !type_type->type) return &STR_NULL;
         const char* name;
-        if (type_type->type->type_id == LMD_TYPE_NUM_SIZED) {
+        if (type_type->type == &TYPE_INTEGER) {
+            name = "integer";
+        } else if (type_type->type == &TYPE_NUMBER) {
+            name = "number";
+        } else if (type_type->type->type_id == LMD_TYPE_NUM_SIZED) {
             name = get_num_sized_type_name((NumSizedType)type_type->type->kind);
         } else {
             name = get_type_name(type_type->type->type_id);
@@ -2675,6 +2679,14 @@ Type* fn_type(Item item) {
             return (Type*)type;
         }
     }
+    if (resolved_type == LMD_TYPE_DECIMAL) {
+        Decimal* dec = item.get_decimal();
+        if (dec && dec->unlimited == DECIMAL_BIGINT) {
+            // integer is a language type carried by Decimal storage; hide the carrier from type().
+            type->type = &TYPE_INTEGER;
+            return (Type*)type;
+        }
+    }
     if (item._type_id) {
         item_type->type_id = item._type_id;
     }
@@ -2715,6 +2727,8 @@ static Symbol* fn_name_symbol_from_strview(StrView name) {
 
 static Symbol* fn_name_from_type(Type* type) {
     if (!type) return nullptr;
+    if (type == &TYPE_INTEGER) return fn_name_symbol_from_chars("integer", 7);
+    if (type == &TYPE_NUMBER) return fn_name_symbol_from_chars("number", 6);
     switch (type->type_id) {
     case LMD_TYPE_OBJECT: {
         TypeObject* obj_type = (TypeObject*)type;

@@ -113,7 +113,39 @@ Restore only works if re-running templates over identical (model, state) reprodu
   - Results return to the **page mailbox keyed by request id**, never by node pointer. Hibernated page = parked loop + retained mailbox; messages buffer (K20) and drain at resurrection.
   - Page-owned `start` tasks complete/cancel at eviction or block it; jobs that outlive eviction are owned by the shell/service context (`start process` or a service). This needs to be baked into the Lambda/Radiant embedding — it does not exist today.
 
-### 3.5 Two hibernation levels *(proposed this review)* (RS11)
+### 3.5 The purity lattice and the evaluation session (RS17–RS19)
+
+> Language-level decisions recorded here because hibernation surfaced them; they should graduate to the Lambda semantics set (`../Lambda_Semantics_Features.md` / the formal-semantics ADR) as the normative home.
+
+**The three-tier effect lattice: `pure fn ⊂ fn ⊂ pn` (RS17).**
+- **`pure fn`** — totally referentially transparent. Inferred automatically; a user may also declare `pure fn` and the compiler *enforces* it ("color contracts, infer mechanics").
+- **`fn`** — pure *given* (model, state, env): may additionally read the frozen **evaluation-session environment** — `today()`, `justnow()`, `input()`. Reads of `~` (model) and template state are defined as *parameters*, not effects, so they never taint inference.
+- **`pn`** — full effects. Genuinely non-repeatable builtins (`clock()` is monotonic — every call differs) live here, never in the env-reader class.
+
+**The evaluation session is a transaction, not a tab lifetime (RS18).** The session window is one evaluation pass — an event cascade / retransform-render pass, on the scale of a DB transaction or a browser event handler (seconds at most). Within the window the engine holds all page inputs constant (transaction isolation): two `today()` calls in one pass always agree; no torn trees. Env changes — synced input updates, time advancing — queue as messages and apply **between passes only** (the same loop-top discipline as K3); the UI then reacts, retransforms, and re-renders with the new env. Hibernation restore needs no special case: **restore is simply the next pass with a fresh env** — the non-pure parts re-evaluate by construction.
+
+**Conservative inference (RS19).** Anything not provably pure is non-pure — higher-order and dynamic call sites default to non-pure rather than requiring effect polymorphism in v1. The direction is safe: over-tainting costs extra re-transform, never a wrong rebinding. `pure fn` annotations at boundaries recover precision where it matters.
+
+**The seven consumers of the purity bit.** Only correctness needs #1; the rest ride the same inference:
+
+1. **Caching / retransform** — the primary consumer. In UI mode, each template instance additionally tracks an **env-cell read-set** (which of today / justnow / each `input()` target it read), recorded in `render_map` like the dirty flags, so an input sync doesn't re-transform time-only parts and vice versa; `justnow()` readers legitimately re-run every pass (RS20).
+2. **Parallelism** — `pure fn` is safely fork-joinable (the K15/K19 safety predicate for free); env-reader `fn`s are *also* parallel-safe within a pass because the env is frozen (an RS18 transaction-isolation dividend); only `pn` is excluded.
+3. **Transpiler optimizations** — constant folding, CSE, hoisting, memoization, DCE for pure calls; env reads are CSE-able/hoistable *within a pass* (two `today()` calls are one).
+4. **Scheduler abortability** — a pure/frozen-env retransform can be abandoned mid-pass on frame-budget overrun and re-run next frame with no cleanup; a useful primitive for the RO1 page scheduler.
+5. **Record-replay / event sourcing** — see RS22: with the env journaled per pass, every frame is reproducible.
+6. **API contracts** — `pure` appears in function types (`pure <: fn` subtyping), the validator, and native-module signatures; the one consumer that is cost rather than benefit (RSO10.3).
+7. **Logging** — the lattice forces the previously-flagged decision, now resolved: `log_*` is **observationally pure** — logs are derived diagnostic output, exempt from the lattice (RS21).
+
+**Event-sourced page state (RS22).** The state design is event sourcing: **page ≡ input docs + event journal + view states**, where durable view state is a *checkpoint of the fold* over the event history — a materialized view that lets replay start from the last snapshot instead of t=0, and lets the journal be truncated behind it. For frame-by-frame reproducibility the journal must capture *all* nondeterminism entering the page: input events (mouse, keyboard, hw), per-pass env deltas (time ticks, input-doc syncs), and mailbox arrivals (background-task results, in loop-arrival order — K20e's per-sender FIFO makes this stable), plus engine/script version stamps (replay is only guaranteed against the same code). The single-threaded page loop (RC1/RC2) means there is exactly one total order of events — journaling it is trivial, which is another dividend of the same-thread decision. Seeds already exist: the RAD_15 event JSONL log and the per-cascade state dump.
+
+**Time-travel debugging (RS23).** Event sourcing makes a time-travel debugger a product feature, not a research project: the user scrolls to any frame and inspects, logs, and evaluates there. Frame addressing = nearest checkpoint + deterministic replay forward (passes are transaction-scale, so replay distance is short and cheap). The effect lattice is the debugger's safety system — the part no competitor has *in the language*:
+- **`pure` eval at a frame** — always safe, side-effect-free inspection: run any expression against frame N's (model, state) values.
+- **`fn` eval at a frame** — safe with that frame's *frozen env*: `today()` answers what it answered then. Historical evaluation is semantically exact, not approximated.
+- **`pn` eval at a frame** — cannot run inside the timeline; it **forks a branch**: a new timeline from frame N's checkpoint. What-if debugging (replay the session with a different input doc, a patched handler) is the same operation.
+- **Retroactive logging** — add `log_*` statements and replay: logs from the past, guaranteed identical to what a live run would have printed (RS21: logs are derived output).
+The differentiator is the lattice, not the journal — every time-travel system can record events; what kills them is paused-world evaluation, and Lambda answers it in the type system. Precedent calibration: rr/Replay.io record at syscall level with heavy overhead — Lambda records at event level (tiny journals) because determinism is a language property, not an instrumentation trick; Elm's famous time-travel debugger decayed because effects/subscriptions broke replay — Lambda's lattice makes replay-safety statically known; Redux DevTools time-travels only the reducer state — Lambda reproduces the *screen* at frame N, because the DOM is derived (RS5) and layout is deterministic (RC6). Scrubbing cost model: RS18's transaction-scale passes make checkpoint-to-frame replay milliseconds of work — no process snapshots or fork-per-checkpoint tricks. Implementation distance is short — the debugger is productizing infrastructure that exists for testing: the `event_sim` replay harness + JSONL event log (RAD_15), the per-cascade Mark state dump (frame checkpoints), the display-list golden machinery (RO8, pixel-exact frames), and the REPL (the eval-at-frame engine).
+
+### 3.6 Two hibernation levels *(proposed this review)* (RS11)
 
 | Level | What is dropped | Serialization | Background tasks |
 |---|---|---|---|
@@ -168,6 +200,13 @@ A page containing Lambda templates *and* non-cooperative `<script>` JS is persis
 - **RS14** — Mixed Lambda+JS pages persist at the JS tier; persistence tier is an explicit page property.
 - **RS15** — Sensitive form fields (passwords) excluded from snapshots; undo rings transient in v1.
 - **RS16** — `STATE_MODE_IMMUTABLE` (COW/HAMT stub) is deleted, not completed; undo stays command-based. *(proposed this review)*
+- **RS17** — Three-tier effect lattice `pure fn ⊂ fn ⊂ pn`: pure = referentially transparent (inferred; `pure fn` declaration compiler-enforced); fn = pure given (model, state, env) — may read the frozen session env (`today()`/`justnow()`/`input()`); pn = full effects. Model/state reads are parameters, not effects. *(user-confirmed)*
+- **RS18** — Evaluation session = one pass (event cascade / retransform-render), DB-transaction scale — **not** a tab lifetime. Engine holds all inputs constant within the window; env changes queue and apply between passes; `today()`/`justnow()` refresh per pass; restore = next pass with fresh env. *(user-confirmed)*
+- **RS19** — Conservative purity inference: not provably pure ⇒ non-pure (higher-order/dynamic call sites default non-pure). Over-tainting costs re-transform, never wrong rebinding; `pure fn` recovers precision. *(user-confirmed)*
+- **RS20** — Env-cell read-sets tracked per template instance in UI mode (in `render_map`, like dirty flags): re-transform only readers of changed cells. *(user-confirmed)*
+- **RS21** — `log_*` is observationally pure — logs are derived diagnostic output, exempt from the effect lattice. Resolves the "logging inside fn" pre-decision flagged in the Unbundled Monad note. *(user-confirmed)*
+- **RS22** — Event-sourced page state: page ≡ input docs + event journal + view states; durable view state = checkpoint of the fold (enables journal truncation); journal captures all nondeterminism (input events, per-pass env deltas, mailbox arrivals in loop order) + version stamps ⇒ frame-by-frame reproducibility on the single-ordered page loop. *(user-confirmed)*
+- **RS23** — Time-travel debugging as a product feature riding RS22: scroll to any frame = checkpoint + short deterministic replay; eval-at-frame safety is decided by the effect lattice (`pure` = free inspection, `fn` = exact historical eval under the frozen env, `pn` = forks a what-if branch timeline); retroactive logging via RS21. *(user-confirmed)*
 
 ## 6. Open items (RSO)
 
@@ -180,10 +219,13 @@ A page containing Lambda templates *and* non-cooperative `<script>` JS is persis
 - **RSO7 — `Serializable` constraint & migration:** validator-checked serializability of declared `state` types; snapshot schema version stamp; migration hooks on restore.
 - **RSO8 — L1/L2 trigger policy** (hidden-tab timer, memory pressure, explicit shell action) and the exact settle-to-neutral set (cancel drag, cancel IME, close overlays — what else?).
 - **RSO9 — Derived-state evictions:** delete the caret/selection projections (+ their invariants); move `DirtyTracker`/`ReflowScheduler`/`AnimationScheduler` into the RO1 page scheduler; relocate renderer bookkeeping (`caret_blink_t`, video placement cache).
-- **RSO10 — Template-body purity (the RS6 determinism gaps).** The runtime substrate is already deterministic (seeded `math.random`, shape-order map iteration, `apply()` ties broken by `definition_order`, K19/K22 parallel determinism) — the leaks are at the language surface, and `fn` rules alone do not close them:
-  1. `today()`/`justnow()` are fn-callable → a body rendering them regenerates a different tree at restore. Fix options: a stricter **template-pure** tier enforced at `build_ast` for view/edit bodies (no time, no I/O), or capture them as implicit snapshot inputs replayed at restore (extends `justnow()`'s existing per-evaluation freeze across hibernation).
-  2. `input()` is fn-callable → I/O can hide inside a body, silently violating DOM = f(model, state) and failing offline at restore. Doctrine: **all I/O enters through the model**; bodies are statically I/O-free (same `build_ast` check).
-  3. Anonymous templates serialize `template_ref` as `(anon)` interned-pointer names — need canonical stable names (source position / definition-order index) to rebind under RS7.
+- **RSO10 — Purity-lattice implementation (residuals of the RS6 determinism gaps, mechanism decided in RS17–RS19).** The runtime substrate is already deterministic (seeded `math.random`, shape-order map iteration, `apply()` ties broken by `definition_order`, K19/K22 parallel determinism); remaining work:
+  1. **Closed builtin classification audit**: every sys-func gets a class (pure / env-reader / pn); unclassified defaults to non-pure. `clock()` stays pn (monotonic); audit locale/timezone/env-var/platform readers.
+  2. **Per-session `input()` memo**: keyed by (canonical target, format), reset per pass. Does not exist — `./temp/cache` is a cross-session HTTP *disk* cache with the opposite semantics (persists across sessions, re-reads local files within one). Decide failure caching: is a `T^E` from `input()` the frozen env value for the pass, or retried next pass?
+  3. **Effect bit in function types**: `pure <: fn` subtyping where fn values cross boundaries — function-type syntax, validator, Jube native-module signatures (`vibe/Lambda_Native_Module_Design.md` fn/pn-prefixed sigs gain the sub-color).
+  4. **Structural vs value taint**: non-pure values flowing only into text/attributes leave structure stable (rebinding safe, re-render only); values reaching control flow (conditions, iterated collections) are the structural-identity risk. Compiler distinguishes by consumption site — shrinks the risky region.
+  5. Anonymous templates serialize `template_ref` as `(anon)` interned-pointer names — need canonical stable names (source position / definition-order index) to rebind under RS7.
+  (Former items — env-cell read-sets and logging-in-fn — are decided: RS20, RS21.)
   Boundary conditions to pin, not fix: snapshots are **machine-local in v1** (libm float differences across platforms); error values rendered into trees must stay value-only (no addresses/timestamps).
 
 ## Cross-references

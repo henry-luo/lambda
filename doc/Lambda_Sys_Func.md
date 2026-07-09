@@ -124,8 +124,8 @@ avg([1, 2, 3, 4])       // 2.5
 | `math.e` | Euler's number (e) | `2.7182818285` |
 | `math.max_int` | Largest compact `int` with exact float64 round-trip | `9007199254740991` |
 
-Compact `int` is bounded to ±(2^53 - 1). Start with decimal literals (`n`/`N`)
-when precise arithmetic beyond this compact boundary is required.
+Compact `int` is bounded to ±(2^53 - 1). Use `n` literals for exact integer or
+decimal arithmetic beyond this compact boundary.
 
 #### Trigonometric
 

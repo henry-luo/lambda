@@ -724,6 +724,10 @@ struct PrintItemVisitor {
             strbuf_append_str(strbuf, "number");
             return;
         }
+        if (type->type == &TYPE_INTEGER) {
+            strbuf_append_str(strbuf, "integer");
+            return;
+        }
         if (type->type->type_id == LMD_TYPE_NUM_SIZED) {
             strbuf_append_str(strbuf, get_num_sized_type_name((NumSizedType)type->type->kind));
             return;

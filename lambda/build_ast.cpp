@@ -2896,6 +2896,7 @@ Type* build_lit_int64(Transpiler* tp, TSNode node) {
 }
 
 static int decimal_literal_significant_digits(const char* str);
+static bool n_literal_is_integer(const char* str);
 
 Type* build_lit_float(Transpiler* tp, TSNode node) {
     TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
@@ -2934,28 +2935,30 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     StrView num_sv = ts_node_source(tp, node);
     char* num_str = strview_to_cstr(&num_sv);
     char suffix_char = num_sv.str[num_sv.length - 1];
-    // num_str may not end with 'n' or 'N'
-    if (suffix_char == 'n' || suffix_char == 'N') {
-        num_str[num_sv.length - 1] = '\0';  // clear suffix 'n'/'N'
-    }
-    log_debug("build lit decimal: %s", num_str);
-
-    if (suffix_char == 'n' && decimal_literal_significant_digits(num_str) > DECIMAL_FIXED_PRECISION) {
+    if (suffix_char == 'N') {
         record_semantic_error(tp, node, ERR_INVALID_NUMBER,
-            "fixed decimal literal exceeds decimal128 precision (%d significant digits)", DECIMAL_FIXED_PRECISION);
+            "decimal literal suffix 'N' has been retired; use 'n'");
         mem_free(num_str);
         return &TYPE_ERROR;
     }
+    if (suffix_char == 'n') {
+        num_str[num_sv.length - 1] = '\0';  // clear suffix 'n'
+    }
+    log_debug("build lit decimal: %s", num_str);
 
     // Allocate heap-allocated Decimal structure
     Decimal* decimal;
     decimal = (Decimal*)pool_alloc(tp->pool, sizeof(Decimal));
     item_type->decimal = decimal;
 
-    // Set unlimited flag based on suffix case: 'N' = extended precision, 'n' = decimal128.
-    decimal->unlimited = (suffix_char == 'N') ? 1 : 0;
+    bool is_integer_literal = n_literal_is_integer(num_str);
+    bool needs_unlimited_decimal =
+        decimal_literal_significant_digits(num_str) > DECIMAL_FIXED_PRECISION;
+    decimal->unlimited = is_integer_literal ? DECIMAL_BIGINT :
+        (needs_unlimited_decimal ? 1 : 0);
 
-    // n literals must round in decimal128 context; N literals keep the extended 200-digit context.
+    // `n` is lexical: integer-like spellings become integer/BigInt; decimal
+    // spellings preserve all literal digits by selecting the necessary tier.
     decimal->dec_val = decimal_parse_str(num_str,
         decimal->unlimited ? decimal_unlimited_context() : decimal_fixed_context());
     if (!decimal->dec_val) {
@@ -3006,6 +3009,23 @@ static int decimal_literal_significant_digits(const char* str) {
         if (seen_nonzero) digits++;
     }
     return saw_digit ? (digits > 0 ? digits : 1) : 0;
+}
+
+static bool n_literal_is_integer(const char* str) {
+    bool has_dot = false;
+    bool has_negative_exponent = false;
+    for (const char* p = str; *p; p++) {
+        if (*p == '.') {
+            has_dot = true;
+        } else if (*p == 'e' || *p == 'E') {
+            const char* exp = p + 1;
+            if (*exp == '+' || *exp == '-') {
+                has_negative_exponent = (*exp == '-');
+            }
+            break;
+        }
+    }
+    return !has_dot && !has_negative_exponent;
 }
 
 static bool sized_literal_is_decimal(const char* str) {
