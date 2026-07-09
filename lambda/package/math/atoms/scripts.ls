@@ -5,6 +5,7 @@ import box: lambda.package.math.box
 import ctx: lambda.package.math.context
 import css: lambda.package.math.css
 import met: lambda.package.math.metrics
+import sp_table: lambda.package.math.spacing_table
 import util: lambda.package.math.util
 import sym: lambda.package.math.symbols
 
@@ -18,6 +19,9 @@ import sym: lambda.package.math.symbols
 pub fn render(node, context, render_fn) {
     // check if base is a big operator (e.g. \sum, \prod, \int, \lim)
     let base = node.base
+    if (is_sequence_script_base(base))
+        render_sequence_base_scripts(node, context, render_fn)
+    else {
     let is_big_op = base != null and base is element and name(base) == 'command' and
         base.name != null and sym.is_limit_op(string(base.name))
     // Integral-family operators (\int, \oint, \iint, etc.) use SIDE limits
@@ -37,6 +41,75 @@ pub fn render(node, context, render_fn) {
         render_inline_big_op_scripts(base, node, context, render_fn)
     else
         render_scripts(node, context, render_fn)
+    }
+}
+
+fn is_sequence_script_base(base) {
+    base is element and name(base) == '_seq' and (len(base) > 1)
+}
+
+fn render_sequence_base_scripts(node, context, render_fn) {
+    let base = node.base
+    let n = len(base)
+    let prefix_box = render_sequence_script_prefix(base, n, context, render_fn)
+    let tail_node = <subsup base: base[n - 1], sub: node.sub, sup: node.sup>
+    let tail_box = render(tail_node, context, render_fn)
+    let gap = sequence_script_gap(prefix_box, tail_box, context)
+    // Some CST shapes attach a superscript to a whole preceding sequence.
+    // MathLive measures only the final atom as the script base; otherwise a
+    // preceding fraction makes `... x^{2n}` use a tall fraction-sized shift.
+    // The composite still spaces like the scripted tail atom (e.g. integral
+    // limits remain mop before the following integrand).
+    with_type(box.hbox([prefix_box, gap, tail_box]), tail_box.type)
+}
+
+fn render_sequence_script_prefix(base, n, context, render_fn) {
+    let prefix_box = if (n == 2) render_fn(base[0], context)
+        else render_fn(<_seq;
+            for (i in 0 to (n - 2)) base[i]
+        >, context)
+    let tail_prefix_node = last_sequence_atom(base[n - 2])
+    let tail_prefix_box = render_fn(tail_prefix_node, context)
+    with_type(prefix_box, tail_prefix_box.type)
+}
+
+fn last_sequence_atom(node) {
+    if (node is element and name(node) == '_seq' and (len(node) > 0))
+        last_sequence_atom_from(node, len(node) - 1)
+    else node
+}
+
+fn last_sequence_atom_from(node, i) {
+    if (i <= 0) last_sequence_atom(node[0])
+    else if (is_blank_string_node(node[i])) last_sequence_atom_from(node, i - 1)
+    else last_sequence_atom(node[i])
+}
+
+fn is_blank_string_node(node) {
+    if (not (node is string)) false
+    else is_blank_string(string(node), 0)
+}
+
+fn is_blank_string(text, i) {
+    if (i >= len(text)) true
+    else if (slice(text, i, i + 1) == " ") is_blank_string(text, i + 1)
+    else false
+}
+
+fn sequence_script_gap(prefix_box, tail_box, context) {
+    let w = sp_table.get_spacing(prefix_box.type, tail_box.type, context.style)
+    if (w > 0.0) box.skip_box(w) else null
+}
+
+fn with_type(bx, box_type) => {
+    element: bx.element,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: box_type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size
 }
 
 // Compute the height to use for the sub-script wrapper. MathLive uses the full
@@ -415,13 +488,18 @@ fn render_scripts(node, context, render_fn) {
          let scriptspace = util.SCRIPT_SPACE,
          let x_height = met.X_HEIGHT,
          let rule_width = met.at(met.defaultRuleThickness, si),
-         let init_sup_shift = if (is_char) 0.0
+         let init_sup_shift = if (is_char or base_box.sup_min_shift_base == true) 0.0
              else base_box.height - met.at(met.supDrop, si) * met.style_scale(sup_ctx.style),
          let init_sub_shift = if (is_char) 0.0
              else base_box.depth + met.at(met.subDrop, si) * met.style_scale(sub_ctx_.style),
          let min_sup_shift = if (ctx.is_display(context)) met.at(met.sup1, si)
              else if (context.cramped) met.at(met.sup3, si)
              else met.at(met.sup2, si),
+         // Small delimiter glyphs are visually tall, but MathLive does not let
+         // that visual height pull a following superscript above the sup1
+         // minimum; otherwise `|z|^2` gets a too-tall VList.
+         let min_sup_shift0 = if (base_box.sup_min_shift_base == true)
+             max(met.at(met.sup1, si), min_sup_shift) else min_sup_shift,
          let parent_scale = met.style_scale(context.style),
          let sup_font_scale = if (has_sup and use_array_text_scripts) 0.7
              else if (has_sup) met.style_scale(sup_ctx.style) / parent_scale
@@ -431,13 +509,13 @@ fn render_scripts(node, context, render_fn) {
              else 1.0,
          let supsub_box = if (has_sup and has_sub)
              render_both(base_box, sup_box, sub_box, init_sup_shift, init_sub_shift,
-                         min_sup_shift, x_height, rule_width, si,
+                         min_sup_shift0, x_height, rule_width, si,
                          sup_font_scale, sub_font_scale)
          else if (has_sub)
              render_sub_only(base_box, sub_box, init_sub_shift, x_height, si,
                              is_char, sub_font_scale)
          else
-             render_sup_only(base_box, sup_box, init_sup_shift, min_sup_shift, x_height,
+             render_sup_only(base_box, sup_box, init_sup_shift, min_sup_shift0, x_height,
                              context, sup_font_scale),
          script_pair(base_box, box.with_class(supsub_box, css.MSUBSUP)))
 }
@@ -447,6 +525,13 @@ fn script_pair(base_box, script_box) {
 }
 
 fn ml_script_pair(base_box, script_box) {
+    if (is_op_group_box(base_box))
+        ml_op_group_script_pair(base_box, script_box)
+    else
+        ml_default_script_pair(base_box, script_box)
+}
+
+fn ml_default_script_pair(base_box, script_box) {
     let hb = box.hbox([base_box, script_box])
     box.ml_box_full(
         hb.element,
@@ -459,6 +544,35 @@ fn ml_script_pair(base_box, script_box) {
         max(if (base_box.max_font_size != null) base_box.max_font_size else base_box.height,
             if (script_box.max_font_size != null) script_box.max_font_size else script_box.height)
     )
+}
+
+fn ml_op_group_script_pair(base_box, script_box) {
+    let children = op_group_children(base_box.element, 0, []) ++ [script_box.element]
+    // MathLive keeps scripts on operator atoms inside the op-group; otherwise
+    // scripted operators lose their mop spacing (`\sin^2 x`) and differ
+    // structurally from limit-operator output.
+    box.ml_box_full(
+        <span class: css.OP_GROUP;
+            for (child in children) child
+        >,
+        max(base_box.height, script_box.height),
+        max(base_box.depth, script_box.depth),
+        base_box.width + script_box.width,
+        base_box.type,
+        0.0,
+        0.0,
+        max(if (base_box.max_font_size != null) base_box.max_font_size else base_box.height,
+            if (script_box.max_font_size != null) script_box.max_font_size else script_box.height)
+    )
+}
+
+fn is_op_group_box(bx) {
+    bx.element is element and bx.element.class == css.OP_GROUP
+}
+
+fn op_group_children(el, i, acc) {
+    if (i >= len(el)) acc
+    else op_group_children(el, i + 1, acc ++ [el[i]])
 }
 
 // ============================================================
@@ -506,9 +620,9 @@ fn render_both(base_box, sup_box, sub_box, init_sup, init_sub,
     let min_pos = min(depth0, min(sub_end, min(cp_sup, sup_end)))
     let pstrut_style = "height:" ++ util.fmt_em_ceil2(pstrut)
     let sub_style = "height:" ++ util.fmt_em_ceil2(sub_h_s + sub_d_s) ++
-        ";display:inline-block;font-size: " ++ fmt_font_pct(sub_font_scale)
+        ";display:inline-block" ++ script_font_suffix(sub_font_scale)
     let sup_style = "height:" ++ util.fmt_em_ceil2(sup_h_s + sup_d_s) ++
-        ";display:inline-block;font-size: " ++ fmt_font_pct(sup_font_scale)
+        ";display:inline-block" ++ script_font_suffix(sup_font_scale)
     let sub_elements = box.elements_of(sub_box)
     let sup_elements = box.elements_of(sup_box)
     let el = <span class: css.VLIST_T2;
@@ -563,7 +677,9 @@ fn render_sub_only(base_box, sub_box, init_sub, x_height, si, is_char, font_scal
     let depth_holder = ceil_em2(depth_holder_raw)
     let top = sub_shift - 3.0
     let vlist_height = vlist_h_only - sub_shift
-    let inner_style = "height:" ++ util.fmt_em(child_h) ++ ";display:inline-block;font-size: " ++ util.fmt_pct(font_scale)
+    // Script child wrappers use MathLive's percent stringification; the old
+    // one-decimal helper turns 5/7 into 71.4%, causing byte-level drift.
+    let inner_style = "height:" ++ util.fmt_em(child_h) ++ ";display:inline-block" ++ script_font_suffix(font_scale)
     // For compound sub_boxes (groups via hbox), strip the lm_base wrapper
     // so the inner span contains the atoms directly — matches MathLive.
     let inner_elements = box.elements_of(sub_box)
@@ -613,7 +729,7 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font
     let has_depth = min_pos < 0.0
     let depth_out = if (has_depth) (0.0 - min_pos) else 0.0
     let inner_style = "height:" ++ util.fmt_em_ceil2(sup_h_s + sup_d_s) ++
-        ";display:inline-block;font-size: " ++ fmt_font_pct(font_scale)
+        ";display:inline-block" ++ script_font_suffix(font_scale)
     let sup_elements = merge_script_elements(box.elements_of(sup_box))
     let top_row = <span style: "top:" ++ util.fmt_em_ceil2(top) ++ ";margin-right:0.05em";
         <span class: css.PSTRUT, style: "height:" ++ util.fmt_em_ceil2(pstrut)>
@@ -655,6 +771,12 @@ fn fmt_font_pct(scale) {
     let as_int = int(rounded + 0.000001)
     if (abs(rounded - float(as_int)) < 0.001) { (as_int) ++ "%" }
     else { util.fmt_num(rounded, 2) ++ "%" }
+}
+
+fn script_font_suffix(scale) {
+    // MathLive omits no-op script scaling; emitting `font-size: 100%` creates
+    // structural drift for scripts already in scriptscript style.
+    if (abs(scale - 1.0) < 0.000001) "" else ";font-size: " ++ fmt_font_pct(scale)
 }
 
 fn can_merge_script_text(a, b) {
