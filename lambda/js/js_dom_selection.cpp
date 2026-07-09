@@ -1972,6 +1972,17 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
     js_doc_runtime_exit(&scope);
 }
 
+extern "C" void js_dom_dispatch_textcontrol_select(DomElement* elem) {
+    if (!elem) return;
+    if (!js_input || !js_input->pool) return;
+    DomDocument* doc = elem->doc ? elem->doc : (DomDocument*)js_dom_get_document();
+    JsDocRuntimeScope scope;
+    if (!js_doc_runtime_enter_if_needed(doc, &scope)) return;
+    Item ev = js_create_event("select", /*bubbles=*/true, /*cancelable=*/false);
+    js_dom_dispatch_event(js_dom_wrap_element(elem), ev);
+    js_doc_runtime_exit(&scope);
+}
+
 extern "C" void js_dom_selection_reset(void) {
     memset(&_range_methods, 0, sizeof(_range_methods));
     memset(&_sel_methods, 0, sizeof(_sel_methods));

@@ -1565,10 +1565,6 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     float css_y = abs_y;
     float css_width = rect ? rect->width : view->width;
     float css_height = rect ? rect->height : view->height;
-    if (rect && rect->hanging_trim > 0.0f) {
-        // CSS Text hanging spaces stay in layout advance, but browser text range rects exclude them.
-        css_width = fmaxf(0.0f, css_width - rect->hanging_trim);
-    }
 
     // For the root <html> element with auto height, viewport clamping sets height
     // to viewport size but browsers report the full content height.
@@ -1655,17 +1651,6 @@ static void print_text_rect_bounds_json(ViewText* text, StrBuf* buf, int indent,
             browser_rect.width = 0.0f;
             browser_rect.hanging_trim = 0.0f;
         }
-        print_bounds_json(text, buf, indent, &browser_rect);
-        return;
-    }
-    CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
-    if (white_space == CSS_VALUE_PRE_WRAP && previous_rect &&
-            previous_rect->hanging_trim > 0.0f && rect->y > previous_rect->y + 0.5f) {
-        TextRect browser_rect = *rect;
-        // Blink range rects keep post-wrap ink beside the previous line's non-hanging text.
-        browser_rect.x = previous_rect->x + previous_rect->width - previous_rect->hanging_trim;
-        browser_rect.y = previous_rect->y;
-        browser_rect.height = previous_rect->height;
         print_bounds_json(text, buf, indent, &browser_rect);
         return;
     }

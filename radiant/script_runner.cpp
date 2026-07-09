@@ -652,38 +652,9 @@ static void script_source_cache_store(const char* resolved_path, bool is_http,
 static char* load_script_content(const char* resolved_path, bool is_http) {
     char* content = nullptr;
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharness.js") == 0) {
-        // WPT test callbacks are conformance assertions, not visual setup; running
-        // them during layout capture leaves API-test DOM artifacts that browser
-        // references do not include.
-        return mem_strdup(
-            "(function(){\n"
-            "function noop(){}\n"
-            "function test(fn,name){}\n"
-            "function setup(opts,fn){ if (typeof opts === 'function') return; }\n"
-            "function done(){}\n"
-            "function async_test(fn,name){ return { step:function(fn){ return fn && fn(); }, step_func:function(fn){ return function(){ return fn && fn.apply(this, arguments); }; }, step_func_done:function(fn){ return function(){ return fn && fn.apply(this, arguments); }; }, unreached_func:function(){ return noop; }, add_cleanup:noop, done:noop }; }\n"
-            "function promise_test(fn,name){}\n"
-            "function assert_true(){}\n"
-            "function assert_false(){}\n"
-            "function assert_equals(){}\n"
-            "function assert_not_equals(){}\n"
-            "function assert_array_equals(){}\n"
-            "function assert_in_array(){}\n"
-            "function assert_throws_js(){}\n"
-            "function assert_throws_dom(){}\n"
-            "function assert_unreached(){}\n"
-            "function assert_greater_than(){}\n"
-            "function assert_greater_than_equal(){}\n"
-            "function assert_less_than(){}\n"
-            "function assert_less_than_equal(){}\n"
-            "function assert_class_string(){}\n"
-            "window.test = test; window.async_test = async_test; window.promise_test = promise_test; window.setup = setup; window.done = done;\n"
-            "window.assert_true = assert_true; window.assert_false = assert_false; window.assert_equals = assert_equals; window.assert_not_equals = assert_not_equals;\n"
-            "window.assert_array_equals = assert_array_equals; window.assert_in_array = assert_in_array; window.assert_throws_js = assert_throws_js; window.assert_throws_dom = assert_throws_dom;\n"
-            "window.assert_unreached = assert_unreached; window.assert_greater_than = assert_greater_than; window.assert_greater_than_equal = assert_greater_than_equal;\n"
-            "window.assert_less_than = assert_less_than; window.assert_less_than_equal = assert_less_than_equal; window.assert_class_string = assert_class_string;\n"
-            "})();\n",
-            MEM_CAT_JS_RUNTIME);
+        // layout references do not serve WPT testharness.js, so API-test scripts
+        // stop at the first harness call instead of leaking assertion-only DOM.
+        return mem_strdup("", MEM_CAT_JS_RUNTIME);
     }
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharnessreport.js") == 0) {
         return mem_strdup("", MEM_CAT_JS_RUNTIME);
