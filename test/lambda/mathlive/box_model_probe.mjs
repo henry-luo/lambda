@@ -2,7 +2,7 @@
 // Dump the math renderer's root box metadata for Phase A box-model migration.
 //
 // This intentionally checks the Lambda box object before HTML serialization, so
-// ML migrations can assert `model: "ml"` without inferring it from markup.
+// migrations can assert the final one-box-field invariant directly.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -69,8 +69,6 @@ function buildLambdaScript(opts) {
   return `import render_pkg: lambda.package.math.render
 import ctx: lambda.package.math.context
 import opt: lambda.package.math.optimize
-import box: lambda.package.math.box
-
 let formula = ${lambdaString(opts.formula)}
 let ast^err = parse(formula, {type: "math", flavor: "latex"})
 let result = if (^err) {
@@ -78,22 +76,30 @@ let result = if (^err) {
 } else {
     let raw_box = render_pkg.render_node(ast, ctx.${ctxFn}())
     let bx = opt.coalesce(raw_box)
+    let has_height_raw = bx.height_raw != null
+    let has_depth_raw = bx.depth_raw != null
+    let has_render_height = bx.render_height != null
+    let has_render_depth = bx.render_depth != null
+    let has_render_total = bx.render_total != null
+    let has_left_right_render_depth = bx.left_right_render_depth != null
+    let has_left_right_render_total = bx.left_right_render_total != null
     {
         formula: formula,
         error: "no-error",
-        model: bx.model,
-        is_ml: box.is_ml_box(bx),
+        one_box_fields: not (has_height_raw or has_depth_raw or
+            has_render_height or has_render_depth or has_render_total or
+            has_left_right_render_depth or has_left_right_render_total),
         type: bx.type,
         height: bx.height,
         depth: bx.depth,
         width: bx.width,
-        has_height_raw: bx.height_raw != null,
-        has_depth_raw: bx.depth_raw != null,
-        has_render_height: bx.render_height != null,
-        has_render_depth: bx.render_depth != null,
-        has_render_total: bx.render_total != null,
-        has_left_right_render_depth: bx.left_right_render_depth != null,
-        has_left_right_render_total: bx.left_right_render_total != null,
+        has_height_raw: has_height_raw,
+        has_depth_raw: has_depth_raw,
+        has_render_height: has_render_height,
+        has_render_depth: has_render_depth,
+        has_render_total: has_render_total,
+        has_left_right_render_depth: has_left_right_render_depth,
+        has_left_right_render_total: has_left_right_render_total,
         max_font_size: bx.max_font_size
     }
 }

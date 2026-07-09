@@ -17,7 +17,7 @@ pub fn make_box(el, height, depth, width, box_type) =>
 
 // create a MathLive-model box. Its height/depth are full-precision layout
 // dimensions; visual CSS extents must live in the element tree, not in render_*
-// side channels. The `model` marker lets Phase A migrate producers one by one.
+// side channels.
 pub fn ml_box(el, height, depth, width, box_type) => {
     element: el,
     height: height,
@@ -26,8 +26,7 @@ pub fn ml_box(el, height, depth, width, box_type) => {
     type: box_type,
     italic: 0.0,
     skew: 0.0,
-    max_font_size: height,
-    model: "ml"
+    max_font_size: height
 }
 
 pub fn ml_box_full(el, height, depth, width, box_type, italic, skew, max_font_size) => {
@@ -38,18 +37,7 @@ pub fn ml_box_full(el, height, depth, width, box_type, italic, skew, max_font_si
     type: box_type,
     italic: italic,
     skew: skew,
-    max_font_size: max_font_size,
-    model: "ml"
-}
-
-pub fn is_ml_box(bx) {
-    bx != null and bx.model == "ml"
-}
-
-fn all_ml_boxes(items, i) {
-    if (i >= len(items)) true
-    else if (not is_ml_box(items[i])) false
-    else all_ml_boxes(items, i + 1)
+    max_font_size: max_font_size
 }
 
 // create a box with a <span class=cls> element (constructed internally)
@@ -78,8 +66,7 @@ pub fn text_box(text, cls, box_type) {
         type: box_type,
         italic: 0.0,
         skew: 0.0,
-        max_font_size: if (h_exact != null) h_exact else h,
-        model: "ml"
+        max_font_size: if (h_exact != null) h_exact else h
     }
 }
 
@@ -449,8 +436,7 @@ pub fn skip_box(width_em) => {
     type: "skip",
     italic: 0.0,
     skew: 0.0,
-    max_font_size: 0.0,
-    model: "ml"
+    max_font_size: 0.0
 }
 
 // create a null delimiter box (invisible spacer with fixed width)
@@ -463,8 +449,7 @@ pub fn null_delim() {
         type: "mopen",
         italic: 0.0,
         skew: 0.0,
-        max_font_size: 0.0,
-        model: "ml"
+        max_font_size: 0.0
     }
 }
 
@@ -486,8 +471,7 @@ pub fn hbox(boxes) {
 }
 
 // Combine MathLive-model boxes without reintroducing legacy render/raw side
-// channels. This is the horizontal propagation point for the Phase A migration:
-// once every child in an hbox is one-box-field, the parent remains one too.
+// channels. Every child is now one-box-field, so the parent remains one too.
 fn ml_hbox_valid(valid, children, total_width, suppress_text_depth, suppress_operator_height) {
     ml_box_full(
         <span class: css.BASE;
@@ -624,8 +608,7 @@ fn build_vbox(children) {
         type: "ord",
         italic: 0.0,
         skew: 0.0,
-        max_font_size: height,
-        model: "ml"
+        max_font_size: height
     }
 }
 
@@ -912,8 +895,7 @@ pub fn with_class(bx, cls) => {
     type: bx.type,
     italic: bx.italic,
     skew: bx.skew,
-    max_font_size: bx.max_font_size,
-    model: bx.model
+    max_font_size: bx.max_font_size
 }
 
 // wrap a box with inline style string
@@ -925,8 +907,7 @@ pub fn with_style(bx, style_str) => {
     type: bx.type,
     italic: bx.italic,
     skew: bx.skew,
-    max_font_size: bx.max_font_size,
-    model: bx.model
+    max_font_size: bx.max_font_size
 }
 
 // wrap a box with inline styles (font-size scaling)
@@ -942,8 +923,7 @@ pub fn with_scale(bx, scale) {
             type: bx.type,
             italic: bx.italic * scale,
             skew: bx.skew * scale,
-            max_font_size: if (bx.max_font_size != null) bx.max_font_size * scale else null,
-            model: bx.model
+            max_font_size: if (bx.max_font_size != null) bx.max_font_size * scale else null
          })
 }
 
@@ -963,7 +943,6 @@ pub fn with_color(bx, color) {
         italic: bx.italic,
         skew: bx.skew,
         max_font_size: bx.max_font_size,
-        model: bx.model,
         suppress_hbox_text_depth: bx.suppress_hbox_text_depth,
         is_middle_delim: bx.is_middle_delim
     })
