@@ -361,7 +361,9 @@ static ArrayNumElemType js_typed_array_elem_type(JsTypedArrayType type) {
     case JS_TYPED_UINT32:        return ELEM_UINT32;
     case JS_TYPED_FLOAT16:       return ELEM_UINT16;
     case JS_TYPED_FLOAT32:       return ELEM_FLOAT32;
-    case JS_TYPED_FLOAT64:       return ELEM_FLOAT64;
+    case JS_TYPED_FLOAT64:
+        // Float64Array shares Lambda's standard double lane; a second tag made equal storage diverge.
+        return ELEM_FLOAT64;
     case JS_TYPED_UINT8_CLAMPED: return ELEM_UINT8_CLAMPED;
     case JS_TYPED_BIGINT64:      return ELEM_INT64;
     case JS_TYPED_BIGUINT64:     return ELEM_UINT64;

@@ -3132,7 +3132,8 @@ Type* build_lit_sized_float(Transpiler* tp, TSNode node) {
             num_str[source.length - 3] = '\0';
             double dval = strtod(num_str, NULL);
             mem_free(num_str);
-            TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT64, sizeof(TypeFloat));
+            // f64 is an alias for Lambda float; producing a distinct tag makes type() observable.
+            TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
             item_type->double_val = dval;
             double* heap_val = (double*)pool_alloc(tp->pool, sizeof(double));
             *heap_val = dval;
@@ -3179,7 +3180,8 @@ Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
         return (Type*)&LIT_TYPE_FLOAT;
     }
     else if (strview_equal(&type_name, "f64")) {
-        return (Type*)&LIT_TYPE_F64;
+        // f64 is accepted on input but canonicalizes to float.
+        return (Type*)&LIT_TYPE_FLOAT;
     }
     else if (strview_equal(&type_name, "decimal")) {
         return (Type*)&LIT_TYPE_DECIMAL;
@@ -3267,7 +3269,8 @@ Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
         return (Type*)&LIT_TYPE_F32;
     }
     else if (strview_equal(&type_name, "f64")) {
-        return (Type*)&LIT_TYPE_F64;
+        // f64 is accepted on input but canonicalizes to float.
+        return (Type*)&LIT_TYPE_FLOAT;
     }
     else {
         log_error("Unknown base type: %.*s", (int)type_name.length, type_name.str);
@@ -5222,7 +5225,8 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
         ast_node->type = (Type*)&LIT_TYPE_FLOAT;
     }
     else if (strview_equal(&type_name, "f64")) {
-        ast_node->type = (Type*)&LIT_TYPE_F64;
+        // f64 is accepted on input but canonicalizes to float.
+        ast_node->type = (Type*)&LIT_TYPE_FLOAT;
     }
     else if (strview_equal(&type_name, "decimal")) {
         ast_node->type = (Type*)&LIT_TYPE_DECIMAL;
@@ -5310,7 +5314,8 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
         ast_node->type = (Type*)&LIT_TYPE_F32;
     }
     else if (strview_equal(&type_name, "f64")) {
-        ast_node->type = (Type*)&LIT_TYPE_F64;
+        // f64 is accepted on input but canonicalizes to float.
+        ast_node->type = (Type*)&LIT_TYPE_FLOAT;
     }
     else {
         log_debug("unknown base type %.*s", (int)type_name.length, type_name.str);

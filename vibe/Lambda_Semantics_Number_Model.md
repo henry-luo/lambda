@@ -223,19 +223,19 @@ An API wanting JS-`number` ergonomics returns `int`; exactness is then guarantee
 
 Deliberately informal — a snapshot of divergences found while designing v2, each with the rule it violates. Not a complete audit.
 
-| # | Item | Violates |
-|---|---|---|
-| 1 | `js_make_number` compact-int packing + `-0` special case + `JS_SYMBOL_BASE` guard (`js_runtime_value.cpp:1071`) | §5.1 (N1 pending) |
-| 2 | Dual double lane tags `ELEM_FLOAT`/`ELEM_FLOAT64`: the dead-but-armed **truncation landmine** in `print.cpp:23` (`read_compact_elem` FLOAT64 → `i2it`), the JS seam (`Float64Array` → `ELEM_FLOAT64` vs inference → `ELEM_FLOAT`), reductions routing FLOAT64 via the generic slow path (`lambda-eval-num.cpp:1385`), `validate_pattern.cpp:111` collapsing both to one leaf | §3.5 |
-| 3 | `LIT_TYPE_F64` as a distinct static type object (`build_ast.cpp:3181`) | §3.2 (alias must resolve, not exist) |
-| 4 | Any `type()` path reporting `"f64"` (the superseded draft direction) | §4 |
-| 5 | Grammar still carries both `n` and `N` suffixes; integer-valued `n` literals still type as `decimal` | §2.2/§2.4 (W1) |
-| 6 | `int64 → JS` silent `(double)` casts (e.g. `js_fs.cpp:217`, `js_child_process.cpp`) | §5.3 (int64 → BigInt always) |
-| 7 | LambdaJS BigInt scaffolding is int64-leaning (`js_bigint_to_index`) | §5.2/§2.2 (W2) |
-| 8 | ArrayNum `==` is representation-sensitive (task_38782787) | P3 (`==` must be value-precise) |
-| 9 | `is` test coverage vs the final §3.4 semantics: missing pins (trues: `1u8 is u16`, `2.5f32 is float`, `42i8 is int`, `5 is i64`, `int is integer`; falses: `1.0 is f32`, `1i16 is f16`, `5 is u8`, `[1i8] is [int]`) **and one existing golden to flip** (`42i8 is i16`: false → true, `sized_numeric_type_annot.txt`) | §3.4 |
-| 10 | `Lambda_Type_Numbers.md` documents the superseded lattice `is` semantics | §3.4 (doc alignment) |
-| 11 | **A8** (`Lambda_Semantics_Formal.md`): `is`-subtyping and assignment-subtyping disagree for arrays (`var ys: any[] = xs` fails at `ensure_typed_array`), and the failure is a **log-only error with silent continuation** — `ys` left invalid, program keeps running | §3.4 covariant-assignment (per §9.2/C12: assignment copies, must widen at COW time) + the error-enforcement discipline |
+| # | Item | Status | Violates |
+|---|---|---|---|
+| 1 | `js_make_number` compact-int packing + `-0` special case + `JS_SYMBOL_BASE` guard (`js_runtime_value.cpp:1071`) | **Fixed in current tree:** `js_make_number` always boxes `LMD_TYPE_FLOAT`. | §5.1 |
+| 2 | Dual double lane tags `ELEM_FLOAT`/`ELEM_FLOAT64`: the dead-but-armed **truncation landmine** in `print.cpp:23` (`read_compact_elem` FLOAT64 → `i2it`), the JS seam (`Float64Array` → `ELEM_FLOAT64` vs inference → `ELEM_FLOAT`), reductions routing FLOAT64 via the generic slow path (`lambda-eval-num.cpp:1385`), `validate_pattern.cpp:111` collapsing both to one leaf | **Fixed:** `ELEM_FLOAT64` is the single canonical double lane at `0x10`; `ELEM_FLOAT` is only a source-compatibility alias, the retired `0xC0` slot has size `0`, JS `Float64Array` and `[float]` inference produce the same lane, and the duplicate slow/dead branches are removed. | §3.5 |
+| 3 | `LIT_TYPE_F64` as a distinct static type object (`build_ast.cpp:3181`) | **Fixed:** `f64` input canonicalizes to `float` literals/type refs; `TYPE_F64`/`LIT_TYPE_F64` now point at `TYPE_FLOAT`. | §3.2 |
+| 4 | Any `type()` path reporting `"f64"` (the superseded draft direction) | **Fixed for new values:** `type(1.0f64)` reports `float`; the legacy scalar `LMD_TYPE_FLOAT64` compatibility tag remains distinct from the ArrayNum lane merge. | §4 |
+| 5 | Grammar still carries both `n` and `N` suffixes; integer-valued `n` literals still type as `decimal` | Open. | §2.2/§2.4 (W1) |
+| 6 | `int64 → JS` silent `(double)` casts (e.g. `js_fs.cpp:217`, `js_child_process.cpp`) | Open. | §5.3 (int64 → BigInt always) |
+| 7 | LambdaJS BigInt scaffolding is int64-leaning (`js_bigint_to_index`) | Open. | §5.2/§2.2 (W2) |
+| 8 | ArrayNum `==` is representation-sensitive (task_38782787) | **Fixed:** N-D shape remains structural, but mixed-lane ArrayNum equality now compares flat elements through exact numeric equality instead of lossy `double` promotion; scalar mixed numeric `==` uses the same comparator for high `i64`/`u64` boundaries. | P3 (`==` must be value-precise) |
+| 9 | `is` test coverage vs the final §3.4 semantics: missing pins (trues: `1u8 is u16`, `2.5f32 is float`, `42i8 is int`, `5 is i64`, `int is integer`; falses: `1.0 is f32`, `1i16 is f16`, `5 is u8`, `[1i8] is [int]`) **and one existing golden to flip** (`42i8 is i16`: false → true, `sized_numeric_type_annot.txt`) | **Fixed:** scalar/type-left pins and array covariance pins are covered in `sized_numeric_semantics`; `sized_numeric_type_annot.txt` golden flipped. | §3.4 |
+| 10 | `Lambda_Type_Numbers.md` documents the superseded lattice `is` semantics | **Fixed:** doc now says `f64` aliases to canonical `float` and `is` uses exact-embedding widening. | §3.4 |
+| 11 | **A8** (`Lambda_Semantics_Formal.md`): `is`-subtyping and assignment-subtyping disagree for arrays (`var ys: any[] = xs` fails at `ensure_typed_array`), and the failure is a **log-only error with silent continuation** — `ys` left invalid, program keeps running | **Partially fixed:** `is`/validator checks now support covariant numeric arrays, including `ArrayNum` and range occurrence checks. Assignment/COW widening and error enforcement remain open. | §3.4 covariant-assignment (per §9.2/C12: assignment copies, must widen at COW time) + the error-enforcement discipline |
 
 ## 9. Scheduled work & migrations (W)
 
@@ -246,4 +246,4 @@ Deliberately informal — a snapshot of divergences found while designing v2, ea
 - **W5** — Deferred design question (not v2): `int64`-tier overflow promoting to `integer` (Python-style full tower). Needs its own C3 amendment; §5.3 egress is unaffected either way.
 - **W6** — The warn-once-per-call-site mechanism for decimal egress (site keying, reset policy); error-by-default stays on record if warnings prove ignorable.
 - **W7** — Sized-scalar cross-layer alignment audit: parser literals, AST range checks, MIR/runtime arithmetic, conversions, and `is`/`type()` all say what §3.3–§3.4 say (including updating `Lambda_Type_Numbers.md`, item 10 above).
-- **W8** — The §3.5 lane merge: single double tag, landmine deleted with its dead branch, JS seam closed, doubled `case` labels removed.
+- **W8** — Done: the §3.5 ArrayNum lane merge now uses `ELEM_FLOAT64` as the single double tag at `0x10`, keeps `ELEM_FLOAT` only as a compatibility alias, retires the duplicate `0xC0` slot, closes the JS `Float64Array` seam, and removes doubled branches.

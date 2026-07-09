@@ -20,7 +20,9 @@ static Item read_compact_elem(ArrayNum* arr, int i) {
     case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)arr->data)[i]))};
     case ELEM_FLOAT32: return (Item){.item = f32_to_item(((float*)arr->data)[i])};
     case ELEM_UINT64:  return (Item){.item = i2it((int64_t)((uint64_t*)arr->data)[i])};
-    case ELEM_FLOAT64: return (Item){.item = i2it((int64_t)((double*)arr->data)[i])};
+    case ELEM_FLOAT64:
+        // double-lane arrays must print as floats; the old retired 0xC0 path truncated values.
+        return (Item){.item = d2it(&((double*)arr->data)[i])};
     case ELEM_BOOL:    return (Item){.item = b2it(((uint8_t*)arr->data)[i] ? BOOL_TRUE : BOOL_FALSE)};
     default:           return ItemNull;
     }
@@ -573,7 +575,7 @@ struct PrintItemVisitor {
 
     // Print one element of an ArrayNum at a flat byte offset (into data buffer).
     void print_array_num_elem(StrBuf* sb, ArrayNum* array, ArrayNumElemType et, int64_t flat_idx) const {
-        if (et == ELEM_FLOAT || et == ELEM_FLOAT64) {
+        if (et == ELEM_FLOAT64) {
             print_double(sb, array->float_items[flat_idx]);
         } else if (et == ELEM_INT || et == ELEM_INT64) {
             strbuf_append_format(sb, "%lld", array->items[flat_idx]);
@@ -622,7 +624,7 @@ struct PrintItemVisitor {
 
         // 1-D flat path (also for ndim=1 owned and views)
         strbuf_append_char(strbuf, '[');
-        if (et == ELEM_FLOAT || et == ELEM_FLOAT64) {
+        if (et == ELEM_FLOAT64) {
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_str(strbuf, ", ");
                 print_double(strbuf, array->float_items[i]);
@@ -797,7 +799,7 @@ void print_root_item(StrBuf *strbuf, Item item, const char* indent) {
     } else if (type_id == LMD_TYPE_ARRAY_NUM && item.array_num->is_content) {
         ArrayNum *array = item.array_num;
         ArrayNumElemType et = array->get_elem_type();
-        if (et == ELEM_FLOAT || et == ELEM_FLOAT64) {
+        if (et == ELEM_FLOAT64) {
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_char(strbuf, '\n');
                 print_double(strbuf, array->float_items[i]);

@@ -799,40 +799,96 @@ static bool sized_kind_is_integer(NumSizedType kind) {
            kind == NUM_UINT8 || kind == NUM_UINT16 || kind == NUM_UINT32;
 }
 
-static bool sized_kind_is_float(NumSizedType kind) {
-    return kind == NUM_FLOAT16 || kind == NUM_FLOAT32;
+static bool numeric_type_subsumes_sized(NumSizedType actual, NumSizedType target) {
+    if (actual == target) return true;
+    switch (target) {
+    case NUM_INT16:
+        return actual == NUM_INT8 || actual == NUM_UINT8;
+    case NUM_INT32:
+        return actual == NUM_INT8 || actual == NUM_INT16 ||
+               actual == NUM_UINT8 || actual == NUM_UINT16;
+    case NUM_UINT16:
+        return actual == NUM_UINT8;
+    case NUM_UINT32:
+        return actual == NUM_UINT8 || actual == NUM_UINT16;
+    case NUM_FLOAT16:
+        return actual == NUM_INT8 || actual == NUM_UINT8;
+    case NUM_FLOAT32:
+        return actual == NUM_FLOAT16 || actual == NUM_INT8 || actual == NUM_INT16 ||
+               actual == NUM_UINT8 || actual == NUM_UINT16;
+    default:
+        return false;
+    }
 }
 
-static bool item_type_is_int_subtype(Item item, TypeId type_id) {
-    if (type_id == LMD_TYPE_INT) return true;
-    if (type_id == LMD_TYPE_NUM_SIZED) return sized_kind_is_integer(item.get_num_type());
+static bool numeric_type_subsumes(Type* actual, Type* target) {
+    if (!actual || !target) return false;
+    if (target == &TYPE_NUMBER) return IS_NUMERIC_ID(actual->type_id);
+    if (actual == &TYPE_NUMBER) return target == &TYPE_NUMBER;
+    if (target == &TYPE_INTEGER) {
+        return actual == &TYPE_INTEGER || actual->type_id == LMD_TYPE_INT ||
+               actual->type_id == LMD_TYPE_INT64 || actual->type_id == LMD_TYPE_UINT64 ||
+               (actual->type_id == LMD_TYPE_NUM_SIZED && sized_kind_is_integer((NumSizedType)actual->kind));
+    }
+    if (target->type_id == LMD_TYPE_DECIMAL) {
+        return actual == &TYPE_INTEGER || IS_NUMERIC_ID(actual->type_id);
+    }
+    if (actual == &TYPE_INTEGER) return false;
+    if (actual->type_id == LMD_TYPE_FLOAT64) actual = &TYPE_FLOAT;
+    if (target->type_id == LMD_TYPE_FLOAT64) target = &TYPE_FLOAT;
+    if (actual->type_id == target->type_id) {
+        if (actual->type_id != LMD_TYPE_NUM_SIZED) return true;
+        return numeric_type_subsumes_sized((NumSizedType)actual->kind, (NumSizedType)target->kind);
+    }
+    if (actual->type_id == LMD_TYPE_NUM_SIZED) {
+        NumSizedType kind = (NumSizedType)actual->kind;
+        if (target->type_id == LMD_TYPE_INT) {
+            return sized_kind_is_integer(kind);
+        }
+        if (target->type_id == LMD_TYPE_INT64) {
+            return kind == NUM_INT8 || kind == NUM_INT16 || kind == NUM_INT32 ||
+                   kind == NUM_UINT8 || kind == NUM_UINT16 || kind == NUM_UINT32;
+        }
+        if (target->type_id == LMD_TYPE_UINT64) {
+            return kind == NUM_UINT8 || kind == NUM_UINT16 || kind == NUM_UINT32;
+        }
+        if (target->type_id == LMD_TYPE_FLOAT) {
+            return kind == NUM_FLOAT16 || kind == NUM_FLOAT32 ||
+                   kind == NUM_INT8 || kind == NUM_INT16 || kind == NUM_INT32 ||
+                   kind == NUM_UINT8 || kind == NUM_UINT16 || kind == NUM_UINT32;
+        }
+    }
+    if (actual->type_id == LMD_TYPE_INT) {
+        return target->type_id == LMD_TYPE_INT64 || target->type_id == LMD_TYPE_FLOAT;
+    }
+    if (actual->type_id == LMD_TYPE_INT64) return false;
+    if (actual->type_id == LMD_TYPE_UINT64) return false;
+    if (actual->type_id == LMD_TYPE_FLOAT) return false;
     return false;
 }
 
+static Type* item_static_type_for_is(Item item, Type* scratch) {
+    TypeId type_id = get_type_id(item);
+    if (type_id == LMD_TYPE_TYPE) {
+        TypeType* tt = (TypeType*)item.type;
+        return tt ? tt->type : NULL;
+    }
+    scratch->type_id = type_id;
+    scratch->kind = 0;
+    if (type_id == LMD_TYPE_NUM_SIZED) {
+        scratch->kind = item.get_num_type();
+    }
+    return scratch;
+}
+
 static bool item_type_is_integer_subtype(Item item, TypeId type_id) {
-    if (type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64) return true;
     if (type_id == LMD_TYPE_DECIMAL) {
         Decimal* dec = item.get_decimal();
         return dec && dec->unlimited == DECIMAL_BIGINT;
     }
-    if (type_id == LMD_TYPE_NUM_SIZED) return sized_kind_is_integer(item.get_num_type());
-    return false;
-}
-
-static bool item_type_is_float_subtype(Item item, TypeId type_id) {
-    if (type_id == LMD_TYPE_INT || type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) return true;
-    if (type_id == LMD_TYPE_NUM_SIZED) {
-        // Lambda's abstract float domain includes int53-exact sized integer lanes; exact sized targets stay width-specific.
-        NumSizedType kind = item.get_num_type();
-        return sized_kind_is_float(kind) || sized_kind_is_integer(kind);
-    }
-    return false;
-}
-
-static bool item_type_is_decimal_subtype(Item item, TypeId type_id) {
-    return type_id == LMD_TYPE_DECIMAL ||
-           item_type_is_integer_subtype(item, type_id) ||
-           item_type_is_float_subtype(item, type_id);
+    Type actual = {.type_id = type_id};
+    if (type_id == LMD_TYPE_NUM_SIZED) actual.kind = item.get_num_type();
+    return numeric_type_subsumes(&actual, &TYPE_INTEGER);
 }
 
 Bool fn_is(Item a, Item b) {
@@ -910,6 +966,8 @@ Bool fn_is(Item a, Item b) {
 
     TypeType *type_b = (TypeType *)b_type;
     TypeId a_type_id = get_type_id(a);
+    Type actual_type_scratch = {.type_id = LMD_TYPE_NULL};
+    Type* actual_type = item_static_type_for_is(a, &actual_type_scratch);
 
     // Check if inner type is TypeUnary (occurrence operator: ?, +, *, [n], [n+], [n,m])
     // Must not match NUM_SIZED types where kind is a NumSizedType, not TypeKind
@@ -941,32 +999,31 @@ Bool fn_is(Item a, Item b) {
     case LMD_TYPE_TYPE:
         if (type_b->type == &TYPE_NUMBER) {
             // `number` is a type-language union, so match concrete numeric tags explicitly.
-            return IS_NUMERIC_ID(a_type_id) ? BOOL_TRUE : BOOL_FALSE;
+            return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
         }
         if (type_b->type == &TYPE_INTEGER) {
+            if (a_type_id == LMD_TYPE_TYPE) {
+                return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
+            }
             return item_type_is_integer_subtype(a, a_type_id) ? BOOL_TRUE : BOOL_FALSE;
         }
         return a_type_id == LMD_TYPE_TYPE ? BOOL_TRUE : BOOL_FALSE;
     case LMD_TYPE_INT:
-        return item_type_is_int_subtype(a, a_type_id) ? BOOL_TRUE : BOOL_FALSE;
+        // numeric `is` is exact-embedding subsumption, not exact tag identity.
+        return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
     case LMD_TYPE_INT64:
-        return a_type_id == LMD_TYPE_INT64 ? BOOL_TRUE : BOOL_FALSE;
+        return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
     case LMD_TYPE_FLOAT:
-        return item_type_is_float_subtype(a, a_type_id) ? BOOL_TRUE : BOOL_FALSE;
+        return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
     case LMD_TYPE_FLOAT64:
-        return a_type_id == LMD_TYPE_FLOAT64 ? BOOL_TRUE : BOOL_FALSE;
+        return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
     case LMD_TYPE_DECIMAL:
-        return item_type_is_decimal_subtype(a, a_type_id) ? BOOL_TRUE : BOOL_FALSE;
+        return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
     case LMD_TYPE_NUM_SIZED: {
-        // specific sized numeric type check (e.g., `x is i8`)
-        if (a_type_id != LMD_TYPE_NUM_SIZED) return BOOL_FALSE;
-        // check the sub-type: type_b->type->kind stores the NumSizedType
-        NumSizedType expected = (NumSizedType)type_b->type->kind;
-        NumSizedType actual = a.get_num_type();
-        return (actual == expected) ? BOOL_TRUE : BOOL_FALSE;
+        return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
     }
     case LMD_TYPE_UINT64:
-        return (a_type_id == LMD_TYPE_UINT64) ? BOOL_TRUE : BOOL_FALSE;
+        return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
     case LMD_TYPE_DTIME:
         if (a_type_id != LMD_TYPE_DTIME) return BOOL_FALSE;
         // sub-type checks: date and time are sub-types of datetime
@@ -1042,6 +1099,84 @@ Bool fn_is_nan(Item a) {
 // forward declaration for recursive structural equality
 static Bool fn_eq_depth(Item a_item, Item b_item, int depth);
 
+enum EqNumberKind {
+    EQ_NUMBER_SIGNED,
+    EQ_NUMBER_UNSIGNED,
+    EQ_NUMBER_FLOAT
+};
+
+static bool numeric_item_parts(Item item, EqNumberKind* kind, int64_t* sval, uint64_t* uval, double* fval) {
+    switch (item._type_id) {
+    case LMD_TYPE_INT:
+        *kind = EQ_NUMBER_SIGNED; *sval = item.get_int56(); return true;
+    case LMD_TYPE_INT64:
+        *kind = EQ_NUMBER_SIGNED; *sval = item.get_int64(); return true;
+    case LMD_TYPE_UINT64:
+        *kind = EQ_NUMBER_UNSIGNED; *uval = item.get_uint64(); return true;
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64:
+        *kind = EQ_NUMBER_FLOAT; *fval = item.get_double(); return true;
+    case LMD_TYPE_NUM_SIZED:
+        switch (item.get_num_type()) {
+        case NUM_INT8:    *kind = EQ_NUMBER_SIGNED; *sval = item.get_i8(); return true;
+        case NUM_INT16:   *kind = EQ_NUMBER_SIGNED; *sval = item.get_i16(); return true;
+        case NUM_INT32:   *kind = EQ_NUMBER_SIGNED; *sval = item.get_i32(); return true;
+        case NUM_UINT8:   *kind = EQ_NUMBER_UNSIGNED; *uval = item.get_u8(); return true;
+        case NUM_UINT16:  *kind = EQ_NUMBER_UNSIGNED; *uval = item.get_u16(); return true;
+        case NUM_UINT32:  *kind = EQ_NUMBER_UNSIGNED; *uval = item.get_u32(); return true;
+        case NUM_FLOAT16: *kind = EQ_NUMBER_FLOAT; *fval = item.get_f16(); return true;
+        case NUM_FLOAT32: *kind = EQ_NUMBER_FLOAT; *fval = item.get_f32(); return true;
+        default:          return false;
+        }
+    default:
+        return false;
+    }
+}
+
+static bool double_equals_int64_exact(double d, int64_t value) {
+    if (!isfinite(d) || d != trunc(d) || d < -0x1p63 || d >= 0x1p63) return false;
+    int64_t di = (int64_t)d;
+    return di == value && (double)di == d;
+}
+
+static bool double_equals_uint64_exact(double d, uint64_t value) {
+    if (!isfinite(d) || d != trunc(d) || d < 0.0 || d >= 0x1p64) return false;
+    uint64_t du = (uint64_t)d;
+    return du == value && (double)du == d;
+}
+
+static Bool numeric_items_equal_exact(Item a_item, Item b_item) {
+    if (a_item._type_id == LMD_TYPE_DECIMAL || b_item._type_id == LMD_TYPE_DECIMAL) {
+        int cmp = decimal_cmp_items(a_item, b_item);
+        return (cmp == 0) ? BOOL_TRUE : BOOL_FALSE;
+    }
+
+    EqNumberKind ak, bk;
+    int64_t as = 0, bs = 0;
+    uint64_t au = 0, bu = 0;
+    double af = 0.0, bf = 0.0;
+    if (!numeric_item_parts(a_item, &ak, &as, &au, &af) ||
+        !numeric_item_parts(b_item, &bk, &bs, &bu, &bf)) {
+        return BOOL_FALSE;
+    }
+
+    // equality must not collapse large integer lanes through binary64 rounding.
+    if (ak == EQ_NUMBER_FLOAT && bk == EQ_NUMBER_FLOAT) return (af == bf) ? BOOL_TRUE : BOOL_FALSE;
+    if (ak == EQ_NUMBER_SIGNED && bk == EQ_NUMBER_SIGNED) return (as == bs) ? BOOL_TRUE : BOOL_FALSE;
+    if (ak == EQ_NUMBER_UNSIGNED && bk == EQ_NUMBER_UNSIGNED) return (au == bu) ? BOOL_TRUE : BOOL_FALSE;
+    if (ak == EQ_NUMBER_SIGNED && bk == EQ_NUMBER_UNSIGNED) {
+        return (as >= 0 && (uint64_t)as == bu) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    if (ak == EQ_NUMBER_UNSIGNED && bk == EQ_NUMBER_SIGNED) {
+        return (bs >= 0 && au == (uint64_t)bs) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    if (ak == EQ_NUMBER_FLOAT && bk == EQ_NUMBER_SIGNED) return double_equals_int64_exact(af, bs) ? BOOL_TRUE : BOOL_FALSE;
+    if (ak == EQ_NUMBER_SIGNED && bk == EQ_NUMBER_FLOAT) return double_equals_int64_exact(bf, as) ? BOOL_TRUE : BOOL_FALSE;
+    if (ak == EQ_NUMBER_FLOAT && bk == EQ_NUMBER_UNSIGNED) return double_equals_uint64_exact(af, bu) ? BOOL_TRUE : BOOL_FALSE;
+    if (ak == EQ_NUMBER_UNSIGNED && bk == EQ_NUMBER_FLOAT) return double_equals_uint64_exact(bf, au) ? BOOL_TRUE : BOOL_FALSE;
+    return BOOL_FALSE;
+}
+
 // forward declaration: get field value from a map's packed data by shape entry
 static Item _map_field_value(TypeMap* map_type, void* data, ShapeEntry* field);
 
@@ -1087,8 +1222,37 @@ static bool array_num_shape_eq(ArrayNum* a, ArrayNum* b) {
     return true;
 }
 
+static Item array_num_flat_item_for_eq(ArrayNum* array, int64_t index) {
+    switch (array->get_elem_type()) {
+    case ELEM_INT:     return (Item){.item = i2it(array->items[index])};
+    case ELEM_INT64:   return push_l(array->items[index]);
+    case ELEM_FLOAT64: return push_d(array->float_items[index]);
+    case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)array->data)[index])};
+    case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)array->data)[index])};
+    case ELEM_INT32:   return (Item){.item = i32_to_item(((int32_t*)array->data)[index])};
+    case ELEM_UINT8:   return (Item){.item = u8_to_item(((uint8_t*)array->data)[index])};
+    case ELEM_UINT8_CLAMPED: return (Item){.item = u8_to_item(((uint8_t*)array->data)[index])};
+    case ELEM_UINT16:  return (Item){.item = u16_to_item(((uint16_t*)array->data)[index])};
+    case ELEM_UINT32:  return (Item){.item = u32_to_item(((uint32_t*)array->data)[index])};
+    case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)array->data)[index]))};
+    case ELEM_FLOAT32: return (Item){.item = f32_to_item(((float*)array->data)[index])};
+    case ELEM_UINT64: {
+        uint64_t val = ((uint64_t*)array->data)[index];
+        uint64_t* heap_val = (uint64_t*)heap_calloc(sizeof(uint64_t), LMD_TYPE_UINT64);
+        *heap_val = val;
+        return (Item){.item = u64_to_item(heap_val)};
+    }
+    case ELEM_BOOL:    return (Item){.item = b2it(((uint8_t*)array->data)[index] ? BOOL_TRUE : BOOL_FALSE)};
+    default:           return ItemNull;
+    }
+}
+
+static inline bool array_num_elem_type_is_float(ArrayNumElemType et) {
+    return et == ELEM_FLOAT16 || et == ELEM_FLOAT32 || et == ELEM_FLOAT64;
+}
+
 // helper: structural equality for typed numeric arrays
-static Bool array_num_eq(ArrayNum* a, ArrayNum* b) {
+static Bool array_num_eq(ArrayNum* a, ArrayNum* b, int depth) {
     if (a == b) return BOOL_TRUE;
     if (a->length != b->length) return BOOL_FALSE;
     if (!array_num_shape_eq(a, b)) {
@@ -1096,16 +1260,28 @@ static Bool array_num_eq(ArrayNum* a, ArrayNum* b) {
         return BOOL_FALSE;
     }
     if (a->get_elem_type() != b->get_elem_type()) {
-        // different elem types: compare element-wise with numeric promotion
+        // different elem types compare as values; double promotion loses high int64/u64 bits.
         for (int64_t i = 0; i < a->length; i++) {
-            if (array_num_get_number_value(a, i) != array_num_get_number_value(b, i)) return BOOL_FALSE;
+            Item val_a = array_num_flat_item_for_eq(a, i);
+            Item val_b = array_num_flat_item_for_eq(b, i);
+            Bool r = fn_eq_depth(val_a, val_b, depth + 1);
+            if (r != BOOL_TRUE) return r;
         }
         return BOOL_TRUE;
     }
-    if (a->get_elem_type() == ELEM_FLOAT) {
+    if (a->get_elem_type() == ELEM_FLOAT64) {
         // element-wise comparison to respect NaN != NaN
         for (int64_t i = 0; i < a->length; i++) {
             if (a->float_items[i] != b->float_items[i]) return BOOL_FALSE;
+        }
+        return BOOL_TRUE;
+    }
+    if (array_num_elem_type_is_float(a->get_elem_type())) {
+        for (int64_t i = 0; i < a->length; i++) {
+            Item val_a = array_num_flat_item_for_eq(a, i);
+            Item val_b = array_num_flat_item_for_eq(b, i);
+            Bool r = fn_eq_depth(val_a, val_b, depth + 1);
+            if (r != BOOL_TRUE) return r;
         }
         return BOOL_TRUE;
     }
@@ -1311,13 +1487,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         }
         // number promotion - only for numeric types (int/int64/float/decimal/num_sized/uint64)
         if (IS_NUMERIC_ID(a_item._type_id) && IS_NUMERIC_ID(b_item._type_id)) {
-            if (a_item._type_id == LMD_TYPE_DECIMAL || b_item._type_id == LMD_TYPE_DECIMAL) {
-                // Decimal-visible comparisons must avoid lossy binary-double fallback.
-                int cmp = decimal_cmp_items(a_item, b_item);
-                return (cmp == 0) ? BOOL_TRUE : BOOL_FALSE;
-            }
-            double a_val = it2d(a_item), b_val = it2d(b_item);
-            return (a_val == b_val) ? BOOL_TRUE : BOOL_FALSE;
+            return numeric_items_equal_exact(a_item, b_item);
         }
 
         // cross-type sequence comparison: range, list, and array types
@@ -1430,7 +1600,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         }
         // typed array equality
         if (a_tid == LMD_TYPE_ARRAY_NUM) {
-            return array_num_eq(a_item.array_num, b_item.array_num);
+            return array_num_eq(a_item.array_num, b_item.array_num, depth);
         }
         // map structural equality (order-independent)
         if (a_tid == LMD_TYPE_MAP) {
@@ -2093,7 +2263,7 @@ Bool fn_in(Item a_item, Item b_item) {
         }
         else if (b_type == LMD_TYPE_ARRAY_NUM) {
             ArrayNum *arr = b_item.array_num;
-            if (arr->get_elem_type() == ELEM_FLOAT) {
+            if (arr->get_elem_type() == ELEM_FLOAT64) {
                 double a_val = it2d(a_item);
                 for (int64_t i = 0; i < arr->length; i++) {
                     if (arr->float_items[i] == a_val) {
@@ -3638,7 +3808,7 @@ Bool fn_contains(Item str_item, Item substr_item) {
     if (coll_type == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = str_item.array_num;
         if (!arr) return BOOL_FALSE;
-        if (arr->get_elem_type() == ELEM_FLOAT) {
+        if (arr->get_elem_type() == ELEM_FLOAT64) {
             double val = it2d(substr_item);
             for (int64_t i = 0; i < arr->length; i++) {
                 if (arr->float_items[i] == val) return BOOL_TRUE;
@@ -3804,7 +3974,7 @@ int64_t fn_index_of(Item str_item, Item sub_item) {
     if (coll_type == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = str_item.array_num;
         if (!arr) return -1;
-        if (arr->get_elem_type() == ELEM_FLOAT) {
+        if (arr->get_elem_type() == ELEM_FLOAT64) {
             double val = it2d(sub_item);
             for (int64_t i = 0; i < arr->length; i++) {
                 if (arr->float_items[i] == val) return i;
@@ -3889,7 +4059,7 @@ int64_t fn_last_index_of(Item str_item, Item sub_item) {
     if (coll_type == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = str_item.array_num;
         if (!arr) return -1;
-        if (arr->get_elem_type() == ELEM_FLOAT) {
+        if (arr->get_elem_type() == ELEM_FLOAT64) {
             double val = it2d(sub_item);
             for (int64_t i = arr->length - 1; i >= 0; i--) {
                 if (arr->float_items[i] == val) return i;
@@ -5438,7 +5608,7 @@ static void convert_specialized_to_generic(Array* arr) {
     if (old_type == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* num_arr = (ArrayNum*)arr;
         ArrayNumElemType etype = num_arr->get_elem_type();
-        if (etype == ELEM_FLOAT) {
+        if (etype == ELEM_FLOAT64) {
             double* old_items = num_arr->float_items;
             int64_t extra_count = 0;
             for (int64_t i = 0; i < len; i++) {
@@ -5524,7 +5694,7 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
         }
         TypeId val_type = get_type_id(value);
         ArrayNumElemType etype = num_arr->get_elem_type();
-        if (etype == ELEM_FLOAT) {
+        if (etype == ELEM_FLOAT64) {
             if (val_type == LMD_TYPE_FLOAT) {
                 num_arr->float_items[index] = value.get_double();
             } else if (val_type == LMD_TYPE_INT) {

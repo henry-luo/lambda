@@ -42,7 +42,7 @@ Type TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
 Type TYPE_INT = {.type_id = LMD_TYPE_INT};
 Type TYPE_INT64 = {.type_id = LMD_TYPE_INT64};
 Type TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
-Type TYPE_FLOAT64 = {.type_id = LMD_TYPE_FLOAT64};
+Type TYPE_FLOAT64 = {.type_id = LMD_TYPE_FLOAT};
 Type TYPE_DECIMAL = {.type_id = LMD_TYPE_DECIMAL};
 Type TYPE_INTEGER = {.type_id = LMD_TYPE_TYPE};
 Type TYPE_NUMBER = {.type_id = LMD_TYPE_TYPE};
@@ -62,7 +62,7 @@ Type TYPE_U16 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_UINT16};
 Type TYPE_U32 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_UINT32};
 Type TYPE_F16 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_FLOAT16};
 Type TYPE_F32 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_FLOAT32};
-Type TYPE_F64 = {.type_id = LMD_TYPE_FLOAT64};
+Type TYPE_F64 = {.type_id = LMD_TYPE_FLOAT};
 Type TYPE_DTIME = {.type_id = LMD_TYPE_DTIME};
 Type TYPE_DATE = {.type_id = LMD_TYPE_DTIME};   // sub-type: date-only datetime
 Type TYPE_TIME = {.type_id = LMD_TYPE_DTIME};   // sub-type: time-only datetime
@@ -207,7 +207,7 @@ void init_typetype() {
     *(Type*)(&LIT_TYPE_INT) = LIT_TYPE;  LIT_TYPE_INT.type = &TYPE_INT;
     *(Type*)(&LIT_TYPE_INT64) = LIT_TYPE;  LIT_TYPE_INT64.type = &TYPE_INT64;
     *(Type*)(&LIT_TYPE_FLOAT) = LIT_TYPE;  LIT_TYPE_FLOAT.type = &TYPE_FLOAT;
-    *(Type*)(&LIT_TYPE_FLOAT64) = LIT_TYPE;  LIT_TYPE_FLOAT64.type = &TYPE_FLOAT64;
+    *(Type*)(&LIT_TYPE_FLOAT64) = LIT_TYPE;  LIT_TYPE_FLOAT64.type = &TYPE_FLOAT;
     *(Type*)(&LIT_TYPE_DECIMAL) = LIT_TYPE;  LIT_TYPE_DECIMAL.type = &TYPE_DECIMAL;
     *(Type*)(&LIT_TYPE_INTEGER) = LIT_TYPE;  LIT_TYPE_INTEGER.type = &TYPE_INTEGER;
     *(Type*)(&LIT_TYPE_NUMBER) = LIT_TYPE;  LIT_TYPE_NUMBER.type = &TYPE_NUMBER;
@@ -238,7 +238,7 @@ void init_typetype() {
     *(Type*)(&LIT_TYPE_U64) = LIT_TYPE;  LIT_TYPE_U64.type = &TYPE_UINT64;
     *(Type*)(&LIT_TYPE_F16) = LIT_TYPE;  LIT_TYPE_F16.type = &TYPE_F16;
     *(Type*)(&LIT_TYPE_F32) = LIT_TYPE;  LIT_TYPE_F32.type = &TYPE_F32;
-    *(Type*)(&LIT_TYPE_F64) = LIT_TYPE;  LIT_TYPE_F64.type = &TYPE_F64;
+    *(Type*)(&LIT_TYPE_F64) = LIT_TYPE;  LIT_TYPE_F64.type = &TYPE_FLOAT;
 
     memset(&EmptyMap, 0, sizeof(TypeMap));
     EmptyMap.type_id = LMD_TYPE_MAP;  EmptyMap.type_index = -1;
@@ -894,7 +894,7 @@ void list_push_spread(List *list, Item item) {
                 for (int64_t i = 0; i < arr->length; i++)
                     list_push(list, {.item = l2it(&arr->items[i])});
                 break;
-            case ELEM_FLOAT:
+            case ELEM_FLOAT64:
                 for (int64_t i = 0; i < arr->length; i++)
                     list_push(list, {.item = d2it(&arr->float_items[i])});
                 break;

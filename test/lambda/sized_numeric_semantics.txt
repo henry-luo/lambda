@@ -1,22 +1,30 @@
 "=== subtype is ==="
 true
+true
+true
+true
+true
+true
+true
+false
 false
 true
 true
 true
 true
 true
+true
+false
+true
+true
 false
 false
-true
-true
-true
 true
 true
 true
 false
 "=== f64 type ==="
-f64
+float
 "=== mixed arithmetic ==="
 f32
 float
