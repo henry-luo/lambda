@@ -1001,6 +1001,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
             // Headless Radiant layout has no frame clock; flush a bounded number
             // of requestAnimationFrame ticks before the JS heap/context are
             // restored so DOM callbacks can still allocate wrapper objects.
+            // WPT reftest-wait pages often call takeScreenshot() from rAF.
             js_animation_frame_drain(64);
         }
     }

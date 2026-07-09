@@ -1738,8 +1738,8 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
             int first_col = current_col;
             int last_col = current_col;
 
-            // Count columns in this group by iterating its children
-            // Each <col> may have a span attribute indicating multiple columns
+            // Count columns in this group by iterating its children.
+            // A <col> box covers its declared span in static table geometry.
             int col_count = 0;
             for (View* col_view = static_cast<View*>(child->first_child); col_view; col_view = static_cast<View*>(col_view->next_sibling)) {
                 ViewElement* col = lam::view_as_element(col_view);
@@ -1792,15 +1792,13 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
 	            for (View* col_view = static_cast<View*>(child->first_child); col_view; col_view = static_cast<View*>(col_view->next_sibling)) {
 	                ViewElement* col = lam::view_as_element(col_view);
 	                if (!col) continue;
-	                if (col->view_type == RDT_VIEW_TABLE_COLUMN && col_idx < columns) {
-                    // Check span attribute on col element
+                if (col->view_type == RDT_VIEW_TABLE_COLUMN && col_idx < columns) {
                     const char* col_span_str = col->get_attribute("span");
                     int col_span = (col_span_str && *col_span_str) ? (int)str_to_int64_default(col_span_str, strlen(col_span_str), 0) : 1; // INT_CAST_OK: span count
                     if (col_span <= 0) col_span = 1;
                     int col_end = col_idx + col_span - 1;
                     if (col_end >= columns) col_end = columns - 1;
 
-                    // Column x absolute from table border-box
                     float col_x_in_table = table_column_visual_x(table, col_widths, col_x_positions,
                                                                  col_idx, col_span, columns);
                     // Column x relative to parent colgroup
@@ -1825,7 +1823,6 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
         else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
             // Standalone column (not in a colgroup)
             if (current_col < columns) {
-                // Check span attribute
                 const char* span_str = child->get_attribute("span");
                 int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: span count
                 if (span <= 0) span = 1;
