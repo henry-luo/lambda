@@ -125,9 +125,9 @@ The known Math5 targets are:
 | `atoms/enclose.ls` bbox | `render_total` encodes overlay extent | represent border/overlay as child boxes/styles; public box stays layout h/d |
 | `atoms/array.ls` smallmatrix | `matrix_table_metrics` fallback deleted; dynamic row walk is the only non-equation path | close remaining matrix extended diffs against MathLive's row/cell operation order |
 | `atoms/scripts.ls` large op text limits | `render_large_op_limits_vlist` deleted; text and symbol limits route through `make_limits_stack` | close remaining large-op/script metric drifts in mixed expressions |
-| `atoms/delimiters.ls` arrows/groups | `render_mult_left_right_delim` table remains | port MathLive `makeStackedDelim`/extensible symbol path for these glyph families |
+| `atoms/delimiters.ls` arrows/groups | old level-3 fallback helper deleted; arrows/groups now route through `render_extensible_recipe_delim` | finish replacing the remaining recipe constants with a fuller MathLive extensible-symbol derivation when available |
 | `render.ls` script radicals | `make_script_sqrt_spec` fallback remains | port Rule 11 for script/scriptscript radicals |
-| fixtures | `fraction_branch_fixture.mjs` now describes Rule 15 geometry cases; no `script_fixture.mjs` yet | add `script_fixture.mjs` for Rule 18 geometry/VBox invariants |
+| fixtures | `fraction_branch_fixture.mjs` describes Rule 15 geometry and `script_fixture.mjs` covers Rule 18 script geometry | expand fixtures only when a newly migrated atom needs a guard |
 
 ## 5. Migration Strategy
 
@@ -164,10 +164,10 @@ Work:
 
 - add a box-field census script/report for `render_*`, `height_raw/depth_raw`,
   and `left_right_render_*` producers and readers;
-- update `fraction_branch_fixture.mjs` so it no longer claims to test
+- done: update `fraction_branch_fixture.mjs` so it no longer claims to test
   `frac_bar_spec`; it should assert Rule 15 intermediate shifts and final HTML;
-- add `script_fixture.mjs` for Rule 18: sup-only, sub-only, both, styles,
-  descenders, nested scripts, and big-op limits;
+- done: add `script_fixture.mjs` for Rule 18: sup-only, sub-only, both,
+  descenders, nested scripts, fraction children, and inline big-op limits;
 - add `diff_harness --cluster-by atom` or an equivalent report postprocessor;
 - add a "box model" probe fixture: render a formula and dump the root box model
   fields, so a converted case can assert `model == "ml"` and no legacy fields.
@@ -291,7 +291,8 @@ following MathLive `makeLeftRightDelim`;
 - make `\left...\right` ask the content box for its public `height/depth`;
 - route sized parentheses/brackets/braces through shared delimiter helpers;
 - route array stacked brackets/braces through `make_stacked_delim`;
-- port arrows/groups currently left in `render_mult_left_right_delim`;
+- route arrows/groups through the named extensible-delimiter recipe path, then
+  replace the remaining recipe constants with derived MathLive inputs;
 - delete `left_right_render_depth` and `left_right_render_total` once all readers
   are gone.
 
