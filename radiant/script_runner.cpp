@@ -1511,16 +1511,11 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
             return;
         }
 
-        if (collection->testharness_seen && task->kind == JS_SCRIPT_TASK_CLASSIC) {
-            // Testharness inline bodies create assertion fixtures; static layout baselines keep the pre-assertion DOM.
-            task->status = JS_SCRIPT_TASK_SKIPPED_TESTHARNESS_INLINE;
-            collection->skipped_scripts++;
-            script_task_list_append(collection->scripts, task);
-            return;
-        }
-
         StrBuf* inline_buf = strbuf_new_cap(256);
         extract_script_text(elem, inline_buf);
+        // WPT inline scripts often perform visual DOM setup before calling
+        // test()/promise_test(); the built-in harness stubs suppress assertion
+        // callbacks, but top-level setup must still run for browser parity.
         if (task->kind == JS_SCRIPT_TASK_CLASSIC && inline_buf->str && inline_buf->length > 0) {
             append_classic_script_window_function_exports(inline_buf->str, inline_buf);
         }

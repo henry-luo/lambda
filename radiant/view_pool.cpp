@@ -1424,7 +1424,18 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
         while (parent) {
             if (parent->is_block()) {
                 ViewBlock* parent_block = lam::view_require_block(parent);
-                // layout JSON reports document/layout coordinates; element scroll is a paint-time offset.
+                bool is_root_scroller = parent_block->doc &&
+                    parent_block->doc->view_tree &&
+                    parent_block->doc->view_tree->root == static_cast<View*>(parent_block);
+                if (!is_root_scroller && parent_block->scroller && parent_block->scroller->pane) {
+                    // visual rects for descendants move by ancestor element scroll; abspos containing-block math is separate above.
+                    DocState* state = parent_block->doc ? parent_block->doc->state : NULL;
+                    float scroll_x = 0.0f, scroll_y = 0.0f;
+                    scroll_state_get_position_for_view(state, static_cast<View*>(parent_block),
+                        parent_block->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
+                    abs_x -= scroll_x;
+                    abs_y -= scroll_y;
+                }
                 if (parent_block->position &&
                     parent_block->position->position == CSS_VALUE_FIXED) {
                     break;
@@ -1433,23 +1444,23 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
             parent = parent->parent_view();
         }
 
-        bool is_view_tree_root = false;
-        if (view->is_block()) {
-            ViewBlock* possible_root = lam::view_require_block(view);
-            is_view_tree_root = possible_root->doc &&
-                possible_root->doc->view_tree &&
-                possible_root->doc->view_tree->root == view;
+        DomElement* doc_owner = view->is_element() ? view->as_element() : nullptr;
+        for (ViewElement* parent = view->parent_view(); !doc_owner && parent; parent = parent->parent_view()) {
+            doc_owner = parent;
         }
-        if (is_view_tree_root) {
-            ViewBlock* root_block = lam::view_require_block(view);
-            if (root_block->scroller && root_block->scroller->pane) {
-                DocState* state = root_block->doc ? root_block->doc->state : NULL;
-                float scroll_x = 0.0f, scroll_y = 0.0f;
-                scroll_state_get_position_for_view(state, static_cast<View*>(root_block),
-                    root_block->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
-                abs_x -= scroll_x;
-                abs_y -= scroll_y;
-            }
+        DomDocument* doc = doc_owner ? doc_owner->doc : nullptr;
+        ViewBlock* root_block = doc && doc->view_tree && doc->view_tree->root &&
+            doc->view_tree->root->is_block()
+            ? lam::view_require_block(doc->view_tree->root)
+            : nullptr;
+        if (root_block && root_block->scroller && root_block->scroller->pane) {
+            // root scroll moves the viewport for every non-fixed box; element scroll remains paint-time only.
+            DocState* state = root_block->doc ? root_block->doc->state : NULL;
+            float scroll_x = 0.0f, scroll_y = 0.0f;
+            scroll_state_get_position_for_view(state, static_cast<View*>(root_block),
+                root_block->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
+            abs_x -= scroll_x;
+            abs_y -= scroll_y;
         }
     }
 
