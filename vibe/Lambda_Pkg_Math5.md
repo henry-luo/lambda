@@ -120,13 +120,13 @@ The known Math5 targets are:
 |------|---------------|-----------------------------|
 | `box.ls` hbox | computes `render_*`, `*_raw`, `left_right_render_*` maxima | one `hbox()` over ML boxes; explicit delimiter sizing asks delimiter helpers for extents |
 | `math.ls` emit | chooses `render_*` vs `height_raw/depth_raw` vs `height/depth` | always strut from `height/depth`; legacy adapter only while migration is incomplete |
-| `render.ls` line accents | `line_accent_box(...)` deleted; simple/tall line-accent callers still carry inline constants | finish porting simple/tall line accents to MathLive `AccentAtom` / `OverunderAtom` VBox construction |
+| `render.ls` line accents | `line_accent_box(...)` and overline simple/tall templates deleted; underline simple/tall templates still carry inline constants | finish porting underline to MathLive `OverunderAtom` VBox construction |
 | `render.ls` wide accents | partial metric path; several hardcoded accent body heights | use stretchy/SVG accent box metrics and VBox, not side-channel total |
 | `atoms/enclose.ls` bbox | `render_total` encodes overlay extent | represent border/overlay as child boxes/styles; public box stays layout h/d |
 | `atoms/array.ls` smallmatrix | `matrix_table_metrics` fallback deleted; dynamic row walk is the only non-equation path | close remaining matrix extended diffs against MathLive's row/cell operation order |
 | `atoms/scripts.ls` large op text limits | `render_large_op_limits_vlist` deleted; text and symbol limits route through `make_limits_stack` | close remaining large-op/script metric drifts in mixed expressions |
 | `atoms/delimiters.ls` arrows/groups | old level-3 fallback helper deleted; arrows/groups now route through `render_extensible_recipe_delim` | finish replacing the remaining recipe constants with a fuller MathLive extensible-symbol derivation when available |
-| `render.ls` script radicals | `make_script_sqrt_spec` deleted; unindexed script/scriptscript radicals route through `sqrt_geom` | port indexed script radicals off the remaining `make_sqrt_spec` special case |
+| `render.ls` script radicals | `make_script_sqrt_spec` and `make_sqrt_spec` deleted; script/scriptscript radicals route through `sqrt_geom` plus an indexed scaled-coordinate projection | fold indexed script projection into shared VBox/radical derivation |
 | fixtures | `fraction_branch_fixture.mjs` describes Rule 15 geometry and `script_fixture.mjs` covers Rule 18 script geometry | expand fixtures only when a newly migrated atom needs a guard |
 
 ## 5. Migration Strategy
@@ -339,7 +339,10 @@ Work:
 - convert `\hat`, `\tilde`, `\bar`, `\dot`, `\ddot`, `\vec`,
   `\widehat`, `\widetilde`, `\overline`, `\underline`, over/under braces where
   applicable;
-- delete `line_accent_box` once all callers are gone.
+- done: route `\overline` through one shared MathLive `VBox({shift:0})`
+  construction for simple, wide, and tall bases;
+- delete the remaining hardcoded underline templates once their bottom-shift
+  formula is derived.
 
 Gate:
 
@@ -397,12 +400,12 @@ Goal: remove the remaining radical spec fallbacks.
 Work:
 
 - done: extend `sqrt_geom` to unindexed script/scriptscript radicals;
-- still open: extend indexed script radicals beyond the remaining `make_sqrt_spec`
-  special case;
+- done: replace the indexed script radical `make_sqrt_spec` special case with a
+  scaled-coordinate projection derived from the small surd glyph, math axis,
+  and script rule thickness;
 - preserve MathLive's `Box.setTop` threshold behavior;
 - ensure radical index stack uses shared VBox and full-precision dimensions;
-- done: delete `make_script_sqrt_spec`; delete legacy `make_sqrt_spec` paths when
-  unused.
+- done: delete `make_script_sqrt_spec` and legacy `make_sqrt_spec` paths.
 
 Gate:
 

@@ -1095,37 +1095,11 @@ fn render_line_accent(node, context, accent_key) {
         if (tall) render_underline_tall(base_box)
         else render_underline_simple(base_box)
     } else {
-        if (tall) render_overline_tall(base_box)
-        else if (base_box.width <= 0.8) render_overline_simple(base_box)
-        else render_overline_wide(base_box, context)
+        render_overline_vlist(base_box, context)
     }
 }
 
-fn render_overline_simple(base_box) {
-    let base_elements = box.elements_of(base_box)
-    let el = <span class: "overline";
-        <span class: css.VLIST_T;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:0.64em";
-                    <span style: "top:-3em";
-                        <span class: css.PSTRUT, style: "height:3em">
-                        <span style: "height:0.44em;display:inline-block";
-                            for (el in base_elements) el
-                        >
-                    >
-                    <span style: "top:-3.55em";
-                        <span class: css.PSTRUT, style: "height:3em">
-                        <span class: "overline-line", style: "height:0.04em;display:inline-block">
-                    >
-                >
-            >
-        >
-    >
-    box_with_suppress_depth(box.ml_box_full(el, 0.64, 0.0, base_box.width,
-        "mord", 0.0, 0.0, 0.64))
-}
-
-fn render_overline_wide(base_box, context) {
+fn render_overline_vlist(base_box, context) {
     let rule = ctx.rule_thickness(context)
     let line_box = box.ml_box_full(
         <span class: "overline-line", style: "height:" ++ util.fmt_em(rule) ++ ";display:inline-block">,
@@ -1143,33 +1117,6 @@ fn render_overline_wide(base_box, context) {
     // VList derives top positions, pstruts, height, and depth from that sequence.
     box.ml_box_full(el, stack.height, stack.depth, base_box.width,
         "mord", 0.0, 0.0, stack.height)
-}
-
-fn render_overline_tall(base_box) {
-    let base_elements = box.elements_of(base_box)
-    let el = <span class: "overline";
-        <span class: css.VLIST_T2;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:1.35em";
-                    <span style: "top:-3.14em";
-                        <span class: css.PSTRUT, style: "height:3.15em">
-                        <span style: "height:1.84em;display:inline-block";
-                            for (el in base_elements) el
-                        >
-                    >
-                    <span style: "top:-4.4em";
-                        <span class: css.PSTRUT, style: "height:3.15em">
-                        <span class: "overline-line", style: "height:0.04em;display:inline-block">
-                    >
-                >
-                <span class: css.VLIST_S; "\u200B">
-            >
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:0.69em">
-            >
-        >
-    >
-    box.ml_box_full(el, 1.35, 0.69, base_box.width, "mord", 0.0, 0.0, 1.35)
 }
 
 fn render_underline_simple(base_box) {
@@ -2374,8 +2321,8 @@ fn render_sqrt_index(index_box, context, compact_index) {
 }
 
 fn sqrt_spec(body_box, context, has_index) {
-    if ((context.style == "script" or context.style == "scriptscript") and has_index)
-        make_sqrt_spec(0.73, 0.27, body_box.height, -3.0, -3.62, 0.08, 3.0, 0.05, css.SMALL_DELIM)
+    if (has_index and (context.style == "script" or context.style == "scriptscript"))
+        sqrt_indexed_script_geom(body_box, context)
     else
         sqrt_geom(body_box, context)
 }
@@ -2466,17 +2413,36 @@ fn surd_metrics(min_delim) {
     r
 }
 
-fn make_sqrt_spec(h, d, body_h, body_top, line_top, sign_top, pstrut, line_h, sign_class) => {
-    height: h,
-    depth: d,
-    visual_total: if (h + d < 1.21) 1.21 else h + d,
-    body_height: body_h,
-    body_top: body_top,
-    line_top: line_top,
-    sign_top: sign_top,
-    pstrut: pstrut,
-    line_height: line_h,
-    sign_class: sign_class
+fn sqrt_indexed_script_geom(body_box, context) {
+    let factor = met.style_scale(context.style)
+    let si = met.style_index(context.style)
+    let rule_width = met.defaultRuleThickness[si]
+    // Indexed radicals inside an explicit scriptstyle group are already under
+    // a 70%/50% wrapper. Keep the emitted dimensions in that scaled coordinate
+    // system instead of dividing by the scale again.
+    let sign_top = met.AXIS_HEIGHT * (1.0 - factor)
+    let surd = surd_metrics(0.0)
+    let h = util.ceil_em2(surd.h - sign_top)
+    let d = 0.0 - util.ceil_em2(0.0 - (surd.d + sign_top))
+    let body_h = util.ceil_em2(body_box.height + body_box.depth)
+    let pstrut = 3.0
+    {
+        height: h,
+        depth: d,
+        box_height: h,
+        box_depth: d,
+        visual_total: util.ceil_em2(h + d),
+        vlist_height: h,
+        body_height: body_h,
+        body_top: 0.0 - pstrut,
+        line_top: 0.0 - pstrut - (body_h + sign_top + 2.0 * rule_width),
+        sign_top: util.ceil_em2(sign_top),
+        pstrut: pstrut,
+        line_height: util.ceil_em2(rule_width),
+        sign_class: surd.cls,
+        is_tall: false,
+        depth_holder: d
+    }
 }
 
 // ============================================================
