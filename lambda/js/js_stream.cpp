@@ -26,6 +26,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <math.h>
 
 struct JsStreamFuncFlagsAccess {
     TypeId type_id;
@@ -554,6 +555,26 @@ static bool js_item_is_true(Item item) {
     return get_type_id(item) == LMD_TYPE_BOOL && it2b(item);
 }
 
+static bool js_stream_item_to_int64(Item value, int64_t* out) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT) {
+        if (out) *out = it2i(value);
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double number = it2d(value);
+        // Public stream sizes are JS Numbers; after migration integral values arrive boxed as FLOAT.
+        if (!isfinite(number) || number != floor(number) ||
+            number < -9223372036854775808.0 ||
+            number > 9223372036854775807.0) {
+            return false;
+        }
+        if (out) *out = (int64_t)number;
+        return true;
+    }
+    return false;
+}
+
 static Item js_readable_pipe_on_drain(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
@@ -649,7 +670,8 @@ static int64_t js_stream_readable_cached_length(Item self, Item buf) {
     Item state = js_property_get(self, key_readable_state);
     if (get_type_id(state) == LMD_TYPE_MAP) {
         Item length = js_property_get(state, make_string_item("length"));
-        if (get_type_id(length) == LMD_TYPE_INT) return it2i(length);
+        int64_t length_int = 0;
+        if (js_stream_item_to_int64(length, &length_int)) return length_int;
     }
     return js_stream_readable_buffer_length(self, buf);
 }
@@ -658,7 +680,8 @@ static void js_stream_adjust_readable_length(Item self, int64_t delta) {
     Item state = js_property_get(self, key_readable_state);
     if (get_type_id(state) != LMD_TYPE_MAP) return;
     Item current_item = js_property_get(state, make_string_item("length"));
-    int64_t current = get_type_id(current_item) == LMD_TYPE_INT ? it2i(current_item) : 0;
+    int64_t current = 0;
+    js_stream_item_to_int64(current_item, &current);
     int64_t next = current + delta;
     if (next < 0) next = 0;
     js_state_set_item(state, "length", (Item){.item = i2it(next)});
@@ -752,7 +775,8 @@ static Item js_writable_state_getBuffer(void) {
 static int64_t js_stream_state_get_int(Item state, const char* name, int64_t fallback) {
     if (get_type_id(state) != LMD_TYPE_MAP) return fallback;
     Item value = js_property_get(state, make_string_item(name));
-    if (get_type_id(value) == LMD_TYPE_INT) return it2i(value);
+    int64_t value_int = 0;
+    if (js_stream_item_to_int64(value, &value_int)) return value_int;
     return fallback;
 }
 
@@ -784,9 +808,11 @@ static int64_t js_stream_chunk_length(Item self, Item chunk) {
         return str ? (int64_t)str->len : 0;
     }
     Item length = js_property_get(chunk, make_string_item("length"));
-    if (get_type_id(length) == LMD_TYPE_INT) return it2i(length);
+    int64_t length_int = 0;
+    if (js_stream_item_to_int64(length, &length_int)) return length_int;
     Item byte_length = js_property_get(chunk, make_string_item("byteLength"));
-    if (get_type_id(byte_length) == LMD_TYPE_INT) return it2i(byte_length);
+    int64_t byte_length_int = 0;
+    if (js_stream_item_to_int64(byte_length, &byte_length_int)) return byte_length_int;
     return 1;
 }
 
@@ -1321,9 +1347,11 @@ static bool js_stream_is_empty_byte_chunk(Item chunk) {
     }
     if (!js_stream_chunk_is_arraybuffer_view(chunk)) return false;
     Item byte_length = js_property_get(chunk, make_string_item("byteLength"));
-    if (get_type_id(byte_length) == LMD_TYPE_INT) return it2i(byte_length) == 0;
+    int64_t byte_length_int = 0;
+    if (js_stream_item_to_int64(byte_length, &byte_length_int)) return byte_length_int == 0;
     Item length = js_property_get(chunk, make_string_item("length"));
-    return get_type_id(length) == LMD_TYPE_INT && it2i(length) == 0;
+    int64_t length_int = 0;
+    return js_stream_item_to_int64(length, &length_int) && length_int == 0;
 }
 
 static Item js_stream_maybe_emit_manual_data(Item self, Item chunk) {
@@ -1850,9 +1878,9 @@ static void js_stream_auto_destroy_after_error_emit(Item self, Item err) {
 static int64_t js_stream_read_size_hint(Item self, Item size_item) {
     Item state = js_property_get(self, key_readable_state);
     int64_t hwm = js_stream_state_get_int(state, "highWaterMark", js_stream_default_byte_hwm);
-    if (get_type_id(size_item) == LMD_TYPE_INT && it2i(size_item) > 0 &&
+    int64_t requested = 0;
+    if (js_stream_item_to_int64(size_item, &requested) && requested > 0 &&
         !js_state_get_bool(state, "objectMode")) {
-        int64_t requested = it2i(size_item);
         if (requested > hwm) {
             int64_t next = 1;
             while (next < requested && next < 0x40000000) next <<= 1;
@@ -2671,9 +2699,11 @@ static int64_t js_stream_readable_chunk_length(Item self, Item chunk) {
         return str ? (int64_t)str->len : 0;
     }
     Item byte_length = js_property_get(chunk, make_string_item("byteLength"));
-    if (get_type_id(byte_length) == LMD_TYPE_INT) return it2i(byte_length);
+    int64_t byte_length_int = 0;
+    if (js_stream_item_to_int64(byte_length, &byte_length_int)) return byte_length_int;
     Item length = js_property_get(chunk, make_string_item("length"));
-    if (get_type_id(length) == LMD_TYPE_INT) return it2i(length);
+    int64_t length_int = 0;
+    if (js_stream_item_to_int64(length, &length_int)) return length_int;
     return 0;
 }
 
@@ -2885,7 +2915,9 @@ static Item js_readable_read_exact(Item self, Item buf, int64_t blen, int64_t wa
 // read() — pull one chunk from buffer (non-flowing mode)
 extern "C" Item js_readable_read_size(Item self, Item size_item) {
     ensure_keys();
-    if (get_type_id(size_item) == LMD_TYPE_INT && it2i(size_item) == 0) {
+    int64_t read_size = 0;
+    bool has_read_size = js_stream_item_to_int64(size_item, &read_size);
+    if (has_read_size && read_size == 0) {
         js_stream_call_read_if_needed(self, size_item);
         if (get_type_id(js_property_get(self, make_string_item("_encoding"))) == LMD_TYPE_STRING) {
             Item buf = js_property_get(self, key_buffer);
@@ -2924,9 +2956,9 @@ extern "C" Item js_readable_read_size(Item self, Item size_item) {
         return ItemNull;
     }
 
-    if (get_type_id(size_item) == LMD_TYPE_INT && it2i(size_item) > 0 &&
+    if (has_read_size && read_size > 0 &&
         !js_stream_readable_is_object_mode(self)) {
-        Item exact = js_readable_read_exact(self, buf, blen, it2i(size_item));
+        Item exact = js_readable_read_exact(self, buf, blen, read_size);
         if (exact.item == 0 || get_type_id(exact) == LMD_TYPE_NULL ||
             get_type_id(exact) == LMD_TYPE_UNDEFINED) {
             if (js_item_is_true(js_property_get(self, key_end_pending)))

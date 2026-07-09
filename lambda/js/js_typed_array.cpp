@@ -50,6 +50,7 @@ extern "C" Item js_iterable_to_array(Item iterable);
 extern "C" bool js_is_generator(Item obj);
 extern Item js_to_number(Item);
 extern double js_get_number(Item value);
+extern Item js_make_number(double d);
 extern "C" Item js_bigint_constructor(Item value);
 extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
 extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
@@ -928,15 +929,17 @@ static bool js_atomics_validate_index(JsTypedArray* ta, Item index_item, int* ou
 }
 
 static Item js_atomics_number_to_integer_item(double number) {
-    if (std::isnan(number)) return (Item){.item = i2it(0)};
+    if (std::isnan(number)) return js_make_number(0.0);
     if (!std::isfinite(number)) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = number;
         return (Item){.item = d2it(fp)};
     }
     double integer = std::trunc(number);
+    // Atomics integer conversion returns an observable Number; -0 must be canonicalized to +0 after truncation.
+    if (integer == 0.0) return js_make_number(0.0);
     if (integer >= (double)INT64_MIN && integer <= (double)INT64_MAX) {
-        return (Item){.item = i2it((int64_t)integer)};
+        return js_make_number(integer);
     }
     double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *fp = integer;
@@ -994,12 +997,12 @@ static bool js_atomics_to_element_bits(JsTypedArrayType type, Item value, uint64
 
 static Item js_atomics_item_from_bits(JsTypedArrayType type, uint64_t bits) {
     switch (type) {
-    case JS_TYPED_INT8:      return (Item){.item = i2it((int64_t)(int8_t)(uint8_t)bits)};
-    case JS_TYPED_UINT8:     return (Item){.item = i2it((int64_t)(uint8_t)bits)};
-    case JS_TYPED_INT16:     return (Item){.item = i2it((int64_t)(int16_t)(uint16_t)bits)};
-    case JS_TYPED_UINT16:    return (Item){.item = i2it((int64_t)(uint16_t)bits)};
-    case JS_TYPED_INT32:     return (Item){.item = i2it((int64_t)(int32_t)(uint32_t)bits)};
-    case JS_TYPED_UINT32:    return (Item){.item = i2it((int64_t)(uint32_t)bits)};
+    case JS_TYPED_INT8:      return js_make_number((double)(int8_t)(uint8_t)bits);
+    case JS_TYPED_UINT8:     return js_make_number((double)(uint8_t)bits);
+    case JS_TYPED_INT16:     return js_make_number((double)(int16_t)(uint16_t)bits);
+    case JS_TYPED_UINT16:    return js_make_number((double)(uint16_t)bits);
+    case JS_TYPED_INT32:     return js_make_number((double)(int32_t)(uint32_t)bits);
+    case JS_TYPED_UINT32:    return js_make_number((double)(uint32_t)bits);
     case JS_TYPED_BIGINT64:  return bigint_from_int64((int64_t)bits);
     case JS_TYPED_BIGUINT64: return js_dataview_biguint64_item(bits);
     default:                 return (Item){.item = ITEM_JS_UNDEFINED};
@@ -2349,7 +2352,8 @@ extern "C" Item js_typed_array_raw_get_item(JsTypedArray* ta, void* data, int id
         case JS_TYPED_INT32:
         case JS_TYPED_UINT32:
         case JS_TYPED_UINT8_CLAMPED:
-            return (Item){.item = i2it((int64_t)value)};
+            // Integer typed-array reads are observable JS Number values, not Lambda compact ints.
+            return js_make_number(value);
         case JS_TYPED_FLOAT16: {
             double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
             *fp = js_float16_bits_to_float64(((uint16_t*)data)[idx]);
@@ -2367,18 +2371,18 @@ extern "C" Item js_typed_array_raw_get_item(JsTypedArray* ta, void* data, int id
     }
     switch (ta->element_type) {
     case JS_TYPED_INT8:
-        return (Item){.item = i2it((int64_t)((int8_t*)data)[idx])};
+        return js_make_number((double)((int8_t*)data)[idx]);
     case JS_TYPED_UINT8:
     case JS_TYPED_UINT8_CLAMPED:
-        return (Item){.item = i2it((int64_t)((uint8_t*)data)[idx])};
+        return js_make_number((double)((uint8_t*)data)[idx]);
     case JS_TYPED_INT16:
-        return (Item){.item = i2it((int64_t)((int16_t*)data)[idx])};
+        return js_make_number((double)((int16_t*)data)[idx]);
     case JS_TYPED_UINT16:
-        return (Item){.item = i2it((int64_t)((uint16_t*)data)[idx])};
+        return js_make_number((double)((uint16_t*)data)[idx]);
     case JS_TYPED_INT32:
-        return (Item){.item = i2it((int64_t)((int32_t*)data)[idx])};
+        return js_make_number((double)((int32_t*)data)[idx]);
     case JS_TYPED_UINT32:
-        return (Item){.item = i2it((int64_t)((uint32_t*)data)[idx])};
+        return js_make_number((double)((uint32_t*)data)[idx]);
     case JS_TYPED_FLOAT16: {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = js_float16_bits_to_float64(((uint16_t*)data)[idx]);

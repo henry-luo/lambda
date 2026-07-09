@@ -1793,6 +1793,12 @@ static const int LIVE_LOOKUP_COLLECTION_NAME = 3;
 static const int LIVE_LOOKUP_COLLECTION_CACHE_SIZE = 4096;
 static __thread LiveLookupCollectionEntry s_live_lookup_collections[LIVE_LOOKUP_COLLECTION_CACHE_SIZE] = {};
 static __thread int s_live_lookup_collection_count = 0;
+static __thread int s_dom_collection_refresh_depth = 0;
+
+struct DomCollectionRefreshGuard {
+    DomCollectionRefreshGuard() { s_dom_collection_refresh_depth++; }
+    ~DomCollectionRefreshGuard() { s_dom_collection_refresh_depth--; }
+};
 
 static void _register_select_options_owner(Item collection, DomElement* owner, int kind) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !owner) return;
@@ -7488,14 +7494,19 @@ static void _select_refresh_cached_selected_options_for_node(DomNode* node) {
 
 extern "C" void js_dom_collection_before_property_get(Item object, Item key) {
     if (get_type_id(object) != LMD_TYPE_ARRAY) return;
+    if (s_dom_collection_refresh_depth > 0) return;
     int child_kind = 0;
     DomElement* child_owner = _live_child_collection_owner(object, &child_kind);
     if (child_owner) {
+        // Live collection rebuilds read their own dense slots; guard against
+        // re-entering refresh through the generic JS array getters.
+        DomCollectionRefreshGuard refresh_guard;
         _refresh_live_child_collection(object, child_owner, child_kind);
         return;
     }
     LiveFormCollectionEntry* form_entry = _live_form_collection_entry(object);
     if (form_entry) {
+        DomCollectionRefreshGuard refresh_guard;
         _refresh_live_form_collection(object, form_entry);
         if (get_type_id(key) != LMD_TYPE_STRING) return;
         String* sk = it2s(key);
@@ -7547,6 +7558,7 @@ extern "C" void js_dom_collection_before_property_get(Item object, Item key) {
     }
     LiveLookupCollectionEntry* lookup_entry = _live_lookup_collection_entry(object);
     if (lookup_entry) {
+        DomCollectionRefreshGuard refresh_guard;
         _refresh_live_lookup_collection(object, lookup_entry);
         return;
     }
@@ -7554,18 +7566,21 @@ extern "C" void js_dom_collection_before_property_get(Item object, Item key) {
     DomElement* owner = _select_options_owner(object, &kind);
     if (!owner) return;
     if (kind == SELECT_COLLECTION_OPTIONS) {
+        DomCollectionRefreshGuard refresh_guard;
         _select_refresh_options_collection(object, owner);
         return;
     }
     if (kind != SELECT_COLLECTION_SELECTED_OPTIONS) return;
     TypeId kt = get_type_id(key);
     if (kt == LMD_TYPE_INT || kt == LMD_TYPE_INT64 || kt == LMD_TYPE_FLOAT) {
+        DomCollectionRefreshGuard refresh_guard;
         _select_refresh_selected_options_collection(object, owner);
         return;
     }
     if (kt != LMD_TYPE_STRING) return;
     String* sk = it2s(key);
     if (!sk) return;
+    DomCollectionRefreshGuard refresh_guard;
     _select_refresh_selected_options_collection(object, owner);
 }
 
@@ -8866,6 +8881,16 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             int64_t idx = -1;
             bool numeric = false;
             if (kt == LMD_TYPE_INT) { idx = it2i(prop_name); numeric = true; }
+            else if (kt == LMD_TYPE_INT64) { idx = it2l(prop_name); numeric = true; }
+            else if (kt == LMD_TYPE_FLOAT) {
+                // JS numeric property keys now arrive as boxed Number values;
+                // integral floats still denote HTMLSelectElement option indices.
+                double d = it2d(prop_name);
+                if (isfinite(d) && d >= 0.0 && d == floor(d)) {
+                    idx = (int64_t)d;
+                    numeric = true;
+                }
+            }
             else if ((prop[0] >= '0' && prop[0] <= '9')) {
                 char* ep = nullptr; long n = strtol(prop, &ep, 10);
                 if (ep && *ep == '\0' && n >= 0) { idx = n; numeric = true; }
