@@ -837,7 +837,8 @@ static bool script_task_timing_enabled() {
 }
 #endif
 
-static const size_t JS_BROWSER_LIBRARY_BUDGET_BYTES = 512u * 1024u;
+static const size_t JS_EXTERNAL_SCRIPT_BUDGET_BYTES = 16u * 1024u * 1024u;
+static const size_t JS_TOTAL_SCRIPT_BUDGET_BYTES = 128u * 1024u * 1024u;
 
 static size_t script_prelayout_defer_limit_bytes() {
     const char* env = getenv("RADIANT_JS_PRELAYOUT_DEFER_BYTES");
@@ -849,7 +850,7 @@ static size_t script_prelayout_defer_limit_bytes() {
             return (size_t)parsed;
         }
     }
-    return JS_BROWSER_LIBRARY_BUDGET_BYTES;
+    return JS_EXTERNAL_SCRIPT_BUDGET_BYTES;
 }
 
 static size_t script_external_compile_limit_bytes() {
@@ -862,9 +863,9 @@ static size_t script_external_compile_limit_bytes() {
             return (size_t)parsed;
         }
     }
-    // browser-library fixtures commonly exceed 128 KiB; keep a finite guard
-    // while allowing classic DOM libraries to run before layout.
-    return JS_BROWSER_LIBRARY_BUDGET_BYTES;
+    // browsers do not enforce small source-byte caps; this guard only protects
+    // Radiant from pathological fixture input while allowing real libraries.
+    return JS_EXTERNAL_SCRIPT_BUDGET_BYTES;
 }
 
 static size_t script_total_compile_limit_bytes() {
@@ -877,9 +878,9 @@ static size_t script_total_compile_limit_bytes() {
             return (size_t)parsed;
         }
     }
-    // Public pages can contain many individually small app-runtime scripts;
-    // cap cumulative browser JS while still admitting common DOM libraries.
-    return JS_BROWSER_LIBRARY_BUDGET_BYTES;
+    // page script graphs can include many files, so total budget must be much
+    // larger than the per-file guard to stay browser-compatible.
+    return JS_TOTAL_SCRIPT_BUDGET_BYTES;
 }
 
 #ifndef NDEBUG
