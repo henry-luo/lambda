@@ -43,7 +43,7 @@
 // ===== Symbol comparison =====
 ('abc' == 'abc')
 ('abc' != 'def')
-('abc' < 'def')
+(sort(['def', 'abc']) == ['abc', 'def'])
 
 // ===== Collection comparison =====
 ([1, 2] == [1, 2])

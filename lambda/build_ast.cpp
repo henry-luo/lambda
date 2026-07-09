@@ -245,14 +245,7 @@ SysFuncInfo* get_sys_func_for_method(StrView* method_name, int method_arg_count,
     // Check type compatibility with first parameter
     if (info->first_param_type != LMD_TYPE_ANY && obj_type_id != LMD_TYPE_ANY) {
         if (info->first_param_type != obj_type_id) {
-            // Additional check for numeric types
             bool type_compatible = false;
-            if (info->first_param_type == LMD_TYPE_NUMBER) {
-                type_compatible = (obj_type_id == LMD_TYPE_INT ||
-                                  obj_type_id == LMD_TYPE_INT64 ||
-                                  obj_type_id == LMD_TYPE_FLOAT ||
-                                  obj_type_id == LMD_TYPE_DECIMAL);
-            }
             if (!type_compatible) {
                 log_debug("method_call type mismatch for '%.*s': expected %d, got %d",
                     (int)method_name->length, method_name->str,
@@ -382,62 +375,6 @@ static bool is_global_simple_type(const Type* type) {
            type == &TYPE_UINT64;
 }
 
-static bool numeric_literal_text_is_zero(Transpiler* tp, TSNode node) {
-    StrView source = ts_node_source(tp, node);
-    bool saw_digit = false;
-    for (uint32_t i = 0; i < source.length; i++) {
-        char ch = source.str[i];
-        if (ch == 'e' || ch == 'E' || ch == 'n' || ch == 'N') break;
-        if (ch >= '1' && ch <= '9') return false;
-        if (ch == '0') saw_digit = true;
-    }
-    return saw_digit;
-}
-
-static bool ast_primary_numeric_literal_node(AstNode* node, TSNode* lit_node) {
-    if (!node || node->node_type != AST_NODE_PRIMARY) return false;
-    TSNode check = node->node;
-    TSSymbol symbol = ts_node_symbol(check);
-    if (symbol == SYM_PRIMARY_EXPR) {
-        check = ts_node_named_child(check, 0);
-        if (ts_node_is_null(check)) return false;
-        symbol = ts_node_symbol(check);
-        if (symbol == SYM_EXPR) {
-            check = ts_node_named_child(check, 0);
-            if (ts_node_is_null(check)) return false;
-            symbol = ts_node_symbol(check);
-        }
-    }
-    if (symbol != SYM_INT && symbol != SYM_FLOAT && symbol != SYM_DECIMAL &&
-        symbol != SYM_SIZED_INT && symbol != SYM_SIZED_FLOAT) {
-        return false;
-    }
-    *lit_node = check;
-    return true;
-}
-
-static bool ast_numeric_literal_is_zero(Transpiler* tp, AstNode* node) {
-    if (!node || node->node_type != AST_NODE_PRIMARY || !node->type) return false;
-    TSNode lit_node;
-    if (!ast_primary_numeric_literal_node(node, &lit_node)) return false;
-    switch (node->type->type_id) {
-        case LMD_TYPE_INT:
-            return numeric_literal_text_is_zero(tp, lit_node);
-        case LMD_TYPE_INT64:
-            return ((TypeInt64*)node->type)->int64_val == 0;
-        case LMD_TYPE_UINT64:
-            return ((TypeUint64*)node->type)->uint64_val == 0;
-        case LMD_TYPE_FLOAT:
-            return ((TypeFloat*)node->type)->double_val == 0.0;
-        case LMD_TYPE_DECIMAL:
-            return numeric_literal_text_is_zero(tp, lit_node);
-        case LMD_TYPE_NUM_SIZED:
-            return ((TypeNumSized*)node->type)->raw_bits == 0;
-        default:
-            return false;
-    }
-}
-
 static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* param_full_type) {
     if (!arg_type || !param_type) return true;  // unknown types are compatible
     if (param_type->type_id == LMD_TYPE_ANY) return true;  // any accepts all
@@ -475,6 +412,15 @@ static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* p
     if (param_type->type_id == LMD_TYPE_FLOAT) {
         if (arg_type->type_id == LMD_TYPE_INT ||
             arg_type->type_id == LMD_TYPE_INT64 ||
+            arg_type->type_id == LMD_TYPE_FLOAT64 ||
+            arg_type->type_id == LMD_TYPE_NUM_SIZED ||
+            arg_type->type_id == LMD_TYPE_UINT64) return true;
+    }
+    if (param_type->type_id == LMD_TYPE_FLOAT64) {
+        if (arg_type->type_id == LMD_TYPE_INT ||
+            arg_type->type_id == LMD_TYPE_INT64 ||
+            arg_type->type_id == LMD_TYPE_FLOAT ||
+            arg_type->type_id == LMD_TYPE_FLOAT64 ||
             arg_type->type_id == LMD_TYPE_NUM_SIZED ||
             arg_type->type_id == LMD_TYPE_UINT64) return true;
     }
@@ -483,13 +429,15 @@ static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* p
             arg_type->type_id == LMD_TYPE_NUM_SIZED ||
             arg_type->type_id == LMD_TYPE_UINT64) return true;
     }
-    if (param_type->type_id == LMD_TYPE_NUMBER) {
+    if (param_type == &TYPE_NUMBER) {
+        // `number` is an abstract type keyword; no runtime TypeId carries it.
+        if (IS_NUMERIC_ID(arg_type->type_id)) return true;
+    }
+    if (param_type == &TYPE_INTEGER) {
         if (arg_type->type_id == LMD_TYPE_INT ||
             arg_type->type_id == LMD_TYPE_INT64 ||
-            arg_type->type_id == LMD_TYPE_FLOAT ||
-            arg_type->type_id == LMD_TYPE_DECIMAL ||
-            arg_type->type_id == LMD_TYPE_NUM_SIZED ||
-            arg_type->type_id == LMD_TYPE_UINT64) return true;
+            arg_type->type_id == LMD_TYPE_UINT64 ||
+            arg_type->type_id == LMD_TYPE_NUM_SIZED) return true;
     }
     // Sized numeric coercion: NUM_SIZED and UINT64 are compatible with each other
     // and with standard numeric types for parameter passing
@@ -547,6 +495,11 @@ static bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
         out->item = d2it(&t->double_val);
         return true;
     }
+    case LMD_TYPE_FLOAT64: {
+        TypeFloat* t = (TypeFloat*)node->type;
+        out->item = f642it(&t->double_val);
+        return true;
+    }
     case LMD_TYPE_DTIME: {
         TypeDateTime* t = (TypeDateTime*)node->type;
         out->item = k2it(&t->datetime);
@@ -584,6 +537,66 @@ static bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
     }
     default:
         return false;
+    }
+}
+
+static Type* ast_called_type_target(AstNode* function) {
+    while (function && function->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)function;
+        if (!primary->expr) break;
+        function = primary->expr;
+    }
+    if (!function || !function->type || function->type->type_id != LMD_TYPE_TYPE) return NULL;
+    TypeType* type_type = (TypeType*)function->type;
+    return type_type->type;
+}
+
+static bool ast_constant_integer_value(Transpiler* tp, AstNode* node, int64_t* out) {
+    bool negate = false;
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        if (!primary->expr) break;
+        node = primary->expr;
+    }
+    if (node && node->node_type == AST_NODE_UNARY) {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        if (unary->op == OPERATOR_NEG || unary->op == OPERATOR_POS) {
+            negate = (unary->op == OPERATOR_NEG);
+            node = unary->operand;
+        }
+    }
+    Item item;
+    if (!ast_static_literal_item(tp, node, &item)) return false;
+    TypeId type_id = get_type_id(item);
+    int64_t value = 0;
+    if (type_id == LMD_TYPE_INT) {
+        value = item.get_int56();
+    } else if (type_id == LMD_TYPE_INT64) {
+        value = item.get_int64();
+    } else if (type_id == LMD_TYPE_UINT64) {
+        uint64_t u = item.get_uint64();
+        if (u > (uint64_t)INT64_MAX) return false;
+        value = (int64_t)u;
+    } else if (type_id == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = item.get_num_type();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) return false;
+        value = item.get_num_sized_as_int64();
+    } else {
+        return false;
+    }
+    *out = negate ? -value : value;
+    return true;
+}
+
+static bool constant_fits_sized_integer(NumSizedType num_type, int64_t value) {
+    switch (num_type) {
+    case NUM_INT8:   return value >= INT8_MIN && value <= INT8_MAX;
+    case NUM_INT16:  return value >= INT16_MIN && value <= INT16_MAX;
+    case NUM_INT32:  return value >= INT32_MIN && value <= INT32_MAX;
+    case NUM_UINT8:  return value >= 0 && value <= UINT8_MAX;
+    case NUM_UINT16: return value >= 0 && value <= UINT16_MAX;
+    case NUM_UINT32: return value >= 0 && (uint64_t)value <= UINT32_MAX;
+    default:         return true;
     }
 }
 
@@ -1170,10 +1183,10 @@ static StrView node_name_text(Transpiler* tp, TSNode node) {
 // check if a name is a reserved type keyword
 bool is_type_keyword(StrView name) {
     static const char* type_keywords[] = {
-        "null", "any", "error", "bool", "int", "int64", "float", "decimal", "number",
+        "null", "any", "error", "bool", "int", "int64", "float", "f64", "decimal", "integer", "number",
         "date", "time", "datetime", "symbol", "string", "binary",
         "list", "array", "map", "element", "entity", "object", "type", "function",
-        "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32"
+        "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32", "f64"
     };
     for (size_t i = 0; i < sizeof(type_keywords) / sizeof(type_keywords[0]); i++) {
         if (strview_equal(&name, type_keywords[i])) {
@@ -1181,6 +1194,10 @@ bool is_type_keyword(StrView name) {
         }
     }
     return false;
+}
+
+bool is_reserved_identifier_keyword(StrView name) {
+    return strview_equal(&name, "last");
 }
 
 // lookup a name in the current scope only (not in parent scopes)
@@ -1200,6 +1217,14 @@ NameEntry* lookup_name_in_current_scope(Transpiler* tp, String* name) {
 
 void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     log_debug("pushing name %.*s, %p", (int)node->name->len, node->name->chars, node->type);
+
+    StrView name_view = {node->name->chars, node->name->len};
+    if (is_reserved_identifier_keyword(name_view)) {
+        int line = ts_node_start_point(node->node).row + 1;
+        // c15 reserves last globally so it cannot escape its two grammar homes via declarations.
+        record_type_error(tp, line, "Error: '%.*s' is a reserved keyword and cannot be used as a name",
+            (int)name_view.length, name_view.str);
+    }
 
     // check for duplicate definition in current scope
     NameEntry* existing = lookup_name_in_current_scope(tp, node->name);
@@ -1671,7 +1696,16 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
         }
     }
     else {
+        AstNode* old_last_object = tp->last_index_object;
+        if (node_type == AST_NODE_INDEX_EXPR) {
+            tp->subscript_depth++;
+            tp->last_index_object = ast_node->object;
+        }
         ast_node->field = build_expr(tp, field_node);
+        if (node_type == AST_NODE_INDEX_EXPR) {
+            tp->subscript_depth--;
+            tp->last_index_object = old_last_object;
+        }
     }
 
     // For index_expr, collect additional comma-separated field children into a
@@ -1688,7 +1722,12 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                     seen_first = true;  // first FIELD_FIELD was already built above
                 } else {
                     TSNode extra_field = ts_tree_cursor_current_node(&cur);
+                    AstNode* old_last_object = tp->last_index_object;
+                    tp->subscript_depth++;
+                    tp->last_index_object = ast_node->object;
                     AstNode* next_idx = build_expr(tp, extra_field);
+                    tp->subscript_depth--;
+                    tp->last_index_object = old_last_object;
                     if (next_idx) {
                         tail->next = next_idx;
                         tail = next_idx;
@@ -2184,6 +2223,28 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }
     ts_tree_cursor_delete(&cursor);
+
+    if (!sys_func_info && ast_node->function && arg_count == 1) {
+        Type* target_type = ast_called_type_target(ast_node->function);
+        if (target_type && (target_type->type_id == LMD_TYPE_NUM_SIZED ||
+                target_type->type_id == LMD_TYPE_UINT64 || target_type->type_id == LMD_TYPE_FLOAT64)) {
+            ast_node->type = target_type;
+            if (target_type->type_id == LMD_TYPE_NUM_SIZED) {
+                NumSizedType num_type = type_num_sized_kind(target_type);
+                if (num_type != NUM_FLOAT16 && num_type != NUM_FLOAT32) {
+                    int64_t const_value = 0;
+                    if (ast_constant_integer_value(tp, ast_node->argument, &const_value) &&
+                            !constant_fits_sized_integer(num_type, const_value)) {
+                        // Constant conversions follow Go: invalid constants are rejected before truncating.
+                        record_semantic_error(tp, call_node, ERR_INVALID_NUMBER,
+                            "constant conversion to %s overflows", get_num_sized_type_name(num_type));
+                        ast_node->type = &TYPE_ERROR;
+                        return (AstNode*)ast_node;
+                    }
+                }
+            }
+        }
+    }
 
     if (sys_func_info) {
         AstNode* first_arg = ast_node->argument;
@@ -2835,6 +2896,7 @@ Type* build_lit_int64(Transpiler* tp, TSNode node) {
 }
 
 static int decimal_literal_significant_digits(const char* str);
+static bool n_literal_is_integer(const char* str);
 
 Type* build_lit_float(Transpiler* tp, TSNode node) {
     TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
@@ -2873,28 +2935,30 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     StrView num_sv = ts_node_source(tp, node);
     char* num_str = strview_to_cstr(&num_sv);
     char suffix_char = num_sv.str[num_sv.length - 1];
-    // num_str may not end with 'n' or 'N'
-    if (suffix_char == 'n' || suffix_char == 'N') {
-        num_str[num_sv.length - 1] = '\0';  // clear suffix 'n'/'N'
-    }
-    log_debug("build lit decimal: %s", num_str);
-
-    if (suffix_char == 'n' && decimal_literal_significant_digits(num_str) > DECIMAL_FIXED_PRECISION) {
+    if (suffix_char == 'N') {
         record_semantic_error(tp, node, ERR_INVALID_NUMBER,
-            "fixed decimal literal exceeds decimal128 precision (%d significant digits)", DECIMAL_FIXED_PRECISION);
+            "decimal literal suffix 'N' has been retired; use 'n'");
         mem_free(num_str);
         return &TYPE_ERROR;
     }
+    if (suffix_char == 'n') {
+        num_str[num_sv.length - 1] = '\0';  // clear suffix 'n'
+    }
+    log_debug("build lit decimal: %s", num_str);
 
     // Allocate heap-allocated Decimal structure
     Decimal* decimal;
     decimal = (Decimal*)pool_alloc(tp->pool, sizeof(Decimal));
     item_type->decimal = decimal;
 
-    // Set unlimited flag based on suffix case: 'N' = extended precision, 'n' = decimal128.
-    decimal->unlimited = (suffix_char == 'N') ? 1 : 0;
+    bool is_integer_literal = n_literal_is_integer(num_str);
+    bool needs_unlimited_decimal =
+        decimal_literal_significant_digits(num_str) > DECIMAL_FIXED_PRECISION;
+    decimal->unlimited = is_integer_literal ? DECIMAL_BIGINT :
+        (needs_unlimited_decimal ? 1 : 0);
 
-    // n literals must round in decimal128 context; N literals keep the extended 200-digit context.
+    // `n` is lexical: integer-like spellings become integer/BigInt; decimal
+    // spellings preserve all literal digits by selecting the necessary tier.
     decimal->dec_val = decimal_parse_str(num_str,
         decimal->unlimited ? decimal_unlimited_context() : decimal_fixed_context());
     if (!decimal->dec_val) {
@@ -2945,6 +3009,23 @@ static int decimal_literal_significant_digits(const char* str) {
         if (seen_nonzero) digits++;
     }
     return saw_digit ? (digits > 0 ? digits : 1) : 0;
+}
+
+static bool n_literal_is_integer(const char* str) {
+    bool has_dot = false;
+    bool has_negative_exponent = false;
+    for (const char* p = str; *p; p++) {
+        if (*p == '.') {
+            has_dot = true;
+        } else if (*p == 'e' || *p == 'E') {
+            const char* exp = p + 1;
+            if (*exp == '+' || *exp == '-') {
+                has_negative_exponent = (*exp == '-');
+            }
+            break;
+        }
+    }
+    return !has_dot && !has_negative_exponent;
 }
 
 static bool sized_literal_is_decimal(const char* str) {
@@ -3068,10 +3149,10 @@ Type* build_lit_sized_float(Transpiler* tp, TSNode node) {
         } else if (suffix[0] == 'f' && suffix[1] == '3' && suffix[2] == '2') {
             num_type = NUM_FLOAT32;
         } else if (suffix[0] == 'f' && suffix[1] == '6' && suffix[2] == '4') {
-            // f64 → use existing FLOAT type
             num_str[source.length - 3] = '\0';
             double dval = strtod(num_str, NULL);
             mem_free(num_str);
+            // f64 is an alias for Lambda float; producing a distinct tag makes type() observable.
             TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
             item_type->double_val = dval;
             double* heap_val = (double*)pool_alloc(tp->pool, sizeof(double));
@@ -3118,8 +3199,15 @@ Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
     else if (strview_equal(&type_name, "float")) {
         return (Type*)&LIT_TYPE_FLOAT;
     }
+    else if (strview_equal(&type_name, "f64")) {
+        // f64 is accepted on input but canonicalizes to float.
+        return (Type*)&LIT_TYPE_FLOAT;
+    }
     else if (strview_equal(&type_name, "decimal")) {
         return (Type*)&LIT_TYPE_DECIMAL;
+    }
+    else if (strview_equal(&type_name, "integer")) {
+        return (Type*)&LIT_TYPE_INTEGER;
     }
     else if (strview_equal(&type_name, "number")) {
         return (Type*)&LIT_TYPE_NUMBER;
@@ -3199,6 +3287,10 @@ Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
     }
     else if (strview_equal(&type_name, "f32")) {
         return (Type*)&LIT_TYPE_F32;
+    }
+    else if (strview_equal(&type_name, "f64")) {
+        // f64 is accepted on input but canonicalizes to float.
+        return (Type*)&LIT_TYPE_FLOAT;
     }
     else {
         log_error("Unknown base type: %.*s", (int)type_name.length, type_name.str);
@@ -3293,6 +3385,16 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         else {
             ast_node->type = ast_node->expr->type;
         }
+    }
+    else if (symbol == SYM_LAST_INDEX) {
+        if (tp->subscript_depth <= 0) {
+            record_semantic_error(tp, child, ERR_SYNTAX_ERROR,
+                "`last` is only valid inside subscripts and `limit last` clauses");
+        }
+        AstNode* last_node = alloc_ast_node(tp, AST_NODE_LAST_INDEX, child, sizeof(AstNode));
+        last_node->type = &TYPE_INT;
+        ast_node->expr = last_node;
+        ast_node->type = &TYPE_INT;
     }
     else if (symbol == SYM_ARRAY) {
         ast_node->expr = build_array(tp, child);
@@ -3544,7 +3646,7 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
             log_debug("end build unary expr");
             return (AstNode*)ast_node;
         }
-        if (LMD_TYPE_INT <= operand_type && operand_type <= LMD_TYPE_NUMBER) {
+        if (IS_NUMERIC_ID(operand_type)) {
             type_id = operand_type;  // Preserve the exact numeric type
         }
         else {
@@ -3594,9 +3696,7 @@ AstNode* build_spread_expr(Transpiler* tp, TSNode sp_node) {
         if (op_type && op_type->is_literal) {
             TypeId tid = op_type->type_id;
             if (tid == LMD_TYPE_NULL || tid == LMD_TYPE_BOOL ||
-                tid == LMD_TYPE_INT  || tid == LMD_TYPE_INT64 ||
-                tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_DECIMAL ||
-                tid == LMD_TYPE_NUMBER || tid == LMD_TYPE_DTIME ||
+                IS_NUMERIC_ID(tid) || tid == LMD_TYPE_DTIME ||
                 tid == LMD_TYPE_SYMBOL || tid == LMD_TYPE_STRING) {
                 record_semantic_error(tp, sp_node, ERR_SEMANTIC_ERROR,
                     "Spread operator '*' is redundant on scalar value");
@@ -3611,6 +3711,55 @@ AstNode* build_spread_expr(Transpiler* tp, TSNode sp_node) {
 // Helper: check if operator is a relational comparison (<, <=, >, >=)
 static inline bool is_relational_op(Operator op) {
     return op == OPERATOR_LT || op == OPERATOR_LE || op == OPERATOR_GT || op == OPERATOR_GE;
+}
+
+static inline bool is_elementwise_comparison_op(Operator op) {
+    return op >= OPERATOR_ELEM_EQ && op <= OPERATOR_ELEM_GE;
+}
+
+static inline bool is_container_type_id(TypeId type_id) {
+    return type_id >= LMD_TYPE_CONTAINER && type_id < LMD_TYPE_ANY;
+}
+
+static bool is_direct_elementwise_comparison(AstNode* node) {
+    node = unwrap_primary_node(node);
+    return node && node->node_type == AST_NODE_BINARY &&
+        is_elementwise_comparison_op(((AstBinaryNode*)node)->op);
+}
+
+static void lint_condition_expr(Transpiler* tp, TSNode cond_node, AstNode* cond, const char* context) {
+    if (!cond) return;
+    TSPoint point = ts_node_start_point(cond_node);
+    int line = (int)point.row + 1;
+
+    if (is_direct_elementwise_comparison(cond)) {
+        // masks are containers and therefore truthy; condition sites need an explicit scalar reduction.
+        log_warn("lambda_condition_lint: line %d: elementwise comparison used as %s condition; use any(...), all(...), sum(mask), or a[mask] explicitly",
+            line, context);
+        return;
+    }
+
+    TypeId cond_type = cond->type ? cond->type->type_id : LMD_TYPE_ANY;
+    if (is_container_type_id(cond_type)) {
+        // containers are truthy by design, so a container condition is almost always a missing scalar predicate.
+        log_warn("lambda_condition_lint: line %d: %s condition has container type %s, which is always truthy; use len(...), any(...), all(...), or an explicit comparison",
+            line, context, get_type_name(cond_type));
+    }
+}
+
+static bool is_magnitude_numeric_type(TypeId type_id) {
+    return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 ||
+           type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_DECIMAL ||
+           type_id == LMD_TYPE_NUM_SIZED || type_id == LMD_TYPE_UINT64;
+}
+
+static bool known_magnitude_comparable(TypeId left_type, TypeId right_type) {
+    if (left_type == LMD_TYPE_ANY || right_type == LMD_TYPE_ANY) return true;
+    if (left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) return true;
+    if (is_magnitude_numeric_type(left_type) && is_magnitude_numeric_type(right_type)) return true;
+    if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) return true;
+    if (left_type == LMD_TYPE_DTIME && right_type == LMD_TYPE_DTIME) return true;
+    return false;
 }
 
 static void normalize_is_array_type_rhs(Transpiler* tp, AstBinaryNode* ast_node) {
@@ -3795,6 +3944,12 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, "<=")) { ast_node->op = OPERATOR_LE; }
     else if (strview_equal(&op, ">")) { ast_node->op = OPERATOR_GT; }
     else if (strview_equal(&op, ">=")) { ast_node->op = OPERATOR_GE; }
+    else if (strview_equal(&op, "eq")) { ast_node->op = OPERATOR_ELEM_EQ; }
+    else if (strview_equal(&op, "ne")) { ast_node->op = OPERATOR_ELEM_NE; }
+    else if (strview_equal(&op, "lt")) { ast_node->op = OPERATOR_ELEM_LT; }
+    else if (strview_equal(&op, "le")) { ast_node->op = OPERATOR_ELEM_LE; }
+    else if (strview_equal(&op, "gt")) { ast_node->op = OPERATOR_ELEM_GT; }
+    else if (strview_equal(&op, "ge")) { ast_node->op = OPERATOR_ELEM_GE; }
     else if (strview_equal(&op, "to")) { ast_node->op = OPERATOR_TO; }
     else if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_UNION; }
     else if (strview_equal(&op, "|>")) { ast_node->op = OPERATOR_PIPE; }
@@ -3912,17 +4067,14 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         return (AstNode*)ast_node;
     }
 
-    if ((ast_node->op == OPERATOR_IDIV || ast_node->op == OPERATOR_MOD) &&
-        ast_numeric_literal_is_zero(tp, ast_node->right)) {
-        // literal zero divisors are rejected before lowering so constant mistakes do not depend on runtime evaluation.
-        record_semantic_error(tp, right_node, ERR_INVALID_OPERATION,
-            "literal zero divisor is not allowed for integer division or modulo");
+    TypeId left_type = ast_node->left->type->type_id, right_type = ast_node->right->type->type_id;
+    log_debug("left type: %d, right type: %d", left_type, right_type);
+    if (is_relational_op(ast_node->op) && !known_magnitude_comparable(left_type, right_type)) {
+        record_semantic_error(tp, bi_node, ERR_INVALID_OPERATION,
+            "ordered comparison has no magnitude for these types; use sort() for total ordering");
         ast_node->type = &TYPE_ERROR;
         return (AstNode*)ast_node;
     }
-
-    TypeId left_type = ast_node->left->type->type_id, right_type = ast_node->right->type->type_id;
-    log_debug("left type: %d, right type: %d", left_type, right_type);
     TypeId type_id;
     if (ast_node->op == OPERATOR_DIV) {
         if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
@@ -3975,33 +4127,31 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (ast_node->op == OPERATOR_EQ || ast_node->op == OPERATOR_NE ||
         ast_node->op == OPERATOR_LT || ast_node->op == OPERATOR_LE ||
         ast_node->op == OPERATOR_GT || ast_node->op == OPERATOR_GE ||
+        is_elementwise_comparison_op(ast_node->op) ||
         ast_node->op == OPERATOR_IS || ast_node->op == OPERATOR_IN ||
         ast_node->op == OPERATOR_AT) {
         type_id = LMD_TYPE_BOOL;
 
-        // Ordering comparisons (< <= > >=) now return Item from fn_lt/gt/le/ge, so
-        // their result representation depends on the operand types — mirror the
-        // transpiler's native-vs-fallback decision so consumers read it correctly:
-        //   • numeric-array operand  → ARRAY_NUM (element-wise mask via vec_cmp)
-        //   • both native numeric    → BOOL      (native MIR comparison → raw bool)
-        //   • anything else (ANY/...) → ANY       (fn_lt fallback → boxed bool / mask Item)
-        // ==/!= keep their Bool (structural / cross-type) semantics.
+        // Keyword comparisons are the explicit element-wise family.  Symbolic
+        // < <= > >= stay scalar so array masks cannot leak into control flow.
         if (ast_node->op >= OPERATOR_LT && ast_node->op <= OPERATOR_GE) {
-            bool l_arr = (left_type == LMD_TYPE_ARRAY_NUM || left_type == LMD_TYPE_ARRAY);
-            bool r_arr = (right_type == LMD_TYPE_ARRAY_NUM || right_type == LMD_TYPE_ARRAY);
             bool l_native = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT);
             bool r_native = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 || right_type == LMD_TYPE_FLOAT);
-            if (l_arr || r_arr)            type_id = LMD_TYPE_ARRAY_NUM;
-            else if (l_native && r_native) type_id = LMD_TYPE_BOOL;
+            if (l_native && r_native) type_id = LMD_TYPE_BOOL;
+            else if (left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) type_id = LMD_TYPE_ANY;
             else                           type_id = LMD_TYPE_ANY;
+        }
+        else if (is_elementwise_comparison_op(ast_node->op)) {
+            bool l_arr = (left_type == LMD_TYPE_ARRAY_NUM || left_type == LMD_TYPE_ARRAY);
+            bool r_arr = (right_type == LMD_TYPE_ARRAY_NUM || right_type == LMD_TYPE_ARRAY);
+            type_id = (l_arr || r_arr) ? LMD_TYPE_ARRAY_NUM : LMD_TYPE_ANY;
         }
 
         // equality is total: incompatible concrete families compile and evaluate
         // to false/true instead of becoming a static type error.
     }
     else if (ast_node->op == OPERATOR_IDIV) {
-        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&
-            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_NUMBER) {
+        if (IS_NUMERIC_ID(left_type) && IS_NUMERIC_ID(right_type)) {
             type_id = LMD_TYPE_INT;  // Integer division always produces int result
         }
         else {
@@ -4157,6 +4307,7 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     AstIfNode* ast_node = (AstIfNode*)alloc_ast_node(tp, AST_NODE_IF_EXPR, if_node, sizeof(AstIfNode));
     TSNode cond_node = ts_node_child_by_field_id(if_node, FIELD_COND);
     ast_node->cond = build_expr(tp, cond_node);
+    lint_condition_expr(tp, cond_node, ast_node->cond, "if");
 
     // Defensive validation: ensure condition was built successfully
     if (!ast_node->cond) {
@@ -4992,7 +5143,8 @@ StrView build_key_string(Transpiler* tp, TSNode key_node) {
         return (StrView) { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
     }
     case SYM_IDENT:
-    case SYM_BASE_TYPE: {
+    case SYM_BASE_TYPE:
+    case SYM_LAST_INDEX: {
         return (StrView)ts_node_source(tp, key_node);
     }
     case anon_sym_STAR: {
@@ -5092,8 +5244,15 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     else if (strview_equal(&type_name, "float")) {
         ast_node->type = (Type*)&LIT_TYPE_FLOAT;
     }
+    else if (strview_equal(&type_name, "f64")) {
+        // f64 is accepted on input but canonicalizes to float.
+        ast_node->type = (Type*)&LIT_TYPE_FLOAT;
+    }
     else if (strview_equal(&type_name, "decimal")) {
         ast_node->type = (Type*)&LIT_TYPE_DECIMAL;
+    }
+    else if (strview_equal(&type_name, "integer")) {
+        ast_node->type = (Type*)&LIT_TYPE_INTEGER;
     }
     else if (strview_equal(&type_name, "number")) {
         ast_node->type = (Type*)&LIT_TYPE_NUMBER;
@@ -5173,6 +5332,10 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     }
     else if (strview_equal(&type_name, "f32")) {
         ast_node->type = (Type*)&LIT_TYPE_F32;
+    }
+    else if (strview_equal(&type_name, "f64")) {
+        // f64 is accepted on input but canonicalizes to float.
+        ast_node->type = (Type*)&LIT_TYPE_FLOAT;
     }
     else {
         log_debug("unknown base type %.*s", (int)type_name.length, type_name.str);
@@ -6709,56 +6872,59 @@ void build_for_clauses(Transpiler* tp, TSNode for_node, AstForNode* ast_node) {
             TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
             TSNode child = ts_tree_cursor_current_node(&cursor);
 
-        if (field_id == FIELD_WHERE) {
-            // Where clause - get the condition expression
-            TSNode cond_node = ts_node_child_by_field_id(child, FIELD_COND);
-            ast_node->where = build_expr(tp, cond_node);
-        }
-        else if (field_id == FIELD_GROUP) {
-            // Group by clause
-            ast_node->group = (AstGroupClause*)build_group_clause(tp, child);
-            // Register group name in scope (as a map with .key and .items)
-            if (ast_node->group && ast_node->group->name) {
-                AstNamedNode* group_var = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, child, sizeof(AstNamedNode));
-                group_var->name = ast_node->group->name;
-                group_var->type = &TYPE_MAP;  // {key: ..., items: [...]}
-                push_name(tp, group_var, NULL);
+            if (field_id == FIELD_WHERE || ts_node_symbol(child) == sym_for_where_clause) {
+                // Where clause - get the condition expression
+                TSNode cond_node = ts_node_child_by_field_id(child, FIELD_COND);
+                ast_node->where = build_expr(tp, cond_node);
+                lint_condition_expr(tp, cond_node, ast_node->where, "where");
             }
-        }
-        else if (field_id == FIELD_ORDER) {
-            // Order by clause - contains multiple order_spec
-            TSTreeCursor order_cursor = ts_tree_cursor_new(child);
-            bool has_spec = ts_tree_cursor_goto_first_child(&order_cursor);
-            while (has_spec) {
-                TSSymbol spec_field = ts_tree_cursor_current_field_id(&order_cursor);
-                if (spec_field == FIELD_SPEC) {
-                    TSNode spec_node = ts_tree_cursor_current_node(&order_cursor);
-                    AstNode* order_spec = build_order_spec(tp, spec_node);
-                    if (prev_order == NULL) {
-                        ast_node->order = order_spec;
-                    } else {
-                        prev_order->next = order_spec;
-                    }
-                    prev_order = order_spec;
+            else if (field_id == FIELD_GROUP) {
+                // Group by clause
+                ast_node->group = (AstGroupClause*)build_group_clause(tp, child);
+                // Register group name in scope (as a map with .key and .items)
+                if (ast_node->group && ast_node->group->name) {
+                    AstNamedNode* group_var = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, child, sizeof(AstNamedNode));
+                    group_var->name = ast_node->group->name;
+                    group_var->type = &TYPE_MAP;  // {key: ..., items: [...]}
+                    push_name(tp, group_var, NULL);
                 }
-                has_spec = ts_tree_cursor_goto_next_sibling(&order_cursor);
             }
-            ts_tree_cursor_delete(&order_cursor);
-        }
-        else if (field_id == FIELD_LIMIT) {
-            // Limit clause
-            TSNode count_node = ts_node_child_by_field_id(child, FIELD_COUNT);
-            ast_node->limit = build_expr(tp, count_node);
-        }
-        else if (field_id == FIELD_OFFSET) {
-            // Offset clause
-            TSNode count_node = ts_node_child_by_field_id(child, FIELD_COUNT);
-            ast_node->offset = build_expr(tp, count_node);
-        }
+            else if (field_id == FIELD_ORDER) {
+                // Order by clause - contains multiple order_spec
+                TSTreeCursor order_cursor = ts_tree_cursor_new(child);
+                bool has_spec = ts_tree_cursor_goto_first_child(&order_cursor);
+                while (has_spec) {
+                    TSSymbol spec_field = ts_tree_cursor_current_field_id(&order_cursor);
+                    if (spec_field == FIELD_SPEC) {
+                        TSNode spec_node = ts_tree_cursor_current_node(&order_cursor);
+                        AstNode* order_spec = build_order_spec(tp, spec_node);
+                        if (prev_order == NULL) {
+                            ast_node->order = order_spec;
+                        } else {
+                            prev_order->next = order_spec;
+                        }
+                        prev_order = order_spec;
+                    }
+                    has_spec = ts_tree_cursor_goto_next_sibling(&order_cursor);
+                }
+                ts_tree_cursor_delete(&order_cursor);
+            }
+            else if (field_id == FIELD_LIMIT) {
+                // Limit clause
+                TSNode last_node = ts_node_child_by_field_id(child, FIELD_LAST);
+                ast_node->limit_from_end = !ts_node_is_null(last_node);
+                TSNode count_node = ts_node_child_by_field_id(child, FIELD_COUNT);
+                ast_node->limit = build_expr(tp, count_node);
+            }
+            else if (field_id == FIELD_OFFSET) {
+                // Offset clause
+                TSNode count_node = ts_node_child_by_field_id(child, FIELD_COUNT);
+                ast_node->offset = build_expr(tp, count_node);
+            }
 
-        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
-    }
-    ts_tree_cursor_delete(&cursor);
+            has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+        }
+        ts_tree_cursor_delete(&cursor);
     } // end if for_clauses node found
 
     if (!ast_node->loop) {
@@ -6913,6 +7079,7 @@ AstNode* build_while_stam(Transpiler* tp, TSNode while_node) {
     // build condition
     TSNode cond_node = ts_node_child_by_field_id(while_node, FIELD_COND);
     ast_node->cond = build_expr(tp, cond_node);
+    lint_condition_expr(tp, cond_node, ast_node->cond, "while");
     log_debug("got while cond type %d", ast_node->cond ? ast_node->cond->node_type : -1);
 
     // build body

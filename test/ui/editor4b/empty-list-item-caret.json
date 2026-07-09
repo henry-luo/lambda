@@ -13,7 +13,7 @@
     {"type": "wait", "ms": 50},
     {"type": "click", "target": {"selector": ".rdt-surface [data-source-path=\"4,3\"]"}},
     {"type": "wait", "ms": 60},
-    {"type": "assert_caret", "view_type": 8, "char_offset": 0, "target": {"selector": ".rdt-surface [data-source-path=\"4,3\"]"}},
+    {"type": "assert_caret", "view_type": "list-item", "char_offset": 0, "target": {"selector": ".rdt-surface [data-source-path=\"4,3\"]"}},
     {"type": "type", "target": {"selector": ".rdt-surface"}, "text": "LI"},
     {"type": "wait", "ms": 100},
     {"type": "assert_text", "target": {"selector": ".rdt-surface [data-source-path=\"4,3\"]"}, "contains": "LI"}

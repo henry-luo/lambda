@@ -190,6 +190,7 @@ struct MirTranspiler {
     MIR_reg_t pipe_item_reg;
     MIR_reg_t pipe_index_reg;
     bool in_pipe;
+    AstNode* last_index_object;
 
     // TCO
     AstFuncNode* tco_func;
@@ -1534,10 +1535,11 @@ static MIR_reg_t emit_load_const_boxed(MirTranspiler* mt, int const_index, TypeI
         return emit_box_string(mt, ptr);
     case LMD_TYPE_SYMBOL:
         return emit_box_symbol(mt, ptr);
-    case LMD_TYPE_FLOAT: {
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64: {
         // d2it(ptr) = ptr ? (FLOAT_TAG | (uint64_t)ptr) : ITEM_NULL
         MIR_reg_t result = new_reg(mt, "boxd", MIR_T_I64);
-        uint64_t FLOAT_TAG = (uint64_t)LMD_TYPE_FLOAT << 56;
+        uint64_t FLOAT_TAG = (uint64_t)type_id << 56;
         uint64_t ITEM_NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
         MIR_label_t l_nn = new_label(mt);
         MIR_label_t l_end = new_label(mt);
@@ -1812,6 +1814,7 @@ static bool static_const_item_from_node(MirTranspiler* mt, AstNode* node, Item* 
         case LMD_TYPE_INT: out->item = i2it(parse_int_literal(mt->source, node->node)); return true;
         case LMD_TYPE_INT64: { TypeInt64* t = (TypeInt64*)node->type; out->item = l2it(&t->int64_val); return true; }
         case LMD_TYPE_FLOAT: { TypeFloat* t = (TypeFloat*)node->type; out->item = d2it(&t->double_val); return true; }
+        case LMD_TYPE_FLOAT64: { TypeFloat* t = (TypeFloat*)node->type; out->item = f642it(&t->double_val); return true; }
         case LMD_TYPE_DTIME: { TypeDateTime* t = (TypeDateTime*)node->type; out->item = k2it(&t->datetime); return true; }
         case LMD_TYPE_DECIMAL: { TypeDecimal* t = (TypeDecimal*)node->type; out->item = c2it(t->decimal); return true; }
         case LMD_TYPE_STRING: { TypeString* t = (TypeString*)node->type; out->item = s2it(t->string); return true; }
@@ -2291,12 +2294,17 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
 // Binary expressions
 // ============================================================================
 
-// True iff a comparison `lt OP rt` should produce a vectorized ELEM_BOOL mask.
-// Only ordering ops (< <= > >=) with an array operand vectorize. ==/!= keep their
-// existing semantics: structural for array-vs-array, cross-type error for
-// array-vs-scalar (so `42 == [42]` stays an error, not a [true] mask).
+static inline bool is_elementwise_comparison_op(int op) {
+    return op >= OPERATOR_ELEM_EQ && op <= OPERATOR_ELEM_GE;
+}
+
+static inline int elementwise_cmp_code(int op) {
+    return op - OPERATOR_ELEM_EQ;
+}
+
+// True iff a keyword comparison `lt OP rt` should produce an ELEM_BOOL mask.
 static inline bool comparison_vectorizes(int op, TypeId lt, TypeId rt) {
-    if (op < OPERATOR_LT || op > OPERATOR_GE) return false;
+    if (!is_elementwise_comparison_op(op)) return false;
     bool l_arr = (lt == LMD_TYPE_ARRAY_NUM || lt == LMD_TYPE_ARRAY);
     bool r_arr = (rt == LMD_TYPE_ARRAY_NUM || rt == LMD_TYPE_ARRAY);
     return l_arr || r_arr;
@@ -2511,7 +2519,10 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         // native cases keep BOOL.)
         {
             int op_ck = bi->op;
-            if (comparison_vectorizes(op_ck, lt, rt)) return LMD_TYPE_ARRAY_NUM;
+            if (is_elementwise_comparison_op(op_ck)) {
+                if (comparison_vectorizes(op_ck, lt, rt)) return LMD_TYPE_ARRAY_NUM;
+                return LMD_TYPE_ANY;
+            }
             if (op_ck == OPERATOR_EQ || op_ck == OPERATOR_NE ||
                 op_ck == OPERATOR_IS || op_ck == OPERATOR_IS_NAN ||
                 op_ck == OPERATOR_IN || op_ck == OPERATOR_AT)
@@ -2566,9 +2577,11 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
                     op == OPERATOR_DIV)
                     return LMD_TYPE_FLOAT;
             }
-            // Comparisons always return bool
+            // Scalar symbolic comparisons always return bool.
             if (op >= OPERATOR_EQ && op <= OPERATOR_GE)
                 return LMD_TYPE_BOOL;
+            if (is_elementwise_comparison_op(op))
+                return LMD_TYPE_ANY;
             if (op == OPERATOR_IS || op == OPERATOR_IS_NAN ||
                 op == OPERATOR_IN || op == OPERATOR_AT)
                 return LMD_TYPE_BOOL;
@@ -2657,19 +2670,15 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
         return emit_bool_const(mt, bi->op == OPERATOR_NE);
     }
 
-    // Vectorized comparison → element-wise ELEM_BOOL mask (boxed Item).
-    // Ordering (< <= > >=): vectorize when any operand is an array.
-    // Equality (== !=): vectorize only array-vs-numeric-scalar — array-vs-array
-    // (and array-vs-ANY) keep structural-equality semantics. (Numeric array
-    // literals are statically ARRAY; ARRAY_NUM is the runtime form. vec_cmp
-    // validates the runtime type and errors on non-numeric arrays.)
-    if (comparison_vectorizes(bi->op, left_tid, right_tid)) {
+    // Keyword comparisons are the only vectorized comparison syntax; symbolic
+    // < <= > >= remain scalar so masks are never implicit truth values.
+    if (is_elementwise_comparison_op(bi->op)) {
         MIR_reg_t boxl = transpile_box_item(mt, bi->left);
         MIR_reg_t boxr = transpile_box_item(mt, bi->right);
         return emit_call_3(mt, "vec_cmp", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(bi->op - OPERATOR_EQ)));
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)elementwise_cmp_code(bi->op)));
     }
 
     // IDIV and MOD: native fast paths when operand types are known
@@ -3341,7 +3350,7 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
              if_tid, then_tid, else_tid, then_mir, else_mir);
 
     // If branches have different MIR types or the node type is ANY, always box to Item (I64)
-    bool need_boxing = (if_tid == LMD_TYPE_ANY || if_tid == LMD_TYPE_NUMBER ||
+    bool need_boxing = (if_tid == LMD_TYPE_ANY ||
                         then_mir != else_mir ||
                         then_mir != type_to_mir(if_tid));
 
@@ -3915,7 +3924,9 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
                 lim_raw = emit_unbox(mt, emit_box(mt, lim_val, lim_tid), LMD_TYPE_INT);
             }
             MIR_reg_t lim_masked = emit_unbox_int_mask(mt, lim_raw);
-            emit_call_void_2(mt, "array_limit_inplace",
+            emit_call_void_2(mt, for_node->limit_from_end
+                    ? "array_limit_last_inplace"
+                    : "array_limit_inplace",
                 MIR_T_P, MIR_new_reg_op(mt->ctx, output),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lim_masked));
         }
@@ -3937,7 +3948,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
             MIR_reg_t lim_val = transpile_expr(mt, for_node->limit);
             TypeId lim_tid = get_effective_type(mt, for_node->limit);
             MIR_reg_t lim_boxed = emit_box(mt, lim_val, lim_tid);
-            cur_result = emit_call_2(mt, "fn_take", MIR_T_I64,
+            cur_result = emit_call_2(mt, for_node->limit_from_end ? "fn_take_last" : "fn_take", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_result),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lim_boxed));
         }
@@ -4386,7 +4397,7 @@ static int mir_detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_nd
     TypeId nid = type->nested->type_id;
     if (nid == LMD_TYPE_INT)   { shape_out[0] = type->length; *elem_type_out = ELEM_INT;   return 1; }
     if (nid == LMD_TYPE_INT64) { shape_out[0] = type->length; *elem_type_out = ELEM_INT64; return 1; }
-    if (nid == LMD_TYPE_FLOAT) { shape_out[0] = type->length; *elem_type_out = ELEM_FLOAT; return 1; }
+    if (nid == LMD_TYPE_FLOAT) { shape_out[0] = type->length; *elem_type_out = ELEM_FLOAT64; return 1; }
     if (nid == LMD_TYPE_NUM_SIZED) {
         shape_out[0] = type->length;
         *elem_type_out = num_sized_to_elem_type(type_num_sized_kind(type->nested));
@@ -5923,6 +5934,7 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
 }
 
 static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
+    mt->last_index_object = field_node->object;
     // Multi-dim path: arr[i, j, k] — when there's more than one index, dispatch
     // to the runtime array_num_at_nd helper.  Indices are stored into a small
     // heap-data buffer and the helper computes the stride-walking offset.
@@ -6934,6 +6946,30 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
 static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
     AstNode* fn_expr = call_node->function;
 
+    AstNode* only_arg = call_node->argument;
+    if (only_arg && !only_arg->next) {
+        AstNode* target_expr = fn_expr;
+        while (target_expr && target_expr->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* primary = (AstPrimaryNode*)target_expr;
+            if (!primary->expr) break;
+            target_expr = primary->expr;
+        }
+        bool callee_is_type_value = target_expr && target_expr->node_type == AST_NODE_TYPE;
+        Type* target_type = callee_is_type_value ? ((AstNode*)call_node)->type : NULL;
+        if (target_type && target_type->type_id == LMD_TYPE_NUM_SIZED) {
+            MIR_reg_t boxed = transpile_box_item(mt, only_arg);
+            NumSizedType num_type = type_num_sized_kind(target_type);
+            return emit_call_2(mt, "coerce_num_sized", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)num_type));
+        }
+        if (target_type && target_type->type_id == LMD_TYPE_UINT64) {
+            MIR_reg_t boxed = transpile_box_item(mt, only_arg);
+            return emit_call_1(mt, "coerce_uint64", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+        }
+    }
+
     // Check for system function calls
     if (fn_expr->node_type == AST_NODE_SYS_FUNC) {
         AstSysFuncNode* sys = (AstSysFuncNode*)fn_expr;
@@ -7071,7 +7107,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
 
         // ==== Bitwise functions: inline as native MIR instructions ====
         // band/bor/bxor → MIR_AND/MIR_OR/MIR_XOR (single instruction, no function call)
-        // shl/shr → guarded: if (b >= 0 && b < 64) then MIR_LSH/MIR_RSH else 0
+        // shl/shr → guarded: negative count is error; b >= 64 yields 0
         // bnot → MIR_XOR with -1 (equivalent to ~a)
         if (info->fn == SYSFUNC_BAND || info->fn == SYSFUNC_BOR ||
             info->fn == SYSFUNC_BXOR || info->fn == SYSFUNC_SHL ||
@@ -7121,11 +7157,12 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                 return result;
             }
 
-            // shl/shr: guarded shift — if (b >= 0 && b < 64) then (a op b) else 0
+            // shl/shr: guarded shift — negative is INT64_ERROR, b >= 64 is 0.
             {
                 MIR_insn_code_t shift_op = (info->fn == SYSFUNC_SHL) ? MIR_LSH : MIR_RSH;
                 MIR_reg_t result = new_reg(mt, "shft", MIR_T_I64);
                 MIR_label_t l_ok = new_label(mt);
+                MIR_label_t l_err = new_label(mt);
                 MIR_label_t l_zero = new_label(mt);
                 MIR_label_t l_end = new_label(mt);
 
@@ -7133,7 +7170,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                 MIR_reg_t neg_chk = new_reg(mt, "sneg", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_chk),
                     MIR_new_reg_op(mt->ctx, a2), MIR_new_int_op(mt->ctx, 0)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_zero),
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_err),
                     MIR_new_reg_op(mt->ctx, neg_chk)));
 
                 // check b < 64
@@ -7145,6 +7182,11 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
 
                 // in range: do the shift
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
+
+                emit_label(mt, l_err);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, INT64_ERROR)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
                 emit_label(mt, l_zero);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
@@ -8748,6 +8790,10 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             TypeConst* tc = (TypeConst*)node->type;
             return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_FLOAT);
         }
+        case LMD_TYPE_FLOAT64: {
+            TypeConst* tc = (TypeConst*)node->type;
+            return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_FLOAT64);
+        }
         case LMD_TYPE_STRING: {
             TypeConst* tc = (TypeConst*)node->type;
             return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_STRING);
@@ -8791,8 +8837,7 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
     // Boxed/unknown expressions already produce Item registers. Do this before
     // binary/unary heuristics so mixed boxed-native arithmetic is not reboxed
     // using a stale scalar expectation.
-    if (tid == LMD_TYPE_ANY || tid == LMD_TYPE_ERROR || tid == LMD_TYPE_NULL ||
-        tid == LMD_TYPE_NUMBER) {
+    if (tid == LMD_TYPE_ANY || tid == LMD_TYPE_ERROR || tid == LMD_TYPE_NULL) {
         return val;
     }
 
@@ -8821,11 +8866,12 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         //   • LT-GE, both native numeric   → native MIR comparison → box it
         //   • LT-GE, otherwise             → fn_lt/gt/le/ge already returned a boxed
         //                                    Item (boxed bool or mask) → return as-is
-        bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE);
+        bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE) || is_elementwise_comparison_op(op);
         if (is_cmp) {
             if (comparison_vectorizes(op, lt, rt)) {
                 return val;  // already a boxed mask Item from vec_cmp
             }
+            if (is_elementwise_comparison_op(op)) return val;  // scalar keyword compare returns boxed bool
             if (op == OPERATOR_EQ || op == OPERATOR_NE) return emit_box_bool(mt, val);
             bool l_native = (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64 || lt == LMD_TYPE_FLOAT);
             bool r_native = (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64 || rt == LMD_TYPE_FLOAT);
@@ -9011,6 +9057,24 @@ static MIR_reg_t transpile_base_type(MirTranspiler* mt, AstTypeNode* type_node) 
                 MIR_reg_t r = new_reg(mt, "tlist", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
                     MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_LIST)));
+                return r;
+            }
+            // `number` has no runtime TypeId; keep its TypeType singleton instead of base_type(LMD_TYPE_TYPE).
+            extern Type TYPE_NUMBER;
+            extern TypeType LIT_TYPE_NUMBER;
+            if (tt->type == &TYPE_NUMBER) {
+                MIR_reg_t r = new_reg(mt, "tnumber", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_NUMBER)));
+                return r;
+            }
+            // `integer` is an abstract numeric domain like `number`; preserve its singleton.
+            extern Type TYPE_INTEGER;
+            extern TypeType LIT_TYPE_INTEGER;
+            if (tt->type == &TYPE_INTEGER) {
+                MIR_reg_t r = new_reg(mt, "tinteger", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_INTEGER)));
                 return r;
             }
             // For NUM_SIZED sub-types (i8..f32), load the specific LIT_TYPE_Xxx pointer
@@ -9357,7 +9421,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 MIR_new_reg_op(mt->ctx, is_aint)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_slow)));
 
-            // Inline ArrayNum int store (only for ELEM_INT / ELEM_INT64, not ELEM_FLOAT)
+            // Inline ArrayNum int store (only for ELEM_INT / ELEM_INT64, not ELEM_FLOAT64)
             emit_label(mt, l_fast);
             {
                 // Reject views: fall back to fn_array_set which logs the error.
@@ -9370,7 +9434,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_slow),
                     MIR_new_reg_op(mt->ctx, is_view_bit)));
                 // elem_type lives in map_kind byte at offset 3.
-                // ELEM_FLOAT=0x10 → fall back to fn_array_set; ELEM_INT=0x00 and ELEM_INT64=0x50 take fast path
+                // ELEM_FLOAT64=0x10 → fall back to fn_array_set; ELEM_INT=0x00 and ELEM_INT64=0x50 take fast path
                 MIR_reg_t etype = new_reg(mt, "etyp", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, etype),
                     MIR_new_mem_op(mt->ctx, MIR_T_U8, 3, arr_ptr, 0, 1)));
@@ -9843,6 +9907,22 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         MIR_reg_t r = new_reg(mt, "pipe_idx", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
             MIR_new_int_op(mt->ctx, 0)));
+        return r;
+    }
+    case AST_NODE_LAST_INDEX: {
+        MIR_reg_t r = new_reg(mt, "last_idx", MIR_T_I64);
+        if (!mt->last_index_object) {
+            log_error("mir: `last` used outside subscript");
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_int_op(mt->ctx, 0)));
+            return r;
+        }
+        MIR_reg_t boxed_obj = transpile_box_item(mt, mt->last_index_object);
+        MIR_reg_t len = emit_call_1(mt, "fn_len", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj));
+        // C15 defines `last` as len(container) - 1; empty containers naturally produce -1.
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_SUB, MIR_new_reg_op(mt->ctx, r),
+            MIR_new_reg_op(mt->ctx, len), MIR_new_int_op(mt->ctx, 1)));
         return r;
     }
     case AST_NODE_TYPE:
@@ -10371,7 +10451,7 @@ static void gather_evidence(AstNode* node, InferCtx* ctx) {
             bool is_arith = (op == OPERATOR_ADD || op == OPERATOR_SUB || op == OPERATOR_MUL ||
                              op == OPERATOR_DIV || op == OPERATOR_IDIV || op == OPERATOR_MOD ||
                              op == OPERATOR_POW);
-            bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE);
+            bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE) || is_elementwise_comparison_op(op);
 
             if (is_arith || is_cmp) {
                 bool left_is_tracked = is_tracked_ref(bi->left, ctx);
@@ -10615,7 +10695,7 @@ static void gather_evidence_multi(AstNode* node, InferCtx* ctxs, int ctx_count) 
             bool is_arith = (op == OPERATOR_ADD || op == OPERATOR_SUB || op == OPERATOR_MUL ||
                              op == OPERATOR_DIV || op == OPERATOR_IDIV || op == OPERATOR_MOD ||
                              op == OPERATOR_POW);
-            bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE);
+            bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE) || is_elementwise_comparison_op(op);
 
             if (is_arith || is_cmp) {
                 for (int c = 0; c < ctx_count; c++) {

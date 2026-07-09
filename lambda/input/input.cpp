@@ -124,8 +124,15 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
+        *(Container**)field_ptr = value.container;
+        break;
+    case LMD_TYPE_VMAP:
+        // Branded DOM VMaps are host-object pointers, not Map payloads; using
+        // value.map here installs an own slot that reads back as JS null.
+        *(VMap**)field_ptr = value.vmap;
+        break;
     case LMD_TYPE_FUNC:
-        *(Map**)field_ptr = value.map;
+        *(Function**)field_ptr = value.function;
         break;
     case LMD_TYPE_TYPE:
         *(Type**)field_ptr = value.type;

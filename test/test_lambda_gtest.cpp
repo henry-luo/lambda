@@ -6,6 +6,7 @@
 //==============================================================================
 
 #include "test_lambda_helpers.hpp"
+#include <string.h>
 
 //==============================================================================
 // Directory Configuration for Baseline Tests
@@ -381,6 +382,50 @@ void test_lambda_script_expects_error(const char* script_path) {
 
 TEST(LambdaNegativeTests, test_func_param_type_errors) {
     test_lambda_script_expects_error("test/lambda/negative/func_param_negative.ls");
+}
+
+TEST(LambdaNegativeTests, test_bare_vector_comparison_error) {
+    test_lambda_script_expects_error("test/lambda/negative/semantic/bare_vector_comparison.ls");
+}
+
+TEST(LambdaNegativeTests, test_condition_lint_masks) {
+    const char* script_path = "test/lambda/negative/semantic/condition_lint_masks.ls";
+    char command[512];
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "lambda.exe \"%s\" 2>&1", script_path);
+#else
+    snprintf(command, sizeof(command), "./lambda.exe \"%s\" 2>&1", script_path);
+#endif
+
+    FILE* pipe = popen(command, "r");
+    ASSERT_NE(pipe, nullptr) << "Failed to execute command: " << command;
+
+    char output[65536];
+    output[0] = '\0';
+    size_t output_len = 0;
+    char buffer[4096];
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        size_t buffer_len = strlen(buffer);
+        if (output_len + buffer_len < sizeof(output)) {
+            memcpy(output + output_len, buffer, buffer_len + 1);
+            output_len += buffer_len;
+        }
+    }
+    int exit_code = pclose(pipe);
+
+    EXPECT_EQ(exit_code, 0) << "Lint probe should not fail:\n" << output;
+    EXPECT_TRUE(strstr(output, "lambda_condition_lint") != nullptr)
+        << "Expected condition lint warning:\n" << output;
+    EXPECT_TRUE(strstr(output, "elementwise comparison used as if condition") != nullptr)
+        << "Expected direct mask-condition warning:\n" << output;
+    EXPECT_TRUE(strstr(output, "if condition has container type") != nullptr)
+        << "Expected container-condition warning:\n" << output;
+    EXPECT_TRUE(strstr(output, "elementwise comparison used as where condition") != nullptr)
+        << "Expected where mask-condition warning:\n" << output;
+    EXPECT_TRUE(strstr(output, "elementwise comparison used as while condition") != nullptr)
+        << "Expected while mask-condition warning:\n" << output;
+    EXPECT_TRUE(strstr(output, "mask branchcontainer branch") != nullptr)
+        << "Expected script output to still be produced:\n" << output;
 }
 
 void test_lambda_proc_script_expects_error(const char* script_path) {

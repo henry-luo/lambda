@@ -328,6 +328,14 @@ static inline bool is_numeric_type(TypeId t) {
     return t == LMD_TYPE_INT || t == LMD_TYPE_INT64 || t == LMD_TYPE_FLOAT;
 }
 
+static inline bool is_elementwise_comparison_op(Operator op) {
+    return op >= OPERATOR_ELEM_EQ && op <= OPERATOR_ELEM_GE;
+}
+
+static inline int elementwise_cmp_code(Operator op) {
+    return (int)(op - OPERATOR_ELEM_EQ);
+}
+
 // Check if a direct call to the native function returns a native scalar that
 // the caller can't detect via fn_type->returned (which is still ANY).
 // When true, the call site wraps with i2it() to convert native int64_t → Item.
@@ -1149,10 +1157,6 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         // Table-driven scalar boxing: handles optional/closure params, captured vars,
         // literal const boxing, and non-literal boxing via TypeBoxInfo table
         try_box_scalar(tp, item);
-        break;
-    case LMD_TYPE_NUMBER:
-        // NUMBER type is a union of int/float - transpile the expression directly
-        transpile_expr(tp, item);
         break;
     case LMD_TYPE_ARRAY:
         // Single-value CONTENT blocks are handled above (before the switch).
@@ -1990,6 +1994,15 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             strbuf_append_char(tp->code_buf, ')');
         }
     }
+    else if (is_elementwise_comparison_op(bi_node->op)) {
+        strbuf_append_str(tp->code_buf, "vec_cmp(");
+        transpile_box_item(tp, bi_node->left);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_box_item(tp, bi_node->right);
+        strbuf_append_char(tp->code_buf, ',');
+        strbuf_append_format(tp->code_buf, "%d", elementwise_cmp_code(bi_node->op));
+        strbuf_append_char(tp->code_buf, ')');
+    }
     else if (bi_node->op == OPERATOR_JOIN) {
         strbuf_append_str(tp->code_buf, "fn_join(");
         transpile_box_item(tp, bi_node->left);
@@ -2654,7 +2667,9 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
             strbuf_append_str(tp->code_buf, " & 0x00FFFFFFFFFFFFFF);\n");
         }
         if (has_limit) {
-            strbuf_append_str(tp->code_buf, " array_limit_inplace(arr_out, ");
+            strbuf_append_str(tp->code_buf, for_node->limit_from_end
+                ? " array_limit_last_inplace(arr_out, "
+                : " array_limit_inplace(arr_out, ");
             transpile_box_item(tp, for_node->limit);
             strbuf_append_str(tp->code_buf, " & 0x00FFFFFFFFFFFFFF);\n");
         }
@@ -2673,9 +2688,13 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
         // Apply LIMIT if present
         if (has_limit) {
             if (has_offset) {
-                strbuf_append_str(tp->code_buf, " Item limited_v = fn_take(offset_v, ");
+                strbuf_append_str(tp->code_buf, for_node->limit_from_end
+                    ? " Item limited_v = fn_take_last(offset_v, "
+                    : " Item limited_v = fn_take(offset_v, ");
             } else {
-                strbuf_append_str(tp->code_buf, " Item limited_v = fn_take((Item)arr_out, ");
+                strbuf_append_str(tp->code_buf, for_node->limit_from_end
+                    ? " Item limited_v = fn_take_last((Item)arr_out, "
+                    : " Item limited_v = fn_take((Item)arr_out, ");
             }
             transpile_box_item(tp, for_node->limit);
             strbuf_append_str(tp->code_buf, ");\n");
@@ -4467,7 +4486,7 @@ static int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
     // Numeric leaf — this is a 1-D base case
     if (nid == LMD_TYPE_INT)   { shape_out[0] = type->length; *elem_type_out = ELEM_INT;   return 1; }
     if (nid == LMD_TYPE_INT64) { shape_out[0] = type->length; *elem_type_out = ELEM_INT64; return 1; }
-    if (nid == LMD_TYPE_FLOAT) { shape_out[0] = type->length; *elem_type_out = ELEM_FLOAT; return 1; }
+    if (nid == LMD_TYPE_FLOAT) { shape_out[0] = type->length; *elem_type_out = ELEM_FLOAT64; return 1; }
     if (nid == LMD_TYPE_NUM_SIZED) {
         shape_out[0] = type->length;
         *elem_type_out = num_sized_to_elem_type(type_num_sized_kind(type->nested));
@@ -5490,6 +5509,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
 
     TypeId object_type = field_node->object->type->type_id;
     TypeId field_type = field_node->field->type->type_id;
+    tp->last_index_object = field_node->object;
 
     // resolve TypeUnary (int[], float[] annotations) to effective array type
     if (object_type == LMD_TYPE_TYPE && field_node->object->type->kind == TYPE_KIND_UNARY) {
@@ -7031,6 +7051,11 @@ void transpile_base_type(Transpiler* tp, AstTypeNode* type_node) {
         arraylist_append(tp->type_list, (void*)type_type);
         int type_index = tp->type_list->length - 1;
         strbuf_append_format(tp->code_buf, "const_type(%d)", type_index);
+    } else if (type_type->type == &TYPE_NUMBER) {
+        // `number` has no runtime TypeId; preserve the singleton instead of base_type(LMD_TYPE_TYPE).
+        arraylist_append(tp->type_list, (void*)type_type);
+        int type_index = tp->type_list->length - 1;
+        strbuf_append_format(tp->code_buf, "const_type(%d)", type_index);
     } else {
         strbuf_append_format(tp->code_buf, "base_type(%d)", type_type->type->type_id);
     }
@@ -7072,6 +7097,17 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_CURRENT_INDEX:
         // ~# references the current pipe context key/index
         strbuf_append_str(tp->code_buf, "pipe_index");
+        break;
+    case AST_NODE_LAST_INDEX:
+        if (tp->last_index_object) {
+            // C15 binds `last` to the innermost subscript object currently being lowered.
+            strbuf_append_str(tp->code_buf, "(fn_len(");
+            transpile_box_item(tp, tp->last_index_object);
+            strbuf_append_str(tp->code_buf, ")-1)");
+        } else {
+            log_error("transpile_expr: `last` used outside subscript");
+            strbuf_append_str(tp->code_buf, "0");
+        }
         break;
     case AST_NODE_IF_EXPR:
         transpile_if(tp, (AstIfNode*)expr_node);

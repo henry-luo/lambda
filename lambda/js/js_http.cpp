@@ -5829,8 +5829,15 @@ extern "C" Item js_http_agent_getName(Item options) {
             host[len] = '\0';
         }
         Item p = js_property_get(options, make_string_item("port"));
-        if (get_type_id(p) == LMD_TYPE_INT) {
+        TypeId p_type = get_type_id(p);
+        if (p_type == LMD_TYPE_INT) {
             snprintf(port, sizeof(port), "%d", (int)it2i(p));
+        } else if (p_type == LMD_TYPE_FLOAT) {
+            double number = it2d(p);
+            // Agent options use normal JS Numbers, now boxed FLOAT even when integral.
+            if (number == number && number == (double)(int)number) {
+                snprintf(port, sizeof(port), "%d", (int)number);
+            }
         } else if (get_type_id(p) == LMD_TYPE_STRING) {
             String* s = it2s(p);
             int len = (int)s->len < 31 ? (int)s->len : 31;
@@ -5845,8 +5852,15 @@ extern "C" Item js_http_agent_getName(Item options) {
             local_addr[len] = '\0';
         }
         Item fam = js_property_get(options, make_string_item("family"));
-        if (get_type_id(fam) == LMD_TYPE_INT) {
-            int fv = (int)it2i(fam);
+        TypeId fam_type = get_type_id(fam);
+        if (fam_type == LMD_TYPE_INT || fam_type == LMD_TYPE_FLOAT) {
+            int fv = 0;
+            if (fam_type == LMD_TYPE_INT) fv = (int)it2i(fam);
+            else {
+                double number = it2d(fam);
+                if (number != number || number != (double)(int)number) fv = 0;
+                else fv = (int)number;
+            }
             if (fv != 0) {
                 snprintf(family_str, sizeof(family_str), "%d", fv);
             }

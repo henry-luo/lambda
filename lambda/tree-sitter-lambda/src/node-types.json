@@ -375,6 +375,10 @@
           "named": true
         },
         {
+          "type": "last_index",
+          "named": true
+        },
+        {
           "type": "symbol",
           "named": true
         }
@@ -505,11 +509,35 @@
             "named": false
           },
           {
+            "type": "eq",
+            "named": false
+          },
+          {
+            "type": "ge",
+            "named": false
+          },
+          {
+            "type": "gt",
+            "named": false
+          },
+          {
             "type": "in",
             "named": false
           },
           {
             "type": "is",
+            "named": false
+          },
+          {
+            "type": "le",
+            "named": false
+          },
+          {
+            "type": "lt",
+            "named": false
+          },
+          {
+            "type": "ne",
             "named": false
           },
           {
@@ -1695,6 +1723,16 @@
             "named": true
           }
         ]
+      },
+      "last": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "last_index",
+            "named": true
+          }
+        ]
       }
     }
   },
@@ -2463,6 +2501,10 @@
           },
           {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "last_index",
             "named": true
           },
           {
@@ -3236,6 +3278,10 @@
         },
         {
           "type": "integer",
+          "named": true
+        },
+        {
+          "type": "last_index",
           "named": true
         },
         {
@@ -4337,6 +4383,10 @@
     "named": false
   },
   {
+    "type": "eq",
+    "named": false
+  },
+  {
     "type": "error",
     "named": false
   },
@@ -4353,7 +4403,15 @@
     "named": false
   },
   {
+    "type": "ge",
+    "named": false
+  },
+  {
     "type": "group",
+    "named": false
+  },
+  {
+    "type": "gt",
     "named": false
   },
   {
@@ -4381,11 +4439,23 @@
     "named": false
   },
   {
+    "type": "last_index",
+    "named": true
+  },
+  {
+    "type": "le",
+    "named": false
+  },
+  {
     "type": "let",
     "named": false
   },
   {
     "type": "limit",
+    "named": false
+  },
+  {
+    "type": "lt",
     "named": false
   },
   {
@@ -4395,6 +4465,10 @@
   {
     "type": "named_value",
     "named": true
+  },
+  {
+    "type": "ne",
+    "named": false
   },
   {
     "type": "not",
@@ -4466,11 +4540,11 @@
   },
   {
     "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "symbol",
-    "named": false
+    "named": true
   },
   {
     "type": "that",

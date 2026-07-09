@@ -108,7 +108,7 @@ static ValidationResult* validate_array_num_occurrence(
     // the inner numeric type, the structure matches.
     if (is_ndim) {
         ArrayNumElemType etype = arr_num->get_elem_type();
-        TypeId leaf_tid = (etype == ELEM_FLOAT || etype == ELEM_FLOAT64) ? LMD_TYPE_FLOAT :
+        TypeId leaf_tid = (etype == ELEM_FLOAT64) ? LMD_TYPE_FLOAT :
                           (etype == ELEM_BOOL) ? LMD_TYPE_BOOL :
                           LMD_TYPE_INT;
         // Walk down through nested unary/occurrence wrappers to find the leaf type.
@@ -131,25 +131,14 @@ static ValidationResult* validate_array_num_occurrence(
         return result;
     }
 
-    if (arr_num && arr_num->get_elem_type() == ELEM_FLOAT) {
-        if (operand_type->type_id == LMD_TYPE_FLOAT) {
-            result->valid = true;
-        } else {
-            result->valid = false;
-            add_constraint_error_fmt(result, validator,
-                "ArrayNum(float) elements are floats, but expected type_id=%d",
-                operand_type->type_id);
-        }
+    if (arr_num && validator_array_elem_embeds(arr_num->get_elem_type(), operand_type)) {
+        // ArrayNum occurrence checks are covariant because validation reads/copies elements.
+        result->valid = true;
     } else {
-        // ELEM_INT or ELEM_INT64
-        if (operand_type->type_id == LMD_TYPE_INT || operand_type->type_id == LMD_TYPE_INT64) {
-            result->valid = true;
-        } else {
-            result->valid = false;
-            add_constraint_error_fmt(result, validator,
-                "ArrayNum(int) elements are integers, but expected type_id=%d",
-                operand_type->type_id);
-        }
+        result->valid = false;
+        add_constraint_error_fmt(result, validator,
+            "ArrayNum elements do not embed exactly into expected type_id=%d",
+            operand_type->type_id);
     }
 
     return result;
@@ -180,7 +169,7 @@ static ValidationResult* validate_range_occurrence(
     // Range elements are always integers
     Type* operand_type = unwrap_type(type_unary->operand);
 
-    if (operand_type && operand_type->type_id == LMD_TYPE_INT) {
+    if (operand_type && validator_numeric_type_embeds(LMD_TYPE_INT, NUM_INT8, operand_type)) {
         result->valid = true;
     } else {
         result->valid = false;

@@ -444,7 +444,7 @@ pn hlf_is_ancestor(hlf_last, w, v) {
 }
 
 // Recursive DFS
-pn hlf_do_dfs(nodes, numMap, last, currentBB, current) {
+pn hlf_do_dfs(nodes, numMap, last_arr, currentBB, current) {
     var ufn = arr_get(nodes, current)
     uf_init(ufn, currentBB, current)
     var bid = (currentBB.bid)
@@ -459,11 +459,11 @@ pn hlf_do_dfs(nodes, numMap, last, currentBB, current) {
         var tnum = iarr_get(numMap, tbid)
         if (tnum == UNVISITED) {
             var nextId = lastId + 1
-            lastId = hlf_do_dfs(nodes, numMap, last, target, nextId)
+            lastId = hlf_do_dfs(nodes, numMap, last_arr, target, nextId)
         }
         i = i + 1
     }
-    iarr_set(last, current, lastId)
+    iarr_set(last_arr, current, lastId)
     return lastId
 }
 

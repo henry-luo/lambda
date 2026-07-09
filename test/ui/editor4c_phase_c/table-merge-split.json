@@ -1,0 +1,25 @@
+{
+  "name": "Editor 4C Phase C table merge and split",
+  "html": "test/html/editor-table.html",
+  "_note": "Phase C follow-up — promotes table-cells merge/split from Phase A into event_sim. A normal cell click establishes the table anchor, Shift-click extends to the adjacent cell, Merge writes colspan=2, and Split restores the original cell count.",
+  "events": [
+    {"type": "wait", "ms": 300},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface td"}, "equals": 6},
+    {"type": "click", "target": {"text": "Alpha"}},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface"}, "attribute": "data-rdt-last-cell", "contains": "2,0,0"},
+    {"type": "click", "target": {"text": "Beta"}, "mods_str": "shift"},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface"}, "attribute": "data-rdt-selection", "contains": "multi-node"},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface td.rdt-cell-selected"}, "equals": 2},
+    {"type": "click", "target": {"selector": "button.rdt-btn[title=\"Merge selected cells (shift-click cells)\"]"}},
+    {"type": "wait", "ms": 180},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface td"}, "equals": 5},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface td", "index": 0}, "attribute": "colspan", "contains": "2"},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface td", "index": 0}, "equals": "AlphaBeta"},
+    {"type": "click", "target": {"selector": "button.rdt-btn[title=\"Split a merged cell\"]"}},
+    {"type": "wait", "ms": 180},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface td"}, "equals": 6},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface td[colspan]"}, "equals": 0}
+  ]
+}

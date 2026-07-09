@@ -31,11 +31,25 @@ extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value
 extern "C" Item js_reflect_get_with_receiver(Item target, Item key, Item receiver);
 extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
+extern "C" bool js_dom_style_resource_has_property(Item item, Item key);
+extern "C" bool js_is_document_proxy(Item item);
+extern "C" bool js_is_inline_style_item(Item item);
+extern "C" bool js_is_computed_style_item(Item item);
+extern "C" bool js_cssom_resource_has_property(Item item, Item key);
+extern "C" bool js_is_stylesheet(Item item);
+extern "C" bool js_is_css_rule(Item item);
+extern "C" bool js_is_rule_style_decl(Item item);
 extern "C" Item js_dom_range_get_prototype_value(void);
 extern "C" Item js_dom_selection_get_prototype_value(void);
 extern "C" Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_dispatch_event(Item event_item);
+extern "C" int radiant_dom_host_has_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_host_delete_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_host_own_property_descriptor(Item object, Item key, Item* out);
+extern "C" int radiant_dom_host_own_property_names(Item object, Item* out);
+extern "C" bool radiant_dom_is_node(Item item);
+extern "C" Item js_dom_get_prototype_value(Item item);
 extern "C" Item js_internal_binding(Item name);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
@@ -83,7 +97,9 @@ static bool js_define_property_has_existing_own(Item obj, Item key) {
 }
 
 static bool js_global_is_bigint(Item value) {
-    if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT64 || type == LMD_TYPE_UINT64) return true;
+    if (type != LMD_TYPE_DECIMAL) return false;
     Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
     return dec && dec->unlimited == DECIMAL_BIGINT;
 }
@@ -215,6 +231,33 @@ static bool js_array_key_to_index(const char* name, int name_len, int64_t* out_i
     if (index > 0xFFFFFFFELL) return false;
     if (out_index) *out_index = index;
     return true;
+}
+
+static bool js_array_item_to_index(Item key, int64_t* out_index) {
+    TypeId type = get_type_id(key);
+    if (type == LMD_TYPE_INT) {
+        int64_t index = it2i(key);
+        if (index < 0 || index > 0xFFFFFFFELL) return false;
+        if (out_index) *out_index = index;
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double index_d = it2d(key);
+        // JS Number keys can arrive as boxed doubles after number-model migration.
+        if (!isfinite(index_d) || index_d < 0.0 || floor(index_d) != index_d ||
+            index_d > 0xFFFFFFFEULL) {
+            return false;
+        }
+        int64_t index = (int64_t)index_d;
+        if ((double)index != index_d) return false;
+        if (out_index) *out_index = index;
+        return true;
+    }
+    if (type == LMD_TYPE_STRING) {
+        String* sk = it2s(key);
+        return sk && js_array_key_to_index(sk->chars, (int)sk->len, out_index);
+    }
+    return false;
 }
 
 static bool js_array_has_nonconfigurable_index_from(Item obj, int64_t new_len) {
@@ -963,7 +1006,8 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
 // v18l: helper to throw TypeError if argument is not an object (ES5 §15.2.3.*)
 static bool js_require_object_type(Item arg, const char* method_name) {
     TypeId t = get_type_id(arg);
-    if (t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY || t == LMD_TYPE_FUNC || t == LMD_TYPE_ELEMENT)
+    if (t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY || t == LMD_TYPE_FUNC ||
+        t == LMD_TYPE_ELEMENT || t == LMD_TYPE_VMAP)
         return true;
     extern Item js_new_error_with_name(Item type_name, Item message);
     extern void js_throw_value(Item error);
@@ -977,16 +1021,46 @@ static bool js_require_object_type(Item arg, const char* method_name) {
 }
 
 static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item* out_result) {
-    if (type == LMD_TYPE_MAP &&
-        (object.map->map_kind == MAP_KIND_DOC_PROXY ||
-         object.map->map_kind == MAP_KIND_FOREIGN_DOC ||
-         object.map->map_kind == MAP_KIND_DOM)) {
+    if (type == LMD_TYPE_VMAP &&
+        (radiant_dom_is_node(object) ||
+         js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
+        if (radiant_dom_host_has_property(object, key, out_result)) return true;
+    }
+    if (type == LMD_TYPE_VMAP && js_is_document_proxy(object)) {
         Item v = js_property_get(object, key);
         if (v.item != ItemNull.item && v.item != ITEM_JS_UNDEFINED) {
             *out_result = (Item){.item = b2it(true)};
             return true;
         }
         return false;
+    }
+    if (type == LMD_TYPE_VMAP &&
+        (js_is_inline_style_item(object) || js_is_computed_style_item(object))) {
+        // Style host objects are native VMaps, so `in` must consult their CSS
+        // support predicate instead of recursing through ordinary object lookup.
+        *out_result = (Item){.item = b2it(js_dom_style_resource_has_property(object, key))};
+        return true;
+    }
+    if (type == LMD_TYPE_VMAP &&
+        (js_is_stylesheet(object) || js_is_css_rule(object) ||
+         js_is_rule_style_decl(object))) {
+        *out_result = (Item){.item = b2it(js_cssom_resource_has_property(object, key))};
+        return true;
+    }
+    if (type == LMD_TYPE_MAP &&
+        (js_is_inline_style_item(object) || js_is_computed_style_item(object))) {
+        *out_result = (Item){.item = b2it(js_dom_style_resource_has_property(object, key))};
+        return true;
+    }
+    if (type == LMD_TYPE_MAP &&
+        (js_is_stylesheet(object) || js_is_css_rule(object) ||
+         js_is_rule_style_decl(object))) {
+        *out_result = (Item){.item = b2it(js_cssom_resource_has_property(object, key))};
+        return true;
+    }
+    if (type == LMD_TYPE_MAP &&
+        object.map->map_kind == MAP_KIND_WEB_API_RESOURCE) {
+        if (radiant_dom_host_has_property(object, key, out_result)) return true;
     }
     if (js_is_proxy(object)) {
         *out_result = js_proxy_trap_has(object, key);
@@ -1037,6 +1111,17 @@ static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item*
 }
 
 static bool js_try_exotic_delete_property(Item obj, Item key, Item* out_result) {
+    if (get_type_id(obj) == LMD_TYPE_VMAP &&
+        (radiant_dom_is_node(obj) ||
+         js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) &&
+        radiant_dom_host_delete_property(obj, key, out_result)) {
+        return true;
+    }
+    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
+        obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE &&
+        radiant_dom_host_delete_property(obj, key, out_result)) {
+        return true;
+    }
     if (js_is_proxy(obj)) {
         *out_result = js_proxy_trap_delete(obj, key);
         return true;
@@ -1072,6 +1157,17 @@ static bool js_hide_legacy_dunder_own_name(const char* name, int name_len) {
 }
 
 static bool js_try_exotic_own_property_names(Item object, Item* out_result) {
+    if (get_type_id(object) == LMD_TYPE_VMAP &&
+        (radiant_dom_is_node(object) ||
+         js_dom_item_is_range(object) || js_dom_item_is_selection(object)) &&
+        radiant_dom_host_own_property_names(object, out_result)) {
+        return true;
+    }
+    if (get_type_id(object) == LMD_TYPE_MAP && object.map &&
+        object.map->map_kind == MAP_KIND_WEB_API_RESOURCE &&
+        radiant_dom_host_own_property_names(object, out_result)) {
+        return true;
+    }
     if (js_is_proxy(object)) {
         *out_result = js_proxy_trap_own_keys(object);
         return true;
@@ -1115,6 +1211,16 @@ static bool js_try_exotic_own_property_descriptor(Item obj, Item name,
                                                   Item* out_result) {
     if (js_is_proxy(obj)) {
         *out_result = js_proxy_trap_get_own_property_descriptor(obj, name);
+        return true;
+    }
+    if (type == LMD_TYPE_VMAP &&
+        (radiant_dom_is_node(obj) ||
+         js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) &&
+        radiant_dom_host_own_property_descriptor(obj, name, out_result)) {
+        return true;
+    }
+    if (type == LMD_TYPE_MAP && obj.map && obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE &&
+        radiant_dom_host_own_property_descriptor(obj, name, out_result)) {
         return true;
     }
     if (type == LMD_TYPE_MAP && obj.map && obj.map->map_kind == MAP_KIND_TYPED_ARRAY) {
@@ -6400,7 +6506,7 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
     return (Item){.item = b2it(contains_map_proto)};
 }
 
-// Forward decls for DOM identity checks (host objects under MAP_KIND_DOM).
+// Forward decls for DOM resource identity checks.
 extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 
@@ -6415,8 +6521,8 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
     // Check built-in types that don't use __class_name__ prototype chain
     TypeId lt = get_type_id(left);
 
-    // DOM host-object identity checks (Selection/Range wrappers are
-    // MAP_KIND_DOM with no __class_name__ in their property map).
+    // DOM resource identity checks (Selection/Range wrappers have no
+    // __class_name__ in their property map).
     if (rn->len == 9 && strncmp(rn->chars, "Selection", 9) == 0) {
         return (Item){.item = b2it(js_dom_item_is_selection(left))};
     }
@@ -6527,7 +6633,7 @@ extern "C" Item js_in(Item key, Item object) {
     TypeId type = get_type_id(object);
     // ES spec: TypeError if RHS is not an object
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC
-        && type != LMD_TYPE_ELEMENT) {
+        && type != LMD_TYPE_ELEMENT && type != LMD_TYPE_VMAP) {
         return js_throw_type_error("Cannot use 'in' operator to search for a property in a non-object");
     }
     Item exotic_result = ItemNull;
@@ -6654,20 +6760,9 @@ extern "C" Item js_in(Item key, Item object) {
     if (type == LMD_TYPE_ARRAY) {
         // check if index is valid and not a deleted hole
         int64_t idx = -1;
-        if (get_type_id(key) == LMD_TYPE_INT) {
-            idx = it2i(key);
-        } else if (get_type_id(key) == LMD_TYPE_STRING) {
+        js_array_item_to_index(key, &idx);
+        if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
-            if (sk && sk->len > 0 && sk->len <= 10) {
-                bool is_num = true;
-                int64_t n = 0;
-                for (int i = 0; i < (int)sk->len; i++) {
-                    char c = sk->chars[i];
-                    if (c < '0' || c > '9') { is_num = false; break; }
-                    n = n * 10 + (c - '0');
-                }
-                if (is_num && !(sk->len > 1 && sk->chars[0] == '0')) idx = n;
-            }
             // Also check "length" for arrays
             if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
                 return (Item){.item = b2it(true)};
@@ -7013,12 +7108,19 @@ extern "C" Item js_get_prototype_of(Item object) {
     if (ot == LMD_TYPE_BOOL) {
         return js_get_intrinsic_prototype_for_class(JS_CLASS_BOOLEAN);
     }
-    if (ot == LMD_TYPE_DECIMAL && js_global_is_bigint(object)) {
+    if (js_global_is_bigint(object)) {
         return js_get_intrinsic_prototype_for_class(JS_CLASS_BIGINT);
     }
     if (!js_require_object_type(object, "getPrototypeOf")) return ItemNull;
+    if (js_is_document_proxy(object)) {
+        return js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
+    }
     if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
     if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
+    if (ot == LMD_TYPE_VMAP && radiant_dom_is_node(object)) {
+        Item dom_proto = js_dom_get_prototype_value(object);
+        return get_type_id(dom_proto) == LMD_TYPE_MAP ? dom_proto : ItemNull;
+    }
     // v18g: Arrays → return Array.prototype (or custom if set via Object.setPrototypeOf)
     if (get_type_id(object) == LMD_TYPE_ARRAY) {
         if (js_is_arguments_exotic_array_for_proto(object)) {
@@ -9749,6 +9851,28 @@ extern "C" Item js_object_keys(Item object) {
     if (!js_require_object_type(object, "keys")) return js_array_new(0);
     TypeId type = get_type_id(object);
 
+    if ((type == LMD_TYPE_VMAP &&
+         (radiant_dom_is_node(object) ||
+          js_dom_item_is_range(object) || js_dom_item_is_selection(object))) ||
+        (type == LMD_TYPE_MAP && object.map && object.map->map_kind == MAP_KIND_WEB_API_RESOURCE)) {
+        Item all_keys = ItemNull;
+        if (radiant_dom_host_own_property_names(object, &all_keys) &&
+            get_type_id(all_keys) == LMD_TYPE_ARRAY && all_keys.array) {
+            Item result = js_array_new(0);
+            for (int i = 0; i < all_keys.array->length; i++) {
+                Item key = all_keys.array->items[i];
+                if (get_type_id(key) != LMD_TYPE_STRING) continue;
+                Item desc = js_object_get_own_property_descriptor(object, key);
+                if (js_check_exception()) return result;
+                if (get_type_id(desc) != LMD_TYPE_MAP) continue;
+                bool enum_found = false;
+                Item enum_val = js_map_get_fast_ext(desc.map, "enumerable", 10, &enum_found);
+                if (enum_found && js_is_truthy(enum_val)) js_array_push(result, key);
+            }
+            return result;
+        }
+    }
+
     // Js55 P16: TypedArray integer-indexed properties are enumerable own
     // properties per ES2024 §10.4.5. Enumerate them in numeric order first,
     // then any custom (non-index, non-internal, enumerable) properties.
@@ -10678,11 +10802,14 @@ extern "C" Item js_object_is(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
 
-    bool left_is_num = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT);
-    bool right_is_num = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 || right_type == LMD_TYPE_FLOAT);
+    bool left_is_num = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT ||
+                        left_type == LMD_TYPE_FLOAT64 || left_type == LMD_TYPE_NUM_SIZED);
+    bool right_is_num = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT ||
+                         right_type == LMD_TYPE_FLOAT64 || right_type == LMD_TYPE_NUM_SIZED);
     if (left_is_num && right_is_num) {
-        double l = (left_type == LMD_TYPE_FLOAT) ? it2d(left) : (double)it2i(left);
-        double r = (right_type == LMD_TYPE_FLOAT) ? it2d(right) : (double)it2i(right);
+        // JS Numbers are boxed FLOAT Items after the number-model migration.
+        double l = js_get_number(left);
+        double r = js_get_number(right);
         // Object.is(NaN, NaN) → true (unlike ===)
         if (isnan(l) && isnan(r)) return (Item){.item = b2it(true)};
         if (isnan(l) || isnan(r)) return (Item){.item = b2it(false)};
@@ -11741,7 +11868,9 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
         js_throw_type_error("Cannot convert undefined or null to object");
         return ItemNull;
     }
-    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_FUNC) {
+    bool keep_host_target = (tid == LMD_TYPE_VMAP && js_is_inline_style_item(target));
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_FUNC && !keep_host_target) {
+        // inline style VMAPs expose setters; boxing them would strand Object.assign(elem.style, ...).
         target = js_to_object(target);
         if (js_check_exception()) return ItemNull;
     }
@@ -12437,8 +12566,8 @@ extern "C" Item js_object_is_extensible(Item obj) {
 
 extern "C" Item js_number_is_integer(Item value) {
     TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
-        if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
+    if (type == LMD_TYPE_INT) {
+        if (it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
         return (Item){.item = b2it(true)};
     }
     if (type == LMD_TYPE_FLOAT) {
@@ -12450,8 +12579,8 @@ extern "C" Item js_number_is_integer(Item value) {
 
 extern "C" Item js_number_is_finite(Item value) {
     TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
-        if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
+    if (type == LMD_TYPE_INT) {
+        if (it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
         return (Item){.item = b2it(true)};
     }
     if (type == LMD_TYPE_FLOAT) {
@@ -12470,8 +12599,8 @@ extern "C" Item js_number_is_nan(Item value) {
 
 extern "C" Item js_number_is_safe_integer(Item value) {
     TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
-        if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
+    if (type == LMD_TYPE_INT) {
+        if (it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
         int64_t v = it2i(value);
         return (Item){.item = b2it(v >= -9007199254740991LL && v <= 9007199254740991LL)};
     }
@@ -13406,8 +13535,7 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
     // ES spec SerializeJSONProperty steps:
     // Step 2: toJSON first
     TypeId vtype = get_type_id(value);
-    if (vtype == LMD_TYPE_MAP || vtype == LMD_TYPE_ARRAY ||
-        (vtype == LMD_TYPE_DECIMAL && js_global_is_bigint(value))) {
+    if (vtype == LMD_TYPE_MAP || vtype == LMD_TYPE_ARRAY || js_global_is_bigint(value)) {
         Item toJSON_name = (Item){.item = s2it(heap_create_name("toJSON", 6))};
         Item toJSON_fn = js_property_access(value, toJSON_name);
         if (get_type_id(toJSON_fn) == LMD_TYPE_FUNC) {
@@ -13468,12 +13596,9 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
     }
 
     // BigInt → TypeError (ES spec §24.5.2.9 step 10)
-    if (vtype == LMD_TYPE_DECIMAL) {
-        Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
-        if (dec && dec->unlimited == DECIMAL_BIGINT) {
-            js_throw_type_error("Do not know how to serialize a BigInt");
-            return false;
-        }
+    if (js_global_is_bigint(value)) {
+        js_throw_type_error("Do not know how to serialize a BigInt");
+        return false;
     }
     if (value.item == ItemNull.item) {
         strbuf_append_str_n(sb, "null", 4);
@@ -13488,7 +13613,7 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
     }
 
     // Number
-    if (vtype == LMD_TYPE_INT || vtype == LMD_TYPE_INT64) {
+    if (vtype == LMD_TYPE_INT) {
         char buf[32];
         int64_t n = it2i(value);
         int len = snprintf(buf, sizeof(buf), "%lld", (long long)n);
@@ -13649,7 +13774,7 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
     const char* gap = "";
 
     TypeId space_type = get_type_id(space);
-    if (space_type == LMD_TYPE_INT || space_type == LMD_TYPE_INT64 || space_type == LMD_TYPE_FLOAT) {
+    if (space_type == LMD_TYPE_INT || space_type == LMD_TYPE_FLOAT) {
         double d = (space_type == LMD_TYPE_FLOAT) ? it2d(space) : (double)it2i(space);
         int n = (int)d;  // ToInteger: truncate toward zero
         if (n < 0) n = 0;
@@ -13701,7 +13826,7 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
             Item item = ItemNull;
             if (vt == LMD_TYPE_STRING) {
                 item = v;
-            } else if ((vt == LMD_TYPE_INT || vt == LMD_TYPE_INT64 || vt == LMD_TYPE_FLOAT) && !js_is_symbol_item(v)) {
+            } else if ((vt == LMD_TYPE_INT || vt == LMD_TYPE_FLOAT) && !js_is_symbol_item(v)) {
                 item = js_to_string(v);
                 if (js_check_exception()) return make_js_undefined();
             } else if (vt == LMD_TYPE_MAP) {
@@ -13963,21 +14088,7 @@ static Item js_delete_array_property(Item obj, Item key) {
     }
     // Convert key to numeric index
     int64_t idx = -1;
-    if (get_type_id(key) == LMD_TYPE_INT) {
-        idx = it2i(key);
-    } else if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* sk = it2s(key);
-        if (sk && sk->len > 0 && sk->len <= 10) {
-            bool is_num = true;
-            int64_t n = 0;
-            for (int i = 0; i < (int)sk->len; i++) {
-                char c = sk->chars[i];
-                if (c < '0' || c > '9') { is_num = false; break; }
-                n = n * 10 + (c - '0');
-            }
-            if (is_num && !(sk->len > 1 && sk->chars[0] == '0')) idx = n;
-        }
-    }
+    js_array_item_to_index(key, &idx);
     if (idx >= 0 && idx < arr->length) {
         // Check companion-map ShapeEntry flags before deleting.
         if (arr->extra != 0) {

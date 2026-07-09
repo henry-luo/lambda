@@ -99,6 +99,27 @@ static int append_item_string(char* out, int pos, int cap, Item value) {
     return pos;
 }
 
+static bool https_item_to_int64(Item value, int64_t* out) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT) {
+        if (out) *out = it2i(value);
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double number = it2d(value);
+        // Agent options use normal JS Numbers, now boxed FLOAT even when integral.
+        if (number != number ||
+            number < -9223372036854775808.0 ||
+            number > 9223372036854775807.0 ||
+            number != (double)(int64_t)number) {
+            return false;
+        }
+        if (out) *out = (int64_t)number;
+        return true;
+    }
+    return false;
+}
+
 static int append_option_value(char* out, int pos, int cap, Item options, const char* name) {
     if (get_type_id(options) != LMD_TYPE_MAP) return pos;
     Item value = js_property_get(options, make_string_item(name));
@@ -166,8 +187,9 @@ extern "C" Item js_https_agent_getName(Item options) {
         }
 
         Item port_item = js_property_get(options, make_string_item("port"));
-        if (get_type_id(port_item) == LMD_TYPE_INT) {
-            snprintf(port, sizeof(port), "%lld", (long long)it2i(port_item));
+        int64_t port_int = 0;
+        if (https_item_to_int64(port_item, &port_int)) {
+            snprintf(port, sizeof(port), "%lld", (long long)port_int);
         } else if (get_type_id(port_item) == LMD_TYPE_STRING) {
             String* s = it2s(port_item);
             int len = (int)s->len < (int)sizeof(port) - 1 ? (int)s->len : (int)sizeof(port) - 1;

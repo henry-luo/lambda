@@ -709,6 +709,7 @@ typedef struct JsSpawnProcess {
     int          exit_code;
     int          exit_signal;
     bool         process_exited;
+    bool         process_handle_closed;
     bool         close_emitted;
     int          handles_closed;
     int          handles_expected;
@@ -822,7 +823,7 @@ static void spawn_emit_event(Item obj, const char* event, Item* args, int argc) 
 
 static void spawn_maybe_emit_process_close(JsSpawnProcess* sp) {
     if (!sp || sp->close_emitted || !sp->process_exited ||
-        sp->stdout_pipe_active || sp->stderr_pipe_active) {
+        !sp->process_handle_closed || sp->stdout_pipe_active || sp->stderr_pipe_active) {
         return;
     }
     sp->close_emitted = true;
@@ -830,7 +831,8 @@ static void spawn_maybe_emit_process_close(JsSpawnProcess* sp) {
         sp->exit_signal == 0 ? (Item){.item = i2it(sp->exit_code)} : ItemNull,
         sp->exit_signal == 0 ? ItemNull : spawn_signal_name_item(sp->exit_signal)
     };
-    // child close observes drained stdio; emitting it from process exit races ahead of pipe EOF.
+    // close observers may probe pid liveness; wait for the libuv process
+    // handle to close as well as stdio so exited children are fully reaped.
     spawn_emit_event(sp->js_object, "close", args, 2);
 }
 
@@ -1162,7 +1164,11 @@ static void spawn_release_process(JsSpawnProcess* sp) {
 static void spawn_handle_close_cb(uv_handle_t* handle) {
     JsSpawnProcess* sp = (JsSpawnProcess*)handle->data;
     if (!sp) return;
+    if (handle == (uv_handle_t*)&sp->process) {
+        sp->process_handle_closed = true;
+    }
     sp->handles_closed++;
+    spawn_maybe_emit_process_close(sp);
     if (sp->handles_closed >= sp->handles_expected) {
         spawn_release_process(sp);
     }

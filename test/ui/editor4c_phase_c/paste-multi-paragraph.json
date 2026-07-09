@@ -1,0 +1,19 @@
+{
+  "name": "editor4c-phase-c: multi-paragraph plain-text paste preserves the payload text",
+  "_note": "Phase C C1 — paste block matrix smoke. Clear the doc, paste text/plain with a blank-line paragraph break, and assert both paragraphs' text reaches the editor through ClipboardEvent data. Full block-splitting parity remains a C2 model-assertion candidate.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 60},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "wait", "ms": 80},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "wait", "ms": 100},
+    {"type": "paste_text", "text": "one\n\ntwo"},
+    {"type": "wait", "ms": 180},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface"}, "contains": "one"},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface"}, "contains": "two"}
+  ]
+}

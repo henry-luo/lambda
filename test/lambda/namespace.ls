@@ -50,9 +50,9 @@ len('hello')
 len('a')
 
 "9. symbol ordering"
-('abc' < 'def')
-('def' > 'abc')
-('abc' <= 'abc')
+sort(['def', 'abc']) == ['abc', 'def']
+sort(['abc', 'def'], 'desc') == ['def', 'abc']
+sort(['abc', 'abc']) == ['abc', 'abc']
 
 // =============================================
 // Section 4: Symbol string functions

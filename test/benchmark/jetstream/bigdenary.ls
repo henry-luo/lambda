@@ -12,68 +12,68 @@ let BD2 = 2480986213549488579706531.6546845013548451265890628N
 
 pn test_plus() {
     var first = BD1 + BD2
-    var last = first
+    var latest = first
     var i: int = 0
     while (i < 10000) {
-        last = BD1 + BD2
+        latest = BD1 + BD2
         i = i + 1
     }
-    return first == last
+    return first == latest
 }
 
 pn test_minus() {
     var first = BD1 - BD2
-    var last = first
+    var latest = first
     var i: int = 0
     while (i < 10000) {
-        last = BD1 - BD2
+        latest = BD1 - BD2
         i = i + 1
     }
-    return first == last
+    return first == latest
 }
 
 pn test_negate() {
     var first = -BD1
-    var last = first
+    var latest = first
     var i: int = 0
     while (i < 10000) {
-        last = -BD1
+        latest = -BD1
         i = i + 1
     }
-    return first == last
+    return first == latest
 }
 
 pn test_compare() {
     var first = BD1 > BD2
-    var last = first
+    var latest = first
     var i: int = 0
     while (i < 10000) {
-        last = BD1 > BD2
+        latest = BD1 > BD2
         i = i + 1
     }
-    return first == last
+    return first == latest
 }
 
 pn test_multiply() {
     var first = BD1 * BD2
-    var last = first
+    var latest = first
     var i: int = 0
     while (i < 10000) {
-        last = BD1 * BD2
+        latest = BD1 * BD2
         i = i + 1
     }
-    return first == last
+    return first == latest
 }
 
 pn test_divide() {
     var first = BD1 / BD2
-    var last = first
+    var latest = first
     var i: int = 0
     while (i < 10000) {
-        last = BD1 / BD2
+        latest = BD1 / BD2
         i = i + 1
     }
-    return first == last
+    return first == latest
 }
 
 pn run() {

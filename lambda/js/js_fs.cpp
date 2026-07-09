@@ -366,12 +366,12 @@ static Item make_string_item(const char* str) {
 static Item internal_fs_binding_namespace = {0};
 static Item internal_fs_default_fstat = {0};
 
-extern "C" Item js_fs_fstatSync(Item fd_item);
+extern "C" Item js_fs_fstatSync(Item fd_item, Item options_item);
 extern int js_check_exception(void);
 extern Item js_clear_exception(void);
 
 static Item js_internal_fs_fstat(Item fd_item) {
-    return js_fs_fstatSync(fd_item);
+    return js_fs_fstatSync(fd_item, make_js_undefined());
 }
 
 extern "C" Item js_get_internal_fs_binding_namespace(void) {
@@ -505,6 +505,7 @@ extern Item js_promise_resolve(Item value);
 extern Item js_promise_reject(Item reason);
 extern "C" Item bigint_from_int64(int64_t val);
 extern "C" Item bigint_from_string(const char* str, int len);
+extern Item js_make_number(double d);
 extern "C" Item js_buffer_alloc(Item size_item, Item fill_item);
 extern "C" int64_t bigint_to_int64(Item bi);
 extern "C" Item js_array_is_array(Item value);
@@ -633,31 +634,55 @@ static Item get_stats_proto() {
     return stats_proto;
 }
 
+static Item fs_bigint_from_uint64(uint64_t value) {
+    if (value <= (uint64_t)INT64_MAX) return bigint_from_int64((int64_t)value);
+    char buf[32];
+    int len = snprintf(buf, sizeof(buf), "%llu", (unsigned long long)value);
+    return bigint_from_string(buf, len);
+}
+
+static Item fs_stats_uint64_value(uint64_t value, bool bigint) {
+    if (bigint) return fs_bigint_from_uint64(value);
+    return js_make_number((double)value);
+}
+
+static Item fs_stats_int64_value(int64_t value, bool bigint) {
+    if (bigint) return bigint_from_int64(value);
+    return js_make_number((double)value);
+}
+
+static Item fs_stats_time_ms_value(const uv_timespec_t& ts, bool bigint) {
+    if (bigint) {
+        int64_t ms = (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
+        return bigint_from_int64(ms);
+    }
+    double ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
+    return js_make_number(ms);
+}
+
+static bool fs_options_bigint(Item options_item);
+
 // Helper: build a Stats object from uv_stat_t
-static Item make_stats_object(const uv_stat_t* st) {
+static Item make_stats_object(const uv_stat_t* st, bool bigint) {
     Item obj = js_new_object();
     
     // Store mode for isFile/isDirectory/etc methods
     js_property_set(obj, make_string_item("__mode"), (Item){.item = i2it((int64_t)st->st_mode)});
-    js_property_set(obj, make_string_item("mode"), (Item){.item = i2it((int64_t)st->st_mode)});
-    js_property_set(obj, make_string_item("size"), (Item){.item = i2it((int64_t)st->st_size)});
-    js_property_set(obj, make_string_item("uid"), (Item){.item = i2it((int64_t)st->st_uid)});
-    js_property_set(obj, make_string_item("gid"), (Item){.item = i2it((int64_t)st->st_gid)});
-    js_property_set(obj, make_string_item("nlink"), (Item){.item = i2it((int64_t)st->st_nlink)});
-    js_property_set(obj, make_string_item("ino"), (Item){.item = i2it((int64_t)st->st_ino)});
-    js_property_set(obj, make_string_item("dev"), (Item){.item = i2it((int64_t)st->st_dev)});
-    js_property_set(obj, make_string_item("rdev"), (Item){.item = i2it((int64_t)st->st_rdev)});
-    js_property_set(obj, make_string_item("blksize"), (Item){.item = i2it((int64_t)st->st_blksize)});
-    js_property_set(obj, make_string_item("blocks"), (Item){.item = i2it((int64_t)st->st_blocks)});
+    // stats fields have an explicit Node API face: numbers by default, BigInt only when requested.
+    js_property_set(obj, make_string_item("mode"), fs_stats_uint64_value((uint64_t)st->st_mode, bigint));
+    js_property_set(obj, make_string_item("size"), fs_stats_int64_value((int64_t)st->st_size, bigint));
+    js_property_set(obj, make_string_item("uid"), fs_stats_uint64_value((uint64_t)st->st_uid, bigint));
+    js_property_set(obj, make_string_item("gid"), fs_stats_uint64_value((uint64_t)st->st_gid, bigint));
+    js_property_set(obj, make_string_item("nlink"), fs_stats_uint64_value((uint64_t)st->st_nlink, bigint));
+    js_property_set(obj, make_string_item("ino"), fs_stats_uint64_value((uint64_t)st->st_ino, bigint));
+    js_property_set(obj, make_string_item("dev"), fs_stats_uint64_value((uint64_t)st->st_dev, bigint));
+    js_property_set(obj, make_string_item("rdev"), fs_stats_uint64_value((uint64_t)st->st_rdev, bigint));
+    js_property_set(obj, make_string_item("blksize"), fs_stats_uint64_value((uint64_t)st->st_blksize, bigint));
+    js_property_set(obj, make_string_item("blocks"), fs_stats_int64_value((int64_t)st->st_blocks, bigint));
 
     // Time properties in milliseconds
     auto set_time = [&](const char* name, const uv_timespec_t& ts) {
-        double ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = ms;
-        Item val;
-        val.item = d2it(fp);
-        js_property_set(obj, make_string_item(name), val);
+        js_property_set(obj, make_string_item(name), fs_stats_time_ms_value(ts, bigint));
     };
     set_time("atimeMs", st->st_atim);
     set_time("mtimeMs", st->st_mtim);
@@ -1539,8 +1564,8 @@ extern "C" Item js_fs_readdirSync(Item path_item, Item options_item) {
     return arr;
 }
 
-// fs.statSync(path) → Stats object with isFile(), isDirectory(), etc.
-extern "C" Item js_fs_statSync(Item path_item) {
+// fs.statSync(path[, options]) → Stats object with isFile(), isDirectory(), etc.
+extern "C" Item js_fs_statSync(Item path_item, Item options_item) {
     char path_buf[1024];
     const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
@@ -1553,7 +1578,7 @@ extern "C" Item js_fs_statSync(Item path_item) {
         return js_throw_system_error(r, "stat", path);
     }
 
-    Item obj = make_stats_object(&req.statbuf);
+    Item obj = make_stats_object(&req.statbuf, fs_options_bigint(options_item));
     uv_fs_req_cleanup(&req);
     return obj;
 }
@@ -1565,14 +1590,8 @@ static bool fs_options_bigint(Item options_item) {
 }
 
 static Item fs_statfs_number(uint64_t value, bool bigint) {
-    if (bigint) {
-        if (value <= (uint64_t)INT64_MAX) return bigint_from_int64((int64_t)value);
-        char buf[32];
-        int len = snprintf(buf, sizeof(buf), "%llu", (unsigned long long)value);
-        return bigint_from_string(buf, len);
-    }
-    if (value > (uint64_t)INT64_MAX) value = (uint64_t)INT64_MAX;
-    return (Item){.item = i2it((int64_t)value)};
+    if (bigint) return fs_bigint_from_uint64(value);
+    return js_make_number((double)value);
 }
 
 static Item make_statfs_object(uint64_t type, uint64_t bsize, uint64_t frsize,
@@ -1923,8 +1942,8 @@ extern "C" Item js_fs_readlinkSync(Item path_item, Item options_item) {
     return result;
 }
 
-// fs.lstatSync(path) — like statSync but doesn't follow symlinks
-extern "C" Item js_fs_lstatSync(Item path_item) {
+// fs.lstatSync(path[, options]) — like statSync but doesn't follow symlinks
+extern "C" Item js_fs_lstatSync(Item path_item, Item options_item) {
     char path_buf[1024];
     const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
@@ -1937,7 +1956,7 @@ extern "C" Item js_fs_lstatSync(Item path_item) {
         return js_throw_system_error(r, "lstat", path);
     }
 
-    Item obj = make_stats_object(&req.statbuf);
+    Item obj = make_stats_object(&req.statbuf, fs_options_bigint(options_item));
     uv_fs_req_cleanup(&req);
     return obj;
 }
@@ -2188,7 +2207,11 @@ extern "C" Item js_fs_truncateSync(Item path_item, Item len_item) {
     if (!js_permission_has_fs_write(p)) return js_permission_check_fs_write(p);
 
     int64_t length = 0;
-    if (get_type_id(len_item) == LMD_TYPE_INT) length = it2i(len_item);
+    TypeId len_type = get_type_id(len_item);
+    if (len_type != LMD_TYPE_UNDEFINED && len_type != LMD_TYPE_NULL) {
+        // JS Number arguments are boxed FLOAT after the number-model migration.
+        if (!fs_validate_int_range(len_item, "len", 0, INT64_MAX, &length)) return ItemNull;
+    }
 
     uv_fs_t req;
     int fd = uv_fs_open(lambda_uv_loop(), &req, path, UV_FS_O_WRONLY, 0, NULL);
@@ -2732,14 +2755,14 @@ static Item js_fs_exists_promisified(Item path_item) {
     return js_promise_resolve(exists);
 }
 
-extern "C" Item js_fs_fstatSync(Item fd_item) {
+extern "C" Item js_fs_fstatSync(Item fd_item, Item options_item) {
     int fd = 0;
     if (!fs_validate_fd(fd_item, &fd)) return ItemNull;
     uv_fs_t req;
     int r = uv_fs_fstat(lambda_uv_loop(), &req, fd, NULL);
     if (r < 0) { uv_fs_req_cleanup(&req); return ItemNull; }
 
-    Item result = make_stats_object(&req.statbuf);
+    Item result = make_stats_object(&req.statbuf, fs_options_bigint(options_item));
     uv_fs_req_cleanup(&req);
     return result;
 }
@@ -2815,8 +2838,10 @@ static Item js_fs_access_async(Item path_item, Item mode_or_cb, Item callback_it
 // fs.stat(path[, options], callback)
 static Item js_fs_stat_async(Item path_item, Item opts_or_cb, Item callback_item) {
     Item callback = callback_item;
+    Item options = opts_or_cb;
     if (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) {
         callback = opts_or_cb;
+        options = make_js_undefined();
     }
     if (get_type_id(callback) != LMD_TYPE_FUNC) {
         return js_throw_invalid_arg_type("callback", "function", callback);
@@ -2838,7 +2863,7 @@ static Item js_fs_stat_async(Item path_item, Item opts_or_cb, Item callback_item
         js_call_function(callback, ItemNull, args, 1);
         return make_js_undefined();
     }
-    Item stat_result = make_stats_object(&req.statbuf);
+    Item stat_result = make_stats_object(&req.statbuf, fs_options_bigint(options));
     uv_fs_req_cleanup(&req);
     Item args[2] = {ItemNull, stat_result};
     js_call_function(callback, ItemNull, args, 2);
@@ -2848,8 +2873,10 @@ static Item js_fs_stat_async(Item path_item, Item opts_or_cb, Item callback_item
 // fs.lstat(path[, options], callback)
 static Item js_fs_lstat_async(Item path_item, Item opts_or_cb, Item callback_item) {
     Item callback = callback_item;
+    Item options = opts_or_cb;
     if (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) {
         callback = opts_or_cb;
+        options = make_js_undefined();
     }
     if (get_type_id(callback) != LMD_TYPE_FUNC) {
         return js_throw_invalid_arg_type("callback", "function", callback);
@@ -2871,7 +2898,7 @@ static Item js_fs_lstat_async(Item path_item, Item opts_or_cb, Item callback_ite
         js_call_function(callback, ItemNull, args, 1);
         return make_js_undefined();
     }
-    Item stat_result = make_stats_object(&req.statbuf);
+    Item stat_result = make_stats_object(&req.statbuf, fs_options_bigint(options));
     uv_fs_req_cleanup(&req);
     Item args[2] = {ItemNull, stat_result};
     js_call_function(callback, ItemNull, args, 2);
@@ -3023,10 +3050,12 @@ static Item js_fs_readdir_async(Item path_item, Item opts_or_cb, Item callback_i
 // fs.fstat(fd[, options], callback)
 static Item js_fs_fstat_async(Item fd_item, Item opts_or_cb, Item callback_item) {
     Item callback = callback_item;
+    Item options = opts_or_cb;
     if (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) {
         callback = opts_or_cb;
+        options = make_js_undefined();
     }
-    Item result = js_fs_fstatSync(fd_item);
+    Item result = js_fs_fstatSync(fd_item, options);
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
         if (result.item == ITEM_NULL || get_type_id(result) == LMD_TYPE_NULL) {
             Item err = make_fs_error(UV_EBADF, NULL);
@@ -3215,13 +3244,13 @@ extern "C" Item js_fs_writeFile_promise(Item path, Item data) {
     return fs_promise_wrap_result(result);
 }
 
-extern "C" Item js_fs_stat_promise(Item path) {
-    Item result = js_fs_statSync(path);
+extern "C" Item js_fs_stat_promise(Item path, Item opts) {
+    Item result = js_fs_statSync(path, opts);
     return fs_promise_wrap_result(result);
 }
 
-extern "C" Item js_fs_lstat_promise(Item path) {
-    Item result = js_fs_lstatSync(path);
+extern "C" Item js_fs_lstat_promise(Item path, Item opts) {
+    Item result = js_fs_lstatSync(path, opts);
     return fs_promise_wrap_result(result);
 }
 
@@ -3645,7 +3674,7 @@ extern "C" Item js_get_fs_namespace(void) {
     js_fs_set_method(fs_namespace, "rmdirSync",       (void*)js_fs_rmdirSync, 1);
     js_fs_set_method(fs_namespace, "renameSync",      (void*)js_fs_renameSync, 2);
     js_fs_set_method(fs_namespace, "readdirSync",     (void*)js_fs_readdirSync, 2);
-    js_fs_set_method(fs_namespace, "statSync",        (void*)js_fs_statSync, 1);
+    js_fs_set_method(fs_namespace, "statSync",        (void*)js_fs_statSync, 2);
     js_fs_set_method(fs_namespace, "appendFileSync",  (void*)js_fs_appendFileSync, 3);
     js_fs_set_method(fs_namespace, "createReadStream",(void*)js_fs_createReadStream, 2);
     js_fs_set_method(fs_namespace, "createWriteStream",(void*)js_fs_createWriteStream, 2);
@@ -3705,7 +3734,7 @@ extern "C" Item js_get_fs_namespace(void) {
     js_fs_set_method(fs_namespace, "fchownSync",      (void*)js_fs_fchownSync, 3);
     js_fs_set_method(fs_namespace, "symlinkSync",     (void*)js_fs_symlinkSync, 2);
     js_fs_set_method(fs_namespace, "readlinkSync",    (void*)js_fs_readlinkSync, 2);
-    js_fs_set_method(fs_namespace, "lstatSync",       (void*)js_fs_lstatSync, 1);
+    js_fs_set_method(fs_namespace, "lstatSync",       (void*)js_fs_lstatSync, 2);
     js_fs_set_method(fs_namespace, "truncateSync",    (void*)js_fs_truncateSync, 2);
     js_fs_set_method(fs_namespace, "utimesSync",      (void*)js_fs_utimesSync, 3);
     js_fs_set_method(fs_namespace, "linkSync",        (void*)js_fs_linkSync, 2);
@@ -3727,7 +3756,7 @@ extern "C" Item js_get_fs_namespace(void) {
     Item writev_fn = js_fs_set_method(fs_namespace, "writev",          (void*)js_fs_writev, 4);
     js_fs_set_custom_promisify_args(writev_fn, "bytesWritten", "buffer");
     js_fs_set_method(fs_namespace, "writevSync",      (void*)js_fs_writevSync, 3);
-    js_fs_set_method(fs_namespace, "fstatSync",       (void*)js_fs_fstatSync, 1);
+    js_fs_set_method(fs_namespace, "fstatSync",       (void*)js_fs_fstatSync, 2);
 
     // fs.constants — null prototype per Node.js spec
     extern Item js_object_create(Item proto);
@@ -3799,8 +3828,8 @@ extern "C" Item js_get_fs_namespace(void) {
         // (or rejected promise on error)
         js_fs_set_method(promises, "readFile",    (void*)js_fs_readFile_promise, 2);
         js_fs_set_method(promises, "writeFile",   (void*)js_fs_writeFile_promise, 2);
-        js_fs_set_method(promises, "stat",        (void*)js_fs_stat_promise, 1);
-        js_fs_set_method(promises, "lstat",       (void*)js_fs_lstat_promise, 1);
+        js_fs_set_method(promises, "stat",        (void*)js_fs_stat_promise, 2);
+        js_fs_set_method(promises, "lstat",       (void*)js_fs_lstat_promise, 2);
         js_fs_set_method(promises, "mkdir",       (void*)js_fs_mkdir_promise, 2);
         js_fs_set_method(promises, "access",      (void*)js_fs_access_promise, 2);
         js_fs_set_method(promises, "unlink",      (void*)js_fs_unlink_promise, 1);

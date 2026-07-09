@@ -363,7 +363,8 @@ let result = company.department.manager.name
 
 ```lambda
 arr[0]             // First element
-arr[-1]            // Last element
+arr[last]          // Last element
+arr[-1]            // null
 map["key"]         // Map value by key
 
 // Null-safe index access

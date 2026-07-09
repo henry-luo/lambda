@@ -21,9 +21,12 @@ let greek_lower = {
 // ============================================================
 
 let greek_upper = {
+    Alpha: "A", Beta: "B",
     Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ",
+    Epsilon: "E", Zeta: "Z", Eta: "H", Iota: "I", Kappa: "K",
     Xi: "Ξ", Pi: "Π", Sigma: "Σ", Upsilon: "Υ",
-    Phi: "Φ", Psi: "Ψ", Omega: "Ω"
+    Phi: "Φ", Psi: "Ψ", Omega: "Ω",
+    Mu: "M", Nu: "N", Omicron: "O", Rho: "P", Tau: "T", Chi: "X"
 }
 
 // ============================================================
@@ -54,7 +57,7 @@ let relations = {
     supseteq: "⊇", sqsubseteq: "⊑", sqsupseteq: "⊒",
     'in': "∈", ni: "∋", notin: "∉",
     vdash: "⊢", dashv: "⊣", models: "⊨",
-    mid: "∣", parallel: "∥", perp: "⊥",
+    mid: "∣", parallel: "∥", perp: "⟂",
     propto: "∝", asymp: "≍", bowtie: "⋈",
     ll: "≪", gg: "≫", doteq: "≐",
     trianglelefteq: "⊴", trianglerighteq: "⊵",
@@ -110,7 +113,6 @@ let misc_symbols = {
     flat: "♭", natural: "♮", sharp: "♯",
     clubsuit: "♣", diamondsuit: "♢",
     heartsuit: "♡", spadesuit: "♠",
-    varheartsuit: "♥",
     blacktriangle: "▲", blacksquare: "■",
     checkmark: "✓", maltese: "✠",
     degree: "°", copyright: "©",
@@ -196,7 +198,8 @@ pub fn lookup_symbol(cmd) {
 pub fn classify_symbol(cmd) {
     let name = if (len(cmd) > 0 and slice(cmd, 0, 1) == "\\") slice(cmd, 1, len(cmd)) else cmd
 
-    if (bin_operators[name]) "mbin"
+    if (name == "neg" or name == "lnot") "mrel"
+    else if (bin_operators[name]) "mbin"
     else if (relations[name]) "mrel"
     else if (arrows[name]) "mrel"
     else if (big_operators[name]) "mop"
@@ -237,7 +240,9 @@ let font_class_map = {
     // -- lowercase Greek: italic with lcGreek marker class --
     alpha: "lcGreek lm_mathit", beta: "lcGreek lm_mathit",
     gamma: "lcGreek lm_mathit", delta: "lcGreek lm_mathit",
-    epsilon: "lcGreek lm_mathit", varepsilon: "lcGreek lm_mathit",
+    // MathLive maps lunate epsilon to Main-Regular, unlike the other
+    // lowercase Greek symbols; keeping it italic splits `∀\epsilon` wrongly.
+    epsilon: "lm_cmr", varepsilon: "lcGreek lm_mathit",
     zeta: "lcGreek lm_mathit", eta: "lcGreek lm_mathit",
     theta: "lcGreek lm_mathit", vartheta: "lcGreek lm_mathit",
     iota: "lcGreek lm_mathit", kappa: "lcGreek lm_mathit",
@@ -252,9 +257,14 @@ let font_class_map = {
     psi: "lcGreek lm_mathit", omega: "lcGreek lm_mathit",
 
     // -- uppercase Greek: upright (CMR) --
+    Alpha: "lm_cmr", Beta: "lm_cmr",
     Gamma: "lm_cmr", Delta: "lm_cmr", Theta: "lm_cmr", Lambda: "lm_cmr",
+    Epsilon: "lm_cmr", Zeta: "lm_cmr", Eta: "lm_cmr",
+    Iota: "lm_cmr", Kappa: "lm_cmr",
     Xi: "lm_cmr", Pi: "lm_cmr", Sigma: "lm_cmr", Upsilon: "lm_cmr",
     Phi: "lm_cmr", Psi: "lm_cmr", Omega: "lm_cmr",
+    Mu: "lm_cmr", Nu: "lm_cmr", Omicron: "lm_cmr",
+    Rho: "lm_cmr", Tau: "lm_cmr", Chi: "lm_cmr",
 
     // -- upright math symbols (CMR) --
     infty: "lm_cmr", nabla: "lm_cmr", partial: "lm_cmr",

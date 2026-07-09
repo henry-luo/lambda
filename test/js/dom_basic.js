@@ -85,5 +85,22 @@ console.log(containers.length);
 var lis = document.getElementsByTagName("li");
 console.log(lis.length);
 
+// Test selector-list APIs
+console.log(document.querySelector("#missing, #intro").id);
+console.log(document.querySelectorAll("#intro, .item").length);
+console.log(special.matches("#missing, .special"));
+console.log(special.closest("p, ul").id);
+
+var table = document.createElement("table");
+var tr = document.createElement("tr");
+var td = document.createElement("td");
+td.id = "cell-a";
+tr.appendChild(td);
+table.appendChild(tr);
+document.body.appendChild(table);
+console.log(document.querySelector("th, td").id);
+console.log(td.matches("th, td"));
+console.log(td.closest("td, th").id);
+
 // Final value
 "DOM tests complete";

@@ -52,6 +52,12 @@ function binary_expr($, in_attr) {
     ['**', 'binary_pow', 'right'],
     ['==', 'binary_eq'],
     ['!=', 'binary_eq'],
+    ['eq', 'binary_eq'],
+    ['ne', 'binary_eq'],
+    ['lt', 'binary_relation'],
+    ['le', 'binary_relation'],
+    ['ge', 'binary_relation'],
+    ['gt', 'binary_relation'],
     // Relational operators - excluded in attr to avoid element tag conflicts
     ...(in_attr ? [] :
       [['<', 'binary_relation'],
@@ -246,10 +252,10 @@ module.exports = grammar({
 
     float: _ => token(float_literal),
 
-    decimal: $ => {
-      // no e-notation for decimal, following JS bigint
-      return token( seq(choice(decimal_literal, integer_literal), choice('n','N')) );
-    },
+    decimal: $ => token(seq(
+      choice(float_literal, decimal_literal, integer_literal),
+      'n'
+    )),
 
     // sized integer: integer literal with type suffix (i8, i16, i32, i64, u8, u16, u32, u64)
     sized_integer: _ => token(seq(
@@ -329,7 +335,7 @@ module.exports = grammar({
       $.named_value,
     ),
 
-    _key: $ => choice($.dotted_name, $.symbol, $.identifier, $.base_type, '*'),
+    _key: $ => choice($.dotted_name, $.symbol, $.identifier, $.base_type, $.last_index, '*'),
 
     map_item: $ => seq( field('name', $._key), ':', field('as', $._expr) ),
 
@@ -409,6 +415,7 @@ module.exports = grammar({
     // prec(50) to make primary_expr higher priority than content
     primary_expr: $ => prec(50, choice(
       $.named_value,
+      $.last_index,
       $._number,
       $.datetime,
       $.string,
@@ -453,6 +460,8 @@ module.exports = grammar({
       repeat(seq(',', field('field', $._expr))),
       ']',
     )),
+
+    last_index: _ => token(prec(2, 'last')),
 
     // Query expression: expr?T (recursive) or expr.?T (direct)
     query_expr: $ => seq(
@@ -793,9 +802,11 @@ module.exports = grammar({
       'as', field('name', $.identifier)
     ),
 
-    // limit clause: limit expr
+    // limit clause: limit expr or limit last expr
     for_limit_clause: $ => seq(
-      'limit', field('count', $._expr)
+      'limit',
+      optional(field('last', $.last_index)),
+      field('count', $._expr)
     ),
 
     // offset clause: offset expr
@@ -896,10 +907,10 @@ module.exports = grammar({
     // reducing SYMBOL_COUNT by 19. Keywords also used standalone elsewhere
     // ('error', 'type', 'string', 'symbol') remain as separate keywords.
     _base_type_kw: _ => token(prec(1, choice(
-      'null', 'any', 'bool', 'int64', 'int', 'float', 'decimal', 'number',
+      'null', 'any', 'bool', 'int64', 'int', 'float', 'f64', 'decimal', 'integer', 'number',
       'datetime', 'date', 'time', 'binary', 'range',
       'list', 'array', 'map', 'element', 'entity', 'object', 'function',
-      'i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64', 'f16', 'f32'
+      'i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64', 'f16', 'f32', 'f64'
     ))),
 
     base_type: $ => prec(1, choice(

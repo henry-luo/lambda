@@ -44,16 +44,18 @@ function _wrapDomMethods(el) {
   return el;
 }
 
-// Wrap window.getComputedStyle
-// In Lambda DOM, getComputedStyle exists as built-in but typeof returns "undefined"
-// and window.getComputedStyle is not set. Must bridge explicitly.
-try {
-  var _testGCS = getComputedStyle(document.body);
-  window.getComputedStyle = function(el, pseudo) { return getComputedStyle(el, pseudo); };
-} catch(e) {
-  window.getComputedStyle = function() {
-    return { getPropertyValue: function() { return ""; }, position: "static", overflow: "visible" };
-  };
+// Only bridge getComputedStyle when the host has not installed window.getComputedStyle;
+// replacing it on globalThis makes the wrapper recursively call itself.
+if (typeof window.getComputedStyle !== "function") {
+  try {
+    var _nativeGetComputedStyle = getComputedStyle;
+    var _testGCS = _nativeGetComputedStyle(document.body);
+    window.getComputedStyle = function(el, pseudo) { return _nativeGetComputedStyle(el, pseudo); };
+  } catch(e) {
+    window.getComputedStyle = function() {
+      return { getPropertyValue: function() { return ""; }, position: "static", overflow: "visible" };
+    };
+  }
 }
 
 // Wrap window methods

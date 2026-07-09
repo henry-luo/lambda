@@ -1,0 +1,18 @@
+{
+  "name": "editor4c-phase-c2: Delete at an hr gap removes the block atom",
+  "_note": "Phase C C2 - gap-cursor block atom delete. Start from an HR-seeded document, click it to enter gap selection, then Delete removes the hr through the real keydown path.",
+  "html": "test/html/editor-gap.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface hr"}, "equals": 1},
+    {"type": "click", "target": {"selector": ".rdt-surface hr"}},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_count", "target": {"selector": ".rdt-gap-caret"}, "equals": 1},
+    {"type": "key_press", "key": "Delete"},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface hr"}, "equals": 0},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface"}, "contains": "before"},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface"}, "contains": "after"}
+  ]
+}

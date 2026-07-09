@@ -5,9 +5,8 @@
  * to expose standard DOM manipulation APIs from JavaScript.
  *
  * Wrapping strategy:
- *   DomElement* is wrapped in a Map with a distinct type marker
- *   (js_dom_type_marker address) and the DomElement* stored in Map::data.
- *   This allows efficient O(1) wrapping/unwrapping with zero HashMap overhead.
+ *   Radiant DOM nodes are branded native VMaps owned by the radiant bridge.
+ *   Document and foreign-document proxies are branded native VMaps as well.
  *
  * All functions use extern "C" for MIR JIT compatibility.
  */
@@ -255,6 +254,7 @@ Item js_computed_style_get_property(Item style_item, Item prop_name);
  * @return true if item wraps a computed style
  */
 bool js_is_computed_style_item(Item item);
+bool js_is_inline_style_item(Item item);
 
 // =============================================================================
 // Element Method Dispatcher

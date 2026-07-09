@@ -1,9 +1,9 @@
-global-unlimited=3.14159
-literal-unlimited=2.71828
-local-unlimited=0.333
-forwarded-unlimited=3.14159
-global-fixed=1.25
-literal-fixed=6.5
-forwarded-fixed=4.75
+global-decimal=3.14159
+literal-decimal=2.71828
+local-decimal=0.333
+forwarded-decimal=3.14159
+global-decimal-2=1.25
+literal-decimal-2=6.5
+forwarded-decimal-2=4.75
 fn-echo=3.14159
 fn-add=3.75

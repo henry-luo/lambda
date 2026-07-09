@@ -108,8 +108,12 @@ pub fn render_stretchy(delim, content_height, atom_type) {
         let level = select_size_level(content_height)
         if (is_corner_delim(display_char))
             render_corner(display_char, atom_type)
-        else if (level == 3 and is_mult_left_right_delim(delim))
-            render_mult_left_right_delim(delim, atom_type)
+        else if (level == 4 and is_brace_delim(display_char))
+            // MathLive switches stretchy Size4 braces to a stacked recipe;
+            // the single glyph has the wrong box extent for \left..\right.
+            render_brace_level4_mult(display_char, atom_type)
+        else if (level == 3 and has_extensible_recipe(delim))
+            render_extensible_recipe_delim(delim, atom_type)
         else if (level <= 4)
             render_sized(display_char, level, atom_type)
         else
@@ -124,7 +128,11 @@ pub fn render_left_right(delim, height, depth, atom_type) {
         render_null_delim(atom_type)
     } else {
         let target_height = left_right_target_height(height, depth)
-        render_stretchy(delim, target_height, atom_type)
+        let display_char = stretchy_char(delim)
+        if (is_vertical_bar(display_char))
+            render_vertical_mult_left_right_to_height(display_char, target_height, atom_type)
+        else
+            render_stretchy(delim, target_height, atom_type)
     }
 }
 
@@ -142,12 +150,24 @@ pub fn render_at_scale(delim, scale, atom_type) {
         else (
             let h = scale * 0.5,
             let d = if (level == 1) 0.345 else scale * 0.3,
-            box.make_box(
+            box.ml_box_full(
                 sized_delim_el(cls, display_char, atom_type),
-                h, d, 0.4 * scale, atom_type
+                h, d, 0.4 * scale, atom_type, 0.0, 0.0, h
             )
         )
     }
+}
+
+pub fn render_stacked_vertical(delim, level, atom_type) {
+    render_vertical_mult(stretchy_char(delim), level, atom_type)
+}
+
+pub fn render_stacked_vertical_to_height(delim, target_height, atom_type) {
+    render_vertical_mult_to_height(stretchy_char(delim), target_height, atom_type)
+}
+
+pub fn render_stacked_brace(delim, atom_type) {
+    render_brace_level4_mult(stretchy_char(delim), atom_type)
 }
 
 // ============================================================
@@ -181,17 +201,8 @@ fn sized_delim_raw(level) {
     r
 }
 
-fn delim_box(el, h, d, w, atom_type, h_raw, d_raw) => {
-    element: el,
-    height: h,
-    depth: d,
-    height_raw: h_raw,
-    depth_raw: d_raw,
-    width: w,
-    type: atom_type,
-    italic: 0.0,
-    skew: 0.0
-}
+fn delim_box(el, h, d, w, atom_type, h_raw, d_raw) =>
+    box.ml_box_full(el, h_raw, d_raw, w, atom_type, 0.0, 0.0, h_raw)
 
 fn sized_delim_el(cls, ch, atom_type) {
     let side = side_class(atom_type)
@@ -202,15 +213,7 @@ fn sized_delim_el(cls, ch, atom_type) {
 fn render_null_delim(atom_type) {
     let side = side_class(atom_type)
     let cls = css.classes([css.NULLDELIMITER, side])
-    {
-        element: <span class: cls, style: "width:0.12em">,
-        height: 0.0,
-        depth: 0.0,
-        width: 0.12,
-        type: atom_type,
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box(<span class: cls, style: "width:0.12em">, 0.0, 0.0, 0.12, atom_type)
 }
 
 fn side_class(atom_type) {
@@ -251,6 +254,10 @@ fn is_vertical_bar(ch) {
     ch == "∣" or ch == "∥"
 }
 
+fn is_brace_delim(ch) {
+    ch == "{" or ch == "}"
+}
+
 pub fn is_corner_delim(ch) {
     ch == "┌" or ch == "┐" or ch == "└" or ch == "┘"
 }
@@ -262,32 +269,34 @@ pub fn is_surd_delim(ch) {
 pub fn render_corner(ch, atom_type) {
     let side = side_class(atom_type)
     let cls = css.classes([css.SMALL_DELIM, side])
-    {
-        element: <span class: cls, style: "top:0.08em;font-size: 70%"; ch>,
-        height: 0.65,
-        depth: 0.15,
-        render_height: 0.65,
-        render_depth: 0.15,
-        render_total: 0.8,
-        width: 0.4,
-        type: atom_type,
-        italic: 0.0,
-        skew: 0.0
-    }
+    box.ml_box_full(<span class: cls, style: "top:0.08em;font-size: 70%"; ch>,
+        0.65, 0.15, 0.4, atom_type, 0.0, 0.0, 0.65)
 }
 
 fn render_vertical_mult(ch, level, atom_type) {
-    // vlist internals (piece tops, container height/depth, pstrut, glyph
-    // height, total) are computed by a faithful makeStackedDelim port; the
-    // strut box fields (height/depth/raw/total) stay axis-centred via
-    // sized_delim_raw so the use_raw emit and the math.ls depth sentinel
-    // (total\u22481.21, depth\u22480.345) keep firing.
-    let spec = make_stacked_delim(level)
+    render_vertical_mult_to_height(ch, size_to_max_height(level), atom_type)
+}
+
+fn render_vertical_mult_to_height(ch, target_height, atom_type) {
+    render_vertical_mult_box(ch, target_height, atom_type, false)
+}
+
+fn render_vertical_mult_left_right_to_height(ch, target_height, atom_type) {
+    render_vertical_mult_box(ch, target_height, atom_type, true)
+}
+
+fn render_vertical_mult_box(ch, target_height, atom_type, use_stacked_fields) {
+    // Explicit \big-size vertical delimiters expose SizeN extents, while
+    // \left|\right| exposes the makeStackedDelim vlist extent; sharing one
+    // field source makes one of those two MathLive paths one strut notch off.
+    let spec = make_stacked_delim_for_height(target_height)
     let pieces = stk_pieces(spec, ch, 0, [])
-    let raw = sized_delim_raw(level)
+    let raw = sized_delim_raw(target_height_to_level(target_height))
+    let box_h = if (use_stacked_fields) spec.vlist_h else raw.h
+    let box_d = if (use_stacked_fields) spec.depth_holder else raw.d
     let cls = css.classes([side_class(atom_type), "lm_delim-mult"])
-    {
-        element: <span class: cls;
+    box.ml_box_full(
+        <span class: cls;
             <span class: "delim-size1 lm_vlist-t lm_vlist-t2";
                 <span class: css.VLIST_R;
                     <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(spec.vlist_h);
@@ -300,21 +309,51 @@ fn render_vertical_mult(ch, level, atom_type) {
                 >
             >
         >,
-        height: raw.h,
-        depth: vertical_mult_box_depth(level),
-        height_raw: raw.h,
-        depth_raw: raw.d,
-        render_height: raw.h,
-        render_depth: vertical_mult_box_depth(level),
-        render_total: util.ceil_em2(spec.real_h),
-        width: 0.4,
-        type: atom_type,
-        italic: 0.0,
-        skew: 0.0
-    }
+        box_h,
+        box_d,
+        0.4,
+        atom_type,
+        0.0,
+        0.0,
+        box_h
+    )
 }
 
-fn is_mult_left_right_delim(delim) {
+fn render_brace_level4_mult(ch, atom_type) {
+    let chars = if (ch == "}") ["⎭", "⎬", "⎫"] else ["⎩", "⎨", "⎧"]
+    let tops = [0.0 - 2.49, 0.0 - 3.13, 0.0 - 4.26]
+    let heights = [0.91, 1.81, 0.91]
+    let cls = css.classes([side_class(atom_type), "lm_delim-mult"])
+    box.ml_box_full(
+        <span class: cls;
+            <span class: "delim-size4 lm_vlist-t lm_vlist-t2";
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:2.02em";
+                        for i in 0 to 2 {
+                            <span style: "top:" ++ util.fmt_em(tops[i]);
+                                <span class: css.PSTRUT, style: "height:3.15em">
+                                <span style: "height:" ++ util.fmt_em(heights[i]) ++ ";display:inline-block"; chars[i]>
+                            >
+                        }
+                    >
+                    <span class: css.VLIST_S; "\u200B">
+                >
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:1.56em">
+                >
+            >
+        >,
+        2.02,
+        1.55003,
+        0.4,
+        atom_type,
+        0.0,
+        0.0,
+        2.02
+    )
+}
+
+fn has_extensible_recipe(delim) {
     delim == "\\uparrow" or delim == "\\downarrow" or
     delim == "\\updownarrow" or delim == "\\Uparrow" or
     delim == "\\Downarrow" or delim == "\\Updownarrow" or
@@ -322,12 +361,12 @@ fn is_mult_left_right_delim(delim) {
     delim == "\\lmoustache" or delim == "\\rmoustache"
 }
 
-fn render_mult_left_right_delim(delim, atom_type) {
-    let spec = mult_left_right_spec(delim)
-    let pieces = mult_left_right_pieces(spec, 0, [])
+fn render_extensible_recipe_delim(delim, atom_type) {
+    let spec = extensible_recipe(delim)
+    let pieces = extensible_recipe_pieces(spec, 0, [])
     let cls = css.classes([side_class(atom_type), "lm_delim-mult"])
-    {
-        element: <span class: cls;
+    box.ml_box_full(
+        <span class: cls;
             <span class: spec.inner_class;
                 <span class: css.VLIST_R;
                     <span class: css.VLIST, style: "height:1.44em";
@@ -340,31 +379,27 @@ fn render_mult_left_right_delim(delim, atom_type) {
                 >
             >
         >,
-        height: 1.45,
-        depth: 0.95,
-        height_raw: 1.45,
-        depth_raw: 0.95003,
-        render_height: 1.45,
-        render_depth: 0.95,
-        render_total: 2.41,
-        width: 0.4,
-        type: atom_type,
-        italic: 0.0,
-        skew: 0.0
-    }
+        1.45,
+        0.95003,
+        0.4,
+        atom_type,
+        0.0,
+        0.0,
+        1.45
+    )
 }
 
-fn mult_left_right_pieces(spec, i, acc) {
+fn extensible_recipe_pieces(spec, i, acc) {
     if (i >= len(spec.chars)) acc
     else
         (let piece = <span style: "top:" ++ util.fmt_em(spec.tops[i]);
              <span class: css.PSTRUT, style: "height:" ++ util.fmt_em(spec.pstrut)>
              <span style: "height:" ++ util.fmt_em(spec.heights[i]) ++ ";display:inline-block"; spec.chars[i]>
          >,
-         mult_left_right_pieces(spec, i + 1, acc ++ [piece]))
+         extensible_recipe_pieces(spec, i + 1, acc ++ [piece]))
 }
 
-fn mult_left_right_spec(delim) {
+fn extensible_recipe(delim) {
     if (delim == "\\downarrow")
         arrow_down_spec("⏐")
     else if (delim == "\\Downarrow")
@@ -428,7 +463,7 @@ fn brace_group_spec(chars) => {
 // (∣ U+2223 / ∥ U+2225 share metrics), centred on the math axis, then
 // lays them out with the makeVList "bottom" walk. Every emitted dimension
 // is CEIL@2 (math.ls util / MathLive Box.toString). This replaces the old
-// per-level lookup tables (tops/height/depth_holder/render_total + the
+// per-level lookup tables (tops/height/depth_holder/visual_total + the
 // hardcoded 2.61 pstrut / 0.61 glyph) with the computation that produced
 // them.
 // ============================================================
@@ -486,9 +521,12 @@ fn stk_walk(entries, i, h, d, pstrut, cur, mx, mn, tops) {
 // (rather than passed in) so the transpiler infers them as float — passing
 // them as params makes the first use `h + d` ambiguous and mis-infer int.
 fn make_stacked_delim(level) {
+    make_stacked_delim_for_height(size_to_max_height(level))
+}
+
+fn make_stacked_delim_for_height(ht) {
     let h = BAR1_H
     let d = BAR1_D
-    let ht = size_to_max_height(level)
     let rht = h + d
     let min_height = 2.0 * rht
     let rc = max(0, ceil_int((ht - min_height) / rht))
@@ -505,6 +543,13 @@ fn make_stacked_delim(level) {
         glyph_h: rht,
         real_h: real_h
     }
+}
+
+fn target_height_to_level(ht) {
+    if (ht <= 1.2) 1
+    else if (ht <= 1.8) 2
+    else if (ht <= 2.4) 3
+    else 4
 }
 
 // emit the vlist pieces (one per stacked glyph) from a computed spec

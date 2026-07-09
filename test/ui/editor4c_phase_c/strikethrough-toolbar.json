@@ -1,0 +1,16 @@
+{
+  "name": "editor4c-phase-c: Strikethrough toolbar applies a line-through mark",
+  "_note": "Phase C C1 — set-mark coverage for a mark not exercised by Phase B. Select the heading, click Strikethrough, and assert the rendered text leaf carries line-through styling.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 60},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "wait", "ms": 80},
+    {"type": "click", "target": {"selector": "button.rdt-btn[title=\"Strikethrough\"]"}},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface [data-source-path=\"0,0\"]"}, "attribute": "style", "contains": "line-through"}
+  ]
+}

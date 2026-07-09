@@ -68,7 +68,13 @@ export function loadFixture(dir: string): FixtureCase {
 export function findFixtureDirs(rootDir: string): string[] {
   const out: string[] = []
   walk(rootDir, out)
-  return out.sort()
+  const sorted = out.sort()
+  const g = globalThis as any
+  const start = typeof g.__LAMBDA_TIER_CASE_START === 'number' ? g.__LAMBDA_TIER_CASE_START : 1
+  const end = typeof g.__LAMBDA_TIER_CASE_END === 'number' ? g.__LAMBDA_TIER_CASE_END : sorted.length
+  // Large inlined tier bundles can stress LambdaJS lowering; chunk by fixture
+  // ordinal while preserving the same sorted corpus and assertions.
+  return sorted.filter((_, i) => i + 1 >= start && i + 1 <= end)
 }
 
 function walk(dir: string, acc: string[]): void {

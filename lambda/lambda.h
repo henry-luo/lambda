@@ -94,8 +94,8 @@ enum EnumTypeId {
     LMD_TYPE_INT64,  // int literal, 64-bit
     LMD_TYPE_UINT64, // unsigned 64-bit integer (heap-allocated pointer)
     LMD_TYPE_FLOAT,  // float literal, 64-bit
+    LMD_TYPE_FLOAT64, // explicit f64 literal/type, binary64 payload
     LMD_TYPE_DECIMAL,
-    LMD_TYPE_NUMBER,  // explicit number, which includes decimal
     LMD_TYPE_DTIME,
     LMD_TYPE_SYMBOL,
     LMD_TYPE_STRING,
@@ -146,7 +146,8 @@ typedef uint8_t NumSizedType;
 enum EnumArrayNumElemType {
     // Lambda's standard numeric types (8 bytes/element each):
     ELEM_INT   = 0x00,   // 8 bytes  — int56-as-int64 (was ARRAY_INT)
-    ELEM_FLOAT = 0x10,   // 8 bytes  — double (was ARRAY_FLOAT)
+    ELEM_FLOAT64 = 0x10, // 8 bytes  — canonical double lane (was ARRAY_FLOAT)
+    ELEM_FLOAT = ELEM_FLOAT64, // source compatibility alias; not a distinct representation
 
     // Compact sized integer types:
     ELEM_INT8    = 0x20,  // 1 byte   — maps to NUM_INT8
@@ -162,7 +163,7 @@ enum EnumArrayNumElemType {
     // Compact sized float types:
     ELEM_FLOAT16 = 0xA0,  // 2 bytes  — maps to NUM_FLOAT16
     ELEM_FLOAT32 = 0xB0,  // 4 bytes  — maps to NUM_FLOAT32
-    ELEM_FLOAT64 = 0xC0,  // 8 bytes  — explicit f64 (same storage as ELEM_FLOAT)
+    ELEM_RESERVED_C0 = 0xC0, // retired duplicate double lane; keep the slot unavailable
 
     // Boolean type (1 byte/element):
     ELEM_BOOL    = 0xD0,  // 1 byte   — bool values, distinct from UINT8 for any()/all() semantics
@@ -170,14 +171,14 @@ enum EnumArrayNumElemType {
     // JS-compatible clamped byte type:
     ELEM_UINT8_CLAMPED = 0xE0,  // 1 byte — Uint8ClampedArray storage semantics
 
-    ELEM_NUM_COUNT = 15
+    ELEM_NUM_COUNT = 14
 };
 typedef uint8_t ArrayNumElemType;
 
 // Bytes per element, indexed by (elem_type >> 4)
 static const uint8_t ELEM_TYPE_SIZE[16] = {
     8, // 0x00 ELEM_INT     — int64_t
-    8, // 0x10 ELEM_FLOAT   — double
+    8, // 0x10 ELEM_FLOAT64 — double
     1, // 0x20 ELEM_INT8
     2, // 0x30 ELEM_INT16
     4, // 0x40 ELEM_INT32
@@ -188,7 +189,7 @@ static const uint8_t ELEM_TYPE_SIZE[16] = {
     8, // 0x90 ELEM_UINT64
     2, // 0xA0 ELEM_FLOAT16
     4, // 0xB0 ELEM_FLOAT32
-    8, // 0xC0 ELEM_FLOAT64
+    0, // 0xC0 reserved retired duplicate double lane
     1, // 0xD0 ELEM_BOOL
     1, // 0xE0 ELEM_UINT8_CLAMPED
     0, // 0xF0 reserved
@@ -520,7 +521,7 @@ typedef struct List Array;
 typedef struct ArrayNum ArrayNum;
 typedef ArrayNum ArrayInt;    // compat alias: int56 arrays (elem_type == ELEM_INT)
 typedef ArrayNum ArrayInt64;  // compat alias: int64 arrays (elem_type == ELEM_INT64)
-typedef ArrayNum ArrayFloat;  // compat alias: float arrays (elem_type == ELEM_FLOAT)
+typedef ArrayNum ArrayFloat;  // compat alias: float arrays (elem_type == ELEM_FLOAT64)
 typedef struct Map Map;
 typedef struct SparseArrayMap SparseArrayMap;
 typedef struct VMap VMap;
@@ -570,13 +571,13 @@ enum MapKind {
     MAP_KIND_TYPED_ARRAY = 1,  // Int8Array, Float64Array, etc.
     MAP_KIND_ARRAYBUFFER = 2,  // ArrayBuffer / SharedArrayBuffer
     MAP_KIND_DATAVIEW    = 3,  // DataView
-    MAP_KIND_DOM         = 4,  // DOM nodes, ComputedStyle
+    MAP_KIND_WEB_API_RESOURCE = 4,  // non-node Web API resources: Range, Selection, styles
     MAP_KIND_CSSOM       = 5,  // Stylesheet, CSSRule, RuleStyleDeclaration
     MAP_KIND_ITERATOR    = 6,  // Synthetic iterator (array, string, typed array)
     MAP_KIND_PROCESS_ENV = 7,  // process.env — coerces all values to strings on set
-    MAP_KIND_DOC_PROXY   = 8,  // document proxy — JS document object
+    MAP_KIND_RESERVED_8  = 8,  // retired document proxy map carrier
     MAP_KIND_PROXY       = 9,  // ES6 Proxy object
-    MAP_KIND_FOREIGN_DOC = 10, // foreign document (createHTMLDocument/createDocument result)
+    MAP_KIND_RESERVED_10 = 10, // retired foreign-document map carrier
     MAP_KIND_ARRAY_PROPS = 11, // array `extra` companion map: stores literal
                                // legacy markers (__get_N/__set_N/__nw_N/...)
                                // — bypasses Phase 4 accessor-marker intercept.
@@ -649,7 +650,7 @@ struct Container {
         //---------------------
         union {
             int64_t* items;        // for ELEM_INT, ELEM_INT64
-            double* float_items;   // for ELEM_FLOAT
+            double* float_items;   // for ELEM_FLOAT64
             void* data;            // for compact types (ELEM_INT8, ELEM_UINT8, etc.)
         };
         int64_t length;  // number of elements
@@ -751,6 +752,7 @@ Item list_end(List *list);
 Array* array_plain();  // constructs a plain empty array (no frame management)
 void array_drop_inplace(Array* arr, int64_t n);  // drop first n items in-place
 void array_limit_inplace(Array* arr, int64_t n);  // limit to first n items in-place
+void array_limit_last_inplace(Array* arr, int64_t n);  // limit to last n items in-place
 Array* array_spreadable();  // constructs a spreadable empty array
 void array_push(Array* arr, Item item);  // push item to array
 void array_push_spread(Array* arr, Item item);      // push item, spreading if spreadable array
@@ -876,9 +878,15 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define DECIMAL_BIGINT      2
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
 
-// numeric type range check — includes sized types outside INT..NUMBER range
-#define IS_NUMERIC_ID(t) (((t) >= LMD_TYPE_INT && (t) <= LMD_TYPE_NUMBER) || \
-                          (t) == LMD_TYPE_NUM_SIZED || (t) == LMD_TYPE_UINT64)
+// numeric type check: `number` is a type-language union, not a runtime TypeId.
+static inline bool is_numeric_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 ||
+           type_id == LMD_TYPE_UINT64 || type_id == LMD_TYPE_FLOAT ||
+           type_id == LMD_TYPE_FLOAT64 || type_id == LMD_TYPE_DECIMAL ||
+           type_id == LMD_TYPE_NUM_SIZED;
+}
+
+#define IS_NUMERIC_ID(t) is_numeric_type_id((TypeId)(t))
 
 #define ITEM_TRUE           (((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)1)
 #define ITEM_FALSE          (((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)0)
@@ -901,6 +909,7 @@ inline uint64_t b2it(uint8_t bool_val) {
 #define bi2it(decimal_ptr)   c2it(decimal_ptr)
 #define l2it(long_ptr)       ((long_ptr)? ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr)): ITEM_NULL)
 #define d2it(double_ptr)     ((double_ptr)? ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr)): ITEM_NULL)
+#define f642it(double_ptr)   ((double_ptr)? ((((uint64_t)LMD_TYPE_FLOAT64)<<56) | (uint64_t)(double_ptr)): ITEM_NULL)
 #define c2it(decimal_ptr)    ((decimal_ptr)? ((((uint64_t)LMD_TYPE_DECIMAL)<<56) | (uint64_t)(decimal_ptr)): ITEM_NULL)
 #define s2it(str_ptr)        ((str_ptr)? ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr)): ITEM_NULL)
 #define y2it(sym_ptr)        ((sym_ptr)? ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr)): ITEM_NULL)
@@ -1529,6 +1538,7 @@ extern "C" {
     void fn_sort_by_keys(Item values, Item keys, int64_t descending);
     Item fn_unique(Item a);
     Item fn_take(Item a, Item n);
+    Item fn_take_last(Item a, Item n);
     Item fn_drop(Item a, Item n);
     Item fn_slice(Item a, Item start, Item end);
     Item fn_slice3(Item a, Item start, Item end);
@@ -1555,7 +1565,7 @@ extern "C" {
     // op: 0=DOT 1=MIN 2=MAX 3=MEDIAN 4=MEAN.  border: 0=CONSTANT 1=EDGE 2=REFLECT
     // 3=WRAP.  pad_h/pad_w: window-start offset from each output's input position
     // (negative → centred at Kh/2, Kw/2 for same-size filtering; 0 → top-left for
-    // pooling).  Result is ELEM_FLOAT.  Covers convolution/morphology/rank/pooling.
+    // pooling).  Result is ELEM_FLOAT64.  Covers convolution/morphology/rank/pooling.
     Item array_num_stencil(Item in, Item kernel, int op, int border, double border_value,
                            int64_t stride_h, int64_t stride_w, int64_t pad_h, int64_t pad_w);
     Item fn_convolve(Item img, Item kernel);       // weighted-sum correlation (DOT)

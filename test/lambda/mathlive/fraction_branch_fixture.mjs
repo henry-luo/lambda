@@ -1,10 +1,9 @@
 #!/usr/bin/env node
-// Per-branch fixture for fraction.ls dispatch.
-// Each entry maps a unique LaTeX expression to the branch in
-// frac_bar_spec() it exercises. Running this script against the
-// Lambda + MathLive renderers reveals which branches drift from
-// MathLive's actual output — used as a regression gate for the
-// Phase 2b port.
+// Rule 15 fraction geometry fixture.
+// Each entry is a representative LaTeX expression for a fraction layout shape
+// that used to have a dedicated frac_bar_spec() branch. The implementation is
+// now metric-driven, so this fixture compares final Lambda HTML against
+// MathLive rather than asserting deleted dispatch branches.
 //
 // Usage:
 //   node test/lambda/mathlive/fraction_branch_fixture.mjs
@@ -25,8 +24,8 @@ const MATHLIVE_SSR = path.join(
   'ref/mathlive/dist/mathlive-ssr.min.mjs'
 );
 
-// Branch fixture — each entry tied to a specific dispatch path through
-// frac_bar_spec(). The `branch` label matches the comment in fraction.ls.
+// Historical labels are kept for --branch compatibility, but they now identify
+// geometry coverage cases instead of code branches.
 const FIXTURE = [
   {
     branch: 'B1',
@@ -287,7 +286,7 @@ async function main() {
     }
   }
   console.log(
-    `\n${pass}/${pass + fail} branches pass${filterBranch ? ` (filter=${filterBranch})` : ''}.`
+    `\n${pass}/${pass + fail} fraction geometry cases pass${filterBranch ? ` (filter=${filterBranch})` : ''}.`
   );
 
   if (failures.length > 0 && args.includes('--show-diffs')) {

@@ -58,6 +58,6 @@ let row = reshape([10, 20, 30], [1, 3])
 // 1-D properties
 "sort idempotent:"; (sort(sort([3, 1, 2])) == sort([3, 1, 2]))
 "sort ascending:";  sort([3, 1, 2, 5, 4])               // [1, 2, 3, 4, 5]
-"all positive:";    all([1, 2, 3] > [0, 0, 0])
-"any over 5:";      any([1, 2, 3] > [5, 5, 5])          // false (none exceed 5)
+"all positive:";    all([1, 2, 3] gt [0, 0, 0])
+"any over 5:";      any([1, 2, 3] gt [5, 5, 5])         // false (none exceed 5)
 "clip range:";      clip([-1, 5, 12], 0, 10)            // [0, 5, 10]

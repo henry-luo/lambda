@@ -31,34 +31,27 @@ pub fn render_math(ast, options) {
     let result_box = opt.coalesce(raw_box)
 
     // wrap with struts and lm_latex class
-    let h = if (result_box.render_height != null) result_box.render_height else result_box.height
-    let d = if (result_box.render_depth != null) result_box.render_depth else result_box.depth
-    let raw_total = if (result_box.render_total != null) result_box.render_total else h + d
-    let total = max(raw_total, h + d)
-    // Full-precision values: only used when the box's whole subtree exposed
-    // raw metrics (no non-raw composite layout boxes inside). The strut then
-    // emits CEIL@2 of the raw sum, matching MathLive's toString() emission rule
-    // and rounding once.
-    let h_raw = result_box.height_raw
-    let d_raw = result_box.depth_raw
-    let use_raw = h_raw != null and d_raw != null
-    let h_em = if (use_raw) util.fmt_em_ceil2(h_raw) else util.fmt_em(h)
-    let latex_el = if (d == 0.0) {
+    let latex_el = emit_ml_latex(result_box)
+
+    // optionally wrap with stylesheet for standalone HTML
+    if (is_standalone) css.wrap_standalone(latex_el, options)
+    else latex_el
+}
+
+// MathLive-model root emission: public height/depth are already full precision,
+// so this path has exactly one CEIL@2 stringification site for root struts.
+fn emit_ml_latex(result_box) {
+    let h = result_box.height
+    let d = result_box.depth
+    let h_em = util.fmt_ml_em(h)
+    if (d == 0.0) {
         <span class: css.LATEX;
             <span class: css.STRUT, style: "height:" ++ h_em>
             result_box.element
         >
     } else {
-        let total_em = if (use_raw)
-            util.fmt_em_ceil2(h_raw + d_raw)
-        else
-            util.fmt_em(total)
-        let depth_em = if (use_raw)
-            util.fmt_em_ceil2(0.0 - d_raw)
-        else if (abs(total - 1.21) < 0.001 and abs(d - 0.345) < 0.001)
-            "-0.35em"
-        else
-            util.fmt_em(0.0 - d)
+        let total_em = util.fmt_ml_em(h + d)
+        let depth_em = util.fmt_ml_em(0.0 - d)
         let strut_bottom_style = "height:" ++ total_em ++ ";vertical-align:" ++ depth_em
         <span class: css.LATEX;
             <span class: css.STRUT, style: "height:" ++ h_em>
@@ -66,10 +59,6 @@ pub fn render_math(ast, options) {
             result_box.element
         >
     }
-
-    // optionally wrap with stylesheet for standalone HTML
-    if (is_standalone) css.wrap_standalone(latex_el, options)
-    else latex_el
 }
 
 // convenience: render in display mode

@@ -69,8 +69,19 @@ extern "C" Item js_get_fs_namespace(void);
 extern "C" Item js_get_fs_promises_namespace(void);
 extern "C" Item js_get_internal_fs_promises_namespace(void);
 extern "C" Item js_get_os_namespace(void);
-extern "C" bool js_doc_has_browsing_context(void* doc);
-extern "C" Item js_dom_get_selection_function_for_document(void* doc);
+extern "C" int radiant_dom_foreign_document_get_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_foreign_document_set_property(Item object, Item key, Item value, Item* out);
+extern "C" int radiant_dom_foreign_document_method(Item object, Item method_name, Item* args, int argc, Item* out);
+extern "C" bool radiant_dom_is_node(Item item);
+extern "C" bool js_is_document_proxy(Item item);
+extern "C" void* js_get_foreign_doc(Item item);
+extern "C" Item js_document_proxy_get_property(Item prop_name);
+extern "C" Item js_document_proxy_set_property(Item prop_name, Item value);
+extern "C" Item js_document_proxy_method(Item method_name, Item* args, int argc);
+extern "C" Item js_dom_get_property(Item elem_item, Item prop_name);
+extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value);
+extern "C" bool js_dom_item_is_range(Item item);
+extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
@@ -3186,13 +3197,6 @@ static bool js_upgrade_native_backed_map_for_properties(Map* m, const char* tag_
     return true;
 }
 
-static bool js_property_key_equals(Item key, const char* name, uint32_t name_len) {
-    if (get_type_id(key) != LMD_TYPE_STRING) return false;
-    String* str_key = it2s(key);
-    return str_key && str_key->len == name_len &&
-        strncmp(str_key->chars, name, name_len) == 0;
-}
-
 static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) {
     Map* m = object.map;
     switch (m->map_kind) {
@@ -3459,38 +3463,7 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
         *out_result = (Item){.item = ITEM_NULL};
         return true;
     }
-    case MAP_KIND_DOC_PROXY:
-        if (object.map->data_cap > 0) {
-            Item own_result = map_get(object.map, key);
-            if (own_result.item != ITEM_NULL) {
-                *out_result = own_result;
-                return true;
-            }
-        }
-        *out_result = js_document_proxy_get_property(key);
-        return true;
-    case MAP_KIND_FOREIGN_DOC: {
-        void* foreign_doc = js_get_foreign_doc(object);
-        if (foreign_doc && js_doc_has_browsing_context(foreign_doc)) {
-            if (js_property_key_equals(key, "defaultView", 11) ||
-                js_property_key_equals(key, "document", 8) ||
-                js_property_key_equals(key, "window", 6) ||
-                js_property_key_equals(key, "self", 4)) {
-                *out_result = object;
-                return true;
-            }
-            if (js_property_key_equals(key, "getSelection", 12)) {
-                *out_result = js_dom_get_selection_function_for_document(foreign_doc);
-                return true;
-            }
-        }
-        void* prev = js_dom_swap_active_document(foreign_doc);
-        Item r = js_document_proxy_get_property(key);
-        js_dom_restore_active_document(prev);
-        *out_result = r;
-        return true;
-    }
-    case MAP_KIND_DOM:
+    case MAP_KIND_WEB_API_RESOURCE:
         *out_result = js_is_computed_style_item(object)
             ? js_computed_style_get_property(object, key)
             : js_dom_get_property(object, key);
@@ -3523,19 +3496,10 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
 static bool js_try_exotic_property_set(Item object, Item key, Item* value, Item* out_result) {
     Map* m = object.map;
     switch (m->map_kind) {
-    case MAP_KIND_DOC_PROXY:
-        *out_result = js_document_proxy_set_property(key, *value);
-        return true;
-    case MAP_KIND_FOREIGN_DOC: {
-        void* prev = js_dom_swap_active_document(js_get_foreign_doc(object));
-        *out_result = js_document_proxy_set_property(key, *value);
-        js_dom_restore_active_document(prev);
-        return true;
-    }
     case MAP_KIND_ITERATOR:
         *out_result = *value;
         return true;
-    case MAP_KIND_DOM:
+    case MAP_KIND_WEB_API_RESOURCE:
         *out_result = js_dom_set_property(object, key, *value);
         return true;
     case MAP_KIND_CSS_NAMESPACE:
@@ -4144,6 +4108,35 @@ extern "C" Item js_property_get(Item object, Item key) {
             }
         }
         return make_js_undefined();
+    } else if (type == LMD_TYPE_VMAP &&
+               js_is_document_proxy(object)) {
+        // Document and foreign-document proxies are native VMaps; preserve the
+        // existing active-document swap semantics through the document bridge.
+        Item out = ItemNull;
+        if (js_get_foreign_doc(object) &&
+            radiant_dom_foreign_document_get_property(object, key, &out)) {
+            return out;
+        }
+        return js_document_proxy_get_property(key);
+    } else if (type == LMD_TYPE_VMAP &&
+               (radiant_dom_is_node(object) ||
+                js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
+        // Host DOM resources are VMaps; Range/Selection share the DOM property
+        // dispatcher even though they are not node-backed objects.
+        return js_dom_get_property(object, key);
+    } else if (type == LMD_TYPE_VMAP && js_is_inline_style_item(object)) {
+        // Inline style is a host VMap whose property surface is owned by DOM.
+        return js_dom_get_property(object, key);
+    } else if (type == LMD_TYPE_VMAP && js_is_computed_style_item(object)) {
+        // Computed style is a read-only host VMap with its own property getter.
+        return js_computed_style_get_property(object, key);
+    } else if (type == LMD_TYPE_VMAP &&
+               (js_is_stylesheet(object) || js_is_css_rule(object) ||
+                js_is_rule_style_decl(object))) {
+        // CSSOM resources are native VMaps, so they bypass MapKind dispatch.
+        if (js_is_stylesheet(object)) return js_cssom_stylesheet_get_property(object, key);
+        if (js_is_css_rule(object)) return js_cssom_rule_get_property(object, key);
+        return js_cssom_rule_decl_get_property(object, key);
     } else if (type == LMD_TYPE_ELEMENT) {
         return elmt_get(object.element, key);
     } else if (type == LMD_TYPE_ARRAY) {
@@ -5060,7 +5053,7 @@ extern "C" Item js_property_get(Item object, Item key) {
 
         // v20: .constructor for number and boolean primitives
         if (str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
-            if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+            if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) {
                 Item num_name = (Item){.item = s2it(heap_create_name("Number", 6))};
                 return js_get_constructor(num_name);
             }
@@ -5068,19 +5061,19 @@ extern "C" Item js_property_get(Item object, Item key) {
                 Item bool_name = (Item){.item = s2it(heap_create_name("Boolean", 7))};
                 return js_get_constructor(bool_name);
             }
-            if (type == LMD_TYPE_DECIMAL && js_is_bigint(object)) {
+            if (js_is_bigint_egress(object)) {
                 Item bigint_name = (Item){.item = s2it(heap_create_name("BigInt", 6))};
                 return js_get_constructor(bigint_name);
             }
         }
         // v83: __proto__ for number, boolean, and BigInt primitives
         if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
-            if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT ||
-                type == LMD_TYPE_BOOL || (type == LMD_TYPE_DECIMAL && js_is_bigint(object))) {
+            if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT ||
+                type == LMD_TYPE_BOOL || js_is_bigint_egress(object)) {
                 return js_get_prototype_of(object);
             }
         }
-        if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT || type == LMD_TYPE_BOOL) {
+        if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT || type == LMD_TYPE_BOOL) {
             Item proto = js_get_prototype_of(object);
             if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
                 // inherited primitive accessors must see the boxed receiver, and
@@ -5090,7 +5083,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
             }
         }
-        if (type == LMD_TYPE_DECIMAL && js_is_bigint(object)) {
+        if (js_is_bigint_egress(object)) {
             Item proto = js_get_prototype_of(object);
             if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
                 // inherited primitive accessors must see the boxed receiver, and
@@ -5114,9 +5107,9 @@ static Item js_arguments_companion_item(Item arguments);
 
 static bool js_is_property_reference_primitive(TypeId type, Item value) {
     return type == LMD_TYPE_STRING || type == LMD_TYPE_BOOL ||
-           type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT ||
+           type == LMD_TYPE_FLOAT ||
            (type == LMD_TYPE_INT && !js_is_symbol(value)) ||
-           (type == LMD_TYPE_DECIMAL && js_is_bigint(value)) ||
+           js_is_bigint_egress(value) ||
            js_is_symbol(value);
 }
 
@@ -6026,6 +6019,11 @@ static Item js_property_set_map(Item object, Item key, Item value) {
         key = (Item){.item = s2it(heap_create_name("null", 4))};
     } else if (kt == LMD_TYPE_UNDEFINED) {
         key = (Item){.item = s2it(heap_create_name("undefined", 9))};
+    } else if (kt != LMD_TYPE_STRING && !js_key_is_symbol(key)) {
+        // Bracket assignment keys use ToPropertyKey too; object wrappers like
+        // new String("x") must address property "x", not an unnameable slot.
+        key = js_to_property_key(key);
+        if (js_check_exception()) return value;
     }
     bool private_internal_property_key = js_is_private_internal_property_key(key);
     if (private_internal_property_key && js_is_proxy(object)) {
@@ -6564,6 +6562,49 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         return js_property_set_array(object, key, value);
     }
 
+    if (type == LMD_TYPE_VMAP &&
+        js_is_document_proxy(object)) {
+        JS_PROPERTY_SET_BRANCH("top_document_proxy_vmap");
+        Item out = ItemNull;
+        if (js_get_foreign_doc(object) &&
+            radiant_dom_foreign_document_set_property(object, key, value, &out)) {
+            return out;
+        }
+        return js_document_proxy_set_property(key, value);
+    }
+
+    if (type == LMD_TYPE_VMAP &&
+        (radiant_dom_is_node(object) ||
+         js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
+        JS_PROPERTY_SET_BRANCH("top_dom_vmap");
+        // Host DOM resources are VMaps; Range/Selection writes must stay on
+        // the native dispatcher instead of falling through as ordinary VMaps.
+        return js_dom_set_property(object, key, value);
+    }
+
+    if (type == LMD_TYPE_VMAP && js_is_inline_style_item(object)) {
+        JS_PROPERTY_SET_BRANCH("top_inline_style_vmap");
+        // Inline style is a host VMap; writes must mutate the owning element's
+        // CSS declaration instead of creating ordinary VMap fields.
+        return js_dom_set_property(object, key, value);
+    }
+
+    if (type == LMD_TYPE_VMAP && js_is_computed_style_item(object)) {
+        JS_PROPERTY_SET_BRANCH("top_computed_style_vmap");
+        return value;
+    }
+
+    if (type == LMD_TYPE_VMAP &&
+        (js_is_css_rule(object) || js_is_rule_style_decl(object) ||
+         js_is_stylesheet(object))) {
+        JS_PROPERTY_SET_BRANCH("top_cssom_vmap");
+        // CSSOM resources are VMaps; writes must stay on the CSSOM bridge
+        // rather than falling through as ordinary VMap fields.
+        if (js_is_css_rule(object)) return js_cssom_rule_set_property(object, key, value);
+        if (js_is_rule_style_decl(object)) return js_cssom_rule_decl_set_property(object, key, value);
+        return value;
+    }
+
     // Typed array: ta[i] = val (use map_kind for fast check)
     // Only intercept numeric index writes; string keys (e.g. __proto__) fall through
     // to the normal Map property set path below.
@@ -6704,6 +6745,9 @@ extern "C" Item js_property_access(Item object, Item key) {
     TypeId type = get_type_id(object);
 
     if (type == LMD_TYPE_ARRAY && get_type_id(key) == LMD_TYPE_INT) {
+        // Live DOM collections must refresh before dense array fast reads;
+        // otherwise optimized member access can observe stale option slots.
+        js_dom_collection_before_property_get(object, key);
         Item dense_value = ItemNull;
         int64_t idx = it2i(key);
         if (js_array_fast_own_dense_get(object, idx, &dense_value)) {
@@ -8074,6 +8118,9 @@ extern "C" Item js_array_get(Item array, Item index) {
     if (get_type_id(array) != LMD_TYPE_ARRAY) {
         return make_js_undefined();
     }
+    // Live DOM collections share array storage but must refresh before any
+    // indexed read; MIR fallback can call this helper directly.
+    js_dom_collection_before_property_get(array, index);
 
     // ES spec: boolean keys are coerced to "true"/"false" string property names,
     // not numeric indices. Route to companion map lookup.
@@ -8157,6 +8204,9 @@ extern "C" Item js_string_get_int(Item str_item, int64_t index) {
 extern "C" Item js_array_get_int(Item array, int64_t index) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_ARRAY_GET_INT);
     if (get_type_id(array) == LMD_TYPE_ARRAY) {
+        // Live DOM collections share array storage but must refresh before any
+        // indexed read; optimized MIR array access calls this fallback directly.
+        js_dom_collection_before_property_get(array, (Item){.item = i2it((int)index)});
         if (index < 0 || index > 0xFFFFFFFELL) {
             char idx_buf[32];
             int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
@@ -9655,7 +9705,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             return (Item){.item = s2it(heap_create_name("[object Object]", 15))};
         if (tt == LMD_TYPE_INT || tt == LMD_TYPE_FLOAT)
             return (Item){.item = s2it(heap_create_name("[object Number]", 15))};
-        if (tt == LMD_TYPE_DECIMAL && js_is_bigint(this_val)) {
+        if (js_is_bigint_egress(this_val)) {
             Item wrapped = js_to_object(this_val);
             Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
             if (js_has_property(wrapped, tag_key)) {
@@ -11244,7 +11294,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             bool pv_own = false;
             Item pv = js_map_get_fast(this_val.map, "__primitiveValue__", 18, &pv_own);
             TypeId pv_type = pv_own ? get_type_id(pv) : LMD_TYPE_NULL;
-            if (pv_own && (pv_type == LMD_TYPE_INT || pv_type == LMD_TYPE_FLOAT || pv_type == LMD_TYPE_INT64)) {
+            if (pv_own && (pv_type == LMD_TYPE_INT || pv_type == LMD_TYPE_FLOAT)) {
                 num_val = pv;
             } else {
                 // this is not a Number object (e.g. String wrapper, plain object)
@@ -11253,7 +11303,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 js_throw_value(js_new_error_with_name(tn, msg));
                 return ItemNull;
             }
-        } else if ((tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_FLOAT && tv_type != LMD_TYPE_INT64)
+        } else if ((tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_FLOAT)
                    || js_key_is_symbol(this_val)) {
             Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
             Item msg = (Item){.item = s2it(heap_create_name("Number.prototype method requires that 'this' be a Number"))};
@@ -11275,14 +11325,15 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         if (tv_type == LMD_TYPE_MAP && js_class_id(this_val) == JS_CLASS_BIGINT) {
             bool pv_own = false;
             Item pv = js_map_get_fast(this_val.map, "__primitiveValue__", 18, &pv_own);
-            if (pv_own && js_is_bigint(pv)) {
-                bigint_val = pv;
+            if (pv_own && js_is_bigint_egress(pv)) {
+                bigint_val = js_is_native_bigint_egress(pv) ? js_native_bigint_to_bigint(pv) : pv;
             } else {
                 return js_throw_type_error("BigInt.prototype method requires that 'this' be a BigInt");
             }
-        } else if (!js_is_bigint(this_val)) {
+        } else if (!js_is_bigint_egress(this_val)) {
             return js_throw_type_error("BigInt.prototype method requires that 'this' be a BigInt");
         }
+        if (js_is_native_bigint_egress(bigint_val)) bigint_val = js_native_bigint_to_bigint(bigint_val);
         const char* mname = "toString";
         if (builtin_id == JS_BUILTIN_BIGINT_VALUE_OF) mname = "valueOf";
         else if (builtin_id == JS_BUILTIN_BIGINT_TO_LOCALE_STRING) mname = "toLocaleString";
@@ -18591,42 +18642,19 @@ extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" Item js_dom_range_get_prototype_value(void);
 extern "C" Item js_dom_selection_get_prototype_value(void);
-extern "C" bool js_doc_has_browsing_context(void* doc);
-
-static Item js_call_foreign_window_global_method(Item obj, void* foreign,
-                                                 Item method_name, Item* args, int argc) {
-    if (!foreign) return ItemNull;
-    if (!js_doc_has_browsing_context(foreign)) return ItemNull;
-    Item fn = js_get_global_property(method_name);
-    if (get_type_id(fn) != LMD_TYPE_FUNC) return ItemNull;
-
-    Item global = js_get_global_this();
-    Item window_key = (Item){.item = s2it(heap_create_name("window", 6))};
-    Item old_window = js_property_get(global, window_key);
-
-    void* prev_doc = js_dom_swap_active_document(foreign);
-    js_property_set(global, window_key, obj);
-    Item result = js_call_function(fn, obj, args, argc);
-    js_property_set(global, window_key, old_window);
-    js_dom_restore_active_document(prev_doc);
-    return result;
-}
+extern "C" Item js_dom_get_prototype_value(Item item);
 
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
     // Document proxy methods (getElementById, querySelector, createElement, ...).
-    // Foreign documents use MAP_KIND_FOREIGN_DOC, so they must be handled before
-    // the generic DOM host-object dispatch below.
+    // Foreign documents use branded VMaps, so they must be handled before the
+    // generic DOM host-object dispatch below.
     if (js_is_document_proxy(obj)) {
         void* foreign = js_get_foreign_doc(obj);
         if (foreign) {
-            void* prev = js_dom_swap_active_document(foreign);
-            Item r = js_document_proxy_method(method_name, args, argc);
-            js_dom_restore_active_document(prev);
-            if (r.item == ItemNull.item && !js_check_exception()) {
-                Item fallback = js_call_foreign_window_global_method(obj, foreign, method_name, args, argc);
-                if (fallback.item != ItemNull.item || js_check_exception()) return fallback;
+            Item result = ItemNull;
+            if (radiant_dom_foreign_document_method(obj, method_name, args, argc, &result)) {
+                return result;
             }
-            return r;
         }
         return js_document_proxy_method(method_name, args, argc);
     }
@@ -18637,8 +18665,8 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         return ItemNull;
     }
 
-    // Computed style wrappers also use MAP_KIND_DOM storage, so dispatch them
-    // before the generic DOM host-object path below.
+    // Computed style wrappers use the DOM resource carrier, so dispatch them
+    // before the generic host-object path below.
     if (js_is_computed_style_item(obj)) {
         String* method = it2s(method_name);
         if (method && method->len == 16 && strncmp(method->chars, "getPropertyValue", 16) == 0) {
@@ -18647,8 +18675,13 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         }
     }
 
-    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
-        (obj.map->map_kind == MAP_KIND_DOM || obj.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
+    if (js_is_inline_style_item(obj)) {
+        extern Item js_dom_style_method(Item elem, Item method_name, Item* args, int argc);
+        return js_dom_style_method(obj, method_name, args, argc);
+    }
+
+    if (get_type_id(obj) == LMD_TYPE_VMAP &&
+        (radiant_dom_is_node(obj) || js_dom_item_is_range(obj) || js_dom_item_is_selection(obj))) {
         if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
             Item fn = js_property_access(obj, method_name);
             if (js_check_exception()) return ItemNull;
@@ -18658,6 +18691,14 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         return js_dom_element_method(obj, method_name, args, argc);
     }
 
+    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
+        obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE) {
+        if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
+            Item fn = js_property_access(obj, method_name);
+            if (js_check_exception()) return ItemNull;
+            return js_call_function(fn, obj, args, argc);
+        }
+    }
     // OffscreenCanvas / CanvasRenderingContext2D methods (js_canvas.cpp)
     {
         Item canvas_result;
@@ -18668,14 +18709,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     if (js_is_document_proxy(obj)) {
         void* foreign = js_get_foreign_doc(obj);
         if (foreign) {
-            void* prev = js_dom_swap_active_document(foreign);
-            Item r = js_document_proxy_method(method_name, args, argc);
-            js_dom_restore_active_document(prev);
-            if (r.item == ItemNull.item && !js_check_exception()) {
-                Item fallback = js_call_foreign_window_global_method(obj, foreign, method_name, args, argc);
-                if (fallback.item != ItemNull.item || js_check_exception()) return fallback;
+            Item result = ItemNull;
+            if (radiant_dom_foreign_document_method(obj, method_name, args, argc, &result)) {
+                return result;
             }
-            return r;
         }
         return js_document_proxy_method(method_name, args, argc);
     }
@@ -20324,7 +20361,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     }
 
     // Fallback: property access + call
-    // Range/Selection are MAP_KIND_DOM host objects but not DOM nodes. Dispatch
+    // Range/Selection are DOM resource host objects but not DOM nodes. Dispatch
     // through their property accessors so ordinary range.setStart(...) keeps
     // the Range receiver instead of falling into element-only method dispatch.
     if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
@@ -20335,20 +20372,20 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     // DOM host objects expose native methods through the DOM dispatcher, but
     // explicit JS overrides (for example document.createRange = wrapper) must
     // win before the native fallback.
-    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
-        (obj.map->map_kind == MAP_KIND_DOM || obj.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
-        String* dom_method = it2s(method_name);
-        if (dom_method) {
-            bool own_dom_method = false;
-            Item dom_fn = js_map_get_fast(obj.map, dom_method->chars,
-                (int)dom_method->len, &own_dom_method);
-            if (own_dom_method && get_type_id(dom_fn) == LMD_TYPE_FUNC) {
-                return js_call_function(dom_fn, obj, args, argc);
-            }
-        }
+    if (get_type_id(obj) == LMD_TYPE_VMAP && radiant_dom_is_node(obj)) {
         extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
         return js_dom_element_method(obj, method_name, args, argc);
     }
+
+    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
+        obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE) {
+        if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
+            Item fn = js_property_access(obj, method_name);
+            if (js_check_exception()) return ItemNull;
+            return js_call_function(fn, obj, args, argc);
+        }
+    }
+
     Item fn = js_property_access(obj, method_name);
     // v37: Check for pending exception (e.g., private brand check TypeError)
     if (js_check_exception()) return ItemNull;
@@ -27497,7 +27534,7 @@ extern "C" Item js_new_number_checked(Item arg) {
         return ItemNull;
     }
     // BigInt → Number conversion (ES2020: ToNumeric then BigInt::numberValue)
-    if (get_type_id(arg) == LMD_TYPE_DECIMAL && js_is_bigint(arg)) {
+    if (js_is_bigint_egress(arg)) {
         arg = js_number_function(arg);
     }
     return js_new_number_wrapper(arg);
@@ -27548,14 +27585,17 @@ extern "C" Item js_to_object(Item value) {
         js_wrapper_set_proto(obj, "Symbol", 6);
         return obj;
     }
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) return js_new_number_wrapper(value);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return js_new_number_wrapper(value);
     if (type == LMD_TYPE_STRING) return js_new_string_wrapper(value);
-    if (type == LMD_TYPE_DECIMAL && js_is_bigint(value)) {
+    if (js_is_bigint_egress(value)) {
         // BigInt wrapper object with __primitiveValue__
         Item obj = js_new_object();
         js_class_stamp(obj, JS_CLASS_BIGINT);
         Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-        js_property_set(obj, pv_key, value);
+        // native int64/uint64 egress as BigInt, but wrapper methods require the
+        // canonical mpdec-unlimited representation in [[BigIntData]].
+        Item pv = js_is_native_bigint_egress(value) ? js_native_bigint_to_bigint(value) : value;
+        js_property_set(obj, pv_key, pv);
         js_wrapper_set_proto(obj, "BigInt", 6);
         return obj;
     }
@@ -27635,9 +27675,15 @@ extern "C" void js_link_base_prototype(Item proto_marker, Item base_ctor) {
 // Get the prototype of an object (read __proto__ property)
 // P10d: uses interned key + first-match lookup (no heap allocation per call)
 extern "C" Item js_get_prototype(Item object) {
-    if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
+    if (js_is_document_proxy(object)) return ItemNull;
     if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
     if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
+    if (get_type_id(object) == LMD_TYPE_VMAP && radiant_dom_is_node(object)) {
+        Item dom_proto = js_dom_get_prototype_value(object);
+        if (get_type_id(dom_proto) == LMD_TYPE_MAP) return dom_proto;
+        return ItemNull;
+    }
+    if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
     Map* m = object.map;
     // Synthetic fast iterators use a 1-byte sentinel as `type`, not a real
     // TypeMap — never walk their (non-existent) shape for a __proto__ slot.
@@ -27692,6 +27738,17 @@ extern "C" Item js_get_prototype(Item object) {
 // Returns ItemNull only at the top of the chain (Object.prototype itself, or
 // when the explicit `__proto__` slot holds the null sentinel).
 static Item js_get_implicit_proto(Item object) {
+    if (js_is_document_proxy(object)) {
+        Item proto = js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
+        return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
+    }
+    if (get_type_id(object) == LMD_TYPE_VMAP &&
+        (radiant_dom_is_node(object) ||
+         js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
+        // Host VMaps have no ordinary __proto__ slot; prototype-chain reads
+        // must start from the module-supplied host prototype instead of stopping.
+        return js_get_prototype(object);
+    }
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
     Map* m = object.map;
     Item raw = js_get_prototype(object);
@@ -29160,9 +29217,9 @@ static Item js_get_iterator_impl(Item iterable, bool cache_next) {
         }
     }
 
-    if (tid == LMD_TYPE_BOOL || tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 ||
+    if (tid == LMD_TYPE_BOOL || tid == LMD_TYPE_INT ||
         tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_SYMBOL ||
-        (tid == LMD_TYPE_DECIMAL && js_is_bigint(iterable))) {
+        js_is_bigint_egress(iterable)) {
         Item wrapped = js_to_object(iterable);
         Item iter_factory = js_property_get_str(wrapped, "__sym_1", 7);
         if (js_check_exception()) return ItemNull;
@@ -29183,8 +29240,10 @@ static Item js_get_iterator_impl(Item iterable, bool cache_next) {
     {
         char msg[128];
         const char* type_str = "object";
-        if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT)
+        if (tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT)
             type_str = "number";
+        else if (js_is_bigint_egress(iterable))
+            type_str = "bigint";
         else if (tid == LMD_TYPE_BOOL)
             type_str = "boolean";
         else if (tid == LMD_TYPE_SYMBOL)
@@ -29500,7 +29559,9 @@ extern "C" Item js_iterator_collect_rest(Item iterator) {
         Item val = js_iterator_step(iterator);
         if (val.item == JS_ITER_DONE_SENTINEL) break;
         if (js_exception_pending) return ItemNull;
-        array_push(arr.array, val);
+        // Rest destructuring builds a JS array; use the JS array path so
+        // boxed Number elements keep dense-slot invariants after migration.
+        js_array_push_item_direct(arr.array, val);
     }
     return arr;
 }
@@ -32759,7 +32820,6 @@ static void js_vm_eval_options_init(JsVmEvalOptions* out) {
 static int64_t js_vm_option_to_int64(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_INT) return it2i(value);
-    if (type == LMD_TYPE_INT64) return it2l(value);
     if (type == LMD_TYPE_FLOAT) {
         double d = it2d(value);
         if (isfinite(d)) return (int64_t)d;
@@ -32820,7 +32880,7 @@ static bool js_vm_is_undefined_item(Item value) {
 
 static bool js_vm_is_number_item(Item value) {
     TypeId type = get_type_id(value);
-    return type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT;
+    return type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT;
 }
 
 static bool js_vm_validate_options_object(Item options) {

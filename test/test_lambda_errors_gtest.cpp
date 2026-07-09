@@ -633,8 +633,8 @@ TEST_F(NegativeScriptTest, SyntaxError_OversizedIntegerLiteral) {
     ExpectErrorCode("test/lambda/negative/syntax/oversized_integer_literal.ls", "error[E108]");
 }
 
-TEST_F(NegativeScriptTest, SyntaxError_Decimal128Overflow) {
-    ExpectErrorCode("test/lambda/negative/syntax/decimal128_overflow.ls", "error[E108]");
+TEST_F(NegativeScriptTest, SyntaxError_RetiredDecimalSuffix) {
+    ExpectErrorWithoutCrash("test/lambda/negative/syntax/retired_decimal_suffix.ls");
 }
 
 TEST_F(NegativeScriptTest, SyntaxError_UnexpectedToken) {
@@ -710,8 +710,18 @@ TEST_F(NegativeScriptTest, SemanticError_SizedIntegerOverflow) {
     ExpectErrorCode("test/lambda/negative/semantic/sized_integer_overflow.ls", "error[E108]");
 }
 
-TEST_F(NegativeScriptTest, SemanticError_LiteralZeroDivisor) {
-    ExpectErrorCode("test/lambda/negative/semantic/literal_zero_divisor.ls", "error[E312]");
+TEST_F(NegativeScriptTest, SemanticError_SizedConstantConversionOverflow) {
+    ExpectErrorCode("test/lambda/negative/semantic/sized_constant_conversion_overflow.ls", "error[E108]");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_ReservedLastKeyword) {
+    ExpectErrorMessage("test/lambda/negative/semantic/reserved_last_keyword.ls",
+        "reserved keyword");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_OperatorComparabilitySymbol) {
+    ExpectErrorMessage("test/lambda/negative/semantic/operator_comparability_symbol.ls",
+        "no magnitude");
 }
 
 // --- Runtime Error Tests (3xx) ---
@@ -730,6 +740,10 @@ TEST_F(NegativeScriptTest, RuntimeError_IndexOutOfBounds) {
 
 TEST_F(NegativeScriptTest, RuntimeError_InvalidOperation) {
     ExpectErrorWithoutCrash("test/lambda/negative/runtime/invalid_operation.ls");
+}
+
+TEST_F(NegativeScriptTest, RuntimeError_OperatorComparabilityDynamic) {
+    ExpectErrorWithoutCrash("test/lambda/negative/runtime/operator_comparability_dynamic.ls");
 }
 
 // Stack overflow test - uses Phase 2 signal-based handler (sigaltstack/SEH)

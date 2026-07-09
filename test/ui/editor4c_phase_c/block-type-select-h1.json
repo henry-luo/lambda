@@ -1,0 +1,15 @@
+{
+  "name": "editor4c-phase-c: block type select converts the current paragraph to h1",
+  "_note": "Phase C C1 — command/text-commands cmdSetBlockType via the real toolbar <select>. Click the first paragraph, select Heading 1, and assert the paragraph's source path now renders as an h1 while the original h1 remains.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface p"}},
+    {"type": "wait", "ms": 80},
+    {"type": "select_option", "target": {"selector": "select.rdt-block"}, "value": "h1"},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface h1"}, "equals": 2},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface h1", "index": 1}, "contains": "WYSIWYG editor"}
+  ]
+}

@@ -146,7 +146,7 @@ typedef struct Item {
         ArrayNum* array_num;
         ArrayNum* array_int;      // compat alias (elem_type == ELEM_INT)
         ArrayNum* array_int64;    // compat alias (elem_type == ELEM_INT64)
-        ArrayNum* array_float;    // compat alias (elem_type == ELEM_FLOAT)
+        ArrayNum* array_float;    // compat alias (elem_type == ELEM_FLOAT64)
         Map* map;
         VMap* vmap;
         Element* element;
@@ -356,7 +356,7 @@ struct ArrayNum : Container {
     // Container::array_flags stores layout flags (is_ndim/is_view/is_pinned).
     union {
         int64_t* items;        // for ELEM_INT, ELEM_INT64
-        double* float_items;   // for ELEM_FLOAT
+        double* float_items;   // for ELEM_FLOAT64
         void* data;            // for compact types (ELEM_INT8, ELEM_UINT8, etc.)
     };
     int64_t length;
@@ -439,6 +439,8 @@ struct VMapVtable {
 struct VMap : Container {
     void* data;            // opaque pointer to backing implementation (e.g. HashMapData*)
     VMapVtable* vtable;    // dispatch table
+    const void* host_type;  // optional branded native host type; NULL for ordinary VMaps
+    void* host_data;        // optional native payload for host-object adapters
 };
 
 // Object: nominally-typed map with type name and methods

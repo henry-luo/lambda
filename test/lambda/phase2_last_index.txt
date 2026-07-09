@@ -1,0 +1,19 @@
+{
+  last_index: 3,
+  arithmetic: 2,
+  slice: [2, 3],
+  empty_is_null: true,
+  nested_innermost: 20,
+  string_last: "c",
+  tail_limit: [98, 99, 100],
+  replace_first: "a+b,c",
+  replace_last: "a,b+c",
+  replace_zero: "a,b,c",
+  find_last: [{
+        value: ",",
+        index: 3
+      }],
+  map_key_last: 3,
+  take_negative_is_error: true,
+  drop_negative_is_error: true
+}

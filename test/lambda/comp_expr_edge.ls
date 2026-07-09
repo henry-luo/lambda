@@ -2,13 +2,19 @@
 
 "===== COMPREHENSIVE COMPARISON OPERATIONS TEST ====="
 
+let any_hello: any = "hello"
+let any_world: any = "world"
+let any_five: any = 5
+let any_true: any = true
+let any_false: any = false
+
 'Error Cases - Type Mismatches (should produce errors):'
 'Testing invalid comparisons...'
-"154."; ("hello" < 5)
-"155."; (true >= false)
+"154."; (any_hello < any_five)
+"155."; (any_true >= any_false)
 "156."; (null == 3)       // null equality returns false (not error) to enable null checking
-"157."; (5 > "world")
-"158."; (false <= true)
+"157."; (any_five > any_world)
+"158."; (any_false <= any_true)
 "159."; ("test" != null)  // null inequality returns true (not error) to enable null checking
 
 'Additional Error Cases - Invalid Type Comparisons:'
@@ -41,18 +47,18 @@
 "182."; ('hello' and 'world')
 
 'Error Cases - Null Comparisons:'
-"183."; (null < 5)
-"184."; (null > 5)
-"185."; (null <= 5)
-"186."; (null >= 5)
-"187."; (5 < null)
-"188."; (5 > null)
-"189."; (5 <= null)
-"190."; (5 >= null)
-"191."; (null < null)
-"192."; (null > null)
-"193."; (null <= null)
-"194."; (null >= null)
+"183."; (null < 5) is null
+"184."; (null > 5) is null
+"185."; (null <= 5) is null
+"186."; (null >= 5) is null
+"187."; (5 < null) is null
+"188."; (5 > null) is null
+"189."; (5 <= null) is null
+"190."; (5 >= null) is null
+"191."; (null < null) is null
+"192."; (null > null) is null
+"193."; (null <= null) is null
+"194."; (null >= null) is null
 
 'Error Cases - Null with Boolean Operations:'
 "195."; [null and true]
@@ -67,10 +73,10 @@
 "204."; [null or null]
 
 'Error Cases - Mixed Invalid Types:'
-"205."; (true < false)
-"206."; (false > true)
-"207."; (true <= false)
-"208."; (false >= true)
+"205."; (any_true < any_false)
+"206."; (any_false > any_true)
+"207."; (any_true <= any_false)
+"208."; (any_false >= any_true)
 "209."; ('string' and 5)
 "210."; (5 and 'string')
 "211."; ('string' or 5)

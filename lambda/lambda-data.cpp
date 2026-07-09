@@ -42,8 +42,10 @@ Type TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
 Type TYPE_INT = {.type_id = LMD_TYPE_INT};
 Type TYPE_INT64 = {.type_id = LMD_TYPE_INT64};
 Type TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
+Type TYPE_FLOAT64 = {.type_id = LMD_TYPE_FLOAT};
 Type TYPE_DECIMAL = {.type_id = LMD_TYPE_DECIMAL};
-Type TYPE_NUMBER = {.type_id = LMD_TYPE_NUMBER};
+Type TYPE_INTEGER = {.type_id = LMD_TYPE_TYPE};
+Type TYPE_NUMBER = {.type_id = LMD_TYPE_TYPE};
 Type TYPE_STRING = {.type_id = LMD_TYPE_STRING};
 Type TYPE_BINARY = {.type_id = LMD_TYPE_BINARY};
 Type TYPE_SYMBOL = {.type_id = LMD_TYPE_SYMBOL};
@@ -60,6 +62,7 @@ Type TYPE_U16 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_UINT16};
 Type TYPE_U32 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_UINT32};
 Type TYPE_F16 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_FLOAT16};
 Type TYPE_F32 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_FLOAT32};
+Type TYPE_F64 = {.type_id = LMD_TYPE_FLOAT};
 Type TYPE_DTIME = {.type_id = LMD_TYPE_DTIME};
 Type TYPE_DATE = {.type_id = LMD_TYPE_DTIME};   // sub-type: date-only datetime
 Type TYPE_TIME = {.type_id = LMD_TYPE_DTIME};   // sub-type: time-only datetime
@@ -101,8 +104,8 @@ extern "C" const char* get_type_name(TypeId type_id) {
         case LMD_TYPE_INT: return "int";
         case LMD_TYPE_INT64: return "int64";
         case LMD_TYPE_FLOAT: return "float";
+        case LMD_TYPE_FLOAT64: return "f64";
         case LMD_TYPE_DECIMAL: return "decimal";
-        case LMD_TYPE_NUMBER: return "number";
         case LMD_TYPE_DTIME: return "datetime";
         case LMD_TYPE_SYMBOL: return "symbol";
         case LMD_TYPE_STRING: return "string";
@@ -145,7 +148,9 @@ TypeType LIT_TYPE_BOOL;
 TypeType LIT_TYPE_INT;
 TypeType LIT_TYPE_INT64;
 TypeType LIT_TYPE_FLOAT;
+TypeType LIT_TYPE_FLOAT64;
 TypeType LIT_TYPE_DECIMAL;
+TypeType LIT_TYPE_INTEGER;
 TypeType LIT_TYPE_NUMBER;
 TypeType LIT_TYPE_STRING;
 TypeType LIT_TYPE_BINARY;
@@ -174,6 +179,7 @@ TypeType LIT_TYPE_U32;
 TypeType LIT_TYPE_U64;
 TypeType LIT_TYPE_F16;
 TypeType LIT_TYPE_F32;
+TypeType LIT_TYPE_F64;
 
 TypeMap EmptyMap;
 TypeElmt EmptyElmt;
@@ -201,7 +207,9 @@ void init_typetype() {
     *(Type*)(&LIT_TYPE_INT) = LIT_TYPE;  LIT_TYPE_INT.type = &TYPE_INT;
     *(Type*)(&LIT_TYPE_INT64) = LIT_TYPE;  LIT_TYPE_INT64.type = &TYPE_INT64;
     *(Type*)(&LIT_TYPE_FLOAT) = LIT_TYPE;  LIT_TYPE_FLOAT.type = &TYPE_FLOAT;
+    *(Type*)(&LIT_TYPE_FLOAT64) = LIT_TYPE;  LIT_TYPE_FLOAT64.type = &TYPE_FLOAT;
     *(Type*)(&LIT_TYPE_DECIMAL) = LIT_TYPE;  LIT_TYPE_DECIMAL.type = &TYPE_DECIMAL;
+    *(Type*)(&LIT_TYPE_INTEGER) = LIT_TYPE;  LIT_TYPE_INTEGER.type = &TYPE_INTEGER;
     *(Type*)(&LIT_TYPE_NUMBER) = LIT_TYPE;  LIT_TYPE_NUMBER.type = &TYPE_NUMBER;
     *(Type*)(&LIT_TYPE_STRING) = LIT_TYPE;  LIT_TYPE_STRING.type = &TYPE_STRING;
     *(Type*)(&LIT_TYPE_BINARY) = LIT_TYPE;  LIT_TYPE_BINARY.type = &TYPE_BINARY;
@@ -230,6 +238,7 @@ void init_typetype() {
     *(Type*)(&LIT_TYPE_U64) = LIT_TYPE;  LIT_TYPE_U64.type = &TYPE_UINT64;
     *(Type*)(&LIT_TYPE_F16) = LIT_TYPE;  LIT_TYPE_F16.type = &TYPE_F16;
     *(Type*)(&LIT_TYPE_F32) = LIT_TYPE;  LIT_TYPE_F32.type = &TYPE_F32;
+    *(Type*)(&LIT_TYPE_F64) = LIT_TYPE;  LIT_TYPE_F64.type = &TYPE_FLOAT;
 
     memset(&EmptyMap, 0, sizeof(TypeMap));
     EmptyMap.type_id = LMD_TYPE_MAP;  EmptyMap.type_index = -1;
@@ -251,8 +260,8 @@ void init_type_info() {
     type_info[LMD_TYPE_INT] = {sizeof(int64_t), "int", &TYPE_INT, (Type*)&LIT_TYPE_INT};  // 64-bit to store 56-bit value
     type_info[LMD_TYPE_INT64] = {sizeof(int64_t), "int64", &TYPE_INT64, (Type*)&LIT_TYPE_INT64};
     type_info[LMD_TYPE_FLOAT] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
+    type_info[LMD_TYPE_FLOAT64] = {sizeof(double), "f64", &TYPE_FLOAT64, (Type*)&LIT_TYPE_F64};
     type_info[LMD_TYPE_DECIMAL] = {sizeof(void*), "decimal", &TYPE_DECIMAL, (Type*)&LIT_TYPE_DECIMAL};
-    type_info[LMD_TYPE_NUMBER] = {sizeof(double), "number", &TYPE_NUMBER, (Type*)&LIT_TYPE_NUMBER};
     type_info[LMD_TYPE_DTIME] = {sizeof(DateTime), "datetime", &TYPE_DTIME, (Type*)&LIT_TYPE_DTIME};
     type_info[LMD_TYPE_SYMBOL] = {sizeof(char*), "symbol", &TYPE_SYMBOL, (Type*)&LIT_TYPE_SYMBOL};
     type_info[LMD_TYPE_STRING] = {sizeof(char*), "string", &TYPE_STRING, (Type*)&LIT_TYPE_STRING};
@@ -261,6 +270,10 @@ void init_type_info() {
     type_info[LMD_TYPE_ARRAY] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
     type_info[LMD_TYPE_ARRAY_NUM] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
     type_info[LMD_TYPE_MAP] = {sizeof(void*), "map", &TYPE_MAP, (Type*)&LIT_TYPE_MAP};
+    // VMap values are container pointers even though they present as Lambda maps;
+    // shape fields need pointer-sized metadata or later map rebuilds pack them as
+    // zero-byte unknown fields and corrupt ordinary maps that store VMaps.
+    type_info[LMD_TYPE_VMAP] = {sizeof(void*), "map", &TYPE_MAP, (Type*)&LIT_TYPE_MAP};
     type_info[LMD_TYPE_ELEMENT] = {sizeof(void*), "element", &TYPE_ELMT, (Type*)&LIT_TYPE_ELMT};
     type_info[LMD_TYPE_OBJECT] = {sizeof(void*), "object", &TYPE_OBJECT, (Type*)&LIT_TYPE_OBJECT};
     type_info[LMD_TYPE_TYPE] = {sizeof(void*), "type", &TYPE_TYPE, (Type*)&LIT_TYPE_TYPE};
@@ -313,7 +326,7 @@ double it2d(Item itm) {
     else if (itm._type_id == LMD_TYPE_INT64) {
         return (double)itm.get_int64();
     }
-    else if (itm._type_id == LMD_TYPE_FLOAT) {
+    else if (itm._type_id == LMD_TYPE_FLOAT || itm._type_id == LMD_TYPE_FLOAT64) {
         return itm.get_double();
     }
     else if (itm._type_id == LMD_TYPE_DECIMAL) {
@@ -343,7 +356,7 @@ bool it2b(Item itm) {
     else if (itm._type_id == LMD_TYPE_INT) {
         return itm.get_int56() != 0;
     }
-    else if (itm._type_id == LMD_TYPE_FLOAT) {
+    else if (itm._type_id == LMD_TYPE_FLOAT || itm._type_id == LMD_TYPE_FLOAT64) {
         double d = itm.get_double();
         return !isnan(d) && d != 0.0;
     }
@@ -362,7 +375,7 @@ int64_t it2i(Item itm) {
     else if (itm._type_id == LMD_TYPE_INT64) {
         return itm.get_int64();
     }
-    else if (itm._type_id == LMD_TYPE_FLOAT) {
+    else if (itm._type_id == LMD_TYPE_FLOAT || itm._type_id == LMD_TYPE_FLOAT64) {
         return (int64_t)itm.get_double();
     }
     else if (itm._type_id == LMD_TYPE_BOOL) {
@@ -387,7 +400,7 @@ int64_t it2l(Item itm) {
     else if (itm._type_id == LMD_TYPE_INT64) {
         return itm.get_int64();
     }
-    else if (itm._type_id == LMD_TYPE_FLOAT) {
+    else if (itm._type_id == LMD_TYPE_FLOAT || itm._type_id == LMD_TYPE_FLOAT64) {
         return (int64_t)itm.get_double();
     }
     else if (itm._type_id == LMD_TYPE_BOOL) {
@@ -523,13 +536,15 @@ void expand_list(List *list, Arena* arena = nullptr) {
         // and is stored in the list extra slots, need to update the pointer
         for (int i = 0; i < list->length; i++) {
             Item itm = list->items[i];
-            if (itm._type_id == LMD_TYPE_FLOAT || itm._type_id == LMD_TYPE_INT64 || itm._type_id == LMD_TYPE_DTIME) {
+            if (itm._type_id == LMD_TYPE_FLOAT || itm._type_id == LMD_TYPE_FLOAT64 ||
+                    itm._type_id == LMD_TYPE_INT64 || itm._type_id == LMD_TYPE_DTIME) {
                 Item* old_pointer = (Item*)itm.double_ptr;
                 // Only update pointers that are in the old list buffer's extra space
                 if (old_items <= old_pointer && old_pointer < old_items + list->capacity/2) {
                     int offset = old_items + list->capacity/2 - old_pointer;
                     void* new_pointer = list->items + list->capacity - offset;
                     list->items[i] = {.item = itm._type_id == LMD_TYPE_FLOAT ? d2it(new_pointer) :
+                        itm._type_id == LMD_TYPE_FLOAT64 ? f642it(new_pointer) :
                         itm._type_id == LMD_TYPE_INT64 ? l2it(new_pointer) : k2it(new_pointer)};
                 }
                 // if the pointer is not in the old buffer, it should not be updated
@@ -567,9 +582,11 @@ void array_set(Array* arr, int64_t index, Item itm) {
     arr->items[index] = itm;
     TypeId type_id = get_type_id(itm);
     switch (type_id) {
-    case LMD_TYPE_FLOAT: {
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64: {
         double* dval = (double*)(arr->items + (arr->capacity - arr->extra - 1));
-        *dval = itm.get_double();  arr->items[index] = {.item = d2it(dval)};
+        *dval = itm.get_double();
+        arr->items[index] = {.item = type_id == LMD_TYPE_FLOAT64 ? f642it(dval) : d2it(dval)};
         arr->extra++;
         break;
     }
@@ -809,10 +826,11 @@ void list_push(List *list, Item item) {
         }
         break;
     }
-    case LMD_TYPE_FLOAT: {
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64: {
         double* dval = (double*)(list->items + (list->capacity - list->extra - 1));
         *dval = item.get_double();
-        list->items[list->length-1] = {.item = d2it(dval)};
+        list->items[list->length-1] = {.item = item._type_id == LMD_TYPE_FLOAT64 ? f642it(dval) : d2it(dval)};
         list->extra++;
         break;
     }
@@ -876,7 +894,7 @@ void list_push_spread(List *list, Item item) {
                 for (int64_t i = 0; i < arr->length; i++)
                     list_push(list, {.item = l2it(&arr->items[i])});
                 break;
-            case ELEM_FLOAT:
+            case ELEM_FLOAT64:
                 for (int64_t i = 0; i < arr->length; i++)
                     list_push(list, {.item = d2it(&arr->float_items[i])});
                 break;
@@ -935,7 +953,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 // handle type coercion: float → int, bool → int
                 TypeId item_type = get_type_id(item);
                 int64_t val;
-                if (item_type == LMD_TYPE_FLOAT) {
+                if (item_type == LMD_TYPE_FLOAT || item_type == LMD_TYPE_FLOAT64) {
                     val = (int64_t)item.get_double();
                 } else if (item_type == LMD_TYPE_BOOL) {
                     val = item.bool_val ? 1 : 0;
@@ -949,7 +967,8 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 *(int64_t*)field_ptr = item.get_int64();
                 break;
             }
-            case LMD_TYPE_FLOAT: {
+            case LMD_TYPE_FLOAT:
+            case LMD_TYPE_FLOAT64: {
                 // handle type coercion: int → float, int64 → float
                 TypeId item_type = get_type_id(item);
                 double val;
@@ -1029,6 +1048,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 case LMD_TYPE_INT64:
                     titem.long_val = item.get_int64();  break;
                 case LMD_TYPE_FLOAT:
+                case LMD_TYPE_FLOAT64:
                     titem.double_val = item.get_double();  break;
                 case LMD_TYPE_DTIME:
                     titem.datetime_val = item.get_datetime();  break;
@@ -1113,6 +1133,8 @@ Item typeditem_to_item(TypedItem *titem) {
         return {.item = l2it(&titem->long_val)};
     case LMD_TYPE_FLOAT:
         return {.item = d2it(&titem->double_val)};
+    case LMD_TYPE_FLOAT64:
+        return {.item = f642it(&titem->double_val)};
     case LMD_TYPE_DTIME:
         return {.item = k2it(&titem->item)};
     case LMD_TYPE_DECIMAL:
@@ -1176,6 +1198,9 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
     case LMD_TYPE_FLOAT:
         result = {.item = d2it(field_ptr)};  // points to double directly
         break;
+    case LMD_TYPE_FLOAT64:
+        result = {.item = f642it(field_ptr)};  // points to double directly
+        break;
     case LMD_TYPE_DTIME:
         result = {.item = k2it(field_ptr)};  // points to datetime directly
         break;
@@ -1204,6 +1229,12 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
         if (result.container && result.container->type_id == LMD_TYPE_RAW_POINTER) {
             result.container->type_id = type_id;
         }
+        break;
+    case LMD_TYPE_VMAP:
+        // VMap is a host-object pointer, not a Container; reading it through
+        // the generic container arm turns named DOM collection slots into null.
+        memcpy(&ptr_val, field_ptr, sizeof(void*));
+        result.vmap = (VMap*)ptr_val;
         break;
     case LMD_TYPE_ANY: {
         result = typeditem_to_item((TypedItem*)field_ptr);
@@ -1377,6 +1408,7 @@ bool item_deep_equal(Item a, Item b) {
         case LMD_TYPE_INT64:
             return a.get_int64() == b.get_int64();
         case LMD_TYPE_FLOAT:
+        case LMD_TYPE_FLOAT64:
             return a.get_double() == b.get_double();
         case LMD_TYPE_STRING: {
             String* sa = a.get_safe_string();

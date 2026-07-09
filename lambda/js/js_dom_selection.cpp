@@ -18,6 +18,7 @@
 #include "js_dom.h"
 #include "js_dom_events.h"
 #include "js_event_loop.h"
+#include "js_props.h"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
 #include "../lambda.h"
@@ -44,6 +45,10 @@ extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
 extern "C" void* js_dom_current_active_text_control(void);
 extern "C" bool js_doc_has_browsing_context(void* doc);
+extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
+extern "C" Item js_object_get_own_property_names(Item object);
+extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
+extern "C" Item js_get_prototype(Item object);
 
 static Item js_dom_flush_selectionchange(Item this_val, Item* args, int argc);
 
@@ -170,23 +175,31 @@ static DocState* get_or_create_state() {
 }
 
 // ============================================================================
-// Range / Selection wrappers — DOM-style: Map::data holds the native pointer,
-// Map::type holds a sentinel marker, map_kind=MAP_KIND_DOM dispatches all
-// property reads/writes to js_dom_get_property / js_dom_set_property, which
-// route by marker into js_dom_range_get_property / js_dom_selection_get_property.
+// Range / Selection wrappers — native host VMaps carry the native pointer.
+// Property reads/writes still route through js_dom_get_property /
+// js_dom_set_property, which dispatch by wrapper brand into
+// js_dom_range_get_property / js_dom_selection_get_property.
 // No JS-visible "private" properties; no shape allocations on the wrapper.
 // ============================================================================
 
-// Sentinel TypeMap addresses — only their identity matters.
+extern "C" Item vmap_new(void);
+
+static const char js_dom_range_vmap_type_marker = 0;
+static const char js_dom_selection_vmap_type_marker = 0;
+
+// Legacy map marker addresses — kept so older resource-map callers fail closed
+// through the same unwrap helpers during this migration window.
 TypeMap js_dom_range_marker     = {};
 TypeMap js_dom_selection_marker = {};
 
 struct SelectionExpandoEntry {
-    Map* wrapper;
+    void* wrapper;
     uint64_t props_item;
 };
 
 static const int SELECTION_EXPANDO_CAP = 64;
+static __thread SelectionExpandoEntry s_range_expandos[SELECTION_EXPANDO_CAP] = {};
+static __thread int s_range_expando_count = 0;
 static __thread SelectionExpandoEntry s_selection_expandos[SELECTION_EXPANDO_CAP] = {};
 static __thread int s_selection_expando_count = 0;
 
@@ -201,27 +214,78 @@ extern "C" Item js_dom_selection_to_string_value(Item obj);
 // Identity / unwrap ----------------------------------------------------------
 
 extern "C" bool js_dom_item_is_range(Item item) {
-    if (get_type_id(item) != LMD_TYPE_MAP) return false;
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_VMAP) {
+        return item.vmap && item.vmap->host_type == (const void*)&js_dom_range_vmap_type_marker &&
+            item.vmap->host_data != nullptr;
+    }
+    if (type != LMD_TYPE_MAP) return false;
     Map* m = item.map;
-    return m && m->map_kind == MAP_KIND_DOM &&
+    return m && m->map_kind == MAP_KIND_WEB_API_RESOURCE &&
            m->type == (void*)&js_dom_range_marker;
 }
 
 extern "C" bool js_dom_item_is_selection(Item item) {
-    if (get_type_id(item) != LMD_TYPE_MAP) return false;
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_VMAP) {
+        return item.vmap && item.vmap->host_type == (const void*)&js_dom_selection_vmap_type_marker &&
+            item.vmap->host_data != nullptr;
+    }
+    if (type != LMD_TYPE_MAP) return false;
     Map* m = item.map;
-    return m && m->map_kind == MAP_KIND_DOM &&
+    return m && m->map_kind == MAP_KIND_WEB_API_RESOURCE &&
            m->type == (void*)&js_dom_selection_marker;
 }
 
 static inline DomRange* range_from(Item obj) {
-    return js_dom_item_is_range(obj) ? (DomRange*)obj.map->data : nullptr;
+    if (!js_dom_item_is_range(obj)) return nullptr;
+    if (get_type_id(obj) == LMD_TYPE_VMAP) return (DomRange*)obj.vmap->host_data;
+    return (DomRange*)obj.map->data;
 }
 static inline DomSelection* selection_from(Item obj) {
-    return js_dom_item_is_selection(obj) ? (DomSelection*)obj.map->data : nullptr;
+    if (!js_dom_item_is_selection(obj)) return nullptr;
+    if (get_type_id(obj) == LMD_TYPE_VMAP) return (DomSelection*)obj.vmap->host_data;
+    return (DomSelection*)obj.map->data;
 }
 static inline DomRange*     range_from_this()     { return range_from(js_get_this()); }
 static inline DomSelection* selection_from_this() { return selection_from(js_get_this()); }
+
+static bool range_is_native_property(const char* p) {
+    if (!p) return true;
+    return strcmp(p, "startContainer") == 0 ||
+        strcmp(p, "startOffset") == 0 ||
+        strcmp(p, "endContainer") == 0 ||
+        strcmp(p, "endOffset") == 0 ||
+        strcmp(p, "collapsed") == 0 ||
+        strcmp(p, "commonAncestorContainer") == 0 ||
+        strcmp(p, "START_TO_START") == 0 ||
+        strcmp(p, "START_TO_END") == 0 ||
+        strcmp(p, "END_TO_END") == 0 ||
+        strcmp(p, "END_TO_START") == 0 ||
+        strcmp(p, "setStart") == 0 ||
+        strcmp(p, "setEnd") == 0 ||
+        strcmp(p, "setStartBefore") == 0 ||
+        strcmp(p, "setStartAfter") == 0 ||
+        strcmp(p, "setEndBefore") == 0 ||
+        strcmp(p, "setEndAfter") == 0 ||
+        strcmp(p, "collapse") == 0 ||
+        strcmp(p, "selectNode") == 0 ||
+        strcmp(p, "selectNodeContents") == 0 ||
+        strcmp(p, "cloneRange") == 0 ||
+        strcmp(p, "compareBoundaryPoints") == 0 ||
+        strcmp(p, "comparePoint") == 0 ||
+        strcmp(p, "isPointInRange") == 0 ||
+        strcmp(p, "intersectsNode") == 0 ||
+        strcmp(p, "detach") == 0 ||
+        strcmp(p, "toString") == 0 ||
+        strcmp(p, "getClientRects") == 0 ||
+        strcmp(p, "getBoundingClientRect") == 0 ||
+        strcmp(p, "deleteContents") == 0 ||
+        strcmp(p, "extractContents") == 0 ||
+        strcmp(p, "cloneContents") == 0 ||
+        strcmp(p, "insertNode") == 0 ||
+        strcmp(p, "surroundContents") == 0;
+}
 
 static bool selection_is_native_property(const char* p) {
     if (!p) return true;
@@ -256,9 +320,29 @@ static bool selection_is_native_property(const char* p) {
         strcmp(p, "__forceDirection") == 0;
 }
 
+static Item range_expando_map(Item obj, bool create) {
+    if (!js_dom_item_is_range(obj)) return ItemNull;
+    void* wrapper = get_type_id(obj) == LMD_TYPE_VMAP ? (void*)obj.vmap : (void*)obj.map;
+    for (int i = 0; i < s_range_expando_count; i++) {
+        if (s_range_expandos[i].wrapper == wrapper) {
+            return (Item){.item = s_range_expandos[i].props_item};
+        }
+    }
+    if (!create || s_range_expando_count >= SELECTION_EXPANDO_CAP) {
+        return ItemNull;
+    }
+    Item props = js_new_object();
+    if (get_type_id(props) != LMD_TYPE_MAP) return ItemNull;
+    SelectionExpandoEntry* entry = &s_range_expandos[s_range_expando_count++];
+    entry->wrapper = wrapper;
+    entry->props_item = props.item;
+    heap_register_gc_root(&entry->props_item);
+    return props;
+}
+
 static Item selection_expando_map(Item obj, bool create) {
     if (!js_dom_item_is_selection(obj)) return ItemNull;
-    Map* wrapper = obj.map;
+    void* wrapper = get_type_id(obj) == LMD_TYPE_VMAP ? (void*)obj.vmap : (void*)obj.map;
     for (int i = 0; i < s_selection_expando_count; i++) {
         if (s_selection_expandos[i].wrapper == wrapper) {
             return (Item){.item = s_selection_expandos[i].props_item};
@@ -277,6 +361,46 @@ static Item selection_expando_map(Item obj, bool create) {
     return props;
 }
 
+static bool dom_selection_expando_has(Item expando, Item key) {
+    if (get_type_id(expando) != LMD_TYPE_MAP || get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* key_str = it2s(key);
+    return key_str && js_ordinary_has_own(expando, key_str->chars, (int)key_str->len);
+}
+
+static Item dom_selection_expando_descriptor(Item expando, Item key) {
+    if (!dom_selection_expando_has(expando, key)) return make_undef();
+    return js_object_get_own_property_descriptor(expando, key);
+}
+
+static Item dom_selection_expando_delete(Item expando, Item key) {
+    if (!dom_selection_expando_has(expando, key)) return make_bool(true);
+    String* key_str = it2s(key);
+    if (!key_str) return make_bool(true);
+    // Range/Selection expandos are stored off-wrapper, so delete must target
+    // the side-table map rather than the resource wrapper shell.
+    return make_bool(js_ordinary_delete(expando, key_str->chars, (int)key_str->len));
+}
+
+static bool dom_selection_expando_internal_key(const char* name, int name_len) {
+    return name && name_len >= 2 && name[0] == '_' && name[1] == '_';
+}
+
+static Item dom_selection_expando_names(Item expando) {
+    Item result = js_array_new(0);
+    if (get_type_id(expando) != LMD_TYPE_MAP) return result;
+    Item names = js_object_get_own_property_names(expando);
+    if (get_type_id(names) != LMD_TYPE_ARRAY || !names.array) return result;
+    for (int i = 0; i < names.array->length; i++) {
+        Item key = names.array->items[i];
+        if (get_type_id(key) != LMD_TYPE_STRING) continue;
+        String* key_str = it2s(key);
+        if (!key_str) continue;
+        if (dom_selection_expando_internal_key(key_str->chars, (int)key_str->len)) continue;
+        js_array_push(result, key);
+    }
+    return result;
+}
+
 static bool selection_state_set(DomSelection* s,
                                 const DomBoundary* anchor,
                                 const DomBoundary* focus,
@@ -291,16 +415,6 @@ static bool selection_state_set(DomSelection* s,
 static bool selection_state_clear(DomSelection* s,
                                   const char** out_exception) {
     return selection_state_set(s, nullptr, nullptr, out_exception);
-}
-
-static void set_wrapper_prototype(Item obj, const char* ctor_name) {
-    Item global = js_get_global_this();
-    Item ctor = js_property_get(global, make_key(ctor_name));
-    if (get_type_id(ctor) != LMD_TYPE_FUNC) return;
-    Item proto = js_property_get(ctor, make_key("prototype"));
-    if (get_type_id(proto) == LMD_TYPE_MAP) {
-        js_set_prototype(obj, proto);
-    }
 }
 
 static Item get_dom_constructor_prototype(const char* ctor_name) {
@@ -322,12 +436,12 @@ extern "C" Item js_dom_selection_get_prototype_value(void) {
 // Reuse cached JS wrapper if the native object already has one; else build.
 static Item js_object_for_range(DomRange* r) {
     if (!r) return ItemNull;
-    if (r->host_wrapper) return (Item){ .map = (Map*)r->host_wrapper };
+    if (r->host_wrapper) return (Item){ .vmap = (VMap*)r->host_wrapper };
     return build_range_object(r);
 }
 static Item js_object_for_selection(DomSelection* s) {
     if (!s) return ItemNull;
-    if (s->host_wrapper) return (Item){ .map = (Map*)s->host_wrapper };
+    if (s->host_wrapper) return (Item){ .vmap = (VMap*)s->host_wrapper };
     return build_selection_object(s);
 }
 
@@ -763,15 +877,12 @@ static inline void range_sync_props(Item /*obj*/, DomRange* /*r*/) {}
 
 static Item build_range_object(DomRange* r) {
     if (!r) return ItemNull;
-    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    m->type_id  = LMD_TYPE_MAP;
-    m->map_kind = MAP_KIND_DOM;
-    m->type     = (void*)&js_dom_range_marker;
-    m->data     = r;
-    m->data_cap = 0;
-    Item obj = (Item){ .map = m };
-    set_wrapper_prototype(obj, "Range");
-    r->host_wrapper = m;
+    Item obj = vmap_new();
+    if (get_type_id(obj) != LMD_TYPE_VMAP || !obj.vmap) return ItemNull;
+    // Range wrappers have no Map shell; the host brand is the unwrap invariant.
+    obj.vmap->host_type = (const void*)&js_dom_range_vmap_type_marker;
+    obj.vmap->host_data = r;
+    r->host_wrapper = obj.vmap;
     dom_range_retain(r);  // released in js_dom_selection_reset
     return obj;
 }
@@ -873,7 +984,69 @@ extern "C" Item js_dom_range_get_property(Item obj, Item key) {
     if (strcmp(p, "insertNode") == 0)            return _range_methods.insertNode;
     if (strcmp(p, "surroundContents") == 0)      return _range_methods.surroundContents;
 
+    Item expando = range_expando_map(obj, false);
+    if (expando.item != ITEM_NULL) {
+        Item value = js_property_get(expando, key);
+        if (value.item != ITEM_NULL) return value;
+    }
+    if (strcmp(p, "__proto__") == 0) return js_get_prototype(obj);
+    bool proto_found = false;
+    Item proto_value = js_prototype_lookup_ex(obj, key, &proto_found);
+    if (proto_found) return proto_value;
     return ItemNull;
+}
+
+extern "C" Item js_dom_range_set_property(Item obj, Item key, Item value) {
+    if (!range_from(obj)) return value;
+    const char* p = fn_to_cstr(key);
+    if (range_is_native_property(p)) return value;
+    Item expando = range_expando_map(obj, true);
+    if (expando.item != ITEM_NULL) {
+        js_property_set(expando, key, value);
+    }
+    return value;
+}
+
+extern "C" bool js_dom_range_native_property(Item obj, Item key) {
+    if (!range_from(obj)) return false;
+    return range_is_native_property(fn_to_cstr(key));
+}
+
+extern "C" bool js_dom_selection_native_property(Item obj, Item key) {
+    if (!selection_from(obj)) return false;
+    return selection_is_native_property(fn_to_cstr(key));
+}
+
+extern "C" bool js_dom_range_expando_has_property(Item obj, Item key) {
+    return dom_selection_expando_has(range_expando_map(obj, false), key);
+}
+
+extern "C" bool js_dom_selection_expando_has_property(Item obj, Item key) {
+    return dom_selection_expando_has(selection_expando_map(obj, false), key);
+}
+
+extern "C" Item js_dom_range_expando_get_own_property_descriptor(Item obj, Item key) {
+    return dom_selection_expando_descriptor(range_expando_map(obj, false), key);
+}
+
+extern "C" Item js_dom_selection_expando_get_own_property_descriptor(Item obj, Item key) {
+    return dom_selection_expando_descriptor(selection_expando_map(obj, false), key);
+}
+
+extern "C" Item js_dom_range_expando_delete_property(Item obj, Item key) {
+    return dom_selection_expando_delete(range_expando_map(obj, false), key);
+}
+
+extern "C" Item js_dom_selection_expando_delete_property(Item obj, Item key) {
+    return dom_selection_expando_delete(selection_expando_map(obj, false), key);
+}
+
+extern "C" Item js_dom_range_expando_own_property_names(Item obj) {
+    return dom_selection_expando_names(range_expando_map(obj, false));
+}
+
+extern "C" Item js_dom_selection_expando_own_property_names(Item obj) {
+    return dom_selection_expando_names(selection_expando_map(obj, false));
 }
 
 // ============================================================================
@@ -1302,15 +1475,12 @@ static inline void selection_sync_props(Item /*obj*/, DomSelection* /*s*/) {}
 
 static Item build_selection_object(DomSelection* s) {
     if (!s) return ItemNull;
-    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    m->type_id  = LMD_TYPE_MAP;
-    m->map_kind = MAP_KIND_DOM;
-    m->type     = (void*)&js_dom_selection_marker;
-    m->data     = s;
-    m->data_cap = 0;
-    Item obj = (Item){ .map = m };
-    set_wrapper_prototype(obj, "Selection");
-    s->host_wrapper = m;
+    Item obj = vmap_new();
+    if (get_type_id(obj) != LMD_TYPE_VMAP || !obj.vmap) return ItemNull;
+    // Selection wrappers have no Map shell; the host brand is the unwrap invariant.
+    obj.vmap->host_type = (const void*)&js_dom_selection_vmap_type_marker;
+    obj.vmap->host_data = s;
+    s->host_wrapper = obj.vmap;
     return obj;
 }
 
@@ -1421,6 +1591,10 @@ extern "C" Item js_dom_selection_get_property(Item obj, Item key) {
         Item value = js_property_get(expando, key);
         if (value.item != ITEM_NULL) return value;
     }
+    if (strcmp(p, "__proto__") == 0) return js_get_prototype(obj);
+    bool proto_found = false;
+    Item proto_value = js_prototype_lookup_ex(obj, key, &proto_found);
+    if (proto_found) return proto_value;
     return ItemNull;
 }
 
@@ -1607,7 +1781,7 @@ extern "C" void js_dom_selection_install_globals(void) {
     // Install Selection.prototype and Range.prototype with method stubs so
     // WPT idl checks like `Selection.prototype.deleteFromDocument.length`
     // succeed. The methods themselves are never invoked through the
-    // prototype path (instances are MAP_KIND_DOM and dispatch through their
+    // prototype path (instances are DOM resources and dispatch through their
     // own get_property hooks); these are pure idl shape.
     init_selection_methods();
     init_range_methods();
@@ -1798,9 +1972,26 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
     js_doc_runtime_exit(&scope);
 }
 
+extern "C" void js_dom_dispatch_textcontrol_select(DomElement* elem) {
+    if (!elem) return;
+    if (!js_input || !js_input->pool) return;
+    DomDocument* doc = elem->doc ? elem->doc : (DomDocument*)js_dom_get_document();
+    JsDocRuntimeScope scope;
+    if (!js_doc_runtime_enter_if_needed(doc, &scope)) return;
+    Item ev = js_create_event("select", /*bubbles=*/true, /*cancelable=*/false);
+    js_dom_dispatch_event(js_dom_wrap_element(elem), ev);
+    js_doc_runtime_exit(&scope);
+}
+
 extern "C" void js_dom_selection_reset(void) {
     memset(&_range_methods, 0, sizeof(_range_methods));
     memset(&_sel_methods, 0, sizeof(_sel_methods));
+    for (int i = 0; i < s_range_expando_count; i++) {
+        heap_unregister_gc_root(&s_range_expandos[i].props_item);
+        s_range_expandos[i].wrapper = nullptr;
+        s_range_expandos[i].props_item = 0;
+    }
+    s_range_expando_count = 0;
     for (int i = 0; i < s_selection_expando_count; i++) {
         heap_unregister_gc_root(&s_selection_expandos[i].props_item);
         s_selection_expandos[i].wrapper = nullptr;

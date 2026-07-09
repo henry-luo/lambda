@@ -151,6 +151,99 @@ inline Type* unwrap_type(Type* type) {
     return type;
 }
 
+static inline bool validator_sized_kind_is_integer(NumSizedType kind) {
+    return kind == NUM_INT8 || kind == NUM_INT16 || kind == NUM_INT32 ||
+           kind == NUM_UINT8 || kind == NUM_UINT16 || kind == NUM_UINT32;
+}
+
+static inline bool validator_sized_kind_embeds(NumSizedType actual, NumSizedType target) {
+    if (actual == target) return true;
+    switch (target) {
+    case NUM_INT16:
+        return actual == NUM_INT8 || actual == NUM_UINT8;
+    case NUM_INT32:
+        return actual == NUM_INT8 || actual == NUM_INT16 ||
+               actual == NUM_UINT8 || actual == NUM_UINT16;
+    case NUM_UINT16:
+        return actual == NUM_UINT8;
+    case NUM_UINT32:
+        return actual == NUM_UINT8 || actual == NUM_UINT16;
+    case NUM_FLOAT16:
+        return actual == NUM_INT8 || actual == NUM_UINT8;
+    case NUM_FLOAT32:
+        return actual == NUM_FLOAT16 || actual == NUM_INT8 || actual == NUM_INT16 ||
+               actual == NUM_UINT8 || actual == NUM_UINT16;
+    default:
+        return false;
+    }
+}
+
+static inline bool validator_numeric_type_embeds(TypeId actual_tid, NumSizedType actual_kind, Type* target) {
+    target = unwrap_type(target);
+    if (!target) return false;
+    if (target == &TYPE_NUMBER) return IS_NUMERIC_ID(actual_tid);
+    if (target == &TYPE_INTEGER) {
+        return actual_tid == LMD_TYPE_INT || actual_tid == LMD_TYPE_INT64 ||
+               actual_tid == LMD_TYPE_UINT64 ||
+               (actual_tid == LMD_TYPE_NUM_SIZED && validator_sized_kind_is_integer(actual_kind));
+    }
+    if (target->type_id == LMD_TYPE_DECIMAL) return IS_NUMERIC_ID(actual_tid);
+    if (target->type_id == LMD_TYPE_FLOAT64) target = &TYPE_FLOAT;
+    if (actual_tid == LMD_TYPE_FLOAT64) actual_tid = LMD_TYPE_FLOAT;
+    if (actual_tid == target->type_id) {
+        if (actual_tid != LMD_TYPE_NUM_SIZED) return true;
+        return validator_sized_kind_embeds(actual_kind, (NumSizedType)target->kind);
+    }
+    if (actual_tid == LMD_TYPE_NUM_SIZED) {
+        if (target->type_id == LMD_TYPE_INT) return validator_sized_kind_is_integer(actual_kind);
+        if (target->type_id == LMD_TYPE_INT64) {
+            return actual_kind == NUM_INT8 || actual_kind == NUM_INT16 || actual_kind == NUM_INT32 ||
+                   actual_kind == NUM_UINT8 || actual_kind == NUM_UINT16 || actual_kind == NUM_UINT32;
+        }
+        if (target->type_id == LMD_TYPE_UINT64) {
+            return actual_kind == NUM_UINT8 || actual_kind == NUM_UINT16 || actual_kind == NUM_UINT32;
+        }
+        if (target->type_id == LMD_TYPE_FLOAT) {
+            return actual_kind == NUM_FLOAT16 || actual_kind == NUM_FLOAT32 ||
+                   actual_kind == NUM_INT8 || actual_kind == NUM_INT16 || actual_kind == NUM_INT32 ||
+                   actual_kind == NUM_UINT8 || actual_kind == NUM_UINT16 || actual_kind == NUM_UINT32;
+        }
+    }
+    if (actual_tid == LMD_TYPE_INT) {
+        return target->type_id == LMD_TYPE_INT64 || target->type_id == LMD_TYPE_FLOAT;
+    }
+    return false;
+}
+
+static inline bool validator_numeric_item_embeds(ConstItem item, Type* target) {
+    TypeId actual = item.type_id();
+    NumSizedType kind = NUM_INT8;
+    if (actual == LMD_TYPE_NUM_SIZED) {
+        kind = ((Item*)&item)->get_num_type();
+    }
+    return validator_numeric_type_embeds(actual, kind, target);
+}
+
+static inline bool validator_array_elem_embeds(ArrayNumElemType elem_type, Type* target) {
+    switch (elem_type) {
+    case ELEM_INT:     return validator_numeric_type_embeds(LMD_TYPE_INT, NUM_INT8, target);
+    case ELEM_INT64:   return validator_numeric_type_embeds(LMD_TYPE_INT64, NUM_INT8, target);
+    case ELEM_UINT64:  return validator_numeric_type_embeds(LMD_TYPE_UINT64, NUM_INT8, target);
+    case ELEM_FLOAT64: return validator_numeric_type_embeds(LMD_TYPE_FLOAT, NUM_INT8, target);
+    case ELEM_INT8:    return validator_numeric_type_embeds(LMD_TYPE_NUM_SIZED, NUM_INT8, target);
+    case ELEM_INT16:   return validator_numeric_type_embeds(LMD_TYPE_NUM_SIZED, NUM_INT16, target);
+    case ELEM_INT32:   return validator_numeric_type_embeds(LMD_TYPE_NUM_SIZED, NUM_INT32, target);
+    case ELEM_UINT8:
+    case ELEM_UINT8_CLAMPED:
+        return validator_numeric_type_embeds(LMD_TYPE_NUM_SIZED, NUM_UINT8, target);
+    case ELEM_UINT16:  return validator_numeric_type_embeds(LMD_TYPE_NUM_SIZED, NUM_UINT16, target);
+    case ELEM_UINT32:  return validator_numeric_type_embeds(LMD_TYPE_NUM_SIZED, NUM_UINT32, target);
+    case ELEM_FLOAT16: return validator_numeric_type_embeds(LMD_TYPE_NUM_SIZED, NUM_FLOAT16, target);
+    case ELEM_FLOAT32: return validator_numeric_type_embeds(LMD_TYPE_NUM_SIZED, NUM_FLOAT32, target);
+    default:           return false;
+    }
+}
+
 /**
  * Check if a type is optional (TypeUnary with OPERATOR_OPTIONAL)
  *

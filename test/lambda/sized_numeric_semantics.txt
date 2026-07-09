@@ -1,0 +1,40 @@
+"=== subtype is ==="
+true
+true
+true
+true
+true
+true
+true
+false
+false
+true
+true
+true
+true
+true
+true
+false
+true
+true
+false
+false
+true
+true
+true
+false
+"=== f64 type ==="
+float
+"=== mixed arithmetic ==="
+f32
+float
+"=== div mod shift ==="
+error
+error
+error
+error
+0
+u8
+"=== conversion ==="
+255
+u8

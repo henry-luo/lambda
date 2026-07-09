@@ -55,11 +55,19 @@ const TABLE_DOC = `
 </doc>
 `
 
+const GAP_DOC = `
+<doc>
+  <p>before</p>
+  <hr></hr>
+  <p>after</p>
+</doc>
+`
+
 function main(): void {
   const root = document.getElementById('root')
   if (root === null) return
   const seed = (window as unknown as { __RDT_SEED?: string }).__RDT_SEED
-  const src = seed === 'table' ? TABLE_DOC : RICH_DOC
+  const src = seed === 'table' ? TABLE_DOC : seed === 'gap' ? GAP_DOC : RICH_DOC
   const { doc, selection } = parseHtmlToDoc(src, docSchema)
   new FullEditorDom(root, { doc, schema: docSchema, initialSelection: selection })
 }

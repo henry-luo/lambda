@@ -33,7 +33,9 @@ fn merge_list(items) {
 }
 
 fn walk(c) {
-    if (c is element and len(c) > 0) build_merged(c)
+    // non-span nodes such as SVG accents must keep their tag and attributes;
+    // rebuilding them as spans destroys MathLive's stretchy accent markup.
+    if (c is element and len(c) > 0 and name(c) == 'span') build_merged(c)
     else c
 }
 
@@ -65,7 +67,7 @@ fn starts_with_color_style(style) {
 }
 
 fn merge_children(el) {
-    if (len(el) > 0) build_merged(el)
+    if (len(el) > 0 and name(el) == 'span') build_merged(el)
     else el
 }
 
@@ -75,16 +77,10 @@ pub fn coalesce(bx) {
         element: merge_children(bx.element),
         height: bx.height,
         depth: bx.depth,
-        height_raw: bx.height_raw,
-        depth_raw: bx.depth_raw,
-        render_height: bx.render_height,
-        render_depth: bx.render_depth,
-        render_total: bx.render_total,
-        left_right_render_depth: bx.left_right_render_depth,
-        left_right_render_total: bx.left_right_render_total,
         width: bx.width,
         type: bx.type,
         italic: bx.italic,
-        skew: bx.skew
+        skew: bx.skew,
+        max_font_size: bx.max_font_size
     }
 }

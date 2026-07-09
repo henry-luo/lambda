@@ -2,7 +2,7 @@
 
 **Status:** design proposal — for discussion
 **Date:** 2026-07-07
-**Context:** follows the data-processing gap audit (2026-07-07 session) on top of the six-language feature comparison (`Lambda_Semantics_Features.md` Parts 2–3). The audit's conclusion: Lambda is a document-processing language with strong numerics; it is **thin precisely at the relational/columnar layer** — grouped aggregation, joins, window functions, and the tabular type that hosts them. This proposal covers that layer as one coherent design. It **absorbs** `Lambda_DataFrame.md` (columnar frame over `ArrayNum`) as its substrate and extends it with the missing relational operations.
+**Context:** follows the data-processing gap audit (2026-07-07 session) on top of the six-language feature comparison (`Lambda_Semantics_Features.md` Parts 2–3). The audit's conclusion: Lambda is a document-processing language with strong numerics; it is **thin precisely at the relational/columnar layer** — grouped aggregation, joins, window functions, and the tabular type that hosts them. This proposal covers that layer as one coherent design. It **absorbs** `Lambda_Design_DataFrame.md` (columnar frame over `ArrayNum`) as its substrate and extends it with the missing relational operations.
 
 **Scope corrections from the audit** (things Lambda already has, contrary to first impressions):
 - **Regex** — supported through **string patterns** (`doc/Lambda_Type.md` §String Patterns): named, regex-like pattern types integrated into the type system.
@@ -17,10 +17,10 @@
 1. **`group by`** — as a for-clause (completing the FLWOR set) and as a frame verb, over one shared engine.
 2. **Joins** — relational join (today's `join()` is *string* join, `lambda-eval.cpp:4343`): for-clause `on` syntax + a `join` verb with the standard kinds.
 3. **Window / rolling functions** — `lag`/`lead`/`rank`/cumulative/rolling aggregates with explicit `over(...)`.
-4. **DataFrame** — `Lambda_DataFrame.md` Phases 1–5 absorbed as the columnar substrate; this proposal supplies the full verb semantics (its Phase 3) plus windows and pivot/melt.
+4. **DataFrame** — `Lambda_Design_DataFrame.md` Phases 1–5 absorbed as the columnar substrate; this proposal supplies the full verb semantics (its Phase 3) plus windows and pivot/melt.
 
 **Deferred to separate proposals:**
-- **Columnar/binary I/O** — Arrow C Data Interface, Parquet/Feather, Avro (was `Lambda_DataFrame.md` Phase 6). The *in-memory Arrow-shaped column layout* stays (it is storage design, not I/O, and costs nothing now); the interchange surface moves out.
+- **Columnar/binary I/O** — Arrow C Data Interface, Parquet/Feather, Avro (was `Lambda_Design_DataFrame.md` Phase 6). The *in-memory Arrow-shaped column layout* stays (it is storage design, not I/O, and costs nothing now); the interchange surface moves out.
 - **Lazy execution / query planning** — direction **decided** (§8: `stream()` sources, laziness carried by the value, `on error` handling); the detailed engineering design note (plan representation, operator coverage, resume semantics) is still a separate work item before its phase (P8).
 - Distribution/RNG/stats library breadth (the "more math packages" track) — orthogonal, accretes independently.
 
@@ -77,7 +77,7 @@ for (x in sales group by (x.region, x.year) into g)
 - Key equality/hash = **C8 value equality** with C2 numeric-tower coherence (`1` and `1.0` land in one group). Composite keys are list/map values — C8 already defines their equality. Grouping by `null` is allowed (nulls form one group, R/SQL-style — decide vs. drop, see D2).
 - Works over any sequence — element children included: `for (p in doc? [para] group by p.style into g) ...`.
 
-### 4.2 Verb surface (frames — from `Lambda_DataFrame.md`, semantics pinned here)
+### 4.2 Verb surface (frames — from `Lambda_Design_DataFrame.md`, semantics pinned here)
 
 ```lambda
 df |> group(.city) |> agg{ n: count(), avg_age: avg(.age), oldest: max(.age) }
@@ -85,7 +85,7 @@ df |> group(.city, .year) |> agg{ total: sum(.amount) }
 ```
 
 - `group(...)` returns a *grouped frame* (a frame + partition index); `agg{...}` collapses to one row per group. Non-`agg` verbs on a grouped frame apply per-group (enabling grouped `with` — which is how window functions arrive in grouped form, §6).
-- Aggregate vocabulary (both surfaces): existing reductions (`sum`/`avg`/`min`/`max`/`mean`/`median`/`variance`/`quantile`) plus new: `count()`, `count(pred)`, `first`/`last`, `collect` (members as list), `n_distinct`. All null-aware per the validity-bitmap semantics (`skip_na` defaults, `Lambda_DataFrame.md` §2.3).
+- Aggregate vocabulary (both surfaces): existing reductions (`sum`/`avg`/`min`/`max`/`mean`/`median`/`variance`/`quantile`) plus new: `count()`, `count(pred)`, `first`/`last`, `collect` (members as list), `n_distinct`. All null-aware per the validity-bitmap semantics (`skip_na` defaults, `Lambda_Design_DataFrame.md` §2.3).
 
 ### 4.3 Engine
 
@@ -171,7 +171,7 @@ Per partition: sort by the `order` key (reuse `order by` machinery), then a sing
 
 ## 7. DataFrame — absorbed substrate
 
-`Lambda_DataFrame.md` stands as written for the type and storage: `MAP_KIND_DATAFRAME` native-backed Map; independent typed columns (`ArrayNum` numeric/bool, Arrow-style offset/data string columns); validity bitmap as native NA; `frame{...}`/`frame(rows)`/`frame(input(...))` construction; `.field` contextual column references; verbs `where`/`select`/`with`/`sort`; CSV/TSV/SQL I/O phases. This proposal **modifies its plan as follows**:
+`Lambda_Design_DataFrame.md` stands as written for the type and storage: `MAP_KIND_DATAFRAME` native-backed Map; independent typed columns (`ArrayNum` numeric/bool, Arrow-style offset/data string columns); validity bitmap as native NA; `frame{...}`/`frame(rows)`/`frame(input(...))` construction; `.field` contextual column references; verbs `where`/`select`/`with`/`sort`; CSV/TSV/SQL I/O phases. This proposal **modifies its plan as follows**:
 
 1. **Phase 3 (operations) is superseded by §4–§6 here** — `group`/`agg`, `join` (all kinds), and windows land with full semantics shared with the for-clause surface, not as frame-only sketches.
 2. **Adds pivot/reshape to the verb set** (the always-forgotten tidying half): `pivot_longer(df, cols, names_to, values_to)` / `pivot_wider(df, names_from, values_from)` — dplyr/tidyr naming, straightforward on columnar storage. Phase: after group/agg (wider is group+spread; longer is a column unstack).
@@ -237,7 +237,17 @@ on error(e) {
 
 ### 8.5 The optimizer's license
 
-`fn` purity makes plan optimization *provable*: pure stages can be fused, reordered, predicate- and projection-pushed with compiler-verified legality (Polars/DuckDB must trust their UDFs; Lambda verifies). **`pn` stages are barriers** — effects keep their order, no fusion across. A plan whose stages are all `fn` is also exactly what concurrency level 0 (`par` map, K9) can consume for free parallelism later.
+`fn` purity makes plan optimization *provable*: pure stages can be fused, reordered, predicate- and projection-pushed with compiler-verified legality (Polars/DuckDB must trust their UDFs; Lambda verifies). **`pn` stages are barriers** — effects keep their order, no fusion across.
+
+### 8.6 Concurrency integration (see `Lambda_Design_Concurrency.md` §11, K21–K26)
+
+With the concurrency design settled (v3: `start` + tasks + child processes + mailboxes), streams and concurrency compose **at forcing time** — specified in the concurrency doc's §11:
+- **Mailbox streams (K21):** `stream(handle)` as source / `send_to(h)` as sink; the K20e message contract (all messages, per-sender FIFO, termination last with `T^E`) *is* this doc's D12 end-of-stream contract — the two designs converged independently on one contract.
+- **Ordered-by-default parallel `fn` segments (K22):** Stage-A fork-join applies to pure stages invisibly; re-sequencing preserves stream order (K19's sibling policy).
+- **`pn` stages are sequential anchors (K23):** no silent pipelining across effects; explicit `start`-based pipelines cover effectful parallelism.
+- **Resource-into-`start` = ownership escape (K25):** extends R3 of the cleanup ledger — a stage task owns the source it consumes; cancellation runs its cleanup.
+- **Forced pipeline = implicit task scope (K26):** early termination (`first(n)`) cancels upstream tasks and closes sources — promoting task scopes/cancellation to a prerequisite for concurrent stream execution.
+- **Cross-language shared stream core (K27/K28, §11.6):** Lambda streams, WHATWG Web Streams, and Node legacy streams (compat shim) built as faces over one primitive — the bounded Item chunk-queue with `T^E` completion — over the shared uv sources. Commitment split (K28): **WHATWG = committed, aim 100% conformance; legacy Node streams = best-effort shim, no 100% promise**. The streaming-language comparison (Node/WHATWG/Nushell/Unix/jq/Java Streams/GenStage/Akka) is §11.6.1, incl. the P8 implementation note that `stream("big.json")` needs an *incremental parser* (jq `--stream` lesson).
 
 ---
 
@@ -248,7 +258,7 @@ on error(e) {
 | **P0** | Key-equality foundation: canonical value hash consistent with C8/C2; fix/spec `ArrayNum ==` value-equality (open task) | equality/hash property tests |
 | **P1** | `group by ... into` for-clause (generic row engine, hash-partition) + aggregate vocabulary | Rosetta suite v1 (for-clause side); baseline green |
 | **P2** | For-clause `on` equi-join (+ `?` optional side); relational `join()` verb naming resolved vs string-`join` (D7) | join semantics suite |
-| **P3** | DataFrame Phases 1–2 (`Lambda_DataFrame.md`: type, columns, NA bitmap) | its Phase-1/2 tests |
+| **P3** | DataFrame Phases 1–2 (`Lambda_Design_DataFrame.md`: type, columns, NA bitmap) | its Phase-1/2 tests |
 | **P4** | Frame verbs: `where`/`select`/`with`/`sort`/`group`/`agg`/`join` on the columnar engine | **Rosetta cross-check: every query runs on both engines, results diffed** |
 | **P5** | Windows W1 (offset/rank/cumulative/rolling-n, `over`) on both surfaces | window suite |
 | **P6** | Pivot longer/wider; CSV/TSV/SQL I/O (DataFrame Phases 4–5) | round-trip tests |
@@ -282,8 +292,8 @@ P1–P2 are pure language-level wins (no DataFrame needed — they work on array
 
 | Doc | Relationship |
 |---|---|
-| `Lambda_DataFrame.md` | absorbed; Phase 3 superseded by §4–6, Phase 6 deferred out, pivot added |
+| `Lambda_Design_DataFrame.md` | absorbed; Phase 3 superseded by §4–6, Phase 6 deferred out, pivot added |
 | `Lambda_IO_RDB.md` | unchanged; RDB stays the lazy row gateway; SQL write-back arrives via DataFrame Phase 5 |
 | `Lambda_Semantics_Features.md` | this implements Part 3's `group by` row and the data-frame verb steal; the streaming row's direction is now decided here (§8, D9–D12) |
-| `Lambda_Concurrency_Design.md` | level 0 (`par` map) naturally accelerates the columnar engine later; K5 flat sharing pairs with columnar buffers across isolates |
+| `Lambda_Design_Concurrency.md` | streams × concurrency integration in its §11 (K21–K26, see §8.6); internal parallel-`fn` (Stage A, K15) accelerates the columnar engine; K5 flat sharing pairs with columnar buffers across isolates |
 | Future: columnar/binary I/O proposal | Arrow C Data Interface, Parquet/Feather — deferred from here and from DataFrame Phase 6 |

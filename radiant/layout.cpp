@@ -821,6 +821,13 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // This must happen BEFORE CSS resolution so CSS can override defaults
             // (e.g., anchor default blue color overridden by .btn-primary { color: white })
             reset_non_inherited_style_cache(lam::view_require_element(lycon->view));
+            DomElement* parent_elem = (dom_elem->parent && dom_elem->parent->is_element())
+                ? dom_elem->parent->as_element() : nullptr;
+            if (parent_elem && parent_elem->font) {
+                // font-relative CSS values resolve against the parent computed font,
+                // not the mutable font context left by previously-laid-out siblings.
+                setup_font(lycon->ui_context, &lycon->font, parent_elem->font);
+            }
             apply_element_default_style(lycon, dom_elem);
 
             // Track measurement vs full resolution

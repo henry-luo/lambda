@@ -85,8 +85,8 @@ true
 true
 "Non-Latin script tests completed"
 '===== EDGE CASES AND ERROR HANDLING ====='
-"hello equals 42 (type error):"
-error
+"hello equals 42 (cross-family equality):"
+false
 "hello less than true (type error):"
 error
 "Edge case tests completed"

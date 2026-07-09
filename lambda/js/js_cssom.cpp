@@ -2,7 +2,7 @@
  * JavaScript CSSOM (CSS Object Model) Bridge Implementation
  *
  * Wraps CssStylesheet, CssRule, and CssDeclaration structures for JS access.
- * Uses the same sentinel-marker Map pattern as js_dom.cpp.
+ * Uses branded native VMaps for stylesheet/rule/declaration host objects.
  */
 
 #include "js_cssom.h"
@@ -26,9 +26,16 @@
 
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern String* heap_create_name(const char* name, size_t len);
+extern "C" Item vmap_new(void);
 
 // Forward declaration
 static Pool* get_document_pool();
+extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
+
+static void js_cssom_notify_stylesheet_mutation(void) {
+    // stylesheet edits do not touch a DOM node, but they still require post-script cascade.
+    js_dom_notify_mutation(DOM_JS_MUTATION_STYLE, nullptr, nullptr);
+}
 
 // =============================================================================
 // Unicode-Range Parsing & Canonical Serialization
@@ -279,27 +286,45 @@ static const char* css_parse_unicode_range_canonical(const char* input, Pool* po
 // Sentinel Markers for CSSOM Types
 // =============================================================================
 
-static TypeMap js_stylesheet_marker = {};    // CSSStyleSheet wrapper
-static TypeMap js_css_rule_marker = {};      // CSSStyleRule wrapper
-static TypeMap js_rule_decl_marker = {};     // CSSStyleDeclaration (rule) wrapper
+static const char js_stylesheet_vmap_marker = 0;
+static const char js_css_rule_vmap_marker = 0;
+static const char js_rule_decl_vmap_marker = 0;
+
+// Legacy map markers are accepted by the predicates only so old callers fail
+// through the same native unwrap path while CSSOM wrappers move to VMaps.
+static TypeMap js_stylesheet_marker = {};
+static TypeMap js_css_rule_marker = {};
+static TypeMap js_rule_decl_marker = {};
 
 // =============================================================================
 // Type Checking
 // =============================================================================
 
 extern "C" bool js_is_stylesheet(Item item) {
+    if (get_type_id(item) == LMD_TYPE_VMAP) {
+        return item.vmap && item.vmap->host_type == (const void*)&js_stylesheet_vmap_marker &&
+            item.vmap->host_data != nullptr;
+    }
     if (get_type_id(item) != LMD_TYPE_MAP) return false;
     Map* m = item.map;
     return m->type == (void*)&js_stylesheet_marker;
 }
 
 extern "C" bool js_is_css_rule(Item item) {
+    if (get_type_id(item) == LMD_TYPE_VMAP) {
+        return item.vmap && item.vmap->host_type == (const void*)&js_css_rule_vmap_marker &&
+            item.vmap->host_data != nullptr;
+    }
     if (get_type_id(item) != LMD_TYPE_MAP) return false;
     Map* m = item.map;
     return m->type == (void*)&js_css_rule_marker;
 }
 
 extern "C" bool js_is_rule_style_decl(Item item) {
+    if (get_type_id(item) == LMD_TYPE_VMAP) {
+        return item.vmap && item.vmap->host_type == (const void*)&js_rule_decl_vmap_marker &&
+            item.vmap->host_data != nullptr;
+    }
     if (get_type_id(item) != LMD_TYPE_MAP) return false;
     Map* m = item.map;
     return m->type == (void*)&js_rule_decl_marker;
@@ -322,6 +347,45 @@ static void cssom_camel_to_css_prop(const char* js_prop, char* css_buf, size_t b
     css_buf[pos] = '\0';
 }
 
+extern "C" bool js_cssom_resource_has_property(Item item, Item prop_name) {
+    const char* prop = fn_to_cstr(prop_name);
+    if (!prop || !prop[0]) return false;
+
+    if (js_is_stylesheet(item)) {
+        return strcmp(prop, "cssRules") == 0 ||
+               strcmp(prop, "rules") == 0 ||
+               strcmp(prop, "ownerNode") == 0 ||
+               strcmp(prop, "insertRule") == 0 ||
+               strcmp(prop, "deleteRule") == 0;
+    }
+
+    if (js_is_css_rule(item)) {
+        return strcmp(prop, "type") == 0 ||
+               strcmp(prop, "cssText") == 0 ||
+               strcmp(prop, "selectorText") == 0 ||
+               strcmp(prop, "style") == 0 ||
+               strcmp(prop, "parentRule") == 0 ||
+               strcmp(prop, "parentStyleSheet") == 0;
+    }
+
+    if (!js_is_rule_style_decl(item)) return false;
+
+    if (strcmp(prop, "length") == 0 ||
+        strcmp(prop, "cssText") == 0 ||
+        strcmp(prop, "getPropertyValue") == 0 ||
+        strcmp(prop, "setProperty") == 0 ||
+        strcmp(prop, "removeProperty") == 0) {
+        return true;
+    }
+
+    char css_prop[128];
+    cssom_camel_to_css_prop(prop, css_prop, sizeof(css_prop));
+    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    // CSSOM declaration VMaps have no ordinary shape; named support comes
+    // from the CSS property table, matching DOM style objects.
+    return prop_id != CSS_PROPERTY_UNKNOWN && prop_id != 0;
+}
+
 // =============================================================================
 // Helper: Create a string Item
 // =============================================================================
@@ -337,19 +401,19 @@ static Item make_string_item(const char* str) {
 extern "C" Item js_cssom_wrap_stylesheet(void* stylesheet) {
     if (!stylesheet) return ItemNull;
 
-    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    wrapper->type_id = LMD_TYPE_MAP;
-    wrapper->map_kind = MAP_KIND_CSSOM;
-    wrapper->type = (void*)&js_stylesheet_marker;
-    wrapper->data = stylesheet;  // CssStylesheet*
-    wrapper->data_cap = 0;
+    Item wrapper = vmap_new();
+    if (get_type_id(wrapper) != LMD_TYPE_VMAP || !wrapper.vmap) return ItemNull;
+    // CSSOM wrappers have no Map shell; the host brand is the unwrap invariant.
+    wrapper.vmap->host_type = (const void*)&js_stylesheet_vmap_marker;
+    wrapper.vmap->host_data = stylesheet;
 
-    log_debug("js_cssom_wrap_stylesheet: wrapped CssStylesheet=%p as Map=%p", stylesheet, (void*)wrapper);
-    return (Item){.map = wrapper};
+    log_debug("js_cssom_wrap_stylesheet: wrapped CssStylesheet=%p as VMap=%p", stylesheet, (void*)wrapper.vmap);
+    return wrapper;
 }
 
 static CssStylesheet* unwrap_stylesheet(Item item) {
     if (!js_is_stylesheet(item)) return nullptr;
+    if (get_type_id(item) == LMD_TYPE_VMAP) return (CssStylesheet*)item.vmap->host_data;
     return (CssStylesheet*)item.map->data;
 }
 
@@ -480,21 +544,22 @@ static CssRule* get_font_face_as_style_rule(CssRule* rule) {
 // =============================================================================
 
 extern "C" Item js_cssom_wrap_rule(void* rule, void* pool) {
+    (void)pool;
     if (!rule) return ItemNull;
 
-    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    wrapper->type_id = LMD_TYPE_MAP;
-    wrapper->map_kind = MAP_KIND_CSSOM;
-    wrapper->type = (void*)&js_css_rule_marker;
-    wrapper->data = rule;               // CssRule*
-    wrapper->data_cap = 0;
+    Item wrapper = vmap_new();
+    if (get_type_id(wrapper) != LMD_TYPE_VMAP || !wrapper.vmap) return ItemNull;
+    // CSS rule wrappers have no Map shell; the host brand is the unwrap invariant.
+    wrapper.vmap->host_type = (const void*)&js_css_rule_vmap_marker;
+    wrapper.vmap->host_data = rule;
 
-    log_debug("js_cssom_wrap_rule: wrapped CssRule=%p as Map=%p", rule, (void*)wrapper);
-    return (Item){.map = wrapper};
+    log_debug("js_cssom_wrap_rule: wrapped CssRule=%p as VMap=%p", rule, (void*)wrapper.vmap);
+    return wrapper;
 }
 
 static CssRule* unwrap_rule(Item item) {
     if (!js_is_css_rule(item)) return nullptr;
+    if (get_type_id(item) == LMD_TYPE_VMAP) return (CssRule*)item.vmap->host_data;
     return (CssRule*)item.map->data;
 }
 
@@ -503,20 +568,21 @@ static CssRule* unwrap_rule(Item item) {
 // =============================================================================
 
 static Item wrap_rule_decl(CssRule* rule, Pool* pool) {
+    (void)pool;
     if (!rule) return ItemNull;
 
-    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    wrapper->type_id = LMD_TYPE_MAP;
-    wrapper->map_kind = MAP_KIND_CSSOM;
-    wrapper->type = (void*)&js_rule_decl_marker;
-    wrapper->data = rule;               // CssRule* (we access declarations from it)
-    wrapper->data_cap = 0;
+    Item wrapper = vmap_new();
+    if (get_type_id(wrapper) != LMD_TYPE_VMAP || !wrapper.vmap) return ItemNull;
+    // Rule declaration wrappers have no Map shell; the host brand is the unwrap invariant.
+    wrapper.vmap->host_type = (const void*)&js_rule_decl_vmap_marker;
+    wrapper.vmap->host_data = rule;
 
-    return (Item){.map = wrapper};
+    return wrapper;
 }
 
 static CssRule* unwrap_rule_decl(Item item) {
     if (!js_is_rule_style_decl(item)) return nullptr;
+    if (get_type_id(item) == LMD_TYPE_VMAP) return (CssRule*)item.vmap->host_data;
     return (CssRule*)item.map->data;
 }
 
@@ -584,7 +650,13 @@ static const char* serialize_declaration_value(CssDeclaration* decl, Pool* pool)
         return decl->value_text;
     }
 
-    // use parsed value (normalizes standard properties, resolves escapes)
+    if (decl->value_text && decl->value_text_len > 0) {
+        // CSSOM rule declarations expose authored strings. Setter-created
+        // declarations can carry parser value trees that are not safe to walk.
+        return decl->value_text;
+    }
+
+    // use parsed value only when no raw declaration text is available.
     if (decl->value) {
         CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
         if (fmt) {
@@ -597,12 +669,54 @@ static const char* serialize_declaration_value(CssDeclaration* decl, Pool* pool)
         }
     }
 
-    // last resort: raw source text (even with backslash, better than empty)
-    if (decl->value_text && decl->value_text_len > 0) {
-        return decl->value_text;
-    }
-
     return "";
+}
+
+static const char* copy_cssom_value_text(const char* value, Pool* pool) {
+    if (!value || !pool) return "";
+    size_t len = strlen(value);
+    char* copy = (char*)pool_calloc(pool, len + 1);
+    if (!copy) return "";
+    memcpy(copy, value, len);
+    copy[len] = '\0';
+    return copy;
+}
+
+static void append_rule_declaration_text(StringBuf* buf, CssDeclaration* decl, Pool* pool) {
+    if (!buf || !decl || !pool) return;
+
+    const char* name = decl->property_name ? decl->property_name : css_property_get_name(decl->property_id);
+    if (!name) return;
+
+    stringbuf_append_str(buf, name);
+    stringbuf_append_str(buf, ": ");
+    // CSSOM setters synthesize declarations from JS strings; their parsed value
+    // trees are not the serialization source of truth and can be unsafe to walk.
+    stringbuf_append_str(buf, serialize_declaration_value(decl, pool));
+    if (decl->important) {
+        stringbuf_append_str(buf, " !important");
+    }
+}
+
+static const char* serialize_style_rule_css_text(CssRule* rule, Pool* pool) {
+    if (!rule || !pool || rule->type != CSS_RULE_STYLE) return "";
+
+    StringBuf* buf = stringbuf_new(pool);
+    if (!buf) return "";
+
+    stringbuf_append_str(buf, serialize_selector_text(rule, pool));
+    stringbuf_append_str(buf, "{");
+    for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
+        CssDeclaration* decl = rule->data.style_rule.declarations[i];
+        if (!decl) continue;
+        if (i > 0) stringbuf_append_str(buf, " ");
+        append_rule_declaration_text(buf, decl, pool);
+        stringbuf_append_str(buf, ";");
+    }
+    stringbuf_append_str(buf, "}");
+
+    String* result = stringbuf_to_string(buf);
+    return result ? result->chars : "";
 }
 
 // =============================================================================
@@ -838,6 +952,9 @@ extern "C" Item js_cssom_rule_get_property(Item rule_item, Item prop_name) {
 
     if (strcmp(prop, "cssText") == 0) {
         if (!pool) return make_string_item("");
+        if (rule->type == CSS_RULE_STYLE) {
+            return make_string_item(serialize_style_rule_css_text(rule, pool));
+        }
         CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
         if (!fmt) return make_string_item("");
         const char* text = css_format_rule(fmt, rule);
@@ -960,29 +1077,13 @@ extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name) 
     // special: cssText — serialize all declarations
     if (strcmp(prop, "cssText") == 0) {
         if (!pool) return make_string_item("");
-        CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
-        if (!fmt) return make_string_item("");
         StringBuf* buf = stringbuf_new(pool);
         for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
             CssDeclaration* d = rule->data.style_rule.declarations[i];
             if (!d) continue;
             if (i > 0) stringbuf_append_str(buf, " ");
-            const char* name = d->property_name ? d->property_name : css_property_get_name(d->property_id);
-            if (name) {
-                stringbuf_append_str(buf, name);
-                stringbuf_append_str(buf, ": ");
-                // serialize value
-                stringbuf_reset(fmt->output);
-                css_format_value(fmt, d->value);
-                String* val_str = stringbuf_to_string(fmt->output);
-                if (val_str) {
-                    stringbuf_append_str(buf, val_str->chars);
-                }
-                if (d->important) {
-                    stringbuf_append_str(buf, " !important");
-                }
-                stringbuf_append_str(buf, ";");
-            }
+            append_rule_declaration_text(buf, d, pool);
+            stringbuf_append_str(buf, ";");
         }
         String* result = stringbuf_to_string(buf);
         return make_string_item(result ? result->chars : "");
@@ -1072,6 +1173,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
             if (d->property_name && strcmp(d->property_name, css_prop) == 0) {
                 rule->data.style_rule.declarations[i] = new_decl;
                 log_debug("js_cssom_rule_decl_set_property: replaced unicode-range = '%s'", canonical);
+                js_cssom_notify_stylesheet_mutation();
                 return value;
             }
         }
@@ -1086,6 +1188,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
             rule->data.style_rule.declaration_count = count + 1;
         }
         log_debug("js_cssom_rule_decl_set_property: added unicode-range = '%s'", canonical);
+        js_cssom_notify_stylesheet_mutation();
         return value;
     }
 
@@ -1104,6 +1207,10 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
         log_debug("js_cssom_rule_decl_set_property: parse error for '%s: %s'", css_prop, val_str);
         return value;
     }
+    // Keep the JS-authored value as the CSSOM serialization source; parser
+    // value graphs are optimized for cascade/layout and may not be walkable.
+    new_decl->value_text = copy_cssom_value_text(val_str, pool);
+    new_decl->value_text_len = strlen(new_decl->value_text);
 
     // find and replace existing declaration with same property
     CssPropertyId prop_id = css_property_id_from_name(css_prop);
@@ -1117,6 +1224,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
         if (match) {
             rule->data.style_rule.declarations[i] = new_decl;
             log_debug("js_cssom_rule_decl_set_property: replaced '%s' = '%s'", css_prop, val_str);
+            js_cssom_notify_stylesheet_mutation();
             return value;
         }
     }
@@ -1133,6 +1241,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
         rule->data.style_rule.declaration_count = count + 1;
     }
     log_debug("js_cssom_rule_decl_set_property: added '%s' = '%s'", css_prop, val_str);
+    js_cssom_notify_stylesheet_mutation();
     return value;
 }
 
@@ -1186,6 +1295,7 @@ extern "C" Item js_cssom_rule_decl_method(Item decl_item, Item method_name, Item
                     rm_rule->data.style_rule.declarations[j] = rm_rule->data.style_rule.declarations[j + 1];
                 }
                 rm_rule->data.style_rule.declaration_count--;
+                js_cssom_notify_stylesheet_mutation();
                 return make_string_item(old_val);
             }
         }

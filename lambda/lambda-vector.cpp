@@ -99,7 +99,7 @@ static Item vector_get(Item item, int64_t index) {
         case LMD_TYPE_ARRAY_NUM: {
             ArrayNum* arr = item.array_num;
             switch (arr->get_elem_type()) {
-                case ELEM_FLOAT:   return push_d(arr->float_items[index]);
+                case ELEM_FLOAT64: return push_d(arr->float_items[index]);
                 case ELEM_INT64:   return push_l(arr->items[index]);
                 case ELEM_INT:     return { .item = i2it(arr->items[index]) };
                 case ELEM_INT8:    return { .item = i8_to_item(((int8_t*)arr->data)[index]) };
@@ -117,7 +117,6 @@ static Item vector_get(Item item, int64_t index) {
                     *heap_val = val;
                     return { .item = u64_to_item(heap_val) };
                 }
-                case ELEM_FLOAT64: return push_d(((double*)arr->data)[index]);
                 case ELEM_BOOL:    return { .item = b2it(((uint8_t*)arr->data)[index] ? BOOL_TRUE : BOOL_FALSE) };
                 default:           return ItemError;
             }
@@ -174,7 +173,7 @@ static double item_to_double(Item item) {
 
 // check if an elem_type represents a float variant
 static inline bool is_float_elem_type(ArrayNumElemType et) {
-    return et == ELEM_FLOAT || et == ELEM_FLOAT16 || et == ELEM_FLOAT32 || et == ELEM_FLOAT64;
+    return et == ELEM_FLOAT16 || et == ELEM_FLOAT32 || et == ELEM_FLOAT64;
 }
 
 // read compact array element as double without boxing to Item
@@ -182,7 +181,7 @@ static inline double compact_elem_to_double(ArrayNum* arr, int64_t index) {
     switch (arr->get_elem_type()) {
         case ELEM_INT:     return (double)arr->items[index];
         case ELEM_INT64:   return (double)arr->items[index];
-        case ELEM_FLOAT:   return arr->float_items[index];
+        case ELEM_FLOAT64: return arr->float_items[index];
         case ELEM_INT8:    return (double)((int8_t*)arr->data)[index];
         case ELEM_INT16:   return (double)((int16_t*)arr->data)[index];
         case ELEM_INT32:   return (double)((int32_t*)arr->data)[index];
@@ -193,7 +192,6 @@ static inline double compact_elem_to_double(ArrayNum* arr, int64_t index) {
         case ELEM_FLOAT16: return (double)f16_bits_to_f32(((uint16_t*)arr->data)[index]);
         case ELEM_FLOAT32: return (double)((float*)arr->data)[index];
         case ELEM_UINT64:  return (double)((uint64_t*)arr->data)[index];
-        case ELEM_FLOAT64: return ((double*)arr->data)[index];
         default:           return NAN;
     }
 }
@@ -280,7 +278,7 @@ static inline void k_vv_widen(const T* __restrict a, const T* __restrict b,
 
 // element-type predicates for selecting the contiguous same-type fast paths.
 static inline bool is_double_elem(ArrayNumElemType et) {
-    return et == ELEM_FLOAT || et == ELEM_FLOAT64;  // both store double (union-aliased)
+    return et == ELEM_FLOAT64;
 }
 static inline bool is_small_int_elem(ArrayNumElemType et) {
     return et == ELEM_INT8 || et == ELEM_INT16 || et == ELEM_INT32 ||
@@ -322,7 +320,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
     // → same shape as mat).  The 1-element wrapper broadcasts to all positions.
     if (vec_type == LMD_TYPE_ARRAY_NUM && vec.array_num->is_ndim) {
         bool sint = is_scalar_numeric(scalar_type) && scalar_type != LMD_TYPE_FLOAT;
-        ArrayNum* swrap = array_num_new(sint ? ELEM_INT64 : ELEM_FLOAT, 1);
+        ArrayNum* swrap = array_num_new(sint ? ELEM_INT64 : ELEM_FLOAT64, 1);
         if (!swrap) return ItemError;
         if (sint) swrap->items[0] = (int64_t)scalar_val;
         else      swrap->float_items[0] = scalar_val;
@@ -385,7 +383,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
         return { .array_num = result };
     }
 
-    // fast path for double-storage arrays (ELEM_FLOAT / ELEM_FLOAT64) — branch-hoisted,
+    // fast path for double-storage arrays (ELEM_FLOAT64) — branch-hoisted,
     // __restrict kernels for add/sub/mul/div; fmod/pow stay on scalar loops.
     if (vec_type == LMD_TYPE_ARRAY_NUM && is_double_elem(vec.array_num->get_elem_type())) {
         const double* __restrict src = (const double*)vec.array_num->data;
@@ -561,7 +559,7 @@ static int compute_broadcast_shape(
 static inline double read_arr_elem_as_double(ArrayNum* arr, int64_t off) {
     switch (arr->get_elem_type()) {
         case ELEM_INT:   case ELEM_INT64:  return (double)arr->items[off];
-        case ELEM_FLOAT: case ELEM_FLOAT64: return arr->float_items[off];
+        case ELEM_FLOAT64: return arr->float_items[off];
         case ELEM_INT8:    return (double)((int8_t*)arr->data)[off];
         case ELEM_INT16:   return (double)((int16_t*)arr->data)[off];
         case ELEM_INT32:   return (double)((int32_t*)arr->data)[off];
@@ -596,7 +594,7 @@ static inline uint8_t clamp_uint8_even(double value) {
 static inline void write_arr_elem_from_double(ArrayNum* arr, int64_t off, double v) {
     switch (arr->get_elem_type()) {
         case ELEM_INT:   case ELEM_INT64:   arr->items[off] = (int64_t)llround(v); return;
-        case ELEM_FLOAT: case ELEM_FLOAT64: arr->float_items[off] = v; return;
+        case ELEM_FLOAT64: arr->float_items[off] = v; return;
         case ELEM_FLOAT32: ((float*)arr->data)[off] = (float)v; return;
         case ELEM_INT8:   { long r = llround(v); ((int8_t*)arr->data)[off]   = (int8_t)(r < -128 ? -128 : r > 127 ? 127 : r); return; }
         case ELEM_UINT8:  { long r = llround(v); ((uint8_t*)arr->data)[off]  = (uint8_t)(r < 0 ? 0 : r > 255 ? 255 : r); return; }
@@ -614,7 +612,7 @@ static inline void write_arr_elem_from_double(ArrayNum* arr, int64_t off, double
 // Returns true if elem_type stores integers (not floats).
 static inline bool elem_is_int(ArrayNumElemType e) {
     switch (e) {
-        case ELEM_FLOAT: case ELEM_FLOAT16: case ELEM_FLOAT32: case ELEM_FLOAT64:
+        case ELEM_FLOAT16: case ELEM_FLOAT32: case ELEM_FLOAT64:
             return false;
         default: return true;
     }
@@ -674,7 +672,7 @@ static Item vec_broadcast_op(ArrayNum* a, ArrayNum* b, int op) {
     bool result_is_float = !elem_is_int(a->get_elem_type()) ||
                            !elem_is_int(b->get_elem_type()) ||
                            op == 3 || op == 5;
-    ArrayNumElemType result_etype = result_is_float ? ELEM_FLOAT : ELEM_INT64;
+    ArrayNumElemType result_etype = result_is_float ? ELEM_FLOAT64 : ELEM_INT64;
     ArrayNum* result = alloc_ndim_arraynum(result_etype, out_ndim, out_shp);
     if (!result) return ItemError;
 
@@ -713,11 +711,12 @@ static Item vec_broadcast_op(ArrayNum* a, ArrayNum* b, int op) {
 }
 
 // ============================================================================
-// Vectorized comparisons: a OP b (a > 0, a == b, …) → ELEM_BOOL mask array.
+// Element-wise keyword comparisons: a OP b (a gt 0, a eq b, …) → ELEM_BOOL mask array.
 // op codes are (operator - OPERATOR_EQ): 0=EQ 1=NE 2=LT 3=LE 4=GT 5=GE.
 // Used to produce boolean masks for arr[mask] indexing.
 // ============================================================================
 static inline bool cmp_apply(double a, double b, int op) {
+    if (isnan(a) || isnan(b)) return false;
     switch (op) {
         case 0: return a == b;
         case 1: return a != b;
@@ -727,6 +726,24 @@ static inline bool cmp_apply(double a, double b, int op) {
         case 5: return a >= b;
     }
     return false;
+}
+
+static Item cmp_scalar_item(Item a, Item b, int op) {
+    if (op == 0) return (Item){ .item = b2it(fn_eq(a, b)) };
+    if (op == 1) return (Item){ .item = b2it(fn_ne(a, b)) };
+    if (get_type_id(a) == LMD_TYPE_NULL || get_type_id(b) == LMD_TYPE_NULL) return ItemNull;
+    Bool r = BOOL_ERROR;
+    if (op == 2) r = fn_lt_scalar(a, b);
+    else if (op == 3) {
+        r = fn_gt_scalar(a, b);
+        if (r != BOOL_ERROR) r = r ? BOOL_FALSE : BOOL_TRUE;
+    }
+    else if (op == 4) r = fn_gt_scalar(a, b);
+    else if (op == 5) {
+        r = fn_lt_scalar(a, b);
+        if (r != BOOL_ERROR) r = r ? BOOL_FALSE : BOOL_TRUE;
+    }
+    return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r) };
 }
 
 // element-wise comparison of two typed arrays (NumPy broadcast) → ELEM_BOOL array
@@ -753,7 +770,7 @@ static Item vec_cmp_broadcast(ArrayNum* a, ArrayNum* b, int op) {
     return { .array_num = result };
 }
 
-// a OP b where at least one operand is a typed numeric array → bool mask.
+// keyword a OP b: typed numeric arrays broadcast to a mask; scalar-scalar returns bool.
 Item vec_cmp(Item a, Item b, int op) {
     GUARD_ERROR2(a, b);
     bool a_arr = (get_type_id(a) == LMD_TYPE_ARRAY_NUM);
@@ -769,13 +786,14 @@ Item vec_cmp(Item a, Item b, int op) {
         }
         double sv = item_to_double(scalar);
         bool sint = (st != LMD_TYPE_FLOAT);
-        ArrayNum* sw = array_num_new(sint ? ELEM_INT64 : ELEM_FLOAT, 1);
+        ArrayNum* sw = array_num_new(sint ? ELEM_INT64 : ELEM_FLOAT64, 1);
         if (!sw) return ItemError;
         if (sint) sw->items[0] = (int64_t)sv; else sw->float_items[0] = sv;
         return a_arr ? vec_cmp_broadcast(a.array_num, sw, op)
                      : vec_cmp_broadcast(sw, b.array_num, op);
     }
-    return ItemError;  // neither operand is an array (transpiler should not route here)
+    // Scalar keyword comparisons share the same scalar rules as symbolic comparisons.
+    return cmp_scalar_item(a, b, op);
 }
 
 // True iff either ArrayNum carries n-d shape metadata.
@@ -874,7 +892,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         return { .array_num = result };
     }
 
-    // fast path: both double-storage (ELEM_FLOAT / ELEM_FLOAT64) — branch-hoisted,
+    // fast path: both double-storage (ELEM_FLOAT64) — branch-hoisted,
     // __restrict kernels for add/sub/mul/div; fmod/pow stay on scalar loops.
     if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM &&
         is_double_elem(vec_a.array_num->get_elem_type()) &&
@@ -1159,7 +1177,7 @@ Item fn_math_prod(Item item) {
         if (arr->length == 0) {
             return is_float_elem_type(arr->get_elem_type()) ? push_d(1.0) : Item{ .item = i2it(1) };
         }
-        if (arr->get_elem_type() == ELEM_FLOAT) {
+        if (arr->get_elem_type() == ELEM_FLOAT64) {
             double prod = 1.0;
             for (int64_t i = 0; i < arr->length; i++) {
                 prod *= arr->float_items[i];
@@ -1236,7 +1254,7 @@ Item fn_math_cumsum(Item item) {
 
     if (type == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = item.array_num;
-        if (arr->get_elem_type() == ELEM_FLOAT) {
+        if (arr->get_elem_type() == ELEM_FLOAT64) {
             ArrayNum* result = array_float_new(len);
             double sum = 0.0;
             for (int64_t i = 0; i < len; i++) {
@@ -1304,7 +1322,7 @@ Item fn_math_cumprod(Item item) {
 
     if (type == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = item.array_num;
-        if (arr->get_elem_type() == ELEM_FLOAT) {
+        if (arr->get_elem_type() == ELEM_FLOAT64) {
             ArrayNum* result = array_float_new(len);
             double prod = 1.0;
             for (int64_t i = 0; i < len; i++) {
@@ -2343,7 +2361,7 @@ Item fn_reverse(Item item) {
                 list_push(result, vector_get(item, i));
             result->is_content = 1;
             return { .array = result };
-        } else if (arr->get_elem_type() == ELEM_FLOAT) {
+        } else if (arr->get_elem_type() == ELEM_FLOAT64) {
             ArrayNum* result = array_float_new(len);
             for (int64_t i = 0; i < len; i++)
                 result->float_items[i] = arr->float_items[len - 1 - i];
@@ -2609,7 +2627,7 @@ Item fn_unique(Item item) {
     if (type == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = item.array_num;
         Array* result = array();
-        if (arr->get_elem_type() == ELEM_FLOAT) {
+        if (arr->get_elem_type() == ELEM_FLOAT64) {
             for (int64_t i = 0; i < len; i++) {
                 double val = arr->float_items[i];
                 bool found = false;
@@ -2685,7 +2703,11 @@ Item fn_take(Item vec, Item n_item) {
     }
 
     int64_t n = (n_type == LMD_TYPE_INT) ? n_item.get_int56() : n_item.get_int64();
-    if (n < 0) n = 0;
+    if (n < 0) {
+        // C15 forbids negative counts so callers must spell tail-relative intent with `last`.
+        log_error("fn_take: n must be non-negative");
+        return ItemError;
+    }
     if (n > len) n = len;
 
     if (type == LMD_TYPE_ARRAY_NUM) {
@@ -2696,7 +2718,7 @@ Item fn_take(Item vec, Item n_item) {
             for (int64_t i = 0; i < n; i++) list_push(result, vector_get(vec, i));
             result->is_content = 1;
             return { .array = result };
-        } else if (arr->get_elem_type() == ELEM_FLOAT) {
+        } else if (arr->get_elem_type() == ELEM_FLOAT64) {
             ArrayNum* result = array_float_new(n);
             for (int64_t i = 0; i < n; i++) result->float_items[i] = arr->float_items[i];
             return { .array_num = result };
@@ -2712,6 +2734,30 @@ Item fn_take(Item vec, Item n_item) {
         result->is_content = 1;
         return { .array = result };
     }
+}
+
+// take_last(vec, n) - last n elements, preserving original order
+Item fn_take_last(Item vec, Item n_item) {
+    GUARD_ERROR2(vec, n_item);
+
+    TypeId n_type = get_type_id(n_item);
+    if (n_type != LMD_TYPE_INT && n_type != LMD_TYPE_INT64) {
+        log_error("fn_take_last: n must be integer");
+        return ItemError;
+    }
+
+    int64_t n = (n_type == LMD_TYPE_INT) ? n_item.get_int56() : n_item.get_int64();
+    if (n < 0) {
+        // C15 tail counts are explicit counts, not negative-limit sign puns.
+        log_error("fn_take_last: n must be non-negative");
+        return ItemError;
+    }
+
+    int64_t len = fn_len(vec);
+    if (len < 0) return ItemError;
+    if (n > len) n = len;
+    Item start = {.item = i2it(len - n)};
+    return fn_drop(vec, start);
 }
 
 // drop(vec, n) - drop first n elements
@@ -2737,7 +2783,11 @@ Item fn_drop(Item vec, Item n_item) {
     }
 
     int64_t n = (n_type == LMD_TYPE_INT) ? n_item.get_int56() : n_item.get_int64();
-    if (n < 0) n = 0;
+    if (n < 0) {
+        // C15 forbids negative counts so slicing direction is never hidden in the sign.
+        log_error("fn_drop: n must be non-negative");
+        return ItemError;
+    }
     if (n > len) n = len;
 
     int64_t new_len = len - n;
@@ -2750,7 +2800,7 @@ Item fn_drop(Item vec, Item n_item) {
             for (int64_t i = n; i < len; i++) list_push(result, vector_get(vec, i));
             result->is_content = 1;
             return { .array = result };
-        } else if (arr->get_elem_type() == ELEM_FLOAT) {
+        } else if (arr->get_elem_type() == ELEM_FLOAT64) {
             ArrayNum* result = array_float_new(new_len);
             for (int64_t i = 0; i < new_len; i++) result->float_items[i] = arr->float_items[n + i];
             return { .array_num = result };
@@ -2812,7 +2862,7 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
             for (int64_t i = start; i < end; i++) list_push(result, vector_get(vec, i));
             result->is_content = 1;
             return { .array = result };
-        } else if (arr->get_elem_type() == ELEM_FLOAT) {
+        } else if (arr->get_elem_type() == ELEM_FLOAT64) {
             ArrayNum* result = array_float_new(new_len);
             for (int64_t i = 0; i < new_len; i++) result->float_items[i] = arr->float_items[start + i];
             return { .array_num = result };
@@ -3211,7 +3261,7 @@ Item fn_matmul(Item a_item, Item b_item) {
     int a_ndim = get_shape_strides(A, a_shp, a_str);
     int b_ndim = get_shape_strides(B, b_shp, b_str);
     bool rf = !elem_is_int(A->get_elem_type()) || !elem_is_int(B->get_elem_type());
-    ArrayNumElemType ret_et = rf ? ELEM_FLOAT : ELEM_INT64;
+    ArrayNumElemType ret_et = rf ? ELEM_FLOAT64 : ELEM_INT64;
 
     if (a_ndim == 1 && b_ndim == 1) {           // dot product → scalar
         if (a_shp[0] != b_shp[0]) { log_error("fn_matmul: length mismatch %lld vs %lld", (long long)a_shp[0], (long long)b_shp[0]); return ItemError; }
@@ -3268,7 +3318,7 @@ Item fn_matmul(Item a_item, Item b_item) {
 
 // helper: pick the result elem_type for a binary join (concat/stack)
 static ArrayNumElemType join_result_etype(ArrayNum* a, ArrayNum* b) {
-    if (!elem_is_int(a->get_elem_type()) || !elem_is_int(b->get_elem_type())) return ELEM_FLOAT;
+    if (!elem_is_int(a->get_elem_type()) || !elem_is_int(b->get_elem_type())) return ELEM_FLOAT64;
     if (a->get_elem_type() == b->get_elem_type()) return a->get_elem_type();
     return ELEM_INT64;
 }
@@ -3431,7 +3481,7 @@ static double k_reduce_contig(const T* __restrict a, int64_t n) {
 
 // element types the contiguous reducer covers (FLOAT16/BOOL fall back to strided).
 static inline bool is_contig_reducible(ArrayNumElemType et) {
-    return et == ELEM_INT || et == ELEM_INT64 || et == ELEM_FLOAT || et == ELEM_FLOAT64 ||
+    return et == ELEM_INT || et == ELEM_INT64 || et == ELEM_FLOAT64 ||
            et == ELEM_FLOAT32 || et == ELEM_INT8 || et == ELEM_INT16 || et == ELEM_INT32 ||
            et == ELEM_UINT8 || et == ELEM_UINT16 || et == ELEM_UINT32 || et == ELEM_UINT64;
 }
@@ -3450,7 +3500,7 @@ static double reduce_contig_dispatch(ArrayNum* arr, int64_t base_off, int64_t le
         } } while (0)
     switch (arr->get_elem_type()) {
         case ELEM_INT: case ELEM_INT64:     LMD_RED(int64_t);  break;
-        case ELEM_FLOAT: case ELEM_FLOAT64: LMD_RED(double);   break;
+        case ELEM_FLOAT64:                  LMD_RED(double);   break;
         case ELEM_FLOAT32:                  LMD_RED(float);    break;
         case ELEM_INT8:                     LMD_RED(int8_t);   break;
         case ELEM_INT16:                    LMD_RED(int16_t);  break;
@@ -3572,7 +3622,7 @@ static Item array_num_reduce_axis(Item arr_item, Item axis_item, int op, const c
     int64_t out_total = 1;
     for (int d = 0; d < out_ndim; d++) out_total *= out_shape[d];
 
-    ArrayNumElemType ret_et = result_float ? ELEM_FLOAT : ELEM_INT64;
+    ArrayNumElemType ret_et = result_float ? ELEM_FLOAT64 : ELEM_INT64;
     ArrayNum* result = (out_ndim >= 2) ? alloc_ndim_arraynum(ret_et, out_ndim, out_shape)
                                        : array_num_new(ret_et, out_shape[0]);
     if (!result) return ItemError;
@@ -3610,7 +3660,7 @@ static Item array_num_cumulative_axis(Item arr_item, Item axis_item, bool is_pro
         return ItemError;
     }
     bool result_float = !elem_is_int(arr->get_elem_type());
-    ArrayNumElemType ret_et = result_float ? ELEM_FLOAT : ELEM_INT64;
+    ArrayNumElemType ret_et = result_float ? ELEM_FLOAT64 : ELEM_INT64;
 
     // result: same shape, owned C-contiguous
     int64_t full_shape[32];
@@ -3803,7 +3853,6 @@ void fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
     // dynamically typed (ANY), e.g. an index variable, that turns out to be an int).
     if (it == LMD_TYPE_INT || it == LMD_TYPE_INT64) {
         int64_t i = (it == LMD_TYPE_INT) ? idx_item.get_int56() : idx_item.get_int64();
-        if (i < 0) i += arr->length;
         if (i >= 0 && i < arr->length) array_num_set_item(arr, i, val_item);
         return;
     }
@@ -3861,7 +3910,7 @@ Item fn_cumprod_axis(Item arr, Item axis) { return array_num_cumulative_axis(arr
 // Slide a Kh×Kw window (centred on each output's input position) over the spatial
 // dims of `in` (2-D H×W, or 3-D H×W×C applied per-channel) and reduce at each
 // output position.  Border positions outside `in` are filled per `border`.
-// Output is ELEM_FLOAT.  Convolution (blur/sharpen/sobel), morphology
+// Output is ELEM_FLOAT64.  Convolution (blur/sharpen/sobel), morphology
 // (erode/dilate), rank filters (median) and pooling all reduce to this primitive.
 //==============================================================================
 
@@ -3929,7 +3978,7 @@ Item array_num_stencil(Item in_item, Item kernel_item, int op, int border,
     }
     int64_t oH = (H + stride_h - 1) / stride_h, oW = (W + stride_w - 1) / stride_w;
     int64_t oshape[3]; oshape[0] = oH; oshape[1] = oW; if (indim == 3) oshape[2] = C;
-    ArrayNum* out = alloc_ndim_arraynum(ELEM_FLOAT, indim, oshape);
+    ArrayNum* out = alloc_ndim_arraynum(ELEM_FLOAT64, indim, oshape);
     if (!out) return ItemError;
 
     double* dst = out->float_items;          // contiguous, row-major (…, oj, c)
@@ -3979,7 +4028,7 @@ Item array_num_stencil(Item in_item, Item kernel_item, int op, int border,
 static ArrayNum* stencil_box_kernel(int64_t ksize) {
     if (ksize < 1) ksize = 1;
     int64_t shape[2] = { ksize, ksize };
-    ArrayNum* k = alloc_ndim_arraynum(ELEM_FLOAT, 2, shape);
+    ArrayNum* k = alloc_ndim_arraynum(ELEM_FLOAT64, 2, shape);
     if (k) for (int64_t i = 0; i < ksize * ksize; i++) k->float_items[i] = 1.0;
     return k;
 }
@@ -4015,7 +4064,7 @@ Item fn_avgpool(Item img, Item ksize)       { return stencil_box_op(img, ksize, 
 //
 // Convention (matches scikit-image img_as_float / img_as_ubyte):
 //   - ubyte image: ELEM_UINT8, samples in [0, 255]
-//   - float image: ELEM_FLOAT, samples in [0, 1]
+//   - float image: ELEM_FLOAT64, samples in [0, 1]
 // load() yields an (H, W, 4) RGBA ubyte image; the per-channel stencil ops and
 // elementwise kernels then operate on it (work in float via as_float for filters
 // that need fractional values, convert back with as_ubyte before save).
@@ -4024,7 +4073,7 @@ Item fn_avgpool(Item img, Item ksize)       { return stencil_box_op(img, ksize, 
 // Convert every element of `in` into a fresh contiguous ArrayNum of `out_etype`,
 // computing v = read*scale, optionally rounded and clamped to [lo, hi].  Walks an
 // N-D odometer so views (non-contiguous crops) convert correctly.  out_etype is
-// ELEM_FLOAT or ELEM_UINT8 (the two image representations).
+// ELEM_FLOAT64 or ELEM_UINT8 (the two image representations).
 static Item array_num_convert(ArrayNum* in, ArrayNumElemType out_etype, double scale,
                               bool clamp_round, double lo, double hi) {
     int64_t shp[32], str[32];
@@ -4034,7 +4083,7 @@ static Item array_num_convert(ArrayNum* in, ArrayNumElemType out_etype, double s
     if (!out) return ItemError;
     int64_t total = 1;
     for (int d = 0; d < ndim; d++) total *= shp[d];
-    double*  fout = (out_etype == ELEM_FLOAT) ? out->float_items : NULL;
+    double*  fout = (out_etype == ELEM_FLOAT64) ? out->float_items : NULL;
     uint8_t* bout = (out_etype == ELEM_UINT8) ? (uint8_t*)out->data : NULL;
     int64_t idx[32]; for (int d = 0; d < ndim; d++) idx[d] = 0;
     for (int64_t lin = 0; lin < total; lin++) {
@@ -4109,10 +4158,10 @@ Item fn_as_float(Item arr_item) {
         case ELEM_UINT8:    scale = 1.0 / 255.0;   break;
         case ELEM_UINT8_CLAMPED: scale = 1.0 / 255.0; break;
         case ELEM_UINT16:   scale = 1.0 / 65535.0; break;
-        case ELEM_FLOAT: case ELEM_FLOAT32: case ELEM_FLOAT64: scale = 1.0; break;  // passthrough
+        case ELEM_FLOAT64: case ELEM_FLOAT32: scale = 1.0; break;  // passthrough
         default:            scale = 1.0 / 255.0;   break;  // assume 8-bit image range
     }
-    return array_num_convert(in, ELEM_FLOAT, scale, false, 0.0, 0.0);
+    return array_num_convert(in, ELEM_FLOAT64, scale, false, 0.0, 0.0);
 }
 
 // as_ubyte(img): float [0,1] -> ubyte [0,255] (clamp+round; int images clamped).
@@ -4137,7 +4186,7 @@ Item fn_as_ubyte(Item arr_item) {
 static inline double image_white(ArrayNumElemType et) {
     switch (et) {
         case ELEM_UINT16: return 65535.0;
-        case ELEM_FLOAT: case ELEM_FLOAT32: case ELEM_FLOAT64: return 1.0;
+        case ELEM_FLOAT64: case ELEM_FLOAT32: return 1.0;
         default:          return 255.0;
     }
 }

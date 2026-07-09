@@ -43,7 +43,7 @@
 6
 "ab--ab--X--X"
 7
-"X--X--X--X"
+"ab--ab--ab--ab"
 8
 "ab--AB--X"
 'Test 4: Pattern Options'
@@ -57,18 +57,6 @@
   index: 8
 }
 10
-{
-  value: "ab",
-  index: 0
-}
-{
-  value: "ab",
-  index: 4
-}
-{
-  value: "ab",
-  index: 8
-}
 11
 "Y--Y--aB"
 12

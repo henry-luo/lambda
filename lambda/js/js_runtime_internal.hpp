@@ -630,7 +630,33 @@ static inline bool js_is_symbol(Item v) {
 }
 
 static inline bool js_is_bigint(Item v) {
-    return get_type_id(v) == LMD_TYPE_DECIMAL;
+    if (get_type_id(v) != LMD_TYPE_DECIMAL) return false;
+    Decimal* dec = (Decimal*)(v.item & 0x00FFFFFFFFFFFFFFULL);
+    return dec && dec->unlimited == DECIMAL_BIGINT;
+}
+
+static inline bool js_is_native_bigint_egress(Item v) {
+    TypeId type = get_type_id(v);
+    return type == LMD_TYPE_INT64 || type == LMD_TYPE_UINT64;
+}
+
+static inline bool js_is_bigint_egress(Item v) {
+    return js_is_bigint(v) || js_is_native_bigint_egress(v);
+}
+
+static inline Item js_native_bigint_to_bigint(Item v) {
+    TypeId type = get_type_id(v);
+    // Lambda int64/uint64 have a JS BigInt FFI face; canonicalize before using
+    // BigInt runtime helpers, which operate on the mpdec-unlimited backing.
+    if (type == LMD_TYPE_INT64) return bigint_from_int64(it2l(v));
+    if (type == LMD_TYPE_UINT64) {
+        uint64_t* ptr = (uint64_t*)(uintptr_t)(v.item & 0x00FFFFFFFFFFFFFFULL);
+        if (!ptr) return ItemError;
+        char buf[32];
+        int len = snprintf(buf, sizeof(buf), "%llu", (unsigned long long)*ptr);
+        return bigint_from_string(buf, len);
+    }
+    return v;
 }
 
 static inline bool js_check_bigint_arithmetic(Item left, Item right) {

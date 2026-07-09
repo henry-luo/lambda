@@ -4,7 +4,7 @@
 
 Use the 4 reserved bits in the existing `Container` flags byte to store a `map_kind` tag, replacing 9 cascading sentinel-pointer comparisons in `js_property_get()` with a single byte comparison. Plain JS objects (95%+ of property accesses) get a fast path that skips all exotic-object checks. Zero struct size increase.
 
-**Status:** Complete (2026-04-13)
+**Status:** Complete (2026-04-13); DOM/document/style carriers have since migrated toward branded native VMaps, so the MapKind examples below are historical for those Web-platform objects.
 
 ---
 
@@ -16,9 +16,9 @@ Every call to `js_property_get(object, key)` for a plain JS object must fall thr
 if (js_is_typed_array(object)) { ... }   // m->type == &js_typed_array_type_marker
 if (js_is_arraybuffer(object)) { ... }   // m->type == &js_arraybuffer_type_marker
 if (js_is_dataview(object)) { ... }      // m->type == &js_dataview_type_marker
-if (js_is_document_proxy(object)) { ... } // m->type == &js_document_proxy_marker
-if (js_is_dom_node(object)) { ... }      // m->type == &js_dom_type_marker
-if (js_is_computed_style(object)) { ... } // m->type == &js_computed_style_marker
+if (js_is_document_proxy(object)) { ... } // now a branded native VMap
+if (js_is_dom_node(object)) { ... }      // now a branded native VMap
+if (js_is_computed_style(object)) { ... } // now a branded native VMap
 if (js_is_stylesheet(object)) { ... }    // m->type == &js_stylesheet_marker
 if (js_is_css_rule(object)) { ... }      // m->type == &js_css_rule_marker
 if (js_is_rule_style_decl(object)) { ... } // m->type == &js_rule_decl_marker
@@ -43,7 +43,7 @@ enum MapKind : uint8_t {
     MAP_KIND_TYPED_ARRAY = 1,  // Int8Array, Float64Array, etc.
     MAP_KIND_ARRAYBUFFER = 2,  // ArrayBuffer / SharedArrayBuffer
     MAP_KIND_DATAVIEW    = 3,  // DataView
-    MAP_KIND_DOM         = 4,  // DOM nodes (Element, Text, Document proxy, etc.)
+    MAP_KIND_WEB_API_RESOURCE = 4,  // transitional non-node Web API resources
     MAP_KIND_CSSOM       = 5,  // Stylesheet, CSSRule, RuleStyleDeclaration, ComputedStyle
     MAP_KIND_COLLECTION  = 6,  // JS Map/Set/WeakMap/WeakSet (future)
 };
@@ -91,9 +91,8 @@ extern "C" Item js_property_get(Item object, Item key) {
             case MAP_KIND_TYPED_ARRAY: return js_typed_array_property_get(object, key);
             case MAP_KIND_ARRAYBUFFER: return js_arraybuffer_property_get(object, key);
             case MAP_KIND_DATAVIEW:    return js_dataview_property_get(object, key);
-            case MAP_KIND_DOM:     // m->type distinguishes dom_node vs document_proxy vs computed_style
-                if (m->type == (void*)&js_document_proxy_marker) return js_document_proxy_get_property(key);
-                if (m->type == (void*)&js_computed_style_marker) return js_computed_style_get_property(object, key);
+            case MAP_KIND_WEB_API_RESOURCE: // historical: now mostly VMap carriers
+                if (js_is_computed_style_item(object)) return js_computed_style_get_property(object, key);
                 return js_dom_get_property(object, key);
             case MAP_KIND_CSSOM:   // m->type distinguishes stylesheet vs css_rule vs rule_decl
                 if (m->type == (void*)&js_stylesheet_marker) return js_cssom_stylesheet_get_property(object, key);
@@ -122,7 +121,7 @@ Similarly refactor `js_property_set()` — move the 4 exotic checks (document_pr
 | `lambda/lambda.h` | Add `MapKind` enum, repurpose `reserved:4` bitfield as `map_kind:4` in Container flags union |
 | `lambda/lambda.hpp` | No changes needed — inherits `map_kind:4` from Container via C++ inheritance |
 | `lambda/js/js_typed_array.cpp` | Set `map_kind = MAP_KIND_TYPED_ARRAY` / `MAP_KIND_ARRAYBUFFER` / `MAP_KIND_DATAVIEW` at creation sites |
-| `lambda/js/js_dom.cpp` | Set `map_kind = MAP_KIND_DOM` at creation sites |
+| `lambda/js/js_dom.cpp` | Historical: DOM creation sites now produce branded native VMaps |
 | `lambda/js/js_cssom.cpp` | Set `map_kind = MAP_KIND_CSSOM` at creation sites |
 | `lambda/js/js_runtime.cpp` | Refactor `js_property_get()` and `js_property_set()` to use kind-based dispatch |
 

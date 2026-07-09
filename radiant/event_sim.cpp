@@ -73,6 +73,14 @@ static void sim_input_turn_yield() {
 // Forward declarations for callbacks (defined in window.cpp)
 extern void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 extern bool radiant_editing_animation_tick(UiContext* uicon, double timestamp);
+extern "C" bool radiant_dispatch_event_sim_simple_event(UiContext* uicon,
+                                                        View* target,
+                                                        const char* type,
+                                                        bool bubbles,
+                                                        bool cancelable);
+extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
+                                                         View* target,
+                                                         int selected_index);
 extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
                                                          View* source,
                                                          uint32_t source_start,
@@ -1003,6 +1011,30 @@ static View* resolve_target_element(SimEvent* ev, DomDocument* doc) {
     return NULL;
 }
 
+static int parse_view_type_value(ItemReader value) {
+    const char* name = value.cstring();
+    if (name && name[0]) {
+        if (strcmp(name, "none") == 0) return RDT_VIEW_NONE;
+        if (strcmp(name, "text") == 0) return RDT_VIEW_TEXT;
+        if (strcmp(name, "br") == 0) return RDT_VIEW_BR;
+        if (strcmp(name, "marker") == 0) return RDT_VIEW_MARKER;
+        if (strcmp(name, "inline") == 0) return RDT_VIEW_INLINE;
+        if (strcmp(name, "inline-block") == 0) return RDT_VIEW_INLINE_BLOCK;
+        if (strcmp(name, "block") == 0) return RDT_VIEW_BLOCK;
+        if (strcmp(name, "list-item") == 0) return RDT_VIEW_LIST_ITEM;
+        if (strcmp(name, "table") == 0) return RDT_VIEW_TABLE;
+        if (strcmp(name, "table-row-group") == 0) return RDT_VIEW_TABLE_ROW_GROUP;
+        if (strcmp(name, "table-row") == 0) return RDT_VIEW_TABLE_ROW;
+        if (strcmp(name, "table-cell") == 0) return RDT_VIEW_TABLE_CELL;
+        if (strcmp(name, "table-column-group") == 0) return RDT_VIEW_TABLE_COLUMN_GROUP;
+        if (strcmp(name, "table-column") == 0) return RDT_VIEW_TABLE_COLUMN;
+        log_error("event_sim: unknown view_type '%s'", name);
+        return -1;
+    }
+    int view_type = value.asInt32();
+    return view_type == 0 ? -1 : view_type;
+}
+
 // Parse target object: {"selector": "...", "text": "..."}
 // Also reads legacy top-level target_text for backward compat
 static void parse_target(MapReader& reader, SimEvent* ev) {
@@ -1230,11 +1262,11 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
     else if (strcmp(type_str, "assert_caret") == 0) {
         ev->type = SIM_EVENT_ASSERT_CARET;
-        ev->expected_view_type = reader.get("view_type").asInt32();
+        // raw enum ordinals drift when ViewType grows; symbolic names keep caret fixtures tied to rendering intent.
+        ev->expected_view_type = parse_view_type_value(reader.get("view_type"));
         ev->expected_char_offset = reader.get("char_offset").asInt32();
-        if (ev->expected_view_type == 0) ev->expected_view_type = -1;  // treat 0 as "don't check"
         if (ev->expected_char_offset == 0 && !reader.has("char_offset")) ev->expected_char_offset = -1;
-        int not_type = reader.get("view_type_not").asInt32();
+        int not_type = parse_view_type_value(reader.get("view_type_not"));
         if (not_type > 0) {
             ev->expected_view_type = not_type;
             ev->negate_view_type = true;
@@ -1286,8 +1318,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
     else if (strcmp(type_str, "assert_target") == 0) {
         ev->type = SIM_EVENT_ASSERT_TARGET;
-        ev->expected_view_type = reader.get("view_type").asInt32();
-        if (ev->expected_view_type == 0) ev->expected_view_type = -1;
+        ev->expected_view_type = parse_view_type_value(reader.get("view_type"));
     }
     else if (strcmp(type_str, "click") == 0) {
         ev->type = SIM_EVENT_CLICK;
@@ -4118,6 +4149,10 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             DocState* state = (DocState*)doc->state;
             form_control_set_selected_index(state, static_cast<View*>(select), match_index);
+            // user-like select changes must notify JS with selectedness already
+            // mirrored into js_dom; otherwise onchange sees the stale value.
+            radiant_dispatch_event_sim_select_change(uicon, static_cast<View*>(select),
+                                                     match_index);
             if (state) {
                 // Close dropdown if open
                 if (state->open_dropdown == select_view) {

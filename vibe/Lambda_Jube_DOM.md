@@ -1,6 +1,6 @@
 # Lambda Jube DOM Implementation Plan
 
-> Status: POC 1 implementation progress record, updated 2026-07-07.
+> Status: POC 1 implementation progress record, updated 2026-07-08.
 > Parent design: [Lambda_Native_Module_Design.md](./Lambda_Native_Module_Design.md).
 > Working module name: `radiant`, imported as `import radiant`.
 
@@ -11,13 +11,14 @@ Build the first visible Jube native-module POC by moving Radiant DOM access behi
 Current checkpoint:
 
 - POC 1A is now implemented as a compatibility checkpoint. `radiant` is statically registered, JS DOM get/set/wrapper entry points cross the module boundary, the DOM wrapper cache lives under `lambda/module/radiant`, and a tiny Lambda script imports `radiant` and mutates a real Radiant DOM node.
-- The current wrapper representation is still `MAP_KIND_DOM`. This is intentional: the module now owns more policy, but the VMap/native-object representation switch is deferred until the host-object semantics are specified and tested.
+- DOM node wrappers now use branded, non-owning VMaps. The stale `MAP_KIND_DOM` node shell has been removed, and Range, Selection, inline style, computed style, CSSOM stylesheet/rule/declaration resources, document proxies, and foreign-document proxies have also moved to branded native VMaps.
 - Module-owned JS DOM reads currently cover the safe first cluster: element `tagName`, `nodeName`, `localName`, `namespaceURI`, `prefix`, `id`, `className`, `nodeType`; text `data`, `nodeValue`, `textContent`, `length`, `nodeType`, `nodeName`; comment `data`, `nodeValue`, `textContent`, `length`, `nodeType`, `nodeName`.
-- Narrow navigation and snapshot collection reads have also moved into the module bridge: `ownerDocument`, `parentNode`, `parentElement`, `firstChild`, `lastChild`, `nextSibling`, `previousSibling`, `childNodes`, `isConnected`, `attributes`, and the element-only `childElementCount`, `length`, `children`, `content` for the current `<template>` shim, `firstElementChild`, `lastElementChild`, `nextElementSibling`, and `previousElementSibling`, plus the current form-control snapshot reads `form.elements`, `form.length`, and `form[name/id]`.
-- Deterministic document proxy reads now live in the module bridge too: `documentElement`, `body`, `head`, `title`, URL/location component reads, `readyState`, `compatMode`, `characterSet`, `charset`, `contentType`, `nodeType`, `nodeName`, `ownerDocument`, document `childNodes`, `doctype`, and the current `document.forms` snapshot/named-access collection.
-- Module-owned JS DOM setters now cover writable element `id`, `className`, reflected string/integer element IDL writes, simple boolean reflected writes, `disabled` with its focus-clear invariant, select/default boolean reflected writes (`select.multiple`, `input.defaultChecked`, and `option.defaultSelected`) with their dirty-state/reset invariants, live selection setters (`input.checked`, `select.value`, `select.selectedIndex`, `select.length`, `option.selected`, and `option.text`), `option.value`, non-text `input.value`, text-control setters (`value`, `defaultValue`, `selectionStart`, `selectionEnd`, and `selectionDirection`), `contentEditable`, editing hint writes for `inputMode`, `enterKeyHint`, `autocapitalize`, `autocorrect`, `spellcheck`, and `writingSuggestions`, `iframe.srcdoc` with iframe load scheduling, and text-node `data` / `nodeValue` / `textContent`, using narrow JS hooks where existing mutation bookkeeping remains authoritative. Module-owned method dispatch also covers the narrow attribute mutation cluster `setAttribute`, `removeAttribute`, and `toggleAttribute`; the CharacterData methods `replaceData`, `insertData`, `appendData`, `deleteData`, and `substringData`; element selector/descendant lookup methods `getElementsByTagName`, `getElementsByClassName`, `querySelector`, `querySelectorAll`, `matches`, and `closest`; document lookup/selector methods `getElementById`, `getElementsByTagName`, `getElementsByClassName`, `getElementsByName`, `querySelector`, and `querySelectorAll`; document factory methods `createElement`, `createElementNS`, `createTextNode`, `createDocumentFragment`, `createComment`, `createProcessingInstruction`, and `importNode`; document structural methods `normalize`, `adoptNode`, and `appendChild`; document lifecycle/location methods `assign`, `replace`, `reload`, `focus`, `blur`, `open`, `close`, `write`, and `writeln`; document hit-test/legacy command methods `elementFromPoint`, `execCommand`, and `queryCommand*`; document Range/Selection entry methods `createRange` and `getSelection`; Range/Selection wrapper get/set dispatch; editor geometry helper methods `__lambdaBoundaryFromPoint`, `__lambdaTextControlCaretBounds`, and `__lambdaTextControlBoundaryFromPoint`; tree-inspection methods `compareDocumentPosition` and element-scoped `getElementById`; structural methods `appendChild`, `removeChild`, `insertBefore`, `remove`, `normalize`, `cloneNode`, `replaceChild`, `replaceWith`, `insertAdjacentElement`, `insertAdjacentHTML`, `append`, and `prepend`; element, document, and window EventTarget methods `addEventListener`, `removeEventListener`, and `dispatchEvent`; inline style methods `setProperty` and `removeProperty`; element geometry/scroll methods `getBoundingClientRect`, `getClientRects`, `scrollIntoView`, `scroll`, `scrollTo`, and `scrollBy`; text-control methods `setSelectionRange`, `setRangeText`, and `select`; focus/click methods `focus`, `blur`, and `click`; form methods `reset`, `checkValidity`, and `reportValidity`; and reflected/read-normalized attribute clusters covering common string, boolean, integer, `contentEditable` / `isContentEditable`, `inputMode`, and `enterKeyHint` element IDL reads.
-- Remaining JS fallback areas are deliberate: true live collection wrappers, form submission/requestSubmit behavior, broader JS-owned document proxy / window cases, and deeper Range/Selection native-object representation cleanup.
-- Latest gate: `make build`, direct `dom_module_props`, `dom_basic`, `dom_mutation`, and `dom_v12b` expected-output diffs, filtered `dom_module_props` + `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery_lib` + `js_document_exit_context` gtest, `git diff --check`, the Lambda `radiant_poc` sample, and full `./test/test_js_gtest.exe` passed `305/305`.
+- Narrow navigation and collection reads have also moved into the module bridge: `ownerDocument`, `parentNode`, `parentElement`, `firstChild`, `lastChild`, `nextSibling`, `previousSibling`, live element `childNodes` / `children`, `isConnected`, `attributes`, and the element-only `childElementCount`, `length`, `content` for the current `<template>` shim, `firstElementChild`, `lastElementChild`, `nextElementSibling`, and `previousElementSibling`, plus live `form.elements`, `form.length`, and `form[name/id]`, and live select/option reads for `select[i]`, `select.options`, `select.length`, `select.selectedOptions`, `select.selectedIndex`, `select.value`, `select.type`, and option `value`, `text`, `label`, `selected`, `index`, and `form`.
+- Deterministic document proxy reads now live in the module bridge too: `documentElement`, `body`, `head`, `title`, URL/location component reads, `readyState`, `compatMode`, `characterSet`, `charset`, `contentType`, `nodeType`, `nodeName`, `ownerDocument`, document `childNodes`, `doctype`, `fonts`, `styleSheets`, `defaultView`, `implementation`, `designMode`, `activeElement`, foreign-document/window proxy aliases (`defaultView`, `document`, `window`, `self`, and `getSelection`), and live `document.forms` with named access.
+- Module-owned JS DOM setters now cover writable element `id`, `className`, reflected string/integer element IDL writes, simple boolean reflected writes, `disabled` with its focus-clear invariant, select/default boolean reflected writes (`select.multiple`, `input.defaultChecked`, and `option.defaultSelected`) with their dirty-state/reset invariants, live selection setters (`input.checked`, `select.value`, `select.selectedIndex`, `select.length`, `option.selected`, and `option.text`), `option.value`, non-text `input.value`, text-control setters (`value`, `defaultValue`, `selectionStart`, `selectionEnd`, and `selectionDirection`), `contentEditable`, editing hint writes for `inputMode`, `enterKeyHint`, `autocapitalize`, `autocorrect`, `spellcheck`, and `writingSuggestions`, `iframe.srcdoc` with iframe load scheduling, foreign-document proxy property writes under active-document swap, and text-node `data` / `nodeValue` / `textContent`, using narrow JS hooks where existing mutation bookkeeping remains authoritative. Module-owned method dispatch also covers the narrow attribute mutation cluster `setAttribute`, `removeAttribute`, and `toggleAttribute`; the CharacterData methods `replaceData`, `insertData`, `appendData`, `deleteData`, and `substringData`; element selector/descendant lookup methods `getElementsByTagName`, `getElementsByClassName`, `querySelector`, `querySelectorAll`, `matches`, and `closest`; document lookup/selector methods `getElementById`, `getElementsByTagName`, `getElementsByClassName`, `getElementsByName`, `querySelector`, and `querySelectorAll`; document factory methods `createElement`, `createElementNS`, `createTextNode`, `createDocumentFragment`, `createComment`, `createProcessingInstruction`, and `importNode`; document structural methods `normalize`, `adoptNode`, and `appendChild`; document lifecycle/location methods `assign`, `replace`, `reload`, `focus`, `blur`, `open`, `close`, `write`, and `writeln`; document hit-test/legacy command methods `elementFromPoint`, `execCommand`, and `queryCommand*`; document Range/Selection entry methods `createRange` and `getSelection`; Range/Selection wrapper get/set dispatch; editor geometry helper methods `__lambdaBoundaryFromPoint`, `__lambdaTextControlCaretBounds`, and `__lambdaTextControlBoundaryFromPoint`; tree-inspection methods `compareDocumentPosition` and element-scoped `getElementById`; structural methods `appendChild`, `removeChild`, `insertBefore`, `remove`, `normalize`, `cloneNode`, `replaceChild`, `replaceWith`, `insertAdjacentElement`, `insertAdjacentHTML`, `append`, and `prepend`; element, document, and window EventTarget methods `addEventListener`, `removeEventListener`, and `dispatchEvent`; inline style methods `setProperty` and `removeProperty`; element geometry/scroll methods `getBoundingClientRect`, `getClientRects`, `scrollIntoView`, `scroll`, `scrollTo`, and `scrollBy`; text-control methods `setSelectionRange`, `setRangeText`, and `select`; focus/click methods `focus`, `blur`, and `click`; select option-list methods `namedItem`, `add`, and `remove`; foreign-document/window proxy methods under active-document swap plus window-global fallback; form methods `submit`, `requestSubmit`, `reset`, `checkValidity`, and `reportValidity`; and reflected/read-normalized attribute clusters covering common string, boolean, integer, `contentEditable` / `isContentEditable`, `inputMode`, and `enterKeyHint` element IDL reads.
+- The post-Phase 7 cleanup items 1-4 are implemented, plus the document/foreign-document carrier cleanup: MIR method-call lowering no longer emits the stale map-DOM branch, non-node DOM resources use native VMap descriptors, Range/Selection use native VMap wrappers, CSSOM stylesheet/rule/declaration objects use native VMap wrappers, and document/foreign-document proxies no longer use `MAP_KIND_DOC_PROXY` / `MAP_KIND_FOREIGN_DOC` compatibility dispatch.
+- Phase 7 has removed DOM-node `MAP_KIND_DOM` creation/unwrap/runtime dispatch. Jube native type metadata records ownership and host-object hooks; the JS DOM adapter has executable coverage for projected-vs-expando lookup, `in`, `delete`, descriptors, own-key enumeration, prototype lookup/patching, `instanceof`, and Range/Selection expando parity.
+- Latest gate: `make build`, direct `dom_v12b`, `dom_jquery_lib`, `dom_module_props`, and `dom_style` runs passed, and focused `test_js_gtest.exe` over `dom_module_props` + `dom_jquery_lib` + `dom_style` + `dom_v12b` + `input_event_target_ranges_constructor` passed `5/5`. The preceding broad checkpoint also had `make build-test`, full `test_ui_automation_gtest.exe` (`236` with `2` skipped), and `git diff --check` green.
 
 Implementation log:
 
@@ -126,12 +127,41 @@ Implementation log:
 - 2026-07-07: Phase 2 form method dispatch moved. `radiant_dom_bridge.cpp` now owns dispatch for `form.reset`, `form.checkValidity`, and `form.reportValidity`; `js_dom.cpp` exposes narrow hooks so reset event cancellation, text-control reset, validity-state computation, and invalid event dispatch remain behavior-identical.
 - 2026-07-07 form method verification: `make build` passed. `test/js/dom_module_props` covers form invalid-event dispatch, `checkValidity` / `reportValidity` return values, cancelable trusted reset event dispatch, reset cancellation, and text-control reset; direct `dom_module_props`, `dom_basic`, `dom_mutation`, and `dom_v12b` expected-output diffs passed; filtered `JavaScriptTests/JsFileTest.Run/dom_module_props` + `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery_lib` + `js_document_exit_context`, `git diff --check`, Lambda `radiant_poc`, and full `./test/test_js_gtest.exe` passed 305/305.
 - 2026-07-07: Phase 2 editor geometry helper dispatch moved. `radiant_dom_bridge.cpp` now owns method dispatch for `__lambdaBoundaryFromPoint`, `__lambdaTextControlCaretBounds`, and `__lambdaTextControlBoundaryFromPoint`; `js_dom.cpp` keeps the UI-context/layout hit-test implementations behind narrow hooks.
+- 2026-07-07: Phase 2 document proxy read cluster extended. `radiant_dom_bridge.cpp` now owns dispatch for document `fonts`, `styleSheets`, `defaultView`, `implementation`, `designMode`, and `activeElement`; `js_dom.cpp` exposes narrow hooks for JS-owned singleton/state behavior, and the `DOMImplementation` singleton now installs callable IDL methods so property reads such as `document.implementation.createHTMLDocument` match direct calls.
+- 2026-07-07 document proxy read extension verification: `make build` passed. `test/js/dom_module_props` covers activeElement, implementation method property reads, font singleton identity, FontFaceSet ready shape, defaultView identity, and designMode read/write reflection; direct `dom_module_props`, `dom_basic`, `dom_mutation`, and `dom_v12b` expected-output diffs passed; filtered `JavaScriptTests/JsFileTest.Run/dom_module_props` + `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery_lib` + `js_document_exit_context`, `git diff --check`, Lambda `radiant_poc`, and full `./test/test_js_gtest.exe` passed 305/305.
+- 2026-07-07: Phase 2 form submission method dispatch moved. `radiant_dom_bridge.cpp` now owns dispatch for `form.submit` and `form.requestSubmit`, preserving the current LambdaJS behavior where these methods are feature-detection-visible but side-effect-free until real FormData/navigation submission is implemented.
+- 2026-07-07 form submission dispatch verification: `make build` passed. `test/js/dom_module_props` covers truthy method visibility, null call results, and no submit-event dispatch for the current no-op behavior; direct `dom_module_props`, `dom_basic`, `dom_mutation`, and `dom_v12b` expected-output diffs passed; filtered `JavaScriptTests/JsFileTest.Run/dom_module_props` + `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery_lib` + `js_document_exit_context`, `git diff --check`, Lambda `radiant_poc`, and full `./test/test_js_gtest.exe` passed 305/305.
+- 2026-07-07: Phase 2 select/options dispatch moved. `radiant_dom_bridge.cpp` now claims HTMLSelectElement indexed/collection/value reads and HTMLOptionElement value/text/label/selected/index/form reads before generic element fallbacks, and dispatches select `namedItem`, `add`, and `remove` before generic node removal. `js_dom.cpp` also now orders the select `remove(index)` overload before `ChildNode.remove()` so delegated calls preserve option-list semantics.
+- 2026-07-07 select/options dispatch verification: `make build` passed. `test/js/dom_module_props` covers `select[i]`, `options`, `selectedOptions`, `selectedIndex`, `namedItem`, `add`, `remove(index)`, and no-arg `select.remove()` preserving select attachment; direct `dom_module_props`, `dom_basic`, `dom_mutation`, and `dom_v12b` expected-output diffs passed; filtered `JavaScriptTests/JsFileTest.Run/dom_module_props` + `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery_lib` + `js_document_exit_context`, `git diff --check`, Lambda `radiant_poc`, and full `./test/test_js_gtest.exe` passed 305/305.
+- 2026-07-08: Phase 2 foreign-document/window proxy dispatch moved. `radiant_dom_bridge.cpp` now owns foreign-document get/set/method routing: browsing-context aliases (`defaultView`, `document`, `window`, `self`, `getSelection`), active-document-swapped document proxy reads/writes/methods, and the window-global method fallback used by iframe `contentWindow`. This initially routed through the foreign-document map carrier and later moved to the branded VMap carrier.
+- 2026-07-08 foreign-document/window proxy verification: `make build` passed. `test/js/dom_module_props` covers `createHTMLDocument` null `defaultView`, foreign `ownerDocument`, foreign active-document-swapped `createElement` / `getElementById` / `querySelector`, foreign document expandos, iframe `contentDocument === contentWindow`, window alias reads, `getSelection`, srcdoc query, expando writes, and current null `getComputedStyle` fallback behavior; direct `dom_module_props`, `dom_basic`, `dom_mutation`, and `dom_v12b` expected-output diffs passed; filtered `JavaScriptTests/JsFileTest.Run/dom_module_props` + `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery_lib` + `js_document_exit_context`, `git diff --check`, Lambda `radiant_poc`, and full `./test/test_js_gtest.exe` passed 305/305.
+- 2026-07-08: Phase 2 form submission behavior implemented. Module-owned `form.submit` now enters the existing headless navigation path while bypassing validation and the cancelable `submit` event per HTML; module-owned `form.requestSubmit` resolves and validates an optional submitter, runs constraint validation unless `novalidate` / `formnovalidate` applies, dispatches a trusted cancelable `submit` event with `event.submitter`, and then performs the existing GET FormData query serialization/navigation if not canceled. Submit-button click activation now shares the same request-submit path.
+- 2026-07-08 form submission behavior verification: `make build` passed. `test/js/dom_module_props` covers `submit()` no-event behavior, `requestSubmit()` event dispatch and undefined return, invalid-form blocking, explicit submitter identity, and GET navigation/query serialization; direct `dom_module_props`, `dom_basic`, `dom_mutation`, and `dom_v12b` expected-output diffs passed; filtered `JavaScriptTests/JsFileTest.Run/dom_module_props` + `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery_lib` + `js_document_exit_context`, `git diff --check`, Lambda `radiant_poc`, and full `./test/test_js_gtest.exe` passed 305/305.
+- 2026-07-08: Phase 2 live element child collections implemented. Element `children` and `childNodes` now return held Array-backed compatibility wrappers that refresh from JS DOM mutation notifications and before indexed/named reads; `children` keeps the current `HTMLCollection` decoration and `namedItem` behavior.
+- 2026-07-08 live element child collection verification: `make build` passed. `test/js/dom_module_props` covers held `children` / `childNodes` collections across append, including live `length`, indexed identity, and `namedItem`; direct `dom_module_props`, `dom_basic`, `dom_mutation`, and `dom_v12b` expected-output diffs passed; filtered `JavaScriptTests/JsFileTest.Run/dom_module_props` + `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery_lib` + `js_document_exit_context`, `git diff --check`, Lambda `radiant_poc`, and full `./test/test_js_gtest.exe` passed 305/305.
+- 2026-07-08: Phase 2 live form collections implemented. `document.forms` and `form.elements` now return held Array-backed compatibility wrappers that refresh from JS DOM mutation notifications and before indexed/named reads; dynamic named properties are tombstoned when a matching form/control is renamed or removed.
+- 2026-07-08 live form collection verification: `make build` passed. `test/js/dom_module_props` covers held `document.forms` and `form.elements` across append, rename, and remove, including live `length`, indexed identity, new named access, and stale named-slot cleanup; filtered `JavaScriptTests/JsFileTest.Run/dom_module_props`, filtered `dom_basic` + `dom_mutation` + `dom_v12b`, `git diff --check`, and full `./test/test_js_gtest.exe` passed 305/305.
+- 2026-07-08: Phase 2 live lookup collections implemented. Document `getElementsByTagName`, `getElementsByClassName`, and `getElementsByName`, plus element-scoped `getElementsByTagName` and `getElementsByClassName`, now return held Array-backed compatibility wrappers that refresh on DOM/attribute mutation and before indexed reads.
+- 2026-07-08 live lookup collection verification: `make build` passed. `test/js/dom_module_props` covers held document tag/class/name collections and held element tag/class collections across append, attribute mutation, remove, live `length`, and indexed identity; filtered `JavaScriptTests/JsFileTest.Run/dom_module_props`, filtered `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery`, `git diff --check`, and full `./test/test_js_gtest.exe` passed 305/305.
+- 2026-07-08: Phase 2 live select/options collections implemented. Held `select.options` now refreshes on select structural mutation and before indexed reads, keeping dense slots plus decorated companion `length` / `selectedIndex` in sync; held `select.selectedOptions` also refreshes through the mutation hook.
+- 2026-07-08 live select/options verification: `make build` passed. `test/js/dom_module_props` covers a held `select.options` collection across `add()` and `remove(index)`, including live `length`, indexed identity, and `selectedIndex`; focused `JavaScriptTests/JsFileTest.Run/dom_module_props`, filtered `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery`, `git diff --check`, and full `./test/test_js_gtest.exe` passed `305/305`.
+- 2026-07-08 Radiant baseline gate: `make test-radiant-baseline` was attempted after the live select/options migration. UI Automation passed (`236` passed, `2` skipped), Radiant View and headless page-load tests passed, but the overall target remained non-green due to visual/layout baseline gates: `wpt-css-inline` reported `initial-letter-raised-sunken-caps-raise`, Render Visual reported `form_buttons_01`, and the summary listed `9` render baseline regressions.
+- 2026-07-08: Phase 5 VMap readiness started. The migration contract is now written down for native host objects before changing DOM wrappers away from `MAP_KIND_DOM`: vtable projection wins, wrapper expandos fill misses, prototype chain resolves last, DOM nodes use non-owning native wrappers, owned module resources keep finalizers, and JS host-object ops must grow `has`, `delete`, descriptor, enumeration, and prototype hooks. `test/js/dom_module_props` now pins basic DOM element expando reads and `in` visibility as the first executable readiness check.
+- 2026-07-08: Phase 5 executable readiness completed for the current carrier. `JubeTypeDef` now has ownership flags plus host-object ops slots, the Radiant DOM bridge provides host `has`, `delete`, own descriptor, own-key, and prototype behavior for DOM wrappers, DOM element/Range/Selection expandos delete from their side-table stores instead of stale wrapper maps, projected host properties synthesize non-configurable descriptors, own keys enumerate projected names before expandos, and `Element` / `Range` / `Selection` prototype patching and `instanceof` behavior are pinned before the Phase 6 carrier switch.
+- 2026-07-08 Phase 5 readiness verification: direct `dom_module_props` expected-output refresh matched, focused `JavaScriptTests/JsFileTest.Run/dom_module_props` passed, filtered `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery_lib` + `js_document_exit_context` passed, `git diff --check` passed, and full `./test/test_js_gtest.exe` passed `305/305`.
+- 2026-07-08: Phase 6 DOM wrapper carrier switch completed. `radiant_dom_wrap_node()` now returns branded, non-owning DOM VMaps; DOM unwrap/identity/prototype/property/method dispatch paths accept the branded carrier; VMap values have pointer-sized map metadata and shaped map read/write/first-insert support so globals and live collection named properties can store DOM wrappers without corrupting or nulling them.
+- 2026-07-08 Phase 6 verification: `make build` passed, direct `test/js/dom_module_props.js --document test/js/dom_module_props.html --no-log` matched `test/js/dom_module_props.txt`, focused `JavaScriptTests/JsFileTest.Run/dom_module_props` passed, and `./lambda.exe --no-log test/lambda/radiant_poc.ls` returned `"ok"`.
+- 2026-07-08 Phase 6 broad Radiant gate: `make test-radiant-baseline` was attempted and remained non-green in existing broad baseline buckets. Summary: `6154` passed, `49` failed, `358` skipped. Failing buckets were Layout Baseline (`wpt-css-inline` regression), UI Automation (`197` passed, `39` failed), and Render Visual (`197/212` passed, `13` expected failures, `1` skipped, `9` baseline regressions including `form_buttons_01`).
+- 2026-07-08 Phase 6 UI Automation fix: the VMap carrier switch initially skipped `on<type>` IDL/inline handlers because event dispatch only recognized MAP/ELEMENT targets for handler lookup. `fire_listeners()` now treats branded DOM VMaps as DOM targets for that lookup, and standalone `./test/test_ui_automation_gtest.exe` passed `236` tests with `2` skipped.
+- 2026-07-08 Phase 7 DOM-node map shell deletion: `radiant_dom_wrap_node()` no longer falls back to a `MAP_KIND_DOM` wrapper on VMap allocation miss, the stale `js_dom_create_wrapper_impl()` constructor and DOM-node map marker were deleted, and runtime DOM node property/method/prototype dispatch is VMap-only. The former `MAP_KIND_DOM` enum value is now `MAP_KIND_WEB_API_RESOURCE` for the remaining non-node Range/Selection/style resources. Verification: `make build`, direct `dom_module_props` expected-output diff, filtered `dom_module_props` + `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery_lib` + `js_document_exit_context`, `radiant_poc`, full `./test/test_js_gtest.exe` (`305/305`), and full `./test/test_ui_automation_gtest.exe` (`236` passed, `2` skipped) passed.
+- 2026-07-08 post-Phase 7 items 1-4 completed: MIR call lowering now sends map receivers through `js_map_method()` and VMap host receivers through the VMap dispatch path without the stale map-DOM branch; inline style and computed style resources use branded native VMaps; Range and Selection wrappers use branded native VMaps with side-table expandos preserved; CSSOM stylesheet/rule/declaration wrappers use branded native VMaps and route `in`, get/set, method, descriptor, and prototype paths through native resource predicates. The DOM unwrap guard now unwraps only Radiant-branded node VMaps so style/CSSOM VMaps cannot recurse through the Radiant fallback path. Verification: `make build`, `make build-test`, direct `dom_v12b`, `dom_jquery_lib`, `dom_module_props`, and `dom_style` runs passed; focused `test_js_gtest.exe` over `dom_module_props` + `dom_jquery_lib` + `dom_style` + `dom_v12b` + `input_event_target_ranges_constructor` passed `5/5`; full `test_ui_automation_gtest.exe` passed `236` with `2` skipped; `git diff --check` passed.
+- 2026-07-08 document/foreign-document carrier cleanup completed: the main `document` proxy and foreign documents produced by `document.implementation.create*Document` now use branded native VMaps with `host_data` carrying the active `DomDocument`; document unwrap, get/set, `in`, method dispatch, and prototype lookup route through the VMap predicates; the stale `MAP_KIND_DOC_PROXY` / `MAP_KIND_FOREIGN_DOC` JS compatibility dispatch and marker state were removed. Verification: `make build`, direct `dom_module_props`, `dom_v12b`, `dom_jquery_lib`, and `dom_style` runs passed; focused `test_js_gtest.exe` over `dom_module_props` + `dom_jquery_lib` + `dom_style` + `dom_v12b` + `input_event_target_ranges_constructor` passed `5/5`.
 - 2026-07-07 editor geometry helper verification: `make build` passed. `test/js/dom_module_props` covers callability and the headless null-return path for the moved helper dispatch; direct `dom_module_props`, `dom_basic`, `dom_mutation`, and `dom_v12b` expected-output diffs passed; filtered `JavaScriptTests/JsFileTest.Run/dom_module_props` + `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery_lib` + `js_document_exit_context`, `git diff --check`, Lambda `radiant_poc`, and full `./test/test_js_gtest.exe` passed 305/305.
 
 POC 1A deliverable status:
 
 1. Done: add a statically linked `radiant` Jube module.
-2. In progress: move DOM property and method resolution tables into module-owned code. The safe clusters now include basic identity/value reads, narrow navigation reads, owner-document reads, snapshot child-list/attribute reads, the current template content shim, deterministic document proxy reads, the current `document.forms` snapshot/named-access collection, form-control collection/named reads, read-only inspection methods, narrow attribute mutation methods, CharacterData mutation methods, element selector/descendant lookup methods, document lookup/selector methods, document factory methods, document structural methods, document lifecycle/location methods, document hit-test/legacy command methods, document Range/Selection entry methods and wrapper get/set dispatch, editor geometry helper methods, tree-inspection methods, structural methods, element/document/window EventTarget methods, inline style methods, CSSOM methods, element geometry/scroll methods, common reflected attribute reads, reflected string/integer setters, simple boolean reflected setters, the `disabled`, `contentEditable`, select/default boolean reflected setters, live selection setters, editing/input hint setters, hint/spelling setters, `iframe.srcdoc` setter, simple `value` setters, option subtree setters, text-control setters, text-control methods, focus/click methods, and form reset/validation methods; form submission/requestSubmit and broader JS-owned document proxy / window paths remain on JS fallback.
+2. Done for the current POC scope: move DOM property and method resolution tables into module-owned code. The safe clusters now include basic identity/value reads, narrow navigation reads, owner-document reads, live element child collections, live form collections, live lookup collections, live select/options collections, snapshot attribute reads, the current template content shim, deterministic document proxy reads including the current `fonts`, `styleSheets`, `defaultView`, `implementation`, `designMode`, and `activeElement` cluster, foreign-document/window proxy routing, form-control named reads, select/option collection and value reads, read-only inspection methods, narrow attribute mutation methods, CharacterData mutation methods, element selector/descendant lookup methods, document lookup/selector methods, document factory methods, document structural methods, document lifecycle/location methods, document hit-test/legacy command methods, document Range/Selection entry methods and wrapper get/set dispatch, editor geometry helper methods, tree-inspection methods, structural methods, element/document/window EventTarget methods, inline style methods, CSSOM methods, element geometry/scroll methods, common reflected attribute reads, reflected string/integer setters, simple boolean reflected setters, the `disabled`, `contentEditable`, select/default boolean reflected setters, live selection setters, editing/input hint setters, hint/spelling setters, `iframe.srcdoc` setter, simple `value` setters, option subtree setters, text-control setters, text-control methods, focus/click methods, select option-list methods, and form reset/validation/submission methods; Range/Selection/style/CSSOM and document/foreign-document carriers now use native VMap wrappers.
 3. Done for checkpoint: keep existing `MAP_KIND_DOM` wrappers, but make their get/set and wrapper factory surface delegate through the module-owned bridge.
 4. Done: add the host/module DOM wrapper cache required by the native-module design, without scoping it per `DomDocument`.
 5. Done: add one tiny Lambda-facing sample early so the POC proves cross-front-end access, not only JS compatibility.
@@ -270,12 +300,12 @@ Purpose: move DOM policy into the module while preserving wrappers.
 Status:
 
 - Started 2026-07-06 with the compatibility bridge: public JS DOM get/set entry points route through `radiant_dom_get_property()` / `radiant_dom_set_property()`.
-- First read cluster moved 2026-07-06. The module now owns simple identity/name/value reads for elements, text nodes, and comment nodes, including element `className`, plus narrow node and element navigation reads, `ownerDocument`, snapshot child/attribute collection reads, the current template `content` shim, deterministic document proxy reads, the current `document.forms` snapshot/named-access collection, form-control collection/named reads, read-only inspection methods, narrow attribute mutation methods, CharacterData mutation methods, element selector/descendant lookup methods, document lookup/selector methods, document factory methods, document structural methods, document lifecycle/location methods, document hit-test/legacy command methods, document Range/Selection entry methods and wrapper get/set dispatch, editor geometry helper methods, tree-inspection methods, structural methods, element/document/window EventTarget methods, inline style methods, CSSOM methods, element geometry/scroll methods, common reflected attribute reads, editing/input hint reads, reflected string/integer setters, simple boolean reflected setters, the `disabled` setter, the `contentEditable` setter, select/default boolean reflected setters, live selection setters, hint/spelling setters, the `iframe.srcdoc` setter, simple `value` setters, option subtree setters, text-control setters, text-control methods, focus/click methods, and form reset/validation methods.
+- First read cluster moved 2026-07-06. The module now owns simple identity/name/value reads for elements, text nodes, and comment nodes, including element `className`, plus narrow node and element navigation reads, `ownerDocument`, live element child collections, live form collections, live lookup collections, live select/options collections, snapshot attribute reads, the current template `content` shim, deterministic document proxy reads including the current `fonts`, `styleSheets`, `defaultView`, `implementation`, `designMode`, and `activeElement` cluster, foreign-document/window proxy routing, form-control named reads, select/option collection and value reads, read-only inspection methods, narrow attribute mutation methods, CharacterData mutation methods, element selector/descendant lookup methods, document lookup/selector methods, document factory methods, document structural methods, document lifecycle/location methods, document hit-test/legacy command methods, document Range/Selection entry methods and wrapper get/set dispatch, editor geometry helper methods, tree-inspection methods, structural methods, element/document/window EventTarget methods, inline style methods, CSSOM methods, element geometry/scroll methods, common reflected attribute reads, editing/input hint reads, reflected string/integer setters, simple boolean reflected setters, the `disabled` setter, the `contentEditable` setter, select/default boolean reflected setters, live selection setters, hint/spelling setters, the `iframe.srcdoc` setter, simple `value` setters, option subtree setters, text-control setters, text-control methods, select option-list methods, and form reset/validation/submission methods.
 - Writable element `id` and `className` moved 2026-07-06. The module uses `dom_element_set_attribute()` for native cache maintenance and a narrow JS mutation hook for the existing mutation ledger.
 - Writable text-node `data`, `nodeValue`, and `textContent` moved 2026-07-06. The module dispatches them through a narrow JS helper that preserves the existing live range and mutation-publication invariants.
 - Added `test/js/dom_module_props.js` / `.html` / `.txt` to pin the moved clusters through the normal JS DOM harness.
-- Current verification: direct `dom_module_props`, `dom_basic`, `dom_mutation`, and `dom_v12b` expected-output diffs, filtered gtest `JavaScriptTests/JsFileTest.Run/dom_module_props` + `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery_lib` + `js_document_exit_context`, `git diff --check`, Lambda `radiant_poc`, and full JS gtest passed.
-- Remaining Phase 2 work: form submission/requestSubmit behavior, broader JS-owned document proxy / window cases, and true live collection wrappers remain on JS fallback; deeper Range/Selection native-object representation cleanup is deferred with the VMap/native-object work.
+- Current verification: direct `dom_module_props`, `dom_basic`, `dom_mutation`, and `dom_v12b` expected-output diffs, filtered gtest `JavaScriptTests/JsFileTest.Run/dom_module_props` + `dom_basic` + `dom_mutation` + `dom_v12b` + `dom_jquery_lib` + `js_document_exit_context`, `git diff --check`, Lambda `radiant_poc`, and full JS gtest passed. `make test-radiant-baseline` was attempted and remains non-green in the visual/layout baseline gates documented above.
+- Post-Phase 7 update: Range/Selection native-object carrier cleanup is complete; broader Range/Selection conformance remains tracked outside the carrier migration.
 
 Tasks:
 
@@ -298,7 +328,7 @@ Acceptance:
 - Complete for first cluster: existing `MAP_KIND_DOM` property get/set still works.
 - Complete for first cluster: moved reads have no behavior delta in targeted JS DOM tests.
 - Complete: `make build` passed.
-- In progress overall: writable properties, navigation, methods, style/CSSOM, collections, Range/Selection, and geometry remain to migrate.
+- In progress overall: deeper native-object representation cleanup remains to migrate with the VMap work.
 
 ### Phase 3: Module/Host Wrapper Cache
 
@@ -379,30 +409,66 @@ Acceptance:
 
 Purpose: answer the questions that block deleting `MAP_KIND_DOM`.
 
+Status:
+
+- Completed 2026-07-08 as a readiness checkpoint after the Phase 2 compatibility migration. No wrapper representation has changed yet; that is Phase 6.
+- The host-object contract for JS-visible native objects is now specified and has current-carrier hooks for `[[HasProperty]]`, `[[Delete]]`, descriptor reflection, enumeration, prototypes, and expando storage. `[[Get]]` and `[[Set]]` still route through the existing DOM get/set bridge until the VMap carrier switch.
+- Executable readiness pins live in `test/js/dom_module_props`: DOM element, Range, and Selection expandos must be readable through normal property access, visible to `in`, descriptor-reflected, enumerable through own keys, deletable through the side-table store, and able to see registered prototype patches.
+
+Host-object lookup contract:
+
+- Canonicalize the JS key with `ToPropertyKey` before any host-object dispatch.
+- Ask the module vtable for a projected own property first. A projected hit shadows wrapper expandos and the prototype chain.
+- On projected miss, consult the wrapper's JS expando store. This store carries ordinary JS descriptor bits and is the only place script-added own properties live.
+- On expando miss, walk the registered prototype chain (`dom_node` -> `Node.prototype` -> `EventTarget.prototype`, `dom_element` -> `Element.prototype` -> `Node.prototype`, concrete HTML subclasses later).
+- Range and Selection wrappers follow the same host-object rules, but their native payloads are internal selection/range records rather than Radiant-owned `DomNode*` values.
+
+Ownership contract:
+
+- `dom_node`, `dom_element`, `dom_text`, `dom_comment`, and document-proxy wrappers are non-owning host objects. Their `destroy` operation unroots wrapper-side state but never frees the Radiant node/document.
+- Owned module resources still use VMap finalizers. `JubeTypeDef` therefore needs an explicit ownership flag, not a convention inferred from whether `destroy` is null.
+- Wrapper caches own the `Item` identity/root, not the native pointer lifetime. Document teardown invalidates cached wrappers before Radiant frees the backing arena; future subtree/node frees need the finer-grained invalidation hook already called out in Phase 3.
+
+JS adapter requirements before carrier switch:
+
+- Done for current carrier: add host-object `has` so `'id' in el` and expando membership do not depend on ad hoc own-shape probes.
+- Done for current carrier: add host-object `delete` so projected DOM IDL attributes reject deletion according to their descriptor, while configurable expandos delete from the wrapper side-table store.
+- Done for current carrier: add descriptor synthesis for projected properties. Current projected descriptors are enumerable, writable, and non-configurable; expando descriptors remain ordinary JS descriptors.
+- Done for current carrier: add stable own-key enumeration with projected enumerable keys first in module-declared order, then expando keys in insertion order, excluding tombstones.
+- Done for current carrier: add prototype mapping by native type. `instanceof`, `__proto__`, and prototype patching are now pinned for Element, Range, and Selection before VMap carrier work.
+- Preserve live collection wrappers. Element, form, lookup, and select/options collection carriers may stay Array-backed during the DOM wrapper switch, but their owner lookup and mutation refresh hooks must continue to work when owners are VMap host objects.
+- Preserve EventTarget rooting. Any native structure that stores script callbacks must expose or root those `Item`s through the host GC API; finalizers must not run script or allocate.
+
+Selected readiness tests:
+
+- Already pinned: wrapper identity (`test/js/dom_identity.js`), live element/form/lookup/select collections (`test/js/dom_module_props.js`), Range/Selection callable dispatch and identity (`test/js/dom_module_props.js` plus focused WPT selection slices), and DOM element expandos with `in`.
+- Now pinned before switching wrappers: `Object.getOwnPropertyDescriptor` for projected attributes and expandos, `delete` for projected attributes and expandos, `Object.keys` ordering for projected-plus-expando keys, `instanceof` / `__proto__` over the registered DOM prototype chain, `Element.prototype`, `Range.prototype`, and `Selection.prototype` patch visibility, and Range/Selection expando parity.
+- Keep broader gates unchanged: focused JS DOM gtests, full `./test/test_js_gtest.exe`, native `test_dom_range_gtest`, focused WPT selection slices, Lambda `radiant_poc`, and the documented Radiant baseline gate.
+
 Tasks:
 
-- Extend the native type descriptor with ownership:
+- Complete: extend the native type descriptor with ownership:
   - owning native object
   - non-owning host object
-- Extend or wrap `VMapVtable` for JS host-object needs:
+- Complete for current carrier adapter: extend or wrap `VMapVtable` for JS host-object needs:
   - `has`
   - `delete`
   - property descriptor reflection
   - stable enumeration order
-- Define expando behavior:
+- Complete: define expando behavior:
   - vtable property first
   - on miss, wrapper expando store
   - then prototype chain
-- Define prototype mapping:
+- Complete for current carrier pins: define prototype mapping:
   - `dom_node` -> `Node.prototype`
   - `dom_element` -> `Element.prototype`
   - HTML element subclasses later
-- Define live collection wrappers for `children`, `childNodes`, and indexed select/options behavior.
+- Keep a regression checklist for live collection wrappers across element, form, lookup, and select/options collections before changing wrapper representation.
 
 Acceptance:
 
-- The VMap migration rules are written down before any wrapper representation change.
-- JS behavior that depends on identity, expandos, prototype patching, and descriptors has targeted tests selected.
+- Complete for readiness spec: the VMap migration rules are written down before any wrapper representation change.
+- Complete for executable pins: JS behavior that depends on identity, expandos, prototype patching, descriptors, delete, and own-key enumeration has targeted current-carrier tests before Phase 6 changes the wrapper representation.
 
 ### Phase 6: Switch DOM Wrappers to VMap
 
@@ -410,17 +476,17 @@ Purpose: make DOM a real native module object.
 
 Tasks:
 
-- Change `radiant_dom_wrap_node()` to return branded VMap wrappers.
-- Make `js_dom_unwrap_element()` accept the branded VMap representation.
-- Route JS property access for `LMD_TYPE_VMAP` host objects through the generic JS native-type adapter.
-- Keep temporary compatibility for old `MAP_KIND_DOM` only if required for staged rollout.
+- Done: change `radiant_dom_wrap_node()` to return branded VMap wrappers.
+- Done: make `js_dom_unwrap_element()` accept the branded VMap representation.
+- Done: route JS property access for `LMD_TYPE_VMAP` host objects through the generic JS native-type adapter.
+- Done: keep temporary compatibility for old `MAP_KIND_DOM` only where required for staged rollout.
 
 Acceptance:
 
-- JS DOM tests pass through the VMap path.
-- Lambda sample still passes.
-- The wrapper cache still preserves identity.
-- DOM node finalizers are non-owning.
+- Done: JS DOM tests pass through the VMap path.
+- Done: Lambda sample still passes.
+- Done: the wrapper cache still preserves identity.
+- Done: DOM node finalizers are non-owning.
 
 ### Phase 7: Delete DOM MapKind Path
 
@@ -428,31 +494,31 @@ Purpose: finish the POC's architectural goal.
 
 Tasks:
 
-- Remove `MAP_KIND_DOM` property dispatch.
-- Remove DOM-specific branches from JS runtime where the generic native-type adapter is sufficient.
-- Delete stale wrapper-map creation code.
-- Remove `js_dom_*` central registry entries that have moved to module descriptors.
+- Done for DOM nodes: remove `MAP_KIND_DOM` property dispatch.
+- Done for DOM nodes: remove DOM-specific map branches from JS runtime where branded VMap host dispatch is sufficient.
+- Done: delete stale wrapper-map creation code.
+- Deferred and explicit: remove `js_dom_*` central registry entries after MIR lowering stops emitting direct document/DOM helper calls.
 
 Acceptance:
 
-- JS DOM tests pass.
-- `make test-radiant-baseline` passes or has a documented unchanged baseline delta.
-- The tiny Lambda sample passes.
-- No DOM bridge entries remain in `sys_func_registry.c` except compatibility shims explicitly documented for later removal.
+- Done: focused JS DOM tests pass.
+- Deferred broad gate: `make test-radiant-baseline` was not rerun after this narrow Phase 7 deletion; the latest documented broad delta is the Phase 6 visual/layout baseline state plus the now-fixed UI bucket.
+- Done: the tiny Lambda sample passes.
+- Deferred and documented: `sys_func_registry.c` still exposes MIR lowering shims (`js_document_method`, `js_document_get_property`, `js_dom_element_method`, `js_dom_get_property`, `js_dom_set_property`, `js_dom_wrap_element`, `js_dom_unwrap_element`, `js_is_dom_node`, and style/computed-style helpers) until lowering routes those operations through generic host-object descriptors.
 
 ## 7. First Deliverable Checklist
 
 The first visible POC deliverable is complete when:
 
 - Done: `import radiant` is the planned script surface and the static module is registered.
-- Done: `MAP_KIND_DOM` get/set delegates to module-owned DOM dispatch for at least the first property cluster.
-- Done: wrapper cache ownership has moved behind module/host APIs, still returning current map wrappers.
+- Done: old `MAP_KIND_DOM` get/set delegated to module-owned DOM dispatch for the first property clusters.
+- Done: wrapper cache ownership moved behind module/host APIs and now returns branded VMap DOM-node wrappers.
 - Done: one tiny Lambda sample proves real DOM read/write access.
 - Done: `make build` passes.
 - Done: focused JS DOM/Radiant regression gates have no behavior delta.
 - Done: full `./test/test_js_gtest.exe` passed `305/305` at the current checkpoint.
 
-The POC 1A deliverable is therefore complete as a compatibility checkpoint. The next work is POC 1B: finish shrinking the remaining document/form fallback surfaces, then write the VMap readiness spec before changing wrapper representation.
+The POC 1A deliverable is therefore complete as a compatibility checkpoint. POC 1B is complete through post-Phase 7 item 4 plus document/foreign-document carrier cleanup: DOM, Range/Selection, style, CSSOM, document proxy, and foreign-document host resources now use branded VMap carriers, the stale DOM-node map shell is gone, and MIR method-call lowering no longer emits the retired map-DOM compatibility path.
 
 ## 8. Test Gates
 
@@ -464,6 +530,7 @@ Minimum gates by phase:
 - Phase 2: focused JS DOM property tests plus `make build`
 - Phase 3: wrapper identity tests plus `make build`
 - Phase 4: new Lambda sample test plus `make build`
+- Phase 5: `dom_module_props` direct diff, focused DOM gtest slice, full JS gtest, and `git diff --check`
 - Phase 6: JS DOM baseline slice, Lambda sample, `make test-radiant-baseline`
 - Phase 7: full JS DOM/Radiant gate selected from the current tree, plus `git diff --check`
 
@@ -483,10 +550,10 @@ Do not use a debug build for performance comparisons. Performance parity claims 
 ## 10. Deferred Work
 
 - Dynamic `dlopen` / manifest loading.
-- Full CSSOM migration.
-- Full Range/Selection migration.
+- Full CSSOM conformance work beyond the native-carrier migration.
+- Full Range/Selection conformance work beyond the native-carrier migration.
 - Node module refactor.
 - Online registry and version resolution.
-- Deleting `MAP_KIND_DOM`.
+- Migrating any remaining non-JS-system host resources outside DOM/Range/Selection/style/CSSOM/document proxies/foreign-document proxies to native descriptors.
 
-`MAP_KIND_DOM` deletion is deferred, not abandoned. The point of this plan is to make that deletion boring when it happens.
+DOM-node `MAP_KIND_DOM` deletion, post-Phase 7 cleanup items 1-4, and document/foreign-document proxy carrier cleanup are complete. Remaining cleanup is broader conformance and descriptor unification outside these migrated carriers.

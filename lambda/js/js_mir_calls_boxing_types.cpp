@@ -775,7 +775,11 @@ MIR_reg_t jm_ensure_native_int(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_ty
         return jm_emit_double_to_int(mt, d);
     }
     if (src_type == LMD_TYPE_INT) return reg;  // already native int
-    if (src_type == LMD_TYPE_FLOAT) return jm_emit_double_to_int(mt, reg);
+    if (src_type == LMD_TYPE_FLOAT) {
+        // Boxed JS Number values also live in I64 lanes; unbox before integer conversion.
+        MIR_reg_t as_dbl = jm_emit_unbox_float(mt, reg);
+        return jm_emit_double_to_int(mt, as_dbl);
+    }
     // boxed Item of unknown type → call it2i for safe conversion
     // (handles INT, FLOAT, INT64, BOOL items correctly)
     return jm_call_1(mt, JS_PROFILED_IT2I_NAME, MIR_T_I64, MIR_T_I64,
@@ -792,10 +796,13 @@ MIR_reg_t jm_ensure_native_float(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_
             MIR_new_reg_op(mt->ctx, d), MIR_new_reg_op(mt->ctx, reg)));
         return d;
     }
-    // P6 widening can leave an expression's TypeId as FLOAT while the emitted
-    // native register is still integral; native call operands must match MIR mode.
-    if (rt == MIR_T_I64 && (src_type == LMD_TYPE_INT || src_type == LMD_TYPE_FLOAT))
+    if (rt == MIR_T_I64 && src_type == LMD_TYPE_INT)
         return jm_emit_int_to_double(mt, reg);
+    if (rt == MIR_T_I64 && src_type == LMD_TYPE_FLOAT) {
+        // Boxed JS Number values also live in I64 lanes; converting the tagged
+        // Item bits as an integer corrupts nested native-call arithmetic.
+        return jm_emit_unbox_float(mt, reg);
+    }
     if (src_type == LMD_TYPE_FLOAT) return reg;  // already native double
     if (src_type == LMD_TYPE_INT) return jm_emit_int_to_double(mt, reg);
     // boxed Item → unbox
@@ -887,13 +894,7 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         JsLiteralNode* lit = (JsLiteralNode*)node;
         switch (lit->literal_type) {
         case JS_LITERAL_NUMBER: {
-            double val = lit->value.number_value;
             if (lit->is_bigint) return LMD_TYPE_DECIMAL;
-            // If source text has '.' or 'e'/'E', treat as FLOAT even if integral-valued
-            // (e.g., 999999.0, 1e5 → FLOAT; 999999 → INT)
-            if (lit->has_decimal) return LMD_TYPE_FLOAT;
-            if (val == (double)(int64_t)val && val >= -36028797018963968.0 && val <= 36028797018963967.0)
-                return LMD_TYPE_INT;
             return LMD_TYPE_FLOAT;
         }
         case JS_LITERAL_BOOLEAN:  return LMD_TYPE_BOOL;
@@ -942,18 +943,17 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
             // if either is string, result is string (JS concatenation)
             if (left_t == LMD_TYPE_STRING || right_t == LMD_TYPE_STRING)
                 return LMD_TYPE_STRING;
-            // if either is float, result is float
-            if (left_t == LMD_TYPE_FLOAT || right_t == LMD_TYPE_FLOAT)
+            // Unknown operands can become strings through ToPrimitive, so `+`
+            // is numeric only when both sides are statically numeric.
+            if ((left_t == LMD_TYPE_INT || left_t == LMD_TYPE_FLOAT) &&
+                (right_t == LMD_TYPE_INT || right_t == LMD_TYPE_FLOAT))
                 return LMD_TYPE_FLOAT;
-            // both int → int
-            if (left_t == LMD_TYPE_INT && right_t == LMD_TYPE_INT)
-                return LMD_TYPE_INT;
             return LMD_TYPE_ANY;
         case JS_OP_SUB: case JS_OP_MUL:
             if (left_t == LMD_TYPE_FLOAT || right_t == LMD_TYPE_FLOAT)
                 return LMD_TYPE_FLOAT;
             if (left_t == LMD_TYPE_INT && right_t == LMD_TYPE_INT)
-                return LMD_TYPE_INT;
+                return LMD_TYPE_FLOAT;
             return LMD_TYPE_ANY;
         case JS_OP_EXP:
             // pow() always returns double
@@ -976,7 +976,7 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
             return LMD_TYPE_ANY;
         case JS_OP_BIT_AND: case JS_OP_BIT_OR: case JS_OP_BIT_XOR:
         case JS_OP_BIT_LSHIFT: case JS_OP_BIT_RSHIFT: case JS_OP_BIT_URSHIFT:
-            return LMD_TYPE_INT;  // bitwise ops always produce int32
+            return LMD_TYPE_FLOAT;  // bitwise ops compute int32, then produce a JS Number
         case JS_OP_AND: case JS_OP_OR:
             return LMD_TYPE_ANY;  // logical AND/OR return one of the operands
         default:
@@ -989,7 +989,7 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         switch (un->op) {
         case JS_OP_NOT:    return LMD_TYPE_BOOL;
         case JS_OP_TYPEOF: return LMD_TYPE_STRING;
-        case JS_OP_BIT_NOT: return LMD_TYPE_INT;
+        case JS_OP_BIT_NOT: return LMD_TYPE_FLOAT;
         case JS_OP_PLUS: case JS_OP_ADD: {
             TypeId t = jm_get_effective_type(mt, un->operand);
             if (t == LMD_TYPE_FLOAT || t == LMD_TYPE_INT) return t;
@@ -1326,12 +1326,32 @@ void jm_scope_env_mark_and_writeback_binding(JsMirTranspiler* mt, const char* na
 // For known-BOOL expressions (comparisons, !expr), extracts the low bit directly
 // instead of calling js_is_truthy (saves a function call).
 MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MIR_reg_t val, JsAstNode* expr) {
-    if (expr && jm_get_effective_type(mt, expr) == LMD_TYPE_BOOL) {
+    TypeId expr_type = expr ? jm_get_effective_type(mt, expr) : LMD_TYPE_ANY;
+    if (expr_type == LMD_TYPE_BOOL) {
         MIR_reg_t result = jm_new_reg(mt, "trthy", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
             MIR_new_reg_op(mt->ctx, result),
             MIR_new_reg_op(mt->ctx, val),
             MIR_new_int_op(mt->ctx, 1)));
+        return result;
+    }
+    if (expr_type == LMD_TYPE_FLOAT && MIR_reg_type(mt->ctx, val, mt->current_func) == MIR_T_D) {
+        MIR_reg_t nonzero = jm_new_reg(mt, "dtruth_nz", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DNE,
+            MIR_new_reg_op(mt->ctx, nonzero),
+            MIR_new_reg_op(mt->ctx, val),
+            MIR_new_double_op(mt->ctx, 0.0)));
+        MIR_reg_t notnan = jm_new_reg(mt, "dtruth_nn", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DEQ,
+            MIR_new_reg_op(mt->ctx, notnan),
+            MIR_new_reg_op(mt->ctx, val),
+            MIR_new_reg_op(mt->ctx, val)));
+        MIR_reg_t result = jm_new_reg(mt, "dtruth", MIR_T_I64);
+        // JS Number truthiness treats +0, -0, and NaN as false; all other doubles are true.
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+            MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, nonzero),
+            MIR_new_reg_op(mt->ctx, notnan)));
         return result;
     }
     return jm_emit_uext8(mt, jm_call_1(mt, "js_is_truthy", MIR_T_I64,

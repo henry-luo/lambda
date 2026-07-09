@@ -141,7 +141,8 @@ pn example() {
     let arr = [1, 2, 3]    // typed as int array
     arr[1] = 99            // OK: same type
     arr[0] = 3.14          // OK: auto-converts array to generic
-    arr[-1] = "hello"      // OK: negative indexing supported
+    arr[last] = "hello"    // OK: tail-relative write
+    arr[-1] = "oops"       // ERROR: negative indexes are absent
 }
 ```
 
