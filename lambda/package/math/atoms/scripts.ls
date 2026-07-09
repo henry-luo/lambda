@@ -188,7 +188,10 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
         else util.ceil_em2(0.0 - sub_shift + sub_inner_h)
     let depth_holder = if (has_sub) util.ceil_em2(box_d_raw) else 0.0
     let sub_top = util.ceil_em2(0.0 - pstrut + sub_shift)
-    let sup_top = util.ceil_em2(0.0 - pstrut - sup_shift - sup_raw_d)
+    // Side-limit row positioning uses the upper shift only; the upper limit's
+    // own descent is contained by its inline-block wrapper, not by lifting the
+    // whole row again (otherwise `g_2(x)` over an integral is too high).
+    let sup_top = util.ceil_em2(0.0 - pstrut - sup_shift)
     let sub_span = if (has_sub) [
         <span style: "top:" ++ util.fmt_em(sub_top) ++ ";" ++ sub_margin_attr;
             <span class: css.PSTRUT, style: "height:3em">
@@ -533,7 +536,7 @@ fn ml_script_pair(base_box, script_box) {
 
 fn ml_default_script_pair(base_box, script_box) {
     let hb = box.hbox([base_box, script_box])
-    box.ml_box_full(
+    mark_scripted_box(box.ml_box_full(
         hb.element,
         max(base_box.height, script_box.height),
         max(base_box.depth, script_box.depth),
@@ -543,7 +546,7 @@ fn ml_default_script_pair(base_box, script_box) {
         0.0,
         max(if (base_box.max_font_size != null) base_box.max_font_size else base_box.height,
             if (script_box.max_font_size != null) script_box.max_font_size else script_box.height)
-    )
+    ), script_box.has_subscript == true)
 }
 
 fn ml_op_group_script_pair(base_box, script_box) {
@@ -551,7 +554,7 @@ fn ml_op_group_script_pair(base_box, script_box) {
     // MathLive keeps scripts on operator atoms inside the op-group; otherwise
     // scripted operators lose their mop spacing (`\sin^2 x`) and differ
     // structurally from limit-operator output.
-    box.ml_box_full(
+    mark_scripted_box(box.ml_box_full(
         <span class: css.OP_GROUP;
             for (child in children) child
         >,
@@ -563,7 +566,20 @@ fn ml_op_group_script_pair(base_box, script_box) {
         0.0,
         max(if (base_box.max_font_size != null) base_box.max_font_size else base_box.height,
             if (script_box.max_font_size != null) script_box.max_font_size else script_box.height)
-    )
+    ), script_box.has_subscript == true)
+}
+
+fn mark_scripted_box(bx, has_subscript) => {
+    element: bx.element,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: bx.type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    is_scripted: true,
+    is_subscripted: has_subscript
 }
 
 fn is_op_group_box(bx) {
@@ -647,9 +663,9 @@ fn render_both(base_box, sup_box, sub_box, init_sup, init_sub,
             <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(0.0 - min_pos)>
         >
     >
-    box.ml_box_full(el, max_pos, 0.0 - min_pos,
+    mark_subscript_component(box.ml_box_full(el, max_pos, 0.0 - min_pos,
         max(sup_box.width * sup_font_scale, sub_box.width * sub_font_scale),
-        "ord", 0.0, 0.0, max_pos)
+        "ord", 0.0, 0.0, max_pos))
 }
 
 // ============================================================
@@ -661,7 +677,11 @@ fn render_sub_only(base_box, sub_box, init_sub, x_height, si, is_char, font_scal
     // not the parent-scale height. Lambda's sub_box reports parent-scale
     // dimensions, so we scale here before applying the formula.
     let sub_h_for_shift = sub_box.height * font_scale
-    let sub_shift = max(init_sub, max(met.at(met.sub1, si), sub_h_for_shift - 0.8 * x_height))
+    // MathLive keeps the subscript-only floor at least the textstyle sub1
+    // value; using the smaller scriptstyle slot drops nested limits like
+    // `g_1` by 0.007em and leaks raw shift precision into the vlist.
+    let sub1_floor = max(met.at(met.sub1, si), met.at(met.sub1, 0))
+    let sub_shift = max(init_sub, max(sub1_floor, sub_h_for_shift - 0.8 * x_height))
     // child_h is the WRAPPER height — includes descent so the wrapper
     // accommodates descender content like y. CEIL@2 at script-style scale.
     // vlist_height uses the H-ONLY portion (no descent) — the descent is
@@ -699,8 +719,20 @@ fn render_sub_only(base_box, sub_box, init_sub, x_height, si, is_char, font_scal
             <span class: css.VLIST, style: "height:" ++ util.fmt_em(depth_holder)>
         >
     >
-    box.ml_box_full(el, 0.0, depth_holder_raw,
-        sub_box.width * font_scale, "ord", 0.0, 0.0, 0.0)
+    mark_subscript_component(box.ml_box_full(el, 0.0, depth_holder_raw,
+        sub_box.width * font_scale, "ord", 0.0, 0.0, 0.0))
+}
+
+fn mark_subscript_component(bx) => {
+    element: bx.element,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: bx.type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    has_subscript: true
 }
 
 // ============================================================
