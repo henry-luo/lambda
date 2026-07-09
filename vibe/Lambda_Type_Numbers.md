@@ -196,11 +196,11 @@ let x: i8 = 42i8
 let y = 255u8
 type(y)          // => u8
 y is u8          // => true
-y is u16         // => false (sized targets are exact)
+y is u16         // => true (exact widening)
 y is int         // => true
 y is integer     // => true
 y is decimal     // => true
-type(1.0f64)     // => f64
+type(1.0f64)     // => float
 ```
 
 #### `get_type_name()` Extension
@@ -230,8 +230,8 @@ Note: `get_type_name()` currently takes only `TypeId`. For `LMD_TYPE_NUM_SIZED`,
 
 #### Numeric Subtype Lattice
 
-Sized storage types remain exact when named directly, but they also sit inside
-Lambda's semantic numeric domains for `is`, matching, and mixed arithmetic joins:
+Sized storage types participate in the same exact-embedding lattice as the
+semantic numeric types for `is`, matching, and mixed arithmetic joins:
 
 | Source type | Semantic supertypes |
 |---|---|
@@ -239,11 +239,13 @@ Lambda's semantic numeric domains for `is`, matching, and mixed arithmetic joins
 | `u8`, `u16`, `u32` | `int`, `float`, `integer`, `decimal`, `number` |
 | `i64`, `u64` | `integer`, `decimal`, `number` |
 | `f16`, `f32` | `float`, `decimal`, `number` |
-| `f64` | `f64`, `float`, `decimal`, `number` |
+| `f64` | `float`, `decimal`, `number` |
 
-Storage-width types are not subtypes of one another for direct type tests. For
-example, `1u8 is u8` is true but `1u8 is u16` is false; `1.0f64 is f64`
-and `1.0f64 is float` are true, but `1.0f64 is f32` is false.
+Storage-width types widen only when every value of the source type embeds
+exactly in the target. For example, `1u8 is u16`, `1u8 is i16`, and
+`42i8 is i16` are true; `42i8 is u8` is false because signed lanes can be
+negative. `f64` is accepted on input as an alias for `float`, and `type(1.0f64)`
+returns `float`; `1.0f64 is f32` is false because narrowing never subsumes.
 
 Canonical `int` is the int53 band and remains a subtype of `float` because every
 canonical int is exactly representable as binary64. Safe sized integer lanes
@@ -429,19 +431,19 @@ The proposal makes `i64` an alias for the existing `LMD_TYPE_INT64`. But `123i64
 
 ### Q3: `f64` suffix for symmetry?
 
-**Resolved:** add `f64` as the explicit float64 surface type, backed by the same
-binary64 payload as existing `float`. It completes the set `f16`, `f32`, `f64`
-and keeps the subtype rules intuitive:
+**Resolved:** accept `f64` as an input alias for Lambda's canonical `float`.
+It completes the spelling set `f16`, `f32`, `f64` without creating a second
+runtime type or a second `type()` result:
 
 ```lambda
-type(1.0f64)     // => f64
+type(1.0f64)     // => float
 1.0f64 is f64    // true
 1.0f64 is float  // true
 1.0f64 is f32    // false
 ```
 
-No new runtime payload width is needed, but the type layer must preserve/report
-the explicit `f64` name for `type()`.
+No new runtime payload width or type name is needed; aliases are accepted on
+input and canonical names are emitted on output.
 
 ### Q4: `get_type_name()` signature
 

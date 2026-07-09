@@ -4397,7 +4397,7 @@ static int mir_detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_nd
     TypeId nid = type->nested->type_id;
     if (nid == LMD_TYPE_INT)   { shape_out[0] = type->length; *elem_type_out = ELEM_INT;   return 1; }
     if (nid == LMD_TYPE_INT64) { shape_out[0] = type->length; *elem_type_out = ELEM_INT64; return 1; }
-    if (nid == LMD_TYPE_FLOAT) { shape_out[0] = type->length; *elem_type_out = ELEM_FLOAT; return 1; }
+    if (nid == LMD_TYPE_FLOAT) { shape_out[0] = type->length; *elem_type_out = ELEM_FLOAT64; return 1; }
     if (nid == LMD_TYPE_NUM_SIZED) {
         shape_out[0] = type->length;
         *elem_type_out = num_sized_to_elem_type(type_num_sized_kind(type->nested));
@@ -9421,7 +9421,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 MIR_new_reg_op(mt->ctx, is_aint)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_slow)));
 
-            // Inline ArrayNum int store (only for ELEM_INT / ELEM_INT64, not ELEM_FLOAT)
+            // Inline ArrayNum int store (only for ELEM_INT / ELEM_INT64, not ELEM_FLOAT64)
             emit_label(mt, l_fast);
             {
                 // Reject views: fall back to fn_array_set which logs the error.
@@ -9434,7 +9434,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_slow),
                     MIR_new_reg_op(mt->ctx, is_view_bit)));
                 // elem_type lives in map_kind byte at offset 3.
-                // ELEM_FLOAT=0x10 → fall back to fn_array_set; ELEM_INT=0x00 and ELEM_INT64=0x50 take fast path
+                // ELEM_FLOAT64=0x10 → fall back to fn_array_set; ELEM_INT=0x00 and ELEM_INT64=0x50 take fast path
                 MIR_reg_t etype = new_reg(mt, "etyp", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, etype),
                     MIR_new_mem_op(mt->ctx, MIR_T_U8, 3, arr_ptr, 0, 1)));

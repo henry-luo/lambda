@@ -640,11 +640,18 @@ static bool zlib_stream_should_reset_member(JsZlibStreamState* state, const uint
     return false;
 }
 
+static bool zlib_option_number_value(Item value, double* out_value);
+
 static int zlib_option_int(Item options_item, const char* name, int fallback) {
     if (get_type_id(options_item) != LMD_TYPE_MAP) return fallback;
     Item value = js_property_get(options_item, make_string_item(name));
-    if (get_type_id(value) != LMD_TYPE_INT) return fallback;
-    return (int)it2i(value);
+    double number = 0.0;
+    // Stream options are user JS Numbers, now boxed as FLOAT even when integral.
+    if (!zlib_option_number_value(value, &number)) return fallback;
+    if (number != number || number == 1.0 / 0.0 || number == -1.0 / 0.0) return fallback;
+    int integer = (int)number;
+    if (number != (double)integer) return fallback;
+    return integer;
 }
 
 static bool zlib_option_number_value(Item value, double* out_value) {
@@ -1135,8 +1142,13 @@ static Item js_zlib_stream_flush_method(Item kind_item, Item callback_item) {
     if (is_callable(kind_item) &&
         (callback_item.item == 0 || get_type_id(callback_item) == LMD_TYPE_UNDEFINED)) {
         callback_item = kind_item;
-    } else if (get_type_id(kind_item) == LMD_TYPE_INT) {
-        flush = (int)it2i(kind_item);
+    } else {
+        double kind_number = 0.0;
+        // flush(kind) receives normal JS Numbers, which are boxed FLOAT after migration.
+        if (zlib_option_number_value(kind_item, &kind_number) &&
+            kind_number == (double)(int)kind_number) {
+            flush = (int)kind_number;
+        }
     }
 
     Item mode_item = js_property_get(self, make_string_item("__zlib_mode__"));

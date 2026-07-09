@@ -435,7 +435,7 @@ static Item vector_get(Item item, int64_t index) {
             switch (arr->get_elem_type()) {
                 case ELEM_INT:   return { .item = i2it(arr->items[index]) };
                 case ELEM_INT64: return push_l(arr->items[index]);
-                case ELEM_FLOAT: return push_d(arr->float_items[index]);
+                case ELEM_FLOAT64: return push_d(arr->float_items[index]);
                 default: return ItemError;
             }
         }
@@ -537,7 +537,7 @@ Item fn_add(Item item_a, Item item_b) {
             return ItemError;
         }
         ArrayNumElemType et = arr_a->get_elem_type();
-        if (et == ELEM_FLOAT) {
+        if (et == ELEM_FLOAT64) {
             ArrayNum* result = array_float_new(arr_a->length);
             for (int64_t i = 0; i < arr_a->length; i++) {
                 result->float_items[i] = arr_a->float_items[i] + arr_b->float_items[i];
@@ -634,7 +634,7 @@ Item fn_mul(Item item_a, Item item_b) {
             return ItemError;
         }
         ArrayNumElemType et = arr_a->get_elem_type();
-        if (et == ELEM_FLOAT) {
+        if (et == ELEM_FLOAT64) {
             ArrayNum* result = array_float_new(arr_a->length);
             for (int64_t i = 0; i < arr_a->length; i++) {
                 result->float_items[i] = arr_a->float_items[i] * arr_b->float_items[i];
@@ -720,7 +720,7 @@ Item fn_sub(Item item_a, Item item_b) {
             return ItemError;
         }
         ArrayNumElemType et = arr_a->get_elem_type();
-        if (et == ELEM_FLOAT) {
+        if (et == ELEM_FLOAT64) {
             ArrayNum* result = array_float_new(arr_a->length);
             for (int64_t i = 0; i < arr_a->length; i++) {
                 result->float_items[i] = arr_a->float_items[i] - arr_b->float_items[i];
@@ -844,7 +844,7 @@ Item fn_div(Item item_a, Item item_b) {
         }
         ArrayNumElemType et = arr_a->get_elem_type();
         ArrayNum* result = array_float_new(arr_a->length);
-        if (et == ELEM_FLOAT) {
+        if (et == ELEM_FLOAT64) {
             for (int64_t i = 0; i < arr_a->length; i++) {
                 if (arr_b->float_items[i] == 0.0) {
                     log_error("float division by zero error in array element %" PRId64, i);
@@ -1364,7 +1364,7 @@ Item fn_min1(Item item_a) {
             return ItemNull; // identity-less aggregate over absence yields null
         }
         ArrayNumElemType et = arr->get_elem_type();
-        if (et == ELEM_FLOAT) {
+        if (et == ELEM_FLOAT64) {
             double min_val = arr->float_items[0];
             for (size_t i = 1; i < (size_t)arr->length; i++) {
                 if (arr->float_items[i] < min_val) {
@@ -1552,7 +1552,7 @@ Item fn_max1(Item item_a) {
             return ItemNull; // identity-less aggregate over absence yields null
         }
         ArrayNumElemType et = arr->get_elem_type();
-        if (et == ELEM_FLOAT) {
+        if (et == ELEM_FLOAT64) {
             double max_val = arr->float_items[0];
             for (size_t i = 1; i < (size_t)arr->length; i++) {
                 if (arr->float_items[i] > max_val) {
@@ -1682,7 +1682,7 @@ Item fn_sum(Item item) {
     else if (type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = item.array_num;
         ArrayNumElemType et = arr->get_elem_type();
-        if (et == ELEM_FLOAT) {
+        if (et == ELEM_FLOAT64) {
             if (arr->length == 0) {
                 return push_d(0.0);
             }
@@ -1960,7 +1960,7 @@ Item fn_neg(Item item) {
             if (t == LMD_TYPE_ARRAY_NUM) {
                 ArrayNum* arr = item.array_num;
                 ArrayNumElemType et = arr->get_elem_type();
-                if (et == ELEM_FLOAT) { result->float_items[i] = -arr->float_items[i]; continue; }
+                if (et == ELEM_FLOAT64) { result->float_items[i] = -arr->float_items[i]; continue; }
                 if (et == ELEM_INT || et == ELEM_INT64) {
                     result->float_items[i] = -(double)arr->items[i]; continue;
                 }

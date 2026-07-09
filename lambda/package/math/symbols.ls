@@ -238,7 +238,9 @@ let font_class_map = {
     // -- lowercase Greek: italic with lcGreek marker class --
     alpha: "lcGreek lm_mathit", beta: "lcGreek lm_mathit",
     gamma: "lcGreek lm_mathit", delta: "lcGreek lm_mathit",
-    epsilon: "lcGreek lm_mathit", varepsilon: "lcGreek lm_mathit",
+    // MathLive maps lunate epsilon to Main-Regular, unlike the other
+    // lowercase Greek symbols; keeping it italic splits `∀\epsilon` wrongly.
+    epsilon: "lm_cmr", varepsilon: "lcGreek lm_mathit",
     zeta: "lcGreek lm_mathit", eta: "lcGreek lm_mathit",
     theta: "lcGreek lm_mathit", vartheta: "lcGreek lm_mathit",
     iota: "lcGreek lm_mathit", kappa: "lcGreek lm_mathit",

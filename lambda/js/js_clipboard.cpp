@@ -580,6 +580,22 @@ static bool dt_is_class(Item v, const char* name, size_t name_len) {
     return cls != JS_CLASS_NONE && js_class_id(v) == cls;
 }
 
+static bool dt_index_arg(Item value, int* out_idx) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT) {
+        if (out_idx) *out_idx = (int)it2i(value);
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double number = it2d(value);
+        // DataTransfer list indexes are public JS Numbers, now boxed as FLOAT.
+        if (number != number || number != (double)(int)number) return false;
+        if (out_idx) *out_idx = (int)number;
+        return true;
+    }
+    return false;
+}
+
 static bool dt_record_kind_is(Item r, const char* kind, size_t kind_len) {
     if (get_type_id(r) != LMD_TYPE_MAP) return false;
     Item k = js_property_get(r, make_str("kind"));
@@ -755,7 +771,7 @@ extern "C" Item js_dt_items_item(Item idx_arg) {
     Item items = js_get_this();
     if (get_type_id(items) != LMD_TYPE_ARRAY) return ItemNull;
     int idx = -1;
-    if (get_type_id(idx_arg) == LMD_TYPE_INT) idx = (int)it2i(idx_arg);
+    dt_index_arg(idx_arg, &idx);
     int64_t n = js_array_length(items);
     if (idx < 0 || idx >= n) return ItemNull;
     return js_array_get_int(items, idx);
@@ -770,7 +786,7 @@ extern "C" Item js_dt_items_remove(Item idx_arg) {
     if (get_type_id(rec_arr) != LMD_TYPE_ARRAY) return ItemNull;
 
     int idx = -1;
-    if (get_type_id(idx_arg) == LMD_TYPE_INT) idx = (int)it2i(idx_arg);
+    dt_index_arg(idx_arg, &idx);
     Array* a = rec_arr.array;
     int64_t n = a->length;
     if (idx < 0 || idx >= n) return ItemNull;
@@ -795,7 +811,7 @@ extern "C" Item js_dt_files_item(Item idx_arg) {
     Item files = js_get_this();
     if (get_type_id(files) != LMD_TYPE_ARRAY) return ItemNull;
     int idx = -1;
-    if (get_type_id(idx_arg) == LMD_TYPE_INT) idx = (int)it2i(idx_arg);
+    dt_index_arg(idx_arg, &idx);
     int64_t n = js_array_length(files);
     if (idx < 0 || idx >= n) return ItemNull;
     return js_array_get_int(files, idx);

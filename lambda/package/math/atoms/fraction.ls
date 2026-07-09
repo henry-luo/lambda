@@ -58,8 +58,10 @@ pub fn render(node, context, render_fn) {
     // fraction. A directly-nested fraction inherits it via frac_gstyle; a
     // top-level / subscript-reached fraction derives it from the cmd + style
     // (the corpus renders inline at DISPLAY geometry, so text -> display).
+    let is_cfrac = cmd == "\\cfrac"
     let is_fraction_child = frac_ctx.frac_gstyle != null
-    let gstyle = if (frac_ctx.frac_gstyle != null) frac_ctx.frac_gstyle
+    let gstyle = if (is_cfrac) "display"
+        else if (frac_ctx.frac_gstyle != null) frac_ctx.frac_gstyle
         else if (cmd == "\\tfrac") "text"
         // A fraction reached through a sub/superscript (script_container) keeps
         // its own geometry style (the display->script cascade already happened
@@ -74,7 +76,10 @@ pub fn render(node, context, render_fn) {
         else "display"
     // numerator/denominator geometry style (one step smaller), threaded so a
     // fraction nested directly in the numer/denom renders correctly.
-    let child_gstyle = match gstyle {
+    let child_gstyle = if (is_cfrac) "display"
+        // Continued fractions keep nested fraction geometry in display style;
+        // inheriting the ordinary fraction-child step wrongly scripts them.
+        else match gstyle {
         case "display": "text"
         case "text": "script"
         case "script": "scriptscript"
@@ -82,8 +87,11 @@ pub fn render(node, context, render_fn) {
     }
 
     // create numerator and denominator contexts (carry the child geometry)
-    let num_ctx = ctx.derive(ctx.numer_context(frac_ctx), {frac_gstyle: child_gstyle, compact_prime: true})
-    let den_ctx = ctx.derive(ctx.denom_context(frac_ctx), {frac_gstyle: child_gstyle, compact_prime: true})
+    // Continued-fraction children are display-rooted; otherwise the third
+    // denominator reaches scriptscript style and loses binary-operator spaces.
+    let child_frac_ctx = if (is_cfrac) ctx.derive(frac_ctx, {style: "display"}) else frac_ctx
+    let num_ctx = ctx.derive(ctx.numer_context(child_frac_ctx), {frac_gstyle: child_gstyle, compact_prime: true})
+    let den_ctx = ctx.derive(ctx.denom_context(child_frac_ctx), {frac_gstyle: child_gstyle, compact_prime: true})
 
     // render numerator and denominator
     let numer_box = if (node.numer != null) render_fn(node.numer, num_ctx)

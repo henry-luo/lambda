@@ -97,7 +97,9 @@ static bool js_define_property_has_existing_own(Item obj, Item key) {
 }
 
 static bool js_global_is_bigint(Item value) {
-    if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT64 || type == LMD_TYPE_UINT64) return true;
+    if (type != LMD_TYPE_DECIMAL) return false;
     Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
     return dec && dec->unlimited == DECIMAL_BIGINT;
 }
@@ -229,6 +231,33 @@ static bool js_array_key_to_index(const char* name, int name_len, int64_t* out_i
     if (index > 0xFFFFFFFELL) return false;
     if (out_index) *out_index = index;
     return true;
+}
+
+static bool js_array_item_to_index(Item key, int64_t* out_index) {
+    TypeId type = get_type_id(key);
+    if (type == LMD_TYPE_INT) {
+        int64_t index = it2i(key);
+        if (index < 0 || index > 0xFFFFFFFELL) return false;
+        if (out_index) *out_index = index;
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double index_d = it2d(key);
+        // JS Number keys can arrive as boxed doubles after number-model migration.
+        if (!isfinite(index_d) || index_d < 0.0 || floor(index_d) != index_d ||
+            index_d > 0xFFFFFFFEULL) {
+            return false;
+        }
+        int64_t index = (int64_t)index_d;
+        if ((double)index != index_d) return false;
+        if (out_index) *out_index = index;
+        return true;
+    }
+    if (type == LMD_TYPE_STRING) {
+        String* sk = it2s(key);
+        return sk && js_array_key_to_index(sk->chars, (int)sk->len, out_index);
+    }
+    return false;
 }
 
 static bool js_array_has_nonconfigurable_index_from(Item obj, int64_t new_len) {
@@ -6731,20 +6760,9 @@ extern "C" Item js_in(Item key, Item object) {
     if (type == LMD_TYPE_ARRAY) {
         // check if index is valid and not a deleted hole
         int64_t idx = -1;
-        if (get_type_id(key) == LMD_TYPE_INT) {
-            idx = it2i(key);
-        } else if (get_type_id(key) == LMD_TYPE_STRING) {
+        js_array_item_to_index(key, &idx);
+        if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
-            if (sk && sk->len > 0 && sk->len <= 10) {
-                bool is_num = true;
-                int64_t n = 0;
-                for (int i = 0; i < (int)sk->len; i++) {
-                    char c = sk->chars[i];
-                    if (c < '0' || c > '9') { is_num = false; break; }
-                    n = n * 10 + (c - '0');
-                }
-                if (is_num && !(sk->len > 1 && sk->chars[0] == '0')) idx = n;
-            }
             // Also check "length" for arrays
             if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
                 return (Item){.item = b2it(true)};
@@ -7090,7 +7108,7 @@ extern "C" Item js_get_prototype_of(Item object) {
     if (ot == LMD_TYPE_BOOL) {
         return js_get_intrinsic_prototype_for_class(JS_CLASS_BOOLEAN);
     }
-    if (ot == LMD_TYPE_DECIMAL && js_global_is_bigint(object)) {
+    if (js_global_is_bigint(object)) {
         return js_get_intrinsic_prototype_for_class(JS_CLASS_BIGINT);
     }
     if (!js_require_object_type(object, "getPrototypeOf")) return ItemNull;
@@ -10784,11 +10802,14 @@ extern "C" Item js_object_is(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
 
-    bool left_is_num = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT);
-    bool right_is_num = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 || right_type == LMD_TYPE_FLOAT);
+    bool left_is_num = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT ||
+                        left_type == LMD_TYPE_FLOAT64 || left_type == LMD_TYPE_NUM_SIZED);
+    bool right_is_num = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT ||
+                         right_type == LMD_TYPE_FLOAT64 || right_type == LMD_TYPE_NUM_SIZED);
     if (left_is_num && right_is_num) {
-        double l = (left_type == LMD_TYPE_FLOAT) ? it2d(left) : (double)it2i(left);
-        double r = (right_type == LMD_TYPE_FLOAT) ? it2d(right) : (double)it2i(right);
+        // JS Numbers are boxed FLOAT Items after the number-model migration.
+        double l = js_get_number(left);
+        double r = js_get_number(right);
         // Object.is(NaN, NaN) → true (unlike ===)
         if (isnan(l) && isnan(r)) return (Item){.item = b2it(true)};
         if (isnan(l) || isnan(r)) return (Item){.item = b2it(false)};
@@ -12545,8 +12566,8 @@ extern "C" Item js_object_is_extensible(Item obj) {
 
 extern "C" Item js_number_is_integer(Item value) {
     TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
-        if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
+    if (type == LMD_TYPE_INT) {
+        if (it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
         return (Item){.item = b2it(true)};
     }
     if (type == LMD_TYPE_FLOAT) {
@@ -12558,8 +12579,8 @@ extern "C" Item js_number_is_integer(Item value) {
 
 extern "C" Item js_number_is_finite(Item value) {
     TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
-        if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
+    if (type == LMD_TYPE_INT) {
+        if (it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
         return (Item){.item = b2it(true)};
     }
     if (type == LMD_TYPE_FLOAT) {
@@ -12578,8 +12599,8 @@ extern "C" Item js_number_is_nan(Item value) {
 
 extern "C" Item js_number_is_safe_integer(Item value) {
     TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
-        if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
+    if (type == LMD_TYPE_INT) {
+        if (it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
         int64_t v = it2i(value);
         return (Item){.item = b2it(v >= -9007199254740991LL && v <= 9007199254740991LL)};
     }
@@ -13514,8 +13535,7 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
     // ES spec SerializeJSONProperty steps:
     // Step 2: toJSON first
     TypeId vtype = get_type_id(value);
-    if (vtype == LMD_TYPE_MAP || vtype == LMD_TYPE_ARRAY ||
-        (vtype == LMD_TYPE_DECIMAL && js_global_is_bigint(value))) {
+    if (vtype == LMD_TYPE_MAP || vtype == LMD_TYPE_ARRAY || js_global_is_bigint(value)) {
         Item toJSON_name = (Item){.item = s2it(heap_create_name("toJSON", 6))};
         Item toJSON_fn = js_property_access(value, toJSON_name);
         if (get_type_id(toJSON_fn) == LMD_TYPE_FUNC) {
@@ -13576,12 +13596,9 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
     }
 
     // BigInt → TypeError (ES spec §24.5.2.9 step 10)
-    if (vtype == LMD_TYPE_DECIMAL) {
-        Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
-        if (dec && dec->unlimited == DECIMAL_BIGINT) {
-            js_throw_type_error("Do not know how to serialize a BigInt");
-            return false;
-        }
+    if (js_global_is_bigint(value)) {
+        js_throw_type_error("Do not know how to serialize a BigInt");
+        return false;
     }
     if (value.item == ItemNull.item) {
         strbuf_append_str_n(sb, "null", 4);
@@ -13596,7 +13613,7 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
     }
 
     // Number
-    if (vtype == LMD_TYPE_INT || vtype == LMD_TYPE_INT64) {
+    if (vtype == LMD_TYPE_INT) {
         char buf[32];
         int64_t n = it2i(value);
         int len = snprintf(buf, sizeof(buf), "%lld", (long long)n);
@@ -13757,7 +13774,7 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
     const char* gap = "";
 
     TypeId space_type = get_type_id(space);
-    if (space_type == LMD_TYPE_INT || space_type == LMD_TYPE_INT64 || space_type == LMD_TYPE_FLOAT) {
+    if (space_type == LMD_TYPE_INT || space_type == LMD_TYPE_FLOAT) {
         double d = (space_type == LMD_TYPE_FLOAT) ? it2d(space) : (double)it2i(space);
         int n = (int)d;  // ToInteger: truncate toward zero
         if (n < 0) n = 0;
@@ -13809,7 +13826,7 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
             Item item = ItemNull;
             if (vt == LMD_TYPE_STRING) {
                 item = v;
-            } else if ((vt == LMD_TYPE_INT || vt == LMD_TYPE_INT64 || vt == LMD_TYPE_FLOAT) && !js_is_symbol_item(v)) {
+            } else if ((vt == LMD_TYPE_INT || vt == LMD_TYPE_FLOAT) && !js_is_symbol_item(v)) {
                 item = js_to_string(v);
                 if (js_check_exception()) return make_js_undefined();
             } else if (vt == LMD_TYPE_MAP) {
@@ -14071,21 +14088,7 @@ static Item js_delete_array_property(Item obj, Item key) {
     }
     // Convert key to numeric index
     int64_t idx = -1;
-    if (get_type_id(key) == LMD_TYPE_INT) {
-        idx = it2i(key);
-    } else if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* sk = it2s(key);
-        if (sk && sk->len > 0 && sk->len <= 10) {
-            bool is_num = true;
-            int64_t n = 0;
-            for (int i = 0; i < (int)sk->len; i++) {
-                char c = sk->chars[i];
-                if (c < '0' || c > '9') { is_num = false; break; }
-                n = n * 10 + (c - '0');
-            }
-            if (is_num && !(sk->len > 1 && sk->chars[0] == '0')) idx = n;
-        }
-    }
+    js_array_item_to_index(key, &idx);
     if (idx >= 0 && idx < arr->length) {
         // Check companion-map ShapeEntry flags before deleting.
         if (arr->extra != 0) {

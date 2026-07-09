@@ -47,27 +47,27 @@ Reductions (`fn_sum`, `fn_avg`, `fn_min`/`fn_max`) accumulate in `double` or exa
 
 `lambda/lambda-decimal.cpp` is the **only** translation unit that includes `<mpdecimal.h>` (`:11`); everything else uses the slim `lambda-decimal.hpp` API with `mpd_t`/`mpd_context_t` forward-declared. A decimal value is a `struct Decimal { uint8_t unlimited; mpd_t* dec_val; }` (`lambda-data.hpp:110`) — a one-byte tri-state tag plus a pointer to the libmpdec number. There is **no reference-count field**: the struct is GC-owned, allocated by `decimal_create` (`lambda-decimal.cpp:325`) via `heap_alloc(..., LMD_TYPE_DECIMAL)`, and `decimal_retain`/`decimal_release` (`:338`/`:342`) are **no-ops** ("GC handles lifetime"). Any external note describing them as live ref-counting is stale.
 
-### 3.1 The tri-state: fixed / unlimited / BigInt
+### 3.1 The tri-state: fixed / extended / integer carrier
 
 <img alt="Decimal tri-state and contagion" src="diagram/d04_decimal_states.svg" width="720">
 
-The `unlimited` byte is a tri-state tag: **0 = fixed**, **1 = unlimited**, **2 = BigInt** (`DECIMAL_BIGINT`, `lambda.h:860`). Each state binds a different libmpdec context, lazily initialized:
+The `unlimited` byte is a tri-state tag: **0 = fixed decimal tier**, **1 = extended decimal tier**, **2 = integer carrier** (`DECIMAL_BIGINT`). Each state binds a different libmpdec context, lazily initialized:
 
-- **Fixed** uses `g_fixed_ctx` = `mpd_defaultcontext`, **38 digits** (`decimal_init`, `lambda-decimal.cpp:29`; `DECIMAL_FIXED_PRECISION 38`, `lambda-decimal.hpp:28`), reached via `decimal_fixed_context()` (`:47`). This is the literal-`n` precision.
-- **Unlimited** uses `g_unlimited_ctx` = `mpd_maxcontext` but with **`prec` forced down to 200** (`:34`–`35`), reached via `decimal_unlimited_context()` (`:52`). This is the literal-`N` precision.
-- **BigInt** uses a separate `g_bigint_ctx` = `mpd_maxcontext` with **`prec = 2000`** (`bigint_context`, `:953`–`956`), integers only.
+- **Fixed** uses `g_fixed_ctx` = `mpd_defaultcontext`, **38 digits**, reached via `decimal_fixed_context()`. Lowercase `n` literals whose significant decimal digits fit this tier use it.
+- **Extended** uses `g_unlimited_ctx` = `mpd_maxcontext` but with **`prec` forced down to 200**, reached via `decimal_unlimited_context()`. Lowercase `n` decimal literals that exceed the fixed tier use it; there is no source-level `N` suffix.
+- **Integer carrier** uses a separate `g_bigint_ctx` = `mpd_maxcontext` with **`prec = 2000`** for integer-like `n` literals and exact integer results carried in Decimal storage.
 
-The 200-digit unlimited cap is a deliberate workaround, not a true "unlimited": the in-code comment (`:32`–`33`) notes that `mpd_maxcontext`'s native precision (~10^18) **crashes `mpd_pow`**, so 200 digits is used as a "far more than needed" stand-in. The name "unlimited" is therefore a misnomer (see §6).
+The 200-digit extended cap is a deliberate runtime guard, not a source-level type distinction: `mpd_maxcontext`'s native precision (~10^18) can crash `mpd_pow`, so 200 digits is used as a practical extended tier.
 
 ### 3.2 Contagion and the operation set
 
-The arithmetic ops (`decimal_add` `:480`, `decimal_sub`, `decimal_mul`, `decimal_div`, `decimal_mod`, `decimal_pow`, `decimal_neg`, `decimal_abs`) are all shaped alike: pick the context with `get_decimal_context` (`:469`), convert any non-decimal operand to a temporary `mpd_t` with `decimal_item_to_mpd` (`:350`), run the libmpdec op, free temporaries via `cleanup_temp` (`:474`), reject `mpd_isnan`/`mpd_isinfinite` results as `ItemError` (`:509`), and wrap the result with `decimal_push_result` (`:433`). **The unlimited flag is contagious**: `should_be_unlimited(a, b)` (`:455`) returns true if *either* operand is unlimited, and that flag is threaded into both the chosen context and the result's `unlimited` byte. Division and modulo additionally check `mpd_iszero` on the divisor and return `ItemError` on a zero divisor.
+The arithmetic ops (`decimal_add`, `decimal_sub`, `decimal_mul`, `decimal_div`, `decimal_mod`, `decimal_pow`, `decimal_neg`, `decimal_abs`) are all shaped alike: pick the context with `get_decimal_context`, convert any non-decimal operand to a temporary `mpd_t` with `decimal_item_to_mpd`, run the libmpdec op, free temporaries via `cleanup_temp`, reject `mpd_isnan`/`mpd_isinfinite` results as `ItemError`, and wrap the result with `decimal_push_result`. The extended tier is contagious for decimal arithmetic: `should_be_unlimited(a, b)` returns true if either operand needs the extended context, and that flag is threaded into both the chosen context and the result's `unlimited` byte. Exact integer `+`, `-`, `*`, `%`, unary negation, and `abs` preserve the integer carrier when both operands are integer carriers; `/` exits to decimal. Division and modulo additionally check `mpd_iszero` on the divisor and return `ItemError` on a zero divisor.
 
 `decimal_item_to_mpd` (`:350`) converts a non-decimal `Item` into an `mpd_t`: `INT`/`INT64` go through `mpd_set_ssize` (exact, `:368`/`:371`), but a `FLOAT` is converted by formatting with `snprintf("%.17g")` and re-parsing with `mpd_qset_string` (`:376`) — a string round-trip that is lossy/fragile at the edges of the double range (see §6). For parser/input contexts where GC allocation is unsafe, an arena-backed family (`decimal_from_*_arena`, `decimal_deep_copy`, declared `lambda-decimal.hpp:84`–`90`) allocates the `Decimal` struct in an arena with a non-GC `mpd_t` inside.
 
 ### 3.3 Comparison and formatting
 
-`decimal_cmp_items` (`:803`) picks an unlimited-or-fixed context from the operands and calls `decimal_cmp` (`:778`), which converts both sides and returns `mpd_cmp`. Critically, on a **conversion failure** `decimal_cmp` returns **`0` (equal)** (`:788`) — a silent error swallow that makes a malformed comparand compare equal to everything (§6). Formatting goes through `decimal_print` / `decimal_big_print` (declared `lambda-decimal.hpp:97`/`100`), both built on `mpd_to_sci` with no truncation.
+`decimal_cmp_items` picks an extended-or-fixed context from the operands and calls `decimal_cmp`, which converts both sides and returns `mpd_cmp`. Critically, on a **conversion failure** `decimal_cmp` returns **`0` (equal)** — a silent error swallow that makes a malformed comparand compare equal to everything (§6). Formatting goes through `decimal_print` / `decimal_big_print`, both built on `mpd_to_sci` with no truncation.
 
 ### 3.4 BigInt
 

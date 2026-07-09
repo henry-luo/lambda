@@ -406,6 +406,19 @@ static bool buffer_from_to_index(Item item, int undefined_default, int nan_defau
     return true;
 }
 
+static int buffer_number_to_int_or_default(Item item, int default_value) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_UNDEFINED || item.item == ITEM_JS_UNDEFINED) return default_value;
+    if (type == LMD_TYPE_INT) return (int)it2i(item);
+    if (type == LMD_TYPE_FLOAT) {
+        double value = it2d(item);
+        // JS numeric arguments can be boxed doubles even when integer-valued.
+        if (value != value) return default_value;
+        return (int)value;
+    }
+    return default_value;
+}
+
 // ─── Buffer.from(data, encodingOrOffset?, length?) ─────────────────────────
 // data can be: string (utf-8), array of bytes, ArrayBuffer, another Buffer/TypedArray
 extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
@@ -1737,8 +1750,8 @@ extern "C" Item js_buffer_slice(Item buf, Item start_item, Item end_item) {
     if (!data || blen == 0) return create_buffer(0);
 
     int start = 0, end = blen;
-    if (get_type_id(start_item) == LMD_TYPE_INT) start = (int)it2i(start_item);
-    if (get_type_id(end_item) == LMD_TYPE_INT) end = (int)it2i(end_item);
+    start = buffer_number_to_int_or_default(start_item, start);
+    end = buffer_number_to_int_or_default(end_item, end);
     if (start < 0) start = blen + start;
     if (end < 0) end = blen + end;
     if (start < 0) start = 0;
@@ -1761,6 +1774,7 @@ extern "C" Item js_buffer_fill(Item buf, Item value) {
 
     uint8_t fill_byte = 0;
     if (get_type_id(value) == LMD_TYPE_INT) fill_byte = (uint8_t)(it2i(value) & 0xFF);
+    else if (get_type_id(value) == LMD_TYPE_FLOAT) fill_byte = (uint8_t)((int64_t)it2d(value) & 0xFF);
     memset(data, fill_byte, blen);
     return buf;
 }
@@ -2538,8 +2552,8 @@ static Item js_buffer_iterator_new(Item target, int kind) {
 extern "C" Item js_buffer_readUIntBE(Item buf, Item offset_item, Item byte_len_item) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
-    int offset = (get_type_id(offset_item) == LMD_TYPE_INT) ? (int)it2i(offset_item) : 0;
-    int nbytes = (get_type_id(byte_len_item) == LMD_TYPE_INT) ? (int)it2i(byte_len_item) : 1;
+    int offset = buffer_number_to_int_or_default(offset_item, 0);
+    int nbytes = buffer_number_to_int_or_default(byte_len_item, 1);
     if (nbytes < 1 || nbytes > 6 || offset < 0 || offset + nbytes > blen) return ItemNull;
     uint64_t val = 0;
     for (int i = 0; i < nbytes; i++) val = (val << 8) | data[offset + i];
@@ -2550,8 +2564,8 @@ extern "C" Item js_buffer_readUIntBE(Item buf, Item offset_item, Item byte_len_i
 extern "C" Item js_buffer_readUIntLE(Item buf, Item offset_item, Item byte_len_item) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
-    int offset = (get_type_id(offset_item) == LMD_TYPE_INT) ? (int)it2i(offset_item) : 0;
-    int nbytes = (get_type_id(byte_len_item) == LMD_TYPE_INT) ? (int)it2i(byte_len_item) : 1;
+    int offset = buffer_number_to_int_or_default(offset_item, 0);
+    int nbytes = buffer_number_to_int_or_default(byte_len_item, 1);
     if (nbytes < 1 || nbytes > 6 || offset < 0 || offset + nbytes > blen) return ItemNull;
     uint64_t val = 0;
     for (int i = nbytes - 1; i >= 0; i--) val = (val << 8) | data[offset + i];
@@ -2562,8 +2576,8 @@ extern "C" Item js_buffer_readUIntLE(Item buf, Item offset_item, Item byte_len_i
 extern "C" Item js_buffer_readIntBE(Item buf, Item offset_item, Item byte_len_item) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
-    int offset = (get_type_id(offset_item) == LMD_TYPE_INT) ? (int)it2i(offset_item) : 0;
-    int nbytes = (get_type_id(byte_len_item) == LMD_TYPE_INT) ? (int)it2i(byte_len_item) : 1;
+    int offset = buffer_number_to_int_or_default(offset_item, 0);
+    int nbytes = buffer_number_to_int_or_default(byte_len_item, 1);
     if (nbytes < 1 || nbytes > 6 || offset < 0 || offset + nbytes > blen) return ItemNull;
     uint64_t val = 0;
     for (int i = 0; i < nbytes; i++) val = (val << 8) | data[offset + i];
@@ -2578,8 +2592,8 @@ extern "C" Item js_buffer_readIntBE(Item buf, Item offset_item, Item byte_len_it
 extern "C" Item js_buffer_readIntLE(Item buf, Item offset_item, Item byte_len_item) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
-    int offset = (get_type_id(offset_item) == LMD_TYPE_INT) ? (int)it2i(offset_item) : 0;
-    int nbytes = (get_type_id(byte_len_item) == LMD_TYPE_INT) ? (int)it2i(byte_len_item) : 1;
+    int offset = buffer_number_to_int_or_default(offset_item, 0);
+    int nbytes = buffer_number_to_int_or_default(byte_len_item, 1);
     if (nbytes < 1 || nbytes > 6 || offset < 0 || offset + nbytes > blen) return ItemNull;
     uint64_t val = 0;
     for (int i = nbytes - 1; i >= 0; i--) val = (val << 8) | data[offset + i];
@@ -2593,11 +2607,11 @@ extern "C" Item js_buffer_readIntLE(Item buf, Item offset_item, Item byte_len_it
 extern "C" Item js_buffer_writeUIntBE(Item buf, Item value_item, Item offset_item, Item byte_len_item) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
-    int offset = (get_type_id(offset_item) == LMD_TYPE_INT) ? (int)it2i(offset_item) : 0;
-    int nbytes = (get_type_id(byte_len_item) == LMD_TYPE_INT) ? (int)it2i(byte_len_item) : 1;
+    int offset = buffer_number_to_int_or_default(offset_item, 0);
+    int nbytes = buffer_number_to_int_or_default(byte_len_item, 1);
     uint64_t val = 0;
     if (get_type_id(value_item) == LMD_TYPE_INT) val = (uint64_t)it2i(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) val = (uint64_t)it2d(value_item);
+    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) val = (uint64_t)(int64_t)it2d(value_item);
     if (nbytes < 1 || nbytes > 6 || offset < 0 || offset + nbytes > blen) return ItemNull;
     for (int i = nbytes - 1; i >= 0; i--) {
         data[offset + i] = (uint8_t)(val & 0xFF);
@@ -2610,11 +2624,11 @@ extern "C" Item js_buffer_writeUIntBE(Item buf, Item value_item, Item offset_ite
 extern "C" Item js_buffer_writeUIntLE(Item buf, Item value_item, Item offset_item, Item byte_len_item) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
-    int offset = (get_type_id(offset_item) == LMD_TYPE_INT) ? (int)it2i(offset_item) : 0;
-    int nbytes = (get_type_id(byte_len_item) == LMD_TYPE_INT) ? (int)it2i(byte_len_item) : 1;
+    int offset = buffer_number_to_int_or_default(offset_item, 0);
+    int nbytes = buffer_number_to_int_or_default(byte_len_item, 1);
     uint64_t val = 0;
     if (get_type_id(value_item) == LMD_TYPE_INT) val = (uint64_t)it2i(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) val = (uint64_t)it2d(value_item);
+    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) val = (uint64_t)(int64_t)it2d(value_item);
     if (nbytes < 1 || nbytes > 6 || offset < 0 || offset + nbytes > blen) return ItemNull;
     for (int i = 0; i < nbytes; i++) {
         data[offset + i] = (uint8_t)(val & 0xFF);
@@ -2638,7 +2652,7 @@ extern "C" Item js_buffer_writeIntLE(Item buf, Item value_item, Item offset_item
 extern "C" Item js_buffer_readBigInt64BE(Item buf, Item offset_item) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
-    int offset = (get_type_id(offset_item) == LMD_TYPE_INT) ? (int)it2i(offset_item) : 0;
+    int offset = buffer_number_to_int_or_default(offset_item, 0);
     if (offset < 0 || offset + 8 > blen) return ItemNull;
     int64_t val = 0;
     for (int i = 0; i < 8; i++) val = (val << 8) | data[offset + i];
@@ -2648,7 +2662,7 @@ extern "C" Item js_buffer_readBigInt64BE(Item buf, Item offset_item) {
 extern "C" Item js_buffer_readBigInt64LE(Item buf, Item offset_item) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
-    int offset = (get_type_id(offset_item) == LMD_TYPE_INT) ? (int)it2i(offset_item) : 0;
+    int offset = buffer_number_to_int_or_default(offset_item, 0);
     if (offset < 0 || offset + 8 > blen) return ItemNull;
     int64_t val = 0;
     for (int i = 7; i >= 0; i--) val = (val << 8) | data[offset + i];
@@ -2666,7 +2680,7 @@ extern "C" Item js_buffer_readBigUInt64LE(Item buf, Item offset_item) {
 extern "C" Item js_buffer_writeBigInt64BE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
-    int offset = (get_type_id(offset_item) == LMD_TYPE_INT) ? (int)it2i(offset_item) : 0;
+    int offset = buffer_number_to_int_or_default(offset_item, 0);
     if (offset < 0 || offset + 8 > blen) return ItemNull;
     int64_t val = (get_type_id(value_item) == LMD_TYPE_INT) ? it2i(value_item) : 0;
     for (int i = 7; i >= 0; i--) {
@@ -2679,7 +2693,7 @@ extern "C" Item js_buffer_writeBigInt64BE(Item buf, Item value_item, Item offset
 extern "C" Item js_buffer_writeBigInt64LE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
-    int offset = (get_type_id(offset_item) == LMD_TYPE_INT) ? (int)it2i(offset_item) : 0;
+    int offset = buffer_number_to_int_or_default(offset_item, 0);
     if (offset < 0 || offset + 8 > blen) return ItemNull;
     int64_t val = (get_type_id(value_item) == LMD_TYPE_INT) ? it2i(value_item) : 0;
     for (int i = 0; i < 8; i++) {

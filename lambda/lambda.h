@@ -146,7 +146,8 @@ typedef uint8_t NumSizedType;
 enum EnumArrayNumElemType {
     // Lambda's standard numeric types (8 bytes/element each):
     ELEM_INT   = 0x00,   // 8 bytes  — int56-as-int64 (was ARRAY_INT)
-    ELEM_FLOAT = 0x10,   // 8 bytes  — double (was ARRAY_FLOAT)
+    ELEM_FLOAT64 = 0x10, // 8 bytes  — canonical double lane (was ARRAY_FLOAT)
+    ELEM_FLOAT = ELEM_FLOAT64, // source compatibility alias; not a distinct representation
 
     // Compact sized integer types:
     ELEM_INT8    = 0x20,  // 1 byte   — maps to NUM_INT8
@@ -162,7 +163,7 @@ enum EnumArrayNumElemType {
     // Compact sized float types:
     ELEM_FLOAT16 = 0xA0,  // 2 bytes  — maps to NUM_FLOAT16
     ELEM_FLOAT32 = 0xB0,  // 4 bytes  — maps to NUM_FLOAT32
-    ELEM_FLOAT64 = 0xC0,  // 8 bytes  — explicit f64 (same storage as ELEM_FLOAT)
+    ELEM_RESERVED_C0 = 0xC0, // retired duplicate double lane; keep the slot unavailable
 
     // Boolean type (1 byte/element):
     ELEM_BOOL    = 0xD0,  // 1 byte   — bool values, distinct from UINT8 for any()/all() semantics
@@ -170,14 +171,14 @@ enum EnumArrayNumElemType {
     // JS-compatible clamped byte type:
     ELEM_UINT8_CLAMPED = 0xE0,  // 1 byte — Uint8ClampedArray storage semantics
 
-    ELEM_NUM_COUNT = 15
+    ELEM_NUM_COUNT = 14
 };
 typedef uint8_t ArrayNumElemType;
 
 // Bytes per element, indexed by (elem_type >> 4)
 static const uint8_t ELEM_TYPE_SIZE[16] = {
     8, // 0x00 ELEM_INT     — int64_t
-    8, // 0x10 ELEM_FLOAT   — double
+    8, // 0x10 ELEM_FLOAT64 — double
     1, // 0x20 ELEM_INT8
     2, // 0x30 ELEM_INT16
     4, // 0x40 ELEM_INT32
@@ -188,7 +189,7 @@ static const uint8_t ELEM_TYPE_SIZE[16] = {
     8, // 0x90 ELEM_UINT64
     2, // 0xA0 ELEM_FLOAT16
     4, // 0xB0 ELEM_FLOAT32
-    8, // 0xC0 ELEM_FLOAT64
+    0, // 0xC0 reserved retired duplicate double lane
     1, // 0xD0 ELEM_BOOL
     1, // 0xE0 ELEM_UINT8_CLAMPED
     0, // 0xF0 reserved
@@ -520,7 +521,7 @@ typedef struct List Array;
 typedef struct ArrayNum ArrayNum;
 typedef ArrayNum ArrayInt;    // compat alias: int56 arrays (elem_type == ELEM_INT)
 typedef ArrayNum ArrayInt64;  // compat alias: int64 arrays (elem_type == ELEM_INT64)
-typedef ArrayNum ArrayFloat;  // compat alias: float arrays (elem_type == ELEM_FLOAT)
+typedef ArrayNum ArrayFloat;  // compat alias: float arrays (elem_type == ELEM_FLOAT64)
 typedef struct Map Map;
 typedef struct SparseArrayMap SparseArrayMap;
 typedef struct VMap VMap;
@@ -649,7 +650,7 @@ struct Container {
         //---------------------
         union {
             int64_t* items;        // for ELEM_INT, ELEM_INT64
-            double* float_items;   // for ELEM_FLOAT
+            double* float_items;   // for ELEM_FLOAT64
             void* data;            // for compact types (ELEM_INT8, ELEM_UINT8, etc.)
         };
         int64_t length;  // number of elements
@@ -1564,7 +1565,7 @@ extern "C" {
     // op: 0=DOT 1=MIN 2=MAX 3=MEDIAN 4=MEAN.  border: 0=CONSTANT 1=EDGE 2=REFLECT
     // 3=WRAP.  pad_h/pad_w: window-start offset from each output's input position
     // (negative → centred at Kh/2, Kw/2 for same-size filtering; 0 → top-left for
-    // pooling).  Result is ELEM_FLOAT.  Covers convolution/morphology/rank/pooling.
+    // pooling).  Result is ELEM_FLOAT64.  Covers convolution/morphology/rank/pooling.
     Item array_num_stencil(Item in, Item kernel, int op, int border, double border_value,
                            int64_t stride_h, int64_t stride_w, int64_t pad_h, int64_t pad_w);
     Item fn_convolve(Item img, Item kernel);       // weighted-sum correlation (DOT)

@@ -31,7 +31,7 @@ false
 number
 "=== is negative ==="
 false
-false
+true
 false
 false
 "=== fn typed params ==="

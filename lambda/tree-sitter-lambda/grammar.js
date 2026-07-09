@@ -252,10 +252,10 @@ module.exports = grammar({
 
     float: _ => token(float_literal),
 
-    decimal: $ => {
-      // no e-notation for decimal, following JS bigint
-      return token( seq(choice(decimal_literal, integer_literal), choice('n','N')) );
-    },
+    decimal: $ => token(seq(
+      choice(float_literal, decimal_literal, integer_literal),
+      'n'
+    )),
 
     // sized integer: integer literal with type suffix (i8, i16, i32, i64, u8, u16, u32, u64)
     sized_integer: _ => token(seq(

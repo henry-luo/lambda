@@ -108,7 +108,7 @@ extern TypeInfo type_info[];
 
 typedef struct mpd_t mpd_t;
 struct Decimal {
-    uint8_t unlimited;   // whether it is an unlimited decimal
+    uint8_t unlimited;   // 0 fixed, 1 extended decimal, DECIMAL_BIGINT integer carrier
     mpd_t* dec_val;  // libmpdec decimal number
 };
 

@@ -62,11 +62,16 @@ static bool array_pattern_simple_type_matches(Item item, Type* type_pattern, boo
     *handled = false;
     if (!type_pattern || type_pattern->type_id != LMD_TYPE_TYPE) return false;
     Type* expected = ((TypeType*)type_pattern)->type;
-    if (!expected || expected->type_id == LMD_TYPE_NUM_SIZED || expected->kind != TYPE_KIND_SIMPLE) return false;
+    if (!expected) return false;
+    if (expected == &TYPE_NUMBER || expected == &TYPE_INTEGER || IS_NUMERIC_ID(expected->type_id)) {
+        *handled = true;
+        // array tuple type patterns use the same exact-embedding rule as scalar `is`.
+        return validator_numeric_item_embeds(item.to_const(), expected);
+    }
+    if (expected->kind != TYPE_KIND_SIMPLE) return false;
     *handled = true;
     TypeId actual = get_type_id(item);
     if (expected->type_id == LMD_TYPE_ANY) return actual != LMD_TYPE_ERROR;
-    if (expected == &TYPE_NUMBER) return IS_NUMERIC_ID(actual);
     if (expected->type_id == LMD_TYPE_ARRAY) {
         return actual == LMD_TYPE_ARRAY || actual == LMD_TYPE_ARRAY_NUM || actual == LMD_TYPE_RANGE;
     }
@@ -193,12 +198,16 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         if (!result->valid) add_type_mismatch_error_ex(result, validator, base_type, item);
         return result;
     }
+    if (base_type == &TYPE_INTEGER) {
+        result->valid = validator_numeric_item_embeds(item, base_type);
+        if (!result->valid) add_type_mismatch_error_ex(result, validator, base_type, item);
+        return result;
+    }
 
     // Handle numeric types with promotion
     if (IS_NUMERIC_ID(base_type->type_id)) {
-        // Number promotion - allow int/float/decimal interchangeably
-        if (IS_NUMERIC_ID(item.type_id()) &&
-            LMD_TYPE_INT <= item.type_id() && item.type_id() <= base_type->type_id) {
+        // Numeric validation follows the same exact-embedding lattice as `is`.
+        if (validator_numeric_item_embeds(item, base_type)) {
             result->valid = true;
         } else {
             result->valid = false;

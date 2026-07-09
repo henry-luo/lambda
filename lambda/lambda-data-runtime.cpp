@@ -243,7 +243,7 @@ static Item array_num_read_scalar_at(ArrayNum* array, int64_t offset) {
     switch (array->get_elem_type()) {
         case ELEM_INT:     return (Item){.item = i2it(array->items[offset])};
         case ELEM_INT64:   return push_l(array->items[offset]);
-        case ELEM_FLOAT:   return push_d(array->float_items[offset]);
+        case ELEM_FLOAT64:   return push_d(array->float_items[offset]);
         case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)array->data)[offset])};
         case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)array->data)[offset])};
         case ELEM_INT32:   return (Item){.item = i32_to_item(((int32_t*)array->data)[offset])};
@@ -259,7 +259,6 @@ static Item array_num_read_scalar_at(ArrayNum* array, int64_t offset) {
             *heap_val = val;
             return (Item){.item = u64_to_item(heap_val)};
         }
-        case ELEM_FLOAT64: return push_d(((double*)array->data)[offset]);
         case ELEM_BOOL:    return (Item){.item = b2it(((uint8_t*)array->data)[offset] ? BOOL_TRUE : BOOL_FALSE)};
         default:           return ItemNull;
     }
@@ -418,7 +417,7 @@ Item array_num_get(ArrayNum *array, int64_t index) {
     }
     case ELEM_INT64:
         return push_l(array->items[index]);
-    case ELEM_FLOAT:
+    case ELEM_FLOAT64:
         return push_d(array->float_items[index]);
     // compact sized types
     case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)array->data)[index])};
@@ -436,8 +435,6 @@ Item array_num_get(ArrayNum *array, int64_t index) {
         *heap_val = val;
         return (Item){.item = u64_to_item(heap_val)};
     }
-    case ELEM_FLOAT64:
-        return push_d(((double*)array->data)[index]);
     case ELEM_BOOL:
         return (Item){.item = b2it(((uint8_t*)array->data)[index] ? BOOL_TRUE : BOOL_FALSE)};
     default:
@@ -550,19 +547,19 @@ int64_t array_int64_get_raw(ArrayNum *array, int64_t index) {
 ArrayNum* array_float() {
     ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->set_elem_type(ELEM_FLOAT);
+    arr->set_elem_type(ELEM_FLOAT64);
     return arr;
 }
 
 // used when there's no interleaving with transpiled code
 ArrayNum* array_float_new(int64_t length) {
-    return array_num_new(ELEM_FLOAT, length);
+    return array_num_new(ELEM_FLOAT64, length);
 }
 
 ArrayNum* array_float_fill(ArrayNum *arr, int count, ...) {
     if (count > 0) {
         arr->type_id = LMD_TYPE_ARRAY_NUM;
-        arr->set_elem_type(ELEM_FLOAT);
+        arr->set_elem_type(ELEM_FLOAT64);
         size_t bytes;
         if (lam::checked_mul((size_t)count, sizeof(double), &bytes)) {
             arr->float_items = (double*)heap_data_alloc(bytes);
@@ -747,7 +744,7 @@ double array_num_get_number_value(ArrayNum *arr, int64_t index) {
     case ELEM_INT:
     case ELEM_INT64:
         return (double)arr->items[index];
-    case ELEM_FLOAT:
+    case ELEM_FLOAT64:
         return arr->float_items[index];
     case ELEM_INT8:
         return (double)((int8_t*)arr->data)[index];
@@ -768,8 +765,6 @@ double array_num_get_number_value(ArrayNum *arr, int64_t index) {
         return (double)((float*)arr->data)[index];
     case ELEM_UINT64:
         return (double)((uint64_t*)arr->data)[index];
-    case ELEM_FLOAT64:
-        return ((double*)arr->data)[index];
     case ELEM_BOOL:
         return ((uint8_t*)arr->data)[index] ? 1.0 : 0.0;
     default:
@@ -788,7 +783,7 @@ void array_num_set_int64_value(ArrayNum *arr, int64_t index, int64_t value) {
     case ELEM_INT64:
         arr->items[index] = value;
         break;
-    case ELEM_FLOAT:
+    case ELEM_FLOAT64:
         arr->float_items[index] = (double)value;
         break;
     case ELEM_INT8:
@@ -819,9 +814,6 @@ void array_num_set_int64_value(ArrayNum *arr, int64_t index, int64_t value) {
     case ELEM_UINT64:
         ((uint64_t*)arr->data)[index] = (uint64_t)value;
         break;
-    case ELEM_FLOAT64:
-        ((double*)arr->data)[index] = (double)value;
-        break;
     case ELEM_BOOL:
         ((uint8_t*)arr->data)[index] = value ? 1 : 0;
         break;
@@ -837,7 +829,7 @@ void array_num_set_double_value(ArrayNum *arr, int64_t index, double value) {
         return;
     }
     switch (arr->get_elem_type()) {
-    case ELEM_FLOAT:
+    case ELEM_FLOAT64:
         arr->float_items[index] = value;
         break;
     case ELEM_FLOAT16:
@@ -845,9 +837,6 @@ void array_num_set_double_value(ArrayNum *arr, int64_t index, double value) {
         break;
     case ELEM_FLOAT32:
         ((float*)arr->data)[index] = (float)value;
-        break;
-    case ELEM_FLOAT64:
-        ((double*)arr->data)[index] = value;
         break;
     case ELEM_UINT8_CLAMPED:
         ((uint8_t*)arr->data)[index] = array_num_clamp_uint8_even(value);
@@ -968,7 +957,7 @@ void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
     case ELEM_INT64:
         arr->items[index] = item_to_int_value(value);
         break;
-    case ELEM_FLOAT:
+    case ELEM_FLOAT64:
         arr->float_items[index] = item_to_float_value(value);
         break;
     case ELEM_INT8:
@@ -1000,9 +989,6 @@ void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
         break;
     case ELEM_UINT64:
         ((uint64_t*)arr->data)[index] = (uint64_t)item_to_int_value(value);
-        break;
-    case ELEM_FLOAT64:
-        ((double*)arr->data)[index] = item_to_float_value(value);
         break;
     case ELEM_BOOL: {
         TypeId vt = get_type_id(value);
@@ -1123,14 +1109,14 @@ static bool row_summary(Item it, ArrayNumElemType* etype_out, int64_t* len_out, 
         Array* a = it.array;
         if (!a || a->is_spreadable || a->is_content) return false;
         if (a->length == 0) return false;
-        // Scan items: all must be numeric; if any is float, etype = ELEM_FLOAT, else ELEM_INT64
+        // Scan items: all must be numeric; if any is float, etype = ELEM_FLOAT64, else ELEM_INT64
         bool any_float = false;
         for (int64_t i = 0; i < a->length; i++) {
             TypeId it_tid = get_type_id(a->items[i]);
             if (it_tid == LMD_TYPE_FLOAT) any_float = true;
             else if (it_tid != LMD_TYPE_INT && it_tid != LMD_TYPE_INT64) return false;
         }
-        *etype_out = any_float ? ELEM_FLOAT : ELEM_INT64;
+        *etype_out = any_float ? ELEM_FLOAT64 : ELEM_INT64;
         *len_out = a->length;
         *is_arr_num = false;
         return true;
@@ -1209,19 +1195,19 @@ static ArrayNum* try_promote_to_ndim(Array* arr) {
         // 1-D rows: each sibling must be the same length, same (or compatible) elem_type
         shape_stack[1] = inner_len;
         out_ndim = 2;
-        bool any_float = (etype == ELEM_FLOAT || etype == ELEM_FLOAT64);
+        bool any_float = (etype == ELEM_FLOAT64);
         for (int64_t i = 1; i < arr->length; i++) {
             ArrayNumElemType e2; int64_t l2; bool an2;
             if (!row_summary(arr->items[i], &e2, &l2, &an2)) return NULL;
             if (l2 != inner_len) return NULL;
             // widen to float if any row is float
-            if (e2 == ELEM_FLOAT || e2 == ELEM_FLOAT64) any_float = true;
+            if (e2 == ELEM_FLOAT64) any_float = true;
             else if (e2 != etype && e2 != ELEM_INT && e2 != ELEM_INT64) {
                 // refuse exotic compact mixes for simplicity
                 return NULL;
             }
         }
-        if (any_float) etype = ELEM_FLOAT;
+        if (any_float) etype = ELEM_FLOAT64;
         else if (etype == ELEM_INT) etype = ELEM_INT64;  // standardize int promotion to INT64 for storage
     }
 
@@ -1267,7 +1253,7 @@ static ArrayNum* try_promote_scalars_to_1d(Array* arr) {
     // all-bool → ELEM_BOOL (mask); all-numeric → int/float; mixed → keep generic
     ArrayNumElemType et;
     if (bool_count == n)     et = ELEM_BOOL;
-    else if (num_count == n) et = any_float ? ELEM_FLOAT : ELEM_INT64;
+    else if (num_count == n) et = any_float ? ELEM_FLOAT64 : ELEM_INT64;
     else return NULL;
     ArrayNum* result = array_num_new(et, n);
     if (!result) return NULL;
@@ -2190,7 +2176,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         ArrayNum* arr = item.array_num;
         ArrayNumElemType et = arr->get_elem_type();
         if ((element_type_id == LMD_TYPE_INT && et == ELEM_INT) ||
-            (element_type_id == LMD_TYPE_FLOAT && et == ELEM_FLOAT) ||
+            (element_type_id == LMD_TYPE_FLOAT && et == ELEM_FLOAT64) ||
             (element_type_id == LMD_TYPE_INT64 && et == ELEM_INT64)) {
             return (void*)arr;
         }
@@ -2223,7 +2209,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         else if (element_type_id == LMD_TYPE_FLOAT) {
             ArrayNum* typed = array_float_new(length);
             for (int64_t i = 0; i < length; i++) {
-                if (src_et == ELEM_FLOAT)
+                if (src_et == ELEM_FLOAT64)
                     typed->float_items[i] = src->float_items[i];
                 else
                     typed->float_items[i] = (double)src->items[i];

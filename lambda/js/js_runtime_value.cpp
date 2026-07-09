@@ -8,6 +8,25 @@ extern "C" Item js_dom_selection_to_string_value(Item item);
 extern "C" void* js_dom_unwrap_element(Item item);
 extern "C" bool js_is_proxy(Item obj);
 
+static inline bool js_number_like_type(TypeId type) {
+    return type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT ||
+           type == LMD_TYPE_FLOAT64 || type == LMD_TYPE_NUM_SIZED;
+}
+
+static double js_sized_number_to_double(Item value) {
+    switch (value.get_num_type()) {
+    case NUM_INT8:    return (double)item_to_i8(value.item);
+    case NUM_INT16:   return (double)item_to_i16(value.item);
+    case NUM_INT32:   return (double)item_to_i32(value.item);
+    case NUM_UINT8:   return (double)item_to_u8(value.item);
+    case NUM_UINT16:  return (double)item_to_u16(value.item);
+    case NUM_UINT32:  return (double)item_to_u32(value.item);
+    case NUM_FLOAT16: return (double)item_to_f16(value.item);
+    case NUM_FLOAT32: return (double)item_to_f32(value.item);
+    default:          return NAN;
+    }
+}
+
 // =============================================================================
 // Type Conversion Functions
 // =============================================================================
@@ -20,25 +39,31 @@ extern "C" Item js_to_number(Item value) {
     case LMD_TYPE_UNDEFINED:
         // null -> 0, undefined -> NaN
         if (type == LMD_TYPE_UNDEFINED) {
-            double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *nan_ptr = NAN;
-            return (Item){.item = d2it(nan_ptr)};
+            return js_make_number(NAN);
         }
-        return (Item){.item = i2it(0)};
+        return js_make_number(0.0);
 
     case LMD_TYPE_BOOL: {
         int val = it2b(value) ? 1 : 0;
-        return (Item){.item = i2it(val)};
+        return js_make_number((double)val);
     }
 
+    case LMD_TYPE_INT:
+        if (js_is_symbol(value)) {
+            js_throw_type_error("Cannot convert a Symbol value to a number");
+            return ItemNull;
+        }
+        return js_make_number((double)it2i(value));
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64:
         return value;
+    case LMD_TYPE_NUM_SIZED:
+        return js_make_number(js_sized_number_to_double(value));
 
     case LMD_TYPE_STRING: {
         String* str = it2s(value);
         if (!str || str->len == 0) {
-            return (Item){.item = i2it(0)};  // Empty string -> 0
+            return js_make_number(0.0);  // Empty string -> 0
         }
         // v20: Trim whitespace before parsing (ES spec: WhiteSpace + LineTerminator)
         // Includes full Unicode StrWhiteSpaceChar set
@@ -87,7 +112,7 @@ extern "C" Item js_to_number(Item value) {
             break;
         }
         if (start == end) {
-            return (Item){.item = i2it(0)};  // Whitespace-only string -> 0
+            return js_make_number(0.0);  // Whitespace-only string -> 0
         }
         // Copy trimmed portion to null-terminated buffer for parsing
         int trimmed_len = (int)(end - start);
@@ -163,16 +188,12 @@ extern "C" Item js_to_number(Item value) {
         // ES spec: only "Infinity" (exact case) is valid; strtod accepts case-insensitive
         if (trimmed_len >= 3 && (buf[0] == 'i' || buf[0] == 'I')) {
             if (strncmp(buf, "Infinity", 8) != 0) {
-                double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-                *nan_ptr = NAN;
-                return (Item){.item = d2it(nan_ptr)};
+                return js_make_number(NAN);
             }
         }
         if (trimmed_len >= 4 && (buf[0] == '+' || buf[0] == '-') && (buf[1] == 'i' || buf[1] == 'I')) {
             if (strncmp(buf + 1, "Infinity", 8) != 0) {
-                double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-                *nan_ptr = NAN;
-                return (Item){.item = d2it(nan_ptr)};
+                return js_make_number(NAN);
             }
         }
         char* endptr;
@@ -180,21 +201,10 @@ extern "C" Item js_to_number(Item value) {
         // Check that ALL trimmed characters were consumed
         if (endptr == buf || *endptr != '\0') {
             // Not a valid number — NaN
-            double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *nan_ptr = NAN;
-            return (Item){.item = d2it(nan_ptr)};
+            return js_make_number(NAN);
         }
-        double* result = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *result = num;
-        return (Item){.item = d2it(result)};
+        return js_make_number(num);
     }
-
-    case LMD_TYPE_INT:
-        if (it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
-            js_throw_type_error("Cannot convert a Symbol value to a number");
-            return ItemNull;
-        }
-        return value;
 
     case LMD_TYPE_DECIMAL: {
         // ES spec: ToNumber(bigint) throws TypeError
@@ -206,6 +216,11 @@ extern "C" Item js_to_number(Item value) {
         // regular decimal → float
         return push_d(decimal_to_double(value));
     }
+
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64:
+        js_throw_type_error("Cannot convert a BigInt value to a number");
+        return ItemNull;
 
     default:
         // J39-1b: route object operands through the unified js_to_primitive
@@ -255,6 +270,7 @@ extern "C" Item js_to_numeric(Item value) {
         Decimal* _dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
         if (_dec && _dec->unlimited == DECIMAL_BIGINT) return value;
     }
+    if (js_is_native_bigint_egress(value)) return js_native_bigint_to_bigint(value);
     // ES spec: Symbol → TypeError in ToNumeric (§7.1.3)
     // Symbols are encoded as LMD_TYPE_INT with value <= -(int64_t)JS_SYMBOL_BASE
     if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
@@ -282,6 +298,7 @@ extern "C" Item js_to_numeric(Item value) {
 static inline Item js_numeric_operand(Item val) {
     TypeId t = get_type_id(val);
     if (t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY || t == LMD_TYPE_FUNC || t == LMD_TYPE_ELEMENT) return js_to_numeric(val);
+    if (js_is_native_bigint_egress(val)) return js_native_bigint_to_bigint(val);
     return val;
 }
 
@@ -430,6 +447,13 @@ extern "C" Item js_to_string(Item value) {
         char buffer[32];
         snprintf(buffer, sizeof(buffer), "%lld", (long long)v);
         return (Item){.item = s2it(heap_create_name(buffer))};
+    }
+
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64: {
+        Item bi = js_native_bigint_to_bigint(value);
+        if (bi.item == ItemError.item) return ItemNull;
+        return js_to_string(bi);
     }
 
     case LMD_TYPE_DECIMAL: {
@@ -734,7 +758,7 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
     case 'n':
         if (type_str[1] == 'u') {
             // "number"
-            if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64) {
+            if (js_number_like_type(type)) {
                 return js_key_is_symbol(value) ? 0 : 1;
             }
             return 0;
@@ -747,11 +771,7 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
         return 0;
     case 'b':
         if (type_str[1] == 'o') return (type == LMD_TYPE_BOOL) ? 1 : 0;      // "boolean"
-        if (type_str[1] == 'i') {  // "bigint"
-            if (type != LMD_TYPE_DECIMAL) return 0;
-            Decimal* _dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
-            return (_dec && _dec->unlimited == DECIMAL_BIGINT) ? 1 : 0;
-        }
+        if (type_str[1] == 'i') return js_is_bigint_egress(value) ? 1 : 0;  // "bigint"
         return 0;
     case 'u': return (type == LMD_TYPE_UNDEFINED) ? 1 : 0;  // "undefined"
     case 'o':
@@ -778,7 +798,7 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
         if (type == LMD_TYPE_FUNC || type == LMD_TYPE_UNDEFINED ||
             type == LMD_TYPE_BOOL || type == LMD_TYPE_STRING ||
             type == LMD_TYPE_SYMBOL) return 0;
-        if ((type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64) && !js_key_is_symbol(value)) return 0;
+        if (js_number_like_type(type) && !js_key_is_symbol(value)) return 0;
         return 1;  // arrays, elements, etc. are "object"
     case 'f':
         // "function"
@@ -822,8 +842,8 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
 static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst = true); // forward declaration
 extern "C" int64_t js_cmp_raw(int64_t op, Item left, Item right) {
     TypeId lt = get_type_id(left), rt = get_type_id(right);
-    bool l_num = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_FLOAT64);
-    bool r_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT64);
+    bool l_num = js_number_like_type(lt);
+    bool r_num = js_number_like_type(rt);
     if (l_num && r_num) {
         double l = (lt == LMD_TYPE_INT) ? (double)it2i(left) : it2d(left);
         double r = (rt == LMD_TYPE_INT) ? (double)it2i(right) : it2d(right);
@@ -980,6 +1000,9 @@ bool js_ta_proto_chain_set(Item object, Item key, Item value) {
     Item proto = js_get_prototype_of(object);
     int depth = 0;
     while (proto.item != ItemNull.item && depth < 16) {
+        // Proxy prototypes own the [[Set]] dispatch; probing them here would
+        // invoke unrelated descriptor traps before OrdinarySet can forward.
+        if (js_is_proxy(proto)) return false;
         if (get_type_id(proto) == LMD_TYPE_MAP && proto.map && proto.map->map_kind == MAP_KIND_TYPED_ARRAY) {
             int idx = 0;
             if (!js_ta_numeric_index_valid(proto, numeric_index, is_negative_zero, &idx)) return true;
@@ -1037,6 +1060,8 @@ double js_get_number(Item value) {
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64:
         return it2d(value);
+    case LMD_TYPE_NUM_SIZED:
+        return js_sized_number_to_double(value);
     case LMD_TYPE_BOOL:
         return it2b(value) ? 1.0 : 0.0;
     case LMD_TYPE_NULL:
@@ -1071,16 +1096,7 @@ double js_get_number(Item value) {
 }
 
 Item js_make_number(double d) {
-    // Check if it can be represented as an integer
-    // Guard with isfinite to avoid UB from (int64_t)Infinity/NaN
-    // v18p: Preserve -0.0 as float (don't collapse to int 0)
-    // Avoid creating ints with magnitude >= JS_SYMBOL_BASE to prevent
-    // collision with JS symbol encoding (symbols use negative ints <= -JS_SYMBOL_BASE)
-    if (isfinite(d) && d == (double)(int64_t)d && d >= INT56_MIN && d <= INT56_MAX
-        && !(d == 0.0 && signbit(d))
-        && (int64_t)d > -(int64_t)JS_SYMBOL_BASE) {
-        return (Item){.item = i2it((int64_t)d)};
-    }
+    // JS Number must not leak Lambda's compact-int representation; representation drift broke type-sensitive JS paths.
     double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *ptr = d;
     return (Item){.item = d2it(ptr)};
@@ -1092,6 +1108,7 @@ Item js_make_number(double d) {
 
 // Increment: handles both Number and BigInt (for ++ operator)
 extern "C" Item js_increment(Item value) {
+    value = js_numeric_operand(value);
     if (js_is_bigint(value)) return bigint_inc(value);
     double d = js_get_number(value);
     return js_make_number(d + 1.0);
@@ -1099,6 +1116,7 @@ extern "C" Item js_increment(Item value) {
 
 // Decrement: handles both Number and BigInt (for -- operator)
 extern "C" Item js_decrement(Item value) {
+    value = js_numeric_operand(value);
     if (js_is_bigint(value)) return bigint_dec(value);
     double d = js_get_number(value);
     return js_make_number(d - 1.0);
@@ -1276,6 +1294,9 @@ extern "C" Item js_add(Item left, Item right) {
         return js_concat_strings_fast(it2s(left_str), it2s(right_str));
     }
 
+    left = js_numeric_operand(left);
+    right = js_numeric_operand(right);
+
     // Numeric addition — use double arithmetic for JS semantics
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     // BigInt: mixed types → TypeError, same types → integer addition
@@ -1365,6 +1386,15 @@ extern "C" Item js_equal(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
 
+    if (js_is_native_bigint_egress(left)) {
+        left = js_native_bigint_to_bigint(left);
+        left_type = get_type_id(left);
+    }
+    if (js_is_native_bigint_egress(right)) {
+        right = js_native_bigint_to_bigint(right);
+        right_type = get_type_id(right);
+    }
+
     // Same type: use strict equality
     if (left_type == right_type) {
         return js_strict_equal(left, right);
@@ -1377,8 +1407,7 @@ extern "C" Item js_equal(Item left, Item right) {
     }
 
     // Number comparisons
-    if ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) &&
-        (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT)) {
+    if (js_number_like_type(left_type) && js_number_like_type(right_type)) {
         double l = js_get_number(left);
         double r = js_get_number(right);
         return (Item){.item = b2it(l == r)};
@@ -1387,12 +1416,12 @@ extern "C" Item js_equal(Item left, Item right) {
     // BigInt == Number: compare values
     bool left_bigint = js_is_bigint(left);
     bool right_bigint = js_is_bigint(right);
-    if (left_bigint && (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT)) {
+    if (left_bigint && js_number_like_type(right_type)) {
         double r = js_get_number(right);
         if (isnan(r) || r == INFINITY || r == -INFINITY) return (Item){.item = b2it(false)};
         return (Item){.item = b2it(bigint_cmp_double(left, r) == 0)};
     }
-    if ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) && right_bigint) {
+    if (js_number_like_type(left_type) && right_bigint) {
         double l = js_get_number(left);
         if (isnan(l) || l == INFINITY || l == -INFINITY) return (Item){.item = b2it(false)};
         return (Item){.item = b2it(bigint_cmp_double(right, l) == 0)};
@@ -1419,8 +1448,8 @@ extern "C" Item js_equal(Item left, Item right) {
     }
 
     // String to number
-    if ((left_type == LMD_TYPE_STRING && (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT)) ||
-        ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) && right_type == LMD_TYPE_STRING)) {
+    if ((left_type == LMD_TYPE_STRING && js_number_like_type(right_type)) ||
+        (js_number_like_type(left_type) && right_type == LMD_TYPE_STRING)) {
         double l = js_get_number(left);
         double r = js_get_number(right);
         return (Item){.item = b2it(l == r)};
@@ -1437,12 +1466,12 @@ extern "C" Item js_equal(Item left, Item right) {
     // Object ToPrimitive: if one side is object/map, convert via ToPrimitive then recurse
     // ES §7.2.13 Abstract Equality steps 10-11: x is Object & y is primitive (or vice versa)
     // → ToPrimitive(object, "default") then re-compare. Hint default for ==.
-    if (left_type == LMD_TYPE_MAP && (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT || right_type == LMD_TYPE_STRING || js_is_bigint(right) || js_is_symbol(right))) {
+    if (left_type == LMD_TYPE_MAP && (js_number_like_type(right_type) || right_type == LMD_TYPE_STRING || js_is_bigint(right) || js_is_symbol(right))) {
         Item prim = js_op_to_primitive(left, 0);
         if (js_exception_pending) return (Item){.item = b2it(false)};
         return js_equal(prim, right);
     }
-    if (right_type == LMD_TYPE_MAP && (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT || left_type == LMD_TYPE_STRING || js_is_bigint(left) || js_is_symbol(left))) {
+    if (right_type == LMD_TYPE_MAP && (js_number_like_type(left_type) || left_type == LMD_TYPE_STRING || js_is_bigint(left) || js_is_symbol(left))) {
         Item prim = js_op_to_primitive(right, 0);
         if (js_exception_pending) return (Item){.item = b2it(false)};
         return js_equal(left, prim);
@@ -1451,14 +1480,14 @@ extern "C" Item js_equal(Item left, Item right) {
     // Array ToPrimitive: arrays are objects; only coerce for object-vs-primitive
     // abstract equality cases, not for null/undefined comparisons.
     if (left_type == LMD_TYPE_ARRAY &&
-        (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT || right_type == LMD_TYPE_STRING ||
+        (js_number_like_type(right_type) || right_type == LMD_TYPE_STRING ||
          js_is_bigint(right) || js_is_symbol(right))) {
         Item prim = js_op_to_primitive(left, 0);
         if (js_exception_pending) return (Item){.item = b2it(false)};
         return js_equal(prim, right);
     }
     if (right_type == LMD_TYPE_ARRAY &&
-        (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT || left_type == LMD_TYPE_STRING ||
+        (js_number_like_type(left_type) || left_type == LMD_TYPE_STRING ||
          js_is_bigint(left) || js_is_symbol(left))) {
         Item prim = js_op_to_primitive(right, 0);
         if (js_exception_pending) return (Item){.item = b2it(false)};
@@ -1476,10 +1505,18 @@ extern "C" Item js_strict_equal(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
 
-    // In JS, all numeric types (int, int64, float) are the same "number" type
-    // so int 0 === float 0.0 should be true (strict equality within number)
-    bool left_is_num = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT);
-    bool right_is_num = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 || right_type == LMD_TYPE_FLOAT);
+    if (js_is_native_bigint_egress(left)) {
+        left = js_native_bigint_to_bigint(left);
+        left_type = get_type_id(left);
+    }
+    if (js_is_native_bigint_egress(right)) {
+        right = js_native_bigint_to_bigint(right);
+        right_type = get_type_id(right);
+    }
+
+    // Legacy compact ints can still enter from host paths, but JS-created Number values are boxed binary64.
+    bool left_is_num = js_number_like_type(left_type);
+    bool right_is_num = js_number_like_type(right_type);
     if (left_is_num && right_is_num) {
         double l = js_get_number(left);
         double r = js_get_number(right);
@@ -1504,7 +1541,10 @@ extern "C" Item js_strict_equal(Item left, Item right) {
         return (Item){.item = b2it(it2i(left) == it2i(right))};
 
     case LMD_TYPE_DECIMAL:
-        return (Item){.item = b2it(bigint_cmp(left, right) == 0)};
+        if (js_is_bigint(left) && js_is_bigint(right)) {
+            return (Item){.item = b2it(bigint_cmp(left, right) == 0)};
+        }
+        return (Item){.item = b2it(decimal_cmp_items(left, right) == 0)};
 
     case LMD_TYPE_FLOAT: {
         double l = it2d(left);
@@ -1527,7 +1567,9 @@ extern "C" Item js_strict_equal(Item left, Item right) {
     }
 
     default:
-        if (left_type == LMD_TYPE_MAP) {
+        if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_VMAP) {
+            // DOM nodes moved from map shells to VMap carriers; strict equality
+            // still follows node identity when duplicate host wrappers exist.
             void* left_dom = js_dom_unwrap_element(left);
             void* right_dom = js_dom_unwrap_element(right);
             if (left_dom || right_dom)
@@ -1672,6 +1714,8 @@ static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
     if (right_type == LMD_TYPE_BOOL) { right = (Item){.item = i2it(it2b(right) ? 1 : 0)}; right_type = LMD_TYPE_INT; }
     if (left_type == LMD_TYPE_NULL) { left = (Item){.item = i2it(0)}; left_type = LMD_TYPE_INT; }
     if (right_type == LMD_TYPE_NULL) { right = (Item){.item = i2it(0)}; right_type = LMD_TYPE_INT; }
+    if (js_is_native_bigint_egress(left)) { left = js_native_bigint_to_bigint(left); left_type = get_type_id(left); }
+    if (js_is_native_bigint_egress(right)) { right = js_native_bigint_to_bigint(right); right_type = get_type_id(right); }
     // BigInt comparisons
     bool left_bi = js_is_bigint(left);
     bool right_bi = js_is_bigint(right);
@@ -1679,12 +1723,12 @@ static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
         return (Item){.item = b2it(bigint_cmp(left, right) < 0)};
     }
     // BigInt vs Number
-    if (left_bi && (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT)) {
+    if (left_bi && js_number_like_type(right_type)) {
         double r = js_get_number(right);
         if (isnan(r)) return (Item){.item = ITEM_JS_UNDEFINED};
         return (Item){.item = b2it(bigint_cmp_double(left, r) < 0)};
     }
-    if ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) && right_bi) {
+    if (js_number_like_type(left_type) && right_bi) {
         double l = js_get_number(left);
         if (isnan(l)) return (Item){.item = ITEM_JS_UNDEFINED};
         return (Item){.item = b2it(bigint_cmp_double(right, l) > 0)};
@@ -1812,7 +1856,7 @@ extern "C" Item js_bitwise_and(Item left, Item right) {
     }
     int32_t l = js_to_int32(js_get_number(left));
     int32_t r = js_to_int32(js_get_number(right));
-    return (Item){.item = i2it(l & r)};
+    return js_make_number((double)(l & r));
 }
 
 extern "C" Item js_bitwise_or(Item left, Item right) {
@@ -1825,7 +1869,7 @@ extern "C" Item js_bitwise_or(Item left, Item right) {
     }
     int32_t l = js_to_int32(js_get_number(left));
     int32_t r = js_to_int32(js_get_number(right));
-    return (Item){.item = i2it(l | r)};
+    return js_make_number((double)(l | r));
 }
 
 extern "C" Item js_bitwise_xor(Item left, Item right) {
@@ -1838,7 +1882,7 @@ extern "C" Item js_bitwise_xor(Item left, Item right) {
     }
     int32_t l = js_to_int32(js_get_number(left));
     int32_t r = js_to_int32(js_get_number(right));
-    return (Item){.item = i2it(l ^ r)};
+    return js_make_number((double)(l ^ r));
 }
 
 extern "C" Item js_bitwise_not(Item operand) {
@@ -1848,7 +1892,7 @@ extern "C" Item js_bitwise_not(Item operand) {
         return bigint_bitwise_not(operand);
     }
     int32_t val = js_to_int32(js_get_number(operand));
-    return (Item){.item = i2it(~val)};
+    return js_make_number((double)(~val));
 }
 
 extern "C" Item js_left_shift(Item left, Item right) {
@@ -1861,7 +1905,7 @@ extern "C" Item js_left_shift(Item left, Item right) {
     }
     int32_t l = js_to_int32(js_get_number(left));
     uint32_t r = (uint32_t)js_to_int32(js_get_number(right)) & 0x1F;
-    return (Item){.item = i2it(l << r)};
+    return js_make_number((double)(l << r));
 }
 
 extern "C" Item js_right_shift(Item left, Item right) {
@@ -1874,7 +1918,7 @@ extern "C" Item js_right_shift(Item left, Item right) {
     }
     int32_t l = js_to_int32(js_get_number(left));
     uint32_t r = (uint32_t)js_to_int32(js_get_number(right)) & 0x1F;
-    return (Item){.item = i2it(l >> r)};
+    return js_make_number((double)(l >> r));
 }
 
 extern "C" Item js_unsigned_right_shift(Item left, Item right) {
@@ -1888,7 +1932,7 @@ extern "C" Item js_unsigned_right_shift(Item left, Item right) {
     }
     uint32_t l = (uint32_t)js_to_int32(js_get_number(left));
     uint32_t r = (uint32_t)js_to_int32(js_get_number(right)) & 0x1F;
-    return (Item){.item = i2it((int64_t)(l >> r))};
+    return js_make_number((double)(l >> r));
 }
 
 // =============================================================================
@@ -1901,6 +1945,7 @@ extern "C" Item js_unsigned_right_shift(Item left, Item right) {
 extern "C" Item js_bigint_constructor(Item value) {
     // If already a BigInt, return as-is
     if (js_is_bigint(value)) return value;
+    if (js_is_native_bigint_egress(value)) return js_native_bigint_to_bigint(value);
     TypeId vt = get_type_id(value);
     // ToPrimitive for objects (hint: number) — ES spec §7.1.13
     if (vt == LMD_TYPE_MAP || vt == LMD_TYPE_ARRAY || vt == LMD_TYPE_FUNC) {
@@ -1949,6 +1994,7 @@ extern "C" Item js_bigint_constructor(Item value) {
 
 static Item js_to_bigint_for_bigint_op(Item value) {
     if (js_is_bigint(value)) return value;
+    if (js_is_native_bigint_egress(value)) return js_native_bigint_to_bigint(value);
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT) {
         Item prim = js_to_primitive(value, JS_HINT_NUMBER);
@@ -2093,10 +2139,15 @@ extern "C" Item js_typeof(Item value) {
     case LMD_TYPE_INT:
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64:
+    case LMD_TYPE_NUM_SIZED:
         result = js_key_is_symbol(value) ? "symbol" : "number";
         break;
-    case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64:
         result = "bigint";
+        break;
+    case LMD_TYPE_DECIMAL:
+        result = js_is_bigint(value) ? "bigint" : "number";
         break;
     case LMD_TYPE_STRING:
         result = "string";

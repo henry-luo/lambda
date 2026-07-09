@@ -2141,7 +2141,7 @@ TypeId jm_p6_expr_type(JsAstNode* expr,
     if (expr->node_type == JS_AST_NODE_LITERAL) {
         JsLiteralNode* lit = (JsLiteralNode*)expr;
         if (lit->literal_type == JS_LITERAL_NUMBER)
-            return lit->has_decimal ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            return lit->is_bigint ? LMD_TYPE_DECIMAL : LMD_TYPE_FLOAT;
         if (lit->literal_type == JS_LITERAL_BOOLEAN) return LMD_TYPE_INT;
         if (lit->literal_type == JS_LITERAL_STRING) return LMD_TYPE_STRING;
         return LMD_TYPE_ANY;
@@ -2164,7 +2164,7 @@ TypeId jm_p6_expr_type(JsAstNode* expr,
             return LMD_TYPE_BOOL;
         case JS_OP_BIT_AND: case JS_OP_BIT_OR: case JS_OP_BIT_XOR:
         case JS_OP_BIT_LSHIFT: case JS_OP_BIT_RSHIFT: case JS_OP_BIT_URSHIFT:
-            return LMD_TYPE_INT;
+            return LMD_TYPE_FLOAT;
         case JS_OP_DIV: case JS_OP_EXP:
             return LMD_TYPE_FLOAT;
         default: {
@@ -2177,18 +2177,17 @@ TypeId jm_p6_expr_type(JsAstNode* expr,
             if (bin->op == JS_OP_ADD) {
                 if (lt == LMD_TYPE_STRING || rt == LMD_TYPE_STRING) return LMD_TYPE_STRING;
                 if (jm_p6_type_is_numeric(lt) && jm_p6_type_is_numeric(rt))
-                    return (lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+                    return LMD_TYPE_FLOAT;
                 return LMD_TYPE_ANY;
             }
-            // SUB, MUL, MOD
-            if (lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
-            if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) return LMD_TYPE_INT;
+            // SUB, MUL, MOD produce JS Number values.
+            if (jm_p6_type_is_numeric(lt) && jm_p6_type_is_numeric(rt)) return LMD_TYPE_FLOAT;
             return LMD_TYPE_ANY;
         }}
     }
     if (expr->node_type == JS_AST_NODE_UNARY_EXPRESSION) {
         JsUnaryNode* un = (JsUnaryNode*)expr;
-        if (un->op == JS_OP_BIT_NOT) return LMD_TYPE_INT;
+        if (un->op == JS_OP_BIT_NOT) return LMD_TYPE_FLOAT;
         if (un->op == JS_OP_NOT) return LMD_TYPE_BOOL;
         if (un->op == JS_OP_TYPEOF) return LMD_TYPE_STRING;
         if (un->op == JS_OP_MINUS || un->op == JS_OP_PLUS)
@@ -2474,7 +2473,7 @@ TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg) {
         JsLiteralNode* lit = (JsLiteralNode*)arg;
         if (lit->literal_type == JS_LITERAL_NUMBER) {
             if (lit->is_bigint) return LMD_TYPE_DECIMAL;
-            return lit->has_decimal ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            return LMD_TYPE_FLOAT;
         }
         if (lit->literal_type == JS_LITERAL_STRING) return LMD_TYPE_STRING;
         if (lit->literal_type == JS_LITERAL_BOOLEAN) return LMD_TYPE_BOOL;
@@ -2515,27 +2514,25 @@ TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg) {
         switch (bin->op) {
         case JS_OP_ADD:
             if (lt == LMD_TYPE_STRING || rt == LMD_TYPE_STRING) return LMD_TYPE_STRING;
-            if (lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
-            if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) return LMD_TYPE_INT;
+            if (jm_p6_type_is_numeric(lt) && jm_p6_type_is_numeric(rt)) return LMD_TYPE_FLOAT;
             return LMD_TYPE_ANY;
         case JS_OP_SUB: case JS_OP_MUL: case JS_OP_MOD:
-            if (lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
-            if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) return LMD_TYPE_INT;
+            if (jm_p6_type_is_numeric(lt) && jm_p6_type_is_numeric(rt)) return LMD_TYPE_FLOAT;
             return LMD_TYPE_ANY;
         case JS_OP_DIV: case JS_OP_EXP:
             return LMD_TYPE_FLOAT;
         case JS_OP_BIT_AND: case JS_OP_BIT_OR: case JS_OP_BIT_XOR:
         case JS_OP_BIT_LSHIFT: case JS_OP_BIT_RSHIFT: case JS_OP_BIT_URSHIFT:
-            return LMD_TYPE_INT;
+            return LMD_TYPE_FLOAT;
         default: return LMD_TYPE_ANY;
         }
     }
     if (arg->node_type == JS_AST_NODE_UNARY_EXPRESSION) {
         JsUnaryNode* un = (JsUnaryNode*)arg;
         if (un->op == JS_OP_MINUS || un->op == JS_OP_SUB ||
-            un->op == JS_OP_PLUS || un->op == JS_OP_ADD ||
-            un->op == JS_OP_BIT_NOT)
+            un->op == JS_OP_PLUS || un->op == JS_OP_ADD)
             return jm_p6_static_arg_type(mt, un->operand);
+        if (un->op == JS_OP_BIT_NOT) return LMD_TYPE_FLOAT;
         if (un->op == JS_OP_TYPEOF) return LMD_TYPE_STRING;
         if (un->op == JS_OP_NOT) return LMD_TYPE_BOOL;
         return LMD_TYPE_ANY;
@@ -2567,7 +2564,7 @@ static int jm_p6_param_index_for_identifier(JsAstNode* arg, JsFuncCollected* fc)
 static TypeId jm_p6_evidence_type(P6NarrowEvidence* e) {
     if (!e || e->other_count > 0) return LMD_TYPE_ANY;
     if (e->float_count > 0) return LMD_TYPE_FLOAT;
-    if (e->int_count > 0) return LMD_TYPE_INT;
+    if (e->int_count > 0) return LMD_TYPE_FLOAT;
     return LMD_TYPE_ANY;
 }
 
@@ -2615,18 +2612,16 @@ static TypeId jm_p6_arg_type_with_evidence(JsMirTranspiler* mt, JsAstNode* arg,
     switch (bin->op) {
     case JS_OP_ADD:
         if (lt == LMD_TYPE_STRING || rt == LMD_TYPE_STRING) return LMD_TYPE_STRING;
-        if (lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
-        if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) return LMD_TYPE_INT;
+        if (jm_p6_type_is_numeric(lt) && jm_p6_type_is_numeric(rt)) return LMD_TYPE_FLOAT;
         return LMD_TYPE_ANY;
     case JS_OP_SUB: case JS_OP_MUL: case JS_OP_MOD:
-        if (lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
-        if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) return LMD_TYPE_INT;
+        if (jm_p6_type_is_numeric(lt) && jm_p6_type_is_numeric(rt)) return LMD_TYPE_FLOAT;
         return LMD_TYPE_ANY;
     case JS_OP_DIV: case JS_OP_EXP:
         return LMD_TYPE_FLOAT;
     case JS_OP_BIT_AND: case JS_OP_BIT_OR: case JS_OP_BIT_XOR:
     case JS_OP_BIT_LSHIFT: case JS_OP_BIT_RSHIFT: case JS_OP_BIT_URSHIFT:
-        return LMD_TYPE_INT;
+        return LMD_TYPE_FLOAT;
     default:
         return jm_p6_static_arg_type(mt, arg);
     }
@@ -2657,9 +2652,7 @@ void jm_p4b_ctor_walk(JsMirTranspiler* mt, JsAstNode* node,
                 for (int pi = 0; arg && pi < 16; pi++, arg = arg->next) {
                     TypeId at = jm_p6_static_arg_type(mt, arg);
                     // boolean arguments are control values, not numeric slot evidence.
-                    if (at == LMD_TYPE_INT)
-                        evidence[ci * 16 + pi].int_count++;
-                    else if (at == LMD_TYPE_FLOAT)
+                    if (at == LMD_TYPE_INT || at == LMD_TYPE_FLOAT)
                         evidence[ci * 16 + pi].float_count++;
                     else
                         evidence[ci * 16 + pi].other_count++;
@@ -2869,9 +2862,7 @@ void jm_p6_narrow_walk(JsMirTranspiler* mt, JsAstNode* node,
                 TypeId at = arg ? jm_p6_arg_type_with_evidence(mt, arg, callee_fc, evidence[fi]) : LMD_TYPE_ANY;
                 // boolean arguments must stay boxed; treating them as INT makes
                 // native conditions read boxed boolean tags as nonzero numbers.
-                if (at == LMD_TYPE_INT)
-                    evidence[fi][pi].int_count++;
-                else if (at == LMD_TYPE_FLOAT)
+                if (at == LMD_TYPE_INT || at == LMD_TYPE_FLOAT)
                     evidence[fi][pi].float_count++;
                 else
                     evidence[fi][pi].other_count++;
@@ -3072,8 +3063,7 @@ void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
                     TypeId arg_type = LMD_TYPE_ANY;
                     if (lit->literal_type == JS_LITERAL_NUMBER) {
                         if (lit->is_bigint) arg_type = LMD_TYPE_DECIMAL;
-                        else
-                        arg_type = lit->has_decimal ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+                        else arg_type = LMD_TYPE_FLOAT;
                     }
                     else if (lit->literal_type == JS_LITERAL_STRING)
                         arg_type = LMD_TYPE_STRING;
@@ -3572,19 +3562,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 mce.const_type = MCONST_MODVAR;
                                 mce.int_val = mt->module_var_count++;
                                 mce.var_kind = (int)v->kind;  // v20 TDZ: track let/const/var
-                                // P5: Track initial type for arithmetic optimization.
-                                // Only set for numeric literal initializers — safe because
-                                // the JIT will use inline unbox/arithmetic for these variables.
+                                // Track initial type for module-var inference. JS Number
+                                // literals are boxed binary64 values even when integer-looking.
                                 mce.modvar_type = 0;  // default: unknown (0 = LMD_TYPE_RAW_POINTER = not tracked)
                                 if (vd->init && vd->init->node_type == JS_AST_NODE_LITERAL) {
                                     JsLiteralNode* mlit = (JsLiteralNode*)vd->init;
                                     if (mlit->literal_type == JS_LITERAL_NUMBER) {
-                                        double mdv = mlit->value.number_value;
                                         if (mlit->is_bigint) {
                                             mce.modvar_type = LMD_TYPE_DECIMAL;
-                                        } else if (!mlit->has_decimal && mdv == (double)(int64_t)mdv &&
-                                            mdv >= -36028797018963968.0 && mdv <= 36028797018963967.0) {
-                                            mce.modvar_type = LMD_TYPE_INT;
                                         } else {
                                             mce.modvar_type = LMD_TYPE_FLOAT;
                                         }
@@ -5585,12 +5570,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 int total = e->int_count + e->float_count + e->other_count;
                 if (total == 0) continue; // never called
                 if (e->other_count > 0) continue; // something non-numeric passed
-                if (e->int_count > 0 && e->float_count == 0) {
-                    fc->param_types[p] = LMD_TYPE_INT;
-                    narrowed = true;
-                    log_info("P6 narrow %s param[%d] → INT (calls: %d int, %d float, %d other)",
-                             fc->name, p, e->int_count, e->float_count, e->other_count);
-                } else if (e->float_count > 0 && e->int_count == 0) {
+                if (e->float_count > 0 && e->int_count == 0) {
                     fc->param_types[p] = LMD_TYPE_FLOAT;
                     narrowed = true;
                     log_info("P6 narrow %s param[%d] → FLOAT (calls: %d int, %d float, %d other)",
@@ -5684,10 +5664,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     P4bCtorEvidence* e = &cevi[ci * 16 + param_idx];
                     int total = e->int_count + e->float_count + e->other_count;
                     if (total == 0 || e->other_count > 0) continue;
-                    if (e->float_count > 0) {
+                    if (e->float_count > 0 || e->int_count > 0) {
                         ctor_fc->ctor_prop_types[pi] = LMD_TYPE_FLOAT;
-                    } else if (e->int_count > 0) {
-                        ctor_fc->ctor_prop_types[pi] = LMD_TYPE_INT;
                     }
                     log_info("P4b: propagated %s.%.*s → %s (param[%d], %d call sites: %d int, %d float)",
                         ce->name ? ce->name->chars : "?",

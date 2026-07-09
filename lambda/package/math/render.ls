@@ -150,7 +150,10 @@ fn render_iff_symbol(display_text, cls) {
 
 fn render_number(node, context) {
     let text = get_text(node)
-    box.text_box(text, css.CMR, "mord")
+    if (should_split_math_text(text))
+        render_split_math_text(text, context)
+    else
+        box.text_box(text, css.CMR, "mord")
 }
 
 fn render_operator(node, context) {
@@ -215,12 +218,17 @@ fn render_punct(node, context) {
 // This produces visual parity with MathLive's `\prime` shortcut and lets
 // the outer strut wrap include the prime's height.
 fn render_prime_script(context) {
+    render_prime_script_count(1, context)
+}
+
+fn render_prime_script_count(count, context) {
     // Prime stacks are compact only in table/fraction child frames. Root
     // display math still uses the taller inline prime stack in MathLive.
     let compact = context.compact_prime == true
     let cramped = context.cramped == true
     let vlist_h = if (compact and cramped) 0.68 else if (compact) 0.76 else 0.81
     let top_em = if (compact and cramped) "-3.28em" else if (compact) "-3.36em" else "-3.41em"
+    let prime_text = repeat_prime_text(count, "")
     let el = <span class: css.MSUBSUP;
         <span class: css.VLIST_T;
             <span class: css.VLIST_R;
@@ -228,14 +236,18 @@ fn render_prime_script(context) {
                     <span style: "top:" ++ top_em ++ ";margin-right:0.05em";
                         <span class: css.PSTRUT, style: "height:3em">
                         <span style: "height:0.39em;display:inline-block;font-size: 70%";
-                            <span class: css.CMR; "′">
+                            <span class: css.CMR; prime_text>
                         >
                     >
                 >
             >
         >
     >
-    box.ml_box_full(el, vlist_h, 0.0, 0.4, "mord", 0.0, 0.0, vlist_h)
+    box.ml_box_full(el, vlist_h, 0.0, 0.4 * float(count), "mord", 0.0, 0.0, vlist_h)
+}
+
+fn repeat_prime_text(count, acc) {
+    if (count <= 0) acc else repeat_prime_text(count - 1, acc ++ "′")
 }
 
 fn operator_display_text(text) {
@@ -263,8 +275,59 @@ fn escaped_symbol_display_text(text) {
 }
 
 fn render_text(text, context) {
+    if (should_split_math_text(text))
+        render_split_math_text(text, context)
+    else
+        render_plain_text(text, context)
+}
+
+fn render_plain_text(text, context) {
     let cls = if (is_plain_number_text(text)) css.CMR else css.font_class(context.font)
     box.text_box(text, cls, "mord")
+}
+
+fn should_split_math_text(text) {
+    contains_math_text_separator(text, 0)
+}
+
+fn contains_math_text_separator(text, i) {
+    if (i >= len(text)) false
+    else if (is_split_math_text_char(slice(text, i, i + 1))) true
+    else contains_math_text_separator(text, i + 1)
+}
+
+fn is_split_math_text_char(ch) {
+    ch == "+" or ch == "-" or ch == "−" or ch == "⋯" or ch == "…"
+}
+
+fn render_split_math_text(text, context) {
+    // Parser recovery can leave math operators inside a plain string leaf;
+    // keep ordinary alpha runs intact but restore operator atoms for spacing.
+    let atoms = split_math_text_atoms(text, context, 0, "", [])
+    box.hbox(apply_spacing(atoms, context))
+}
+
+fn split_math_text_atoms(text, context, i, run, acc) {
+    if (i >= len(text)) flush_math_text_run(run, context, acc)
+    else {
+        let ch = slice(text, i, i + 1)
+        if (is_split_math_text_char(ch))
+            split_math_text_atoms(text, context, i + 1, "",
+                flush_math_text_run(run, context, acc) ++ [render_split_math_char(ch)])
+        else
+            split_math_text_atoms(text, context, i + 1, run ++ ch, acc)
+    }
+}
+
+fn flush_math_text_run(run, context, acc) {
+    if (run == "") acc else acc ++ [render_plain_text(run, context)]
+}
+
+fn render_split_math_char(ch) {
+    if (ch == "+" or ch == "-" or ch == "−")
+        box.text_box(operator_display_text(ch), css.CMR, "mbin")
+    else
+        box.text_box(ch, css.CMR, "mord")
 }
 
 // ============================================================
@@ -762,11 +825,27 @@ fn render_textstyle_command(node, context) {
 
 fn render_text_content_box(content) {
     let tiny_idx = index_of(content, "\\tiny")
-    if (is_ensuremath_text(content)) render_ensuremath_text(content)
-    else if (is_text_inline_math_content(content)) render_text_inline_math_content(content)
-    else if (tiny_idx >= 0) render_tiny_text_content(content, tiny_idx)
-    else if (is_text_textcolor_content(content)) render_text_textcolor_content(content)
-    else box.text_box(decode_latex_text(content), css.TEXT, "mord")
+    let bx = if (is_ensuremath_text(content)) render_ensuremath_text(content)
+        else if (is_text_inline_math_content(content)) render_text_inline_math_content(content)
+        else if (tiny_idx >= 0) render_tiny_text_content(content, tiny_idx)
+        else if (is_text_textcolor_content(content)) render_text_textcolor_content(content)
+        else box.text_box(decode_latex_text(content), css.TEXT, "mord")
+    text_command_box(bx)
+}
+
+fn text_command_box(bx) => {
+    element: bx.element,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: bx.type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    // MathLive emits \text atoms directly after display/binary operators
+    // without the usual implicit left space; ordinary non-text atoms keep it.
+    no_left_op_space: true,
+    no_left_bin_space: true
 }
 
 fn is_ensuremath_text(content) =>
@@ -1784,8 +1863,8 @@ fn has_middle_delim(items, i) {
 }
 
 fn render_stretchy_delimiter_group(left_text, right_text, content) {
-    let left_box = delims.render_left_right(left_text, content.height, content.depth, "mopen")
-    let right_box = delims.render_left_right(right_text, content.height, content.depth, "mclose")
+    let left_box = render_table_aware_left_right_delim(left_text, content, "mopen")
+    let right_box = render_table_aware_left_right_delim(right_text, content, "mclose")
     let parts = [left_box, content, right_box]
     let elements = box.child_elements(parts)
     let style_attr = stretchy_left_right_style(content)
@@ -1805,6 +1884,20 @@ fn render_stretchy_delimiter_group(left_text, right_text, content) {
         0.0,
         box_h
     )
+}
+
+fn render_table_aware_left_right_delim(delim_text, content, atom_type) {
+    if (content.is_table == true and is_brace_delim_text(delim_text))
+        // A \left brace around an array uses MathLive's stacked Size4 recipe;
+        // generic cases/Bmatrix braces still use their matrix wrapper rules.
+        delims.render_stacked_brace(delim_text, atom_type)
+    else
+        delims.render_left_right(delim_text, content.height, content.depth, atom_type)
+}
+
+fn is_brace_delim_text(delim_text) {
+    delim_text == "{" or delim_text == "}" or delim_text == "\\{" or
+    delim_text == "\\}" or delim_text == "\\lbrace" or delim_text == "\\rbrace"
 }
 
 fn stretchy_left_right_style(content) {
@@ -2570,6 +2663,12 @@ fn render_children_scan(node, context, i, acc) {
     else if (is_null_middle_sequence(node, i))
         (let rendered = render_middle_delim(node[i], context),
          render_children_scan(node, context, i + 2, acc ++ [rendered]))
+    else if (is_prime_node(node[i]) and i + 1 < len(node) and is_prime_node(node[i + 1]))
+        // MathLive folds adjacent apostrophe tokens into one prime script box;
+        // emitting one box per token makes `f''` wider and structurally wrong.
+        (let count = consecutive_prime_count(node, i, 0),
+         let rendered = render_prime_script_count(count, context),
+         render_children_scan(node, context, i + count, acc ++ [rendered]))
     else
         (let child = node[i],
          let leading_spacer = if (has_trailing_radical(acc) and is_fraction_like_sequence_node(child))
@@ -2579,6 +2678,19 @@ fn render_children_scan(node, context, i, acc) {
              else if (child is string) acc ++ render_text_atoms(string(child), context)
              else acc ++ leading_spacer ++ [render_node(child, context)],
          render_children_scan(node, context, i + 1, next_acc))
+}
+
+fn is_prime_node(child) {
+    if (child is string) string(child) == "'"
+    else child is element and
+        (name(child) == 'punct' or name(child) == 'punctuation') and
+        get_text(child) == "'"
+}
+
+fn consecutive_prime_count(node, i, acc) {
+    if (i >= len(node)) acc
+    else if (is_prime_node(node[i])) consecutive_prime_count(node, i + 1, acc + 1)
+    else acc
 }
 
 fn is_fraction_like_sequence_node(child) {
@@ -3076,7 +3188,7 @@ fn build_normalized(filtered, i, prev_type, acc) {
     if (i >= len(filtered)) acc
     else
         (let current = normalize_bin_atom(filtered[i], prev_type),
-         build_normalized(filtered, i + 1, current.type, acc ++ [current]))
+         build_normalized(filtered, i + 1, next_spacing_prev_type(prev_type, current), acc ++ [current]))
 }
 
 fn normalize_atom_types(filtered) {
@@ -3084,18 +3196,31 @@ fn normalize_atom_types(filtered) {
 }
 
 // recursive helper for building spaced box list
-fn build_spaced(normalized, i, prev_type, acc, context) {
+fn build_spaced(normalized, i, prev_type, acc, context, explicit_skip_after_prev) {
     if (i >= len(normalized)) acc
     else
         (let current = normalized[i],
-        let space = if (current.no_left_bin_space == true and prev_type == "mbin")
-             0.0 else if (prev_type == "mpunct" and current.type == "skip")
+        // Explicit spacing commands are emitted at their source position, but
+        // they are not TeX atoms; using them as the previous atom moves the
+        // following implicit spacing to the wrong side of `\,`.
+        let space = if (current.type == "skip")
+             0.0 else if (explicit_skip_after_prev and prev_type == "mpunct")
+             // Explicit space after punctuation already accounts for the
+             // separation; adding mpunct->mord spacing double-counts it.
+             0.0 else if (current.no_left_bin_space == true and prev_type == "mbin")
+             0.0 else if (current.no_left_op_space == true and prev_type == "mop")
              0.0 else sp_table.get_spacing(prev_type, current.type, context.style),
          let with_space = if (space != 0.0)
              acc ++ [box.skip_box(space), current]
          else
              acc ++ [current],
-         build_spaced(normalized, i + 1, current.type, with_space, context))
+         let next_prev = next_spacing_prev_type(prev_type, current),
+         build_spaced(normalized, i + 1, next_prev, with_space, context,
+            current.type == "skip" or (explicit_skip_after_prev and next_prev == prev_type)))
+}
+
+fn next_spacing_prev_type(prev_type, current) {
+    if (current.type == "skip") prev_type else current.type
 }
 
 // apply inter-atom spacing between boxes
@@ -3104,5 +3229,5 @@ fn apply_spacing(boxes, context) {
     if (len(filtered) <= 1) filtered
     else
         (let normalized = normalize_atom_types(filtered),
-         build_spaced(normalized, 1, normalized[0].type, [normalized[0]], context))
+         build_spaced(normalized, 1, normalized[0].type, [normalized[0]], context, false))
 }
