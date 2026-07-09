@@ -546,7 +546,7 @@ fn ml_default_script_pair(base_box, script_box) {
         0.0,
         max(if (base_box.max_font_size != null) base_box.max_font_size else base_box.height,
             if (script_box.max_font_size != null) script_box.max_font_size else script_box.height)
-    ), script_box.has_subscript == true)
+    ), script_box.has_subscript == true, is_upright_script_base(base_box))
 }
 
 fn ml_op_group_script_pair(base_box, script_box) {
@@ -566,10 +566,10 @@ fn ml_op_group_script_pair(base_box, script_box) {
         0.0,
         max(if (base_box.max_font_size != null) base_box.max_font_size else base_box.height,
             if (script_box.max_font_size != null) script_box.max_font_size else script_box.height)
-    ), script_box.has_subscript == true)
+    ), script_box.has_subscript == true, is_upright_script_base(base_box))
 }
 
-fn mark_scripted_box(bx, has_subscript) => {
+fn mark_scripted_box(bx, has_subscript, upright_base) => {
     element: bx.element,
     height: bx.height,
     depth: bx.depth,
@@ -579,7 +579,12 @@ fn mark_scripted_box(bx, has_subscript) => {
     skew: bx.skew,
     max_font_size: bx.max_font_size,
     is_scripted: true,
-    is_subscripted: has_subscript
+    is_subscripted: has_subscript,
+    is_subscripted_upright: has_subscript and upright_base
+}
+
+fn is_upright_script_base(base_box) {
+    base_box.element is element and base_box.element.class == css.CMR
 }
 
 fn is_op_group_box(bx) {

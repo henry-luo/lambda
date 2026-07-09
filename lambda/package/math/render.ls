@@ -3288,6 +3288,7 @@ fn ml_box_with_suppress_depth(bx) => {
     is_script_radical: bx.is_script_radical,
     is_scripted: bx.is_scripted,
     is_subscripted: bx.is_subscripted,
+    is_subscripted_upright: bx.is_subscripted_upright,
     is_table: bx.is_table,
     delim_visual_total: bx.delim_visual_total
 }
@@ -3364,6 +3365,7 @@ fn ml_box_with_type(bx, atom_type) => {
     is_script_radical: bx.is_script_radical,
     is_scripted: bx.is_scripted,
     is_subscripted: bx.is_subscripted,
+    is_subscripted_upright: bx.is_subscripted_upright,
     is_table: bx.is_table,
     delim_visual_total: bx.delim_visual_total
 }

@@ -128,7 +128,11 @@ pub fn render_left_right(delim, height, depth, atom_type) {
         render_null_delim(atom_type)
     } else {
         let target_height = left_right_target_height(height, depth)
-        render_stretchy(delim, target_height, atom_type)
+        let display_char = stretchy_char(delim)
+        if (is_vertical_bar(display_char))
+            render_vertical_mult_left_right_to_height(display_char, target_height, atom_type)
+        else
+            render_stretchy(delim, target_height, atom_type)
     }
 }
 
@@ -274,14 +278,22 @@ fn render_vertical_mult(ch, level, atom_type) {
 }
 
 fn render_vertical_mult_to_height(ch, target_height, atom_type) {
-    // vlist internals (piece tops, container height/depth, pstrut, glyph
-    // height, total) are computed by a faithful makeStackedDelim port; the
-    // strut box fields (height/depth/raw/total) stay axis-centred via
-    // sized_delim_raw so the use_raw emit and the math.ls depth sentinel
-    // (total\u22481.21, depth\u22480.345) keep firing.
+    render_vertical_mult_box(ch, target_height, atom_type, false)
+}
+
+fn render_vertical_mult_left_right_to_height(ch, target_height, atom_type) {
+    render_vertical_mult_box(ch, target_height, atom_type, true)
+}
+
+fn render_vertical_mult_box(ch, target_height, atom_type, use_stacked_fields) {
+    // Explicit \big-size vertical delimiters expose SizeN extents, while
+    // \left|\right| exposes the makeStackedDelim vlist extent; sharing one
+    // field source makes one of those two MathLive paths one strut notch off.
     let spec = make_stacked_delim_for_height(target_height)
     let pieces = stk_pieces(spec, ch, 0, [])
     let raw = sized_delim_raw(target_height_to_level(target_height))
+    let box_h = if (use_stacked_fields) spec.vlist_h else raw.h
+    let box_d = if (use_stacked_fields) spec.depth_holder else raw.d
     let cls = css.classes([side_class(atom_type), "lm_delim-mult"])
     box.ml_box_full(
         <span class: cls;
@@ -297,13 +309,13 @@ fn render_vertical_mult_to_height(ch, target_height, atom_type) {
                 >
             >
         >,
-        raw.h,
-        raw.d,
+        box_h,
+        box_d,
         0.4,
         atom_type,
         0.0,
         0.0,
-        raw.h
+        box_h
     )
 }
 

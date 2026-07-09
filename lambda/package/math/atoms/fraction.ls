@@ -211,7 +211,7 @@ fn frac_bar_geom(frac_ctx, numer_box, denom_box, gstyle, is_fraction_child) {
         // thickness of clearance for scripted denominator boxes; otherwise
         // `\frac{\rho}{\epsilon_0}` exposes a denominator wrapper/depth that
         // is one theta too short and compresses align rows.
-        let scripted_denom_depth = if (denom_box.is_subscripted == true) theta else 0.0
+        let scripted_denom_depth = if (denom_box.is_subscripted_upright == true) theta else 0.0
         let d_d = frac_metric_d(denom_box) * s_child + scripted_denom_depth
         // Rule 15d: shift numerator up by u, denominator down by v, keeping
         // each clear of the bar (centred on the axis) by `clearance`.
