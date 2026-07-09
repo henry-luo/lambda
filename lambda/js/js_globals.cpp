@@ -231,6 +231,33 @@ static bool js_array_key_to_index(const char* name, int name_len, int64_t* out_i
     return true;
 }
 
+static bool js_array_item_to_index(Item key, int64_t* out_index) {
+    TypeId type = get_type_id(key);
+    if (type == LMD_TYPE_INT) {
+        int64_t index = it2i(key);
+        if (index < 0 || index > 0xFFFFFFFELL) return false;
+        if (out_index) *out_index = index;
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double index_d = it2d(key);
+        // JS Number keys can arrive as boxed doubles after number-model migration.
+        if (!isfinite(index_d) || index_d < 0.0 || floor(index_d) != index_d ||
+            index_d > 0xFFFFFFFEULL) {
+            return false;
+        }
+        int64_t index = (int64_t)index_d;
+        if ((double)index != index_d) return false;
+        if (out_index) *out_index = index;
+        return true;
+    }
+    if (type == LMD_TYPE_STRING) {
+        String* sk = it2s(key);
+        return sk && js_array_key_to_index(sk->chars, (int)sk->len, out_index);
+    }
+    return false;
+}
+
 static bool js_array_has_nonconfigurable_index_from(Item obj, int64_t new_len) {
     if (get_type_id(obj) != LMD_TYPE_ARRAY || !obj.array) return false;
     Array* arr = obj.array;
@@ -6731,20 +6758,9 @@ extern "C" Item js_in(Item key, Item object) {
     if (type == LMD_TYPE_ARRAY) {
         // check if index is valid and not a deleted hole
         int64_t idx = -1;
-        if (get_type_id(key) == LMD_TYPE_INT) {
-            idx = it2i(key);
-        } else if (get_type_id(key) == LMD_TYPE_STRING) {
+        js_array_item_to_index(key, &idx);
+        if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
-            if (sk && sk->len > 0 && sk->len <= 10) {
-                bool is_num = true;
-                int64_t n = 0;
-                for (int i = 0; i < (int)sk->len; i++) {
-                    char c = sk->chars[i];
-                    if (c < '0' || c > '9') { is_num = false; break; }
-                    n = n * 10 + (c - '0');
-                }
-                if (is_num && !(sk->len > 1 && sk->chars[0] == '0')) idx = n;
-            }
             // Also check "length" for arrays
             if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
                 return (Item){.item = b2it(true)};
@@ -10784,11 +10800,14 @@ extern "C" Item js_object_is(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
 
-    bool left_is_num = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT);
-    bool right_is_num = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 || right_type == LMD_TYPE_FLOAT);
+    bool left_is_num = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT ||
+                        left_type == LMD_TYPE_FLOAT64 || left_type == LMD_TYPE_NUM_SIZED);
+    bool right_is_num = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT ||
+                         right_type == LMD_TYPE_FLOAT64 || right_type == LMD_TYPE_NUM_SIZED);
     if (left_is_num && right_is_num) {
-        double l = (left_type == LMD_TYPE_FLOAT) ? it2d(left) : (double)it2i(left);
-        double r = (right_type == LMD_TYPE_FLOAT) ? it2d(right) : (double)it2i(right);
+        // JS Numbers are boxed FLOAT Items after the number-model migration.
+        double l = js_get_number(left);
+        double r = js_get_number(right);
         // Object.is(NaN, NaN) → true (unlike ===)
         if (isnan(l) && isnan(r)) return (Item){.item = b2it(true)};
         if (isnan(l) || isnan(r)) return (Item){.item = b2it(false)};
@@ -14071,21 +14090,7 @@ static Item js_delete_array_property(Item obj, Item key) {
     }
     // Convert key to numeric index
     int64_t idx = -1;
-    if (get_type_id(key) == LMD_TYPE_INT) {
-        idx = it2i(key);
-    } else if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* sk = it2s(key);
-        if (sk && sk->len > 0 && sk->len <= 10) {
-            bool is_num = true;
-            int64_t n = 0;
-            for (int i = 0; i < (int)sk->len; i++) {
-                char c = sk->chars[i];
-                if (c < '0' || c > '9') { is_num = false; break; }
-                n = n * 10 + (c - '0');
-            }
-            if (is_num && !(sk->len > 1 && sk->chars[0] == '0')) idx = n;
-        }
-    }
+    js_array_item_to_index(key, &idx);
     if (idx >= 0 && idx < arr->length) {
         // Check companion-map ShapeEntry flags before deleting.
         if (arr->extra != 0) {

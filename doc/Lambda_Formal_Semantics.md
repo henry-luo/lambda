@@ -148,30 +148,35 @@ int/float mixing, and the decimal×float lattice is costly. [C3]
 ### 4.2 Literals are strict; data always fits
 
 - An unsuffixed integer literal that exceeds the `int` range is a **compile
-  error** — never a silent conversion. Suffixes (`i64`, `n`, `N`, float form)
-  express intent explicitly. A decimal literal exceeding its suffix's capacity
-  (>34 digits for `n`) is likewise a compile error suggesting `N`.
+  error** — never a silent conversion. Suffixes (`i64`, `u64`, sized numeric
+  suffixes, `n`, float form) express intent explicitly. The `n` suffix is
+  lexical: integer-like spellings (`1n`, `1e3n`) are `integer`; spellings with
+  a decimal point or negative exponent (`1.0n`, `1e-3n`) are `decimal`.
 - **Data cannot be rejected**: input parsers place integer tokens in the
   smallest exact home — `int`, else `int64`, else `decimal` — never silently in
   float. [C3, C13]
 
 ### 4.3 Mixed-operation promotion lattice
 
-> `int → float → decimal128 (n) → extended decimal (N)`
+> numeric operations use the exact-embedding lattice: `int` can enter both
+> `float` and `integer`; `integer` and `float` meet at `decimal`.
 
-The wider operand is contagious. **A float entering the decimal world is
+The exact meeting type is contagious. **A float entering the decimal world is
 converted by one rule: it denotes its shortest round-trip decimal** (§4.5), and
 the operation proceeds in decimal arithmetic. [C3, C8.5a, C13]
 
-### 4.4 The decimal tiers
+### 4.4 Decimal storage tiers
 
-- **`n` — IEEE 754-2008 decimal128**: 34 significant digits, IEEE rounding, the
-  standard interchange tier (SQL DECIMAL, Arrow). The decimal for money,
-  measurements, documents.
-- **`N` — extended decimal**: exact `+ − ×` at any size; division and
-  irrational operations round at a stated operating context (200 digits).
-  **The honesty clause: `N` is not mathematically unbounded** — division must
-  round somewhere; the context is documented, and is never a mutable global.
+`decimal` is one source-level type with invisible storage tiers. Values that fit
+the fixed decimal tier may use it; larger exact literals and results use the
+extended tier. Literal digits are preserved exactly regardless of tier. Precision
+control belongs on operations (`decimal(x, prec:, rounding:)`, `quantize`,
+`round`) rather than on a second literal suffix. The retired uppercase `N`
+suffix is not part of the grammar.
+
+Decimal `+`, `-`, and `*` are exact and may grow storage; division and other
+inexact operations round at the documented decimal context. `integer ÷ integer`
+exits to `decimal`, not floor division.
 
 *Rationale.* The third instance of the two-tier philosophy. Precision carried in
 the type is the value-semantics-compatible design; Python's context — mutable
@@ -267,9 +272,8 @@ an `if` branch silently; `error == error → false` mirrors `nan` by design.
 ### 5.2 Numbers
 
 Numeric equality is by mathematical value across all representations:
-`1 == 1.0 == 1n`; `0.1n == 0.1` per §4.5; `-0.0 == 0.0`; `0.1n == 0.1N`
-(decimal width is representation, P6). `nan != nan` (IEEE, and the poison
-rule).
+`1 == 1.0 == 1n`; `0.1n == 0.1` per §4.5; `-0.0 == 0.0`. Decimal storage width
+is representation, not value identity. `nan != nan` (IEEE, and the poison rule).
 
 ### 5.3 Sequences
 

@@ -100,7 +100,17 @@ static int tls_append_received_suffix(char* out, int pos, int cap, Item value) {
         return tls_append_cstr(out, pos, cap, buf);
     }
     if (type == LMD_TYPE_FLOAT) {
-        snprintf(buf, sizeof(buf), " Received type number");
+        double number = it2d(value);
+        // Boxed JS Numbers should preserve Node-style integer details in diagnostics.
+        if (number == number &&
+            number >= -9223372036854775808.0 &&
+            number <= 9223372036854775807.0 &&
+            number == (double)(int64_t)number) {
+            snprintf(buf, sizeof(buf), " Received type number (%lld)",
+                     (long long)(int64_t)number);
+        } else {
+            snprintf(buf, sizeof(buf), " Received type number");
+        }
         return tls_append_cstr(out, pos, cap, buf);
     }
     if (type == LMD_TYPE_STRING) {

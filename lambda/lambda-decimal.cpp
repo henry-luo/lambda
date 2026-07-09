@@ -637,13 +637,40 @@ Item decimal_push_result(mpd_t* mpd_val, bool is_unlimited) {
     return result;
 }
 
+static Item decimal_push_bigint_result(mpd_t* mpd_val) {
+    if (!mpd_val) return ItemError;
+
+    Decimal* decimal = (Decimal*)heap_alloc(sizeof(Decimal), LMD_TYPE_DECIMAL);
+    if (!decimal) {
+        mpd_del(mpd_val);
+        return ItemError;
+    }
+
+    decimal->unlimited = DECIMAL_BIGINT;
+    decimal->dec_val = mpd_val;
+
+    Item result;
+    result.item = c2it(decimal);
+    return result;
+}
+
+static bool decimal_item_is_bigint(Item item) {
+    if (get_type_id(item) != LMD_TYPE_DECIMAL) return false;
+    Decimal* dec = item.get_decimal();
+    return dec && dec->unlimited == DECIMAL_BIGINT;
+}
+
+static bool decimal_binary_result_is_bigint(Item a, Item b) {
+    return decimal_item_is_bigint(a) && decimal_item_is_bigint(b);
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Arithmetic Operations
 // ─────────────────────────────────────────────────────────────────────
 
 // Helper: determine if result should be unlimited based on operands
 static bool should_be_unlimited(Item a, Item b) {
-    // Check if either operand is an unlimited decimal
+    // Check if either operand requires the extended decimal context.
     if (a._type_id == LMD_TYPE_DECIMAL) {
         Decimal* dec_a = a.get_decimal();
         if (dec_a && dec_a->unlimited) return true;
@@ -702,6 +729,8 @@ Item decimal_add(Item a, Item b, EvalContext* ctx) {
         return ItemError;
     }
     
+    // integer + integer stays integer; mixed numeric ops leave the integer lane.
+    if (decimal_binary_result_is_bigint(a, b)) return decimal_push_bigint_result(result);
     return decimal_push_result(result, is_unlimited);
 }
 
@@ -740,6 +769,8 @@ Item decimal_sub(Item a, Item b, EvalContext* ctx) {
         return ItemError;
     }
     
+    // integer - integer stays integer; mixed numeric ops leave the integer lane.
+    if (decimal_binary_result_is_bigint(a, b)) return decimal_push_bigint_result(result);
     return decimal_push_result(result, is_unlimited);
 }
 
@@ -778,6 +809,8 @@ Item decimal_mul(Item a, Item b, EvalContext* ctx) {
         return ItemError;
     }
     
+    // integer * integer stays integer; mixed numeric ops leave the integer lane.
+    if (decimal_binary_result_is_bigint(a, b)) return decimal_push_bigint_result(result);
     return decimal_push_result(result, is_unlimited);
 }
 
@@ -824,6 +857,7 @@ Item decimal_div(Item a, Item b, EvalContext* ctx) {
         return ItemError;
     }
     
+    // integer division exits to decimal, even when the quotient happens to be exact.
     return decimal_push_result(result, is_unlimited);
 }
 
@@ -870,6 +904,8 @@ Item decimal_mod(Item a, Item b, EvalContext* ctx) {
         return ItemError;
     }
     
+    // integer remainder is still an integer; division exits to decimal separately.
+    if (decimal_binary_result_is_bigint(a, b)) return decimal_push_bigint_result(result);
     return decimal_push_result(result, is_unlimited);
 }
 
@@ -933,6 +969,8 @@ Item decimal_neg(Item a, EvalContext* ctx) {
     
     if (!a_is_dec) mpd_del(a_dec);
     
+    // unary integer negation preserves the language-level integer type.
+    if (decimal_item_is_bigint(a)) return decimal_push_bigint_result(result);
     return decimal_push_result(result, is_unlimited);
 }
 
@@ -958,6 +996,8 @@ Item decimal_abs(Item a, EvalContext* ctx) {
     
     if (!a_is_dec) mpd_del(a_dec);
     
+    // integer abs preserves the language-level integer type.
+    if (decimal_item_is_bigint(a)) return decimal_push_bigint_result(result);
     return decimal_push_result(result, is_unlimited);
 }
 

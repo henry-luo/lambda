@@ -156,9 +156,9 @@ type IntArr2 = int[]
 "10.1"; ([1.0, 2.0, 3.0] is FloatArr)   // true - ArrayFloat matches float[]
 "10.2"; ([1.0] is FloatArr)              // true - single float element
 "10.3"; ([] is FloatArr)                 // true - empty matches float[]
-"10.4"; ([1, 2] is FloatArr)             // false - ints don't match float[]
+"10.4"; ([1, 2] is FloatArr)             // true - int elements embed exactly in float
 "10.5"; (1 to 10 is IntArr2)             // true - Range matches int[]
-"10.6"; (1 to 5 is FloatArr)             // false - Range is int, not float
+"10.6"; (1 to 5 is FloatArr)             // true - Range int elements embed exactly in float
 
 // ============================================================
 // Test 11: Typed Array Annotation (runtime coercion)

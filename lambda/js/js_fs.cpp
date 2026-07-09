@@ -2188,7 +2188,11 @@ extern "C" Item js_fs_truncateSync(Item path_item, Item len_item) {
     if (!js_permission_has_fs_write(p)) return js_permission_check_fs_write(p);
 
     int64_t length = 0;
-    if (get_type_id(len_item) == LMD_TYPE_INT) length = it2i(len_item);
+    TypeId len_type = get_type_id(len_item);
+    if (len_type != LMD_TYPE_UNDEFINED && len_type != LMD_TYPE_NULL) {
+        // JS Number arguments are boxed FLOAT after the number-model migration.
+        if (!fs_validate_int_range(len_item, "len", 0, INT64_MAX, &length)) return ItemNull;
+    }
 
     uv_fs_t req;
     int fd = uv_fs_open(lambda_uv_loop(), &req, path, UV_FS_O_WRONLY, 0, NULL);

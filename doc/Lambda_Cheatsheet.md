@@ -110,10 +110,11 @@ type Vec {
 **Numbers:**
 ```lambda
 42        // Integer
+42n       // Arbitrary precision integer
 3.14      // Float
 1.5e-10   // Scientific notation
-123.45n   // Decimal128 (~34 digits)
-123.45N   // Decimal (ultra precision, 200 digits)
+123.45n   // Decimal
+1e-3n     // Decimal (negative exponent)
 inf  nan  // Special values
 0xFF      // hexdecimal literal for int value
 

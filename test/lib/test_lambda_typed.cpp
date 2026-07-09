@@ -313,7 +313,7 @@ TEST(LambdaTypedItem, ItemOrErrorWrapsRetStructs) {
 
 TEST(LambdaTypedItem, Uint8ClampedArrayNumUsesReservedNibbleSlot) {
     EXPECT_EQ(ELEM_UINT8_CLAMPED, 0xE0);
-    EXPECT_EQ(ELEM_NUM_COUNT, 15);
+    EXPECT_EQ(ELEM_NUM_COUNT, 14);
     EXPECT_EQ(ELEM_TYPE_SIZE[ELEM_UINT8_CLAMPED >> 4], 1);
 }
 

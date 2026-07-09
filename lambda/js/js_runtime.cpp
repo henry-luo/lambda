@@ -6740,6 +6740,9 @@ extern "C" Item js_property_access(Item object, Item key) {
     TypeId type = get_type_id(object);
 
     if (type == LMD_TYPE_ARRAY && get_type_id(key) == LMD_TYPE_INT) {
+        // Live DOM collections must refresh before dense array fast reads;
+        // otherwise optimized member access can observe stale option slots.
+        js_dom_collection_before_property_get(object, key);
         Item dense_value = ItemNull;
         int64_t idx = it2i(key);
         if (js_array_fast_own_dense_get(object, idx, &dense_value)) {
@@ -8110,6 +8113,9 @@ extern "C" Item js_array_get(Item array, Item index) {
     if (get_type_id(array) != LMD_TYPE_ARRAY) {
         return make_js_undefined();
     }
+    // Live DOM collections share array storage but must refresh before any
+    // indexed read; MIR fallback can call this helper directly.
+    js_dom_collection_before_property_get(array, index);
 
     // ES spec: boolean keys are coerced to "true"/"false" string property names,
     // not numeric indices. Route to companion map lookup.
@@ -8193,6 +8199,9 @@ extern "C" Item js_string_get_int(Item str_item, int64_t index) {
 extern "C" Item js_array_get_int(Item array, int64_t index) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_ARRAY_GET_INT);
     if (get_type_id(array) == LMD_TYPE_ARRAY) {
+        // Live DOM collections share array storage but must refresh before any
+        // indexed read; optimized MIR array access calls this fallback directly.
+        js_dom_collection_before_property_get(array, (Item){.item = i2it((int)index)});
         if (index < 0 || index > 0xFFFFFFFELL) {
             char idx_buf[32];
             int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
@@ -29539,7 +29548,9 @@ extern "C" Item js_iterator_collect_rest(Item iterator) {
         Item val = js_iterator_step(iterator);
         if (val.item == JS_ITER_DONE_SENTINEL) break;
         if (js_exception_pending) return ItemNull;
-        array_push(arr.array, val);
+        // Rest destructuring builds a JS array; use the JS array path so
+        // boxed Number elements keep dense-slot invariants after migration.
+        js_array_push_item_direct(arr.array, val);
     }
     return arr;
 }

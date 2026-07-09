@@ -8,5 +8,5 @@
   array_type_true: true
 }
 {
-  array_type_false: false
+  array_type_float_covariant: true
 }

@@ -57,10 +57,10 @@ bool lambda_numeric_to_canonical_string(Item item, char* out, int out_size);
 // Returns NULL on parse error
 mpd_t* decimal_parse_str(const char* str, mpd_context_t* ctx);
 
-// Parse "123.45n" → fixed decimal (uses fixed context)
+// Parse using the fixed decimal context
 mpd_t* decimal_parse_fixed_str(const char* str);
 
-// Parse "123.45N" → unlimited decimal (uses unlimited context)
+// Parse using the extended decimal context
 mpd_t* decimal_parse_unlimited_str(const char* str);
 
 // ─────────────────────────────────────────────────────────────────────
@@ -105,7 +105,7 @@ Item decimal_from_int64_arena(int64_t val, void* arena_ptr);
 // Format decimal to string buffer (no truncation)
 void decimal_print(StrBuf* strbuf, Decimal* decimal);
 
-// Format unlimited decimal to string buffer (no truncation)
+// Format extended decimal to string buffer (no truncation)
 void decimal_big_print(StrBuf* strbuf, Decimal* decimal);
 
 // ─────────────────────────────────────────────────────────────────────
@@ -206,7 +206,7 @@ bool decimal_item_is_zero(Item item);
 // Check if mpd_t* is zero
 bool decimal_is_zero(mpd_t* dec);
 
-// Check if item is unlimited decimal type
+// Check if item is carried by an extended decimal tier
 bool decimal_is_unlimited(Item item);
 
 // Check if item is any decimal type (fixed or unlimited)

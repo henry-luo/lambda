@@ -4486,7 +4486,7 @@ static int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
     // Numeric leaf — this is a 1-D base case
     if (nid == LMD_TYPE_INT)   { shape_out[0] = type->length; *elem_type_out = ELEM_INT;   return 1; }
     if (nid == LMD_TYPE_INT64) { shape_out[0] = type->length; *elem_type_out = ELEM_INT64; return 1; }
-    if (nid == LMD_TYPE_FLOAT) { shape_out[0] = type->length; *elem_type_out = ELEM_FLOAT; return 1; }
+    if (nid == LMD_TYPE_FLOAT) { shape_out[0] = type->length; *elem_type_out = ELEM_FLOAT64; return 1; }
     if (nid == LMD_TYPE_NUM_SIZED) {
         shape_out[0] = type->length;
         *elem_type_out = num_sized_to_elem_type(type_num_sized_kind(type->nested));

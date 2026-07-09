@@ -112,11 +112,11 @@ true
 "10.3"
 true
 "10.4"
-false
+true
 "10.5"
 true
 "10.6"
-false
+true
 'Test 11: Typed Array Annotation Coercion'
 "11.1"
 [1, 2, 3]

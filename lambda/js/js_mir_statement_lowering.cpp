@@ -25,6 +25,17 @@ static JsMirVarEntry* jm_find_nearest_catch_param_var(JsMirTranspiler* mt, const
     return NULL;
 }
 
+static MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MIR_reg_t val) {
+    if (!mt || !mt->in_native_func || !mt->current_fc) return val;
+    TypeId ret_type = mt->current_fc->return_type;
+    if (ret_type != LMD_TYPE_FLOAT) return val;
+    MIR_type_t val_type = MIR_reg_type(mt->ctx, val, mt->current_func);
+    if (val_type == MIR_T_D) return val;
+    // Delayed try/finally returns store boxed Items in I64 slots; native
+    // FLOAT functions must unbox them before emitting the final MIR ret.
+    return jm_emit_unbox_float(mt, val);
+}
+
 typedef struct JsMirLastClosureSnapshot {
     bool has_env;
     MIR_reg_t env_reg;
@@ -4764,8 +4775,9 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                 MIR_new_label_op(mt->ctx, target)));
         } else {
             // No outer try — emit actual return
+            MIR_reg_t native_ret = jm_native_return_reg(mt, forit_return_val);
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
-                MIR_new_reg_op(mt->ctx, forit_return_val)));
+                MIR_new_reg_op(mt->ctx, native_ret)));
         }
         jm_emit_label(mt, l_no_delayed_ret);
     }
@@ -5006,8 +5018,9 @@ static void jm_transpile_using_tail(JsMirTranspiler* mt, JsAstNode* tail,
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
         MIR_new_label_op(mt->ctx, no_ret_label),
         MIR_new_reg_op(mt->ctx, has_return_reg)));
+    MIR_reg_t native_ret = jm_native_return_reg(mt, return_val_reg);
     jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
-        MIR_new_reg_op(mt->ctx, return_val_reg)));
+        MIR_new_reg_op(mt->ctx, native_ret)));
     jm_emit_label(mt, no_ret_label);
 
     MIR_reg_t still_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
@@ -5024,13 +5037,15 @@ static void jm_transpile_using_tail(JsMirTranspiler* mt, JsAstNode* tail,
                 MIR_new_label_op(mt->ctx, target)));
         } else {
             MIR_reg_t null_ret = jm_emit_null(mt);
+            MIR_reg_t native_null_ret = jm_native_return_reg(mt, null_ret);
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
-                MIR_new_reg_op(mt->ctx, null_ret)));
+                MIR_new_reg_op(mt->ctx, native_null_ret)));
         }
     } else {
         MIR_reg_t null_ret = jm_emit_null(mt);
+        MIR_reg_t native_null_ret = jm_native_return_reg(mt, null_ret);
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
-            MIR_new_reg_op(mt->ctx, null_ret)));
+            MIR_new_reg_op(mt->ctx, native_null_ret)));
     }
     jm_emit_label(mt, no_exc_label);
 }
@@ -6411,8 +6426,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
                 MIR_new_reg_op(mt->ctx, done_result)));
         } else {
+            MIR_reg_t native_ret = jm_native_return_reg(mt, return_val_reg);
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
-                MIR_new_reg_op(mt->ctx, return_val_reg)));
+                MIR_new_reg_op(mt->ctx, native_ret)));
         }
         jm_emit_label(mt, no_ret_label);
 
@@ -6434,13 +6450,15 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         MIR_new_label_op(mt->ctx, target)));
                 } else {
                     MIR_reg_t null_ret = jm_emit_null(mt);
+                    MIR_reg_t native_ret = jm_native_return_reg(mt, null_ret);
                     jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
-                        MIR_new_reg_op(mt->ctx, null_ret)));
+                        MIR_new_reg_op(mt->ctx, native_ret)));
                 }
             } else {
                 MIR_reg_t null_ret = jm_emit_null(mt);
+                MIR_reg_t native_ret = jm_native_return_reg(mt, null_ret);
                 jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
-                    MIR_new_reg_op(mt->ctx, null_ret)));
+                    MIR_new_reg_op(mt->ctx, native_ret)));
             }
             jm_emit_label(mt, no_exc_label);
         }
@@ -6473,8 +6491,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             jm_call_void_1(mt, "js_throw_value",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, thrown_val));
             MIR_reg_t null_ret = jm_emit_null(mt);
+            MIR_reg_t native_ret = jm_native_return_reg(mt, null_ret);
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
-                MIR_new_reg_op(mt->ctx, null_ret)));
+                MIR_new_reg_op(mt->ctx, native_ret)));
         }
         break;
     }

@@ -18,6 +18,14 @@
 1.0f64 is f64
 1.0f64 is float
 1.0f64 is f32
+42i8 is int
+5 is i64
+5 is u8
+1i16 is f16
+int is integer
+float is decimal
+[1i8] is [int]
+[1.5] is [i8]
 
 "=== f64 type ==="
 type(1.0f64)

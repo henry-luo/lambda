@@ -442,7 +442,6 @@ static Item arr_num_leaf_item(ArrayNum* a, int64_t off) {
     switch (a->get_elem_type()) {
         case ELEM_INT:     return Item{ .item = i2it(a->items[off]) };
         case ELEM_INT64:   return Item{ .item = l2it(&a->items[off]) };
-        case ELEM_FLOAT:
         case ELEM_FLOAT64: return Item{ .item = d2it(&a->float_items[off]) };
         case ELEM_INT8:    return Item{ .item = i8_to_item(((int8_t*)a->data)[off]) };
         case ELEM_INT16:   return Item{ .item = i16_to_item(((int16_t*)a->data)[off]) };

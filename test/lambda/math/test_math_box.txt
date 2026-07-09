@@ -1,5 +1,5 @@
 "===== MATH BOX TESTS =====1. text_box type:mord2. text_box height:"
-0.44
+0.43056
 "3. text_box depth:"
 0
 "4. text_box italic:"
@@ -29,7 +29,7 @@ true
 "23. hbox has width:"
 true
 "24. hbox height:"
-0.44
+0.43056
 "25. with_class tag:"
 'span'
 "26. with_class has class:extra27. with_color tag:"

@@ -1540,15 +1540,14 @@ TypeId jm_detect_ctor_field_type(JsAstNode* rhs) {
         JsLiteralNode* lit = (JsLiteralNode*)rhs;
         switch (lit->literal_type) {
         case JS_LITERAL_NUMBER:
-            if (lit->has_decimal) return LMD_TYPE_FLOAT;
-            return LMD_TYPE_INT;
+            return lit->is_bigint ? LMD_TYPE_DECIMAL : LMD_TYPE_FLOAT;
         case JS_LITERAL_BOOLEAN: return LMD_TYPE_BOOL;
         case JS_LITERAL_STRING: return LMD_TYPE_STRING;
         case JS_LITERAL_NULL: return LMD_TYPE_NULL;
         default: return LMD_TYPE_NULL;
         }
     }
-    // Unary minus on number literal: -0.0 → FLOAT, -1 → INT
+    // Unary minus on JS Number keeps the binary64 lane.
     if (rhs->node_type == JS_AST_NODE_UNARY_EXPRESSION) {
         JsUnaryNode* un = (JsUnaryNode*)rhs;
         if ((un->op == JS_OP_MINUS || un->op == JS_OP_SUB) && un->operand) {
@@ -2286,8 +2285,8 @@ void jm_infer_param_types(JsFuncCollected* fc) {
         }
     }
 
-    // Resolve: int_evidence > 0 && float_evidence == 0 → INT
-    //          float_evidence > 0 → FLOAT
+    // Resolve numeric evidence to FLOAT because JS Number uses binary64 even
+    // when every observed argument is integer-looking.
     //          otherwise → ANY
     for (int i = 0; i < pc; i++) {
         if (evidence[i].used_as_container || evidence[i].compared_with_non_numeric) {
@@ -2303,7 +2302,7 @@ void jm_infer_param_types(JsFuncCollected* fc) {
         } else if (evidence[i].float_evidence > 0) {
             fc->param_types[i] = LMD_TYPE_FLOAT;
         } else if (evidence[i].int_evidence > 0 && evidence[i].string_evidence == 0) {
-            fc->param_types[i] = LMD_TYPE_INT;
+            fc->param_types[i] = LMD_TYPE_FLOAT;
         } else {
             fc->param_types[i] = LMD_TYPE_ANY;
         }
@@ -2364,8 +2363,7 @@ void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
                     t = LMD_TYPE_DECIMAL;
                     break;
                 }
-                double val = lit->value.number_value;
-                t = (lit->has_decimal || val != (double)(int64_t)val) ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+                t = LMD_TYPE_FLOAT;
                 break;
             }
             case JS_LITERAL_BOOLEAN: t = LMD_TYPE_BOOL; break;
@@ -2394,8 +2392,8 @@ void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
                     t = LMD_TYPE_ANY;
                 break;
             case JS_OP_SUB: case JS_OP_MUL: case JS_OP_MOD:
-                t = jm_expr_has_bigint_literal(expr) ? LMD_TYPE_ANY : LMD_TYPE_INT;
-                break; // approximate — may be float
+                t = jm_expr_has_bigint_literal(expr) ? LMD_TYPE_ANY : LMD_TYPE_FLOAT;
+                break;
             case JS_OP_DIV: case JS_OP_EXP:
                 t = jm_expr_has_bigint_literal(expr) ? LMD_TYPE_ANY : LMD_TYPE_FLOAT;
                 break;
@@ -2409,7 +2407,7 @@ void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
                 char cn[128];
                 snprintf(cn, sizeof(cn), "_js_%.*s", (int)cid->name->len, cid->name->chars);
                 if (strncmp(cn, self_name, strlen(self_name)) == 0) {
-                    t = LMD_TYPE_INT; // provisional: recursive calls return INT
+                    t = LMD_TYPE_FLOAT; // recursive JS Number calls return binary64
                 }
             }
         }
@@ -2505,8 +2503,7 @@ void jm_infer_return_type(JsFuncCollected* fc) {
                     fc->return_type = LMD_TYPE_DECIMAL;
                     return;
                 }
-                double val = lit->value.number_value;
-                fc->return_type = (lit->has_decimal || val != (double)(int64_t)val) ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+                fc->return_type = LMD_TYPE_FLOAT;
             }
         }
         return;

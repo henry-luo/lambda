@@ -1,6 +1,17 @@
+"=== n suffix classification ==="
+integer
+integer
+decimal
+decimal
+"=== integer arithmetic ==="
+3
+integer
+-2
+integer
+"=== division exits to decimal ==="
+0.5
+decimal
+"=== decimal precision ==="
 true
-decimal
-decimal
 9999999999999999999999999999999999
 99999999999999999999999999999999999
-100000000000000000000000000000000000

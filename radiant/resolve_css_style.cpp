@@ -3592,10 +3592,29 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
 // ============================================================================
 
 // Callback for AVL tree traversal - first pass (font properties only)
+static bool is_first_letter_raise_initial_letter_context(LayoutContext* lycon) {
+    if (!lycon || !lycon->view || !lycon->view->is_element()) return false;
+    DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
+    if (!elem || !elem->specified_style || !elem->tag_name ||
+        strcmp(elem->tag_name, "::first-letter") != 0) {
+        return false;
+    }
+    CssDeclaration* decl = style_tree_get_declaration(
+        elem->specified_style, CSS_PROPERTY_INITIAL_LETTER);
+    if (!decl || !decl->value) return false;
+    return decl->value_text && strstr(decl->value_text, "raise") != NULL;
+}
+
 static bool resolve_font_property_callback(AvlNode* node, void* context) {
     LayoutContext* lycon = (LayoutContext*)context;
     StyleNode* style_node = (StyleNode*)node->declaration;
     CssPropertyId prop_id = (CssPropertyId)node->property_id;
+
+    if ((prop_id == CSS_PROPERTY_FONT_SIZE || prop_id == CSS_PROPERTY_LINE_HEIGHT) &&
+        is_first_letter_raise_initial_letter_context(lycon)) {
+        // initial-letter sizes from the parent line metrics; authored pseudo font metrics would create a plain oversized first-letter.
+        return true;
+    }
 
     // Only process font-related properties in first pass
     // These must be resolved before width/height/etc. which may use em/ex units
