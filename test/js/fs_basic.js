@@ -25,8 +25,19 @@ console.log(fs.existsSync("./temp/nonexistent_file_xyz.txt"));
 // Test 3: statSync
 var stat = fs.statSync("./temp/fs_test1.txt");
 console.log(stat.size);
+console.log(typeof stat.size);
 console.log(stat.isFile());
 console.log(stat.isDirectory());
+var statBig = fs.statSync("./temp/fs_test1.txt", { bigint: true });
+console.log(typeof statBig.size);
+console.log(typeof statBig.mtimeMs);
+console.log(statBig.isFile());
+console.log(typeof fs.lstatSync("./temp/fs_test1.txt", { bigint: true }).ino);
+var fd = fs.openSync("./temp/fs_test1.txt", "r");
+console.log(typeof fs.fstatSync(fd, { bigint: true }).size);
+fs.closeSync(fd);
+console.log(typeof fs.statfsSync("./temp").bsize);
+console.log(typeof fs.statfsSync("./temp", { bigint: true }).bsize);
 
 // Test 4: appendFileSync
 fs.appendFileSync("./temp/fs_test1.txt", " appended");

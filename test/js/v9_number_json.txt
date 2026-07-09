@@ -10,6 +10,13 @@ host int64 json: TypeError
 host int64 strict: true
 bigint radix 64: ffffffffffffffff
 bigint asUintN64: ffffffffffffffff
+buffer biguint64: bigint ffffffffffffffff
+buffer bigint64: bigint -1
+buffer bigint64 string: TypeError
+dataview biguint64: bigint ffffffffffffffff
+dataview bigint64: bigint -1
+typed biguint64: bigint ffffffffffffffff
+typed bigint64: bigint -1
 from array: 10,20,30
 from len: 3
 from string: h,i

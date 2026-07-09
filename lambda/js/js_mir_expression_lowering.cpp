@@ -954,6 +954,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
         (mt->current_fc && mt->current_fc->is_strict);
     ref.uninitialized_this = false;
     ref.is_private = false;
+    ref.computed_key = false;
     ref.named_key = NULL;
     ref.named_key_len = 0;
     ref.named_key_item = 0;
@@ -973,6 +974,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
         if (is_super) {
             ref.kind = JS_MIR_REF_SUPER_PROPERTY;
             ref.uninitialized_this = jm_super_reference_before_constructor_super_call(mt, node);
+            ref.computed_key = mem->computed;
             ref.base_reg = jm_emit_current_this(mt);
             if (ref.uninitialized_this && mem->computed) {
                 ref.key_reg = jm_emit_undefined(mt);
@@ -983,6 +985,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
         }
 
         ref.kind = JS_MIR_REF_PROPERTY;
+        ref.computed_key = mem->computed;
         if (!mem->computed && mem->property &&
             mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* prop_id = (JsIdentifierNode*)mem->property;
@@ -1022,6 +1025,17 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
     }
 
     return ref;
+}
+
+static void jm_emit_canonicalize_computed_key_for_get_put(JsMirTranspiler* mt, JsMirReference* ref) {
+    if (!ref || ref->kind != JS_MIR_REF_PROPERTY || !ref->computed_key || ref->key_reg == 0) return;
+    // computed update/compound references must preserve base-nullish errors while reusing one ToPropertyKey result.
+    jm_call_void_1(mt, "js_require_object_coercible",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg));
+    jm_emit_exc_propagate_check(mt);
+    ref->key_reg = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg));
+    jm_emit_exc_propagate_check(mt);
 }
 
 MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref) {
@@ -2899,6 +2913,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 return un->prefix ? result : old_value;
             }
             JsMirReference ref = jm_emit_reference(mt, un->operand);
+            jm_emit_canonicalize_computed_key_for_get_put(mt, &ref);
             MIR_reg_t operand = jm_emit_get_value(mt, &ref);
             MIR_reg_t num_operand = jm_call_1(mt, "js_to_numeric", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, operand));
@@ -3159,6 +3174,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 return un->prefix ? result : old_value;
             }
             JsMirReference ref = jm_emit_reference(mt, un->operand);
+            jm_emit_canonicalize_computed_key_for_get_put(mt, &ref);
             MIR_reg_t operand = jm_emit_get_value(mt, &ref);
             MIR_reg_t num_operand = jm_call_1(mt, "js_to_numeric", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, operand));
@@ -5842,6 +5858,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             // obj[key] ||= expr: if obj[key] is truthy, skip RHS eval and assignment
             // obj[key] ??= expr: if obj[key] is not nullish, skip RHS eval and assignment
             MIR_reg_t result = jm_new_reg(mt, "la_res", MIR_T_I64);
+            jm_emit_canonicalize_computed_key_for_get_put(mt, &ref);
             MIR_reg_t cur_val = jm_emit_get_value(mt, &ref);
             MIR_label_t l_assign = jm_new_label(mt);
             MIR_label_t l_end = jm_new_label(mt);
@@ -5882,6 +5899,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             return result;
         } else {
             // Compound: get current value, apply operation, set result
+            jm_emit_canonicalize_computed_key_for_get_put(mt, &ref);
             MIR_reg_t cur_val = jm_emit_get_value(mt, &ref);
             MIR_reg_t rval = jm_transpile_box_item(mt, asgn->right);
             const char* fn = jm_compound_assign_fn(asgn->op);

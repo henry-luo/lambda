@@ -2,8 +2,16 @@ hello world
 true
 false
 11
+number
 true
 false
+bigint
+bigint
+true
+bigint
+bigint
+number
+bigint
 hello world appended
 2
 false

@@ -5,22 +5,10 @@
 // Spacing values: 0=none, 1=thin(3mu), 2=medium(4mu), 3=thick(5mu)
 // Negative values = only in display/text style (not script/scriptscript)
 
-// The 8×8 spacing table
-// Row = left atom type, Column = right atom type
-// -1 = thin (display/text only), -2 = medium (display/text only), -3 = thick (display/text only)
-// 99 = impossible combination (should not occur)
-
-let SPACING_TABLE = [
-    //          ord  op  bin  rel  open close punct inner
-    /* ord   */ [0,   1,  -2,  -3,  0,   0,    0,   -1],
-    /* op    */ [1,   1,   99, -3,  0,   0,    0,    1],
-    /* bin   */ [-2, -2,   99,  99, -2,  99,   99,  -2],
-    /* rel   */ [-3, -3,   99,  0,  -3,  0,    0,   -3],
-    /* open  */ [0,   0,   99,  0,   0,  0,    0,    0],
-    /* close */ [0,   1,  -2,  -3,  0,   0,    0,   -1],
-    /* punct */ [-1, -1,   99, -1,  -1, -1,   -1,   -1],
-    /* inner */ [-1,  1,  -2,  -3,  -1,  0,   -1,   -1]
-]
+// The 8×8 spacing table.
+// Row = left atom type, Column = right atom type.
+// -1 = thin (display/text only), -2 = medium (display/text only), -3 = thick (display/text only).
+// 99 = impossible combination (should not occur).
 
 // Spacing values in em (mu = 1/18 em)
 let THIN_SPACE = 0.17          // MathLive snapshot value for 3mu
@@ -40,13 +28,78 @@ pub fn atom_type_index(atom_type) {
     else 0
 }
 
+fn spacing_code_for_indices(li, ri) {
+    // Long single-process corpus runs exposed module-level nested array state
+    // going stale after prior renders; keep this immutable TeX table as branch
+    // logic so each lookup is derived from scalar indices only.
+    if (li == 0) spacing_code_ord(ri)
+    else if (li == 1) spacing_code_op(ri)
+    else if (li == 2) spacing_code_bin(ri)
+    else if (li == 3) spacing_code_rel(ri)
+    else if (li == 4) spacing_code_open(ri)
+    else if (li == 5) spacing_code_close(ri)
+    else if (li == 6) spacing_code_punct(ri)
+    else spacing_code_inner(ri)
+}
+
+fn spacing_code_ord(ri) {
+    if (ri == 1) 1
+    else if (ri == 2) -2
+    else if (ri == 3) -3
+    else if (ri == 7) -1
+    else 0
+}
+
+fn spacing_code_op(ri) {
+    if (ri == 0 or ri == 1 or ri == 7) 1
+    else if (ri == 2) 99
+    else if (ri == 3) -3
+    else 0
+}
+
+fn spacing_code_bin(ri) {
+    if (ri == 2 or ri == 3 or ri == 5 or ri == 6) 99
+    else -2
+}
+
+fn spacing_code_rel(ri) {
+    if (ri == 3 or ri == 5 or ri == 6) 0
+    else -3
+}
+
+fn spacing_code_open(ri) {
+    if (ri == 2) 99
+    else 0
+}
+
+fn spacing_code_close(ri) {
+    if (ri == 1) 1
+    else if (ri == 2) -2
+    else if (ri == 3) -3
+    else if (ri == 7) -1
+    else 0
+}
+
+fn spacing_code_punct(ri) {
+    if (ri == 2) 99
+    else -1
+}
+
+fn spacing_code_inner(ri) {
+    if (ri == 1) 1
+    else if (ri == 2) -2
+    else if (ri == 3) -3
+    else if (ri == 5) 0
+    else -1
+}
+
 // Get spacing between two atom types
 // Returns spacing in em, or 0.0 if no spacing needed
 // style: "display" | "text" | "script" | "scriptscript"
 pub fn get_spacing(left_type, right_type, style) {
     let li = atom_type_index(left_type)
     let ri = atom_type_index(right_type)
-    let code = SPACING_TABLE[li][ri]
+    let code = spacing_code_for_indices(li, ri)
 
     if (code == 99) 0.0          // impossible combination
     else if (code == 0) 0.0      // no space
