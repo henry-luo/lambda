@@ -217,6 +217,11 @@ extern "C" Item js_to_number(Item value) {
         return push_d(decimal_to_double(value));
     }
 
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64:
+        js_throw_type_error("Cannot convert a BigInt value to a number");
+        return ItemNull;
+
     default:
         // J39-1b: route object operands through the unified js_to_primitive
         // kernel (ES §7.1.1). Returned primitive is then re-coerced via ToNumber.
@@ -265,6 +270,7 @@ extern "C" Item js_to_numeric(Item value) {
         Decimal* _dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
         if (_dec && _dec->unlimited == DECIMAL_BIGINT) return value;
     }
+    if (js_is_native_bigint_egress(value)) return js_native_bigint_to_bigint(value);
     // ES spec: Symbol → TypeError in ToNumeric (§7.1.3)
     // Symbols are encoded as LMD_TYPE_INT with value <= -(int64_t)JS_SYMBOL_BASE
     if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
@@ -292,6 +298,7 @@ extern "C" Item js_to_numeric(Item value) {
 static inline Item js_numeric_operand(Item val) {
     TypeId t = get_type_id(val);
     if (t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY || t == LMD_TYPE_FUNC || t == LMD_TYPE_ELEMENT) return js_to_numeric(val);
+    if (js_is_native_bigint_egress(val)) return js_native_bigint_to_bigint(val);
     return val;
 }
 
@@ -440,6 +447,13 @@ extern "C" Item js_to_string(Item value) {
         char buffer[32];
         snprintf(buffer, sizeof(buffer), "%lld", (long long)v);
         return (Item){.item = s2it(heap_create_name(buffer))};
+    }
+
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64: {
+        Item bi = js_native_bigint_to_bigint(value);
+        if (bi.item == ItemError.item) return ItemNull;
+        return js_to_string(bi);
     }
 
     case LMD_TYPE_DECIMAL: {
@@ -757,11 +771,7 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
         return 0;
     case 'b':
         if (type_str[1] == 'o') return (type == LMD_TYPE_BOOL) ? 1 : 0;      // "boolean"
-        if (type_str[1] == 'i') {  // "bigint"
-            if (type != LMD_TYPE_DECIMAL) return 0;
-            Decimal* _dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
-            return (_dec && _dec->unlimited == DECIMAL_BIGINT) ? 1 : 0;
-        }
+        if (type_str[1] == 'i') return js_is_bigint_egress(value) ? 1 : 0;  // "bigint"
         return 0;
     case 'u': return (type == LMD_TYPE_UNDEFINED) ? 1 : 0;  // "undefined"
     case 'o':
@@ -1098,6 +1108,7 @@ Item js_make_number(double d) {
 
 // Increment: handles both Number and BigInt (for ++ operator)
 extern "C" Item js_increment(Item value) {
+    value = js_numeric_operand(value);
     if (js_is_bigint(value)) return bigint_inc(value);
     double d = js_get_number(value);
     return js_make_number(d + 1.0);
@@ -1105,6 +1116,7 @@ extern "C" Item js_increment(Item value) {
 
 // Decrement: handles both Number and BigInt (for -- operator)
 extern "C" Item js_decrement(Item value) {
+    value = js_numeric_operand(value);
     if (js_is_bigint(value)) return bigint_dec(value);
     double d = js_get_number(value);
     return js_make_number(d - 1.0);
@@ -1282,6 +1294,9 @@ extern "C" Item js_add(Item left, Item right) {
         return js_concat_strings_fast(it2s(left_str), it2s(right_str));
     }
 
+    left = js_numeric_operand(left);
+    right = js_numeric_operand(right);
+
     // Numeric addition — use double arithmetic for JS semantics
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     // BigInt: mixed types → TypeError, same types → integer addition
@@ -1370,6 +1385,15 @@ extern "C" Item js_power(Item left, Item right) {
 extern "C" Item js_equal(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
+
+    if (js_is_native_bigint_egress(left)) {
+        left = js_native_bigint_to_bigint(left);
+        left_type = get_type_id(left);
+    }
+    if (js_is_native_bigint_egress(right)) {
+        right = js_native_bigint_to_bigint(right);
+        right_type = get_type_id(right);
+    }
 
     // Same type: use strict equality
     if (left_type == right_type) {
@@ -1481,6 +1505,15 @@ extern "C" Item js_strict_equal(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
 
+    if (js_is_native_bigint_egress(left)) {
+        left = js_native_bigint_to_bigint(left);
+        left_type = get_type_id(left);
+    }
+    if (js_is_native_bigint_egress(right)) {
+        right = js_native_bigint_to_bigint(right);
+        right_type = get_type_id(right);
+    }
+
     // Legacy compact ints can still enter from host paths, but JS-created Number values are boxed binary64.
     bool left_is_num = js_number_like_type(left_type);
     bool right_is_num = js_number_like_type(right_type);
@@ -1508,7 +1541,10 @@ extern "C" Item js_strict_equal(Item left, Item right) {
         return (Item){.item = b2it(it2i(left) == it2i(right))};
 
     case LMD_TYPE_DECIMAL:
-        return (Item){.item = b2it(bigint_cmp(left, right) == 0)};
+        if (js_is_bigint(left) && js_is_bigint(right)) {
+            return (Item){.item = b2it(bigint_cmp(left, right) == 0)};
+        }
+        return (Item){.item = b2it(decimal_cmp_items(left, right) == 0)};
 
     case LMD_TYPE_FLOAT: {
         double l = it2d(left);
@@ -1678,6 +1714,8 @@ static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
     if (right_type == LMD_TYPE_BOOL) { right = (Item){.item = i2it(it2b(right) ? 1 : 0)}; right_type = LMD_TYPE_INT; }
     if (left_type == LMD_TYPE_NULL) { left = (Item){.item = i2it(0)}; left_type = LMD_TYPE_INT; }
     if (right_type == LMD_TYPE_NULL) { right = (Item){.item = i2it(0)}; right_type = LMD_TYPE_INT; }
+    if (js_is_native_bigint_egress(left)) { left = js_native_bigint_to_bigint(left); left_type = get_type_id(left); }
+    if (js_is_native_bigint_egress(right)) { right = js_native_bigint_to_bigint(right); right_type = get_type_id(right); }
     // BigInt comparisons
     bool left_bi = js_is_bigint(left);
     bool right_bi = js_is_bigint(right);
@@ -1907,6 +1945,7 @@ extern "C" Item js_unsigned_right_shift(Item left, Item right) {
 extern "C" Item js_bigint_constructor(Item value) {
     // If already a BigInt, return as-is
     if (js_is_bigint(value)) return value;
+    if (js_is_native_bigint_egress(value)) return js_native_bigint_to_bigint(value);
     TypeId vt = get_type_id(value);
     // ToPrimitive for objects (hint: number) — ES spec §7.1.13
     if (vt == LMD_TYPE_MAP || vt == LMD_TYPE_ARRAY || vt == LMD_TYPE_FUNC) {
@@ -1955,6 +1994,7 @@ extern "C" Item js_bigint_constructor(Item value) {
 
 static Item js_to_bigint_for_bigint_op(Item value) {
     if (js_is_bigint(value)) return value;
+    if (js_is_native_bigint_egress(value)) return js_native_bigint_to_bigint(value);
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT) {
         Item prim = js_to_primitive(value, JS_HINT_NUMBER);
@@ -2102,8 +2142,12 @@ extern "C" Item js_typeof(Item value) {
     case LMD_TYPE_NUM_SIZED:
         result = js_key_is_symbol(value) ? "symbol" : "number";
         break;
-    case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64:
         result = "bigint";
+        break;
+    case LMD_TYPE_DECIMAL:
+        result = js_is_bigint(value) ? "bigint" : "number";
         break;
     case LMD_TYPE_STRING:
         result = "string";
