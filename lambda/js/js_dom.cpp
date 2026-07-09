@@ -1095,6 +1095,7 @@ static bool js_dom_replace_text_data(DomText* text_node, uint32_t offset,
 static void expando_reset(); // forward declaration
 static void reset_dom_wrapper_cache(); // forward declaration
 static void reset_foreign_document_cache(); // forward declaration
+static void reset_live_dom_collections(); // forward declaration
 // Phase 6E: text-control helpers are shared with Radiant event/render paths.
 #include "../../radiant/text_control.hpp"
 #define tc_is_text_control_elem(e)      tc_is_text_control(e)
@@ -1124,6 +1125,7 @@ extern "C" void js_dom_batch_reset() {
     DocState* state = js_dom_current_state();
     js_dom_selection_reset();
     js_dom_rich_history_reset();
+    reset_live_dom_collections();
     reset_dom_wrapper_cache();
     js_document_proxy_item = (Item){.item = ITEM_NULL};
     js_document_default_view = (Item){.item = ITEM_NULL};
@@ -1141,6 +1143,7 @@ extern "C" void js_dom_batch_reset() {
 
 extern "C" void js_dom_shutdown() {
     js_dom_rich_history_reset();
+    reset_live_dom_collections();
     reset_dom_wrapper_cache();
     js_dom_events_reset();
     js_xhr_reset();
@@ -1794,6 +1797,18 @@ static const int LIVE_LOOKUP_COLLECTION_CACHE_SIZE = 4096;
 static __thread LiveLookupCollectionEntry s_live_lookup_collections[LIVE_LOOKUP_COLLECTION_CACHE_SIZE] = {};
 static __thread int s_live_lookup_collection_count = 0;
 
+static void reset_live_dom_collections() {
+    // Live collection registries borrow per-document owners; batch reset must drop them before the next document mutates.
+    memset(s_select_options_owners, 0, sizeof(s_select_options_owners));
+    s_select_options_owner_count = 0;
+    memset(s_live_child_collections, 0, sizeof(s_live_child_collections));
+    s_live_child_collection_count = 0;
+    memset(s_live_form_collections, 0, sizeof(s_live_form_collections));
+    s_live_form_collection_count = 0;
+    memset(s_live_lookup_collections, 0, sizeof(s_live_lookup_collections));
+    s_live_lookup_collection_count = 0;
+}
+
 static void _register_select_options_owner(Item collection, DomElement* owner, int kind) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !owner) return;
     for (int i = 0; i < s_select_options_owner_count; i++) {
@@ -1955,6 +1970,17 @@ static Item _collection_named_item(Item name_arg) {
     return ItemNull;
 }
 
+static Item _options_collection_add(Item element_arg, Item before_arg) {
+    Item self = js_get_this();
+    int kind = 0;
+    DomElement* owner = _select_options_owner(self, &kind);
+    if (!owner || kind != SELECT_COLLECTION_OPTIONS || !_is_tag(owner, "select")) return ItemNull;
+
+    Item method = (Item){.item = s2it(heap_create_name("add"))};
+    Item args[2] = { element_arg, before_arg };
+    return js_dom_element_method(js_dom_wrap_element(owner), method, args, 2);
+}
+
 static void _decorate_dom_collection(Item collection, const char* ctor_name) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !ctor_name) return;
     Item named_key = (Item){.item = s2it(heap_create_name("namedItem"))};
@@ -1967,6 +1993,20 @@ static void _decorate_dom_collection(Item collection, const char* ctor_name) {
     if (get_type_id(ctor) == LMD_TYPE_FUNC) {
         js_property_set(collection, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
     }
+}
+
+static void _decorate_options_collection(Item collection) {
+    _decorate_dom_collection(collection, "HTMLOptionsCollection");
+    if (get_type_id(collection) != LMD_TYPE_ARRAY) return;
+
+    Item add_key = (Item){.item = s2it(heap_create_name("add"))};
+    Item existing = js_property_get(collection, add_key);
+    if (get_type_id(existing) == LMD_TYPE_FUNC) return;
+
+    // select.options is a live collection object, so install add() on the collection and delegate to the owning select.
+    Item add_fn = js_new_function((void*)_options_collection_add, 2);
+    js_set_function_name(add_fn, add_key);
+    js_property_set(collection, add_key, add_fn);
 }
 
 static bool _array_companion_set_int_slot(Item collection, const char* name,
@@ -9478,7 +9518,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     if (_is_tag(elem, "select")) {
         if (strcmp(prop, "options") == 0) {
             Item arr = js_array_new(0);
-            _decorate_dom_collection(arr, "HTMLOptionsCollection");
+            _decorate_options_collection(arr);
             _register_select_options_owner(arr, elem, SELECT_COLLECTION_OPTIONS);
             _select_refresh_options_collection(arr, elem);
             return arr;

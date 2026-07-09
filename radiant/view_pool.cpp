@@ -1424,14 +1424,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
         while (parent) {
             if (parent->is_block()) {
                 ViewBlock* parent_block = lam::view_require_block(parent);
-                if (parent_block->scroller && parent_block->scroller->pane) {
-                    DocState* state = parent_block->doc ? parent_block->doc->state : NULL;
-                    float scroll_x = 0.0f, scroll_y = 0.0f;
-                    scroll_state_get_position_for_view(state, static_cast<View*>(parent_block),
-                        parent_block->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
-                    abs_x -= scroll_x;
-                    abs_y -= scroll_y;
-                }
+                // layout JSON reports document/layout coordinates; element scroll is a paint-time offset.
                 if (parent_block->position &&
                     parent_block->position->position == CSS_VALUE_FIXED) {
                     break;
