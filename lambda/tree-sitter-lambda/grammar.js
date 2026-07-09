@@ -907,10 +907,10 @@ module.exports = grammar({
     // reducing SYMBOL_COUNT by 19. Keywords also used standalone elsewhere
     // ('error', 'type', 'string', 'symbol') remain as separate keywords.
     _base_type_kw: _ => token(prec(1, choice(
-      'null', 'any', 'bool', 'int64', 'int', 'float', 'decimal', 'number',
+      'null', 'any', 'bool', 'int64', 'int', 'float', 'f64', 'decimal', 'integer', 'number',
       'datetime', 'date', 'time', 'binary', 'range',
       'list', 'array', 'map', 'element', 'entity', 'object', 'function',
-      'i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64', 'f16', 'f32'
+      'i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64', 'f16', 'f32', 'f64'
     ))),
 
     base_type: $ => prec(1, choice(

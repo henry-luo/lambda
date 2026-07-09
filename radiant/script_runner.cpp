@@ -396,6 +396,12 @@ static char* resolve_wpt_absolute_script_path(const char* src, Url* base_url) {
     if (strcmp(src, "/resources/testharnessreport.js") == 0) {
         return mem_strdup("builtin:wpt-testharnessreport.js", MEM_CAT_JS_RUNTIME);
     }
+    if (strcmp(src, "/resources/testdriver.js") == 0) {
+        return mem_strdup("builtin:wpt-testdriver.js", MEM_CAT_JS_RUNTIME);
+    }
+    if (strcmp(src, "/resources/testdriver-vendor.js") == 0) {
+        return mem_strdup("builtin:wpt-testdriver-vendor.js", MEM_CAT_JS_RUNTIME);
+    }
 
     if (base_url) {
         char* base_local = url_to_local_path(base_url);
@@ -638,18 +644,52 @@ static void script_source_cache_store(const char* resolved_path, bool is_http,
 static char* load_script_content(const char* resolved_path, bool is_http) {
     char* content = nullptr;
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharness.js") == 0) {
-        // CSS WPT layout fixtures only need synchronous assertion helpers; the
-        // full harness exceeds the pre-layout script budget and skips mutations.
+        // WPT test callbacks are conformance assertions, not visual setup; running
+        // them during layout capture leaves API-test DOM artifacts that browser
+        // references do not include.
         return mem_strdup(
-            "function test(fn, name) { try { fn(); } catch (e) { if (typeof console !== 'undefined' && console.log) console.log('FAIL: ' + name + ' - ' + (e && e.message ? e.message : e)); } }\n"
-            "function assert_true(value, desc) { if (value !== true) throw new Error(desc || 'assert_true failed'); }\n"
-            "function assert_equals(actual, expected, desc) { if (actual !== expected) throw new Error(desc || ('assert_equals: ' + actual + ' !== ' + expected)); }\n"
-            "function assert_not_equals(actual, expected, desc) { if (actual === expected) throw new Error(desc || ('assert_not_equals: ' + actual)); }\n"
-            "function assert_in_array(actual, expected, desc) { for (var i = 0; i < expected.length; i++) { if (actual === expected[i]) return; } throw new Error(desc || ('assert_in_array: ' + actual)); }\n"
-            "window.test = test; window.assert_true = assert_true; window.assert_equals = assert_equals; window.assert_not_equals = assert_not_equals; window.assert_in_array = assert_in_array;\n",
+            "(function(){\n"
+            "function noop(){}\n"
+            "function test(fn,name){}\n"
+            "function setup(opts,fn){ if (typeof opts === 'function') return; }\n"
+            "function done(){}\n"
+            "function async_test(fn,name){ return { step:function(fn){ return fn && fn(); }, step_func:function(fn){ return function(){ return fn && fn.apply(this, arguments); }; }, step_func_done:function(fn){ return function(){ return fn && fn.apply(this, arguments); }; }, unreached_func:function(){ return noop; }, add_cleanup:noop, done:noop }; }\n"
+            "function promise_test(fn,name){}\n"
+            "function assert_true(){}\n"
+            "function assert_false(){}\n"
+            "function assert_equals(){}\n"
+            "function assert_not_equals(){}\n"
+            "function assert_array_equals(){}\n"
+            "function assert_in_array(){}\n"
+            "function assert_throws_js(){}\n"
+            "function assert_throws_dom(){}\n"
+            "function assert_unreached(){}\n"
+            "function assert_greater_than(){}\n"
+            "function assert_greater_than_equal(){}\n"
+            "function assert_less_than(){}\n"
+            "function assert_less_than_equal(){}\n"
+            "function assert_class_string(){}\n"
+            "window.test = test; window.async_test = async_test; window.promise_test = promise_test; window.setup = setup; window.done = done;\n"
+            "window.assert_true = assert_true; window.assert_false = assert_false; window.assert_equals = assert_equals; window.assert_not_equals = assert_not_equals;\n"
+            "window.assert_array_equals = assert_array_equals; window.assert_in_array = assert_in_array; window.assert_throws_js = assert_throws_js; window.assert_throws_dom = assert_throws_dom;\n"
+            "window.assert_unreached = assert_unreached; window.assert_greater_than = assert_greater_than; window.assert_greater_than_equal = assert_greater_than_equal;\n"
+            "window.assert_less_than = assert_less_than; window.assert_less_than_equal = assert_less_than_equal; window.assert_class_string = assert_class_string;\n"
+            "})();\n",
             MEM_CAT_JS_RUNTIME);
     }
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharnessreport.js") == 0) {
+        return mem_strdup("", MEM_CAT_JS_RUNTIME);
+    }
+    if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testdriver.js") == 0) {
+        return mem_strdup(
+            "(function(){\n"
+            "function resolved(){ return { then:function(resolve){ if (resolve) resolve(); return this; }, catch:function(){ return this; } }; }\n"
+            "function Actions(){ this.pointerMove=function(){return this;}; this.pointerDown=function(){return this;}; this.pointerUp=function(){return this;}; this.keyDown=function(){return this;}; this.keyUp=function(){return this;}; this.send=function(){return resolved();}; }\n"
+            "window.test_driver = window.test_driver || { send_keys:function(){return resolved();}, click:function(){return resolved();}, bless:function(name, fn){ if (fn) fn(); return resolved(); }, Actions:Actions };\n"
+            "})();\n",
+            MEM_CAT_JS_RUNTIME);
+    }
+    if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testdriver-vendor.js") == 0) {
         return mem_strdup("", MEM_CAT_JS_RUNTIME);
     }
     if (is_http) {

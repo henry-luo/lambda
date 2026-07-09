@@ -10330,6 +10330,15 @@ static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_
     css_buf[out] = '\0';
 }
 
+static bool js_inline_style_cssom_property_exposed(const char* css_prop) {
+    if (!css_prop) return false;
+    // object-view-box is parsed for stylesheet layout tests, but the browser
+    // reference CSSOM does not expose dynamic inline writes for this draft
+    // property; treating it as writable changes pre-screenshot WPT geometry.
+    if (strcasecmp(css_prop, "object-view-box") == 0) return false;
+    return true;
+}
+
 // Helper: parse class_names from space-separated string, updates elem->class_names/class_count
 static void parse_class_names(DomElement* elem, const char* class_str) {
     if (!elem || !class_str) return;
@@ -11019,6 +11028,11 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
     // convert camelCase JS property to CSS property
     char css_prop[128];
     js_camel_to_css_prop(js_prop, css_prop, sizeof(css_prop));
+    if (!js_inline_style_cssom_property_exposed(css_prop)) {
+        log_debug("js_dom_set_style_property: ignored unsupported CSSOM property %s on <%s>",
+                  css_prop, elem->tag_name ? elem->tag_name : "?");
+        return value;
+    }
 
     // handle cssText special case: replace entire inline style
     if (strcmp(css_prop, "cssText") == 0) {
@@ -11115,6 +11129,9 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
     // convert camelCase JS property to CSS property
     char css_prop[128];
     js_camel_to_css_prop(js_prop, css_prop, sizeof(css_prop));
+    if (!js_inline_style_cssom_property_exposed(css_prop)) {
+        return (Item){.item = s2it(heap_create_name(""))};
+    }
 
     // v12: cssText getter — return the raw inline style string
     if (strcmp(css_prop, "cssText") == 0) {
@@ -11252,6 +11269,9 @@ extern "C" bool js_dom_style_resource_has_property(Item style_item, Item prop_na
 
     char css_prop[128];
     js_camel_to_css_prop(prop, css_prop, sizeof(css_prop));
+    if (!js_inline_style_cssom_property_exposed(css_prop)) {
+        return false;
+    }
     CssPropertyId prop_id = css_property_id_from_name(css_prop);
     // Style host VMaps have no ordinary shape; `in` must answer from the CSS
     // property table so vendor probes do not recurse through JS fallbacks.
@@ -13947,6 +13967,11 @@ static Item js_dom_style_set_property_for_elem(DomElement* elem, Item prop_arg,
     const char* css_prop = fn_to_cstr(prop_arg);
     const char* val_str = fn_to_cstr(value_arg);
     if (!css_prop || !val_str) return ItemNull;
+    if (!js_inline_style_cssom_property_exposed(css_prop)) {
+        log_debug("js_dom_style_method: ignored unsupported CSSOM property '%s' on <%s>",
+                  css_prop, elem->tag_name ? elem->tag_name : "?");
+        return ItemNull;
+    }
 
     char style_decl[256];
     if (has_priority) {

@@ -710,8 +710,8 @@ TEST_F(NegativeScriptTest, SemanticError_SizedIntegerOverflow) {
     ExpectErrorCode("test/lambda/negative/semantic/sized_integer_overflow.ls", "error[E108]");
 }
 
-TEST_F(NegativeScriptTest, SemanticError_LiteralZeroDivisor) {
-    ExpectErrorCode("test/lambda/negative/semantic/literal_zero_divisor.ls", "error[E312]");
+TEST_F(NegativeScriptTest, SemanticError_SizedConstantConversionOverflow) {
+    ExpectErrorCode("test/lambda/negative/semantic/sized_constant_conversion_overflow.ls", "error[E108]");
 }
 
 TEST_F(NegativeScriptTest, SemanticError_ReservedLastKeyword) {

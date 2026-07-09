@@ -7807,7 +7807,15 @@
             },
             {
               "type": "STRING",
+              "value": "f64"
+            },
+            {
+              "type": "STRING",
               "value": "decimal"
+            },
+            {
+              "type": "STRING",
+              "value": "integer"
             },
             {
               "type": "STRING",
@@ -7900,6 +7908,10 @@
             {
               "type": "STRING",
               "value": "f32"
+            },
+            {
+              "type": "STRING",
+              "value": "f64"
             }
           ]
         }
