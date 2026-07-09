@@ -878,7 +878,6 @@ fn text_color_box(text, color_value) => {
     italic: 0.0,
     skew: 0.0,
     max_font_size: 0.65,
-    model: "ml",
     suppress_hbox_text_depth: true,
     suppress_hbox_operator_height: true,
     no_left_bin_space: true
@@ -913,7 +912,6 @@ fn text_content_special_box(el, h, d, w) => {
     italic: 0.0,
     skew: 0.0,
     max_font_size: h,
-    model: "ml",
     suppress_hbox_text_depth: true,
     suppress_hbox_operator_height: true,
     no_left_bin_space: true
@@ -1247,7 +1245,6 @@ fn accent_box_raw(el, h, w) => {
     italic: 0.0,
     skew: 0.0,
     max_font_size: h,
-    model: "ml",
     no_left_bin_space: true
 }
 
@@ -1348,8 +1345,7 @@ fn render_overrightarrow_accent(base_box, context) {
         type: "mord",
         italic: 0.0,
         skew: 0.0,
-        max_font_size: stack.height,
-        model: "ml"
+        max_font_size: stack.height
     }
 }
 
@@ -1370,8 +1366,7 @@ fn render_long_arrow_label_sequence(base_name, label_name, context) {
         type: "mrel",
         italic: 0.0,
         skew: 0.0,
-        max_font_size: stack.height,
-        model: "ml"
+        max_font_size: stack.height
     }
 }
 
@@ -1387,7 +1382,6 @@ fn make_padded_svg_body_box(svg_name) {
         italic: 0.0,
         skew: 0.0,
         max_font_size: h / 2.0 + 0.166,
-        model: "ml",
         no_pstrut_floor: true
     }
 }
@@ -1410,7 +1404,6 @@ fn make_padded_svg_label_box(svg_name) {
         italic: 0.0,
         skew: 0.0,
         max_font_size: scaled_h,
-        model: "ml",
         no_pstrut_floor: true
     }
 }
@@ -1491,7 +1484,6 @@ fn accent_box_from_stack(stack, w) => {
     italic: 0.0,
     skew: 0.0,
     max_font_size: stack.height,
-    model: "ml",
     no_left_bin_space: true
 }
 
@@ -1607,18 +1599,23 @@ fn svg_accent_path(svg_name) {
 }
 
 fn render_missing_base_accent(accent_key, accent_text, accent_cls, accent_height) {
-    let vheight = accent_height + 0.27
-    let pstrut = if (accent_key == "vec") 2.72 else 2.7
-    let base_top = if (accent_height > 0.7) 0.0 - pstrut + 0.01 else 0.0 - pstrut
-    let accent_top = if (accent_key == "tilde") 0.0 - pstrut - 0.61 else 0.0 - pstrut - 0.26
-    let margin_left = if (accent_key == "dot") 0.27 else 0.16
+    let base_box = missing_accent_base_box()
+    let clearance = if (base_box.height < met.X_HEIGHT) base_box.height else met.X_HEIGHT
+    let vheight = util.ceil_em2(base_box.height - clearance + accent_height)
+    let pstrut = max(accent_height, base_box.max_font_size) + 2.0
+    let accent_lift = if (accent_key == "tilde") 0.35 else 0.0
+    let base_overshoot = max(0.0, accent_height - base_box.max_font_size)
+    let base_top = util.ceil_em2(0.0 - pstrut + base_overshoot / 2.0)
+    let accent_top = util.ceil_em2(0.0 - pstrut - (base_box.height - clearance + accent_lift))
+    let margin_left = util.ceil_em2((base_box.width - accent_glyph_width(accent_key)) / 2.0)
+    let body_height = util.ceil_em2(base_box.height + base_box.depth)
     let el = <span class: css.VLIST_T2;
         <span class: css.VLIST_R;
             <span class: css.VLIST, style: "height:" ++ fmt_accent_em(vheight);
                 <span style: "top:" ++ fmt_accent_em(base_top);
                     <span class: css.PSTRUT, style: "height:" ++ fmt_accent_em(pstrut)>
-                    <span style: "height:0.9em;display:inline-block";
-                        <span class: css.CMR; "□">
+                    <span style: "height:" ++ fmt_accent_em(body_height) ++ ";display:inline-block";
+                        base_box.element
                     >
                 >
                 <span class: css.CENTER, style: "top:" ++ fmt_accent_em(accent_top) ++ ";margin-left:" ++ fmt_accent_em(margin_left);
@@ -1632,8 +1629,11 @@ fn render_missing_base_accent(accent_key, accent_text, accent_cls, accent_height
             <span class: css.VLIST, style: "height:0.2em">
         >
     >
-    accent_box(el, vheight, 0.2, 0.8)
+    accent_box(el, vheight, base_box.depth, base_box.width)
 }
+
+fn missing_accent_base_box() =>
+    box.ml_box_full(<span class: css.CMR; "□">, 0.7, 0.2, 0.8, "mord", 0.0, 0.0, 0.7)
 
 fn accent_box(el, h, d, w) => {
     element: el,
@@ -1644,7 +1644,6 @@ fn accent_box(el, h, d, w) => {
     italic: 0.0,
     skew: 0.0,
     max_font_size: h,
-    model: "ml",
     no_left_bin_space: true
 }
 
@@ -2101,7 +2100,6 @@ fn box_with_error(bx, err) => {
     italic: bx.italic,
     skew: bx.skew,
     max_font_size: bx.max_font_size,
-    model: "ml",
     mathlive_error: err
 }
 
@@ -2120,7 +2118,6 @@ fn render_middle_delim(node, context) {
             italic: 0.0,
             skew: 0.0,
             max_font_size: 0.0,
-            model: "ml",
             suppress_hbox_text_depth: true
         }
     } else {
@@ -2136,7 +2133,6 @@ fn render_middle_delim(node, context) {
             italic: bx.italic,
             skew: bx.skew,
             max_font_size: bx.max_font_size,
-            model: "ml",
             is_middle_delim: true
         }
     }
@@ -2177,7 +2173,6 @@ fn radical_box(el, spec, width, context) => {
         italic: 0.0,
         skew: 0.0,
         max_font_size: if (spec.box_height != null) spec.box_height else spec.height,
-        model: "ml",
         is_radical: true,
         is_script_radical: context.style == "script" or context.style == "scriptscript"
 }
@@ -2777,7 +2772,6 @@ fn render_color_switch_tail(node, context, i) {
         italic: hb.italic,
         skew: hb.skew,
         max_font_size: hb.max_font_size,
-        model: hb.model,
         is_middle_delim: has_middle_delim(spaced, 0)
     })
 }
@@ -2843,7 +2837,6 @@ fn render_size_switch_tail(node, context, i) {
         italic: hb.italic * scale,
         skew: hb.skew * scale,
         max_font_size: if (hb.max_font_size != null) hb.max_font_size * scale else report_height,
-        model: "ml",
         is_middle_delim: has_middle_delim(spaced, 0)
     }
 }
@@ -2891,7 +2884,6 @@ fn ml_style_wrap_box(bx, style_text) => {
     italic: bx.italic,
     skew: bx.skew,
     max_font_size: bx.max_font_size,
-    model: "ml",
     suppress_hbox_text_depth: true,
     is_middle_delim: bx.is_middle_delim,
     is_colorbox: bx.is_colorbox
@@ -2969,8 +2961,7 @@ fn render_textcolor_sequence(node, context, i) {
         type: hb.type,
         italic: hb.italic,
         skew: hb.skew,
-        max_font_size: hb.max_font_size,
-        model: hb.model
+        max_font_size: hb.max_font_size
     })
 }
 
@@ -2999,7 +2990,6 @@ fn ml_box_with_suppress_depth(bx) => {
     italic: bx.italic,
     skew: bx.skew,
     max_font_size: bx.max_font_size,
-    model: "ml",
     suppress_hbox_text_depth: true,
     is_middle_delim: bx.is_middle_delim,
     is_script_radical: bx.is_script_radical
@@ -3073,7 +3063,6 @@ fn ml_box_with_type(bx, atom_type) => {
     italic: bx.italic,
     skew: bx.skew,
     max_font_size: bx.max_font_size,
-    model: "ml",
     is_fraction: bx.is_fraction,
     is_script_radical: bx.is_script_radical
 }

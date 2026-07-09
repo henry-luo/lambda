@@ -21,9 +21,8 @@ pub fn render(node, context, render_fn) {
     let is_big_op = base != null and base is element and name(base) == 'command' and
         base.name != null and sym.is_limit_op(string(base.name))
     // Integral-family operators (\int, \oint, \iint, etc.) use SIDE limits
-    // (lm_msubsup as a sibling of the symbol) in inline mode, matching
-    // MathLive's subsupPlacement='adjacent' rule. Display mode would stack
-    // them (TODO).
+    // (lm_msubsup as a sibling of the symbol), matching MathLive's
+    // subsupPlacement='adjacent' rule.
     let cmd_name = if (is_big_op) string(base.name) else ""
     let is_integral = is_integral_op(cmd_name)
 

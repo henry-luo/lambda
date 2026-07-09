@@ -61,7 +61,6 @@ pub fn with_background(content_box, bg_color) {
         skew: 0.0,
         max_font_size: if (content_box.max_font_size != null)
             content_box.max_font_size else content_box.height,
-        model: "ml",
         suppress_hbox_text_depth: content_box.suppress_hbox_text_depth,
         is_colorbox: true
     }

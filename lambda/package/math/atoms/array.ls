@@ -144,7 +144,6 @@ fn ml_box_with_type(bx, atom_type) => {
     italic: bx.italic,
     skew: bx.skew,
     max_font_size: bx.max_font_size,
-    model: "ml",
     is_fraction: bx.is_fraction
 }
 
@@ -236,7 +235,6 @@ fn ml_table_box(el, metrics, total_w) => {
     italic: 0.0,
     skew: 0.0,
     max_font_size: if (metrics.box_height != null) metrics.box_height else metrics.height,
-    model: "ml",
     delim_total: metrics.box_total
 }
 

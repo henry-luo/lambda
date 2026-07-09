@@ -131,7 +131,6 @@ fn ml_fraction_wrapper(el, frac_box, width) => {
         italic: 0.0,
         skew: 0.0,
         max_font_size: frac_box.max_font_size,
-        model: "ml",
         is_fraction: true
 }
 
@@ -170,13 +169,10 @@ fn frac_metric_d(bx) { bx.depth }
 // Rule 15d geometry, computed from font metrics + sigma constants — covers
 // the display/text/script/scriptscript geometry styles (the children are
 // rendered unscaled by Lambda, so we scale their metrics here by s_child and
-// emit the matching font-size on the wrapper). Returns a geom record (all em
-// values full precision) or null to fall back to the legacy constant dispatch
-// (colorbox quirks, or composite children that lack raw metrics).
-// Returns the geom record for ANY bar fraction — display/text/script/
-// scriptscript geometry, colorbox, and composite children alike. Children that
-// carry their full extent in the primary height/depth fields. (The legacy
-// frac_bar_spec constant table is gone.)
+// emit the matching font-size on the wrapper). Returns the geom record for any
+// bar fraction — display/text/script/scriptscript geometry, colorbox, and
+// composite children alike. Children carry their full extent in the primary
+// height/depth fields; the old frac_bar_spec constant table is gone.
 fn frac_bar_geom(frac_ctx, numer_box, denom_box, gstyle, is_fraction_child) {
         // geom_style is the MathLive geometry style threaded/derived in render().
         let geom_style = gstyle
@@ -304,7 +300,6 @@ fn build_frac_bar_rule15(numer_box, denom_box, geom) {
         italic: 0.0,
         skew: 0.0,
         max_font_size: geom.frac_height,
-        model: "ml",
         is_fraction: true
     }
 }
@@ -347,7 +342,6 @@ fn build_frac_nobar_vlist(numer_box, denom_box, frac_ctx, cmd, unbraced_numeric)
         italic: 0.0,
         skew: 0.0,
         max_font_size: spec.box_height,
-        model: "ml",
         no_bar: true,
         is_fraction: true,
         delim_level: spec.delim_level,
@@ -481,7 +475,6 @@ fn ml_delimited_fraction_wrapper(el, combined) => {
         italic: 0.0,
         skew: 0.0,
         max_font_size: combined.max_font_size,
-        model: "ml",
         is_fraction: true
 }
 
@@ -501,7 +494,6 @@ fn delimiter_box(delim, frac_box, atom_type) {
         type: atom_type,
         italic: 0.0,
         skew: 0.0,
-        max_font_size: h,
-        model: "ml"
+        max_font_size: h
     }
 }

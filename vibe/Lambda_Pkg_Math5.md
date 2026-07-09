@@ -92,16 +92,15 @@ The Lambda target box record becomes:
     width,
     italic, skew,
     max_font_size,
-    type,
-    model: "ml"    // temporary migration marker, removed at the end
+    type
 }
 ```
 
 `height_raw` and `depth_raw` disappear because `height/depth` are already raw.
 `render_height`, `render_depth`, and `render_total` disappear because visual
 CSS extents are represented inside the element tree, as MathLive does. The
-temporary `model: "ml"` marker only exists while legacy boxes still flow through
-the renderer.
+temporary migration marker has been removed now that all math package boxes use
+the same one-box-field model.
 
 ## 3. Non-Goals
 
@@ -131,7 +130,7 @@ The known Math5 targets are:
 
 ## 5. Migration Strategy
 
-The safe path is a two-model bridge:
+The migration used a two-model bridge:
 
 1. **Legacy boxes** keep today's fields and behavior.
 2. **ML boxes** use only full-precision `height/depth` plus element/CSS
@@ -143,16 +142,12 @@ fn box_h(b) { b.height }
 fn box_d(b) { b.depth }
 fn legacy_emit_h(b) { if (b.render_height != null) b.render_height else b.height }
 fn legacy_emit_d(b) { if (b.render_depth != null) b.render_depth else b.depth }
-fn is_ml_box(b) { b.model == "ml" }
 ```
 
-During migration, parents must not accidentally treat a legacy rounded box as an
-ML full-precision box. Every converted producer gets `model: "ml"`, and every
-consumer chooses the ML path only when all relevant children are ML boxes. This
-turns a global rewrite into a series of local conversions gated by the corpus.
-
-At the end, all producers are ML boxes; the legacy accessors and fields are
-deleted mechanically.
+During migration, parents could not accidentally treat a legacy rounded box as
+an ML full-precision box. That bridge is now retired: all producers are
+MathLive-shaped boxes, the legacy accessors and fields are gone, and the probe
+asserts the absence of side-channel fields directly.
 
 ## 6. Phased Plan
 
@@ -169,8 +164,8 @@ Work:
 - done: add `script_fixture.mjs` for Rule 18: sup-only, sub-only, both,
   descenders, nested scripts, fraction children, and inline big-op limits;
 - add `diff_harness --cluster-by atom` or an equivalent report postprocessor;
-- add a "box model" probe fixture: render a formula and dump the root box model
-  fields, so a converted case can assert `model == "ml"` and no legacy fields.
+- done: update the "box model" probe fixture to dump root box metadata and
+  assert the final one-box-field invariant directly.
 
 Gate:
 
@@ -193,7 +188,6 @@ Work:
 - add `box.ml_box(...)` constructor:
   - sets `height/depth` full precision;
   - sets `max_font_size`;
-  - sets `model: "ml"`;
   - does not set `height_raw`, `depth_raw`, or `render_*`;
 - add `box.set_style_em(...)` / `util.fmt_ml_em(...)` helpers matching
   MathLive CEIL@2;
@@ -244,12 +238,11 @@ Gate:
 
 ### Phase 3 — Collapse Root Strut Emission
 
-Goal: make `math.ls` match MathLive for ML roots while preserving legacy roots.
+Goal: make `math.ls` match MathLive root strut emission.
 
 Work:
 
-- split `emit_ml_strut(box)` from `emit_legacy_strut(box)`;
-- ML path:
+- done: simplify `math.ls` to one MathLive-style strut path:
 
 ```lambda
 let h = box.height
@@ -259,9 +252,7 @@ bottom.height = fmt_ml_em(h + d)
 bottom.vertical_align = fmt_ml_em(0.0 - d)
 ```
 
-- legacy path remains the current `render_*`/`*_raw` branch;
-- emit code chooses ML path only when `result_box.model == "ml"`;
-- add report of root ML coverage by corpus case.
+- done: delete the legacy `render_*`/`*_raw` root branch.
 
 Gate:
 
@@ -316,7 +307,7 @@ Work:
   `render_total`;
 - public box `height/depth` describes layout; visual border height lives in the
   overlay child style;
-- remove `render_total` from `atoms/enclose.ls`.
+- done: remove `render_total` from `atoms/enclose.ls`.
 
 Gate:
 
@@ -369,7 +360,8 @@ Work:
   - exact `makeRows` accumulation order;
 - port smallmatrix to `compute_dyn_metrics` or a dedicated MathLive-compatible
   `compute_smallmatrix_metrics`;
-- delete `matrix_table_metrics` fallback if no remaining environment uses it.
+- done: delete `matrix_table_metrics`; dynamic row walking is now the only
+  non-equation table-metric path.
 
 Gate:
 
@@ -385,11 +377,12 @@ Work:
 
 - route text operators (`\lim`, `\max`, `\det`, etc.) through
   `make_limits_stack`;
-- remove `render_large_op_limits_vlist` once symbol and text paths both use the
-  shared helper;
+- done: remove `render_large_op_limits_vlist`; symbol and text paths both use
+  the shared helper;
 - verify integral side-limits still use side-script Rule 18 rather than
   centered limit stacks;
-- remove related `render_height/render_depth/render_total` fields in scripts.
+- done: remove related `render_height/render_depth/render_total` fields in
+  scripts.
 
 Gate:
 
@@ -437,11 +430,12 @@ Prerequisites:
 
 Work:
 
-- delete legacy accessors from `box.ls`, `math.ls`, `optimize.ls`, and atom
-  forwarders;
-- remove `model: "ml"` marker after it becomes universal;
-- simplify `math.ls` to a single strut emission path;
-- update docs and fixtures to describe the final model.
+- done: delete legacy accessors from `box.ls`, `math.ls`, `optimize.ls`, and
+  atom forwarders;
+- done: remove the temporary migration marker after the one-box model became
+  universal;
+- done: simplify `math.ls` to a single strut emission path;
+- done: update docs and fixtures to describe the final model.
 
 Gate:
 
@@ -463,7 +457,7 @@ Acceptance:
 | ID | Severity | Risk | Mitigation |
 |----|----------|------|------------|
 | R1 | HIGH | Deleting `render_total` before its visual extent is represented in the element tree regresses bbox/accent cases. | Convert producer to MathLive box tree first; delete field only after reader census is empty. |
-| R2 | HIGH | `height/depth` become a mix of rounded and full-precision values during migration. | Use `model: "ml"` marker and accessors; ML parents consume ML children only. |
+| R2 | HIGH | `height/depth` become a mix of rounded and full-precision values during migration. | Retired with Phase 10: the marker/accessor bridge is gone and all math boxes use full-precision `height/depth`. |
 | R3 | HIGH | Delimiter sizing changes cascade into fractions, arrays, cases, and radicals. | Convert delimiters after clean producers; keep `LEFT/RIGHT` as a strict subgate. |
 | R4 | MEDIUM | hbox raw max-height/max-depth cross-terms overestimate the actual MathLive root strut. | Port hbox/atom wrapping semantics instead of summing separate raw maxima blindly. |
 | R5 | MEDIUM | smallmatrix and wide accents hide MathLive-specific SVG/browser quirks. | Probe MathLive SSR and source side by side; reproduce operation order exactly. |
