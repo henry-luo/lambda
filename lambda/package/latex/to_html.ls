@@ -61,7 +61,9 @@ fn serialize_list_rec(lst, i, n, acc) {
 
 fn serialize_element(el) {
     let tag = string(name(el))
-    if (is_void_element(tag)) {
+    if (is_transparent_math_boundary(el)) {
+        serialize_children(el)
+    } else if (is_void_element(tag)) {
         "<" ++ tag ++ serialize_attrs(el) ++ ">"
     } else {
         let children_html = serialize_children(el)
@@ -70,6 +72,10 @@ fn serialize_element(el) {
         // preserveAspectRatio="none"; keep it so stretchy accent snapshots compare exactly.
         "<" ++ tag ++ serialize_attrs(el) ++ close ++ children_html ++ "</" ++ tag ++ ">"
     }
+}
+
+fn is_transparent_math_boundary(el) {
+    string(name(el)) == "span" and el.class == "lm_boundary"
 }
 
 fn serialize_children(el) {

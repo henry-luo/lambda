@@ -129,7 +129,9 @@ fn render_symbol_command(node, context) {
     let display_text = if (unicode != null) unicode else cmd_text
     let atom_type = sym.classify_symbol(cmd_text)
     let cls = symbol_font_class(cmd_text, context)
-    if (cmd_text == "\\iff")
+    if (is_standalone_long_arrow_command(cmd_text))
+        render_standalone_long_arrow(cmd_text)
+    else if (cmd_text == "\\iff")
         render_iff_symbol(display_text, cls)
     else if (cmd_text == "\\perp")
         render_perp_symbol(display_text)
@@ -137,6 +139,29 @@ fn render_symbol_command(node, context) {
         render_limit_operator_symbol(display_text, context)
     else
         box.text_box(display_text, cls, atom_type)
+}
+
+fn is_standalone_long_arrow_command(cmd_text) {
+    cmd_text == "\\longrightarrow" or cmd_text == "\\longleftarrow" or
+    cmd_text == "longrightarrow" or cmd_text == "longleftarrow"
+}
+
+fn render_standalone_long_arrow(cmd_text) {
+    let svg_name = if (cmd_text == "\\longleftarrow" or cmd_text == "longleftarrow")
+        "longleftarrow" else "longrightarrow"
+    let body = make_padded_svg_body_box(svg_name)
+    // MathLive uses SVG extensible arrows for standalone long-arrow commands;
+    // the Unicode glyph fallback has taller glyph metrics and loses the slices.
+    box.ml_box_full(
+        <span style: "position:relative"; body.element>,
+        body.height,
+        body.depth,
+        body.width,
+        "mrel",
+        0.0,
+        0.0,
+        body.max_font_size
+    )
 }
 
 fn render_iff_symbol(display_text, cls) {
@@ -167,6 +192,8 @@ fn render_operator(node, context) {
 
 fn render_relation(node, context) {
     let text = get_text(node)
+    if (is_standalone_long_arrow_command(text)) render_standalone_long_arrow(text)
+    else {
     // If this is a command-form relation (e.g., \uparrow, \downarrow), look
     // up its Unicode glyph. The grammar tokenizes these as relation nodes
     // rather than commands, so render_command's symbol lookup isn't invoked.
@@ -190,6 +217,7 @@ fn render_relation(node, context) {
     // without thickspace between the letter and the factorial.
     let atom_type = if (text == "!") "mclose" else "mrel"
     box.text_box(display, css.CMR, atom_type)
+    }
     }
 }
 
@@ -364,12 +392,18 @@ fn render_command(node, context) {
         render_boldsymbol_command(node, context)
     } else {
         let unicode = sym.lookup_symbol(cmd_text)
-        if (unicode != null) {
+        if (is_standalone_long_arrow_command(cmd_text)) {
+            render_standalone_long_arrow(cmd_text)
+        } else if (unicode != null) {
         let atom_type = sym.classify_symbol(cmd_text)
         if (sym.is_limit_op(cmd_text))
             render_limit_operator_symbol(unicode, context)
-        else
-            box.text_box(unicode, symbol_font_class(cmd_text, context), atom_type)
+        else {
+            let symbol_box = box.text_box(unicode, symbol_font_class(cmd_text, context), atom_type)
+            if (is_ascii_latin_letter(unicode))
+                box_with_serial_boundary(symbol_box, atom_type)
+            else symbol_box
+        }
     } else {
         if (name_str == "pdiff") {
             render_pdiff(node, context)
@@ -411,8 +445,8 @@ fn render_unknown_command_node(node, name_str, context) {
         0.75
     )
     // Render only the brace/bracket-group arguments as math (skip the bare
-    // command-name string). MathLive puts a thin space (0.17em) between the
-    // error token and the following argument content.
+    // command-name string). The grouped atom follows the tail argument's type;
+    // treating it as `minner` adds a spurious thin space before the next token.
     let arg_boxes = (for (child in node
         where child is element and (name(child) == 'group' or name(child) == 'brack_group'))
         render_node(child, context))
@@ -420,8 +454,25 @@ fn render_unknown_command_node(node, name_str, context) {
     else {
         let all_boxes = [err_box, box.skip_box(0.17)] ++ arg_boxes
         let spaced = apply_spacing(all_boxes, context)
-        box_with_type(box.hbox(spaced), "minner")
+        box_with_serial_boundary(box.hbox(spaced), arg_boxes[len(arg_boxes) - 1].type)
     }
+}
+
+fn box_with_serial_boundary(bx, atom_type) => {
+    element: <span class: "lm_boundary";
+        for (el in box.elements_of(bx)) el
+    >,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: atom_type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size
+}
+
+fn is_ascii_latin_letter(text) {
+    len(text) == 1 and contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", text)
 }
 
 fn render_limit_operator_symbol(text, context) {
@@ -1137,10 +1188,34 @@ fn render_accent(node, context) {
     let cmd = if (node.cmd != null) string(node.cmd) else ""
     let accent_key = if (len(cmd) > 0 and slice(cmd, 0, 1) == "\\")
         slice(cmd, 1, len(cmd)) else cmd
-    if (accent_key == "overline" or accent_key == "underline")
+    let combined_symbol = accent_prefix_symbol(accent_key, node.base)
+    if (sym.lookup_symbol("\\" ++ accent_key) != null)
+        // Some longest-match symbol commands (notably \ddots) can still be
+        // shaped as accent nodes by the parser; symbol lookup is authoritative.
+        render_combined_symbol_command(accent_key, context)
+    else if (combined_symbol != null)
+        // The parser can split a longest-match command like \ddots into the
+        // accent prefix \ddot plus a bare base `s`; recover the TeX command.
+        render_combined_symbol_command(combined_symbol, context)
+    else if (accent_key == "overline" or accent_key == "underline")
         render_line_accent(node, context, accent_key)
     else
         render_glyph_accent(node, context, accent_key)
+}
+
+fn accent_prefix_symbol(accent_key, base) {
+    let base_text = bare_letter_of(base)
+    if (base_text == null) null
+    else (let cmd = accent_key ++ base_text,
+        if (sym.lookup_symbol("\\" ++ cmd) != null) cmd else null)
+}
+
+fn render_combined_symbol_command(cmd_name, context) {
+    let unicode = sym.lookup_symbol("\\" ++ cmd_name)
+    if (unicode == null) render_unknown_command("\\\\" ++ cmd_name)
+    else (let atom_type = sym.classify_symbol(cmd_name),
+        if (sym.is_limit_op(cmd_name)) render_limit_operator_symbol(unicode, context)
+        else box.text_box(unicode, symbol_font_class(cmd_name, context), atom_type))
 }
 
 fn render_glyph_accent(node, context, accent_key) {
@@ -1778,7 +1853,10 @@ fn render_delimiter_group(node, context) {
 
     let children = render_children(node, context)
     let spaced = apply_spacing(children, context)
-    let content = box.hbox(spaced)
+    let raw_content = box.hbox(spaced)
+    let content = if (has_table_child(spaced, 0))
+        box_with_table_metadata(raw_content, spaced)
+    else raw_content
 
     if (content.height + content.depth <= 1.2)
         render_small_delimiter_group(left_text, right_text, spaced, content)
@@ -1872,17 +1950,23 @@ fn render_stretchy_delimiter_group(left_text, right_text, content) {
     let content_d = content.depth
     let box_h = max(content_h, max(delim_extent_h(left_box), delim_extent_h(right_box)))
     let box_d = max(content_d, max(delim_extent_d(left_box), delim_extent_d(right_box)))
+    let table_brace = content.is_table == true and
+        (is_brace_delim_text(left_text) or is_brace_delim_text(right_text))
+    // Stacked table braces expose separately rounded h/d like MathLive's
+    // array wrapper; otherwise h+d can tip one CEIL@2 notch at the root strut.
+    let out_h = if (table_brace) util.ceil_em2(box_h) else box_h
+    let out_d = if (table_brace) 0.0 - util.ceil_em2(0.0 - box_d) else box_d
     box.ml_box_full(
         <span class: css.LEFT_RIGHT, style: style_attr;
             for (el in elements) el
         >,
-        box_h,
-        box_d,
+        out_h,
+        out_d,
         sum((for (p in parts where p != null) p.width)),
         "minner",
         0.0,
         0.0,
-        box_h
+        out_h
     )
 }
 
@@ -2093,6 +2177,18 @@ fn render_combined_big_command(combo, context) {
     else (let synthetic_base = <command name: combo.cmd_name>,
           let synthetic_subsup = <subsup base: synthetic_base, sub: combo.subsup.sub, sup: combo.subsup.sup>,
           scripts.render(synthetic_subsup, context, render_node))
+}
+
+// Recover known commands that the grammar split at a shorter command prefix:
+// `\ddots` can arrive as `\ddot` + `s`; render it as the single symbol.
+fn try_command_prefix_word_combine(node, i) {
+    if (i + 1 >= len(node)) null
+    else (let cur = node[i],
+        if (not (cur is element)) null
+        else if (name(cur) != 'command') null
+        else (let prefix = command_name(cur),
+            if (not is_alpha_text(prefix)) null
+            else attempt_error_prefix_combine(node, i, prefix)))
 }
 
 // Detect an ERROR node carrying a truncated command prefix (e.g., "\left",
@@ -2608,9 +2704,44 @@ fn transparent_hbox(children) {
         (let last_idx = len(filtered) - 1,
          let tail = filtered[last_idx],
          let typed = box_with_type(hb, tail.type),
+         let tagged = if (has_table_child(filtered, 0)) box_with_table_metadata(typed, filtered) else typed,
          if (has_suppressed_text_depth(filtered, 0))
-            box_with_suppress_depth(typed)
-         else typed)
+            box_with_suppress_depth(tagged)
+         else tagged)
+}
+
+fn has_table_child(items, i) {
+    if (i >= len(items)) false
+    else if (items[i].is_table == true) true
+    else has_table_child(items, i + 1)
+}
+
+fn box_with_table_metadata(bx, items) => {
+    element: bx.element,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: bx.type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    // \left...\right groups wrap array content in a transparent hbox; keep
+    // the table marker so delimiter selection can use table-specific recipes.
+    is_table: true,
+    delim_visual_total: table_child_visual_total(items, 0, 0.0)
+}
+
+fn table_child_visual_total(items, i, acc) {
+    if (i >= len(items)) acc
+    else {
+        let item = items[i]
+        let total = if (item.delim_visual_total != null)
+            item.delim_visual_total
+        else if (item.is_table == true)
+            item.height + item.depth
+        else 0.0
+        table_child_visual_total(items, i + 1, max(acc, total))
+    }
 }
 
 fn render_children_scan(node, context, i, acc) {
@@ -2642,6 +2773,9 @@ fn render_children_scan(node, context, i, acc) {
     else if (is_malformed_left_sequence(node, i))
         (let rendered = render_malformed_left_sequence(node[i], node[i + 1], context),
          render_children_scan(node, context, i + 2, acc ++ [rendered]))
+    else if (is_tail_style_switch(node, i))
+        (let rendered = render_tail_style_switch(node, context, i),
+         acc ++ [rendered])
     else if (is_scriptstyle_switch(node, i))
         (let rendered = render_scriptstyle_sibling(node[i + 1], context),
          let spacer = if (has_trailing_radical(acc)) [box.skip_box(0.17)] else [],
@@ -2649,6 +2783,10 @@ fn render_children_scan(node, context, i, acc) {
     else if (is_long_arrow_label_sequence(node, i))
         (let rendered = render_long_arrow_label_sequence(command_name(node[i]), command_name(node[i + 1]), context),
          render_children_scan(node, context, i + 2, acc ++ [rendered]))
+    else if (try_command_prefix_word_combine(node, i) != null)
+        (let combo = try_command_prefix_word_combine(node, i),
+         let rendered = render_combined_error_prefix_command(combo, context),
+         render_children_scan(node, context, i + combo.consumed, acc ++ [rendered]))
     else if (try_sized_delim_word_combine(node, i) != null)
         (let combo = try_sized_delim_word_combine(node, i),
          let rendered = render_combined_big_command(combo, context),
@@ -2920,6 +3058,28 @@ fn is_scriptstyle_switch(node, i) {
          child.arg == null and len(child) == 0)
 }
 
+fn is_tail_style_switch(node, i) {
+    let child = if (i < len(node)) node[i] else null
+    child is element and name(child) == 'style_command' and
+        child.cmd != null and child.arg == null and len(child) == 0 and
+        tail_style_override(string(child.cmd)) != null
+}
+
+fn tail_style_override(cmd) {
+    if (cmd == "\\displaystyle") "display"
+    else if (cmd == "\\textstyle") "text"
+    else if (cmd == "\\scriptscriptstyle") "scriptscript"
+    else null
+}
+
+fn render_tail_style_switch(node, context, i) {
+    // Display/text style commands are TeX switches over the remaining list, not
+    // zero-width atoms; rendering the command itself leaks an empty span.
+    let style_ctx = ctx.derive(context, {style: tail_style_override(string(node[i].cmd))})
+    let children = render_children_scan(node, style_ctx, i + 1, [])
+    transparent_hbox(apply_spacing(children, style_ctx))
+}
+
 fn is_size_switch(node, i) {
     let child = if (i < len(node)) node[i] else null
     child is element and name(child) == 'command' and len(child) == 0 and
@@ -3104,7 +3264,9 @@ fn ml_box_with_suppress_depth(bx) => {
     max_font_size: bx.max_font_size,
     suppress_hbox_text_depth: true,
     is_middle_delim: bx.is_middle_delim,
-    is_script_radical: bx.is_script_radical
+    is_script_radical: bx.is_script_radical,
+    is_table: bx.is_table,
+    delim_visual_total: bx.delim_visual_total
 }
 
 fn plain_text(node) {
@@ -3176,7 +3338,9 @@ fn ml_box_with_type(bx, atom_type) => {
     skew: bx.skew,
     max_font_size: bx.max_font_size,
     is_fraction: bx.is_fraction,
-    is_script_radical: bx.is_script_radical
+    is_script_radical: bx.is_script_radical,
+    is_table: bx.is_table,
+    delim_visual_total: bx.delim_visual_total
 }
 
 fn normalize_bin_atom(bx, prev_type) {
