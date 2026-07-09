@@ -452,10 +452,28 @@ fn render_unknown_command_node(node, name_str, context) {
         render_node(child, context))
     if (len(arg_boxes) == 0) err_box
     else {
-        let all_boxes = [err_box, box.skip_box(0.17)] ++ arg_boxes
-        let spaced = apply_spacing(all_boxes, context)
+        // Numeric unknown arguments stay attached to the unknown control word
+        // (`\cbrt{8}` -> `\cbrt8`); word-like arguments keep MathLive's
+        // explicit unknown-command separator (`\label{eq:x}`).
+        let all_boxes = if (unknown_numeric_args(node))
+            [err_box] ++ arg_boxes
+            else [err_box, box.skip_box(0.17)] ++ arg_boxes
+        let spaced = if (unknown_numeric_args(node)) all_boxes else apply_spacing(all_boxes, context)
         box_with_serial_boundary(box.hbox(spaced), arg_boxes[len(arg_boxes) - 1].type)
     }
+}
+
+fn unknown_numeric_args(node) {
+    let arg_texts = (for (child in node
+        where child is element and (name(child) == 'group' or name(child) == 'brack_group'))
+        plain_text(child))
+    (len(arg_texts) > 0) and all_plain_number_text(arg_texts, 0)
+}
+
+fn all_plain_number_text(items, i) {
+    if (i >= len(items)) true
+    else if (is_plain_number_text(items[i])) all_plain_number_text(items, i + 1)
+    else false
 }
 
 fn box_with_serial_boundary(bx, atom_type) => {
@@ -508,6 +526,9 @@ fn render_limit_operator_symbol(text, context) {
 fn large_op_metrics(text) {
     let is_integral = text == "∫" or text == "∮" or text == "∯" or text == "∰"
     let is_summation = text == "∑" or text == "∏" or text == "⋂" or text == "⋃" or
+        // \bigvee/\bigwedge share the Size2 summation-family metrics; letting
+        // them fall through exposes a 1.61em visual height to the root hbox.
+        text == "⋁" or text == "⋀" or
         text == "⨀" or text == "⨁" or text == "⨂" or text == "⨃" or
         text == "⨄" or text == "⨆" or text == "⨅" or text == "⨇" or
         text == "⨈" or text == "⨉" or text == "⨊" or text == "⨋" or
@@ -3265,6 +3286,9 @@ fn ml_box_with_suppress_depth(bx) => {
     suppress_hbox_text_depth: true,
     is_middle_delim: bx.is_middle_delim,
     is_script_radical: bx.is_script_radical,
+    is_scripted: bx.is_scripted,
+    is_subscripted: bx.is_subscripted,
+    is_subscripted_upright: bx.is_subscripted_upright,
     is_table: bx.is_table,
     delim_visual_total: bx.delim_visual_total
 }
@@ -3339,6 +3363,9 @@ fn ml_box_with_type(bx, atom_type) => {
     max_font_size: bx.max_font_size,
     is_fraction: bx.is_fraction,
     is_script_radical: bx.is_script_radical,
+    is_scripted: bx.is_scripted,
+    is_subscripted: bx.is_subscripted,
+    is_subscripted_upright: bx.is_subscripted_upright,
     is_table: bx.is_table,
     delim_visual_total: bx.delim_visual_total
 }

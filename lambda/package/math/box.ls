@@ -487,17 +487,24 @@ pub fn hbox(boxes) {
     let suppress_text_depth = has_suppress_hbox_text_depth(valid, 0)
     let suppress_operator_height = has_suppress_hbox_operator_height(valid, 0)
     let sup_min_shift_base = has_sup_min_shift_base(valid, 0)
+    // scripted/subscripted metadata must survive transparent group hboxes so
+    // fraction geometry can derive denominator clearance from child structure.
+    let scripted_child = has_scripted_child(valid, 0)
+    let subscripted_child = has_subscripted_child(valid, 0)
+    let subscripted_upright_child = has_subscripted_upright_child(valid, 0)
     if (len(valid) == 0)
         ml_box(<span class: css.BASE>, 0.0, 0.0, 0.0, "ord")
     else
         ml_hbox_valid(valid, children, total_width, suppress_text_depth,
-            suppress_operator_height, sup_min_shift_base)
+            suppress_operator_height, sup_min_shift_base, scripted_child,
+            subscripted_child, subscripted_upright_child)
 }
 
 // Combine MathLive-model boxes without reintroducing legacy render/raw side
 // channels. Every child is now one-box-field, so the parent remains one too.
 fn ml_hbox_valid(valid, children, total_width, suppress_text_depth,
-                 suppress_operator_height, sup_min_shift_base) {
+                 suppress_operator_height, sup_min_shift_base, scripted_child,
+                 subscripted_child, subscripted_upright_child) {
     let bx = ml_box_full(
         <span class: css.BASE;
             for (child in children) child
@@ -510,7 +517,24 @@ fn ml_hbox_valid(valid, children, total_width, suppress_text_depth,
         0.0,
         ml_hbox_max_font_size(valid, 0, 0.0, suppress_operator_height)
     )
-    if (sup_min_shift_base) with_sup_min_shift(bx) else bx
+    let bx2 = if (sup_min_shift_base) with_sup_min_shift(bx) else bx
+    if (scripted_child) with_scripted_child(bx2, subscripted_child,
+        subscripted_upright_child) else bx2
+}
+
+fn with_scripted_child(bx, subscripted_child, subscripted_upright_child) => {
+    element: bx.element,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: bx.type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    sup_min_shift_base: bx.sup_min_shift_base,
+    is_scripted: true,
+    is_subscripted: subscripted_child,
+    is_subscripted_upright: subscripted_upright_child
 }
 
 fn ml_hbox_max_font_size(valid, i, acc, suppress_operator_height) {
@@ -571,6 +595,24 @@ fn has_sup_min_shift_base(items, i) {
     if (i >= len(items)) false
     else if (items[i].sup_min_shift_base == true) true
     else has_sup_min_shift_base(items, i + 1)
+}
+
+fn has_scripted_child(items, i) {
+    if (i >= len(items)) false
+    else if (items[i].is_scripted == true) true
+    else has_scripted_child(items, i + 1)
+}
+
+fn has_subscripted_child(items, i) {
+    if (i >= len(items)) false
+    else if (items[i].is_subscripted == true or items[i].has_subscript == true) true
+    else has_subscripted_child(items, i + 1)
+}
+
+fn has_subscripted_upright_child(items, i) {
+    if (i >= len(items)) false
+    else if (items[i].is_subscripted_upright == true) true
+    else has_subscripted_upright_child(items, i + 1)
 }
 
 fn hbox_depth_of(bx, suppress_text_depth) {
@@ -927,7 +969,11 @@ pub fn with_class(bx, cls) => {
     type: bx.type,
     italic: bx.italic,
     skew: bx.skew,
-    max_font_size: bx.max_font_size
+    max_font_size: bx.max_font_size,
+    has_subscript: bx.has_subscript,
+    is_scripted: bx.is_scripted,
+    is_subscripted: bx.is_subscripted,
+    is_subscripted_upright: bx.is_subscripted_upright
 }
 
 // wrap a box with inline style string

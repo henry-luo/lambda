@@ -151,6 +151,13 @@ typedef struct JsDomRichHistorySelection {
 static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
                                       bool notify_mutation);
 
+static String* js_dom_fragment_text(Item item) {
+    String* s = it2s(item);
+    // The HTML fragment parser can return zero-length string tokens around
+    // element boundaries; browsers do not expose those as empty Text nodes.
+    return (s && s->len > 0) ? s : nullptr;
+}
+
 // Reserved-attribute filter: attribute names starting with "__lambda_" are used
 // internally (e.g. createElementNS records the namespace URI as
 // "__lambda_ns_uri") and must not leak through JS-facing attribute
@@ -2790,7 +2797,8 @@ static void append_iframe_srcdoc_to_document(DomElement* iframe,
             build_dom_tree_from_element(body_elem->items[i].element,
                                         doc, body);
         } else if (t == LMD_TYPE_STRING) {
-            String* s = it2s(body_elem->items[i]);
+            String* s = js_dom_fragment_text(body_elem->items[i]);
+            if (!s) continue;
             DomText* tn = dom_text_create(s, body);
             if (tn) {
                 tn->parent = body;
@@ -5332,11 +5340,10 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
                     dom_post_insert((DomNode*)elem, (DomNode*)child_dom);
                 }
             } else if (type == LMD_TYPE_STRING) {
-                String* s = it2s(body_elem->items[i]);
-                if (s) {
-                    DomText* text_dom = dom_element_append_text(elem, s->chars);
-                    if (text_dom) dom_post_insert((DomNode*)elem, (DomNode*)text_dom);
-                }
+                String* s = js_dom_fragment_text(body_elem->items[i]);
+                if (!s) continue;
+                DomText* text_dom = dom_element_append_text(elem, s->chars);
+                if (text_dom) dom_post_insert((DomNode*)elem, (DomNode*)text_dom);
             }
         }
     }
@@ -10752,14 +10759,17 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             }
             elem->first_child = nullptr;
             elem->last_child = nullptr;
-            // create a text node with the new content
-            String* s = js_dom_create_document_string(elem->doc, text_str, strlen(text_str));
-            DomText* text_node = dom_text_create(s, elem);
-            if (text_node) {
-                ((DomNode*)text_node)->parent = (DomNode*)elem;
-                elem->first_child = (DomNode*)text_node;
-                elem->last_child = (DomNode*)text_node;
-                dom_post_insert((DomNode*)elem, (DomNode*)text_node);
+            // DOM string-replace-all uses no replacement node for empty
+            // strings; otherwise textContent="" leaves observable children.
+            if (text_str[0] != '\0') {
+                String* s = js_dom_create_document_string(elem->doc, text_str, strlen(text_str));
+                DomText* text_node = dom_text_create(s, elem);
+                if (text_node) {
+                    ((DomNode*)text_node)->parent = (DomNode*)elem;
+                    elem->first_child = (DomNode*)text_node;
+                    elem->last_child = (DomNode*)text_node;
+                    dom_post_insert((DomNode*)elem, (DomNode*)text_node);
+                }
             }
             log_debug("js_dom_set_property: set textContent on <%s>",
                       elem->tag_name ? elem->tag_name : "?");
@@ -12432,7 +12442,8 @@ extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem_ptr, Item position
                     ((DomNode*)target_parent)->append_child((DomNode*)child_dom);
             }
         } else if (type == LMD_TYPE_STRING) {
-            String* s = it2s(body_elem->items[i]);
+            String* s = js_dom_fragment_text(body_elem->items[i]);
+            if (!s) continue;
             DomText* text_node = dom_text_create_detached(s, doc);
             if (text_node) {
                 if (ref_node)
@@ -13271,7 +13282,8 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                         ((DomNode*)target_parent)->append_child((DomNode*)child_dom);
                 }
             } else if (type == LMD_TYPE_STRING) {
-                String* s = it2s(body_elem->items[i]);
+                String* s = js_dom_fragment_text(body_elem->items[i]);
+                if (!s) continue;
                 DomText* text_node = dom_text_create_detached(s, doc);
                 if (text_node) {
                     if (ref_node)
