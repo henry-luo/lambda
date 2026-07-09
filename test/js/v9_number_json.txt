@@ -8,6 +8,8 @@ host int64 ctor: true
 host int64 isInteger: false
 host int64 json: TypeError
 host int64 strict: true
+bigint radix 64: ffffffffffffffff
+bigint asUintN64: ffffffffffffffff
 from array: 10,20,30
 from len: 3
 from string: h,i

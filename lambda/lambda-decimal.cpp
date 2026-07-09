@@ -1756,24 +1756,70 @@ char* bigint_to_cstring_radix(Item bi, int radix) {
         return owned;
     }
 
-    // non-10 radix: extract int64 and do manual conversion
-    int64_t val = bigint_to_int64(bi);
-    bool negative = val < 0;
-    uint64_t uval = negative ? (uint64_t)(-val) : (uint64_t)val;
+    // non-10 radix must not pass through int64; JS BigInt strings are
+    // arbitrary precision and asUintN(64, -1n) depends on the full 64 bits.
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* n = mpd_new(ctx);
+    mpd_t* base = mpd_new(ctx);
+    mpd_t* q = mpd_new(ctx);
+    mpd_t* rem = mpd_new(ctx);
+    if (!n || !base || !q || !rem) {
+        if (n) mpd_del(n);
+        if (base) mpd_del(base);
+        if (q) mpd_del(q);
+        if (rem) mpd_del(rem);
+        return NULL;
+    }
 
-    char buf[256];
-    int pos = sizeof(buf) - 1;
-    buf[pos] = '\0';
-    if (uval == 0) {
-        buf[--pos] = '0';
+    bool negative = mpd_isnegative(m);
+    mpd_abs(n, m, ctx);
+    mpd_set_u32(base, (uint32_t)radix, ctx);
+
+    int cap = (int)(m->digits * 4 + 4);
+    if (cap < 32) cap = 32;
+    char* rev = (char*)mem_alloc(cap, MEM_CAT_STRING);
+    if (!rev) {
+        mpd_del(n); mpd_del(base); mpd_del(q); mpd_del(rem);
+        return NULL;
+    }
+
+    int len = 0;
+    if (mpd_iszero(n)) {
+        rev[len++] = '0';
     } else {
-        while (uval > 0 && pos > 1) {
-            int digit = (int)(uval % radix);
-            buf[--pos] = digit < 10 ? ('0' + digit) : ('a' + digit - 10);
-            uval /= radix;
+        while (!mpd_iszero(n)) {
+            mpd_divmod(q, rem, n, base, ctx);
+            int digit = (int)mpd_get_ssize(rem, ctx);
+            if (len + 2 >= cap) {
+                int new_cap = cap * 2;
+                char* grown = (char*)mem_alloc(new_cap, MEM_CAT_STRING);
+                if (!grown) {
+                    mem_free(rev);
+                    mpd_del(n); mpd_del(base); mpd_del(q); mpd_del(rem);
+                    return NULL;
+                }
+                memcpy(grown, rev, len);
+                mem_free(rev);
+                rev = grown;
+                cap = new_cap;
+            }
+            rev[len++] = digit < 10 ? (char)('0' + digit) : (char)('a' + digit - 10);
+            mpd_copy(n, q, ctx);
         }
     }
-    if (negative) buf[--pos] = '-';
+    if (negative) rev[len++] = '-';
 
-    return mem_strdup(buf + pos, MEM_CAT_STRING);
+    char* out = (char*)mem_alloc(len + 1, MEM_CAT_STRING);
+    if (!out) {
+        mem_free(rev);
+        mpd_del(n); mpd_del(base); mpd_del(q); mpd_del(rem);
+        return NULL;
+    }
+    for (int i = 0; i < len; i++) {
+        out[i] = rev[len - 1 - i];
+    }
+    out[len] = '\0';
+    mem_free(rev);
+    mpd_del(n); mpd_del(base); mpd_del(q); mpd_del(rem);
+    return out;
 }
