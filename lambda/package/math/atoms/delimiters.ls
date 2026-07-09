@@ -108,8 +108,8 @@ pub fn render_stretchy(delim, content_height, atom_type) {
         let level = select_size_level(content_height)
         if (is_corner_delim(display_char))
             render_corner(display_char, atom_type)
-        else if (level == 3 and is_mult_left_right_delim(delim))
-            render_mult_left_right_delim(delim, atom_type)
+        else if (level == 3 and has_extensible_recipe(delim))
+            render_extensible_recipe_delim(delim, atom_type)
         else if (level <= 4)
             render_sized(display_char, level, atom_type)
         else
@@ -283,7 +283,7 @@ fn render_vertical_mult(ch, level, atom_type) {
     )
 }
 
-fn is_mult_left_right_delim(delim) {
+fn has_extensible_recipe(delim) {
     delim == "\\uparrow" or delim == "\\downarrow" or
     delim == "\\updownarrow" or delim == "\\Uparrow" or
     delim == "\\Downarrow" or delim == "\\Updownarrow" or
@@ -291,9 +291,9 @@ fn is_mult_left_right_delim(delim) {
     delim == "\\lmoustache" or delim == "\\rmoustache"
 }
 
-fn render_mult_left_right_delim(delim, atom_type) {
-    let spec = mult_left_right_spec(delim)
-    let pieces = mult_left_right_pieces(spec, 0, [])
+fn render_extensible_recipe_delim(delim, atom_type) {
+    let spec = extensible_recipe(delim)
+    let pieces = extensible_recipe_pieces(spec, 0, [])
     let cls = css.classes([side_class(atom_type), "lm_delim-mult"])
     box.ml_box_full(
         <span class: cls;
@@ -319,17 +319,17 @@ fn render_mult_left_right_delim(delim, atom_type) {
     )
 }
 
-fn mult_left_right_pieces(spec, i, acc) {
+fn extensible_recipe_pieces(spec, i, acc) {
     if (i >= len(spec.chars)) acc
     else
         (let piece = <span style: "top:" ++ util.fmt_em(spec.tops[i]);
              <span class: css.PSTRUT, style: "height:" ++ util.fmt_em(spec.pstrut)>
              <span style: "height:" ++ util.fmt_em(spec.heights[i]) ++ ";display:inline-block"; spec.chars[i]>
          >,
-         mult_left_right_pieces(spec, i + 1, acc ++ [piece]))
+         extensible_recipe_pieces(spec, i + 1, acc ++ [piece]))
 }
 
-fn mult_left_right_spec(delim) {
+fn extensible_recipe(delim) {
     if (delim == "\\downarrow")
         arrow_down_spec("⏐")
     else if (delim == "\\Downarrow")

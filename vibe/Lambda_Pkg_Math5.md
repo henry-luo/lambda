@@ -120,14 +120,14 @@ The known Math5 targets are:
 |------|---------------|-----------------------------|
 | `box.ls` hbox | computes `render_*`, `*_raw`, `left_right_render_*` maxima | one `hbox()` over ML boxes; explicit delimiter sizing asks delimiter helpers for extents |
 | `math.ls` emit | chooses `render_*` vs `height_raw/depth_raw` vs `height/depth` | always strut from `height/depth`; legacy adapter only while migration is incomplete |
-| `render.ls` line accents | `line_accent_box(... render_total ...)` constants | port MathLive `AccentAtom` / `OverunderAtom` VBox construction |
+| `render.ls` line accents | `line_accent_box(...)` deleted; simple/tall line-accent callers still carry inline constants | finish porting simple/tall line accents to MathLive `AccentAtom` / `OverunderAtom` VBox construction |
 | `render.ls` wide accents | partial metric path; several hardcoded accent body heights | use stretchy/SVG accent box metrics and VBox, not side-channel total |
 | `atoms/enclose.ls` bbox | `render_total` encodes overlay extent | represent border/overlay as child boxes/styles; public box stays layout h/d |
-| `atoms/array.ls` smallmatrix | still uses `matrix_table_metrics` fallback | port MathLive small array/cell scaling path exactly |
-| `atoms/scripts.ls` large op text limits | `render_large_op_limits_vlist` legacy path remains | route text operators through `make_limits_stack` / VBox model |
-| `atoms/delimiters.ls` arrows/groups | `render_mult_left_right_delim` table remains | port MathLive `makeStackedDelim`/extensible symbol path for these glyph families |
-| `render.ls` script radicals | `make_script_sqrt_spec` fallback remains | port Rule 11 for script/scriptscript radicals |
-| fixtures | `fraction_branch_fixture.mjs` still references deleted `frac_bar_spec`; no `script_fixture.mjs` | update fixtures to assert geometry/VBox invariants rather than deleted branches |
+| `atoms/array.ls` smallmatrix | `matrix_table_metrics` fallback deleted; dynamic row walk is the only non-equation path | close remaining matrix extended diffs against MathLive's row/cell operation order |
+| `atoms/scripts.ls` large op text limits | `render_large_op_limits_vlist` deleted; text and symbol limits route through `make_limits_stack` | close remaining large-op/script metric drifts in mixed expressions |
+| `atoms/delimiters.ls` arrows/groups | old level-3 fallback helper deleted; arrows/groups now route through `render_extensible_recipe_delim` | finish replacing the remaining recipe constants with a fuller MathLive extensible-symbol derivation when available |
+| `render.ls` script radicals | `make_script_sqrt_spec` deleted; unindexed script/scriptscript radicals route through `sqrt_geom` | port indexed script radicals off the remaining `make_sqrt_spec` special case |
+| fixtures | `fraction_branch_fixture.mjs` describes Rule 15 geometry and `script_fixture.mjs` covers Rule 18 script geometry | expand fixtures only when a newly migrated atom needs a guard |
 
 ## 5. Migration Strategy
 
@@ -164,10 +164,10 @@ Work:
 
 - add a box-field census script/report for `render_*`, `height_raw/depth_raw`,
   and `left_right_render_*` producers and readers;
-- update `fraction_branch_fixture.mjs` so it no longer claims to test
+- done: update `fraction_branch_fixture.mjs` so it no longer claims to test
   `frac_bar_spec`; it should assert Rule 15 intermediate shifts and final HTML;
-- add `script_fixture.mjs` for Rule 18: sup-only, sub-only, both, styles,
-  descenders, nested scripts, and big-op limits;
+- done: add `script_fixture.mjs` for Rule 18: sup-only, sub-only, both,
+  descenders, nested scripts, fraction children, and inline big-op limits;
 - add `diff_harness --cluster-by atom` or an equivalent report postprocessor;
 - add a "box model" probe fixture: render a formula and dump the root box model
   fields, so a converted case can assert `model == "ml"` and no legacy fields.
@@ -291,7 +291,8 @@ following MathLive `makeLeftRightDelim`;
 - make `\left...\right` ask the content box for its public `height/depth`;
 - route sized parentheses/brackets/braces through shared delimiter helpers;
 - route array stacked brackets/braces through `make_stacked_delim`;
-- port arrows/groups currently left in `render_mult_left_right_delim`;
+- route arrows/groups through the named extensible-delimiter recipe path, then
+  replace the remaining recipe constants with derived MathLive inputs;
 - delete `left_right_render_depth` and `left_right_render_total` once all readers
   are gone.
 
@@ -395,10 +396,13 @@ Goal: remove the remaining radical spec fallbacks.
 
 Work:
 
-- extend `sqrt_geom` to script/scriptscript radicals and indexed radicals;
+- done: extend `sqrt_geom` to unindexed script/scriptscript radicals;
+- still open: extend indexed script radicals beyond the remaining `make_sqrt_spec`
+  special case;
 - preserve MathLive's `Box.setTop` threshold behavior;
 - ensure radical index stack uses shared VBox and full-precision dimensions;
-- delete `make_script_sqrt_spec` and legacy `make_sqrt_spec` paths when unused.
+- done: delete `make_script_sqrt_spec`; delete legacy `make_sqrt_spec` paths when
+  unused.
 
 Gate:
 
@@ -486,4 +490,3 @@ text limits, and script radicals are all places where the right answer is not
 another scalar field. The right answer is the same one MathLive uses: build the
 right box tree, keep the box's layout dimensions full precision, and let
 emission stringify once.
-
