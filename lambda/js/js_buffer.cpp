@@ -71,6 +71,51 @@ static uint8_t* buffer_data(Item buf, int* out_len) {
     return data;
 }
 
+extern "C" Item bigint_from_int64(int64_t val);
+extern "C" Item bigint_from_string(const char* str, int len);
+extern "C" int64_t bigint_to_int64(Item bi);
+extern "C" char* bigint_to_cstring_radix(Item bi, int radix);
+extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
+extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
+extern "C" int js_check_exception(void);
+
+static bool buffer_value_is_bigint(Item value) {
+    if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
+    Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFFULL);
+    return dec && dec->unlimited == DECIMAL_BIGINT;
+}
+
+static bool buffer_to_bigint_value(Item value, Item* out_bigint) {
+    if (buffer_value_is_bigint(value)) {
+        *out_bigint = value;
+        return true;
+    }
+
+    TypeId value_type = get_type_id(value);
+    // buffer's BigInt write APIs require a BigInt value; generic ToBigInt would wrongly accept strings/booleans.
+    if (value_type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+        js_throw_type_error("Cannot convert a Symbol value to a BigInt");
+    } else {
+        js_throw_type_error("Cannot convert non-BigInt value to BigInt");
+    }
+    return false;
+}
+
+static Item buffer_biguint64_item(uint64_t value) {
+    if (value <= (uint64_t)INT64_MAX) return bigint_from_int64((int64_t)value);
+    char buf[32];
+    int len = snprintf(buf, sizeof(buf), "%llu", (unsigned long long)value);
+    return bigint_from_string(buf, len);
+}
+
+static uint64_t buffer_bigint_to_uint64_bits(Item value) {
+    char* value_str = bigint_to_cstring_radix(value, 10);
+    if (!value_str) return 0;
+    unsigned long long raw_value = strtoull(value_str, NULL, 10);
+    mem_free(value_str);
+    return (uint64_t)raw_value;
+}
+
 static int buffer_valid_hex_byte_length(const char* str, int str_len, int max_out) {
     if (!str || str_len <= 0 || max_out == 0) return 0;
     int limit = str_len / 2;
@@ -2654,9 +2699,10 @@ extern "C" Item js_buffer_readBigInt64BE(Item buf, Item offset_item) {
     uint8_t* data = buffer_data(buf, &blen);
     int offset = buffer_number_to_int_or_default(offset_item, 0);
     if (offset < 0 || offset + 8 > blen) return ItemNull;
-    int64_t val = 0;
-    for (int i = 0; i < 8; i++) val = (val << 8) | data[offset + i];
-    return (Item){.item = i2it(val)};
+    uint64_t raw = 0;
+    for (int i = 0; i < 8; i++) raw = (raw << 8) | data[offset + i];
+    // bigint64 Buffer APIs must expose JS BigInt; returning packed int made typeof value "number".
+    return bigint_from_int64((int64_t)raw);
 }
 
 extern "C" Item js_buffer_readBigInt64LE(Item buf, Item offset_item) {
@@ -2664,17 +2710,30 @@ extern "C" Item js_buffer_readBigInt64LE(Item buf, Item offset_item) {
     uint8_t* data = buffer_data(buf, &blen);
     int offset = buffer_number_to_int_or_default(offset_item, 0);
     if (offset < 0 || offset + 8 > blen) return ItemNull;
-    int64_t val = 0;
-    for (int i = 7; i >= 0; i--) val = (val << 8) | data[offset + i];
-    return (Item){.item = i2it(val)};
+    uint64_t raw = 0;
+    for (int i = 7; i >= 0; i--) raw = (raw << 8) | data[offset + i];
+    // bigint64 Buffer APIs must expose JS BigInt; returning packed int made typeof value "number".
+    return bigint_from_int64((int64_t)raw);
 }
 
 extern "C" Item js_buffer_readBigUInt64BE(Item buf, Item offset_item) {
-    return js_buffer_readBigInt64BE(buf, offset_item);
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    int offset = buffer_number_to_int_or_default(offset_item, 0);
+    if (offset < 0 || offset + 8 > blen) return ItemNull;
+    uint64_t raw = 0;
+    for (int i = 0; i < 8; i++) raw = (raw << 8) | data[offset + i];
+    return buffer_biguint64_item(raw);
 }
 
 extern "C" Item js_buffer_readBigUInt64LE(Item buf, Item offset_item) {
-    return js_buffer_readBigInt64LE(buf, offset_item);
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    int offset = buffer_number_to_int_or_default(offset_item, 0);
+    if (offset < 0 || offset + 8 > blen) return ItemNull;
+    uint64_t raw = 0;
+    for (int i = 7; i >= 0; i--) raw = (raw << 8) | data[offset + i];
+    return buffer_biguint64_item(raw);
 }
 
 extern "C" Item js_buffer_writeBigInt64BE(Item buf, Item value_item, Item offset_item) {
@@ -2682,7 +2741,11 @@ extern "C" Item js_buffer_writeBigInt64BE(Item buf, Item value_item, Item offset
     uint8_t* data = buffer_data(buf, &blen);
     int offset = buffer_number_to_int_or_default(offset_item, 0);
     if (offset < 0 || offset + 8 > blen) return ItemNull;
-    int64_t val = (get_type_id(value_item) == LMD_TYPE_INT) ? it2i(value_item) : 0;
+    Item bigint_value;
+    if (!buffer_to_bigint_value(value_item, &bigint_value)) return ItemNull;
+    Item wrapped = js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_value);
+    if (js_check_exception()) return ItemNull;
+    uint64_t val = (uint64_t)bigint_to_int64(wrapped);
     for (int i = 7; i >= 0; i--) {
         data[offset + i] = (uint8_t)(val & 0xFF);
         val >>= 8;
@@ -2695,7 +2758,11 @@ extern "C" Item js_buffer_writeBigInt64LE(Item buf, Item value_item, Item offset
     uint8_t* data = buffer_data(buf, &blen);
     int offset = buffer_number_to_int_or_default(offset_item, 0);
     if (offset < 0 || offset + 8 > blen) return ItemNull;
-    int64_t val = (get_type_id(value_item) == LMD_TYPE_INT) ? it2i(value_item) : 0;
+    Item bigint_value;
+    if (!buffer_to_bigint_value(value_item, &bigint_value)) return ItemNull;
+    Item wrapped = js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_value);
+    if (js_check_exception()) return ItemNull;
+    uint64_t val = (uint64_t)bigint_to_int64(wrapped);
     for (int i = 0; i < 8; i++) {
         data[offset + i] = (uint8_t)(val & 0xFF);
         val >>= 8;
@@ -2704,11 +2771,37 @@ extern "C" Item js_buffer_writeBigInt64LE(Item buf, Item value_item, Item offset
 }
 
 extern "C" Item js_buffer_writeBigUInt64BE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_writeBigInt64BE(buf, value_item, offset_item);
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    int offset = buffer_number_to_int_or_default(offset_item, 0);
+    if (offset < 0 || offset + 8 > blen) return ItemNull;
+    Item bigint_value;
+    if (!buffer_to_bigint_value(value_item, &bigint_value)) return ItemNull;
+    Item wrapped = js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_value);
+    if (js_check_exception()) return ItemNull;
+    uint64_t val = buffer_bigint_to_uint64_bits(wrapped);
+    for (int i = 7; i >= 0; i--) {
+        data[offset + i] = (uint8_t)(val & 0xFF);
+        val >>= 8;
+    }
+    return (Item){.item = i2it(offset + 8)};
 }
 
 extern "C" Item js_buffer_writeBigUInt64LE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_writeBigInt64LE(buf, value_item, offset_item);
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    int offset = buffer_number_to_int_or_default(offset_item, 0);
+    if (offset < 0 || offset + 8 > blen) return ItemNull;
+    Item bigint_value;
+    if (!buffer_to_bigint_value(value_item, &bigint_value)) return ItemNull;
+    Item wrapped = js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_value);
+    if (js_check_exception()) return ItemNull;
+    uint64_t val = buffer_bigint_to_uint64_bits(wrapped);
+    for (int i = 0; i < 8; i++) {
+        data[offset + i] = (uint8_t)(val & 0xFF);
+        val >>= 8;
+    }
+    return (Item){.item = i2it(offset + 8)};
 }
 
 // ─── Static Buffer.compare(buf1, buf2) ─────────────────────────────────────

@@ -62,6 +62,7 @@ typedef struct JsMirReference {
     bool strict;
     bool uninitialized_this;
     bool is_private;
+    bool computed_key;
     const char* named_key;
     int named_key_len;
     uint64_t named_key_item;
