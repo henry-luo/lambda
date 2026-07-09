@@ -129,7 +129,9 @@ fn render_symbol_command(node, context) {
     let display_text = if (unicode != null) unicode else cmd_text
     let atom_type = sym.classify_symbol(cmd_text)
     let cls = symbol_font_class(cmd_text, context)
-    if (cmd_text == "\\iff")
+    if (is_standalone_long_arrow_command(cmd_text))
+        render_standalone_long_arrow(cmd_text)
+    else if (cmd_text == "\\iff")
         render_iff_symbol(display_text, cls)
     else if (cmd_text == "\\perp")
         render_perp_symbol(display_text)
@@ -137,6 +139,29 @@ fn render_symbol_command(node, context) {
         render_limit_operator_symbol(display_text, context)
     else
         box.text_box(display_text, cls, atom_type)
+}
+
+fn is_standalone_long_arrow_command(cmd_text) {
+    cmd_text == "\\longrightarrow" or cmd_text == "\\longleftarrow" or
+    cmd_text == "longrightarrow" or cmd_text == "longleftarrow"
+}
+
+fn render_standalone_long_arrow(cmd_text) {
+    let svg_name = if (cmd_text == "\\longleftarrow" or cmd_text == "longleftarrow")
+        "longleftarrow" else "longrightarrow"
+    let body = make_padded_svg_body_box(svg_name)
+    // MathLive uses SVG extensible arrows for standalone long-arrow commands;
+    // the Unicode glyph fallback has taller glyph metrics and loses the slices.
+    box.ml_box_full(
+        <span style: "position:relative"; body.element>,
+        body.height,
+        body.depth,
+        body.width,
+        "mrel",
+        0.0,
+        0.0,
+        body.max_font_size
+    )
 }
 
 fn render_iff_symbol(display_text, cls) {
@@ -167,6 +192,8 @@ fn render_operator(node, context) {
 
 fn render_relation(node, context) {
     let text = get_text(node)
+    if (is_standalone_long_arrow_command(text)) render_standalone_long_arrow(text)
+    else {
     // If this is a command-form relation (e.g., \uparrow, \downarrow), look
     // up its Unicode glyph. The grammar tokenizes these as relation nodes
     // rather than commands, so render_command's symbol lookup isn't invoked.
@@ -190,6 +217,7 @@ fn render_relation(node, context) {
     // without thickspace between the letter and the factorial.
     let atom_type = if (text == "!") "mclose" else "mrel"
     box.text_box(display, css.CMR, atom_type)
+    }
     }
 }
 
@@ -364,7 +392,9 @@ fn render_command(node, context) {
         render_boldsymbol_command(node, context)
     } else {
         let unicode = sym.lookup_symbol(cmd_text)
-        if (unicode != null) {
+        if (is_standalone_long_arrow_command(cmd_text)) {
+            render_standalone_long_arrow(cmd_text)
+        } else if (unicode != null) {
         let atom_type = sym.classify_symbol(cmd_text)
         if (sym.is_limit_op(cmd_text))
             render_limit_operator_symbol(unicode, context)
@@ -1778,7 +1808,10 @@ fn render_delimiter_group(node, context) {
 
     let children = render_children(node, context)
     let spaced = apply_spacing(children, context)
-    let content = box.hbox(spaced)
+    let raw_content = box.hbox(spaced)
+    let content = if (has_table_child(spaced, 0))
+        box_with_table_metadata(raw_content, spaced)
+    else raw_content
 
     if (content.height + content.depth <= 1.2)
         render_small_delimiter_group(left_text, right_text, spaced, content)
@@ -1872,17 +1905,23 @@ fn render_stretchy_delimiter_group(left_text, right_text, content) {
     let content_d = content.depth
     let box_h = max(content_h, max(delim_extent_h(left_box), delim_extent_h(right_box)))
     let box_d = max(content_d, max(delim_extent_d(left_box), delim_extent_d(right_box)))
+    let table_brace = content.is_table == true and
+        (is_brace_delim_text(left_text) or is_brace_delim_text(right_text))
+    // Stacked table braces expose separately rounded h/d like MathLive's
+    // array wrapper; otherwise h+d can tip one CEIL@2 notch at the root strut.
+    let out_h = if (table_brace) util.ceil_em2(box_h) else box_h
+    let out_d = if (table_brace) 0.0 - util.ceil_em2(0.0 - box_d) else box_d
     box.ml_box_full(
         <span class: css.LEFT_RIGHT, style: style_attr;
             for (el in elements) el
         >,
-        box_h,
-        box_d,
+        out_h,
+        out_d,
         sum((for (p in parts where p != null) p.width)),
         "minner",
         0.0,
         0.0,
-        box_h
+        out_h
     )
 }
 
@@ -2608,9 +2647,44 @@ fn transparent_hbox(children) {
         (let last_idx = len(filtered) - 1,
          let tail = filtered[last_idx],
          let typed = box_with_type(hb, tail.type),
+         let tagged = if (has_table_child(filtered, 0)) box_with_table_metadata(typed, filtered) else typed,
          if (has_suppressed_text_depth(filtered, 0))
-            box_with_suppress_depth(typed)
-         else typed)
+            box_with_suppress_depth(tagged)
+         else tagged)
+}
+
+fn has_table_child(items, i) {
+    if (i >= len(items)) false
+    else if (items[i].is_table == true) true
+    else has_table_child(items, i + 1)
+}
+
+fn box_with_table_metadata(bx, items) => {
+    element: bx.element,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: bx.type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size,
+    // \left...\right groups wrap array content in a transparent hbox; keep
+    // the table marker so delimiter selection can use table-specific recipes.
+    is_table: true,
+    delim_visual_total: table_child_visual_total(items, 0, 0.0)
+}
+
+fn table_child_visual_total(items, i, acc) {
+    if (i >= len(items)) acc
+    else {
+        let item = items[i]
+        let total = if (item.delim_visual_total != null)
+            item.delim_visual_total
+        else if (item.is_table == true)
+            item.height + item.depth
+        else 0.0
+        table_child_visual_total(items, i + 1, max(acc, total))
+    }
 }
 
 fn render_children_scan(node, context, i, acc) {
@@ -2642,6 +2716,9 @@ fn render_children_scan(node, context, i, acc) {
     else if (is_malformed_left_sequence(node, i))
         (let rendered = render_malformed_left_sequence(node[i], node[i + 1], context),
          render_children_scan(node, context, i + 2, acc ++ [rendered]))
+    else if (is_tail_style_switch(node, i))
+        (let rendered = render_tail_style_switch(node, context, i),
+         acc ++ [rendered])
     else if (is_scriptstyle_switch(node, i))
         (let rendered = render_scriptstyle_sibling(node[i + 1], context),
          let spacer = if (has_trailing_radical(acc)) [box.skip_box(0.17)] else [],
@@ -2920,6 +2997,28 @@ fn is_scriptstyle_switch(node, i) {
          child.arg == null and len(child) == 0)
 }
 
+fn is_tail_style_switch(node, i) {
+    let child = if (i < len(node)) node[i] else null
+    child is element and name(child) == 'style_command' and
+        child.cmd != null and child.arg == null and len(child) == 0 and
+        tail_style_override(string(child.cmd)) != null
+}
+
+fn tail_style_override(cmd) {
+    if (cmd == "\\displaystyle") "display"
+    else if (cmd == "\\textstyle") "text"
+    else if (cmd == "\\scriptscriptstyle") "scriptscript"
+    else null
+}
+
+fn render_tail_style_switch(node, context, i) {
+    // Display/text style commands are TeX switches over the remaining list, not
+    // zero-width atoms; rendering the command itself leaks an empty span.
+    let style_ctx = ctx.derive(context, {style: tail_style_override(string(node[i].cmd))})
+    let children = render_children_scan(node, style_ctx, i + 1, [])
+    transparent_hbox(apply_spacing(children, style_ctx))
+}
+
 fn is_size_switch(node, i) {
     let child = if (i < len(node)) node[i] else null
     child is element and name(child) == 'command' and len(child) == 0 and
@@ -3104,7 +3203,9 @@ fn ml_box_with_suppress_depth(bx) => {
     max_font_size: bx.max_font_size,
     suppress_hbox_text_depth: true,
     is_middle_delim: bx.is_middle_delim,
-    is_script_radical: bx.is_script_radical
+    is_script_radical: bx.is_script_radical,
+    is_table: bx.is_table,
+    delim_visual_total: bx.delim_visual_total
 }
 
 fn plain_text(node) {
@@ -3176,7 +3277,9 @@ fn ml_box_with_type(bx, atom_type) => {
     skew: bx.skew,
     max_font_size: bx.max_font_size,
     is_fraction: bx.is_fraction,
-    is_script_radical: bx.is_script_radical
+    is_script_radical: bx.is_script_radical,
+    is_table: bx.is_table,
+    delim_visual_total: bx.delim_visual_total
 }
 
 fn normalize_bin_atom(bx, prev_type) {

@@ -54,7 +54,7 @@ fn render_body(body, context, render_fn, env_name, columns) {
         expand_declared_rows(source_rows, declared_cols, 0, [])
     else source_rows
     let nrows = max(len(row_groups), 1)
-    let ncols = if (declared_cols > 0) declared_cols else max_cols(row_groups, 0, 0)
+    let ncols = max_cols(row_groups, 0, 0)
     let aligns = if (declared_cols > 0) declared_alignment(columns)
         else get_alignment(env_name, ncols)
     let spacing_ctx = cell_spacing_context(env_name, context, cell_ctx)
@@ -91,12 +91,11 @@ fn expand_declared_rows(rows, ncols, i, acc) {
 
 fn chunk_row(row, ncols, i, acc) {
     if (i >= len(row)) acc
-    else chunk_row(row, ncols, i + ncols, acc ++ [make_row(pad_row(slice(row, i, min(len(row), i + ncols)), ncols))])
-}
-
-fn pad_row(row, ncols) {
-    if (len(row) >= ncols) row
-    else pad_row(row ++ [make_cell([])], ncols)
+    else
+        // A column preamble controls alignment/chunking, but MathLive does not
+        // materialize missing `&` cells as visible blank columns.
+        chunk_row(row, ncols, i + ncols,
+            acc ++ [make_row(slice(row, i, min(len(row), i + ncols)))])
 }
 
 fn max_cols(rows, i, acc) {
@@ -281,10 +280,18 @@ fn build_table(row_boxes, ncols, nrows, aligns, env_name) {
         else compute_dyn_metrics(row_boxes, ncols, nrows, env_name)
     let total_w = compute_table_width(row_boxes, ncols, env_name)
     let children = build_table_children(row_boxes, ncols, aligns, metrics, env_name, 0, [])
-    let el = <span class: css.MTABLE;
+    let table_class = table_environment_class(env_name)
+    let el = <span class: table_class;
         for el in children { el }
     >
     ml_table_box(el, metrics, total_w, nrows)
+}
+
+fn table_environment_class(env_name) {
+    // MathLive marks the top-level align table so stylesheet consumers can
+    // distinguish display alignment from ordinary arrays/matrices.
+    if (env_name == "align") css.classes([css.MTABLE, css.ALIGN_ENVIRONMENT])
+    else css.MTABLE
 }
 
 fn array_has_delimiters(env_name) {
