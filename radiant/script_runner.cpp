@@ -837,6 +837,8 @@ static bool script_task_timing_enabled() {
 }
 #endif
 
+static const size_t JS_BROWSER_LIBRARY_BUDGET_BYTES = 512u * 1024u;
+
 static size_t script_prelayout_defer_limit_bytes() {
     const char* env = getenv("RADIANT_JS_PRELAYOUT_DEFER_BYTES");
     if (env && env[0]) {
@@ -847,7 +849,7 @@ static size_t script_prelayout_defer_limit_bytes() {
             return (size_t)parsed;
         }
     }
-    return 128 * 1024;
+    return JS_BROWSER_LIBRARY_BUDGET_BYTES;
 }
 
 static size_t script_external_compile_limit_bytes() {
@@ -860,9 +862,9 @@ static size_t script_external_compile_limit_bytes() {
             return (size_t)parsed;
         }
     }
-    // Keep external bundles within the same browser-compat budget as deferred
-    // pre-layout scripts so unsupported app runtimes degrade before JIT setup.
-    return 128 * 1024;
+    // browser-library fixtures commonly exceed 128 KiB; keep a finite guard
+    // while allowing classic DOM libraries to run before layout.
+    return JS_BROWSER_LIBRARY_BUDGET_BYTES;
 }
 
 static size_t script_total_compile_limit_bytes() {
@@ -876,8 +878,8 @@ static size_t script_total_compile_limit_bytes() {
         }
     }
     // Public pages can contain many individually small app-runtime scripts;
-    // cap cumulative browser JS until LambdaJS supports those runtimes safely.
-    return 128 * 1024;
+    // cap cumulative browser JS while still admitting common DOM libraries.
+    return JS_BROWSER_LIBRARY_BUDGET_BYTES;
 }
 
 #ifndef NDEBUG
