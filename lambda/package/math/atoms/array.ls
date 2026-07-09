@@ -144,7 +144,6 @@ fn ml_box_with_type(bx, atom_type) => {
     italic: bx.italic,
     skew: bx.skew,
     max_font_size: bx.max_font_size,
-    model: "ml",
     is_fraction: bx.is_fraction
 }
 
@@ -214,9 +213,7 @@ fn is_col_sep(child) {
 fn build_table(row_boxes, ncols, nrows, aligns, env_name) {
     let metrics = if (env_name == "equation" and nrows == 1 and ncols == 1)
         equation_table_metrics(row_boxes[0][0])
-        else if (uses_dyn_metrics(env_name))
-        compute_dyn_metrics(row_boxes, ncols, nrows, env_name)
-        else table_metrics(env_name, nrows)
+        else compute_dyn_metrics(row_boxes, ncols, nrows, env_name)
     let total_w = compute_table_width(row_boxes, ncols, env_name)
     let children = build_table_children(row_boxes, ncols, aligns, metrics, env_name, 0, [])
     let el = <span class: css.MTABLE;
@@ -238,7 +235,6 @@ fn ml_table_box(el, metrics, total_w) => {
     italic: 0.0,
     skew: 0.0,
     max_font_size: if (metrics.box_height != null) metrics.box_height else metrics.height,
-    model: "ml",
     delim_total: metrics.box_total
 }
 
@@ -309,25 +305,13 @@ fn cell_at(row_boxes, row, col) {
     else blank_cell_box()
 }
 
-// environments not needing the dynamic row walk use the fixed matrix estimate.
-fn table_metrics(env_name, nrows) {
-    matrix_table_metrics(nrows)
-}
-
 // ============================================================
 // Metric-driven table layout (TeX \@array, ref MathLive array.ts render).
-// Replaces the per-nrows hardcoded *_table_metrics + *_row_top tables for
-// scale-1.0 environments. Each row's height/depth derive from the real cell
+// Each row's height/depth derive from the real cell
 // boxes plus the array strut (arstrutHeight 0.84, arstrutDepth 0.36 =
 // 0.7/0.3 × arraystretch(1.0) × baselineskip(1.2)); the box height/depth,
 // vlist tops, and depth-holder all fall out of the centering offset.
 // ============================================================
-
-// Dynamic envs use the MathLive row walk. `smallmatrix` uses the same walk with
-// compact scriptstyle arstruts; `equation` has its own single-row centering.
-fn uses_dyn_metrics(env_name) {
-    not (env_name == "equation")
-}
 
 // TeX \jot (3pt = 0.3em): extra depth added to every non-last row in dcases/
 // rcases/aligned-style environments (NOT matrices, cases, or array).
@@ -482,42 +466,14 @@ fn equation_table_metrics(content_box) {
     }
 }
 
-fn matrix_table_metrics(nrows) => {
-    height: 0.85 + 0.6 * float(nrows - 1),
-    depth: 0.35 + 0.6 * float(nrows - 1),
-    box_total: 1.21 + 1.2 * float(nrows - 1),
-    vlist_height: 0.85 + 0.6 * float(nrows - 1),
-    depth_holder: if (nrows == 1) 0.35
-        else if (nrows == 2) 0.96
-        else 0.35 + 0.6 * float(nrows - 1),
-    pstrut: 3.0,
-    cell_height: 1.2
-}
-
 fn row_top(metrics, row) {
     if (metrics.tops != null) metrics.tops[row]
-    else if (metrics.is_equation == true) metrics.eq_top
-    else matrix_row_top(metrics, row)
+    else metrics.eq_top
 }
 
 fn row_cell_height(metrics, row) {
     if (metrics.cell_heights != null) metrics.cell_heights[row]
     else metrics.cell_height
-}
-
-
-
-fn matrix_row_top(metrics, row) {
-    let nrows = int(round((metrics.box_total - 1.21) / 1.2)) + 1
-    if (nrows == 1) 0.0 - 3.01
-    else if (nrows == 2) {
-        if (row == 0) 0.0 - 3.61 else 0.0 - 2.4
-    }
-    else {
-        if (row == 0) 0.0 - 4.21
-        else if (row == 1) 0.0 - 3.0
-        else 0.0 - 1.81 + 1.2 * float(row - 2)
-    }
 }
 
 // ============================================================

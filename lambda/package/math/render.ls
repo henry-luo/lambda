@@ -878,7 +878,6 @@ fn text_color_box(text, color_value) => {
     italic: 0.0,
     skew: 0.0,
     max_font_size: 0.65,
-    model: "ml",
     suppress_hbox_text_depth: true,
     suppress_hbox_operator_height: true,
     no_left_bin_space: true
@@ -913,7 +912,6 @@ fn text_content_special_box(el, h, d, w) => {
     italic: 0.0,
     skew: 0.0,
     max_font_size: h,
-    model: "ml",
     suppress_hbox_text_depth: true,
     suppress_hbox_operator_height: true,
     no_left_bin_space: true
@@ -1084,47 +1082,20 @@ fn render_glyph_accent(node, context, accent_key) {
          else if (base_box.width <= 0.8)
             render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_height, node.base)
          else
-            render_wide_accent(accent_key, base_box, accent_text, accent_cls, accent_height))
+            render_wide_accent(accent_key, base_box, accent_text, accent_cls, accent_height, node.base))
 }
 
 fn render_line_accent(node, context, accent_key) {
     let base_box = if (node.base != null) render_accent_base(node.base, context)
         else box.text_box("□", css.CMR, "mord")
-    let tall = line_accent_is_tall(base_box)
     if (accent_key == "underline") {
-        if (tall) render_underline_tall(base_box)
-        else render_underline_simple(base_box)
+        render_underline_vlist(base_box, context)
     } else {
-        if (tall) render_overline_tall(base_box)
-        else if (base_box.width <= 0.8) render_overline_simple(base_box)
-        else render_overline_wide(base_box, context)
+        render_overline_vlist(base_box, context)
     }
 }
 
-fn render_overline_simple(base_box) {
-    let base_elements = box.elements_of(base_box)
-    let el = <span class: "overline";
-        <span class: css.VLIST_T;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:0.64em";
-                    <span style: "top:-3em";
-                        <span class: css.PSTRUT, style: "height:3em">
-                        <span style: "height:0.44em;display:inline-block";
-                            for (el in base_elements) el
-                        >
-                    >
-                    <span style: "top:-3.55em";
-                        <span class: css.PSTRUT, style: "height:3em">
-                        <span class: "overline-line", style: "height:0.04em;display:inline-block">
-                    >
-                >
-            >
-        >
-    >
-    line_accent_box(el, 0.64, 0.0, base_box.width, 0.0, 0.64, true)
-}
-
-fn render_overline_wide(base_box, context) {
+fn render_overline_vlist(base_box, context) {
     let rule = ctx.rule_thickness(context)
     let line_box = box.ml_box_full(
         <span class: "overline-line", style: "height:" ++ util.fmt_em(rule) ++ ";display:inline-block">,
@@ -1140,107 +1111,28 @@ fn render_overline_wide(base_box, context) {
     >
     // MathLive's overline uses VBox({shift:0}) with [inner, 3*rule, line, rule];
     // VList derives top positions, pstruts, height, and depth from that sequence.
-    line_accent_box(el, stack.height, stack.depth, base_box.width, stack.depth,
-        util.ceil_em2(stack.height + stack.depth), false)
+    box.ml_box_full(el, stack.height, stack.depth, base_box.width,
+        "mord", 0.0, 0.0, stack.height)
 }
 
-fn render_overline_tall(base_box) {
-    let base_elements = box.elements_of(base_box)
-    let el = <span class: "overline";
-        <span class: css.VLIST_T2;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:1.35em";
-                    <span style: "top:-3.14em";
-                        <span class: css.PSTRUT, style: "height:3.15em">
-                        <span style: "height:1.84em;display:inline-block";
-                            for (el in base_elements) el
-                        >
-                    >
-                    <span style: "top:-4.4em";
-                        <span class: css.PSTRUT, style: "height:3.15em">
-                        <span class: "overline-line", style: "height:0.04em;display:inline-block">
-                    >
-                >
-                <span class: css.VLIST_S; "\u200B">
-            >
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:0.69em">
-            >
-        >
-    >
-    line_accent_box(el, 1.35, 0.69, base_box.width, 0.69, 2.04, false)
-}
-
-fn render_underline_simple(base_box) {
-    let base_elements = box.elements_of(base_box)
+fn render_underline_vlist(base_box, context) {
+    let rule = ctx.rule_thickness(context)
+    let line_box = box.ml_box_full(
+        <span class: "underline-line", style: "height:" ++ util.fmt_em(rule) ++ ";display:inline-block">,
+        rule, rule, 0.0, "ord", 0.0, 0.0, rule)
+    let line_shift = base_box.depth + 3.0 * rule + line_box.height
+    let stack = box.ml_vlist_individual([
+        {box: line_box, shift: line_shift, no_wrap: true},
+        {box: base_box, shift: 0.0}
+    ], "ord")
     let el = <span class: "underline";
-        <span class: css.VLIST_T2;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:0.7em";
-                    <span style: "top:-2.84em";
-                        <span class: css.PSTRUT, style: "height:3em">
-                        <span class: "underline-line", style: "height:0.04em;display:inline-block">
-                    >
-                    <span style: "top:-3em";
-                        <span class: css.PSTRUT, style: "height:3em">
-                        <span style: "height:0.7em;display:inline-block";
-                            for (el in base_elements) el
-                        >
-                    >
-                >
-                <span class: css.VLIST_S; "\u200B">
-            >
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:0.21em">
-            >
-        >
+        stack.element
     >
-    line_accent_box(el, 0.7, 0.21, base_box.width, 0.21, 0.91, false)
-}
-
-fn render_underline_tall(base_box) {
-    let base_elements = box.elements_of(base_box)
-    let el = <span class: "underline";
-        <span class: css.VLIST_T2;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:1.15em";
-                    <span style: "top:-2.29em";
-                        <span class: css.PSTRUT, style: "height:3.15em">
-                        <span class: "underline-line", style: "height:0.04em;display:inline-block">
-                    >
-                    <span style: "top:-3.14em";
-                        <span class: css.PSTRUT, style: "height:3.15em">
-                        <span style: "height:1.84em;display:inline-block";
-                            for (el in base_elements) el
-                        >
-                    >
-                >
-                <span class: css.VLIST_S; "\u200B">
-            >
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:0.89em">
-            >
-        >
-    >
-    line_accent_box(el, 1.15, 0.89, base_box.width, 0.88, 2.24, false)
-}
-
-fn line_accent_box(el, h, d, w, visual_d, visual_total, suppress_text_depth) => {
-    element: el,
-    height: h,
-    depth: d,
-    width: w,
-    type: "mord",
-    italic: 0.0,
-    skew: 0.0,
-    max_font_size: h,
-    model: "ml",
-    suppress_hbox_text_depth: suppress_text_depth
-}
-
-fn line_accent_is_tall(base_box) {
-    let total = base_box.height + base_box.depth
-    (total > 1.0)
+    // MathLive's underline is the overline stack mirrored below the baseline:
+    // line, 3*rule gap, then the base. The old simple/tall templates encoded
+    // these positions directly.
+    box.ml_box_full(el, stack.height, stack.depth, base_box.width,
+        "mord", 0.0, 0.0, stack.height)
 }
 
 fn render_accent_base(base_node, context) {
@@ -1353,7 +1245,6 @@ fn accent_box_raw(el, h, w) => {
     italic: 0.0,
     skew: 0.0,
     max_font_size: h,
-    model: "ml",
     no_left_bin_space: true
 }
 
@@ -1363,32 +1254,73 @@ fn fmt_accent_margin(v) {
     if (v == 0.0) "0" else fmt_accent_em(v)
 }
 
-fn render_wide_accent(accent_key, base_box, accent_text, accent_cls, accent_height) {
+fn render_wide_accent(accent_key, base_box, accent_text, accent_cls, accent_height, base_node) {
     let base_elements = box.elements_of(base_box)
-    let vheight = accent_height + if (accent_height < 0.7) 0.22 else 0.21
-    let accent_top = if (accent_key == "tilde") -3.56 else -3.21
-    let margin_left = if (accent_key == "dot") 0.79 else 0.68
+    let clearance = if (base_box.height < met.X_HEIGHT) base_box.height else met.X_HEIGHT
+    let accent_h = accent_body_height_precise(accent_key)
+    let vheight = util.ceil_em2(base_box.height - clearance + accent_h)
+    let base_body_h = util.ceil_em2(base_box.height + base_box.depth)
+    let pstrut = accent_pstrut(base_box)
+    let accent_lift = if (accent_key == "tilde") 0.35 else 0.0
+    let accent_top = 0.0 - pstrut - (base_box.height - clearance + accent_lift)
+    let margin_left = wide_accent_margin_left(accent_key, base_node, base_box)
+    let depth_holder = util.ceil_em2(base_box.depth)
     let el = <span class: css.VLIST_T2;
         <span class: css.VLIST_R;
             <span class: css.VLIST, style: "height:" ++ fmt_accent_em(vheight);
-                <span style: "top:-3em";
-                    <span class: css.PSTRUT, style: "height:3em">
-                    <span style: "height:0.73em;display:inline-block";
+                <span style: "top:" ++ fmt_accent_em(0.0 - pstrut);
+                    <span class: css.PSTRUT, style: "height:" ++ fmt_accent_em(pstrut)>
+                    <span style: "height:" ++ fmt_accent_em(base_body_h) ++ ";display:inline-block";
                         for (el in base_elements) el
                     >
                 >
                 <span class: css.CENTER, style: "top:" ++ fmt_accent_em(accent_top) ++ ";margin-left:" ++ fmt_accent_em(margin_left);
-                    <span class: css.PSTRUT, style: "height:3em">
+                    <span class: css.PSTRUT, style: "height:" ++ fmt_accent_em(pstrut)>
                     <span class: accent_cls, style: "height:" ++ fmt_accent_em(accent_height) ++ ";display:inline-block"; accent_text>
                 >
             >
             <span class: css.VLIST_S; "\u200B">
         >
         <span class: css.VLIST_R;
-            <span class: css.VLIST, style: "height:0.09em">
+            <span class: css.VLIST, style: "height:" ++ fmt_accent_em(depth_holder)>
         >
     >
-    accent_box(el, vheight, 0.09, base_box.width)
+    accent_box(el, vheight, depth_holder, base_box.width)
+}
+
+fn accent_pstrut(base_box) {
+    let mf = if (base_box.max_font_size != null) base_box.max_font_size else base_box.height
+    max(1.0, max(mf, base_box.height)) + 2.0
+}
+
+fn wide_accent_margin_left(accent_key, base_node, base_box) {
+    let text_w = accent_visual_text_width(plain_text(base_node))
+    let base_w = if (text_w != null) text_w else base_box.width
+    util.ceil_em2((base_w - accent_glyph_width(accent_key)) / 2.0)
+}
+
+fn accent_visual_text_width(text) {
+    accent_visual_text_width_at(text, 0, 0.0)
+}
+
+fn accent_visual_text_width_at(text, i, acc) {
+    if (i >= len(text)) acc
+    else {
+        let ch = slice(text, i, i + 1)
+        if (ch == " ") accent_visual_text_width_at(text, i + 1, acc)
+        else {
+            let w = accent_visual_char_width(ch)
+            if (w == null) null
+            else accent_visual_text_width_at(text, i + 1, acc + w)
+        }
+    }
+}
+
+fn accent_visual_char_width(ch) {
+    let font = if ((ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z"))
+        "Math-Italic" else "Main-Regular"
+    let m = met.get_character_metrics(ch, font)
+    if (m == null or m.default) null else m.width
 }
 
 fn render_overrightarrow_accent(base_box, context) {
@@ -1413,8 +1345,7 @@ fn render_overrightarrow_accent(base_box, context) {
         type: "mord",
         italic: 0.0,
         skew: 0.0,
-        max_font_size: stack.height,
-        model: "ml"
+        max_font_size: stack.height
     }
 }
 
@@ -1435,8 +1366,7 @@ fn render_long_arrow_label_sequence(base_name, label_name, context) {
         type: "mrel",
         italic: 0.0,
         skew: 0.0,
-        max_font_size: stack.height,
-        model: "ml"
+        max_font_size: stack.height
     }
 }
 
@@ -1452,7 +1382,6 @@ fn make_padded_svg_body_box(svg_name) {
         italic: 0.0,
         skew: 0.0,
         max_font_size: h / 2.0 + 0.166,
-        model: "ml",
         no_pstrut_floor: true
     }
 }
@@ -1475,7 +1404,6 @@ fn make_padded_svg_label_box(svg_name) {
         italic: 0.0,
         skew: 0.0,
         max_font_size: scaled_h,
-        model: "ml",
         no_pstrut_floor: true
     }
 }
@@ -1556,7 +1484,6 @@ fn accent_box_from_stack(stack, w) => {
     italic: 0.0,
     skew: 0.0,
     max_font_size: stack.height,
-    model: "ml",
     no_left_bin_space: true
 }
 
@@ -1672,18 +1599,23 @@ fn svg_accent_path(svg_name) {
 }
 
 fn render_missing_base_accent(accent_key, accent_text, accent_cls, accent_height) {
-    let vheight = accent_height + 0.27
-    let pstrut = if (accent_key == "vec") 2.72 else 2.7
-    let base_top = if (accent_height > 0.7) 0.0 - pstrut + 0.01 else 0.0 - pstrut
-    let accent_top = if (accent_key == "tilde") 0.0 - pstrut - 0.61 else 0.0 - pstrut - 0.26
-    let margin_left = if (accent_key == "dot") 0.27 else 0.16
+    let base_box = missing_accent_base_box()
+    let clearance = if (base_box.height < met.X_HEIGHT) base_box.height else met.X_HEIGHT
+    let vheight = util.ceil_em2(base_box.height - clearance + accent_height)
+    let pstrut = max(accent_height, base_box.max_font_size) + 2.0
+    let accent_lift = if (accent_key == "tilde") 0.35 else 0.0
+    let base_overshoot = max(0.0, accent_height - base_box.max_font_size)
+    let base_top = util.ceil_em2(0.0 - pstrut + base_overshoot / 2.0)
+    let accent_top = util.ceil_em2(0.0 - pstrut - (base_box.height - clearance + accent_lift))
+    let margin_left = util.ceil_em2((base_box.width - accent_glyph_width(accent_key)) / 2.0)
+    let body_height = util.ceil_em2(base_box.height + base_box.depth)
     let el = <span class: css.VLIST_T2;
         <span class: css.VLIST_R;
             <span class: css.VLIST, style: "height:" ++ fmt_accent_em(vheight);
                 <span style: "top:" ++ fmt_accent_em(base_top);
                     <span class: css.PSTRUT, style: "height:" ++ fmt_accent_em(pstrut)>
-                    <span style: "height:0.9em;display:inline-block";
-                        <span class: css.CMR; "□">
+                    <span style: "height:" ++ fmt_accent_em(body_height) ++ ";display:inline-block";
+                        base_box.element
                     >
                 >
                 <span class: css.CENTER, style: "top:" ++ fmt_accent_em(accent_top) ++ ";margin-left:" ++ fmt_accent_em(margin_left);
@@ -1697,8 +1629,11 @@ fn render_missing_base_accent(accent_key, accent_text, accent_cls, accent_height
             <span class: css.VLIST, style: "height:0.2em">
         >
     >
-    accent_box(el, vheight, 0.2, 0.8)
+    accent_box(el, vheight, base_box.depth, base_box.width)
 }
+
+fn missing_accent_base_box() =>
+    box.ml_box_full(<span class: css.CMR; "□">, 0.7, 0.2, 0.8, "mord", 0.0, 0.0, 0.7)
 
 fn accent_box(el, h, d, w) => {
     element: el,
@@ -1709,7 +1644,6 @@ fn accent_box(el, h, d, w) => {
     italic: 0.0,
     skew: 0.0,
     max_font_size: h,
-    model: "ml",
     no_left_bin_space: true
 }
 
@@ -1731,13 +1665,7 @@ fn accent_display_text(key) {
 }
 
 fn accent_body_height(key) {
-    if (key == "vec") 0.72
-    else if (key == "dot") 0.67
-    else if (key == "ddot") 0.67
-    else if (key == "tilde") 0.67
-    else if (key == "bar") 0.57
-    else if (key == "check") 0.63
-    else 0.7
+    util.ceil_em2(accent_body_height_precise(key))
 }
 
 // Precise accent glyph height in Main-Regular (from MathLive
@@ -2172,7 +2100,6 @@ fn box_with_error(bx, err) => {
     italic: bx.italic,
     skew: bx.skew,
     max_font_size: bx.max_font_size,
-    model: "ml",
     mathlive_error: err
 }
 
@@ -2191,7 +2118,6 @@ fn render_middle_delim(node, context) {
             italic: 0.0,
             skew: 0.0,
             max_font_size: 0.0,
-            model: "ml",
             suppress_hbox_text_depth: true
         }
     } else {
@@ -2207,7 +2133,6 @@ fn render_middle_delim(node, context) {
             italic: bx.italic,
             skew: bx.skew,
             max_font_size: bx.max_font_size,
-            model: "ml",
             is_middle_delim: true
         }
     }
@@ -2248,7 +2173,6 @@ fn radical_box(el, spec, width, context) => {
         italic: 0.0,
         skew: 0.0,
         max_font_size: if (spec.box_height != null) spec.box_height else spec.height,
-        model: "ml",
         is_radical: true,
         is_script_radical: context.style == "script" or context.style == "scriptscript"
 }
@@ -2386,10 +2310,8 @@ fn render_sqrt_index(index_box, context, compact_index) {
 }
 
 fn sqrt_spec(body_box, context, has_index) {
-    if ((context.style == "script" or context.style == "scriptscript") and has_index)
-        make_sqrt_spec(0.73, 0.27, body_box.height, -3.0, -3.62, 0.08, 3.0, 0.05, css.SMALL_DELIM)
-    else if (context.style == "script" or context.style == "scriptscript")
-        make_script_sqrt_spec(body_box)
+    if (has_index and (context.style == "script" or context.style == "scriptscript"))
+        sqrt_indexed_script_geom(body_box, context)
     else
         sqrt_geom(body_box, context)
 }
@@ -2397,9 +2319,9 @@ fn sqrt_spec(body_box, context, has_index) {
 // Metric-driven radical geometry — a faithful port of TeXBook Rule 11 as
 // implemented by MathLive's SurdAtom.render + makeCustomSizedDelim + VBox
 // (ref/mathlive/src/atoms/surd.ts, core/delimiters.ts, core/v-box.ts).
-// Covers display & text styles (scalingFactor 1.0); script/scriptscript stay
-// on the legacy specs above. Every dimension derives from the body's
-// full-precision height/depth plus the surd font metrics — no bucket dispatch.
+// Covers display, text, script, and scriptscript styles. Every dimension
+// derives from the body's full-precision height/depth plus the surd font
+// metrics — no bucket dispatch.
 fn sqrt_metric_h(b) { b.height }
 fn sqrt_metric_d(b) { b.depth }
 
@@ -2480,32 +2402,36 @@ fn surd_metrics(min_delim) {
     r
 }
 
-fn make_sqrt_spec(h, d, body_h, body_top, line_top, sign_top, pstrut, line_h, sign_class) => {
-    height: h,
-    depth: d,
-    visual_total: if (h + d < 1.21) 1.21 else h + d,
-    body_height: body_h,
-    body_top: body_top,
-    line_top: line_top,
-    sign_top: sign_top,
-    pstrut: pstrut,
-    line_height: line_h,
-    sign_class: sign_class
-}
-
-fn make_script_sqrt_spec(body_box) => {
-    height: 0.84,
-    depth: 0.09,
-    visual_total: 1.0,
-    body_height: max(body_box.height, 0.83),
-    body_top: -3.0,
-    line_top: -3.75,
-    sign_top: -0.03,
-    pstrut: 3.0,
-    line_height: 0.04,
-    sign_class: css.SMALL_DELIM,
-    is_tall: true,
-    depth_holder: 0.09
+fn sqrt_indexed_script_geom(body_box, context) {
+    let factor = met.style_scale(context.style)
+    let si = met.style_index(context.style)
+    let rule_width = met.defaultRuleThickness[si]
+    // Indexed radicals inside an explicit scriptstyle group are already under
+    // a 70%/50% wrapper. Keep the emitted dimensions in that scaled coordinate
+    // system instead of dividing by the scale again.
+    let sign_top = met.AXIS_HEIGHT * (1.0 - factor)
+    let surd = surd_metrics(0.0)
+    let h = util.ceil_em2(surd.h - sign_top)
+    let d = 0.0 - util.ceil_em2(0.0 - (surd.d + sign_top))
+    let body_h = util.ceil_em2(body_box.height + body_box.depth)
+    let pstrut = 3.0
+    {
+        height: h,
+        depth: d,
+        box_height: h,
+        box_depth: d,
+        visual_total: util.ceil_em2(h + d),
+        vlist_height: h,
+        body_height: body_h,
+        body_top: 0.0 - pstrut,
+        line_top: 0.0 - pstrut - (body_h + sign_top + 2.0 * rule_width),
+        sign_top: util.ceil_em2(sign_top),
+        pstrut: pstrut,
+        line_height: util.ceil_em2(rule_width),
+        sign_class: surd.cls,
+        is_tall: false,
+        depth_holder: d
+    }
 }
 
 // ============================================================
@@ -2846,7 +2772,6 @@ fn render_color_switch_tail(node, context, i) {
         italic: hb.italic,
         skew: hb.skew,
         max_font_size: hb.max_font_size,
-        model: hb.model,
         is_middle_delim: has_middle_delim(spaced, 0)
     })
 }
@@ -2912,7 +2837,6 @@ fn render_size_switch_tail(node, context, i) {
         italic: hb.italic * scale,
         skew: hb.skew * scale,
         max_font_size: if (hb.max_font_size != null) hb.max_font_size * scale else report_height,
-        model: "ml",
         is_middle_delim: has_middle_delim(spaced, 0)
     }
 }
@@ -2960,7 +2884,6 @@ fn ml_style_wrap_box(bx, style_text) => {
     italic: bx.italic,
     skew: bx.skew,
     max_font_size: bx.max_font_size,
-    model: "ml",
     suppress_hbox_text_depth: true,
     is_middle_delim: bx.is_middle_delim,
     is_colorbox: bx.is_colorbox
@@ -3038,8 +2961,7 @@ fn render_textcolor_sequence(node, context, i) {
         type: hb.type,
         italic: hb.italic,
         skew: hb.skew,
-        max_font_size: hb.max_font_size,
-        model: hb.model
+        max_font_size: hb.max_font_size
     })
 }
 
@@ -3068,7 +2990,6 @@ fn ml_box_with_suppress_depth(bx) => {
     italic: bx.italic,
     skew: bx.skew,
     max_font_size: bx.max_font_size,
-    model: "ml",
     suppress_hbox_text_depth: true,
     is_middle_delim: bx.is_middle_delim,
     is_script_radical: bx.is_script_radical
@@ -3142,7 +3063,6 @@ fn ml_box_with_type(bx, atom_type) => {
     italic: bx.italic,
     skew: bx.skew,
     max_font_size: bx.max_font_size,
-    model: "ml",
     is_fraction: bx.is_fraction,
     is_script_radical: bx.is_script_radical
 }

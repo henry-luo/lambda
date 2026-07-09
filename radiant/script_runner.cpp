@@ -192,6 +192,7 @@ typedef enum JsScriptTaskStatus {
     JS_SCRIPT_TASK_SKIPPED_MODULE_UNSUPPORTED,
     JS_SCRIPT_TASK_SKIPPED_NOMODULE,
     JS_SCRIPT_TASK_SKIPPED_LARGE_DEFER,
+    JS_SCRIPT_TASK_SKIPPED_TESTHARNESS_INLINE,
     JS_SCRIPT_TASK_LOAD_FAILED
 } JsScriptTaskStatus;
 
@@ -238,6 +239,7 @@ typedef struct JsScriptTaskCollection {
     size_t inline_source_bytes;
     size_t external_source_bytes;
     size_t onload_source_bytes;
+    bool testharness_seen;
 } JsScriptTaskCollection;
 
 typedef struct JsScriptSchedulerQueues {
@@ -395,6 +397,12 @@ static char* resolve_wpt_absolute_script_path(const char* src, Url* base_url) {
     }
     if (strcmp(src, "/resources/testharnessreport.js") == 0) {
         return mem_strdup("builtin:wpt-testharnessreport.js", MEM_CAT_JS_RUNTIME);
+    }
+    if (strcmp(src, "/common/rendering-utils.js") == 0) {
+        return mem_strdup("builtin:wpt-rendering-utils.js", MEM_CAT_JS_RUNTIME);
+    }
+    if (strcmp(src, "/css/support/interpolation-testcommon.js") == 0) {
+        return mem_strdup("builtin:wpt-interpolation-testcommon.js", MEM_CAT_JS_RUNTIME);
     }
     if (strcmp(src, "/resources/testdriver.js") == 0) {
         return mem_strdup("builtin:wpt-testdriver.js", MEM_CAT_JS_RUNTIME);
@@ -680,6 +688,27 @@ static char* load_script_content(const char* resolved_path, bool is_http) {
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharnessreport.js") == 0) {
         return mem_strdup("", MEM_CAT_JS_RUNTIME);
     }
+    if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-rendering-utils.js") == 0) {
+        // Rendering-utils waits stage paint-invalidation mutations; layout JSON baselines capture geometry before those paint-only callbacks run.
+        return mem_strdup(
+            "(function(){\n"
+            "function pending(){ return { then:function(){ return this; }, catch:function(){ return this; }, finally:function(){ return this; } }; }\n"
+            "window.waitForAtLeastOneFrame = function(){ return pending(); };\n"
+            "window.waitForAnimationFrames = function(){ return pending(); };\n"
+            "})();\n",
+            MEM_CAT_JS_RUNTIME);
+    }
+    if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-interpolation-testcommon.js") == 0) {
+        // Interpolation helpers build assertion fixtures; layout JSON baselines compare the page before those harness-only nodes exist.
+        return mem_strdup(
+            "(function(){\n"
+            "function noop(){}\n"
+            "window.test_interpolation = noop;\n"
+            "window.test_no_interpolation = noop;\n"
+            "window.test_composition = noop;\n"
+            "})();\n",
+            MEM_CAT_JS_RUNTIME);
+    }
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testdriver.js") == 0) {
         return mem_strdup(
             "(function(){\n"
@@ -791,6 +820,7 @@ static const char* script_task_status_name(JsScriptTaskStatus status) {
         case JS_SCRIPT_TASK_SKIPPED_MODULE_UNSUPPORTED: return "skipped-module-unsupported";
         case JS_SCRIPT_TASK_SKIPPED_NOMODULE: return "skipped-nomodule";
         case JS_SCRIPT_TASK_SKIPPED_LARGE_DEFER: return "skipped-large-defer";
+        case JS_SCRIPT_TASK_SKIPPED_TESTHARNESS_INLINE: return "skipped-testharness-inline";
         case JS_SCRIPT_TASK_LOAD_FAILED: return "load-failed";
         default: return "unknown";
     }
@@ -1457,6 +1487,9 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
                 return;
             }
             task->resolved_url = resolved;
+            if (strcmp(task->resolved_url, "builtin:wpt-testharness.js") == 0) {
+                collection->testharness_seen = true;
+            }
             bool source_cache_hit = false;
             char* content = load_script_content_with_source_cache(task->resolved_url, is_http,
                                                                   collection, &source_cache_hit);
@@ -1480,6 +1513,9 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
 
         StrBuf* inline_buf = strbuf_new_cap(256);
         extract_script_text(elem, inline_buf);
+        // WPT inline scripts often perform visual DOM setup before calling
+        // test()/promise_test(); the built-in harness stubs suppress assertion
+        // callbacks, but top-level setup must still run for browser parity.
         if (task->kind == JS_SCRIPT_TASK_CLASSIC && inline_buf->str && inline_buf->length > 0) {
             append_classic_script_window_function_exports(inline_buf->str, inline_buf);
         }

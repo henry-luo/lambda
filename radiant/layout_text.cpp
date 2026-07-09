@@ -2444,6 +2444,8 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view) {
     return RDT_NOT_SURE;
 }
 
+static float initial_letter_sink_size(DomNode* text_node);
+
 void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_length, float text_width) {
     if (text_length <= 0) {
         log_error("output_text: text_length=%d, skipping (node=%s)", text_length, text->node_name());
@@ -2556,6 +2558,16 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
             float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
             lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);
         }
+        float initial_size = initial_letter_sink_size(text);
+        if (initial_size > 1.0f && lycon->block.line_height > 0.0f) {
+            // initial-letter reserves block-axis flow space; without this, following inline rows collapse upward.
+            float reserved_height = lycon->block.line_height * initial_size;
+            float reserved_descender = reserved_height - lycon->line.max_ascender;
+            if (reserved_descender > lycon->line.max_descender) {
+                lycon->line.max_descender = reserved_descender;
+                lycon->line.has_expanded_inline_lh = true;
+            }
+        }
     }
     log_debug("text rect: '%.*t', x %f, y %f, width %f, height %f, font size %f, font family '%s'",
         text_length, text->text_data() + rect->start_index, rect->x, rect->y, rect->width, rect->height, text->font->font_size, text->font->family);
@@ -2607,6 +2619,33 @@ static inline bool line_is_at_collapsible_text_edge(LayoutContext* lycon) {
         !lycon->line.has_replaced_content &&
         !lycon->line.has_c1_control_text &&
         !lycon->line.has_non_c1_text;
+}
+
+static float initial_letter_sink_size(DomNode* text_node) {
+    if (!text_node || !text_node->parent || !text_node->parent->is_element()) return 0.0f;
+    DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(text_node->parent);
+    if (!elem || !elem->tag_name || strcmp(elem->tag_name, "::first-letter") != 0 ||
+        !elem->specified_style) {
+        return 0.0f;
+    }
+    CssDeclaration* decl = style_tree_get_declaration(
+        elem->specified_style, CSS_PROPERTY_INITIAL_LETTER);
+    if (!decl || !decl->value) return 0.0f;
+    if (!decl->value_text || strstr(decl->value_text, "raise") == NULL) return 0.0f;
+    CssValue* value = decl->value;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        return value->data.keyword == CSS_VALUE_NORMAL ? 0.0f : 1.0f;
+    }
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        return value->data.number.value > 1.0 ? (float)value->data.number.value : 0.0f;
+    }
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+        CssValue* first = value->data.list.values[0];
+        if (first && first->type == CSS_VALUE_TYPE_NUMBER && first->data.number.value > 1.0) {
+            return (float)first->data.number.value;
+        }
+    }
+    return 0.0f;
 }
 
 void layout_text(LayoutContext* lycon, DomNode *text_node) {

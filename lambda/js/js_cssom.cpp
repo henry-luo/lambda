@@ -30,6 +30,12 @@ extern "C" Item vmap_new(void);
 
 // Forward declaration
 static Pool* get_document_pool();
+extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
+
+static void js_cssom_notify_stylesheet_mutation(void) {
+    // stylesheet edits do not touch a DOM node, but they still require post-script cascade.
+    js_dom_notify_mutation(DOM_JS_MUTATION_STYLE, nullptr, nullptr);
+}
 
 // =============================================================================
 // Unicode-Range Parsing & Canonical Serialization
@@ -1167,6 +1173,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
             if (d->property_name && strcmp(d->property_name, css_prop) == 0) {
                 rule->data.style_rule.declarations[i] = new_decl;
                 log_debug("js_cssom_rule_decl_set_property: replaced unicode-range = '%s'", canonical);
+                js_cssom_notify_stylesheet_mutation();
                 return value;
             }
         }
@@ -1181,6 +1188,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
             rule->data.style_rule.declaration_count = count + 1;
         }
         log_debug("js_cssom_rule_decl_set_property: added unicode-range = '%s'", canonical);
+        js_cssom_notify_stylesheet_mutation();
         return value;
     }
 
@@ -1216,6 +1224,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
         if (match) {
             rule->data.style_rule.declarations[i] = new_decl;
             log_debug("js_cssom_rule_decl_set_property: replaced '%s' = '%s'", css_prop, val_str);
+            js_cssom_notify_stylesheet_mutation();
             return value;
         }
     }
@@ -1232,6 +1241,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
         rule->data.style_rule.declaration_count = count + 1;
     }
     log_debug("js_cssom_rule_decl_set_property: added '%s' = '%s'", css_prop, val_str);
+    js_cssom_notify_stylesheet_mutation();
     return value;
 }
 
@@ -1285,6 +1295,7 @@ extern "C" Item js_cssom_rule_decl_method(Item decl_item, Item method_name, Item
                     rm_rule->data.style_rule.declarations[j] = rm_rule->data.style_rule.declarations[j + 1];
                 }
                 rm_rule->data.style_rule.declaration_count--;
+                js_cssom_notify_stylesheet_mutation();
                 return make_string_item(old_val);
             }
         }
