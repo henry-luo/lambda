@@ -837,6 +837,9 @@ static bool script_task_timing_enabled() {
 }
 #endif
 
+static const size_t JS_EXTERNAL_SCRIPT_BUDGET_BYTES = 16u * 1024u * 1024u;
+static const size_t JS_TOTAL_SCRIPT_BUDGET_BYTES = 128u * 1024u * 1024u;
+
 static size_t script_prelayout_defer_limit_bytes() {
     const char* env = getenv("RADIANT_JS_PRELAYOUT_DEFER_BYTES");
     if (env && env[0]) {
@@ -847,7 +850,7 @@ static size_t script_prelayout_defer_limit_bytes() {
             return (size_t)parsed;
         }
     }
-    return 128 * 1024;
+    return JS_EXTERNAL_SCRIPT_BUDGET_BYTES;
 }
 
 static size_t script_external_compile_limit_bytes() {
@@ -860,9 +863,9 @@ static size_t script_external_compile_limit_bytes() {
             return (size_t)parsed;
         }
     }
-    // Keep external bundles within the same browser-compat budget as deferred
-    // pre-layout scripts so unsupported app runtimes degrade before JIT setup.
-    return 128 * 1024;
+    // browsers do not enforce small source-byte caps; this guard only protects
+    // Radiant from pathological fixture input while allowing real libraries.
+    return JS_EXTERNAL_SCRIPT_BUDGET_BYTES;
 }
 
 static size_t script_total_compile_limit_bytes() {
@@ -875,9 +878,9 @@ static size_t script_total_compile_limit_bytes() {
             return (size_t)parsed;
         }
     }
-    // Public pages can contain many individually small app-runtime scripts;
-    // cap cumulative browser JS until LambdaJS supports those runtimes safely.
-    return 128 * 1024;
+    // page script graphs can include many files, so total budget must be much
+    // larger than the per-file guard to stay browser-compatible.
+    return JS_TOTAL_SCRIPT_BUDGET_BYTES;
 }
 
 #ifndef NDEBUG

@@ -6019,6 +6019,11 @@ static Item js_property_set_map(Item object, Item key, Item value) {
         key = (Item){.item = s2it(heap_create_name("null", 4))};
     } else if (kt == LMD_TYPE_UNDEFINED) {
         key = (Item){.item = s2it(heap_create_name("undefined", 9))};
+    } else if (kt != LMD_TYPE_STRING && !js_key_is_symbol(key)) {
+        // Bracket assignment keys use ToPropertyKey too; object wrappers like
+        // new String("x") must address property "x", not an unnameable slot.
+        key = js_to_property_key(key);
+        if (js_check_exception()) return value;
     }
     bool private_internal_property_key = js_is_private_internal_property_key(key);
     if (private_internal_property_key && js_is_proxy(object)) {
