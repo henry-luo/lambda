@@ -118,11 +118,11 @@ The known Math5 targets are:
 
 | Area | Current shape | Desired MathLive-shaped fix |
 |------|---------------|-----------------------------|
-| `box.ls` hbox | computes `render_*`, `*_raw`, `left_right_render_*` maxima | one `hbox()` over ML boxes; explicit delimiter sizing asks delimiter helpers for extents |
-| `math.ls` emit | chooses `render_*` vs `height_raw/depth_raw` vs `height/depth` | always strut from `height/depth`; legacy adapter only while migration is incomplete |
-| `render.ls` line accents | `line_accent_box(...)` and overline simple/tall templates deleted; underline simple/tall templates still carry inline constants | finish porting underline to MathLive `OverunderAtom` VBox construction |
-| `render.ls` wide accents | partial metric path; several hardcoded accent body heights | use stretchy/SVG accent box metrics and VBox, not side-channel total |
-| `atoms/enclose.ls` bbox | `render_total` encodes overlay extent | represent border/overlay as child boxes/styles; public box stays layout h/d |
+| `box.ls` hbox | one-box-field path; no `render_*`, `*_raw`, or `left_right_render_*` producers/readers remain | keep the census guard at zero |
+| `math.ls` emit | root struts emit directly from public `height/depth` | keep root emission as the only CEIL@2 strut stringification site |
+| `render.ls` line accents | `line_accent_box(...)` plus overline/underline simple/tall templates deleted; line accents route through shared MathLive-style VList stacks | keep line-accent coverage green |
+| `render.ls` wide accents | non-SVG wide accent vertical extents and centering derive from base clearance plus glyph metrics; SVG accents use stretchy accent boxes | extend metric coverage only when new accent forms are added |
+| `atoms/enclose.ls` bbox | public box uses layout `height/depth`; no `render_total` producer remains | keep bbox and box-field census gates green |
 | `atoms/array.ls` smallmatrix | `matrix_table_metrics` fallback deleted; dynamic row walk is the only non-equation path | close remaining matrix extended diffs against MathLive's row/cell operation order |
 | `atoms/scripts.ls` large op text limits | `render_large_op_limits_vlist` deleted; text and symbol limits route through `make_limits_stack` | close remaining large-op/script metric drifts in mixed expressions |
 | `atoms/delimiters.ls` arrows/groups | old level-3 fallback helper deleted; arrows/groups now route through `render_extensible_recipe_delim` | finish replacing the remaining recipe constants with a fuller MathLive extensible-symbol derivation when available |
@@ -341,8 +341,12 @@ Work:
   applicable;
 - done: route `\overline` through one shared MathLive `VBox({shift:0})`
   construction for simple, wide, and tall bases;
-- delete the remaining hardcoded underline templates once their bottom-shift
-  formula is derived.
+- done: route `\underline` through the mirrored VList construction
+  `[line, 3*rule gap, base]`, deleting the simple/tall templates.
+- done: collapse rounded accent body heights into `ceil2(precise glyph height)`
+  and derive wide-base vertical extents from base clearance.
+- done: replace the wide non-SVG centering shim with a no-spacing visual-width
+  walk over the accent body's plain glyph text.
 
 Gate:
 

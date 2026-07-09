@@ -1084,16 +1084,14 @@ fn render_glyph_accent(node, context, accent_key) {
          else if (base_box.width <= 0.8)
             render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_height, node.base)
          else
-            render_wide_accent(accent_key, base_box, accent_text, accent_cls, accent_height))
+            render_wide_accent(accent_key, base_box, accent_text, accent_cls, accent_height, node.base))
 }
 
 fn render_line_accent(node, context, accent_key) {
     let base_box = if (node.base != null) render_accent_base(node.base, context)
         else box.text_box("□", css.CMR, "mord")
-    let tall = line_accent_is_tall(base_box)
     if (accent_key == "underline") {
-        if (tall) render_underline_tall(base_box)
-        else render_underline_simple(base_box)
+        render_underline_vlist(base_box, context)
     } else {
         render_overline_vlist(base_box, context)
     }
@@ -1119,63 +1117,24 @@ fn render_overline_vlist(base_box, context) {
         "mord", 0.0, 0.0, stack.height)
 }
 
-fn render_underline_simple(base_box) {
-    let base_elements = box.elements_of(base_box)
+fn render_underline_vlist(base_box, context) {
+    let rule = ctx.rule_thickness(context)
+    let line_box = box.ml_box_full(
+        <span class: "underline-line", style: "height:" ++ util.fmt_em(rule) ++ ";display:inline-block">,
+        rule, rule, 0.0, "ord", 0.0, 0.0, rule)
+    let line_shift = base_box.depth + 3.0 * rule + line_box.height
+    let stack = box.ml_vlist_individual([
+        {box: line_box, shift: line_shift, no_wrap: true},
+        {box: base_box, shift: 0.0}
+    ], "ord")
     let el = <span class: "underline";
-        <span class: css.VLIST_T2;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:0.7em";
-                    <span style: "top:-2.84em";
-                        <span class: css.PSTRUT, style: "height:3em">
-                        <span class: "underline-line", style: "height:0.04em;display:inline-block">
-                    >
-                    <span style: "top:-3em";
-                        <span class: css.PSTRUT, style: "height:3em">
-                        <span style: "height:0.7em;display:inline-block";
-                            for (el in base_elements) el
-                        >
-                    >
-                >
-                <span class: css.VLIST_S; "\u200B">
-            >
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:0.21em">
-            >
-        >
+        stack.element
     >
-    box.ml_box_full(el, 0.7, 0.21, base_box.width, "mord", 0.0, 0.0, 0.7)
-}
-
-fn render_underline_tall(base_box) {
-    let base_elements = box.elements_of(base_box)
-    let el = <span class: "underline";
-        <span class: css.VLIST_T2;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:1.15em";
-                    <span style: "top:-2.29em";
-                        <span class: css.PSTRUT, style: "height:3.15em">
-                        <span class: "underline-line", style: "height:0.04em;display:inline-block">
-                    >
-                    <span style: "top:-3.14em";
-                        <span class: css.PSTRUT, style: "height:3.15em">
-                        <span style: "height:1.84em;display:inline-block";
-                            for (el in base_elements) el
-                        >
-                    >
-                >
-                <span class: css.VLIST_S; "\u200B">
-            >
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:0.89em">
-            >
-        >
-    >
-    box.ml_box_full(el, 1.15, 0.89, base_box.width, "mord", 0.0, 0.0, 1.15)
-}
-
-fn line_accent_is_tall(base_box) {
-    let total = base_box.height + base_box.depth
-    (total > 1.0)
+    // MathLive's underline is the overline stack mirrored below the baseline:
+    // line, 3*rule gap, then the base. The old simple/tall templates encoded
+    // these positions directly.
+    box.ml_box_full(el, stack.height, stack.depth, base_box.width,
+        "mord", 0.0, 0.0, stack.height)
 }
 
 fn render_accent_base(base_node, context) {
@@ -1298,32 +1257,73 @@ fn fmt_accent_margin(v) {
     if (v == 0.0) "0" else fmt_accent_em(v)
 }
 
-fn render_wide_accent(accent_key, base_box, accent_text, accent_cls, accent_height) {
+fn render_wide_accent(accent_key, base_box, accent_text, accent_cls, accent_height, base_node) {
     let base_elements = box.elements_of(base_box)
-    let vheight = accent_height + if (accent_height < 0.7) 0.22 else 0.21
-    let accent_top = if (accent_key == "tilde") -3.56 else -3.21
-    let margin_left = if (accent_key == "dot") 0.79 else 0.68
+    let clearance = if (base_box.height < met.X_HEIGHT) base_box.height else met.X_HEIGHT
+    let accent_h = accent_body_height_precise(accent_key)
+    let vheight = util.ceil_em2(base_box.height - clearance + accent_h)
+    let base_body_h = util.ceil_em2(base_box.height + base_box.depth)
+    let pstrut = accent_pstrut(base_box)
+    let accent_lift = if (accent_key == "tilde") 0.35 else 0.0
+    let accent_top = 0.0 - pstrut - (base_box.height - clearance + accent_lift)
+    let margin_left = wide_accent_margin_left(accent_key, base_node, base_box)
+    let depth_holder = util.ceil_em2(base_box.depth)
     let el = <span class: css.VLIST_T2;
         <span class: css.VLIST_R;
             <span class: css.VLIST, style: "height:" ++ fmt_accent_em(vheight);
-                <span style: "top:-3em";
-                    <span class: css.PSTRUT, style: "height:3em">
-                    <span style: "height:0.73em;display:inline-block";
+                <span style: "top:" ++ fmt_accent_em(0.0 - pstrut);
+                    <span class: css.PSTRUT, style: "height:" ++ fmt_accent_em(pstrut)>
+                    <span style: "height:" ++ fmt_accent_em(base_body_h) ++ ";display:inline-block";
                         for (el in base_elements) el
                     >
                 >
                 <span class: css.CENTER, style: "top:" ++ fmt_accent_em(accent_top) ++ ";margin-left:" ++ fmt_accent_em(margin_left);
-                    <span class: css.PSTRUT, style: "height:3em">
+                    <span class: css.PSTRUT, style: "height:" ++ fmt_accent_em(pstrut)>
                     <span class: accent_cls, style: "height:" ++ fmt_accent_em(accent_height) ++ ";display:inline-block"; accent_text>
                 >
             >
             <span class: css.VLIST_S; "\u200B">
         >
         <span class: css.VLIST_R;
-            <span class: css.VLIST, style: "height:0.09em">
+            <span class: css.VLIST, style: "height:" ++ fmt_accent_em(depth_holder)>
         >
     >
-    accent_box(el, vheight, 0.09, base_box.width)
+    accent_box(el, vheight, depth_holder, base_box.width)
+}
+
+fn accent_pstrut(base_box) {
+    let mf = if (base_box.max_font_size != null) base_box.max_font_size else base_box.height
+    max(1.0, max(mf, base_box.height)) + 2.0
+}
+
+fn wide_accent_margin_left(accent_key, base_node, base_box) {
+    let text_w = accent_visual_text_width(plain_text(base_node))
+    let base_w = if (text_w != null) text_w else base_box.width
+    util.ceil_em2((base_w - accent_glyph_width(accent_key)) / 2.0)
+}
+
+fn accent_visual_text_width(text) {
+    accent_visual_text_width_at(text, 0, 0.0)
+}
+
+fn accent_visual_text_width_at(text, i, acc) {
+    if (i >= len(text)) acc
+    else {
+        let ch = slice(text, i, i + 1)
+        if (ch == " ") accent_visual_text_width_at(text, i + 1, acc)
+        else {
+            let w = accent_visual_char_width(ch)
+            if (w == null) null
+            else accent_visual_text_width_at(text, i + 1, acc + w)
+        }
+    }
+}
+
+fn accent_visual_char_width(ch) {
+    let font = if ((ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z"))
+        "Math-Italic" else "Main-Regular"
+    let m = met.get_character_metrics(ch, font)
+    if (m == null or m.default) null else m.width
 }
 
 fn render_overrightarrow_accent(base_box, context) {
@@ -1666,13 +1666,7 @@ fn accent_display_text(key) {
 }
 
 fn accent_body_height(key) {
-    if (key == "vec") 0.72
-    else if (key == "dot") 0.67
-    else if (key == "ddot") 0.67
-    else if (key == "tilde") 0.67
-    else if (key == "bar") 0.57
-    else if (key == "check") 0.63
-    else 0.7
+    util.ceil_em2(accent_body_height_precise(key))
 }
 
 // Precise accent glyph height in Main-Regular (from MathLive
