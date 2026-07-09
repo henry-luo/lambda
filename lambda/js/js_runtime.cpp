@@ -5053,7 +5053,7 @@ extern "C" Item js_property_get(Item object, Item key) {
 
         // v20: .constructor for number and boolean primitives
         if (str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
-            if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+            if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) {
                 Item num_name = (Item){.item = s2it(heap_create_name("Number", 6))};
                 return js_get_constructor(num_name);
             }
@@ -5061,19 +5061,19 @@ extern "C" Item js_property_get(Item object, Item key) {
                 Item bool_name = (Item){.item = s2it(heap_create_name("Boolean", 7))};
                 return js_get_constructor(bool_name);
             }
-            if (type == LMD_TYPE_DECIMAL && js_is_bigint(object)) {
+            if (js_is_bigint_egress(object)) {
                 Item bigint_name = (Item){.item = s2it(heap_create_name("BigInt", 6))};
                 return js_get_constructor(bigint_name);
             }
         }
         // v83: __proto__ for number, boolean, and BigInt primitives
         if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
-            if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT ||
-                type == LMD_TYPE_BOOL || (type == LMD_TYPE_DECIMAL && js_is_bigint(object))) {
+            if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT ||
+                type == LMD_TYPE_BOOL || js_is_bigint_egress(object)) {
                 return js_get_prototype_of(object);
             }
         }
-        if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT || type == LMD_TYPE_BOOL) {
+        if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT || type == LMD_TYPE_BOOL) {
             Item proto = js_get_prototype_of(object);
             if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
                 // inherited primitive accessors must see the boxed receiver, and
@@ -5083,7 +5083,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
             }
         }
-        if (type == LMD_TYPE_DECIMAL && js_is_bigint(object)) {
+        if (js_is_bigint_egress(object)) {
             Item proto = js_get_prototype_of(object);
             if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
                 // inherited primitive accessors must see the boxed receiver, and
@@ -5107,9 +5107,9 @@ static Item js_arguments_companion_item(Item arguments);
 
 static bool js_is_property_reference_primitive(TypeId type, Item value) {
     return type == LMD_TYPE_STRING || type == LMD_TYPE_BOOL ||
-           type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT ||
+           type == LMD_TYPE_FLOAT ||
            (type == LMD_TYPE_INT && !js_is_symbol(value)) ||
-           (type == LMD_TYPE_DECIMAL && js_is_bigint(value)) ||
+           js_is_bigint_egress(value) ||
            js_is_symbol(value);
 }
 
@@ -9700,7 +9700,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             return (Item){.item = s2it(heap_create_name("[object Object]", 15))};
         if (tt == LMD_TYPE_INT || tt == LMD_TYPE_FLOAT)
             return (Item){.item = s2it(heap_create_name("[object Number]", 15))};
-        if (tt == LMD_TYPE_DECIMAL && js_is_bigint(this_val)) {
+        if (js_is_bigint_egress(this_val)) {
             Item wrapped = js_to_object(this_val);
             Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
             if (js_has_property(wrapped, tag_key)) {
@@ -11289,7 +11289,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             bool pv_own = false;
             Item pv = js_map_get_fast(this_val.map, "__primitiveValue__", 18, &pv_own);
             TypeId pv_type = pv_own ? get_type_id(pv) : LMD_TYPE_NULL;
-            if (pv_own && (pv_type == LMD_TYPE_INT || pv_type == LMD_TYPE_FLOAT || pv_type == LMD_TYPE_INT64)) {
+            if (pv_own && (pv_type == LMD_TYPE_INT || pv_type == LMD_TYPE_FLOAT)) {
                 num_val = pv;
             } else {
                 // this is not a Number object (e.g. String wrapper, plain object)
@@ -11298,7 +11298,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 js_throw_value(js_new_error_with_name(tn, msg));
                 return ItemNull;
             }
-        } else if ((tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_FLOAT && tv_type != LMD_TYPE_INT64)
+        } else if ((tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_FLOAT)
                    || js_key_is_symbol(this_val)) {
             Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
             Item msg = (Item){.item = s2it(heap_create_name("Number.prototype method requires that 'this' be a Number"))};
@@ -11320,14 +11320,15 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         if (tv_type == LMD_TYPE_MAP && js_class_id(this_val) == JS_CLASS_BIGINT) {
             bool pv_own = false;
             Item pv = js_map_get_fast(this_val.map, "__primitiveValue__", 18, &pv_own);
-            if (pv_own && js_is_bigint(pv)) {
-                bigint_val = pv;
+            if (pv_own && js_is_bigint_egress(pv)) {
+                bigint_val = js_is_native_bigint_egress(pv) ? js_native_bigint_to_bigint(pv) : pv;
             } else {
                 return js_throw_type_error("BigInt.prototype method requires that 'this' be a BigInt");
             }
-        } else if (!js_is_bigint(this_val)) {
+        } else if (!js_is_bigint_egress(this_val)) {
             return js_throw_type_error("BigInt.prototype method requires that 'this' be a BigInt");
         }
+        if (js_is_native_bigint_egress(bigint_val)) bigint_val = js_native_bigint_to_bigint(bigint_val);
         const char* mname = "toString";
         if (builtin_id == JS_BUILTIN_BIGINT_VALUE_OF) mname = "valueOf";
         else if (builtin_id == JS_BUILTIN_BIGINT_TO_LOCALE_STRING) mname = "toLocaleString";
@@ -27528,7 +27529,7 @@ extern "C" Item js_new_number_checked(Item arg) {
         return ItemNull;
     }
     // BigInt → Number conversion (ES2020: ToNumeric then BigInt::numberValue)
-    if (get_type_id(arg) == LMD_TYPE_DECIMAL && js_is_bigint(arg)) {
+    if (js_is_bigint_egress(arg)) {
         arg = js_number_function(arg);
     }
     return js_new_number_wrapper(arg);
@@ -27579,14 +27580,17 @@ extern "C" Item js_to_object(Item value) {
         js_wrapper_set_proto(obj, "Symbol", 6);
         return obj;
     }
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) return js_new_number_wrapper(value);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return js_new_number_wrapper(value);
     if (type == LMD_TYPE_STRING) return js_new_string_wrapper(value);
-    if (type == LMD_TYPE_DECIMAL && js_is_bigint(value)) {
+    if (js_is_bigint_egress(value)) {
         // BigInt wrapper object with __primitiveValue__
         Item obj = js_new_object();
         js_class_stamp(obj, JS_CLASS_BIGINT);
         Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-        js_property_set(obj, pv_key, value);
+        // native int64/uint64 egress as BigInt, but wrapper methods require the
+        // canonical mpdec-unlimited representation in [[BigIntData]].
+        Item pv = js_is_native_bigint_egress(value) ? js_native_bigint_to_bigint(value) : value;
+        js_property_set(obj, pv_key, pv);
         js_wrapper_set_proto(obj, "BigInt", 6);
         return obj;
     }
@@ -29208,9 +29212,9 @@ static Item js_get_iterator_impl(Item iterable, bool cache_next) {
         }
     }
 
-    if (tid == LMD_TYPE_BOOL || tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 ||
+    if (tid == LMD_TYPE_BOOL || tid == LMD_TYPE_INT ||
         tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_SYMBOL ||
-        (tid == LMD_TYPE_DECIMAL && js_is_bigint(iterable))) {
+        js_is_bigint_egress(iterable)) {
         Item wrapped = js_to_object(iterable);
         Item iter_factory = js_property_get_str(wrapped, "__sym_1", 7);
         if (js_check_exception()) return ItemNull;
@@ -29231,8 +29235,10 @@ static Item js_get_iterator_impl(Item iterable, bool cache_next) {
     {
         char msg[128];
         const char* type_str = "object";
-        if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT)
+        if (tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT)
             type_str = "number";
+        else if (js_is_bigint_egress(iterable))
+            type_str = "bigint";
         else if (tid == LMD_TYPE_BOOL)
             type_str = "boolean";
         else if (tid == LMD_TYPE_SYMBOL)
@@ -32809,7 +32815,6 @@ static void js_vm_eval_options_init(JsVmEvalOptions* out) {
 static int64_t js_vm_option_to_int64(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_INT) return it2i(value);
-    if (type == LMD_TYPE_INT64) return it2l(value);
     if (type == LMD_TYPE_FLOAT) {
         double d = it2d(value);
         if (isfinite(d)) return (int64_t)d;
@@ -32870,7 +32875,7 @@ static bool js_vm_is_undefined_item(Item value) {
 
 static bool js_vm_is_number_item(Item value) {
     TypeId type = get_type_id(value);
-    return type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT;
+    return type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT;
 }
 
 static bool js_vm_validate_options_object(Item options) {
