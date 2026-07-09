@@ -25,6 +25,8 @@ try {
   console.log("host int64 json:", e.name);
 }
 console.log("host int64 strict:", hostInt64 === 9007199254740993n);
+console.log("bigint radix 64:", (18446744073709551615n).toString(16));
+console.log("bigint asUintN64:", BigInt.asUintN(64, -1n).toString(16));
 
 // Array.from array
 let src = [10, 20, 30];
