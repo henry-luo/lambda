@@ -60,6 +60,65 @@ static DomElement* layout_positioned_containing_block(DomElement* elem) {
     return nullptr;
 }
 
+static bool layout_ua_block_margin_em(uintptr_t tag, float* top_em, float* bottom_em) {
+    if (!top_em || !bottom_em) return false;
+    switch (tag) {
+    case HTM_TAG_P:
+    case HTM_TAG_UL:
+    case HTM_TAG_OL:
+    case HTM_TAG_MENU:
+    case HTM_TAG_PRE:
+    case HTM_TAG_BLOCKQUOTE:
+    case HTM_TAG_DL:
+    case HTM_TAG_FIGURE:
+        *top_em = 1.0f;
+        *bottom_em = 1.0f;
+        return true;
+    case HTM_TAG_H1:
+        *top_em = 0.67f;
+        *bottom_em = 0.67f;
+        return true;
+    case HTM_TAG_H2:
+        *top_em = 0.83f;
+        *bottom_em = 0.83f;
+        return true;
+    case HTM_TAG_H3:
+        *top_em = 1.0f;
+        *bottom_em = 1.0f;
+        return true;
+    case HTM_TAG_H4:
+        *top_em = 1.33f;
+        *bottom_em = 1.33f;
+        return true;
+    case HTM_TAG_H5:
+        *top_em = 1.67f;
+        *bottom_em = 1.67f;
+        return true;
+    case HTM_TAG_H6:
+        *top_em = 2.33f;
+        *bottom_em = 2.33f;
+        return true;
+    default:
+        return false;
+    }
+}
+
+static void layout_reresolve_ua_em_margins(DomElement* dom_elem, float font_size) {
+    if (!dom_elem || !dom_elem->bound || font_size <= 0.0f) return;
+    float top_em = 0.0f;
+    float bottom_em = 0.0f;
+    if (!layout_ua_block_margin_em(dom_elem->tag(), &top_em, &bottom_em)) return;
+
+    // UA em margins are specified values; author font-size changes must update
+    // their used pixels from the element's computed font, not from a stale pass.
+    if (dom_elem->bound->margin.top_specificity == -1) {
+        dom_elem->bound->margin.top = top_em * font_size;
+    }
+    if (dom_elem->bound->margin.bottom_specificity == -1) {
+        dom_elem->bound->margin.bottom = bottom_em * font_size;
+    }
+}
+
 static float layout_scroll_document_coord(DomElement* elem, bool x_axis) {
     if (!elem) return 0.0f;
     float value = x_axis ? elem->x : elem->y;
@@ -838,13 +897,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             }
 
             // Lambda CSS: use the full implementation from resolve_css_style.cpp
-            // Save the UA-assumed font-size before CSS cascade. For elements with
-            // UA-default font-size (headings), this is their computed font-size.
-            // For others (<p>, <ul>, etc.), they inherit the parent's font-size.
-            float ua_font_size = (dom_elem->font && dom_elem->font->font_size > 0)
-                                 ? dom_elem->font->font_size
-                                 : lycon->font.style->font_size;
-
             resolve_css_styles(dom_elem, lycon);
 
             // CSS Display: The display property is resolved separately (not in the
@@ -870,32 +922,12 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 css_transition_resolve(dom_elem, lycon);
             }
 
-            // CSS 2.1 §15.2: When CSS changes an element's font-size, UA-default
-            // margins specified in 'em' units (specificity -1) must be re-resolved
-            // using the element's computed font-size, not the inherited parent font-size.
-            // Only applies to elements whose UA stylesheet uses em-based margins:
-            // <p>, <ul>, <ol>, <h1>-<h6>, <pre>, <blockquote>, <dl>, <fieldset>
-            // NOT <body> (which has absolute 8px margins).
-            if (dom_elem->bound && ua_font_size > 0 && dom_elem->is_element()) {
-                uintptr_t tag = dom_elem->tag();
-                bool has_em_margins = (tag == HTM_TAG_P || tag == HTM_TAG_UL || tag == HTM_TAG_OL ||
-                    tag == HTM_TAG_PRE || tag == HTM_TAG_BLOCKQUOTE || tag == HTM_TAG_DL ||
-                    (tag >= HTM_TAG_H1 && tag <= HTM_TAG_H6));
-                if (has_em_margins) {
-                    ViewSpan* span = lam::view_require_element(static_cast<View*>(dom_elem));
-                    float css_font_size = (span->font && span->font->font_size > 0)
-                                          ? span->font->font_size
-                                          : lycon->font.style->font_size;
-                    if (css_font_size != ua_font_size) {
-                        float ratio = css_font_size / ua_font_size;
-                        if (dom_elem->bound->margin.top_specificity == -1) {
-                            dom_elem->bound->margin.top *= ratio;
-                        }
-                        if (dom_elem->bound->margin.bottom_specificity == -1) {
-                            dom_elem->bound->margin.bottom *= ratio;
-                        }
-                    }
-                }
+            if (dom_elem->bound) {
+                ViewSpan* span = lam::view_require_element(static_cast<View*>(dom_elem));
+                float css_font_size = (span->font && span->font->font_size > 0)
+                                      ? span->font->font_size
+                                      : lycon->font.style->font_size;
+                layout_reresolve_ua_em_margins(dom_elem, css_font_size);
             }
 
             // Mark as resolved for this layout pass

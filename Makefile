@@ -2222,7 +2222,7 @@ capture-layout:
 		echo "  make capture-layout test=table_007 force=1"; \
 		echo "  make capture-layout suite=baseline platform=linux force=1"; \
 		echo ""; \
-		echo "Available suites: basic, baseline, css2.1, flex, grid, yoga, web-tmpl, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text, wpt-css-lists"; \
+		echo "Available suites: antd, basic, baseline, bootstrap, css2.1, flex, grid, tailwind, yoga, web-tmpl, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text, wpt-css-lists"; \
 		echo "Available platforms: linux, darwin, win32"; \
 		echo ""; \
 		exit 1; \
@@ -2250,7 +2250,7 @@ capture-layout:
 	            *) \
 	                TEST_FILE=""; \
 	                FOUND_SUITE=""; \
-	                for dir in basic baseline css2.1 flex grid yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists; do \
+	                for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists; do \
 	                    if [ -f "data/$$dir/$${TEST_VAR}.htm" ]; then \
 	                        TEST_FILE="data/$$dir/$${TEST_VAR}.htm"; \
 	                        FOUND_SUITE="$$dir"; \
@@ -2280,7 +2280,7 @@ capture-layout:
 	                fi; \
 	                if [ -z "$$TEST_FILE" ]; then \
 	                    echo "❌ Error: Test file '$$TEST_VAR' not found in any suite directory"; \
-	                    echo "   Searched in: basic, baseline, css2.1, flex, grid, yoga, web-tmpl, wpt-css-*"; \
+	                    echo "   Searched in: antd, basic, baseline, bootstrap, css2.1, flex, grid, tailwind, yoga, web-tmpl, wpt-css-*"; \
 	                    exit 1; \
 	                fi; \
 	                echo "📄 Found test in suite: $$FOUND_SUITE" \
@@ -2333,7 +2333,7 @@ test-layout:
 				*.html|*.htm) TEST_FILE="$$TEST_VAR" ;; \
 				*) \
 					TEST_FILE=""; \
-					for dir in basic baseline css2.1 flex grid yoga form wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists wpt-css-inline; do \
+					for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga form wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists wpt-css-inline; do \
 						if [ -f "test/layout/data/$$dir/$${TEST_VAR}.htm" ]; then \
 							TEST_FILE="$${TEST_VAR}.htm"; \
 							break; \
