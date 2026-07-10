@@ -344,6 +344,7 @@ static void hashmap_data_set(HashMapData* hd, Item key, Item value) {
 
 // get value by key (returns ItemNull if not found)
 static Item hashmap_data_get(HashMapData* hd, Item key) {
+    if (!hd) return ItemNull;
     HashMapEntry probe = { .key = key };
     const HashMapEntry* found = (const HashMapEntry*)hashmap_get(hd->table, &probe);
     if (found) return found->value;
@@ -361,11 +362,13 @@ static Item hashmap_vmap_get(void* data, Item key) {
 
 static void hashmap_vmap_set(void* data, Item key, Item value) {
     HashMapData* hd = (HashMapData*)data;
+    if (!hd) return;
     hashmap_data_set(hd, key, value);
 }
 
 static int64_t hashmap_vmap_count(void* data) {
     HashMapData* hd = (HashMapData*)data;
+    if (!hd) return 0;
     return hd->count;
 }
 
@@ -374,6 +377,7 @@ static int64_t hashmap_vmap_count(void* data) {
 // other keys → synthetic symbol "__v<index>"
 static SymbolKeyList* hashmap_vmap_keys(void* data) {
     HashMapData* hd = (HashMapData*)data;
+    if (!hd) return symbol_key_list_new(4);
     SymbolKeyList* keys = symbol_key_list_new(hd->count > 0 ? hd->count : 4);
     for (int i = 0; i < hd->key_order->length; i++) {
         Item key = *(Item*)&hd->key_order->data[i];
@@ -403,12 +407,14 @@ static SymbolKeyList* hashmap_vmap_keys(void* data) {
 
 static Item hashmap_vmap_key_at(void* data, int64_t index) {
     HashMapData* hd = (HashMapData*)data;
+    if (!hd) return ItemNull;
     if (index < 0 || index >= hd->key_order->length) return ItemNull;
     return *(Item*)&hd->key_order->data[index];
 }
 
 static Item hashmap_vmap_value_at(void* data, int64_t index) {
     HashMapData* hd = (HashMapData*)data;
+    if (!hd) return ItemNull;
     if (index < 0 || index >= hd->key_order->length) return ItemNull;
     Item key = *(Item*)&hd->key_order->data[index];
     return hashmap_data_get(hd, key);
@@ -416,6 +422,7 @@ static Item hashmap_vmap_value_at(void* data, int64_t index) {
 
 static void hashmap_vmap_destroy(void* data) {
     HashMapData* hd = (HashMapData*)data;
+    if (!hd) return;
     hashmap_data_free(hd);
 }
 
@@ -437,9 +444,17 @@ static VMapVtable hashmap_vtable = {
 static VMap* vmap_alloc() {
     VMap* vm = (VMap*)heap_calloc(sizeof(VMap), LMD_TYPE_VMAP);
     vm->type_id = LMD_TYPE_VMAP;
-    vm->data = hashmap_data_new();
+    vm->data = nullptr;
     vm->vtable = &hashmap_vtable;
     return vm;
+}
+
+static bool vmap_ensure_hashmap_data(VMap* vm) {
+    if (!vm) return false;
+    if (vm->data) return true;
+    // Host-branded VMaps are projection shells; only real map mutation needs backing storage.
+    vm->data = hashmap_data_new();
+    return vm->data != nullptr;
 }
 
 // create an empty VMap
@@ -469,6 +484,7 @@ extern "C" Item vmap_from_array(Item array_item) {
         return ItemNull;
     }
     VMap* vm = vmap_alloc();
+    if (!vmap_ensure_hashmap_data(vm)) return ItemNull;
     HashMapData* hd = (HashMapData*)vm->data;
 
     for (int64_t i = 0; i < len; i += 2) {
@@ -499,6 +515,10 @@ extern "C" void vmap_set(Item vmap_item, Item key, Item value) {
     if (vmap_host_set_by_item(vm, key, value, &host_result)) {
         return;
     }
+    if (!vmap_ensure_hashmap_data(vm)) {
+        log_error("vmap_set: failed to allocate backing hashmap");
+        return;
+    }
     vm->vtable->set(vm->data, key, value);
 }
 
@@ -509,10 +529,11 @@ extern "C" void vmap_set(Item vmap_item, Item key, Item value) {
 // get value from VMap by string key (used by item_attr dispatch)
 // handles both regular string keys and synthetic "__v<N>" keys
 Item vmap_get_by_str(VMap* vm, const char* key) {
-    if (!vm || !vm->data || !key) return ItemNull;
+    if (!vm || !key) return ItemNull;
     Item host_result = ItemNull;
     Item host_key = {.item = s2it(heap_create_name(key))};
     if (vmap_host_get_by_item(vm, host_key, &host_result)) return host_result;
+    if (!vm->data) return ItemNull;
 
     HashMapData* hd = (HashMapData*)vm->data;
 
@@ -534,9 +555,10 @@ Item vmap_get_by_str(VMap* vm, const char* key) {
 
 // get value from VMap by Item key (used by map_get / fn_member dispatch)
 Item vmap_get_by_item(VMap* vm, Item key) {
-    if (!vm || !vm->data) return ItemNull;
+    if (!vm) return ItemNull;
     Item host_result = ItemNull;
     if (vmap_host_get_by_item(vm, key, &host_result)) return host_result;
+    if (!vm->data || !vm->vtable) return ItemNull;
     return vm->vtable->get(vm->data, key);
 }
 

@@ -11,6 +11,7 @@
 #include "../../../radiant/form_control.hpp"
 #include "../../../radiant/text_control.hpp"
 #include "../../../lib/log.h"
+#include "../../../lib/hashmap.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
@@ -184,6 +185,12 @@ struct RadiantDomWrapperCacheEntry {
     DomNode* node;
     DomDocument* owner_doc;
     uint64_t item;
+    RadiantDomWrapperCacheEntry* next_free;
+};
+
+struct RadiantDomWrapperCacheIndexEntry {
+    DomNode* node;
+    RadiantDomWrapperCacheEntry* entry;
 };
 
 struct RadiantDomWrapperCacheChunk {
@@ -194,8 +201,34 @@ struct RadiantDomWrapperCacheChunk {
 
 static __thread RadiantDomWrapperCacheChunk* s_radiant_dom_wrapper_cache_head = nullptr;
 static __thread RadiantDomWrapperCacheChunk* s_radiant_dom_wrapper_cache_tail = nullptr;
+static __thread HashMap* s_radiant_dom_wrapper_index = nullptr;
+static __thread RadiantDomWrapperCacheEntry* s_radiant_dom_wrapper_free = nullptr;
 static __thread bool s_radiant_dom_cache_owner_set = false;
 static __thread pthread_t s_radiant_dom_cache_owner;
+
+static void* radiant_dom_cache_malloc(size_t size) {
+    return mem_alloc(size, MEM_CAT_JS_RUNTIME);
+}
+
+static void* radiant_dom_cache_realloc(void* ptr, size_t size) {
+    return mem_realloc(ptr, size, MEM_CAT_JS_RUNTIME);
+}
+
+static void radiant_dom_cache_free(void* ptr) {
+    mem_free(ptr);
+}
+
+static uint64_t radiant_dom_cache_index_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const RadiantDomWrapperCacheIndexEntry* entry = (const RadiantDomWrapperCacheIndexEntry*)item;
+    return hashmap_sip(&entry->node, sizeof(entry->node), seed0, seed1);
+}
+
+static int radiant_dom_cache_index_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const RadiantDomWrapperCacheIndexEntry* ea = (const RadiantDomWrapperCacheIndexEntry*)a;
+    const RadiantDomWrapperCacheIndexEntry* eb = (const RadiantDomWrapperCacheIndexEntry*)b;
+    return ea->node == eb->node ? 0 : 1;
+}
 
 static void radiant_dom_cache_check_owner(const char* op) {
     pthread_t current = pthread_self();
@@ -217,6 +250,24 @@ static void radiant_dom_cache_check_owner(const char* op) {
 static bool radiant_dom_is_node_host_type(const void* host_type) {
     return host_type == (const void*)&s_radiant_dom_vmap_type_marker ||
         host_type == radiant_dom_node_host_type();
+}
+
+static HashMap* radiant_dom_wrapper_index() {
+    if (!s_radiant_dom_wrapper_index) {
+        s_radiant_dom_wrapper_index = hashmap_new_with_allocator(
+            radiant_dom_cache_malloc,
+            radiant_dom_cache_realloc,
+            radiant_dom_cache_free,
+            sizeof(RadiantDomWrapperCacheIndexEntry),
+            4096,
+            0x726164646f6d3032ULL,
+            0x7772617063616368ULL,
+            radiant_dom_cache_index_hash,
+            radiant_dom_cache_index_compare,
+            nullptr,
+            nullptr);
+    }
+    return s_radiant_dom_wrapper_index;
 }
 
 static Item radiant_dom_string_item(const char* value) {
@@ -1072,12 +1123,13 @@ static void radiant_dom_selector_group_collect_all(SelectorMatcher* matcher,
 
 static Item radiant_dom_lookup_wrapper(DomNode* node) {
     radiant_dom_cache_check_owner("lookup_wrapper");
-    for (RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_head; chunk; chunk = chunk->next) {
-        for (int i = 0; i < chunk->count; i++) {
-            if (chunk->entries[i].node == node) {
-                return (Item){.item = chunk->entries[i].item};
-            }
-        }
+    HashMap* index = s_radiant_dom_wrapper_index;
+    if (!index || !node) return ItemNull;
+    RadiantDomWrapperCacheIndexEntry probe = {.node = node, .entry = nullptr};
+    const RadiantDomWrapperCacheIndexEntry* found =
+        (const RadiantDomWrapperCacheIndexEntry*)hashmap_get(index, &probe);
+    if (found && found->entry && found->entry->item != 0) {
+        return (Item){.item = found->entry->item};
     }
     return ItemNull;
 }
@@ -1101,22 +1153,40 @@ static RadiantDomWrapperCacheChunk* radiant_dom_alloc_wrapper_cache_chunk() {
 static void radiant_dom_cache_wrapper(DomNode* node, Item wrapper) {
     radiant_dom_cache_check_owner("cache_wrapper");
     if (!node || wrapper.item == ITEM_NULL) return;
-    RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_tail;
-    if (!chunk || chunk->count >= RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE) {
-        chunk = radiant_dom_alloc_wrapper_cache_chunk();
-        if (!chunk) return;
+    RadiantDomWrapperCacheEntry* entry = s_radiant_dom_wrapper_free;
+    if (entry) {
+        s_radiant_dom_wrapper_free = entry->next_free;
+    } else {
+        RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_tail;
+        if (!chunk || chunk->count >= RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE) {
+            chunk = radiant_dom_alloc_wrapper_cache_chunk();
+            if (!chunk) return;
+        }
+        entry = &chunk->entries[chunk->count++];
     }
-    int index = chunk->count++;
-    chunk->entries[index].node = node;
-    chunk->entries[index].owner_doc = radiant_dom_node_document(node, true);
-    chunk->entries[index].item = wrapper.item;
-    radiant_host_api->gc->register_root(&chunk->entries[index].item);
+    entry->node = node;
+    entry->owner_doc = radiant_dom_node_document(node, true);
+    entry->item = wrapper.item;
+    entry->next_free = nullptr;
+
+    HashMap* index = radiant_dom_wrapper_index();
+    if (index) {
+        // The hash table stores pointers to stable chunk slots; GC root slots
+        // never move when the index grows or rehashes.
+        RadiantDomWrapperCacheIndexEntry index_entry = {.node = node, .entry = entry};
+        hashmap_set(index, &index_entry);
+    }
+    radiant_host_api->gc->register_root(&entry->item);
 }
 
 static void radiant_dom_clear_cache_entry(RadiantDomWrapperCacheEntry* entry) {
     radiant_dom_cache_check_owner("clear_cache_entry");
     if (!entry || entry->item == 0) return;
     DomNode* node = entry->node;
+    if (s_radiant_dom_wrapper_index && node) {
+        RadiantDomWrapperCacheIndexEntry probe = {.node = node, .entry = nullptr};
+        hashmap_delete(s_radiant_dom_wrapper_index, &probe);
+    }
     if (node && node->is_element()) {
         form_control_release_prop(node->as_element());
     }
@@ -1135,6 +1205,8 @@ static void radiant_dom_clear_cache_entry(RadiantDomWrapperCacheEntry* entry) {
     entry->node = nullptr;
     entry->owner_doc = nullptr;
     entry->item = 0;
+    entry->next_free = s_radiant_dom_wrapper_free;
+    s_radiant_dom_wrapper_free = entry;
 }
 
 RADIANT_C_API void radiant_dom_invalidate_document(DomDocument* doc) {
@@ -1161,8 +1233,13 @@ RADIANT_C_API void radiant_dom_reset_wrapper_cache(void) {
         mem_free(chunk);
         chunk = next;
     }
+    if (s_radiant_dom_wrapper_index) {
+        hashmap_free(s_radiant_dom_wrapper_index);
+    }
     s_radiant_dom_wrapper_cache_head = nullptr;
     s_radiant_dom_wrapper_cache_tail = nullptr;
+    s_radiant_dom_wrapper_index = nullptr;
+    s_radiant_dom_wrapper_free = nullptr;
 }
 
 RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem) {

@@ -34,6 +34,7 @@
 extern __thread EvalContext* context;
 
 Item vmap_get_by_item(VMap* vm, Item key);
+extern "C" void vmap_set(Item vmap_item, Item key, Item value);
 
 // create_match_map helper for find() (implemented in re2_wrapper.cpp)
 extern "C" Map* create_match_map_ext(const char* match_str, size_t match_len, int64_t index);
@@ -6380,12 +6381,9 @@ void fn_map_set(Item map_item, Item key, Item value) {
 
     // VMap: in-place mutation via vtable
     if (map_type_id == LMD_TYPE_VMAP) {
-        VMap* vm = map_item.vmap;
-        if (!vm || !vm->vtable) {
-            log_error("fn_map_set: null vmap or vtable");
-            return;
-        }
-        vm->vtable->set(vm->data, key, value);
+        // VMap backing storage is lazy for host wrappers; route all writes
+        // through the public setter so ordinary maps allocate on first write.
+        vmap_set(map_item, key, value);
         return;
     }
 

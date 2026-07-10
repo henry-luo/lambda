@@ -354,6 +354,8 @@ static void init_sys_func_maps() {
     dynamic_count = jube_sys_func_record_count;
 #endif
 
+    // Release logging strips log_info arguments, so keep this counter observed under -Werror.
+    (void)dynamic_count;
     log_info("sys_func maps initialized: %zu static entries, %d Jube entries, %zu unique names",
              count, dynamic_count, hashmap_count(sys_func_name_set));
 }

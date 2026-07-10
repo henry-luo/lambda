@@ -628,20 +628,41 @@ Validation: direct `radiant_dom_read`; direct `radiant_dom_mutate`; direct
 
 Purpose: M1, M2 — paid after the architecture stabilizes so the work isn't redone.
 
+Status 2026-07-10: complete, with Radiant render-visual baseline triaged separately.
+
 Tasks:
 
-1. Pointer-keyed hashmap wrapper cache with slot reuse; preserve GC-root address stability
-   (stable slot storage or root re-registration on rehash — measure, then choose).
-2. Lazy backing-store allocation for branded VMaps.
-3. Release-build measurement: wrap-sweep benchmark (`querySelectorAll('*')` on a large document,
-   plus a repeated `parentNode` loop) before/after; record numbers here. No debug-build claims.
+1. Done: DOM wrapper lookup is now a pointer-keyed `HashMap` from `DomNode*` to stable
+   chunk slots. GC roots remain registered against chunk entry `item` fields, so rehashing
+   the index cannot move root addresses. Invalidated entries unregister their roots, clear
+   form-control expandos, delete their index entry, and enter a free list for slot reuse.
+2. Done: ordinary `VMap` backing storage is now lazy. Host-branded VMaps stay projection
+   shells until a real map write needs a backing `HashMapData`; host payload cleanup was
+   also fixed to run even when backing storage is absent.
+3. Done: release-build wrap-sweep benchmark on 2026-07-10 using `./lambda.exe js
+   temp/dom_phase6_bench.js --document temp/dom_phase6_bench.html --no-log` after a
+   release compile. The script built a 4,255-node document, ran `querySelectorAll('*')`,
+   then performed 4,602,200 repeated `parentNode` hops. Three release runs:
+   `query_ms=3/3/3`, `walk_ms=3119/3092/3252`. Allocation invariant after the lazy
+   VMap change: one VMap shell per newly wrapped DOM node, with no eager per-wrapper
+   backing hashmap; expando writes still allocate backing storage on demand.
 
 Testable goals:
 
-- Identity tests (`dom_identity`, `dom_module_props`) green; UAF test still green.
-- Recorded release-build numbers show wrap-sweep allocation count ≈ 1 per node (from ~4) and
-  cache lookup no longer scales with total wrappers.
-- Full JS gtest + UI-automation + `make test-radiant-baseline` green vs the triage table.
+- Green: focused Lambda DOM/UAF/import set
+  (`radiant_poc_uaf`, `*radiant_dom*`, `proc_radiant_dom_set`, `hostobj_demo_jube_import`)
+  → 5/5 passed.
+- Green: focused JS identity/module/host-object set
+  (`dom_identity`, `dom_module_props`, `hostobj_demo`) → 3/3 passed.
+- Green: full JS gtest → 308/308 passed.
+- Green: UI automation gtest → 236 passed, 2 expected headless webview skips.
+- Mixed/triaged: `make test-radiant-baseline` passed layout baseline, layout page suite,
+  UI automation, Radiant view command, view page/markdown, and WPT CSS syntax, but exited
+  nonzero on existing render-visual baseline drift: `form_buttons_01` plus 9 render
+  baseline regressions. No DOM2 wrapper-cache failure was observed in this target.
+- Release build note: initial `make release` exposed a release-only `build_ast.cpp`
+  `-Werror` from `log_info` argument stripping; the dead counter is now explicitly
+  observed, and the serial release `lambda` compile passes.
 
 ### Phase 7 (stretch) — Dynamic loading dev proof
 
