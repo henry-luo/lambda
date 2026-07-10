@@ -4148,34 +4148,6 @@ extern "C" Item js_property_get(Item object, Item key) {
     } else if (type == LMD_TYPE_VMAP && js_host_object_type(object)) {
         Item out = ItemNull;
         if (js_host_object_get_property(object, key, &out)) return out;
-    } else if (type == LMD_TYPE_VMAP &&
-               js_is_document_proxy(object)) {
-        // Document and foreign-document proxies are native VMaps; preserve the
-        // existing active-document swap semantics through the document bridge.
-        Item out = ItemNull;
-        if (js_get_foreign_doc(object) &&
-            radiant_dom_foreign_document_get_property(object, key, &out)) {
-            return out;
-        }
-        return js_document_proxy_get_property(key);
-    } else if (type == LMD_TYPE_VMAP &&
-               (js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
-        // Host DOM resources are VMaps; Range/Selection share the DOM property
-        // dispatcher even though they are not node-backed objects.
-        return js_dom_get_property(object, key);
-    } else if (type == LMD_TYPE_VMAP && js_is_inline_style_item(object)) {
-        // Inline style is a host VMap whose property surface is owned by DOM.
-        return js_dom_get_property(object, key);
-    } else if (type == LMD_TYPE_VMAP && js_is_computed_style_item(object)) {
-        // Computed style is a read-only host VMap with its own property getter.
-        return js_computed_style_get_property(object, key);
-    } else if (type == LMD_TYPE_VMAP &&
-               (js_is_stylesheet(object) || js_is_css_rule(object) ||
-                js_is_rule_style_decl(object))) {
-        // CSSOM resources are native VMaps, so they bypass MapKind dispatch.
-        if (js_is_stylesheet(object)) return js_cssom_stylesheet_get_property(object, key);
-        if (js_is_css_rule(object)) return js_cssom_rule_get_property(object, key);
-        return js_cssom_rule_decl_get_property(object, key);
     } else if (type == LMD_TYPE_ELEMENT) {
         return elmt_get(object.element, key);
     } else if (type == LMD_TYPE_ARRAY) {
@@ -6607,48 +6579,6 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             JS_PROPERTY_SET_BRANCH("top_jube_host_vmap");
             return out;
         }
-    }
-
-    if (type == LMD_TYPE_VMAP &&
-        js_is_document_proxy(object)) {
-        JS_PROPERTY_SET_BRANCH("top_document_proxy_vmap");
-        Item out = ItemNull;
-        if (js_get_foreign_doc(object) &&
-            radiant_dom_foreign_document_set_property(object, key, value, &out)) {
-            return out;
-        }
-        return js_document_proxy_set_property(key, value);
-    }
-
-    if (type == LMD_TYPE_VMAP &&
-        (js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
-        JS_PROPERTY_SET_BRANCH("top_dom_vmap");
-        // Host DOM resources are VMaps; Range/Selection writes must stay on
-        // the native dispatcher instead of falling through as ordinary VMaps.
-        return js_dom_set_property(object, key, value);
-    }
-
-    if (type == LMD_TYPE_VMAP && js_is_inline_style_item(object)) {
-        JS_PROPERTY_SET_BRANCH("top_inline_style_vmap");
-        // Inline style is a host VMap; writes must mutate the owning element's
-        // CSS declaration instead of creating ordinary VMap fields.
-        return js_dom_set_property(object, key, value);
-    }
-
-    if (type == LMD_TYPE_VMAP && js_is_computed_style_item(object)) {
-        JS_PROPERTY_SET_BRANCH("top_computed_style_vmap");
-        return value;
-    }
-
-    if (type == LMD_TYPE_VMAP &&
-        (js_is_css_rule(object) || js_is_rule_style_decl(object) ||
-         js_is_stylesheet(object))) {
-        JS_PROPERTY_SET_BRANCH("top_cssom_vmap");
-        // CSSOM resources are VMaps; writes must stay on the CSSOM bridge
-        // rather than falling through as ordinary VMap fields.
-        if (js_is_css_rule(object)) return js_cssom_rule_set_property(object, key, value);
-        if (js_is_rule_style_decl(object)) return js_cssom_rule_decl_set_property(object, key, value);
-        return value;
     }
 
     // Typed array: ta[i] = val (use map_kind for fast check)
