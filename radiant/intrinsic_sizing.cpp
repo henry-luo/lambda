@@ -824,6 +824,94 @@ static bool node_is_table_cell_like(DomNode* node) {
     return false;
 }
 
+static bool intrinsic_element_matches_display(DomElement* elem, CssEnum display_value) {
+    if (!elem) return false;
+    if (elem->display.inner == display_value || elem->display.outer == display_value) {
+        return true;
+    }
+    if (elem->specified_style) {
+        CssDeclaration* display_decl = style_tree_get_declaration(
+            elem->specified_style, CSS_PROPERTY_DISPLAY);
+        if (display_decl && display_decl->value &&
+            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            display_decl->value->data.keyword == display_value) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool intrinsic_is_table_box(DomElement* elem) {
+    if (!elem) return false;
+    return elem->tag() == HTM_TAG_TABLE ||
+           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE) ||
+           intrinsic_element_matches_display(elem, CSS_VALUE_INLINE_TABLE);
+}
+
+static bool intrinsic_is_table_row_group_box(DomElement* elem) {
+    if (!elem) return false;
+    uintptr_t tag = elem->tag();
+    return tag == HTM_TAG_TBODY || tag == HTM_TAG_THEAD || tag == HTM_TAG_TFOOT ||
+           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_ROW_GROUP) ||
+           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_HEADER_GROUP) ||
+           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_FOOTER_GROUP);
+}
+
+static bool intrinsic_is_table_row_box(DomElement* elem) {
+    if (!elem) return false;
+    return elem->tag() == HTM_TAG_TR ||
+           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_ROW);
+}
+
+static bool intrinsic_should_skip_height_child(DomElement* elem) {
+    if (!elem) return true;
+    if (elem->display.outer == CSS_VALUE_NONE || elem->display.inner == CSS_VALUE_NONE) {
+        return true;
+    }
+    ViewBlock* block = lam::view_as_block(elem);
+    if (block && block->position &&
+        (block->position->position == CSS_VALUE_ABSOLUTE ||
+         block->position->position == CSS_VALUE_FIXED ||
+         element_has_float(block))) {
+        return true;
+    }
+    return false;
+}
+
+static float intrinsic_table_structure_height(LayoutContext* lycon, DomElement* elem, float width) {
+    if (!elem) return 0.0f;
+
+    if (intrinsic_is_table_row_box(elem)) {
+        float row_height = 0.0f;
+        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+            if (!child->is_element()) continue;
+            DomElement* child_elem = child->as_element();
+            if (intrinsic_should_skip_height_child(child_elem)) continue;
+            float child_height = calculate_max_content_height(lycon, child, width);
+            if (child_height > row_height) row_height = child_height;
+        }
+        return row_height;
+    }
+
+    float total_height = 0.0f;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* child_elem = child->as_element();
+        if (intrinsic_should_skip_height_child(child_elem)) continue;
+
+        // Table row groups stack rows, but each row's height is the maximum of
+        // its cells; generic block stacking would double-count sibling cells.
+        if (intrinsic_is_table_row_box(child_elem) ||
+            intrinsic_is_table_row_group_box(child_elem) ||
+            intrinsic_is_table_box(child_elem)) {
+            total_height += intrinsic_table_structure_height(lycon, child_elem, width);
+        } else {
+            total_height += calculate_max_content_height(lycon, child, width);
+        }
+    }
+    return total_height;
+}
+
 static bool intrinsic_text_ends_with_whitespace(const char* text) {
     if (!text) return false;
     size_t len = strlen(text);
@@ -5862,6 +5950,10 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         block_flow_pad_top <= 0.0f && block_flow_border_top <= 0.0f &&
         !block_context_establishes_bfc(view);
 
+    bool is_table_structure_box = intrinsic_is_table_box(element) ||
+        intrinsic_is_table_row_group_box(element) ||
+        intrinsic_is_table_row_box(element);
+
     // For multi-column grids, calculate height based on rows
     if (is_form_control_replaced) {
         // Replaced form control: skip children entirely; padding/border added below.
@@ -5869,6 +5961,10 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         // Empty auto-height containers have zero content height. Padding and border
         // are still added below, but line-height must not synthesize a line.
         height = 0.0f;
+    } else if (is_table_structure_box) {
+        // CSS tables size rows from the max cell height; block stacking would sum
+        // sibling cells and overstate intrinsic table height.
+        height = intrinsic_table_structure_height(lycon, element, width);
     } else if (is_grid_container && grid_column_count > 1) {
         // Collect child heights
         int child_count = 0;

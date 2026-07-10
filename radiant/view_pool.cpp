@@ -2530,12 +2530,24 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     strbuf_append_char_n(buf, ' ', indent + 4);
 
     // Check for grid/flex container by display.inner FIRST (overrides view_type)
-    // This ensures inline-flex and inline-grid report correctly as "flex"/"grid"
     const char* display = "block";
+    bool display_outer_is_inline = block->display.outer == CSS_VALUE_INLINE ||
+        block->display.outer == CSS_VALUE_INLINE_BLOCK;
+    bool display_is_blockified_flex_item = false;
+    if (display_outer_is_inline && block->parent && block->parent->is_element()) {
+        DomElement* parent_elem = block->parent->as_element();
+        display_is_blockified_flex_item = parent_elem &&
+            (parent_elem->display.inner == CSS_VALUE_FLEX ||
+             parent_elem->display.inner == CSS_VALUE_GRID);
+    }
     if (block->display.inner == CSS_VALUE_GRID) {
-        display = "grid";  // both grid and inline-grid report as "grid"
+        // Flex/grid items are blockified, while standalone legacy inline grid/flex
+        // values keep their inline outer display in CSSOM serialization.
+        display = (display_outer_is_inline && !display_is_blockified_flex_item) ? "inline-grid" : "grid";
     } else if (block->display.inner == CSS_VALUE_FLEX || (block->embed && block->embed->flex)) {
-        display = "flex";  // both flex and inline-flex report as "flex"
+        // Flex/grid items are blockified, while standalone legacy inline grid/flex
+        // values keep their inline outer display in CSSOM serialization.
+        display = (display_outer_is_inline && !display_is_blockified_flex_item) ? "inline-flex" : "flex";
     } else if (block->view_type == RDT_VIEW_INLINE_BLOCK) display = "inline-block";
     else if (block->view_type == RDT_VIEW_LIST_ITEM) display = "list-item";
     else if (block->view_type == RDT_VIEW_TABLE) {
