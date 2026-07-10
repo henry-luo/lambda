@@ -668,11 +668,47 @@ Testable goals:
 
 Purpose: validate that Phases 2–4 actually decoupled the module.
 
-Tasks: build `hostobj_demo` as a `.dylib` in a dev configuration; `dlopen` + manifest-less load
-via the single entry symbol; run its JS/Lambda tests against the dynamically loaded copy.
+Status 2026-07-10: complete as a dev proof. Shipping dynamic loading, discovery, manifests, and
+Windows loader support remain deferred.
 
-Testable goals: same `hostobj_demo` tests pass statically and dynamically. (Shipping dynamic
-loading, discovery, manifests remain deferred per the parent design.)
+Tasks:
+
+1. Done: `hostobj_demo` now exports a manifest-less single entry symbol, `jube_module`, returning
+   its `JubeModuleDef`. A module-specific alias, `hostobj_demo_jube_module`, is also exported for
+   explicit local probes; static registration is unchanged.
+2. Done: the Jube registry has an opt-in dev loader, `jube_load_dynamic_module(path, entry_symbol)`,
+   using `dlopen`/`dlsym` on non-Windows builds. Dynamic modules register through the same descriptor
+   validation and init path as static modules. Loaded handles stay open because descriptor, type,
+   function, and namespace pointers are borrowed from the image.
+3. Done: `jube_register_builtin_modules()` can skip the static demo module with
+   `JUBE_HOSTOBJ_DEMO_DYNAMIC_ONLY=1`, then load a dynamic descriptor from
+   `JUBE_DYNAMIC_MODULE`. `JUBE_DYNAMIC_ENTRY` optionally overrides the default `jube_module`
+   symbol.
+
+Validation:
+
+- Static JS direct: `./lambda.exe js test/js/hostobj_demo.js --no-log` passed.
+- Static Lambda direct: `./lambda.exe test/lambda/hostobj_demo_jube_import.ls` returned
+  `{ answer: 42, sum: 12 }`.
+- Dynamic dylib build:
+  `g++ -std=c++17 -fPIC -dynamiclib -undefined dynamic_lookup -I. -Ilambda -o
+  temp/hostobj_demo_dynamic.dylib lambda/module/hostobj_demo/hostobj_demo_module.cpp` passed
+  after avoiding `-Ilib`, which makes the project `lib/string.h` intercept `<string.h>`.
+- Dynamic JS direct:
+  `env JUBE_HOSTOBJ_DEMO_DYNAMIC_ONLY=1 JUBE_DYNAMIC_MODULE=temp/hostobj_demo_dynamic.dylib
+  ./lambda.exe js test/js/hostobj_demo.js --no-log` passed.
+- Dynamic Lambda direct:
+  `env JUBE_HOSTOBJ_DEMO_DYNAMIC_ONLY=1 JUBE_DYNAMIC_MODULE=temp/hostobj_demo_dynamic.dylib
+  ./lambda.exe test/lambda/hostobj_demo_jube_import.ls` returned `{ answer: 42, sum: 12 }`.
+- Build gate: `make build-test` passed.
+- Focused gtests: static and dynamic `test_lambda_gtest --gtest_filter='*hostobj_demo_jube_import*'`
+  passed 1/1. Static and dynamic `test_js_gtest --gtest_filter='*hostobj_demo*'` also passed 1/1;
+  note that the JS gtest harness still warms/caches neighboring JS scripts before the selected
+  parameter and emits existing ASan/memtrack noise from that prelude, but the selected
+  `hostobj_demo` case itself passed.
+
+Testable goal met: the same `hostobj_demo` JS and Lambda tests pass statically and against the
+dynamically loaded copy.
 
 ### Sequencing and exit
 

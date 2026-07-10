@@ -2,16 +2,22 @@
 #include "../input/css/dom_element.hpp"
 #include "../../lib/log.h"
 #include <string.h>
+#include <stdlib.h>
+#if !defined(_WIN32)
+#include <dlfcn.h>
+#endif
 
 #define JUBE_STATIC_MODULE_CAPACITY 64
 
 typedef struct JubeStaticModuleEntry {
     const JubeModuleDef* module;
     bool initialized;
+    void* dynamic_handle;
 } JubeStaticModuleEntry;
 
 static JubeStaticModuleEntry jube_static_modules[JUBE_STATIC_MODULE_CAPACITY];
 static int jube_static_modules_count = 0;
+static bool jube_dynamic_modules_from_env_loaded = false;
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
 extern "C" Item vmap_new(void);
@@ -384,6 +390,20 @@ static int jube_find_static_module_index(const char* name) {
     return -1;
 }
 
+static bool jube_env_flag_enabled(const char* name) {
+    const char* value = getenv(name);
+    if (!value || !*value) return false;
+    return strcmp(value, "0") != 0 && strcmp(value, "false") != 0 && strcmp(value, "FALSE") != 0;
+}
+
+static void jube_close_dynamic_handle(void* handle) {
+#if !defined(_WIN32)
+    if (handle) dlclose(handle);
+#else
+    (void)handle;
+#endif
+}
+
 // release strips log_info arguments, so keep diagnostic-only helpers out of NDEBUG builds.
 #if !defined(NDEBUG)
 static int jube_host_ops_count(const JubeHostObjectOps* ops) {
@@ -417,9 +437,10 @@ static void jube_log_module_type_ops(const JubeModuleDef* module) {
 }
 #endif
 
-int jube_register_static_module(const JubeModuleDef* module) {
+static int jube_register_module_descriptor(const JubeModuleDef* module, void* dynamic_handle,
+                                           const char* source_label) {
     if (!module || !module->name) {
-        log_error("JUBE_REG: cannot register null static module");
+        log_error("JUBE_REG: cannot register null %s module", source_label ? source_label : "Jube");
         return -1;
     }
     if (module->abi_version != JUBE_ABI_VERSION) {
@@ -435,17 +456,22 @@ int jube_register_static_module(const JubeModuleDef* module) {
 
     int existing = jube_find_static_module_index(module->name);
     if (existing >= 0) {
-        log_debug("JUBE_REG: static module '%s' already registered", module->name);
+        log_debug("JUBE_REG: %s module '%s' already registered",
+                  source_label ? source_label : "Jube", module->name);
+        jube_close_dynamic_handle(dynamic_handle);
         return 0;
     }
     if (jube_static_modules_count >= JUBE_STATIC_MODULE_CAPACITY) {
-        log_error("JUBE_REG: static module capacity exceeded while registering '%s'", module->name);
+        log_error("JUBE_REG: module capacity exceeded while registering '%s'", module->name);
+        jube_close_dynamic_handle(dynamic_handle);
         return -1;
     }
 
     int slot = jube_static_modules_count++;
     jube_static_modules[slot].module = module;
     jube_static_modules[slot].initialized = false;
+    // Dynamic descriptors and function tables live in the loaded image, so keep the handle open.
+    jube_static_modules[slot].dynamic_handle = dynamic_handle;
 
     if (module->init) {
         int rc = module->init(&jube_host_api);
@@ -453,23 +479,85 @@ int jube_register_static_module(const JubeModuleDef* module) {
             jube_static_modules_count--;
             jube_static_modules[slot].module = NULL;
             jube_static_modules[slot].initialized = false;
-            log_error("JUBE_REG: static module '%s' init failed with code %d", module->name, rc);
+            jube_static_modules[slot].dynamic_handle = NULL;
+            jube_close_dynamic_handle(dynamic_handle);
+            log_error("JUBE_REG: %s module '%s' init failed with code %d",
+                      source_label ? source_label : "Jube", module->name, rc);
             return -1;
         }
         jube_static_modules[slot].initialized = true;
     }
 
-    log_info("JUBE_REG: registered static module '%s' version '%s'",
-             module->name, module->version ? module->version : "(none)");
+    log_info("JUBE_REG: registered %s module '%s' version '%s'",
+             source_label ? source_label : "Jube", module->name,
+             module->version ? module->version : "(none)");
 #if !defined(NDEBUG)
     jube_log_module_type_ops(module);
 #endif
     return 0;
 }
 
+int jube_register_static_module(const JubeModuleDef* module) {
+    return jube_register_module_descriptor(module, NULL, "static");
+}
+
+typedef const JubeModuleDef* (*JubeDynamicModuleEntry)(void);
+
+int jube_load_dynamic_module(const char* path, const char* entry_symbol) {
+    if (!path || !*path) {
+        log_error("JUBE_REG: dynamic module path is empty");
+        return -1;
+    }
+#if defined(_WIN32)
+    (void)entry_symbol;
+    log_error("JUBE_REG: dynamic Jube module loading is not implemented on Windows");
+    return -1;
+#else
+    const char* symbol = (entry_symbol && *entry_symbol) ? entry_symbol : "jube_module";
+    void* handle = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
+    if (!handle) {
+        log_error("JUBE_REG: dlopen failed for '%s': %s", path, dlerror());
+        return -1;
+    }
+
+    dlerror();
+    JubeDynamicModuleEntry entry = (JubeDynamicModuleEntry)dlsym(handle, symbol);
+    const char* error = dlerror();
+    if (error || !entry) {
+        log_error("JUBE_REG: dlsym failed for '%s' in '%s': %s",
+                  symbol, path, error ? error : "entry not found");
+        jube_close_dynamic_handle(handle);
+        return -1;
+    }
+
+    const JubeModuleDef* module = entry();
+    if (!module) {
+        log_error("JUBE_REG: dynamic module '%s' returned a null descriptor", path);
+        jube_close_dynamic_handle(handle);
+        return -1;
+    }
+    return jube_register_module_descriptor(module, handle, "dynamic");
+#endif
+}
+
+static void jube_load_dynamic_modules_from_env(void) {
+    if (jube_dynamic_modules_from_env_loaded) return;
+    jube_dynamic_modules_from_env_loaded = true;
+    const char* path = getenv("JUBE_DYNAMIC_MODULE");
+    if (!path || !*path) return;
+    const char* entry = getenv("JUBE_DYNAMIC_ENTRY");
+    if (jube_load_dynamic_module(path, entry) != 0) {
+        log_error("JUBE_REG: failed to load env dynamic module '%s'", path);
+    }
+}
+
 void jube_register_builtin_modules(void) {
     radiant_jube_register_static();
-    hostobj_demo_jube_register_static();
+    // Phase-7 validation must let the dlopen copy win name registration over the static demo.
+    if (!jube_env_flag_enabled("JUBE_HOSTOBJ_DEMO_DYNAMIC_ONLY")) {
+        hostobj_demo_jube_register_static();
+    }
+    jube_load_dynamic_modules_from_env();
 }
 
 int jube_static_module_count(void) {
