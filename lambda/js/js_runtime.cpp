@@ -151,38 +151,82 @@ extern "C" int64_t js_profiled_it2i(Item item) {
 #endif
 
 static ArrayList* g_js_array_runtime_item_buffers = NULL;
+static ArrayList* g_js_array_runtime_item_owners = NULL;
 
-static bool js_array_runtime_items_forget(Item* items) {
+static void js_array_runtime_items_free_lists_if_empty(void) {
+    if (g_js_array_runtime_item_buffers && g_js_array_runtime_item_buffers->length == 0) {
+        arraylist_free(g_js_array_runtime_item_buffers);
+        g_js_array_runtime_item_buffers = NULL;
+        if (g_js_array_runtime_item_owners) {
+            arraylist_free(g_js_array_runtime_item_owners);
+            g_js_array_runtime_item_owners = NULL;
+        }
+    }
+}
+
+static bool js_array_runtime_items_forget(Item* items, Array** owner_out) {
+    if (owner_out) *owner_out = NULL;
     if (!g_js_array_runtime_item_buffers || !items) return false;
     for (int i = 0; i < g_js_array_runtime_item_buffers->length; i++) {
         if (g_js_array_runtime_item_buffers->data[i] == items) {
-            g_js_array_runtime_item_buffers->data[i] =
-                g_js_array_runtime_item_buffers->data[g_js_array_runtime_item_buffers->length - 1];
-            g_js_array_runtime_item_buffers->length--;
-            if (g_js_array_runtime_item_buffers->length == 0) {
-                arraylist_free(g_js_array_runtime_item_buffers);
-                g_js_array_runtime_item_buffers = NULL;
+            if (owner_out && g_js_array_runtime_item_owners &&
+                    i < g_js_array_runtime_item_owners->length) {
+                *owner_out = (Array*)g_js_array_runtime_item_owners->data[i];
             }
+            int last = g_js_array_runtime_item_buffers->length - 1;
+            g_js_array_runtime_item_buffers->data[i] =
+                g_js_array_runtime_item_buffers->data[last];
+            g_js_array_runtime_item_buffers->length--;
+            if (g_js_array_runtime_item_owners && i < g_js_array_runtime_item_owners->length) {
+                g_js_array_runtime_item_owners->data[i] = g_js_array_runtime_item_owners->data[last];
+                g_js_array_runtime_item_owners->length--;
+            }
+            js_array_runtime_items_free_lists_if_empty();
             return true;
         }
     }
     return false;
 }
 
-static void js_array_runtime_items_register(Item* items) {
+static void js_array_runtime_items_neuter_owner(Array* owner, Item* items) {
+    if (!owner || owner->items != items) return;
+    // Runtime item buffers are mem_alloc-owned; stale Array slots must not be traced after release.
+    owner->items = NULL;
+    owner->capacity = 0;
+}
+
+static void js_array_runtime_items_register(Array* owner, Item* items) {
     if (!items) return;
     if (!g_js_array_runtime_item_buffers) {
         g_js_array_runtime_item_buffers = arraylist_new(32);
-        if (!g_js_array_runtime_item_buffers) return;
+        g_js_array_runtime_item_owners = arraylist_new(32);
+        if (!g_js_array_runtime_item_buffers || !g_js_array_runtime_item_owners) {
+            if (g_js_array_runtime_item_buffers) arraylist_free(g_js_array_runtime_item_buffers);
+            if (g_js_array_runtime_item_owners) arraylist_free(g_js_array_runtime_item_owners);
+            g_js_array_runtime_item_buffers = NULL;
+            g_js_array_runtime_item_owners = NULL;
+            return;
+        }
     }
     for (int i = 0; i < g_js_array_runtime_item_buffers->length; i++) {
-        if (g_js_array_runtime_item_buffers->data[i] == items) return;
+        if (g_js_array_runtime_item_buffers->data[i] == items) {
+            if (g_js_array_runtime_item_owners && i < g_js_array_runtime_item_owners->length) {
+                g_js_array_runtime_item_owners->data[i] = owner;
+            }
+            return;
+        }
     }
-    arraylist_append(g_js_array_runtime_item_buffers, items);
+    if (!arraylist_append(g_js_array_runtime_item_buffers, items)) return;
+    if (!arraylist_append(g_js_array_runtime_item_owners, owner)) {
+        g_js_array_runtime_item_buffers->length--;
+        js_array_runtime_items_free_lists_if_empty();
+    }
 }
 
 extern "C" bool js_array_runtime_items_release(Item* items) {
-    if (!js_array_runtime_items_forget(items)) return false;
+    Array* owner = NULL;
+    if (!js_array_runtime_items_forget(items, &owner)) return false;
+    js_array_runtime_items_neuter_owner(owner, items);
     mem_free(items);
     return true;
 }
@@ -190,12 +234,20 @@ extern "C" bool js_array_runtime_items_release(Item* items) {
 extern "C" void js_array_runtime_items_cleanup_all(void) {
     if (!g_js_array_runtime_item_buffers) return;
     for (int i = 0; i < g_js_array_runtime_item_buffers->length; i++) {
-        if (g_js_array_runtime_item_buffers->data[i]) {
-            mem_free(g_js_array_runtime_item_buffers->data[i]);
+        Item* items = (Item*)g_js_array_runtime_item_buffers->data[i];
+        Array* owner = (g_js_array_runtime_item_owners && i < g_js_array_runtime_item_owners->length)
+            ? (Array*)g_js_array_runtime_item_owners->data[i] : NULL;
+        js_array_runtime_items_neuter_owner(owner, items);
+        if (items) {
+            mem_free(items);
         }
     }
     arraylist_free(g_js_array_runtime_item_buffers);
     g_js_array_runtime_item_buffers = NULL;
+    if (g_js_array_runtime_item_owners) {
+        arraylist_free(g_js_array_runtime_item_owners);
+        g_js_array_runtime_item_owners = NULL;
+    }
 }
 
 static void js_array_install_runtime_items(Array* arr, Item* items, int64_t capacity) {
@@ -203,7 +255,7 @@ static void js_array_install_runtime_items(Array* arr, Item* items, int64_t capa
     if (arr->items) js_array_runtime_items_release(arr->items);
     arr->items = items;
     arr->capacity = capacity;
-    js_array_runtime_items_register(items);
+    js_array_runtime_items_register(arr, items);
 }
 
 // =============================================================================
