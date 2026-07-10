@@ -18621,20 +18621,6 @@ extern "C" Item js_dom_selection_get_prototype_value(void);
 extern "C" Item js_dom_get_prototype_value(Item item);
 
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
-    // Legacy document marker VMaps predate Jube host types; branded documents
-    // must flow through the host dispatch so foreign-doc active swaps are local.
-    if (get_type_id(obj) == LMD_TYPE_VMAP &&
-        !js_host_object_type(obj) &&
-        js_is_document_proxy(obj)) {
-        void* foreign = js_get_foreign_doc(obj);
-        if (foreign) {
-            Item result = ItemNull;
-            if (radiant_dom_foreign_document_method(obj, method_name, args, argc, &result)) {
-                return result;
-            }
-        }
-        return js_document_proxy_method(method_name, args, argc);
-    }
     // document.implementation singleton methods
     if (js_is_dom_implementation(obj)) {
         Item out;
@@ -18649,9 +18635,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         }
     }
 
-    // Legacy computed style markers predate Jube host-type registration and
-    // still need the old special dispatch during the staged migration.
-    if (js_is_computed_style_item(obj)) {
+    if (get_type_id(obj) == LMD_TYPE_MAP && js_is_computed_style_item(obj)) {
         String* method = it2s(method_name);
         if (method && method->len == 16 && strncmp(method->chars, "getPropertyValue", 16) == 0) {
             if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
@@ -18659,21 +18643,9 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         }
     }
 
-    if (js_is_inline_style_item(obj)) {
+    if (get_type_id(obj) == LMD_TYPE_MAP && js_is_inline_style_item(obj)) {
         extern Item js_dom_style_method(Item elem, Item method_name, Item* args, int argc);
         return js_dom_style_method(obj, method_name, args, argc);
-    }
-
-    if (get_type_id(obj) == LMD_TYPE_VMAP &&
-        !js_host_object_type(obj) &&
-        (radiant_dom_is_node(obj) || js_dom_item_is_range(obj) || js_dom_item_is_selection(obj))) {
-        if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
-            Item fn = js_property_access(obj, method_name);
-            if (js_check_exception()) return ItemNull;
-            return js_call_function(fn, obj, args, argc);
-        }
-        extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
-        return js_dom_element_method(obj, method_name, args, argc);
     }
 
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
@@ -18690,27 +18662,8 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         if (js_canvas_method_dispatch(obj, method_name, args, argc, &canvas_result))
             return canvas_result;
     }
-    // Document proxy methods (getElementById, querySelector, etc.)
-    if (get_type_id(obj) == LMD_TYPE_VMAP &&
-        !js_host_object_type(obj) &&
-        js_is_document_proxy(obj)) {
-        void* foreign = js_get_foreign_doc(obj);
-        if (foreign) {
-            Item result = ItemNull;
-            if (radiant_dom_foreign_document_method(obj, method_name, args, argc, &result)) {
-                return result;
-            }
-        }
-        return js_document_proxy_method(method_name, args, argc);
-    }
-    // document.implementation singleton methods
-    if (js_is_dom_implementation(obj)) {
-        Item out;
-        if (js_dom_implementation_method(method_name, args, argc, &out)) return out;
-        return ItemNull;
-    }
     // CSSOM wrapper methods
-    {
+    if (get_type_id(obj) == LMD_TYPE_MAP) {
         Item cssom_result = ItemNull;
         if (radiant_dom_cssom_method(obj, method_name, args, argc, &cssom_result)) {
             return cssom_result;
@@ -20356,19 +20309,6 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         if (js_host_object_call_method(obj, method_name, args, argc, &result)) {
             return result;
         }
-    }
-    if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
-        Item fn = js_property_access(obj, method_name);
-        if (js_check_exception()) return ItemNull;
-        return js_call_function(fn, obj, args, argc);
-    }
-    // DOM host objects expose native methods through the DOM dispatcher, but
-    // explicit JS overrides (for example document.createRange = wrapper) must
-    // win before the native fallback.
-    if (get_type_id(obj) == LMD_TYPE_VMAP && !js_host_object_type(obj) &&
-        radiant_dom_is_node(obj)) {
-        extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
-        return js_dom_element_method(obj, method_name, args, argc);
     }
 
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
@@ -27669,7 +27609,6 @@ extern "C" void js_link_base_prototype(Item proto_marker, Item base_ctor) {
 // Get the prototype of an object (read __proto__ property)
 // P10d: uses interned key + first-match lookup (no heap allocation per call)
 extern "C" Item js_get_prototype(Item object) {
-    if (js_is_document_proxy(object)) return ItemNull;
     if (get_type_id(object) == LMD_TYPE_VMAP) {
         Item host_proto = ItemNull;
         if (js_host_object_prototype(object, &host_proto)) {
@@ -27677,8 +27616,6 @@ extern "C" Item js_get_prototype(Item object) {
             return ItemNull;
         }
     }
-    if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
-    if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
     Map* m = object.map;
     // Synthetic fast iterators use a 1-byte sentinel as `type`, not a real
@@ -27734,13 +27671,7 @@ extern "C" Item js_get_prototype(Item object) {
 // Returns ItemNull only at the top of the chain (Object.prototype itself, or
 // when the explicit `__proto__` slot holds the null sentinel).
 static Item js_get_implicit_proto(Item object) {
-    if (js_is_document_proxy(object)) {
-        Item proto = js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
-        return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
-    }
-    if (get_type_id(object) == LMD_TYPE_VMAP &&
-        (js_host_object_type(object) ||
-         js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
+    if (get_type_id(object) == LMD_TYPE_VMAP && js_host_object_type(object)) {
         // Host VMaps have no ordinary __proto__ slot; prototype-chain reads
         // must start from the module-supplied host prototype instead of stopping.
         return js_get_prototype(object);
