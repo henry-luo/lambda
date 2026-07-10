@@ -1,0 +1,4 @@
+readSync -1n: ok
+readSync -2n: RangeError ERR_OUT_OF_RANGE
+readSync too large: RangeError ERR_OUT_OF_RANGE
+readvSync too large: RangeError ERR_OUT_OF_RANGE
