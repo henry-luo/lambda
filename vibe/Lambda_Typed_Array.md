@@ -731,7 +731,7 @@ type(arr)            // u8[]
 arr is u8[]          // true
 arr is array         // true  (typed arrays are arrays)
 arr is i8[]          // false (different element type)
-arr is u16[]         // false (different element width)
+arr is u16[]         // true  (covariant exact widening)
 ```
 
 ### 21. `is` and Pattern Matching

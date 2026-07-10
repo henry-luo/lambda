@@ -27,6 +27,19 @@ static double js_sized_number_to_double(Item value) {
     }
 }
 
+static void js_warn_decimal_number_egress_once(uintptr_t site) {
+    static uintptr_t warned_sites[256];
+    static int warned_count = 0;
+    if (site == 0) site = 1;
+    for (int i = 0; i < warned_count; i++) {
+        if (warned_sites[i] == site) return;
+    }
+    if (warned_count < (int)(sizeof(warned_sites) / sizeof(warned_sites[0]))) {
+        warned_sites[warned_count++] = site;
+    }
+    log_warn("JS_DECIMAL_EGRESS: converting Lambda decimal to JS Number loses decimal precision (site=%p)", (void*)site);
+}
+
 // =============================================================================
 // Type Conversion Functions
 // =============================================================================
@@ -213,7 +226,12 @@ extern "C" Item js_to_number(Item value) {
             js_throw_type_error("Cannot convert a BigInt value to a number");
             return ItemNull;
         }
-        // regular decimal → float
+        // regular decimal egress is intentionally lossy; warn once per native caller so BigInt's TypeError path stays quiet.
+#if defined(__GNUC__) || defined(__clang__)
+        js_warn_decimal_number_egress_once((uintptr_t)__builtin_return_address(0));
+#else
+        js_warn_decimal_number_egress_once(0);
+#endif
         return push_d(decimal_to_double(value));
     }
 

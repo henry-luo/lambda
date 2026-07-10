@@ -141,7 +141,7 @@ f16  f32  f64        // Sized floats
 // Special type values
 any         // Top type (supertype of all)
 error       // Error type
-number      // Union: int | float | sized numerics
+number      // Union: all numeric value types and sized-storage types
 ```
 
 ### Type Examples

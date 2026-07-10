@@ -64,8 +64,9 @@ it; printing distinguishes exactly what it distinguishes. [C8, C11]
 
 ### 2.1 Types
 
-Scalars: `null`, `bool`, `int`, `i8 i16 i32 i64 u8 u16 u32 u64` (machine ints),
-`f16 f32 f64`, `float`, `decimal` (two tiers, §4.4), `string`, `symbol` (with
+Scalars: `null`, `bool`, `int`, `integer`, `int64`/`i64`, `uint64`/`u64`,
+`i8 i16 i32 u8 u16 u32` (sized storage ints), `f16 f32`, `float`/`f64`,
+`decimal` (two tiers, §4.4), `string`, `symbol` (with
 `path` as a special symbol), `binary`, `datetime` (with `date`/`time` sub-kinds).
 Containers: `range`, `list`, `array` (with transparently unboxed numeric arrays),
 `map`, `element` (simultaneously a list of children and a map of attributes),
