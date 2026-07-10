@@ -10,6 +10,7 @@
 #include "js_state_guards.h"
 #include "js_exec_profile.h"
 #include "js_permission.h"
+#include "../jube/jube_registry.h"
 #include "../../lib/lambda_typed.hpp"
 #include "../../lib/gc/gc_heap.h"
 #include "../../lib/lambda_alloca.h"
@@ -93,6 +94,42 @@ extern "C" void js_map_promote_descriptor_kind(Map* m) {
 
 static Item js_runtime_make_string_item(const char* str, int len) {
     return (Item){.item = s2it(heap_strcpy((char*)str, len))};
+}
+
+static const JubeTypeDef* js_host_object_type(Item object) {
+    if (get_type_id(object) != LMD_TYPE_VMAP || !object.vmap || !object.vmap->host_type) {
+        return NULL;
+    }
+    return jube_find_type_by_host_type(object.vmap->host_type);
+}
+
+static bool js_host_object_get_property(Item object, Item key, Item* out) {
+    const JubeTypeDef* type = js_host_object_type(object);
+    return type && type->host_ops && type->host_ops->get_property &&
+        type->host_ops->get_property(object, key, out);
+}
+
+static bool js_host_object_set_property(Item object, Item key, Item value, Item* out) {
+    const JubeTypeDef* type = js_host_object_type(object);
+    return type && type->host_ops && type->host_ops->set_property &&
+        type->host_ops->set_property(object, key, value, out);
+}
+
+static bool js_host_object_call_method(Item object,
+                                       Item method_name,
+                                       Item* args,
+                                       int argc,
+                                       Item* out) {
+    const JubeTypeDef* type = js_host_object_type(object);
+    return type && type->host_ops && type->host_ops->call_method &&
+        type->host_ops->call_method(object, method_name, args, argc, out);
+}
+
+static bool js_host_object_prototype(Item object, Item* out) {
+    const JubeTypeDef* type = js_host_object_type(object);
+    if (!type || !type->host_ops || !type->host_ops->prototype || !out) return false;
+    *out = type->host_ops->prototype(object);
+    return true;
 }
 
 extern "C" Item js_using_dispose(Item resource) {
@@ -4108,6 +4145,9 @@ extern "C" Item js_property_get(Item object, Item key) {
             }
         }
         return make_js_undefined();
+    } else if (type == LMD_TYPE_VMAP && js_host_object_type(object)) {
+        Item out = ItemNull;
+        if (js_host_object_get_property(object, key, &out)) return out;
     } else if (type == LMD_TYPE_VMAP &&
                js_is_document_proxy(object)) {
         // Document and foreign-document proxies are native VMaps; preserve the
@@ -4119,8 +4159,7 @@ extern "C" Item js_property_get(Item object, Item key) {
         }
         return js_document_proxy_get_property(key);
     } else if (type == LMD_TYPE_VMAP &&
-               (radiant_dom_is_node(object) ||
-                js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
+               (js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
         // Host DOM resources are VMaps; Range/Selection share the DOM property
         // dispatcher even though they are not node-backed objects.
         return js_dom_get_property(object, key);
@@ -6562,6 +6601,14 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         return js_property_set_array(object, key, value);
     }
 
+    if (type == LMD_TYPE_VMAP) {
+        Item out = ItemNull;
+        if (js_host_object_set_property(object, key, value, &out)) {
+            JS_PROPERTY_SET_BRANCH("top_jube_host_vmap");
+            return out;
+        }
+    }
+
     if (type == LMD_TYPE_VMAP &&
         js_is_document_proxy(object)) {
         JS_PROPERTY_SET_BRANCH("top_document_proxy_vmap");
@@ -6574,8 +6621,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     }
 
     if (type == LMD_TYPE_VMAP &&
-        (radiant_dom_is_node(object) ||
-         js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
+        (js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
         JS_PROPERTY_SET_BRANCH("top_dom_vmap");
         // Host DOM resources are VMaps; Range/Selection writes must stay on
         // the native dispatcher instead of falling through as ordinary VMaps.
@@ -18645,10 +18691,11 @@ extern "C" Item js_dom_selection_get_prototype_value(void);
 extern "C" Item js_dom_get_prototype_value(Item item);
 
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
-    // Document proxy methods (getElementById, querySelector, createElement, ...).
-    // Foreign documents use branded VMaps, so they must be handled before the
-    // generic DOM host-object dispatch below.
-    if (js_is_document_proxy(obj)) {
+    // Legacy document marker VMaps predate Jube host types; branded documents
+    // must flow through the host dispatch so foreign-doc active swaps are local.
+    if (get_type_id(obj) == LMD_TYPE_VMAP &&
+        !js_host_object_type(obj) &&
+        js_is_document_proxy(obj)) {
         void* foreign = js_get_foreign_doc(obj);
         if (foreign) {
             Item result = ItemNull;
@@ -18665,8 +18712,15 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         return ItemNull;
     }
 
-    // Computed style wrappers use the DOM resource carrier, so dispatch them
-    // before the generic host-object path below.
+    if (get_type_id(obj) == LMD_TYPE_VMAP && js_host_object_type(obj)) {
+        Item result = ItemNull;
+        if (js_host_object_call_method(obj, method_name, args, argc, &result)) {
+            return result;
+        }
+    }
+
+    // Legacy computed style markers predate Jube host-type registration and
+    // still need the old special dispatch during the staged migration.
     if (js_is_computed_style_item(obj)) {
         String* method = it2s(method_name);
         if (method && method->len == 16 && strncmp(method->chars, "getPropertyValue", 16) == 0) {
@@ -18681,6 +18735,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     }
 
     if (get_type_id(obj) == LMD_TYPE_VMAP &&
+        !js_host_object_type(obj) &&
         (radiant_dom_is_node(obj) || js_dom_item_is_range(obj) || js_dom_item_is_selection(obj))) {
         if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
             Item fn = js_property_access(obj, method_name);
@@ -18706,7 +18761,9 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             return canvas_result;
     }
     // Document proxy methods (getElementById, querySelector, etc.)
-    if (js_is_document_proxy(obj)) {
+    if (get_type_id(obj) == LMD_TYPE_VMAP &&
+        !js_host_object_type(obj) &&
+        js_is_document_proxy(obj)) {
         void* foreign = js_get_foreign_doc(obj);
         if (foreign) {
             Item result = ItemNull;
@@ -20364,6 +20421,12 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     // Range/Selection are DOM resource host objects but not DOM nodes. Dispatch
     // through their property accessors so ordinary range.setStart(...) keeps
     // the Range receiver instead of falling into element-only method dispatch.
+    if (get_type_id(obj) == LMD_TYPE_VMAP && js_host_object_type(obj)) {
+        Item result = ItemNull;
+        if (js_host_object_call_method(obj, method_name, args, argc, &result)) {
+            return result;
+        }
+    }
     if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
         Item fn = js_property_access(obj, method_name);
         if (js_check_exception()) return ItemNull;
@@ -20372,7 +20435,8 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     // DOM host objects expose native methods through the DOM dispatcher, but
     // explicit JS overrides (for example document.createRange = wrapper) must
     // win before the native fallback.
-    if (get_type_id(obj) == LMD_TYPE_VMAP && radiant_dom_is_node(obj)) {
+    if (get_type_id(obj) == LMD_TYPE_VMAP && !js_host_object_type(obj) &&
+        radiant_dom_is_node(obj)) {
         extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
         return js_dom_element_method(obj, method_name, args, argc);
     }
@@ -27676,13 +27740,15 @@ extern "C" void js_link_base_prototype(Item proto_marker, Item base_ctor) {
 // P10d: uses interned key + first-match lookup (no heap allocation per call)
 extern "C" Item js_get_prototype(Item object) {
     if (js_is_document_proxy(object)) return ItemNull;
+    if (get_type_id(object) == LMD_TYPE_VMAP) {
+        Item host_proto = ItemNull;
+        if (js_host_object_prototype(object, &host_proto)) {
+            if (get_type_id(host_proto) == LMD_TYPE_MAP) return host_proto;
+            return ItemNull;
+        }
+    }
     if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
     if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
-    if (get_type_id(object) == LMD_TYPE_VMAP && radiant_dom_is_node(object)) {
-        Item dom_proto = js_dom_get_prototype_value(object);
-        if (get_type_id(dom_proto) == LMD_TYPE_MAP) return dom_proto;
-        return ItemNull;
-    }
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
     Map* m = object.map;
     // Synthetic fast iterators use a 1-byte sentinel as `type`, not a real
@@ -27743,7 +27809,7 @@ static Item js_get_implicit_proto(Item object) {
         return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
     }
     if (get_type_id(object) == LMD_TYPE_VMAP &&
-        (radiant_dom_is_node(object) ||
+        (js_host_object_type(object) ||
          js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
         // Host VMaps have no ordinary __proto__ slot; prototype-chain reads
         // must start from the module-supplied host prototype instead of stopping.

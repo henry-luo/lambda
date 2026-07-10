@@ -27,6 +27,9 @@
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern String* heap_create_name(const char* name, size_t len);
 extern "C" Item vmap_new(void);
+extern "C" const void* radiant_dom_stylesheet_host_type(void);
+extern "C" const void* radiant_dom_css_rule_host_type(void);
+extern "C" const void* radiant_dom_rule_style_decl_host_type(void);
 
 // Forward declaration
 static Pool* get_document_pool();
@@ -302,7 +305,9 @@ static TypeMap js_rule_decl_marker = {};
 
 extern "C" bool js_is_stylesheet(Item item) {
     if (get_type_id(item) == LMD_TYPE_VMAP) {
-        return item.vmap && item.vmap->host_type == (const void*)&js_stylesheet_vmap_marker &&
+        return item.vmap &&
+            (item.vmap->host_type == (const void*)&js_stylesheet_vmap_marker ||
+             item.vmap->host_type == radiant_dom_stylesheet_host_type()) &&
             item.vmap->host_data != nullptr;
     }
     if (get_type_id(item) != LMD_TYPE_MAP) return false;
@@ -312,7 +317,9 @@ extern "C" bool js_is_stylesheet(Item item) {
 
 extern "C" bool js_is_css_rule(Item item) {
     if (get_type_id(item) == LMD_TYPE_VMAP) {
-        return item.vmap && item.vmap->host_type == (const void*)&js_css_rule_vmap_marker &&
+        return item.vmap &&
+            (item.vmap->host_type == (const void*)&js_css_rule_vmap_marker ||
+             item.vmap->host_type == radiant_dom_css_rule_host_type()) &&
             item.vmap->host_data != nullptr;
     }
     if (get_type_id(item) != LMD_TYPE_MAP) return false;
@@ -322,7 +329,9 @@ extern "C" bool js_is_css_rule(Item item) {
 
 extern "C" bool js_is_rule_style_decl(Item item) {
     if (get_type_id(item) == LMD_TYPE_VMAP) {
-        return item.vmap && item.vmap->host_type == (const void*)&js_rule_decl_vmap_marker &&
+        return item.vmap &&
+            (item.vmap->host_type == (const void*)&js_rule_decl_vmap_marker ||
+             item.vmap->host_type == radiant_dom_rule_style_decl_host_type()) &&
             item.vmap->host_data != nullptr;
     }
     if (get_type_id(item) != LMD_TYPE_MAP) return false;
@@ -404,7 +413,7 @@ extern "C" Item js_cssom_wrap_stylesheet(void* stylesheet) {
     Item wrapper = vmap_new();
     if (get_type_id(wrapper) != LMD_TYPE_VMAP || !wrapper.vmap) return ItemNull;
     // CSSOM wrappers have no Map shell; the host brand is the unwrap invariant.
-    wrapper.vmap->host_type = (const void*)&js_stylesheet_vmap_marker;
+    wrapper.vmap->host_type = radiant_dom_stylesheet_host_type();
     wrapper.vmap->host_data = stylesheet;
 
     log_debug("js_cssom_wrap_stylesheet: wrapped CssStylesheet=%p as VMap=%p", stylesheet, (void*)wrapper.vmap);
@@ -550,7 +559,7 @@ extern "C" Item js_cssom_wrap_rule(void* rule, void* pool) {
     Item wrapper = vmap_new();
     if (get_type_id(wrapper) != LMD_TYPE_VMAP || !wrapper.vmap) return ItemNull;
     // CSS rule wrappers have no Map shell; the host brand is the unwrap invariant.
-    wrapper.vmap->host_type = (const void*)&js_css_rule_vmap_marker;
+    wrapper.vmap->host_type = radiant_dom_css_rule_host_type();
     wrapper.vmap->host_data = rule;
 
     log_debug("js_cssom_wrap_rule: wrapped CssRule=%p as VMap=%p", rule, (void*)wrapper.vmap);
@@ -574,7 +583,7 @@ static Item wrap_rule_decl(CssRule* rule, Pool* pool) {
     Item wrapper = vmap_new();
     if (get_type_id(wrapper) != LMD_TYPE_VMAP || !wrapper.vmap) return ItemNull;
     // Rule declaration wrappers have no Map shell; the host brand is the unwrap invariant.
-    wrapper.vmap->host_type = (const void*)&js_rule_decl_vmap_marker;
+    wrapper.vmap->host_type = radiant_dom_rule_style_decl_host_type();
     wrapper.vmap->host_data = rule;
 
     return wrapper;

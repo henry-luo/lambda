@@ -23,6 +23,7 @@
 #include "../lambda-decimal.hpp"
 #include "../lambda.hpp"
 #include "../transpiler.hpp"
+#include "../jube/jube_registry.h"
 
 extern "C" Item js_to_property_key(Item key);
 extern "C" int64_t js_key_is_symbol_c(Item key);
@@ -55,6 +56,44 @@ extern "C" void js_async_hooks_after_gc(void);
 extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
 extern double js_get_number(Item value);
 extern __thread EvalContext* context;
+
+static const JubeTypeDef* js_host_object_type(Item object) {
+    if (get_type_id(object) != LMD_TYPE_VMAP || !object.vmap || !object.vmap->host_type) {
+        return NULL;
+    }
+    return jube_find_type_by_host_type(object.vmap->host_type);
+}
+
+static bool js_host_object_has_property(Item object, Item key, Item* out) {
+    const JubeTypeDef* type = js_host_object_type(object);
+    return type && type->host_ops && type->host_ops->has_property &&
+        type->host_ops->has_property(object, key, out);
+}
+
+static bool js_host_object_delete_property(Item object, Item key, Item* out) {
+    const JubeTypeDef* type = js_host_object_type(object);
+    return type && type->host_ops && type->host_ops->delete_property &&
+        type->host_ops->delete_property(object, key, out);
+}
+
+static bool js_host_object_own_property_names(Item object, Item* out) {
+    const JubeTypeDef* type = js_host_object_type(object);
+    return type && type->host_ops && type->host_ops->own_property_keys &&
+        type->host_ops->own_property_keys(object, out);
+}
+
+static bool js_host_object_own_property_descriptor(Item object, Item key, Item* out) {
+    const JubeTypeDef* type = js_host_object_type(object);
+    return type && type->host_ops && type->host_ops->get_own_property_descriptor &&
+        type->host_ops->get_own_property_descriptor(object, key, out);
+}
+
+static bool js_host_object_prototype(Item object, Item* out) {
+    const JubeTypeDef* type = js_host_object_type(object);
+    if (!type || !type->host_ops || !type->host_ops->prototype || !out) return false;
+    *out = type->host_ops->prototype(object);
+    return true;
+}
 
 #define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16
 
@@ -1021,9 +1060,11 @@ static bool js_require_object_type(Item arg, const char* method_name) {
 }
 
 static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item* out_result) {
+    if (type == LMD_TYPE_VMAP && js_host_object_has_property(object, key, out_result)) {
+        return true;
+    }
     if (type == LMD_TYPE_VMAP &&
-        (radiant_dom_is_node(object) ||
-         js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
+        (js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
         if (radiant_dom_host_has_property(object, key, out_result)) return true;
     }
     if (type == LMD_TYPE_VMAP && js_is_document_proxy(object)) {
@@ -1112,8 +1153,11 @@ static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item*
 
 static bool js_try_exotic_delete_property(Item obj, Item key, Item* out_result) {
     if (get_type_id(obj) == LMD_TYPE_VMAP &&
-        (radiant_dom_is_node(obj) ||
-         js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) &&
+        js_host_object_delete_property(obj, key, out_result)) {
+        return true;
+    }
+    if (get_type_id(obj) == LMD_TYPE_VMAP &&
+        (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) &&
         radiant_dom_host_delete_property(obj, key, out_result)) {
         return true;
     }
@@ -1158,8 +1202,11 @@ static bool js_hide_legacy_dunder_own_name(const char* name, int name_len) {
 
 static bool js_try_exotic_own_property_names(Item object, Item* out_result) {
     if (get_type_id(object) == LMD_TYPE_VMAP &&
-        (radiant_dom_is_node(object) ||
-         js_dom_item_is_range(object) || js_dom_item_is_selection(object)) &&
+        js_host_object_own_property_names(object, out_result)) {
+        return true;
+    }
+    if (get_type_id(object) == LMD_TYPE_VMAP &&
+        (js_dom_item_is_range(object) || js_dom_item_is_selection(object)) &&
         radiant_dom_host_own_property_names(object, out_result)) {
         return true;
     }
@@ -1214,8 +1261,11 @@ static bool js_try_exotic_own_property_descriptor(Item obj, Item name,
         return true;
     }
     if (type == LMD_TYPE_VMAP &&
-        (radiant_dom_is_node(obj) ||
-         js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) &&
+        js_host_object_own_property_descriptor(obj, name, out_result)) {
+        return true;
+    }
+    if (type == LMD_TYPE_VMAP &&
+        (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) &&
         radiant_dom_host_own_property_descriptor(obj, name, out_result)) {
         return true;
     }
@@ -7115,12 +7165,14 @@ extern "C" Item js_get_prototype_of(Item object) {
     if (js_is_document_proxy(object)) {
         return js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
     }
+    if (ot == LMD_TYPE_VMAP) {
+        Item host_proto = ItemNull;
+        if (js_host_object_prototype(object, &host_proto)) {
+            return get_type_id(host_proto) == LMD_TYPE_MAP ? host_proto : ItemNull;
+        }
+    }
     if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
     if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
-    if (ot == LMD_TYPE_VMAP && radiant_dom_is_node(object)) {
-        Item dom_proto = js_dom_get_prototype_value(object);
-        return get_type_id(dom_proto) == LMD_TYPE_MAP ? dom_proto : ItemNull;
-    }
     // v18g: Arrays → return Array.prototype (or custom if set via Object.setPrototypeOf)
     if (get_type_id(object) == LMD_TYPE_ARRAY) {
         if (js_is_arguments_exotic_array_for_proto(object)) {
@@ -9850,12 +9902,28 @@ extern "C" Item js_object_keys(Item object) {
     }
     if (!js_require_object_type(object, "keys")) return js_array_new(0);
     TypeId type = get_type_id(object);
+    Item all_keys = ItemNull;
+
+    if (type == LMD_TYPE_VMAP && js_host_object_own_property_names(object, &all_keys) &&
+        get_type_id(all_keys) == LMD_TYPE_ARRAY && all_keys.array) {
+        Item result = js_array_new(0);
+        for (int i = 0; i < all_keys.array->length; i++) {
+            Item key = all_keys.array->items[i];
+            if (get_type_id(key) != LMD_TYPE_STRING) continue;
+            Item desc = js_object_get_own_property_descriptor(object, key);
+            if (js_check_exception()) return result;
+            if (get_type_id(desc) != LMD_TYPE_MAP) continue;
+            bool enum_found = false;
+            Item enum_val = js_map_get_fast_ext(desc.map, "enumerable", 10, &enum_found);
+            if (enum_found && js_is_truthy(enum_val)) js_array_push(result, key);
+        }
+        return result;
+    }
 
     if ((type == LMD_TYPE_VMAP &&
-         (radiant_dom_is_node(object) ||
-          js_dom_item_is_range(object) || js_dom_item_is_selection(object))) ||
+         (js_dom_item_is_range(object) || js_dom_item_is_selection(object))) ||
         (type == LMD_TYPE_MAP && object.map && object.map->map_kind == MAP_KIND_WEB_API_RESOURCE)) {
-        Item all_keys = ItemNull;
+        all_keys = ItemNull;
         if (radiant_dom_host_own_property_names(object, &all_keys) &&
             get_type_id(all_keys) == LMD_TYPE_ARRAY && all_keys.array) {
             Item result = js_array_new(0);

@@ -186,6 +186,8 @@ extern "C" Item vmap_new(void);
 
 static const char js_dom_range_vmap_type_marker = 0;
 static const char js_dom_selection_vmap_type_marker = 0;
+extern "C" const void* radiant_dom_range_host_type(void);
+extern "C" const void* radiant_dom_selection_host_type(void);
 
 // Legacy map marker addresses — kept so older resource-map callers fail closed
 // through the same unwrap helpers during this migration window.
@@ -216,7 +218,9 @@ extern "C" Item js_dom_selection_to_string_value(Item obj);
 extern "C" bool js_dom_item_is_range(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_VMAP) {
-        return item.vmap && item.vmap->host_type == (const void*)&js_dom_range_vmap_type_marker &&
+        return item.vmap &&
+            (item.vmap->host_type == (const void*)&js_dom_range_vmap_type_marker ||
+             item.vmap->host_type == radiant_dom_range_host_type()) &&
             item.vmap->host_data != nullptr;
     }
     if (type != LMD_TYPE_MAP) return false;
@@ -228,7 +232,9 @@ extern "C" bool js_dom_item_is_range(Item item) {
 extern "C" bool js_dom_item_is_selection(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_VMAP) {
-        return item.vmap && item.vmap->host_type == (const void*)&js_dom_selection_vmap_type_marker &&
+        return item.vmap &&
+            (item.vmap->host_type == (const void*)&js_dom_selection_vmap_type_marker ||
+             item.vmap->host_type == radiant_dom_selection_host_type()) &&
             item.vmap->host_data != nullptr;
     }
     if (type != LMD_TYPE_MAP) return false;
@@ -880,7 +886,7 @@ static Item build_range_object(DomRange* r) {
     Item obj = vmap_new();
     if (get_type_id(obj) != LMD_TYPE_VMAP || !obj.vmap) return ItemNull;
     // Range wrappers have no Map shell; the host brand is the unwrap invariant.
-    obj.vmap->host_type = (const void*)&js_dom_range_vmap_type_marker;
+    obj.vmap->host_type = radiant_dom_range_host_type();
     obj.vmap->host_data = r;
     r->host_wrapper = obj.vmap;
     dom_range_retain(r);  // released in js_dom_selection_reset
@@ -1478,7 +1484,7 @@ static Item build_selection_object(DomSelection* s) {
     Item obj = vmap_new();
     if (get_type_id(obj) != LMD_TYPE_VMAP || !obj.vmap) return ItemNull;
     // Selection wrappers have no Map shell; the host brand is the unwrap invariant.
-    obj.vmap->host_type = (const void*)&js_dom_selection_vmap_type_marker;
+    obj.vmap->host_type = radiant_dom_selection_host_type();
     obj.vmap->host_data = s;
     s->host_wrapper = obj.vmap;
     return obj;

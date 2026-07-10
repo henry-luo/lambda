@@ -6,11 +6,14 @@
 #include "../../input/css/selector_matcher.hpp"
 #include "../../../radiant/form_control.hpp"
 #include "../../../radiant/text_control.hpp"
+#include "../../../lib/log.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/url.h"
+#include <assert.h>
 #include <ctype.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,11 +34,26 @@ extern "C" Item vmap_new(void);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
 extern "C" void js_throw_value(Item error);
 extern "C" bool js_is_css_namespace(Item item);
+extern "C" bool js_is_inline_style_item(Item item);
+extern "C" bool js_is_computed_style_item(Item item);
 extern "C" bool js_is_stylesheet(Item item);
+extern "C" bool js_is_css_rule(Item item);
 extern "C" bool js_is_rule_style_decl(Item item);
 extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name);
 extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item value);
 extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Item* args, int argc);
+extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name);
+extern "C" bool js_dom_style_resource_has_property(Item style_item, Item prop_name);
+extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args, int argc);
+extern "C" Item js_dom_get_prototype_value(Item obj);
+extern "C" const void* radiant_dom_node_host_type(void);
+extern "C" void radiant_dom_host_invalidate(Item object);
+extern "C" bool js_cssom_resource_has_property(Item item, Item prop_name);
+extern "C" Item js_cssom_stylesheet_get_property(Item sheet_item, Item prop_name);
+extern "C" Item js_cssom_rule_get_property(Item rule_item, Item prop_name);
+extern "C" Item js_cssom_rule_set_property(Item rule_item, Item prop_name, Item value);
+extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name);
+extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value);
 extern "C" void* js_get_foreign_doc(Item item);
 extern "C" void* js_dom_swap_active_document(void* new_doc);
 extern "C" void js_dom_restore_active_document(void* prev_doc);
@@ -48,6 +66,8 @@ extern "C" Item js_dom_range_get_property(Item obj, Item key);
 extern "C" Item js_dom_range_set_property(Item obj, Item key, Item value);
 extern "C" Item js_dom_selection_get_property(Item obj, Item key);
 extern "C" Item js_dom_selection_set_property(Item obj, Item key, Item value);
+extern "C" Item js_dom_range_get_prototype_value(void);
+extern "C" Item js_dom_selection_get_prototype_value(void);
 extern "C" bool js_dom_range_native_property(Item obj, Item key);
 extern "C" bool js_dom_selection_native_property(Item obj, Item key);
 extern "C" bool js_dom_expando_has_property(Item obj, Item key);
@@ -179,6 +199,30 @@ struct RadiantDomWrapperCacheChunk {
 
 static __thread RadiantDomWrapperCacheChunk* s_radiant_dom_wrapper_cache_head = nullptr;
 static __thread RadiantDomWrapperCacheChunk* s_radiant_dom_wrapper_cache_tail = nullptr;
+static __thread bool s_radiant_dom_cache_owner_set = false;
+static __thread pthread_t s_radiant_dom_cache_owner;
+
+static void radiant_dom_cache_check_owner(const char* op) {
+    pthread_t current = pthread_self();
+    if (!s_radiant_dom_cache_owner_set) {
+        s_radiant_dom_cache_owner = current;
+        s_radiant_dom_cache_owner_set = true;
+        return;
+    }
+    if (!pthread_equal(s_radiant_dom_cache_owner, current)) {
+        // wrapper cache slots are rooted per runtime thread; cross-thread use
+        // would unregister or mutate roots owned by a different JS runtime.
+        log_error("RDOM_CACHE_THREAD_MISMATCH: %s on non-owner thread", op ? op : "unknown");
+#ifndef NDEBUG
+        assert(false && "Radiant DOM wrapper cache used from non-owner thread");
+#endif
+    }
+}
+
+static bool radiant_dom_is_node_host_type(const void* host_type) {
+    return host_type == (const void*)&s_radiant_dom_vmap_type_marker ||
+        host_type == radiant_dom_node_host_type();
+}
 
 static Item radiant_dom_string_item(const char* value) {
     return (Item){.item = s2it(heap_create_name(value ? value : ""))};
@@ -1021,6 +1065,7 @@ static void radiant_dom_selector_group_collect_all(SelectorMatcher* matcher,
 }
 
 static Item radiant_dom_lookup_wrapper(DomNode* node) {
+    radiant_dom_cache_check_owner("lookup_wrapper");
     for (RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_head; chunk; chunk = chunk->next) {
         for (int i = 0; i < chunk->count; i++) {
             if (chunk->entries[i].node == node) {
@@ -1032,6 +1077,7 @@ static Item radiant_dom_lookup_wrapper(DomNode* node) {
 }
 
 static RadiantDomWrapperCacheChunk* radiant_dom_alloc_wrapper_cache_chunk() {
+    radiant_dom_cache_check_owner("alloc_wrapper_cache_chunk");
     RadiantDomWrapperCacheChunk* chunk = (RadiantDomWrapperCacheChunk*)mem_alloc(
         sizeof(RadiantDomWrapperCacheChunk), MEM_CAT_JS_RUNTIME);
     if (!chunk) return nullptr;
@@ -1047,6 +1093,7 @@ static RadiantDomWrapperCacheChunk* radiant_dom_alloc_wrapper_cache_chunk() {
 }
 
 static void radiant_dom_cache_wrapper(DomNode* node, Item wrapper) {
+    radiant_dom_cache_check_owner("cache_wrapper");
     if (!node || wrapper.item == ITEM_NULL) return;
     RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_tail;
     if (!chunk || chunk->count >= RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE) {
@@ -1061,11 +1108,16 @@ static void radiant_dom_cache_wrapper(DomNode* node, Item wrapper) {
 }
 
 static void radiant_dom_clear_cache_entry(RadiantDomWrapperCacheEntry* entry) {
+    radiant_dom_cache_check_owner("clear_cache_entry");
     if (!entry || entry->item == 0) return;
     DomNode* node = entry->node;
     if (node && node->is_element()) {
         form_control_release_prop(node->as_element());
     }
+    Item wrapper = (Item){.item = entry->item};
+    // Document teardown frees arena-owned DOM nodes; retained wrappers must
+    // keep their JS identity but lose the native payload before roots drop.
+    radiant_dom_host_invalidate(wrapper);
     heap_unregister_gc_root(&entry->item);
     entry->node = nullptr;
     entry->owner_doc = nullptr;
@@ -1073,6 +1125,7 @@ static void radiant_dom_clear_cache_entry(RadiantDomWrapperCacheEntry* entry) {
 }
 
 extern "C" void radiant_dom_invalidate_document(DomDocument* doc) {
+    radiant_dom_cache_check_owner("invalidate_document");
     if (!doc) return;
     for (RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_head; chunk; chunk = chunk->next) {
         for (int i = 0; i < chunk->count; i++) {
@@ -1085,6 +1138,7 @@ extern "C" void radiant_dom_invalidate_document(DomDocument* doc) {
 }
 
 extern "C" void radiant_dom_reset_wrapper_cache(void) {
+    radiant_dom_cache_check_owner("reset_wrapper_cache");
     RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_head;
     while (chunk) {
         for (int i = 0; i < chunk->count; i++) {
@@ -1099,6 +1153,7 @@ extern "C" void radiant_dom_reset_wrapper_cache(void) {
 }
 
 extern "C" Item radiant_dom_wrap_node(void* dom_elem) {
+    radiant_dom_cache_check_owner("wrap_node");
     if (!dom_elem) return ItemNull;
 
     DomNode* node = (DomNode*)dom_elem;
@@ -1115,7 +1170,7 @@ extern "C" Item radiant_dom_wrap_node(void* dom_elem) {
 
     Item wrapper = vmap_new();
     if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) {
-        wrapper.vmap->host_type = (const void*)&s_radiant_dom_vmap_type_marker;
+        wrapper.vmap->host_type = radiant_dom_node_host_type();
         wrapper.vmap->host_data = dom_elem;
         js_dom_initialize_node_wrapper(dom_elem);
         radiant_dom_cache_wrapper(node, wrapper);
@@ -1128,7 +1183,7 @@ extern "C" Item radiant_dom_wrap_node(void* dom_elem) {
 
 extern "C" void* radiant_dom_unwrap_node(Item item) {
     if (get_type_id(item) == LMD_TYPE_VMAP && item.vmap &&
-        item.vmap->host_type == (const void*)&s_radiant_dom_vmap_type_marker) {
+        radiant_dom_is_node_host_type(item.vmap->host_type)) {
         return item.vmap->host_data;
     }
     return js_dom_unwrap_element_impl(item);
@@ -1136,7 +1191,7 @@ extern "C" void* radiant_dom_unwrap_node(Item item) {
 
 extern "C" bool radiant_dom_is_node(Item item) {
     if (get_type_id(item) == LMD_TYPE_VMAP && item.vmap &&
-        item.vmap->host_type == (const void*)&s_radiant_dom_vmap_type_marker) {
+        radiant_dom_is_node_host_type(item.vmap->host_type)) {
         return item.vmap->host_data != nullptr;
     }
     return false;
@@ -2382,6 +2437,38 @@ static void radiant_dom_push_projected_key(Item result, Item object, const char*
     }
 }
 
+extern "C" int radiant_dom_host_get_property(Item object, Item key, Item* out) {
+    if (!out) return 0;
+    *out = radiant_dom_get_property(object, key);
+    return 1;
+}
+
+extern "C" int radiant_dom_host_set_property(Item object, Item key, Item value, Item* out) {
+    if (!out) return 0;
+    *out = radiant_dom_set_property(object, key, value);
+    return 1;
+}
+
+extern "C" int radiant_dom_host_call_method(Item object,
+                                            Item method_name,
+                                            Item* args,
+                                            int argc,
+                                            Item* out) {
+    if (!out) return 0;
+    if (js_dom_item_is_range(object)) {
+        Item fn = js_dom_range_get_property(object, method_name);
+        *out = js_call_function(fn, object, args, argc);
+        return 1;
+    }
+    if (js_dom_item_is_selection(object)) {
+        Item fn = js_dom_selection_get_property(object, method_name);
+        *out = js_call_function(fn, object, args, argc);
+        return 1;
+    }
+    *out = radiant_dom_element_method(object, method_name, args, argc);
+    return 1;
+}
+
 extern "C" int radiant_dom_host_has_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     Item projected = ItemNull;
@@ -2473,6 +2560,163 @@ extern "C" int radiant_dom_host_own_property_names(Item object, Item* out) {
     }
     *out = result;
     return 1;
+}
+
+extern "C" Item radiant_dom_host_prototype(Item object) {
+    if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
+    if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
+    return js_dom_get_prototype_value(object);
+}
+
+extern "C" void radiant_dom_host_invalidate(Item object) {
+    if (get_type_id(object) == LMD_TYPE_VMAP && object.vmap &&
+        radiant_dom_is_node_host_type(object.vmap->host_type)) {
+        object.vmap->host_data = nullptr;
+    }
+}
+
+extern "C" int radiant_dom_style_host_get_property(Item object, Item key, Item* out) {
+    if (!out) return 0;
+    *out = js_is_computed_style_item(object)
+        ? js_computed_style_get_property(object, key)
+        : radiant_dom_get_property(object, key);
+    return 1;
+}
+
+extern "C" int radiant_dom_style_host_set_property(Item object, Item key, Item value, Item* out) {
+    if (!out) return 0;
+    *out = js_is_computed_style_item(object) ? value : radiant_dom_set_property(object, key, value);
+    return 1;
+}
+
+extern "C" int radiant_dom_style_host_call_method(Item object,
+                                                  Item method_name,
+                                                  Item* args,
+                                                  int argc,
+                                                  Item* out) {
+    if (!out) return 0;
+    if (js_is_computed_style_item(object)) {
+        const char* method = fn_to_cstr(method_name);
+        if (method && strcmp(method, "getPropertyValue") == 0) {
+            *out = argc >= 1 ? js_computed_style_get_property(object, args[0]) : radiant_dom_string_item("");
+            return 1;
+        }
+        *out = ItemNull;
+        return 1;
+    }
+    *out = js_dom_style_method(object, method_name, args, argc);
+    return 1;
+}
+
+extern "C" int radiant_dom_style_host_has_property(Item object, Item key, Item* out) {
+    if (!out) return 0;
+    *out = (Item){.item = b2it(js_dom_style_resource_has_property(object, key) ? 1 : 0)};
+    return 1;
+}
+
+extern "C" int radiant_dom_style_host_delete_property(Item object, Item key, Item* out) {
+    if (!out) return 0;
+    *out = (Item){.item = b2it(js_dom_style_resource_has_property(object, key) ? 0 : 1)};
+    return 1;
+}
+
+extern "C" int radiant_dom_style_host_own_property_descriptor(Item object, Item key, Item* out) {
+    if (!out) return 0;
+    *out = radiant_dom_undefined_item();
+    return 1;
+}
+
+extern "C" int radiant_dom_style_host_own_property_names(Item object, Item* out) {
+    if (!out) return 0;
+    *out = js_array_new(0);
+    return 1;
+}
+
+extern "C" Item radiant_dom_style_host_prototype(Item object) {
+    return ItemNull;
+}
+
+extern "C" int radiant_dom_cssom_host_get_property(Item object, Item key, Item* out) {
+    if (!out) return 0;
+    if (js_is_stylesheet(object)) {
+        *out = js_cssom_stylesheet_get_property(object, key);
+        return 1;
+    }
+    if (js_is_css_rule(object)) {
+        *out = js_cssom_rule_get_property(object, key);
+        return 1;
+    }
+    if (js_is_rule_style_decl(object)) {
+        *out = js_cssom_rule_decl_get_property(object, key);
+        return 1;
+    }
+    return 0;
+}
+
+extern "C" int radiant_dom_cssom_host_set_property(Item object, Item key, Item value, Item* out) {
+    if (!out) return 0;
+    if (js_is_css_rule(object)) {
+        *out = js_cssom_rule_set_property(object, key, value);
+        return 1;
+    }
+    if (js_is_rule_style_decl(object)) {
+        *out = js_cssom_rule_decl_set_property(object, key, value);
+        return 1;
+    }
+    if (js_is_stylesheet(object)) {
+        *out = value;
+        return 1;
+    }
+    return 0;
+}
+
+extern "C" int radiant_dom_cssom_host_call_method(Item object,
+                                                  Item method_name,
+                                                  Item* args,
+                                                  int argc,
+                                                  Item* out) {
+    if (!out) return 0;
+    if (js_is_stylesheet(object)) {
+        *out = js_cssom_stylesheet_method(object, method_name, args, argc);
+        return 1;
+    }
+    if (js_is_rule_style_decl(object)) {
+        *out = js_cssom_rule_decl_method(object, method_name, args, argc);
+        return 1;
+    }
+    if (js_is_css_rule(object)) {
+        *out = ItemNull;
+        return 1;
+    }
+    return 0;
+}
+
+extern "C" int radiant_dom_cssom_host_has_property(Item object, Item key, Item* out) {
+    if (!out) return 0;
+    *out = (Item){.item = b2it(js_cssom_resource_has_property(object, key) ? 1 : 0)};
+    return 1;
+}
+
+extern "C" int radiant_dom_cssom_host_delete_property(Item object, Item key, Item* out) {
+    if (!out) return 0;
+    *out = (Item){.item = b2it(js_cssom_resource_has_property(object, key) ? 0 : 1)};
+    return 1;
+}
+
+extern "C" int radiant_dom_cssom_host_own_property_descriptor(Item object, Item key, Item* out) {
+    if (!out) return 0;
+    *out = radiant_dom_undefined_item();
+    return 1;
+}
+
+extern "C" int radiant_dom_cssom_host_own_property_names(Item object, Item* out) {
+    if (!out) return 0;
+    *out = js_array_new(0);
+    return 1;
+}
+
+extern "C" Item radiant_dom_cssom_host_prototype(Item object) {
+    return ItemNull;
 }
 
 static Item radiant_dom_call_foreign_window_global_method(Item object,
@@ -2575,6 +2819,74 @@ extern "C" int radiant_dom_foreign_document_method(Item object,
     }
     *out = result;
     return 1;
+}
+
+extern "C" int radiant_dom_document_host_get_property(Item object, Item key, Item* out) {
+    if (!out) return 0;
+    if (js_get_foreign_doc(object)) {
+        return radiant_dom_foreign_document_get_property(object, key, out);
+    }
+    *out = js_document_proxy_get_property(key);
+    return 1;
+}
+
+extern "C" int radiant_dom_document_host_set_property(Item object,
+                                                      Item key,
+                                                      Item value,
+                                                      Item* out) {
+    if (!out) return 0;
+    if (js_get_foreign_doc(object)) {
+        return radiant_dom_foreign_document_set_property(object, key, value, out);
+    }
+    *out = js_document_proxy_set_property(key, value);
+    return 1;
+}
+
+extern "C" int radiant_dom_document_host_call_method(Item object,
+                                                     Item method_name,
+                                                     Item* args,
+                                                     int argc,
+                                                     Item* out) {
+    if (!out) return 0;
+    if (js_get_foreign_doc(object)) {
+        return radiant_dom_foreign_document_method(object, method_name, args, argc, out);
+    }
+    *out = js_document_proxy_method(method_name, args, argc);
+    return 1;
+}
+
+extern "C" int radiant_dom_document_host_has_property(Item object, Item key, Item* out) {
+    if (!out) return 0;
+    Item value = ItemNull;
+    if (!radiant_dom_document_host_get_property(object, key, &value)) return 0;
+    *out = (Item){.item = b2it(value.item != ItemNull.item && value.item != ITEM_JS_UNDEFINED)};
+    return 1;
+}
+
+extern "C" int radiant_dom_document_host_delete_property(Item object, Item key, Item* out) {
+    (void)object; (void)key;
+    if (!out) return 0;
+    *out = (Item){.item = b2it(true)};
+    return 1;
+}
+
+extern "C" int radiant_dom_document_host_own_property_descriptor(Item object, Item key, Item* out) {
+    (void)object; (void)key;
+    if (!out) return 0;
+    *out = radiant_dom_undefined_item();
+    return 1;
+}
+
+extern "C" int radiant_dom_document_host_own_property_names(Item object, Item* out) {
+    (void)object;
+    if (!out) return 0;
+    *out = js_array_new(0);
+    return 1;
+}
+
+extern "C" Item radiant_dom_document_host_prototype(Item object) {
+    (void)object;
+    return ItemNull;
 }
 
 static DomElement* radiant_dom_document_child_by_tag(DomDocument* doc, const char* tag) {
