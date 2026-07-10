@@ -1,10 +1,6 @@
 #include "js_runtime_internal.hpp"
 
 extern "C" bool js_ordinary_has_property(Item object, const char* name, int name_len);
-extern "C" bool js_dom_item_is_range(Item item);
-extern "C" bool js_dom_item_is_selection(Item item);
-extern "C" Item js_dom_range_to_string_value(Item item);
-extern "C" Item js_dom_selection_to_string_value(Item item);
 extern "C" void* js_dom_unwrap_element(Item item);
 extern "C" bool js_is_proxy(Item obj);
 
@@ -598,12 +594,6 @@ extern "C" Item js_to_string(Item value) {
                 }
                 return js_to_string(result);
             }
-        }
-        if (js_dom_item_is_selection(value)) {
-            return js_dom_selection_to_string_value(value);
-        }
-        if (js_dom_item_is_range(value)) {
-            return js_dom_range_to_string_value(value);
         }
         // Check for Date objects via the typed JsClass tag (A3-T4).
         if (js_class_id(value) == JS_CLASS_DATE) {

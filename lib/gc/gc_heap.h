@@ -73,9 +73,9 @@ typedef void (*gc_vmap_trace_fn)(void* data, gc_heap_t* gc);
 
 /**
  * Callback type for destroying VMap backing data during GC sweep.
- * Called with the VMap's opaque data pointer (HashMapData*).
+ * Called with the VMap object and its opaque data pointer (HashMapData*).
  */
-typedef void (*gc_vmap_destroy_fn)(void* data);
+typedef void (*gc_vmap_destroy_fn)(void* obj, void* data);
 
 /**
  * Callback types for tracing/finalizing heap-owned LambdaError payloads.
@@ -179,7 +179,7 @@ typedef struct gc_heap {
 
     // VMap tracing/finalization callbacks (set by runtime, called from GC)
     gc_vmap_trace_fn vmap_trace;    // traces Item keys/values in VMap's HashMap
-    gc_vmap_destroy_fn vmap_destroy; // frees VMap's malloc'd backing data
+    gc_vmap_destroy_fn vmap_destroy; // frees VMap native payload/backing data
     gc_error_trace_fn error_trace;   // traces heap-owned LambdaError cause chain
     gc_error_destroy_fn error_destroy; // frees LambdaError external payload fields
     gc_js_native_trace_fn js_native_trace; // traces native payload edges on JS Map wrappers

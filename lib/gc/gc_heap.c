@@ -1408,7 +1408,7 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
         uint8_t* p = (uint8_t*)obj;
         void* data = *(void**)(p + 8);
         if (data && gc->vmap_destroy) {
-            gc->vmap_destroy(data);
+            gc->vmap_destroy(obj, data);
             *(void**)(p + 8) = NULL;  // prevent double-free at context teardown
         }
     }

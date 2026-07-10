@@ -16,6 +16,7 @@ static JubeHostAPI jube_host_api = {
 };
 
 extern "C" void radiant_jube_register_static(void);
+extern "C" void hostobj_demo_jube_register_static(void);
 
 static bool jube_module_name_equals(const char* a, const char* b) {
     if (!a || !b) return false;
@@ -116,6 +117,7 @@ int jube_register_static_module(const JubeModuleDef* module) {
 
 void jube_register_builtin_modules(void) {
     radiant_jube_register_static();
+    hostobj_demo_jube_register_static();
 }
 
 int jube_static_module_count(void) {

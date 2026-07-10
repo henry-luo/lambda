@@ -29,6 +29,7 @@
         "lambda/validator",
         "lambda/js",
         "lambda/module/radiant",
+        "lambda/module/hostobj_demo",
         "lambda/ts",
         "lambda/npm",
         "lambda/network",

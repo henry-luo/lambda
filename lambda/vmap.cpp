@@ -384,6 +384,7 @@ extern "C" void vmap_gc_trace(void* data, gc_heap_t* gc) {
 
 // Destroy VMap's HashMapData backing store.
 // Called by gc_finalize_dead_object() during the sweep phase.
-extern "C" void vmap_gc_destroy(void* data) {
+extern "C" void vmap_gc_destroy(void* obj, void* data) {
+    (void)obj;
     hashmap_data_free((HashMapData*)data);
 }
