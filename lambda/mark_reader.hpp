@@ -356,7 +356,6 @@ public:
 
     // Element properties
     const char* tagName() const { return element_type_ ? element_type_->name.str : nullptr; }
-    int64_t tagNameLen() const { return element_type_ ? (int64_t)element_type_->name.length : 0; }
     bool hasTag(const char* tag_name) const;
     int64_t childCount() const { return element_ ? ((const List*)element_)->length : 0; }
     int64_t attrCount() const { return element_type_ ? ((const TypeMap*)element_type_)->length : 0; }

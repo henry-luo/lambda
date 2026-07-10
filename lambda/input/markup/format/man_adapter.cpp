@@ -214,11 +214,6 @@ public:
         return false;
     }
 
-    // Man-specific: check if line is a macro
-    bool isMacro(const char* line) const {
-        return line[0] == '.';
-    }
-
     // Get macro name (without leading .)
     const char* getMacroName(const char* line, size_t* len) const {
         if (line[0] != '.') return nullptr;

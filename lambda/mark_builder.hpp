@@ -48,7 +48,6 @@ private:
     NamePool* name_pool_;       // string interning pool
     ArrayList* type_list_;      // type registry
 
-    bool auto_string_merge_;    // automatically merge consecutive strings
     bool ui_mode_;              // true = allocate DomElement/DomText (for layout/render/view)
 
 public:
@@ -226,15 +225,6 @@ public:
     Item createMetaType(TypeId type_id);
 
     // ============================================================================
-    // Configuration Methods
-    // ============================================================================
-
-    /**
-     * Enable/disable automatic merging of consecutive string children
-     */
-    void setAutoStringMerge(bool enabled) { auto_string_merge_ = enabled; }
-
-    // ============================================================================
     // Accessors (for internal use by sub-builders)
     // ============================================================================
 
@@ -244,7 +234,6 @@ public:
     NamePool* namePool() const { return name_pool_; }
     ArrayList* typeList() const { return type_list_; }
     bool ui_mode() const { return ui_mode_; }
-    bool autoStringMerge() const { return auto_string_merge_; }
 
     // ============================================================================
     // Deep Copy Methods (with smart ownership checking)

@@ -276,36 +276,6 @@ public:
     }
 
     /**
-     * Check if a specific row contains any occupied cells
-     */
-    bool row_is_occupied(size_t row_index) const {
-        if (row_index >= row_count_) return false;
-        if (!data_) return false;
-
-        for (size_t c = 0; c < col_count_; ++c) {
-            if (data_[row_index * col_count_ + c] != CellOccupancyState::Unoccupied) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Check if a specific column contains any occupied cells
-     */
-    bool column_is_occupied(size_t col_index) const {
-        if (col_index >= col_count_) return false;
-        if (!data_) return false;
-
-        for (size_t r = 0; r < row_count_; ++r) {
-            if (data_[r * col_count_ + col_index] != CellOccupancyState::Unoccupied) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
      * Find the last cell of a given type in a track, searching from end to start
      *
      * @param track_type Which axis to search along

@@ -367,23 +367,6 @@ TEST_F(MarkBuilderTest, NameSymbolStringSeparation) {
     EXPECT_NE(str_s1, str_s2);
 }
 
-// Test auto string merge
-TEST_F(MarkBuilderTest, AutoStringMerge) {
-    MarkBuilder builder(input);
-    builder.setAutoStringMerge(true);
-
-    Item elem_item = builder.element("p")
-        .text("Hello ")
-        .text("World")
-        .final();
-
-    Element* elem = elem_item.element;
-    ASSERT_NE(elem, nullptr);
-
-    // With auto merge, adjacent strings should be merged
-    // (actual verification would depend on implementation details)
-}
-
 //==============================================================================
 // Negative Tests - Error Handling
 //==============================================================================

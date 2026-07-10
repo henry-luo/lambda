@@ -216,11 +216,6 @@ public:
      */
     FormatAdapter* adapter() const { return adapter_; }
 
-    /**
-     * Set format adapter (for format detection)
-     */
-    void setAdapter(FormatAdapter* adapter) { adapter_ = adapter; }
-
     // ========================================================================
     // Error Reporting
     // ========================================================================
@@ -280,15 +275,6 @@ public:
             return lines[idx];
         }
         return nullptr;
-    }
-
-    /**
-     * Advance to next line
-     */
-    void advanceLine() {
-        if (current_line < line_count) {
-            current_line++;
-        }
     }
 
     /**

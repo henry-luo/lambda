@@ -62,39 +62,6 @@ TEST_F(GridCoordinatesTest, OriginZeroLineComparison) {
     EXPECT_TRUE(line1 >= line3);
 }
 
-TEST_F(GridCoordinatesTest, OriginZeroLineImpliedTracks) {
-    // Positive line - no negative implicit tracks needed
-    OriginZeroLine pos(3);
-    EXPECT_EQ(pos.implied_negative_implicit_tracks(), 0);
-    EXPECT_EQ(pos.implied_positive_implicit_tracks(2), 1); // 3 > 2, so 1 positive implicit
-
-    // Negative line - needs negative implicit tracks
-    OriginZeroLine neg(-2);
-    EXPECT_EQ(neg.implied_negative_implicit_tracks(), 2);
-    EXPECT_EQ(neg.implied_positive_implicit_tracks(5), 0);
-}
-
-TEST_F(GridCoordinatesTest, GridLineToOriginZero) {
-    uint16_t explicit_tracks = 3; // 4 lines (0, 1, 2, 3 in origin-zero)
-
-    // Positive CSS grid lines (1 = first line)
-    GridLine line1(1);
-    EXPECT_EQ(line1.into_origin_zero_line(explicit_tracks).value, 0);
-
-    GridLine line2(2);
-    EXPECT_EQ(line2.into_origin_zero_line(explicit_tracks).value, 1);
-
-    GridLine line4(4);
-    EXPECT_EQ(line4.into_origin_zero_line(explicit_tracks).value, 3);
-
-    // Negative CSS grid lines (-1 = last line)
-    GridLine lineN1(-1);
-    EXPECT_EQ(lineN1.into_origin_zero_line(explicit_tracks).value, 3); // Last line
-
-    GridLine lineN2(-2);
-    EXPECT_EQ(lineN2.into_origin_zero_line(explicit_tracks).value, 2);
-}
-
 TEST_F(GridCoordinatesTest, TrackCountsBasics) {
     TrackCounts counts(2, 3, 1); // 2 negative implicit, 3 explicit, 1 positive implicit
 
@@ -221,25 +188,6 @@ TEST_F(CellOccupancyMatrixTest, AreaIsUnoccupied) {
     EXPECT_FALSE(matrix.line_area_is_unoccupied(AbsoluteAxis::Horizontal, col_span2, row_span2));
 }
 
-TEST_F(CellOccupancyMatrixTest, RowAndColumnOccupancy) {
-    TrackCounts cols(0, 3, 0);
-    TrackCounts rows(0, 3, 0);
-
-    CellOccupancyMatrix matrix(cols, rows);
-
-    // Initially no rows/columns are occupied
-    EXPECT_FALSE(matrix.row_is_occupied(0));
-    EXPECT_FALSE(matrix.column_is_occupied(0));
-
-    // Mark a cell
-    matrix.set(1, 2, CellOccupancyState::AutoPlaced);
-
-    EXPECT_TRUE(matrix.row_is_occupied(1));
-    EXPECT_TRUE(matrix.column_is_occupied(2));
-    EXPECT_FALSE(matrix.row_is_occupied(0));
-    EXPECT_FALSE(matrix.column_is_occupied(0));
-}
-
 // ============================================================================
 // GridTrack and TrackSizingFunction Tests
 // ============================================================================
@@ -269,7 +217,6 @@ TEST_F(GridTrackTest, MaxTrackSizingFunction) {
     EXPECT_EQ(fr_fn.flex_factor(), 2.0f);
 
     auto fit_content_fn = MaxTrackSizingFunction::FitContentPx(150.0f);
-    EXPECT_TRUE(fit_content_fn.is_fit_content());
     EXPECT_EQ(fit_content_fn.fit_content_limit(500.0f), 150.0f);
 
     auto fit_content_pct = MaxTrackSizingFunction::FitContentPercent(20.0f);
@@ -279,7 +226,6 @@ TEST_F(GridTrackTest, MaxTrackSizingFunction) {
 TEST_F(GridTrackTest, TrackSizingFunctionFactories) {
     auto auto_track = TrackSizingFunction::Auto();
     EXPECT_FALSE(auto_track.is_flexible());
-    EXPECT_TRUE(auto_track.has_intrinsic_sizing());
 
     auto fr_track = TrackSizingFunction::Fr(1.5f);
     EXPECT_TRUE(fr_track.is_flexible());
@@ -287,7 +233,6 @@ TEST_F(GridTrackTest, TrackSizingFunctionFactories) {
 
     auto fixed_track = TrackSizingFunction::Length(200.0f);
     EXPECT_FALSE(fixed_track.is_flexible());
-    EXPECT_FALSE(fixed_track.has_intrinsic_sizing());
 }
 
 TEST_F(GridTrackTest, EnhancedGridTrackBasics) {
@@ -297,7 +242,6 @@ TEST_F(GridTrackTest, EnhancedGridTrackBasics) {
     );
 
     EXPECT_TRUE(track.is_flexible());
-    EXPECT_TRUE(track.has_intrinsic_sizing_function());
     EXPECT_EQ(track.flex_factor(), 1.0f);
     EXPECT_EQ(track.kind, GridTrackKind::Track);
     EXPECT_FALSE(track.is_collapsed);
@@ -500,12 +444,24 @@ protected:
     void SetUp() override {}
 };
 
+// test-local constructor (the engine builds GridPlacement from CSS parsing, not line pairs)
+static GridPlacement placement_from_lines(int16_t s, int16_t e) {
+    GridPlacement p;
+    p.start = s;
+    p.end = e;
+    p.span = 1;
+    p.is_definite = (s != 0) || (e != 0);
+    p.has_negative_end = (e < 0);
+    p.has_negative_start = (s < 0);
+    return p;
+}
+
 TEST_F(GridPlacementTest, GridPlacementBasics) {
     auto auto_placement = GridPlacement::Auto(2);
     EXPECT_FALSE(auto_placement.is_definite);
     EXPECT_EQ(auto_placement.get_span(), 2);
 
-    auto line_placement = GridPlacement::FromLines(1, 3);
+    auto line_placement = placement_from_lines(1, 3);
     EXPECT_TRUE(line_placement.is_definite);
     EXPECT_EQ(line_placement.get_span(), 2);
 
@@ -519,12 +475,12 @@ TEST_F(GridPlacementTest, PlacementToOriginZero) {
     uint16_t explicit_tracks = 3;
 
     // Line 1 -> OriginZero 0
-    auto placement1 = GridPlacement::FromLines(1, 0);
+    auto placement1 = placement_from_lines(1, 0);
     LineSpan span1 = placement1.to_origin_zero(explicit_tracks);
     EXPECT_EQ(span1.start.value, 0);
 
     // Line -1 -> OriginZero 3 (last line)
-    auto placementN1 = GridPlacement::FromLines(-1, 0);
+    auto placementN1 = placement_from_lines(-1, 0);
     LineSpan spanN1 = placementN1.to_origin_zero(explicit_tracks);
     EXPECT_EQ(spanN1.start.value, 3);
 }
@@ -539,15 +495,15 @@ TEST_F(GridPlacementTest, PlaceDefiniteItems) {
     // Item 1: Definite position at column 1-3, row 1-2
     GridItemInfo item1;
     item1.item_index = 0;
-    item1.column = GridPlacement::FromLines(1, 3);
-    item1.row = GridPlacement::FromLines(1, 2);
+    item1.column = placement_from_lines(1, 3);
+    item1.row = placement_from_lines(1, 2);
     items.push_back(item1);
 
     // Item 2: Definite position at column 3-4, row 2-4
     GridItemInfo item2;
     item2.item_index = 1;
-    item2.column = GridPlacement::FromLines(3, 4);
-    item2.row = GridPlacement::FromLines(2, 4);
+    item2.column = placement_from_lines(3, 4);
+    item2.row = placement_from_lines(2, 4);
     items.push_back(item2);
 
     place_grid_items(matrix, items, GridAutoFlow::Row, 4, 4);

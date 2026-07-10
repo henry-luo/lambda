@@ -84,7 +84,6 @@ TEST_F(CssTempDeclTest, TwoValuesRouteAsList) {
     EXPECT_TRUE(decl.append(&a));
     EXPECT_TRUE(decl.append(&b));
     EXPECT_EQ(decl.count(), 2);
-    EXPECT_TRUE(decl.is_full());
 
     decl.resolve(nullptr);
 
@@ -103,7 +102,6 @@ TEST_F(CssTempDeclTest, SingleValueListIsNotWrapped) {
     lam::CssTempListDecl<2> decl(&base, CSS_PROPERTY_BACKGROUND_SIZE);
     EXPECT_TRUE(decl.append(&a));
     EXPECT_EQ(decl.count(), 1);
-    EXPECT_FALSE(decl.is_full());
 
     decl.resolve(nullptr);
 

@@ -342,42 +342,6 @@ inline Element* create_inline_element(MarkupParser* parser, const char* tag) {
 }
 
 /**
- * Add text content to an inline element
- */
-inline void add_text_to_element(MarkupParser* parser, Element* elem, const char* text, size_t len) {
-    String* str = parser->builder.createString(text, len);
-    if (str) {
-        Item item = {.item = s2it(str)};
-        list_push((List*)elem, item);
-        TypeElmt* elmt_type = (TypeElmt*)elem->type;
-        elmt_type->content_length++;
-    }
-}
-
-/**
- * Add child item to an inline element
- */
-inline void add_child_to_element(Element* elem, Item child) {
-    if (child.item != ITEM_UNDEFINED && child.item != ITEM_ERROR) {
-        list_push((List*)elem, child);
-        TypeElmt* elmt_type = (TypeElmt*)elem->type;
-        elmt_type->content_length++;
-    }
-}
-
-/**
- * Add attribute to an inline element
- */
-inline void add_inline_attribute(MarkupParser* parser, Element* elem,
-                                 const char* key, const char* val) {
-    String* k = parser->builder.createString(key);
-    String* v = parser->builder.createString(val);
-    if (k && v) {
-        parser->builder.putToElement(lam::gc_borrow(elem), k, Item{.item = s2it(v)});
-    }
-}
-
-/**
  * Check if character at position is escaped
  */
 inline bool is_escaped(const char* start, const char* pos) {
@@ -400,18 +364,6 @@ const char* find_closing(const char* start, const char* delimiter);
  * Find the end of an inline element, handling nesting
  */
 const char* find_inline_end(const char* start, const char* open, const char* close);
-
-/**
- * Count consecutive occurrences of a character
- */
-inline int count_consecutive(const char* pos, char c) {
-    int count = 0;
-    while (*pos == c) {
-        count++;
-        pos++;
-    }
-    return count;
-}
 
 /**
  * Find matching closing delimiter with same count

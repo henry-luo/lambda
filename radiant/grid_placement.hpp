@@ -90,20 +90,6 @@ struct GridPlacement {
     GridPlacement() : start(0), end(0), span(1), is_definite(false), has_negative_end(false), has_negative_start(false) {}
 
     /**
-     * Create placement from start and end lines
-     */
-    static GridPlacement FromLines(int16_t s, int16_t e) {
-        GridPlacement p;
-        p.start = s;
-        p.end = e;
-        p.span = 1;
-        p.is_definite = (s != 0) || (e != 0);
-        p.has_negative_end = (e < 0);
-        p.has_negative_start = (s < 0);
-        return p;
-    }
-
-    /**
      * Create placement from start line and span
      */
     static GridPlacement FromStartSpan(int16_t s, uint16_t sp) {
@@ -374,85 +360,6 @@ inline void place_definite_column_item(
 
     item.resolved_row = row_span;
     item.resolved_column = col_span;
-}
-
-/**
- * Place an item with definite secondary axis position
- *
- * @param matrix The cell occupancy matrix
- * @param item The item to place
- * @param auto_flow The auto-flow mode
- * @param explicit_row_count Number of explicit row tracks
- * @param explicit_col_count Number of explicit column tracks
- */
-inline void place_definite_secondary_axis_item(
-    CellOccupancyMatrix& matrix,
-    GridItemInfo& item,
-    GridAutoFlow auto_flow,
-    uint16_t explicit_row_count,
-    uint16_t explicit_col_count
-) {
-    AbsoluteAxis primary = primary_axis(auto_flow);
-    AbsoluteAxis secondary = other_axis(primary);
-
-    // Get the definite secondary placement
-    const GridPlacement& secondary_placement =
-        (secondary == AbsoluteAxis::Vertical) ? item.row : item.column;
-    const GridPlacement& primary_placement =
-        (primary == AbsoluteAxis::Vertical) ? item.row : item.column;
-
-    uint16_t secondary_explicit = (secondary == AbsoluteAxis::Vertical) ? explicit_row_count : explicit_col_count;
-
-    LineSpan secondary_span = secondary_placement.to_origin_zero(secondary_explicit);
-    uint16_t primary_item_span = primary_placement.get_span();
-
-    // Starting position for search
-    OriginZeroLine primary_start_line = matrix.track_counts(primary).implicit_start_line();
-    OriginZeroLine position = is_dense(auto_flow)
-        ? primary_start_line
-        : primary_start_line; // TODO: Use last_of_type for sparse packing
-
-    // Search for an unoccupied area with iteration limit
-    // The grid can grow implicitly, but we need a reasonable upper bound
-    constexpr int MAX_SEARCH_ITERATIONS = 10000;
-    int iterations = 0;
-
-    while (iterations < MAX_SEARCH_ITERATIONS) {
-        LineSpan primary_span(position, position + primary_item_span);
-
-        // Ensure matrix can accommodate this position by expanding if needed
-        matrix.ensure_fits(primary, primary_span, secondary_span);
-
-        if (matrix.line_area_is_unoccupied(primary, primary_span, secondary_span)) {
-            // Found a free space
-            if (primary == AbsoluteAxis::Vertical) {
-                item.resolved_row = primary_span;
-                item.resolved_column = secondary_span;
-            } else {
-                item.resolved_row = secondary_span;
-                item.resolved_column = primary_span;
-            }
-            return;
-        }
-
-        position += 1;
-        iterations++;
-    }
-
-    // Fallback: If we couldn't find a spot, place at the end of the grid
-    log_warn("[RAD_CAP_GRID_AUTO_PLACE] exhausted secondary-axis search after %d iterations; placing at grid end",
-             MAX_SEARCH_ITERATIONS);
-    OriginZeroLine fallback_pos = matrix.track_counts(primary).implicit_end_line();
-    LineSpan primary_span(fallback_pos, fallback_pos + primary_item_span);
-    matrix.ensure_fits(primary, primary_span, secondary_span);
-
-    if (primary == AbsoluteAxis::Vertical) {
-        item.resolved_row = primary_span;
-        item.resolved_column = secondary_span;
-    } else {
-        item.resolved_row = secondary_span;
-        item.resolved_column = primary_span;
-    }
 }
 
 /**

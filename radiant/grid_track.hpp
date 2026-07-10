@@ -176,14 +176,6 @@ struct MaxTrackSizingFunction {
     }
 
     /**
-     * Returns true if this is a fit-content() function
-     */
-    constexpr bool is_fit_content() const {
-        return type == SizingFunctionType::FitContentPx ||
-               type == SizingFunctionType::FitContentPercent;
-    }
-
-    /**
      * Get the flex factor if this is an Fr track, else 0
      */
     constexpr float flex_factor() const {
@@ -263,12 +255,7 @@ struct TrackSizingFunction {
     static constexpr TrackSizingFunction FitContentPercent(float pct) {
         return TrackSizingFunction(MinTrackSizingFunction::Auto(), MaxTrackSizingFunction::FitContentPercent(pct));
     }
-    static constexpr TrackSizingFunction Minmax(MinTrackSizingFunction mn, MaxTrackSizingFunction mx) {
-        return TrackSizingFunction(mn, mx);
-    }
-
     constexpr bool is_flexible() const { return max.is_fr(); }
-    constexpr bool has_intrinsic_sizing() const { return min.is_intrinsic() || max.is_intrinsic(); }
     constexpr bool uses_percentage() const { return min.uses_percentage() || max.uses_percentage(); }
 };
 
@@ -404,21 +391,9 @@ struct EnhancedGridTrack {
                max_track_sizing_function.uses_percentage();
     }
 
-    /** Returns true if this track has an intrinsic min or max sizing function */
-    bool has_intrinsic_sizing_function() const {
-        return min_track_sizing_function.is_intrinsic() ||
-               max_track_sizing_function.is_intrinsic();
-    }
-
     /** Get the fit-content limit (infinity if not a fit-content track) */
     float fit_content_limit(float axis_available_space) const {
         return max_track_sizing_function.fit_content_limit(axis_available_space);
-    }
-
-    /** Get the growth limit clamped by fit-content */
-    float fit_content_limited_growth_limit(float axis_available_space) const {
-        float limit = fit_content_limit(axis_available_space);
-        return grid_min_value(growth_limit, limit);
     }
 
     /** Get the flex factor (0 if not flexible) */

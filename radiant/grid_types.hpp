@@ -100,21 +100,6 @@ struct OriginZeroLine {
     constexpr bool operator>(OriginZeroLine other) const { return value > other.value; }
     constexpr bool operator>=(OriginZeroLine other) const { return value >= other.value; }
 
-    /**
-     * The minimum number of negative implicit tracks needed if an item starts at this line
-     */
-    constexpr uint16_t implied_negative_implicit_tracks() const {
-        return value < 0 ? static_cast<uint16_t>(-value) : 0;
-    }
-
-    /**
-     * The minimum number of positive implicit tracks needed if an item ends at this line
-     */
-    constexpr uint16_t implied_positive_implicit_tracks(uint16_t explicit_track_count) const {
-        return value > static_cast<int16_t>(explicit_track_count)
-            ? static_cast<uint16_t>(value) - explicit_track_count
-            : 0;
-    }
 };
 
 /**
@@ -131,25 +116,6 @@ struct GridLine {
     constexpr explicit GridLine(int16_t v) : value(v) {}
 
     constexpr int16_t as_i16() const { return value; }
-
-    /**
-     * Convert CSS grid line to origin-zero coordinates
-     *
-     * @param explicit_track_count Number of explicit tracks in this axis
-     */
-    OriginZeroLine into_origin_zero_line(uint16_t explicit_track_count) const {
-        int16_t explicit_line_count = static_cast<int16_t>(explicit_track_count + 1);
-        int16_t oz_line = 0;
-
-        if (value > 0) {
-            oz_line = value - 1;
-        } else if (value < 0) {
-            oz_line = value + explicit_line_count;
-        }
-        // else value == 0 is invalid - treat as line 1, oz_line = 0
-
-        return OriginZeroLine(oz_line);
-    }
 
     constexpr bool is_valid() const { return value != 0; }
 };
@@ -245,33 +211,6 @@ struct TrackCounts {
         return OriginZeroLine(static_cast<int16_t>(track_idx) - static_cast<int16_t>(negative_implicit));
     }
 
-    /**
-     * Convert a track index range back to OriginZero line range
-     */
-    constexpr LineSpan track_range_to_oz_line_range(int16_t start_idx, int16_t end_idx) const {
-        return LineSpan(
-            track_to_prev_oz_line(static_cast<uint16_t>(start_idx)),
-            track_to_prev_oz_line(static_cast<uint16_t>(end_idx))
-        );
-    }
-
-    /**
-     * Convert OriginZero line to GridTrackVec index (which stores lines and tracks interleaved)
-     * Even indices = lines, odd indices = tracks
-     *
-     * Returns -1 if the line is out of bounds
-     */
-    int into_track_vec_index(OriginZeroLine line) const {
-        // Check bounds
-        if (line.value < -static_cast<int16_t>(negative_implicit)) {
-            return -1;
-        }
-        if (line.value > static_cast<int16_t>(explicit_count + positive_implicit)) {
-            return -1;
-        }
-
-        return 2 * (line.value + static_cast<int>(negative_implicit));
-    }
 };
 
 /**

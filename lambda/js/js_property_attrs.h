@@ -56,16 +56,6 @@ static inline bool jspd_is_deleted(const ShapeEntry* se) {
 // Mutators (must be called only on shapes that are NOT pool-deduplicated, i.e.
 // shapes private to a single map instance). For deduplicated shapes the caller
 // must first transition the map to a fresh shape.
-static inline void jspd_set_writable(ShapeEntry* se, bool w) {
-    if (!se) return;
-    if (w) se->flags &= (uint8_t)~JSPD_NON_WRITABLE;
-    else   se->flags |= JSPD_NON_WRITABLE;
-}
-static inline void jspd_set_enumerable(ShapeEntry* se, bool e) {
-    if (!se) return;
-    if (e) se->flags &= (uint8_t)~JSPD_NON_ENUMERABLE;
-    else   se->flags |= JSPD_NON_ENUMERABLE;
-}
 static inline void jspd_set_configurable(ShapeEntry* se, bool c) {
     if (!se) return;
     if (c) se->flags &= (uint8_t)~JSPD_NON_CONFIGURABLE;
@@ -76,16 +66,6 @@ static inline void jspd_set_accessor(ShapeEntry* se, bool a) {
     if (a) se->flags |= JSPD_IS_ACCESSOR;
     else   se->flags &= (uint8_t)~JSPD_IS_ACCESSOR;
 }
-// A2-T8: tombstone bit mutator. Must only be called on shapes private to a
-// single Map (post A2-T1 clone). Setting the bit logically deletes the property;
-// clearing the bit revives it (used when a new value/descriptor is installed
-// over a previously-deleted slot).
-static inline void jspd_set_deleted(ShapeEntry* se, bool d) {
-    if (!se) return;
-    if (d) se->flags |= JSPD_DELETED;
-    else   se->flags &= (uint8_t)~JSPD_DELETED;
-}
-
 // =============================================================================
 // JsAccessorPair allocation and tagging
 // =============================================================================

@@ -668,47 +668,6 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
     return res;
 }
 
-// mark resource as completed
-void resource_manager_mark_completed(NetworkResourceManager* mgr, NetworkResource* res) {
-    if (!mgr || !res) return;
-    
-    pthread_mutex_lock(&mgr->mutex);
-    
-    res->state = STATE_COMPLETED;
-    if (!res->stats_counted) {
-        mgr->completed_resources++;
-        res->stats_counted = true;
-    }
-    
-    log_debug("network: resource completed: %s (%d/%d)", 
-              res->url, mgr->completed_resources, mgr->total_resources);
-    
-    // invoke callback if set
-    if (res->on_complete) {
-        res->on_complete(res, res->user_data);
-    }
-    
-    pthread_mutex_unlock(&mgr->mutex);
-}
-
-// mark resource as failed
-void resource_manager_mark_failed(NetworkResourceManager* mgr, NetworkResource* res, const char* error) {
-    if (!mgr || !res) return;
-    
-    pthread_mutex_lock(&mgr->mutex);
-    
-    res->state = STATE_FAILED;
-    res->error_message = mem_strdup(error ? error : "Unknown error", MEM_CAT_NETWORK);
-    if (!res->stats_counted) {
-        mgr->failed_resources++;
-        res->stats_counted = true;
-    }
-    
-    log_error("network: resource failed: %s - %s", res->url, res->error_message);
-    
-    pthread_mutex_unlock(&mgr->mutex);
-}
-
 // schedule reflow
 void resource_manager_schedule_reflow(NetworkResourceManager* mgr, struct DomElement* element) {
     if (!mgr || !element) return;

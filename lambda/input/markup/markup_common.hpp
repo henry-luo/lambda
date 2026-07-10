@@ -339,17 +339,6 @@ inline bool is_blank_line(const char* line) {
 }
 
 /**
- * Trim trailing whitespace from a string, return new length
- */
-inline size_t trim_trailing(const char* start, size_t len) {
-    while (len > 0 && (start[len-1] == ' ' || start[len-1] == '\t' ||
-                       start[len-1] == '\r' || start[len-1] == '\n')) {
-        len--;
-    }
-    return len;
-}
-
-/**
  * Check if string starts with prefix
  */
 inline bool starts_with(const char* str, const char* prefix) {

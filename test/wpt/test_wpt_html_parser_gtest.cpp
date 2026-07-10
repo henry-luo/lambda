@@ -213,7 +213,7 @@ void serialize_element_wpt(Item item, std::string& output, int depth) {
         ElementReader elem(item);
 
         // Get tag name
-        std::string tag_name(elem.tagName(), elem.tagNameLen());
+        std::string tag_name(elem.tagName());
 
         // Handle special element types
         if (tag_name == "#comment") {
@@ -310,7 +310,7 @@ std::string lambda_tree_to_wpt_format(Item root) {
 
                 if (child_type == LMD_TYPE_ELEMENT) {
                     ElementReader elem(child);
-                    std::string tag_name(elem.tagName(), elem.tagNameLen());
+                    std::string tag_name(elem.tagName());
 
                     // Serialize the html element and its children
                     serialize_element_wpt(child, result, 0);
@@ -322,7 +322,7 @@ std::string lambda_tree_to_wpt_format(Item root) {
     else if (root_type == LMD_TYPE_ELEMENT) {
         // Check if this is a #document element
         ElementReader doc_elem(root);
-        std::string tag_name(doc_elem.tagName(), doc_elem.tagNameLen());
+        std::string tag_name(doc_elem.tagName());
 
         if (tag_name == "#document") {
             // Skip the #document element itself (already printed above)

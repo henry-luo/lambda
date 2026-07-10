@@ -183,18 +183,6 @@ inline TrackArray convert_tracks_to_enhanced(
 // ============================================================================
 
 /**
- * Copy EnhancedGridTrack computed values back to old GridTrack (from grid.hpp)
- */
-inline void copy_enhanced_to_old(const EnhancedGridTrack& enhanced, ::GridTrack* old_track) {
-    if (!old_track) return;
-
-    old_track->base_size = static_cast<int>(enhanced.base_size);
-    old_track->growth_limit = enhanced.growth_limit;
-    old_track->computed_size = static_cast<int>(enhanced.base_size);
-    old_track->is_flexible = enhanced.max_track_sizing_function.is_fr();
-}
-
-/**
  * Copy vector of EnhancedGridTrack back to old GridTrack array (from grid.hpp)
  * Uses the "largest remainder" method to distribute any fractional pixel loss:
  * floor all track sizes first, then give +1px to the tracks with the largest
@@ -255,24 +243,6 @@ inline void copy_enhanced_tracks_to_old(
             old_tracks[idx].computed_size++;
         }
     }
-}
-
-// ============================================================================
-// Coordinate System Conversion
-// ============================================================================
-
-/**
- * Convert 1-based CSS line number to GridLine
- */
-inline GridLine css_line_to_grid_line(int css_line) {
-    return GridLine(static_cast<int16_t>(css_line));
-}
-
-/**
- * Convert GridLine to 1-based CSS line number
- */
-inline int grid_line_to_css_line(GridLine line) {
-    return static_cast<int>(line.as_i16());
 }
 
 // ============================================================================

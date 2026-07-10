@@ -74,7 +74,6 @@ public:
     CssTempListDecl& operator=(const CssTempListDecl&) = delete;
 
     int count() const { return count_; }
-    bool is_full() const { return count_ >= N; }
 
     // Append a borrowed shorthand component. Returns false on null value or
     // when the compile-time capacity N is already reached.

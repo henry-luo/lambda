@@ -15,7 +15,8 @@ extern "C" {
 namespace {
 
 static void expect_raw_item_header(void* ptr, TypeId expected_type) {
-    assert_raw_item_header(ptr, expected_type);
+    // Constructors must write byte-zero TypeId before exposing raw-pointer Items.
+    EXPECT_EQ(*(TypeId*)ptr, expected_type);
     Item item = p2it(ptr);
     uint64_t bits = item.item;
 

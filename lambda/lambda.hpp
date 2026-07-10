@@ -510,21 +510,6 @@ static inline Item p2it(void* ptr) {
     return Item{.item = (uint64_t)(uintptr_t)ptr};
 }
 
-static inline void assert_raw_item_header(void* ptr, TypeId expected_type) {
-#if !defined(NDEBUG) && !defined(LAMBDA_C2MIR_RUNTIME)
-    if (!ptr) return;
-    assert_raw_item_pointer(ptr);
-    Item item = Item{.item = (uint64_t)(uintptr_t)ptr};
-    // Constructors must write byte-zero TypeId before exposing raw-pointer Items.
-    if (*(TypeId*)ptr != expected_type || get_type_id(item) != expected_type ||
-        it2p(item) != ptr) {
-        lambda_item_debug_trap();
-    }
-#else
-    (void)ptr; (void)expected_type;
-#endif
-}
-
 static inline Item err2it(LambdaError* err) {
     if (!err) return ItemNull;
     return Item{.item = ((uint64_t)LMD_TYPE_ERROR << 56) | (uint64_t)(uintptr_t)err};

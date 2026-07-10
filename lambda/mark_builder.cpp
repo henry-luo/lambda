@@ -57,7 +57,6 @@ MarkBuilder::MarkBuilder(Input* input)
     , arena_(input->arena)
     , name_pool_(input->name_pool)
     , type_list_(input->type_list)
-    , auto_string_merge_(false)
     , ui_mode_(input->ui_mode)
 {
     assert(input != nullptr);

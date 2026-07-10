@@ -595,24 +595,6 @@ static void v_append_class_char(std::string& out, int c) {
     }
 }
 
-// Append code-point as a top-level literal (outside a class). Escape regex
-// metacharacters; otherwise emit as UTF-8/RE2 hex literal.
-static __attribute__((unused)) void v_append_topcode(std::string& out, int c) {
-    // metacharacters that must be escaped outside class
-    if (c == '\\' || c == '(' || c == ')' || c == '[' || c == ']' ||
-        c == '{' || c == '}' || c == '.' || c == '*' || c == '+' ||
-        c == '?' || c == '|' || c == '^' || c == '$' || c == '/') {
-        out.push_back('\\');
-        out.push_back((char)c);
-    } else if (c >= 0x20 && c <= 0x7E) {
-        out.push_back((char)c);
-    } else {
-        char buf[16];
-        snprintf(buf, sizeof(buf), "\\x{%X}", c);
-        out.append(buf);
-    }
-}
-
 static std::string v_ranges_to_class(const CodePointRanges& set, bool negated) {
     if (set.empty()) {
         return negated ? std::string("[\\s\\S]") : std::string("(?!)");

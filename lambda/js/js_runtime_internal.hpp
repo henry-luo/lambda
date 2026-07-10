@@ -670,18 +670,9 @@ static inline bool js_check_bigint_arithmetic(Item left, Item right) {
     return false;
 }
 
-static inline Item js_make_bigint(int64_t val) {
-    return bigint_from_int64(val);
-}
-
 // Helper to make JS undefined value
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
-// Sentinel value for deleted properties.
-static inline Item make_js_deleted_sentinel() {
-    return lam::hole_sentinel_item();
 }
 
 static inline bool js_is_deleted_sentinel(Item val) {

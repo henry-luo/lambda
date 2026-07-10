@@ -21,6 +21,8 @@ static bool js_regex_sorted_range_contains(const JsRegexRange* ranges, int count
     return false;
 }
 
+// UNUSED_FUNCTION_OK: called from the generated js_regex_generated_property_tables.inc,
+// which the unused-function lint does not scan (*.inc extension).
 static bool js_regex_sorted_range_contains_cursor(const JsRegexRange* ranges, int count, int cp, int* cursor) {
     if (count <= 0) return false;
     int c = *cursor;
