@@ -1205,6 +1205,15 @@ static mpd_context_t bigint_sized_context(mpd_t* a, mpd_t* b, mpd_ssize_t extra_
     return bigint_precision_context(need);
 }
 
+static mpd_context_t bigint_shift_context(mpd_t* value, mpd_ssize_t shift) {
+    mpd_ssize_t need = value ? value->digits + 8 : 8;
+    if (shift > 0) {
+        // a left shift by N bits needs about N*log10(2) decimal digits.
+        need += (shift * 31) / 100 + 16;
+    }
+    return bigint_precision_context(need);
+}
+
 // helper: allocate Decimal struct on GC heap with DECIMAL tag, wrap mpd_t*
 static Item bigint_push_result(mpd_t* mpd_val) {
     if (!mpd_val) return ItemError;
@@ -1260,16 +1269,23 @@ Item bigint_from_string(const char* str, int len) {
     while (len > 0 && (str[len-1] == ' ' || str[len-1] == '\t' || str[len-1] == '\n' || str[len-1] == '\r')) { len--; }
     // empty string (or whitespace-only) → 0n
     if (len == 0) return bigint_from_int64(0);
-    mpd_context_t* ctx = bigint_context();
+    if (len > 100000) return ItemError;
+    // BigInt string construction must not inherit the default 2000-digit cap;
+    // hex input expands to more decimal digits than source characters.
+    mpd_context_t parse_ctx = bigint_precision_context((mpd_ssize_t)len * 2 + 8);
+    mpd_context_t* ctx = &parse_ctx;
 
     // handle hex, octal, binary prefixes
-    char buf[4096];
-    if (len >= (int)sizeof(buf)) return ItemError;
+    char* buf = (char*)mem_alloc(len + 1, MEM_CAT_STRING);
+    if (!buf) return ItemError;
     memcpy(buf, str, len);
     buf[len] = '\0';
 
     mpd_t* dec_val = mpd_new(ctx);
-    if (!dec_val) return ItemError;
+    if (!dec_val) {
+        mem_free(buf);
+        return ItemError;
+    }
 
     if (len > 2 && buf[0] == '0' && (buf[1] == 'x' || buf[1] == 'X')) {
         // hex: parse manually since mpd doesn't support hex
@@ -1280,7 +1296,7 @@ Item bigint_from_string(const char* str, int len) {
         if (hex_len <= 16) {
             char* endptr;
             unsigned long long uval = strtoull(hex, &endptr, 16);
-            if (*endptr != '\0') { mpd_del(dec_val); return ItemError; }
+            if (*endptr != '\0') { mpd_del(dec_val); mem_free(buf); return ItemError; }
             mpd_set_u64(dec_val, uval, ctx);
         } else {
             // digit-by-digit: result = result * 16 + digit
@@ -1293,6 +1309,7 @@ Item bigint_from_string(const char* str, int len) {
                 if (digit) mpd_del(digit);
                 if (temp) mpd_del(temp);
                 mpd_del(dec_val);
+                mem_free(buf);
                 return ItemError;
             }
             mpd_set_u32(sixteen, 16, ctx);
@@ -1302,7 +1319,7 @@ Item bigint_from_string(const char* str, int len) {
                 if (c >= '0' && c <= '9') d = c - '0';
                 else if (c >= 'a' && c <= 'f') d = 10 + c - 'a';
                 else if (c >= 'A' && c <= 'F') d = 10 + c - 'A';
-                else { mpd_del(sixteen); mpd_del(digit); mpd_del(temp); mpd_del(dec_val); return ItemError; }
+                else { mpd_del(sixteen); mpd_del(digit); mpd_del(temp); mpd_del(dec_val); mem_free(buf); return ItemError; }
                 mpd_mul(temp, dec_val, sixteen, ctx);
                 mpd_set_u32(digit, d, ctx);
                 mpd_add(dec_val, temp, digit, ctx);
@@ -1321,12 +1338,13 @@ Item bigint_from_string(const char* str, int len) {
             if (digit) mpd_del(digit);
             if (temp) mpd_del(temp);
             mpd_del(dec_val);
+            mem_free(buf);
             return ItemError;
         }
         mpd_set_u32(eight, 8, ctx);
         for (int i = 0; i < oct_len; i++) {
             char c = oct[i];
-            if (c < '0' || c > '7') { mpd_del(eight); mpd_del(digit); mpd_del(temp); mpd_del(dec_val); return ItemError; }
+            if (c < '0' || c > '7') { mpd_del(eight); mpd_del(digit); mpd_del(temp); mpd_del(dec_val); mem_free(buf); return ItemError; }
             mpd_mul(temp, dec_val, eight, ctx);
             mpd_set_u32(digit, (uint32_t)(c - '0'), ctx);
             mpd_add(dec_val, temp, digit, ctx);
@@ -1344,12 +1362,13 @@ Item bigint_from_string(const char* str, int len) {
             if (digit) mpd_del(digit);
             if (temp) mpd_del(temp);
             mpd_del(dec_val);
+            mem_free(buf);
             return ItemError;
         }
         mpd_set_u32(two, 2, ctx);
         for (int i = 0; i < bin_len; i++) {
             char c = bin[i];
-            if (c != '0' && c != '1') { mpd_del(two); mpd_del(digit); mpd_del(temp); mpd_del(dec_val); return ItemError; }
+            if (c != '0' && c != '1') { mpd_del(two); mpd_del(digit); mpd_del(temp); mpd_del(dec_val); mem_free(buf); return ItemError; }
             mpd_mul(temp, dec_val, two, ctx);
             mpd_set_u32(digit, (uint32_t)(c - '0'), ctx);
             mpd_add(dec_val, temp, digit, ctx);
@@ -1360,15 +1379,16 @@ Item bigint_from_string(const char* str, int len) {
         // reject decimal points, exponents, Infinity, NaN
         int start = 0;
         if (buf[0] == '+' || buf[0] == '-') start = 1;
-        if (start >= len) { mpd_del(dec_val); return ItemError; }
+        if (start >= len) { mpd_del(dec_val); mem_free(buf); return ItemError; }
         for (int i = start; i < len; i++) {
-            if (buf[i] < '0' || buf[i] > '9') { mpd_del(dec_val); return ItemError; }
+            if (buf[i] < '0' || buf[i] > '9') { mpd_del(dec_val); mem_free(buf); return ItemError; }
         }
         uint32_t status = 0;
         mpd_qset_string(dec_val, buf, ctx, &status);
-        if (status != 0) { mpd_del(dec_val); return ItemError; }
+        if (status != 0) { mpd_del(dec_val); mem_free(buf); return ItemError; }
     }
 
+    mem_free(buf);
     return bigint_push_result(dec_val);
 }
 
@@ -1533,23 +1553,24 @@ Item bigint_pow(Item base, Item exp) {
 Item bigint_neg(Item a) {
     mpd_t* m = bigint_get_mpd(a);
     if (!m) return ItemError;
-    mpd_context_t* ctx = bigint_context();
-    mpd_t* r = mpd_new(ctx);
+    mpd_context_t ctx = bigint_sized_context(m, NULL, 1);
+    mpd_t* r = mpd_new(&ctx);
     if (!r) return ItemError;
-    mpd_minus(r, m, ctx);
+    mpd_minus(r, m, &ctx);
     return bigint_push_result(r);
 }
 
 Item bigint_inc(Item a) {
     mpd_t* m = bigint_get_mpd(a);
     if (!m) return ItemError;
-    mpd_context_t* ctx = bigint_context();
-    mpd_t* one = mpd_new(ctx);
+    // increment/decrement can add a carry digit, so size the exact context first.
+    mpd_context_t ctx = bigint_sized_context(m, NULL, 2);
+    mpd_t* one = mpd_new(&ctx);
     if (!one) return ItemError;
-    mpd_set_u32(one, 1, ctx);
-    mpd_t* r = mpd_new(ctx);
+    mpd_set_u32(one, 1, &ctx);
+    mpd_t* r = mpd_new(&ctx);
     if (!r) { mpd_del(one); return ItemError; }
-    mpd_add(r, m, one, ctx);
+    mpd_add(r, m, one, &ctx);
     mpd_del(one);
     return bigint_push_result(r);
 }
@@ -1557,13 +1578,14 @@ Item bigint_inc(Item a) {
 Item bigint_dec(Item a) {
     mpd_t* m = bigint_get_mpd(a);
     if (!m) return ItemError;
-    mpd_context_t* ctx = bigint_context();
-    mpd_t* one = mpd_new(ctx);
+    // increment/decrement can add a carry digit, so size the exact context first.
+    mpd_context_t ctx = bigint_sized_context(m, NULL, 2);
+    mpd_t* one = mpd_new(&ctx);
     if (!one) return ItemError;
-    mpd_set_u32(one, 1, ctx);
-    mpd_t* r = mpd_new(ctx);
+    mpd_set_u32(one, 1, &ctx);
+    mpd_t* r = mpd_new(&ctx);
     if (!r) { mpd_del(one); return ItemError; }
-    mpd_sub(r, m, one, ctx);
+    mpd_sub(r, m, one, &ctx);
     mpd_del(one);
     return bigint_push_result(r);
 }
@@ -1584,7 +1606,8 @@ static Item bigint_bitwise_op(Item a, Item b, int op) {
     mpd_t* y = bigint_get_mpd(b);
     if (!x || !y) return ItemError;
 
-    mpd_context_t* ctx = bigint_context();
+    mpd_context_t ctx_storage = bigint_sized_context(x, y, 16);
+    mpd_context_t* ctx = &ctx_storage;
 
     // working copies
     mpd_t* xw = mpd_new(ctx);
@@ -1676,14 +1699,14 @@ Item bigint_bitwise_not(Item a) {
     // ~x = -(x + 1) for BigInt (two's complement identity)
     mpd_t* m = bigint_get_mpd(a);
     if (!m) return ItemError;
-    mpd_context_t* ctx = bigint_context();
-    mpd_t* one = mpd_new(ctx);
+    mpd_context_t ctx = bigint_sized_context(m, NULL, 2);
+    mpd_t* one = mpd_new(&ctx);
     if (!one) return ItemError;
-    mpd_set_i32(one, 1, ctx);
-    mpd_t* r = mpd_new(ctx);
+    mpd_set_i32(one, 1, &ctx);
+    mpd_t* r = mpd_new(&ctx);
     if (!r) { mpd_del(one); return ItemError; }
-    mpd_add(r, m, one, ctx);
-    mpd_minus(r, r, ctx);
+    mpd_add(r, m, one, &ctx);
+    mpd_minus(r, r, &ctx);
     mpd_del(one);
     return bigint_push_result(r);
 }
@@ -1692,13 +1715,15 @@ Item bigint_left_shift(Item a, Item b) {
     mpd_t* ma = bigint_get_mpd(a);
     mpd_t* mb = bigint_get_mpd(b);
     if (!ma || !mb) return ItemError;
-    mpd_context_t* ctx = bigint_context();
     // shift amount must fit in a reasonable range
     uint32_t status = 0;
     mpd_ssize_t shift = mpd_qget_ssize(mb, &status);
     if (status & MPD_Invalid_operation) return ItemError;
     if (shift < 0) return bigint_right_shift(a, bigint_neg(b));
     if (shift > 100000) return ItemError;
+    // exact BigInt shifts need enough decimal precision for the generated power of two.
+    mpd_context_t ctx_storage = bigint_shift_context(ma, shift);
+    mpd_context_t* ctx = &ctx_storage;
     // x << y = x * 2^y
     mpd_t* two = mpd_new(ctx);
     mpd_t* shift_mpd = mpd_new(ctx);
@@ -1721,12 +1746,14 @@ Item bigint_right_shift(Item a, Item b) {
     mpd_t* ma = bigint_get_mpd(a);
     mpd_t* mb = bigint_get_mpd(b);
     if (!ma || !mb) return ItemError;
-    mpd_context_t* ctx = bigint_context();
     uint32_t status = 0;
     mpd_ssize_t shift = mpd_qget_ssize(mb, &status);
     if (status & MPD_Invalid_operation) return ItemError;
     if (shift < 0) return bigint_left_shift(a, bigint_neg(b));
     if (shift > 100000) return ItemError;
+    // exact BigInt shifts need enough decimal precision for the generated power of two.
+    mpd_context_t ctx_storage = bigint_shift_context(ma, shift);
+    mpd_context_t* ctx = &ctx_storage;
     // x >> y = floor(x / 2^y)
     mpd_t* two = mpd_new(ctx);
     mpd_t* shift_mpd = mpd_new(ctx);
@@ -1766,26 +1793,22 @@ char* bigint_to_cstring_radix(Item bi, int radix) {
         // fast path: use mpd_to_sci
         char* str = mpd_to_sci(m, 1);
         if (!str) return NULL;
-        // strip trailing ".0" or decimal point artifacts
-        char* dot = strchr(str, '.');
-        if (dot) *dot = '\0';
-        // strip trailing 'E+0' etc from sci notation
         char* e = strchr(str, 'E');
         if (!e) e = strchr(str, 'e');
-        if (e) {
-            // has exponent - convert via int64 fallback
-            int64_t v = bigint_to_int64(bi);
-            char buf[32];
-            snprintf(buf, sizeof(buf), "%lld", (long long)v);
+        if (!e) {
+            // strip trailing ".0" or decimal point artifacts
+            char* dot = strchr(str, '.');
+            if (dot) *dot = '\0';
+            char* owned = mem_strdup(str, MEM_CAT_STRING);
             mpd_free(str);
-            return mem_strdup(buf, MEM_CAT_STRING);
+            return owned;
         }
-        char* owned = mem_strdup(str, MEM_CAT_STRING);
+        // Scientific notation is not a valid BigInt string form; fall through to
+        // exact digit extraction instead of narrowing through a host integer.
         mpd_free(str);
-        return owned;
     }
 
-    // non-10 radix must not pass through int64; JS BigInt strings are
+    // Radix conversion must not pass through int64; JS BigInt strings are
     // arbitrary precision and asUintN(64, -1n) depends on the full 64 bits.
     mpd_context_t conv_ctx = *bigint_context();
     // BigInt radix conversion repeatedly divides the whole value; the default
