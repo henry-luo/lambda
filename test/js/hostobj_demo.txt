@@ -1,4 +1,5 @@
 ctor type: function
+global enumerable: false
 value: 7
 set value: 10
 label: hostobj-demo

@@ -34,7 +34,6 @@ extern "C" bool js_is_css_rule(Item item);
 extern "C" Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_dispatch_event(Item event_item);
-extern "C" Item hostobj_demo_namespace(void);
 extern "C" Item js_internal_binding(Item name);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
@@ -52,6 +51,23 @@ static bool js_host_object_has_property(Item object, Item key, Item* out) {
     const JubeTypeDef* type = js_host_object_type(object);
     return type && type->host_ops && type->host_ops->has_property &&
         type->host_ops->has_property(object, key, out);
+}
+
+static void js_install_jube_global_namespaces(Item global) {
+    int module_count = jube_static_module_count();
+    for (int i = 0; i < module_count; i++) {
+        const JubeModuleDef* module = jube_static_module_at(i);
+        if (!module || !module->namespaces || module->namespace_count <= 0) continue;
+        for (int j = 0; j < module->namespace_count; j++) {
+            const JubeNamespaceDef* ns = &module->namespaces[j];
+            if (!ns || !ns->build || !ns->specifiers || ns->specifier_count <= 0) continue;
+            const char* name = ns->specifiers[0];
+            if (!name || !name[0]) continue;
+            Item key = (Item){.item = s2it(heap_create_name(name, strlen(name)))};
+            js_property_set(global, key, ns->build());
+            js_mark_non_enumerable(global, key);
+        }
+    }
 }
 
 static bool js_host_object_delete_property(Item object, Item key, Item* out) {
@@ -15888,9 +15904,7 @@ extern "C" Item js_get_global_this() {
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("process", 7))}, js_get_process_object_value());
         extern Item js_get_css_object_value(void);
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("CSS", 3))}, js_get_css_object_value());
-        Item hostobj_demo_key = (Item){.item = s2it(heap_create_name("hostobjDemo", 11))};
-        js_property_set(js_global_this_obj, hostobj_demo_key, hostobj_demo_namespace());
-        js_mark_non_enumerable(js_global_this_obj, hostobj_demo_key);
+        js_install_jube_global_namespaces(js_global_this_obj);
         extern Item js_get_crypto_namespace(void);
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("crypto", 6))}, js_get_crypto_namespace());
         extern Item js_get_os_namespace(void);

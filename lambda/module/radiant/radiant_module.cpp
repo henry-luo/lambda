@@ -1,5 +1,7 @@
 #include "../../jube/jube_registry.h"
 #include "../../input/css/dom_element.hpp"
+#include "radiant_host_api.hpp"
+#include "radiant_dom_bridge.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/mem_context.h"
 #include "../../../lib/mem_factory.h"
@@ -11,45 +13,47 @@ extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
     bool track_source_lines, bool execute_scripts);
 extern void free_document(DomDocument* doc);
-extern "C" Item radiant_dom_wrap_node(void* dom_elem);
-extern "C" void* radiant_dom_unwrap_node(Item item);
-extern "C" int radiant_dom_host_get_property(Item object, Item key, Item* out);
-extern "C" int radiant_dom_host_set_property(Item object, Item key, Item value, Item* out);
-extern "C" int radiant_dom_host_call_method(Item object, Item method_name,
+RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem);
+RADIANT_C_API void* radiant_dom_unwrap_node(Item item);
+RADIANT_C_API int radiant_dom_host_get_property(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_host_set_property(Item object, Item key, Item value, Item* out);
+RADIANT_C_API int radiant_dom_host_call_method(Item object, Item method_name,
                                             Item* args, int argc, Item* out);
-extern "C" int radiant_dom_host_has_property(Item object, Item key, Item* out);
-extern "C" int radiant_dom_host_delete_property(Item object, Item key, Item* out);
-extern "C" int radiant_dom_host_own_property_descriptor(Item object, Item key, Item* out);
-extern "C" int radiant_dom_host_own_property_names(Item object, Item* out);
-extern "C" Item radiant_dom_host_prototype(Item object);
-extern "C" void radiant_dom_host_invalidate(Item object);
-extern "C" int radiant_dom_style_host_get_property(Item object, Item key, Item* out);
-extern "C" int radiant_dom_style_host_set_property(Item object, Item key, Item value, Item* out);
-extern "C" int radiant_dom_style_host_call_method(Item object, Item method_name,
+RADIANT_C_API int radiant_dom_host_has_property(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_host_delete_property(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_host_own_property_descriptor(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_host_own_property_names(Item object, Item* out);
+RADIANT_C_API Item radiant_dom_host_prototype(Item object);
+RADIANT_C_API void radiant_dom_host_invalidate(Item object);
+RADIANT_C_API int radiant_dom_style_host_get_property(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_style_host_set_property(Item object, Item key, Item value, Item* out);
+RADIANT_C_API int radiant_dom_style_host_call_method(Item object, Item method_name,
                                                   Item* args, int argc, Item* out);
-extern "C" int radiant_dom_style_host_has_property(Item object, Item key, Item* out);
-extern "C" int radiant_dom_style_host_delete_property(Item object, Item key, Item* out);
-extern "C" int radiant_dom_style_host_own_property_descriptor(Item object, Item key, Item* out);
-extern "C" int radiant_dom_style_host_own_property_names(Item object, Item* out);
-extern "C" Item radiant_dom_style_host_prototype(Item object);
-extern "C" int radiant_dom_cssom_host_get_property(Item object, Item key, Item* out);
-extern "C" int radiant_dom_cssom_host_set_property(Item object, Item key, Item value, Item* out);
-extern "C" int radiant_dom_cssom_host_call_method(Item object, Item method_name,
+RADIANT_C_API int radiant_dom_style_host_has_property(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_style_host_delete_property(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_style_host_own_property_descriptor(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_style_host_own_property_names(Item object, Item* out);
+RADIANT_C_API Item radiant_dom_style_host_prototype(Item object);
+RADIANT_C_API int radiant_dom_cssom_host_get_property(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_cssom_host_set_property(Item object, Item key, Item value, Item* out);
+RADIANT_C_API int radiant_dom_cssom_host_call_method(Item object, Item method_name,
                                                   Item* args, int argc, Item* out);
-extern "C" int radiant_dom_cssom_host_has_property(Item object, Item key, Item* out);
-extern "C" int radiant_dom_cssom_host_delete_property(Item object, Item key, Item* out);
-extern "C" int radiant_dom_cssom_host_own_property_descriptor(Item object, Item key, Item* out);
-extern "C" int radiant_dom_cssom_host_own_property_names(Item object, Item* out);
-extern "C" Item radiant_dom_cssom_host_prototype(Item object);
-extern "C" int radiant_dom_document_host_get_property(Item object, Item key, Item* out);
-extern "C" int radiant_dom_document_host_set_property(Item object, Item key, Item value, Item* out);
-extern "C" int radiant_dom_document_host_call_method(Item object, Item method_name,
+RADIANT_C_API int radiant_dom_cssom_host_has_property(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_cssom_host_delete_property(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_cssom_host_own_property_descriptor(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_cssom_host_own_property_names(Item object, Item* out);
+RADIANT_C_API Item radiant_dom_cssom_host_prototype(Item object);
+RADIANT_C_API int radiant_dom_document_host_get_property(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_document_host_set_property(Item object, Item key, Item value, Item* out);
+RADIANT_C_API int radiant_dom_document_host_call_method(Item object, Item method_name,
                                                      Item* args, int argc, Item* out);
-extern "C" int radiant_dom_document_host_has_property(Item object, Item key, Item* out);
-extern "C" int radiant_dom_document_host_delete_property(Item object, Item key, Item* out);
-extern "C" int radiant_dom_document_host_own_property_descriptor(Item object, Item key, Item* out);
-extern "C" int radiant_dom_document_host_own_property_names(Item object, Item* out);
-extern "C" Item radiant_dom_document_host_prototype(Item object);
+RADIANT_C_API int radiant_dom_document_host_has_property(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_document_host_delete_property(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_document_host_own_property_descriptor(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_document_host_own_property_names(Item object, Item* out);
+RADIANT_C_API Item radiant_dom_document_host_prototype(Item object);
+
+const JubeHostAPI* radiant_host_api = nullptr;
 
 static Item radiant_string_item(const char* value) {
     return value ? (Item){.item = s2it(heap_create_name(value))} : ItemNull;
@@ -119,7 +123,7 @@ static DomDocument* radiant_load_html_document(const char* path, const char* fun
     return doc;
 }
 
-extern "C" Item fn_radiant_load(Item path_item) {
+RADIANT_C_API Item fn_radiant_load(Item path_item) {
     DomDocument* doc = radiant_load_html_document(fn_to_cstr(path_item), "LOAD");
     if (!doc || !doc->root) return ItemNull;
     // The POC exposes the document through its root wrapper until document
@@ -127,7 +131,7 @@ extern "C" Item fn_radiant_load(Item path_item) {
     return radiant_dom_wrap_node(doc->root);
 }
 
-extern "C" Item fn_radiant_root(Item doc_item) {
+RADIANT_C_API Item fn_radiant_root(Item doc_item) {
     DomNode* node = radiant_dom_node_from_item(doc_item, "ROOT");
     if (!node) return ItemNull;
     DomDocument* doc = radiant_dom_document_from_node(node);
@@ -138,14 +142,14 @@ extern "C" Item fn_radiant_root(Item doc_item) {
     return radiant_dom_wrap_node(doc->root);
 }
 
-extern "C" Item fn_radiant_attr(Item node_item, Item name_item) {
+RADIANT_C_API Item fn_radiant_attr(Item node_item, Item name_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "ATTR");
     const char* name = fn_to_cstr(name_item);
     if (!elem || !name || !name[0]) return ItemNull;
     return radiant_string_item(dom_element_get_attribute(elem, name));
 }
 
-extern "C" Item fn_radiant_set_attr(Item node_item, Item name_item, Item value_item) {
+RADIANT_C_API Item fn_radiant_set_attr(Item node_item, Item name_item, Item value_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "SET_ATTR");
     const char* name = fn_to_cstr(name_item);
     const char* value = fn_to_cstr(value_item);
@@ -154,7 +158,7 @@ extern "C" Item fn_radiant_set_attr(Item node_item, Item name_item, Item value_i
     return node_item;
 }
 
-extern "C" Item fn_radiant_free(Item node_item) {
+RADIANT_C_API Item fn_radiant_free(Item node_item) {
     DomNode* node = radiant_dom_node_from_item(node_item, "FREE");
     if (!node) return ItemNull;
     DomDocument* doc = radiant_dom_document_from_node(node);
@@ -166,7 +170,7 @@ extern "C" Item fn_radiant_free(Item node_item) {
     return ItemNull;
 }
 
-extern "C" Item fn_radiant_poc_attr(Item path_item) {
+RADIANT_C_API Item fn_radiant_poc_attr(Item path_item) {
     DomDocument* doc = radiant_load_html_document(fn_to_cstr(path_item), "POC");
     if (!doc || !doc->root) return ItemNull;
 
@@ -177,10 +181,12 @@ extern "C" Item fn_radiant_poc_attr(Item path_item) {
 }
 
 static int radiant_module_init(const JubeHostAPI* host) {
-    if (!host) {
+    if (!host || host->api_version != JUBE_ABI_VERSION ||
+        !host->gc || !host->value || !host->script || !host->dom) {
         log_error("JUBE_RADIANT: missing host API during module init");
         return -1;
     }
+    radiant_host_api = host;
     log_info("JUBE_RADIANT: static radiant module initialized");
     return 0;
 }
@@ -250,43 +256,43 @@ static const JubeTypeDef radiant_types[] = {
     {"foreign_document", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_document_host_ops, NULL},
 };
 
-extern "C" const void* radiant_dom_node_host_type(void) {
+RADIANT_C_API const void* radiant_dom_node_host_type(void) {
     return &radiant_types[0];
 }
 
-extern "C" const void* radiant_dom_range_host_type(void) {
+RADIANT_C_API const void* radiant_dom_range_host_type(void) {
     return &radiant_types[1];
 }
 
-extern "C" const void* radiant_dom_selection_host_type(void) {
+RADIANT_C_API const void* radiant_dom_selection_host_type(void) {
     return &radiant_types[2];
 }
 
-extern "C" const void* radiant_dom_inline_style_host_type(void) {
+RADIANT_C_API const void* radiant_dom_inline_style_host_type(void) {
     return &radiant_types[3];
 }
 
-extern "C" const void* radiant_dom_computed_style_host_type(void) {
+RADIANT_C_API const void* radiant_dom_computed_style_host_type(void) {
     return &radiant_types[4];
 }
 
-extern "C" const void* radiant_dom_stylesheet_host_type(void) {
+RADIANT_C_API const void* radiant_dom_stylesheet_host_type(void) {
     return &radiant_types[5];
 }
 
-extern "C" const void* radiant_dom_css_rule_host_type(void) {
+RADIANT_C_API const void* radiant_dom_css_rule_host_type(void) {
     return &radiant_types[6];
 }
 
-extern "C" const void* radiant_dom_rule_style_decl_host_type(void) {
+RADIANT_C_API const void* radiant_dom_rule_style_decl_host_type(void) {
     return &radiant_types[7];
 }
 
-extern "C" const void* radiant_dom_document_host_type(void) {
+RADIANT_C_API const void* radiant_dom_document_host_type(void) {
     return &radiant_types[8];
 }
 
-extern "C" const void* radiant_dom_foreign_document_host_type(void) {
+RADIANT_C_API const void* radiant_dom_foreign_document_host_type(void) {
     return &radiant_types[9];
 }
 
@@ -324,10 +330,10 @@ static const JubeModuleDef radiant_module = {
     NULL,
 };
 
-extern "C" const JubeModuleDef* radiant_jube_module(void) {
+RADIANT_C_API const JubeModuleDef* radiant_jube_module(void) {
     return &radiant_module;
 }
 
-extern "C" void radiant_jube_register_static(void) {
+RADIANT_C_API void radiant_jube_register_static(void) {
     jube_register_static_module(&radiant_module);
 }
