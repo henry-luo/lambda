@@ -164,15 +164,21 @@ let d: u64 = 1000u64
 
 ### Sized Numeric Type Checking
 
-The `is` operator checks for the exact sized type. All sized numerics also match `number`:
+The `is` operator uses exact-embedding widening for sized numerics. A value
+matches a wider numeric type when every value of the source type can be
+represented exactly by the target type. All sized numerics also match `number`:
 
 ```lambda
 42i8 is i8           // true
-42i8 is u8           // false (different signedness)
-42i8 is i16          // false (different width)
+42i8 is i16          // true  (signed widening)
+42i8 is u8           // false (u8 cannot represent negative i8 values)
+255u8 is u16         // true  (unsigned widening)
+5 is i64             // true  (compact int embeds in i64)
+5 is u8              // false (not every int embeds in u8)
 42i8 is number       // true  (all numerics match number)
 3.14f32 is f32       // true
-3.14f32 is f16       // false
+3.14f32 is float     // true  (float can represent f32 values)
+3.14f32 is f16       // false (narrowing)
 1000u64 is u64       // true
 1000u64 is number    // true
 ```

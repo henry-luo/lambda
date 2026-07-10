@@ -6246,6 +6246,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 }
                 hashmap_free(catch_names);
                 jm_emit_object_destructure(mt, catch_node->param, thrown_val);
+                // destructuring defaults can create closures before the pattern
+                // finishes; publish initialized catch bindings into keyed env slots.
+                jm_scope_env_mark_pattern_bindings(mt, catch_node->param);
             } else if (catch_node->param && catch_node->param->node_type == JS_AST_NODE_ARRAY_PATTERN) {
                 struct hashmap* catch_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
                     jm_name_hash, jm_name_cmp, NULL, NULL);
@@ -6268,6 +6271,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 }
                 hashmap_free(catch_names);
                 jm_emit_array_destructure(mt, catch_node->param, thrown_val);
+                // destructuring defaults can create closures before the pattern
+                // finishes; publish initialized catch bindings into keyed env slots.
+                jm_scope_env_mark_pattern_bindings(mt, catch_node->param);
             }
 
             // Transpile catch body

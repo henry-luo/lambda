@@ -271,6 +271,15 @@ static Type* unwrap_simple_type_type(Type* type) {
     return type;
 }
 
+static bool type_is_sized_integer(Type* type) {
+    type = unwrap_simple_type_type(type);
+    if (!type) return false;
+    if (type->type_id == LMD_TYPE_UINT64) return true;
+    if (type->type_id != LMD_TYPE_NUM_SIZED) return false;
+    NumSizedType st = type_num_sized_kind(type);
+    return st != NUM_FLOAT16 && st != NUM_FLOAT32;
+}
+
 static bool typed_array_element_compatible(Type* arg_elem, Type* expected_elem) {
     arg_elem = unwrap_simple_type_type(arg_elem);
     expected_elem = unwrap_simple_type_type(expected_elem);
@@ -280,13 +289,16 @@ static bool typed_array_element_compatible(Type* arg_elem, Type* expected_elem) 
     if (arg_tid == LMD_TYPE_ANY || arg_tid == LMD_TYPE_TYPE) return true;
     switch (expected_elem->type_id) {
     case LMD_TYPE_INT:
-        return arg_tid == LMD_TYPE_INT || arg_tid == LMD_TYPE_INT64 || arg_tid == LMD_TYPE_BOOL;
+        return arg_tid == LMD_TYPE_INT || arg_tid == LMD_TYPE_INT64 ||
+               arg_tid == LMD_TYPE_BOOL || type_is_sized_integer(arg_elem);
     case LMD_TYPE_FLOAT:
         return arg_tid == LMD_TYPE_FLOAT || arg_tid == LMD_TYPE_INT ||
                arg_tid == LMD_TYPE_INT64 || arg_tid == LMD_TYPE_DECIMAL ||
-               arg_tid == LMD_TYPE_BOOL;
+               arg_tid == LMD_TYPE_BOOL || arg_tid == LMD_TYPE_NUM_SIZED ||
+               arg_tid == LMD_TYPE_UINT64;
     case LMD_TYPE_INT64:
-        return arg_tid == LMD_TYPE_INT || arg_tid == LMD_TYPE_INT64 || arg_tid == LMD_TYPE_BOOL;
+        return arg_tid == LMD_TYPE_INT || arg_tid == LMD_TYPE_INT64 ||
+               arg_tid == LMD_TYPE_BOOL || type_is_sized_integer(arg_elem);
     default:
         return false;
     }
@@ -350,6 +362,25 @@ static bool typed_array_argument_compatible(AstNode* arg, Type* param_type) {
     }
 
     AstNode* item = ((AstArrayNode*)arg)->item;
+    while (item) {
+        if (item->node_type != AST_NODE_ASSIGN &&
+            item->type && item->type->type_id != LMD_TYPE_ANY &&
+            !typed_array_element_compatible(item->type, expected_elem)) {
+            return false;
+        }
+        item = item->next;
+    }
+    return true;
+}
+
+static bool typed_array_literal_elements_compatible(AstNode* node, Type* expected_elem) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        if (!primary->expr) break;
+        node = primary->expr;
+    }
+    if (!node || node->node_type != AST_NODE_ARRAY) return true;
+    AstNode* item = ((AstArrayNode*)node)->item;
     while (item) {
         if (item->node_type != AST_NODE_ASSIGN &&
             item->type && item->type->type_id != LMD_TYPE_ANY &&
@@ -4746,12 +4777,15 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                                         get_type_name(expected_tid), get_type_name(actual_tid));
                                 }
                             } else if (arr_type->length > 0) {
-                                // RHS is a mixed-type array literal — incompatible with typed occurrence
-                                int line = ts_node_start_point(asn_node).row + 1;
-                                record_type_error(tp, line,
-                                    "cannot assign mixed-type array to %s[]: all elements must be %s",
-                                    get_type_name(expected_elem->type_id),
-                                    get_type_name(expected_elem->type_id));
+                                // Mixed literals may still be assignment-compatible through
+                                // numeric widening; nonliteral arrays are checked by runtime coercion.
+                                if (!typed_array_literal_elements_compatible(ast_node->as, expected_elem)) {
+                                    int line = ts_node_start_point(asn_node).row + 1;
+                                    record_type_error(tp, line,
+                                        "cannot assign mixed-type array to %s[]: all elements must be %s",
+                                        get_type_name(expected_elem->type_id),
+                                        get_type_name(expected_elem->type_id));
+                                }
                             }
                         }
                     }
