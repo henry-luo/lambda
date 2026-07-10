@@ -54,6 +54,7 @@
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
 extern "C" Item vmap_new(void);
 extern void free_document(DomDocument* doc);
+extern Item js_make_number(double d);
 
 #include <cstring>
 #include <cctype>
@@ -7836,8 +7837,9 @@ extern "C" void js_dom_select_set_length_bridge(void* dom_elem, Item value) {
     TypeId t = get_type_id(value);
     if (t == LMD_TYPE_INT) new_len = (int)it2i(value); // INT_CAST_OK: option count
     else if (t == LMD_TYPE_FLOAT) {
-        double* d = (double*)(value.item & 0x00FFFFFFFFFFFFFF);
-        if (d) new_len = (int)*d; // INT_CAST_OK: option count
+        // self-tagged float Items have no boxed payload; select length uses
+        // the shared numeric decoder before truncating to a DOM option count.
+        new_len = (int)it2d(value); // INT_CAST_OK: option count
     }
     if (new_len < 0) new_len = 0;
     Item arr = js_array_new(0);
@@ -11685,10 +11687,7 @@ static float js_dom_item_to_float(Item value) {
 }
 
 static Item js_dom_float_item(float value) {
-    double* number = (double*)heap_calloc(sizeof(double), LMD_TYPE_FLOAT);
-    if (!number) return (Item){.item = i2it((int64_t)value)};
-    *number = (double)value;
-    return (Item){.item = d2it(number)};
+    return js_make_number((double)value);
 }
 
 static Item js_dom_make_plain_boundary_object(DomBoundary boundary) {
@@ -12562,8 +12561,9 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         int idx = -1;
         if (t == LMD_TYPE_INT) idx = (int)it2i(args[0]); // INT_CAST_OK: index
         else if (t == LMD_TYPE_FLOAT) {
-            double* d = (double*)(args[0].item & 0x00FFFFFFFFFFFFFF);
-            if (d) idx = (int)*d; // INT_CAST_OK: index
+            // remove(index) may receive an inline float from JS Number
+            // lowering, so decode through Item instead of dereferencing.
+            idx = (int)it2d(args[0]); // INT_CAST_OK: index
         }
         if (idx < 0) return ItemNull;
         Item arr = js_array_new(0);

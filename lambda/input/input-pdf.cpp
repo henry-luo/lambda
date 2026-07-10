@@ -425,7 +425,7 @@ static Item parse_pdf_number(Input *input, const char **pdf) {
     *dval = strtod(*pdf, &end);
     *pdf = end;
 
-    return {.item = d2it(dval)};
+    return lambda_float_ptr_to_item(dval);
 }
 
 static Array* parse_pdf_array(InputContext& ctx, const char **pdf) {
@@ -807,7 +807,7 @@ static Item parse_pdf_indirect_ref(InputContext& ctx, const char **pdf) {
         double* obj_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (obj_val) {
             *obj_val = (double)obj_num;
-            Item obj_item = {.item = d2it(obj_val)};
+            Item obj_item = lambda_float_ptr_to_item(obj_val);
             ctx.builder.putToMap(lam::gc_borrow(ref_map), obj_key, obj_item);
         }
     }
@@ -818,7 +818,7 @@ static Item parse_pdf_indirect_ref(InputContext& ctx, const char **pdf) {
         double* gen_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (gen_val) {
             *gen_val = (double)gen_num;
-            Item gen_item = {.item = d2it(gen_val)};
+            Item gen_item = lambda_float_ptr_to_item(gen_val);
             ctx.builder.putToMap(lam::gc_borrow(ref_map), gen_key, gen_item);
         }
     }
@@ -888,7 +888,7 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
         obj_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (obj_val) {
             *obj_val = (double)obj_num;
-            Item obj_item = {.item = d2it(obj_val)};
+            Item obj_item = lambda_float_ptr_to_item(obj_val);
             ctx.builder.putToMap(lam::gc_borrow(obj_map), obj_key, obj_item);
         }
     }
@@ -900,7 +900,7 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
         gen_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (gen_val) {
             *gen_val = (double)gen_num;
-            Item gen_item = {.item = d2it(gen_val)};
+            Item gen_item = lambda_float_ptr_to_item(gen_val);
             ctx.builder.putToMap(lam::gc_borrow(obj_map), gen_key, gen_item);
         }
     }
@@ -989,7 +989,7 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
         length_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (length_val) {
             *length_val = (double)data_length;
-            Item length_item = {.item = d2it(length_val)};
+            Item length_item = lambda_float_ptr_to_item(length_val);
             ctx.builder.putToMap(lam::gc_borrow(stream_map), length_key, length_item);
         }
     }
@@ -1098,7 +1098,7 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                                                     obj_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
                                                     if (obj_val) {
                                                         *obj_val = (double)(start_num + i);
-                                                        Item obj_item = {.item = d2it(obj_val)};
+                                                        Item obj_item = lambda_float_ptr_to_item(obj_val);
                                                         ctx.builder.putToMap(lam::gc_borrow(entry_map), obj_key, obj_item);
                                                     }
                                                 }
@@ -1110,7 +1110,7 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                                                     offset_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
                                                     if (offset_val) {
                                                         *offset_val = (double)offset;
-                                                        Item offset_item = {.item = d2it(offset_val)};
+                                                        Item offset_item = lambda_float_ptr_to_item(offset_val);
                                                         ctx.builder.putToMap(lam::gc_borrow(entry_map), offset_key, offset_item);
                                                     }
                                                 }
@@ -1244,7 +1244,7 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
         text_count = (double*)pool_calloc(input->pool, sizeof(double));
         if (text_count) {
             *text_count = (double)text_objects;
-            Item text_item = {.item = d2it(text_count)};
+            Item text_item = lambda_float_ptr_to_item(text_count);
             builder.putToMap(lam::gc_borrow(analysis_map), text_key, text_item);
         }
     }
@@ -1256,7 +1256,7 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
         draw_count = (double*)pool_calloc(input->pool, sizeof(double));
         if (draw_count) {
             *draw_count = (double)drawing_ops;
-            Item draw_item = {.item = d2it(draw_count)};
+            Item draw_item = lambda_float_ptr_to_item(draw_count);
             builder.putToMap(lam::gc_borrow(analysis_map), draw_key, draw_item);
         }
     }
@@ -1498,7 +1498,7 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
                     obj_count_val = (double*)pool_calloc(input->pool, sizeof(double));
                     if (obj_count_val) {
                         *obj_count_val = objects ? (double)objects->length : 0.0;
-                        Item obj_count_item = {.item = d2it(obj_count_val)};
+                        Item obj_count_item = lambda_float_ptr_to_item(obj_count_val);
                         builder.putToMap(lam::gc_borrow(stats_map), obj_count_key, obj_count_item);
                     }
                 }
@@ -1537,7 +1537,7 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
                     stream_count_val = (double*)pool_calloc(input->pool, sizeof(double));
                     if (stream_count_val) {
                         *stream_count_val = (double)stream_count;
-                        Item stream_count_item = {.item = d2it(stream_count_val)};
+                        Item stream_count_item = lambda_float_ptr_to_item(stream_count_val);
                         builder.putToMap(lam::gc_borrow(stats_map), stream_count_key, stream_count_item);
                     }
                 }

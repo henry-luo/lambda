@@ -94,7 +94,7 @@ enum EnumTypeId {
     LMD_TYPE_INT64,  // int literal, 64-bit
     LMD_TYPE_UINT64, // unsigned 64-bit integer (heap-allocated pointer)
     LMD_TYPE_FLOAT,  // float literal, 64-bit
-    LMD_TYPE_FLOAT64, // explicit f64 literal/type, binary64 payload
+    LMD_TYPE_FLOAT64, // legacy reserved tag; f64 syntax canonicalizes to LMD_TYPE_FLOAT
     LMD_TYPE_DECIMAL,
     LMD_TYPE_DTIME,
     LMD_TYPE_SYMBOL,
@@ -941,8 +941,7 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 static inline bool is_numeric_type_id(TypeId type_id) {
     return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 ||
            type_id == LMD_TYPE_UINT64 || type_id == LMD_TYPE_FLOAT ||
-           type_id == LMD_TYPE_FLOAT64 || type_id == LMD_TYPE_DECIMAL ||
-           type_id == LMD_TYPE_NUM_SIZED;
+           type_id == LMD_TYPE_DECIMAL || type_id == LMD_TYPE_NUM_SIZED;
 }
 
 #define IS_NUMERIC_ID(t) is_numeric_type_id((TypeId)(t))
@@ -1014,7 +1013,24 @@ inline uint64_t b2it(uint8_t bool_val) {
 #define bi2it(decimal_ptr)   c2it(decimal_ptr)
 #define l2it(long_ptr)       ((long_ptr)? ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr)): ITEM_NULL)
 #define d2it(double_ptr)     ((double_ptr)? ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr)): ITEM_NULL)
-#define f642it(double_ptr)   ((double_ptr)? ((((uint64_t)LMD_TYPE_FLOAT64)<<56) | (uint64_t)(double_ptr)): ITEM_NULL)
+// f64 is a type-language alias for binary64; runtime Items use canonical float encoding.
+#define f642it(double_ptr)   lambda_float_ptr_to_item(double_ptr)
+
+#ifdef __cplusplus
+static inline Item lambda_float_ptr_to_item(const double* double_ptr);
+#else
+static inline Item lambda_float_ptr_to_item(const double* double_ptr) {
+    if (!double_ptr) return ITEM_NULL;
+#ifdef LAMBDA_SELF_TAG_FLOAT
+    double value = *double_ptr;
+    uint64_t bits;
+    __builtin_memcpy(&bits, &value, sizeof(bits));
+    if (value == 0.0) return ITEM_FLOAT_P0 | ((bits >> 63) ? UINT64_C(1) : UINT64_C(0));
+    if (bits & ITEM_DBL_MASK) return bits;
+#endif
+    return d2it(double_ptr);
+}
+#endif
 #define c2it(decimal_ptr)    ((decimal_ptr)? ((((uint64_t)LMD_TYPE_DECIMAL)<<56) | (uint64_t)(decimal_ptr)): ITEM_NULL)
 #define s2it(str_ptr)        ((str_ptr)? ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr)): ITEM_NULL)
 #define y2it(sym_ptr)        ((sym_ptr)? ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr)): ITEM_NULL)
@@ -1392,6 +1408,7 @@ extern "C" {
     Bool is_truthy(Item item);
     Item v2it(List *list);
 
+    Item flt2it(double dval);  // canonical double -> Item encoder
     Item push_d(double dval);
     Item push_l(int64_t lval);
     Item push_l_safe(int64_t val);  // safe boxing: detects already-boxed INT64 Items
@@ -1403,7 +1420,7 @@ extern "C" {
     // Const pool pointer — modules override this single macro to redirect to module-local consts
     #define _const_pool  rt->consts
 
-    #define const_d2it(index)    d2it(_const_pool[index])
+    #define const_d2it(index)    lambda_float_ptr_to_item((const double*)_const_pool[index])
     #define const_l2it(index)    l2it(_const_pool[index])
     #define const_c2it(index)    c2it(_const_pool[index])
     #define const_s2it(index)    s2it(_const_pool[index])

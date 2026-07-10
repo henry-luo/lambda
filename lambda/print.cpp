@@ -22,7 +22,7 @@ static Item read_compact_elem(ArrayNum* arr, int i) {
     case ELEM_UINT64:  return (Item){.item = i2it((int64_t)((uint64_t*)arr->data)[i])};
     case ELEM_FLOAT64:
         // double-lane arrays must print as floats; the old retired 0xC0 path truncated values.
-        return (Item){.item = d2it(&((double*)arr->data)[i])};
+        return lambda_float_ptr_to_item(&((double*)arr->data)[i]);
     case ELEM_BOOL:    return (Item){.item = b2it(((uint8_t*)arr->data)[i] ? BOOL_TRUE : BOOL_FALSE)};
     default:           return ItemNull;
     }
@@ -476,7 +476,8 @@ struct PrintItemVisitor {
     }
 
     void operator()(lam::ItemOf<LMD_TYPE_FLOAT> item) const {
-        print_double(strbuf, *item.ptr());
+        // Float Items may be self-tagged inline values, so decode through Item.
+        print_double(strbuf, item.value());
     }
 
     void operator()(lam::ItemOf<LMD_TYPE_NUM_SIZED> item) const {

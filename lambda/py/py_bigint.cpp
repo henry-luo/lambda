@@ -268,7 +268,7 @@ Item py_bigint_pow(Item base_item, Item exp_item) {
         double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         if (!ptr) return ItemNull;
         *ptr = pow(b, e);
-        return (Item){.item = d2it(ptr)};
+        return lambda_float_ptr_to_item(ptr);
     }
     mpd_t* r = mpd_new(ctx);
     uint32_t status = 0;

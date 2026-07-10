@@ -165,7 +165,7 @@ Item parse_typed_value(InputContext& ctx, const char* str, size_t len) {
                 double* dval_ptr = (double*)pool_calloc(input->pool, sizeof(double));
                 if (dval_ptr) {
                     *dval_ptr = dval;
-                    return {.item = d2it(dval_ptr)};
+                    return lambda_float_ptr_to_item(dval_ptr);
                 }
             }
         } else {

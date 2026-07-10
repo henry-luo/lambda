@@ -84,20 +84,16 @@ static inline String* item_as_pdf_name(Item it) {
     return item_as_string(map_lookup(m, "value"));
 }
 
-// Read a numeric Item as int (handles d2it floats and packed ints).
+// Read a numeric Item as int (handles inline/boxed floats and packed ints).
 static inline int item_as_int(Item it, int dflt) {
-    TypeId t = (TypeId)((it.item >> 56) & 0xFF);
+    TypeId t = get_type_id(it);
     if (t == LMD_TYPE_INT) {
-        return (int)(int32_t)(it.item & 0xFFFFFFFFULL);
-    }
-    if (t == 0 && it.item) {
-        // Could be a heap double (d2it). Conservative: peek at high tag again.
-        // d2it stores LMD_TYPE_FLOAT in the high byte; if we got here the tag
-        // was zero, so this isn't a float — give up.
+        return (int)it.get_int56();
     }
     if (t == LMD_TYPE_FLOAT) {
-        double* d = (double*)(it.item & 0x00FFFFFFFFFFFFFFULL);
-        return d ? (int)*d : dflt;
+        // PDF object references are stored as numeric Items; self-tagged
+        // floats do not have a boxed payload to dereference.
+        return (int)it.get_double();
     }
     return dflt;
 }
@@ -173,14 +169,7 @@ static void build_obj_table(Array* objects, ObjTable* table, Pool* pool) {
         Map* m = item_as_map(it);
         if (!m || !map_has_type(m, "indirect_object")) continue;
         Item num_it = map_lookup(m, "object_num");
-        int num = -1;
-        TypeId nt = (TypeId)((num_it.item >> 56) & 0xFF);
-        if (nt == LMD_TYPE_FLOAT) {
-            double* d = (double*)(num_it.item & 0x00FFFFFFFFFFFFFFULL);
-            if (d) num = (int)*d;
-        } else {
-            num = item_as_int(num_it, -1);
-        }
+        int num = item_as_int(num_it, -1);
         if (num < 0) continue;
         Item content = map_lookup(m, "content");
         if (content.item == ITEM_NULL) continue;
@@ -194,14 +183,7 @@ static Item resolve_ref(Item it, ObjTable* table) {
     Map* m = item_as_map(it);
     if (!m || !map_has_type(m, "indirect_ref")) return it;
     Item num_it = map_lookup(m, "object_num");
-    int num = -1;
-    TypeId nt = (TypeId)((num_it.item >> 56) & 0xFF);
-    if (nt == LMD_TYPE_FLOAT) {
-        double* d = (double*)(num_it.item & 0x00FFFFFFFFFFFFFFULL);
-        if (d) num = (int)*d;
-    } else {
-        num = item_as_int(num_it, -1);
-    }
+    int num = item_as_int(num_it, -1);
     if (num < 0) return {.item = ITEM_NULL};
     return obj_table_get(table, num);
 }
@@ -1111,8 +1093,8 @@ static Item osp_make_ref(ObjStreamParser* p, int obj_num, int gen_num) {
     if (!obj_val || !gen_val) return {.item = ITEM_ERROR};
     *obj_val = (double)obj_num;
     *gen_val = (double)gen_num;
-    p->builder->putToMap(lam::gc_borrow(ref), p->builder->createString("object_num"), {.item = d2it(obj_val)});
-    p->builder->putToMap(lam::gc_borrow(ref), p->builder->createString("gen_num"), {.item = d2it(gen_val)});
+    p->builder->putToMap(lam::gc_borrow(ref), p->builder->createString("object_num"), lambda_float_ptr_to_item(obj_val));
+    p->builder->putToMap(lam::gc_borrow(ref), p->builder->createString("gen_num"), lambda_float_ptr_to_item(gen_val));
     return {.item = (uint64_t)ref};
 }
 
@@ -1141,7 +1123,7 @@ static Item osp_parse_number_or_ref(ObjStreamParser* p) {
     *val = strtod(p->pos, &end);
     if (end == p->pos) return {.item = ITEM_ERROR};
     p->pos = end;
-    return {.item = d2it(val)};
+    return lambda_float_ptr_to_item(val);
 }
 
 static Array* osp_parse_array(ObjStreamParser* p, int depth) {
@@ -1253,8 +1235,8 @@ static Map* make_indirect_object(Input* input, MarkBuilder& builder, int obj_num
     if (!obj_val || !gen_val) return nullptr;
     *obj_val = (double)obj_num;
     *gen_val = 0.0;
-    builder.putToMap(lam::gc_borrow(obj), builder.createString("object_num"), {.item = d2it(obj_val)});
-    builder.putToMap(lam::gc_borrow(obj), builder.createString("gen_num"), {.item = d2it(gen_val)});
+    builder.putToMap(lam::gc_borrow(obj), builder.createString("object_num"), lambda_float_ptr_to_item(obj_val));
+    builder.putToMap(lam::gc_borrow(obj), builder.createString("gen_num"), lambda_float_ptr_to_item(gen_val));
     if (content.item != ITEM_ERROR && content.item != ITEM_NULL) {
         builder.putToMap(lam::gc_borrow(obj), builder.createString("content"), content);
     }

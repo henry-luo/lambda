@@ -15,6 +15,7 @@
 #include "lambda-decimal.hpp"
 #include "lambda-stack.h"
 #include <mpdecimal.h>
+#include <math.h>
 #include <setjmp.h>
 #include <stdlib.h>
 
@@ -626,13 +627,34 @@ Symbol* heap_create_symbol(const char* symbol) {
     return heap_create_symbol(symbol, strlen(symbol));
 }
 
-Item push_d(double dval) {
-    if (!context->nursery) {
-        log_error("push_d called with invalid context");
+static Item box_float_cold(double dval) {
+    if (!context || !context->nursery) {
+        log_error("box_float_cold called with invalid context");
         return ItemError;
     }
     double *dptr = gc_nursery_alloc_double(context->nursery, dval);
     return {.item = d2it(dptr)};
+}
+
+Item flt2it(double dval) {
+#ifdef LAMBDA_SELF_TAG_FLOAT
+    uint64_t bits;
+    memcpy(&bits, &dval, sizeof(bits));
+    if (dval == 0.0) {
+        return {.item = ITEM_FLOAT_P0 | (signbit(dval) ? UINT64_C(1) : UINT64_C(0))};
+    }
+    if (bits & ITEM_DBL_MASK) {
+        return {.item = bits};
+    }
+    // S1 canonical encoding: tiny/subnormal out-of-band doubles stay boxed.
+    return box_float_cold(dval);
+#else
+    return box_float_cold(dval);
+#endif
+}
+
+Item push_d(double dval) {
+    return flt2it(dval);
 }
 
 Item push_l(int64_t lval) {
@@ -674,6 +696,12 @@ Item push_l_safe(int64_t val) {
 Item push_d_safe(double val) {
     uint64_t bits;
     memcpy(&bits, &val, sizeof(bits));
+#ifdef LAMBDA_SELF_TAG_FLOAT
+    if (bits & ITEM_DBL_MASK) {
+        // Already an inline FLOAT Item — return as-is.
+        return {.item = bits};
+    }
+#endif
     uint8_t tag = bits >> 56;
 
     if (tag == LMD_TYPE_FLOAT) {

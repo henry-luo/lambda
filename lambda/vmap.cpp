@@ -309,7 +309,7 @@ static Item stabilize_value(HashMapData* hd, Item value) {
     if (vtype == LMD_TYPE_FLOAT) {
         double* dval = (double*)mem_alloc(sizeof(double), MEM_CAT_EVAL);
         *dval = value.get_double();
-        value = {.item = d2it(dval)};
+        value = lambda_float_ptr_to_item(dval);
         if (!hd->num_values) hd->num_values = arraylist_new(4);
         arraylist_append(hd->num_values, (void*)dval);
     } else if (vtype == LMD_TYPE_INT64) {

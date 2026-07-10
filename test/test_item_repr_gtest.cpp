@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -213,6 +214,69 @@ TEST(ItemRepresentation, NonPointerDiscriminatorWordsDoNotReadHeaders) {
     EXPECT_NE(synthetic.item & ITEM_DBL_MASK, UINT64_C(0));
     EXPECT_NE(get_type_id(synthetic), LMD_TYPE_RAW_POINTER);
 }
+
+#ifdef LAMBDA_SELF_TAG_FLOAT
+TEST(ItemRepresentation, SelfTaggedFloatEncoderKeepsInBandBitsImmediate) {
+    double value = 1.5;
+    uint64_t bits = 0;
+    memcpy(&bits, &value, sizeof(bits));
+
+    Item encoded = lambda_float_ptr_to_item(&value);
+
+    EXPECT_EQ(encoded.item, bits);
+    EXPECT_NE(encoded.item & ITEM_DBL_MASK, UINT64_C(0));
+    EXPECT_EQ(get_type_id(encoded), LMD_TYPE_FLOAT);
+    EXPECT_EQ(encoded.get_double(), value);
+    EXPECT_EQ(it2d(encoded), value);
+}
+
+TEST(ItemRepresentation, SelfTaggedFloatEncoderPacksSignedZero) {
+    double pos_value = 0.0;
+    double neg_value = -0.0;
+    Item pos_zero = lambda_float_ptr_to_item(&pos_value);
+    Item neg_zero = lambda_float_ptr_to_item(&neg_value);
+
+    EXPECT_EQ(pos_zero.item, ITEM_FLOAT_P0);
+    EXPECT_EQ(neg_zero.item, ITEM_FLOAT_N0);
+    EXPECT_EQ(get_type_id(pos_zero), LMD_TYPE_FLOAT);
+    EXPECT_EQ(get_type_id(neg_zero), LMD_TYPE_FLOAT);
+    EXPECT_FALSE(signbit(it2d(pos_zero)));
+    EXPECT_TRUE(signbit(it2d(neg_zero)));
+    EXPECT_TRUE(isinf(1.0 / it2d(pos_zero)));
+    EXPECT_TRUE(isinf(1.0 / it2d(neg_zero)));
+    EXPECT_GT(1.0 / it2d(pos_zero), 0.0);
+    EXPECT_LT(1.0 / it2d(neg_zero), 0.0);
+}
+
+TEST(ItemRepresentation, SelfTaggedFloatEncoderPreservesInfAndNanPayloadBits) {
+    double inf = INFINITY;
+    uint64_t inf_bits = 0;
+    memcpy(&inf_bits, &inf, sizeof(inf_bits));
+    Item inf_item = lambda_float_ptr_to_item(&inf);
+    EXPECT_EQ(inf_item.item, inf_bits);
+    EXPECT_TRUE(isinf(it2d(inf_item)));
+
+    uint64_t nan_bits = UINT64_C(0x7ff8000000001234);
+    double nan_value = 0.0;
+    memcpy(&nan_value, &nan_bits, sizeof(nan_value));
+    Item nan_item = lambda_float_ptr_to_item(&nan_value);
+    EXPECT_EQ(nan_item.item, nan_bits);
+    EXPECT_TRUE(isnan(it2d(nan_item)));
+}
+
+TEST(ItemRepresentation, SelfTaggedFloatHelperBoxesOutOfBandPayloads) {
+    double tiny = ldexp(1.0, -1074);
+    uint64_t bits = 0;
+    memcpy(&bits, &tiny, sizeof(bits));
+    ASSERT_EQ(bits & ITEM_DBL_MASK, UINT64_C(0));
+
+    Item encoded = lambda_float_ptr_to_item(&tiny);
+
+    EXPECT_EQ(encoded.item, d2it(&tiny));
+    EXPECT_EQ(get_type_id(encoded), LMD_TYPE_FLOAT);
+    EXPECT_EQ(it2d(encoded), tiny);
+}
+#endif
 
 TEST(ItemRepresentation, MirMemberAccessKeepsContainerItemUnmodified) {
     int rc = system("./lambda.exe test/lambda/item_repr_container_member_load.ls > temp/item_repr_mir_stdout.txt");

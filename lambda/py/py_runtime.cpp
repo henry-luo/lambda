@@ -105,12 +105,12 @@ extern "C" Item py_to_float(Item value) {
     case LMD_TYPE_BOOL: {
         double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *ptr = it2b(value) ? 1.0 : 0.0;
-        return (Item){.item = d2it(ptr)};
+        return lambda_float_ptr_to_item(ptr);
     }
     case LMD_TYPE_INT: {
         double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *ptr = (double)it2i(value);
-        return (Item){.item = d2it(ptr)};
+        return lambda_float_ptr_to_item(ptr);
     }
     case LMD_TYPE_FLOAT:
         return value;
@@ -122,7 +122,7 @@ extern "C" Item py_to_float(Item value) {
         if (endptr == str->chars) return (Item){.item = i2it(0)};
         double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *ptr = d;
-        return (Item){.item = d2it(ptr)};
+        return lambda_float_ptr_to_item(ptr);
     }
     default:
         return (Item){.item = i2it(0)};
@@ -307,7 +307,7 @@ static Item py_make_number(double d) {
     }
     double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *ptr = d;
-    return (Item){.item = d2it(ptr)};
+    return lambda_float_ptr_to_item(ptr);
 }
 
 double py_get_number(Item value) {
@@ -474,7 +474,7 @@ extern "C" Item py_divide(Item left, Item right) {
     }
     double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *ptr = l / r;
-    return (Item){.item = d2it(ptr)};
+    return lambda_float_ptr_to_item(ptr);
 }
 
 extern "C" Item py_floor_divide(Item left, Item right) {
@@ -718,7 +718,7 @@ extern "C" Item py_power(Item left, Item right) {
             // negative exponent → float
             double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
             *ptr = pow((double)base, (double)exp);
-            return (Item){.item = d2it(ptr)};
+            return lambda_float_ptr_to_item(ptr);
         }
         if (exp == 0) return (Item){.item = i2it(1)};
         if (base == 0) return (Item){.item = i2it(0)};

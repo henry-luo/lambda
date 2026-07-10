@@ -282,7 +282,7 @@ Item MarkBuilder::createFloat(double value) {
     // allocate double from arena
     double* float_ptr = (double*)arena_alloc(arena_, sizeof(double));
     *float_ptr = value;
-    Item item = {.item = d2it(float_ptr)};
+    Item item = lambda_float_ptr_to_item(float_ptr);
     return item;
 }
 
@@ -816,7 +816,8 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
     } else if constexpr (Tag == LMD_TYPE_INT64) {
         return createLong(*typed.ptr());
     } else if constexpr (Tag == LMD_TYPE_FLOAT) {
-        return createFloat(*typed.ptr());
+        // Float Items may be self-tagged inline values; never assume pointer storage.
+        return createFloat(typed.value());
     } else if constexpr (Tag == LMD_TYPE_SYMBOL) {
         Symbol* sym = typed.ptr();
         if (!sym) return createNull();

@@ -1482,7 +1482,7 @@ extern "C" Item js_performance_now(void) {
     double* fp = &js_perf_now_buf[js_perf_now_idx % 64];
     js_perf_now_idx++;
     *fp = ms;
-    return (Item){.item = d2it(fp)};
+    return lambda_float_ptr_to_item(fp);
 }
 
 static Item js_performance_observer_string(const char* str) {
@@ -1863,7 +1863,7 @@ extern "C" Item js_date_new_from(Item value) {
         static int date_idx = 0;
         double* fp = &date_buf[date_idx++ % 16];
         *fp = ms;
-        js_property_set(obj, key, (Item){.item = d2it(fp)});
+        js_property_set(obj, key, lambda_float_ptr_to_item(fp));
     };
 
     if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT) {
@@ -1998,7 +1998,7 @@ extern "C" Item js_date_utc(Item args_array) {
     ms = js_date_time_clip(ms);
     double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *fp = ms;
-    return (Item){.item = d2it(fp)};
+    return lambda_float_ptr_to_item(fp);
 }
 
 // v11: Date instance method dispatch
@@ -2033,7 +2033,7 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
         static int gt_idx = 0;
         double* fp = &gt_buf[gt_idx++ % 16];
         *fp = ms;
-        return (Item){.item = d2it(fp)};
+        return lambda_float_ptr_to_item(fp);
     }
     // NaN (Invalid Date) handling
     if (isnan(ms)) {
@@ -2043,7 +2043,7 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
             return (Item){.item = s2it(heap_create_name("Invalid Date", 12))};
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
-        return (Item){.item = d2it(fp)};
+        return lambda_float_ptr_to_item(fp);
     }
     time_t secs = js_date_seconds_from_ms(ms);
     struct tm tm;
@@ -2197,7 +2197,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
         new_ms = js_date_time_clip(new_ms);
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = new_ms;
-        Item new_time = (Item){.item = d2it(fp)};
+        Item new_time = lambda_float_ptr_to_item(fp);
         js_property_set(date_obj, key, new_time);
         return new_time;
     };
@@ -2249,7 +2249,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
             if (method_id == 43) { // valueOf — return NaN
                 double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
                 *fp = NAN;
-                return (Item){.item = d2it(fp)};
+                return lambda_float_ptr_to_item(fp);
             }
             if (method_id == 44) // toJSON — return null for Invalid Date
                 return ItemNull;
@@ -2257,7 +2257,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
                 return (Item){.item = s2it(heap_create_name("Invalid Date", 12))};
             double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
             *fp = NAN;
-            return (Item){.item = d2it(fp)};
+            return lambda_float_ptr_to_item(fp);
         }
         time_t secs = js_date_seconds_from_ms(ms);
         if (method_id == 40) { // getDay
@@ -2277,7 +2277,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
         if (method_id == 43) { // valueOf — same as getTime
             double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
             *fp = ms;
-            return (Item){.item = d2it(fp)};
+            return lambda_float_ptr_to_item(fp);
         }
         if (method_id == 44) { // toJSON — same as toISOString
             return js_date_to_json(date_obj);
@@ -2368,7 +2368,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
         if (isnan(ms)) {
             double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
             *fp = NAN;
-            return (Item){.item = d2it(fp)};
+            return lambda_float_ptr_to_item(fp);
         }
 
         // local setters (21-27)
@@ -2567,7 +2567,7 @@ extern "C" Item js_date_new_multi(Item args_array) {
     double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     ms_val = js_date_time_clip(ms_val);
     *fp = ms_val;
-    js_property_set(obj, time_key, (Item){.item = d2it(fp)});
+    js_property_set(obj, time_key, lambda_float_ptr_to_item(fp));
     js_class_stamp(obj, JS_CLASS_DATE);
     js_date_set_instance_prototype(obj);
     return obj;
@@ -2580,19 +2580,19 @@ extern "C" Item js_date_parse(Item str_item) {
     if (!s || s->len == 0) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
-        return (Item){.item = d2it(fp)};
+        return lambda_float_ptr_to_item(fp);
     }
     // ES spec: extended year "-000000" is invalid (year zero must be "+000000")
     if (s->len >= 7 && memcmp(s->chars, "-000000", 7) == 0) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
-        return (Item){.item = d2it(fp)};
+        return lambda_float_ptr_to_item(fp);
     }
     double iso_ms;
     if (js_date_parse_iso_ms(s, &iso_ms)) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = iso_ms;
-        return (Item){.item = d2it(fp)};
+        return lambda_float_ptr_to_item(fp);
     }
     struct tm tm = {};
     // Try ISO 8601 first
@@ -2606,11 +2606,11 @@ extern "C" Item js_date_parse(Item str_item) {
         double ms = (double)t * 1000.0;
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = ms;
-        return (Item){.item = d2it(fp)};
+        return lambda_float_ptr_to_item(fp);
     }
     double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *fp = NAN;
-    return (Item){.item = d2it(fp)};
+    return lambda_float_ptr_to_item(fp);
 }
 
 extern "C" void js_store_process_argv(int argc, const char** argv) {
@@ -2769,7 +2769,7 @@ extern "C" Item js_process_uptime(void) {
     double now = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
     double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *fp = now - start_time;
-    return (Item){.item = d2it(fp)};
+    return lambda_float_ptr_to_item(fp);
 }
 
 // build process.env as a map of environment variables
@@ -4526,7 +4526,7 @@ extern "C" Item js_parseInt(Item str_item, Item radix_item) {
     if (!s || s->len == 0) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
-        return (Item){.item = d2it(fp)};
+        return lambda_float_ptr_to_item(fp);
     }
 
     // Get radix per ES spec: ToInt32(radix), then validate 2-36
@@ -4557,7 +4557,7 @@ extern "C" Item js_parseInt(Item str_item, Item radix_item) {
     if (radix_explicit && (radix < 2 || radix > 36)) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
-        return (Item){.item = d2it(fp)};
+        return lambda_float_ptr_to_item(fp);
     }
 
     // Null-terminate
@@ -4627,7 +4627,7 @@ extern "C" Item js_parseInt(Item str_item, Item radix_item) {
     if (!found_digit) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
-        return (Item){.item = d2it(fp)};
+        return lambda_float_ptr_to_item(fp);
     }
     result *= sign;
 
@@ -4638,7 +4638,7 @@ extern "C" Item js_parseInt(Item str_item, Item radix_item) {
     }
     double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *fp = result;
-    return (Item){.item = d2it(fp)};
+    return lambda_float_ptr_to_item(fp);
 }
 
 extern "C" Item js_parseFloat(Item str_item) {
@@ -4647,7 +4647,7 @@ extern "C" Item js_parseFloat(Item str_item) {
     if (!s || s->len == 0) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
-        return (Item){.item = d2it(fp)};
+        return lambda_float_ptr_to_item(fp);
     }
 
     char buf[256];
@@ -4694,23 +4694,23 @@ extern "C" Item js_parseFloat(Item str_item) {
         if (strncmp(p, "Infinity", 8) == 0) {
             double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
             *fp = (*start == '-') ? -HUGE_VAL : HUGE_VAL;
-            return (Item){.item = d2it(fp)};
+            return lambda_float_ptr_to_item(fp);
         }
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
-        return (Item){.item = d2it(fp)};
+        return lambda_float_ptr_to_item(fp);
     }
     // must start with a decimal digit or '.'
     if ((*p < '0' || *p > '9') && *p != '.') {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
-        return (Item){.item = d2it(fp)};
+        return lambda_float_ptr_to_item(fp);
     }
     // '.' alone without a following digit is not valid
     if (*p == '.' && (p[1] < '0' || p[1] > '9')) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
-        return (Item){.item = d2it(fp)};
+        return lambda_float_ptr_to_item(fp);
     }
 
     // scan to find the end of the valid decimal literal (no hex)
@@ -4734,12 +4734,12 @@ extern "C" Item js_parseFloat(Item str_item) {
     if (endptr == start) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
-        return (Item){.item = d2it(fp)};
+        return lambda_float_ptr_to_item(fp);
     }
 
     double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *fp = val;
-    return (Item){.item = d2it(fp)};
+    return lambda_float_ptr_to_item(fp);
 }
 
 extern "C" Item js_isNaN(Item value) {
@@ -5381,7 +5381,7 @@ extern "C" Item js_string_charCodeAt(Item str_item, Item index_item) {
     if (idx < 0 || idx >= (int)s->len) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
-        return (Item){.item = d2it(fp)};
+        return lambda_float_ptr_to_item(fp);
     }
 
     // Return the UTF-16 code unit (for ASCII, same as byte value)
@@ -10484,7 +10484,7 @@ extern "C" Item js_to_string_val(Item value) {
 static Item make_double(double val) {
     double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *fp = val;
-    return (Item){.item = d2it(fp)};
+    return lambda_float_ptr_to_item(fp);
 }
 
 extern "C" Item js_number_property(Item prop_name) {
@@ -15836,10 +15836,10 @@ extern "C" Item js_get_global_this() {
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("event", 5))}, make_js_undefined());
         double* nan_p = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *nan_p = NAN;
-        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("NaN", 3))}, (Item){.item = d2it(nan_p)});
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("NaN", 3))}, lambda_float_ptr_to_item(nan_p));
         double* inf_p = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *inf_p = INFINITY;
-        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Infinity", 8))}, (Item){.item = d2it(inf_p)});
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Infinity", 8))}, lambda_float_ptr_to_item(inf_p));
 
         // ES spec: NaN, Infinity, undefined are non-writable, non-enumerable, non-configurable
         static const char* ro_globals[] = {"NaN", "Infinity", "undefined", NULL};
@@ -16056,7 +16056,7 @@ extern "C" Item js_get_global_this() {
             // timeOrigin: process start time (use 0 for simplicity)
             double* origin = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
             *origin = 0.0;
-            js_property_set(perf, make_string_item("timeOrigin"), (Item){.item = d2it(origin)});
+            js_property_set(perf, make_string_item("timeOrigin"), lambda_float_ptr_to_item(origin));
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("performance", 11))}, perf);
             Item perf_observer = js_new_function(

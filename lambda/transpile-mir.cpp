@@ -1539,7 +1539,9 @@ static MIR_reg_t emit_load_const_boxed(MirTranspiler* mt, int const_index, TypeI
     case LMD_TYPE_FLOAT64: {
         // d2it(ptr) = ptr ? (FLOAT_TAG | (uint64_t)ptr) : ITEM_NULL
         MIR_reg_t result = new_reg(mt, "boxd", MIR_T_I64);
-        uint64_t FLOAT_TAG = (uint64_t)type_id << 56;
+        // f64 is a source-level alias; any legacy path that reaches here still
+        // emits the canonical runtime float tag.
+        uint64_t FLOAT_TAG = (uint64_t)LMD_TYPE_FLOAT << 56;
         uint64_t ITEM_NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
         MIR_label_t l_nn = new_label(mt);
         MIR_label_t l_end = new_label(mt);
@@ -1813,8 +1815,8 @@ static bool static_const_item_from_node(MirTranspiler* mt, AstNode* node, Item* 
         case LMD_TYPE_BOOL: out->item = b2it(parse_bool_literal(mt->source, node->node)); return true;
         case LMD_TYPE_INT: out->item = i2it(parse_int_literal(mt->source, node->node)); return true;
         case LMD_TYPE_INT64: { TypeInt64* t = (TypeInt64*)node->type; out->item = l2it(&t->int64_val); return true; }
-        case LMD_TYPE_FLOAT: { TypeFloat* t = (TypeFloat*)node->type; out->item = d2it(&t->double_val); return true; }
-        case LMD_TYPE_FLOAT64: { TypeFloat* t = (TypeFloat*)node->type; out->item = f642it(&t->double_val); return true; }
+        case LMD_TYPE_FLOAT: { TypeFloat* t = (TypeFloat*)node->type; *out = lambda_float_ptr_to_item(&t->double_val); return true; }
+        case LMD_TYPE_FLOAT64: { TypeFloat* t = (TypeFloat*)node->type; *out = lambda_float_ptr_to_item(&t->double_val); return true; }
         case LMD_TYPE_DTIME: { TypeDateTime* t = (TypeDateTime*)node->type; out->item = k2it(&t->datetime); return true; }
         case LMD_TYPE_DECIMAL: { TypeDecimal* t = (TypeDecimal*)node->type; out->item = c2it(t->decimal); return true; }
         case LMD_TYPE_STRING: { TypeString* t = (TypeString*)node->type; out->item = s2it(t->string); return true; }

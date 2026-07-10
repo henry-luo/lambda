@@ -182,7 +182,7 @@ int32_t ItemReader::asInt32() const {
 }
 
 double ItemReader::asFloat() const {
-    if (auto val = asItem<LMD_TYPE_FLOAT>()) { return *val.ptr(); }
+    if (auto val = asItem<LMD_TYPE_FLOAT>()) { return val.value(); }
     if (cached_type_ == LMD_TYPE_NUM_SIZED) { return item_.get_num_sized_as_double(); }
     return NAN;
 }
@@ -442,7 +442,7 @@ static Item arr_num_leaf_item(ArrayNum* a, int64_t off) {
     switch (a->get_elem_type()) {
         case ELEM_INT:     return Item{ .item = i2it(a->items[off]) };
         case ELEM_INT64:   return Item{ .item = l2it(&a->items[off]) };
-        case ELEM_FLOAT64: return Item{ .item = d2it(&a->float_items[off]) };
+        case ELEM_FLOAT64: return lambda_float_ptr_to_item(&a->float_items[off]);
         case ELEM_INT8:    return Item{ .item = i8_to_item(((int8_t*)a->data)[off]) };
         case ELEM_INT16:   return Item{ .item = i16_to_item(((int16_t*)a->data)[off]) };
         case ELEM_INT32:   return Item{ .item = i32_to_item(((int32_t*)a->data)[off]) };

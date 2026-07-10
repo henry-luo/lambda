@@ -228,7 +228,7 @@ extern "C" Item py_builtin_abs(Item value) {
         double d = it2d(value);
         double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *ptr = fabs(d);
-        return (Item){.item = d2it(ptr)};
+        return lambda_float_ptr_to_item(ptr);
     }
     if (type == LMD_TYPE_DECIMAL && py_is_bigint(value)) {
         return py_bigint_abs(value);
@@ -487,7 +487,7 @@ extern "C" Item py_builtin_round(Item x, Item ndigits) {
     double rounded = round(val * scale) / scale;
     double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *ptr = rounded;
-    return (Item){.item = d2it(ptr)};
+    return lambda_float_ptr_to_item(ptr);
 }
 
 // ============================================================================
@@ -582,7 +582,7 @@ extern "C" Item py_builtin_divmod(Item a, Item b) {
     if (get_type_id(a) == LMD_TYPE_FLOAT || get_type_id(b) == LMD_TYPE_FLOAT) {
         double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *ptr = remainder;
-        py_tuple_set(tuple, 1, (Item){.item = d2it(ptr)});
+        py_tuple_set(tuple, 1, lambda_float_ptr_to_item(ptr));
     } else {
         py_tuple_set(tuple, 1, (Item){.item = i2it((int64_t)remainder)});
     }
@@ -620,7 +620,7 @@ extern "C" Item py_builtin_pow(Item base, Item exp, Item mod) {
     }
     double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *ptr = result;
-    return (Item){.item = d2it(ptr)};
+    return lambda_float_ptr_to_item(ptr);
 }
 
 // ============================================================================

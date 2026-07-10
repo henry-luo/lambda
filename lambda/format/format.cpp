@@ -14,7 +14,7 @@ Item create_item_from_field_data(void* field_data, TypeId type_id) {
         case LMD_TYPE_INT64:
             return {.item = l2it((int64_t*)field_data)};
         case LMD_TYPE_FLOAT:
-            return {.item = d2it((double*)field_data)};
+            return lambda_float_ptr_to_item((const double*)field_data);
         case LMD_TYPE_STRING:
         case LMD_TYPE_SYMBOL:
         case LMD_TYPE_DTIME:
