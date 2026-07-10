@@ -30,11 +30,16 @@ typedef enum JubeTypeFlags {
 } JubeTypeFlags;
 
 struct JubeHostObjectOps {
-    int64_t (*has_property)(void* native, Item key);
-    int64_t (*delete_property)(void* native, Item key);
-    int64_t (*get_own_property_descriptor)(void* native, Item key, Item* out_descriptor);
-    Item (*own_property_keys)(void* native);
-    Item (*prototype)(void* native);
+    int (*get_property)(Item receiver, Item key, Item* out);
+    int (*set_property)(Item receiver, Item key, Item value, Item* out);
+    int (*call_method)(Item receiver, Item method_name, Item* args, int argc, Item* out);
+    int (*has_property)(Item receiver, Item key, Item* out);
+    int (*delete_property)(Item receiver, Item key, Item* out);
+    int (*get_own_property_descriptor)(Item receiver, Item key, Item* out);
+    int (*own_property_keys)(Item receiver, Item* out);
+    Item (*prototype)(Item receiver);
+    void (*invalidate)(Item receiver);
+    void (*destroy)(void* native);
 };
 
 struct JubeTypeDef {
@@ -42,6 +47,8 @@ struct JubeTypeDef {
     uint32_t flags;
     const void* vmap_ops;
     const JubeHostObjectOps* host_ops;
+    // Deprecated for host objects; use host_ops->destroy so the lifecycle
+    // surface stays with the rest of the native object protocol.
     void (*destroy)(void* native);
 };
 

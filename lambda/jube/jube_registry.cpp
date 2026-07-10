@@ -31,6 +31,36 @@ static int jube_find_static_module_index(const char* name) {
     return -1;
 }
 
+static int jube_host_ops_count(const JubeHostObjectOps* ops) {
+    if (!ops) return 0;
+    int count = 0;
+    if (ops->get_property) count++;
+    if (ops->set_property) count++;
+    if (ops->call_method) count++;
+    if (ops->has_property) count++;
+    if (ops->delete_property) count++;
+    if (ops->get_own_property_descriptor) count++;
+    if (ops->own_property_keys) count++;
+    if (ops->prototype) count++;
+    if (ops->invalidate) count++;
+    if (ops->destroy) count++;
+    return count;
+}
+
+static void jube_log_module_type_ops(const JubeModuleDef* module) {
+    if (!module || !module->types || module->type_count <= 0) return;
+    for (int i = 0; i < module->type_count; i++) {
+        const JubeTypeDef* type = &module->types[i];
+        if (!type || !(type->flags & (JUBE_TYPE_NON_OWNING_HOST | JUBE_TYPE_OWNING_NATIVE))) {
+            continue;
+        }
+        log_info("JUBE_REG: type %s.%s host_ops=%d/10",
+                 module->name ? module->name : "(module)",
+                 type->name ? type->name : "(type)",
+                 jube_host_ops_count(type->host_ops));
+    }
+}
+
 int jube_register_static_module(const JubeModuleDef* module) {
     if (!module || !module->name) {
         log_error("JUBE_REG: cannot register null static module");
@@ -75,6 +105,7 @@ int jube_register_static_module(const JubeModuleDef* module) {
 
     log_info("JUBE_REG: registered static module '%s' version '%s'",
              module->name, module->version ? module->version : "(none)");
+    jube_log_module_type_ops(module);
     return 0;
 }
 
@@ -95,4 +126,17 @@ const JubeModuleDef* jube_find_static_module(const char* name) {
     int index = jube_find_static_module_index(name);
     if (index < 0) return NULL;
     return jube_static_modules[index].module;
+}
+
+const JubeTypeDef* jube_find_type_by_host_type(const void* host_type) {
+    if (!host_type) return NULL;
+    for (int i = 0; i < jube_static_modules_count; i++) {
+        const JubeModuleDef* module = jube_static_modules[i].module;
+        if (!module || !module->types || module->type_count <= 0) continue;
+        for (int j = 0; j < module->type_count; j++) {
+            const JubeTypeDef* type = &module->types[j];
+            if ((const void*)type == host_type) return type;
+        }
+    }
+    return NULL;
 }

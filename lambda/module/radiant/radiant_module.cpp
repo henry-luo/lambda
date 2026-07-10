@@ -13,6 +13,43 @@ extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename
 extern void free_document(DomDocument* doc);
 extern "C" Item radiant_dom_wrap_node(void* dom_elem);
 extern "C" void* radiant_dom_unwrap_node(Item item);
+extern "C" int radiant_dom_host_get_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_host_set_property(Item object, Item key, Item value, Item* out);
+extern "C" int radiant_dom_host_call_method(Item object, Item method_name,
+                                            Item* args, int argc, Item* out);
+extern "C" int radiant_dom_host_has_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_host_delete_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_host_own_property_descriptor(Item object, Item key, Item* out);
+extern "C" int radiant_dom_host_own_property_names(Item object, Item* out);
+extern "C" Item radiant_dom_host_prototype(Item object);
+extern "C" void radiant_dom_host_invalidate(Item object);
+extern "C" int radiant_dom_style_host_get_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_style_host_set_property(Item object, Item key, Item value, Item* out);
+extern "C" int radiant_dom_style_host_call_method(Item object, Item method_name,
+                                                  Item* args, int argc, Item* out);
+extern "C" int radiant_dom_style_host_has_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_style_host_delete_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_style_host_own_property_descriptor(Item object, Item key, Item* out);
+extern "C" int radiant_dom_style_host_own_property_names(Item object, Item* out);
+extern "C" Item radiant_dom_style_host_prototype(Item object);
+extern "C" int radiant_dom_cssom_host_get_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_cssom_host_set_property(Item object, Item key, Item value, Item* out);
+extern "C" int radiant_dom_cssom_host_call_method(Item object, Item method_name,
+                                                  Item* args, int argc, Item* out);
+extern "C" int radiant_dom_cssom_host_has_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_cssom_host_delete_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_cssom_host_own_property_descriptor(Item object, Item key, Item* out);
+extern "C" int radiant_dom_cssom_host_own_property_names(Item object, Item* out);
+extern "C" Item radiant_dom_cssom_host_prototype(Item object);
+extern "C" int radiant_dom_document_host_get_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_document_host_set_property(Item object, Item key, Item value, Item* out);
+extern "C" int radiant_dom_document_host_call_method(Item object, Item method_name,
+                                                     Item* args, int argc, Item* out);
+extern "C" int radiant_dom_document_host_has_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_document_host_delete_property(Item object, Item key, Item* out);
+extern "C" int radiant_dom_document_host_own_property_descriptor(Item object, Item key, Item* out);
+extern "C" int radiant_dom_document_host_own_property_names(Item object, Item* out);
+extern "C" Item radiant_dom_document_host_prototype(Item object);
 
 static Item radiant_string_item(const char* value) {
     return value ? (Item){.item = s2it(heap_create_name(value))} : ItemNull;
@@ -148,9 +185,110 @@ static int radiant_module_init(const JubeHostAPI* host) {
     return 0;
 }
 
-static const JubeTypeDef radiant_types[] = {
-    {"dom_node", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
+static const JubeHostObjectOps radiant_dom_node_host_ops = {
+    radiant_dom_host_get_property,
+    radiant_dom_host_set_property,
+    radiant_dom_host_call_method,
+    radiant_dom_host_has_property,
+    radiant_dom_host_delete_property,
+    radiant_dom_host_own_property_descriptor,
+    radiant_dom_host_own_property_names,
+    radiant_dom_host_prototype,
+    radiant_dom_host_invalidate,
+    NULL,
 };
+
+static const JubeHostObjectOps radiant_dom_style_host_ops = {
+    radiant_dom_style_host_get_property,
+    radiant_dom_style_host_set_property,
+    radiant_dom_style_host_call_method,
+    radiant_dom_style_host_has_property,
+    radiant_dom_style_host_delete_property,
+    radiant_dom_style_host_own_property_descriptor,
+    radiant_dom_style_host_own_property_names,
+    radiant_dom_style_host_prototype,
+    NULL,
+    NULL,
+};
+
+static const JubeHostObjectOps radiant_dom_cssom_host_ops = {
+    radiant_dom_cssom_host_get_property,
+    radiant_dom_cssom_host_set_property,
+    radiant_dom_cssom_host_call_method,
+    radiant_dom_cssom_host_has_property,
+    radiant_dom_cssom_host_delete_property,
+    radiant_dom_cssom_host_own_property_descriptor,
+    radiant_dom_cssom_host_own_property_names,
+    radiant_dom_cssom_host_prototype,
+    NULL,
+    NULL,
+};
+
+static const JubeHostObjectOps radiant_dom_document_host_ops = {
+    radiant_dom_document_host_get_property,
+    radiant_dom_document_host_set_property,
+    radiant_dom_document_host_call_method,
+    radiant_dom_document_host_has_property,
+    radiant_dom_document_host_delete_property,
+    radiant_dom_document_host_own_property_descriptor,
+    radiant_dom_document_host_own_property_names,
+    radiant_dom_document_host_prototype,
+    NULL,
+    NULL,
+};
+
+static const JubeTypeDef radiant_types[] = {
+    {"dom_node", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_node_host_ops, NULL},
+    {"range", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_node_host_ops, NULL},
+    {"selection", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_node_host_ops, NULL},
+    {"inline_style", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_style_host_ops, NULL},
+    {"computed_style", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_style_host_ops, NULL},
+    {"stylesheet", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_cssom_host_ops, NULL},
+    {"css_rule", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_cssom_host_ops, NULL},
+    {"rule_style_decl", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_cssom_host_ops, NULL},
+    {"document", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_document_host_ops, NULL},
+    {"foreign_document", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_document_host_ops, NULL},
+};
+
+extern "C" const void* radiant_dom_node_host_type(void) {
+    return &radiant_types[0];
+}
+
+extern "C" const void* radiant_dom_range_host_type(void) {
+    return &radiant_types[1];
+}
+
+extern "C" const void* radiant_dom_selection_host_type(void) {
+    return &radiant_types[2];
+}
+
+extern "C" const void* radiant_dom_inline_style_host_type(void) {
+    return &radiant_types[3];
+}
+
+extern "C" const void* radiant_dom_computed_style_host_type(void) {
+    return &radiant_types[4];
+}
+
+extern "C" const void* radiant_dom_stylesheet_host_type(void) {
+    return &radiant_types[5];
+}
+
+extern "C" const void* radiant_dom_css_rule_host_type(void) {
+    return &radiant_types[6];
+}
+
+extern "C" const void* radiant_dom_rule_style_decl_host_type(void) {
+    return &radiant_types[7];
+}
+
+extern "C" const void* radiant_dom_document_host_type(void) {
+    return &radiant_types[8];
+}
+
+extern "C" const void* radiant_dom_foreign_document_host_type(void) {
+    return &radiant_types[9];
+}
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcast-function-type-mismatch"

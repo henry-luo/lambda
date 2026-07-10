@@ -200,6 +200,11 @@ static const char js_inline_style_vmap_marker = 0;
 static const char js_document_proxy_vmap_marker = 0;
 static const char js_foreign_doc_vmap_marker = 0;
 
+extern "C" const void* radiant_dom_inline_style_host_type(void);
+extern "C" const void* radiant_dom_computed_style_host_type(void);
+extern "C" const void* radiant_dom_document_host_type(void);
+extern "C" const void* radiant_dom_foreign_document_host_type(void);
+
 // Legacy style map markers are accepted only by type predicates during migration.
 static TypeMap js_computed_style_marker = {};
 static TypeMap js_inline_style_marker = {};
@@ -1548,7 +1553,8 @@ extern "C" void js_dom_set_document(void* dom_doc) {
     if (js_document_proxy_item.item != ITEM_NULL) {
         TypeId proxy_type = get_type_id(js_document_proxy_item);
         if (proxy_type == LMD_TYPE_VMAP && js_document_proxy_item.vmap &&
-            js_document_proxy_item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker) {
+            (js_document_proxy_item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker ||
+             js_document_proxy_item.vmap->host_type == radiant_dom_document_host_type())) {
             js_document_proxy_item.vmap->host_data = dom_doc;
         }
     }
@@ -2401,7 +2407,9 @@ extern "C" bool js_is_document_proxy(Item item) {
     if (tid == LMD_TYPE_VMAP) {
         return item.vmap &&
             (item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker ||
-             item.vmap->host_type == (const void*)&js_foreign_doc_vmap_marker);
+             item.vmap->host_type == (const void*)&js_foreign_doc_vmap_marker ||
+             item.vmap->host_type == radiant_dom_document_host_type() ||
+             item.vmap->host_type == radiant_dom_foreign_document_host_type());
     }
     return false;
 }
@@ -2409,11 +2417,13 @@ extern "C" bool js_is_document_proxy(Item item) {
 static DomDocument* js_document_proxy_doc_from_item(Item item) {
     TypeId tid = get_type_id(item);
     if (tid == LMD_TYPE_VMAP && item.vmap) {
-        if (item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker) {
+        if (item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker ||
+            item.vmap->host_type == radiant_dom_document_host_type()) {
             DomDocument* doc = (DomDocument*)item.vmap->host_data;
             return doc ? doc : (_js_main_document ? _js_main_document : _js_current_document);
         }
-        if (item.vmap->host_type == (const void*)&js_foreign_doc_vmap_marker) {
+        if (item.vmap->host_type == (const void*)&js_foreign_doc_vmap_marker ||
+            item.vmap->host_type == radiant_dom_foreign_document_host_type()) {
             return (DomDocument*)item.vmap->host_data;
         }
         return nullptr;
@@ -2425,7 +2435,9 @@ static DomDocument* js_document_proxy_doc_from_item(Item item) {
 extern "C" void* js_get_foreign_doc(Item item) {
     TypeId tid = get_type_id(item);
     if (tid == LMD_TYPE_VMAP) {
-        if (item.vmap && item.vmap->host_type == (const void*)&js_foreign_doc_vmap_marker) {
+        if (item.vmap &&
+            (item.vmap->host_type == (const void*)&js_foreign_doc_vmap_marker ||
+             item.vmap->host_type == radiant_dom_foreign_document_host_type())) {
             return item.vmap->host_data;
         }
         return nullptr;
@@ -2445,7 +2457,8 @@ extern "C" Item js_get_document_object_value() {
     if (js_document_proxy_item.item != ITEM_NULL) {
         TypeId proxy_type = get_type_id(js_document_proxy_item);
         if (proxy_type == LMD_TYPE_VMAP && js_document_proxy_item.vmap &&
-            js_document_proxy_item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker) {
+            (js_document_proxy_item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker ||
+             js_document_proxy_item.vmap->host_type == radiant_dom_document_host_type())) {
             js_document_proxy_item.vmap->host_data = _js_main_document;
         }
         return js_document_proxy_item;
@@ -2456,7 +2469,7 @@ extern "C" Item js_get_document_object_value() {
     }
     // Document proxies are native VMaps; host_data keeps the browsing-context
     // document current without relying on map-kind compatibility shells.
-    js_document_proxy_item.vmap->host_type = (const void*)&js_document_proxy_vmap_marker;
+    js_document_proxy_item.vmap->host_type = radiant_dom_document_host_type();
     js_document_proxy_item.vmap->host_data = _js_main_document;
     heap_register_gc_root(&js_document_proxy_item.item);
     return js_document_proxy_item;
@@ -2659,7 +2672,7 @@ static Item wrap_foreign_doc_owned(DomDocument* doc, bool owns_doc) {
     if (get_type_id(it) != LMD_TYPE_VMAP || !it.vmap) return ItemNull;
     // Foreign document wrappers are native VMaps; the cached host_data is the
     // document selected during active-document swaps.
-    it.vmap->host_type = (const void*)&js_foreign_doc_vmap_marker;
+    it.vmap->host_type = radiant_dom_foreign_document_host_type();
     it.vmap->host_data = doc;
     if (s_foreign_doc_cache_count < FOREIGN_DOC_CACHE_SIZE) {
         s_foreign_doc_cache[s_foreign_doc_cache_count].doc = doc;
@@ -3274,7 +3287,9 @@ extern "C" bool js_dom_implementation_method(Item method_name, Item* args, int a
 static bool js_is_computed_style(Item item) {
     TypeId tid = get_type_id(item);
     if (tid == LMD_TYPE_VMAP) {
-        return item.vmap && item.vmap->host_type == (const void*)&js_computed_style_vmap_marker &&
+        return item.vmap &&
+            (item.vmap->host_type == (const void*)&js_computed_style_vmap_marker ||
+             item.vmap->host_type == radiant_dom_computed_style_host_type()) &&
             item.vmap->host_data != nullptr;
     }
     if (tid != LMD_TYPE_MAP) return false;
@@ -3292,7 +3307,9 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
 static bool js_is_inline_style(Item item) {
     TypeId tid = get_type_id(item);
     if (tid == LMD_TYPE_VMAP) {
-        return item.vmap && item.vmap->host_type == (const void*)&js_inline_style_vmap_marker &&
+        return item.vmap &&
+            (item.vmap->host_type == (const void*)&js_inline_style_vmap_marker ||
+             item.vmap->host_type == radiant_dom_inline_style_host_type()) &&
             item.vmap->host_data != nullptr;
     }
     if (tid != LMD_TYPE_MAP) return false;
@@ -3323,7 +3340,7 @@ static Item js_dom_get_inline_style_wrapper(DomElement* elem) {
     if (get_type_id(wrapped) != LMD_TYPE_VMAP || !wrapped.vmap) return ItemNull;
     // Inline style wrappers are native VMaps; the owner element pointer is the
     // invariant used by style get/set and method dispatch.
-    wrapped.vmap->host_type = (const void*)&js_inline_style_vmap_marker;
+    wrapped.vmap->host_type = radiant_dom_inline_style_host_type();
     wrapped.vmap->host_data = elem;
     if (exp_map.item != ITEM_NULL) {
         Item key = (Item){.item = s2it(heap_create_name("__styleWrapper"))};
@@ -3592,7 +3609,7 @@ extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
     if (get_type_id(wrapper) != LMD_TYPE_VMAP || !wrapper.vmap) return ItemNull;
     // Computed style wrappers are native VMaps; pseudo-element state lives in
     // the document pool instead of overloading Map::data_cap.
-    wrapper.vmap->host_type = (const void*)&js_computed_style_vmap_marker;
+    wrapper.vmap->host_type = radiant_dom_computed_style_host_type();
     wrapper.vmap->host_data = host;
 
     log_debug("js_get_computed_style: created wrapper for <%s> pseudo=%d",

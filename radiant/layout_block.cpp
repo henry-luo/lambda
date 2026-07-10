@@ -6083,9 +6083,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             const char* html_height_attr = block->get_attribute("height");
             bool has_html_width = html_width_attr && html_width_attr[0] >= '0' && html_width_attr[0] <= '9';
             bool has_html_height = html_height_attr && html_height_attr[0] >= '0' && html_height_attr[0] <= '9';
-            // HTML width/height attributes still define the replaced box when the image request fails.
-            bool has_explicit_dimension = has_css_width || has_css_height ||
-                has_html_width || has_html_height;
+            // Broken image fallback renders alt text; browsers ignore HTML width/height
+            // attributes after load failure, while explicit CSS sizing still controls the box.
+            bool has_explicit_dimension = has_css_width || has_css_height;
             if (alt_text && alt_text[0] != '\0' && !has_explicit_dimension) {
                 if (!block->embed) {
                     block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
