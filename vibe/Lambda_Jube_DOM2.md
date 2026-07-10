@@ -3,7 +3,7 @@
 > **Status**: DOM1 review + DOM2 proposal, written 2026-07-10.
 > **Parent design**: [Lambda_Desing_Native_Module.md](./Lambda_Desing_Native_Module.md) (Jube modules, VMap projections, host API).
 > **Predecessor**: [Lambda_Jube_DOM.md](./Lambda_Jube_DOM.md) (DOM1 = POC 1A/1B implementation record).
-> **Downstream consumer**: [Lambda_Pkg_DOM.md](./Lambda_Pkg_DOM.md) — the Lambda `dom` package assumes the
+> **Downstream consumer**: [Lambda_Design_DOM_Pkg.md](./Lambda_Design_DOM_Pkg.md) — the Lambda `dom` package assumes the
 > generic host-object protocol proposed here (its L4 adapter and ST2 stress goals).
 
 ---
@@ -147,7 +147,7 @@ Make the module *system* real, using the DOM module as its proving load — so t
 3. Script-facing surface (Lambda import, JS namespaces, MIR lowering) is **driven by module
    descriptors**, shrinking `sys_func_registry.c` and `build_ast.cpp` hardcodes (kills G3).
 4. Lambda scripts get **projected field access** on native types (kills G4; the ergonomic floor
-   for `Lambda_Pkg_DOM.md`).
+   for `Lambda_Design_DOM_Pkg.md`).
 5. Wrapper lifetime is **temporally safe** under document teardown (kills S1) and the cache/
    allocation debts are paid (M1–M2).
 
@@ -230,7 +230,7 @@ Rules (from the parent design's N-API adoption, now enforced):
 - **No unwinding across the boundary**: status-int returns + pending-exception queries.
 - **The `dom` sub-table is honest scaffolding**: the DOM-behavior hooks (`js_dom_after_*`,
   live-range/focus/dirty-state invariants) are Radiant-coupling that will *shrink* as behavior
-  migrates per `Lambda_Pkg_DOM.md` Phase 3. Keeping them in a named sub-table makes the
+  migrates per `Lambda_Design_DOM_Pkg.md` Phase 3. Keeping them in a named sub-table makes the
   remaining coupling measurable (count the entries) instead of invisible (scattered externs).
 - End state for the bridge: **zero `extern "C" js_*` declarations** in
   `lambda/module/radiant/*.cpp`; everything flows through the `JubeHostAPI*` received at init.
@@ -410,7 +410,7 @@ Testable goals:
 - `grep -c 'extern "C"' lambda/module/radiant/*.cpp` → **0** (module receives everything via
   the `JubeHostAPI*` from `init`).
 - The `dom` hooks sub-table entry count is recorded in this doc (the measurable
-  Radiant-coupling number that `Lambda_Pkg_DOM.md` Phase 3 will drive down).
+  Radiant-coupling number that `Lambda_Design_DOM_Pkg.md` Phase 3 will drive down).
 - `hostobj_demo` builds against the host API alone (it never declares an engine symbol).
 - Anchors + full JS gtest + UI-automation green.
 
@@ -496,7 +496,7 @@ loading, discovery, manifests remain deferred per the parent design.)
 Phase 0 ─→ Phase 1 ─→ Phase 2 ─→ Phase 3 ─→ Phase 4 ─→ Phase 5 ─→ Phase 6 ─→ (7)
 hardening   ops        generic     host API    descriptor  Lambda      perf       dlopen
 + truth     tables     dispatch                registration projections debts      proof
-                       [gates Lambda_Pkg_DOM Phase 0/1]
+                       [gates Lambda_Design_DOM_Pkg Phase 0/1]
 ```
 
 **DOM2 exit = the parent design's POC-1 exit criteria, actually met**: bridge fully
@@ -505,7 +505,7 @@ module-specific host-object branches (grep gates at 0), a second module integrat
 engine edits, a Lambda script driving DOM mutation → query round-trip through projections, and
 all documented baselines green against the Phase-0 triage table.
 
-After DOM2, `Lambda_Pkg_DOM.md` Phase 1 (MutationObserver et al. in Lambda script) can start on
+After DOM2, `Lambda_Design_DOM_Pkg.md` Phase 1 (MutationObserver et al. in Lambda script) can start on
 an honest foundation: its L4 adapter is the generic protocol of §2.2, its host-API needs
 (microtask scheduling, mutation-ring subscription) are additive entries on the §2.3 tables, and
 its Lambda-side ergonomics stand on §2.5 projections.
