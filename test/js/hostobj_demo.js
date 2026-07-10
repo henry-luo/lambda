@@ -2,6 +2,7 @@ var before = hostobjDemo.destroyed();
 var obj = hostobjDemo.create(7);
 
 console.log('ctor type:', typeof hostobjDemo.HostObjDemo);
+console.log('global enumerable:', Object.prototype.propertyIsEnumerable.call(globalThis, 'hostobjDemo'));
 console.log('value:', obj.value);
 obj.value = 10;
 console.log('set value:', obj.value);

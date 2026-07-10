@@ -1,6 +1,8 @@
 #include "../../lambda-data.hpp"
 #include "../../mark_builder.hpp"
 #include "../../jube/jube_registry.h"
+#include "radiant_host_api.hpp"
+#include "radiant_dom_bridge.hpp"
 #include "../../input/css/dom_node.hpp"
 #include "../../input/css/dom_element.hpp"
 #include "../../input/css/css_tokenizer.hpp"
@@ -20,170 +22,159 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern "C" void heap_register_gc_root(uint64_t* slot);
-extern "C" void heap_unregister_gc_root(uint64_t* slot);
+RADIANT_C_API const void* radiant_dom_node_host_type(void);
+RADIANT_C_API void radiant_dom_host_invalidate(Item object);
+RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem);
+RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 
-extern "C" void* js_dom_get_document(void);
-extern "C" Item js_get_document_object_value(void);
-extern "C" Item js_get_global_this(void);
-extern "C" Item js_get_global_property(Item key);
-extern "C" Item js_new_function(void* func_ptr, int param_count);
-extern "C" void* js_dom_get_or_create_doc_node(void* doc);
-extern "C" Item js_dom_document_proxy_for_doc_bridge(void* doc);
-extern "C" void* js_dom_unwrap_element_impl(Item item);
-extern "C" void js_dom_initialize_node_wrapper(void* dom_elem);
-extern "C" Item vmap_new(void);
-extern "C" Item js_new_error_with_name(Item error_name, Item message);
-extern "C" void js_throw_value(Item error);
-extern "C" bool js_is_css_namespace(Item item);
-extern "C" bool js_is_inline_style_item(Item item);
-extern "C" bool js_is_computed_style_item(Item item);
-extern "C" bool js_is_stylesheet(Item item);
-extern "C" bool js_is_css_rule(Item item);
-extern "C" bool js_is_rule_style_decl(Item item);
-extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name);
-extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item value);
-extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Item* args, int argc);
-extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name);
-extern "C" bool js_dom_style_resource_has_property(Item style_item, Item prop_name);
-extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args, int argc);
-extern "C" Item js_dom_get_prototype_value(Item obj);
-extern "C" Item js_get_intrinsic_prototype_for_class(int class_id);
-extern "C" const void* radiant_dom_node_host_type(void);
-extern "C" void radiant_dom_host_invalidate(Item object);
-extern "C" bool js_cssom_resource_has_property(Item item, Item prop_name);
-extern "C" Item js_cssom_stylesheet_get_property(Item sheet_item, Item prop_name);
-extern "C" Item js_cssom_rule_get_property(Item rule_item, Item prop_name);
-extern "C" Item js_cssom_rule_set_property(Item rule_item, Item prop_name, Item value);
-extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name);
-extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value);
-extern "C" void* js_get_foreign_doc(Item item);
-extern "C" void* js_dom_swap_active_document(void* new_doc);
-extern "C" void js_dom_restore_active_document(void* prev_doc);
-extern "C" Item js_document_proxy_get_property(Item prop_name);
-extern "C" Item js_document_proxy_set_property(Item prop_name, Item value);
-extern "C" Item js_document_proxy_method(Item method_name, Item* args, int argc);
-extern "C" bool js_dom_item_is_range(Item item);
-extern "C" bool js_dom_item_is_selection(Item item);
-extern "C" Item js_dom_range_get_property(Item obj, Item key);
-extern "C" Item js_dom_range_set_property(Item obj, Item key, Item value);
-extern "C" Item js_dom_selection_get_property(Item obj, Item key);
-extern "C" Item js_dom_selection_set_property(Item obj, Item key, Item value);
-extern "C" Item js_dom_range_get_prototype_value(void);
-extern "C" Item js_dom_selection_get_prototype_value(void);
-extern "C" bool js_dom_range_native_property(Item obj, Item key);
-extern "C" bool js_dom_selection_native_property(Item obj, Item key);
-extern "C" bool js_dom_expando_has_property(Item obj, Item key);
-extern "C" bool js_dom_range_expando_has_property(Item obj, Item key);
-extern "C" bool js_dom_selection_expando_has_property(Item obj, Item key);
-extern "C" Item js_dom_expando_get_own_property_descriptor(Item obj, Item key);
-extern "C" Item js_dom_range_expando_get_own_property_descriptor(Item obj, Item key);
-extern "C" Item js_dom_selection_expando_get_own_property_descriptor(Item obj, Item key);
-extern "C" Item js_dom_expando_delete_property(Item obj, Item key);
-extern "C" Item js_dom_range_expando_delete_property(Item obj, Item key);
-extern "C" Item js_dom_selection_expando_delete_property(Item obj, Item key);
-extern "C" Item js_dom_expando_own_property_names(Item obj);
-extern "C" Item js_dom_range_expando_own_property_names(Item obj);
-extern "C" Item js_dom_selection_expando_own_property_names(Item obj);
-extern "C" Item js_array_push(Item array, Item value);
-extern "C" Item js_css_namespace_method(Item obj, Item method_name, Item* args, int argc);
-extern "C" Item js_cssom_stylesheet_method(Item sheet_item, Item method_name, Item* args, int argc);
-extern "C" Item js_cssom_rule_decl_method(Item decl_item, Item method_name, Item* args, int argc);
-extern "C" Item js_dom_owner_document_for_node(void* node);
-extern "C" const char* js_dom_to_attribute_cstr(Item value);
-extern "C" bool js_is_truthy(Item value);
-extern "C" void js_dom_after_set_attribute(void* elem, const char* attr_name, const char* attr_value);
-extern "C" void js_dom_after_remove_attribute(void* elem, const char* attr_name);
-extern "C" void js_dom_after_toggle_attribute_remove(void* elem, const char* attr_name);
-extern "C" void js_dom_after_disabled_attribute_set(void* elem);
-extern "C" void js_dom_after_default_checked_set(void* elem, bool checked);
-extern "C" void js_dom_after_default_selected_set(void* elem, bool selected);
-extern "C" void js_dom_after_select_multiple_removed(void* elem);
-extern "C" void js_dom_set_checked_dirty(void* elem, bool checked);
-extern "C" void js_dom_select_set_value_bridge(void* elem, const char* value);
-extern "C" void js_dom_select_set_selected_index_bridge(void* elem, Item value);
-extern "C" void js_dom_select_set_length_bridge(void* elem, Item value);
-extern "C" void js_dom_set_option_selected_dirty(void* elem, bool selected);
-extern "C" void js_dom_set_option_text_bridge(void* elem, const char* value);
-extern "C" void js_dom_after_srcdoc_set(void* elem);
-extern "C" void js_dom_throw_contenteditable_syntax_error(void);
-extern "C" Item js_dom_set_text_data_property(void* text, Item value);
-extern "C" Item js_dom_text_control_set_value_bridge(void* elem, Item value);
-extern "C" Item js_dom_text_control_set_selection_start_bridge(void* elem, Item value);
-extern "C" Item js_dom_text_control_set_selection_end_bridge(void* elem, Item value);
-extern "C" Item js_dom_text_control_set_selection_direction_bridge(void* elem, Item value);
-extern "C" Item js_dom_text_control_set_default_value_bridge(void* elem, Item value);
-extern "C" Item js_dom_text_control_set_selection_range_bridge(void* elem, Item start, Item end, Item dir);
-extern "C" Item js_dom_text_control_set_range_text_bridge(void* elem, Item replacement, Item start, Item end, Item mode);
-extern "C" Item js_dom_text_control_select_bridge(void* elem);
-extern "C" Item js_dom_form_reset_bridge(Item form_item);
-extern "C" Item js_dom_check_validity_bridge(Item elem_item);
-extern "C" Item js_dom_report_validity_bridge(Item elem_item);
-extern "C" Item js_dom_form_submit_bridge(Item form_item);
-extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter);
-extern "C" Item js_dom_focus_method_bridge(void* elem, bool focus);
-extern "C" Item js_dom_click_method_bridge(Item elem_item);
-extern "C" Item js_dom_add_event_listener_bridge(Item target_item, Item type, Item callback, Item opts);
-extern "C" Item js_dom_remove_event_listener_bridge(Item target_item, Item type, Item callback, Item opts);
-extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
-extern "C" Item js_dom_get_bounding_client_rect_bridge(void* elem);
-extern "C" Item js_dom_get_client_rects_bridge(void* elem);
-extern "C" Item js_dom_scroll_into_view_bridge(void* elem);
-extern "C" Item js_dom_scroll_method_bridge(Item elem_item, Item method_name, Item* args, int argc);
-extern "C" Item js_dom_text_control_caret_bounds_bridge(void* elem);
-extern "C" Item js_dom_text_control_boundary_from_point_bridge(void* elem, Item x, Item y);
-extern "C" Item js_dom_boundary_from_point_bridge(void* elem, Item x, Item y, Item behavior);
-extern "C" Item js_dom_style_set_property_bridge(void* elem, Item prop, Item value, Item priority, bool has_priority);
-extern "C" Item js_dom_style_remove_property_bridge(void* elem, Item prop);
-extern "C" Item js_dom_text_replace_data_bridge(void* text, Item offset, Item count, Item data);
-extern "C" Item js_dom_text_insert_data_bridge(void* text, Item offset, Item data);
-extern "C" Item js_dom_text_append_data_bridge(void* text, Item data);
-extern "C" Item js_dom_text_delete_data_bridge(void* text, Item offset, Item count);
-extern "C" Item js_dom_text_substring_data_bridge(void* text, Item offset, Item count);
-extern "C" Item js_dom_append_child_bridge(void* parent, Item child);
-extern "C" Item js_dom_remove_child_bridge(void* parent, Item child);
-extern "C" Item js_dom_insert_before_bridge(void* parent, Item new_child, Item ref_child);
-extern "C" Item js_dom_remove_bridge(void* node);
-extern "C" Item js_dom_adopt_node_bridge(Item node);
-extern "C" Item js_dom_location_method_bridge(void* doc, Item method_name, Item* args, int argc);
-extern "C" Item js_dom_document_open_bridge(void* doc);
-extern "C" Item js_dom_document_write_bridge(void* doc, Item text);
-extern "C" Item js_dom_document_element_from_point_bridge(void* doc, Item x, Item y);
-extern "C" Item js_dom_create_range(void);
-extern "C" Item js_dom_get_selection(void);
-extern "C" Item js_dom_get_selection_function_for_document(void* doc);
-extern "C" bool js_doc_has_browsing_context(void* doc);
-extern "C" Item js_dom_document_fonts_bridge(void);
-extern "C" Item js_dom_document_stylesheets_bridge(void);
-extern "C" Item js_dom_document_default_view_bridge(void* doc);
-extern "C" Item js_dom_document_implementation_bridge(void);
-extern "C" Item js_dom_document_design_mode_bridge(void);
-extern "C" Item js_dom_document_active_element_bridge(void* doc);
-extern "C" Item js_dom_normalize_bridge(void* elem);
-extern "C" Item js_dom_live_child_collection_bridge(void* elem, bool elements_only);
-extern "C" Item js_dom_live_document_forms_bridge(void* doc);
-extern "C" Item js_dom_live_form_elements_bridge(void* elem);
-extern "C" Item js_dom_live_document_get_elements_by_tag_name_bridge(void* doc, Item query);
-extern "C" Item js_dom_live_document_get_elements_by_class_name_bridge(void* doc, Item query);
-extern "C" Item js_dom_live_document_get_elements_by_name_bridge(void* doc, Item query);
-extern "C" Item js_dom_live_element_get_elements_by_tag_name_bridge(void* elem, Item query);
-extern "C" Item js_dom_live_element_get_elements_by_class_name_bridge(void* elem, Item query);
-extern "C" Item js_dom_clone_node_bridge(void* elem, Item deep, bool has_deep);
-extern "C" Item js_dom_replace_child_bridge(void* parent, Item new_child, Item old_child);
-extern "C" Item js_dom_replace_with_bridge(void* node, Item* args, int argc);
-extern "C" Item js_dom_insert_adjacent_element_bridge(void* elem, Item position, Item new_node);
-extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem, Item position, Item html);
-extern "C" Item js_dom_append_variadic_bridge(void* elem, Item* args, int argc);
-extern "C" Item js_dom_prepend_variadic_bridge(void* elem, Item* args, int argc);
-extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
-extern "C" Item radiant_dom_wrap_node(void* dom_elem);
-extern "C" Item radiant_dom_get_property(Item elem_item, Item prop_name);
-extern "C" Item js_new_object(void);
-extern "C" Item js_array_new(int64_t capacity);
-extern "C" Item js_property_get(Item object, Item key);
-extern "C" Item js_property_set(Item object, Item key, Item value);
-extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
-extern "C" int js_check_exception(void);
+// The Phase-3 DOM hook table preserves the legacy hook names at call sites
+// while routing every module-to-engine call through the checked host API.
+#define js_dom_get_document radiant_host_api->dom->get_document
+#define js_get_document_object_value radiant_host_api->dom->get_document_object_value
+#define js_dom_get_or_create_doc_node radiant_host_api->dom->get_or_create_doc_node
+#define js_dom_document_proxy_for_doc_bridge radiant_host_api->dom->document_proxy_for_doc_bridge
+#define js_dom_unwrap_element_impl radiant_host_api->dom->unwrap_element_impl
+#define js_dom_initialize_node_wrapper radiant_host_api->dom->initialize_node_wrapper
+#define js_is_css_namespace radiant_host_api->dom->is_css_namespace
+#define js_is_inline_style_item radiant_host_api->dom->is_inline_style_item
+#define js_is_computed_style_item radiant_host_api->dom->is_computed_style_item
+#define js_is_stylesheet radiant_host_api->dom->is_stylesheet
+#define js_is_css_rule radiant_host_api->dom->is_css_rule
+#define js_is_rule_style_decl radiant_host_api->dom->is_rule_style_decl
+#define js_dom_get_property_impl radiant_host_api->dom->dom_get_property_impl
+#define js_dom_set_property_impl radiant_host_api->dom->dom_set_property_impl
+#define js_dom_element_method_impl radiant_host_api->dom->dom_element_method_impl
+#define js_computed_style_get_property radiant_host_api->dom->computed_style_get_property
+#define js_dom_style_resource_has_property radiant_host_api->dom->style_resource_has_property
+#define js_dom_style_method radiant_host_api->dom->style_method
+#define js_dom_get_prototype_value radiant_host_api->dom->dom_get_prototype_value
+#define js_get_intrinsic_prototype_for_class radiant_host_api->script->intrinsic_prototype_for_class
+#define js_cssom_resource_has_property radiant_host_api->dom->cssom_resource_has_property
+#define js_cssom_stylesheet_get_property radiant_host_api->dom->cssom_stylesheet_get_property
+#define js_cssom_rule_get_property radiant_host_api->dom->cssom_rule_get_property
+#define js_cssom_rule_set_property radiant_host_api->dom->cssom_rule_set_property
+#define js_cssom_rule_decl_get_property radiant_host_api->dom->cssom_rule_decl_get_property
+#define js_cssom_rule_decl_set_property radiant_host_api->dom->cssom_rule_decl_set_property
+#define js_get_foreign_doc radiant_host_api->dom->get_foreign_doc
+#define js_dom_swap_active_document radiant_host_api->dom->swap_active_document
+#define js_dom_restore_active_document radiant_host_api->dom->restore_active_document
+#define js_document_proxy_get_property radiant_host_api->dom->document_proxy_get_property
+#define js_document_proxy_set_property radiant_host_api->dom->document_proxy_set_property
+#define js_document_proxy_method radiant_host_api->dom->document_proxy_method
+#define js_dom_item_is_range radiant_host_api->dom->item_is_range
+#define js_dom_item_is_selection radiant_host_api->dom->item_is_selection
+#define js_dom_range_get_property radiant_host_api->dom->range_get_property
+#define js_dom_range_set_property radiant_host_api->dom->range_set_property
+#define js_dom_selection_get_property radiant_host_api->dom->selection_get_property
+#define js_dom_selection_set_property radiant_host_api->dom->selection_set_property
+#define js_dom_range_get_prototype_value radiant_host_api->dom->range_get_prototype_value
+#define js_dom_selection_get_prototype_value radiant_host_api->dom->selection_get_prototype_value
+#define js_dom_range_native_property radiant_host_api->dom->range_native_property
+#define js_dom_selection_native_property radiant_host_api->dom->selection_native_property
+#define js_dom_expando_has_property radiant_host_api->dom->expando_has_property
+#define js_dom_range_expando_has_property radiant_host_api->dom->range_expando_has_property
+#define js_dom_selection_expando_has_property radiant_host_api->dom->selection_expando_has_property
+#define js_dom_expando_get_own_property_descriptor radiant_host_api->dom->expando_get_own_property_descriptor
+#define js_dom_range_expando_get_own_property_descriptor radiant_host_api->dom->range_expando_get_own_property_descriptor
+#define js_dom_selection_expando_get_own_property_descriptor radiant_host_api->dom->selection_expando_get_own_property_descriptor
+#define js_dom_expando_delete_property radiant_host_api->dom->expando_delete_property
+#define js_dom_range_expando_delete_property radiant_host_api->dom->range_expando_delete_property
+#define js_dom_selection_expando_delete_property radiant_host_api->dom->selection_expando_delete_property
+#define js_dom_expando_own_property_names radiant_host_api->dom->expando_own_property_names
+#define js_dom_range_expando_own_property_names radiant_host_api->dom->range_expando_own_property_names
+#define js_dom_selection_expando_own_property_names radiant_host_api->dom->selection_expando_own_property_names
+#define js_css_namespace_method radiant_host_api->dom->css_namespace_method
+#define js_cssom_stylesheet_method radiant_host_api->dom->cssom_stylesheet_method
+#define js_cssom_rule_decl_method radiant_host_api->dom->cssom_rule_decl_method
+#define js_dom_owner_document_for_node radiant_host_api->dom->owner_document_for_node
+#define js_dom_to_attribute_cstr radiant_host_api->dom->to_attribute_cstr
+#define js_is_truthy radiant_host_api->script->is_truthy
+#define js_dom_after_set_attribute radiant_host_api->dom->after_set_attribute
+#define js_dom_after_remove_attribute radiant_host_api->dom->after_remove_attribute
+#define js_dom_after_toggle_attribute_remove radiant_host_api->dom->after_toggle_attribute_remove
+#define js_dom_after_disabled_attribute_set radiant_host_api->dom->after_disabled_attribute_set
+#define js_dom_after_default_checked_set radiant_host_api->dom->after_default_checked_set
+#define js_dom_after_default_selected_set radiant_host_api->dom->after_default_selected_set
+#define js_dom_after_select_multiple_removed radiant_host_api->dom->after_select_multiple_removed
+#define js_dom_set_checked_dirty radiant_host_api->dom->set_checked_dirty
+#define js_dom_select_set_value_bridge radiant_host_api->dom->select_set_value_bridge
+#define js_dom_select_set_selected_index_bridge radiant_host_api->dom->select_set_selected_index_bridge
+#define js_dom_select_set_length_bridge radiant_host_api->dom->select_set_length_bridge
+#define js_dom_set_option_selected_dirty radiant_host_api->dom->set_option_selected_dirty
+#define js_dom_set_option_text_bridge radiant_host_api->dom->set_option_text_bridge
+#define js_dom_after_srcdoc_set radiant_host_api->dom->after_srcdoc_set
+#define js_dom_throw_contenteditable_syntax_error radiant_host_api->dom->throw_contenteditable_syntax_error
+#define js_dom_set_text_data_property radiant_host_api->dom->set_text_data_property
+#define js_dom_text_control_set_value_bridge radiant_host_api->dom->text_control_set_value_bridge
+#define js_dom_text_control_set_selection_start_bridge radiant_host_api->dom->text_control_set_selection_start_bridge
+#define js_dom_text_control_set_selection_end_bridge radiant_host_api->dom->text_control_set_selection_end_bridge
+#define js_dom_text_control_set_selection_direction_bridge radiant_host_api->dom->text_control_set_selection_direction_bridge
+#define js_dom_text_control_set_default_value_bridge radiant_host_api->dom->text_control_set_default_value_bridge
+#define js_dom_text_control_set_selection_range_bridge radiant_host_api->dom->text_control_set_selection_range_bridge
+#define js_dom_text_control_set_range_text_bridge radiant_host_api->dom->text_control_set_range_text_bridge
+#define js_dom_text_control_select_bridge radiant_host_api->dom->text_control_select_bridge
+#define js_dom_form_reset_bridge radiant_host_api->dom->form_reset_bridge
+#define js_dom_check_validity_bridge radiant_host_api->dom->check_validity_bridge
+#define js_dom_report_validity_bridge radiant_host_api->dom->report_validity_bridge
+#define js_dom_form_submit_bridge radiant_host_api->dom->form_submit_bridge
+#define js_dom_form_request_submit_bridge radiant_host_api->dom->form_request_submit_bridge
+#define js_dom_focus_method_bridge radiant_host_api->dom->focus_method_bridge
+#define js_dom_click_method_bridge radiant_host_api->dom->click_method_bridge
+#define js_dom_add_event_listener_bridge radiant_host_api->dom->add_event_listener_bridge
+#define js_dom_remove_event_listener_bridge radiant_host_api->dom->remove_event_listener_bridge
+#define js_dom_dispatch_event_bridge radiant_host_api->dom->dispatch_event_bridge
+#define js_dom_get_bounding_client_rect_bridge radiant_host_api->dom->get_bounding_client_rect_bridge
+#define js_dom_get_client_rects_bridge radiant_host_api->dom->get_client_rects_bridge
+#define js_dom_scroll_into_view_bridge radiant_host_api->dom->scroll_into_view_bridge
+#define js_dom_scroll_method_bridge radiant_host_api->dom->scroll_method_bridge
+#define js_dom_text_control_caret_bounds_bridge radiant_host_api->dom->text_control_caret_bounds_bridge
+#define js_dom_text_control_boundary_from_point_bridge radiant_host_api->dom->text_control_boundary_from_point_bridge
+#define js_dom_boundary_from_point_bridge radiant_host_api->dom->boundary_from_point_bridge
+#define js_dom_style_set_property_bridge radiant_host_api->dom->style_set_property_bridge
+#define js_dom_style_remove_property_bridge radiant_host_api->dom->style_remove_property_bridge
+#define js_dom_text_replace_data_bridge radiant_host_api->dom->text_replace_data_bridge
+#define js_dom_text_insert_data_bridge radiant_host_api->dom->text_insert_data_bridge
+#define js_dom_text_append_data_bridge radiant_host_api->dom->text_append_data_bridge
+#define js_dom_text_delete_data_bridge radiant_host_api->dom->text_delete_data_bridge
+#define js_dom_text_substring_data_bridge radiant_host_api->dom->text_substring_data_bridge
+#define js_dom_append_child_bridge radiant_host_api->dom->append_child_bridge
+#define js_dom_remove_child_bridge radiant_host_api->dom->remove_child_bridge
+#define js_dom_insert_before_bridge radiant_host_api->dom->insert_before_bridge
+#define js_dom_remove_bridge radiant_host_api->dom->remove_bridge
+#define js_dom_adopt_node_bridge radiant_host_api->dom->adopt_node_bridge
+#define js_dom_location_method_bridge radiant_host_api->dom->location_method_bridge
+#define js_dom_document_open_bridge radiant_host_api->dom->document_open_bridge
+#define js_dom_document_write_bridge radiant_host_api->dom->document_write_bridge
+#define js_dom_document_element_from_point_bridge radiant_host_api->dom->document_element_from_point_bridge
+#define js_dom_create_range radiant_host_api->dom->create_range
+#define js_dom_get_selection radiant_host_api->dom->get_selection
+#define js_dom_get_selection_function_for_document radiant_host_api->dom->get_selection_function_for_document
+#define js_doc_has_browsing_context radiant_host_api->dom->doc_has_browsing_context
+#define js_dom_document_fonts_bridge radiant_host_api->dom->document_fonts_bridge
+#define js_dom_document_stylesheets_bridge radiant_host_api->dom->document_stylesheets_bridge
+#define js_dom_document_default_view_bridge radiant_host_api->dom->document_default_view_bridge
+#define js_dom_document_implementation_bridge radiant_host_api->dom->document_implementation_bridge
+#define js_dom_document_design_mode_bridge radiant_host_api->dom->document_design_mode_bridge
+#define js_dom_document_active_element_bridge radiant_host_api->dom->document_active_element_bridge
+#define js_dom_normalize_bridge radiant_host_api->dom->normalize_bridge
+#define js_dom_live_child_collection_bridge radiant_host_api->dom->live_child_collection_bridge
+#define js_dom_live_document_forms_bridge radiant_host_api->dom->live_document_forms_bridge
+#define js_dom_live_form_elements_bridge radiant_host_api->dom->live_form_elements_bridge
+#define js_dom_live_document_get_elements_by_tag_name_bridge radiant_host_api->dom->live_document_get_elements_by_tag_name_bridge
+#define js_dom_live_document_get_elements_by_class_name_bridge radiant_host_api->dom->live_document_get_elements_by_class_name_bridge
+#define js_dom_live_document_get_elements_by_name_bridge radiant_host_api->dom->live_document_get_elements_by_name_bridge
+#define js_dom_live_element_get_elements_by_tag_name_bridge radiant_host_api->dom->live_element_get_elements_by_tag_name_bridge
+#define js_dom_live_element_get_elements_by_class_name_bridge radiant_host_api->dom->live_element_get_elements_by_class_name_bridge
+#define js_dom_clone_node_bridge radiant_host_api->dom->clone_node_bridge
+#define js_dom_replace_child_bridge radiant_host_api->dom->replace_child_bridge
+#define js_dom_replace_with_bridge radiant_host_api->dom->replace_with_bridge
+#define js_dom_insert_adjacent_element_bridge radiant_host_api->dom->insert_adjacent_element_bridge
+#define js_dom_insert_adjacent_html_bridge radiant_host_api->dom->insert_adjacent_html_bridge
+#define js_dom_append_variadic_bridge radiant_host_api->dom->append_variadic_bridge
+#define js_dom_prepend_variadic_bridge radiant_host_api->dom->prepend_variadic_bridge
+#define js_dom_notify_mutation radiant_host_api->dom->notify_mutation
+#define js_call_function radiant_host_api->script->call_function
+#define js_check_exception radiant_host_api->script->check_exception
 
 static const int RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE = 4096;
 static const char s_radiant_dom_vmap_type_marker = 0;
@@ -832,11 +823,11 @@ static Item radiant_dom_attributes_item(DomElement* elem) {
         const char* name = attr_names[i];
         if (radiant_dom_is_internal_attr(name)) continue;
         const char* value = dom_element_get_attribute(elem, name);
-        Item pair = js_new_object();
-        js_property_set(pair,
+        Item pair = radiant_host_api->value->new_object();
+        radiant_host_api->value->property_set(pair,
             (Item){.item = s2it(heap_create_name("name"))},
             radiant_dom_string_item(name));
-        js_property_set(pair,
+        radiant_host_api->value->property_set(pair,
             (Item){.item = s2it(heap_create_name("value"))},
             radiant_dom_string_item(value));
         array_push(arr, pair);
@@ -1107,7 +1098,7 @@ static void radiant_dom_cache_wrapper(DomNode* node, Item wrapper) {
     chunk->entries[index].node = node;
     chunk->entries[index].owner_doc = radiant_dom_node_document(node, true);
     chunk->entries[index].item = wrapper.item;
-    heap_register_gc_root(&chunk->entries[index].item);
+    radiant_host_api->gc->register_root(&chunk->entries[index].item);
 }
 
 static void radiant_dom_clear_cache_entry(RadiantDomWrapperCacheEntry* entry) {
@@ -1128,13 +1119,13 @@ static void radiant_dom_clear_cache_entry(RadiantDomWrapperCacheEntry* entry) {
             radiant_dom_host_invalidate(wrapper);
         }
     }
-    heap_unregister_gc_root(&entry->item);
+    radiant_host_api->gc->unregister_root(&entry->item);
     entry->node = nullptr;
     entry->owner_doc = nullptr;
     entry->item = 0;
 }
 
-extern "C" void radiant_dom_invalidate_document(DomDocument* doc) {
+RADIANT_C_API void radiant_dom_invalidate_document(DomDocument* doc) {
     radiant_dom_cache_check_owner("invalidate_document");
     if (!doc) return;
     for (RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_head; chunk; chunk = chunk->next) {
@@ -1147,7 +1138,7 @@ extern "C" void radiant_dom_invalidate_document(DomDocument* doc) {
     }
 }
 
-extern "C" void radiant_dom_reset_wrapper_cache(void) {
+RADIANT_C_API void radiant_dom_reset_wrapper_cache(void) {
     radiant_dom_cache_check_owner("reset_wrapper_cache");
     RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_head;
     while (chunk) {
@@ -1162,7 +1153,7 @@ extern "C" void radiant_dom_reset_wrapper_cache(void) {
     s_radiant_dom_wrapper_cache_tail = nullptr;
 }
 
-extern "C" Item radiant_dom_wrap_node(void* dom_elem) {
+RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem) {
     radiant_dom_cache_check_owner("wrap_node");
     if (!dom_elem) return ItemNull;
 
@@ -1178,7 +1169,7 @@ extern "C" Item radiant_dom_wrap_node(void* dom_elem) {
     Item cached = radiant_dom_lookup_wrapper(node);
     if (cached.item != ITEM_NULL) return cached;
 
-    Item wrapper = vmap_new();
+    Item wrapper = radiant_host_api->value->vmap_new();
     if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) {
         wrapper.vmap->host_type = radiant_dom_node_host_type();
         wrapper.vmap->host_data = dom_elem;
@@ -1191,7 +1182,7 @@ extern "C" Item radiant_dom_wrap_node(void* dom_elem) {
     return ItemNull;
 }
 
-extern "C" void* radiant_dom_unwrap_node(Item item) {
+RADIANT_C_API void* radiant_dom_unwrap_node(Item item) {
     if (get_type_id(item) == LMD_TYPE_VMAP && item.vmap &&
         radiant_dom_is_node_host_type(item.vmap->host_type)) {
         return item.vmap->host_data;
@@ -1199,7 +1190,7 @@ extern "C" void* radiant_dom_unwrap_node(Item item) {
     return js_dom_unwrap_element_impl(item);
 }
 
-extern "C" bool radiant_dom_is_node(Item item) {
+RADIANT_C_API bool radiant_dom_is_node(Item item) {
     if (get_type_id(item) == LMD_TYPE_VMAP && item.vmap &&
         radiant_dom_is_node_host_type(item.vmap->host_type)) {
         return item.vmap->host_data != nullptr;
@@ -2325,7 +2316,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
     return false;
 }
 
-extern "C" Item radiant_dom_get_property(Item elem_item, Item prop_name) {
+RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
     if (js_dom_item_is_range(elem_item)) {
         return js_dom_range_get_property(elem_item, prop_name);
     }
@@ -2339,7 +2330,7 @@ extern "C" Item radiant_dom_get_property(Item elem_item, Item prop_name) {
     return js_dom_get_property_impl(elem_item, prop_name);
 }
 
-extern "C" Item radiant_dom_set_property(Item elem_item, Item prop_name, Item value) {
+RADIANT_C_API Item radiant_dom_set_property(Item elem_item, Item prop_name, Item value) {
     if (js_dom_item_is_range(elem_item)) {
         return js_dom_range_set_property(elem_item, prop_name, value);
     }
@@ -2353,7 +2344,7 @@ extern "C" Item radiant_dom_set_property(Item elem_item, Item prop_name, Item va
     return js_dom_set_property_impl(elem_item, prop_name, value);
 }
 
-extern "C" Item radiant_dom_element_method(Item elem_item, Item method_name, Item* args, int argc) {
+RADIANT_C_API Item radiant_dom_element_method(Item elem_item, Item method_name, Item* args, int argc) {
     Item result = ItemNull;
     if (radiant_dom_element_method_basic(elem_item, method_name, args, argc, &result)) {
         return result;
@@ -2370,13 +2361,13 @@ static bool radiant_dom_key_equals(Item key, const char* name, uint32_t name_len
 
 static Item radiant_dom_data_descriptor(Item value, bool writable,
                                         bool enumerable, bool configurable) {
-    Item desc = js_new_object();
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("value"))}, value);
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("writable"))},
+    Item desc = radiant_host_api->value->new_object();
+    radiant_host_api->value->property_set(desc, (Item){.item = s2it(heap_create_name("value"))}, value);
+    radiant_host_api->value->property_set(desc, (Item){.item = s2it(heap_create_name("writable"))},
         (Item){.item = b2it(writable ? 1 : 0)});
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable"))},
+    radiant_host_api->value->property_set(desc, (Item){.item = s2it(heap_create_name("enumerable"))},
         (Item){.item = b2it(enumerable ? 1 : 0)});
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable"))},
+    radiant_host_api->value->property_set(desc, (Item){.item = s2it(heap_create_name("configurable"))},
         (Item){.item = b2it(configurable ? 1 : 0)});
     return desc;
 }
@@ -2443,23 +2434,23 @@ static void radiant_dom_push_projected_key(Item result, Item object, const char*
     Item key_item = (Item){.item = s2it(heap_create_name(key))};
     Item value = ItemNull;
     if (radiant_dom_projected_own_value(object, key_item, &value)) {
-        js_array_push(result, key_item);
+        radiant_host_api->value->array_push(result, key_item);
     }
 }
 
-extern "C" int radiant_dom_host_get_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_host_get_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     *out = radiant_dom_get_property(object, key);
     return 1;
 }
 
-extern "C" int radiant_dom_host_set_property(Item object, Item key, Item value, Item* out) {
+RADIANT_C_API int radiant_dom_host_set_property(Item object, Item key, Item value, Item* out) {
     if (!out) return 0;
     *out = radiant_dom_set_property(object, key, value);
     return 1;
 }
 
-extern "C" int radiant_dom_host_call_method(Item object,
+RADIANT_C_API int radiant_dom_host_call_method(Item object,
                                             Item method_name,
                                             Item* args,
                                             int argc,
@@ -2479,7 +2470,7 @@ extern "C" int radiant_dom_host_call_method(Item object,
     return 1;
 }
 
-extern "C" int radiant_dom_host_has_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_host_has_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     Item projected = ItemNull;
     if (radiant_dom_projected_own_value(object, key, &projected) ||
@@ -2493,7 +2484,7 @@ extern "C" int radiant_dom_host_has_property(Item object, Item key, Item* out) {
     return 1;
 }
 
-extern "C" int radiant_dom_host_delete_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_host_delete_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     Item projected = ItemNull;
     if (radiant_dom_projected_own_value(object, key, &projected)) {
@@ -2510,7 +2501,7 @@ extern "C" int radiant_dom_host_delete_property(Item object, Item key, Item* out
     return 1;
 }
 
-extern "C" int radiant_dom_host_own_property_descriptor(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_host_own_property_descriptor(Item object, Item key, Item* out) {
     if (!out) return 0;
     Item projected = ItemNull;
     if (radiant_dom_projected_own_value(object, key, &projected)) {
@@ -2525,9 +2516,9 @@ extern "C" int radiant_dom_host_own_property_descriptor(Item object, Item key, I
     return 1;
 }
 
-extern "C" int radiant_dom_host_own_property_names(Item object, Item* out) {
+RADIANT_C_API int radiant_dom_host_own_property_names(Item object, Item* out) {
     if (!out) return 0;
-    Item result = js_array_new(0);
+    Item result = radiant_host_api->value->array_new(0);
     if (js_dom_item_is_range(object)) {
         static const char* const range_keys[] = {
             "startContainer", "startOffset", "endContainer", "endOffset",
@@ -2565,27 +2556,27 @@ extern "C" int radiant_dom_host_own_property_names(Item object, Item* out) {
     if (get_type_id(expando_names) == LMD_TYPE_ARRAY && expando_names.array) {
         for (int i = 0; i < expando_names.array->length; i++) {
             Item key = expando_names.array->items[i];
-            if (!radiant_dom_array_has_key(result, key)) js_array_push(result, key);
+            if (!radiant_dom_array_has_key(result, key)) radiant_host_api->value->array_push(result, key);
         }
     }
     *out = result;
     return 1;
 }
 
-extern "C" Item radiant_dom_host_prototype(Item object) {
+RADIANT_C_API Item radiant_dom_host_prototype(Item object) {
     if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
     if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
     return js_dom_get_prototype_value(object);
 }
 
-extern "C" void radiant_dom_host_invalidate(Item object) {
+RADIANT_C_API void radiant_dom_host_invalidate(Item object) {
     if (get_type_id(object) == LMD_TYPE_VMAP && object.vmap &&
         radiant_dom_is_node_host_type(object.vmap->host_type)) {
         object.vmap->host_data = nullptr;
     }
 }
 
-extern "C" int radiant_dom_style_host_get_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_style_host_get_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     *out = js_is_computed_style_item(object)
         ? js_computed_style_get_property(object, key)
@@ -2593,13 +2584,13 @@ extern "C" int radiant_dom_style_host_get_property(Item object, Item key, Item* 
     return 1;
 }
 
-extern "C" int radiant_dom_style_host_set_property(Item object, Item key, Item value, Item* out) {
+RADIANT_C_API int radiant_dom_style_host_set_property(Item object, Item key, Item value, Item* out) {
     if (!out) return 0;
     *out = js_is_computed_style_item(object) ? value : radiant_dom_set_property(object, key, value);
     return 1;
 }
 
-extern "C" int radiant_dom_style_host_call_method(Item object,
+RADIANT_C_API int radiant_dom_style_host_call_method(Item object,
                                                   Item method_name,
                                                   Item* args,
                                                   int argc,
@@ -2618,35 +2609,35 @@ extern "C" int radiant_dom_style_host_call_method(Item object,
     return 1;
 }
 
-extern "C" int radiant_dom_style_host_has_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_style_host_has_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     *out = (Item){.item = b2it(js_dom_style_resource_has_property(object, key) ? 1 : 0)};
     return 1;
 }
 
-extern "C" int radiant_dom_style_host_delete_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_style_host_delete_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     *out = (Item){.item = b2it(js_dom_style_resource_has_property(object, key) ? 0 : 1)};
     return 1;
 }
 
-extern "C" int radiant_dom_style_host_own_property_descriptor(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_style_host_own_property_descriptor(Item object, Item key, Item* out) {
     if (!out) return 0;
     *out = radiant_dom_undefined_item();
     return 1;
 }
 
-extern "C" int radiant_dom_style_host_own_property_names(Item object, Item* out) {
+RADIANT_C_API int radiant_dom_style_host_own_property_names(Item object, Item* out) {
     if (!out) return 0;
-    *out = js_array_new(0);
+    *out = radiant_host_api->value->array_new(0);
     return 1;
 }
 
-extern "C" Item radiant_dom_style_host_prototype(Item object) {
+RADIANT_C_API Item radiant_dom_style_host_prototype(Item object) {
     return ItemNull;
 }
 
-extern "C" int radiant_dom_cssom_host_get_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_cssom_host_get_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     if (js_is_stylesheet(object)) {
         *out = js_cssom_stylesheet_get_property(object, key);
@@ -2663,7 +2654,7 @@ extern "C" int radiant_dom_cssom_host_get_property(Item object, Item key, Item* 
     return 0;
 }
 
-extern "C" int radiant_dom_cssom_host_set_property(Item object, Item key, Item value, Item* out) {
+RADIANT_C_API int radiant_dom_cssom_host_set_property(Item object, Item key, Item value, Item* out) {
     if (!out) return 0;
     if (js_is_css_rule(object)) {
         *out = js_cssom_rule_set_property(object, key, value);
@@ -2680,7 +2671,7 @@ extern "C" int radiant_dom_cssom_host_set_property(Item object, Item key, Item v
     return 0;
 }
 
-extern "C" int radiant_dom_cssom_host_call_method(Item object,
+RADIANT_C_API int radiant_dom_cssom_host_call_method(Item object,
                                                   Item method_name,
                                                   Item* args,
                                                   int argc,
@@ -2701,31 +2692,31 @@ extern "C" int radiant_dom_cssom_host_call_method(Item object,
     return 0;
 }
 
-extern "C" int radiant_dom_cssom_host_has_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_cssom_host_has_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     *out = (Item){.item = b2it(js_cssom_resource_has_property(object, key) ? 1 : 0)};
     return 1;
 }
 
-extern "C" int radiant_dom_cssom_host_delete_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_cssom_host_delete_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     *out = (Item){.item = b2it(js_cssom_resource_has_property(object, key) ? 0 : 1)};
     return 1;
 }
 
-extern "C" int radiant_dom_cssom_host_own_property_descriptor(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_cssom_host_own_property_descriptor(Item object, Item key, Item* out) {
     if (!out) return 0;
     *out = radiant_dom_undefined_item();
     return 1;
 }
 
-extern "C" int radiant_dom_cssom_host_own_property_names(Item object, Item* out) {
+RADIANT_C_API int radiant_dom_cssom_host_own_property_names(Item object, Item* out) {
     if (!out) return 0;
-    *out = js_array_new(0);
+    *out = radiant_host_api->value->array_new(0);
     return 1;
 }
 
-extern "C" Item radiant_dom_cssom_host_prototype(Item object) {
+RADIANT_C_API Item radiant_dom_cssom_host_prototype(Item object) {
     return ItemNull;
 }
 
@@ -2735,17 +2726,17 @@ static Item radiant_dom_call_foreign_window_global_method(Item object,
                                                           Item* args,
                                                           int argc) {
     if (!foreign_doc || !js_doc_has_browsing_context(foreign_doc)) return ItemNull;
-    Item fn = js_get_global_property(method_name);
+    Item fn = radiant_host_api->script->global_property(method_name);
     if (get_type_id(fn) != LMD_TYPE_FUNC) return ItemNull;
 
-    Item global = js_get_global_this();
+    Item global = radiant_host_api->script->global_this();
     Item window_key = (Item){.item = s2it(heap_create_name("window"))};
-    Item old_window = js_property_get(global, window_key);
+    Item old_window = radiant_host_api->value->property_get(global, window_key);
 
     void* prev_doc = js_dom_swap_active_document(foreign_doc);
-    js_property_set(global, window_key, object);
+    radiant_host_api->value->property_set(global, window_key, object);
     Item result = js_call_function(fn, object, args, argc);
-    js_property_set(global, window_key, old_window);
+    radiant_host_api->value->property_set(global, window_key, old_window);
     js_dom_restore_active_document(prev_doc);
     return result;
 }
@@ -2755,7 +2746,7 @@ static Item radiant_dom_foreign_get_computed_style(Item elem_item, Item pseudo_i
     return ItemNull;
 }
 
-extern "C" int radiant_dom_foreign_document_get_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_foreign_document_get_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     void* foreign_doc = js_get_foreign_doc(object);
     if (foreign_doc && js_doc_has_browsing_context(foreign_doc)) {
@@ -2773,7 +2764,8 @@ extern "C" int radiant_dom_foreign_document_get_property(Item object, Item key, 
         if (radiant_dom_key_equals(key, "getComputedStyle", 16)) {
             // iframe contentWindow is modeled as a document wrapper; do not let
             // the main-window getComputedStyle binding leak into foreign docs.
-            *out = js_new_function((void*)radiant_dom_foreign_get_computed_style, 2);
+            *out = radiant_host_api->script->new_function(
+                (void*)radiant_dom_foreign_get_computed_style, 2);
             return 1;
         }
     }
@@ -2786,7 +2778,7 @@ extern "C" int radiant_dom_foreign_document_get_property(Item object, Item key, 
     return 1;
 }
 
-extern "C" int radiant_dom_foreign_document_set_property(Item object,
+RADIANT_C_API int radiant_dom_foreign_document_set_property(Item object,
                                                          Item key,
                                                          Item value,
                                                          Item* out) {
@@ -2800,7 +2792,7 @@ extern "C" int radiant_dom_foreign_document_set_property(Item object,
     return 1;
 }
 
-extern "C" int radiant_dom_foreign_document_method(Item object,
+RADIANT_C_API int radiant_dom_foreign_document_method(Item object,
                                                    Item method_name,
                                                    Item* args,
                                                    int argc,
@@ -2831,7 +2823,7 @@ extern "C" int radiant_dom_foreign_document_method(Item object,
     return 1;
 }
 
-extern "C" int radiant_dom_document_host_get_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_document_host_get_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     if (js_get_foreign_doc(object)) {
         return radiant_dom_foreign_document_get_property(object, key, out);
@@ -2840,7 +2832,7 @@ extern "C" int radiant_dom_document_host_get_property(Item object, Item key, Ite
     return 1;
 }
 
-extern "C" int radiant_dom_document_host_set_property(Item object,
+RADIANT_C_API int radiant_dom_document_host_set_property(Item object,
                                                       Item key,
                                                       Item value,
                                                       Item* out) {
@@ -2852,7 +2844,7 @@ extern "C" int radiant_dom_document_host_set_property(Item object,
     return 1;
 }
 
-extern "C" int radiant_dom_document_host_call_method(Item object,
+RADIANT_C_API int radiant_dom_document_host_call_method(Item object,
                                                      Item method_name,
                                                      Item* args,
                                                      int argc,
@@ -2865,7 +2857,7 @@ extern "C" int radiant_dom_document_host_call_method(Item object,
     return 1;
 }
 
-extern "C" int radiant_dom_document_host_has_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_document_host_has_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     Item value = ItemNull;
     if (!radiant_dom_document_host_get_property(object, key, &value)) return 0;
@@ -2873,28 +2865,28 @@ extern "C" int radiant_dom_document_host_has_property(Item object, Item key, Ite
     return 1;
 }
 
-extern "C" int radiant_dom_document_host_delete_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_document_host_delete_property(Item object, Item key, Item* out) {
     (void)object; (void)key;
     if (!out) return 0;
     *out = (Item){.item = b2it(true)};
     return 1;
 }
 
-extern "C" int radiant_dom_document_host_own_property_descriptor(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_dom_document_host_own_property_descriptor(Item object, Item key, Item* out) {
     (void)object; (void)key;
     if (!out) return 0;
     *out = radiant_dom_undefined_item();
     return 1;
 }
 
-extern "C" int radiant_dom_document_host_own_property_names(Item object, Item* out) {
+RADIANT_C_API int radiant_dom_document_host_own_property_names(Item object, Item* out) {
     (void)object;
     if (!out) return 0;
-    *out = js_array_new(0);
+    *out = radiant_host_api->value->array_new(0);
     return 1;
 }
 
-extern "C" Item radiant_dom_document_host_prototype(Item object) {
+RADIANT_C_API Item radiant_dom_document_host_prototype(Item object) {
     (void)object;
     // Document wrappers have no ordinary __proto__ slot; keep their inherited
     // Object surface in the registered host op instead of an engine-side brand check.
@@ -3017,7 +3009,7 @@ static Item radiant_dom_document_doctype_item(DomDocument* doc) {
     return (first && first->is_comment()) ? radiant_dom_node_item(first) : ItemNull;
 }
 
-extern "C" int radiant_dom_document_get_property(Item prop_name, Item* out) {
+RADIANT_C_API int radiant_dom_document_get_property(Item prop_name, Item* out) {
     const char* prop = fn_to_cstr(prop_name);
     if (!prop || !out) return 0;
 
@@ -3129,7 +3121,7 @@ extern "C" int radiant_dom_document_get_property(Item prop_name, Item* out) {
     return 0;
 }
 
-extern "C" int radiant_dom_document_method(Item method_name, Item* args, int argc, Item* out) {
+RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int argc, Item* out) {
     const char* method = fn_to_cstr(method_name);
     if (!method || !out) return 0;
 
@@ -3254,7 +3246,8 @@ extern "C" int radiant_dom_document_method(Item method_name, Item* args, int arg
         if (!selector_group) {
             Item err_name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
             Item err_msg = (Item){.item = s2it(heap_create_name("is not a valid selector"))};
-            js_throw_value(js_new_error_with_name(err_name, err_msg));
+            radiant_host_api->script->throw_value(
+                radiant_host_api->script->new_error_with_name(err_name, err_msg));
             *out = ItemNull;
             return 1;
         }
@@ -3488,22 +3481,22 @@ extern "C" int radiant_dom_document_method(Item method_name, Item* args, int arg
     return 0;
 }
 
-extern "C" Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts) {
+RADIANT_C_API Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts) {
     // window EventTarget storage must key on the canonical global object.
-    return js_dom_add_event_listener_bridge(js_get_global_this(), type, callback, opts);
+    return js_dom_add_event_listener_bridge(radiant_host_api->script->global_this(), type, callback, opts);
 }
 
-extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts) {
+RADIANT_C_API Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts) {
     // window EventTarget storage must key on the canonical global object.
-    return js_dom_remove_event_listener_bridge(js_get_global_this(), type, callback, opts);
+    return js_dom_remove_event_listener_bridge(radiant_host_api->script->global_this(), type, callback, opts);
 }
 
-extern "C" Item radiant_dom_window_dispatch_event(Item event_item) {
+RADIANT_C_API Item radiant_dom_window_dispatch_event(Item event_item) {
     // dispatch must use the same global-object key that listener registration uses.
-    return js_dom_dispatch_event_bridge(js_get_global_this(), event_item);
+    return js_dom_dispatch_event_bridge(radiant_host_api->script->global_this(), event_item);
 }
 
-extern "C" int radiant_dom_style_method(Item elem_item, Item method_name, Item* args, int argc, Item* out) {
+RADIANT_C_API int radiant_dom_style_method(Item elem_item, Item method_name, Item* args, int argc, Item* out) {
     DomElement* elem = (DomElement*)js_dom_unwrap_element_impl(elem_item);
     if (!elem || !out) return 0;
 
@@ -3530,7 +3523,7 @@ extern "C" int radiant_dom_style_method(Item elem_item, Item method_name, Item* 
     return 0;
 }
 
-extern "C" int radiant_dom_cssom_method(Item obj, Item method_name, Item* args, int argc, Item* out) {
+RADIANT_C_API int radiant_dom_cssom_method(Item obj, Item method_name, Item* args, int argc, Item* out) {
     if (!out) return 0;
 
     if (js_is_css_namespace(obj)) {
