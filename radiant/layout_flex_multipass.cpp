@@ -270,6 +270,28 @@ static bool has_flex_item_prop(ViewElement* item) {
     return item && item->item_prop_type == DomElement::ITEM_PROP_FLEX && item->fi;
 }
 
+static bool flex_final_content_is_block_item(View* view) {
+    return view && (view->view_type == RDT_VIEW_BLOCK ||
+        view->view_type == RDT_VIEW_INLINE_BLOCK ||
+        view->view_type == RDT_VIEW_LIST_ITEM ||
+        view->view_type == RDT_VIEW_TABLE);
+}
+
+static bool flex_final_content_is_layout_item(View* view) {
+    if (!flex_final_content_is_block_item(view)) return false;
+    ViewBlock* block = lam::view_as_block(view);
+    return block && !layout_view_is_abs_or_fixed(block);
+}
+
+static float flex_final_content_outer_height(ViewElement* elem) {
+    if (!elem) return 0.0f;
+    float outer_height = elem->height;
+    if (elem->bound) {
+        outer_height += elem->bound->margin.top + elem->bound->margin.bottom;
+    }
+    return outer_height;
+}
+
 static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* container,
     AbsStaticContext* ctx, AbsChildLayoutState* state) {
     (void)lycon;  (void)ctx;
@@ -960,6 +982,10 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     // Set up block formatting context for nested content
     lycon->block.content_width = content_width;
     lycon->block.content_height = content_height;
+    // Flex layout has already resolved the item's used size; child flow must
+    // see that definite content box even when the CSS width/height was auto.
+    lycon->block.given_width = content_width;
+    lycon->block.given_height = content_height;
     lycon->block.advance_y = content_y_offset;
     lycon->block.max_width = 0;
 
@@ -1390,6 +1416,9 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                 }
             }
             float total_height = flex_item->content_height + padding_top + padding_bottom + border_top + border_bottom;
+            // Post-content row-flex sizing can refine estimates, but it must not
+            // shrink below the item's resolved CSS min-height/max-height constraints.
+            total_height = flex_apply_border_box_height_constraints(flex_item, total_height);
             if (fabsf(total_height - flex_item->height) > 0.5f) {
                 log_debug("ROW FLEX CROSS FIX: item %s height %.1f -> %.1f (content=%.1f)",
                           flex_item->node_name(), flex_item->height, total_height, flex_item->content_height);
@@ -2008,17 +2037,24 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
 
     int original_height_count = 0;
     {
-        View* count_item = flex_container->first_child;
-        while (count_item) {
-            if (count_item->view_type == RDT_VIEW_BLOCK || count_item->view_type == RDT_VIEW_INLINE_BLOCK ||
-                count_item->view_type == RDT_VIEW_LIST_ITEM) {
-                ViewElement* flex_item = lam::view_require_element(count_item);
-                if (has_flex_item_prop(flex_item) ||
-                    (flex_item->item_prop_type == DomElement::ITEM_PROP_FORM && flex_item->form)) {
+        if (flex && flex->flex_items && flex->item_count > 0) {
+            for (int i = 0; i < flex->item_count; i++) {
+                if (flex_final_content_is_layout_item(flex->flex_items[i])) {
                     original_height_count++;
                 }
             }
-            count_item = count_item->next();
+        } else {
+            View* count_item = flex_container->first_child;
+            while (count_item) {
+                if (flex_final_content_is_block_item(count_item)) {
+                    ViewElement* flex_item = lam::view_require_element(count_item);
+                    if (has_flex_item_prop(flex_item) ||
+                        (flex_item->item_prop_type == DomElement::ITEM_PROP_FORM && flex_item->form)) {
+                        original_height_count++;
+                    }
+                }
+                count_item = count_item->next();
+            }
         }
     }
 
@@ -2038,17 +2074,26 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     }
     int item_index = 0;
     {
-        View* pre_item = flex_container->first_child;
-        while (pre_item && item_index < original_height_count) {
-            if (pre_item->view_type == RDT_VIEW_BLOCK || pre_item->view_type == RDT_VIEW_INLINE_BLOCK ||
-                pre_item->view_type == RDT_VIEW_LIST_ITEM) {
-                ViewElement* flex_item = lam::view_require_element(pre_item);
-                if (has_flex_item_prop(flex_item) ||
-                    (flex_item->item_prop_type == DomElement::ITEM_PROP_FORM && flex_item->form)) {
+        if (flex && flex->flex_items && flex->item_count > 0) {
+            for (int i = 0; i < flex->item_count && item_index < original_height_count; i++) {
+                View* pre_item = flex->flex_items[i];
+                if (flex_final_content_is_layout_item(pre_item)) {
+                    ViewElement* flex_item = lam::view_require_element(pre_item);
                     original_heights[item_index++] = flex_item->height;
                 }
             }
-            pre_item = pre_item->next();
+        } else {
+            View* pre_item = flex_container->first_child;
+            while (pre_item && item_index < original_height_count) {
+                if (flex_final_content_is_block_item(pre_item)) {
+                    ViewElement* flex_item = lam::view_require_element(pre_item);
+                    if (has_flex_item_prop(flex_item) ||
+                        (flex_item->item_prop_type == DomElement::ITEM_PROP_FORM && flex_item->form)) {
+                        original_heights[item_index++] = flex_item->height;
+                    }
+                }
+                pre_item = pre_item->next();
+            }
         }
     }
 
@@ -2097,45 +2142,80 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         float y_shift = 0;
         int adj_index = 0;
 
-        View* item = flex_container->first_child;
-        while (item && adj_index < original_height_count) {
-            if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK ||
-                item->view_type == RDT_VIEW_LIST_ITEM) {
+        if (flex && flex->flex_items && flex->item_count > 0) {
+            // The collected flex item list is authoritative after CSS ordering;
+            // some flex items, such as tables, do not carry a regular fi payload.
+            for (int i = 0; i < flex->item_count && adj_index < original_height_count; i++) {
+                View* item = flex->flex_items[i];
+                if (!flex_final_content_is_layout_item(item)) continue;
                 ViewElement* flex_item = lam::view_require_element(item);
 
-                // Only process flex items (has fi or form)
-                if (has_flex_item_prop(flex_item) ||
-                    (flex_item->item_prop_type == DomElement::ITEM_PROP_FORM && flex_item->form)) {
-
-                    // Apply accumulated shift from previous expanded items
-                    if (y_shift > 0.5f) {
-                        float old_y = flex_item->y;
-                        flex_item->y += y_shift;
-                        log_debug("COLUMN ADJUST: item %s y: %.1f -> %.1f (shift=%.1f)",
-                                  flex_item->node_name(), old_y, flex_item->y, y_shift);
-                    }
-
-                    // Check if this item's height changed from original
-                    float original_height = original_heights[adj_index];
-                    float new_height = flex_item->height;
-                    // Per CSS Sizing Level 4 §7: aspect-ratio establishes fixed box dimensions;
-                    // content overflows but does NOT resize the box.
-                    if (has_flex_item_prop(flex_item) &&
-                        flex_item->fi->aspect_ratio > 0.0f && new_height > original_height + 0.5f) {
-                        log_debug("COLUMN ADJUST: item %s has aspect-ratio=%.3f, restoring height %.1f -> %.1f",
-                                  flex_item->node_name(), flex_item->fi->aspect_ratio, new_height, original_height);
-                        flex_item->height = original_height;
-                    } else if (new_height > original_height + 0.5f) {
-                        float height_diff = new_height - original_height;
-                        log_debug("COLUMN ADJUST: item %s height diff %.1f (%.1f -> %.1f)",
-                                  flex_item->node_name(), height_diff, original_height, new_height);
-                        y_shift += height_diff;
-                    }
-
-                    adj_index++;
+                // Apply accumulated shift from previous expanded items
+                if (y_shift > 0.5f) {
+                    float old_y = flex_item->y;
+                    flex_item->y += y_shift;
+                    log_debug("COLUMN ADJUST: item %s y: %.1f -> %.1f (shift=%.1f)",
+                              flex_item->node_name(), old_y, flex_item->y, y_shift);
                 }
+
+                // Check if this item's height changed from original
+                float original_height = original_heights[adj_index];
+                float new_height = flex_item->height;
+                // Per CSS Sizing Level 4 §7: aspect-ratio establishes fixed box dimensions;
+                // content overflows but does NOT resize the box.
+                if (has_flex_item_prop(flex_item) &&
+                    flex_item->fi->aspect_ratio > 0.0f && new_height > original_height + 0.5f) {
+                    log_debug("COLUMN ADJUST: item %s has aspect-ratio=%.3f, restoring height %.1f -> %.1f",
+                              flex_item->node_name(), flex_item->fi->aspect_ratio, new_height, original_height);
+                    flex_item->height = original_height;
+                } else if (new_height > original_height + 0.5f) {
+                    float height_diff = new_height - original_height;
+                    log_debug("COLUMN ADJUST: item %s height diff %.1f (%.1f -> %.1f)",
+                              flex_item->node_name(), height_diff, original_height, new_height);
+                    y_shift += height_diff;
+                }
+
+                adj_index++;
             }
-            item = item->next();
+        } else {
+            View* item = flex_container->first_child;
+            while (item && adj_index < original_height_count) {
+                if (flex_final_content_is_block_item(item)) {
+                    ViewElement* flex_item = lam::view_require_element(item);
+
+                    if (has_flex_item_prop(flex_item) ||
+                        (flex_item->item_prop_type == DomElement::ITEM_PROP_FORM && flex_item->form)) {
+
+                        // Apply accumulated shift from previous expanded items
+                        if (y_shift > 0.5f) {
+                            float old_y = flex_item->y;
+                            flex_item->y += y_shift;
+                            log_debug("COLUMN ADJUST: item %s y: %.1f -> %.1f (shift=%.1f)",
+                                      flex_item->node_name(), old_y, flex_item->y, y_shift);
+                        }
+
+                        // Check if this item's height changed from original
+                        float original_height = original_heights[adj_index];
+                        float new_height = flex_item->height;
+                        // Per CSS Sizing Level 4 §7: aspect-ratio establishes fixed box dimensions;
+                        // content overflows but does NOT resize the box.
+                        if (has_flex_item_prop(flex_item) &&
+                            flex_item->fi->aspect_ratio > 0.0f && new_height > original_height + 0.5f) {
+                            log_debug("COLUMN ADJUST: item %s has aspect-ratio=%.3f, restoring height %.1f -> %.1f",
+                                      flex_item->node_name(), flex_item->fi->aspect_ratio, new_height, original_height);
+                            flex_item->height = original_height;
+                        } else if (new_height > original_height + 0.5f) {
+                            float height_diff = new_height - original_height;
+                            log_debug("COLUMN ADJUST: item %s height diff %.1f (%.1f -> %.1f)",
+                                      flex_item->node_name(), height_diff, original_height, new_height);
+                            y_shift += height_diff;
+                        }
+
+                        adj_index++;
+                    }
+                }
+                item = item->next();
+            }
         }
 
         // Update container height if needed (for auto-height containers)
@@ -2162,37 +2242,47 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             if (!has_explicit_height) {
                 float recomputed_content_height = 0.0f;
                 int recomputed_count = 0;
-                View* scan_item = flex_container->first_child;
-                while (scan_item) {
-                    float outer_height = 0.0f;
-                    bool contributes = false;
-                    if (scan_item->view_type == RDT_VIEW_BLOCK ||
-                        scan_item->view_type == RDT_VIEW_INLINE_BLOCK ||
-                        scan_item->view_type == RDT_VIEW_LIST_ITEM) {
+                if (flex && flex->flex_items && flex->item_count > 0 && !has_text_content) {
+                    // Recompute from the same collected flex items used for layout;
+                    // DOM probing can omit valid flex items that lack fi metadata.
+                    for (int i = 0; i < flex->item_count; i++) {
+                        View* scan_item = flex->flex_items[i];
+                        if (!flex_final_content_is_layout_item(scan_item)) continue;
                         ViewElement* scan_elem = lam::view_require_element(scan_item);
-                        if (has_flex_item_prop(scan_elem) ||
-                            (scan_elem->item_prop_type == DomElement::ITEM_PROP_FORM && scan_elem->form)) {
-                            outer_height = scan_elem->height;
-                            if (scan_elem->bound) {
-                                outer_height += scan_elem->bound->margin.top + scan_elem->bound->margin.bottom;
-                            }
-                            contributes = true;
-                        }
-                    } else if (scan_item->view_type == RDT_VIEW_TEXT) {
-                        ViewText* scan_text = lam::view_require<RDT_VIEW_TEXT>(scan_item);
-                        if (scan_text && scan_text->height > 0.0f) {
-                            outer_height = scan_text->height;
-                            contributes = true;
-                        }
-                    }
-                    if (contributes) {
-                        if (recomputed_count > 0 && flex) {
+                        if (recomputed_count > 0) {
                             recomputed_content_height += flex->row_gap;
                         }
-                        recomputed_content_height += outer_height;
+                        recomputed_content_height += flex_final_content_outer_height(scan_elem);
                         recomputed_count++;
                     }
-                    scan_item = scan_item->next();
+                } else {
+                    View* scan_item = flex_container->first_child;
+                    while (scan_item) {
+                        float outer_height = 0.0f;
+                        bool contributes = false;
+                        if (flex_final_content_is_block_item(scan_item)) {
+                            ViewElement* scan_elem = lam::view_require_element(scan_item);
+                            if (has_flex_item_prop(scan_elem) ||
+                                (scan_elem->item_prop_type == DomElement::ITEM_PROP_FORM && scan_elem->form)) {
+                                outer_height = flex_final_content_outer_height(scan_elem);
+                                contributes = true;
+                            }
+                        } else if (scan_item->view_type == RDT_VIEW_TEXT) {
+                            ViewText* scan_text = lam::view_require<RDT_VIEW_TEXT>(scan_item);
+                            if (scan_text && scan_text->height > 0.0f) {
+                                outer_height = scan_text->height;
+                                contributes = true;
+                            }
+                        }
+                        if (contributes) {
+                            if (recomputed_count > 0 && flex) {
+                                recomputed_content_height += flex->row_gap;
+                            }
+                            recomputed_content_height += outer_height;
+                            recomputed_count++;
+                        }
+                        scan_item = scan_item->next();
+                    }
                 }
 
                 float padding_height = 0.0f;
@@ -2223,6 +2313,62 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             if (flex && flex->lines && flex->line_count > 0) {
                 for (int line_idx = 0; line_idx < flex->line_count; line_idx++) {
                     align_items_main_axis(flex, &flex->lines[line_idx]);
+                }
+            }
+        }
+    }
+
+    if (flex && is_main_axis_horizontal(flex)) {
+        bool has_explicit_height = (flex_container->blk && flex_container->blk->given_height >= 0);
+        if (!has_explicit_height && !flex->has_definite_cross_size) {
+            float actual_cross_height = 0.0f;
+            int actual_line_count = 0;
+            if (flex->lines && flex->line_count > 0) {
+                for (int line_idx = 0; line_idx < flex->line_count; line_idx++) {
+                    FlexLineInfo* line = &flex->lines[line_idx];
+                    if (!line || line->item_count <= 0) continue;
+                    float line_cross = 0.0f;
+                    for (int item_idx = 0; item_idx < line->item_count; item_idx++) {
+                        ViewElement* item = lam::view_as_element(line->items[item_idx]);
+                        if (!item) continue;
+                        float item_cross = flex_final_content_outer_height(item);
+                        if (item_cross > line_cross) line_cross = item_cross;
+                    }
+                    if (actual_line_count > 0) {
+                        actual_cross_height += flex->row_gap;
+                    }
+                    actual_cross_height += line_cross;
+                    actual_line_count++;
+                }
+            } else if (flex->flex_items && flex->item_count > 0) {
+                for (int item_idx = 0; item_idx < flex->item_count; item_idx++) {
+                    ViewElement* item = lam::view_as_element(flex->flex_items[item_idx]);
+                    if (!item) continue;
+                    float item_cross = flex_final_content_outer_height(item);
+                    if (item_cross > actual_cross_height) actual_cross_height = item_cross;
+                }
+                actual_line_count = actual_cross_height > 0.0f ? 1 : 0;
+            }
+            if (actual_line_count > 0) {
+                float padding_height = 0.0f;
+                float border_height = 0.0f;
+                if (flex_container->bound) {
+                    padding_height = flex_container->bound->padding.top + flex_container->bound->padding.bottom;
+                    if (flex_container->bound->border) {
+                        border_height = flex_container->bound->border->width.top +
+                            flex_container->bound->border->width.bottom;
+                    }
+                }
+                float actual_border_height = actual_cross_height + padding_height + border_height;
+                actual_border_height = flex_apply_border_box_height_constraints(flex_container, actual_border_height);
+                if (actual_border_height > flex_container->height + 0.5f) {
+                    // Table/grid descendants can resolve their used cross size only during
+                    // content layout; auto-height row flex containers must grow to that size.
+                    log_debug("ROW FLEX FINAL CROSS: container %s height %.1f -> %.1f (actual cross=%.1f)",
+                              flex_container->node_name(), flex_container->height,
+                              actual_border_height, actual_cross_height);
+                    flex_container->height = actual_border_height;
+                    flex->cross_axis_size = layout_content_height_from_border_box(flex_container, actual_border_height);
                 }
             }
         }

@@ -227,6 +227,9 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     bool has_explicit_height = container->blk && container->blk->given_height >= 0;
     bool has_explicit_width = container->blk && container->blk->given_width >= 0;
     bool is_horizontal = is_main_axis_horizontal(flex);
+    bool has_parent_used_width = !has_explicit_width && lycon->flex_container &&
+        lycon->block.given_width >= 0.0f && content_width > 0.0f &&
+        fabsf(lycon->block.given_width - content_width) <= 0.5f;
     bool width_is_intrinsic_keyword = container->blk &&
         (container->blk->given_width_type == CSS_VALUE_MAX_CONTENT ||
          container->blk->given_width_type == CSS_VALUE_MIN_CONTENT ||
@@ -288,7 +291,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         }
     }
     // Inline-flex with auto width also uses shrink-to-fit
-    bool is_inline_no_width = !has_explicit_width &&
+    bool is_inline_no_width = !has_explicit_width && !has_parent_used_width &&
         (container->display.outer == CSS_VALUE_INLINE_BLOCK ||
          container->display.outer == CSS_VALUE_INLINE);
     bool is_shrink_to_fit = is_absolute_no_width || is_inline_no_width || width_is_intrinsic_keyword;
@@ -452,6 +455,13 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // Exception: shrink-to-fit containers (absolute-positioned or inline-flex with auto
         // width) get their containing block's width as fallback, so we must NOT treat that
         // as definite.
+        if (!has_definite_width && has_parent_used_width) {
+            // A parent flex pass has already resolved this item's used border box;
+            // nested inline-flex content layout must not shrink it back to max-content.
+            has_definite_width = true;
+            log_debug("%s init_flex_container: using parent flex item width %.1f as definite",
+                      container->source_loc(), content_width);
+        }
         if (!has_definite_width && container->width > 0 && !is_shrink_to_fit && !width_is_intrinsic_keyword) {
             has_definite_width = true;
             log_debug("%s init_flex_container: using width set by parent (%.1f)", container->source_loc(),

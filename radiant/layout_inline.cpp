@@ -1941,6 +1941,19 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     compute_span_bounding_box(span, span_is_multi_line, lycon->font.font_handle);
+    if (!had_children && has_inline_axis_decoration) {
+        float border_left = 0.0f;
+        float padding_left = 0.0f;
+        if (span->bound) {
+            if (span->bound->border) {
+                border_left = span->bound->border->width.left;
+            }
+            padding_left = span->bound->padding.left > 0.0f ? span->bound->padding.left : 0.0f;
+        }
+        // Empty inline elements still have a border box; it starts after the
+        // inline-start margin, while width excludes margins.
+        span->x = collapsed_inline_fragment_x - border_left - padding_left;
+    }
     if (span->width == 0.0f && span->height == 0.0f && had_children &&
         span_children_have_no_line_content(span)) {
         // css 2.1 section 9.5: keep no-line-content spans collapsed, but anchor their
