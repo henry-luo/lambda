@@ -241,7 +241,7 @@ typedef struct Item {
         uint64_t raw = item & 0x00FFFFFFFFFFFFFFULL;
         // sign extend from bit 55
         if (raw & 0x0080000000000000ULL) {
-            return (int64_t)(raw | 0xFF00000000000000ULL);
+            return (int64_t)(raw | 0xFF00000000000000ULL);  // ITEM_TAG_LITERAL_OK: int56 sign extension mask, not an Item tag.
         }
         return (int64_t)raw;
     }
@@ -479,6 +479,21 @@ static inline Item p2it(void* ptr) {
     if (!ptr) return Item{.item = ITEM_NULL};
     assert_raw_item_pointer(ptr);
     return Item{.item = (uint64_t)(uintptr_t)ptr};
+}
+
+static inline void assert_raw_item_header(void* ptr, TypeId expected_type) {
+#if !defined(NDEBUG) && !defined(LAMBDA_C2MIR_RUNTIME)
+    if (!ptr) return;
+    assert_raw_item_pointer(ptr);
+    Item item = Item{.item = (uint64_t)(uintptr_t)ptr};
+    // Constructors must write byte-zero TypeId before exposing raw-pointer Items.
+    if (*(TypeId*)ptr != expected_type || get_type_id(item) != expected_type ||
+        it2p(item) != ptr) {
+        lambda_item_debug_trap();
+    }
+#else
+    (void)ptr; (void)expected_type;
+#endif
 }
 
 static inline Item err2it(LambdaError* err) {

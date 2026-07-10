@@ -1,0 +1,25 @@
+id: no-item-tag-literal-shift
+language: cpp
+severity: error
+message: >-
+  Raw Item high-byte comparison against an integer literal. Compare with a
+  named EnumTypeId / Item sentinel constant, or route through get_type_id().
+  Mark audited non-Item byte extraction with "// ITEM_TAG_SHIFT_OK: <reason>".
+metadata:
+  suppress: ITEM_TAG_SHIFT_OK
+constraints:
+  TAG:
+    regex: '^(0x[0-9A-Fa-f]+|[0-9]+)$'
+rule:
+  any:
+    - pattern: ($X >> 56) == $TAG
+    - pattern: ($X >> 56) != $TAG
+    - pattern: $TAG == ($X >> 56)
+    - pattern: $TAG != ($X >> 56)
+files:
+  - "lambda/**/*.{c,cpp,h,hpp}"
+  - "lib/**/*.{c,cpp,h,hpp}"
+  - "test/**/*.{c,cpp,h,hpp}"
+ignores:
+  - "**/tree-sitter*/**"
+  - "lib/sqlite/**"

@@ -29,6 +29,7 @@
 ## 2. Current state (audited 2026-07-07)
 
 **Already in place — the layer below this proposal:**
+
 | Capability | Where |
 |---|---|
 | FLWOR for-clauses: `let` / `where` / `order by` / `limit` / `offset` | grammar.js `for_*_clause` |

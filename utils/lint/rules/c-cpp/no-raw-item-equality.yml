@@ -1,0 +1,19 @@
+id: no-raw-item-equality
+language: cpp
+severity: error
+message: >-
+  Raw Item equality is representation-sensitive. Use semantic equality helpers
+  unless this is documented identity/sentinel code; audited exceptions require
+  "// RAW_ITEM_EQ_OK: <reason>".
+metadata:
+  suppress: RAW_ITEM_EQ_OK
+rule:
+  any:
+    - pattern: $A.item == $B
+    - pattern: $A.item != $B
+    - pattern: $A == $B.item
+    - pattern: $A != $B.item
+files:
+  - "lambda/vmap.cpp"
+  - "lambda/render_map.cpp"
+  - "lib/lambda_typed.hpp"

@@ -72,6 +72,27 @@ rules:
     category: api-hygiene
     tags: [lambda, item, mandatory]
 
+  no-item-high-tag-literal:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-item-high-tag-literal.yml
+    category: correctness
+    tags: [lambda, item, boxing, mandatory]
+    note: "S0 double-boxing guardrail: Item sentinels must stay outside double-discriminator high-byte space."
+
+  no-item-tag-literal-shift:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-item-tag-literal-shift.yml
+    category: correctness
+    tags: [lambda, item, boxing, mandatory]
+    note: "S0 double-boxing guardrail: raw >> 56 checks must compare named TypeIds/sentinels, not integer literals."
+
+  no-raw-item-equality:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-raw-item-equality.yml
+    category: correctness
+    tags: [lambda, item, equality, mandatory]
+    note: "S0 semantic-equality ratchet over audited representation-layer files; broader semantic sites are inventoried in the double-boxing plan."
+
   css-temp-decl:
     backend: ast-grep
     file: utils/lint/rules/c-cpp/css-temp-decl.yml

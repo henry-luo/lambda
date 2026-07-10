@@ -1503,7 +1503,7 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
     case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
     case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
         memcpy(&ptr_val, field_ptr, sizeof(void*));
-        if (((uintptr_t)ptr_val >> 56) != 0) return ItemNull;
+        if (((uintptr_t)ptr_val >> 56) != 0) return ItemNull;  // ITEM_TAG_SHIFT_OK: raw pointer high-byte validation, not Item tag dispatch.
         Container* container = (Container*)ptr_val;
         if (!container) return ItemNull;
         if (container->type_id == LMD_TYPE_RAW_POINTER) {

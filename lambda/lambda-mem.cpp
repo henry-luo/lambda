@@ -43,6 +43,14 @@ static __thread int64_t jit_gc_root_frame_depth = 0;
 static void gc_finalize_all_objects(gc_heap_t *gc);
 extern "C" void vmap_gc_destroy(void* obj, void* data);
 
+static void heap_assert_raw_item_allocation(void* ptr, TypeId type_id) {
+    (void)type_id;
+    if (!ptr) return;
+    // Allocation returns before many constructors write byte-zero TypeId, so
+    // only the pointer-form invariant is valid at this boundary.
+    assert_raw_item_pointer(ptr);
+}
+
 static void gc_finalize_vmap_host_payload(VMap* vm) {
     if (!vm || !vm->host_type || !vm->host_data) return;
     const JubeTypeDef* type = jube_find_type_by_host_type(vm->host_type);
@@ -496,6 +504,7 @@ void* heap_alloc(int size, TypeId type_id) {
         log_error("failed to allocate memory for heap entry");
         return NULL;
     }
+    heap_assert_raw_item_allocation(data, type_id);
     return data;
 }
 
@@ -509,6 +518,7 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     if (type_id >= LMD_TYPE_CONTAINER && type_id != LMD_TYPE_FUNC && type_id != LMD_TYPE_TYPE) {
         ((Container*)ptr)->is_heap = 1;
     }
+    heap_assert_raw_item_allocation(ptr, type_id);
     return ptr;
 }
 
@@ -527,6 +537,7 @@ extern "C" void* heap_calloc_class(size_t size, TypeId type_id, int cls) {
     if (type_id >= LMD_TYPE_CONTAINER && type_id != LMD_TYPE_FUNC && type_id != LMD_TYPE_TYPE) {
         ((Container*)ptr)->is_heap = 1;
     }
+    heap_assert_raw_item_allocation(ptr, type_id);
     return ptr;
 }
 
