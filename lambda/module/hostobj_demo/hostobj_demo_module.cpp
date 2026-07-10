@@ -380,3 +380,11 @@ static const JubeModuleDef s_hostobj_demo_module = {
 extern "C" void hostobj_demo_jube_register_static(void) {
     jube_register_static_module(&s_hostobj_demo_module);
 }
+
+extern "C" const JubeModuleDef* hostobj_demo_jube_module(void) {
+    return &s_hostobj_demo_module;
+}
+
+extern "C" const JubeModuleDef* jube_module(void) {
+    return hostobj_demo_jube_module();
+}

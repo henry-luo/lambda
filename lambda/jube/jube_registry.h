@@ -7,6 +7,7 @@ extern "C" {
 #endif
 
 int jube_register_static_module(const JubeModuleDef* module);
+int jube_load_dynamic_module(const char* path, const char* entry_symbol);
 void jube_register_builtin_modules(void);
 int jube_static_module_count(void);
 const JubeModuleDef* jube_static_module_at(int index);
