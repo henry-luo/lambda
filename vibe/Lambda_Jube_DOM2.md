@@ -702,10 +702,18 @@ Validation:
   ./lambda.exe test/lambda/hostobj_demo_jube_import.ls` returned `{ answer: 42, sum: 12 }`.
 - Build gate: `make build-test` passed.
 - Focused gtests: static and dynamic `test_lambda_gtest --gtest_filter='*hostobj_demo_jube_import*'`
-  passed 1/1. Static and dynamic `test_js_gtest --gtest_filter='*hostobj_demo*'` also passed 1/1;
-  note that the JS gtest harness still warms/caches neighboring JS scripts before the selected
-  parameter and emits existing ASan/memtrack noise from that prelude, but the selected
-  `hostobj_demo` case itself passed.
+  passed 1/1. Static and dynamic `test_js_gtest --gtest_filter='*hostobj_demo*'` also passed 1/1
+  without the former ASan/memtrack prelude noise; focused JS filters now skip unrelated batch
+  warm-up scripts and run the selected parameter directly.
+- Broad JS file suite: `test_js_gtest --gtest_filter=JavaScriptTests/JsFileTest.*` passed 296/296;
+  the old ASan runtime-buffer UAF did not recur, though crash-recovery scripts still emit existing
+  memtrack diagnostics during batch warm-up.
+- Follow-up ASan/memtrack triage: direct `lib_ajv.js` was crashing after `AJV_DONE` because
+  heap teardown destroyed the GC pool before runtime array-item cleanup could neuter Array owners.
+  `heap_destroy()` now releases runtime item buffers before `gc_heap_destroy()`, and focused
+  `lib_ajv`/`tco` gtests pass. Remaining `js-test-batch` reports for `tco.js`/`lib_ajv.js` are
+  batch-stack crashes: batch workers run on the process default stack, while focused JS CLI tests
+  use the 256 MB JS execution-stack wrapper.
 
 Testable goal met: the same `hostobj_demo` JS and Lambda tests pass statically and against the
 dynamically loaded copy.

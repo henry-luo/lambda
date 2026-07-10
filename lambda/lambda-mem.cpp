@@ -725,13 +725,15 @@ extern "C" void heap_finalize_gc_objects(gc_heap_t *gc) {
 void heap_destroy() {
     if (context->heap) {
         jit_gc_root_frame_cache_clear();
+        // Runtime item cleanup may neuter owning Array objects, so it must run
+        // while the GC heap pool that contains those owners is still alive.
+        js_array_runtime_items_cleanup_all();
         if (context->heap->gc) {
             // finalize all GC-managed objects: free sub-allocations (items[], data, mpd_t, closure_env)
             // that were malloc'd/calloc'd separately from the pool
             heap_finalize_gc_objects(context->heap->gc);
             gc_heap_destroy(context->heap->gc);  // pool_destroy frees all pool memory
         }
-        js_array_runtime_items_cleanup_all();
         context->heap->pool = NULL;
         mem_free(context->heap);
     }

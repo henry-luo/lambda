@@ -565,6 +565,11 @@ static std::vector<JsTestParam> discover_all_js_tests() {
 // Parameterised test — one test case per discovered .js file (batch mode)
 // ---------------------------------------------------------------------------
 
+static bool js_gtest_filter_requests_full_batch() {
+    std::string filter = ::testing::GTEST_FLAG(filter);
+    return filter.empty() || filter == "*" || filter == "JavaScriptTests/JsFileTest.*";
+}
+
 class JsFileTest : public testing::TestWithParam<JsTestParam> {
 public:
     static std::unordered_map<std::string, JsBatchResult> batch_results;
@@ -572,6 +577,11 @@ public:
 
     static void SetUpTestSuite() {
         if (batch_executed) return;
+        if (!js_gtest_filter_requests_full_batch()) {
+            // Focused filters must not batch unrelated crash-recovery scripts before the selected case.
+            batch_executed = true;
+            return;
+        }
 
         // collect non-DOM scripts for batch execution
         auto all = discover_all_js_tests();
