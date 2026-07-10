@@ -107,16 +107,57 @@ deliver, how a TreeWalker filters — is Lambda.
 Corollary: "implement all Obscura APIs in Lambda" means *all new per-API logic* is Lambda.
 The adapter is a bounded, one-time engine investment shared by every API, present and future.
 
-### 3.3 Placement rules
+### 3.3 Placement policy (the decision procedure)
 
-What lives where, as a decision rule rather than a list:
+The decision procedure matters more than the dividing list: the §4 catalog is the *output* of
+this section applied surface-by-surface. When the list and the principles disagree, the
+principles win and the list gets corrected.
 
-- **L1/L2 (native)**: anything on a per-frame or per-node-visit hot path (selector matching,
-  tree mutation primitives, `innerHTML` parsing, layout metric reads, the inner 3-phase event
-  dispatch loop), anything already implemented and baseline-protected, anything touching the
-  cascade or layout internals.
-- **L3 (Lambda)**: spec-shaped state machines and orchestration — called per user-visible
-  event or per API call, not per node-visit. All *new* Obscura-parity surface lands here.
+**At the heart of the whole placement process is one principle: mechanism native, policy
+Lambda.** Most interesting features do not divide per-API — they split *internally*: event
+dispatch (mechanism, native) vs default actions (policy, Lambda); form-control dirty-flags
+(mechanism) vs constraint validation logic (policy); mutation ring (mechanism) vs observer
+record delivery (policy); focusability computation (layout-coupled query, native) vs tab-order
+policy (Lambda). Faced with any API, first find the mechanism/policy seam *inside* it, then
+place the two halves separately. An API that seems to defy placement usually just hasn't had
+its seam found yet.
+
+A companion principle bounds the mechanism side: **performance-critical cores are native,
+extensible by hooks.** Layout, rendering, and animation are performance-critical; their cores
+are native unconditionally. Where script customization or extension is wanted (custom layout
+behavior, animation callbacks), the shape is native-core + explicit hook points at defined
+seams — script extends the frame loop from outside; it never runs inside it. (Note:
+`lambda.exe layout page.html` does run page JS today — layout stays native for performance,
+not for lack of script availability.)
+
+The principles are operationalized as four tests, applied in order; the first test that fires
+decides the placement.
+
+1. **Frequency test** — can real workloads invoke it per animation frame or per node-visit
+   (rather than per discrete user action or per API call)? → **native**. Examples: selector
+   matching inside hover restyle, `classList` toggles in rAF animation loops, live-range offset
+   updates during typing, live-collection refresh on mutation.
+2. **Coupling test** — does it read or mutate layout, render, parser, or cascade internals
+   *mid-operation* (not through a stable query primitive)? → **native**. This covers all of:
+   layout, rendering, animation, media handling, hit testing, scroll mechanics, slot
+   assignment, caret/selection painting.
+3. **Incumbency test** — is it already implemented in C+, baseline-protected, and not blocking
+   any Lambda-side feature? → **stays native for now**. Migration must be *earned*: a concrete
+   Phase-3 case (policy-heavy and bug-prone, or blocking a Lambda feature, or a measured
+   C+-reduction win). "It could be Lambda" is not a reason to rewrite working, tested code.
+4. **Shape test** — is it a spec-defined state machine or bookkeeping layer over stable
+   primitives, invoked per API call or per discrete user event? → **Lambda**. All *new*
+   Obscura-parity surface passes this test by construction.
+
+One operational consequence: where Lambda takes over an existing native policy (e.g. event
+default actions), the native side keeps its current built-in behavior as the fallback until
+the package registers its replacement — every migration step stays incremental and
+baseline-safe, and basic interaction never depends on the package being present (§4.4).
+
+Layer codes used in the tables below: **N** = engine core (L1), **M** = module primitive
+exposed to the package (L2), **L** = Lambda package (L3), **A** = JS adapter shape (L4),
+**F** = honest facade (implemented in Lambda, explicitly marked non-functional).
+
 - **L4 (adapter)**: only what JS object semantics require and Lambda cannot express. If a
   piece of adapter code contains API-specific *logic* (beyond shape declaration), it is in
   the wrong layer.
@@ -124,6 +165,8 @@ What lives where, as a decision rule rather than a list:
 ---
 
 ## 4. API inventory and placement
+
+### 4.1 The Obscura-gap APIs (new surface — all Lambda by construction)
 
 Placement of the Obscura-gap APIs (from `Radiant_vs_Obscura.md` §4), plus the honesty policy
 per API. **Real** = backed by actual engine state; **facade** = honest stub that unblocks
@@ -147,9 +190,236 @@ bootstrap and is internally explicit about non-support; never fake data dressed 
 | `indexedDB` / `caches` | minimal async facades only when a target app demands them | — | shape | Facade, on demand only |
 | Broad `HTML*Element` constructor names, token-list reflections | — (data tables can be Lambda-declared) | — | prototype-registry driven | Shape-only, declared not coded |
 
-Explicitly staying native (not package scope): `querySelector*` and selector matching,
-tree mutation primitives, `innerHTML` fragment parsing, layout metric reads
-(`getBoundingClientRect` et al.), CSSOM cascade internals, the inner event dispatch loop.
+### 4.2 Full-surface placement catalog
+
+The complete DOM/Web surface, domain by domain, placed by the §3.3 tests. This is the
+normative catalog; a placement change is a design change and gets a ledger entry.
+
+**Tree structure and nodes**
+
+| Surface | Place | Deciding test / rationale |
+|---|---|---|
+| Structural mutation primitives (`appendChild`, `removeChild`, `insertBefore`, `replaceChild`, fragment splice) | N | frequency + incumbency; live-range/focus/select bookkeeping is woven through them |
+| Pre-insertion validity checks (`HierarchyRequestError` conditions) | N | rides the primitive; revisit only if it blocks a Lambda feature (ledger Q9) |
+| CharacterData ops (`replaceData`, `insertData`, …) | N | typing-hot; live-range offset updates |
+| `cloneNode` / `importNode` / `adoptNode` | N | tree-walk primitives + expando-copy hooks; exist |
+| `innerHTML` / `outerHTML` / `insertAdjacentHTML` (parse + serialize) | N | rule 1: parser-integrated |
+| `normalize`, `contains`, `compareDocumentPosition`, `isEqualNode` | N | incumbency (exist, trivial there) |
+| Navigation getters (`parentNode`, `children`, …) | N/M | exist as projections |
+| `TreeWalker` / `NodeIterator` | **L** | shape test: stateful cursors whose filters are script callbacks anyway |
+| `DOMParser` / `XMLSerializer` / `XMLDocument` | **L** | glue over native parsers/formatters |
+| `document.evaluate` / XPath | **L** | shape test; cold; new code |
+
+**Selectors and collections**
+
+| Surface | Place | Rationale |
+|---|---|---|
+| `querySelector(All)`, `matches`, `closest`, selector engine | N | rule 1 |
+| `getElementsBy*` live collections + refresh machinery | N | frequency (mutation-hooked); exist |
+| XPath result iteration | **L** | rides the Lambda XPath evaluator |
+
+**Observers** — all Lambda logic over module hooks (per §4.1)
+
+| Surface | Place | Rationale |
+|---|---|---|
+| Record construction, filtering, queues, delivery ordering, loop-limit algorithms | **L** | shape test — the canonical case |
+| Mutation-ring subscription, post-layout box-change notification, microtask/rAF delivery hooks | M | the mechanisms |
+
+**Custom elements**
+
+| Surface | Place | Rationale |
+|---|---|---|
+| Registry (`define`/`get`/`whenDefined`), upgrade bookkeeping, reactions queue + ordering | **L** | shape test |
+| Element-creation interception in parser / `createElement` / fragment parsing | M | one narrow native hook consulting the registry |
+| `attributeChangedCallback` sourcing | M | already exists as the mutation ring |
+| `ElementInternals` states/form-association bookkeeping | **L** | validity integration via M hooks |
+
+**Events and input** — the detailed pipeline split is §4.4
+
+| Surface | Place | Rationale |
+|---|---|---|
+| Hit testing, target-path computation, pointer capture, shadow retargeting | N | coupling test (user decision 2) |
+| Listener storage, 3-phase dispatch loop, propagation/cancelation flags | N | frequency (user decision 2) |
+| Trusted event construction, hover/mousemove restyle, cursor | N | frequency; dispatch must run before/without any policy registration |
+| Default actions / activation behavior (link follow, checkbox/radio toggle, submit-on-Enter, button/space activation, `details` toggle, label forwarding) | **L** | policy (user decision 2) |
+| Sequential focus navigation (Tab order, focus delegation, `autofocus` processing) | **L** | policy, per-keypress cold |
+| Focusability computation (needs style/layout: visibility, `disabled`, `tabindex`) | M | layout-coupled query the policy calls |
+| Key→editing-command mapping policy | **L** (later) | with the editor migration; text-insertion mechanics stay N |
+| IME/composition, caret mechanics | N | coupling test |
+| Drag-and-drop protocol state machine | **L** (later) | policy; mechanism (drag images, hit tests) N |
+| Inline `on*` handler compilation | N | JS-engine internals |
+| Event loop, timers, microtasks, rAF callback list | N | engine-owned scheduling |
+| Synthetic event constructors | A | shape |
+
+**Forms**
+
+| Surface | Place | Rationale |
+|---|---|---|
+| Control state flags (dirty value/checkedness), selection mirrors, reflected IDL attributes | N | frequency + incumbency; interwoven with focus/editing |
+| Constraint validation logic (validity computation, message selection) | **L** (Phase 3) | policy; earned migration — bug-prone spec logic |
+| Submission: form-data-set construction, urlencoded/multipart serialization | **L** (Phase 3) | shape test; per-submit cold |
+| Submission: navigation execution | N | network/lifecycle |
+| `form.elements`, named access, live collections | N | incumbency |
+
+**CSS and CSSOM**
+
+| Surface | Place | Rationale |
+|---|---|---|
+| Parsing, cascade, computed style, invalidation, `getComputedStyle` | N | rule 1 |
+| Inline style get/set, CSSOM sheet/rule objects, `CSS.supports`/`escape` | N | incumbency |
+| Constructible `CSSStyleSheet` bookkeeping, `adoptedStyleSheets` lists (document + shadow root) | **L** | shape; actual parse + cascade insertion via M |
+| `matchMedia`: MQ evaluation | N | parser/viewport-coupled; exists |
+| `matchMedia`: `MediaQueryList` registry + change-event bookkeeping | **L** | shape |
+| Font Loading API surface (`document.fonts`, `FontFace`) | **L** | over the native `@font-face` registry; loading itself N |
+
+**Geometry, scrolling, layout reads**
+
+| Surface | Place | Rationale |
+|---|---|---|
+| `getBoundingClientRect`, `getClientRects`, `offset*`/`client*`/`scroll*` reads | N | rule 1 |
+| `scrollIntoView` / `scroll` / `scrollTo` / `scrollBy`, scroll anchoring | N | all layout stays native (rule 1) |
+| `elementFromPoint` | N | hit test |
+
+**Ranges, selection, editing**
+
+| Surface | Place | Rationale |
+|---|---|---|
+| Live-range offset maintenance on mutation | N | typing-hot |
+| Range content ops, Selection bookkeeping, selection/caret painting | N | incumbency + coupling |
+| `StaticRange` | **L**/A | trivial value object |
+| Editing command policy (`execCommand`-level behaviors) | **L** (post-Stage-5) | policy; mechanics stay N |
+
+**Shadow DOM**
+
+| Surface | Place | Rationale |
+|---|---|---|
+| `attachShadow` bookkeeping | N | exists |
+| Slot assignment | N | coupling test (layout-tree construction) |
+| Event retargeting | N | part of the dispatch loop |
+| Shadow-root `adoptedStyleSheets` | **L** | list management, same as document-level |
+
+**Storage, channels, cookies**
+
+| Surface | Place | Rationale |
+|---|---|---|
+| `localStorage` / `sessionStorage` incl. quota + `storage` event fan-out | **L** | shape; persistence via host I/O |
+| `document.cookie` accessor (parse/serialize/policy) | **L** | shape |
+| Cookie jar itself | N | shared with the native network stack (fetch must see cookies) |
+| `indexedDB`, `caches` | **F** | facades on demand |
+| `BroadcastChannel` | **F** → real via K20 mailboxes later | ledger Q6 |
+| `WebSocket` / `EventSource` | **F**; if made real later: native net transport + **L** protocol state machine | ledger Q7 |
+| Workers / ServiceWorker | **F** | no threading semantics pretense |
+
+**Documents and lifecycle**
+
+| Surface | Place | Rationale |
+|---|---|---|
+| HTML parsing, parser scheduling, `document.open/write/close` | N | rule 1 + incumbency |
+| `readyState` / `DOMContentLoaded` / `load` ordering | N now; **L** candidate later | bootstrap-critical; migrate only after the package loads early enough (ledger Q10) |
+| `createDocument` / `createHTMLDocument` | **L** | glue over native parsers |
+| Navigation, `Location` | N | network/lifecycle |
+| History `pushState`/`popstate` bookkeeping | **L** candidate (later) | policy over native navigation; couples to session restore (RS) |
+| **State store** (RS1–RS16: durable/transient/derived schema, regeneration-based persistence, dirty-subtree delta) | **L** | user decision 2; native provides document identity + input markup store (RSO1) |
+
+**Media, canvas, animation** — all native (user decision 1)
+
+| Surface | Place | Rationale |
+|---|---|---|
+| Media playback/decoding, canvas/OffscreenCanvas, image decoding | N | rule 1 |
+| CSS animations/transitions, Web Animations engine | N | per-frame |
+| `element.animate` surface bookkeeping | A/N | shape over native engine |
+| Layout/animation extension hooks (script customization at defined seams) | M | native-core + hooks principle (§3.3); hook points are module API, callbacks run outside the frame loop |
+| `createImageBitmap` etc. glue | **L**/F | as bootstrap compatibility demands |
+
+### 4.3 The narrow waist — module primitives the package may call
+
+Everything the Lambda package does reduces to calls on a small, enumerable set of M-level
+primitives. This set **is** the Lambda-facing half of the `radiant-dom` module API, and its
+size is a design health metric — it should stay reviewable at a glance.
+
+1. **Tree read**: navigation, node identity/kind, attribute reads (mostly via projections).
+2. **Tree write**: the structural + attribute + character-data mutation primitives (§4.2).
+3. **Parse/serialize**: fragment/document parse, serialize subtree (backing DOMParser,
+   `createHTMLDocument`, XMLSerializer).
+4. **Match/query**: selector match on a node (backing XPath-free fast paths, `closest`-style
+   policy checks).
+5. **Geometry/layout queries**: box reads, viewport/scroll state, focusability, hit test.
+6. **Mutation-ring subscription**: the one native→Lambda callback channel for observers,
+   custom-element reactions, and live bookkeeping.
+7. **Scheduling**: enqueue microtask, rAF-aligned hook, timers (via existing event loop).
+8. **Event-policy registration**: register the default-action/focus/key policy handlers +
+   the per-event-type interest mask (§4.4).
+9. **Action primitives**: `focus_move`, `submit_form`, `request_navigation`, `toggle_checked`,
+   `scroll_by` — the verbs policies execute through.
+10. **Persistence I/O**: origin-scoped storage read/write (backing Web Storage, cookies
+    accessor).
+
+Budget rule: each addition to the waist is a versioned host-API/module entry (DOM2 §2.3) and
+gets reviewed. If a single Lambda API needs more than one *new* primitive cluster, that is a
+signal its placement is wrong — re-run the §3.3 tests before widening the waist.
+
+### 4.4 The event pipeline split (decision 2, elaborated)
+
+```
+OS / WebDriver / synthetic input
+  │
+  ▼
+[N] coalescing, hit test, pointer capture, hover-state restyle,
+    target-path computation (incl. shadow retargeting)
+  │
+  ▼
+[N] trusted event construction → 3-phase dispatch loop
+    (capture → target → bubble; invokes JS listeners and, later,
+     Lambda-registered listeners identically)
+  │
+  ├── defaultPrevented? ──→ done (native cleanup only)
+  ▼
+[L] default-action policy — at most ONE Lambda call per discrete user event,
+    keyed by (event type, target role):
+      activation behavior, focus advance (Tab order), submit-on-Enter,
+      checkbox/radio/select behaviors, details/label forwarding, key policy
+  │
+  ▼
+[M] policy executes through action primitives:
+    focus_move · submit_form · request_navigation · toggle_checked · scroll_by
+```
+
+Rules that keep this split safe:
+
+- **Hot-path guard**: `pointermove`/`mousemove`/`scroll`/`wheel` never enter Lambda unless the
+  package has registered interest in that event type (a native-side per-type bitmask). Hover
+  restyle in particular stays 100% native — the ~187-failure inline-hover episode is the
+  cautionary precedent.
+- **One-call ceiling**: policy is invoked once per discrete event, after dispatch, never per
+  node on the propagation path.
+- **Fallback until registered**: the engine keeps its current C+ default actions; when the
+  package registers a policy for an event class, the native fallback for that class is
+  bypassed. This makes the Phase-3 extraction incremental (one behavior class at a time, each
+  under the UI-automation baseline) and means basic interaction never depends on the package
+  being present or correct.
+- **Reentrancy**: policy handlers run after dispatch completes, so they mutate the DOM in a
+  quiescent dispatch state; anything they trigger (focus events, submit events) enters the
+  pipeline as a fresh event.
+
+### 4.5 What moves OUT of C+ — the net-reduction ledger
+
+Per the incumbency test, existing native code migrates only when earned. The candidates, in
+rough order:
+
+| Candidate | Earned by | Precondition |
+|---|---|---|
+| Event default-action / activation policy in `event.cpp` | policy layer exists (§4.4); behaviors are spec-shaped and accreting | UI-automation baseline green per extracted behavior class |
+| Sequential focus navigation / tab-order logic | same policy layer; cold path | `is_focusable` M query |
+| Constraint validation logic | bug-prone spec logic; `ElementInternals` needs it Lambda-side anyway | form gtest coverage stays green |
+| Submission data-set construction + serialization | pairs with validation; per-submit cold | FormData interop at the boundary |
+| State store (`Radiant_Design_State_Store_*`) | RS design is already Lambda-shaped | RS/RSO1 decisions land |
+| History/pushState bookkeeping | couples to RS session restore | after state store migrates |
+| Select/option bookkeeping (dirty-state choreography) | only if validation/submission migration makes it the last C+ island | measured; may stay N |
+| Editing command policy | Stage-5+ editor roadmap | editor baselines |
+
+Anti-candidates (never migrate, restated for clarity): selector engine, HTML parser,
+layout/render/animation/media, live-range maintenance, dispatch loop, hit testing, slot
+assignment, cookie jar, event loop/scheduling.
 
 ---
 
@@ -321,7 +591,10 @@ perf checks on interaction latency.*
 | Q4 | Live collections: native (shape+behavior exception at L4) vs VMap-lazy with Lambda queries | leaning native for v1 |
 | Q5 | `storage` event semantics across pages (needs cross-isolate signaling — touches RC event mailboxes) | open — Phase 1 can ship without cross-page events |
 | Q6 | Does `BroadcastChannel` become *real* via K20 mailboxes (in-process)? | open — attractive ST-alignment, not required |
-| Q7 | Facade upgrade path: when `WebSocket` gets a real implementation (libuv exists in-tree), does it move into the package or the net module? | open — later |
+| Q7 | Facade upgrade path: when `WebSocket` gets a real implementation (libuv exists in-tree), does it move into the package or the net module? | open — later; leaning native transport + Lambda protocol state machine (§4.2) |
+| Q8 | Can Lambda code register event *listeners* (not just policy) through the same dispatch loop as JS listeners? Needed once package features (e.g. drag-and-drop state machine) listen to events themselves | open — dispatch loop should treat listener closures uniformly; interacts with K20 |
+| Q9 | Pre-insertion validity checks: stay fused with native mutation primitives, or lift to Lambda if a package feature needs custom insertion semantics? | leaning native permanently (§4.2) |
+| Q10 | Document lifecycle ordering (`readyState`/`DOMContentLoaded`): migrate to Lambda only if the package reliably loads before parsing starts — what is the package load point in document setup? | open — tied to §6.5 startup-cost decision |
 
 Friction-log entries from ST1–ST3 get appended here as F-numbered rows once work starts.
 
