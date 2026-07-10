@@ -1,0 +1,348 @@
+{
+  "_metadata": {
+    "schema_version": 2,
+    "mode": "time",
+    "started_at": "2026-07-11T00:45:55",
+    "command": "test/benchmark/run_benchmarks.py -s awfy,beng,kostya,larceny,jetstream -b gcbench,binarytrees,storage,mandelbrot,nbody,matmul,splay,richards,deltablue -e mir,lambdajs -n 1 -t 180 --fresh --results-output test/benchmark/s3_release_self_tag_float_post_delete_2026-07-11.json",
+    "engines": [
+      "mir",
+      "lambdajs"
+    ],
+    "runs": 1,
+    "timeout_s": 180,
+    "results_output": "test/benchmark/s3_release_self_tag_float_post_delete_2026-07-11.json",
+    "fresh": true,
+    "suite_filters": [
+      "awfy",
+      "beng",
+      "kostya",
+      "larceny",
+      "jetstream"
+    ],
+    "bench_filters": [
+      "gcbench",
+      "binarytrees",
+      "storage",
+      "mandelbrot",
+      "nbody",
+      "matmul",
+      "splay",
+      "richards",
+      "deltablue"
+    ],
+    "platform": "Darwin arm64",
+    "lambda_exe": "./lambda.exe --no-log",
+    "lambda_exe_size_bytes": null,
+    "lambda_commit": "c9f20d15d7a415f74f168ba0742979f2e18eb55c",
+    "node_version": "v22.13.0",
+    "python_version": "Python 3.14.4",
+    "quickjs_version": "2025-09-13",
+    "profile_check": "not_recorded",
+    "log_dir": null,
+    "finished_at": "2026-07-11T00:46:36"
+  },
+  "awfy": {
+    "storage": {
+      "category": "micro",
+      "mir": 2.122,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "lambdajs": 34.154166
+    },
+    "mandelbrot": {
+      "category": "compute",
+      "mir": 115.647,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "lambdajs": 371.618667
+    },
+    "nbody": {
+      "category": "compute",
+      "mir": 243.841,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "lambdajs": 623.909375
+    },
+    "richards": {
+      "category": "macro",
+      "mir": 690.844,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "lambdajs": 6096.405166
+    },
+    "deltablue": {
+      "category": "macro",
+      "mir": 292.243,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "lambdajs": 6780.627667
+    }
+  },
+  "beng": {
+    "binarytrees": {
+      "category": "allocation",
+      "mir": 39.457,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "lambdajs": 63.032583
+    },
+    "mandelbrot": {
+      "category": "numeric",
+      "mir": 291.721,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "lambdajs": 74.303416
+    },
+    "nbody": {
+      "category": "numeric",
+      "mir": 248.679,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "lambdajs": 333.504375
+    }
+  },
+  "kostya": {
+    "matmul": {
+      "category": "numeric",
+      "mir": 720.541,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "lambdajs": 841.842666
+    }
+  },
+  "larceny": {
+    "gcbench": {
+      "category": "allocation",
+      "mir": 1258.51,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "lambdajs": 1471.153167
+    }
+  },
+  "jetstream": {
+    "nbody": {
+      "category": "numeric",
+      "mir": 247.543,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "lambdajs": 272.825
+    },
+    "richards": {
+      "category": "macro",
+      "mir": 638.681,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "lambdajs": 696.197
+    },
+    "splay": {
+      "category": "data",
+      "mir": 3171.15,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "lambdajs": 1616.739
+    },
+    "deltablue": {
+      "category": "macro",
+      "mir": 36.834,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "lambdajs": 1990.643
+    }
+  }
+}

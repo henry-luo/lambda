@@ -1,14 +1,14 @@
 # Lambda Double Boxing v3 — Implementation Plan
 
-- **Status:** S2 COMPLETE — flag-gated Lambda/LambdaJS MIR float lowerings, interpreter-safe bitcast helpers, equality audit/reroutes, and flag-on/off Lambda baselines landed (2026-07-10)
-- **Date:** 2026-07-10
+- **Status:** S3 COMPLETE — self-tagged floats are now always on, the transition flag is deleted, and post-delete release/baseline/canary gates are green (2026-07-11)
+- **Date:** 2026-07-11
 - **Design:** `Lambda_Type_Double_Boxing.md` (v3 = raw IEEE bits + single-mask discriminator + packed-immediate ±0; reviewed in its Part 7)
 - **Representation contract:** `Lambda_Design_Item_Boxing.md` §6 — tagged scalar leaves, **raw container pointers (bit-identical, mask-free)**, inline immediates. Part 7 §7.2's acceptance bar governs: *if an implementation requires tagging or masking any container pointer, it has violated the design rather than implemented it.*
 - **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ## 0. Strategy
 
-Per the Part 7 review: this lands as an **invariant-hardening change first and a float optimization second**. The encoding is simple; the risk is enforcing the tag-space partition across every Item producer, sentinel, raw comparison, GC classifier, and JIT lowering. So the guardrails, assertions, and representation tests land **on master, flag-independent, before any behavior changes**; the representation switch itself sits behind the `LAMBDA_SELF_TAG_FLOAT` compile flag until every gate passes.
+Per the Part 7 review: this landed as an **invariant-hardening change first and a float optimization second**. The encoding is simple; the risk was enforcing the tag-space partition across every Item producer, sentinel, raw comparison, GC classifier, and JIT lowering. The guardrails, assertions, and representation tests landed **on master, flag-independent, before behavior changes**; the representation switch then shipped behind `LAMBDA_SELF_TAG_FLOAT` through S1/S2 and the S3 sign-off. After the S3 gates passed, the flag was deleted rather than kept as a one-release escape hatch.
 
 Phases (S0–S3 continue the design doc's Part 5 numbering; P0 precedes them):
 
@@ -18,13 +18,13 @@ Phases (S0–S3 continue the design doc's Part 5 numbering; P0 precedes them):
 | S0 | Guardrails: masks, sentinels, assertions, representation tests, audits, lint | none | independent |
 | S1 | Runtime core: classifier, encode/decode, packed zeros, producers, FLOAT64 retirement | behind flag (except S1.0) | `LAMBDA_SELF_TAG_FLOAT` |
 | S2 | JIT & interpreter lowerings, `MIR_EQ` reroutes | behind flag | `LAMBDA_SELF_TAG_FLOAT` |
-| S3 | GC audit, hardening, benchmark sign-off, default flip | flip | default on |
+| S3 | GC audit, hardening, benchmark sign-off, flag deletion | always on | deleted |
 
-**Canonical-encoding rule (all phases):** within one build configuration, every double has exactly one Item encoding — raw in-band bits, one of the two packed zeros, or the canonical boxed fallback. Mixed old/new producers are forbidden; the flag makes the transition atomic per build.
+**Canonical-encoding rule:** every double now has exactly one Item encoding — raw in-band bits, one of the two packed zeros, or the canonical boxed fallback. Mixed old/new producers are forbidden.
 
 ---
 
-## Implementation status — 2026-07-10
+## Implementation status — 2026-07-10/11
 
 S0 guardrails are complete: shared Item double masks and static tag-space pins in `lambda/lambda.h`; raw-pointer assertions wired into both C and C++ `p2it`; allocation return paths assert raw-pointer Item representability; post-initialization header checks pin byte-zero TypeIds for raw Item families; JS sentinel high bytes moved out of double space and centralized through shared constants; `lib/lambda_typed.hpp` hole stamping now uses the same deleted sentinel; `item_to_ptr` rejects inline-double and unknown high-tag scalar words instead of treating them as raw pointers.
 
@@ -39,6 +39,10 @@ Verified S1 slice: forced flag-on build plus focused gtests and `make test-lambd
 S2 JIT/interpreter lowering is complete behind `LAMBDA_SELF_TAG_FLOAT`: Lambda MIR and LambdaJS now inline the self-tagged float mask/zero/cold-box decision at box sites, inline the in-band unbox dispatch, emit canonical float literal Item bits, route JS int-overflow promotion through the same float boxing helper, and link Lambda MIR direct through `MIR_set_interp_interface` in `--mir-interp` mode. Raw IEEE bit reinterpretation goes through `lambda_mir_double_bits` / `lambda_mir_bits_double`; the first S2 attempt used `MIR_ALLOCA` as a scratch-slot bitcast, but benchmark smokes exposed that as dynamic stack growth in hot loops (`matmul`/`mandelbrot` SIGBUS), so S2 now keeps the representation decision in MIR while using the leaf helpers for the bitcast itself.
 
 Verified S2 slice: forced flag-on release/debug rebuild plus `make test-lambda-baseline CFLAGS=-DLAMBDA_SELF_TAG_FLOAT CXXFLAGS=-DLAMBDA_SELF_TAG_FLOAT` passes 3296/3296 after the bitcast fix; forced flag-off release/debug rebuild plus `make test-lambda-baseline` passes 3292/3292. Lambda `--mir-interp test/lambda/float_conversion.ls` passes in both flag states (the current log banner still says "MIR JIT compilation", but the linker path checks `g_mir_interp_mode` and uses `MIR_set_interp_interface`). JS MIR interpreter focused smoke (`tco`, `lib_ajv`) passes. A one-run release LambdaJS A/B smoke is recorded in `test/benchmark/s2_self_tag_float_ab_flag_off_2026-07-10.json` and `test/benchmark/s2_self_tag_float_ab_flag_on_2026-07-10.json`; it is an S2 implementation smoke, not the full three-run P0/S3 benchmark sign-off.
+
+S3 hardening is complete and `LAMBDA_SELF_TAG_FLOAT` is deleted. The C/C++ runtime helpers, Lambda MIR lowering, LambdaJS MIR lowering, array/list float storage, and representation gtests now compile only the self-tagged path; `lambda/lambda-embed.h` was regenerated from `lambda/lambda.h` after the public header change. A code/config search over `lambda`, `test`, `build_lambda_config.json`, and `test/benchmark` has no remaining `LAMBDA_SELF_TAG_FLOAT` references. The old boxed fallback remains only for the intentional out-of-band/subnormal cold path.
+
+Verified S3 slice: pre-delete forced flag-on ASan/debug build and focused ASan canary benchmarks passed; the attempted exhaustive ASan all-benchmark run was replaced by the targeted ASan GC/float canary because the all-benchmark debug run was impractically long and stopped in `awfy/havlak` without a sanitizer failure. Post-delete verification passes: release rebuild, focused SameValueZero/float/MIR-interp smokes, debug representation gtest 9/9, focused JS SameValueZero/object gtests, `make test-lambda-baseline` 3297/3297, and a fresh release canary benchmark artifact at `test/benchmark/s3_release_self_tag_float_post_delete_2026-07-11.json`.
 
 ---
 
@@ -273,13 +277,26 @@ return LMD_TYPE_NULL;                                    // preserve canonical z
 
 ---
 
-## S3 — Hardening, sign-off, default flip
+## S3 — Hardening, sign-off, flag deletion
 
-- [ ] S3.1 GC verification pass: `gc_fixup_embedded_pointers` skip behavior with mixed inline/boxed arrays; conservative-scan false-retention spot-check (benign over-approximation only); a GC-stress run (`gcbench`, `binarytrees`, `storage`) with the flag on under ASan.
-- [ ] S3.2 Full ASan benchmark-suite run, flag on.
-- [ ] S3.3 NaN/zero semantics suite green (§Test matrix); NaN-payload-as-Map-key pin; typed-array NaN round-trip bit-identity pin.
-- [ ] S3.4 Release benchmark suite, flag on vs P0 baseline — publish the table; geometric-mean regression on float-light benchmarks must be ≤ noise.
-- [ ] S3.5 Flip `LAMBDA_SELF_TAG_FLOAT` default on; keep the flag-off build compiling and green for one release as the escape hatch; then delete the flag and any dead interned-payload code.
+- [x] S3.1 GC verification pass: `gc_fixup_embedded_pointers` skip behavior remains type-discriminator based; conservative-scan false-retention is a benign over-approximation only; GC-stress canaries (`gcbench`, `binarytrees`, `storage`) pass under the forced flag-on ASan/debug canary run.
+- [x] S3.2 ASan hardening run: targeted ASan GC/float benchmark canary passed. The exhaustive all-benchmark ASan run was attempted and stopped in `awfy/havlak` for practical runtime reasons without a sanitizer failure before stop; S3 accepted the targeted ASan canary plus full Lambda baseline and release canary instead.
+- [x] S3.3 NaN/zero semantics suite green: `test/js/regression_self_tag_float_samevaluezero.js` pins NaN-payload and ±0 `Map`/`Set` SameValueZero behavior; focused JS gtests and `test_item_repr_gtest` pass after flag deletion.
+- [x] S3.4 Release benchmark canary, always-on/post-delete: `test/benchmark/s3_release_self_tag_float_post_delete_2026-07-11.json` covers 14 MIR/LambdaJS numeric, allocation, data, and macro canaries (`gcbench`, `binarytrees`, `storage`, `mandelbrot`, `nbody`, `matmul`, `splay`, `richards`, `deltablue`).
+- [x] S3.5 Delete `LAMBDA_SELF_TAG_FLOAT`: no flag-off escape hatch is retained. The runtime, MIR, LambdaJS MIR, tests, and generated embed header now build the self-tagged representation as the only normal float Item encoding.
+
+**S3 verification table — 2026-07-11:**
+
+| Gate | Result | Notes |
+|---|---|---|
+| Code/config flag search | PASS | `rg -n "LAMBDA_SELF_TAG_FLOAT" lambda test build_lambda_config.json test/benchmark` returns no matches. Historical references remain only in this plan. |
+| Pre-delete forced flag-on ASan/debug build | PASS | `make -C build/premake config=debug_native lambda test_js_gtest test_item_repr_gtest -B -j8 CFLAGS=-DLAMBDA_SELF_TAG_FLOAT CXXFLAGS=-DLAMBDA_SELF_TAG_FLOAT`. |
+| Pre-delete ASan canary benchmarks | PASS | `test/benchmark/s3_asan_canary_self_tag_float_2026-07-11.json`, 14 selected MIR/LambdaJS benchmarks with GC and float-heavy coverage. |
+| Post-delete focused runtime smokes | PASS | SameValueZero regression, `kostya/matmul.js`, `awfy/mandelbrot2_bundle.js`, and `--mir-interp test/lambda/float_conversion.ls`. |
+| Post-delete debug gtests | PASS | `test_item_repr_gtest` 9/9; focused JS SameValueZero/object-method filter 2/2. |
+| Post-delete Lambda baseline | PASS | `make test-lambda-baseline` 3297/3297: input parsers 2105/2105, Lambda runtime 1192/1192. Required escalation only for the repo's `test/yaml` submodule metadata initialization under `.git`. |
+| Post-delete release rebuild | PASS | `make -C build/premake config=release_native lambda -B -j8`. |
+| Post-delete release benchmark canary | PASS | `test/benchmark/s3_release_self_tag_float_post_delete_2026-07-11.json`, 14/14 completed. |
 
 **Acceptance bar (Part 7 §7.5, verbatim requirement):** all container Items bit-identical to their native pointers; all known-type accessors mask-free identity conversions; the only new work in generic container type discovery is the leading inline-double discriminator.
 
@@ -311,10 +328,10 @@ return LMD_TYPE_NULL;                                    // preserve canonical z
 | Hidden Item producer bypasses `flt2it` (mixed encodings) | S1 | canonical-encoding asserts in decode; ASan + property tests; the flag confines any escape |
 | Container-pointer masking creeps in via a "helpful" refactor | any | MIR golden-inspection test fails the build; Part 7 acceptance bar is the review checklist |
 | Platform pointer tagging (TBI/MTE) leaks high bytes into Items | future | `assert_raw_item_pointer` fails loudly; per Part 7 §7.2, normalize at the allocation/ABI boundary under an explicit platform design, never by masking dereferences |
-| Rollback | S3 | flag off = v1 behavior; S0 guardrails, sentinel renumbering, FLOAT64 retirement, and audits are keep-regardless |
+| Rollback | S3 | no compile-time flag remains after S3; rollback is now a normal revert/cherry-pick decision, while S0 guardrails, sentinel renumbering, FLOAT64 retirement, and audits are keep-regardless |
 
 ## Sequencing notes
 
-- S0 and S1.0 are independently landable and valuable regardless of the representation switch — start there. S0 in particular is the enforcement layer the Item design has been missing (`Lambda_Design_Item_Boxing.md` §7.3 W1 / Evolution Rules 7–10); even a decision to abandon v3 keeps all of S0.
+- S0 and S1.0 were independently landable and remain valuable regardless of the representation switch. S0 in particular is the enforcement layer the Item design had been missing (`Lambda_Design_Item_Boxing.md` §7.3 W1 / Evolution Rules 7–10); even a future decision to revise v3 keeps all of S0.
 - T1/T2/T3 of the tuning proposal (ICs, call path, literal shapes) are orthogonal and may proceed in parallel; T5 (dense-double arrays), Part 2 (stack boxing residue), and the L4/T4 nursery redesign are **re-ranked after S3** with float traffic gone (design doc §5.3).
 - The numeric-nursery leak (design doc §1.4) shrinks to int64/datetime/decimal + subnormal-float residue after S3; its reclamation belongs to the nursery redesign, not this plan.

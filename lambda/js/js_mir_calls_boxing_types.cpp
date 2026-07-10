@@ -420,7 +420,6 @@ MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val) {
     return result;
 }
 
-#ifdef LAMBDA_SELF_TAG_FLOAT
 static MIR_reg_t jm_emit_double_bits(JsMirTranspiler* mt, MIR_reg_t d_reg) {
     // MIR_ALLOCA is a dynamic stack allocation, so a scratch-slot bitcast inside
     // numeric JS loops can grow the stack until SIGBUS. Keep encode branches in
@@ -435,11 +434,9 @@ static MIR_reg_t jm_emit_bits_double(JsMirTranspiler* mt, MIR_reg_t bits_reg) {
     return jm_call_1(mt, "lambda_mir_bits_double", MIR_T_D, MIR_T_I64,
         MIR_new_reg_op(mt->ctx, bits_reg));
 }
-#endif
 
-// Box double -> Item; under LAMBDA_SELF_TAG_FLOAT the hot in-band arm is inline.
+// Box double -> Item; the hot in-band arm is inline.
 MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg) {
-#ifdef LAMBDA_SELF_TAG_FLOAT
     MIR_reg_t bits = jm_emit_double_bits(mt, d_reg);
     MIR_reg_t in_band = jm_new_reg(mt, "jfdmask", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
@@ -494,10 +491,6 @@ MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg) {
 
     jm_emit_label(mt, l_end);
     return result;
-#else
-    return jm_call_1(mt, JS_PROFILED_PUSH_D_NAME, MIR_T_I64, MIR_T_D,
-        MIR_new_reg_op(mt->ctx, d_reg));
-#endif
 }
 
 // Box string via s2it tagging: result = ptr ? (STR_TAG | ptr) : ITEM_NULL
@@ -820,7 +813,6 @@ MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item) {
             MIR_new_reg_op(mt->ctx, d), MIR_new_reg_op(mt->ctx, item)));
         return d;
     }
-#ifdef LAMBDA_SELF_TAG_FLOAT
     MIR_reg_t in_band = jm_new_reg(mt, "jfumask", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
         MIR_new_reg_op(mt->ctx, in_band),
@@ -845,10 +837,6 @@ MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item) {
         MIR_new_reg_op(mt->ctx, inline_d)));
     jm_emit_label(mt, l_end);
     return result;
-#else
-    return jm_call_1(mt, JS_PROFILED_IT2D_NAME, MIR_T_D, MIR_T_I64,
-        MIR_new_reg_op(mt->ctx, item));
-#endif
 }
 
 // Convert native int64_t → native double

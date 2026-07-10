@@ -215,7 +215,6 @@ TEST(ItemRepresentation, NonPointerDiscriminatorWordsDoNotReadHeaders) {
     EXPECT_NE(get_type_id(synthetic), LMD_TYPE_RAW_POINTER);
 }
 
-#ifdef LAMBDA_SELF_TAG_FLOAT
 TEST(ItemRepresentation, SelfTaggedFloatEncoderKeepsInBandBitsImmediate) {
     double value = 1.5;
     uint64_t bits = 0;
@@ -276,14 +275,18 @@ TEST(ItemRepresentation, SelfTaggedFloatHelperBoxesOutOfBandPayloads) {
     EXPECT_EQ(get_type_id(encoded), LMD_TYPE_FLOAT);
     EXPECT_EQ(it2d(encoded), tiny);
 }
-#endif
 
 TEST(ItemRepresentation, MirMemberAccessKeepsContainerItemUnmodified) {
-    remove("temp/mir_dump.txt");
-    int rc = system("./lambda.exe test/lambda/item_repr_container_member_load.ls > temp/item_repr_mir_stdout.txt");
+    // use a test-private dump path: the default temp/mir_dump.txt is truncated and
+    // rewritten by every concurrent debug lambda.exe run (e.g. test_lambda_gtest in
+    // the parallel harness), which raced this test and made member_calls == 0 flaky.
+    const char* dump_path = "temp/item_repr_mir_dump.txt";
+    remove(dump_path);
+    int rc = system("LAMBDA_MIR_DUMP_PATH=temp/item_repr_mir_dump.txt "
+                    "./lambda.exe test/lambda/item_repr_container_member_load.ls > temp/item_repr_mir_stdout.txt");
     ASSERT_EQ(rc, 0);
 
-    FILE* f = fopen("temp/mir_dump.txt", "r");
+    FILE* f = fopen(dump_path, "r");
     if (!f) {
         GTEST_SKIP() << "current lambda.exe does not emit debug MIR dump";
     }

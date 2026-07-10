@@ -157,13 +157,11 @@ typedef struct Item {
     };
 
     inline TypeId type_id() const {
-#ifdef LAMBDA_SELF_TAG_FLOAT
         // Inline double Items must be recognized before interpreting the word
         // as either a high-byte tag or a raw container header.
         if (this->item & ITEM_DBL_MASK) {
             return LMD_TYPE_FLOAT;
         }
-#endif
         if (this->_type_id) {
             return this->_type_id;
         }
@@ -178,7 +176,6 @@ typedef struct Item {
 
     // get raw value out of an Item
     inline double get_double() const{
-#ifdef LAMBDA_SELF_TAG_FLOAT
         if (this->item & ITEM_DBL_MASK) {
             double value;
             __builtin_memcpy(&value, &this->item, sizeof(value));
@@ -187,7 +184,6 @@ typedef struct Item {
         if (this->_type_id == LMD_TYPE_FLOAT && this->double_ptr <= 1) {
             return this->double_ptr ? -0.0 : 0.0;
         }
-#endif
         return *(double*)this->double_ptr;
     }
     inline int64_t get_int64() const { return *(int64_t*)this->int64_ptr; }
@@ -315,7 +311,6 @@ static inline TypeId get_type_id(Item value) { return value.type_id(); }
 
 static inline Item lambda_float_ptr_to_item(const double* double_ptr) {
     if (!double_ptr) return {.item = ITEM_NULL};
-#ifdef LAMBDA_SELF_TAG_FLOAT
     double value = *double_ptr;
     uint64_t bits;
     __builtin_memcpy(&bits, &value, sizeof(bits));
@@ -325,7 +320,6 @@ static inline Item lambda_float_ptr_to_item(const double* double_ptr) {
     if (bits & ITEM_DBL_MASK) {
         return {.item = bits};
     }
-#endif
     return {.item = d2it(double_ptr)};
 }
 

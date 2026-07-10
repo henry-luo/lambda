@@ -588,11 +588,9 @@ void array_set(Array* arr, int64_t index, Item itm) {
     switch (type_id) {
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64: {
-#ifdef LAMBDA_SELF_TAG_FLOAT
         if ((itm.item & ITEM_DBL_MASK) || itm.item == ITEM_FLOAT_P0 || itm.item == ITEM_FLOAT_N0) {
             break;
         }
-#endif
         double* dval = (double*)(arr->items + (arr->capacity - arr->extra - 1));
         *dval = itm.get_double();
         Item encoded = lambda_float_ptr_to_item(dval);
@@ -838,11 +836,9 @@ void list_push(List *list, Item item) {
     }
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64: {
-#ifdef LAMBDA_SELF_TAG_FLOAT
         if (item.item == ITEM_FLOAT_P0 || item.item == ITEM_FLOAT_N0) {
             break;
         }
-#endif
         double* dval = (double*)(list->items + (list->capacity - list->extra - 1));
         *dval = item.get_double();
         Item encoded = lambda_float_ptr_to_item(dval);

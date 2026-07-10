@@ -1087,7 +1087,6 @@ static void emit_return_if_item_error(MirTranspiler* mt, MIR_reg_t item_reg) {
     emit_label(mt, l_ok);
 }
 
-#ifdef LAMBDA_SELF_TAG_FLOAT
 static MIR_reg_t emit_double_bits(MirTranspiler* mt, MIR_reg_t d_reg) {
     // MIR_ALLOCA is dynamic, so using it as a bitcast scratch slot inside hot
     // loops grows the stack per box/unbox. Keep the Item encoding decisions
@@ -1102,11 +1101,9 @@ static MIR_reg_t emit_bits_double(MirTranspiler* mt, MIR_reg_t bits_reg) {
     return emit_call_1(mt, "lambda_mir_bits_double", MIR_T_D, MIR_T_I64,
         MIR_new_reg_op(mt->ctx, bits_reg));
 }
-#endif
 
-// Box float (double) -> Item; under LAMBDA_SELF_TAG_FLOAT the hot in-band arm is inline.
+// Box float (double) -> Item; the hot in-band arm is inline.
 static MIR_reg_t emit_box_float(MirTranspiler* mt, MIR_reg_t val_reg) {
-#ifdef LAMBDA_SELF_TAG_FLOAT
     MIR_reg_t bits = emit_double_bits(mt, val_reg);
     MIR_reg_t in_band = new_reg(mt, "fdmask", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
@@ -1161,9 +1158,6 @@ static MIR_reg_t emit_box_float(MirTranspiler* mt, MIR_reg_t val_reg) {
 
     emit_label(mt, l_end);
     return result;
-#else
-    return emit_call_1(mt, "push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, val_reg));
-#endif
 }
 
 // Load a C string literal pointer into a register
@@ -1410,7 +1404,6 @@ static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_i
     case LMD_TYPE_INT:
         return emit_call_1(mt, "it2i", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, item_reg));
     case LMD_TYPE_FLOAT:
-#ifdef LAMBDA_SELF_TAG_FLOAT
         {
             MIR_reg_t in_band = new_reg(mt, "fumask", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
@@ -1437,9 +1430,6 @@ static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_i
             emit_label(mt, l_end);
             return result;
         }
-#else
-        return emit_call_1(mt, "it2d", MIR_T_D, MIR_T_I64, MIR_new_reg_op(mt->ctx, item_reg));
-#endif
     case LMD_TYPE_BOOL:
         return emit_uext8(mt, emit_call_1(mt, "it2b", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, item_reg)));
     case LMD_TYPE_STRING:
@@ -8899,7 +8889,6 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_INT64);
         }
         case LMD_TYPE_FLOAT: {
-#ifdef LAMBDA_SELF_TAG_FLOAT
             TypeFloat* t = (TypeFloat*)node->type;
             Item encoded = lambda_float_ptr_to_item(&t->double_val);
             MIR_reg_t reg = new_reg(mt, "fconst", MIR_T_I64);
@@ -8908,13 +8897,8 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, reg),
                 MIR_new_int_op(mt->ctx, (int64_t)encoded.item)));
             return reg;
-#else
-            TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_FLOAT);
-#endif
         }
         case LMD_TYPE_FLOAT64: {
-#ifdef LAMBDA_SELF_TAG_FLOAT
             TypeFloat* t = (TypeFloat*)node->type;
             Item encoded = lambda_float_ptr_to_item(&t->double_val);
             MIR_reg_t reg = new_reg(mt, "fconst", MIR_T_I64);
@@ -8923,10 +8907,6 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, reg),
                 MIR_new_int_op(mt->ctx, (int64_t)encoded.item)));
             return reg;
-#else
-            TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_FLOAT64);
-#endif
         }
         case LMD_TYPE_STRING: {
             TypeConst* tc = (TypeConst*)node->type;
@@ -13265,11 +13245,18 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     emit_insn(&mt, MIR_new_ret_insn(ctx, 1, MIR_new_reg_op(ctx, result)));
 
 #ifndef NDEBUG
-    // Dump MIR text for debugging (before finish_func to capture state on error)
-    FILE* mir_dump = fopen("temp/mir_dump.txt", "w");
+    // Dump MIR text for debugging (before finish_func to capture state on error).
+    // The path is overridable via LAMBDA_MIR_DUMP_PATH: every debug lambda.exe run
+    // truncates the fixed default path, so tests that inspect the dump while other
+    // lambda.exe processes run concurrently must redirect it to a private file.
+    const char* mir_dump_path = getenv("LAMBDA_MIR_DUMP_PATH");
+    if (!mir_dump_path || !*mir_dump_path) { mir_dump_path = "temp/mir_dump.txt"; }
+    FILE* mir_dump = fopen(mir_dump_path, "w");
     if (mir_dump) {
         MIR_output(ctx, mir_dump);
         fclose(mir_dump);
+    } else {
+        log_warn("mir dump: failed to open '%s' for writing", mir_dump_path);
     }
 #endif
 

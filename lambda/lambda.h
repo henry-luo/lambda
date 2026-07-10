@@ -1021,13 +1021,11 @@ static inline Item lambda_float_ptr_to_item(const double* double_ptr);
 #else
 static inline Item lambda_float_ptr_to_item(const double* double_ptr) {
     if (!double_ptr) return ITEM_NULL;
-#ifdef LAMBDA_SELF_TAG_FLOAT
     double value = *double_ptr;
     uint64_t bits;
     __builtin_memcpy(&bits, &value, sizeof(bits));
     if (value == 0.0) return ITEM_FLOAT_P0 | ((bits >> 63) ? UINT64_C(1) : UINT64_C(0));
     if (bits & ITEM_DBL_MASK) return bits;
-#endif
     return d2it(double_ptr);
 }
 #endif

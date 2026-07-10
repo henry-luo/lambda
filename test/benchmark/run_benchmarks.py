@@ -49,7 +49,7 @@ os.chdir(PROJECT_ROOT)
 # Configuration
 # ============================================================
 DEFAULT_TIMEOUT_S = 120
-LAMBDA_EXE = "./lambda.exe"
+LAMBDA_EXE = os.environ.get("LAMBDA_EXE", "./lambda.exe")
 NODE_EXE = "node"
 PYTHON_EXE = "python3"
 QJS_EXE = "qjs"
