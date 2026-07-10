@@ -327,7 +327,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
             } else {
                 double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
                 *ptr = value;
-                final_result = (Item){.item = d2it(ptr)};
+                final_result = lambda_float_ptr_to_item(ptr);
             }
         } else {
             final_result = result;
@@ -1058,7 +1058,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
             } else {
                 double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
                 *ptr = value;
-                final_result = (Item){.item = d2it(ptr)};
+                final_result = lambda_float_ptr_to_item(ptr);
             }
         } else {
             final_result = result;

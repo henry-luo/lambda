@@ -6951,7 +6951,7 @@ void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env
         strbuf_append_str(tp->code_buf, "l2it(&_");
         break;
     case LMD_TYPE_FLOAT:
-        strbuf_append_str(tp->code_buf, "d2it(&_");
+        strbuf_append_str(tp->code_buf, "lambda_float_ptr_to_item(&_");
         break;
     case LMD_TYPE_BOOL:
         strbuf_append_str(tp->code_buf, "b2it(_");

@@ -104,7 +104,7 @@ extern "C" const char* get_type_name(TypeId type_id) {
         case LMD_TYPE_INT: return "int";
         case LMD_TYPE_INT64: return "int64";
         case LMD_TYPE_FLOAT: return "float";
-        case LMD_TYPE_FLOAT64: return "f64";
+        case LMD_TYPE_FLOAT64: return "float";
         case LMD_TYPE_DECIMAL: return "decimal";
         case LMD_TYPE_DTIME: return "datetime";
         case LMD_TYPE_SYMBOL: return "symbol";
@@ -260,7 +260,7 @@ void init_type_info() {
     type_info[LMD_TYPE_INT] = {sizeof(int64_t), "int", &TYPE_INT, (Type*)&LIT_TYPE_INT};  // 64-bit to store 56-bit value
     type_info[LMD_TYPE_INT64] = {sizeof(int64_t), "int64", &TYPE_INT64, (Type*)&LIT_TYPE_INT64};
     type_info[LMD_TYPE_FLOAT] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
-    type_info[LMD_TYPE_FLOAT64] = {sizeof(double), "f64", &TYPE_FLOAT64, (Type*)&LIT_TYPE_F64};
+    type_info[LMD_TYPE_FLOAT64] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
     type_info[LMD_TYPE_DECIMAL] = {sizeof(void*), "decimal", &TYPE_DECIMAL, (Type*)&LIT_TYPE_DECIMAL};
     type_info[LMD_TYPE_DTIME] = {sizeof(DateTime), "datetime", &TYPE_DTIME, (Type*)&LIT_TYPE_DTIME};
     type_info[LMD_TYPE_SYMBOL] = {sizeof(char*), "symbol", &TYPE_SYMBOL, (Type*)&LIT_TYPE_SYMBOL};
@@ -320,47 +320,50 @@ extern "C" {
 // Note: The main it2l function is defined below it2i
 
 double it2d(Item itm) {
-    if (itm._type_id == LMD_TYPE_INT) {
+    TypeId type_id = get_type_id(itm);
+    if (type_id == LMD_TYPE_INT) {
         return (double)itm.get_int56();
     }
-    else if (itm._type_id == LMD_TYPE_INT64) {
+    else if (type_id == LMD_TYPE_INT64) {
         return (double)itm.get_int64();
     }
-    else if (itm._type_id == LMD_TYPE_FLOAT || itm._type_id == LMD_TYPE_FLOAT64) {
+    else if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
         return itm.get_double();
     }
-    else if (itm._type_id == LMD_TYPE_DECIMAL) {
+    else if (type_id == LMD_TYPE_DECIMAL) {
         return decimal_to_double(itm);
     }
-    else if (itm._type_id == LMD_TYPE_NUM_SIZED) {
+    else if (type_id == LMD_TYPE_NUM_SIZED) {
         return itm.get_num_sized_as_double();
     }
-    else if (itm._type_id == LMD_TYPE_UINT64) {
+    else if (type_id == LMD_TYPE_UINT64) {
         return (double)itm.get_uint64();
     }
-    else if (itm._type_id == LMD_TYPE_ERROR) {
+    else if (type_id == LMD_TYPE_ERROR) {
         return NAN;  // poison NaN — auto-propagates through all downstream arithmetic
     }
-    log_debug("it2d: cannot convert type %s to double", get_type_name(itm._type_id));
+    log_debug("it2d: cannot convert type %s to double", get_type_name(type_id));
     return NAN;  // NaN for unrecognized types (was 0.0 — silent data corruption)
 }
 
 bool it2b(Item itm) {
-    if (itm._type_id == LMD_TYPE_BOOL) {
+    TypeId type_id = get_type_id(itm);
+    if (type_id == LMD_TYPE_BOOL) {
         return itm.bool_val != 0;
     }
     // Convert other types to boolean following JavaScript rules
-    else if (itm._type_id == LMD_TYPE_NULL || itm._type_id == LMD_TYPE_ERROR) {
+    else if (type_id == LMD_TYPE_NULL || type_id == LMD_TYPE_ERROR) {
         return false;  // errors are falsy
     }
-    else if (itm._type_id == LMD_TYPE_INT) {
+    else if (type_id == LMD_TYPE_INT) {
         return itm.get_int56() != 0;
     }
-    else if (itm._type_id == LMD_TYPE_FLOAT || itm._type_id == LMD_TYPE_FLOAT64) {
-        double d = itm.get_double();
-        return !isnan(d) && d != 0.0;
+    else if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
+        // Lambda truthiness treats every number as truthy; inline floats must not
+        // inherit JS-style zero/NaN falsiness from their raw double payload.
+        return true;
     }
-    else if (itm._type_id == LMD_TYPE_STRING) {
+    else if (type_id == LMD_TYPE_STRING) {
         String* str = itm.get_safe_string();
         return str && str->len > 0;
     }
@@ -369,19 +372,20 @@ bool it2b(Item itm) {
 }
 
 int64_t it2i(Item itm) {
-    if (itm._type_id == LMD_TYPE_INT) {
+    TypeId type_id = get_type_id(itm);
+    if (type_id == LMD_TYPE_INT) {
         return itm.get_int56();
     }
-    else if (itm._type_id == LMD_TYPE_INT64) {
+    else if (type_id == LMD_TYPE_INT64) {
         return itm.get_int64();
     }
-    else if (itm._type_id == LMD_TYPE_FLOAT || itm._type_id == LMD_TYPE_FLOAT64) {
+    else if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
         return (int64_t)itm.get_double();
     }
-    else if (itm._type_id == LMD_TYPE_BOOL) {
+    else if (type_id == LMD_TYPE_BOOL) {
         return itm.bool_val ? 1 : 0;
     }
-    else if (itm._type_id == LMD_TYPE_ERROR) {
+    else if (type_id == LMD_TYPE_ERROR) {
         return 0;  // error items return 0 (callers should check type before calling it2i)
     }
     return 0;  // unrecognized type
@@ -394,16 +398,17 @@ void _store_f64(double* dst, double val) { *dst = val; }
 
 // extract int56 as int64 (full precision)
 int64_t it2l(Item itm) {
-    if (itm._type_id == LMD_TYPE_INT) {
+    TypeId type_id = get_type_id(itm);
+    if (type_id == LMD_TYPE_INT) {
         return itm.get_int56();
     }
-    else if (itm._type_id == LMD_TYPE_INT64) {
+    else if (type_id == LMD_TYPE_INT64) {
         return itm.get_int64();
     }
-    else if (itm._type_id == LMD_TYPE_FLOAT || itm._type_id == LMD_TYPE_FLOAT64) {
+    else if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
         return (int64_t)itm.get_double();
     }
-    else if (itm._type_id == LMD_TYPE_BOOL) {
+    else if (type_id == LMD_TYPE_BOOL) {
         return itm.bool_val ? 1 : 0;
     }
     return INT64_MAX;  // error sentinel
@@ -536,15 +541,14 @@ void expand_list(List *list, Arena* arena = nullptr) {
         // and is stored in the list extra slots, need to update the pointer
         for (int i = 0; i < list->length; i++) {
             Item itm = list->items[i];
-            if (itm._type_id == LMD_TYPE_FLOAT || itm._type_id == LMD_TYPE_FLOAT64 ||
+            if (((itm._type_id == LMD_TYPE_FLOAT && itm.double_ptr > 1) || itm._type_id == LMD_TYPE_FLOAT64) ||
                     itm._type_id == LMD_TYPE_INT64 || itm._type_id == LMD_TYPE_DTIME) {
                 Item* old_pointer = (Item*)itm.double_ptr;
                 // Only update pointers that are in the old list buffer's extra space
                 if (old_items <= old_pointer && old_pointer < old_items + list->capacity/2) {
                     int offset = old_items + list->capacity/2 - old_pointer;
                     void* new_pointer = list->items + list->capacity - offset;
-                    list->items[i] = {.item = itm._type_id == LMD_TYPE_FLOAT ? d2it(new_pointer) :
-                        itm._type_id == LMD_TYPE_FLOAT64 ? f642it(new_pointer) :
+                    list->items[i] = {.item = (itm._type_id == LMD_TYPE_FLOAT || itm._type_id == LMD_TYPE_FLOAT64) ? d2it(new_pointer) :
                         itm._type_id == LMD_TYPE_INT64 ? l2it(new_pointer) : k2it(new_pointer)};
                 }
                 // if the pointer is not in the old buffer, it should not be updated
@@ -584,10 +588,16 @@ void array_set(Array* arr, int64_t index, Item itm) {
     switch (type_id) {
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64: {
+#ifdef LAMBDA_SELF_TAG_FLOAT
+        if ((itm.item & ITEM_DBL_MASK) || itm.item == ITEM_FLOAT_P0 || itm.item == ITEM_FLOAT_N0) {
+            break;
+        }
+#endif
         double* dval = (double*)(arr->items + (arr->capacity - arr->extra - 1));
         *dval = itm.get_double();
-        arr->items[index] = {.item = type_id == LMD_TYPE_FLOAT64 ? f642it(dval) : d2it(dval)};
-        arr->extra++;
+        Item encoded = lambda_float_ptr_to_item(dval);
+        arr->items[index] = encoded;
+        if (encoded.item == d2it(dval)) arr->extra++;
         break;
     }
     case LMD_TYPE_INT64: {
@@ -828,10 +838,16 @@ void list_push(List *list, Item item) {
     }
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64: {
+#ifdef LAMBDA_SELF_TAG_FLOAT
+        if (item.item == ITEM_FLOAT_P0 || item.item == ITEM_FLOAT_N0) {
+            break;
+        }
+#endif
         double* dval = (double*)(list->items + (list->capacity - list->extra - 1));
         *dval = item.get_double();
-        list->items[list->length-1] = {.item = item._type_id == LMD_TYPE_FLOAT64 ? f642it(dval) : d2it(dval)};
-        list->extra++;
+        Item encoded = lambda_float_ptr_to_item(dval);
+        list->items[list->length-1] = encoded;
+        if (encoded.item == d2it(dval)) list->extra++;
         break;
     }
     case LMD_TYPE_INT64: {
@@ -896,7 +912,7 @@ void list_push_spread(List *list, Item item) {
                 break;
             case ELEM_FLOAT64:
                 for (int64_t i = 0; i < arr->length; i++)
-                    list_push(list, {.item = d2it(&arr->float_items[i])});
+                    list_push(list, lambda_float_ptr_to_item(&arr->float_items[i]));
                 break;
             default: break;
             }
@@ -1132,9 +1148,9 @@ Item typeditem_to_item(TypedItem *titem) {
     case LMD_TYPE_INT64:
         return {.item = l2it(&titem->long_val)};
     case LMD_TYPE_FLOAT:
-        return {.item = d2it(&titem->double_val)};
+        return lambda_float_ptr_to_item(&titem->double_val);
     case LMD_TYPE_FLOAT64:
-        return {.item = f642it(&titem->double_val)};
+        return lambda_float_ptr_to_item(&titem->double_val);
     case LMD_TYPE_DTIME:
         return {.item = k2it(&titem->item)};
     case LMD_TYPE_DECIMAL:
@@ -1196,10 +1212,10 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
         result = {.item = l2it(field_ptr)};  // points to long directly
         break;
     case LMD_TYPE_FLOAT:
-        result = {.item = d2it(field_ptr)};  // points to double directly
+        result = lambda_float_ptr_to_item((const double*)field_ptr);
         break;
     case LMD_TYPE_FLOAT64:
-        result = {.item = f642it(field_ptr)};  // points to double directly
+        result = lambda_float_ptr_to_item((const double*)field_ptr);
         break;
     case LMD_TYPE_DTIME:
         result = {.item = k2it(field_ptr)};  // points to datetime directly

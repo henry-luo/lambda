@@ -165,26 +165,18 @@ extern "C" Item js_to_number(Item value) {
             long long val = 0;
             while (*bp == '0' || *bp == '1') { val = val * 2 + (*bp - '0'); bp++; }
             if (*bp != '\0' || bp == buf + 2) {
-                double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-                *nan_ptr = NAN;
-                return (Item){.item = d2it(nan_ptr)};
+                return js_make_number(NAN);
             }
-            double* result = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *result = (double)val;
-            return (Item){.item = d2it(result)};
+            return js_make_number((double)val);
         }
         if (trimmed_len > 2 && buf[0] == '0' && (buf[1] == 'o' || buf[1] == 'O')) {
             char* op = buf + 2;
             long long val = 0;
             while (*op >= '0' && *op <= '7') { val = val * 8 + (*op - '0'); op++; }
             if (*op != '\0' || op == buf + 2) {
-                double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-                *nan_ptr = NAN;
-                return (Item){.item = d2it(nan_ptr)};
+                return js_make_number(NAN);
             }
-            double* result = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *result = (double)val;
-            return (Item){.item = d2it(result)};
+            return js_make_number((double)val);
         }
         // v29: Handle hex (0x/0X) literals explicitly — ES spec does not allow
         // a sign prefix on hex literals. strtod() on some platforms (macOS) accepts
@@ -203,21 +195,15 @@ extern "C" Item js_to_number(Item value) {
                 hp++;
             }
             if (*hp != '\0' || !has_digits) {
-                double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-                *nan_ptr = NAN;
-                return (Item){.item = d2it(nan_ptr)};
+                return js_make_number(NAN);
             }
-            double* result = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *result = (double)val;
-            return (Item){.item = d2it(result)};
+            return js_make_number((double)val);
         }
         // v29: Reject signed hex/octal/binary — strtod might accept "+0x..." on some platforms
         if (trimmed_len > 3 && (buf[0] == '+' || buf[0] == '-') && buf[1] == '0' &&
             (buf[2] == 'x' || buf[2] == 'X' || buf[2] == 'b' || buf[2] == 'B' ||
              buf[2] == 'o' || buf[2] == 'O')) {
-            double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *nan_ptr = NAN;
-            return (Item){.item = d2it(nan_ptr)};
+            return js_make_number(NAN);
         }
         // ES spec: only "Infinity" (exact case) is valid; strtod accepts case-insensitive
         if (trimmed_len >= 3 && (buf[0] == 'i' || buf[0] == 'I')) {
@@ -295,9 +281,7 @@ extern "C" Item js_to_number(Item value) {
             return js_to_number(str);
         }
         // Objects, arrays, etc. -> NaN
-        double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *nan_ptr = NAN;
-        return (Item){.item = d2it(nan_ptr)};
+        return js_make_number(NAN);
     }
 }
 
@@ -1130,9 +1114,7 @@ double js_get_number(Item value) {
 
 Item js_make_number(double d) {
     // JS Number must not leak Lambda's compact-int representation; representation drift broke type-sensitive JS paths.
-    double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *ptr = d;
-    return (Item){.item = d2it(ptr)};
+    return flt2it(d);
 }
 
 // =============================================================================

@@ -65,7 +65,7 @@ static Item rdb_map_attr(Item data, const char* key) {
             result.item = l2it((int64_t*)field_ptr);
             return result;
         case LMD_TYPE_FLOAT:
-            result.item = d2it((double*)field_ptr);
+            result = lambda_float_ptr_to_item((const double*)field_ptr);
             return result;
         case LMD_TYPE_DTIME:
             result.item = k2it((DateTime*)field_ptr);

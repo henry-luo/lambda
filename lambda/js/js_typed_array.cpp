@@ -933,9 +933,7 @@ static bool js_atomics_validate_index(JsTypedArray* ta, Item index_item, int* ou
 static Item js_atomics_number_to_integer_item(double number) {
     if (std::isnan(number)) return js_make_number(0.0);
     if (!std::isfinite(number)) {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = number;
-        return (Item){.item = d2it(fp)};
+        return js_make_number(number);
     }
     double integer = std::trunc(number);
     // Atomics integer conversion returns an observable Number; -0 must be canonicalized to +0 after truncation.
@@ -943,9 +941,7 @@ static Item js_atomics_number_to_integer_item(double number) {
     if (integer >= (double)INT64_MIN && integer <= (double)INT64_MAX) {
         return js_make_number(integer);
     }
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = integer;
-    return (Item){.item = d2it(fp)};
+    return js_make_number(integer);
 }
 
 static bool js_atomics_to_number_bits(JsTypedArrayType type, Item value, uint64_t* out_bits, Item* out_store_value) {
@@ -1909,7 +1905,9 @@ extern "C" Item js_sharedarraybuffer_construct_with_options(Item length_arg, Ite
 
     double dval;
     if (type == LMD_TYPE_FLOAT) {
-        dval = *((double*)((uintptr_t)num.item & 0x00FFFFFFFFFFFFFF));
+        // self-tagged floats do not have a boxed payload; all numeric Items
+        // must decode through the shared Item reader.
+        dval = it2d(num);
     } else {
         dval = (double)it2i(num);
     }
@@ -2357,15 +2355,11 @@ extern "C" Item js_typed_array_raw_get_item(JsTypedArray* ta, void* data, int id
             // Integer typed-array reads are observable JS Number values, not Lambda compact ints.
             return js_make_number(value);
         case JS_TYPED_FLOAT16: {
-            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *fp = js_float16_bits_to_float64(((uint16_t*)data)[idx]);
-            return (Item){.item = d2it(fp)};
+            return js_make_number(js_float16_bits_to_float64(((uint16_t*)data)[idx]));
         }
         case JS_TYPED_FLOAT32:
         case JS_TYPED_FLOAT64: {
-            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *fp = value;
-            return (Item){.item = d2it(fp)};
+            return js_make_number(value);
         }
         default:
             break;
@@ -2386,19 +2380,13 @@ extern "C" Item js_typed_array_raw_get_item(JsTypedArray* ta, void* data, int id
     case JS_TYPED_UINT32:
         return js_make_number((double)((uint32_t*)data)[idx]);
     case JS_TYPED_FLOAT16: {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = js_float16_bits_to_float64(((uint16_t*)data)[idx]);
-        return (Item){.item = d2it(fp)};
+        return js_make_number(js_float16_bits_to_float64(((uint16_t*)data)[idx]));
     }
     case JS_TYPED_FLOAT32: {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = (double)((float*)data)[idx];
-        return (Item){.item = d2it(fp)};
+        return js_make_number((double)((float*)data)[idx]);
     }
     case JS_TYPED_FLOAT64: {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = ((double*)data)[idx];
-        return (Item){.item = d2it(fp)};
+        return js_make_number(((double*)data)[idx]);
     }
     case JS_TYPED_BIGINT64: {
         extern Item bigint_from_int64(int64_t val);
@@ -3206,9 +3194,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         if (little_endian != sys_le) raw = swap32(raw);
         float f;
         memcpy(&f, &raw, 4);
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = (double)f;
-        return (Item){.item = d2it(fp)};
+        return js_make_number((double)f);
     }
     if (ml == 10 && strncmp(mn, "getFloat64", 10) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 8);
@@ -3219,9 +3205,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         if (little_endian != sys_le) raw = swap64(raw);
         double d;
         memcpy(&d, &raw, 8);
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = d;
-        return (Item){.item = d2it(fp)};
+        return js_make_number(d);
     }
     if (ml == 11 && strncmp(mn, "getBigInt64", 11) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 8);

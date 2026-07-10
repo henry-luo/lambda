@@ -345,7 +345,7 @@ extern "C" Item js_canvas_measure_text(Item ctx_obj, Item text_arg) {
     Item wk = (Item){.item = s2it(heap_create_name("width"))};
     double* dp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *dp = (double)width;
-    Item wv = (Item){.item = d2it(dp)};
+    Item wv = lambda_float_ptr_to_item(dp);
     js_property_set(result, wk, wv);
     return result;
 }

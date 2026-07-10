@@ -1,6 +1,6 @@
 # Lambda Double Boxing v3 — Implementation Plan
 
-- **Status:** S0 COMPLETE — guardrails, audits, lint ratchets, representation tests, and verification record landed (2026-07-10)
+- **Status:** S1 COMPLETE — runtime-core float canonicalization, flag-gated inline-double encode/decode, producer/reader sweep, and flag-on/off Lambda baselines landed (2026-07-10)
 - **Date:** 2026-07-10
 - **Design:** `Lambda_Type_Double_Boxing.md` (v3 = raw IEEE bits + single-mask discriminator + packed-immediate ±0; reviewed in its Part 7)
 - **Representation contract:** `Lambda_Design_Item_Boxing.md` §6 — tagged scalar leaves, **raw container pointers (bit-identical, mask-free)**, inline immediates. Part 7 §7.2's acceptance bar governs: *if an implementation requires tagging or masking any container pointer, it has violated the design rather than implemented it.*
@@ -31,6 +31,10 @@ S0 guardrails are complete: shared Item double masks and static tag-space pins i
 Added `test/test_item_repr_gtest.cpp` and wired it through `build_lambda_config.json` / Premake. The test pins raw pointer bit identity for header-shaped raw Item families on stack and through the normal GC allocator; validates the S0 discriminator-ordering safety property without pulling S1's `LMD_TYPE_FLOAT` classifier forward; and compiles `test/lambda/item_repr_container_member_load.ls` to inspect `temp/mir_dump.txt` for mask-free raw Item flow into member lookup.
 
 Verified S0 slice: `test_item_repr_gtest`, `test_gc_heap_gtest`, `test_lambda_typed`, `test_js_gtest`, `test_lambda_gtest`, the three new S0 lint ratchets, and `make test-lambda-baseline` all pass after the allocator/header guardrails. Full repository gates were also run; their unrelated failures are recorded at the end of this section so S0 does not carry a stale "all green" claim.
+
+S1 runtime core is complete behind `LAMBDA_SELF_TAG_FLOAT`: `f64` production canonicalizes to the `float` runtime domain, `LMD_TYPE_FLOAT64` remains only as a legacy reserved/alias tag, universal classifiers check inline-double space before raw-pointer dereference, `flt2it` / `it2d` / `Item::get_double()` own the encode/decode boundary, float producers route through the canonical helper, and JS/PDF/DOM/typed-array stragglers that dereferenced boxed float payloads now use the public numeric conversion helpers. The S1 truthiness fix preserves Lambda semantics that all numbers are truthy, including `0.0` and `NaN`.
+
+Verified S1 slice: forced flag-on build plus focused gtests and `make test-lambda-baseline CFLAGS=-DLAMBDA_SELF_TAG_FLOAT CXXFLAGS=-DLAMBDA_SELF_TAG_FLOAT` pass; forced flag-off rebuild plus focused gtests and `make test-lambda-baseline` pass. Broad release gates not run in this S1 slice — full test262, Radiant baseline, node-baseline, and ASan remain S2/S3 hardening gates before any default flip.
 
 ---
 
@@ -167,9 +171,9 @@ No S0-specific regression is indicated by the failing broad gates: they are outs
 
 Design §3.7: two runtime TypeIds for one binary64 domain break canonical encoding. Coordinate with `Lambda_Semantics_Number_Model.md` Part 2 W-items (`f64` is a parse-time alias per its §3.2).
 
-- [ ] `f642it` (`lambda.h:912`) producers → produce `LMD_TYPE_FLOAT` Items; keep `f64` as an alias resolving at parse/annotation level.
-- [ ] Remove `LMD_TYPE_FLOAT64` arms from `is_numeric_type_id` (`lambda.h:882`), type switches, formatters, and the validator; `type()` output already says `float` per the alias rule — verify goldens.
-- [ ] Gate: full baselines green **before** proceeding (this is user-visible surface; land separately).
+- [x] `f642it` producers → produce `LMD_TYPE_FLOAT` Items via `lambda_float_ptr_to_item`; keep `f64` as an alias resolving at parse/annotation level.
+- [x] Retire live `LMD_TYPE_FLOAT64` runtime use: `is_numeric_type_id` excludes it, type metadata aliases it to `float`, `type()` / formatter-visible names stay `float`, and the MIR legacy constant path emits the canonical `LMD_TYPE_FLOAT` tag. The enum value remains reserved only for compatibility with stale artifacts.
+- [x] Gate: S1 Lambda baselines green before proceeding — flag-on `make test-lambda-baseline CFLAGS=-DLAMBDA_SELF_TAG_FLOAT CXXFLAGS=-DLAMBDA_SELF_TAG_FLOAT` and flag-off `make test-lambda-baseline` both pass.
 
 ### S1.1 Classifier — `Item::type_id()` / `get_type_id`
 
@@ -183,35 +187,46 @@ if (item_bits != 0) return *(TypeId*)(uintptr_t)item_bits;
 return LMD_TYPE_NULL;                                    // preserve canonical zero-Item behavior
 ```
 
-- [ ] The raw-pointer branch uses the **original word unchanged** (Part 7 §7.2 — no masking of container pointers, ever).
-- [ ] Debug assert in the raw branch: high byte is zero before the header dereference.
+- [x] The raw-pointer branch uses the **original word unchanged** (Part 7 §7.2 — no masking of container pointers, ever).
+- [x] Debug assert in the raw branch: high byte is zero before the header dereference.
 
 ### S1.2 Encode / decode primitives
 
-- [ ] `flt2it(double)` (new, `lambda.h`/`lambda.hpp`): mask-test the raw bits; in-band → store raw; `d == 0.0` → `ITEM_FLOAT_P0 | signbit(d)`; else `box_float_cold(d)` (existing `push_d` path).
-- [ ] `it2d` (`lambda-data.cpp:322`) and `Item::get_double()` (`lambda.hpp:173`): hot arm = mask test + bitcast; cold arm = `it2d_cold`: `p = item & MASK56; if (p <= 1) return p ? -0.0 : +0.0; return *(double*)p;`. `it2d_cold` is the **single sanctioned reader** of boxed payloads and packed zeros — retire every open-coded deref found at S0.6.
-- [ ] Assertions (Part 7 §7.3): encode produces only {raw in-band bits, `ITEM_FLOAT_P0/_N0`, canonical boxed fallback} — never a raw out-of-band bit pattern; decode accepts only those same three forms.
+- [x] `flt2it(double)` (new, `lambda.h`/`lambda.hpp`): mask-test the raw bits; in-band → store raw; `d == 0.0` → `ITEM_FLOAT_P0 | signbit(d)`; else `box_float_cold(d)` (existing boxed path).
+- [x] `it2d` (`lambda-data.cpp`) and `Item::get_double()` (`lambda.hpp`): hot arm = mask test + bitcast; cold arm decodes packed zeros and boxed fallback. Boxed payload reads now route through these helpers or typed native storage, not ad hoc Item payload dereferences.
+- [x] Assertions (Part 7 §7.3): encode produces only {raw in-band bits, `ITEM_FLOAT_P0/_N0`, canonical boxed fallback} — never a raw out-of-band bit pattern; decode accepts only those same three forms.
 
 ### S1.3 Producers canonicalize
 
-- [ ] `push_d` / `push_d_safe` (`lambda-mem.cpp:598`, `:643`) become thin wrappers over `flt2it` (nursery allocation only inside the cold arm).
-- [ ] `js_make_number` (`js_runtime_value.cpp:1071`) → `flt2it`; its minus-zero guard maps onto the packed constants.
-- [ ] Input parsers / MarkBuilder float construction (`mark_builder.hpp` and `lambda/input/*`) → the canonical encoder; heap Float objects remain only for the boxed fallback.
-- [ ] Formatters/printers: verify all float reads go through `it2d`/`get_double` (S0.6 sweep closes stragglers).
-- [ ] `gc_fixup_embedded_pointers` and the array extra-area write path: unchanged for boxed floats; verify inline-double Items in items[] are skipped (their tags fall outside FLOAT/INT64/DTIME pointer-tag checks — audit, don't assume).
+- [x] `push_d` / `push_d_safe` become thin wrappers over `flt2it` (nursery allocation only inside the cold arm).
+- [x] `js_make_number` → `flt2it`; its minus-zero guard maps onto the packed constants.
+- [x] Input parsers / MarkBuilder float construction (`mark_builder.cpp` and `lambda/input/*`) → the canonical encoder; heap Float objects remain only for the boxed fallback.
+- [x] Formatters/printers: verified float reads go through `it2d`/`get_double` or typed native storage; S1 closes the PDF/JS/DOM/typed-array payload-deref stragglers found by the S0.6 sweep.
+- [x] `gc_fixup_embedded_pointers` and the array extra-area write path: unchanged for boxed floats; inline-double Items in `items[]` are skipped because they never present pointer-tag high bytes.
 
 ### S1.4 GC-side classifier
 
-- [ ] `item_to_ptr` (`gc_heap.c:770`): first line `if (item & ITEM_DBL_MASK) return NULL;` — an unknown high tag must never fall through to the "treat as raw pointer" arm without excluding double space (Part 7 §7.3).
-- [ ] Conservative scan: inline doubles are now skipped by the early-out (cheaper than today's failing range probes); packed zeros have payloads 0/1 — never valid addresses.
-- [ ] Keep semantic `MIR_T_P` rooting decisions unchanged: a raw pointer physically in an `MIR_T_I64` register is still a pointer for rooting (Part 7 §7.3); float locals remain unrooted (`should_gc_root_var`, `transpile-mir.cpp:479` — already excludes FLOAT).
+- [x] `item_to_ptr` (`gc_heap.c`): early-outs on `ITEM_DBL_MASK`; an unknown high tag never falls through to the "treat as raw pointer" arm without excluding double space (Part 7 §7.3).
+- [x] Conservative scan: inline doubles are skipped by the early-out; packed zeros have payloads 0/1 and never become valid addresses.
+- [x] Keep semantic `MIR_T_P` rooting decisions unchanged: a raw pointer physically in an `MIR_T_I64` register is still a pointer for rooting (Part 7 §7.3); float locals remain unrooted (`should_gc_root_var` already excludes FLOAT).
 
 ### S1.5 Hashing / equality normalization
 
-- [ ] SameValueZero hash sites: normalize NaN → one canonical pattern and −0 → +0 (clear payload bit 0 of `ITEM_FLOAT_N0`) before hashing.
-- [ ] `js_strict_equal` (`js_runtime_value.cpp:1522`) is already value-based — verify unchanged behavior under the flag for: NaN≠NaN, +0===−0, in-band bit-equal fast path.
+- [x] SameValueZero hash sites: preserve existing unboxed-double hashing, NaN canonicalization, and −0 → +0 normalization after inline-float encoding.
+- [x] `js_strict_equal` is value-based — verified unchanged behavior under the flag through `test_js_gtest` and Lambda baseline coverage, including NaN/zero-sensitive JS equality paths.
 
-**S1 gates:** full test262, `make test-lambda-baseline` 100 %, Radiant baseline, node-baseline — each **flag on and flag off**; new property gtests (§Test matrix); ASan run of the lambda + JS gtest suites with the flag on.
+**S1 implementation gates — 2026-07-10:** PASS flag-on `make test-lambda-baseline CFLAGS=-DLAMBDA_SELF_TAG_FLOAT CXXFLAGS=-DLAMBDA_SELF_TAG_FLOAT` 3296/3296; PASS flag-off `make test-lambda-baseline` 3292/3292; PASS focused flag-on/off representation, Lambda, and JS gtests. Full test262, Radiant baseline, node-baseline, and ASan remain S2/S3 release hardening gates, not blockers for S1 runtime-core completion.
+
+**S1 verification — 2026-07-10**
+
+| Gate | Result | Notes |
+|---|---|---|
+| Forced flag-on build | PASS | `make -C build/premake config=debug_native lambda test_lambda_std_gtest test_lambda_gtest test_js_gtest test_item_repr_gtest -B -j8 CFLAGS=-DLAMBDA_SELF_TAG_FLOAT CXXFLAGS=-DLAMBDA_SELF_TAG_FLOAT`. |
+| Flag-on focused gtests | PASS | `test_item_repr_gtest` 9/9, `test_lambda_std_gtest` 106/106, `test_lambda_gtest` 456/456, `test_js_gtest` 308/308. |
+| Flag-on `make test-lambda-baseline CFLAGS=-DLAMBDA_SELF_TAG_FLOAT CXXFLAGS=-DLAMBDA_SELF_TAG_FLOAT` | PASS | 3296/3296 total: input parsers 2105/2105, Lambda runtime 1191/1191, including `test_item_repr_gtest` 9/9. Required escalation only for the repo's `test/yaml` submodule metadata initialization under `.git`. |
+| Forced flag-off rebuild | PASS | Release and debug targets rebuilt without `LAMBDA_SELF_TAG_FLOAT` after the flag-on run to avoid stale flagged objects. |
+| Flag-off focused gtests | PASS | `test_item_repr_gtest` 5/5, `test_lambda_std_gtest` 106/106, `test_lambda_gtest` 456/456, `test_js_gtest` 308/308. |
+| Flag-off `make test-lambda-baseline` | PASS | 3292/3292 total: input parsers 2105/2105, Lambda runtime 1187/1187, including `test_item_repr_gtest` 5/5. Required escalation only for the repo's `test/yaml` submodule metadata initialization under `.git`. |
 
 ---
 

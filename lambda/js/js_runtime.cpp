@@ -18246,9 +18246,7 @@ static Item js_collection_canonical_key(Item key) {
     if (get_type_id(key) == LMD_TYPE_FLOAT) {
         double value = it2d(key);
         if (value == 0.0 && signbit(value)) {
-            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *fp = 0.0;
-            return (Item){.item = d2it(fp)};
+            return flt2it(0.0);
         }
     }
     return key;

@@ -98,6 +98,8 @@ public:
             return raw_.bool_val != 0;
         } else if constexpr (Tag == LMD_TYPE_INT) {
             return raw_.get_int56();
+        } else if constexpr (Tag == LMD_TYPE_FLOAT) {
+            return raw_.get_double();
         } else if constexpr (Tag == LMD_TYPE_NUM_SIZED) {
             return raw_;
         } else {

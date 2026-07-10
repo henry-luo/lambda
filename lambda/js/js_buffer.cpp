@@ -44,6 +44,7 @@ extern "C" Item js_get_current_this(void);
 extern "C" Item js_blob_new(Item parts, Item options);
 extern "C" Item js_blob_url_resolve(Item id_item);
 extern "C" void js_set_function_name(Item fn_item, Item name_item);
+extern Item js_make_number(double d);
 void* heap_alloc(int size, TypeId type_id);
 
 static Item make_buffer_content_string_item(const char* str, int len,
@@ -2162,9 +2163,7 @@ extern "C" Item js_buffer_readFloatBE(Item buf, Item offset_item) {
                     ((uint32_t)data[off + 2] << 8) | data[off + 3];
     float f;
     memcpy(&f, &bits, sizeof(float));
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = (double)f;
-    return (Item){.item = d2it(fp)};
+    return js_make_number((double)f);
 }
 
 extern "C" Item js_buffer_readFloatLE(Item buf, Item offset_item) {
@@ -2178,9 +2177,7 @@ extern "C" Item js_buffer_readFloatLE(Item buf, Item offset_item) {
                     ((uint32_t)data[off + 2] << 16) | ((uint32_t)data[off + 3] << 24);
     float f;
     memcpy(&f, &bits, sizeof(float));
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = (double)f;
-    return (Item){.item = d2it(fp)};
+    return js_make_number((double)f);
 }
 
 extern "C" Item js_buffer_readDoubleBE(Item buf, Item offset_item) {
@@ -2194,9 +2191,7 @@ extern "C" Item js_buffer_readDoubleBE(Item buf, Item offset_item) {
     for (int i = 0; i < 8; i++) bits = (bits << 8) | data[off + i];
     double d;
     memcpy(&d, &bits, sizeof(double));
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = d;
-    return (Item){.item = d2it(fp)};
+    return js_make_number(d);
 }
 
 extern "C" Item js_buffer_readDoubleLE(Item buf, Item offset_item) {
@@ -2208,9 +2203,7 @@ extern "C" Item js_buffer_readDoubleLE(Item buf, Item offset_item) {
     if (off < 0) return err;
     double d;
     memcpy(&d, data + off, sizeof(double));
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = d;
-    return (Item){.item = d2it(fp)};
+    return js_make_number(d);
 }
 
 // ─── Endian-aware write methods ──────────────────────────────────────────────

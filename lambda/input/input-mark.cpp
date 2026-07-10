@@ -248,7 +248,7 @@ static Item parse_number(Input *input, const char **mark) {
         // For now, treat as regular double - could enhance for true decimal support
     }
 
-    return {.item = d2it(dval)};
+    return lambda_float_ptr_to_item(dval);
 }
 
 static Array* parse_array(InputContext& ctx, const char **mark, int depth = 0) {
@@ -556,7 +556,7 @@ static Item parse_value(InputContext& ctx, const char **mark, int depth) {
                 dval = (double*)pool_calloc(input->pool, sizeof(double));
                 if (dval == NULL) return {.item = ITEM_ERROR};
                 *dval = NAN;
-                return {.item = d2it(dval)};
+                return lambda_float_ptr_to_item(dval);
             }
             goto UNQUOTED_IDENTIFIER;
         case 'i':
@@ -566,7 +566,7 @@ static Item parse_value(InputContext& ctx, const char **mark, int depth) {
                 dval = (double*)pool_calloc(input->pool, sizeof(double));
                 if (dval == NULL) return {.item = ITEM_ERROR};
                 *dval = INFINITY;
-                return {.item = d2it(dval)};
+                return lambda_float_ptr_to_item(dval);
             }
             goto UNQUOTED_IDENTIFIER;
         case '-':
@@ -576,14 +576,14 @@ static Item parse_value(InputContext& ctx, const char **mark, int depth) {
                 dval = (double*)pool_calloc(input->pool, sizeof(double));
                 if (dval == NULL) return {.item = ITEM_ERROR};
                 *dval = -INFINITY;
-                return {.item = d2it(dval)};
+                return lambda_float_ptr_to_item(dval);
             } else if (strncmp(*mark, "-nan", 4) == 0) {
                 *mark += 4;
                 double *dval;
                 dval = (double*)pool_calloc(input->pool, sizeof(double));
                 if (dval == NULL) return {.item = ITEM_ERROR};
                 *dval = -NAN;
-                return {.item = d2it(dval)};
+                return lambda_float_ptr_to_item(dval);
             }
             // Fall through to number parsing
         default:

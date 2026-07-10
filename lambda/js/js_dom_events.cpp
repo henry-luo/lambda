@@ -40,6 +40,7 @@ extern Item js_get_document_object_value();
 extern "C" Item js_get_global_this();
 extern "C" int js_check_exception(void);
 extern Item js_clear_exception(void);
+extern Item js_make_number(double d);
 
 // Form-control IDL helpers from js_dom.cpp — used by HTMLElement click
 // activation behavior (HTML §6.4.4).
@@ -56,9 +57,7 @@ extern "C" Item js_dom_check_validity_bridge(Item elem_item);
 extern "C" int64_t js_array_length(Item array);
 extern "C" Item js_array_get_int(Item array, int64_t index);
 static inline Item event_make_double(double v) {
-    double* p = (double*)heap_calloc(sizeof(double), LMD_TYPE_FLOAT);
-    *p = v;
-    return (Item){.item = d2it(p)};
+    return js_make_number(v);
 }
 
 static char* js_dom_build_submit_query(Item entries) {

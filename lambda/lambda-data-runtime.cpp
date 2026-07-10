@@ -147,11 +147,6 @@ Item array_get(Array *array, int64_t index) {
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64: {
         double dval = item.get_double();
-        if (item._type_id == LMD_TYPE_FLOAT64) {
-            double* ptr = (double*)heap_calloc(sizeof(double), LMD_TYPE_FLOAT64);
-            *ptr = dval;
-            return (Item){.item = f642it(ptr)};
-        }
         return push_d(dval); // need to push to num_stack, as float values are not ref counted
     }
     case LMD_TYPE_DTIME: {
@@ -1397,11 +1392,6 @@ Item list_get(List *list, int64_t index) {
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64: {
         double dval = item.get_double();
-        if (item._type_id == LMD_TYPE_FLOAT64) {
-            double* ptr = (double*)heap_calloc(sizeof(double), LMD_TYPE_FLOAT64);
-            *ptr = dval;
-            return (Item){.item = f642it(ptr)};
-        }
         return push_d(dval);
     }
     default:

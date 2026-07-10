@@ -56,7 +56,7 @@ static Item mk_float(double d) {
     if (!py_input) return ItemNull;
     double* pd = (double*)pool_calloc(py_input->pool, sizeof(double));
     *pd = d;
-    return (Item){.item = d2it(pd)};
+    return lambda_float_ptr_to_item(pd);
 }
 
 // Helper: create an int item

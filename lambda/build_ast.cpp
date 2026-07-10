@@ -754,12 +754,12 @@ static bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
     }
     case LMD_TYPE_FLOAT: {
         TypeFloat* t = (TypeFloat*)node->type;
-        out->item = d2it(&t->double_val);
+        *out = lambda_float_ptr_to_item(&t->double_val);
         return true;
     }
     case LMD_TYPE_FLOAT64: {
         TypeFloat* t = (TypeFloat*)node->type;
-        out->item = f642it(&t->double_val);
+        *out = lambda_float_ptr_to_item(&t->double_val);
         return true;
     }
     case LMD_TYPE_DTIME: {

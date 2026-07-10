@@ -34,6 +34,7 @@ extern "C" Item js_throw_error_with_code(const char* code, const char* message);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
 extern "C" void js_set_function_name(Item fn_item, Item name_item);
 extern "C" void js_stream_flush_data_now(Item self);
+extern Item js_make_number(double d);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -1698,9 +1699,7 @@ extern "C" Item js_readline_createInterface(Item options_item) {
         } else if (get_type_id(crlf_delay) == LMD_TYPE_FLOAT) {
             double v = it2d(crlf_delay);
             if (v > 100.0) {
-                double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-                *fp = v;
-                delay_item = (Item){.item = d2it(fp)};
+                delay_item = js_make_number(v);
             } else {
                 delay_item = (Item){.item = i2it(100)};
             }

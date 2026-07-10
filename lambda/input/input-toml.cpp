@@ -488,7 +488,7 @@ static Item parse_number(InputContext& ctx, const char **toml) {
         *dval = INFINITY;
         *toml += 3;
         tracker.advance(3);
-        return {.item = d2it(dval)};
+        return lambda_float_ptr_to_item(dval);
     }
     if (strncmp(*toml, "-inf", 4) == 0) {
         double *dval;
@@ -500,7 +500,7 @@ static Item parse_number(InputContext& ctx, const char **toml) {
         *dval = -INFINITY;
         *toml += 4;
         tracker.advance(4);
-        return {.item = d2it(dval)};
+        return lambda_float_ptr_to_item(dval);
     }
     if (strncmp(*toml, "nan", 3) == 0) {
         double *dval;
@@ -512,7 +512,7 @@ static Item parse_number(InputContext& ctx, const char **toml) {
         *dval = NAN;
         *toml += 3;
         tracker.advance(3);
-        return {.item = d2it(dval)};
+        return lambda_float_ptr_to_item(dval);
     }
     if (strncmp(*toml, "-nan", 4) == 0) {
         double *dval;
@@ -524,7 +524,7 @@ static Item parse_number(InputContext& ctx, const char **toml) {
         *dval = NAN;
         *toml += 4;
         tracker.advance(4);
-        return {.item = d2it(dval)};
+        return lambda_float_ptr_to_item(dval);
     }
 
     // Handle hex, octal, binary integers
@@ -615,7 +615,7 @@ static Item parse_number(InputContext& ctx, const char **toml) {
         size_t consumed = end - *toml;
         *toml = end;
         tracker.advance(consumed);
-        return {.item = d2it(dval)};
+        return lambda_float_ptr_to_item(dval);
     } else {
         const char* token_end = temp;
         size_t token_len = (size_t)(token_end - start);
