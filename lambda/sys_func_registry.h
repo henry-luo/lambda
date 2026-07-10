@@ -74,6 +74,7 @@ typedef struct JitImport {
 // System function definitions (AST metadata + JIT pointers)
 extern SysFuncInfo sys_func_defs[];
 extern const int sys_func_def_count;
+fn_ptr find_dynamic_sys_func_import(const char* c_func_name);
 
 // Runtime JIT imports (non-sys-func entries: operators, runtime infra, JS, etc.)
 extern JitImport jit_runtime_imports[];

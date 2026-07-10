@@ -120,6 +120,15 @@ static Item hostobj_demo_destroyed(void) {
     return (Item){.item = i2it(s_hostobj_demo_destroy_count)};
 }
 
+static Item fn_hostobj_demo_answer(void) {
+    return (Item){.item = i2it(42)};
+}
+
+static Item fn_hostobj_demo_add(Item left, Item right) {
+    int64_t value = hostobj_demo_item_to_int(left, 0) + hostobj_demo_item_to_int(right, 0);
+    return (Item){.item = i2it(value)};
+}
+
 static Item hostobj_demo_release(Item receiver) {
     if (get_type_id(receiver) != LMD_TYPE_VMAP || !receiver.vmap ||
             receiver.vmap->host_type != (const void*)&s_hostobj_demo_types[0]) {
@@ -332,6 +341,16 @@ static const JubeNamespaceDef s_hostobj_demo_namespaces[] = {
     {s_hostobj_demo_specifiers, 2, hostobj_demo_namespace, NULL, 0},
 };
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
+static const JubeFuncDef s_hostobj_demo_functions[] = {
+    {"answer", "fn() -> int", (fn_ptr)fn_hostobj_demo_answer, JUBE_FN_NONE,
+     "Item fn_hostobj_demo_answer(void)", (fn_ptr)fn_hostobj_demo_answer},
+    {"add", "fn(left: int, right: int) -> int", (fn_ptr)fn_hostobj_demo_add, JUBE_FN_NONE,
+     "Item fn_hostobj_demo_add(Item left, Item right)", (fn_ptr)fn_hostobj_demo_add},
+};
+#pragma clang diagnostic pop
+
 static int hostobj_demo_init(const JubeHostAPI* host) {
     if (!host || host->api_version != JUBE_ABI_VERSION || !host->gc || !host->value || !host->script) {
         log_error("JUBE_HOSTOBJ_DEMO: missing required host API tables");
@@ -350,8 +369,8 @@ static const JubeModuleDef s_hostobj_demo_module = {
     "Jube host-object proof module",
     s_hostobj_demo_types,
     1,
-    NULL,
-    0,
+    s_hostobj_demo_functions,
+    (int32_t)(sizeof(s_hostobj_demo_functions) / sizeof(s_hostobj_demo_functions[0])),
     s_hostobj_demo_namespaces,
     1,
     hostobj_demo_init,

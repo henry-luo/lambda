@@ -23,6 +23,7 @@
 #include <string.h>
 
 RADIANT_C_API const void* radiant_dom_node_host_type(void);
+RADIANT_C_API const void* radiant_dom_document_host_type(void);
 RADIANT_C_API void radiant_dom_host_invalidate(Item object);
 RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem);
 RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
@@ -243,6 +244,17 @@ static String* radiant_dom_document_string(DomDocument* doc, const char* str, si
 
 static Item radiant_dom_node_item(DomNode* node) {
     return node ? radiant_dom_wrap_node((void*)node) : ItemNull;
+}
+
+static Item radiant_dom_document_item(DomDocument* doc) {
+    if (!doc) return ItemNull;
+    Item wrapper = radiant_host_api->value->vmap_new();
+    if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) {
+        wrapper.vmap->host_type = radiant_dom_document_host_type();
+        wrapper.vmap->host_data = (void*)doc;
+        return wrapper;
+    }
+    return ItemNull;
 }
 
 static Item radiant_dom_empty_node_list() {
@@ -1243,7 +1255,9 @@ static bool radiant_dom_get_text_property(DomText* text_node, const char* prop, 
         return true;
     }
     if (strcmp(prop, "ownerDocument") == 0) {
-        *out = js_dom_owner_document_for_node((void*)text_node);
+        DomNode* parent = text_node->parent;
+        DomDocument* doc = (parent && parent->is_element()) ? parent->as_element()->doc : nullptr;
+        *out = doc ? radiant_dom_document_item(doc) : js_dom_owner_document_for_node((void*)text_node);
         return true;
     }
     return false;
@@ -1294,7 +1308,9 @@ static bool radiant_dom_get_comment_property(DomComment* comment_node, const cha
         return true;
     }
     if (strcmp(prop, "ownerDocument") == 0) {
-        *out = js_dom_owner_document_for_node((void*)comment_node);
+        DomNode* parent = comment_node->parent;
+        DomDocument* doc = (parent && parent->is_element()) ? parent->as_element()->doc : nullptr;
+        *out = doc ? radiant_dom_document_item(doc) : js_dom_owner_document_for_node((void*)comment_node);
         return true;
     }
     return false;
@@ -1459,7 +1475,7 @@ static bool radiant_dom_get_element_property(DomElement* elem, const char* prop,
         return true;
     }
     if (strcmp(prop, "ownerDocument") == 0) {
-        *out = js_dom_owner_document_for_node((void*)elem);
+        *out = radiant_dom_document_item(elem->doc);
         return true;
     }
     if (strcmp(prop, "firstChild") == 0) {
@@ -2431,11 +2447,11 @@ static bool radiant_dom_array_has_key(Item arr, Item key) {
 }
 
 static void radiant_dom_push_projected_key(Item result, Item object, const char* key) {
+    (void)object;
     Item key_item = (Item){.item = s2it(heap_create_name(key))};
-    Item value = ItemNull;
-    if (radiant_dom_projected_own_value(object, key_item, &value)) {
-        radiant_host_api->value->array_push(result, key_item);
-    }
+    // Own-key enumeration must not materialize live DOM collections; value
+    // reads remain lazy through get_property/descriptor dispatch.
+    radiant_host_api->value->array_push(result, key_item);
 }
 
 RADIANT_C_API int radiant_dom_host_get_property(Item object, Item key, Item* out) {
@@ -2828,6 +2844,12 @@ RADIANT_C_API int radiant_dom_document_host_get_property(Item object, Item key, 
     if (js_get_foreign_doc(object)) {
         return radiant_dom_foreign_document_get_property(object, key, out);
     }
+    if (get_type_id(object) == LMD_TYPE_VMAP && object.vmap && object.vmap->host_data) {
+        void* prev = js_dom_swap_active_document(object.vmap->host_data);
+        *out = js_document_proxy_get_property(key);
+        js_dom_restore_active_document(prev);
+        return 1;
+    }
     *out = js_document_proxy_get_property(key);
     return 1;
 }
@@ -2839,6 +2861,12 @@ RADIANT_C_API int radiant_dom_document_host_set_property(Item object,
     if (!out) return 0;
     if (js_get_foreign_doc(object)) {
         return radiant_dom_foreign_document_set_property(object, key, value, out);
+    }
+    if (get_type_id(object) == LMD_TYPE_VMAP && object.vmap && object.vmap->host_data) {
+        void* prev = js_dom_swap_active_document(object.vmap->host_data);
+        *out = js_document_proxy_set_property(key, value);
+        js_dom_restore_active_document(prev);
+        return 1;
     }
     *out = js_document_proxy_set_property(key, value);
     return 1;
@@ -2852,6 +2880,12 @@ RADIANT_C_API int radiant_dom_document_host_call_method(Item object,
     if (!out) return 0;
     if (js_get_foreign_doc(object)) {
         return radiant_dom_foreign_document_method(object, method_name, args, argc, out);
+    }
+    if (get_type_id(object) == LMD_TYPE_VMAP && object.vmap && object.vmap->host_data) {
+        void* prev = js_dom_swap_active_document(object.vmap->host_data);
+        *out = js_document_proxy_method(method_name, args, argc);
+        js_dom_restore_active_document(prev);
+        return 1;
     }
     *out = js_document_proxy_method(method_name, args, argc);
     return 1;

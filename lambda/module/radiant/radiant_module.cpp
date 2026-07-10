@@ -154,7 +154,11 @@ RADIANT_C_API Item fn_radiant_set_attr(Item node_item, Item name_item, Item valu
     const char* name = fn_to_cstr(name_item);
     const char* value = fn_to_cstr(value_item);
     if (!elem || !name || !name[0] || !value) return ItemNull;
-    dom_element_set_attribute(elem, name, value);
+    // Attribute writes from Lambda must share JS DOM side effects such as
+    // event-attribute compilation, selection refresh, and mutation notices.
+    Item args[2] = {name_item, value_item};
+    Item method = (Item){.item = s2it(heap_create_name("setAttribute"))};
+    radiant_dom_element_method(node_item, method, args, 2);
     return node_item;
 }
 

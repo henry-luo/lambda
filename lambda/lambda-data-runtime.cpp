@@ -44,6 +44,7 @@ static uint8_t array_num_clamp_uint8_even(double value) {
 // VMap access helpers (implemented in vmap.cpp)
 Item vmap_get_by_str(VMap* vm, const char* key);
 Item vmap_get_by_item(VMap* vm, Item key);
+SymbolKeyList* vmap_keys_for_item(Item vmap_item);
 
 struct LambdaSymbolKeyList {
     lam::ArrayList<Symbol*> keys;
@@ -2032,6 +2033,8 @@ SymbolKeyList* item_keys(Item data) {
     }
     case LMD_TYPE_VMAP: {
         VMap* vm = data.vmap;
+        SymbolKeyList* host_keys = vmap_keys_for_item(data);
+        if (host_keys) return host_keys;
         if (vm && vm->vtable && vm->data) {
             return vm->vtable->keys(vm->data);
         }

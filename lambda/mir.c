@@ -121,6 +121,13 @@ void *import_resolver(const char *name) {
         log_debug("found function: %s at %p", name, found->func);
         return (void*)found->func;
     }
+    fn_ptr dynamic_sys_func = find_dynamic_sys_func_import(name);
+    if (dynamic_sys_func) {
+        // Descriptor-backed native modules are registered after the static MIR
+        // import map is built, so resolve them through the AST descriptor cache.
+        log_debug("found dynamic sys func: %s at %p", name, dynamic_sys_func);
+        return (void*)dynamic_sys_func;
+    }
     log_error("failed to resolve native fn/pn: %s", name);
     return NULL;
 }

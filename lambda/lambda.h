@@ -480,12 +480,7 @@ typedef enum SysFunc {
     // vmap functions
     SYSFUNC_VMAP_NEW,        // map() or map([k1,v1,...]) - create VMap
     SYSPROC_VMAP_SET,        // m.set(k, v) - in-place insert on VMap (procedural)
-    SYSFUNC_RADIANT_LOAD,    // radiant.load(path) - POC load HTML document root wrapper
-    SYSFUNC_RADIANT_ROOT,    // radiant.root(node) - POC owning document root wrapper
-    SYSFUNC_RADIANT_ATTR,    // radiant.attr(node, name) - POC DOM attribute read
-    SYSFUNC_RADIANT_SET_ATTR, // radiant.set_attr(node, name, value) - POC DOM attribute write
-    SYSFUNC_RADIANT_FREE,    // radiant.free(node) - POC free owning Radiant document
-    SYSFUNC_RADIANT_POC_ATTR, // radiant.poc_attr(path) - POC real DOM attr round trip
+    SYSFUNC_JUBE_MODULE,     // descriptor-backed native module function
     SYSPROC_CLOCK,           // clock() - high-resolution monotonic time in seconds (float)
     // file-based find/replace (procedural)
     SYSPROC_REPLACE_FILE,    // pn replace(path, pattern, repl) - sed-like file replace
