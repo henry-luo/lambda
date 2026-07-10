@@ -16,13 +16,23 @@ classDiagram
     }
     class JsTypedArray {
         +JsTypedArrayType element_type
-        +int length
-        +int byte_length
-        +int byte_offset
-        +void* data
+        +JsArrayBuffer* buffer
         +uint64_t buffer_item
         +bool length_tracking
         +bool is_buffer
+        +ArrayNum* view
+    }
+    class ArrayNum {
+        +uint8_t elem_type
+        +void* data
+        +int64_t length
+        +int64_t extra
+        +is_view / is_mutable_view
+    }
+    class ArrayNumShape {
+        +void* base
+        +int64_t offset
+        +dims / strides
     }
     class JsDataView {
         +int byte_offset
@@ -33,6 +43,10 @@ classDiagram
     Map "MAP_KIND_TYPED_ARRAY" --> JsTypedArray : data when data_cap==0
     Map "MAP_KIND_ARRAYBUFFER" --> JsArrayBuffer : data when data_cap==0
     Map "MAP_KIND_DATAVIEW" --> JsDataView : data when data_cap==0
-    JsTypedArray --> JsArrayBuffer : buffer, NULL if standalone
+    JsTypedArray --> JsArrayBuffer : buffer
+    JsTypedArray --> ArrayNum : view (refreshed before every access)
+    ArrayNum --> ArrayNumShape : extra
+    ArrayNumShape --> Map : base = buffer's wrapper Map (GC root)
     JsDataView --> JsArrayBuffer : buffer
+    note for JsTypedArray "length/byteOffset derive from the view: length = view->length, byteOffset = shape->offset * elem_size. No cached data pointer."
     note for Map "data_cap==0 means native-backed. First user property write upgrades to a real shape and stows the native pointer under __ta__ / __ab__ / __dv__."

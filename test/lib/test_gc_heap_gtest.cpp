@@ -956,9 +956,12 @@ TEST_F(GCHeapTest, VMapNullDataSafe) {
     gc_collect(gc, NULL, 0, 0, 0);
 
     EXPECT_EQ(gc->object_count, 0u);
-    // trace/destroy should NOT have been called (data was NULL)
+    // NULL backing data is not traced, but finalization still runs so host
+    // VMaps can release native payloads even when the map store was lazy.
     EXPECT_EQ(s_vmap_trace_calls, 0);
-    EXPECT_EQ(s_vmap_destroy_calls, 0);
+    EXPECT_EQ(s_vmap_destroy_calls, 1);
+    EXPECT_EQ(s_vmap_destroy_last_obj, obj);
+    EXPECT_EQ(s_vmap_destroy_last_data, nullptr);
 }
 
 TEST_F(GCHeapTest, VMapNoCallbacksSafe) {

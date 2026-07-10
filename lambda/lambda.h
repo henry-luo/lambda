@@ -123,6 +123,58 @@ enum EnumTypeId {
 };
 typedef uint8_t TypeId;
 
+// Item tag-space partition for the self-tagged double representation
+// (`vibe/Lambda_Type_Double_Boxing.md` §2.3).
+// Non-double Item tags must keep high-byte bits 6 and 5 clear; raw container
+// pointers remain bit-identical pointers and are never tagged or masked.
+#define ITEM_DBL_MASK        UINT64_C(0x6000000000000000)
+#define ITEM_HIGH_BYTE_MASK  UINT64_C(0xFF00000000000000)
+#define ITEM_TAG_IS_NON_DOUBLE(tag)  ((((uint8_t)(tag)) & 0x60u) == 0)
+
+#if !defined(LAMBDA_C2MIR_RUNTIME)
+#ifdef __cplusplus
+#define LAMBDA_STATIC_ASSERT(cond, msg) static_assert((cond), msg)
+#else
+#define LAMBDA_STATIC_ASSERT(cond, msg) _Static_assert((cond), msg)
+#endif
+
+LAMBDA_STATIC_ASSERT(sizeof(uintptr_t) == sizeof(uint64_t),
+                     "Lambda Item requires 64-bit pointers");
+// Valid while TypeIds occupy the first legal non-double block. If a future
+// TypeId jumps to 0x80-0x9F, replace this with per-tag assertions.
+LAMBDA_STATIC_ASSERT(LMD_TYPE_COUNT <= 0x20,
+                     "Lambda TypeIds must stay out of double discriminator space");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_RAW_POINTER), "raw pointer tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_NULL), "null tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_UNDEFINED), "undefined tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_BOOL), "bool tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_NUM_SIZED), "sized numeric tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_INT), "int tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_INT64), "int64 tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_UINT64), "uint64 tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_FLOAT), "float tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_FLOAT64), "float64 tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_DECIMAL), "decimal tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_DTIME), "datetime tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_SYMBOL), "symbol tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_STRING), "string tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_BINARY), "binary tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_PATH), "path tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_RANGE), "range tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ARRAY_NUM), "array-num tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ARRAY), "array tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_MAP), "map tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_VMAP), "vmap tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ELEMENT), "element tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_OBJECT), "object tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_TYPE), "type tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_FUNC), "function tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ANY), "any tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ERROR), "error tag must be non-double");
+#else
+#define LAMBDA_STATIC_ASSERT(cond, msg)
+#endif
+
 // ============================================================================
 // Sized numeric sub-types (stored in bits [55:48] of NUM_SIZED Items)
 // ============================================================================
@@ -613,6 +665,11 @@ struct Container {
     uint8_t padding[4];  // padding to align to 8 bytes
 };
 
+#if !defined(LAMBDA_C2MIR_RUNTIME)
+LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, type_id) == 0,
+                     "Container TypeId must remain at byte zero");
+#endif
+
 // List/Array flags (stored in List.flags / Array.flags field)
 
 #ifndef __cplusplus
@@ -780,6 +837,11 @@ struct Function {
     const char* name;     // function name for stack traces (may be NULL)
 };
 
+#if !defined(LAMBDA_C2MIR_RUNTIME)
+LAMBDA_STATIC_ASSERT(__builtin_offsetof(Function, type_id) == 0,
+                     "Function TypeId must remain at byte zero");
+#endif
+
 // Dynamic function invocation for first-class functions
 Item fn_call(Function* fn, List* args);
 Item fn_call0(Function* fn);
@@ -868,6 +930,8 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define ITEM_NULL_SPREADABLE ((uint64_t)LMD_TYPE_NULL << 56 | 1)  // spreadable null (skip when spreading)
 #define ITEM_JS_UNDEFINED   ((uint64_t)LMD_TYPE_UNDEFINED << 56)  // JavaScript undefined
 #define ITEM_JS_TDZ         ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 1)  // TDZ sentinel for let/const
+#define ITEM_JS_DELETED_SENTINEL UINT64_C(0x9E00DEAD00DEAD00)
+#define ITEM_JS_ITER_DONE_SENTINEL UINT64_C(0x9F00DEAD00000000)
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
 // BigInt reuses LMD_TYPE_DECIMAL; distinguished by Decimal.unlimited == DECIMAL_BIGINT
 #define DECIMAL_BIGINT      2
@@ -885,6 +949,52 @@ static inline bool is_numeric_type_id(TypeId type_id) {
 
 #define ITEM_TRUE           (((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)1)
 #define ITEM_FALSE          (((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)0)
+#define ITEM_FLOAT_P0       ((uint64_t)LMD_TYPE_FLOAT << 56)
+#define ITEM_FLOAT_N0       (ITEM_FLOAT_P0 | UINT64_C(1))
+
+#if !defined(LAMBDA_C2MIR_RUNTIME)
+#ifndef __cplusplus
+LAMBDA_STATIC_ASSERT(sizeof(Item) == sizeof(uint64_t), "C Item must remain one word");
+#endif
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_NULL >> 56)), "ITEM_NULL tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_NULL_SPREADABLE >> 56)), "ITEM_NULL_SPREADABLE tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_JS_UNDEFINED >> 56)), "ITEM_JS_UNDEFINED tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_JS_TDZ >> 56)), "ITEM_JS_TDZ tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_JS_DELETED_SENTINEL >> 56)), "ITEM_JS_DELETED_SENTINEL tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_JS_ITER_DONE_SENTINEL >> 56)), "ITEM_JS_ITER_DONE_SENTINEL tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_INT >> 56)), "ITEM_INT tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_ERROR >> 56)), "ITEM_ERROR tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_TRUE >> 56)), "ITEM_TRUE tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_FALSE >> 56)), "ITEM_FALSE tag must be non-double");
+LAMBDA_STATIC_ASSERT((ITEM_FLOAT_P0 & ITEM_DBL_MASK) == 0, "packed +0 must be outside double space");
+LAMBDA_STATIC_ASSERT((ITEM_FLOAT_N0 & ITEM_DBL_MASK) == 0, "packed -0 must be outside double space");
+LAMBDA_STATIC_ASSERT((uint8_t)(ITEM_FLOAT_P0 >> 56) == LMD_TYPE_FLOAT, "packed +0 must carry float tag");
+LAMBDA_STATIC_ASSERT((uint8_t)(ITEM_FLOAT_N0 >> 56) == LMD_TYPE_FLOAT, "packed -0 must carry float tag");
+#endif
+
+static inline void lambda_item_debug_trap(void) {
+#if defined(_MSC_VER)
+    __debugbreak();
+#elif defined(__GNUC__) || defined(__clang__)
+    __builtin_trap();
+#else
+    *((volatile int*)0) = 0;
+#endif
+}
+
+static inline void assert_raw_item_pointer(const void* ptr) {
+#if !defined(NDEBUG) && !defined(LAMBDA_C2MIR_RUNTIME)
+    if (!ptr) return;
+    uint64_t word = (uint64_t)(uintptr_t)ptr;
+    // Raw-pointer Items must be bit-identical native pointers, never tagged.
+    if ((word & ITEM_HIGH_BYTE_MASK) != 0 || (word & ITEM_DBL_MASK) != 0 ||
+        (const void*)(uintptr_t)word != ptr) {
+        lambda_item_debug_trap();
+    }
+#else
+    (void)ptr;
+#endif
+}
 
 // Lambda compact int is capped to the IEEE float64 safe-integer band; the
 // payload is wider, so every packing/overflow check must enforce this bound.
@@ -983,6 +1093,7 @@ typedef struct LambdaError LambdaError;
 // Container boxing helper: native pointer → Item
 static inline Item p2it(void* ptr) {
     if (!ptr) return ITEM_NULL;
+    assert_raw_item_pointer(ptr);
     return (Item)(uint64_t)(uintptr_t)ptr;
 }
 

@@ -24,15 +24,20 @@ static inline bool js_map_kind_is_ordinary_shape(uint8_t map_kind) {
 
 void js_map_promote_descriptor_kind(Map* m);
 
-// Sentinel value for dense array holes. Uses type tag 0x7E (unused), so it
-// cannot collide with any valid JS value. Ordinary object deletes use
+// Sentinel value for dense array holes. Uses non-double tag 0x9E (unused), so
+// it cannot collide with any valid JS value. Ordinary object deletes use
 // JSPD_DELETED shape bits instead of storing this raw value in map slots.
-#define JS_DELETED_SENTINEL_VAL 0x7E00DEAD00DEAD00ULL
+#define JS_DELETED_SENTINEL_VAL ITEM_JS_DELETED_SENTINEL
 
 // Sentinel value for iterator "done" (returned by js_iterator_step when exhausted).
-// Uses type tag 0x7F (unused) so it cannot collide with any valid JS value
+// Uses non-double tag 0x9F (unused) so it cannot collide with any valid JS value
 // including null, undefined, false, 0, or empty string.
-#define JS_ITER_DONE_SENTINEL (0x7F00DEAD00000000ULL)
+#define JS_ITER_DONE_SENTINEL ITEM_JS_ITER_DONE_SENTINEL
+
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(JS_DELETED_SENTINEL_VAL >> 56)),
+                     "JS deleted sentinel tag must stay out of double discriminator space");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(JS_ITER_DONE_SENTINEL >> 56)),
+                     "JS iterator-done sentinel tag must stay out of double discriminator space");
 
 // Maximum module-level live bindings tracked in the compact slot table.
 // Generated Unicode identifier tests declare thousands of top-level vars; keep

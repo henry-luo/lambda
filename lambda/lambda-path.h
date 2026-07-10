@@ -40,6 +40,11 @@ struct Path {
     PathMeta* meta;         // optional metadata (NULL until stat'd)
 };
 
+#if !defined(LAMBDA_C2MIR_RUNTIME)
+LAMBDA_STATIC_ASSERT(__builtin_offsetof(Path, type_id) == 0,
+                     "Path TypeId must remain at byte zero");
+#endif
+
 // Helper macros for path segment type
 #define PATH_GET_SEG_TYPE(p)      ((LPathSegmentType)((p)->flags & 0x03))
 #define PATH_SET_SEG_TYPE(p, t)   ((p)->flags = ((p)->flags & 0xFC) | ((t) & 0x03))

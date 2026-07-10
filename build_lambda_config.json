@@ -3770,6 +3770,17 @@
                         "icon": "🐑"
                     },
                     {
+                        "source": "test/test_item_repr_gtest.cpp",
+                        "name": "Lambda Item Representation Tests",
+                        "dependencies": [],
+                        "binary": "test_item_repr_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "icon": "🐑"
+                    },
+                    {
                         "source": "test/test_lambda_errors_gtest.cpp",
                         "name": "Lambda Error System Tests",
                         "dependencies": [
