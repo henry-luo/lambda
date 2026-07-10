@@ -30,20 +30,11 @@ extern "C" int64_t js_key_is_symbol_c(Item key);
 extern "C" Item js_bound_function_target(Item func_item);
 extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value, Item receiver);
 extern "C" Item js_reflect_get_with_receiver(Item target, Item key, Item receiver);
-extern "C" bool js_dom_style_resource_has_property(Item item, Item key);
-extern "C" bool js_is_inline_style_item(Item item);
-extern "C" bool js_is_computed_style_item(Item item);
-extern "C" bool js_cssom_resource_has_property(Item item, Item key);
-extern "C" bool js_is_stylesheet(Item item);
 extern "C" bool js_is_css_rule(Item item);
-extern "C" bool js_is_rule_style_decl(Item item);
 extern "C" Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_dispatch_event(Item event_item);
-extern "C" int radiant_dom_host_has_property(Item object, Item key, Item* out);
-extern "C" int radiant_dom_host_delete_property(Item object, Item key, Item* out);
-extern "C" int radiant_dom_host_own_property_descriptor(Item object, Item key, Item* out);
-extern "C" int radiant_dom_host_own_property_names(Item object, Item* out);
+extern "C" Item hostobj_demo_namespace(void);
 extern "C" Item js_internal_binding(Item name);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
@@ -1056,21 +1047,6 @@ static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item*
     if (type == LMD_TYPE_VMAP && js_host_object_has_property(object, key, out_result)) {
         return true;
     }
-    if (type == LMD_TYPE_MAP &&
-        (js_is_inline_style_item(object) || js_is_computed_style_item(object))) {
-        *out_result = (Item){.item = b2it(js_dom_style_resource_has_property(object, key))};
-        return true;
-    }
-    if (type == LMD_TYPE_MAP &&
-        (js_is_stylesheet(object) || js_is_css_rule(object) ||
-         js_is_rule_style_decl(object))) {
-        *out_result = (Item){.item = b2it(js_cssom_resource_has_property(object, key))};
-        return true;
-    }
-    if (type == LMD_TYPE_MAP &&
-        object.map->map_kind == MAP_KIND_WEB_API_RESOURCE) {
-        if (radiant_dom_host_has_property(object, key, out_result)) return true;
-    }
     if (js_is_proxy(object)) {
         *out_result = js_proxy_trap_has(object, key);
         return true;
@@ -1124,11 +1100,6 @@ static bool js_try_exotic_delete_property(Item obj, Item key, Item* out_result) 
         js_host_object_delete_property(obj, key, out_result)) {
         return true;
     }
-    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
-        obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE &&
-        radiant_dom_host_delete_property(obj, key, out_result)) {
-        return true;
-    }
     if (js_is_proxy(obj)) {
         *out_result = js_proxy_trap_delete(obj, key);
         return true;
@@ -1166,11 +1137,6 @@ static bool js_hide_legacy_dunder_own_name(const char* name, int name_len) {
 static bool js_try_exotic_own_property_names(Item object, Item* out_result) {
     if (get_type_id(object) == LMD_TYPE_VMAP &&
         js_host_object_own_property_names(object, out_result)) {
-        return true;
-    }
-    if (get_type_id(object) == LMD_TYPE_MAP && object.map &&
-        object.map->map_kind == MAP_KIND_WEB_API_RESOURCE &&
-        radiant_dom_host_own_property_names(object, out_result)) {
         return true;
     }
     if (js_is_proxy(object)) {
@@ -1220,10 +1186,6 @@ static bool js_try_exotic_own_property_descriptor(Item obj, Item name,
     }
     if (type == LMD_TYPE_VMAP &&
         js_host_object_own_property_descriptor(obj, name, out_result)) {
-        return true;
-    }
-    if (type == LMD_TYPE_MAP && obj.map && obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE &&
-        radiant_dom_host_own_property_descriptor(obj, name, out_result)) {
         return true;
     }
     if (type == LMD_TYPE_MAP && obj.map && obj.map->map_kind == MAP_KIND_TYPED_ARRAY) {
@@ -9855,26 +9817,6 @@ extern "C" Item js_object_keys(Item object) {
         return result;
     }
 
-    if (type == LMD_TYPE_MAP && object.map &&
-        object.map->map_kind == MAP_KIND_WEB_API_RESOURCE) {
-        all_keys = ItemNull;
-        if (radiant_dom_host_own_property_names(object, &all_keys) &&
-            get_type_id(all_keys) == LMD_TYPE_ARRAY && all_keys.array) {
-            Item result = js_array_new(0);
-            for (int i = 0; i < all_keys.array->length; i++) {
-                Item key = all_keys.array->items[i];
-                if (get_type_id(key) != LMD_TYPE_STRING) continue;
-                Item desc = js_object_get_own_property_descriptor(object, key);
-                if (js_check_exception()) return result;
-                if (get_type_id(desc) != LMD_TYPE_MAP) continue;
-                bool enum_found = false;
-                Item enum_val = js_map_get_fast_ext(desc.map, "enumerable", 10, &enum_found);
-                if (enum_found && js_is_truthy(enum_val)) js_array_push(result, key);
-            }
-            return result;
-        }
-    }
-
     // Js55 P16: TypedArray integer-indexed properties are enumerable own
     // properties per ES2024 §10.4.5. Enumerate them in numeric order first,
     // then any custom (non-index, non-internal, enumerable) properties.
@@ -15946,6 +15888,9 @@ extern "C" Item js_get_global_this() {
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("process", 7))}, js_get_process_object_value());
         extern Item js_get_css_object_value(void);
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("CSS", 3))}, js_get_css_object_value());
+        Item hostobj_demo_key = (Item){.item = s2it(heap_create_name("hostobjDemo", 11))};
+        js_property_set(js_global_this_obj, hostobj_demo_key, hostobj_demo_namespace());
+        js_mark_non_enumerable(js_global_this_obj, hostobj_demo_key);
         extern Item js_get_crypto_namespace(void);
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("crypto", 6))}, js_get_crypto_namespace());
         extern Item js_get_os_namespace(void);

@@ -70,10 +70,6 @@ extern "C" Item js_get_fs_namespace(void);
 extern "C" Item js_get_fs_promises_namespace(void);
 extern "C" Item js_get_internal_fs_promises_namespace(void);
 extern "C" Item js_get_os_namespace(void);
-extern "C" Item js_dom_get_property(Item elem_item, Item prop_name);
-extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value);
-extern "C" bool js_dom_item_is_range(Item item);
-extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
@@ -3491,18 +3487,8 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
         *out_result = (Item){.item = ITEM_NULL};
         return true;
     }
-    case MAP_KIND_WEB_API_RESOURCE:
-        *out_result = js_is_computed_style_item(object)
-            ? js_computed_style_get_property(object, key)
-            : js_dom_get_property(object, key);
-        return true;
     case MAP_KIND_CSS_NAMESPACE:
         return false;
-    case MAP_KIND_CSSOM:
-        if (js_is_stylesheet(object)) *out_result = js_cssom_stylesheet_get_property(object, key);
-        else if (js_is_css_rule(object)) *out_result = js_cssom_rule_get_property(object, key);
-        else *out_result = js_cssom_rule_decl_get_property(object, key);
-        return true;
     case MAP_KIND_ITERATOR:
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
@@ -3527,16 +3513,8 @@ static bool js_try_exotic_property_set(Item object, Item key, Item* value, Item*
     case MAP_KIND_ITERATOR:
         *out_result = *value;
         return true;
-    case MAP_KIND_WEB_API_RESOURCE:
-        *out_result = js_dom_set_property(object, key, *value);
-        return true;
     case MAP_KIND_CSS_NAMESPACE:
         return false;
-    case MAP_KIND_CSSOM:
-        *out_result = js_is_css_rule(object)
-            ? js_cssom_rule_set_property(object, key, *value)
-            : js_cssom_rule_decl_set_property(object, key, *value);
-        return true;
     case MAP_KIND_ARRAYBUFFER:
     case MAP_KIND_DATAVIEW:
         js_upgrade_native_backed_map_for_properties(
@@ -18605,9 +18583,6 @@ extern "C" Item js_generator_return(Item generator, Item value);
 extern "C" Item js_generator_throw(Item generator, Item error);
 
 // Map method dispatcher: handles collection methods, falls back to property access
-extern "C" bool js_dom_item_is_range(Item item);
-extern "C" bool js_dom_item_is_selection(Item item);
-
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
     // document.implementation singleton methods
     if (js_is_dom_implementation(obj)) {
@@ -18623,27 +18598,6 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         }
     }
 
-    if (get_type_id(obj) == LMD_TYPE_MAP && js_is_computed_style_item(obj)) {
-        String* method = it2s(method_name);
-        if (method && method->len == 16 && strncmp(method->chars, "getPropertyValue", 16) == 0) {
-            if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
-            return js_computed_style_get_property(obj, args[0]);
-        }
-    }
-
-    if (get_type_id(obj) == LMD_TYPE_MAP && js_is_inline_style_item(obj)) {
-        extern Item js_dom_style_method(Item elem, Item method_name, Item* args, int argc);
-        return js_dom_style_method(obj, method_name, args, argc);
-    }
-
-    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
-        obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE) {
-        if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
-            Item fn = js_property_access(obj, method_name);
-            if (js_check_exception()) return ItemNull;
-            return js_call_function(fn, obj, args, argc);
-        }
-    }
     // OffscreenCanvas / CanvasRenderingContext2D methods (js_canvas.cpp)
     {
         Item canvas_result;
@@ -20285,15 +20239,6 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 return js_object_prototype_has_own_property(obj, make_js_undefined());
             }
-        }
-    }
-
-    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
-        obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE) {
-        if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
-            Item fn = js_property_access(obj, method_name);
-            if (js_check_exception()) return ItemNull;
-            return js_call_function(fn, obj, args, argc);
         }
     }
 

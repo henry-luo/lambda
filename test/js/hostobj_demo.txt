@@ -1,0 +1,17 @@
+ctor type: function
+value: 7
+set value: 10
+label: hostobj-demo
+bump: 15
+after bump: 15
+extra in: true
+extra: x
+keys: value,label,extra
+desc: true,false,true
+instanceof: true
+delete value: false
+delete extra: true
+extra after delete: false
+destroyed grew: true
+released value: true
+destroyed stable: true

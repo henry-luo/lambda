@@ -799,6 +799,7 @@ static int s_vmap_trace_calls = 0;
 static void* s_vmap_trace_last_data = nullptr;
 static gc_heap_t* s_vmap_trace_last_gc = nullptr;
 static int s_vmap_destroy_calls = 0;
+static void* s_vmap_destroy_last_obj = nullptr;
 static void* s_vmap_destroy_last_data = nullptr;
 // Track Items marked during trace callback
 static uint64_t s_traced_items[64];
@@ -821,8 +822,9 @@ static void test_vmap_trace(void* data, gc_heap_t* gc) {
     }
 }
 
-static void test_vmap_destroy(void* data) {
+static void test_vmap_destroy(void* obj, void* data) {
     s_vmap_destroy_calls++;
+    s_vmap_destroy_last_obj = obj;
     s_vmap_destroy_last_data = data;
     free(data);
 }
@@ -832,6 +834,7 @@ static void reset_vmap_test_state() {
     s_vmap_trace_last_data = nullptr;
     s_vmap_trace_last_gc = nullptr;
     s_vmap_destroy_calls = 0;
+    s_vmap_destroy_last_obj = nullptr;
     s_vmap_destroy_last_data = nullptr;
     s_traced_item_count = 0;
     memset(s_traced_items, 0, sizeof(s_traced_items));
@@ -916,6 +919,7 @@ TEST_F(GCHeapTest, VMapDestroyCallbackOnDead) {
     EXPECT_EQ(gc->object_count, 0u);
     // destroy callback should have been called once
     EXPECT_EQ(s_vmap_destroy_calls, 1);
+    EXPECT_EQ(s_vmap_destroy_last_obj, vm);
 }
 
 TEST_F(GCHeapTest, VMapDeadAlsoCollectsUnreferencedChildren) {
@@ -933,6 +937,7 @@ TEST_F(GCHeapTest, VMapDeadAlsoCollectsUnreferencedChildren) {
 
     EXPECT_EQ(gc->object_count, 0u);
     EXPECT_EQ(s_vmap_destroy_calls, 1);
+    EXPECT_EQ(s_vmap_destroy_last_obj, vm);
 }
 
 TEST_F(GCHeapTest, VMapNullDataSafe) {

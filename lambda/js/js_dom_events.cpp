@@ -15,6 +15,7 @@
 #include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
+#include "../jube/jube_registry.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/strbuf.h"
@@ -415,10 +416,23 @@ static int _entry_capacity = 0;
 static int _window_sentinel = 0;
 static int _document_sentinel = 0;
 
+static bool js_dom_event_is_document_target(Item target) {
+    if (get_type_id(target) == LMD_TYPE_VMAP && target.vmap && target.vmap->host_type) {
+        const JubeTypeDef* type = jube_find_type_by_host_type(target.vmap->host_type);
+        if (type && type->name) {
+            return strcmp(type->name, "document") == 0 ||
+                   strcmp(type->name, "foreign_document") == 0;
+        }
+    }
+    Item current_doc = js_get_document_object_value();
+    return target.item != ITEM_NULL && target.item == current_doc.item;
+}
+
 // get the key pointer for a target item
 static void* get_event_target_key(Item target) {
-    // check for document proxy
-    if (js_is_document_proxy(target)) {
+    // document wrappers are host VMAPs; key them through the registry instead
+    // of the old proxy-brand predicate so listener storage follows host types.
+    if (js_dom_event_is_document_target(target)) {
         return (void*)&_document_sentinel;
     }
     // check for DOM node

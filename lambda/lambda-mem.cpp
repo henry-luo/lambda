@@ -8,6 +8,7 @@
 #include "../lib/gc/gc_heap.h"
 #include "mem_factory_rt.h"
 #include "lambda-error.h"
+#include "jube/jube_registry.h"
 #include "js/js_runtime.h"
 #include "js/js_exec_profile_weak.h"
 #include "js/js_typed_array.h"
@@ -40,6 +41,26 @@ static __thread int jit_gc_root_frame_cache_count = 0;
 static __thread int64_t jit_gc_root_frame_depth = 0;
 
 static void gc_finalize_all_objects(gc_heap_t *gc);
+extern "C" void vmap_gc_destroy(void* obj, void* data);
+
+static void gc_finalize_vmap_host_payload(VMap* vm) {
+    if (!vm || !vm->host_type || !vm->host_data) return;
+    const JubeTypeDef* type = jube_find_type_by_host_type(vm->host_type);
+    if (!type || !(type->flags & JUBE_TYPE_OWNING_NATIVE) ||
+            !type->host_ops || !type->host_ops->destroy) {
+        return;
+    }
+    void* native = vm->host_data;
+    // owning host VMAPs store native payload beside the backing map, so GC must
+    // finalize host_data before freeing the backing store or the payload leaks.
+    vm->host_data = NULL;
+    type->host_ops->destroy(native);
+}
+
+static void gc_destroy_vmap_object(void* obj, void* data) {
+    gc_finalize_vmap_host_payload((VMap*)obj);
+    vmap_gc_destroy(obj, data);
+}
 
 static JsTypedArray* gc_typed_array_from_map(Map* map) {
     if (!map) return NULL;
@@ -189,7 +210,6 @@ static uint64_t* jit_gc_root_snapshot_active(int* out_count) {
 
 // VMap GC bridge functions (defined in vmap.cpp)
 extern "C" void vmap_gc_trace(void* data, gc_heap_t* gc);
-extern "C" void vmap_gc_destroy(void* data);
 extern "C" void err_gc_trace(void* data, gc_heap_t* gc);
 extern "C" void err_gc_destroy(void* data);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
@@ -238,7 +258,7 @@ void heap_init() {
 
     // register VMap tracing/finalization callbacks
     context->heap->gc->vmap_trace = vmap_gc_trace;
-    context->heap->gc->vmap_destroy = vmap_gc_destroy;
+    context->heap->gc->vmap_destroy = gc_destroy_vmap_object;
     context->heap->gc->error_trace = err_gc_trace;
     context->heap->gc->error_destroy = err_gc_destroy;
     context->heap->gc->js_native_trace = js_native_map_gc_trace;
@@ -260,7 +280,7 @@ void heap_init_with_pool(Pool* pool) {
     gc_register_root(context->heap->gc, &context->heap->result_root);
     gc_set_collect_callback(context->heap->gc, heap_gc_collect);
     context->heap->gc->vmap_trace = vmap_gc_trace;
-    context->heap->gc->vmap_destroy = vmap_gc_destroy;
+    context->heap->gc->vmap_destroy = gc_destroy_vmap_object;
     context->heap->gc->error_trace = err_gc_trace;
     context->heap->gc->error_destroy = err_gc_destroy;
     context->heap->gc->js_native_trace = js_native_map_gc_trace;
@@ -725,6 +745,7 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
         if (tag == LMD_TYPE_VMAP) {
             VMap *vm = (VMap*)obj;
             if (vm->vtable && vm->data) {
+                gc_finalize_vmap_host_payload(vm);
                 vm->vtable->destroy(vm->data);
                 vm->data = NULL;
             }

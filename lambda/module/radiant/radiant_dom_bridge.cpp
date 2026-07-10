@@ -1,5 +1,6 @@
 #include "../../lambda-data.hpp"
 #include "../../mark_builder.hpp"
+#include "../../jube/jube_registry.h"
 #include "../../input/css/dom_node.hpp"
 #include "../../input/css/dom_element.hpp"
 #include "../../input/css/css_tokenizer.hpp"
@@ -1118,8 +1119,15 @@ static void radiant_dom_clear_cache_entry(RadiantDomWrapperCacheEntry* entry) {
     }
     Item wrapper = (Item){.item = entry->item};
     // Document teardown frees arena-owned DOM nodes; retained wrappers must
-    // keep their JS identity but lose the native payload before roots drop.
-    radiant_dom_host_invalidate(wrapper);
+    // keep their JS identity but lose the native payload via the registered host op.
+    if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap && wrapper.vmap->host_type) {
+        const JubeTypeDef* type = jube_find_type_by_host_type(wrapper.vmap->host_type);
+        if (type && type->host_ops && type->host_ops->invalidate) {
+            type->host_ops->invalidate(wrapper);
+        } else {
+            radiant_dom_host_invalidate(wrapper);
+        }
+    }
     heap_unregister_gc_root(&entry->item);
     entry->node = nullptr;
     entry->owner_doc = nullptr;
