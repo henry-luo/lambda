@@ -26,7 +26,11 @@ console.log(typeof os.totalmem());
 console.log(typeof os.freemem());
 
 // os.cpus() returns an array
-console.log(Array.isArray(os.cpus()));
+const cpus = os.cpus();
+console.log(Array.isArray(cpus));
+const firstCpu = cpus[0] || { times: {} };
+console.log(typeof firstCpu.speed);
+console.log(typeof firstCpu.times.user);
 
 // os.uptime()
 console.log(typeof os.uptime());

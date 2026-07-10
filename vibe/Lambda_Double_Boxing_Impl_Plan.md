@@ -36,6 +36,8 @@ Gate: none (measurement only). Deliverable: a dated results file under `test/ben
 
 ## S0 — Guardrails and audits (zero behavior change, lands on master)
 
+**S0 is not scaffolding for the float migration — it is the Item representation acquiring its enforcement layer** (`Lambda_Design_Item_Boxing.md` §7.3 W1 and Evolution Rule 7: every §6 invariant becomes an assertion, a debug check, or a lint rule). The sentinel collisions, raw `>> 56` scatter, open-coded payload dereferences, and representation-dependent raw equality that S0 closes are pre-existing debt; S0 lands and stays **regardless of whether v3 ever ships**.
+
 ### S0.1 Shared masks and predicates — `lambda/lambda.h`
 
 Define next to the `EnumTypeId` (`lambda.h:83`), compiled unconditionally (used by asserts now, by the runtime at S1):
@@ -96,6 +98,14 @@ Plus:
 - [ ] New rule (style of `no-int-cast-radiant`): flag any new 64-bit integer constant whose high-byte bit 6 or 5 is set, outside the float representation module.
 - [ ] Flag any new `>> 56` comparison against an integer literal not expressed via the `EnumTypeId`.
 - [ ] Run in `make lint`; whole tree must be clean at S0 exit.
+
+### S0.8 Semantic equality — one entry point (Item Boxing Evolution Rule 9)
+
+Raw Item bit-comparison is representation-layer code; this bug family has shipped at least three times (ArrayNum `==` representation-sensitivity, NaN identity, packed ±0). Groundwork here, enforcement grows with S1/S2:
+
+- [ ] Inventory every raw Item comparison in C/C++ runtime code (`.item ==`, `raw ==` on Item words) — the C-side sibling of the S0.6 `MIR_EQ` audit. Classify: (a) identity-semantics types only (objects/functions — fine), (b) sentinel compares (fine once sentinels are pinned), (c) value types where bit-equality is representation-dependent → route through the canonical equality helpers (`js_strict_equal`-class / Lambda `item_equal`).
+- [ ] Lint rule: flag new raw Item equality comparisons outside the representation layer and the audited allowlist (ratchet — the allowlist only shrinks).
+- [ ] Each surviving raw compare carries a one-line comment naming its proof (per CLAUDE.md rule 12 — state the invariant being relied on).
 
 **S0 gates:** `make test-lambda-baseline` 100 %, `make test-radiant-baseline` 100 %, JS gtests, `make node-baseline` unchanged, `make lint` clean. No benchmark movement expected (assert-only in release = none).
 
@@ -223,6 +233,6 @@ return LMD_TYPE_NULL;                                    // preserve canonical z
 
 ## Sequencing notes
 
-- S0 and S1.0 are independently landable and valuable regardless of the representation switch — start there.
+- S0 and S1.0 are independently landable and valuable regardless of the representation switch — start there. S0 in particular is the enforcement layer the Item design has been missing (`Lambda_Design_Item_Boxing.md` §7.3 W1 / Evolution Rules 7–10); even a decision to abandon v3 keeps all of S0.
 - T1/T2/T3 of the tuning proposal (ICs, call path, literal shapes) are orthogonal and may proceed in parallel; T5 (dense-double arrays), Part 2 (stack boxing residue), and the L4/T4 nursery redesign are **re-ranked after S3** with float traffic gone (design doc §5.3).
 - The numeric-nursery leak (design doc §1.4) shrinks to int64/datetime/decimal + subnormal-float residue after S3; its reclamation belongs to the nursery redesign, not this plan.

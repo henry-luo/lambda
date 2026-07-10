@@ -8,6 +8,8 @@ number
 number
 true
 number
+number
+number
 true
 string
 object

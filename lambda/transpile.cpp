@@ -161,6 +161,31 @@ bool current_func_returns_retitem(Transpiler* tp) {
     return true;
 }
 
+static void emit_current_func_error_return(Transpiler* tp) {
+    if (!tp->current_func_node) {
+        strbuf_append_str(tp->code_buf, "return ITEM_ERROR;");
+        return;
+    }
+    TypeFunc* fn_type = (TypeFunc*)tp->current_func_node->type;
+    bool is_closure = tp->current_func_node->captures != nullptr;
+    bool is_method = tp->method_owner != nullptr;
+    if (fn_type && fn_type->can_raise && !is_closure && !is_method) {
+        strbuf_append_str(tp->code_buf, "return item_to_ri(ITEM_ERROR);");
+        return;
+    }
+    Type* ret = fn_type ? fn_type->returned : nullptr;
+    TypeId ret_tid = ret ? ret->type_id : LMD_TYPE_ANY;
+    if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_INT64) {
+        strbuf_append_str(tp->code_buf, "return 0;");
+    } else if (ret_tid == LMD_TYPE_FLOAT) {
+        strbuf_append_str(tp->code_buf, "return 0.0;");
+    } else if (ret_tid == LMD_TYPE_BOOL) {
+        strbuf_append_str(tp->code_buf, "return false;");
+    } else {
+        strbuf_append_str(tp->code_buf, "return ITEM_ERROR;");
+    }
+}
+
 // Check if the callee of a call node returns RetItem.
 // Returns true for: (1) user-defined can_raise functions (non-closure, non-method),
 // and (2) system functions with can_raise=true (Phase 2.7 migration).
@@ -2201,20 +2226,29 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
                              rhs_tid == LMD_TYPE_ARRAY);
         if (needs_coerce && operand) {
             TypeId elem_tid = operand->type_id;
+            int tmp_id = tp->temp_var_counter++;
             if (elem_tid == LMD_TYPE_NUM_SIZED) {
                 // compact sized array: use ensure_sized_array(item, ArrayNumElemType)
                 ArrayNumElemType et = num_sized_to_elem_type(type_num_sized_kind(operand));
-                strbuf_append_str(tp->code_buf, "(ArrayNum*)ensure_sized_array(");
+                strbuf_append_format(tp->code_buf, "({void* _ta%d=ensure_sized_array(", tmp_id);
                 transpile_box_item(tp, asn_node->as);
-                strbuf_append_format(tp->code_buf, ",%d)", (int)et);
+                strbuf_append_format(tp->code_buf, ",%d);", (int)et);
+                // failed typed-array coercion must not leave a null native array in a typed binding.
+                strbuf_append_format(tp->code_buf, "if(!_ta%d){", tmp_id);
+                emit_current_func_error_return(tp);
+                strbuf_append_format(tp->code_buf, "}(ArrayNum*)_ta%d;})", tmp_id);
             } else {
                 const char* cast_type = "Array";
                 if (elem_tid == LMD_TYPE_INT) cast_type = "ArrayInt";
                 else if (elem_tid == LMD_TYPE_INT64) cast_type = "ArrayInt64";
                 else if (elem_tid == LMD_TYPE_FLOAT) cast_type = "ArrayFloat";
-                strbuf_append_format(tp->code_buf, "(%s*)ensure_typed_array(", cast_type);
+                strbuf_append_format(tp->code_buf, "({void* _ta%d=ensure_typed_array(", tmp_id);
                 transpile_box_item(tp, asn_node->as);
-                strbuf_append_format(tp->code_buf, ",%d)", elem_tid);
+                strbuf_append_format(tp->code_buf, ",%d);", elem_tid);
+                // failed typed-array coercion must not leave a null native array in a typed binding.
+                strbuf_append_format(tp->code_buf, "if(!_ta%d){", tmp_id);
+                emit_current_func_error_return(tp);
+                strbuf_append_format(tp->code_buf, " }(%s*)_ta%d;})", cast_type, tmp_id);
             }
         } else {
             transpile_expr(tp, asn_node->as);

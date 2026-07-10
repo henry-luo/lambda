@@ -15,6 +15,8 @@
 #include <cstdlib>
 #include <cerrno>
 
+extern Item js_make_number(double d);
+
 #ifdef _WIN32
 #include <windows.h>
 #include <process.h>
@@ -59,6 +61,12 @@ static Item make_string_item(const char* str, int len) {
 static Item make_string_item(const char* str) {
     if (!str) return ItemNull;
     return make_string_item(str, (int)strlen(str));
+}
+
+static Item make_node_number_i64(int64_t value) {
+    // Node os APIs expose host counters as JS Number; avoid compact-int packing,
+    // which turns values outside Lambda's safe-int band into ITEM_ERROR.
+    return js_make_number((double)value);
 }
 
 // =============================================================================
@@ -192,7 +200,7 @@ extern "C" Item js_os_totalmem(void) {
     struct sysinfo si;
     if (sysinfo(&si) == 0) total = (int64_t)si.totalram * si.mem_unit;
 #endif
-    return (Item){.item = i2it(total)};
+    return make_node_number_i64(total);
 }
 
 // os.freemem()
@@ -216,7 +224,7 @@ extern "C" Item js_os_freemem(void) {
     struct sysinfo si;
     if (sysinfo(&si) == 0) free_mem = (int64_t)si.freeram * si.mem_unit;
 #endif
-    return (Item){.item = i2it(free_mem)};
+    return make_node_number_i64(free_mem);
 }
 
 // os.cpus() — returns array of CPU info objects
@@ -257,7 +265,7 @@ extern "C" Item js_os_cpus(void) {
     for (int i = 0; i < num_cpus; i++) {
         Item cpu = js_new_object();
         js_property_set(cpu, make_string_item("model"), make_string_item(cpu_model));
-        js_property_set(cpu, make_string_item("speed"), (Item){.item = i2it(cpu_speed)});
+        js_property_set(cpu, make_string_item("speed"), make_node_number_i64(cpu_speed));
         Item times = js_new_object();
         if (cpu_info && i < (int)cpu_count) {
             processor_cpu_load_info_data_t* load =
@@ -266,17 +274,17 @@ extern "C" Item js_os_cpus(void) {
             int64_t nice_t = (int64_t)load->cpu_ticks[CPU_STATE_NICE] * 10;
             int64_t sys_t  = (int64_t)load->cpu_ticks[CPU_STATE_SYSTEM] * 10;
             int64_t idle_t = (int64_t)load->cpu_ticks[CPU_STATE_IDLE] * 10;
-            js_property_set(times, make_string_item("user"), (Item){.item = i2it(user_t)});
-            js_property_set(times, make_string_item("nice"), (Item){.item = i2it(nice_t)});
-            js_property_set(times, make_string_item("sys"),  (Item){.item = i2it(sys_t)});
-            js_property_set(times, make_string_item("idle"), (Item){.item = i2it(idle_t)});
-            js_property_set(times, make_string_item("irq"),  (Item){.item = i2it(0)});
+            js_property_set(times, make_string_item("user"), make_node_number_i64(user_t));
+            js_property_set(times, make_string_item("nice"), make_node_number_i64(nice_t));
+            js_property_set(times, make_string_item("sys"),  make_node_number_i64(sys_t));
+            js_property_set(times, make_string_item("idle"), make_node_number_i64(idle_t));
+            js_property_set(times, make_string_item("irq"),  make_node_number_i64(0));
         } else {
-            js_property_set(times, make_string_item("user"), (Item){.item = i2it(0)});
-            js_property_set(times, make_string_item("nice"), (Item){.item = i2it(0)});
-            js_property_set(times, make_string_item("sys"),  (Item){.item = i2it(0)});
-            js_property_set(times, make_string_item("idle"), (Item){.item = i2it(0)});
-            js_property_set(times, make_string_item("irq"),  (Item){.item = i2it(0)});
+            js_property_set(times, make_string_item("user"), make_node_number_i64(0));
+            js_property_set(times, make_string_item("nice"), make_node_number_i64(0));
+            js_property_set(times, make_string_item("sys"),  make_node_number_i64(0));
+            js_property_set(times, make_string_item("idle"), make_node_number_i64(0));
+            js_property_set(times, make_string_item("irq"),  make_node_number_i64(0));
         }
         js_property_set(cpu, make_string_item("times"), times);
         js_array_push(arr, cpu);
@@ -296,13 +304,13 @@ extern "C" Item js_os_cpus(void) {
     for (int i = 0; i < num_cpus; i++) {
         Item cpu = js_new_object();
         js_property_set(cpu, make_string_item("model"), make_string_item("CPU"));
-        js_property_set(cpu, make_string_item("speed"), (Item){.item = i2it(0)});
+        js_property_set(cpu, make_string_item("speed"), make_node_number_i64(0));
         Item times = js_new_object();
-        js_property_set(times, make_string_item("user"), (Item){.item = i2it(0)});
-        js_property_set(times, make_string_item("nice"), (Item){.item = i2it(0)});
-        js_property_set(times, make_string_item("sys"),  (Item){.item = i2it(0)});
-        js_property_set(times, make_string_item("idle"), (Item){.item = i2it(0)});
-        js_property_set(times, make_string_item("irq"),  (Item){.item = i2it(0)});
+        js_property_set(times, make_string_item("user"), make_node_number_i64(0));
+        js_property_set(times, make_string_item("nice"), make_node_number_i64(0));
+        js_property_set(times, make_string_item("sys"),  make_node_number_i64(0));
+        js_property_set(times, make_string_item("idle"), make_node_number_i64(0));
+        js_property_set(times, make_string_item("irq"),  make_node_number_i64(0));
         js_property_set(cpu, make_string_item("times"), times);
         js_array_push(arr, cpu);
     }
@@ -362,13 +370,13 @@ extern "C" Item js_os_cpus(void) {
     for (int i = 0; i < num_cpus; i++) {
         Item cpu = js_new_object();
         js_property_set(cpu, make_string_item("model"), make_string_item(cpu_model));
-        js_property_set(cpu, make_string_item("speed"), (Item){.item = i2it(cpu_speed)});
+        js_property_set(cpu, make_string_item("speed"), make_node_number_i64(cpu_speed));
         Item times = js_new_object();
-        js_property_set(times, make_string_item("user"), (Item){.item = i2it(0)});
-        js_property_set(times, make_string_item("nice"), (Item){.item = i2it(0)});
-        js_property_set(times, make_string_item("sys"),  (Item){.item = i2it(0)});
-        js_property_set(times, make_string_item("idle"), (Item){.item = i2it(0)});
-        js_property_set(times, make_string_item("irq"),  (Item){.item = i2it(0)});
+        js_property_set(times, make_string_item("user"), make_node_number_i64(0));
+        js_property_set(times, make_string_item("nice"), make_node_number_i64(0));
+        js_property_set(times, make_string_item("sys"),  make_node_number_i64(0));
+        js_property_set(times, make_string_item("idle"), make_node_number_i64(0));
+        js_property_set(times, make_string_item("irq"),  make_node_number_i64(0));
         js_property_set(cpu, make_string_item("times"), times);
         js_array_push(arr, cpu);
     }

@@ -110,7 +110,7 @@ The transpiler statically knows the property set of `{left: …, right: …}`. E
 
 ### T4 — Generational collection within the non-moving constraint
 
-The heap cannot move objects (JIT holds raw pointers), but **sticky mark bits** work non-moving: minor collections mark only objects allocated since the last cycle, with a write barrier on old→young pointer stores (property/array/env writes are already centralized C entry points, so barrier emission sites are few). Add lazy sweeping; switch GC-time field tracing from the ShapeEntry linked list to `slot_entries[]`. Splay/gcbench/binarytrees are "allocate fast, die young" workloads that generational collection collapses. Part 2 (stack boxing) reduces what reaches the nursery at all and pairs with this.
+The heap cannot move objects (JIT holds raw pointers), but **sticky mark bits** work non-moving: minor collections mark only objects allocated since the last cycle, with a write barrier on old→young pointer stores (property/array/env writes are already centralized C entry points, so barrier emission sites are few). Add lazy sweeping; switch GC-time field tracing from the ShapeEntry linked list to `slot_entries[]`. Splay/gcbench/binarytrees are "allocate fast, die young" workloads that generational collection collapses. Part 2 (stack boxing) reduces what reaches the nursery at all and pairs with this. The same redesign carries a **correctness deliverable**, not just a perf one: a coherent lifecycle for boxed int64/datetime payloads, whose nursery is currently never reclaimed at all — see Part 3 **L4.1**.
 
 ### T5 — Dense-double / dense-int element kinds for JS arrays
 
@@ -314,9 +314,26 @@ Replace the C-call + heap-block machinery with plain emitted MIR, keeping the GC
 
 The frame slots exist only because promotion **moves** data-zone payloads. If nursery blocks referenced by JIT roots were **pinned** (sticky blocks: survivors stay in place; the block is retained until empty) instead of copied, the conservative stack scan would cover JIT locals and the entire mechanism — even L2's inline version — could be deleted. Trade-offs: nursery retention/fragmentation, and container-buffer relocation must still work through owner-slot fixup (it already does — the rewrites at `gc_heap.c:1258`+ go through the owning object's field, not JIT roots). This becomes most attractive after Part 2, which keeps frame-local payloads out of the nursery entirely, leaving mostly container-owned data there. Treat as part of a deliberate nursery redesign (with T4), not a first move.
 
+*(2026-07-10 correction from code review: the premise above overstates what moves. The numeric nursery (`gc_nursery_t`, the `push_d`/`push_l`/`push_k` payload store) is in fact **never collected, moved, or reset** — `gc_nursery.h:15` — and JIT root slots are mark-only, never rewritten by the GC; only data-zone container buffers relocate, via owner-slot fixup. The rooting mechanism's real job is sweep-liveness of object-zone values, and deleting it is gated on root-causing why the conservative scan historically missed live JIT values (the deltablue corruption in `Lambda_Issue_GC_Root (fixed).md` §4), not on pinning. Full analysis: `Lambda_Type_Double_Boxing.md` §1.4.)*
+
+### L4.1 — Nursery-redesign deliverable: a coherent lifecycle for boxed int64/datetime *(added 2026-07-10)*
+
+Once double-boxing v3 lands (`Lambda_Type_Double_Boxing.md` — inline doubles, packed ±0), floats leave the numeric nursery almost entirely; the remaining population is **boxed `int64` and `datetime` payloads** (`push_l`/`push_k`, `lambda-mem.cpp`) plus the subnormal/tiny-float residue. Their current lifecycle is incoherent, and per `Lambda_Design_Item_Boxing.md` Evolution Rule 8 (*a storage class is not designed until its lifecycle is*), the nursery redesign must fix all three legs, not just performance:
+
+- **Allocation:** nursery bump slots — fine as-is.
+- **Reclamation:** **none** — payloads persist until `nursery_destroy()` at runtime teardown. This is a monotonic leak in long-running processes (Radiant pages, servers), independent of any benchmark concern. The redesign's hard requirement is *some* reclamation story: sticky blocks with per-block occupancy freed when empty is the natural non-moving scheme (liveness would need the GC's pointer discrimination taught nursery ranges — today `is_gc_object` ignores them, so marking a nursery pointer is a no-op and rooting int64 locals protects nothing).
+- **Equality/identity:** payload pointers are distinct for equal values, so raw Item bits are not value equality — the recurring bug family Item Boxing Evolution Rule 9 ratchets against. The redesign should state each type's canonical-representation rule explicitly.
+
+Two demand-reduction options to evaluate *before* sizing the reclamation machinery, since they shrink the problem instead of managing it:
+
+1. **Pack in-band `int64` inline.** An int64 whose value fits 56 sign-extended bits (|v| < 2⁵⁵ — the overwhelming majority in practice) could pack directly under the `LMD_TYPE_INT64` tag exactly as compact `int` does, boxing only the extreme tail. Semantics unchanged (`type()` still `int64`); killer question is the audit cost of a second packed-vs-pointer discrimination on the int64 read path — same shape as the v3 float work, much smaller prize; measure `push_l` rates first (P0-style counter).
+2. **Part 2 stack boxing for the rest.** Frame-local int64/datetime temporaries are exactly the residue Part 2 remains valuable for after v3 subsumes its float case (`datetime` likely cannot pack — `DateTime` uses the full 64 bits).
+
+Sequencing: after v3 S3, sized by profiling the actual residue; lands as part of the L4/T4 nursery redesign, and its lifecycle decisions (especially canonical representation) should be recorded in `Lambda_Design_Item_Boxing.md` when made.
+
 ### Sequencing & validation
 
-**L0 → L1 → L2 → L3 (profile-guided) → L4 (with T4/Part 2).** Gates: `make test-lambda-baseline` 100 %, `test_lambda_errors_gtest` 61/61 (the StackOverflow test is the canary for over-rooting cost; deltablue/deltablue2 are the canaries for under-rooting correctness — both directions burned us before, see `Lambda_Issue_GC_Root (fixed).md` §4), plus an ASan pass of the benchmark suite for the L2 lifetime changes. Measure fib/ack (call overhead), deltablue (rooted recursion), gcbench (GC-side range walking) before/after each layer.
+**L0 → L1 → L2 → L3 (profile-guided) → L4 + L4.1 (with T4/Part 2, after double-boxing v3).** Gates: `make test-lambda-baseline` 100 %, `test_lambda_errors_gtest` 61/61 (the StackOverflow test is the canary for over-rooting cost; deltablue/deltablue2 are the canaries for under-rooting correctness — both directions burned us before, see `Lambda_Issue_GC_Root (fixed).md` §4), plus an ASan pass of the benchmark suite for the L2 lifetime changes. Measure fib/ack (call overhead), deltablue (rooted recursion), gcbench (GC-side range walking) before/after each layer.
 
 ---
 

@@ -30,6 +30,8 @@ console.log("bigint asUintN64:", BigInt.asUintN(64, -1n).toString(16));
 console.log("bigint shift neg typeof:", typeof (-(1n << 63n)));
 console.log("bigint shift neg:", (-(1n << 63n)).toString());
 console.log("bigint asIntN64 min:", BigInt.asIntN(64, -(1n << 63n)).toString());
+const hugeUintHex = BigInt.asUintN(8000, -1n).toString(16);
+console.log("bigint asUintN8000 hex:", hugeUintHex === "f".repeat(2000));
 console.log("bigint pow huge identity:", (1n ** (1n << 63n)).toString());
 try {
   BigInt.asIntN(1n, 0n);

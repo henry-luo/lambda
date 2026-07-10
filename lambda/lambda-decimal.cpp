@@ -1189,6 +1189,22 @@ static mpd_context_t* bigint_context() {
     return &g_bigint_ctx;
 }
 
+static mpd_context_t bigint_precision_context(mpd_ssize_t need) {
+    mpd_context_t ctx = *bigint_context();
+    // BigInt arithmetic is exact; wide asUintN/asIntN intermediates must not
+    // be rounded by the default 2000-digit context before narrowing.
+    if (need > ctx.prec) ctx.prec = need < 100000 ? need : 100000;
+    return ctx;
+}
+
+static mpd_context_t bigint_sized_context(mpd_t* a, mpd_t* b, mpd_ssize_t extra_digits) {
+    mpd_ssize_t need = extra_digits;
+    if (a && a->digits > need) need = a->digits;
+    if (b && b->digits > need) need = b->digits;
+    need += extra_digits;
+    return bigint_precision_context(need);
+}
+
 // helper: allocate Decimal struct on GC heap with DECIMAL tag, wrap mpd_t*
 static Item bigint_push_result(mpd_t* mpd_val) {
     if (!mpd_val) return ItemError;
@@ -1424,10 +1440,10 @@ Item bigint_add(Item a, Item b) {
     mpd_t* ma = bigint_get_mpd(a);
     mpd_t* mb = bigint_get_mpd(b);
     if (!ma || !mb) return ItemError;
-    mpd_context_t* ctx = bigint_context();
-    mpd_t* r = mpd_new(ctx);
+    mpd_context_t ctx = bigint_sized_context(ma, mb, 2);
+    mpd_t* r = mpd_new(&ctx);
     if (!r) return ItemError;
-    mpd_add(r, ma, mb, ctx);
+    mpd_add(r, ma, mb, &ctx);
     return bigint_push_result(r);
 }
 
@@ -1435,10 +1451,10 @@ Item bigint_sub(Item a, Item b) {
     mpd_t* ma = bigint_get_mpd(a);
     mpd_t* mb = bigint_get_mpd(b);
     if (!ma || !mb) return ItemError;
-    mpd_context_t* ctx = bigint_context();
-    mpd_t* r = mpd_new(ctx);
+    mpd_context_t ctx = bigint_sized_context(ma, mb, 2);
+    mpd_t* r = mpd_new(&ctx);
     if (!r) return ItemError;
-    mpd_sub(r, ma, mb, ctx);
+    mpd_sub(r, ma, mb, &ctx);
     return bigint_push_result(r);
 }
 
@@ -1446,10 +1462,10 @@ Item bigint_mul(Item a, Item b) {
     mpd_t* ma = bigint_get_mpd(a);
     mpd_t* mb = bigint_get_mpd(b);
     if (!ma || !mb) return ItemError;
-    mpd_context_t* ctx = bigint_context();
-    mpd_t* r = mpd_new(ctx);
+    mpd_context_t ctx = bigint_precision_context(ma->digits + mb->digits + 2);
+    mpd_t* r = mpd_new(&ctx);
     if (!r) return ItemError;
-    mpd_mul(r, ma, mb, ctx);
+    mpd_mul(r, ma, mb, &ctx);
     return bigint_push_result(r);
 }
 
@@ -1458,13 +1474,13 @@ Item bigint_div(Item a, Item b) {
     mpd_t* mb = bigint_get_mpd(b);
     if (!ma || !mb) return ItemError;
     if (mpd_iszero(mb)) return ItemError;  // caller should throw RangeError
-    mpd_context_t* ctx = bigint_context();
+    mpd_context_t ctx = bigint_sized_context(ma, mb, 2);
     // integer division: truncate toward zero
-    mpd_t* r = mpd_new(ctx);
+    mpd_t* r = mpd_new(&ctx);
     if (!r) return ItemError;
-    mpd_t* rem = mpd_new(ctx);
+    mpd_t* rem = mpd_new(&ctx);
     if (!rem) { mpd_del(r); return ItemError; }
-    mpd_divmod(r, rem, ma, mb, ctx);
+    mpd_divmod(r, rem, ma, mb, &ctx);
     mpd_del(rem);
     return bigint_push_result(r);
 }
@@ -1474,10 +1490,10 @@ Item bigint_mod(Item a, Item b) {
     mpd_t* mb = bigint_get_mpd(b);
     if (!ma || !mb) return ItemError;
     if (mpd_iszero(mb)) return ItemError;
-    mpd_context_t* ctx = bigint_context();
-    mpd_t* r = mpd_new(ctx);
+    mpd_context_t ctx = bigint_sized_context(ma, mb, 2);
+    mpd_t* r = mpd_new(&ctx);
     if (!r) return ItemError;
-    mpd_rem(r, ma, mb, ctx);
+    mpd_rem(r, ma, mb, &ctx);
     return bigint_push_result(r);
 }
 
@@ -1771,11 +1787,14 @@ char* bigint_to_cstring_radix(Item bi, int radix) {
 
     // non-10 radix must not pass through int64; JS BigInt strings are
     // arbitrary precision and asUintN(64, -1n) depends on the full 64 bits.
-    mpd_context_t* ctx = bigint_context();
-    mpd_t* n = mpd_new(ctx);
-    mpd_t* base = mpd_new(ctx);
-    mpd_t* q = mpd_new(ctx);
-    mpd_t* rem = mpd_new(ctx);
+    mpd_context_t conv_ctx = *bigint_context();
+    // BigInt radix conversion repeatedly divides the whole value; the default
+    // BigInt context is too small for wide asUintN/asIntN results and can trap.
+    if (m->digits + 16 > conv_ctx.prec) conv_ctx.prec = m->digits + 16;
+    mpd_t* n = mpd_new(&conv_ctx);
+    mpd_t* base = mpd_new(&conv_ctx);
+    mpd_t* q = mpd_new(&conv_ctx);
+    mpd_t* rem = mpd_new(&conv_ctx);
     if (!n || !base || !q || !rem) {
         if (n) mpd_del(n);
         if (base) mpd_del(base);
@@ -1785,8 +1804,13 @@ char* bigint_to_cstring_radix(Item bi, int radix) {
     }
 
     bool negative = mpd_isnegative(m);
-    mpd_abs(n, m, ctx);
-    mpd_set_u32(base, (uint32_t)radix, ctx);
+    uint32_t status = 0;
+    mpd_qabs(n, m, &conv_ctx, &status);
+    mpd_qset_ssize(base, (mpd_ssize_t)radix, &conv_ctx, &status);
+    if (status & MPD_Errors) {
+        mpd_del(n); mpd_del(base); mpd_del(q); mpd_del(rem);
+        return NULL;
+    }
 
     int cap = (int)(m->digits * 4 + 4);
     if (cap < 32) cap = 32;
@@ -1801,8 +1825,14 @@ char* bigint_to_cstring_radix(Item bi, int radix) {
         rev[len++] = '0';
     } else {
         while (!mpd_iszero(n)) {
-            mpd_divmod(q, rem, n, base, ctx);
-            int digit = (int)mpd_get_ssize(rem, ctx);
+            status = 0;
+            mpd_qdivmod(q, rem, n, base, &conv_ctx, &status);
+            int digit = (int)mpd_qget_ssize(rem, &status);
+            if (status & MPD_Errors) {
+                mem_free(rev);
+                mpd_del(n); mpd_del(base); mpd_del(q); mpd_del(rem);
+                return NULL;
+            }
             if (len + 2 >= cap) {
                 int new_cap = cap * 2;
                 char* grown = (char*)mem_alloc(new_cap, MEM_CAT_STRING);
@@ -1817,7 +1847,7 @@ char* bigint_to_cstring_radix(Item bi, int radix) {
                 cap = new_cap;
             }
             rev[len++] = digit < 10 ? (char)('0' + digit) : (char)('a' + digit - 10);
-            mpd_copy(n, q, ctx);
+            mpd_copy(n, q, &conv_ctx);
         }
     }
     if (negative) rev[len++] = '-';
