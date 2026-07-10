@@ -1386,6 +1386,11 @@ bool bigint_is_zero(Item bi) {
     return m && mpd_iszero(m);
 }
 
+bool bigint_is_negative(Item bi) {
+    mpd_t* m = bigint_get_mpd(bi);
+    return m && mpd_isnegative(m);
+}
+
 int bigint_cmp(Item a, Item b) {
     mpd_t* ma = bigint_get_mpd(a);
     mpd_t* mb = bigint_get_mpd(b);
@@ -1485,10 +1490,18 @@ Item bigint_pow(Item base, Item exp) {
     if (mpd_iszero(me)) return bigint_from_int64(1);
     if (mpd_iszero(mb)) return bigint_from_int64(0);
     mpd_context_t* ctx = bigint_context();
+    mpd_t* one = mpd_new(ctx);
+    if (!one) return ItemError;
+    mpd_set_u32(one, 1, ctx);
+    bool base_is_one = mpd_cmp(mb, one, ctx) == 0;
+    mpd_del(one);
+    if (base_is_one) return bigint_from_int64(1);
     // dynamically increase precision for large exponents
     mpd_context_t pow_ctx = *ctx;
-    int64_t exp_val = mpd_get_ssize(me, ctx);
-    if (exp_val > 0) {
+    // exponent magnitude is arbitrary BigInt; only use a host-sized estimate when it fits.
+    uint32_t exp_status = 0;
+    mpd_ssize_t exp_val = mpd_qget_ssize(me, &exp_status);
+    if ((exp_status & MPD_Invalid_operation) == 0 && exp_val > 0) {
         // estimate result digits: base_digits * exp
         mpd_ssize_t base_digits = mb->digits;
         mpd_ssize_t est = base_digits * exp_val + 10;

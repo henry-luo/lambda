@@ -1387,8 +1387,8 @@ extern "C" Item js_power(Item left, Item right) {
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
-        int64_t exp = bigint_to_int64(right);
-        if (exp < 0) { js_throw_range_error("Exponent must be positive"); return ItemNull; }
+        // BigInt exponents are arbitrary precision; sign checks must not truncate through int64.
+        if (bigint_is_negative(right)) { js_throw_range_error("Exponent must be positive"); return ItemNull; }
         return bigint_pow(left, right);
     }
     double base_d = js_get_number(js_to_number(left));
