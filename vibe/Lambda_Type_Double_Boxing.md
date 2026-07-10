@@ -1,11 +1,11 @@
-# Lambda Double Boxing v2 — Inline Doubles via High-Byte Float Self-Tagging
+# Lambda Double Boxing v3 — Inline Doubles via High-Byte Float Self-Tagging
 
-- **Status:** PROPOSED
+- **Status:** PROPOSED — reviewed (Part 7); implementation plan at `Lambda_Double_Boxing_Impl_Plan.md`
 - **Date:** 2026-07-10
 - **Co-Author:** Anthropic Fable
 - **Scope:** the runtime `Item` representation of `float` (binary64) across Lambda core, LambdaJS, the MIR transpilers, and the GC. Supersedes and expands **Part 5** of `Lambda_Tuning_Proposal.md`.
 - **Convention:** `file:line` references drift; confirm against the symbol name.
-- **Related:** `Lambda_Tuning_Proposal.md` (Parts 1–5 — the engine-wide analysis this fix comes from), `Lambda_Semantics_Number_Model.md` (number model v2 — `int` compact band, `f64` alias rule), `doc/dev/js/JS_03_Value_Model.md`, `doc/Lambda_Formal_Semantics.md` §4 (numerics ADR).
+- **Related:** `Lambda_Design_Item_Boxing.md` (**the Item-representation design record this extension must preserve** — tagged scalar leaves, raw container pointers, and the invariants in its §6), `Lambda_Tuning_Proposal.md` (Parts 1–5 — the engine-wide analysis this fix comes from), `Lambda_Semantics_Number_Model.md` (number model v2 — `int` compact band, `f64` alias rule), `doc/dev/js/JS_03_Value_Model.md`, `doc/Lambda_Formal_Semantics.md` §4 (numerics ADR).
 
 ## 0. Summary
 
@@ -250,7 +250,7 @@ A build where some producers inline and some still box violates §2.6 and makes 
 The compact `int` band is **±(2⁵³−1)** — deliberately the JS safe-integer band (`INT56_MAX`, `lambda.h:896`; number model v2 §2.1) — packed in the low 56 bits with high byte = `LMD_TYPE_INT` (`i2it`, `lambda.h:904`). Findings:
 
 1. **No packing change needed.** The `& 0x00FFFFFFFFFFFFFF` mask confines sign extension to the payload; the high byte is always `LMD_TYPE_INT` (= 5, bits 6,5 = 00), so packed ints — positive and negative — sit outside double space and are compliant with §2.3 by construction.
-2. **`int → float` conversion becomes allocation-free.** The band was chosen so every compact int is exactly representable in binary64; with self-tagging, the converted double is always in-band (integers up to 2⁵³ have exponents ≤ 0x434). What is today `I2D + push_d` (allocation) becomes `I2D + ADD + BT` (~3 ALU ops). This completes the number model's egress story: `int → number` is *exact* by design and now also *free*.
+2. **`int → float` conversion becomes allocation-free.** The band was chosen so every compact int is exactly representable in binary64; with self-tagging, every *nonzero* converted int is in-band (|n| ≥ 1 ⟹ `e ≥ 0x3FF`; a JIT that proves the operand nonzero may skip the check entirely), and zero maps to the packed immediate (§2.5). What is today `I2D + push_d` (allocation) becomes `I2D` + the mask check, with the resulting bits stored unchanged. This completes the number model's egress story: `int → number` is *exact* by design and now also *free*.
 3. **The int-overflow promotion arm stops allocating.** `jm_box_int_reg`'s out-of-range arm (`js_mir_calls_boxing_types.cpp:356`) promotes to a boxed float via `push_d` — the only allocation in the int packing path. It becomes an inline encode; the results (magnitudes just past 2⁵³) are comfortably in-band.
 4. **JS ingress needs nothing new.** Number model v2 makes JS numbers uniformly `float` (compact-int packing already removed from LambdaJS, §5.1) — which *increased* boxed-double traffic and thus the prize here. Safe-integer-valued JS numbers arrive as doubles and self-tag like any other.
 5. **Type semantics untouched.** `int` and `float` remain distinct runtime types (`type(5)` = `int`; `5 is float` is the §3.4 subsumption question, answered at the type level, not by representation). No temptation to encode ints as inline doubles — that would erase the `int`/`float` distinction the semantics ADR requires.
@@ -288,6 +288,8 @@ If S2 measures worse than expected (branch cost in `get_type_id` on float-light 
 
 # Part 6 — Cross-references
 
+- `Lambda_Design_Item_Boxing.md` — **the Item-representation design record** (tagged leaves / raw containers / inline immediates, the measured direct-string-pointer counter-experiment, and the §6 runtime/GC invariants). This proposal is the "local evolution" its §7.1 anticipates; the raw-container ABI it documents is the non-negotiable constraint of Part 7 §7.2.
+- `Lambda_Double_Boxing_Impl_Plan.md` — the detailed implementation plan (phases, work items, assertions, tests, gates) derived from Part 5 and the Part 7 guardrails.
 - `Lambda_Tuning_Proposal.md` — Part 1 (Wall 1/Wall 4 sizing), Part 2 (stack boxing — float case subsumed by this doc), Part 3 (rooting — inline floats need none), Part 4 (the tagging-vs-NaN-boxing verdict this design implements), Part 5 (the sketch this doc supersedes).
 - `Lambda_Semantics_Number_Model.md` — §2.1 (compact band = safe-integer band), §3.2 (`f64` alias rule → §3.7 here), §5.1/§5.4 (JS number ≡ float; compact-int packing removal), Part 2 W-items (migration coordination).
 - `doc/Lambda_Formal_Semantics.md` §4 — numeric semantics ADR (value domain unchanged by this proposal; representation only).
