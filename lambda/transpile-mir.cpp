@@ -13246,17 +13246,21 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
 
 #ifndef NDEBUG
     // Dump MIR text for debugging (before finish_func to capture state on error).
+    // The dump is a debug artifact like log.txt, so --no-log suppresses it too:
+    // log_disable_all() clears the default category's enabled flag, checked here.
     // The path is overridable via LAMBDA_MIR_DUMP_PATH: every debug lambda.exe run
     // truncates the fixed default path, so tests that inspect the dump while other
     // lambda.exe processes run concurrently must redirect it to a private file.
-    const char* mir_dump_path = getenv("LAMBDA_MIR_DUMP_PATH");
-    if (!mir_dump_path || !*mir_dump_path) { mir_dump_path = "temp/mir_dump.txt"; }
-    FILE* mir_dump = fopen(mir_dump_path, "w");
-    if (mir_dump) {
-        MIR_output(ctx, mir_dump);
-        fclose(mir_dump);
-    } else {
-        log_warn("mir dump: failed to open '%s' for writing", mir_dump_path);
+    if (log_default_category && log_default_category->enabled) {
+        const char* mir_dump_path = getenv("LAMBDA_MIR_DUMP_PATH");
+        if (!mir_dump_path || !*mir_dump_path) { mir_dump_path = "temp/mir_dump.txt"; }
+        FILE* mir_dump = fopen(mir_dump_path, "w");
+        if (mir_dump) {
+            MIR_output(ctx, mir_dump);
+            fclose(mir_dump);
+        } else {
+            log_warn("mir dump: failed to open '%s' for writing", mir_dump_path);
+        }
     }
 #endif
 

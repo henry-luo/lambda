@@ -91,21 +91,6 @@ struct AvailableSize {
     }
 
     /**
-     * Get the pixel value, or a fallback if not definite.
-     */
-    float to_px_or(float fallback) const {
-        return is_definite() ? value : fallback;
-    }
-
-    /**
-     * Get the pixel value, or INFINITY if not definite.
-     * Useful for max-width constraints where indefinite means no limit.
-     */
-    float to_px_or_infinity() const {
-        return is_definite() ? value : INFINITY;
-    }
-
-    /**
      * Resolve to a definite value given a fallback for indefinite.
      * For intrinsic sizing, returns 0 (caller should handle specially).
      */
@@ -201,32 +186,11 @@ struct AvailableSpace {
     bool is_width_max_content() const {
         return width.is_max_content();
     }
-
-    /**
-     * Check if both dimensions are definite.
-     */
-    bool is_fully_definite() const {
-        return width.is_definite() && height.is_definite();
-    }
 };
 
 // ============================================================================
 // Size Constraint Utilities
 // ============================================================================
-
-/**
- * Apply min/max constraints to a computed size.
- *
- * @param size The computed size
- * @param min_size Minimum size constraint (or 0 for none)
- * @param max_size Maximum size constraint (or INFINITY for none)
- * @return Clamped size value
- */
-inline float apply_size_constraints(float size, float min_size, float max_size) {
-    if (min_size > 0 && size < min_size) size = min_size;
-    if (max_size > 0 && !isinf(max_size) && size > max_size) size = max_size;
-    return size;
-}
 
 /**
  * Compute shrink-to-fit width (fit-content).

@@ -57,18 +57,6 @@ inline KnownDimensions known_dimensions_none() {
     return {0.0f, 0.0f, false, false};
 }
 
-inline KnownDimensions known_dimensions_width(float w) {
-    return {w, 0.0f, true, false};
-}
-
-inline KnownDimensions known_dimensions_height(float h) {
-    return {0.0f, h, false, true};
-}
-
-inline KnownDimensions known_dimensions_both(float w, float h) {
-    return {w, h, true, true};
-}
-
 // ============================================================================
 // SizeF - Simple float size (width, height)
 // ============================================================================
