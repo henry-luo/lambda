@@ -3,6 +3,7 @@
 #include "lambda-error.h"
 #ifndef SIMPLE_SCHEMA_PARSER
 #include "module_registry.h"
+#include "jube/jube_registry.h"
 #endif
 #include "../lib/hashmap.h"
 #include "../lib/datetime.h"
@@ -14,6 +15,7 @@
 #include "../lib/file.h"
 #include "../lib/recursion_guard.hpp"
 #include <errno.h>
+#include <stdlib.h>
 #include <algorithm>  // for std::max
 
 // Caps build_expr recursion so a pathologically nested source reports an error
@@ -42,8 +44,8 @@ AstNode* build_current_expr(Transpiler* tp, TSNode node);
 // Forward declaration for let_block (uses build_let_expr defined later)
 AstNode* build_let_expr(Transpiler* tp, TSNode let_node);
 
-// Forward declaration for builtin module resolution
-static const char* resolve_builtin_module(Transpiler* tp, StrView* name);
+// Forward declaration for imported module resolution
+static const char* resolve_imported_module(Transpiler* tp, StrView* name);
 
 // Forward declaration for type building (used by query expressions)
 AstNode* build_primary_type(Transpiler* tp, TSNode type_node);
@@ -92,6 +94,17 @@ typedef struct {
 static struct hashmap* sys_func_map = NULL;       // (name, arg_count) → SysFuncInfo*
 static struct hashmap* sys_func_name_set = NULL;   // name → exists
 
+typedef struct JubeSysFuncRecord {
+    SysFuncInfo info;
+    char name[128];
+    char c_func_name[128];
+} JubeSysFuncRecord;
+
+#ifndef SIMPLE_SCHEMA_PARSER
+static JubeSysFuncRecord* jube_sys_func_records = NULL;
+static int jube_sys_func_record_count = 0;
+#endif
+
 static uint64_t sys_func_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const SysFuncEntry* e = (const SysFuncEntry*)item;
     // hash the name and mix in arg_count
@@ -120,6 +133,206 @@ static int sys_func_name_compare(const void* a, const void* b, void* udata) {
     return strncmp(ea->name, eb->name, ea->name_len);
 }
 
+static void register_sys_func_info(SysFuncInfo* info) {
+    if (!info || !info->name) return;
+    int name_len = (int)strlen(info->name);
+
+    SysFuncEntry entry = {
+        .name = info->name,
+        .name_len = name_len,
+        .arg_count = info->arg_count,
+        .info = info
+    };
+    hashmap_set(sys_func_map, &entry);
+
+    SysFuncNameEntry name_entry = {
+        .name = info->name,
+        .name_len = name_len
+    };
+    hashmap_set(sys_func_name_set, &name_entry);
+}
+
+#ifndef SIMPLE_SCHEMA_PARSER
+static int jube_signature_arg_count(const char* signature) {
+    if (!signature) return -1;
+    const char* open = strchr(signature, '(');
+    const char* close = open ? strchr(open, ')') : NULL;
+    if (!open || !close || close < open) return -1;
+
+    const char* p = open + 1;
+    while (p < close && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    if (p >= close) return 0;
+
+    int count = 1;
+    while (p < close) {
+        if (*p == ',') count++;
+        p++;
+    }
+    return count;
+}
+
+static bool jube_type_name_matches(const char* text, const char* name) {
+    size_t name_len = strlen(name);
+    if (strncmp(text, name, name_len) != 0) return false;
+    char next = text[name_len];
+    return next == '\0' || next == ' ' || next == '\t' || next == '\n' ||
+        next == '\r' || next == ',' || next == ')';
+}
+
+static TypeId jube_signature_type_id(const char* text) {
+    if (!text) return LMD_TYPE_ANY;
+    while (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r') text++;
+
+    if (jube_type_name_matches(text, "null")) return LMD_TYPE_NULL;
+    if (jube_type_name_matches(text, "bool")) return LMD_TYPE_BOOL;
+    if (jube_type_name_matches(text, "int64")) return LMD_TYPE_INT64;
+    if (jube_type_name_matches(text, "int")) return LMD_TYPE_INT;
+    if (jube_type_name_matches(text, "float")) return LMD_TYPE_FLOAT;
+    if (jube_type_name_matches(text, "string")) return LMD_TYPE_STRING;
+
+    int module_count = jube_static_module_count();
+    for (int i = 0; i < module_count; i++) {
+        const JubeModuleDef* module = jube_static_module_at(i);
+        if (!module || !module->types || module->type_count <= 0) continue;
+        for (int j = 0; j < module->type_count; j++) {
+            const JubeTypeDef* type = &module->types[j];
+            if (type->name && jube_type_name_matches(text, type->name)) {
+                return LMD_TYPE_VMAP;
+            }
+        }
+    }
+    return LMD_TYPE_ANY;
+}
+
+static TypeId jube_signature_first_param_type_id(const char* signature) {
+    if (!signature) return LMD_TYPE_ANY;
+    const char* open = strchr(signature, '(');
+    const char* close = open ? strchr(open, ')') : NULL;
+    if (!open || !close || close < open) return LMD_TYPE_ANY;
+
+    const char* p = open + 1;
+    while (p < close && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    if (p >= close) return LMD_TYPE_ANY;
+
+    const char* colon = p;
+    while (colon < close && *colon != ':' && *colon != ',') colon++;
+    if (colon >= close || *colon != ':') return LMD_TYPE_ANY;
+    return jube_signature_type_id(colon + 1);
+}
+
+static Type* jube_type_from_type_id(TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_NULL: return &TYPE_NULL;
+    case LMD_TYPE_BOOL: return &TYPE_BOOL;
+    case LMD_TYPE_INT: return &TYPE_INT;
+    case LMD_TYPE_INT64: return &TYPE_INT64;
+    case LMD_TYPE_FLOAT: return &TYPE_FLOAT;
+    case LMD_TYPE_STRING: return &TYPE_STRING;
+    default: return &TYPE_ANY;
+    }
+}
+
+static Type* jube_signature_return_type(const char* signature) {
+    if (!signature) return &TYPE_ANY;
+    const char* arrow = strstr(signature, "->");
+    if (!arrow) return &TYPE_ANY;
+    return jube_type_from_type_id(jube_signature_type_id(arrow + 2));
+}
+
+static bool jube_extract_native_c_name(const char* native_signature, char* out, size_t out_size) {
+    if (!native_signature || !out || out_size == 0) return false;
+    const char* open = strchr(native_signature, '(');
+    if (!open) return false;
+
+    const char* end = open;
+    while (end > native_signature && (*(end - 1) == ' ' || *(end - 1) == '\t')) end--;
+    const char* start = end;
+    while (start > native_signature) {
+        char ch = *(start - 1);
+        if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+            (ch >= '0' && ch <= '9') || ch == '_') {
+            start--;
+        } else {
+            break;
+        }
+    }
+    if (start == end) return false;
+
+    size_t len = (size_t)(end - start);
+    if (len >= out_size) len = out_size - 1;
+    memcpy(out, start, len);
+    out[len] = '\0';
+    return true;
+}
+
+static int jube_count_module_functions(void) {
+    jube_register_builtin_modules();
+
+    int count = 0;
+    int module_count = jube_static_module_count();
+    for (int i = 0; i < module_count; i++) {
+        const JubeModuleDef* module = jube_static_module_at(i);
+        if (!module || !module->functions || module->function_count <= 0) continue;
+        count += module->function_count;
+    }
+    return count;
+}
+
+static void register_jube_sys_funcs(void) {
+    if (jube_sys_func_records) return;
+
+    int total = jube_count_module_functions();
+    if (total <= 0) return;
+
+    jube_sys_func_records = (JubeSysFuncRecord*)calloc((size_t)total, sizeof(JubeSysFuncRecord));
+    if (!jube_sys_func_records) {
+        log_error("JUBE_AST: failed to allocate %d descriptor sys-func records", total);
+        return;
+    }
+
+    int out = 0;
+    int module_count = jube_static_module_count();
+    for (int i = 0; i < module_count; i++) {
+        const JubeModuleDef* module = jube_static_module_at(i);
+        if (!module || !module->name || !module->functions || module->function_count <= 0) continue;
+        for (int j = 0; j < module->function_count; j++) {
+            const JubeFuncDef* fn = &module->functions[j];
+            if (!fn->name || (!fn->native_func && !fn->func)) continue;
+
+            JubeSysFuncRecord* record = &jube_sys_func_records[out++];
+            snprintf(record->name, sizeof(record->name), "%s_%s", module->name, fn->name);
+            if (!jube_extract_native_c_name(fn->native_signature,
+                    record->c_func_name, sizeof(record->c_func_name))) {
+                snprintf(record->c_func_name, sizeof(record->c_func_name), "%s", record->name);
+            }
+
+            record->info.fn = SYSFUNC_JUBE_MODULE;
+            record->info.name = record->name;
+            record->info.arg_count = jube_signature_arg_count(fn->signature);
+            record->info.return_type = jube_signature_return_type(fn->signature);
+            record->info.is_proc = false;
+            record->info.is_overloaded = false;
+            record->info.is_method_eligible = (fn->flags & JUBE_FN_METHOD_ELIGIBLE) != 0;
+            record->info.first_param_type = jube_signature_first_param_type_id(fn->signature);
+            record->info.can_raise = false;
+            record->info.c_ret_type = C_RET_ITEM;
+            record->info.c_arg_conv = C_ARG_ITEM;
+            record->info.c_func_name = record->c_func_name;
+            record->info.func_ptr = fn->native_func ? fn->native_func : fn->func;
+            record->info.native_c_name = NULL;
+            record->info.native_func_ptr = NULL;
+            record->info.native_returns_float = false;
+            record->info.native_arg_count = 0;
+
+            // Descriptor functions are registered as module-prefixed sys funcs
+            // so legacy MIR call lowering sees the same metadata shape.
+            register_sys_func_info(&record->info);
+        }
+    }
+    jube_sys_func_record_count = out;
+}
+#endif
+
 static void init_sys_func_maps() {
     if (sys_func_map) return;  // already initialized
 
@@ -132,31 +345,35 @@ static void init_sys_func_maps() {
         0, 0, sys_func_name_hash, sys_func_name_compare, NULL, NULL);
 
     for (size_t i = 0; i < count; i++) {
-        int name_len = (int)strlen(sys_func_defs[i].name);
-
-        // insert into composite-key map
-        SysFuncEntry entry = {
-            .name = sys_func_defs[i].name,
-            .name_len = name_len,
-            .arg_count = sys_func_defs[i].arg_count,
-            .info = &sys_func_defs[i]
-        };
-        hashmap_set(sys_func_map, &entry);
-
-        // insert into name-only set (deduplicates automatically)
-        SysFuncNameEntry name_entry = {
-            .name = sys_func_defs[i].name,
-            .name_len = name_len
-        };
-        hashmap_set(sys_func_name_set, &name_entry);
+        register_sys_func_info(&sys_func_defs[i]);
     }
 
-    log_info("sys_func maps initialized: %zu entries, %zu unique names",
-             count, hashmap_count(sys_func_name_set));
+    int dynamic_count = 0;
+#ifndef SIMPLE_SCHEMA_PARSER
+    register_jube_sys_funcs();
+    dynamic_count = jube_sys_func_record_count;
+#endif
+
+    log_info("sys_func maps initialized: %zu static entries, %d Jube entries, %zu unique names",
+             count, dynamic_count, hashmap_count(sys_func_name_set));
 }
 
 void ensure_sys_func_maps_initialized() {
     init_sys_func_maps();
+}
+
+extern "C" fn_ptr find_dynamic_sys_func_import(const char* c_func_name) {
+    if (!c_func_name) return NULL;
+    init_sys_func_maps();
+#ifndef SIMPLE_SCHEMA_PARSER
+    for (int i = 0; i < jube_sys_func_record_count; i++) {
+        SysFuncInfo* info = &jube_sys_func_records[i].info;
+        if (info->c_func_name && strcmp(info->c_func_name, c_func_name) == 0) {
+            return info->func_ptr;
+        }
+    }
+#endif
+    return NULL;
 }
 
 // Check if a name matches any system function (regardless of arg count)
@@ -207,6 +424,18 @@ static SysFuncInfo* get_unambiguous_sys_func_value(StrView* name) {
         if (found) return NULL;
         found = &sys_func_defs[i];
     }
+#ifndef SIMPLE_SCHEMA_PARSER
+    for (int i = 0; i < jube_sys_func_record_count; i++) {
+        SysFuncInfo* info = &jube_sys_func_records[i].info;
+        int name_len = (int)strlen(info->name);
+        if (name_len != (int)name->length || strncmp(info->name, name->str, name->length) != 0) {
+            continue;
+        }
+        if (!info->func_ptr) return NULL;
+        if (found) return NULL;
+        found = info;
+    }
+#endif
     return found;
 }
 
@@ -1646,7 +1875,7 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
 
                 // Check for math module constants: math.pi, math.e (also via alias)
                 StrView ns_view = {ns_ident->name->chars, (size_t)ns_ident->name->len};
-                const char* ns_resolved = resolve_builtin_module(tp, &ns_view);
+                const char* ns_resolved = resolve_imported_module(tp, &ns_view);
                 if (ns_resolved && strcmp(ns_resolved, "math") == 0) {
                     if (id_node->name->len == 7 && memcmp(id_node->name->chars, "max_int", 7) == 0) {
                         TypeInt64* it = (TypeInt64*)alloc_type(tp->pool, LMD_TYPE_INT, sizeof(TypeInt64));
@@ -1865,22 +2094,73 @@ static bool tsnode_has_current_item_ref(Transpiler* tp, TSNode node) {
     return false;
 }
 
-// Check if an identifier matches a built-in module name or a registered alias for one.
-// Returns the real module name if matched, or NULL if not a builtin module.
-static const char* resolve_builtin_module(Transpiler* tp, StrView* name) {
+static bool strview_matches_string(StrView* view, String* str) {
+    return view && str && view->length == str->len &&
+        strncmp(view->str, str->chars, view->length) == 0;
+}
+
+#ifndef SIMPLE_SCHEMA_PARSER
+static void add_jube_module_import(Transpiler* tp, String* module, String* alias) {
+    JubeModuleImport* entry = (JubeModuleImport*)pool_calloc(tp->pool, sizeof(JubeModuleImport));
+    entry->module = module;
+    entry->alias = alias;
+    entry->next = tp->jube_module_imports;
+    tp->jube_module_imports = entry;
+}
+#endif
+
+static const char* registered_jube_module_name(StrView* name) {
+#ifndef SIMPLE_SCHEMA_PARSER
+    char module_name[128];
+    if (!name || name->length >= sizeof(module_name)) return NULL;
+    memcpy(module_name, name->str, name->length);
+    module_name[name->length] = '\0';
+    jube_register_builtin_modules();
+    const JubeModuleDef* module = jube_find_static_module(module_name);
+    return module ? module->name : NULL;
+#else
+    (void)name;
+    return NULL;
+#endif
+}
+
+// Check if an identifier matches a built-in or descriptor-backed module name,
+// or a registered alias for one. Returns the real module name if matched.
+static const char* resolve_imported_module(Transpiler* tp, StrView* name) {
     if (strview_equal(name, "math")) return "math";
     if (strview_equal(name, "io")) return "io";
-    if (strview_equal(name, "radiant")) return "radiant";
     // check aliases
-    if (tp->builtin_alias_math && (int)name->length == (int)tp->builtin_alias_math->len
-        && strncmp(name->str, tp->builtin_alias_math->chars, name->length) == 0)
-        return "math";
-    if (tp->builtin_alias_io && (int)name->length == (int)tp->builtin_alias_io->len
-        && strncmp(name->str, tp->builtin_alias_io->chars, name->length) == 0)
-        return "io";
-    if (tp->builtin_alias_radiant && (int)name->length == (int)tp->builtin_alias_radiant->len
-        && strncmp(name->str, tp->builtin_alias_radiant->chars, name->length) == 0)
-        return "radiant";
+    if (strview_matches_string(name, tp->builtin_alias_math)) return "math";
+    if (strview_matches_string(name, tp->builtin_alias_io)) return "io";
+    for (JubeModuleImport* import = tp->jube_module_imports; import; import = import->next) {
+        if (import->alias && strview_matches_string(name, import->alias)) return import->module->chars;
+    }
+    return registered_jube_module_name(name);
+}
+
+static SysFuncInfo* lookup_module_prefixed_sys_func(const char* module, StrView* func_name, int arg_count) {
+    if (!module || !func_name) return NULL;
+    char prefixed[128];
+    snprintf(prefixed, sizeof(prefixed), "%s_%.*s",
+        module, (int)func_name->length, func_name->str);
+    StrView prefixed_view = strview_from_cstr(prefixed);
+    return get_sys_func_info(&prefixed_view, arg_count);
+}
+
+static SysFuncInfo* lookup_global_imported_sys_func(Transpiler* tp, StrView* func_name, int arg_count) {
+    const char* modules[] = { NULL, NULL };
+    int mod_count = 0;
+    if (tp->builtin_import_math) modules[mod_count++] = "math";
+    if (tp->builtin_import_io) modules[mod_count++] = "io";
+    for (int mi = 0; mi < mod_count; mi++) {
+        SysFuncInfo* info = lookup_module_prefixed_sys_func(modules[mi], func_name, arg_count);
+        if (info) return info;
+    }
+    for (JubeModuleImport* import = tp->jube_module_imports; import; import = import->next) {
+        if (import->alias) continue;
+        SysFuncInfo* info = lookup_module_prefixed_sys_func(import->module->chars, func_name, arg_count);
+        if (info) return info;
+    }
     return NULL;
 }
 
@@ -1937,9 +2217,9 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     AstNode* method_object = NULL;
     TypeId obj_type_id = LMD_TYPE_ANY;
 
-    // Check if this is a built-in module call (e.g., fs.copy())
-    // Built-in modules are identified by name (or alias) and don't require building the object
-    bool is_builtin_module_call = false;
+    // Check if this is a module call (e.g., io.copy() or hostobj_demo.answer()).
+    // Modules are identified by name or alias and don't require building the object.
+    bool is_imported_module_call = false;
     StrView module_name = {0};
     const char* resolved_module = NULL;  // real module name (e.g., "math" even when alias is "m")
     if (is_method_call && !ts_node_is_null(object_node)) {
@@ -1949,7 +2229,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             TSNode inner = ts_node_child(object_node, 0);
             if (!ts_node_is_null(inner) && ts_node_symbol(inner) == sym_identifier) {
                 module_name = ts_node_source(tp, inner);
-                resolved_module = resolve_builtin_module(tp, &module_name);
+                resolved_module = resolve_imported_module(tp, &module_name);
                 if (resolved_module) {
                     // Check if module.method is already defined via aliased import
                     char qbuf[256];
@@ -1959,8 +2239,8 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                     StrView qview = strview_from_cstr(qbuf);
                     NameEntry* qualified = lookup_name(tp, qview);
                     if (qualified == NULL) {
-                        is_builtin_module_call = true;
-                        log_debug("builtin module call detected: %.*s.%.*s() -> %s",
+                        is_imported_module_call = true;
+                        log_debug("module call detected: %.*s.%.*s() -> %s",
                             (int)module_name.length, module_name.str,
                             (int)method_name.length, method_name.str, resolved_module);
                     } else {
@@ -1971,7 +2251,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             }
         } else if (obj_symbol == sym_identifier) {
             module_name = ts_node_source(tp, object_node);
-            resolved_module = resolve_builtin_module(tp, &module_name);
+            resolved_module = resolve_imported_module(tp, &module_name);
             if (resolved_module) {
                 char qbuf[256];
                 snprintf(qbuf, sizeof(qbuf), "%.*s.%.*s",
@@ -1980,8 +2260,8 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                 StrView qview = strview_from_cstr(qbuf);
                 NameEntry* qualified = lookup_name(tp, qview);
                 if (qualified == NULL) {
-                    is_builtin_module_call = true;
-                    log_debug("builtin module call detected: %.*s.%.*s() -> %s",
+                    is_imported_module_call = true;
+                    log_debug("module call detected: %.*s.%.*s() -> %s",
                         (int)module_name.length, module_name.str,
                         (int)method_name.length, method_name.str, resolved_module);
                 } else {
@@ -1993,7 +2273,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     }
 
     bool is_aliased_import_call = false;
-    if (is_method_call && !is_builtin_module_call && !ts_node_is_null(object_node)) {
+    if (is_method_call && !is_imported_module_call && !ts_node_is_null(object_node)) {
         // Check if object.method is an aliased import call (e.g., helper.add())
         // by looking up the qualified name "object.method" in scope
         if (module_name.length > 0 && method_name.length > 0) {
@@ -2049,12 +2329,12 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     StrView func_name = ts_node_source(tp, function_node);
     SysFuncInfo* sys_func_info = NULL;
 
-    // For built-in module calls, construct the full function name (e.g., math_sqrt)
+    // For module calls, construct the full function name (e.g., math_sqrt)
     // Use resolved_module (real name) instead of module_name (may be alias)
     if (is_aliased_import_call) {
         // Already resolved above - skip sys func and regular call resolution
     }
-    else if (is_builtin_module_call) {
+    else if (is_imported_module_call) {
         char full_name[128];
         snprintf(full_name, sizeof(full_name), "%s_%.*s",
             resolved_module,
@@ -2062,7 +2342,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         StrView full_name_view = strview_from_cstr(full_name);
         sys_func_info = get_sys_func_info(&full_name_view, arg_count);
         if (sys_func_info) {
-            log_debug("builtin module call resolved to sys func: %s", sys_func_info->name);
+            log_debug("module call resolved to sys func: %s", sys_func_info->name);
         } else {
             // Report unknown module function
             record_semantic_error(tp, call_node, ERR_UNDEFINED_FUNCTION,
@@ -2137,27 +2417,16 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                 ast_node->pipe_inject = true;
             }
         }
-        // Global import fallback: if `import math;`, `import io;`, or a POC
-        // native module import was used,
+        // Global import fallback: if `import math;`, `import io;`, or a
+        // descriptor-backed native module import was used,
         // try prefixing the function name with the module name (e.g., sqrt -> math_sqrt)
         if (!sys_func_info) {
-            const char* modules[] = { NULL, NULL, NULL };
-            int mod_count = 0;
-            if (tp->builtin_import_math)    modules[mod_count++] = "math";
-            if (tp->builtin_import_io)      modules[mod_count++] = "io";
-            if (tp->builtin_import_radiant) modules[mod_count++] = "radiant";
-            for (int mi = 0; mi < mod_count && !sys_func_info; mi++) {
-                char prefixed[128];
-                snprintf(prefixed, sizeof(prefixed), "%s_%.*s",
-                    modules[mi], (int)func_name.length, func_name.str);
-                StrView prefixed_view = strview_from_cstr(prefixed);
-                sys_func_info = get_sys_func_info(&prefixed_view, lookup_arg_count);
-                if (sys_func_info) {
-                    log_debug("global import resolved: %.*s -> %s",
-                        (int)func_name.length, func_name.str, sys_func_info->name);
-                    if (tp->pipe_inject_args > 0) {
-                        ast_node->pipe_inject = true;
-                    }
+            sys_func_info = lookup_global_imported_sys_func(tp, &func_name, lookup_arg_count);
+            if (sys_func_info) {
+                log_debug("global import resolved: %.*s -> %s",
+                    (int)func_name.length, func_name.str, sys_func_info->name);
+                if (tp->pipe_inject_args > 0) {
+                    ast_node->pipe_inject = true;
                 }
             }
         }
@@ -3907,18 +4176,7 @@ static AstNode* promote_bare_pipe_sysfunc(Transpiler* tp, TSNode right_node, Ast
 
     SysFuncInfo* sys_func_info = get_sys_func_info(&func_name, 1);
     if (!sys_func_info) {
-        const char* modules[] = { NULL, NULL, NULL };
-        int mod_count = 0;
-        if (tp->builtin_import_math)    modules[mod_count++] = "math";
-        if (tp->builtin_import_io)      modules[mod_count++] = "io";
-        if (tp->builtin_import_radiant) modules[mod_count++] = "radiant";
-        for (int mi = 0; mi < mod_count && !sys_func_info; mi++) {
-            char prefixed[128];
-            snprintf(prefixed, sizeof(prefixed), "%s_%.*s",
-                modules[mi], (int)func_name.length, func_name.str);
-            StrView prefixed_view = strview_from_cstr(prefixed);
-            sys_func_info = get_sys_func_info(&prefixed_view, 1);
-        }
+        sys_func_info = lookup_global_imported_sys_func(tp, &func_name, 1);
     }
     if (!sys_func_info) return NULL;
 
@@ -8866,18 +9124,29 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
             }
             return NULL;  // no AST node needed: resolved at call sites
         }
-        if (strview_equal(&ast_node->module, "radiant")) {
-            if (ast_node->alias) {
-                tp->builtin_alias_radiant = ast_node->alias;
-                log_debug("built-in module aliased import: %.*s:%.*s",
-                    (int)ast_node->alias->len, ast_node->alias->chars,
-                    (int)ast_node->module.length, ast_node->module.str);
-            } else {
-                tp->builtin_import_radiant = true;
-                log_debug("built-in module global import: radiant");
+
+#ifndef SIMPLE_SCHEMA_PARSER
+        {
+            char module_buf[128];
+            if (ast_node->module.length < sizeof(module_buf)) {
+                memcpy(module_buf, ast_node->module.str, ast_node->module.length);
+                module_buf[ast_node->module.length] = '\0';
+                jube_register_builtin_modules();
+                const JubeModuleDef* module = jube_find_static_module(module_buf);
+                if (module) {
+                    StrView module_view = strview_from_cstr(module->name);
+                    String* module_name = name_pool_create_strview(tp->name_pool, module_view);
+                    add_jube_module_import(tp, module_name, ast_node->alias);
+                    log_debug("Jube module import: %.*s%s%.*s",
+                        ast_node->alias ? (int)ast_node->alias->len : 0,
+                        ast_node->alias ? ast_node->alias->chars : "",
+                        ast_node->alias ? ":" : "",
+                        (int)module_view.length, module_view.str);
+                    return NULL;  // no AST node needed: resolved at call sites
+                }
             }
-            return NULL;  // no AST node needed: resolved at call sites
         }
+#endif
 
         // Check if module is a bare URI (symbol literal like 'http://...')
         // This is a namespace-only import: import ns: 'url'

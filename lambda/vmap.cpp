@@ -10,11 +10,179 @@
 #include "../lib/arraylist.h"
 #include "../lib/gc/gc_heap.h"
 #include "../lib/log.h"
+#include "jube/jube_registry.h"
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
 
 extern Context* context;
+
+static bool ascii_is_lower(char c) {
+    return c >= 'a' && c <= 'z';
+}
+
+static bool ascii_is_upper(char c) {
+    return c >= 'A' && c <= 'Z';
+}
+
+static char ascii_to_upper(char c) {
+    return ascii_is_lower(c) ? (char)(c - 'a' + 'A') : c;
+}
+
+static char ascii_to_lower(char c) {
+    return ascii_is_upper(c) ? (char)(c - 'A' + 'a') : c;
+}
+
+static const JubeHostObjectOps* vmap_host_ops(VMap* vm) {
+    if (!vm || !vm->host_type) return nullptr;
+    const JubeTypeDef* type = jube_find_type_by_host_type(vm->host_type);
+    return type ? type->host_ops : nullptr;
+}
+
+static bool item_key_chars(Item key, const char** chars, uint32_t* len) {
+    TypeId type_id = get_type_id(key);
+    if (type_id != LMD_TYPE_STRING && type_id != LMD_TYPE_SYMBOL) return false;
+    const char* key_chars = key.get_chars();
+    if (!key_chars) return false;
+    *chars = key_chars;
+    *len = key.get_len();
+    return true;
+}
+
+static Item string_key_item(const char* chars, uint32_t len) {
+    return (Item){.item = s2it(heap_strcpy((char*)chars, len))};
+}
+
+static bool snake_to_camel_key(const char* in, uint32_t len, char* out, size_t cap) {
+    if (!in || !out || cap == 0) return false;
+    bool saw_underscore = false;
+    size_t oi = 0;
+    for (uint32_t i = 0; i < len; i++) {
+        char c = in[i];
+        if (c == '_' && i + 1 < len && ascii_is_lower(in[i + 1])) {
+            saw_underscore = true;
+            i++;
+            c = ascii_to_upper(in[i]);
+        }
+        if (oi + 1 >= cap) return false;
+        out[oi++] = c;
+    }
+    out[oi] = '\0';
+    return saw_underscore;
+}
+
+static bool camel_to_snake_key(const char* in, uint32_t len, char* out, size_t cap) {
+    if (!in || !out || cap == 0) return false;
+    size_t oi = 0;
+    bool changed = false;
+    for (uint32_t i = 0; i < len; i++) {
+        char c = in[i];
+        if (ascii_is_upper(c)) {
+            if (oi > 0) {
+                if (oi + 1 >= cap) return false;
+                out[oi++] = '_';
+            }
+            c = ascii_to_lower(c);
+            changed = true;
+        }
+        if (oi + 1 >= cap) return false;
+        out[oi++] = c;
+    }
+    out[oi] = '\0';
+    return changed;
+}
+
+static bool key_has_attribute_syntax(Item key) {
+    const char* chars = nullptr;
+    uint32_t len = 0;
+    if (!item_key_chars(key, &chars, &len)) return false;
+    for (uint32_t i = 0; i < len; i++) {
+        if (chars[i] == '-') return true;
+    }
+    return false;
+}
+
+static bool host_item_is_absent(Item item) {
+    return item.item == ITEM_JS_UNDEFINED;
+}
+
+static bool vmap_host_get_by_item(VMap* vm, Item key, Item* out) {
+    const JubeHostObjectOps* ops = vmap_host_ops(vm);
+    if (!ops || !ops->get_property || !out) return false;
+
+    Item receiver = (Item){.vmap = vm};
+    Item result = ItemNull;
+    const char* chars = nullptr;
+    uint32_t len = 0;
+    bool has_chars = item_key_chars(key, &chars, &len);
+    if (has_chars) {
+        char camel[256];
+        if (snake_to_camel_key(chars, len, camel, sizeof(camel))) {
+            Item camel_key = string_key_item(camel, (uint32_t)strlen(camel));
+            if (ops->get_property(receiver, camel_key, &result) && !host_item_is_absent(result)) {
+                *out = result;
+                return true;
+            }
+            *out = ItemNull;
+            return true;
+        }
+    }
+
+    Item lookup_key = has_chars ? string_key_item(chars, len) : key;
+    if (ops->get_property(receiver, lookup_key, &result) && !host_item_is_absent(result)) {
+        *out = result;
+        return true;
+    }
+
+    *out = ItemNull;
+    return true;
+}
+
+static bool vmap_host_set_attribute(VMap* vm, Item key, Item value, Item* out) {
+    const JubeHostObjectOps* ops = vmap_host_ops(vm);
+    if (!ops || !ops->call_method || !key_has_attribute_syntax(key)) return false;
+    Item receiver = (Item){.vmap = vm};
+    Item args[2] = {key, value};
+    Item method = string_key_item("setAttribute", 12);
+    return ops->call_method(receiver, method, args, 2, out) != 0;
+}
+
+static bool vmap_host_set_by_item(VMap* vm, Item key, Item value, Item* out) {
+    const JubeHostObjectOps* ops = vmap_host_ops(vm);
+    if (!ops || !ops->set_property || !out) return false;
+
+    if (vmap_host_set_attribute(vm, key, value, out)) return true;
+
+    Item receiver = (Item){.vmap = vm};
+    const char* chars = nullptr;
+    uint32_t len = 0;
+    if (item_key_chars(key, &chars, &len)) {
+        char camel[256];
+        if (snake_to_camel_key(chars, len, camel, sizeof(camel))) {
+            // Lambda projection keys are snake_case; DOM host setters are camelCase.
+            Item camel_key = string_key_item(camel, (uint32_t)strlen(camel));
+            return ops->set_property(receiver, camel_key, value, out) != 0;
+        }
+        Item lookup_key = string_key_item(chars, len);
+        return ops->set_property(receiver, lookup_key, value, out) != 0;
+    }
+    return ops->set_property(receiver, key, value, out) != 0;
+}
+
+static void append_host_key(SymbolKeyList* keys, Item key_item) {
+    const char* chars = nullptr;
+    uint32_t len = 0;
+    if (!keys || !item_key_chars(key_item, &chars, &len)) return;
+    char snake[256];
+    const char* out_chars = chars;
+    uint32_t out_len = len;
+    if (camel_to_snake_key(chars, len, snake, sizeof(snake))) {
+        out_chars = snake;
+        out_len = (uint32_t)strlen(snake);
+    }
+    Symbol* sym = heap_create_symbol(out_chars, out_len);
+    if (sym) symbol_key_list_append(keys, sym);
+}
 
 // ============================================================================
 // HashMap Entry and Data Structures
@@ -327,6 +495,10 @@ extern "C" void vmap_set(Item vmap_item, Item key, Item value) {
         log_error("vmap_set: null vmap or vtable");
         return;
     }
+    Item host_result = ItemNull;
+    if (vmap_host_set_by_item(vm, key, value, &host_result)) {
+        return;
+    }
     vm->vtable->set(vm->data, key, value);
 }
 
@@ -338,6 +510,10 @@ extern "C" void vmap_set(Item vmap_item, Item key, Item value) {
 // handles both regular string keys and synthetic "__v<N>" keys
 Item vmap_get_by_str(VMap* vm, const char* key) {
     if (!vm || !vm->data || !key) return ItemNull;
+    Item host_result = ItemNull;
+    Item host_key = {.item = s2it(heap_create_name(key))};
+    if (vmap_host_get_by_item(vm, host_key, &host_result)) return host_result;
+
     HashMapData* hd = (HashMapData*)vm->data;
 
     // check for synthetic key format "__v<N>"
@@ -359,7 +535,27 @@ Item vmap_get_by_str(VMap* vm, const char* key) {
 // get value from VMap by Item key (used by map_get / fn_member dispatch)
 Item vmap_get_by_item(VMap* vm, Item key) {
     if (!vm || !vm->data) return ItemNull;
+    Item host_result = ItemNull;
+    if (vmap_host_get_by_item(vm, key, &host_result)) return host_result;
     return vm->vtable->get(vm->data, key);
+}
+
+SymbolKeyList* vmap_keys_for_item(Item vmap_item) {
+    if (get_type_id(vmap_item) != LMD_TYPE_VMAP || !vmap_item.vmap) return nullptr;
+    VMap* vm = vmap_item.vmap;
+    const JubeHostObjectOps* ops = vmap_host_ops(vm);
+    if (!ops || !ops->own_property_keys) return nullptr;
+
+    Item result = ItemNull;
+    if (!ops->own_property_keys(vmap_item, &result)) return nullptr;
+    if (get_type_id(result) != LMD_TYPE_ARRAY || !result.array) return nullptr;
+
+    List* list = result.array;
+    SymbolKeyList* keys = symbol_key_list_new(list->length > 0 ? list->length : 4);
+    for (int64_t i = 0; i < list->length; i++) {
+        append_host_key(keys, list->items[i]);
+    }
+    return keys;
 }
 
 // ============================================================================

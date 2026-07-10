@@ -7226,7 +7226,10 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
 
         // Build runtime function name: "fn_" or "pn_" + name + optional arg count for overloaded
         char sys_fn_name[128];
-        if (info->is_overloaded) {
+        if (info->c_func_name && info->c_func_name[0]) {
+            // descriptor-backed functions carry the exact lowered C symbol.
+            snprintf(sys_fn_name, sizeof(sys_fn_name), "%s", info->c_func_name);
+        } else if (info->is_overloaded) {
             snprintf(sys_fn_name, sizeof(sys_fn_name), "%s%s%d",
                 info->is_proc ? "pn_" : "fn_", info->name, arg_count);
         } else {
@@ -8116,7 +8119,10 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
                 if (info) {
                     // build the correct function name using the fn_info (already resolved to N+1 version)
                     char sys_fn_name[128];
-                    if (info->is_overloaded) {
+                    if (info->c_func_name && info->c_func_name[0]) {
+                        // descriptor-backed functions carry the exact lowered C symbol.
+                        snprintf(sys_fn_name, sizeof(sys_fn_name), "%s", info->c_func_name);
+                    } else if (info->is_overloaded) {
                         snprintf(sys_fn_name, sizeof(sys_fn_name), "%s%s%d",
                             info->is_proc ? "pn_" : "fn_", info->name, info->arg_count);
                     } else {

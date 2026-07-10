@@ -33,6 +33,8 @@
 
 extern __thread EvalContext* context;
 
+Item vmap_get_by_item(VMap* vm, Item key);
+
 // create_match_map helper for find() (implemented in re2_wrapper.cpp)
 extern "C" Map* create_match_map_ext(const char* match_str, size_t match_len, int64_t index);
 
@@ -3249,7 +3251,7 @@ Item fn_index(Item item, Item index_item) {
     if (item_type == LMD_TYPE_VMAP) {
         // VMap integer-looking keys are still map keys, not sequence offsets.
         VMap* vm = item.vmap;
-        if (vm && vm->vtable) return vm->vtable->get(vm->data, index_item);
+        if (vm && vm->vtable) return vmap_get_by_item(vm, index_item);
         return ItemNull;
     }
 
@@ -3551,7 +3553,7 @@ Item fn_member(Item item, Item key) {
     case LMD_TYPE_VMAP: {
         VMap *vm = item.vmap;
         if (!vm || !vm->vtable) return ItemNull;
-        return vm->vtable->get(vm->data, key);
+        return vmap_get_by_item(vm, key);
     }
     case LMD_TYPE_ELEMENT: {
         Element *elmt = item.element;

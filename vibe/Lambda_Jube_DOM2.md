@@ -550,6 +550,31 @@ Testable goals:
 - `make test-lambda-baseline` green (import machinery touched ⇒ full Lambda gate, not just POC).
 - Anchors + full JS gtest green.
 
+Progress (2026-07-10): Phase 4 is complete.
+`build_ast.cpp` now synthesizes `SysFuncInfo` records from static `JubeModuleDef.functions`,
+deriving module-prefixed names, arity, return type, first-parameter type metadata, and lowered
+C symbols from `JubeFuncDef.signature` / `native_signature`. `import radiant`, qualified calls such as
+`radiant.load(...)`, aliased Jube imports, and global imports such as `import hostobj_demo`
+resolve through `jube_find_static_module()` instead of `builtin_import_radiant` /
+`builtin_alias_radiant`.
+
+MIR direct lowering now honors `SysFuncInfo.c_func_name`, and `import_resolver()` has a dynamic
+descriptor fallback so module functions deleted from `sys_func_registry.c` still resolve by
+function pointer. The central Radiant sys-func rows and enum values are gone; the remaining enum
+tag is the generic `SYSFUNC_JUBE_MODULE`.
+
+Registry hygiene proof: `hostobj_demo` registers two Lambda-facing functions (`answer`, `add`) in
+its own descriptor table, and `test/lambda/hostobj_demo_jube_import.ls` calls both without adding
+central registry rows. JS namespace installation remains descriptor-driven through
+`JubeNamespaceDef` in `js_globals.cpp`. The deferred DOM1 central-registry shim audit is clean:
+`sys_func_registry.c` has no `js_dom_*` / `js_document_*` sys-func rows; the remaining
+`js_get_document_object_value` entry is a runtime import for JS globals, not a module lowering shim.
+
+Validation: `make build`; direct `hostobj_demo_jube_import` (`{ answer: 42, sum: 12 }`);
+direct `radiant_poc` (`"ok"`); direct `radiant_poc_uaf` (`null` after invalid-wrapper guard);
+`rg "radiant|SYSFUNC_RADIANT|fn_radiant|builtin_import_radiant|builtin_alias_radiant" lambda/build_ast.cpp lambda/sys_func_registry.c lambda/lambda.h`
+→ 0 hits; `git diff --check`; escalated `make test-lambda-baseline` → 3283/3283 passed.
+
 ### Phase 5 — Lambda-side projections
 
 Purpose: G4. Lambda field access on native types.
@@ -571,6 +596,33 @@ Testable goals:
   vice versa).
 - JS behavior unchanged (full JS gtest green) — projections are additive.
 - `make test-lambda-baseline` green.
+
+Progress (2026-07-10): complete. Host-backed VMaps now route Lambda field/member reads, writes,
+and key enumeration through the registered Jube host-object operations. The bridge accepts
+snake_case Lambda names (`node_name`, `class_name`, `owner_document`, etc.), converts them to the
+DOM camelCase operation surface, and maps own-property keys back to snake_case symbols for
+Lambda-side iteration. Attribute-like string keys such as `"data-phase"` write through
+`setAttribute`, and `class_name` / `id` writes use the same mutation path as JS property writes.
+
+Document projection is active as well: loaded DOM nodes now expose a document wrapper for
+`owner_document`, and document reads dispatch against the owning loaded document rather than the
+global JS document singleton. Own-key enumeration was kept lazy so iterating node keys does not
+materialize live DOM collections during key discovery.
+
+Coverage added:
+
+- `test/lambda/radiant_dom_read.ls` / `.txt`: node identity, names, navigation, text value,
+  document projection, key iteration, and printable type surface.
+- `test/lambda/radiant_dom_mutate.ls` / `.txt`: Lambda-side mutation through the Radiant function
+  path, then readback through the projected document root.
+- `test/lambda/proc/radiant_dom_set.ls` / `.txt`: procedural `root.set(...)` coverage for `id`,
+  `class_name`, and attribute-key writes.
+
+Validation: direct `radiant_dom_read`; direct `radiant_dom_mutate`; direct
+`lambda.exe run test/lambda/proc/radiant_dom_set.ls`; focused
+`test_lambda_gtest --gtest_filter='AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/*radiant_dom*'`
+→ 3/3 passed; escalated `make test-lambda-baseline` → 3286/3286 passed, including JS gtest
+308/308.
 
 ### Phase 6 — Cache and allocation debts
 

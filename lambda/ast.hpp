@@ -224,6 +224,12 @@ typedef struct NameScope {
     struct NameScope* parent;  // parent scope
 } NameScope;
 
+typedef struct JubeModuleImport {
+    String* module;
+    String* alias;
+    struct JubeModuleImport* next;
+} JubeModuleImport;
+
 typedef enum AstNodeType {
     AST_NODE_NULL,
     AST_NODE_PRIMARY,
@@ -741,13 +747,15 @@ typedef struct Transpiler : Script {
     // can be called without prefix (e.g., `import math;` allows `sqrt(x)`)
     bool builtin_import_math;
     bool builtin_import_io;
-    bool builtin_import_radiant;
 
     // Built-in module aliased imports: non-null when module imported with alias
     // (e.g., `import m:math;` sets builtin_alias_math to "m")
     String* builtin_alias_math;
     String* builtin_alias_io;
-    String* builtin_alias_radiant;
+
+    // Descriptor-backed Jube module imports (e.g., `import radiant;`,
+    // `import r:radiant;`). The compiler resolves these through JubeModuleDef.
+    JubeModuleImport* jube_module_imports;
 } Transpiler;
 
 // Helper to check if arg_type is compatible with param_type
