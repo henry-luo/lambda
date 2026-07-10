@@ -12649,6 +12649,14 @@ static bool jm_closure_has_scope_env_slot(JsFuncCollected* fc) {
     return false;
 }
 
+static bool jm_capture_matches_scope_env_name(JsCaptureEntry* cap, const char* scope_name) {
+    if (!cap || !scope_name) return false;
+    // duplicate block lexicals share the same source name; scope_env_key keeps
+    // the closure wired to the binding range selected during scope-env layout.
+    if (cap->scope_env_key[0] && strcmp(cap->scope_env_key, scope_name) == 0) return true;
+    return strcmp(cap->name, scope_name) == 0;
+}
+
 static int jm_find_var_scope_depth_for_expr(JsMirTranspiler* mt, const char* name) {
     if (!mt || !name) return -1;
     for (int depth = mt->scope_depth; depth >= 0 && depth < 64; depth--) {
@@ -12796,7 +12804,8 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             if (!fc->captures[ci].is_nfe_binding && fc->captures[ci].scope_env_slot < 0 &&
                 mt->current_fc && mt->current_fc->has_scope_env && mt->current_fc->scope_env_names) {
                 for (int s = 0; s < mt->current_fc->scope_env_count; s++) {
-                    if (strcmp(fc->captures[ci].name, mt->current_fc->scope_env_names[s]) == 0) {
+                    if (jm_capture_matches_scope_env_name(&fc->captures[ci],
+                            mt->current_fc->scope_env_names[s])) {
                         fc->captures[ci].scope_env_slot = s;
                         break;
                     }
@@ -13026,7 +13035,8 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
             if (!fc->captures[ci].is_nfe_binding && fc->captures[ci].scope_env_slot < 0 &&
                 mt->current_fc && mt->current_fc->has_scope_env && mt->current_fc->scope_env_names) {
                 for (int s = 0; s < mt->current_fc->scope_env_count; s++) {
-                    if (strcmp(fc->captures[ci].name, mt->current_fc->scope_env_names[s]) == 0) {
+                    if (jm_capture_matches_scope_env_name(&fc->captures[ci],
+                            mt->current_fc->scope_env_names[s])) {
                         fc->captures[ci].scope_env_slot = s;
                         break;
                     }

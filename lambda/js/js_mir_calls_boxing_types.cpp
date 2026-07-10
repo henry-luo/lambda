@@ -976,7 +976,11 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
             return LMD_TYPE_ANY;
         case JS_OP_BIT_AND: case JS_OP_BIT_OR: case JS_OP_BIT_XOR:
         case JS_OP_BIT_LSHIFT: case JS_OP_BIT_RSHIFT: case JS_OP_BIT_URSHIFT:
-            return LMD_TYPE_FLOAT;  // bitwise ops compute int32, then produce a JS Number
+            // bigint bitwise/shift operators return BigInt, so only Number-proven operands may use the Number result type.
+            if ((left_t == LMD_TYPE_INT || left_t == LMD_TYPE_FLOAT) &&
+                (right_t == LMD_TYPE_INT || right_t == LMD_TYPE_FLOAT))
+                return LMD_TYPE_FLOAT;
+            return LMD_TYPE_ANY;
         case JS_OP_AND: case JS_OP_OR:
             return LMD_TYPE_ANY;  // logical AND/OR return one of the operands
         default:

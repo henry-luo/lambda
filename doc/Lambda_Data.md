@@ -1075,7 +1075,9 @@ Mixed signed/unsigned promotion uses these rules:
 | `iN` + `uM`, where the next signed width can represent both | next wider signed type | example: `i8 + u8 -> i16`, `i16 + u16 -> i32`, `i32 + u32 -> i64` |
 | `i64` + `u64` | `u64` | no signed Lambda integer can represent all `u64` values |
 
-Sized types can be passed to functions expecting `int`, `float`, or `number` parameters, and vice versa.
+Sized values can be passed to wider numeric parameters when the source type
+embeds exactly in the target type, and all numeric values match `number`.
+Narrowing in the reverse direction requires an explicit conversion.
 
 ### Explicit Conversion
 

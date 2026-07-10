@@ -668,6 +668,7 @@ static int64_t item_to_int_value(Item value) {
     switch (tid) {
     case LMD_TYPE_INT:       return value.get_int56();
     case LMD_TYPE_INT64:     return value.get_int64();
+    case LMD_TYPE_BOOL:      return value.bool_val ? 1 : 0;
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64:   return (int64_t)value.get_double();
     case LMD_TYPE_NUM_SIZED: {
@@ -697,6 +698,7 @@ static double item_to_float_value(Item value) {
     case LMD_TYPE_FLOAT64:   return value.get_double();
     case LMD_TYPE_INT:       return (double)value.get_int56();
     case LMD_TYPE_INT64:     return (double)value.get_int64();
+    case LMD_TYPE_BOOL:      return value.bool_val ? 1.0 : 0.0;
     case LMD_TYPE_NUM_SIZED: {
         NumSizedType st = (NumSizedType)NUM_SIZED_SUBTYPE(value.item);
         switch (st) {
@@ -714,6 +716,14 @@ static double item_to_float_value(Item value) {
     case LMD_TYPE_UINT64:    return (double)value.get_uint64();
     default:                 return 0.0;
     }
+}
+
+static bool item_is_integer_typed_array_source(Item value) {
+    TypeId tid = get_type_id(value);
+    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_BOOL) return true;
+    if (tid != LMD_TYPE_NUM_SIZED) return false;
+    NumSizedType st = value.get_num_type();
+    return st != NUM_FLOAT16 && st != NUM_FLOAT32;
 }
 
 extern "C" Item coerce_num_sized(Item value, int64_t num_type_int) {
@@ -2194,35 +2204,31 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
     if (item_tid == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* src = item.array_num;
         int64_t length = src->length;
-        ArrayNumElemType src_et = src->get_elem_type();
 
         if (element_type_id == LMD_TYPE_INT) {
             ArrayNum* typed = array_int_new(length);
             for (int64_t i = 0; i < length; i++) {
-                if (src_et == ELEM_INT || src_et == ELEM_INT64)
-                    typed->items[i] = src->items[i];
-                else
-                    typed->items[i] = (int64_t)src->float_items[i];
+                // compact ArrayNum lanes do not live in items[]; widen through
+                // Item access so sized numeric payloads are decoded first.
+                typed->items[i] = item_to_int_value(array_num_get(src, i));
             }
             return typed;
         }
         else if (element_type_id == LMD_TYPE_FLOAT) {
             ArrayNum* typed = array_float_new(length);
             for (int64_t i = 0; i < length; i++) {
-                if (src_et == ELEM_FLOAT64)
-                    typed->float_items[i] = src->float_items[i];
-                else
-                    typed->float_items[i] = (double)src->items[i];
+                // compact ArrayNum lanes do not live in items[]; widen through
+                // Item access so sized numeric payloads are decoded first.
+                typed->float_items[i] = item_to_float_value(array_num_get(src, i));
             }
             return typed;
         }
         else if (element_type_id == LMD_TYPE_INT64) {
             ArrayNum* typed = array_int64_new(length);
             for (int64_t i = 0; i < length; i++) {
-                if (src_et == ELEM_INT || src_et == ELEM_INT64)
-                    typed->items[i] = src->items[i];
-                else
-                    typed->items[i] = (int64_t)src->float_items[i];
+                // compact ArrayNum lanes do not live in items[]; widen through
+                // Item access so sized numeric payloads are decoded first.
+                typed->items[i] = item_to_int_value(array_num_get(src, i));
             }
             return typed;
         }
@@ -2238,11 +2244,13 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             ArrayNum* typed = array_int_new(length);
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
-                if (elem_tid != LMD_TYPE_INT && elem_tid != LMD_TYPE_INT64 && elem_tid != LMD_TYPE_BOOL) {
+                if (!item_is_integer_typed_array_source(items[i])) {
                     log_error("ensure_typed_array: element %lld has type %s, expected int", i, get_type_name(elem_tid));
                     return NULL;
                 }
-                typed->items[i] = it2i(items[i]);
+                // boxed sized numerics carry their value in NUM_SIZED payload bits,
+                // not the compact-int slot; decode before widening to int[].
+                typed->items[i] = item_to_int_value(items[i]);
             }
             return typed;
         }
@@ -2252,14 +2260,14 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (elem_tid != LMD_TYPE_FLOAT && elem_tid != LMD_TYPE_INT &&
                     elem_tid != LMD_TYPE_INT64 && elem_tid != LMD_TYPE_DECIMAL &&
-                    elem_tid != LMD_TYPE_BOOL) {
+                    elem_tid != LMD_TYPE_BOOL && elem_tid != LMD_TYPE_NUM_SIZED) {
                     log_error("ensure_typed_array: element %lld has type %s, expected float", i, get_type_name(elem_tid));
                     return NULL;
                 }
                 if (elem_tid == LMD_TYPE_BOOL)
                     typed->float_items[i] = items[i].bool_val ? 1.0 : 0.0;
                 else
-                    typed->float_items[i] = it2d(items[i]);
+                    typed->float_items[i] = item_to_float_value(items[i]);
             }
             return typed;
         }
@@ -2267,11 +2275,13 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             ArrayNum* typed = array_int64_new(length);
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
-                if (elem_tid != LMD_TYPE_INT && elem_tid != LMD_TYPE_INT64 && elem_tid != LMD_TYPE_BOOL) {
+                if (!item_is_integer_typed_array_source(items[i])) {
                     log_error("ensure_typed_array: element %lld has type %s, expected int64", i, get_type_name(elem_tid));
                     return NULL;
                 }
-                typed->items[i] = it2l(items[i]);
+                // boxed sized numerics carry their value in NUM_SIZED payload bits,
+                // not the compact-int slot; decode before widening to int64[].
+                typed->items[i] = item_to_int_value(items[i]);
             }
             return typed;
         }

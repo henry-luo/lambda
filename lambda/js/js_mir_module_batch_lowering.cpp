@@ -457,6 +457,16 @@ static void jm_note_module_block_lexical_decl(struct hashmap* seen, struct hashm
     }
 }
 
+static void jm_note_module_direct_var_decl(struct hashmap* seen, struct hashmap* duplicate_consts,
+        JsVariableDeclarationNode* vd) {
+    if (!vd) return;
+    for (JsAstNode* d = vd->declarations; d; d = d->next) {
+        if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
+        jm_note_module_block_lexical_pattern(seen, duplicate_consts, decl->id, (int)vd->kind);
+    }
+}
+
 static void jm_collect_duplicate_module_block_lexicals(JsAstNode* node,
         struct hashmap* seen, struct hashmap* duplicate_consts, bool direct_program) {
     if (!node) return;
@@ -468,7 +478,11 @@ static void jm_collect_duplicate_module_block_lexicals(JsAstNode* node,
         return;
     }
     case JS_AST_NODE_VARIABLE_DECLARATION:
-        if (!direct_program) {
+        // top-level let/const names seed duplicate detection so a nested block
+        // lexical with the same name does not collapse onto the module slot.
+        if (direct_program) {
+            jm_note_module_direct_var_decl(seen, duplicate_consts, (JsVariableDeclarationNode*)node);
+        } else {
             jm_note_module_block_lexical_decl(seen, duplicate_consts, (JsVariableDeclarationNode*)node);
         }
         return;
@@ -1410,6 +1424,19 @@ static bool jm_lexical_decl_matches_name(JsAstNode* stmt, const char* name, char
     return false;
 }
 
+static bool jm_switch_lexical_decl_matches_name(JsSwitchNode* sw, const char* name,
+        char out_key[128]) {
+    if (!sw || !name || !out_key) return false;
+    for (JsAstNode* c = sw->cases; c; c = c->next) {
+        if (c->node_type != JS_AST_NODE_SWITCH_CASE) continue;
+        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)c;
+        for (JsAstNode* s = sc->consequent; s; s = s->next) {
+            if (jm_lexical_decl_matches_name(s, name, out_key)) return true;
+        }
+    }
+    return false;
+}
+
 static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode* target,
         const char* name, char out_key[128]) {
     if (!node || !target || !name || !out_key) return false;
@@ -1423,7 +1450,6 @@ static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode*
     case JS_AST_NODE_PROGRAM: {
         JsProgramNode* program = (JsProgramNode*)node;
         for (JsAstNode* s = program->body; s; s = s->next) {
-            if (jm_lexical_decl_matches_name(s, name, out_key)) found_here = true;
             if (jm_ast_node_contains_target(s, target) &&
                 jm_find_enclosing_lexical_key_for_target(s, target, name, out_key)) return true;
         }
@@ -1466,6 +1492,84 @@ static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode*
         if (method->computed &&
             jm_find_enclosing_lexical_key_for_target(method->key, target, name, out_key)) return true;
         return jm_find_enclosing_lexical_key_for_target(method->value, target, name, out_key);
+    }
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* try_node = (JsTryNode*)node;
+        if (jm_find_enclosing_lexical_key_for_target(try_node->block, target, name, out_key)) return true;
+        if (jm_find_enclosing_lexical_key_for_target(try_node->handler, target, name, out_key)) return true;
+        return jm_find_enclosing_lexical_key_for_target(try_node->finalizer, target, name, out_key);
+    }
+    case JS_AST_NODE_CATCH_CLAUSE: {
+        JsCatchNode* catch_node = (JsCatchNode*)node;
+        if (catch_node->param && jm_ast_node_contains_target(catch_node->param, target)) {
+            return jm_lexical_pattern_matches_name_key(catch_node->param, name, out_key) ||
+                jm_find_enclosing_lexical_key_for_target(catch_node->param, target, name, out_key);
+        }
+        if (catch_node->body && jm_ast_node_contains_target(catch_node->body, target)) {
+            if (jm_find_enclosing_lexical_key_for_target(catch_node->body, target, name, out_key)) return true;
+            // catch parameter bindings are visible throughout the catch body;
+            // fall back to them only after body lets/consts fail to match.
+            return jm_lexical_pattern_matches_name_key(catch_node->param, name, out_key);
+        }
+        return false;
+    }
+    case JS_AST_NODE_SWITCH_STATEMENT: {
+        JsSwitchNode* sw = (JsSwitchNode*)node;
+        if (sw->discriminant && jm_ast_node_contains_target(sw->discriminant, target)) {
+            return jm_find_enclosing_lexical_key_for_target(sw->discriminant, target, name, out_key);
+        }
+        if (jm_switch_lexical_decl_matches_name(sw, name, out_key)) found_here = true;
+        for (JsAstNode* c = sw->cases; c; c = c->next) {
+            if (jm_ast_node_contains_target(c, target) &&
+                jm_find_enclosing_lexical_key_for_target(c, target, name, out_key)) return true;
+        }
+        return found_here;
+    }
+    case JS_AST_NODE_SWITCH_CASE: {
+        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
+        if (sc->test && jm_ast_node_contains_target(sc->test, target)) {
+            return jm_find_enclosing_lexical_key_for_target(sc->test, target, name, out_key);
+        }
+        for (JsAstNode* s = sc->consequent; s; s = s->next) {
+            if (jm_lexical_decl_matches_name(s, name, out_key)) found_here = true;
+            if (jm_ast_node_contains_target(s, target) &&
+                jm_find_enclosing_lexical_key_for_target(s, target, name, out_key)) return true;
+        }
+        return found_here;
+    }
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* for_node = (JsForNode*)node;
+        if (for_node->init && for_node->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION &&
+            jm_lexical_decl_matches_name(for_node->init, name, out_key)) {
+            found_here = true;
+        }
+        if (for_node->init && jm_ast_node_contains_target(for_node->init, target) &&
+            jm_find_enclosing_lexical_key_for_target(for_node->init, target, name, out_key)) return true;
+        if (for_node->test && jm_ast_node_contains_target(for_node->test, target) &&
+            jm_find_enclosing_lexical_key_for_target(for_node->test, target, name, out_key)) return true;
+        if (for_node->update && jm_ast_node_contains_target(for_node->update, target) &&
+            jm_find_enclosing_lexical_key_for_target(for_node->update, target, name, out_key)) return true;
+        if (for_node->body && jm_ast_node_contains_target(for_node->body, target) &&
+            jm_find_enclosing_lexical_key_for_target(for_node->body, target, name, out_key)) return true;
+        return found_here;
+    }
+    case JS_AST_NODE_FOR_IN_STATEMENT:
+    case JS_AST_NODE_FOR_OF_STATEMENT: {
+        JsForOfNode* for_node = (JsForOfNode*)node;
+        if (for_node->left) {
+            if (for_node->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                if (jm_lexical_decl_matches_name(for_node->left, name, out_key)) found_here = true;
+            } else if (for_node->kind == JS_VAR_LET || for_node->kind == JS_VAR_CONST) {
+                if (jm_lexical_pattern_matches_name_key(for_node->left, name, out_key)) found_here = true;
+            }
+        }
+        if (for_node->left && jm_ast_node_contains_target(for_node->left, target) &&
+            jm_find_enclosing_lexical_key_for_target(for_node->left, target, name, out_key)) return true;
+        if (for_node->right && jm_ast_node_contains_target(for_node->right, target) &&
+            jm_find_enclosing_lexical_key_for_target(for_node->right, target, name, out_key)) return true;
+        if (for_node->body && jm_ast_node_contains_target(for_node->body, target) &&
+            jm_find_enclosing_lexical_key_for_target(for_node->body, target, name, out_key)) return true;
+        return found_here;
     }
     default:
         return false;
@@ -2162,9 +2266,6 @@ TypeId jm_p6_expr_type(JsAstNode* expr,
         case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
         case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
             return LMD_TYPE_BOOL;
-        case JS_OP_BIT_AND: case JS_OP_BIT_OR: case JS_OP_BIT_XOR:
-        case JS_OP_BIT_LSHIFT: case JS_OP_BIT_RSHIFT: case JS_OP_BIT_URSHIFT:
-            return LMD_TYPE_FLOAT;
         case JS_OP_DIV: case JS_OP_EXP:
             return LMD_TYPE_FLOAT;
         default: {
@@ -2174,6 +2275,12 @@ TypeId jm_p6_expr_type(JsAstNode* expr,
             TypeId rt = jm_p6_expr_type(bin->right, param_names, param_types, param_count,
                                          local_names, local_types, local_count,
                                          self_name, self_return_type);
+            if (bin->op == JS_OP_BIT_AND || bin->op == JS_OP_BIT_OR || bin->op == JS_OP_BIT_XOR ||
+                bin->op == JS_OP_BIT_LSHIFT || bin->op == JS_OP_BIT_RSHIFT || bin->op == JS_OP_BIT_URSHIFT) {
+                // bigint bitwise/shift operators stay boxed; treating them as Number loses the BigInt lane.
+                if (jm_p6_type_is_numeric(lt) && jm_p6_type_is_numeric(rt)) return LMD_TYPE_FLOAT;
+                return LMD_TYPE_ANY;
+            }
             if (bin->op == JS_OP_ADD) {
                 if (lt == LMD_TYPE_STRING || rt == LMD_TYPE_STRING) return LMD_TYPE_STRING;
                 if (jm_p6_type_is_numeric(lt) && jm_p6_type_is_numeric(rt))
@@ -2523,7 +2630,9 @@ TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg) {
             return LMD_TYPE_FLOAT;
         case JS_OP_BIT_AND: case JS_OP_BIT_OR: case JS_OP_BIT_XOR:
         case JS_OP_BIT_LSHIFT: case JS_OP_BIT_RSHIFT: case JS_OP_BIT_URSHIFT:
-            return LMD_TYPE_FLOAT;
+            // bigint bitwise/shift operators stay boxed; treating them as Number loses the BigInt lane.
+            if (jm_p6_type_is_numeric(lt) && jm_p6_type_is_numeric(rt)) return LMD_TYPE_FLOAT;
+            return LMD_TYPE_ANY;
         default: return LMD_TYPE_ANY;
         }
     }
@@ -2621,7 +2730,9 @@ static TypeId jm_p6_arg_type_with_evidence(JsMirTranspiler* mt, JsAstNode* arg,
         return LMD_TYPE_FLOAT;
     case JS_OP_BIT_AND: case JS_OP_BIT_OR: case JS_OP_BIT_XOR:
     case JS_OP_BIT_LSHIFT: case JS_OP_BIT_RSHIFT: case JS_OP_BIT_URSHIFT:
-        return LMD_TYPE_FLOAT;
+        // bigint bitwise/shift operators stay boxed; treating them as Number loses the BigInt lane.
+        if (jm_p6_type_is_numeric(lt) && jm_p6_type_is_numeric(rt)) return LMD_TYPE_FLOAT;
+        return LMD_TYPE_ANY;
     default:
         return jm_p6_static_arg_type(mt, arg);
     }
@@ -5020,16 +5131,34 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // P7a: helper that decides whether a capture name qualifies for a
         // module-level slot. Loop bindings use those slots only inside copied
         // closure envs so they keep per-iteration semantics.
-        auto capture_qualifies = [&](const char* name, bool is_let_const,
-                                     bool is_nfe_binding) -> bool {
-            if (!is_let_const) return false;
-            if (is_nfe_binding) return false;
+        auto capture_is_module_shadow_lexical = [&](JsFuncCollected* child,
+                JsCaptureEntry* cap) -> bool {
+            if (!child || !cap) return false;
+            if (!jm_name_set_has(duplicate_module_block_const_lexicals, cap->name)) return false;
+            char derived_key[128];
+            memset(derived_key, 0, sizeof(derived_key));
+            JsAstNode* target = child->node ? (JsAstNode*)child->node : NULL;
+            bool found_key = jm_find_enclosing_lexical_key_for_target((JsAstNode*)program,
+                target, cap->name, derived_key);
+            if (!found_key || strcmp(derived_key, cap->name) == 0) return false;
+            // A block lexical that shadows a top-level module var must use the
+            // scope-env cell, otherwise the function body resolves the module var.
+            snprintf(cap->scope_env_key, sizeof(cap->scope_env_key), "%s", derived_key);
+            return true;
+        };
+
+        auto capture_qualifies = [&](JsFuncCollected* child, JsCaptureEntry* cap) -> bool {
+            if (!cap) return false;
+            const char* name = cap->name;
+            if (!cap->is_let_const) return false;
+            if (cap->is_nfe_binding) return false;
+            bool module_shadow_lexical = capture_is_module_shadow_lexical(child, cap);
             if (mt->module_consts) {
                 JsModuleConstEntry mclookup;
                 memset(&mclookup, 0, sizeof(mclookup));
                 snprintf(mclookup.name, sizeof(mclookup.name), "%s", name);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                if (mc && mc->const_type == MCONST_MODVAR) return false;
+                if (mc && mc->const_type == MCONST_MODVAR && !module_shadow_lexical) return false;
             }
             if (strcmp(name, "_js_this") == 0 ||
                 strcmp(name, "_js_new.target") == 0 ||
@@ -5039,6 +5168,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
         auto capture_slot_key = [&](JsFuncCollected* child, JsCaptureEntry* cap) -> const char* {
             if (!cap) return "";
+            if (cap->scope_env_key[0] && strcmp(cap->scope_env_key, cap->name) != 0) {
+                JsModuleConstEntry mclookup;
+                memset(&mclookup, 0, sizeof(mclookup));
+                snprintf(mclookup.name, sizeof(mclookup.name), "%s", cap->name);
+                JsModuleConstEntry* mc = mt->module_consts ?
+                    (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup) : NULL;
+                if (mc && mc->const_type == MCONST_MODVAR) return cap->scope_env_key;
+            }
             if (jm_name_set_has(duplicate_module_block_const_lexicals, cap->name) &&
                 cap->scope_env_key[0]) {
                 char derived_key[128];
@@ -5068,9 +5205,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             return true;
         };
 
-        auto capture_is_shared_module_binding = [&](JsCaptureEntry* cap) -> bool {
+        auto capture_is_shared_module_binding = [&](JsFuncCollected* child, JsCaptureEntry* cap) -> bool {
             if (!cap) return false;
-            if (!capture_qualifies(cap->name, cap->is_let_const, cap->is_nfe_binding)) {
+            if (!capture_qualifies(child, cap)) {
                 return false;
             }
             if (cap->force_env_capture) return false;
@@ -5084,7 +5221,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             bool has_shared = false;
             for (int k = 0; k < child->capture_count; k++) {
                 JsCaptureEntry* cap = &child->captures[k];
-                if (!capture_qualifies(cap->name, cap->is_let_const, cap->is_nfe_binding)) continue;
+                if (!capture_qualifies(child, cap)) continue;
                 if (cap->force_env_capture || jm_name_set_has(for_init_lets, cap->name)) {
                     has_private = true;
                 } else {
@@ -5096,7 +5233,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
         auto include_capture = [&](JsFuncCollected* child, int k) -> bool {
             JsCaptureEntry* cap = &child->captures[k];
-            return capture_qualifies(cap->name, cap->is_let_const, cap->is_nfe_binding);
+            return capture_qualifies(child, cap);
         };
 
         for (int ci = 0; ci < mt->func_count; ci++) {
@@ -5161,7 +5298,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     child->closure_env_parent_link_slot = total;
                     for (int k = 0; k < child->capture_count; k++) {
                         JsCaptureEntry* cap = &child->captures[k];
-                        if (capture_is_shared_module_binding(cap) && cap->scope_env_slot >= 0) {
+                        if (capture_is_shared_module_binding(child, cap) && cap->scope_env_slot >= 0) {
                             // copied envs keep loop lets private; outer module
                             // lets must still mutate the shared parent slot.
                             cap->grandparent_slot = cap->scope_env_slot;

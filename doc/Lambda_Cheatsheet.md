@@ -481,7 +481,7 @@ symbol keyword = 'if' | 'else' | 'for' // symbol pattern
 
 `int(v)` `int64(v)` `float(v)` `decimal(v)` `string(v)` `symbol(v)` `binary(v)` `number(v)` `type(v)` `len(v)`
 
-`type()` returns the specific type name for sized numerics: `type(42i8)` → `"i8"`, `type(3.14f32)` → `"f32"`
+`type()` returns the canonical numeric name: `type(42i8)` → `"i8"`, `type(3.14f32)` → `"f32"`, `type(1.0f64)` → `"float"`
 
 **Math:**
 

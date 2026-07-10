@@ -10,13 +10,24 @@ host int64 json: TypeError
 host int64 strict: true
 bigint radix 64: ffffffffffffffff
 bigint asUintN64: ffffffffffffffff
+bigint shift neg typeof: bigint
+bigint shift neg: -9223372036854775808
+bigint asIntN64 min: -9223372036854775808
+bigint asIntN bits bigint: TypeError
+bigint mix add: TypeError
+bigint unsigned shift: TypeError
 buffer biguint64: bigint ffffffffffffffff
 buffer bigint64: bigint -1
+buffer bigint64 min: bigint -9223372036854775808
 buffer bigint64 string: TypeError
 dataview biguint64: bigint ffffffffffffffff
 dataview bigint64: bigint -1
+dataview bigint64 min: bigint -9223372036854775808
 typed biguint64: bigint ffffffffffffffff
 typed bigint64: bigint -1
+typed bigint64 min: bigint -9223372036854775808
+atomics bigint add: 1 3
+atomics bigint number: TypeError
 from array: 10,20,30
 from len: 3
 from string: h,i
