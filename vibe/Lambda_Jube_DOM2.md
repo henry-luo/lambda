@@ -1,6 +1,6 @@
 # Lambda Jube DOM — Stage 2 (DOM2): Review and Proposal
 
-> **Status**: DOM1 review + DOM2 proposal, written 2026-07-10.
+> **Status**: DOM2 implementation in progress; latest checkpoint 2026-07-10.
 > **Parent design**: [Lambda_Desing_Native_Module.md](./Lambda_Desing_Native_Module.md) (Jube modules, VMap projections, host API).
 > **Predecessor**: [Lambda_Jube_DOM.md](./Lambda_Jube_DOM.md) (DOM1 = POC 1A/1B implementation record).
 > **Downstream consumer**: [Lambda_Design_DOM_Pkg.md](./Lambda_Design_DOM_Pkg.md) — the Lambda `dom` package assumes the
@@ -321,6 +321,34 @@ each phase as a long-lived green checkpoint; no debug-build performance claims. 
 `./test/test_js_gtest.exe`, `./lambda.exe test/lambda/radiant_poc.ls` — plus the phase-specific
 gates below.
 
+### 3.0 Progress log (2026-07-10)
+
+Current implementation checkpoint:
+
+- **Phase 0 hardening is partially landed and green.** `test/lambda/radiant_poc.ls` still
+  returns `"ok"`, and `test/lambda/radiant_poc_uaf.ls` now exercises the post-free wrapper path
+  without crashing. The retained wrapper reports the intended
+  `JUBE_RADIANT_ATTR: expected DOM node wrapper` error and returns `null`.
+- **Phase 2 generic-host cleanup is partially landed.** The primary VMAP host-object paths now
+  route through generic host dispatch for property get/set, method lookup, `has`/`delete`,
+  descriptors, own keys, and prototype handling. Document/Range/Selection prototype and
+  `instanceof` special cases were removed from `js_globals.cpp`; `Object.assign` now preserves
+  all registered host VMAP targets instead of only inline style objects; the duplicate VMAP
+  method fallback was removed from `js_runtime.cpp`.
+- **UI Automation failure fixed during this checkpoint.** The `test_rich_text_editor` failure
+  was traced to `textarea onselect`: the eager inline-handler collector skipped `onselect`, so
+  the text-control `select` event could call a stale pre-reconcile handler. `onselect` is now in
+  `radiant/script_runner.cpp`'s retained event-handler list.
+- **Verified gates so far:** `make build`; full JS gtest 305/305; DOM-focused JS tests
+  `dom_module_props`, `dom_identity`, `dom_style`, `dom_v12b`, `dom_jquery_lib`; direct
+  `radiant_poc` and `radiant_poc_uaf`; UI Automation gtest 236 passed / 2 skipped / 0 failed.
+- **Still open:** Phase 2 grep gate is not yet zero. Legacy `MAP_KIND_WEB_API_RESOURCE`
+  Range/Selection branches, stylesheet/style predicates, `hostobj_demo`, ops-table completion,
+  host API migration, descriptor-driven registration, and Lambda-side projections remain pending.
+  Noisy `js_set_prototype: circular prototype chain detected` and
+  `heap_create_name called with invalid context or name_pool` logs observed during the direct UI
+  fixture are tracked as separate debt, not as blockers for the `onselect` fix.
+
 ### Phase 0 — Hardening and truth-establishment (small, do first)
 
 Tasks:
@@ -340,6 +368,9 @@ Testable goals:
 - Baseline triage table recorded; any DOM1-introduced regression fixed or explicitly accepted
   with reason.
 - Anchors green.
+
+Progress (2026-07-10): tasks 1 and 2 are implemented and verified by `radiant_poc_uaf`; task 3
+and the full Phase-0 baseline triage table are still pending.
 
 ### Phase 1 — Ops-table plumbing (no dispatch behavior change)
 
@@ -392,6 +423,11 @@ Testable goals:
 - Full JS gtest, UI-automation gtest, `dom_module_props`/`dom_jquery_lib`/`dom_style`/`dom_v12b`
   direct diffs green at every sub-step.
 - `make test-radiant-baseline` re-run at phase end; no new failures vs the Phase-0 triage table.
+
+Progress (2026-07-10): the generic path is active for the main VMAP host operations and the JS/UI
+gates listed in §3.0 are green. Do not mark Phase 2 complete until the grep gate reaches zero,
+`hostobj_demo` exists, and a second native host type proves no further `lambda/js/` edits are
+needed.
 
 ### Phase 3 — Host API realization
 
@@ -516,7 +552,7 @@ its Lambda-side ergonomics stand on §2.5 projections.
 
 | Finding | Evidence |
 |---|---|
-| G1 if-chains | `lambda/js/js_runtime.cpp:4111–4139`; ~70 predicate sites (38 js_runtime, 31 js_globals, 1 js_dom_events) |
+| G1 if-chains | Initial evidence: `lambda/js/js_runtime.cpp:4111–4139`; ~70 predicate sites (38 js_runtime, 31 js_globals, 1 js_dom_events). Partially reduced in the 2026-07-10 checkpoint; Phase 2 grep gate remains open. |
 | G1 unused ops | `lambda/module/radiant/radiant_module.cpp:152` (`{"dom_node", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL}`) |
 | G1b wrong receiver type | `lambda/jube/jube.h:32–38` (`void* native`) vs `radiant_dom_host_has_property(Item, Item, Item*)` |
 | G2 empty host API | `lambda/jube/jube.h:65–67`; externs at `lambda/module/radiant/radiant_dom_bridge.cpp:18–160` |

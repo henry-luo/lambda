@@ -70,15 +70,6 @@ extern "C" Item js_get_fs_namespace(void);
 extern "C" Item js_get_fs_promises_namespace(void);
 extern "C" Item js_get_internal_fs_promises_namespace(void);
 extern "C" Item js_get_os_namespace(void);
-extern "C" int radiant_dom_foreign_document_get_property(Item object, Item key, Item* out);
-extern "C" int radiant_dom_foreign_document_set_property(Item object, Item key, Item value, Item* out);
-extern "C" int radiant_dom_foreign_document_method(Item object, Item method_name, Item* args, int argc, Item* out);
-extern "C" bool radiant_dom_is_node(Item item);
-extern "C" bool js_is_document_proxy(Item item);
-extern "C" void* js_get_foreign_doc(Item item);
-extern "C" Item js_document_proxy_get_property(Item prop_name);
-extern "C" Item js_document_proxy_set_property(Item prop_name, Item value);
-extern "C" Item js_document_proxy_method(Item method_name, Item* args, int argc);
 extern "C" Item js_dom_get_property(Item elem_item, Item prop_name);
 extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value);
 extern "C" bool js_dom_item_is_range(Item item);
@@ -18616,9 +18607,6 @@ extern "C" Item js_generator_throw(Item generator, Item error);
 // Map method dispatcher: handles collection methods, falls back to property access
 extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
-extern "C" Item js_dom_range_get_prototype_value(void);
-extern "C" Item js_dom_selection_get_prototype_value(void);
-extern "C" Item js_dom_get_prototype_value(Item item);
 
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
     // document.implementation singleton methods
@@ -20297,17 +20285,6 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 return js_object_prototype_has_own_property(obj, make_js_undefined());
             }
-        }
-    }
-
-    // Fallback: property access + call
-    // Range/Selection are DOM resource host objects but not DOM nodes. Dispatch
-    // through their property accessors so ordinary range.setStart(...) keeps
-    // the Range receiver instead of falling into element-only method dispatch.
-    if (get_type_id(obj) == LMD_TYPE_VMAP && js_host_object_type(obj)) {
-        Item result = ItemNull;
-        if (js_host_object_call_method(obj, method_name, args, argc, &result)) {
-            return result;
         }
     }
 

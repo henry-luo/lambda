@@ -30,18 +30,13 @@ extern "C" int64_t js_key_is_symbol_c(Item key);
 extern "C" Item js_bound_function_target(Item func_item);
 extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value, Item receiver);
 extern "C" Item js_reflect_get_with_receiver(Item target, Item key, Item receiver);
-extern "C" bool js_dom_item_is_range(Item item);
-extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" bool js_dom_style_resource_has_property(Item item, Item key);
-extern "C" bool js_is_document_proxy(Item item);
 extern "C" bool js_is_inline_style_item(Item item);
 extern "C" bool js_is_computed_style_item(Item item);
 extern "C" bool js_cssom_resource_has_property(Item item, Item key);
 extern "C" bool js_is_stylesheet(Item item);
 extern "C" bool js_is_css_rule(Item item);
 extern "C" bool js_is_rule_style_decl(Item item);
-extern "C" Item js_dom_range_get_prototype_value(void);
-extern "C" Item js_dom_selection_get_prototype_value(void);
 extern "C" Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_dispatch_event(Item event_item);
@@ -49,8 +44,6 @@ extern "C" int radiant_dom_host_has_property(Item object, Item key, Item* out);
 extern "C" int radiant_dom_host_delete_property(Item object, Item key, Item* out);
 extern "C" int radiant_dom_host_own_property_descriptor(Item object, Item key, Item* out);
 extern "C" int radiant_dom_host_own_property_names(Item object, Item* out);
-extern "C" bool radiant_dom_is_node(Item item);
-extern "C" Item js_dom_get_prototype_value(Item item);
 extern "C" Item js_internal_binding(Item name);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
@@ -6516,10 +6509,6 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
     return (Item){.item = b2it(contains_map_proto)};
 }
 
-// Forward decls for DOM resource identity checks.
-extern "C" bool js_dom_item_is_range(Item item);
-extern "C" bool js_dom_item_is_selection(Item item);
-
 // instanceof check by constructor name for native function fallback.
 extern "C" Item js_instanceof_classname(Item left, Item classname) {
     if (get_type_id(classname) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
@@ -6530,15 +6519,6 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
 
     // Check built-in types that don't use __class_name__ prototype chain
     TypeId lt = get_type_id(left);
-
-    // DOM resource identity checks (Selection/Range wrappers have no
-    // __class_name__ in their property map).
-    if (rn->len == 9 && strncmp(rn->chars, "Selection", 9) == 0) {
-        return (Item){.item = b2it(js_dom_item_is_selection(left))};
-    }
-    if (rn->len == 5 && strncmp(rn->chars, "Range", 5) == 0) {
-        return (Item){.item = b2it(js_dom_item_is_range(left))};
-    }
 
     // Array check
     if (rn->len == 5 && strncmp(rn->chars, "Array", 5) == 0) {
@@ -7122,17 +7102,12 @@ extern "C" Item js_get_prototype_of(Item object) {
         return js_get_intrinsic_prototype_for_class(JS_CLASS_BIGINT);
     }
     if (!js_require_object_type(object, "getPrototypeOf")) return ItemNull;
-    if (js_is_document_proxy(object)) {
-        return js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
-    }
     if (ot == LMD_TYPE_VMAP) {
         Item host_proto = ItemNull;
         if (js_host_object_prototype(object, &host_proto)) {
             return get_type_id(host_proto) == LMD_TYPE_MAP ? host_proto : ItemNull;
         }
     }
-    if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
-    if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
     // v18g: Arrays → return Array.prototype (or custom if set via Object.setPrototypeOf)
     if (get_type_id(object) == LMD_TYPE_ARRAY) {
         if (js_is_arguments_exotic_array_for_proto(object)) {
@@ -11895,9 +11870,9 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
         js_throw_type_error("Cannot convert undefined or null to object");
         return ItemNull;
     }
-    bool keep_host_target = (tid == LMD_TYPE_VMAP && js_is_inline_style_item(target));
+    bool keep_host_target = (tid == LMD_TYPE_VMAP && js_host_object_type(target));
     if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_FUNC && !keep_host_target) {
-        // inline style VMAPs expose setters; boxing them would strand Object.assign(elem.style, ...).
+        // host VMAPs expose setters; boxing them would strand Object.assign() writes.
         target = js_to_object(target);
         if (js_check_exception()) return ItemNull;
     }

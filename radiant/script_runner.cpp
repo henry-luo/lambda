@@ -2254,6 +2254,9 @@ static const struct {
     {"onblur",       "blur"},
     {"onchange",     "change"},
     {"oninput",      "input"},
+    // textarea onselect must use the retained handler context; the generic
+    // event-attribute fallback can otherwise expose a stale pre-reconcile fn.
+    {"onselect",     "select"},
     {"onsubmit",     "submit"},
     {"onreset",      "reset"},
     {"onscroll",     "scroll"},
