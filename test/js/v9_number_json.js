@@ -32,6 +32,13 @@ console.log("bigint shift neg:", (-(1n << 63n)).toString());
 console.log("bigint asIntN64 min:", BigInt.asIntN(64, -(1n << 63n)).toString());
 const hugeUintHex = BigInt.asUintN(8000, -1n).toString(16);
 console.log("bigint asUintN8000 hex:", hugeUintHex === "f".repeat(2000));
+const hugeDecimalSource = "1" + "0".repeat(4096);
+const hugeDecimalBigInt = BigInt(hugeDecimalSource);
+console.log("bigint parse decimal4097:", hugeDecimalBigInt.toString().length, hugeDecimalBigInt.toString() === hugeDecimalSource);
+const hugeHexBigInt = BigInt("0x" + "f".repeat(4096));
+console.log("bigint parse hex4096:", hugeHexBigInt.toString(16).length, hugeHexBigInt.toString(16) === "f".repeat(4096));
+const hugeShiftHex = (1n << 8000n).toString(16);
+console.log("bigint shift8000 hex:", hugeShiftHex.length, hugeShiftHex[0], hugeShiftHex.slice(1) === "0".repeat(2000));
 console.log("bigint pow huge identity:", (1n ** (1n << 63n)).toString());
 try {
   BigInt.asIntN(1n, 0n);

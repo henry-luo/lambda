@@ -12,6 +12,8 @@ bigint
 bigint
 number
 bigint
+number
+number
 hello world appended
 2
 false

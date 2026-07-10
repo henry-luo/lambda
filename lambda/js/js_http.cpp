@@ -47,6 +47,7 @@ extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, 
 extern "C" void js_throw_value(Item error);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_symbol_for(Item key);
+extern Item js_make_number(double d);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -266,6 +267,30 @@ static bool http_status_code_is_valid(Item status_item, int* out_status) {
     if (status < 100 || status > 999) return false;
     *out_status = status;
     return true;
+}
+
+static bool http_item_to_integral_int64(Item value, int64_t* out) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT) {
+        if (out) *out = it2i(value);
+        return true;
+    }
+    if (type == LMD_TYPE_INT64) {
+        if (out) *out = it2l(value);
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double number = value.get_double();
+        // JS option numbers are float-backed after the Number migration; host timers need integral ms.
+        if (!isfinite(number) || number != floor(number) ||
+            number < -9223372036854775808.0 ||
+            number > 9223372036854775807.0) {
+            return false;
+        }
+        if (out) *out = (int64_t)number;
+        return true;
+    }
+    return false;
 }
 
 // =============================================================================
@@ -683,12 +708,13 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
 
 static void http_conn_update_socket_counters(JsHttpConn* conn) {
     if (!conn || conn->socket_object.item == 0) return;
+    // Node socket counters are public JS Number APIs; keep them explicit.
     js_property_set(conn->socket_object, make_string_item("bytesRead"),
-                    (Item){.item = i2it(conn->bytes_read)});
+                    js_make_number((double)conn->bytes_read));
     js_property_set(conn->socket_object, make_string_item("bytesWritten"),
-                    (Item){.item = i2it(conn->bytes_written)});
+                    js_make_number((double)conn->bytes_written));
     js_property_set(conn->socket_object, make_string_item("bufferSize"),
-                    (Item){.item = i2it(conn->pending_write_bytes)});
+                    js_make_number((double)conn->pending_write_bytes));
 }
 
 static void http_conn_pause_read_for_backpressure(JsHttpConn* conn) {
@@ -2475,8 +2501,8 @@ static void http_server_schedule_error(Item self, Item err, JsHttpServer* failed
 }
 
 static void http_server_schedule_after_stack(Item callback) {
-    // listen callbacks must not run during the listen() native call; cluster
-    // primaries often assign worker = cluster.fork() in the following statement.
+    // listen callbacks must not run during the listen() native call; listeners
+    // are often attached immediately after server.listen().
     js_setTimeout(callback, (Item){.item = i2it(0)});
 }
 
@@ -2791,7 +2817,7 @@ static Item js_http_conn_socket_setTimeout(Item maybe_self, Item msecs_item, Ite
         js_http_conn_socket_on(self, make_string_item("timeout"), actual_callback);
     }
     int64_t delay = 0;
-    if (get_type_id(actual_msecs) == LMD_TYPE_INT) delay = it2i(actual_msecs);
+    http_item_to_integral_int64(actual_msecs, &delay);
     if (delay < 0) delay = 0;
     http_conn_start_timeout(conn, delay);
     return self;
@@ -2812,7 +2838,7 @@ static Item js_http_server_req_setTimeout(Item maybe_self, Item msecs_item, Item
         conn->request_timeout_callback = make_js_undefined();
     }
     int64_t delay = 0;
-    if (get_type_id(actual_msecs) == LMD_TYPE_INT) delay = it2i(actual_msecs);
+    http_item_to_integral_int64(actual_msecs, &delay);
     http_conn_start_timeout(conn, delay);
     return self;
 }
@@ -2839,7 +2865,7 @@ static Item js_http_res_inst_setTimeout(Item maybe_self, Item msecs_item, Item c
         conn->response_timeout_callback = make_js_undefined();
     }
     int64_t delay = 0;
-    if (get_type_id(actual_msecs) == LMD_TYPE_INT) delay = it2i(actual_msecs);
+    http_item_to_integral_int64(actual_msecs, &delay);
     http_conn_start_timeout(conn, delay);
     return self;
 }
@@ -2871,10 +2897,10 @@ static Item http_conn_socket_object(JsHttpConn* conn) {
     js_property_set(obj, make_string_item("setTimeout"),
                     js_new_function((void*)js_http_conn_socket_setTimeout, 3));
     js_property_set(obj, make_string_item("destroyed"), (Item){.item = b2it(false)});
-    js_property_set(obj, make_string_item("bytesRead"), (Item){.item = i2it(conn->bytes_read)});
-    js_property_set(obj, make_string_item("bytesWritten"), (Item){.item = i2it(conn->bytes_written)});
-    js_property_set(obj, make_string_item("bufferSize"), (Item){.item = i2it(0)});
-    Item hwm = (Item){.item = i2it(16 * 1024)};
+    js_property_set(obj, make_string_item("bytesRead"), js_make_number((double)conn->bytes_read));
+    js_property_set(obj, make_string_item("bytesWritten"), js_make_number((double)conn->bytes_written));
+    js_property_set(obj, make_string_item("bufferSize"), js_make_number(0.0));
+    Item hwm = js_make_number((double)(16 * 1024));
     Item readable_state = js_new_object();
     js_property_set(readable_state, make_string_item("highWaterMark"), hwm);
     Item writable_state = js_new_object();
@@ -3400,8 +3426,9 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
                get_type_id(port_item) == LMD_TYPE_UNDEFINED ||
                get_type_id(port_item) == LMD_TYPE_NULL) {
         port = 0;
-    } else if (get_type_id(port_item) == LMD_TYPE_INT) {
-        port = (int)it2i(port_item);
+    } else {
+        int64_t parsed_port = 0;
+        if (http_item_to_integral_int64(port_item, &parsed_port)) port = (int)parsed_port;
     }
 
     char host_buf[256] = "0.0.0.0";
@@ -3416,16 +3443,9 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
 
     if (js_http_is_object_like(port_item) && js_http_object_has_key(port_item, "fd")) {
         Item fd_item = js_property_get(port_item, make_string_item("fd"));
-        TypeId fd_type = get_type_id(fd_item);
         bool valid_fd_number = false;
         int64_t fd_value = 0;
-        if (fd_type == LMD_TYPE_INT) {
-            fd_value = it2i(fd_item);
-            valid_fd_number = true;
-        } else if (fd_type == LMD_TYPE_INT64) {
-            fd_value = it2l(fd_item);
-            valid_fd_number = true;
-        }
+        valid_fd_number = http_item_to_integral_int64(fd_item, &fd_value);
         if (!valid_fd_number || fd_value < 0) {
             return js_throw_type_error_code(
                 "ERR_INVALID_ARG_VALUE",
@@ -3930,10 +3950,10 @@ static Item http_client_socket_object(JsHttpClientReq* creq) {
     js_property_set(obj, make_string_item("__client__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)creq)});
     js_property_set(obj, make_string_item("destroyed"), (Item){.item = b2it(false)});
-    js_property_set(obj, make_string_item("bytesRead"), (Item){.item = i2it(0)});
-    js_property_set(obj, make_string_item("bytesWritten"), (Item){.item = i2it(0)});
-    js_property_set(obj, make_string_item("bufferSize"), (Item){.item = i2it(0)});
-    Item hwm = (Item){.item = i2it(16 * 1024)};
+    js_property_set(obj, make_string_item("bytesRead"), js_make_number(0.0));
+    js_property_set(obj, make_string_item("bytesWritten"), js_make_number(0.0));
+    js_property_set(obj, make_string_item("bufferSize"), js_make_number(0.0));
+    Item hwm = js_make_number((double)(16 * 1024));
     Item readable_state = js_new_object();
     js_property_set(readable_state, make_string_item("highWaterMark"), hwm);
     Item writable_state = js_new_object();
@@ -5906,11 +5926,13 @@ extern "C" Item js_http_Agent(Item options) {
 
     if (get_type_id(options) == LMD_TYPE_MAP) {
         Item ms = js_property_get(options, make_string_item("maxSockets"));
-        if (get_type_id(ms) == LMD_TYPE_INT) max_sockets = (int)it2i(ms);
+        int64_t ms_value = 0;
+        if (http_item_to_integral_int64(ms, &ms_value)) max_sockets = (int)ms_value;
         Item ka = js_property_get(options, make_string_item("keepAlive"));
         if (get_type_id(ka) == LMD_TYPE_BOOL) keep_alive = it2b(ka);
         Item kam = js_property_get(options, make_string_item("keepAliveMsecs"));
-        if (get_type_id(kam) == LMD_TYPE_INT) keep_alive_msecs = (int)it2i(kam);
+        int64_t kam_value = 0;
+        if (http_item_to_integral_int64(kam, &kam_value)) keep_alive_msecs = (int)kam_value;
     }
 
     js_property_set(agent, make_string_item("maxSockets"), (Item){.item = i2it(max_sockets)});

@@ -14,6 +14,9 @@ bigint shift neg typeof: bigint
 bigint shift neg: -9223372036854775808
 bigint asIntN64 min: -9223372036854775808
 bigint asUintN8000 hex: true
+bigint parse decimal4097: 4097 true
+bigint parse hex4096: 4096 true
+bigint shift8000 hex: 2001 1 true
 bigint pow huge identity: 1
 bigint asIntN bits bigint: TypeError
 bigint mix add: TypeError

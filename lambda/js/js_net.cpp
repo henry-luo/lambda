@@ -42,6 +42,7 @@ extern "C" Item js_object_keys(Item object);
 extern "C" void js_cluster_notify_worker_listening(void);
 extern "C" void js_process_ipc_notify_handle_accepted(void);
 extern "C" void js_process_ipc_notify_socket_closed(void);
+extern Item js_make_number(double d);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -81,6 +82,30 @@ static double net_number_value(Item value) {
     if (type == LMD_TYPE_INT64) return (double)it2l(value);
     if (type == LMD_TYPE_FLOAT) return it2d(value);
     return 0.0;
+}
+
+static bool net_item_to_integral_int64(Item value, int64_t* out) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT) {
+        if (out) *out = it2i(value);
+        return true;
+    }
+    if (type == LMD_TYPE_INT64) {
+        if (out) *out = it2l(value);
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double number = it2d(value);
+        // JS option numbers are float-backed after the Number migration; host knobs still require integers.
+        if (!isfinite(number) || number != floor(number) ||
+            number < -9223372036854775808.0 ||
+            number > 9223372036854775807.0) {
+            return false;
+        }
+        if (out) *out = (int64_t)number;
+        return true;
+    }
+    return false;
 }
 
 // =============================================================================
@@ -492,14 +517,15 @@ static void socket_start_auto_attempt_timer(JsSocket* sock) {
 
 static void socket_update_io_counters(JsSocket* sock) {
     if (!sock) return;
+    // Node stream counters are public JS Number APIs; avoid magnitude-driven BigInt egress.
     js_property_set(sock->js_object, make_string_item("bytesRead"),
-                    (Item){.item = i2it(sock->bytes_read)});
+                    js_make_number((double)sock->bytes_read));
     js_property_set(sock->js_object, make_string_item("bytesWritten"),
-                    (Item){.item = i2it(sock->bytes_written)});
+                    js_make_number((double)sock->bytes_written));
     js_property_set(sock->js_object, make_string_item("bufferSize"),
-                    (Item){.item = i2it(sock->buffer_size)});
+                    js_make_number((double)sock->buffer_size));
     js_property_set(sock->js_object, make_string_item("writableLength"),
-                    (Item){.item = i2it(sock->buffer_size)});
+                    js_make_number((double)sock->buffer_size));
 }
 
 static void socket_update_state_properties(JsSocket* sock) {
@@ -2074,11 +2100,11 @@ static Item make_socket_object(JsSocket* sock, bool expose_handle) {
     js_property_set(obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
     js_property_set(obj, make_string_item("writable"), (Item){.item = ITEM_TRUE});
     js_property_set(obj, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
-    js_property_set(obj, make_string_item("bytesRead"), (Item){.item = i2it(0)});
-    js_property_set(obj, make_string_item("bytesWritten"), (Item){.item = i2it(0)});
-    js_property_set(obj, make_string_item("bufferSize"), (Item){.item = i2it(0)});
-    js_property_set(obj, make_string_item("writableLength"), (Item){.item = i2it(0)});
-    Item hwm = (Item){.item = i2it(sock->high_water_mark)};
+    js_property_set(obj, make_string_item("bytesRead"), js_make_number(0.0));
+    js_property_set(obj, make_string_item("bytesWritten"), js_make_number(0.0));
+    js_property_set(obj, make_string_item("bufferSize"), js_make_number(0.0));
+    js_property_set(obj, make_string_item("writableLength"), js_make_number(0.0));
+    Item hwm = js_make_number((double)sock->high_water_mark);
     Item readable_state = js_new_object();
     js_property_set(readable_state, make_string_item("highWaterMark"), hwm);
     Item writable_state = js_new_object();
@@ -5375,16 +5401,9 @@ extern "C" Item js_net_Socket(Item options) {
         get_type_id(options) == LMD_TYPE_VMAP) {
         Item fd = js_property_get(options, make_string_item("fd"));
         if (!is_undefined_item(fd) && fd.item != ITEM_NULL) {
-            TypeId fd_type = get_type_id(fd);
             bool valid_fd_number = false;
             int64_t fd_value = 0;
-            if (fd_type == LMD_TYPE_INT) {
-                fd_value = it2i(fd);
-                valid_fd_number = true;
-            } else if (fd_type == LMD_TYPE_INT64) {
-                fd_value = it2l(fd);
-                valid_fd_number = true;
-            }
+            valid_fd_number = net_item_to_integral_int64(fd, &fd_value);
             if (!valid_fd_number) {
                 js_throw_invalid_arg_type("options.fd", "number", fd);
                 return ItemNull;
@@ -5401,8 +5420,10 @@ extern "C" Item js_net_Socket(Item options) {
     if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT ||
         get_type_id(options) == LMD_TYPE_VMAP) {
         Item hwm = js_property_get(options, make_string_item("highWaterMark"));
-        if (get_type_id(hwm) == LMD_TYPE_INT && it2i(hwm) >= 0) {
-            sock->high_water_mark = it2i(hwm);
+        int64_t hwm_value = 0;
+        if (!is_undefined_item(hwm) && hwm.item != ITEM_NULL &&
+            net_item_to_integral_int64(hwm, &hwm_value) && hwm_value >= 0) {
+            sock->high_water_mark = hwm_value;
         }
     }
     uv_tcp_init(loop, &sock->tcp);

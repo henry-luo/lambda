@@ -1038,9 +1038,15 @@ static Item js_fs_writestream_write(Item chunk_item, Item callback_item) {
     }
     js_fs_writestream_call_write_hook(stream, fd_item);
     Item bytes_written = js_property_get(stream, make_string_item("bytesWritten"));
-    int64_t total = (get_type_id(bytes_written) == LMD_TYPE_INT) ? it2i(bytes_written) : 0;
+    int64_t total = 0;
+    if (get_type_id(bytes_written) == LMD_TYPE_INT) {
+        total = it2i(bytes_written);
+    } else if (get_type_id(bytes_written) == LMD_TYPE_FLOAT) {
+        total = (int64_t)it2d(bytes_written);
+    }
     total += len;
-    js_property_set(stream, make_string_item("bytesWritten"), (Item){.item = i2it(total)});
+    // WriteStream.bytesWritten is a Node JS Number surface, independent of host counter width.
+    js_property_set(stream, make_string_item("bytesWritten"), js_make_number((double)total));
 
     Item hwm_item = js_property_get(stream, make_string_item("__writestream_high_water_mark__"));
     int64_t high_water_mark = (get_type_id(hwm_item) == LMD_TYPE_INT) ? it2i(hwm_item) : 16384;
@@ -1255,7 +1261,7 @@ extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
     js_property_set(stream, make_string_item("__writestream_drain_pending__"), (Item){.item = b2it(false)});
     js_property_set(stream, make_string_item("__writestream_high_water_mark__"), (Item){.item = i2it(16384)});
     js_property_set(stream, make_string_item("closed"), (Item){.item = b2it(false)});
-    js_property_set(stream, make_string_item("bytesWritten"), (Item){.item = i2it(0)});
+    js_property_set(stream, make_string_item("bytesWritten"), js_make_number(0.0));
     js_property_set(stream, make_string_item("fd"), ItemNull);
 
     Item flags = make_string_item("w");
@@ -1266,26 +1272,39 @@ extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
             flags = flags_opt;
         }
         Item mode_opt = js_property_get(options_item, make_string_item("mode"));
-        if (get_type_id(mode_opt) == LMD_TYPE_INT) mode = mode_opt;
+        if (!fs_is_nullish(mode_opt)) {
+            uint32_t parsed_mode = 0;
+            if (!fs_validate_mode(mode_opt, &parsed_mode)) return ItemNull;
+            mode = (Item){.item = i2it((int64_t)parsed_mode)};
+        }
         Item auto_close = js_property_get(options_item, make_string_item("autoClose"));
         if (get_type_id(auto_close) == LMD_TYPE_BOOL) {
             js_property_set(stream, make_string_item("__writestream_auto_close__"), auto_close);
         }
         Item hwm = js_property_get(options_item, make_string_item("highWaterMark"));
-        if (get_type_id(hwm) == LMD_TYPE_INT) {
-            js_property_set(stream, make_string_item("__writestream_high_water_mark__"), hwm);
+        if (!fs_is_nullish(hwm)) {
+            int64_t parsed_hwm = 0;
+            // JS numeric literals are float-backed Numbers; fs internals keep HWM as an integral counter.
+            if (!fs_validate_int_range(hwm, "options.highWaterMark", 0, 9223372036854775807LL, &parsed_hwm)) return ItemNull;
+            js_property_set(stream, make_string_item("__writestream_high_water_mark__"),
+                            (Item){.item = i2it(parsed_hwm)});
         }
         Item hooks = js_property_get(options_item, make_string_item("fs"));
         if (get_type_id(hooks) == LMD_TYPE_MAP) {
             js_property_set(stream, make_string_item("__writestream_fs_hooks__"), hooks);
         }
         Item fd_opt = js_property_get(options_item, make_string_item("fd"));
-        if (get_type_id(fd_opt) == LMD_TYPE_INT) {
-            js_property_set(stream, make_string_item("fd"), fd_opt);
+        if (!fs_is_nullish(fd_opt)) {
+            int parsed_fd = 0;
+            if (!fs_validate_fd(fd_opt, &parsed_fd)) return ItemNull;
+            js_property_set(stream, make_string_item("fd"), (Item){.item = i2it(parsed_fd)});
         }
         Item start_opt = js_property_get(options_item, make_string_item("start"));
-        if (get_type_id(start_opt) == LMD_TYPE_INT) {
-            js_property_set(stream, make_string_item("__writestream_position__"), start_opt);
+        if (!fs_is_nullish(start_opt)) {
+            int64_t parsed_start = 0;
+            if (!fs_validate_int_range(start_opt, "options.start", 0, 9223372036854775807LL, &parsed_start)) return ItemNull;
+            js_property_set(stream, make_string_item("__writestream_position__"),
+                            (Item){.item = i2it(parsed_start)});
         }
     }
 
@@ -2305,8 +2324,8 @@ extern "C" Item js_fs_readSync(Item fd_item, Item buffer_item, Item offset_item,
     int offset = 0, length = blen;
     if (!fs_validate_offset_length(read_offset, read_length, blen, &offset, &length)) return ItemNull;
     if (blen == 0 && length > 0) return fs_throw_empty_read_buffer(ta);
-    if (length <= 0) return (Item){.item = i2it(0)};
-    if (!data) return (Item){.item = i2it(0)};
+    if (length <= 0) return js_make_number(0.0);
+    if (!data) return js_make_number(0.0);
 
     int64_t position = -1;
     if (!fs_read_position_to_int64(read_position, &position)) return ItemNull;
@@ -2315,8 +2334,9 @@ extern "C" Item js_fs_readSync(Item fd_item, Item buffer_item, Item offset_item,
     uv_fs_t req;
     int nread = uv_fs_read(lambda_uv_loop(), &req, fd, &buf, 1, position, NULL);
     uv_fs_req_cleanup(&req);
-    if (nread < 0) return (Item){.item = i2it(0)};
-    return (Item){.item = i2it((int64_t)nread)};
+    if (nread < 0) return js_make_number(0.0);
+    // fs read/write byte counts are Node JS Number results, not lossless data ids.
+    return js_make_number((double)nread);
 }
 
 extern "C" Item js_fs_read(Item fd_item, Item buffer_item, Item offset_item, Item length_item, Item position_item, Item callback) {
@@ -2544,11 +2564,11 @@ extern "C" Item js_fs_writeSync(Item fd_item, Item data_item, Item offset_item, 
             write_len = blen;
         }
     }
-    if (!write_buf) return (Item){.item = i2it(0)};
+    if (!write_buf) return js_make_number(0.0);
 
     int offset = 0, length = write_len;
     if (!fs_validate_offset_length(offset_item, length_item, write_len, &offset, &length)) return ItemNull;
-    if (length <= 0) return (Item){.item = i2it(0)};
+    if (length <= 0) return js_make_number(0.0);
 
     int64_t position = -1;
     if (get_type_id(position_item) == LMD_TYPE_INT) position = it2i(position_item);
@@ -2557,8 +2577,9 @@ extern "C" Item js_fs_writeSync(Item fd_item, Item data_item, Item offset_item, 
     uv_fs_t req;
     int nwritten = uv_fs_write(lambda_uv_loop(), &req, fd, &buf, 1, position, NULL);
     uv_fs_req_cleanup(&req);
-    if (nwritten < 0) return (Item){.item = i2it(0)};
-    return (Item){.item = i2it((int64_t)nwritten)};
+    if (nwritten < 0) return js_make_number(0.0);
+    // fs read/write byte counts are Node JS Number results, not lossless data ids.
+    return js_make_number((double)nwritten);
 }
 
 static bool fs_write_parse_options(Item options_item, Item data_item,
@@ -2649,7 +2670,7 @@ extern "C" Item js_fs_readvSync(Item fd_item, Item buffers_item, Item position_i
     }
 
     int64_t count64 = js_array_length(buffers_item);
-    if (count64 <= 0) return (Item){.item = i2it(0)};
+    if (count64 <= 0) return js_make_number(0.0);
     if (count64 > 1024) {
         js_throw_out_of_range("buffers.length", "<= 1024", (Item){.item = i2it(count64)});
         return ItemNull;
@@ -2671,8 +2692,9 @@ extern "C" Item js_fs_readvSync(Item fd_item, Item buffers_item, Item position_i
     uv_fs_t req;
     int nread = uv_fs_read(lambda_uv_loop(), &req, fd, bufs, (unsigned int)count64, position, NULL);
     uv_fs_req_cleanup(&req);
-    if (nread < 0) return (Item){.item = i2it(0)};
-    return (Item){.item = i2it((int64_t)nread)};
+    if (nread < 0) return js_make_number(0.0);
+    // fs readv/writev byte counts are Node JS Number results, not lossless data ids.
+    return js_make_number((double)nread);
 }
 
 extern "C" Item js_fs_readv(Item fd_item, Item buffers_item, Item position_item, Item callback_item) {
@@ -2700,7 +2722,7 @@ extern "C" Item js_fs_writevSync(Item fd_item, Item buffers_item, Item position_
     }
 
     int64_t count64 = js_array_length(buffers_item);
-    if (count64 <= 0) return (Item){.item = i2it(0)};
+    if (count64 <= 0) return js_make_number(0.0);
     if (count64 > 1024) {
         js_throw_out_of_range("buffers.length", "<= 1024", (Item){.item = i2it(count64)});
         return ItemNull;
@@ -2728,8 +2750,9 @@ extern "C" Item js_fs_writevSync(Item fd_item, Item buffers_item, Item position_
     uv_fs_t req;
     int nwritten = uv_fs_write(lambda_uv_loop(), &req, fd, bufs, (unsigned int)count64, position, NULL);
     uv_fs_req_cleanup(&req);
-    if (nwritten < 0) return (Item){.item = i2it(0)};
-    return (Item){.item = i2it((int64_t)nwritten)};
+    if (nwritten < 0) return js_make_number(0.0);
+    // fs readv/writev byte counts are Node JS Number results, not lossless data ids.
+    return js_make_number((double)nwritten);
 }
 
 extern "C" Item js_fs_writev(Item fd_item, Item buffers_item, Item position_item, Item callback_item) {

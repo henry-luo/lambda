@@ -38,6 +38,13 @@ console.log(typeof fs.fstatSync(fd, { bigint: true }).size);
 fs.closeSync(fd);
 console.log(typeof fs.statfsSync("./temp").bsize);
 console.log(typeof fs.statfsSync("./temp", { bigint: true }).bsize);
+fs.writeFileSync("./temp/fs_rw_count.txt", "abc");
+var rwfd = fs.openSync("./temp/fs_rw_count.txt", "r+");
+var rwbuf = Buffer.alloc(1);
+console.log(typeof fs.readSync(rwfd, rwbuf, 0, 1, 0));
+console.log(typeof fs.writeSync(rwfd, "z", 0, 1, 0));
+fs.closeSync(rwfd);
+fs.unlinkSync("./temp/fs_rw_count.txt");
 
 // Test 4: appendFileSync
 fs.appendFileSync("./temp/fs_test1.txt", " appended");
