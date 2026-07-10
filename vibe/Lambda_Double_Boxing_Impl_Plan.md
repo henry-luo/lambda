@@ -1,6 +1,6 @@
 # Lambda Double Boxing v3 — Implementation Plan
 
-- **Status:** PLAN (implements the reviewed v3 design)
+- **Status:** IN PROGRESS — S0 guardrails partially landed (2026-07-10)
 - **Date:** 2026-07-10
 - **Design:** `Lambda_Type_Double_Boxing.md` (v3 = raw IEEE bits + single-mask discriminator + packed-immediate ±0; reviewed in its Part 7)
 - **Representation contract:** `Lambda_Design_Item_Boxing.md` §6 — tagged scalar leaves, **raw container pointers (bit-identical, mask-free)**, inline immediates. Part 7 §7.2's acceptance bar governs: *if an implementation requires tagging or masking any container pointer, it has violated the design rather than implemented it.*
@@ -21,6 +21,18 @@ Phases (S0–S3 continue the design doc's Part 5 numbering; P0 precedes them):
 | S3 | GC audit, hardening, benchmark sign-off, default flip | flip | default on |
 
 **Canonical-encoding rule (all phases):** within one build configuration, every double has exactly one Item encoding — raw in-band bits, one of the two packed zeros, or the canonical boxed fallback. Mixed old/new producers are forbidden; the flag makes the transition atomic per build.
+
+---
+
+## Implementation status — 2026-07-10
+
+S0 guardrails landed as a first slice: shared Item double masks and static tag-space pins in `lambda/lambda.h`; raw-pointer assertions wired into both C and C++ `p2it`; JS sentinel high bytes moved out of double space and centralized through shared constants; `lib/lambda_typed.hpp` hole stamping now uses the same deleted sentinel; `item_to_ptr` now rejects inline-double and unknown high-tag scalar words instead of treating them as raw pointers.
+
+Added `test/test_item_repr_gtest.cpp` and wired it through `build_lambda_config.json` / Premake. This is an initial representation test: it pins raw pointer bit identity and discriminator ordering for header-shaped families, but the normal-allocator construction path and MIR golden inspection remain open. Also refreshed `lambda/lambda-embed.h`.
+
+One stale GC unit expectation was updated: VMap NULL backing data is not traced, but the destroy callback still runs so host-branded VMaps can release native payloads even when the backing map store was lazy.
+
+Verified slice: `test_item_repr_gtest`, `test_gc_heap_gtest`, `test_lambda_typed`, `test_js_gtest`, and `test_lambda_gtest` all pass. Full S0 gates (`make test-lambda-baseline`, Radiant baseline, node baseline, lint) remain open.
 
 ---
 
@@ -49,26 +61,26 @@ Define next to the `EnumTypeId` (`lambda.h:83`), compiled unconditionally (used 
 #define ITEM_TAG_IS_NON_DOUBLE(tag)  (((tag) & 0x60u) == 0)
 ```
 
-- [ ] Mirror into the C++ side (`lambda/lambda.hpp`) or include-share; one definition, two languages.
-- [ ] Comment on the enum stating the partition rule and pointing at `Lambda_Type_Double_Boxing.md` §2.3.
+- [x] Mirror into the C++ side (`lambda/lambda.hpp`) or include-share; one definition, two languages.
+- [x] Comment on the enum stating the partition rule and pointing at `Lambda_Type_Double_Boxing.md` §2.3.
 
 ### S0.2 Compile-time assertions (Part 7 §7.3)
 
-- [ ] `static_assert(sizeof(Item) == sizeof(uint64_t))`, `static_assert(sizeof(uintptr_t) == sizeof(uint64_t))`.
-- [ ] `static_assert(LMD_TYPE_COUNT <= 0x20)` — valid while all TypeIds stay in the first legal block. Add the review's caveat as a comment: if a future TypeId jumps to `0x80–0x9F`, replace this with an X-macro/per-tag assertion list, **not** a weaker max-value check.
-- [ ] Per-tag predicate check: an X-macro or `static_assert` list asserting `ITEM_TAG_IS_NON_DOUBLE(t)` for every `EnumTypeId` value and for the high byte of every non-float Item sentinel (`ITEM_NULL`, `ITEM_JS_UNDEFINED`, `ITEM_JS_TDZ`, `ITEM_INT`, `ITEM_TRUE/FALSE`, `ITEM_ERROR`, `ITEM_NULL_SPREADABLE`, `lambda.h:871`–`:892`).
-- [ ] `static_assert(offsetof(Container, type_id) == 0)`; same pin for every raw-Item family that does **not** inherit `Container` — notably `Function` and `Path` (their `TypeId` must be byte zero; Part 7 §7.3).
-- [ ] Packed-zero constants (defined here, used at S1): `ITEM_FLOAT_P0 = ((uint64_t)LMD_TYPE_FLOAT << 56)`, `ITEM_FLOAT_N0 = ITEM_FLOAT_P0 | 1`; assert both satisfy `(x & ITEM_DBL_MASK) == 0` and have the FLOAT high byte.
+- [x] `static_assert(sizeof(Item) == sizeof(uint64_t))`, `static_assert(sizeof(uintptr_t) == sizeof(uint64_t))`.
+- [x] `static_assert(LMD_TYPE_COUNT <= 0x20)` — valid while all TypeIds stay in the first legal block. Add the review's caveat as a comment: if a future TypeId jumps to `0x80–0x9F`, replace this with an X-macro/per-tag assertion list, **not** a weaker max-value check.
+- [x] Per-tag predicate check: an X-macro or `static_assert` list asserting `ITEM_TAG_IS_NON_DOUBLE(t)` for every `EnumTypeId` value and for the high byte of every non-float Item sentinel (`ITEM_NULL`, `ITEM_JS_UNDEFINED`, `ITEM_JS_TDZ`, `ITEM_INT`, `ITEM_TRUE/FALSE`, `ITEM_ERROR`, `ITEM_NULL_SPREADABLE`, `lambda.h:871`–`:892`).
+- [x] `static_assert(offsetof(Container, type_id) == 0)`; same pin for every raw-Item family that does **not** inherit `Container` — notably `Function` and `Path` (their `TypeId` must be byte zero; Part 7 §7.3).
+- [x] Packed-zero constants (defined here, used at S1): `ITEM_FLOAT_P0 = ((uint64_t)LMD_TYPE_FLOAT << 56)`, `ITEM_FLOAT_N0 = ITEM_FLOAT_P0 | 1`; assert both satisfy `(x & ITEM_DBL_MASK) == 0` and have the FLOAT high byte.
 
 ### S0.3 Sentinel renumbering — `lambda/js/js_runtime.h`
 
-- [ ] `JS_DELETED_SENTINEL_VAL` (`js_runtime.h:30`, high byte `0x7E`) and `JS_ITER_DONE_SENTINEL` (`:35`, `0x7F`) → renumber to bits-6,5-clear high bytes (e.g. `0x1E…`/`0x1F…` or `0x9E…`/`0x9F…`), keeping their distinctive low-bit patterns.
-- [ ] Update every comparison site (grep both names; also grep the raw hex constants in case any site open-codes them).
-- [ ] Add `static_assert(ITEM_TAG_IS_NON_DOUBLE(...))` pins on both (S0.2 list).
+- [x] `JS_DELETED_SENTINEL_VAL` (`js_runtime.h:30`, high byte `0x7E`) and `JS_ITER_DONE_SENTINEL` (`:35`, `0x7F`) → renumber to bits-6,5-clear high bytes (e.g. `0x1E…`/`0x1F…` or `0x9E…`/`0x9F…`), keeping their distinctive low-bit patterns.
+- [x] Update every comparison site (grep both names; also grep the raw hex constants in case any site open-codes them).
+- [x] Add `static_assert(ITEM_TAG_IS_NON_DOUBLE(...))` pins on both (S0.2 list).
 
 ### S0.4 Raw-pointer assertion helpers (Part 7 §7.3)
 
-- [ ] Debug-only `assert_raw_item_pointer(ptr)`: high byte exactly zero, `DBL_MASK` clear, round-trips through `(void*)`. Wire into **both** `p2it` definitions (`lambda.h:989`, `lambda.hpp:476`).
+- [x] Debug-only `assert_raw_item_pointer(ptr)`: high byte exactly zero, `DBL_MASK` clear, round-trips through `(void*)`. Wire into **both** `p2it` definitions (`lambda.h:989`, `lambda.hpp:476`).
 - [ ] Same helper called at Item-visible container allocation/construction boundaries (the `heap_calloc_class`/constructor paths) — `p2it` alone is insufficient because code also builds Items through the C++ union fields (`.container`, `.array`, `.map`, …).
 - [ ] Post-initialization debug check for header-bearing objects: object address == header address; header `TypeId` is a valid raw family; `get_type_id(Item{ptr})` == header TypeId; `it2p` returns the original pointer. Do **not** put header validation inside `p2it` itself (it is also an ABI helper for pointer-shaped values whose header may not exist yet — Part 7 §7.3).
 
@@ -85,12 +97,14 @@ Plus:
 - [ ] the discriminator-ordering test: a synthetic in-band double word whose low 56 bits are deliberately **not** a valid address must classify as `LMD_TYPE_FLOAT` with no header read (run under ASan — a header read would fault); a real container pointer must reach the header branch with the word unmodified.
 - [ ] MIR golden-inspection test: transpile a known container field load; assert the emitted MIR contains no `AND`/`XOR`/pointer reconstruction between the Item register and the field load (Part 7 §7.4 — this is a performance invariant as well as correctness). Wire into `build_lambda_config.json` + expected `.txt` goldens per repo convention.
 
+2026-07-10 note: `test_item_repr_gtest` now covers header-shaped raw Item families and an S0-era non-pointer discriminator word without requiring S1 float classification. The normal allocator construction matrix, ASan fault guard, and MIR golden remain open.
+
 ### S0.6 Audits (deliverable: a checked-off audit table appended to this file)
 
 - [ ] **Raw `>> 56` sweep** — ~24 sites / 11 files: classify each as (a) downstream of `get_type_id` (fine), (b) tag-literal compare provably never seeing a float Item (fine), (c) needs the `DBL_MASK` test added at S1. Include `& 0x00FF…` mask-only sites and any private tag arithmetic in the Jube runtimes (`lambda/py/`, `lambda/bash/`, …).
 - [ ] **Raw-Item equality audit** — every `MIR_EQ`/`MIR_BEQ` emission on Item words (`js_mir_expression_lowering.cpp:1519`, `:1562`, `:1575`, `:5560`, `:6590`, …, plus Lambda-side `transpile-mir.cpp` equivalents): float-free proof, or marked for `MIR_DEQ`/runtime-helper reroute at S2. The three semantic traps: equal in-band doubles become raw-equal; same-payload NaNs raw-equal (must be `false`); `ITEM_FLOAT_P0` vs `_N0` raw-unequal (must be `true`).
 - [ ] **Open-coded payload dereference sweep** — every read of a float payload not going through `it2d`: known: `Item::get_double()` (`lambda.hpp:173`, `*(double*)this->double_ptr`) and the C `it2d` (`lambda-data.cpp:322`); find the rest (`grep '\*(double\*)'` filtered to Item-payload use, not shaped-field slots). Each must route through the S1 two-arm decode or be proven boxed-only.
-- [ ] **GC classifier audit** — `item_to_ptr` (`gc_heap.c:770`), `gc_scan_stack` (`:1569`), map-field tracing (`:1017`–`:1058`), `gc_fixup_embedded_pointers` (`:1202`): confirm none can misread a bit-62/61-set word as a pointer once such Items exist, and that GC-internal header tags (`LMD_TYPE_MAP_` etc. past `LMD_TYPE_COUNT`) are never materialized into Item high bytes.
+- [ ] **GC classifier audit** — `item_to_ptr` (`gc_heap.c:770`), `gc_scan_stack` (`:1569`), map-field tracing (`:1017`–`:1058`), `gc_fixup_embedded_pointers` (`:1202`): confirm none can misread a bit-62/61-set word as a pointer once such Items exist, and that GC-internal header tags (`LMD_TYPE_MAP_` etc. past `LMD_TYPE_COUNT`) are never materialized into Item high bytes. 2026-07-10: `item_to_ptr` is hardened; broader scan/fixup audit remains open.
 - [ ] **Hashing/SameValueZero audit** — every value-keyed container (JS `Map`/`Set`, any Item-keyed hashmap): confirm float keys are hashed via unboxed value with NaN-canonicalization and −0→+0 normalization (required today for pointer-distinct boxed floats; must survive the rewrite — design §3.4/§3.5).
 
 ### S0.7 Lint rules — `utils/lint/rules`

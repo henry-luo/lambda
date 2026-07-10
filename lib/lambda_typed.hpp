@@ -235,7 +235,7 @@ class HoleSentinel {
 
 public:
     static uint64_t raw_value() {
-        return 0x7E00DEAD00DEAD00ULL;
+        return ITEM_JS_DELETED_SENTINEL;
     }
 
     static HoleSentinel make() {

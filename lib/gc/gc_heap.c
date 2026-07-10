@@ -770,6 +770,10 @@ static gc_header_t* mark_stack_pop(gc_heap_t* gc) {
 static void* item_to_ptr(uint64_t item) {
     if (item == 0) return NULL;  // all-zero value
 
+    // Inline doubles and invalid sentinel tags are scalar words; treating them
+    // as fallback raw pointers can keep or rewrite JS holes as live objects.
+    if (item & ITEM_DBL_MASK) return NULL;
+
     uint8_t tag = (uint8_t)(item >> 56);
 
     // tag 1 = NULL item, tag 2 = BOOL (inline), tag 3 = INT (inline)
@@ -790,12 +794,9 @@ static void* item_to_ptr(uint64_t item) {
         return (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
     }
 
-    // tags >= 12 (containers with tag in high byte): shouldn't normally occur on
-    // mainstream 64-bit platforms where heap pointers have 0 in the high byte.
-    // But for safety, treat as raw pointer.
-    if (tag >= LMD_TYPE_RANGE_) {
-        return (void*)(uintptr_t)item;
-    }
+    // Raw container pointers have a zero high byte; unknown high tags are
+    // sentinels or invalid Items, not recoverable pointer encodings.
+    if (tag >= LMD_TYPE_RANGE_) return NULL;
 
     // anything else (ERROR=25 with null pointer, ANY=24, etc.)
     // extract pointer — if lower 56 bits are 0, returns NULL

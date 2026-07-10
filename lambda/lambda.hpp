@@ -247,6 +247,8 @@ typedef struct Item {
     }
 } Item;
 
+static_assert(sizeof(Item) == sizeof(uint64_t), "C++ Item must remain one word");
+
 // const read-only item
 // ConstItem, instead of const Item, to hide fields from Item
 struct ConstItem {
@@ -474,7 +476,8 @@ static inline Path*    it2path(Item item)   { return item.path; }
 static inline void*    it2p(Item item)      { return (void*)item.container; }
 
 static inline Item p2it(void* ptr) {
-    if (!ptr) return ItemNull;
+    if (!ptr) return Item{.item = ITEM_NULL};
+    assert_raw_item_pointer(ptr);
     return Item{.item = (uint64_t)(uintptr_t)ptr};
 }
 
