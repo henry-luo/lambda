@@ -11,7 +11,7 @@
 
 Today every Lambda/LambdaJS `float` that exists as an `Item` is a tagged **pointer** to a heap-allocated 8-byte payload. This proposal stores effectively all real-world doubles **directly inside the 64-bit `Item` word** — no allocation, no dereference, no GC involvement — while keeping Lambda's high-byte tag scheme, int53 compact packing, containers-as-bare-pointers, and the 256-value tag space untouched.
 
-The mechanism adapts the published "Float Self-Tagging" technique to Lambda's layout. Because Lambda's tag byte already occupies the bits where a double's sign and top exponent bits live, the adaptation needs **no rotation at all**: one integer **bias** add centers the common exponent band onto tag values discriminable by a **single bit test** (word bit 62). Encode = 1 add + 1 branch; decode = 1 test + 1 subtract + 1 bitcast. Coverage is magnitudes ≈1.5·10⁻¹⁵⁴ … 2.7·10¹⁵⁴ — effectively 100 % of doubles any real workload produces.
+The mechanism adapts the published "Float Self-Tagging" technique to Lambda's layout. Because Lambda's tag byte already occupies the bits where a double's sign and top exponent bits live, the adaptation needs **no rotation and no bias**: an in-band double is stored as its **raw IEEE-754 bits** — the Item *is* the double — and discrimination is a two-bit exponent test (`(u ^ (u << 1))` & bit 62, i.e. "exponent bits 10 and 9 differ"). Encode = the band check only (the stored value is untransformed); decode = a **pure bitcast**. The tag-space rule becomes: every non-double encoding keeps its high-byte bits 6 and 5 **equal**. Coverage is magnitudes ≈1.5·10⁻¹⁵⁴ … 2.7·10¹⁵⁴ — effectively 100 % of doubles any real workload produces. (A bias-add variant that buys a single-bit discriminator at the price of transforming the value on every encode/decode is retained as an alternative, §2.9.)
 
 ---
 
@@ -66,67 +66,69 @@ The aggregate cost (Tuning Proposal Part 1, Wall 1 + Wall 4): every float crossi
 
 # Part 2 — The New Design
 
-## 2.1 The no-rotation observation
+## 2.1 The no-rotation, no-bias observation
 
-Lambda's tag is the **high byte** — exactly where a double's sign bit (63) and exponent (62:52) already live. The paper rotates to move a double's predictable high bits down to the low-bit tag position; in Lambda **they are already in the tag position**. So no rotation is needed — only a **bias** to center the common exponent band onto a tag region testable with a single bit.
+Lambda's tag is the **high byte** — exactly where a double's sign bit (63) and exponent (62:52) already live. The paper rotates to move a double's predictable high bits down to the low-bit tag position; in Lambda **they are already in the tag position**. So no rotation is needed.
+
+Can detection be a plain bit mask on the *raw* bits, with no bias either? A single-bit test is impossible in principle: the common band `e ∈ [0x200, 0x5FF]` straddles `e = 0x3FF/0x400` — the 1.0↔2.0 boundary, where *every* exponent bit flips — so no one raw bit is constant across it (this is exactly what a bias-add's carry propagation papers over). But a **two-bit** predicate works directly: `e ∈ [0x200, 0x5FF]` ⟺ the exponent's top two bits (word bits 62 and 61) **differ** — `[0x200, 0x3FF]` is `01`, `[0x400, 0x5FF]` is `10`. That predicate is one shift + XOR + mask, and it frees the *value* from any transformation: the Item stores the double's bits verbatim.
 
 ## 2.2 Encoding
 
-Let `BIAS = 0x2000_0000_0000_0000` (bit 61 = exponent-field bit 9, so the add puts `+0x200` on the 11-bit biased exponent) and `BIT62 = 0x4000_0000_0000_0000`.
+Let `BIT62 = 0x4000_0000_0000_0000`.
 
 ```c
+// discrimination — bit 62 of (u ^ (u << 1)) is (bit62 XOR bit61) of u:
+is_inline_double(x)  ⟺  ((x ^ (x << 1)) & BIT62) != 0
+
 // encode: double → Item          (replaces push_d at boxing sites)
 uint64_t u = bits(d);              // bit-identical reinterpret
-uint64_t t = u + BIAS;             // one integer add
-if (t & BIT62)  item = t;          // in-band: the word IS the double (self-tagged)
-else            item = box_float_cold(d);   // rare: out-of-band → interned or boxed (§2.5)
+if (is_inline_double(u))  item = u;              // in-band: stored RAW — the Item IS the double
+else                      item = box_float_cold(d);  // rare: out-of-band → interned or boxed (§2.5)
 
 // decode: Item → double          (replaces the it2d masked dereference)
-if (item & BIT62)  d = bits⁻¹(item - BIAS);        // subtract + reinterpret
-else               d = *(double*)(item & MASK56);  // boxed fallback
-
-// discrimination — the single bit-mask test used everywhere:
-is_inline_double(item)  ⟺  (item & BIT62) != 0
+if (is_inline_double(item))  d = bits⁻¹(item);           // pure bitcast, zero arithmetic
+else                         d = *(double*)(item & MASK56);  // boxed fallback
 ```
 
 ### Why the arithmetic is exactly right (verified by hand)
 
-- Adding `BIAS` adds `0x200` to the exponent field `e` (bits 62:52). The result has **bit 62 set iff `e + 0x200 ∈ [0x400, 0x7FF]` iff `e ∈ [0x200, 0x5FF]`**.
-- For in-band values (`e ≤ 0x5FF`), `e + 0x200 ≤ 0x7FF` fits inside the exponent field — **no carry into the sign bit**, so negative doubles keep their sign through encode/decode.
-- Out-of-band values (`e ≥ 0x600`) carry into bit 63 (and can wrap mod 2⁶⁴); tiny values (`e < 0x200`) leave bit 62 clear. Either way the transient `t` has bit 62 clear and is **discarded, never stored** — no out-of-band bit pattern ever aliases a real tagged Item.
-- Decode `t − BIAS` is the exact inverse mod 2⁶⁴.
+- Word bits 62 and 61 are exponent bits 10 and 9. `u << 1` moves bit 61 into position 62, so bit 62 of `u ^ (u << 1)` equals `e₁₀ XOR e₉` — set **iff `e ∈ [0x200, 0x5FF]`**, the same band the bias variant covers.
+- The sign bit does not participate in the test, so positive and negative doubles are handled symmetrically with no carry/wrap subtleties at all.
+- Out-of-band doubles (`e < 0x200`: zeros/subnormals/tiny; `e ≥ 0x600`: huge, and `0x7FF`: ±Inf/NaN) fail the check and are **never stored raw** — so although their high bytes would alias TypeId space (a subnormal's high byte is `0x00–0x1F`!), no such bit pattern ever exists as an Item. The cold path interns or boxes them (§2.5).
+- On ARM64 the whole discriminator folds into one ALU instruction plus a branch: `eor t, x, x, lsl #1` (shifted-operand form) then `tbnz t, #62`. On x86-64 it is `lea/shl + xor + bt` — comparable to the bias form, with no 64-bit constant to materialize.
 
-| Input double | `e` | `t` high byte | bit 62 | Result |
+| Input double | `e` | raw high byte | bits 62,61 | Result |
 |---|---|---|---|---|
-| `1.0` (`0x3FF0…`) | 0x3FF | 0x5F | set | inline |
-| `-1.0` (`0xBFF0…`) | 0x3FF | 0xDF | set | inline |
-| `2⁻⁵⁰⁰` | 0x20B | 0x40 | set | inline |
-| `1e-300` | ~0x01A | 0x21 | clear | boxed |
-| `1e300` | ~0x7E3 | 0x9E (carry into sign) | clear (discarded) | boxed |
-| `±0.0`, subnormals | 0x000–0x1FF | 0x20–0x3F | clear | interned (§2.5) |
-| `±Inf`, `NaN` | 0x7FF | 0x9F / 0x1F | clear | interned (§2.5) |
+| `1.0` (`0x3FF0…`) | 0x3FF | 0x3F | 01 | inline (raw) |
+| `-1.0` (`0xBFF0…`) | 0x3FF | 0xBF | 01 | inline (raw) |
+| `2.0` (`0x4000…`) | 0x400 | 0x40 | 10 | inline (raw) |
+| `2⁻⁵⁰⁰` | 0x20B | 0x20 | 01 | inline (raw) |
+| `1e-300` | ~0x01A | 0x01 | 00 | boxed |
+| `1e300` | ~0x7E3 | 0x7E | 11 | boxed |
+| `±0.0`, subnormals | 0x000–0x1FF | 0x00–0x1F / 0x80–0x9F | 00 | interned (§2.5) |
+| `±Inf`, `NaN` | 0x7FF | 0x7F / 0xFF | 11 | interned (§2.5) |
 
 ### Coverage
 
 `e ∈ [0x200, 0x5FF]` → unbiased exponent −511 … +512 → magnitudes **≈1.5·10⁻¹⁵⁴ to ≈2.7·10¹⁵⁴** — the square root of the double range in both directions. The paper's >99 % measured self-tag rate becomes effectively **100 %** here; only subnormals, zeros, infinities, NaNs, and astronomically scaled magnitudes take the fallback.
 
-## 2.3 The occupancy invariant (one bit partitions the tag space)
+## 2.3 The occupancy invariant (two bits partition the tag space)
 
-> **Invariant:** word bit 62 (`0x40` in the high byte) set ⟺ the Item is an inline self-tagged double. Every TypeId, sentinel, and packed encoding keeps bit 62 **clear** — high bytes stay within `0x00–0x3F` and `0x80–0xBF`.
+> **Invariant:** high-byte bits 6 and 5 **differ** ⟺ the Item is an inline self-tagged double. Every TypeId, sentinel, and packed encoding keeps high-byte bits 6 and 5 **equal** — high bytes stay within `0x00–0x1F ∪ 0x60–0x7F ∪ 0x80–0x9F ∪ 0xE0–0xFF` (128 values, same total headroom as the bias variant, differently shaped).
 
-Inline doubles occupy exactly the high bytes `0x40–0x7F` (positive) and `0xC0–0xFF` (negative). Audit of current occupancy:
+Inline doubles occupy exactly the high bytes `0x20–0x5F` (positive) and `0xA0–0xDF` (negative). Audit of current occupancy:
 
-- **TypeId enum** (`lambda.h:92`–`:121`) — sequential from 0, `LMD_TYPE_COUNT < 0x1E`. ✓ Compliant, with `0x1E–0x3F` and `0x80–0xBF` free for future types.
-- **Containers** — bare pointers, high byte `0x00` on canonical user-space addresses. ✓ Even under Linux LA57 (57-bit VAs), user addresses reach bit 56 at most — bit 62 of an address is unreachable. ✓
-- **Packed layouts** — `ITEM_INT` int53-in-56 (high byte = `LMD_TYPE_INT`; sign extension confined to the low 56 bits by the `& 0x00FF…` mask in `i2it`, `lambda.h:904`), `NUM_SIZED` (`lambda.h:221`), bool/null/undefined/TDZ/spreadable-null (`lambda.h:871`–`:892`): all keep their TypeId in the high byte. ✓
-- **✗ Two violations to renumber:** `JS_DELETED_SENTINEL_VAL = 0x7E00DEAD00DEAD00` (`js_runtime.h:30`) and `JS_ITER_DONE_SENTINEL = 0x7F00DEAD00000000` (`js_runtime.h:35`) sit in bit-62-set space and would read as inline doubles. Both are engine-internal constants chosen precisely *because* their tag bytes were unused — renumber to bit-62-clear values (e.g. high bytes `0x3E`/`0x3F`), one-line changes plus their comparison sites.
-- **Enforce forever:** `static_assert(LMD_TYPE_COUNT < 0x40)` next to the enum, a comment stating the invariant, and a lint rule (§4, S0) so no future sentinel re-enters the reserved space.
+- **TypeId enum** (`lambda.h:83`–`:123`) — sequential from 0; counted: `LMD_TYPE_COUNT` = 27 (`0x1B`), `LMD_CONTAINER_HEAP_START` = 28 (`0x1C`). ✓ Compliant with the `0x20` wall, with **three spare sequential slots** (`0x1D–0x1F`); type 29+ must jump to the next free block (`0x60–0x7F`) via explicit enum values. Tighter than the bias variant's 0x40 wall — see §2.10.
+- **Containers** — bare pointers, high byte `0x00` on canonical user-space addresses. ✓ Even under Linux LA57 (57-bit VAs), user addresses reach bit 56 at most — high byte ≤ `0x01`, bits 6,5 = 00. ✓
+- **Packed layouts** — `ITEM_INT` int53-in-56 (high byte = `LMD_TYPE_INT` = 5; sign extension confined to the low 56 bits by the `& 0x00FF…` mask in `i2it`, `lambda.h:904`), `NUM_SIZED` (`lambda.h:221`), bool/null/undefined/TDZ/spreadable-null (`lambda.h:871`–`:892`): all keep their TypeId (< 0x20) in the high byte. ✓
+- **The two "hole-squatter" sentinels are compliant as-is:** `JS_DELETED_SENTINEL_VAL = 0x7E…` (`js_runtime.h:30`) and `JS_ITER_DONE_SENTINEL = 0x7F…` (`js_runtime.h:35`) have high-byte bits 6,5 = 11 — inside the free zone. **No renumbering needed** (under the bias variant both would have had to move). They must still be *pinned* by the static assert below so a future edit doesn't drift them into double space.
+- **Enforce forever:** next to the enum — `static_assert(LMD_TYPE_COUNT <= 0x20)` and a comment stating the bits-6,5-equal rule; compile-time asserts on the two sentinels' high bytes (`(hb>>5 & 3) == 0 || == 3`); and a lint rule (§5.2, S0) so no future tag or sentinel enters double space.
 
 ## 2.4 What each primitive becomes
 
-- **`get_type_id(item)`** — prepend one branch **before** everything else (including the container header-dereference path): `if (item & BIT62) return LMD_TYPE_FLOAT;`. This is the hottest primitive in the runtime; the test is one AND against a constant and is highly predictable per call site.
-- **`it2d`** — bit-62 test → subtract + bitcast on the hot arm; masked dereference on the cold arm. In C this is free; in emitted MIR there is no int↔float bitcast instruction, so the JIT lowering uses a store/load through a scratch frame slot (~4–6 cycles of store-forwarding — still ~2 orders cheaper than the current call + cache-missing dereference). Patching a `bitcast` insn into vendored MIR is a possible later micro-win, **not** v1 scope.
-- **Boxing sites** — `jm_box_float` (`js_mir_calls_boxing_types.cpp:406`), the overflow-promotion arm of `jm_box_int_reg` (`:356`), Lambda-side `push_d` emission, and `js_make_number` (`js_runtime_value.cpp:1071`) become inline `ADD + BT(bit62)` with a cold call to the fallback. The `push_d` C call disappears from all in-band traffic.
+- **`get_type_id(item)`** — prepend one branch **before** everything else (including the container header-dereference path): `if ((item ^ (item << 1)) & BIT62) return LMD_TYPE_FLOAT;`. This is the hottest primitive in the runtime; the test is shift + XOR + mask (a single `eor …, lsl #1` + `tbnz` on ARM64), no 64-bit constant to load, and highly predictable per call site.
+- **`it2d`** — the same test → **pure bitcast** on the hot arm (zero arithmetic — the Item bits *are* the double bits); masked dereference on the cold arm. In C the bitcast is free; in emitted MIR there is no int↔float bitcast instruction, so the JIT lowering uses a store/load through a scratch frame slot (~4–6 cycles of store-forwarding — still ~2 orders cheaper than the current call + cache-missing dereference). Patching a `bitcast` insn into vendored MIR is a possible later micro-win, **not** v1 scope.
+- **Boxing sites** — `jm_box_float` (`js_mir_calls_boxing_types.cpp:406`), the overflow-promotion arm of `jm_box_int_reg` (`:356`), Lambda-side `push_d` emission, and `js_make_number` (`js_runtime_value.cpp:1071`) become inline `SHL + XOR + BT` on the raw bits with a cold call to the fallback — and the stored value is the raw bits themselves, so the check is off the critical path of the value (better ILP than the bias form, where the ADD produces the stored word). The `push_d` C call disappears from all in-band traffic. A pleasant side effect: compile-time float constants embed in MIR as their literal IEEE bit patterns, directly readable in `temp/mir_dump.txt`.
 - **Type-switch sites** — any `switch (get_type_id(v))` is correct once `get_type_id` normalizes. Only code reading the **raw high byte** directly needs the §3.3 audit (measured: ~24 `>> 56` sites across 11 files — small).
 - **`d2it(ptr)` (the pointer-tagging macro)** stays, serving the boxed fallback arm. New value-level primitives `flt2it(double)` / updated `it2d(Item)` become the canonical API.
 
@@ -147,7 +149,7 @@ Without this, one value has two representations and raw-bit comparisons diverge.
 ## 2.7 GC interaction
 
 - **In-band floats never touch the GC.** No allocation, no nursery growth (this also caps the never-reclaimed numeric-nursery leak, §1.4), no relocation, no rooting — an inline double is a non-pointer. The Part 3 rooting machinery and `gc_fixup_embedded_pointers` simply stop applying to them; boxed-float traffic collapses to the special/extreme residue.
-- **Marking:** tag-switching mark code never treats bit-62 high bytes as pointer tags. One wart to tighten: `item_to_ptr` (`gc_heap.c:770`) treats unknown high tags ≥ `LMD_TYPE_RANGE_` as raw pointers "for safety" — inline doubles land in that branch and get (harmlessly) probed against heap ranges on every conservative-scan word. Add an early `if (item & BIT62) return NULL;` — correctness-neutral, saves probe work.
+- **Marking:** tag-switching mark code never treats double-space high bytes as pointer tags. One wart to tighten: `item_to_ptr` (`gc_heap.c:770`) treats unknown high tags ≥ `LMD_TYPE_RANGE_` as raw pointers "for safety" — inline doubles land in that branch and get (harmlessly) probed against heap ranges on every conservative-scan word. Add an early `if ((item ^ (item << 1)) & BIT62) return NULL;` — correctness-neutral, saves probe work.
 - **Conservative stack scan:** an inline double whose low bits alias a heap address could false-retain an object — the same benign over-approximation packed int53 already causes today (the conservative scan only marks, never rewrites).
 - **`gc_fixup_embedded_pointers`** (`gc_heap.c:1202`) keys on tag bytes `FLOAT/INT64/DTIME`; inline doubles fall outside those tags and are correctly skipped — verify, don't assume (S3 audit).
 
@@ -158,12 +160,31 @@ Without this, one value has two representations and raw-bit comparisons diverge.
 | **v1 boxed doubles** | Boxing cost at every boundary (array element, argument, return, untyped local, property) drops from C-call + allocation + later cache-missing dereference to ~2 ALU ops. GC-trigger pressure and the nursery leak drop to the special-value residue. Equal values become bit-identical (fixes a whole class of representation-sensitivity). |
 | **NaN-boxing** | Keeps **all** of Lambda's architectural assets: 256-value uniform tag space (20+ types, `NUM_SIZED` inline sub-typed scalars), int53 compact band, containers as bare 56-bit pointers, and every existing `it2*`/`*2it` packing. NaN-boxing would force a ~50 % runtime refactor across four frontends, the GC, and every container API for benefit in exactly one type category. Self-tagging is a local carve-out: nothing that doesn't opt in changes. |
 | **V8's strategy alone** (typed storage + unboxed native paths) | Complementary, not competing — but self-tagging fixes the *universal* representation, which V8 never has to because its feedback JIT hides it. Lambda's static inference cannot promise that, so the fallback representation must be cheap. Typed storage (T5 element kinds, shaped float slots) still wins inside kernels; self-tagging covers everything those can't reach. |
-| **The paper's rotation scheme** | No rotation instructions at all (the tag byte is already where the predictable bits live); discrimination is **one bit test** instead of a rotate + tag-range compare; the low-bit-tag sacrifices the paper assumes (loss of the clean tag byte, of int56-class packing, of aligned-pointer self-tagging) simply don't arise. Wider band too: bias by `0x200` covers 10^±154 vs. the paper's narrower common band. |
+| **The paper's rotation scheme** | No rotation *and no bias*: the tag byte is already where the predictable bits live, and in-band doubles are stored as their raw IEEE bits — encode/decode transform nothing. Discrimination is shift+XOR+mask instead of a rotate + tag-range compare; the low-bit-tag sacrifices the paper assumes (loss of the clean tag byte, of int53-class packing, of aligned-pointer self-tagging) simply don't arise. Wider band too: the two-bit test covers 10^±154 vs. the paper's narrower common band. |
 
-## 2.9 Honest costs
+## 2.9 Alternative considered: the bias variant
 
-- **Encode/decode ALU tax:** ~2 ops per float boundary crossing, plus the MIR bitcast-via-slot dance in JIT code. Orders of magnitude cheaper than allocation + dereference, but nonzero on paths where the value was *already* unboxed native (`MIR_T_D` registers) — those paths don't change and must not accidentally start round-tripping through Items.
+The earlier sketch (Tuning Proposal Part 5) transformed the value instead of widening the test: encode adds `BIAS = 0x2000_0000_0000_0000` (+0x200 on the exponent), which merges the band's two halves into one bit-62-set region via carry propagation; decode subtracts it back; discrimination is a **single** `AND BIT62`.
+
+| | **Raw two-bit (this proposal)** | Bias variant |
+|---|---|---|
+| encode transform | none — Item = IEEE bits | `ADD BIAS` (on the stored value's critical path) |
+| decode transform | none — pure bitcast | `SUB BIAS` |
+| discrimination | `SHL+XOR+AND` (~2 ops; 1 on ARM64) | `AND` (1 op, but needs the 64-bit constant materialized) |
+| in-band coverage | e ∈ [0x200, 0x5FF] | identical |
+| non-double tag space | `0x00–0x1F ∪ 0x60–0x7F ∪ 0x80–0x9F ∪ 0xE0–0xFF` (fragmented; 3 spare sequential TypeIds before the 0x20 wall) | `0x00–0x3F ∪ 0x80–0xBF` (contiguous; ~35 spare TypeIds) |
+| existing sentinels (`0x7E`/`0x7F`) | **compliant as-is** | must be renumbered |
+| debuggability | Item bits readable as the double directly | mentally subtract the bias first |
+
+The single-bit test is impossible on raw bits *in principle* — the band straddles `e = 0x3FF/0x400` (the 1.0↔2.0 boundary) where every exponent bit flips, so two examined bits is the floor, and the bias's carry is precisely the trick that converts two bits into one at the cost of an add/sub on every crossing. Since discrimination and decode almost always run *together* (`it2d`, `get_type_id` → use), the raw form's totals are equal or better everywhere except a bare type-test with no subsequent use — and it wins outright on encode ILP, constant pressure, tag-space compatibility (no sentinel churn), and conceptual simplicity ("an in-band float Item *is* the IEEE-754 word").
+
+**Decision: raw two-bit is the primary scheme.** Fall back to the bias variant only if S2 A/B shows the discriminator's extra op measurably hurting `get_type_id`-dominated workloads *and* the enum's fragmented headroom becomes a real constraint — both unlikely.
+
+## 2.10 Honest costs
+
+- **Discriminator ALU tax:** ~2 ops (1 on ARM64) per float boundary crossing and per `get_type_id` call, plus the MIR bitcast-via-slot dance in JIT code. Orders of magnitude cheaper than allocation + dereference, but nonzero on paths where the value was *already* unboxed native (`MIR_T_D` registers) — those paths don't change and must not accidentally start round-tripping through Items.
 - **One extra predictable branch in `get_type_id`** — the hottest primitive; measured A/B on float-light workloads (richards, splay) is the honest check, and the compile flag confines the experiment.
+- **Fragmented TypeId headroom:** only 3 sequential slots remain below the `0x20` wall; the 28th-plus future type takes an explicit value in `0x60–0x7F`. Cosmetic, but the enum stops being purely sequential at that point (§2.9 table).
 - **Two float representations, permanently.** Every float consumer keeps a boxed arm (specials + extremes). The cold arm is the *existing* code, so this is additive — but it doubles the float test matrix (in-band / out-of-band / specials) forever. §4's property tests are the mitigation.
 
 ---
@@ -181,11 +202,11 @@ The C-runtime path is safe — `js_strict_equal` (`js_runtime_value.cpp:1522`) u
 
 ## 3.2 `get_type_id` ordering and the container path
 
-The bit-62 test must come **first** — before the tag-0 container branch dereferences the object header. Getting the order wrong doesn't just cost cycles; a bit-62 word interpreted as a container pointer is a wild dereference. One-line rule, worth a dedicated unit test.
+The inline-double test must come **first** — before the tag-0 container branch dereferences the object header. Getting the order wrong doesn't just cost cycles; a double-space word interpreted as a container pointer is a wild dereference. One-line rule, worth a dedicated unit test.
 
 ## 3.3 The raw high-byte reader tail
 
-Measured surface: ~24 `>> 56` extractions across 11 files (plus the packing macros in `lambda.h` and mask-only `& 0x00FF…` sites). Each must classify as: (a) already downstream of `get_type_id` normalization — fine; (b) comparing against specific tags — fine iff it can never see a float Item; (c) genuinely needs the bit-62 test added. Same audit for the Jube guest runtimes (`lambda/py/`, etc.) and any private copies of the macros. Small but must be exhaustive — this is the S0 deliverable.
+Measured surface: ~24 `>> 56` extractions across 11 files (plus the packing macros in `lambda.h` and mask-only `& 0x00FF…` sites). Each must classify as: (a) already downstream of `get_type_id` normalization — fine; (b) comparing against specific tags — fine iff it can never see a float Item; (c) genuinely needs the inline-double test added. Same audit for the Jube guest runtimes (`lambda/py/`, etc.) and any private copies of the macros. Small but must be exhaustive — this is the S0 deliverable.
 
 ## 3.4 NaN payload canonicalization
 
@@ -217,7 +238,7 @@ A build where some producers inline and some still box violates §2.6 and makes 
 
 The compact `int` band is **±(2⁵³−1)** — deliberately the JS safe-integer band (`INT56_MAX`, `lambda.h:896`; number model v2 §2.1) — packed in the low 56 bits with high byte = `LMD_TYPE_INT` (`i2it`, `lambda.h:904`). Findings:
 
-1. **No packing change needed.** The `& 0x00FFFFFFFFFFFFFF` mask confines sign extension to the payload; the high byte is always `LMD_TYPE_INT` (< `0x40`), so packed ints — positive and negative — are bit-62-clear and compliant with §2.3 by construction.
+1. **No packing change needed.** The `& 0x00FFFFFFFFFFFFFF` mask confines sign extension to the payload; the high byte is always `LMD_TYPE_INT` (= 5, bits 6,5 = 00), so packed ints — positive and negative — sit outside double space and are compliant with §2.3 by construction.
 2. **`int → float` conversion becomes allocation-free.** The band was chosen so every compact int is exactly representable in binary64; with self-tagging, the converted double is always in-band (integers up to 2⁵³ have exponents ≤ 0x434). What is today `I2D + push_d` (allocation) becomes `I2D + ADD + BT` (~3 ALU ops). This completes the number model's egress story: `int → number` is *exact* by design and now also *free*.
 3. **The int-overflow promotion arm stops allocating.** `jm_box_int_reg`'s out-of-range arm (`js_mir_calls_boxing_types.cpp:356`) promotes to a boxed float via `push_d` — the only allocation in the int packing path. It becomes an inline encode; the results (magnitudes just past 2⁵³) are comfortably in-band.
 4. **JS ingress needs nothing new.** Number model v2 makes JS numbers uniformly `float` (compact-int packing already removed from LambdaJS, §5.1) — which *increased* boxed-double traffic and thus the prize here. Safe-integer-valued JS numbers arrive as doubles and self-tag like any other.
@@ -232,16 +253,16 @@ The compact `int` band is **±(2⁵³−1)** — deliberately the JS safe-intege
 
 | Phase | Content | Risk | Gate |
 |---|---|---|---|
-| **S0** — occupancy + comparison audit *(land independently; zero behavior change)* | Renumber `JS_DELETED_SENTINEL_VAL` / `JS_ITER_DONE_SENTINEL` to bit-62-clear values + their comparison sites. Add `static_assert(LMD_TYPE_COUNT < 0x40)` + invariant comment on the TypeId enum. Sweep all raw `>> 56` / high-byte-mask sites (≈24 sites / 11 files) and classify per §3.3. **Audit every raw-Item `MIR_EQ`/`MIR_BEQ` emission site (§3.1): float-free proof or `MIR_DEQ` reroute plan.** Grep Jube runtimes for private tag arithmetic. Confirm GC-internal header tags never materialize into Item high bytes. | none | full baselines green (`make test-lambda-baseline`, JS gtests, Radiant) |
-| **S1** — runtime level, behind `LAMBDA_SELF_TAG_FLOAT` | `get_type_id` bit-62 fast path (ordered first); `it2d`/`flt2it` two-arm forms; `js_make_number` + `push_d` wrappers canonicalize; interned specials (§2.5) with sign-aware zero; **retire `LMD_TYPE_FLOAT64`** (§3.7, coordinated with number-model W-items); producer canonicalization in parsers/MarkBuilder. | medium | test262 full + `make test-lambda-baseline` + Radiant baseline, **flag on vs. off**; new property tests (§5.2) |
+| **S0** — occupancy + comparison audit *(land independently; zero behavior change)* | Add `static_assert(LMD_TYPE_COUNT <= 0x20)` + the bits-6,5-equal invariant comment on the TypeId enum; pin `JS_DELETED_SENTINEL_VAL` / `JS_ITER_DONE_SENTINEL` with compile-time asserts (they are compliant as-is, §2.3 — no renumbering). Sweep all raw `>> 56` / high-byte-mask sites (≈24 sites / 11 files) and classify per §3.3. **Audit every raw-Item `MIR_EQ`/`MIR_BEQ` emission site (§3.1): float-free proof or `MIR_DEQ` reroute plan.** Grep Jube runtimes for private tag arithmetic. Confirm GC-internal header tags never materialize into Item high bytes. | none | full baselines green (`make test-lambda-baseline`, JS gtests, Radiant) |
+| **S1** — runtime level, behind `LAMBDA_SELF_TAG_FLOAT` | `get_type_id` inline-double fast path (ordered first); `it2d`/`flt2it` two-arm forms; `js_make_number` + `push_d` wrappers canonicalize; interned specials (§2.5) with sign-aware zero; **retire `LMD_TYPE_FLOAT64`** (§3.7, coordinated with number-model W-items); producer canonicalization in parsers/MarkBuilder. | medium | test262 full + `make test-lambda-baseline` + Radiant baseline, **flag on vs. off**; new property tests (§5.2) |
 | **S2** — JIT lowering fast paths | Inline encode at `jm_box_float`, `jm_box_int_reg` overflow arm, Lambda-side `push_d` emission; inline decode at `jm_emit_unbox_float` / Lambda unbox sites (bitcast via scratch slot); apply the §3.1 `MIR_DEQ` reroutes decided in S0. | medium | same gates + benchmark A/B (nbody, mandelbrot, navier_stokes, matmul, splay float keys; richards/splay as the float-light branch-cost canaries), JIT **and** MIR-interp modes |
 | **S3** — GC audit + hardening; default the flag on | §2.7 verification pass (`gc_fixup_embedded_pointers` skip, `item_to_ptr` bit-62 early-out, conservative-scan behavior); ASan run of the full benchmark suite; NaN-payload canonicalization test (§3.4); then flip the default. | low | clean ASan, no baseline regressions, flag-off build kept working one release as escape hatch |
 
 ## 5.2 Test & tooling additions
 
-- **Property tests** at the encode/decode boundary: round-trip identity over the band edges (`e` = 0x1FF/0x200/0x5FF/0x600), subnormals, ±0.0, ±Inf, quiet/signaling NaN payloads, and randomized in-band doubles (`bits⁻¹((bits(d)+BIAS)−BIAS) == d` bit-exactly; sign preservation for negatives). Table-driven, both engines.
+- **Property tests** at the encode/decode boundary: round-trip identity over the band edges (`e` = 0x1FF/0x200/0x5FF/0x600), subnormals, ±0.0, ±Inf, quiet/signaling NaN payloads, and randomized in-band doubles. For the raw scheme the strongest property is **bit identity**: for every in-band `d`, the Item word `== bits(d)` exactly (encode stores raw) and decode is the identity bitcast; plus discriminator agreement — `is_inline_double(bits(d))` ⟺ `e(d) ∈ [0x200, 0x5FF]` — over exhaustive exponent sweeps. Table-driven, both engines.
 - **Semantics pins:** `NaN === NaN` false, `0.0 === -0.0` true, `Object.is(-0, 0)` false, `Map` SameValueZero with ±0 and NaN keys, `1/-0.0 === -Infinity` — under flag on and off.
-- **Lint ratchet** (precedent: `no-int-cast-radiant`): flag any new integer constant literal with bit 62 set outside the float module, and any new `>> 56` comparison against a literal not going through the TypeId enum. Run in `make lint`.
+- **Lint ratchet** (precedent: `no-int-cast-radiant`): flag any new 64-bit integer constant whose high-byte bits 6 and 5 differ (i.e. lands in double space) outside the float module, and any new `>> 56` comparison against a literal not going through the TypeId enum. Run in `make lint`.
 - **`get_type_id` ordering test:** a synthetic in-band double Item must return `LMD_TYPE_FLOAT` without touching memory (assert no header read — e.g. an Item whose low bits alias an unmapped address).
 
 ## 5.3 Sequencing within the tuning program
@@ -250,7 +271,7 @@ Per the tuning-proposal review: **T0/L0 re-measure → S0 (land now) → S1 → 
 
 ## 5.4 Fallback
 
-If S2 measures worse than expected (branch cost in `get_type_id` on float-light code), the flag confines the experiment and the build reverts cleanly. The S0 sentinel renumbering, the static_assert/lint invariant, the `MIR_EQ` audit results, and the `LMD_TYPE_FLOAT64` retirement are all worth keeping regardless of the outcome.
+If S2 measures worse than expected (branch cost in `get_type_id` on float-light code), the flag confines the experiment and the build reverts cleanly — and §2.9's bias variant remains available as a drop-in swap of the encode/decode/discriminate primitives if the two-op discriminator specifically is the problem. The S0 asserts/lint invariant, the `MIR_EQ` audit results, and the `LMD_TYPE_FLOAT64` retirement are all worth keeping regardless of the outcome.
 
 ---
 
