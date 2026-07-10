@@ -2596,13 +2596,22 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
     JsTypedArray* ta = js_get_typed_array_ptr(m);
     bool is_bigint_array = ta && (ta->element_type == JS_TYPED_BIGINT64 || ta->element_type == JS_TYPED_BIGUINT64);
     double num_val = 0.0;
-    int64_t bigint_val = 0;
+    int64_t bigint_i64 = 0;
+    uint64_t bigint_u64 = 0;
 
     if (is_bigint_array) {
         Item bigint_item;
         if (!js_dataview_to_bigint_value(value, &bigint_item)) return ItemNull;
-        extern int64_t bigint_to_int64(Item bi);
-        bigint_val = bigint_to_int64(bigint_item);
+        // BigInt typed-array stores wrap modulo 64 bits; bigint_to_int64 alone clamps oversized inputs.
+        Item wrapped = (ta->element_type == JS_TYPED_BIGINT64)
+            ? js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_item)
+            : js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_item);
+        if (js_check_exception()) return ItemNull;
+        if (ta->element_type == JS_TYPED_BIGINT64) {
+            bigint_i64 = bigint_to_int64(wrapped);
+        } else {
+            bigint_u64 = js_dataview_bigint_to_uint64(wrapped);
+        }
     } else {
         if (value.item == ITEM_JS_UNDEFINED) {
             num_val = NAN;
@@ -2697,12 +2706,12 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
     }
     case JS_TYPED_BIGINT64: {
         int64_t* p = (int64_t*)data + start;
-        for (int i = 0; i < count; i++) p[i] = bigint_val;
+        for (int i = 0; i < count; i++) p[i] = bigint_i64;
         return ta_item;
     }
     case JS_TYPED_BIGUINT64: {
         uint64_t* p = (uint64_t*)data + start;
-        for (int i = 0; i < count; i++) p[i] = (uint64_t)bigint_val;
+        for (int i = 0; i < count; i++) p[i] = bigint_u64;
         return ta_item;
     }
     default:

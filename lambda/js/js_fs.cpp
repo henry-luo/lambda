@@ -505,6 +505,7 @@ extern Item js_promise_resolve(Item value);
 extern Item js_promise_reject(Item reason);
 extern "C" Item bigint_from_int64(int64_t val);
 extern "C" Item bigint_from_string(const char* str, int len);
+extern "C" int bigint_cmp(Item a, Item b);
 extern Item js_make_number(double d);
 extern "C" Item js_buffer_alloc(Item size_item, Item fill_item);
 extern "C" int64_t bigint_to_int64(Item bi);
@@ -537,11 +538,13 @@ static bool fs_read_position_to_int64(Item position_item, int64_t* out_position)
         return true;
     }
     if (fs_is_bigint(position_item)) {
-        int64_t position = bigint_to_int64(position_item);
-        if (position < -1) {
-            js_throw_out_of_range("position", ">= -1", position_item);
+        // BigInt host positions must be range-checked before narrowing; bigint_to_int64 clamps oversized values.
+        if (bigint_cmp(position_item, bigint_from_int64(-1)) < 0 ||
+            bigint_cmp(position_item, bigint_from_int64(INT64_MAX)) > 0) {
+            js_throw_out_of_range("position", ">= -1 && <= 9223372036854775807", position_item);
             return false;
         }
+        int64_t position = bigint_to_int64(position_item);
         *out_position = position;
         return true;
     }

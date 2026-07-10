@@ -31,6 +31,8 @@ static int jube_find_static_module_index(const char* name) {
     return -1;
 }
 
+// release strips log_info arguments, so keep diagnostic-only helpers out of NDEBUG builds.
+#if !defined(NDEBUG)
 static int jube_host_ops_count(const JubeHostObjectOps* ops) {
     if (!ops) return 0;
     int count = 0;
@@ -60,6 +62,7 @@ static void jube_log_module_type_ops(const JubeModuleDef* module) {
                  jube_host_ops_count(type->host_ops));
     }
 }
+#endif
 
 int jube_register_static_module(const JubeModuleDef* module) {
     if (!module || !module->name) {
@@ -105,7 +108,9 @@ int jube_register_static_module(const JubeModuleDef* module) {
 
     log_info("JUBE_REG: registered static module '%s' version '%s'",
              module->name, module->version ? module->version : "(none)");
+#if !defined(NDEBUG)
     jube_log_module_type_ops(module);
+#endif
     return 0;
 }
 
