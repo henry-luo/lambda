@@ -4,6 +4,7 @@
 #include "../../input/css/dom_element.hpp"
 #include "../../input/css/css_tokenizer.hpp"
 #include "../../input/css/selector_matcher.hpp"
+#include "../../js/js_class.h"
 #include "../../../radiant/form_control.hpp"
 #include "../../../radiant/text_control.hpp"
 #include "../../../lib/log.h"
@@ -46,6 +47,7 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name);
 extern "C" bool js_dom_style_resource_has_property(Item style_item, Item prop_name);
 extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args, int argc);
 extern "C" Item js_dom_get_prototype_value(Item obj);
+extern "C" Item js_get_intrinsic_prototype_for_class(int class_id);
 extern "C" const void* radiant_dom_node_host_type(void);
 extern "C" void radiant_dom_host_invalidate(Item object);
 extern "C" bool js_cssom_resource_has_property(Item item, Item prop_name);
@@ -2886,7 +2888,10 @@ extern "C" int radiant_dom_document_host_own_property_names(Item object, Item* o
 
 extern "C" Item radiant_dom_document_host_prototype(Item object) {
     (void)object;
-    return ItemNull;
+    // Document wrappers have no ordinary __proto__ slot; keep their inherited
+    // Object surface in the registered host op instead of an engine-side brand check.
+    Item proto = js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
+    return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
 }
 
 static DomElement* radiant_dom_document_child_by_tag(DomDocument* doc, const char* tag) {

@@ -1063,31 +1063,6 @@ static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item*
     if (type == LMD_TYPE_VMAP && js_host_object_has_property(object, key, out_result)) {
         return true;
     }
-    if (type == LMD_TYPE_VMAP &&
-        (js_dom_item_is_range(object) || js_dom_item_is_selection(object))) {
-        if (radiant_dom_host_has_property(object, key, out_result)) return true;
-    }
-    if (type == LMD_TYPE_VMAP && js_is_document_proxy(object)) {
-        Item v = js_property_get(object, key);
-        if (v.item != ItemNull.item && v.item != ITEM_JS_UNDEFINED) {
-            *out_result = (Item){.item = b2it(true)};
-            return true;
-        }
-        return false;
-    }
-    if (type == LMD_TYPE_VMAP &&
-        (js_is_inline_style_item(object) || js_is_computed_style_item(object))) {
-        // Style host objects are native VMaps, so `in` must consult their CSS
-        // support predicate instead of recursing through ordinary object lookup.
-        *out_result = (Item){.item = b2it(js_dom_style_resource_has_property(object, key))};
-        return true;
-    }
-    if (type == LMD_TYPE_VMAP &&
-        (js_is_stylesheet(object) || js_is_css_rule(object) ||
-         js_is_rule_style_decl(object))) {
-        *out_result = (Item){.item = b2it(js_cssom_resource_has_property(object, key))};
-        return true;
-    }
     if (type == LMD_TYPE_MAP &&
         (js_is_inline_style_item(object) || js_is_computed_style_item(object))) {
         *out_result = (Item){.item = b2it(js_dom_style_resource_has_property(object, key))};
@@ -1156,11 +1131,6 @@ static bool js_try_exotic_delete_property(Item obj, Item key, Item* out_result) 
         js_host_object_delete_property(obj, key, out_result)) {
         return true;
     }
-    if (get_type_id(obj) == LMD_TYPE_VMAP &&
-        (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) &&
-        radiant_dom_host_delete_property(obj, key, out_result)) {
-        return true;
-    }
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
         obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE &&
         radiant_dom_host_delete_property(obj, key, out_result)) {
@@ -1203,11 +1173,6 @@ static bool js_hide_legacy_dunder_own_name(const char* name, int name_len) {
 static bool js_try_exotic_own_property_names(Item object, Item* out_result) {
     if (get_type_id(object) == LMD_TYPE_VMAP &&
         js_host_object_own_property_names(object, out_result)) {
-        return true;
-    }
-    if (get_type_id(object) == LMD_TYPE_VMAP &&
-        (js_dom_item_is_range(object) || js_dom_item_is_selection(object)) &&
-        radiant_dom_host_own_property_names(object, out_result)) {
         return true;
     }
     if (get_type_id(object) == LMD_TYPE_MAP && object.map &&
@@ -1262,11 +1227,6 @@ static bool js_try_exotic_own_property_descriptor(Item obj, Item name,
     }
     if (type == LMD_TYPE_VMAP &&
         js_host_object_own_property_descriptor(obj, name, out_result)) {
-        return true;
-    }
-    if (type == LMD_TYPE_VMAP &&
-        (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) &&
-        radiant_dom_host_own_property_descriptor(obj, name, out_result)) {
         return true;
     }
     if (type == LMD_TYPE_MAP && obj.map && obj.map->map_kind == MAP_KIND_WEB_API_RESOURCE &&
@@ -9920,9 +9880,8 @@ extern "C" Item js_object_keys(Item object) {
         return result;
     }
 
-    if ((type == LMD_TYPE_VMAP &&
-         (js_dom_item_is_range(object) || js_dom_item_is_selection(object))) ||
-        (type == LMD_TYPE_MAP && object.map && object.map->map_kind == MAP_KIND_WEB_API_RESOURCE)) {
+    if (type == LMD_TYPE_MAP && object.map &&
+        object.map->map_kind == MAP_KIND_WEB_API_RESOURCE) {
         all_keys = ItemNull;
         if (radiant_dom_host_own_property_names(object, &all_keys) &&
             get_type_id(all_keys) == LMD_TYPE_ARRAY && all_keys.array) {
