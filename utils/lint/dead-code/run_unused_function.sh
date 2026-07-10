@@ -16,7 +16,9 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-TMP=$(mktemp -d)
+mkdir -p "$ROOT/temp"
+# keep lint scratch data inside the repo temp dir so policy checks never touch /tmp.
+TMP=$(mktemp -d "$ROOT/temp/unused-function.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
 cd "$ROOT"
