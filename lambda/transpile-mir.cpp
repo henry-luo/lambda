@@ -90,6 +90,7 @@ void resolve_sys_paths_recursive(Item item);
 extern "C" {
     void *import_resolver(const char *name);
     void register_bss_gc_roots(void* mir_ctx);
+    extern int g_mir_interp_mode;
 }
 
 // ============================================================================
@@ -1086,9 +1087,83 @@ static void emit_return_if_item_error(MirTranspiler* mt, MIR_reg_t item_reg) {
     emit_label(mt, l_ok);
 }
 
-// Box float (double) -> Item via push_d runtime call
+#ifdef LAMBDA_SELF_TAG_FLOAT
+static MIR_reg_t emit_double_bits(MirTranspiler* mt, MIR_reg_t d_reg) {
+    // MIR_ALLOCA is dynamic, so using it as a bitcast scratch slot inside hot
+    // loops grows the stack per box/unbox. Keep the Item encoding decisions
+    // inline, but route the raw bit reinterpretation through a leaf helper.
+    return emit_call_1(mt, "lambda_mir_double_bits", MIR_T_I64, MIR_T_D,
+        MIR_new_reg_op(mt->ctx, d_reg));
+}
+
+static MIR_reg_t emit_bits_double(MirTranspiler* mt, MIR_reg_t bits_reg) {
+    // Inline-float Items carry raw double bits; the helper reinterprets them
+    // without per-iteration stack allocation in JIT or interpreter mode.
+    return emit_call_1(mt, "lambda_mir_bits_double", MIR_T_D, MIR_T_I64,
+        MIR_new_reg_op(mt->ctx, bits_reg));
+}
+#endif
+
+// Box float (double) -> Item; under LAMBDA_SELF_TAG_FLOAT the hot in-band arm is inline.
 static MIR_reg_t emit_box_float(MirTranspiler* mt, MIR_reg_t val_reg) {
+#ifdef LAMBDA_SELF_TAG_FLOAT
+    MIR_reg_t bits = emit_double_bits(mt, val_reg);
+    MIR_reg_t in_band = new_reg(mt, "fdmask", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
+        MIR_new_reg_op(mt->ctx, in_band),
+        MIR_new_reg_op(mt->ctx, bits),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK)));
+
+    MIR_reg_t result = new_reg(mt, "boxf", MIR_T_I64);
+    MIR_label_t l_in_band = new_label(mt);
+    MIR_label_t l_zero = new_label(mt);
+    MIR_label_t l_cold = new_label(mt);
+    MIR_label_t l_end = new_label(mt);
+
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, l_in_band),
+        MIR_new_reg_op(mt->ctx, in_band)));
+
+    MIR_reg_t is_zero = new_reg(mt, "fzero", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DEQ,
+        MIR_new_reg_op(mt->ctx, is_zero),
+        MIR_new_reg_op(mt->ctx, val_reg),
+        MIR_new_double_op(mt->ctx, 0.0)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, l_zero),
+        MIR_new_reg_op(mt->ctx, is_zero)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_cold)));
+
+    emit_label(mt, l_in_band);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, bits)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+    emit_label(mt, l_zero);
+    MIR_reg_t sign = new_reg(mt, "fsign", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_URSH,
+        MIR_new_reg_op(mt->ctx, sign),
+        MIR_new_reg_op(mt->ctx, bits),
+        MIR_new_int_op(mt->ctx, 63)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR,
+        MIR_new_reg_op(mt->ctx, result),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_FLOAT_P0),
+        MIR_new_reg_op(mt->ctx, sign)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+    emit_label(mt, l_cold);
+    MIR_reg_t boxed = emit_call_1(mt, "push_d", MIR_T_I64, MIR_T_D,
+        MIR_new_reg_op(mt->ctx, val_reg));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, boxed)));
+
+    emit_label(mt, l_end);
+    return result;
+#else
     return emit_call_1(mt, "push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, val_reg));
+#endif
 }
 
 // Load a C string literal pointer into a register
@@ -1335,7 +1410,36 @@ static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_i
     case LMD_TYPE_INT:
         return emit_call_1(mt, "it2i", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, item_reg));
     case LMD_TYPE_FLOAT:
+#ifdef LAMBDA_SELF_TAG_FLOAT
+        {
+            MIR_reg_t in_band = new_reg(mt, "fumask", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                MIR_new_reg_op(mt->ctx, in_band),
+                MIR_new_reg_op(mt->ctx, item_reg),
+                MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK)));
+            MIR_reg_t result = new_reg(mt, "unboxf", MIR_T_D);
+            MIR_label_t l_inline = new_label(mt);
+            MIR_label_t l_end = new_label(mt);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, l_inline),
+                MIR_new_reg_op(mt->ctx, in_band)));
+            MIR_reg_t cold = emit_call_1(mt, "it2d", MIR_T_D, MIR_T_I64,
+                MIR_new_reg_op(mt->ctx, item_reg));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, cold)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+            emit_label(mt, l_inline);
+            MIR_reg_t inline_d = emit_bits_double(mt, item_reg);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, inline_d)));
+            emit_label(mt, l_end);
+            return result;
+        }
+#else
         return emit_call_1(mt, "it2d", MIR_T_D, MIR_T_I64, MIR_new_reg_op(mt->ctx, item_reg));
+#endif
     case LMD_TYPE_BOOL:
         return emit_uext8(mt, emit_call_1(mt, "it2b", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, item_reg)));
     case LMD_TYPE_STRING:
@@ -8795,12 +8899,34 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_INT64);
         }
         case LMD_TYPE_FLOAT: {
+#ifdef LAMBDA_SELF_TAG_FLOAT
+            TypeFloat* t = (TypeFloat*)node->type;
+            Item encoded = lambda_float_ptr_to_item(&t->double_val);
+            MIR_reg_t reg = new_reg(mt, "fconst", MIR_T_I64);
+            // Literal floats already have a stable TypeFloat slot, so emit the
+            // canonical Item bits directly instead of re-tagging the const pointer.
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, reg),
+                MIR_new_int_op(mt->ctx, (int64_t)encoded.item)));
+            return reg;
+#else
             TypeConst* tc = (TypeConst*)node->type;
             return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_FLOAT);
+#endif
         }
         case LMD_TYPE_FLOAT64: {
+#ifdef LAMBDA_SELF_TAG_FLOAT
+            TypeFloat* t = (TypeFloat*)node->type;
+            Item encoded = lambda_float_ptr_to_item(&t->double_val);
+            MIR_reg_t reg = new_reg(mt, "fconst", MIR_T_I64);
+            // f64 is an alias for runtime float Items; keep its literal encoding
+            // identical to float so equality and unboxing see one canonical shape.
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, reg),
+                MIR_new_int_op(mt->ctx, (int64_t)encoded.item)));
+            return reg;
+#else
             TypeConst* tc = (TypeConst*)node->type;
             return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_FLOAT64);
+#endif
         }
         case LMD_TYPE_STRING: {
             TypeConst* tc = (TypeConst*)node->type;
@@ -13386,7 +13512,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
 #endif
 
     transpile_mir_ast(ctx, ast_root, tp->source, tp->type_list, tp->const_list, tp->pool, tp->name_pool);
-    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+    MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
 
 #ifdef _WIN32
     if (timing) QueryPerformanceCounter(&pt2);
@@ -13396,7 +13522,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
 
     // Store results in the transpiler and propagate back to script
     tp->jit_context = ctx;
-    tp->main_func = (main_func_t)jit_gen_func(ctx, "main");
+    tp->main_func = (main_func_t)(g_mir_interp_mode ? find_func(ctx, "main") : jit_gen_func(ctx, "main"));
 
 #ifdef _WIN32
     if (timing) QueryPerformanceCounter(&pt3);

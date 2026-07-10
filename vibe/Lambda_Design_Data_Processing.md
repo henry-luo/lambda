@@ -64,6 +64,8 @@ Lambda has two query surfaces, and both matter:
 
 ### 4.1 For-clause (completes FLWOR)
 
+> **Extracted 2026-07-10 → `Lambda_Expr_For_Clauses2.md`** (settled, implement-first, FC1–FC8). Note the surface changed there: the shipped grammar's `group by KEY as g` with `g.key`/`g.items` supersedes the `into g` form sketched below — see FC1. This section kept for history.
+
 LINQ-style explicit grouping — no XQuery-style implicit variable regrouping (Lambda's no-NSE explicitness bias):
 
 ```lambda
@@ -105,6 +107,8 @@ One hash-partition engine (hash on canonical value-hash consistent with C8; `lib
 ## 5. Joins
 
 ### 5.1 For-clause: `on`
+
+> **Extracted 2026-07-10 → `Lambda_Expr_For_Clauses2.md`** (settled, implement-first, FC5–FC7; v1 = inner + left join, full/right outer deferred to the verb surface).
 
 ```lambda
 // equi-join of two sources — hash join under the hood
@@ -158,6 +162,25 @@ df |> group(~.ticker) |> with(avg_7d: rolling(avg, ~.close, 7) over(order: ~.dat
 
 **`over` is a genuinely new grammar construct (D14, user-confirmed 2026-07-10):** a postfix clause on a call expression — `CALL over(part: EXPR, order: EXPR)` — added to `grammar.js`, with named-argument body reusing the existing `named_argument` rule. `part:` and `order:` expressions resolve `~` as the current row, same rule as verb arguments (one scoping rule everywhere — D6). Both are optional: no `part:` = one whole-input partition; no `order:` = the operand's current row order. `over(...)` is only legal on the window functions of §6.2 — the AST builder rejects it elsewhere (it is a window spec, not a general combinator).
 
+### 6.1b For-clause form — window functions as body expressions (proposed — D16)
+
+Per the §3 parity rule, windows also work on the row surface — as **expressions in the for body**, not a new clause. The loop variable plays the role `~` plays in verbs (the comprehension already names its row):
+
+```lambda
+for (t in trades order by t.date)
+    { date: t.date, prev: lag(t.close, 1) over(part: t.ticker) }
+
+// joins: source variables disambiguate rows naturally — no positional convention needed
+for (o in orders, c in customers on o.cust_id == c.id)
+    { id: o.id, region_rank: rank(o.total) over(part: c.region) }
+```
+
+A for body is evaluated per row while a window needs the whole row set — SQL's SELECT/`OVER` duality. Resolution, following the FLWOR clause order:
+
+- **Window universe** = the comprehension's tuple stream *after* `where`/`group by`/`order by` — exactly the rows the body sees. Omitted `order:` in `over(...)` = the comprehension's own order at that point (mirrors the verb surface's current-row-order default).
+- **Nesting**: a window expression binds to the **innermost enclosing comprehension**. One rule, documented.
+- **Execution**: a window expression forces the comprehension to materialize its tuple stream (pass 1 collect rows, pass 2 compute window columns per partition, then evaluate bodies). This is the SQL cost, stated honestly — and it makes a window stage a **pipeline breaker** for the §8 plan recorder, like sort.
+
 ### 6.2 Function vocabulary
 
 | Family | Functions |
@@ -171,7 +194,7 @@ All null-aware (validity bitmap); rolling windows shorter than `n` yield null by
 
 ### 6.3 Engine
 
-Per partition: sort by the `order` key (reuse `order by` machinery), then a single forward pass. Offset/ranking/cumulative are trivially one-pass; rolling aggregates use prefix sums (sum/avg) or a monotonic deque (min/max). Columnar path runs per-partition over `ArrayNum` slices — SIMD-friendly. The generic (non-frame) path supports the same functions inside for-comprehension bodies over any sequence (D5 scopes how much of `over(...)` the row engine carries in v1).
+Per partition: sort by the `order` key (reuse `order by` machinery), then a single forward pass. Offset/ranking/cumulative are trivially one-pass; rolling aggregates use prefix sums (sum/avg) or a monotonic deque (min/max). Columnar path runs per-partition over `ArrayNum` slices — SIMD-friendly. The generic (non-frame) path supports the same functions inside for-comprehension bodies over any sequence, with §6.1b's universe/binding/materialization semantics (D5 scopes how much of `over(...)` the row engine carries in v1; D16 pins the form).
 
 ### 6.4 Phasing within this track
 
@@ -287,6 +310,7 @@ P1–P2 are pure language-level wins (no DataFrame needed — they work on array
 - **D3** — Left-join marker: `c?` optional-source syntax vs `left join` keywords. Proposal: `c?`. §5.1.
 - **D4** — Join collision handling: suffix convention + `suffix:` option. §5.2.
 - **D5** — v1 scope of `over(...)` on the generic (non-frame) engine: full parity, or frame-only for W1 with generic parity in W2?
+- **D16** — For-clause window form (§6.1b): body-expression semantics — universe = post-`where`/`group by`/`order by` tuple stream, innermost-comprehension binding, materialization consequence. Proposed; pairs with D5's scope question.
 - **D6** — One `~`-scoping rule across verbs, `on:`, `over(...)`: `~` = current row of the operand in pipe scope. §7.4. *(mechanism confirmed via D13; exact binding spec still to write)*
 - **D7** — Naming: relational `join()` vs existing string `join(list, sep)` — overload by arity/types, or rename one (e.g. string side becomes `str.join`)? Breaking-change surface, needs a call.
 - **D8** — P0 (canonical value hash + `ArrayNum` value-equality fix) gates P1; confirm it may land as an engine change under the semantics ledger (C8) without new syntax.

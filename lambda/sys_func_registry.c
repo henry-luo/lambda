@@ -1150,6 +1150,8 @@ extern void js_donotevaluate(void);
 extern Item js_is_constructor(Item fn);
 extern Item js_decimal_to_percent_hex_string(Item n);
 extern Item js_test262_build_string(Item args);
+extern uint64_t lambda_mir_double_bits(double dval);
+extern double lambda_mir_bits_double(uint64_t bits);
 
 // always available: emitted unconditionally by JS class transpiler
 extern void js_private_field_init_begin(void);
@@ -1246,6 +1248,8 @@ JitImport jit_runtime_imports[] = {
     {"is_truthy", FPTR(is_truthy)},
     {"v2it", FPTR(v2it)},
     {"push_d", FPTR(push_d)},
+    {"lambda_mir_double_bits", FPTR(lambda_mir_double_bits)},
+    {"lambda_mir_bits_double", FPTR(lambda_mir_bits_double)},
 #ifdef LAMBDA_JS_EXEC_PROFILE
     {"js_profiled_push_d", FPTR(js_profiled_push_d)},
     {"js_profile_shape_guard_hit", FPTR(js_profile_shape_guard_hit)},

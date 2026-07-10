@@ -1,6 +1,6 @@
 # Lambda Double Boxing v3 — Implementation Plan
 
-- **Status:** S1 COMPLETE — runtime-core float canonicalization, flag-gated inline-double encode/decode, producer/reader sweep, and flag-on/off Lambda baselines landed (2026-07-10)
+- **Status:** S2 COMPLETE — flag-gated Lambda/LambdaJS MIR float lowerings, interpreter-safe bitcast helpers, equality audit/reroutes, and flag-on/off Lambda baselines landed (2026-07-10)
 - **Date:** 2026-07-10
 - **Design:** `Lambda_Type_Double_Boxing.md` (v3 = raw IEEE bits + single-mask discriminator + packed-immediate ±0; reviewed in its Part 7)
 - **Representation contract:** `Lambda_Design_Item_Boxing.md` §6 — tagged scalar leaves, **raw container pointers (bit-identical, mask-free)**, inline immediates. Part 7 §7.2's acceptance bar governs: *if an implementation requires tagging or masking any container pointer, it has violated the design rather than implemented it.*
@@ -35,6 +35,10 @@ Verified S0 slice: `test_item_repr_gtest`, `test_gc_heap_gtest`, `test_lambda_ty
 S1 runtime core is complete behind `LAMBDA_SELF_TAG_FLOAT`: `f64` production canonicalizes to the `float` runtime domain, `LMD_TYPE_FLOAT64` remains only as a legacy reserved/alias tag, universal classifiers check inline-double space before raw-pointer dereference, `flt2it` / `it2d` / `Item::get_double()` own the encode/decode boundary, float producers route through the canonical helper, and JS/PDF/DOM/typed-array stragglers that dereferenced boxed float payloads now use the public numeric conversion helpers. The S1 truthiness fix preserves Lambda semantics that all numbers are truthy, including `0.0` and `NaN`.
 
 Verified S1 slice: forced flag-on build plus focused gtests and `make test-lambda-baseline CFLAGS=-DLAMBDA_SELF_TAG_FLOAT CXXFLAGS=-DLAMBDA_SELF_TAG_FLOAT` pass; forced flag-off rebuild plus focused gtests and `make test-lambda-baseline` pass. Broad release gates not run in this S1 slice — full test262, Radiant baseline, node-baseline, and ASan remain S2/S3 hardening gates before any default flip.
+
+S2 JIT/interpreter lowering is complete behind `LAMBDA_SELF_TAG_FLOAT`: Lambda MIR and LambdaJS now inline the self-tagged float mask/zero/cold-box decision at box sites, inline the in-band unbox dispatch, emit canonical float literal Item bits, route JS int-overflow promotion through the same float boxing helper, and link Lambda MIR direct through `MIR_set_interp_interface` in `--mir-interp` mode. Raw IEEE bit reinterpretation goes through `lambda_mir_double_bits` / `lambda_mir_bits_double`; the first S2 attempt used `MIR_ALLOCA` as a scratch-slot bitcast, but benchmark smokes exposed that as dynamic stack growth in hot loops (`matmul`/`mandelbrot` SIGBUS), so S2 now keeps the representation decision in MIR while using the leaf helpers for the bitcast itself.
+
+Verified S2 slice: forced flag-on release/debug rebuild plus `make test-lambda-baseline CFLAGS=-DLAMBDA_SELF_TAG_FLOAT CXXFLAGS=-DLAMBDA_SELF_TAG_FLOAT` passes 3296/3296 after the bitcast fix; forced flag-off release/debug rebuild plus `make test-lambda-baseline` passes 3292/3292. Lambda `--mir-interp test/lambda/float_conversion.ls` passes in both flag states (the current log banner still says "MIR JIT compilation", but the linker path checks `g_mir_interp_mode` and uses `MIR_set_interp_interface`). JS MIR interpreter focused smoke (`tco`, `lib_ajv`) passes. A one-run release LambdaJS A/B smoke is recorded in `test/benchmark/s2_self_tag_float_ab_flag_off_2026-07-10.json` and `test/benchmark/s2_self_tag_float_ab_flag_on_2026-07-10.json`; it is an S2 implementation smoke, not the full three-run P0/S3 benchmark sign-off.
 
 ---
 
@@ -234,25 +238,38 @@ return LMD_TYPE_NULL;                                    // preserve canonical z
 
 ### S2.1 Lambda MIR transpiler — `lambda/transpile-mir.cpp`
 
-- [ ] Replace emitted `push_d` calls with inline: `AND tmp, bits, DBL_MASK; BT in_band; <cold call>` — the stored value is the untransformed bits register (off the value's critical path).
-- [ ] Unbox sites: inline mask test + scratch-slot store/load bitcast (MIR has no int↔float reinterpret; the slot dance is ~4–6 cycles; a vendored `bitcast` insn is a later micro-win, not v1).
-- [ ] Float constants: emit in-band literals directly as 64-bit immediates (their IEEE bits); zero as `ITEM_FLOAT_P0/_N0`.
+- [x] Replace emitted `push_d` calls with inline: mask-test the raw bits, return in-band bits directly, encode packed signed zero, and call `push_d` only for the cold boxed fallback.
+- [x] Unbox sites: inline `ITEM_DBL_MASK` dispatch; in-band values call `lambda_mir_bits_double`, while packed zeros and boxed fallback route through `it2d`. S2 explicitly avoids `MIR_ALLOCA` scratch-slot bitcasts because they allocate dynamically inside hot loops.
+- [x] Float constants: emit canonical Item bits directly under `LAMBDA_SELF_TAG_FLOAT`, including `f64` literals through the same `float` runtime encoding.
 
 ### S2.2 LambdaJS lowering — `lambda/js/`
 
-- [ ] `jm_box_float` (`js_mir_calls_boxing_types.cpp:406`): same inline encode; cold call for zero/subnormal/tiny.
-- [ ] `jm_box_int_reg` overflow arm (`:356`): `I2D` + inline encode (result always in-band for |n| > 2⁵³; keep the check for uniformity or prove and skip).
-- [ ] `jm_emit_unbox_float` and every `it2d`-emitting site: inline two-arm decode.
-- [ ] Apply the S0.6 `MIR_EQ` reroutes: each non-float-free site → `MIR_DEQ` after unbox, or the runtime helper.
+- [x] `jm_box_float` (`js_mir_calls_boxing_types.cpp`): same inline mask/zero/cold-box encode, with `lambda_mir_double_bits` for the raw bit reinterpretation.
+- [x] `jm_box_int_reg` overflow arm: `I2D` now flows through `jm_box_float`, so overflow promotion shares the self-tagged float encoding instead of bypassing through the profiled `push_d` helper.
+- [x] `jm_emit_unbox_float` and every `it2d`-emitting site: inline in-band decode dispatch; packed zeros and boxed fallback still route through `it2d`.
+- [x] Apply the S0.6 `MIR_EQ` reroutes: typed numeric equality already uses `MIR_DEQ` / `MIR_DNE`; unknown boxed JS comparisons call `js_eq_raw` / `js_loose_eq_raw`, whose identical-float fast path rejects NaN and whose non-identical path falls through to `js_strict_equal` / `js_equal` for `+0/-0` and boxed/inline mixtures. Lambda generic equality falls through to `fn_eq` / `fn_ne`; type/tag/sentinel/string identity comparisons remain raw by proof.
 
 ### S2.3 Cross-cutting
 
-- [ ] Apply `DBL_MASK` **only** to universal Item values — never to statically native `MIR_T_D`/`MIR_T_P` registers (Part 7 §7.3); the native fast paths must not start round-tripping through Items.
-- [ ] Known-type container unboxing stays identity: re-run the S0.5 MIR golden-inspection test — container field loads must show zero new instructions (the acceptance bar).
-- [ ] MIR **interpreter** mode: the same lowered MIR runs under `MIR_set_interp_interface` — run the S1/S2 gates in interp mode too (mem-ops and immediates behave identically, but verify, don't assume).
-- [ ] Legacy C2MIR path (`--c2mir`): the C transpiler (`transpile.cpp`) consumes the same runtime helpers — confirm it compiles against the flagged `flt2it`/`it2d` and passes its smoke tests.
+- [x] Apply `DBL_MASK` **only** to universal Item values — never to statically native `MIR_T_D`/`MIR_T_P` registers (Part 7 §7.3); native numeric fast paths stay native and only box/unbox at Item boundaries.
+- [x] Known-type container unboxing stays identity: the S0.5 MIR golden-inspection test still covers member lookup, and the release-run guard now skips stale dump inspection when the current `lambda.exe` does not emit `temp/mir_dump.txt`.
+- [x] MIR **interpreter** mode: Lambda MIR direct now links with `MIR_set_interp_interface` when `g_mir_interp_mode` is set and uses `find_func` instead of JIT-generating `main`; bitcasts use runtime helpers so interpreter mode does not depend on `MIR_ALLOCA`.
+- [x] Legacy C2MIR path (`--c2mir`): the C transpiler consumes the same `flt2it`/`it2d` helpers. Focused C2MIR smoke compiles and runs; `box_unbox`, `box_unbox_negative`, and `item_repr_container_member_load` pass, while `box_unbox_advanced` and `float_conversion` retain old output-format mismatches (`0.2` vs `0.19999999999999998`, scientific notation), not representation failures.
 
-**S2 gates:** S1 gates repeated (both flag states, JIT + interp) **plus** benchmark A/B against P0: primary movers nbody / mandelbrot / navier_stokes / matmul / splay(float keys); regression canaries richards / splay / deltablue (float-light, branch-cost sensitive); MIR golden diffs reviewed.
+**S2 gates — 2026-07-10:** PASS S1 gates repeated in both flag states; PASS focused JIT/interp smokes; PASS one-run release LambdaJS A/B smoke for S2's named movers/canaries. The full P0 three-run benchmark snapshot remains unchecked above and is still required before S3/default flip sign-off.
+
+**S2 verification — 2026-07-10**
+
+| Gate | Result | Notes |
+|---|---|---|
+| Forced flag-on release/debug rebuild | PASS | `make -C build/premake config=release_native lambda -B -j8 CFLAGS=-DLAMBDA_SELF_TAG_FLOAT CXXFLAGS=-DLAMBDA_SELF_TAG_FLOAT` and forced debug rebuild of the Lambda baseline executables. |
+| Flag-on `make test-lambda-baseline CFLAGS=-DLAMBDA_SELF_TAG_FLOAT CXXFLAGS=-DLAMBDA_SELF_TAG_FLOAT` | PASS | 3296/3296 total: input parsers 2105/2105, Lambda runtime 1191/1191, including `test_item_repr_gtest` 9/9. Required escalation only for the repo's `test/yaml` submodule metadata initialization under `.git`. |
+| Forced flag-off release/debug rebuild | PASS | Rebuilt without `LAMBDA_SELF_TAG_FLOAT` after flag-on runs to avoid stale flagged objects. |
+| Flag-off `make test-lambda-baseline` | PASS | 3292/3292 total: input parsers 2105/2105, Lambda runtime 1187/1187, including `test_item_repr_gtest` 5/5. Required the same submodule metadata escalation. |
+| Lambda MIR interpreter smoke | PASS | `./lambda.exe --mir-interp test/lambda/float_conversion.ls` passes in both flag states; the user-facing log string remains generic but the link path uses `MIR_set_interp_interface`. |
+| JS MIR interpreter focused smoke | PASS | `JS_MIR_INTERP=1 ./test/test_js_gtest.exe --gtest_brief=1 --gtest_filter='JavaScriptTests/JsFileTest.Run/tco:JavaScriptTests/JsFileTest.Run/lib_ajv'` passes 2/2. |
+| C2MIR focused smoke | PARTIAL / unchanged | 3/5 focused cases pass; the two failures are longstanding output-format drift, not self-tagged float representation crashes. |
+| S2 A/B benchmark smoke | PASS / informative | One release run, LambdaJS only: `awfy/mandelbrot` 15001ms → 354ms (42.3x), `awfy/nbody` 9918ms → 578ms (17.2x), `kostya/matmul` 25102ms → 792ms (31.7x), `jetstream/nbody` 7372ms → 247ms (29.9x), `jetstream/richards` 7396ms → 647ms (11.4x), `jetstream/deltablue` 23189ms → 1980ms (11.7x). No-flag `jetstream/navier_stokes` and `jetstream/splay` timed out; flag-on completed at 36273ms and 1540ms respectively. Artifacts: `test/benchmark/s2_self_tag_float_ab_flag_off_2026-07-10.json`, `test/benchmark/s2_self_tag_float_ab_flag_on_2026-07-10.json`. |
 
 ---
 

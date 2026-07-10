@@ -1,6 +1,8 @@
 #include "js_mir_internal.hpp"
 #include "js_exec_profile.h"
 
+MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg);
+
 // ============================================================================
 // Tune8 Phase 0 §1.3: opt-in emit telemetry
 //
@@ -405,8 +407,9 @@ MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val) {
     MIR_reg_t d_ovf = jm_new_reg(mt, "i2d_ovf", MIR_T_D);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
         MIR_new_reg_op(mt->ctx, d_ovf), MIR_new_reg_op(mt->ctx, val)));
-    MIR_reg_t float_boxed = jm_call_1(mt, JS_PROFILED_PUSH_D_NAME, MIR_T_I64,
-        MIR_T_D, MIR_new_reg_op(mt->ctx, d_ovf));
+    // Overflow promotion must share float Item encoding with ordinary doubles;
+    // bypassing jm_box_float would leave this hot JS path on the legacy box helper.
+    MIR_reg_t float_boxed = jm_box_float(mt, d_ovf);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
         MIR_new_reg_op(mt->ctx, float_boxed)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
@@ -417,10 +420,84 @@ MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val) {
     return result;
 }
 
-// Box double -> Item via push_d
+#ifdef LAMBDA_SELF_TAG_FLOAT
+static MIR_reg_t jm_emit_double_bits(JsMirTranspiler* mt, MIR_reg_t d_reg) {
+    // MIR_ALLOCA is a dynamic stack allocation, so a scratch-slot bitcast inside
+    // numeric JS loops can grow the stack until SIGBUS. Keep encode branches in
+    // MIR, but use the leaf helper for raw IEEE bit reinterpretation.
+    return jm_call_1(mt, "lambda_mir_double_bits", MIR_T_I64, MIR_T_D,
+        MIR_new_reg_op(mt->ctx, d_reg));
+}
+
+static MIR_reg_t jm_emit_bits_double(JsMirTranspiler* mt, MIR_reg_t bits_reg) {
+    // Inline-float Items carry raw double bits; the helper reinterprets them
+    // without dynamic stack allocation in either JIT or interpreter mode.
+    return jm_call_1(mt, "lambda_mir_bits_double", MIR_T_D, MIR_T_I64,
+        MIR_new_reg_op(mt->ctx, bits_reg));
+}
+#endif
+
+// Box double -> Item; under LAMBDA_SELF_TAG_FLOAT the hot in-band arm is inline.
 MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg) {
+#ifdef LAMBDA_SELF_TAG_FLOAT
+    MIR_reg_t bits = jm_emit_double_bits(mt, d_reg);
+    MIR_reg_t in_band = jm_new_reg(mt, "jfdmask", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+        MIR_new_reg_op(mt->ctx, in_band),
+        MIR_new_reg_op(mt->ctx, bits),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK)));
+
+    MIR_reg_t result = jm_new_reg(mt, "boxf", MIR_T_I64);
+    MIR_label_t l_in_band = jm_new_label(mt);
+    MIR_label_t l_zero = jm_new_label(mt);
+    MIR_label_t l_cold = jm_new_label(mt);
+    MIR_label_t l_end = jm_new_label(mt);
+
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, l_in_band),
+        MIR_new_reg_op(mt->ctx, in_band)));
+
+    MIR_reg_t is_zero = jm_new_reg(mt, "jfzero", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DEQ,
+        MIR_new_reg_op(mt->ctx, is_zero),
+        MIR_new_reg_op(mt->ctx, d_reg),
+        MIR_new_double_op(mt->ctx, 0.0)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, l_zero),
+        MIR_new_reg_op(mt->ctx, is_zero)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_cold)));
+
+    jm_emit_label(mt, l_in_band);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, bits)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+    jm_emit_label(mt, l_zero);
+    MIR_reg_t sign = jm_new_reg(mt, "jfsign", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_URSH,
+        MIR_new_reg_op(mt->ctx, sign),
+        MIR_new_reg_op(mt->ctx, bits),
+        MIR_new_int_op(mt->ctx, 63)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR,
+        MIR_new_reg_op(mt->ctx, result),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_FLOAT_P0),
+        MIR_new_reg_op(mt->ctx, sign)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+    jm_emit_label(mt, l_cold);
+    MIR_reg_t boxed = jm_call_1(mt, JS_PROFILED_PUSH_D_NAME, MIR_T_I64, MIR_T_D,
+        MIR_new_reg_op(mt->ctx, d_reg));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, boxed)));
+
+    jm_emit_label(mt, l_end);
+    return result;
+#else
     return jm_call_1(mt, JS_PROFILED_PUSH_D_NAME, MIR_T_I64, MIR_T_D,
         MIR_new_reg_op(mt->ctx, d_reg));
+#endif
 }
 
 // Box string via s2it tagging: result = ptr ? (STR_TAG | ptr) : ITEM_NULL
@@ -732,7 +809,7 @@ MIR_reg_t jm_emit_unbox_int(JsMirTranspiler* mt, MIR_reg_t item) {
     return result;
 }
 
-// Unbox Item → native double via it2d runtime function
+// Unbox Item → native double; inline the raw-bit arm for self-tagged floats.
 MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item) {
     // Safety: if item is already a native double, return it directly
     MIR_type_t rt = MIR_reg_type(mt->ctx, item, mt->current_func);
@@ -743,8 +820,35 @@ MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item) {
             MIR_new_reg_op(mt->ctx, d), MIR_new_reg_op(mt->ctx, item)));
         return d;
     }
+#ifdef LAMBDA_SELF_TAG_FLOAT
+    MIR_reg_t in_band = jm_new_reg(mt, "jfumask", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+        MIR_new_reg_op(mt->ctx, in_band),
+        MIR_new_reg_op(mt->ctx, item),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK)));
+    MIR_reg_t result = jm_new_reg(mt, "junboxf", MIR_T_D);
+    MIR_label_t l_inline = jm_new_label(mt);
+    MIR_label_t l_end = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, l_inline),
+        MIR_new_reg_op(mt->ctx, in_band)));
+    MIR_reg_t cold = jm_call_1(mt, JS_PROFILED_IT2D_NAME, MIR_T_D, MIR_T_I64,
+        MIR_new_reg_op(mt->ctx, item));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+        MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, cold)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+    jm_emit_label(mt, l_inline);
+    MIR_reg_t inline_d = jm_emit_bits_double(mt, item);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+        MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, inline_d)));
+    jm_emit_label(mt, l_end);
+    return result;
+#else
     return jm_call_1(mt, JS_PROFILED_IT2D_NAME, MIR_T_D, MIR_T_I64,
         MIR_new_reg_op(mt->ctx, item));
+#endif
 }
 
 // Convert native int64_t → native double

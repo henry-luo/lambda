@@ -657,6 +657,18 @@ Item push_d(double dval) {
     return flt2it(dval);
 }
 
+extern "C" uint64_t lambda_mir_double_bits(double dval) {
+    uint64_t bits;
+    memcpy(&bits, &dval, sizeof(bits));
+    return bits;
+}
+
+extern "C" double lambda_mir_bits_double(uint64_t bits) {
+    double dval;
+    memcpy(&dval, &bits, sizeof(dval));
+    return dval;
+}
+
 Item push_l(int64_t lval) {
     if (!context->nursery) {
         log_error("push_l called with invalid context");
