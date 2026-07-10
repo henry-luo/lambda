@@ -744,8 +744,9 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
 
         if (tag == LMD_TYPE_VMAP) {
             VMap *vm = (VMap*)obj;
+            // Host payload ownership is independent of the optional lazy map backing.
+            gc_finalize_vmap_host_payload(vm);
             if (vm->vtable && vm->data) {
-                gc_finalize_vmap_host_payload(vm);
                 vm->vtable->destroy(vm->data);
                 vm->data = NULL;
             }

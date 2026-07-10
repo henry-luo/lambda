@@ -1403,11 +1403,10 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
         // TODO: Add a finalization callback mechanism.
     }
     else if (tag == LMD_TYPE_VMAP_) {
-        // VMap: backing data is malloc'd by HashMap implementation.
-        // Free it immediately during sweep so dead VMaps don't leak.
+        // VMap host payload cleanup is independent of optional lazy backing data.
         uint8_t* p = (uint8_t*)obj;
         void* data = *(void**)(p + 8);
-        if (data && gc->vmap_destroy) {
+        if (gc->vmap_destroy) {
             gc->vmap_destroy(obj, data);
             *(void**)(p + 8) = NULL;  // prevent double-free at context teardown
         }
