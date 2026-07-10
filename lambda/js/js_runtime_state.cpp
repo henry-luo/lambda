@@ -463,6 +463,7 @@ extern "C" void js_batch_reset() {
     js_exception_value = (Item){0};
     js_reset_transient_call_state();
     js_reset_heap_bound_runtime_state();
+    js_decimal_number_egress_warning_reset();
     // reset cached global objects (Math, JSON, console, Reflect) so they're recreated fresh
     // — tests may modify them (delete/overwrite properties)
     js_canvas_cleanup();
@@ -599,6 +600,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_exception_value = (Item){0};
     js_reset_transient_call_state();
     js_reset_heap_bound_runtime_state();
+    js_decimal_number_egress_warning_reset();
     // reset cached global objects — tests may modify them
     js_canvas_cleanup();
     js_reset_math_object();

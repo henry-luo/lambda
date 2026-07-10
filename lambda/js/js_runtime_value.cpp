@@ -27,17 +27,42 @@ static double js_sized_number_to_double(Item value) {
     }
 }
 
+static uv_mutex_t g_js_decimal_number_egress_mutex;
+static uv_once_t g_js_decimal_number_egress_once = UV_ONCE_INIT;
+static uintptr_t g_js_decimal_number_egress_sites[256];
+static int g_js_decimal_number_egress_count = 0;
+
+static void js_decimal_number_egress_warning_init(void) {
+    uv_mutex_init(&g_js_decimal_number_egress_mutex);
+}
+
+void js_decimal_number_egress_warning_reset(void) {
+    uv_once(&g_js_decimal_number_egress_once, js_decimal_number_egress_warning_init);
+    uv_mutex_lock(&g_js_decimal_number_egress_mutex);
+    g_js_decimal_number_egress_count = 0;
+    uv_mutex_unlock(&g_js_decimal_number_egress_mutex);
+}
+
 static void js_warn_decimal_number_egress_once(uintptr_t site) {
-    static uintptr_t warned_sites[256];
-    static int warned_count = 0;
     if (site == 0) site = 1;
-    for (int i = 0; i < warned_count; i++) {
-        if (warned_sites[i] == site) return;
+    uv_once(&g_js_decimal_number_egress_once, js_decimal_number_egress_warning_init);
+    bool should_warn = false;
+    uv_mutex_lock(&g_js_decimal_number_egress_mutex);
+    for (int i = 0; i < g_js_decimal_number_egress_count; i++) {
+        if (g_js_decimal_number_egress_sites[i] == site) {
+            uv_mutex_unlock(&g_js_decimal_number_egress_mutex);
+            return;
+        }
     }
-    if (warned_count < (int)(sizeof(warned_sites) / sizeof(warned_sites[0]))) {
-        warned_sites[warned_count++] = site;
+    // warning site accounting is shared by worker threads; keep mutation serialized and resettable per JS batch.
+    if (g_js_decimal_number_egress_count < (int)(sizeof(g_js_decimal_number_egress_sites) / sizeof(g_js_decimal_number_egress_sites[0]))) {
+        g_js_decimal_number_egress_sites[g_js_decimal_number_egress_count++] = site;
+        should_warn = true;
     }
-    log_warn("JS_DECIMAL_EGRESS: converting Lambda decimal to JS Number loses decimal precision (site=%p)", (void*)site);
+    uv_mutex_unlock(&g_js_decimal_number_egress_mutex);
+    if (should_warn) {
+        log_warn("JS_DECIMAL_EGRESS: converting Lambda decimal to JS Number loses decimal precision (site=%p)", (void*)site);
+    }
 }
 
 // =============================================================================
@@ -1387,8 +1412,8 @@ extern "C" Item js_power(Item left, Item right) {
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
-        int64_t exp = bigint_to_int64(right);
-        if (exp < 0) { js_throw_range_error("Exponent must be positive"); return ItemNull; }
+        // BigInt exponents are arbitrary precision; sign checks must not truncate through int64.
+        if (bigint_is_negative(right)) { js_throw_range_error("Exponent must be positive"); return ItemNull; }
         return bigint_pow(left, right);
     }
     double base_d = js_get_number(js_to_number(left));

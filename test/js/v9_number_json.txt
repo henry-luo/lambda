@@ -13,6 +13,7 @@ bigint asUintN64: ffffffffffffffff
 bigint shift neg typeof: bigint
 bigint shift neg: -9223372036854775808
 bigint asIntN64 min: -9223372036854775808
+bigint pow huge identity: 1
 bigint asIntN bits bigint: TypeError
 bigint mix add: TypeError
 bigint unsigned shift: TypeError
