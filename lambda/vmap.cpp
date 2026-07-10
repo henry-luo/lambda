@@ -103,7 +103,7 @@ static bool key_has_attribute_syntax(Item key) {
 }
 
 static bool host_item_is_absent(Item item) {
-    return item.item == ITEM_JS_UNDEFINED;
+    return item.item == ITEM_JS_UNDEFINED;  // RAW_ITEM_EQ_OK: sentinel identity only.
 }
 
 static bool vmap_host_get_by_item(VMap* vm, Item key, Item* out) {
@@ -270,7 +270,7 @@ static int vmap_compare_item(const void* a, const void* b, void* udata) {
         return memcmp(sa->chars, sb->chars, sa->len);
     }
     default:
-        return (ka.item == kb.item) ? 0 : 1;
+        return (ka.item == kb.item) ? 0 : 1;  // RAW_ITEM_EQ_OK: non-numeric keys use pointer/sentinel identity after numeric value compare.
     }
 }
 

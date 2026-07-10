@@ -465,6 +465,7 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
     if (ptr) {
         gc->total_allocated += sizeof(gc_header_t) + size;
         gc->object_count++;
+        assert_raw_item_pointer(ptr);
         return ptr;
     }
 
@@ -494,7 +495,9 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
     gc->total_allocated += total;
     gc->object_count++;
 
-    return (void*)(header + 1);
+    void* large_ptr = (void*)(header + 1);
+    assert_raw_item_pointer(large_ptr);
+    return large_ptr;
 }
 
 void* gc_heap_calloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
@@ -512,6 +515,7 @@ void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cl
     if (ptr) {
         gc->total_allocated += sizeof(gc_header_t) + size;
         gc->object_count++;
+        assert_raw_item_pointer(ptr);
     }
     // No large-object fallback needed — JIT only uses this for known small sizes.
     // No memset needed — object zone returns zeroed memory.
@@ -537,7 +541,9 @@ void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
         gc->object_zone->total_slots_allocated++;
         gc->total_allocated += sizeof(gc_header_t) + alloc_size;
         gc->object_count++;
-        return (void*)(free_hdr + 1);
+        void* ptr = (void*)(free_hdr + 1);
+        assert_raw_item_pointer(ptr);
+        return ptr;
     }
 
     // ---- Bump-pointer path ----
@@ -551,8 +557,10 @@ void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
         gc_bump_block_t* new_block = gc_alloc_bump_block(gc, new_size);
         if (!new_block) {
             // Fallback to slab allocator
-            return gc_object_zone_alloc_class(gc->object_zone, cls, alloc_size,
-                                               type_tag, &gc->all_objects);
+            void* ptr = gc_object_zone_alloc_class(gc->object_zone, cls, alloc_size,
+                                                   type_tag, &gc->all_objects);
+            if (ptr) assert_raw_item_pointer(ptr);
+            return ptr;
         }
         new_block->next = gc->bump_blocks;
         gc->bump_blocks = new_block;
@@ -577,7 +585,9 @@ void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
     gc->total_allocated += slot_size;
     gc->object_count++;
 
-    return (void*)(header + 1);
+    void* ptr = (void*)(header + 1);
+    assert_raw_item_pointer(ptr);
+    return ptr;
 }
 
 void gc_heap_pool_free(gc_heap_t* gc, void* ptr) {
@@ -1220,7 +1230,7 @@ static void gc_fixup_embedded_pointers(uint64_t* old_items, uint64_t* new_items,
             if (ptr >= old_start && ptr < old_end) {
                 // Pointer is inside the old buffer — rebase to new location
                 uint8_t* new_ptr = ptr + offset;
-                new_items[i] = (item & 0xFF00000000000000ULL) |
+                new_items[i] = (item & 0xFF00000000000000ULL) |  // ITEM_TAG_LITERAL_OK: preserves existing boxed-pointer high-byte tag.
                                ((uint64_t)(uintptr_t)new_ptr & 0x00FFFFFFFFFFFFFFULL);
             }
         }

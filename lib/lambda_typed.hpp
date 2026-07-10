@@ -249,7 +249,7 @@ public:
     }
 
     static bool is(Item raw) {
-        return raw.item == raw_value();
+        return raw.item == raw_value();  // RAW_ITEM_EQ_OK: typed-array hole sentinel identity.
     }
 
     Item raw() const {

@@ -247,7 +247,7 @@ int render_map_retransform(void) {
         Item tree_parent = saved.parent_result;
         int tree_child_index = saved.child_index;
         if (get_type_id(tree_parent) == LMD_TYPE_NULL && s_doc_root.item) {
-            if (s_doc_root.item == old_result.item) {
+            if (s_doc_root.item == old_result.item) {  // RAW_ITEM_EQ_OK: render tree replacement is container identity.
                 // old result IS the doc root — will be replaced directly
             } else {
                 // Walk tree to find parent while tree is still valid
@@ -287,7 +287,7 @@ int render_map_retransform(void) {
                     parent_arr->items[tree_child_index] = new_result;
                 }
             }
-        } else if (s_doc_root.item == old_result.item && old_result.item != new_result.item) {
+        } else if (s_doc_root.item == old_result.item && old_result.item != new_result.item) {  // RAW_ITEM_EQ_OK: render tree root replacement is identity-based.
             s_doc_root = new_result;
             log_debug("render_map_retransform: updated s_doc_root to new result 0x%llx",
                       (unsigned long long)new_result.item);
@@ -352,7 +352,7 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
         Item tree_parent = saved.parent_result;
         int tree_child_index = saved.child_index;
         if (get_type_id(tree_parent) == LMD_TYPE_NULL && s_doc_root.item) {
-            if (s_doc_root.item == old_result.item) {
+            if (s_doc_root.item == old_result.item) {  // RAW_ITEM_EQ_OK: render tree replacement is container identity.
                 // old result IS the doc root — will be replaced directly
             } else {
                 // Walk tree to find parent while tree is still valid
@@ -399,7 +399,7 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
                     parent_arr->items[tree_child_index] = new_result;
                 }
             }
-        } else if (s_doc_root.item == old_result.item && old_result.item != new_result.item) {
+        } else if (s_doc_root.item == old_result.item && old_result.item != new_result.item) {  // RAW_ITEM_EQ_OK: render tree root replacement is identity-based.
             s_doc_root = new_result;
             log_debug("render_map_retransform_with_results: updated s_doc_root to new result 0x%llx",
                       (unsigned long long)new_result.item);
@@ -485,7 +485,7 @@ static Item find_parent_of(Item node, Item target, int* out_index, int depth) {
         Element* elmt = it2elmt(node);
         if (!elmt) return ItemNull;
         for (unsigned i = 0; i < elmt->length; i++) {
-            if (elmt->items[i].item == target.item) {
+            if (elmt->items[i].item == target.item) {  // RAW_ITEM_EQ_OK: tree parent search needs exact child identity.
                 *out_index = (int)i;
                 return node;
             }
@@ -496,7 +496,7 @@ static Item find_parent_of(Item node, Item target, int* out_index, int depth) {
         Array* arr = it2arr(node);
         if (!arr) return ItemNull;
         for (unsigned i = 0; i < arr->length; i++) {
-            if (arr->items[i].item == target.item) {
+            if (arr->items[i].item == target.item) {  // RAW_ITEM_EQ_OK: tree parent search needs exact child identity.
                 *out_index = (int)i;
                 return node;
             }
@@ -580,7 +580,7 @@ extern "C" bool render_map_has_path_recorder(void) {
 static int find_path_to(Item node, Item target,
                         int* out_indices, int max_depth, int depth) {
     if (depth > max_depth || depth > 64) return -1;
-    if (node.item == target.item) return depth;
+    if (node.item == target.item) return depth;  // RAW_ITEM_EQ_OK: path search matches exact render node identity.
     TypeId tid = get_type_id(node);
     if (tid == LMD_TYPE_ELEMENT) {
         Element* elmt = it2elmt(node);
@@ -617,7 +617,7 @@ static int find_path_to(Item node, Item target,
 
 void render_map_record_source_path(Item target, const char* template_ref) {
     if (!s_path_recorder) return;
-    if (s_source_doc_root.item == 0) return;
+    if (s_source_doc_root.item == 0) return;  // RAW_ITEM_EQ_OK: zero Item means no source root recorded.
     int indices[64];
     int depth = find_path_to(s_source_doc_root, target,
                              indices, (int)(sizeof(indices) / sizeof(int)), 0);

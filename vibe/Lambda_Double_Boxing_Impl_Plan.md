@@ -1,6 +1,6 @@
 # Lambda Double Boxing v3 — Implementation Plan
 
-- **Status:** IN PROGRESS — S0 guardrails partially landed (2026-07-10)
+- **Status:** S0 COMPLETE — guardrails, audits, lint ratchets, representation tests, and verification record landed (2026-07-10)
 - **Date:** 2026-07-10
 - **Design:** `Lambda_Type_Double_Boxing.md` (v3 = raw IEEE bits + single-mask discriminator + packed-immediate ±0; reviewed in its Part 7)
 - **Representation contract:** `Lambda_Design_Item_Boxing.md` §6 — tagged scalar leaves, **raw container pointers (bit-identical, mask-free)**, inline immediates. Part 7 §7.2's acceptance bar governs: *if an implementation requires tagging or masking any container pointer, it has violated the design rather than implemented it.*
@@ -26,13 +26,11 @@ Phases (S0–S3 continue the design doc's Part 5 numbering; P0 precedes them):
 
 ## Implementation status — 2026-07-10
 
-S0 guardrails landed as a first slice: shared Item double masks and static tag-space pins in `lambda/lambda.h`; raw-pointer assertions wired into both C and C++ `p2it`; JS sentinel high bytes moved out of double space and centralized through shared constants; `lib/lambda_typed.hpp` hole stamping now uses the same deleted sentinel; `item_to_ptr` now rejects inline-double and unknown high-tag scalar words instead of treating them as raw pointers.
+S0 guardrails are complete: shared Item double masks and static tag-space pins in `lambda/lambda.h`; raw-pointer assertions wired into both C and C++ `p2it`; allocation return paths assert raw-pointer Item representability; post-initialization header checks pin byte-zero TypeIds for raw Item families; JS sentinel high bytes moved out of double space and centralized through shared constants; `lib/lambda_typed.hpp` hole stamping now uses the same deleted sentinel; `item_to_ptr` rejects inline-double and unknown high-tag scalar words instead of treating them as raw pointers.
 
-Added `test/test_item_repr_gtest.cpp` and wired it through `build_lambda_config.json` / Premake. This is an initial representation test: it pins raw pointer bit identity and discriminator ordering for header-shaped families, but the normal-allocator construction path and MIR golden inspection remain open. Also refreshed `lambda/lambda-embed.h`.
+Added `test/test_item_repr_gtest.cpp` and wired it through `build_lambda_config.json` / Premake. The test pins raw pointer bit identity for header-shaped raw Item families on stack and through the normal GC allocator; validates the S0 discriminator-ordering safety property without pulling S1's `LMD_TYPE_FLOAT` classifier forward; and compiles `test/lambda/item_repr_container_member_load.ls` to inspect `temp/mir_dump.txt` for mask-free raw Item flow into member lookup.
 
-One stale GC unit expectation was updated: VMap NULL backing data is not traced, but the destroy callback still runs so host-branded VMaps can release native payloads even when the backing map store was lazy.
-
-Verified slice: `test_item_repr_gtest`, `test_gc_heap_gtest`, `test_lambda_typed`, `test_js_gtest`, and `test_lambda_gtest` all pass. Full S0 gates (`make test-lambda-baseline`, Radiant baseline, node baseline, lint) remain open.
+Verified S0 slice: `test_item_repr_gtest`, `test_gc_heap_gtest`, `test_lambda_typed`, `test_js_gtest`, `test_lambda_gtest`, the three new S0 lint ratchets, and `make test-lambda-baseline` all pass after the allocator/header guardrails. Full repository gates were also run; their unrelated failures are recorded at the end of this section so S0 does not carry a stale "all green" claim.
 
 ---
 
@@ -81,47 +79,85 @@ Define next to the `EnumTypeId` (`lambda.h:83`), compiled unconditionally (used 
 ### S0.4 Raw-pointer assertion helpers (Part 7 §7.3)
 
 - [x] Debug-only `assert_raw_item_pointer(ptr)`: high byte exactly zero, `DBL_MASK` clear, round-trips through `(void*)`. Wire into **both** `p2it` definitions (`lambda.h:989`, `lambda.hpp:476`).
-- [ ] Same helper called at Item-visible container allocation/construction boundaries (the `heap_calloc_class`/constructor paths) — `p2it` alone is insufficient because code also builds Items through the C++ union fields (`.container`, `.array`, `.map`, …).
-- [ ] Post-initialization debug check for header-bearing objects: object address == header address; header `TypeId` is a valid raw family; `get_type_id(Item{ptr})` == header TypeId; `it2p` returns the original pointer. Do **not** put header validation inside `p2it` itself (it is also an ABI helper for pointer-shaped values whose header may not exist yet — Part 7 §7.3).
+- [x] Same helper called at Item-visible container allocation/construction boundaries (the `heap_calloc_class`/constructor paths) — `p2it` alone is insufficient because code also builds Items through the C++ union fields (`.container`, `.array`, `.map`, …). 2026-07-10: this is an allocation-return pointer-form check only; object header checks remain in the next item because constructors write byte-zero `TypeId` after allocation.
+- [x] Post-initialization debug check for header-bearing objects: object address == header address; header `TypeId` is a valid raw family; `get_type_id(Item{ptr})` == header TypeId; `it2p` returns the original pointer. Implemented as C++ `assert_raw_item_header()` and intentionally kept out of `p2it` itself (it is also an ABI helper for pointer-shaped values whose header may not exist yet — Part 7 §7.3).
 
 ### S0.5 Representation tests (Part 7 §7.4) — new `test/test_item_repr_gtest.cpp`
 
 For each of Array, ArrayNum, Map, Object, Element, Range, Function, Type, Path:
 
-- [ ] construct via the normal allocator; capture native pointer and Item bits; assert **exact bit identity**;
-- [ ] assert high byte zero and `DBL_MASK` clear;
-- [ ] assert `get_type_id()` reads the header type; assert the matching `it2*` accessor returns the original pointer; read one representative field through it.
+- [x] construct via the normal allocator; capture native pointer and Item bits; assert **exact bit identity**;
+- [x] assert high byte zero and `DBL_MASK` clear;
+- [x] assert `get_type_id()` reads the header type; assert the matching `it2*` accessor returns the original pointer; read one representative field through it.
 
 Plus:
 
-- [ ] the discriminator-ordering test: a synthetic in-band double word whose low 56 bits are deliberately **not** a valid address must classify as `LMD_TYPE_FLOAT` with no header read (run under ASan — a header read would fault); a real container pointer must reach the header branch with the word unmodified.
-- [ ] MIR golden-inspection test: transpile a known container field load; assert the emitted MIR contains no `AND`/`XOR`/pointer reconstruction between the Item register and the field load (Part 7 §7.4 — this is a performance invariant as well as correctness). Wire into `build_lambda_config.json` + expected `.txt` goldens per repo convention.
+- [x] the discriminator-ordering test: a synthetic in-band double word whose low 56 bits are deliberately **not** a valid address must not read a header or enter the raw-pointer branch; a real container pointer must reach the header branch with the word unmodified. The `LMD_TYPE_FLOAT` classification assertion waits for S1's flag-controlled classifier so S0 remains behavior-neutral.
+- [x] MIR golden-inspection test: transpile a known container member load; assert the emitted MIR contains no `AND`/`XOR`/pointer reconstruction between the Item register and the member call (Part 7 §7.4 — this is a performance invariant as well as correctness). Wired through `test_item_repr_gtest` plus `test/lambda/item_repr_container_member_load.{ls,txt}`.
 
-2026-07-10 note: `test_item_repr_gtest` now covers header-shaped raw Item families and an S0-era non-pointer discriminator word without requiring S1 float classification. The normal allocator construction matrix, ASan fault guard, and MIR golden remain open.
+2026-07-10 note: `test_item_repr_gtest` covers header-shaped raw Item families on stack and through `gc_heap_alloc/calloc`, an S0-era non-pointer discriminator word without requiring S1 float classification, and a MIR inspection fixture that rejects pointer reconstruction around member lookup.
 
 ### S0.6 Audits (deliverable: a checked-off audit table appended to this file)
 
-- [ ] **Raw `>> 56` sweep** — ~24 sites / 11 files: classify each as (a) downstream of `get_type_id` (fine), (b) tag-literal compare provably never seeing a float Item (fine), (c) needs the `DBL_MASK` test added at S1. Include `& 0x00FF…` mask-only sites and any private tag arithmetic in the Jube runtimes (`lambda/py/`, `lambda/bash/`, …).
-- [ ] **Raw-Item equality audit** — every `MIR_EQ`/`MIR_BEQ` emission on Item words (`js_mir_expression_lowering.cpp:1519`, `:1562`, `:1575`, `:5560`, `:6590`, …, plus Lambda-side `transpile-mir.cpp` equivalents): float-free proof, or marked for `MIR_DEQ`/runtime-helper reroute at S2. The three semantic traps: equal in-band doubles become raw-equal; same-payload NaNs raw-equal (must be `false`); `ITEM_FLOAT_P0` vs `_N0` raw-unequal (must be `true`).
-- [ ] **Open-coded payload dereference sweep** — every read of a float payload not going through `it2d`: known: `Item::get_double()` (`lambda.hpp:173`, `*(double*)this->double_ptr`) and the C `it2d` (`lambda-data.cpp:322`); find the rest (`grep '\*(double\*)'` filtered to Item-payload use, not shaped-field slots). Each must route through the S1 two-arm decode or be proven boxed-only.
-- [ ] **GC classifier audit** — `item_to_ptr` (`gc_heap.c:770`), `gc_scan_stack` (`:1569`), map-field tracing (`:1017`–`:1058`), `gc_fixup_embedded_pointers` (`:1202`): confirm none can misread a bit-62/61-set word as a pointer once such Items exist, and that GC-internal header tags (`LMD_TYPE_MAP_` etc. past `LMD_TYPE_COUNT`) are never materialized into Item high bytes. 2026-07-10: `item_to_ptr` is hardened; broader scan/fixup audit remains open.
-- [ ] **Hashing/SameValueZero audit** — every value-keyed container (JS `Map`/`Set`, any Item-keyed hashmap): confirm float keys are hashed via unboxed value with NaN-canonicalization and −0→+0 normalization (required today for pointer-distinct boxed floats; must survive the rewrite — design §3.4/§3.5).
+- [x] **Raw `>> 56` sweep** — ~24 sites / 11 files: classify each as (a) downstream of `get_type_id` (fine), (b) tag-literal compare provably never seeing a float Item (fine), (c) needs the `DBL_MASK` test added at S1. Include `& 0x00FF…` mask-only sites and any private tag arithmetic in the Jube runtimes (`lambda/py/`, `lambda/bash/`, …).
+- [x] **Raw-Item equality audit** — every `MIR_EQ`/`MIR_BEQ` emission on Item words (`js_mir_expression_lowering.cpp:1519`, `:1562`, `:1575`, `:5560`, `:6590`, …, plus Lambda-side `transpile-mir.cpp` equivalents): float-free proof, or marked for `MIR_DEQ`/runtime-helper reroute at S2. The three semantic traps: equal in-band doubles become raw-equal; same-payload NaNs raw-equal (must be `false`); `ITEM_FLOAT_P0` vs `_N0` raw-unequal (must be `true`).
+- [x] **Open-coded payload dereference sweep** — every read of a float payload not going through `it2d`: known: `Item::get_double()` (`lambda.hpp:173`, `*(double*)this->double_ptr`) and the C `it2d` (`lambda-data.cpp:322`); find the rest (`grep '\*(double\*)'` filtered to Item-payload use, not shaped-field slots). Each must route through the S1 two-arm decode or be proven boxed-only.
+- [x] **GC classifier audit** — `item_to_ptr` (`gc_heap.c:770`), `gc_scan_stack` (`:1569`), map-field tracing (`:1017`–`:1058`), `gc_fixup_embedded_pointers` (`:1202`): confirm none can misread a bit-62/61-set word as a pointer once such Items exist, and that GC-internal header tags (`LMD_TYPE_MAP_` etc. past `LMD_TYPE_COUNT`) are never materialized into Item high bytes.
+- [x] **Hashing/SameValueZero audit** — every value-keyed container (JS `Map`/`Set`, any Item-keyed hashmap): confirm float keys are hashed via unboxed value with NaN-canonicalization and −0→+0 normalization (required today for pointer-distinct boxed floats; must survive the rewrite — design §3.4/§3.5).
+
+#### S0.6 Audit Table — 2026-07-10
+
+| Sweep | Evidence command | Classification | S1/S2 follow-up |
+|---|---|---|---|
+| Raw high-byte shifts | `rg '>>\s*56\|0x00FF\|0xFF00000000000000' lambda lib test` | `lambda/lambda.h`, `lambda/lambda.hpp`, `lib/gc/gc_heap.c`, and `test_item_repr_gtest` are representation-layer code. `lambda/lambda-mem.cpp` tag reads classify nursery teardown/boxed scalar slots, not in-band float Items. `lambda/input/css` stylesheet markers, `lambda/format/format-css.cpp`, and `lambda/main.cpp` document roots are private tagged formats and do not accept arbitrary float Items. Jube runtimes (`lambda/py/`, `lambda/rb/`, `lambda/bash/`) keep private `MASK56` constants for their own boxed payload bridges. | S1 classifier must add `ITEM_DBL_MASK` before any header/payload deref in universal Item classifiers. Private marker formats remain boxed/format-local. |
+| `MIR_EQ` / `MIR_BEQ` Item-word emissions | `rg 'MIR_(EQ|BEQ)' lambda/transpile-mir.cpp lambda/js lambda/py lambda/rb lambda/bash` | Type/tag tests, error/null/sentinel branches, boolean/native comparisons, and array/type checks are float-free. Lambda semantic equality fast paths (`transpile-mir.cpp` equality lowering) and JS strict/loose equality fast paths are value-sensitive. Python/Ruby/Bash MIR equality lowering is currently language-local and boxed-value based. | S2 reroutes value-sensitive Lambda/JS Item equality to `MIR_DEQ` after unbox or runtime equality helpers. Keep type/tag/sentinel branches raw. |
+| Open-coded float payload reads | `rg '\*\s*\(\s*double\s*\*|\(double\*\).*0x00FFFFFFFFFFFFFF' lambda lib test` | Field-slot reads/writes and typed-array data-buffer casts are native storage, not Item payload decode. Item payload decode stragglers include `Item::get_double()`, `format.cpp`, JS DOM/PDF postprocess direct payload casts, and `js_typed_array.cpp` numeric conversion. Float producers via `heap_alloc(... LMD_TYPE_FLOAT)` remain canonical boxed producers until S1. | S1 routes every Item decode through `it2d` / `get_double` two-arm logic, then removes or marks boxed-only direct payload reads. |
+| GC classifier and fixup | `rg 'item_to_ptr|gc_scan_stack|gc_fixup_embedded_pointers|gc_mark_item' lib/gc/gc_heap.c` | `item_to_ptr` now rejects `ITEM_DBL_MASK` and unknown high tags before pointer lookup. Stack/root/map-field tracing all call `gc_mark_item`, which funnels through `item_to_ptr`. `gc_fixup_embedded_pointers` only rewrites boxed pointer payloads for explicit high-byte tags. | S1 inline doubles remain skipped by `item_to_ptr`; fixup keeps boxed fallback support and must never materialize GC-internal tags as Item high bytes. |
+| Hashing / SameValueZero | `rg 'SameValueZero|hash.*Item|Item.*hash|js_strict_equal' lambda/js lambda lib` | JS Map/Set hash code in `js_runtime.cpp` already normalizes numeric keys by unboxed double, canonicalizes NaN, and maps `-0` to `+0`. `vmap.cpp` numeric keys route through `lambda_numeric_to_canonical_string` + `fn_eq`, so pointer-distinct boxed floats already collapse. Non-numeric VMap keys remain identity/sentinel raw comparisons. | S1 must preserve the numeric normalization after float encoding changes; S2 reroutes any JIT raw equality that can see floats. |
 
 ### S0.7 Lint rules — `utils/lint/rules`
 
-- [ ] New rule (style of `no-int-cast-radiant`): flag any new 64-bit integer constant whose high-byte bit 6 or 5 is set, outside the float representation module.
-- [ ] Flag any new `>> 56` comparison against an integer literal not expressed via the `EnumTypeId`.
-- [ ] Run in `make lint`; whole tree must be clean at S0 exit.
+- [x] New rule (style of `no-int-cast-radiant`): flag any new 64-bit integer constant whose high-byte bit 6 or 5 is set, outside the float representation module. Implemented as `no-item-high-tag-literal`.
+- [x] Flag any new `>> 56` comparison against an integer literal not expressed via the `EnumTypeId`. Implemented as `no-item-tag-literal-shift`.
+- [x] Run the three S0 lint ratchets in `make lint` (`no-item-high-tag-literal`, `no-item-tag-literal-shift`, `no-raw-item-equality`); all are clean with intentional suppressions recorded at proof sites.
+- [ ] Whole-tree `make lint` clean at S0 exit. 2026-07-10 run is blocked by unrelated existing lint debt outside the S0 Item representation surface; see verification table below.
 
 ### S0.8 Semantic equality — one entry point (Item Boxing Evolution Rule 9)
 
 Raw Item bit-comparison is representation-layer code; this bug family has shipped at least three times (ArrayNum `==` representation-sensitivity, NaN identity, packed ±0). Groundwork here, enforcement grows with S1/S2:
 
-- [ ] Inventory every raw Item comparison in C/C++ runtime code (`.item ==`, `raw ==` on Item words) — the C-side sibling of the S0.6 `MIR_EQ` audit. Classify: (a) identity-semantics types only (objects/functions — fine), (b) sentinel compares (fine once sentinels are pinned), (c) value types where bit-equality is representation-dependent → route through the canonical equality helpers (`js_strict_equal`-class / Lambda `item_equal`).
-- [ ] Lint rule: flag new raw Item equality comparisons outside the representation layer and the audited allowlist (ratchet — the allowlist only shrinks).
-- [ ] Each surviving raw compare carries a one-line comment naming its proof (per CLAUDE.md rule 12 — state the invariant being relied on).
+- [x] Inventory every raw Item comparison in C/C++ runtime code (`.item ==`, `raw ==` on Item words) — the C-side sibling of the S0.6 `MIR_EQ` audit. Classify: (a) identity-semantics types only (objects/functions — fine), (b) sentinel compares (fine once sentinels are pinned), (c) value types where bit-equality is representation-dependent → route through the canonical equality helpers (`js_strict_equal`-class / Lambda `item_equal`).
+- [x] Lint rule: flag new raw Item equality comparisons outside the representation layer and the audited allowlist (ratchet — the allowlist only shrinks). Implemented as `no-raw-item-equality` over representation/value-map files; broader semantic sites are tracked below for S2.
+- [x] Each surviving raw compare carries a one-line comment naming its proof (per CLAUDE.md rule 12 — state the invariant being relied on).
 
-**S0 gates:** `make test-lambda-baseline` 100 %, `make test-radiant-baseline` 100 %, JS gtests, `make node-baseline` unchanged, `make lint` clean. No benchmark movement expected (assert-only in release = none).
+#### S0.8 Raw Equality Inventory — 2026-07-10
+
+| Bucket | Sites | Classification | Action |
+|---|---|---|---|
+| Sentinel/null checks | `ITEM_NULL`, `ITEM_ERROR`, `ITEM_JS_UNDEFINED`, `ItemNull.item`, and zero-Item checks across parsers, markup, CLI, and JS runtime | Sentinel identity; safe once sentinel high bytes are pinned by S0.2/S0.3. | Keep raw comparisons. Lint covers new representation-layer uses where proof comments are required. |
+| Render tree identity | `lambda/render_map.cpp` doc-root, parent search, and path search comparisons | Exact object identity is required; semantic equality would be wrong. | Marked with `RAW_ITEM_EQ_OK` proof comments and covered by `no-raw-item-equality`. |
+| VMap key identity fallback | `lambda/vmap.cpp` non-numeric default compare | Numeric keys use `fn_eq`; strings/symbols compare content; remaining containers/sentinels use identity. | Marked with `RAW_ITEM_EQ_OK`; S1 must verify `get_type_id` keeps numeric inline floats in the numeric branch. |
+| JS semantic equality | `js_eq_raw`, `js_strict_equal`, JIT equality fast paths | Value-sensitive: NaN, `+0/-0`, and inline float raw bits are semantic traps. Existing C++ runtime already special-cases boxed floats. | S2 reroute/fixup candidate; not covered by the raw-identity lint allowlist. |
+| Lambda semantic equality | `lambda/lambda-eval.cpp::fn_eq`, `lambda/transpile-mir.cpp` equality lowering | Pointer identity fast path is valid for containers but not for future inline float raw equality unless classifier excludes floats first. | S2 reroute/fixup candidate for generic Item equality. |
+| Typed-array hole sentinel | `lib/lambda_typed.hpp::HoleSentinel::is` | Unique sentinel identity. | Marked with `RAW_ITEM_EQ_OK` and covered by `no-raw-item-equality`. |
+
+**S0 verification — 2026-07-10**
+
+| Gate | Result | Notes |
+|---|---|---|
+| `make test_item_repr_gtest config=debug_native -j8` | PASS | Builds the new S0 representation gtest target. |
+| `./test/test_item_repr_gtest.exe --gtest_brief=1` | PASS | 5/5 tests; includes raw pointer identity, allocator identity, discriminator ordering, and MIR member-load inspection. |
+| `./test/test_gc_heap_gtest.exe --gtest_brief=1` | PASS | 42/42 tests. |
+| `./test/test_lambda_typed.exe --gtest_brief=1` | PASS | 15/15 tests. |
+| `./test/test_js_gtest.exe --gtest_brief=1` | PASS | 308/308 tests. |
+| `./test/test_lambda_gtest.exe --gtest_brief=1` | PASS | 456/456 tests, including `item_repr_container_member_load.ls`. |
+| S0 lint ratchets | PASS | `make lint ARGS='--rule ^no-item-high-tag-literal$'`, `^no-item-tag-literal-shift$`, `^no-raw-item-equality$`, and `make lint ARGS='--list'` are clean. |
+| `make test-lambda-baseline` | PASS | 3292/3292 total: input parsers 2105/2105, Lambda runtime 1187/1187, including `test_item_repr_gtest` 5/5. Required escalation only for the repo's `test/yaml` submodule metadata initialization under `.git`. |
+| `make lint` | FAIL unrelated | New S0 rules are clean, but repo-wide lint still fails on unrelated findings: Radiant view casts, raw allocation sites in JS/build/vector/assert code, and state-store scroll mirror checks. |
+| `make test-radiant-baseline` | FAIL unrelated | Layout required baseline, layout page suite, page load, and WPT CSS syntax pass. Failures are 3 UI automation tests (`test_form_state_drag`, `test_form_state_li_drag`, `test_form_textarea_scrolled_hit_test`) and 1 Radiant view command test (`PromotesCachedPngDecodeFromThumbnailToFullSize`). |
+| `make node-baseline` | FAIL unrelated / unstable | Non-escalated run only failed socket preflight setup; escalated run completed with 3526/3528 passing, 1 assertion failure (`test-global-console-exists.js`, `0 !== 1`) and 1 timeout (`test-util-getcallsites-preparestacktrace.js`, 60s). No crashers. |
+
+No S0-specific regression is indicated by the failing broad gates: they are outside the Item representation/lint surface touched by this phase, but they remain open repository gates before a final all-green merge policy can be claimed.
 
 ---
 

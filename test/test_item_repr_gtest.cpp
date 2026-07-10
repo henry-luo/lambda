@@ -1,12 +1,20 @@
 #include <gtest/gtest.h>
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "../lambda/lambda.hpp"
 #include "../lambda/js/js_runtime.h"
+
+extern "C" {
+#include "../lib/gc/gc_heap.h"
+}
 
 namespace {
 
 static void expect_raw_item_header(void* ptr, TypeId expected_type) {
-    assert_raw_item_pointer(ptr);
+    assert_raw_item_header(ptr, expected_type);
     Item item = p2it(ptr);
     uint64_t bits = item.item;
 
@@ -23,6 +31,25 @@ static void expect_array_like_header(List* ptr, TypeId expected_type) {
     EXPECT_EQ(it2list(item), ptr);
     EXPECT_EQ(item.array, ptr);
 }
+
+static void item_repr_noop_fn() {}
+
+class RuntimeItemRepresentation : public ::testing::Test {
+protected:
+    gc_heap_t* gc = nullptr;
+
+    void SetUp() override {
+        gc = gc_heap_create();
+        ASSERT_NE(gc, nullptr);
+    }
+
+    void TearDown() override {
+        if (gc) {
+            gc_heap_destroy(gc);
+            gc = nullptr;
+        }
+    }
+};
 
 } // namespace
 
@@ -107,9 +134,113 @@ TEST(ItemRepresentation, ContainerPointersAreBitIdenticalItems) {
     EXPECT_EQ(it2path(p2it(&path))->flags, PATH_FLAG_META_LOADED);
 }
 
+TEST_F(RuntimeItemRepresentation, HeapAllocatedHeadersAreBitIdenticalItems) {
+    Range* range = (Range*)gc_heap_alloc(gc, sizeof(Range), LMD_TYPE_RANGE);
+    ASSERT_NE(range, nullptr);
+    range->type_id = LMD_TYPE_RANGE;
+    range->start = 1;
+    expect_raw_item_header(range, LMD_TYPE_RANGE);
+    EXPECT_EQ(it2range(p2it(range))->start, 1);
+
+    Array* array = (Array*)gc_heap_calloc(gc, sizeof(Array), LMD_TYPE_ARRAY);
+    ASSERT_NE(array, nullptr);
+    array->type_id = LMD_TYPE_ARRAY;
+    array->length = 2;
+    expect_array_like_header(array, LMD_TYPE_ARRAY);
+    EXPECT_EQ(it2arr(p2it(array))->length, 2);
+
+    ArrayNum* array_num = (ArrayNum*)gc_heap_calloc(gc, sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    ASSERT_NE(array_num, nullptr);
+    array_num->type_id = LMD_TYPE_ARRAY_NUM;
+    array_num->length = 3;
+    expect_raw_item_header(array_num, LMD_TYPE_ARRAY_NUM);
+    EXPECT_EQ(p2it(array_num).array_num->length, 3);
+
+    Map* map = (Map*)gc_heap_calloc(gc, sizeof(Map), LMD_TYPE_MAP);
+    ASSERT_NE(map, nullptr);
+    map->type_id = LMD_TYPE_MAP;
+    map->data_cap = 4;
+    expect_raw_item_header(map, LMD_TYPE_MAP);
+    EXPECT_EQ(it2map(p2it(map))->data_cap, 4);
+
+    VMap* vmap = (VMap*)gc_heap_calloc(gc, sizeof(VMap), LMD_TYPE_VMAP);
+    ASSERT_NE(vmap, nullptr);
+    vmap->type_id = LMD_TYPE_VMAP;
+    vmap->host_data = array;
+    expect_raw_item_header(vmap, LMD_TYPE_VMAP);
+    EXPECT_EQ(p2it(vmap).vmap->host_data, array);
+
+    Element* element = (Element*)gc_heap_calloc(gc, sizeof(Element), LMD_TYPE_ELEMENT);
+    ASSERT_NE(element, nullptr);
+    element->type_id = LMD_TYPE_ELEMENT;
+    element->length = 5;
+    expect_array_like_header(element, LMD_TYPE_ELEMENT);
+    EXPECT_EQ(it2elmt(p2it(element))->length, 5);
+
+    Object* object = (Object*)gc_heap_calloc(gc, sizeof(Object), LMD_TYPE_OBJECT);
+    ASSERT_NE(object, nullptr);
+    object->type_id = LMD_TYPE_OBJECT;
+    object->data_cap = 6;
+    expect_raw_item_header(object, LMD_TYPE_OBJECT);
+    EXPECT_EQ(it2obj(p2it(object))->data_cap, 6);
+
+    Type* type = (Type*)gc_heap_calloc(gc, sizeof(Type), LMD_TYPE_TYPE);
+    ASSERT_NE(type, nullptr);
+    type->type_id = LMD_TYPE_TYPE;
+    type->kind = TYPE_KIND_SIMPLE;
+    expect_raw_item_header(type, LMD_TYPE_TYPE);
+    EXPECT_EQ(p2it(type).type->kind, TYPE_KIND_SIMPLE);
+
+    Function* function = (Function*)gc_heap_calloc(gc, sizeof(Function), LMD_TYPE_FUNC);
+    ASSERT_NE(function, nullptr);
+    function->type_id = LMD_TYPE_FUNC;
+    function->arity = 8;
+    function->ptr = (fn_ptr)item_repr_noop_fn;
+    expect_raw_item_header(function, LMD_TYPE_FUNC);
+    EXPECT_EQ(p2it(function).function->arity, 8);
+
+    Path* path = (Path*)gc_heap_calloc(gc, sizeof(Path), LMD_TYPE_PATH);
+    ASSERT_NE(path, nullptr);
+    path->type_id = LMD_TYPE_PATH;
+    path->flags = PATH_FLAG_META_LOADED;
+    expect_raw_item_header(path, LMD_TYPE_PATH);
+    EXPECT_EQ(it2path(p2it(path))->flags, PATH_FLAG_META_LOADED);
+}
+
 TEST(ItemRepresentation, NonPointerDiscriminatorWordsDoNotReadHeaders) {
     Item synthetic = {.item = ITEM_DBL_MASK | UINT64_C(0x0000000000001234)};
 
     EXPECT_NE(synthetic.item & ITEM_DBL_MASK, UINT64_C(0));
     EXPECT_NE(get_type_id(synthetic), LMD_TYPE_RAW_POINTER);
+}
+
+TEST(ItemRepresentation, MirMemberAccessKeepsContainerItemUnmodified) {
+    int rc = system("./lambda.exe test/lambda/item_repr_container_member_load.ls > temp/item_repr_mir_stdout.txt");
+    ASSERT_EQ(rc, 0);
+
+    FILE* f = fopen("temp/mir_dump.txt", "r");
+    ASSERT_NE(f, nullptr);
+
+    char window[12][512] = {};
+    int line_index = 0;
+    int member_calls = 0;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        if (strstr(line, "\tcall\tfn_member_p, fn_member,")) {
+            member_calls++;
+            for (int i = 0; i < 12; i++) {
+                const char* prev = window[(line_index + i) % 12];
+                // Raw container Items must flow into member lookup without pointer reconstruction.
+                EXPECT_EQ(strstr(prev, "\tand\t"), nullptr) << prev;
+                EXPECT_EQ(strstr(prev, "\txor\t"), nullptr) << prev;
+                EXPECT_EQ(strstr(prev, "72057594037927935"), nullptr) << prev;
+                EXPECT_EQ(strstr(prev, "ITEM_DBL_MASK"), nullptr) << prev;
+            }
+        }
+        snprintf(window[line_index % 12], sizeof(window[0]), "%s", line);
+        line_index++;
+    }
+    fclose(f);
+
+    ASSERT_GT(member_calls, 0);
 }
