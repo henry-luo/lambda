@@ -73,6 +73,36 @@ struct JubeNamespaceDef {
     int32_t func_count;
 };
 
+// DOM3: binding-table halves of the module interface declaration.
+// Shape (names, types, purity, arity, defaults) lives in Lambda type syntax in
+// JubeModuleDef.interface_decl; behavior lives here as handler pointers.
+// Handlers return 1 when handled, 0 to fall through, and use the
+// pending-exception model (no unwinding across the module boundary).
+typedef struct JubeMemberBind {
+    const char* name;         // snake_case; must match a declared interface member
+    const char* js_name;      // optional camelCase override for irregular names
+                              //   (innerHTML, namespaceURI, ...); NULL = derived
+    const char* applies_to;   // optional lowercase tag-list guard ("input select")
+    int (*guard)(Item receiver);                     // optional extra predicate
+    int (*get)(Item receiver, Item* out);
+    int (*set)(Item receiver, Item value, Item* out);            // absent = readonly
+    int (*call)(Item receiver, Item* args, int argc, Item* out); // methods
+    const char* reflect_attr; // attribute-reflected member: generic reflect routine
+                              //   handles get/set; no handler functions needed
+} JubeMemberBind;
+
+typedef struct JubeTypeBinding {
+    const char* type_name;    // matches `type X { ... }` in interface_decl
+    const JubeTypeDef* host_brand;  // the JubeTypeDef used as vmap->host_type
+    const JubeMemberBind* members;
+    int32_t member_count;
+    // open-name catch-alls (WebIDL named/indexed getters); any may be NULL
+    int (*named_get)(Item receiver, Item key, Item* out);
+    int (*named_set)(Item receiver, Item key, Item value, Item* out);
+    int (*indexed_get)(Item receiver, int64_t index, Item* out);
+    int (*indexed_set)(Item receiver, int64_t index, Item value, Item* out);
+} JubeTypeBinding;
+
 struct JubeHostGcAPI {
     void (*register_root)(uint64_t* slot);
     void (*unregister_root)(uint64_t* slot);
@@ -275,7 +305,18 @@ struct JubeModuleDef {
 
     int (*init)(const JubeHostAPI* host);
     void (*shutdown)(void);
+
+    // -- DOM3 additive tail --
+    // JubeModuleDef is always passed by pointer (never embedded in arrays), so
+    // appending fields is ABI-safe: the registry gates access on struct_size and
+    // accepts v1 modules whose struct_size stops at JUBE_MODULE_DEF_V1_SIZE.
+    const char* interface_decl;            // Lambda-type-syntax module interface
+    const JubeTypeBinding* type_bindings;  // one per declared type
+    int32_t type_binding_count;
 };
+
+// Size of the frozen v1 layout: everything before the DOM3 additive tail.
+#define JUBE_MODULE_DEF_V1_SIZE offsetof(JubeModuleDef, interface_decl)
 
 #ifdef __cplusplus
 }

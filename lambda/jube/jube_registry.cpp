@@ -1,4 +1,5 @@
 #include "jube_registry.h"
+#include "jube_interface.h"
 #include "../input/css/dom_element.hpp"
 #include "../../lib/log.h"
 #include <string.h>
@@ -373,6 +374,31 @@ static JubeHostAPI jube_host_api = {
     &jube_host_dom_api,
 };
 
+extern "C" const JubeHostAPI* jube_internal_host_api(void) {
+    return &jube_host_api;
+}
+
+// size-gated access to the DOM3 additive tail: a field exists only when the
+// module's declared struct_size covers it, so v1 descriptors read as "no tail"
+static bool jube_module_has_field(const JubeModuleDef* module, size_t field_end) {
+    return module && module->struct_size >= field_end;
+}
+
+extern "C" const char* jube_module_interface_decl(const JubeModuleDef* module) {
+    size_t end = offsetof(JubeModuleDef, interface_decl) + sizeof(module->interface_decl);
+    return jube_module_has_field(module, end) ? module->interface_decl : NULL;
+}
+
+extern "C" const JubeTypeBinding* jube_module_type_bindings(const JubeModuleDef* module,
+                                                            int32_t* count) {
+    if (count) *count = 0;
+    size_t end = offsetof(JubeModuleDef, type_binding_count) +
+                 sizeof(module->type_binding_count);
+    if (!jube_module_has_field(module, end)) return NULL;
+    if (count) *count = module->type_binding_count;
+    return module->type_bindings;
+}
+
 extern "C" void radiant_jube_register_static(void);
 extern "C" void hostobj_demo_jube_register_static(void);
 
@@ -448,9 +474,11 @@ static int jube_register_module_descriptor(const JubeModuleDef* module, void* dy
                   module->name, module->abi_version, JUBE_ABI_VERSION);
         return -1;
     }
-    if (module->struct_size < sizeof(JubeModuleDef)) {
+    // v1 modules stop at JUBE_MODULE_DEF_V1_SIZE; the DOM3 tail is additive and
+    // size-gated, so only the frozen v1 prefix is a hard requirement here.
+    if (module->struct_size < JUBE_MODULE_DEF_V1_SIZE) {
         log_error("JUBE_REG: module '%s' descriptor is too small: got %u expected %zu",
-                  module->name, module->struct_size, sizeof(JubeModuleDef));
+                  module->name, module->struct_size, (size_t)JUBE_MODULE_DEF_V1_SIZE);
         return -1;
     }
 
@@ -486,6 +514,20 @@ static int jube_register_module_descriptor(const JubeModuleDef* module, void* dy
             return -1;
         }
         jube_static_modules[slot].initialized = true;
+    }
+
+    // DOM3: compile the module's interface declaration against its binding
+    // tables; a half-valid interface must fail registration, not limp along.
+    if (jube_compile_module_interface(module) != 0) {
+        if (module->shutdown) module->shutdown();
+        jube_static_modules_count--;
+        jube_static_modules[slot].module = NULL;
+        jube_static_modules[slot].initialized = false;
+        jube_static_modules[slot].dynamic_handle = NULL;
+        jube_close_dynamic_handle(dynamic_handle);
+        log_error("JUBE_REG: %s module '%s' interface compilation failed",
+                  source_label ? source_label : "Jube", module->name);
+        return -1;
     }
 
     log_info("JUBE_REG: registered %s module '%s' version '%s'",

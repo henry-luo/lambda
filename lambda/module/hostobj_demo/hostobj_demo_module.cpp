@@ -1,3 +1,11 @@
+// hostobj_demo — the Jube proof module.
+//
+// DOM3 form: the script-facing shape is declared once in Lambda type syntax
+// (interface_decl) and behavior is a binding table of handler pointers; the
+// generic engine dispatch (member records + expando store + prototype) does
+// everything the hand-written JubeHostObjectOps used to do. host_ops is NULL —
+// that absence is the falsifiable proof of the DOM3 design promise.
+
 #include "../../lambda.hpp"
 #include "../../jube/jube_registry.h"
 #include "../../../lib/mem.h"
@@ -6,12 +14,9 @@
 
 typedef struct HostObjDemoNative {
     int64_t value;
-    Item expando;
-    bool expando_rooted;
 } HostObjDemoNative;
 
 static Item s_hostobj_demo_namespace = ItemNull;
-static Item s_hostobj_demo_proto = ItemNull;
 static Item s_hostobj_demo_ctor = ItemNull;
 static bool s_hostobj_demo_roots_registered = false;
 static int64_t s_hostobj_demo_destroy_count = 0;
@@ -22,13 +27,6 @@ static void hostobj_demo_destroy(void* payload);
 
 static Item hostobj_demo_key(const char* name) {
     return (Item){.item = s2it(heap_create_name(name))};
-}
-
-static bool hostobj_demo_key_eq(Item key, const char* name) {
-    if (get_type_id(key) != LMD_TYPE_STRING) return false;
-    String* str = key.get_safe_string();
-    size_t len = strlen(name);
-    return str && str->len == len && memcmp(str->chars, name, len) == 0;
 }
 
 static Item hostobj_demo_undefined(void) {
@@ -51,36 +49,40 @@ static int64_t hostobj_demo_item_to_int(Item value, int64_t fallback) {
     return fallback;
 }
 
-static Item hostobj_demo_expando(HostObjDemoNative* native) {
-    if (!native) return ItemNull;
-    if (native->expando.item == ItemNull.item || native->expando.item == 0) {
-        native->expando = s_hostobj_demo_host->value->new_object();
-        s_hostobj_demo_host->gc->register_root(&native->expando.item);
-        native->expando_rooted = true;
-    }
-    return native->expando;
+// ---- member bindings (behavior half of the interface declaration) ----
+
+static int hostobj_demo_value_get(Item receiver, Item* out) {
+    HostObjDemoNative* native = hostobj_demo_native(receiver);
+    if (!native || !out) return 0;
+    *out = (Item){.item = i2it(native->value)};
+    return 1;
 }
 
-static Item hostobj_demo_data_descriptor(Item value, bool writable, bool enumerable, bool configurable) {
-    Item desc = s_hostobj_demo_host->value->new_object();
-    s_hostobj_demo_host->value->property_set(desc, hostobj_demo_key("value"), value);
-    s_hostobj_demo_host->value->property_set(desc, hostobj_demo_key("writable"),
-        (Item){.item = b2it(writable)});
-    s_hostobj_demo_host->value->property_set(desc, hostobj_demo_key("enumerable"),
-        (Item){.item = b2it(enumerable)});
-    s_hostobj_demo_host->value->property_set(desc, hostobj_demo_key("configurable"),
-        (Item){.item = b2it(configurable)});
-    return desc;
+static int hostobj_demo_value_set(Item receiver, Item value, Item* out) {
+    HostObjDemoNative* native = hostobj_demo_native(receiver);
+    if (!native || !out) return 0;
+    native->value = hostobj_demo_item_to_int(value, native->value);
+    *out = value;
+    return 1;
 }
 
-static Item hostobj_demo_get_prototype(void) {
-    if (s_hostobj_demo_proto.item != ItemNull.item && s_hostobj_demo_proto.item != 0) {
-        return s_hostobj_demo_proto;
-    }
-    s_hostobj_demo_proto = s_hostobj_demo_host->value->new_object();
-    s_hostobj_demo_host->gc->register_root(&s_hostobj_demo_proto.item);
-    return s_hostobj_demo_proto;
+static int hostobj_demo_label_get(Item receiver, Item* out) {
+    (void)receiver;
+    if (!out) return 0;
+    *out = hostobj_demo_key("hostobj-demo");
+    return 1;
 }
+
+static int hostobj_demo_bump_call(Item receiver, Item* args, int argc, Item* out) {
+    HostObjDemoNative* native = hostobj_demo_native(receiver);
+    if (!native || !out) return 0;
+    int64_t delta = argc > 0 ? hostobj_demo_item_to_int(args[0], 1) : 1;
+    native->value += delta;
+    *out = (Item){.item = i2it(native->value)};
+    return 1;
+}
+
+// ---- construction / namespace ----
 
 static Item hostobj_demo_construct(Item initial);
 
@@ -88,7 +90,9 @@ static Item hostobj_demo_get_constructor(void) {
     if (s_hostobj_demo_ctor.item != ItemNull.item && s_hostobj_demo_ctor.item != 0) {
         return s_hostobj_demo_ctor;
     }
-    Item proto = hostobj_demo_get_prototype();
+    // the constructor's .prototype must be the same object the generic
+    // dispatch reports for instances, or instanceof breaks
+    Item proto = jube_type_prototype(&s_hostobj_demo_types[0]);
     s_hostobj_demo_ctor = s_hostobj_demo_host->script->new_function((void*)hostobj_demo_construct, 1);
     s_hostobj_demo_host->script->set_function_name(s_hostobj_demo_ctor, hostobj_demo_key("HostObjDemo"));
     s_hostobj_demo_host->script->function_set_prototype(s_hostobj_demo_ctor, proto);
@@ -101,7 +105,6 @@ static Item hostobj_demo_get_constructor(void) {
 static Item hostobj_demo_make(int64_t value) {
     HostObjDemoNative* native = (HostObjDemoNative*)mem_calloc(1, sizeof(HostObjDemoNative), MEM_CAT_JS_RUNTIME);
     native->value = value;
-    native->expando = ItemNull;
     Item wrapper = s_hostobj_demo_host->value->vmap_new();
     if (get_type_id(wrapper) != LMD_TYPE_VMAP || !wrapper.vmap) {
         mem_free(native);
@@ -142,172 +145,38 @@ static Item hostobj_demo_release(Item receiver) {
     return hostobj_demo_undefined();
 }
 
-static int hostobj_demo_get_property(Item receiver, Item key, Item* out) {
-    if (!out) return 0;
-    HostObjDemoNative* native = hostobj_demo_native(receiver);
-    if (!native) {
-        *out = hostobj_demo_undefined();
-        return 1;
-    }
-    if (hostobj_demo_key_eq(key, "value")) {
-        *out = (Item){.item = i2it(native->value)};
-        return 1;
-    }
-    if (hostobj_demo_key_eq(key, "label")) {
-        *out = hostobj_demo_key("hostobj-demo");
-        return 1;
-    }
-    if (hostobj_demo_key_eq(key, "bump")) {
-        *out = s_hostobj_demo_host->script->new_function((void*)hostobj_demo_construct, 1);
-        return 1;
-    }
-    if (native->expando.item != ItemNull.item && native->expando.item != 0) {
-        *out = s_hostobj_demo_host->value->property_get(native->expando, key);
-        return 1;
-    }
-    *out = hostobj_demo_undefined();
-    return 1;
-}
-
-static int hostobj_demo_set_property(Item receiver, Item key, Item value, Item* out) {
-    if (!out) return 0;
-    HostObjDemoNative* native = hostobj_demo_native(receiver);
-    if (!native) {
-        *out = hostobj_demo_undefined();
-        return 1;
-    }
-    if (hostobj_demo_key_eq(key, "value")) {
-        native->value = hostobj_demo_item_to_int(value, native->value);
-        *out = value;
-        return 1;
-    }
-    if (hostobj_demo_key_eq(key, "label") || hostobj_demo_key_eq(key, "bump")) {
-        *out = value;
-        return 1;
-    }
-    Item expando = hostobj_demo_expando(native);
-    *out = s_hostobj_demo_host->value->property_set(expando, key, value);
-    return 1;
-}
-
-static int hostobj_demo_call_method(Item receiver, Item method_name, Item* args, int argc, Item* out) {
-    if (!out) return 0;
-    HostObjDemoNative* native = hostobj_demo_native(receiver);
-    if (!native) {
-        *out = hostobj_demo_undefined();
-        return 1;
-    }
-    if (hostobj_demo_key_eq(method_name, "bump")) {
-        int64_t delta = argc > 0 ? hostobj_demo_item_to_int(args[0], 1) : 1;
-        native->value += delta;
-        *out = (Item){.item = i2it(native->value)};
-        return 1;
-    }
-    return 0;
-}
-
-static int hostobj_demo_has_property(Item receiver, Item key, Item* out) {
-    if (!out) return 0;
-    HostObjDemoNative* native = hostobj_demo_native(receiver);
-    bool present = hostobj_demo_key_eq(key, "value") ||
-        hostobj_demo_key_eq(key, "label") ||
-        hostobj_demo_key_eq(key, "bump");
-    if (!present && native && native->expando.item != ItemNull.item && native->expando.item != 0) {
-        Item value = s_hostobj_demo_host->value->property_get(native->expando, key);
-        present = value.item != ITEM_JS_UNDEFINED && value.item != ITEM_NULL;
-    }
-    *out = (Item){.item = b2it(present)};
-    return 1;
-}
-
-static int hostobj_demo_delete_property(Item receiver, Item key, Item* out) {
-    if (!out) return 0;
-    if (hostobj_demo_key_eq(key, "value") || hostobj_demo_key_eq(key, "label") ||
-            hostobj_demo_key_eq(key, "bump")) {
-        *out = (Item){.item = b2it(false)};
-        return 1;
-    }
-    HostObjDemoNative* native = hostobj_demo_native(receiver);
-    if (native && native->expando.item != ItemNull.item && native->expando.item != 0) {
-        *out = s_hostobj_demo_host->script->reflect_delete_property(native->expando, key);
-        return 1;
-    }
-    *out = (Item){.item = b2it(true)};
-    return 1;
-}
-
-static int hostobj_demo_get_own_property_descriptor(Item receiver, Item key, Item* out) {
-    if (!out) return 0;
-    Item value = hostobj_demo_undefined();
-    if (hostobj_demo_key_eq(key, "value") || hostobj_demo_key_eq(key, "label")) {
-        hostobj_demo_get_property(receiver, key, &value);
-        *out = hostobj_demo_data_descriptor(value, hostobj_demo_key_eq(key, "value"), true, false);
-        return 1;
-    }
-    HostObjDemoNative* native = hostobj_demo_native(receiver);
-    if (native && native->expando.item != ItemNull.item && native->expando.item != 0) {
-        value = s_hostobj_demo_host->value->property_get(native->expando, key);
-        if (value.item != ITEM_JS_UNDEFINED && value.item != ITEM_NULL) {
-            *out = hostobj_demo_data_descriptor(value, true, true, true);
-            return 1;
-        }
-    }
-    *out = hostobj_demo_undefined();
-    return 1;
-}
-
-static int hostobj_demo_own_property_keys(Item receiver, Item* out) {
-    if (!out) return 0;
-    Item keys = s_hostobj_demo_host->value->array_new(0);
-    s_hostobj_demo_host->value->array_push(keys, hostobj_demo_key("value"));
-    s_hostobj_demo_host->value->array_push(keys, hostobj_demo_key("label"));
-    HostObjDemoNative* native = hostobj_demo_native(receiver);
-    if (native && native->expando.item != ItemNull.item && native->expando.item != 0) {
-        Item expando_keys = s_hostobj_demo_host->script->reflect_own_keys(native->expando);
-        if (get_type_id(expando_keys) == LMD_TYPE_ARRAY && expando_keys.array) {
-            Array* arr = expando_keys.array;
-            for (int64_t i = 0; i < arr->length; i++) {
-                s_hostobj_demo_host->value->array_push(keys, arr->items[i]);
-            }
-        }
-    }
-    *out = keys;
-    return 1;
-}
-
-static Item hostobj_demo_prototype(Item receiver) {
-    (void)receiver;
-    return hostobj_demo_get_prototype();
-}
-
-static void hostobj_demo_invalidate(Item receiver) {
-    if (get_type_id(receiver) != LMD_TYPE_VMAP || !receiver.vmap) return;
-    receiver.vmap->host_data = NULL;
-}
-
 static void hostobj_demo_destroy(void* payload) {
     HostObjDemoNative* native = (HostObjDemoNative*)payload;
     if (!native) return;
-    if (native->expando_rooted) s_hostobj_demo_host->gc->unregister_root(&native->expando.item);
     s_hostobj_demo_destroy_count++;
     mem_free(native);
 }
 
-static const JubeHostObjectOps s_hostobj_demo_host_ops = {
-    hostobj_demo_get_property,
-    hostobj_demo_set_property,
-    hostobj_demo_call_method,
-    hostobj_demo_has_property,
-    hostobj_demo_delete_property,
-    hostobj_demo_get_own_property_descriptor,
-    hostobj_demo_own_property_keys,
-    hostobj_demo_prototype,
-    hostobj_demo_invalidate,
-    hostobj_demo_destroy
-};
+// ---- descriptors ----
 
 const JubeTypeDef s_hostobj_demo_types[1] = {
-    {"hostobj_demo", JUBE_TYPE_OWNING_NATIVE, NULL, &s_hostobj_demo_host_ops, NULL},
+    // host_ops intentionally NULL: dispatch is fully record-driven; the owning
+    // finalizer moves to JubeTypeDef.destroy
+    {"hostobj_demo", JUBE_TYPE_OWNING_NATIVE, NULL, NULL, hostobj_demo_destroy},
+};
+
+static const char s_hostobj_demo_interface[] =
+    "type hostobj_demo {\n"
+    "    value: int,\n"
+    "    label: string,\n"
+    "    bump: fn(delta: int) int\n"
+    "}\n";
+
+static const JubeMemberBind s_hostobj_demo_members[] = {
+    {"value", NULL, NULL, NULL, hostobj_demo_value_get, hostobj_demo_value_set, NULL, NULL},
+    {"label", NULL, NULL, NULL, hostobj_demo_label_get, NULL, NULL, NULL},
+    {"bump",  NULL, NULL, NULL, NULL, NULL, hostobj_demo_bump_call, NULL},
+};
+
+static const JubeTypeBinding s_hostobj_demo_bindings[] = {
+    {"hostobj_demo", &s_hostobj_demo_types[0], s_hostobj_demo_members,
+     (int32_t)(sizeof(s_hostobj_demo_members) / sizeof(s_hostobj_demo_members[0])),
+     NULL, NULL, NULL, NULL},
 };
 
 extern "C" Item hostobj_demo_namespace(void) {
@@ -365,8 +234,8 @@ static const JubeModuleDef s_hostobj_demo_module = {
     JUBE_ABI_VERSION,
     sizeof(JubeModuleDef),
     "hostobj_demo",
-    "0.1.0",
-    "Jube host-object proof module",
+    "0.2.0",
+    "Jube host-object proof module (DOM3 declared interface)",
     s_hostobj_demo_types,
     1,
     s_hostobj_demo_functions,
@@ -374,7 +243,10 @@ static const JubeModuleDef s_hostobj_demo_module = {
     s_hostobj_demo_namespaces,
     1,
     hostobj_demo_init,
-    NULL
+    NULL,
+    s_hostobj_demo_interface,
+    s_hostobj_demo_bindings,
+    (int32_t)(sizeof(s_hostobj_demo_bindings) / sizeof(s_hostobj_demo_bindings[0])),
 };
 
 extern "C" void hostobj_demo_jube_register_static(void) {

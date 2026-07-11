@@ -55,15 +55,17 @@ static void heap_assert_raw_item_allocation(void* ptr, TypeId type_id) {
 static void gc_finalize_vmap_host_payload(VMap* vm) {
     if (!vm || !vm->host_type || !vm->host_data) return;
     const JubeTypeDef* type = jube_find_type_by_host_type(vm->host_type);
-    if (!type || !(type->flags & JUBE_TYPE_OWNING_NATIVE) ||
-            !type->host_ops || !type->host_ops->destroy) {
-        return;
-    }
+    if (!type || !(type->flags & JUBE_TYPE_OWNING_NATIVE)) return;
+    // DOM3 declared-interface types carry no host_ops; their finalizer lives on
+    // the typedef itself, so fall back to JubeTypeDef.destroy.
+    void (*destroy)(void*) = (type->host_ops && type->host_ops->destroy)
+        ? type->host_ops->destroy : type->destroy;
+    if (!destroy) return;
     void* native = vm->host_data;
     // owning host VMAPs store native payload beside the backing map, so GC must
     // finalize host_data before freeing the backing store or the payload leaks.
     vm->host_data = NULL;
-    type->host_ops->destroy(native);
+    destroy(native);
 }
 
 static void gc_destroy_vmap_object(void* obj, void* data) {

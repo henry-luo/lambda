@@ -1,6 +1,6 @@
 # Lambda Jube DOM — Stage 3 (DOM3): Table-Driven Property Dispatch — Review and Proposal
 
-> **Status**: Proposal refreshed; DOM3 implementation not started.
+> **Status**: Phase 0 implemented and green (2026-07-11); Phases 1+ not started.
 > **Parent design**: [Lambda_Desing_Native_Module.md](./Lambda_Desing_Native_Module.md) — Jube modules, signatures in Lambda type syntax, VMap projections.
 > **Predecessors**: [Lambda_Jube_DOM.md](./Lambda_Jube_DOM.md) (DOM1: carrier switch to branded VMaps),
 > [Lambda_Jube_DOM2.md](./Lambda_Jube_DOM2.md) (DOM2: generic host-object protocol, real host API,
@@ -25,9 +25,14 @@
 -  **Phase 0 ABI direction cleaned up.** The plan now uses an additive `JubeModuleDef`
   extension guarded by `struct_size`; it no longer proposes a `JubeTypeDef` stride change or
   `JUBE_ABI_VERSION` bump.
-- **Not started:** `interface_decl`, `JubeMemberBind`, `JubeTypeBinding`, registration-time
-  interface parsing/cross-checking, per-type property indexes, generic reflected-member
-  dispatch, and `hostobj_demo` conversion to declared interface + binding table.
+- **Phase 0 implemented (2026-07-11):** `interface_decl` + `JubeMemberBind`/`JubeTypeBinding`
+  on the `JubeModuleDef` additive tail; registration-time interface parsing (real Lambda
+  grammar) with binding cross-checks; per-type content-hashed dual-keyed property indexes;
+  generic record dispatch wired ahead of host_ops in js_runtime/js_globals/vmap;
+  `hostobj_demo` converted (`host_ops = NULL`) with its golden matching byte-for-byte. Full
+  gates recorded in the Phase 0 progress log below. **Not started:** Phases 1+ (range/
+  selection, CSSOM, style hosts, element/document, Lambda projection convergence), the
+  `reflect_attr` generic routine, `applies_to` tag guards, `pn`-typed members.
 
 Four directional decisions are fixed as input to this proposal (not open questions):
 
@@ -493,6 +498,52 @@ recorded at each phase end (the countdown meter, like DOM2's dom-hooks entry cou
 Gates: anchors; full JS gtest; `hostobj_demo` direct + gtest; startup `log_info` summary
 `JUBE_REG: type <name> members=<n> (methods=<m>, reflected=<r>, inherited=<i>)`; Lambda
 baseline (registration machinery touched).
+
+Progress (2026-07-11): **Phase 0 complete.**
+
+- ABI: `jube.h` gained `JubeMemberBind` / `JubeTypeBinding` and the `JubeModuleDef` additive
+  tail (`interface_decl`, `type_bindings`, `type_binding_count`) guarded by
+  `JUBE_MODULE_DEF_V1_SIZE`; the registry check relaxed to the v1 prefix with size-gated
+  accessors (`jube_module_interface_decl` / `jube_module_type_bindings`). `JubeTypeDef` and
+  `JUBE_ABI_VERSION` are unchanged.
+- New `lambda/jube/jube_interface.cpp|.h`: parses `interface_decl` with the real Lambda
+  grammar (Tree-sitter `lambda_parse_source`; object types live under `document > content`,
+  found by recursive walk), flattens single inheritance, cross-checks declarations against
+  bindings (declared-but-unbound and bound-but-undeclared fail registration loudly), and
+  compiles per-type member records with a content-hashed dual-keyed (snake+camel, `js_name`
+  override honored) `lib/hashmap` index. Methods are declared as **fn-typed fields**
+  (`bump: fn(delta: int) int`) — existing grammar, no body-less `fn_stam` ambiguity; arity and
+  `^` can-raise come from the parsed `fn_type`. Constants = default literal + no binding.
+- Generic dispatch: `jube_member_get/set/call/has/delete/descriptor/own_keys/prototype`
+  consult compiled records ahead of `host_ops` in `js_runtime.cpp`, `js_globals.cpp`, and the
+  vmap host path (get/set/keys). Expandos are generic now: a JS object in the wrapper's own
+  lazy VMap backing store under a reserved key (GC-marked via backing traversal, no rooting;
+  raw `vmap_backing_get/set` accessors bypass host routing to avoid recursion). Method-name
+  property reads return one cached, GC-rooted, named function object per member — the record
+  pointer rides the `JsFunction` closure env (the established JsProxyData pattern) into one of
+  nine per-arity trampolines; `js_get_this()` recovers the receiver. Per-type prototype objects
+  are lazily created and shared with module constructors via `jube_type_prototype()`
+  (instanceof identity). `gc_finalize_vmap_host_payload` falls back to `JubeTypeDef.destroy`
+  when `host_ops` is NULL. Compiled records free at process exit via `jube_interface_cleanup()`
+  in the pre-memtrack cleanup hook (zero-leak gate stays honest).
+- **Proof: `hostobj_demo` now has `host_ops = NULL`** — a 4-line interface declaration plus a
+  3-row binding table; its hand-written ops (get/set/call/has/delete/descriptor/keys/
+  prototype/invalidate, ~160 lines) are deleted. `test/js/hostobj_demo.js` output matches its
+  golden byte-for-byte, including expandos, `Object.keys` order, descriptor flags
+  (`true,false,true`), `instanceof`, delete semantics, release-then-read undefined, and
+  explicit-release + GC destroy-count stability.
+- Verified gates: `make build` (0 errors); direct `hostobj_demo.js` golden match with
+  memtrack-clean shutdown; full JS gtest **309/309**; focused lambda gtest
+  (`*radiant*:*hostobj*`) 6/6; direct `radiant_poc` (`"ok"`) / `radiant_poc_uaf` (`null`) /
+  `hostobj_demo_jube_import` (`{answer: 42, sum: 12}`) / `radiant_dom_read`;
+  `make test-lambda-baseline` exit 0; startup summary
+  `JUBE_REG: type hostobj_demo.hostobj_demo members=3 (methods=1, consts=0, inherited=0)`.
+- Deferred within Phase 0 scope, carried to Phase 1: `pn`-typed members in the type grammar
+  (fn-typed fields cover Phase 0; purity split for mutating methods lands with range/
+  selection), interned tag guards for `applies_to` (no tag-gated members exist yet), the
+  generic `reflect_attr` routine (no reflected members yet), and the O(1) typedef membership
+  set (record lookup is a ≤64-entry scan until radiant types convert and the hot path moves
+  onto records).
 
 ### Phase 1 — Range + Selection (best first target)
 

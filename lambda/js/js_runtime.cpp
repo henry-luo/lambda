@@ -11,6 +11,7 @@
 #include "js_exec_profile.h"
 #include "js_permission.h"
 #include "../jube/jube_registry.h"
+#include "../jube/jube_interface.h"
 #include "../../lib/lambda_typed.hpp"
 #include "../../lib/gc/gc_heap.h"
 #include "../../lib/lambda_alloca.h"
@@ -92,12 +93,15 @@ static const JubeTypeDef* js_host_object_type(Item object) {
 }
 
 static bool js_host_object_get_property(Item object, Item key, Item* out) {
+    // DOM3: declared-interface types dispatch through compiled member records
+    if (jube_member_get(object, key, out)) return true;
     const JubeTypeDef* type = js_host_object_type(object);
     return type && type->host_ops && type->host_ops->get_property &&
         type->host_ops->get_property(object, key, out);
 }
 
 static bool js_host_object_set_property(Item object, Item key, Item value, Item* out) {
+    if (jube_member_set(object, key, value, out)) return true;
     const JubeTypeDef* type = js_host_object_type(object);
     return type && type->host_ops && type->host_ops->set_property &&
         type->host_ops->set_property(object, key, value, out);
@@ -108,12 +112,14 @@ static bool js_host_object_call_method(Item object,
                                        Item* args,
                                        int argc,
                                        Item* out) {
+    if (jube_member_call(object, method_name, args, argc, out)) return true;
     const JubeTypeDef* type = js_host_object_type(object);
     return type && type->host_ops && type->host_ops->call_method &&
         type->host_ops->call_method(object, method_name, args, argc, out);
 }
 
 static bool js_host_object_prototype(Item object, Item* out) {
+    if (jube_member_prototype(object, out)) return true;
     const JubeTypeDef* type = js_host_object_type(object);
     if (!type || !type->host_ops || !type->host_ops->prototype || !out) return false;
     *out = type->host_ops->prototype(object);

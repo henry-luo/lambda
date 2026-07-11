@@ -11,6 +11,7 @@
 #include "../lib/gc/gc_heap.h"
 #include "../lib/log.h"
 #include "jube/jube_registry.h"
+#include "jube/jube_interface.h"
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
@@ -107,6 +108,9 @@ static bool host_item_is_absent(Item item) {
 }
 
 static bool vmap_host_get_by_item(VMap* vm, Item key, Item* out) {
+    // DOM3: declared-interface types resolve through compiled member records
+    // (dual-keyed snake/camel index), ahead of any hand-written host ops.
+    if (out && jube_member_get((Item){.vmap = vm}, key, out)) return true;
     const JubeHostObjectOps* ops = vmap_host_ops(vm);
     if (!ops || !ops->get_property || !out) return false;
 
@@ -148,6 +152,7 @@ static bool vmap_host_set_attribute(VMap* vm, Item key, Item value, Item* out) {
 }
 
 static bool vmap_host_set_by_item(VMap* vm, Item key, Item value, Item* out) {
+    if (out && jube_member_set((Item){.vmap = vm}, key, value, out)) return true;
     const JubeHostObjectOps* ops = vmap_host_ops(vm);
     if (!ops || !ops->set_property || !out) return false;
 
@@ -401,6 +406,20 @@ static bool vmap_ensure_hashmap_data(VMap* vm) {
     return vm->data != nullptr;
 }
 
+// DOM3 raw backing-store access: bypasses host-object routing so the generic
+// expando store (jube_interface.cpp) cannot recurse back into member dispatch.
+extern "C" Item vmap_backing_get(VMap* vm, Item key) {
+    if (!vm || !vm->data || !vm->vtable) return ItemNull;
+    return vm->vtable->get(vm->data, key);
+}
+
+extern "C" bool vmap_backing_set(VMap* vm, Item key, Item value) {
+    if (!vm || !vm->vtable) return false;
+    if (!vmap_ensure_hashmap_data(vm)) return false;
+    vm->vtable->set(vm->data, key, value);
+    return true;
+}
+
 // create an empty VMap
 extern "C" Item vmap_new() {
     log_debug("vmap_new: creating empty VMap");
@@ -509,11 +528,13 @@ Item vmap_get_by_item(VMap* vm, Item key) {
 SymbolKeyList* vmap_keys_for_item(Item vmap_item) {
     if (get_type_id(vmap_item) != LMD_TYPE_VMAP || !vmap_item.vmap) return nullptr;
     VMap* vm = vmap_item.vmap;
-    const JubeHostObjectOps* ops = vmap_host_ops(vm);
-    if (!ops || !ops->own_property_keys) return nullptr;
 
     Item result = ItemNull;
-    if (!ops->own_property_keys(vmap_item, &result)) return nullptr;
+    if (!jube_member_own_keys(vmap_item, &result)) {
+        const JubeHostObjectOps* ops = vmap_host_ops(vm);
+        if (!ops || !ops->own_property_keys) return nullptr;
+        if (!ops->own_property_keys(vmap_item, &result)) return nullptr;
+    }
     if (get_type_id(result) != LMD_TYPE_ARRAY || !result.array) return nullptr;
 
     List* list = result.array;

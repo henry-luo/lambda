@@ -24,6 +24,7 @@
 #include "../lambda.hpp"
 #include "../transpiler.hpp"
 #include "../jube/jube_registry.h"
+#include "../jube/jube_interface.h"
 #include "../../lib/base64.h"
 #include "../../lib/escape.h"
 #include "../../lib/utf.h"
@@ -51,6 +52,8 @@ static const JubeTypeDef* js_host_object_type(Item object) {
 }
 
 static bool js_host_object_has_property(Item object, Item key, Item* out) {
+    // DOM3: declared-interface types dispatch through compiled member records
+    if (jube_member_has(object, key, out)) return true;
     const JubeTypeDef* type = js_host_object_type(object);
     return type && type->host_ops && type->host_ops->has_property &&
         type->host_ops->has_property(object, key, out);
@@ -74,24 +77,28 @@ static void js_install_jube_global_namespaces(Item global) {
 }
 
 static bool js_host_object_delete_property(Item object, Item key, Item* out) {
+    if (jube_member_delete(object, key, out)) return true;
     const JubeTypeDef* type = js_host_object_type(object);
     return type && type->host_ops && type->host_ops->delete_property &&
         type->host_ops->delete_property(object, key, out);
 }
 
 static bool js_host_object_own_property_names(Item object, Item* out) {
+    if (jube_member_own_keys(object, out)) return true;
     const JubeTypeDef* type = js_host_object_type(object);
     return type && type->host_ops && type->host_ops->own_property_keys &&
         type->host_ops->own_property_keys(object, out);
 }
 
 static bool js_host_object_own_property_descriptor(Item object, Item key, Item* out) {
+    if (jube_member_descriptor(object, key, out)) return true;
     const JubeTypeDef* type = js_host_object_type(object);
     return type && type->host_ops && type->host_ops->get_own_property_descriptor &&
         type->host_ops->get_own_property_descriptor(object, key, out);
 }
 
 static bool js_host_object_prototype(Item object, Item* out) {
+    if (jube_member_prototype(object, out)) return true;
     const JubeTypeDef* type = js_host_object_type(object);
     if (!type || !type->host_ops || !type->host_ops->prototype || !out) return false;
     *out = type->host_ops->prototype(object);

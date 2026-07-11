@@ -6,6 +6,7 @@
 #include "../lib/mem_context.h"
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
+#include "jube/jube_interface.h"
 #include "../lib/strbuf.h"  // For string buffer
 #include "../lib/str.h"     // For str_to_int64_default, str_to_double_default
 #include "../lib/arena.h"   // For arena allocator
@@ -355,6 +356,8 @@ static void lambda_main_pre_memtrack_cleanup_once(void) {
     // Tagged-template cache entries are tracked allocations; freeing them from
     // a late atexit hook runs after memtrack shutdown and becomes a raw bad free.
     js_reset_template_registry();
+    // Jube compiled interface records are registry-lifetime tracked allocations.
+    jube_interface_cleanup();
 }
 
 static size_t lambda_main_memtrack_shutdown_once(void) {
