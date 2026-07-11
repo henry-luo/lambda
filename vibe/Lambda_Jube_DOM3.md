@@ -1,6 +1,6 @@
 # Lambda Jube DOM — Stage 3 (DOM3): Table-Driven Property Dispatch — Review and Proposal
 
-> **Status**: Proposal (not started).
+> **Status**: Proposal refreshed; DOM3 implementation not started.
 > **Parent design**: [Lambda_Desing_Native_Module.md](./Lambda_Desing_Native_Module.md) — Jube modules, signatures in Lambda type syntax, VMap projections.
 > **Predecessors**: [Lambda_Jube_DOM.md](./Lambda_Jube_DOM.md) (DOM1: carrier switch to branded VMaps),
 > [Lambda_Jube_DOM2.md](./Lambda_Jube_DOM2.md) (DOM2: generic host-object protocol, real host API,
@@ -8,6 +8,26 @@
 > **Downstream consumer**: [Lambda_Design_DOM_Pkg.md](./Lambda_Design_DOM_Pkg.md) — its L4 adapter is
 > "generic machinery (route getter X of prototype Y to Lambda function F), not per-API C+ code."
 > The property tables proposed here **are** that machinery.
+
+## Progress snapshot (2026-07-11)
+
+- **Review cleanup complete**. The DOM3 review has been refreshed around the current live
+  code shape: `JubeTypeDef` stays frozen, the authored IDL surface is now the module-level
+  Lambda interface declaration, and the C side is narrowed to binding tables.
+- **DOM2/Jube prerequisites verified in code.** `lambda/jube/jube.h` already has ABI v1
+  `JubeModuleDef.struct_size`, `JubeTypeDef.host_ops`, `JubeFuncDef.signature`, and the host API
+  surfaces DOM3 builds on; `lambda/module/radiant/radiant_module.cpp` registers the static
+  `radiant` module with `dom_node`/Range/Selection/CSSOM/document host types and top-level
+  `JubeFuncDef` functions.
+-  **Current signature gap documented.** `build_ast.cpp` still parses `JubeFuncDef.signature`
+  with positional string scanning and hardcodes `can_raise = false`; DOM3 Phase 0 keeps the
+  parser upgrade as an explicit task instead of pretending it is done.
+-  **Phase 0 ABI direction cleaned up.** The plan now uses an additive `JubeModuleDef`
+  extension guarded by `struct_size`; it no longer proposes a `JubeTypeDef` stride change or
+  `JUBE_ABI_VERSION` bump.
+- **Not started:** `interface_decl`, `JubeMemberBind`, `JubeTypeBinding`, registration-time
+  interface parsing/cross-checking, per-type property indexes, generic reflected-member
+  dispatch, and `hostobj_demo` conversion to declared interface + binding table.
 
 Four directional decisions are fixed as input to this proposal (not open questions):
 
@@ -165,8 +185,9 @@ not an engine change.
 
 ### 2.1 Goal
 
-1. **One fact base per type**: a `JubePropDef` table declaring every regular property, method,
-   and constant, with Lambda-type-syntax signatures (kills F1, F4, F5).
+1. **One fact base per type**: a module-level interface declaration in Lambda object-type
+   syntax, plus a C binding table, declaring every regular property, method, and constant
+   (kills F1, F4, F5).
 2. **O(1) name resolution**: a per-type name index built at registration — content-hashed,
    dual-keyed camelCase + snake_case (kills F2, F3; deletes the per-access snake↔camel
    transforms from `vmap.cpp`).
@@ -189,112 +210,137 @@ maps; no dispatch to fix); inline caches (enabled by this design, not included);
 form (D0b); dataset (`js_dataset_get_property` is already zero-strcmp algorithmic conversion —
 it becomes a named-hook, unchanged).
 
-### 2.2 `JubePropDef` — the property descriptor
+### 2.2 The module interface declaration — Lambda object types as the IDL level (D0c)
 
-```c
-typedef enum JubePropKind {
-    JUBE_PROP_ACCESSOR = 0,   // get/set handler functions
-    JUBE_PROP_METHOD,         // call handler; signature begins with fn/pn
-    JUBE_PROP_CONST_INT,      // spec constant (Node.ELEMENT_NODE, Range.START_TO_START)
-    JUBE_PROP_REFLECT_BOOL,   // attribute-reflected; no handler needed
-    JUBE_PROP_REFLECT_INT,    //   aux.attr = attribute name, aux2 = default
-    JUBE_PROP_REFLECT_STRING,
-    JUBE_PROP_ALIAS,          // aux.alias_of = canonical entry name
-} JubePropKind;
+The whole-module interface is **one Lambda-syntax text**: a sequence of `type` object
+declarations plus top-level `fn`/`pn` signatures — a Lambda header file. The grammar already
+exists: `object_type` (grammar.js:1130; doc/Lambda_Type.md §Object Types) gives nominally-typed
+maps with fields, a `;`-separated methods section, single inheritance, and default values.
 
-typedef enum JubePropFlags {
-    JUBE_PROP_READONLY       = 1u << 0,   // set attempts fall through (expando), like today
-    JUBE_PROP_NON_ENUMERABLE = 1u << 1,   // excluded from own_property_keys
-    JUBE_PROP_LAMBDA_HIDDEN  = 1u << 2,   // JS-only; not projected to Lambda field access
-    JUBE_PROP_JS_HIDDEN      = 1u << 3,   // Lambda-only projection (rare)
-} JubePropFlags;
+```lambda
+// radiant module interface (excerpt) — pure existing Lambda type syntax
+type dom_node {
+    node_name: string,
+    node_type: int,
+    parent_node: dom_node?,
+    text_content: string,
+    ELEMENT_NODE: int = 1;               // spec constant: default literal + no setter binding
+    fn contains(other: dom_node) -> bool
+    pn remove_child(child: dom_node) -> dom_node^
+}
 
-typedef struct JubePropDef {
-    const char* name;        // canonical WebIDL camelCase; snake_case derived at registration
-    const char* signature;   // Lambda type syntax (see §2.3)
-    uint16_t kind;           // JubePropKind
-    uint16_t flags;          // JubePropFlags
-    const char* applies_to;  // NULL = all receivers of the type; else lowercase tag list,
-                             //   e.g. "input select textarea" (interned at registration)
-    int (*guard)(Item receiver);                    // optional extra predicate (e.g.
-                                                    //   text-control check); NULL = none
-    int (*get)(Item receiver, Item* out);           // ACCESSOR
-    int (*set)(Item receiver, Item value, Item* out);
-    int (*call)(Item receiver, Item* args, int argc, Item* out);   // METHOD
-    union {
-        int64_t     ival;      // CONST_INT value; REFLECT_INT default
-        const char* attr;      // REFLECT_*: attribute name (NULL ⇒ lowercase of name)
-        const char* alias_of;  // ALIAS target
-    } aux;
-} JubePropDef;
+type element : dom_node {                // inheritance: node basics declared once
+    tag_name: string,
+    id: string,
+    value: string;                       // tag-guarded behavior lives in bindings (§2.3)
+    fn matches(selectors: string) -> bool
+    pn set_attribute(name: string, value: string)
+}
+
+type document : dom_node { ...; fn query_selector(sel: string) -> element? }
+
+pn load(path: string) -> document^      // top-level module functions (today's JubeFuncDef)
 ```
 
-Handlers return status ints and use the pending-exception model, matching `JubeHostObjectOps` —
-no unwinding across the boundary. Same-name entries with different `applies_to`/`guard` are
-legal; **declaration order is resolution order** (first matching guard wins), which preserves
-today's ordering-dependent overloads (`<select>.remove(index)` before `ChildNode.remove()`,
-js_dom.cpp:12550) as visible data instead of implicit chain order.
+Conventions, all derived rather than invented:
 
-`JubeTypeDef` grows the table plus the catch-all hooks (§2.4):
+- **Method vs property**: declared with `fn`/`pn` vs declared as a field. The fn/pn purity
+  split stays part of the interface (mutating methods are `pn`), `->T^` marks can-raise.
+- **Writability = "a setter is bound"** (§2.3). No readonly syntax is invented; a field with no
+  `set` binding is readonly, exactly like today's fall-through-to-expando behavior.
+- **Constants** are fields with default literals and no bindings — existing grammar
+  (`START_TO_START: int = 0`).
+- **Inheritance** (`element : dom_node`) flattens at registration into the per-type index, so
+  the node/element/document surfaces are declared once each — the hand-list duplication class
+  (F1) cannot re-form even inside the declaration.
+- **Names are snake_case** (Lambda convention is canonical in the interface); the JS camelCase
+  spelling is derived at registration. Derivation is not bijective for acronyms
+  (`inner_html` → `innerHtml`, not `innerHTML`), so bindings carry an optional `js_name`
+  override for the ~dozen irregulars (`innerHTML`, `outerHTML`, `namespaceURI`, `baseURI`, …).
+
+**One grammar accommodation to decide in Phase 0**: interface methods are declaration-only
+(no body), while `fn_stam` in script context expects one. Either the object-type methods
+section learns an optional-body form (also useful for future `.li` interface files), or the
+registry's parse context accepts the body-less form specially. Parsing goes through the real
+Lambda type parser (finishing the upgrade DOM2 Phase 4 deferred — F8); the parsed form is
+cached in the registry, and a binary pre-parsed blob remains future fine-tuning (D0b).
+
+The interface text is also the human-readable module manifest: `lambda module info radiant`
+prints a real API listing — types, properties, methods, purity, error tiers — for free.
+
+### 2.3 Binding tables — the C side shrinks to name → handler pointers
+
+`JubeTypeDef` is **unchanged** (D0c). `JubeModuleDef` gains three fields, appended under its
+existing `struct_size` gate (the registry's check becomes `struct_size >= V1_SIZE` with
+new-field access gated on the module's declared size — additive, no stride hazard, because
+`JubeModuleDef` is always passed by pointer, never embedded in arrays):
 
 ```c
-struct JubeTypeDef {
-    const char* name;
-    uint32_t flags;
-    const void* vmap_ops;
-    const JubeHostObjectOps* host_ops;    // now optional: NULL ⇒ fully generic dispatch (§2.5)
-    void (*destroy)(void* native);
-    // -- DOM3 additions --
-    const JubePropDef* props;
-    int32_t prop_count;
-    int (*named_get)(Item receiver, Item key, Item* out);    // open-name fallbacks; any NULL
+struct JubeModuleDef {
+    ...                                   // v1 fields exactly as today
+    const char* interface_decl;           // §2.2 Lambda interface text (NULL = none)
+    const JubeTypeBinding* type_bindings; // one per declared type
+    int32_t type_binding_count;
+};
+
+typedef struct JubeMemberBind {
+    const char* name;         // snake_case, must match a declared interface member
+    const char* js_name;      // optional camelCase override for irregulars; NULL ⇒ derived
+    const char* applies_to;   // NULL = all receivers; else lowercase tag list
+                              //   ("input select textarea"), interned at registration
+    int (*guard)(Item receiver);          // optional extra predicate (text-control check…)
+    int (*get)(Item receiver, Item* out);
+    int (*set)(Item receiver, Item value, Item* out);            // absent ⇒ readonly
+    int (*call)(Item receiver, Item* args, int argc, Item* out); // methods
+    const char* reflect_attr; // non-NULL ⇒ attribute-reflected: generic reflect routine
+                              //   handles get/set from the declared type + default; no
+                              //   handler functions needed at all
+} JubeMemberBind;
+
+typedef struct JubeTypeBinding {
+    const char* type_name;    // matches `type X {...}` in interface_decl
+    const void* host_brand;   // the JubeTypeDef* used as vmap->host_type (unchanged carrier)
+    const JubeMemberBind* members;
+    int32_t member_count;
+    // open-name catch-alls (WebIDL named/indexed getters — §2.5); any may be NULL
+    int (*named_get)(Item receiver, Item key, Item* out);
     int (*named_set)(Item receiver, Item key, Item value, Item* out);
     int (*indexed_get)(Item receiver, int64_t index, Item* out);
     int (*indexed_set)(Item receiver, int64_t index, Item value, Item* out);
-};
+} JubeTypeBinding;
 ```
 
-**ABI consequence, stated honestly**: modules embed `JubeTypeDef` in arrays, so adding fields
-changes the array stride — this is a breaking layout change, not an additive append.
-`JUBE_ABI_VERSION` bumps to **2**. This is cheap *now*: all modules are in-tree, dynamic loading
-is a dev proof only, and no external module exists. It gets expensive later; DOM3 should be the
-release that spends it (and v2 should also give `JubeTypeDef` a `struct_size`-style guard so v3+
-extensions can be additive).
+Handlers return status ints under the pending-exception model, matching `JubeHostObjectOps`.
+Same-name members with different `applies_to`/`guard` are legal; **declaration order is
+resolution order** (first matching guard wins), preserving today's ordering-dependent overloads
+(`<select>.remove(index)` before `ChildNode.remove()`, js_dom.cpp:12550) as visible data.
 
-### 2.3 Signatures: the `JubeFuncDef.signature` convention, extended to properties
+**Registration cross-checks the two halves** and fails loudly on mismatch: every declared
+member must have exactly one binding cluster (declared-but-unbound is an error, except
+constants) and every binding must match a declared member (bound-but-undeclared is an error).
+The registry then compiles interface + bindings into **internal per-type descriptor records**
+(name, parsed type, kind, flags, guards, handlers) — the property-descriptor concept survives,
+but as a *derived internal structure*, not authored ABI surface. Everything downstream (§2.4
+index, §2.5 dispatch, §2.6 prototypes, §2.7 projections) consumes those records.
 
-One string per entry, in the Lambda type language (D0a). The discriminator is the existing
-fn/pn rule:
-
-- **Method**: signature begins with `fn` or `pn` — exactly like `JubeFuncDef`:
-  `"fn (selectors: string) -> bool"` (matches), `"pn (name: string, value: string) -> null"`
-  (setAttribute — mutation ⇒ pn, consistent with the fn/pn contract in the parent design §6.2),
-  `"fn (index: int) -> dom_node^"` (getRangeAt — `^` marks can-raise).
-- **Property**: signature is just the value type: `"string"`, `"int"`, `"bool"`,
-  `"dom_node"`, `"[dom_node]"`, `"string?"`. Writability is the `JUBE_PROP_READONLY` flag, not
-  grammar — mutability is not a type in Lambda and we do not invent syntax for it (D0a).
-
-What registration derives from the parsed signature: method arity (argc validated/padded by the
-generic layer before `call`), `can_raise`, return/param types for future Lambda-side inference,
-and the printable API listing (`lambda module info radiant` can now list properties, not just
-functions). This requires finishing the parser upgrade DOM2 Phase 4 deferred (F8): route
-signature parsing through the real Lambda type parser and honor `T^`. Binary pre-compiled
-signature blobs remain future work (D0b) — the design keeps the parse strictly at registration
-time so that swap is invisible.
+This is the DOM package's shape/behavior split applied at the module boundary: **shape is
+Lambda text, behavior is a table of C pointers** — and when the DOM package later rebinds a
+member from a C+ handler to a Lambda function, only the binding side changes.
 
 ### 2.4 Name resolution: registration-time index, content-hashed, dual-keyed
 
-At `jube_register_module_descriptor` time, for each type with `props`:
+At `jube_register_module_descriptor` time, for each declared type:
 
-1. Parse every signature (once). Reject malformed entries loudly (`log_error`, registration
-   fails) — the table is the interface; it does not get to be half-valid.
+1. Parse the interface declaration (once), flatten inheritance, and cross-check bindings
+   (§2.3). Reject malformed or mismatched declarations loudly (`log_error`, registration
+   fails) — the interface does not get to be half-valid.
 2. Build the type's **property index**: a `lib/hashmap.h` table mapping name → head of the
    same-name entry chain (declaration-ordered). Entries are keyed by **content hash**
    (xxhash3/sip over bytes — the CSS property table precedent, css_properties.cpp:619), because
    incoming keys are transient strings (F2). Both spellings are inserted per entry: the declared
-   camelCase and the derived snake_case (`tagName` and `tag_name` → same descriptor). The
-   precomputed snake string is stored on the registered entry so Lambda key iteration never
-   converts case at runtime again.
+   snake_case and the derived camelCase — honoring any `js_name` override — (`tag_name` and
+   `tagName` → same descriptor record). Both precomputed strings live on the record, so neither
+   front-end ever converts case at runtime again.
 3. Intern the `applies_to` tag names via `name_pool_create_name`; a guard evaluation is then a
    ≤4-element pointer/`strcasecmp` check against the element's tag, not a fresh parse.
 
@@ -317,19 +363,19 @@ one shared resolution routine:
 
 ```
 resolve(type, receiver, key):
-    entry = prop_index_lookup(type, key)          // §2.4; guard-filtered
-    if entry: return entry                        // ACCESSOR/METHOD/CONST/REFLECT/ALIAS
-    if key is array-index and type->indexed_*:    → indexed hook
-    if type->named_*:                             → named hook (form named getter, attribute
+    entry = prop_index_lookup(type, key)          // §2.4; guard-filtered descriptor records
+    if entry: return entry                        // accessor/method/constant/reflected/alias
+    if key is array-index and binding->indexed_*: → indexed hook
+    if binding->named_*:                          → named hook (form named getter, attribute
                                                      fallback, on* handlers, dataset,
                                                      CSS property names on style/decl types)
     → expando store → prototype chain             // unchanged DOM1-pinned order
 ```
 
-- `get_property`/`set_property`/`call_method` consume the resolved entry: REFLECT kinds run a
-  shared generic reflect routine (attribute read/write + type coercion + default — one
-  implementation, ~40 chains deleted); CONST returns the value; ALIAS re-resolves; METHOD read
-  as a *property* returns the type's cached bound-function object (§2.6).
+- `get_property`/`set_property`/`call_method` consume the resolved record: reflected members
+  run a shared generic reflect routine (attribute read/write + declared-type coercion +
+  default — one implementation, ~40 chains deleted); constants return their declared default
+  literal; methods read as a *property* return the type's cached bound-function object (§2.6).
 - `has_property` = "resolves to entry or named/indexed hook says yes or expando has it" — the
   `*_is_native_property` predicate copies and the drifted CSSOM `has` chain are deleted, and
   `in` can no longer disagree with `get` (F1's bug class is structurally gone).
@@ -350,18 +396,28 @@ runs everything from the table + hooks.
 
 ### 2.6 Prototypes, methods, and feature detection
 
-- The generic layer synthesizes each type's prototype method objects from METHOD entries
-  (`js_new_function(entry, arity-from-signature)`), replacing the hand-maintained
-  `init_range_methods`/`init_selection_methods` binders and the per-element trampoline factories
-  where they exist only to bind names.
-- Reading a method name as a property returns the cached bound function. **Behavioral note**:
-  today ~80 element/document method names on the `dom_methods[]`/`doc_methods[]` lists return
-  `ITEM_TRUE` instead of a function (js_dom.cpp:10344/6499). Returning real functions is
-  spec-correct and strictly more truthful for feature detection (`typeof x.method ===
-  "function"`); both are truthy, so probe-style code keeps working. Recommendation: **align**
-  (return functions), update the affected goldens deliberately in that phase, and watch
-  `dom_jquery_lib`/`dom_v12b` closely. If a golden diff reveals real breakage, the fallback is a
-  `JUBE_PROP_FEATURE_STUB` flag preserving `ITEM_TRUE` — but only as retreat, not plan.
+- The generic layer synthesizes each type's prototype method objects from declared methods
+  (`js_new_function(handler, arity-from-signature)`), cached **one function object per method
+  per type** and GC-rooted at registration — the pattern `init_range_methods`/
+  `init_selection_methods` (js_dom_selection.cpp:912/1504) already implement by hand, now
+  generated. Handlers recover the receiver via `js_get_this()`, unchanged. Identity is
+  spec-shaped (`a.foo === b.foo`, prototype-level), and there is no per-read allocation.
+- Reading a method name as a property returns the cached function object (**D0d, decided**).
+  The evidence this is a correction, not a gamble: `ITEM_TRUE` already broke real code, and the
+  codebase has been converting names to real functions piecemeal — the trampoline block at
+  js_dom.cpp:2282 says it outright: *"Trampolines so property access to these method names
+  returns a real, callable function instead of the ITEM_TRUE feature-detection sentinel. …
+  without a callable property, optional-chaining calls (`el?.querySelector(sel)`) fall through
+  to `(true)(sel)` and throw 'is not a function'."* DOM3 finishes that conversion for the ~80
+  names still on the `dom_methods[]`/`doc_methods[]` `ITEM_TRUE` lists (js_dom.cpp:10344/6499),
+  mechanically instead of trampoline-by-trampoline. Both values are truthy, so
+  `if (el.method)` probes are unaffected; `typeof`-probes flip from the wrong answer to the
+  spec answer. Golden updates are isolated to the sub-step that lands this (Phase 4d), with
+  `dom_jquery_lib`/`dom_v12b` watched as the real-library canaries.
+- Detached-call semantics footnote: `const f = el.matches; f("div")` gets `this = undefined`;
+  spec says throw "Illegal invocation", current trampolines log an error and return null. The
+  generic layer keeps the current lenient behavior initially (one place to tighten later), so
+  D0d introduces no third behavior change.
 
 ### 2.7 Lambda projections ride the same table
 
@@ -371,8 +427,8 @@ under-enumerates (`keys` returns a curated hardcoded list). With dual-keyed inde
 - Lambda `node.tag_name` and JS `node.tagName` hit the same descriptor — one write path, two
   spellings, by construction.
 - `keys`/`for` iteration enumerates the guard-filtered enumerable entries with their precomputed
-  snake names (`JUBE_PROP_LAMBDA_HIDDEN` prunes JS-isms like `__proto__`-adjacent surface from
-  Lambda's view where wanted).
+  snake names (a per-binding visibility flag can prune JS-isms from Lambda's view where
+  wanted).
 - `set` from Lambda stays pn-scoped (vmap vtable contract) and routes through the same entry —
   the mutation-notify path cannot diverge between front-ends.
 - The `setAttribute`-in-generic-code hack and both case transforms disappear from `vmap.cpp`;
@@ -395,12 +451,12 @@ under-enumerates (`keys` returns a curated hardcoded list). With dual-keyed inde
 
 | Finding | Remedy | Where |
 |---|---|---|
-| F1 four hand-synced copies per name list | one `JubePropDef` table per type; has/keys/descriptors/prototypes derived | §2.2, §2.5, §2.6 |
+| F1 four hand-synced copies per name list | one interface declaration + binding table per type; has/keys/descriptors/prototypes derived | §2.2, §2.3, §2.5, §2.6 |
 | F2 transient keys, strcmp per access | content-hashed per-type index built at registration; dual camel/snake keys | §2.4 |
 | F3 linear type scan + case transforms per access | O(1) typedef membership check; precomputed snake names; transforms deleted from vmap.cpp | §2.4, §2.7 |
 | F4 hand-built derived surfaces | generic derivation from the table | §2.5, §2.6 |
-| F5 reflection predicate chains | `JUBE_PROP_REFLECT_*` declarative rows + one generic reflect routine | §2.2, §2.5 |
-| F6 tag-dependent props | `applies_to` tag guards + declaration-ordered same-name chains | §2.2 |
+| F5 reflection predicate chains | `reflect_attr` binding column + one generic reflect routine | §2.3, §2.5 |
+| F6 tag-dependent props | `applies_to` tag guards + declaration-ordered same-name bindings | §2.3 |
 | F7 open-name catch-alls | `named_/indexed_` hooks per type; collection refresh moves inside them | §2.4, §2.5 |
 | F8 weak signature parser | real Lambda type parser + `T^`; arity/can_raise derived | §2.3 |
 
@@ -414,24 +470,29 @@ phase-specific gates; cluster-by-cluster deletion — a strcmp arm is deleted in
 that lands its table row, never bypassed. New standing gate: a per-file **strcmp budget** table
 recorded at each phase end (the countdown meter, like DOM2's dom-hooks entry count).
 
-### Phase 0 — Descriptor infrastructure + proof module
+### Phase 0 — Interface + binding infrastructure, proof module
 
-1. `JubePropDef`, `JubeTypeDef` v2 fields, `JUBE_ABI_VERSION = 2` (with `struct_size` guard for
-   future additive extension). Update both in-tree modules and the dynamic-load dev proof.
-2. Signature parsing through the real Lambda type parser incl. `T^` (finishes the DOM2 Phase-4
-   deferred item); registration-time validation, per-type content-hashed dual-keyed index,
-   interned tag guards, O(1) typedef membership check.
+1. `JubeModuleDef` additive extension (`interface_decl`, `type_bindings`) with the relaxed
+   `struct_size >= V1_SIZE` check and size-gated access to the new tail; `JubeMemberBind` /
+   `JubeTypeBinding` structs. **`JubeTypeDef` and `JUBE_ABI_VERSION` unchanged** (D0c) — v1
+   modules keep loading as-is.
+2. Interface parsing through the real Lambda type parser incl. `T^` and inheritance flattening
+   (finishes the DOM2 Phase-4 deferred parser item); settle the body-less method declaration
+   form (§2.2); registration-time interface↔binding cross-check; per-type content-hashed
+   dual-keyed index; interned tag guards; O(1) typedef membership check.
 3. Generic resolution routine (§2.5) wired into `js_host_object_*` and the vmap host path,
-   consulting the table **before** existing host_ops (types without tables see zero change).
-4. Generic reflect routine; prototype synthesis from METHOD entries; derived
-   has/keys/descriptor paths for table-driven types.
-5. **`hostobj_demo` converts to a property table** (its `value`/`label`/`bump` move from
-   hand-written ops to descriptors; `host_ops` goes NULL) — the falsifiable proof that a module
-   gets full dispatch from pure data with zero engine edits.
+   consulting the compiled records **before** existing host_ops (types without an interface
+   declaration see zero change).
+4. Generic reflect routine; prototype method-object synthesis + GC-rooted per-type cache
+   (§2.6); derived has/keys/descriptor paths for declared types.
+5. **`hostobj_demo` converts to an interface declaration** (its `value`/`label`/`bump` move
+   from hand-written ops to a declared type + a 3-row binding table; `host_ops` goes NULL) —
+   the falsifiable proof that a module gets full dispatch from declared shape plus bound
+   behavior with zero engine edits.
 
 Gates: anchors; full JS gtest; `hostobj_demo` direct + gtest; startup `log_info` summary
-`JUBE_REG: type <name> props=<n> (methods=<m>, reflected=<r>)`; Lambda baseline (ABI bump touches
-registration).
+`JUBE_REG: type <name> members=<n> (methods=<m>, reflected=<r>, inherited=<i>)`; Lambda
+baseline (registration machinery touched).
 
 ### Phase 1 — Range + Selection (best first target)
 
@@ -514,8 +575,8 @@ infra +     range/     CSSOM      style      element/doc     Lambda      perf
 demo proof  selection             hosts      clusters        convergence
 ```
 
-**DOM3 exit criteria**: every branded DOM type dispatches through a declared `JubePropDef`
-table + hooks (`host_ops` NULL or trivially thin); zero hand-maintained name lists
+**DOM3 exit criteria**: every branded DOM type dispatches through its declared interface +
+binding table + hooks (`host_ops` NULL or trivially thin); zero hand-maintained name lists
 (`*_is_native_property`, `dom_methods[]`, `doc_methods[]`, bridge own-key arrays, reflection
 predicate chains — all grep-gated to 0); strcmp in DOM dispatch reduced to data-value
 comparisons (budget table recorded); `vmap.cpp` free of DOM-specific knowledge; generic engine

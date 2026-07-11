@@ -27,20 +27,29 @@ The codebase (~590k LOC surveyed) is not uniformly duplicative — several subsy
 
 **Estimated removable duplication:** roughly 4,000–6,000 LOC of direct clones, plus large maintainability wins from table-driving the op/builtin dispatch families.
 
+### Progress update (2026-07-11)
+
+- ✅ Formatter dispatch + element attribute iteration (§3.1, §3.2) are complete: serializer dispatch now goes through shared formatter handlers, and formatter/validator attribute walks use reader iterators.
+- ✅ JS/core sharing (§6.1, §6.2, §6.3, §6.5, §6.6 partial) has landed for dtoa, base64 decode, common JS value helpers, civil-date math, JSON string escaping, and core UTF-16 pair math.
+- ✅ Input/parser cleanup has landed for the INI/Properties unified parser (§2.1), hexadecimal escape decoding (§2.3), TOML radix integer parsing (§2.6 partial), and several small parser helper migrations.
+- ✅ Lambda core cleanup has landed for transpiler analysis helpers (§1.1), numeric conversion/ArrayNum readers (§1.2, §1.3), scalar TypeId predicates (§1.5 partial), map field reconstruction (§1.4 partial), UTF normalization (§1.6), and the §1.7 small items.
+- ✅ Radiant paint/display-list utility sharing has landed for XML/SVG escaping, color parsing, grow-array helpers, matrix/rect bounds helpers, dirty-region bounds, surface-region save/restore, glyph sampling, and related §5.6 utility cleanup.
+- Still open: Radiant layout box-metric/min-max migration (§4.1, §4.2, §4.8), flex/grid alignment and percentage sharing (§4.4-§4.6), display-list replay/tile replay consolidation (§5.1-§5.2), broader shared scanned-number parsing (§2.6), and shared MIR emitter infrastructure (§6.4).
+
 ### Top 10 highest-leverage actions
 
 | # | Action | Area | ~LOC | Effort | Risk |
 |---|--------|------|------|--------|------|
-| 1 | Extract `lib/dtoa` from `lambda_double_to_shortest` ≡ `js_double_to_string` | JS↔core | 135 | Low | Low |
-| 2 | Resolve INI/Properties triple implementation (wire `input-kv.cpp`, delete `input-ini`/`input-prop`) | input | 480 | Med | Med |
+| 1 | ✅ Extract `lib/dtoa` from `lambda_double_to_shortest` ≡ `js_double_to_string` | JS↔core | 135 | Low | Low |
+| 2 | ✅ Resolve INI/Properties triple implementation (wire `input-kv.cpp`, delete `input-ini`/`input-prop`) | input | 480 | Med | Med |
 | 3 | Migrate radiant layout to existing `layout_box_metrics`/`layout_apply_min_max_*` helpers | radiant | 450–750 | Med | Low |
 | 4 | De-clone `dl_replay_tile` vs `dl_replay` + shared glyph raster | radiant | 530 | High | Med |
-| 5 | Kill the 22×/21×/8× static helper copies in lambda/js | JS | 270 | Trivial | Low |
+| 5 | ✅ Kill the 22×/21×/8× static helper copies in lambda/js | JS | 270 | Trivial | Low |
 | 6 | `MirEmitter` base shared by `transpile-mir.cpp` and `js_mir_*` | JS↔core | 300–500 | Med-High | Med |
-| 7 | Shared formatter dispatch visitor + `ElementReader` attribute iterator | format | 290 | Med | Med |
-| 8 | Unify quoted-string + `\uXXXX` escape parsing on `parse_shared_quoted_string` | input | 450 | Med | Med |
-| 9 | Move 5 duplicated analysis helpers into `transpile_shared.cpp` | core | 120 | Low | Low |
-| 10 | Replace 3 hand-rolled base64 decode tables with `base64_decode_variant` | JS | 90 | Low | Low |
+| 7 | ✅ Shared formatter dispatch visitor + `ElementReader` attribute iterator | format | 290 | Med | Med |
+| 8 | ✅ Partial: unify `\uXXXX`/surrogate escape handling; broader quoted-string policy remains open | input | 450 | Med | Med |
+| 9 | ✅ Move 5 duplicated analysis helpers into `transpile_shared.cpp` | core | 120 | Low | Low |
+| 10 | ✅ Replace 3 hand-rolled base64 decode tables with `base64_decode_variant` | JS | 90 | Low | Low |
 
 ---
 

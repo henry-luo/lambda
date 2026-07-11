@@ -4,8 +4,7 @@
 #include "../../lib/stringbuf.h"
 #include "../../lib/log.h"
 
-// Common number formatting function
-void format_number(StringBuf* sb, Item item) {
+static void format_number_impl(StringBuf* sb, Item item, bool compact_float) {
     TypeId type = get_type_id(item);
 
     if (type == LMD_TYPE_INT) {
@@ -27,7 +26,10 @@ void format_number(StringBuf* sb, Item item) {
         // ItemReader can pass inline floats; get_double() handles both inline and heap encodings.
         if (!isnan(d) && !isinf(d)) {
             char num_buf[32];
-            lambda_double_to_shortest(d, num_buf, sizeof(num_buf));
+            // XML/SVG golden output historically uses concise numeric attributes;
+            // keep round-trip dtoa for data formats and %.6g for markup geometry.
+            if (compact_float) snprintf(num_buf, sizeof(num_buf), "%.6g", d);
+            else lambda_double_to_shortest(d, num_buf, sizeof(num_buf));
             stringbuf_append_str(sb, num_buf);
         } else {
             stringbuf_append_str(sb, "null");
@@ -41,7 +43,8 @@ void format_number(StringBuf* sb, Item item) {
             if (isnan(d) || isinf(d)) {
                 stringbuf_append_str(sb, "null");
             } else {
-                lambda_double_to_shortest(d, num_buf, sizeof(num_buf));
+                if (compact_float) snprintf(num_buf, sizeof(num_buf), "%.6g", d);
+                else lambda_double_to_shortest(d, num_buf, sizeof(num_buf));
                 stringbuf_append_str(sb, num_buf);
             }
         } else {
@@ -52,6 +55,15 @@ void format_number(StringBuf* sb, Item item) {
         // fallback for unknown numeric types
         stringbuf_append_str(sb, "0");
     }
+}
+
+// Common number formatting function
+void format_number(StringBuf* sb, Item item) {
+    format_number_impl(sb, item, false);
+}
+
+void format_number_compact(StringBuf* sb, Item item) {
+    format_number_impl(sb, item, true);
 }
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool) {

@@ -100,6 +100,11 @@ void format_markup_string_safe(StringBuf* sb, String* str, bool is_attribute,
                                bool escape_apostrophe_in_text,
                                bool escape_apostrophe_in_attr,
                                const char* log_prefix);
+void format_markup_string_safe_ex(StringBuf* sb, String* str, bool is_attribute,
+                                  bool escape_apostrophe_in_text,
+                                  bool escape_apostrophe_in_attr,
+                                  const char* log_prefix,
+                                  bool escape_non_ascii_bytes);
 void format_html_string_safe(StringBuf* sb, String* str, bool is_attribute);
 
 // ==============================================================================

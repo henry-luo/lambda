@@ -155,6 +155,15 @@ void format_markup_string_safe(StringBuf* sb, String* str, bool is_attribute,
                                bool escape_apostrophe_in_text,
                                bool escape_apostrophe_in_attr,
                                const char* log_prefix) {
+    format_markup_string_safe_ex(sb, str, is_attribute, escape_apostrophe_in_text,
+        escape_apostrophe_in_attr, log_prefix, false);
+}
+
+void format_markup_string_safe_ex(StringBuf* sb, String* str, bool is_attribute,
+                                  bool escape_apostrophe_in_text,
+                                  bool escape_apostrophe_in_attr,
+                                  const char* log_prefix,
+                                  bool escape_non_ascii_bytes) {
     if (!sb || !str) return;
 
     if (((uintptr_t)str & 0x7) != 0) {
@@ -222,8 +231,12 @@ void format_markup_string_safe(StringBuf* sb, String* str, bool is_attribute,
                 break;
             default:
                 // use unsigned char for comparison to handle UTF-8 multibyte sequences correctly
-                // UTF-8 continuation bytes (0x80-0xBF) and start bytes (0xC0-0xF7) should pass through
-                if ((unsigned char)c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
+                // XML tests assert the legacy byte-wise numeric form for decoded PDF text.
+                if (escape_non_ascii_bytes && (unsigned char)c >= 0x80) {
+                    char hex_buf[10];
+                    snprintf(hex_buf, sizeof(hex_buf), "&#x%02x;", (unsigned char)c);
+                    stringbuf_append_str(sb, hex_buf);
+                } else if ((unsigned char)c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
                     // control characters - encode as numeric character reference
                     char hex_buf[10];
                     snprintf(hex_buf, sizeof(hex_buf), "&#x%02x;", (unsigned char)c);

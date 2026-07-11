@@ -13,6 +13,7 @@
 
 // Common function declarations
 void format_number(StringBuf* sb, Item item);
+void format_number_compact(StringBuf* sb, Item item);
 
 // Format function declarations — all return String* (canonical public API)
 String* format_json(Pool* pool, const Item root_item);

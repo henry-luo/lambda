@@ -10,9 +10,9 @@
   replace_last: "a,b+c",
   replace_zero: "a,b,c",
   find_last: [{
-        value: ",",
-        index: 3
-      }],
+      value: ",",
+      index: 3
+    }],
   map_key_last: 3,
   take_negative_is_error: true,
   drop_negative_is_error: true

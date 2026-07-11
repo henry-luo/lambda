@@ -12,7 +12,7 @@ void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 static void format_item_reader(XmlContext& ctx, const ItemReader& item, const char* tag_name);
 
 static void format_xml_string(XmlContext& ctx, String* str, bool is_attribute = false) {
-    format_markup_string_safe(ctx.output(), str, is_attribute, true, true, "xml");
+    format_markup_string_safe_ex(ctx.output(), str, is_attribute, true, true, "xml", true);
 }
 
 static void xml_emit_attr_value(XmlContext& ctx, const ItemReader& value) {
@@ -22,7 +22,7 @@ static void xml_emit_attr_value(XmlContext& ctx, const ItemReader& value) {
             format_xml_string(ctx, str, true);
         }
     } else if (value.isInt() || value.isFloat()) {
-        format_number(ctx.output(), value.item());
+        format_number_compact(ctx.output(), value.item());
     } else if (value.isBool()) {
         ctx.emit("%b", value.asBool());
     }
@@ -98,7 +98,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
         }
         void number_value(const ItemReader& item) override {
             ctx_.emit("<%N>", tag_name_);
-            format_number(ctx_.output(), item.item());
+            format_number_compact(ctx_.output(), item.item());
             ctx_.emit("</%N>", tag_name_);
         }
         void string_value(const ItemReader& item, String* str) override {
