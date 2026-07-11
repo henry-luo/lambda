@@ -372,7 +372,7 @@ TEST_F(MarkBuilderTest, NameSymbolStringSeparation) {
 //==============================================================================
 
 // Test null/empty string handling
-// Empty strings and null inputs now map to null Item (not EMPTY_STRING)
+// Null inputs map to null; empty strings are preserved as real string values.
 TEST_F(MarkBuilderTest, NullAndEmptyStrings) {
     MarkBuilder builder(input);
 
@@ -380,20 +380,28 @@ TEST_F(MarkBuilderTest, NullAndEmptyStrings) {
     Item null_str = builder.createStringItem(nullptr);
     EXPECT_EQ(get_type_id(null_str), LMD_TYPE_NULL);
 
-    // Empty string ("") should also return null Item
+    // Empty string ("") should return a zero-length string
     Item empty_str = builder.createStringItem("");
-    EXPECT_EQ(get_type_id(empty_str), LMD_TYPE_NULL);
+    EXPECT_EQ(get_type_id(empty_str), LMD_TYPE_STRING);
+    String* empty_s = empty_str.get_string();
+    ASSERT_NE(empty_s, nullptr);
+    EXPECT_EQ(empty_s->len, 0U);
+    EXPECT_STREQ(empty_s->chars, "");
 
-    // Zero-length string should also return null Item
+    // Zero-length explicit length should also return a zero-length string
     Item zero_len = builder.createStringItem("test", 0);
-    EXPECT_EQ(get_type_id(zero_len), LMD_TYPE_NULL);
+    EXPECT_EQ(get_type_id(zero_len), LMD_TYPE_STRING);
+    String* zero_s = zero_len.get_string();
+    ASSERT_NE(zero_s, nullptr);
+    EXPECT_EQ(zero_s->len, 0U);
+    EXPECT_STREQ(zero_s->chars, "");
     
     // Non-empty string should return a proper string
     Item normal_str = builder.createStringItem("hello");
     EXPECT_EQ(get_type_id(normal_str), LMD_TYPE_STRING);
     String* str = normal_str.get_string();
     ASSERT_NE(str, nullptr);
-    EXPECT_EQ(str->len, 5);
+    EXPECT_EQ(str->len, 5U);
     EXPECT_STREQ(str->chars, "hello");
 }
 

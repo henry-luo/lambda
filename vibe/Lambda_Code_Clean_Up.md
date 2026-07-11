@@ -82,7 +82,7 @@ Five `normalize_utf8proc_nfc/nfd/casefold/nfkc/nfkd` (`utf_string.cpp:17–84, 2
 - **`shape_pool.cpp` hand-rolls hashmap glue** (`shape_signature_hash`/`compare`, raw 8-arg `hashmap_new`, :21–47, 99–107) while `name_pool.cpp:18` uses `HASHMAP_DEFINE_LENSTRKEY` cleanly — C1, low effort.
 - **Refcount + mem_node + release-hook lifecycle duplicated** between `name_pool.cpp` (63–94) and `shape_pool.cpp` (118–144) — C4; extract a shared `RefCountedPool` base (candidate home: `lib/mem_factory.h`). ~40 LOC.
 - **`print.cpp` number/decimal/escape formatting is inline** (189–791) rather than shared with `format-utils`/`lib/escape` — C3; coordinate with §3 (findings 3.4/3.5 there).
-- **`shape_builder.cpp` repeats the strcmp linear scan 4×** (add/remove/has/get, 29–114) — factor one `shape_builder_find()`. Low effort.
+- ✅ **`shape_builder.cpp` repeats the strcmp linear scan 4×** (add/remove/has/get, 29–114) — factor one `shape_builder_find()`. Low effort. **Implementation status (2026-07-11): done.** Added a private `shape_builder_find_field()` helper and routed add/remove/has/get through it.
 - **`emit_current_func_error_return` (`transpile.cpp:164–187`) re-hardcodes zero values** the `type_box_table.zero_value` column already defines — drive both backends from the table.
 - **Dead/unreachable duplicate branches in `lambda-eval.cpp`** — `query_collect` has consecutive identical `else if (type_id == LMD_TYPE_ARRAY)` guards at 2135/2140 and 2207/2222; the second is unreachable and one was likely meant to be `LMD_TYPE_LIST`. **Latent bug — check and fix.**
 - **`NUM_SIZED` sub-switch decode duplicated** (`lambda-data-runtime.cpp:673–685, 701–712`, `array_num_set_item` 956+) vs the `get_num_sized_as_double()` accessor path (`lambda.hpp:213`) — standardize on accessors, add `get_num_sized_as_int64()`.
@@ -152,8 +152,10 @@ Canonical `get_type_name()` (`lambda-data.cpp:99`, uses `type_info[]`) vs `valid
 - Shared `format_number()` (`format.cpp:41–95`, used by kv/toml/yaml/latex) is re-implemented inline in `format-json.cpp:163–171`, `format-text.cpp:22–36`, `format-html.cpp:33–43, 369–372`, `format-xml.cpp:108–116, 277–280`. Add a nan/inf-policy arg (JSON emits "null") and route all through it. ~40 LOC.
 - Datetime→ISO8601 done 3 ways: `format-json.cpp:221–227`, `format-yaml.cpp:208–219` (StrBuf + `datetime_format_iso8601` dance) and `format-text.cpp:49–61` (a divergent manual snprintf **that drops the time component** — correctness inconsistency). Add one `write_datetime_iso8601()` helper. ~30 LOC.
 
-### 3.6 Escaper proliferation — C1/C2/C3, MED
+### ✅ 3.6 Escaper proliferation — C1/C2/C3, MED
 Three parallel escaping mechanisms now exist: the `EscapeRule[]`/`escape_append` engine in `lib/escape.c`; `format_text_with_escape`+`TextEscapeConfig` (`format-utils.cpp:91–125`) whose `markdown_escape`/`wiki_escape`/`rst_escape` helpers (24–69) are **entirely dead** (every branch returns NULL); and `format-graph.cpp:9–33`'s `GraphEscapeRules`. **Fix:** delete the dead escape_fns; express Markdown/RST/Wiki/DOT/Mermaid/D2 escaping as `EscapeRule[]` tables in `lib/escape.h`; retire the two bespoke engines. ~80 LOC.
+
+**Implementation status (2026-07-11): partial.** Deleted the dead Markdown/Wiki/RST escape callbacks and set those `TextEscapeConfig` entries to use the existing backslash escape path directly. The broader `lib/escape.h` table migration for graph-format escaping remains open.
 
 ### 3.7 Math ASCII/LaTeX dispatch ladders — C3, MED
 `format-math-ascii.cpp:496–562` and `format-math-latex.cpp:645–704` — two ~30-branch `strcmp(tag,...)` ladders with near-identical tag sets; both also re-declare `format_children` identically (ascii:723, latex:710). ~70 LOC. **Fix:** extend `format-math-shared.hpp` with a `{tag, handler-slot}` table + per-format function-pointer struct (slots optional — tag sets differ slightly). Hoist `format_children`.

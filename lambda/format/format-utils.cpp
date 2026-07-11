@@ -20,71 +20,23 @@ void format_raw_text_common(StringBuf* sb, String* str) {
     stringbuf_append_str_n(sb, str->chars, str->len);
 }
 
-// helper function to get markdown escape sequence
-static const char* markdown_escape(char c) {
-    switch (c) {
-        case '*':
-        case '_':
-        case '`':
-        case '#':
-        case '[':
-        case ']':
-        case '(':
-        case ')':
-        case '\\':
-            return NULL; // use backslash prefix
-        default:
-            return NULL;
-    }
-}
-
-// helper function to get wiki escape sequence
-static const char* wiki_escape(char c) {
-    switch (c) {
-        case '[':
-        case ']':
-        case '{':
-        case '}':
-        case '|':
-            return NULL; // use backslash prefix
-        default:
-            return NULL;
-    }
-}
-
-// helper function to get rst escape sequence
-static const char* rst_escape(char c) {
-    switch (c) {
-        case '*':
-        case '`':
-        case '_':
-        case '\\':
-        case '[':
-        case ']':
-        case '|':
-            return NULL; // use backslash prefix
-        default:
-            return NULL;
-    }
-}
-
 // predefined escape configurations
 const TextEscapeConfig MARKDOWN_ESCAPE_CONFIG = {
     .chars_to_escape = "*_`#[]()\\",
     .use_backslash_escape = true,
-    .escape_fn = markdown_escape
+    .escape_fn = NULL
 };
 
 const TextEscapeConfig WIKI_ESCAPE_CONFIG = {
     .chars_to_escape = "[]{}|",
     .use_backslash_escape = true,
-    .escape_fn = wiki_escape
+    .escape_fn = NULL
 };
 
 const TextEscapeConfig RST_ESCAPE_CONFIG = {
     .chars_to_escape = "*`_\\[]|",
     .use_backslash_escape = true,
-    .escape_fn = rst_escape
+    .escape_fn = NULL
 };
 
 // format text with configurable escaping

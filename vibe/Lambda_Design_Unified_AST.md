@@ -1,8 +1,8 @@
 # Unified AST & Compiler Design — Lambda + LambdaJS (and beyond)
 
-**Date:** 2026-07-11
-**Status:** Proposal — decision ledger U1–U12 in §9 awaits confirmation
-**Related:** `vibe/Lambda_Semantics_Features.md` Part 1 (J1–J6, G1–G8), `vibe/Lambda_Design_Concurrency.md` (K17), `vibe/Lambda_Desing_Native_Module.md`, `vibe/Lambda_Code_Clean_Up.md` §6, `vibe/Lambda_GC_Root_Issue.md`
+**Date:** 2026-07-11 (rev 4 — CodeQL prior art, call-site inference common)
+**Status:** Proposal — ledger U1–U18 in §9; U13, U15–U18 user-confirmed
+**Related:** `vibe/Lambda_Semantics_Features.md` Part 1 (J1–J6, G1–G8), `vibe/Lambda_Design_Concurrency.md` (K17), `vibe/Lambda_Desing_Native_Module.md`, `vibe/Lambda_Code_Clean_Up.md` §6, `vibe/Lambda_GC_Root_Issue.md`, `vibe/Lambda_Expr_For_Clauses2.md` (FC1–FC9)
 
 ---
 
@@ -15,6 +15,8 @@ Unify the Lambda-script and LambdaJS compilers onto a **common AST**:
 3. one shared AST→MIR transpiler core, with per-language semantic handlers;
 4. deeper unification of the compile-time/runtime substrate: name pool, shape pool, const pool, variable lookup, module registry;
 5. a foundation such that Python, Ruby, Bash (and future front-ends) become *builders + language profiles* on the same spine instead of parallel ~300 KB transpilers.
+
+The common AST is organized as a **leveled core-node catalog** (§2): each level defines the core nodes all languages map onto, targeting ≥80% of any guest language expressed in core nodes; language-unique nodes are kept to a minimum and per-language variance is carried as extra fields or clauses on the shared nodes, not as new node kinds.
 
 ### 1.1 Relation to prior decisions (J-ledger amendment)
 
@@ -49,82 +51,210 @@ The unification surface is therefore: **(a) the node-kind space and leaf structs
 
 ---
 
-## 2. The Common AST
+## 2. The Common AST — Leveled Core-Node Catalog
 
-### 2.1 Base node — keep, formalize
+The core AST is defined in **levels**, each building on the ones below. Level 0 (the type system) is already in place and is the model the rest follows: one shared representation, per-language surface syntax resolving into it.
+
+| Level | Layer | Contents |
+|---|---|---|
+| **L0** | Type | `Type*`/`TypeId` model, `TypeMap`/`ShapeEntry`, `NamePool`/`ShapePool` — **already unified** |
+| **L1** | Expression | literal, ident, unary, binary, call, member, if-expr, for-expr, match/switch-expr, … |
+| **L2** | Statement & variable | declarations, assignment, control flow, error statements — variables given particular care |
+| **L3** | Binding & pattern | declarators, params, destructuring patterns (proposed fill for the level gap — binding targets cut across L2/L4/L5 and deserve their own layer) |
+| **L4** | Function & closure | fn/pn, arrow/async/generator flags, captures, yield/await |
+| **L5** | Class & interface | class members, methods/fields, interfaces resolving to `TypeObject` |
+| **L6** | Module | import/export, module root, registry integration |
+
+### 2.1 Base node and the three-tier variance mechanism
 
 The existing base contract is correct and stays:
 
 ```c
 struct AstNode {
     AstNodeType node_type;   // unified kind space, §2.2
-    Type*       type;        // Lambda Type* (shared type model)
+    Type*       type;        // Lambda Type* (L0)
     AstNode*    next;        // intrusive sibling list
     TSNode      node;        // CST node of the *module's* grammar
 };
 ```
 
-- `TSNode` stays as the source-location carrier. It is grammar-specific, but **language is a property of the compilation unit, not the node** (§2.4), so consumers always know which grammar a module's TSNodes belong to. No per-node lang tag, no fattening.
-- `Type*` stays the single type carrier on nodes. Deeper analysis hangs off the function-level side structure (§3.3), not the node.
-- Allocation stays pool-based (`alloc_ast_node` pattern), whole-pool lifetime.
+Per-language variance on core nodes is expressed in exactly three ways, in order of preference:
 
-The header split: extract the base node + core kinds + shared leaf structs into a new **`lambda/ast-core.hpp`**, included by both `ast.hpp` and `js_ast.hpp`. Lambda- and JS-specific leaf structs remain in their own headers.
+1. **Fields/flags on the shared struct** — e.g. `FuncFlags{is_proc, is_arrow, is_async, is_generator, …}` covers fn/pn *and* JS function kinds in one node; `CatchNode.type_filter` is NULL for JS but carries Python's `except TypeError` / Ruby's `rescue TypeError`; `Declarator.error_name` carries Lambda's `let a^err`. Cheap, uniform, and shared passes see through it.
+2. **Clause chains** — clause-bearing core nodes (for-expr, class, function) carry an optional `AstNode* clauses` list of *clause nodes*. Core clauses are shared (for-binding, where/if, let); language clauses attach to the same list (Lambda's `group by`/`order by`/`join on` per FC1–FC9; Python decorators; Lambda object-type constraints). Shared passes iterate the chain and hand unknown clause kinds to the profile.
+3. **Language-range node kinds** — the last resort, for constructs with genuinely language-specific *structure* (JS `with`, Lambda element literals, Bash redirection). Kept to a minimum by design.
 
-### 2.2 One node-kind space: core + language ranges (generalize the TS precedent)
+Allocation stays pool-based; deeper per-function analysis hangs off `FnAnalysis` (§3.3), not nodes.
 
-A single `AstNodeType` integer space, partitioned:
+### 2.2 One node-kind space
 
-| Range | Owner | Contents |
-|---|---|---|
-| 0–499 | **Core** | Constructs with shared *shape* across languages: literal/primary, identifier, binary, unary, assignment, call, member, index, array, map/object, list/sequence, if, while, do-while, for (C-style), for-in/of/loop, block, return, break/continue, function, param, spread, conditional, template pieces, import/export/module, try/throw-shaped error nodes, match/switch |
-| 500–999 | **Lambda** | Lambda-only constructs: pipe, current-item `~`, query-expr, for-clauses (group/order/join), element/content, path-expr, string/symbol patterns, view/state/event-handler, type-stam & type nodes, raise/`T^E` nodes |
-| 1000–1499 | **JS** | JS-only constructs: with, labeled statement, tagged template, regex literal, class/method/field/static-block, getter/setter property, yield/await, new-expression, optional chaining forms, destructuring patterns (until/unless promoted to core) |
-| 1500–1999 | **TS** | existing TS annotation nodes (renumbered from 1000 → 1500 block) |
-| 2000+ | future guests | Python (2000), Ruby (2500), Bash (3000) reserved |
+A single `AstNodeType` integer space. Core kinds are blocked by level so dispatch tables and debug dumps read cleanly; language ranges follow (generalizing the existing TS-at-1000 precedent):
 
-Rules:
+| Range | Owner |
+|---|---|
+| 1–49 | L0 type surface (`AST_TYPE_REF`) |
+| 50–149 | L1 expressions |
+| 150–249 | L2 statements |
+| 250–299 | L3 bindings & patterns |
+| 300–349 | L4 functions |
+| 350–399 | L5 classes |
+| 400–449 | L6 modules |
+| 450–499 | reserved core |
+| 500–999 | Lambda-specific |
+| 1000–1499 | JS-specific |
+| 1500–1999 | TS (renumbered from 1000) |
+| 2000+ | Python (2000), Ruby (2500), Bash (3000) |
 
-- **A node kind goes in core only if its *structure* (child slots) is language-independent.** Semantics may differ (JS `==` vs Lambda `==`) — that is the lowering profile's problem (§4), not the node's. Structure-identical + semantics-divergent ⇒ core node + profile-dispatched lowering.
-- **A node kind stays in a language range if its structure is language-specific** (Lambda's group-by clause, JS's class body). Language-range nodes are handled by that language's lowering handler; the shared driver just dispatches.
-- Promotion is allowed later (e.g., destructuring patterns start JS-range; when Python arrives with near-identical structure, promote to core). Demotion is not — ranges only widen.
-- The `switch` dispatchers in both transpilers already dispatch on `node_type` integers, so range partitioning costs nothing at runtime.
+Rules: a kind is core only if its *structure* (child slots) is language-independent — semantics may differ (JS `==` vs Lambda `==`); that is the lowering profile's problem (§4), never grounds for a second node kind. Promotion from language range to core is allowed later; demotion never.
 
-### 2.3 Leaf structs — unify where shape-identical
+### 2.3 The core-node catalog
 
-Merge the struct pairs that are already isomorphic into shared definitions in `ast-core.hpp`:
+Notation: each table lists the core node, its fields (beyond the base), and what maps onto it from Lambda (`AST_NODE_*`), JS (`JS_AST_NODE_*`), and — prospectively — Python/Ruby. *(var.)* marks fields that exist for one language's variance, per §2.1 tier 1.
 
-| Shared struct | Replaces | Notes |
-|---|---|---|
-| `AstIdentNode {String* name; NameEntry* entry}` | `AstIdentNode` ≡ `JsIdentifierNode` | identical today |
-| `AstBinaryNode {op; left; right}` | `AstBinaryNode` ≡ `JsBinaryNode` | operator enum: §2.5 |
-| `AstUnaryNode {op; operand; prefix}` | both | Lambda gains the (unused-for-Lambda) `prefix` bit |
-| `AstCallNode {callee; args; flags}` | `AstCallNode` ≅ `JsCallNode` | flags union: `pipe_inject/propagate/can_raise` (Lambda) + `optional` (JS) |
-| `AstFieldNode {object; property; computed; optional}` | `AstFieldNode` ≅ `JsMemberNode` | Lambda member/index unify onto `computed` |
-| `AstIfNode`, `AstWhileNode`, `AstReturnNode`, `AstBlockNode`, `AstConditional`, `AstArrayNode`, `AstProgram/Script` | near-identical pairs | mechanical |
-| `AstFuncNode` | `AstFuncNode` ≅ `JsFunctionNode` | unified: `{name; params; body; NameScope* vars; FnAnalysis* analysis; FuncFlags flags}` where flags = `{is_proc, is_arrow, is_async, is_generator, is_anonymous, is_public, strict}` — the fn/pn distinction and JS function kinds are the same field |
-| `AstLiteralNode` | `AstPrimaryNode` ≅ `JsLiteralNode` | carries value union + `has_decimal/is_bigint` hints; Lambda literals keep pointing at `LIT_*` type singletons via `type` |
+#### L0 — Type (in place; the model)
 
-Language-specific structs (`AstForNode` with group/order/join clauses, `JsClassNode`, `AstViewNode`, patterns, …) stay in their language headers, extending the shared base.
+The type *model* is already unified: `TypeId`, `Type`, `TypeConst` family, `TypeFunc`, `TypeMap`+`ShapeEntry`, `TypeArray`/`TypeList`, `TypeElmt`, `TypeObject`, `TypePattern`, the `LIT_*`/`TYPE_*` singletons, `NamePool`, `ShapePool`, and the Item runtime mapping. JS already annotates its nodes with Lambda `Type*`; TS resolves annotations to `Type*` then strips.
 
-### 2.4 Language on the compilation unit
+Core AST surface at L0 is deliberately tiny:
 
-`Script` (which both pipelines already flow through via `module_registry`) gains the authoritative language descriptor:
+| Core node | Fields | Lambda | JS/TS | Py/Rb |
+|---|---|---|---|---|
+| `AST_TYPE_REF` | resolves to `Type*` in `node->type` | wraps the Lambda type-syntax nodes | TS annotation nodes | Py type hints (advisory) |
 
-```c
-struct Script {
-    ...
-    const LangProfile* lang;   // §4 — replaces string-typed source_lang as the working handle
-};
-```
+The rich type-*syntax* nodes stay per-language (Lambda's `LIST_TYPE/MAP_TYPE/FUNC_TYPE/BINARY_TYPE/…` in the Lambda range — its type syntax is a language feature; TS annotation nodes in the TS range). All of them must terminate in a `Type*`; everything above L0 consumes only the `Type*`.
 
-`ModuleDescriptor.source_lang` remains the registry's string tag; the `LangProfile*` is resolved from it at load. Every analysis and lowering pass receives the `Script*` and therefore knows the language without per-node tagging. Mixed-language *programs* exist (Lambda importing JS), but each *module* is single-language — this matches today's reality and keeps the design simple.
+#### L1 — Expression core
 
-### 2.5 Operator representation
+| Core node | Fields | Lambda maps | JS maps | Py/Rb maps |
+|---|---|---|---|---|
+| `AST_LITERAL` | `LiteralKind {null, undefined, bool, int, float, decimal, string, symbol}`; value union; `has_decimal`, `is_bigint` hints | `AST_NODE_PRIMARY` (literal) | `JS_AST_NODE_LITERAL` (+BigInt) | int/str/None/True… |
+| `AST_IDENT` | `String* name; NameEntry* entry` | `AST_NODE_IDENT` | `IDENTIFIER` | names |
+| `AST_ARRAY` | `items; length` | `AST_NODE_ARRAY` | `ARRAY_EXPRESSION` | list literal |
+| `AST_MAP` | `entries` (list of `AST_MAP_ENTRY`) | `AST_NODE_MAP` | `OBJECT_EXPRESSION` | dict / hash |
+| `AST_MAP_ENTRY` | `key; value; computed; shorthand` *(var.)* | `AST_NODE_KEY_EXPR` | `PROPERTY` (method/get/set forms become entries whose value is an L4 `AST_FUNC`) | dict entry |
+| `AST_SEQ` | `items; SeqKind {list, tuple, comma}` *(var.)* | `AST_NODE_LIST` / `AST_NODE_CONTENT` | `SEQUENCE_EXPRESSION` | tuple |
+| `AST_UNARY` | `Operator op; operand; prefix` | `AST_NODE_UNARY` | `UNARY_EXPRESSION` | unary |
+| `AST_BINARY` | `Operator op; left; right` | `AST_NODE_BINARY` | `BINARY_EXPRESSION` (+logical) | binary/boolean ops |
+| `AST_ASSIGN` | `Operator op (incl. compound); target; value; lhs_parenthesized` *(var.)* — usable in expr (JS, Py walrus) and stmt position (§L2) | `AST_NODE_ASSIGN`, `ASSIGN_STAM`, `INDEX_ASSIGN_STAM`, `MEMBER_ASSIGN_STAM` (target = ident/member/pattern) | `ASSIGNMENT_EXPRESSION` | assignment, `:=` |
+| `AST_IF` | `cond; then; otherwise` — one node for if-expr and if-stmt; value-ness from context | `AST_NODE_IF_EXPR` | `IF_STATEMENT`, `CONDITIONAL_EXPRESSION` | if / ternary |
+| `AST_CALL` | `callee; args; flags {optional, pipe_inject, propagate, can_raise}` *(var.)*; named args as `AST_NAMED_ARG` entries | `AST_NODE_CALL_EXPR`, `SYS_FUNC`, `NAMED_ARG` | `CALL_EXPRESSION` | call, kwargs |
+| `AST_MEMBER` | `object; property; computed; optional` | `AST_NODE_MEMBER_EXPR`, `INDEX_EXPR` | `MEMBER_EXPRESSION` | attribute / subscript |
+| `AST_FOR_EXPR` | clause chain (§2.1 tier 2) + `body/then` — the comprehension/query node | `AST_NODE_FOR_EXPR` with core clauses `CLAUSE_FOR` (binding, iterable, key/index flags), `CLAUSE_WHERE`, `CLAUSE_LET`; Lambda-range clauses `CLAUSE_GROUP`, `CLAUSE_ORDER`, `CLAUSE_JOIN`, limit/offset (FC1–FC9) | — (JS has no comprehension; never produced) | **Python comprehensions = exactly `CLAUSE_FOR` + `CLAUSE_WHERE` + body** |
+| `AST_MATCH` | `scrutinee; arms` | `AST_NODE_MATCH_EXPR` | — | Py `match`, Rb `case/in` |
+| `AST_MATCH_ARM` | `pattern; guard` *(var.)*`; body` | `AST_NODE_MATCH_ARM` | — | arm with guard |
+| `AST_SWITCH` | `discriminant; cases; fallthrough semantics via profile` | — | `SWITCH_STATEMENT`+`SWITCH_CASE` | Bash `case` |
+| `AST_INTERP_STR` | `quasis; exprs` | — today; **Lambda to adopt interpolation in some manner later** (node is ready) | `TEMPLATE_LITERAL`+`TEMPLATE_ELEMENT` | **f-strings, Ruby `#{}`, Bash strings** |
+| `AST_RANGE` | `start; end; inclusive; step` *(var.)* | `to` operator | — | Py `range`/slice, Rb `..`/`...` |
+| `AST_SPREAD` | `argument` | `AST_NODE_SPREAD` | `SPREAD_ELEMENT` | `*args` splat |
+| `AST_NEW` | `callee; args` | — (never produced) | `NEW_EXPRESSION` (`new.target` stays a JS-range detail) | — (Py/Rb instantiate via plain `AST_CALL`; profile dispatches) |
 
-One superset `Operator` enum in core. Lambda's `Operator` (lambda-data.hpp:518) and `JsOperator` (js_ast.hpp:161) overlap heavily (add/sub/mul/div/mod/pow, comparisons, logical, unary). JS adds: `===/!==`, `>>>`, `in`, `instanceof`, `typeof`, `void`, `delete`, `??`, compound assignments incl. `??=/&&=/||=`. Lambda adds: `to` (range), `is`, occurrence operators, pipe.
+Language-range L1 nodes (kept, minimal): **Lambda** — `PIPE`, `CURRENT_ITEM ~`/`CURRENT_INDEX`/`LAST_INDEX`, `QUERY_EXPR`, `PATH_EXPR`/`PATH_INDEX_EXPR`/`PARENT_EXPR`, `ELEMENT`/`CONTENT` (document model), string/symbol pattern nodes, `OBJECT_LITERAL`; **JS** — `REGEX`, `TAGGED_TEMPLATE`.
 
-- Merge into one enum; operators that exist in only one language are simply never produced by the other builder.
-- **Operator semantics are not encoded in the enum** — `OP_EQ` from a JS module lowers via the JS profile (coercing `==`), from a Lambda module via the Lambda profile. Where behavior differs the *shape* is still one binary node. This mirrors how `map_kind` already lets one Map type carry two object models.
+#### L2 — Statement core (variables get particular care)
+
+| Core node | Fields | Lambda maps | JS maps | Py/Rb maps |
+|---|---|---|---|---|
+| `AST_SCRIPT` | `body; NameScope* globals; LangProfile* (via Script)` | `AST_SCRIPT` | `PROGRAM` | module body |
+| `AST_BLOCK` | `statements; NameScope*; label?` | let-block / body | `BLOCK_STATEMENT` | suite |
+| `AST_EXPR_STMT` | `expression` | expression content | `EXPRESSION_STATEMENT` | expr stmt |
+| `AST_VAR_DECL` | `DeclKind {let, var, const, pub}` *(var.)*`; declarators` (L3) | `LET_STAM`, `VAR_STAM`, `PUB_STAM` | `VARIABLE_DECLARATION` (+`is_using`) | synthesized (below) |
+| `AST_WHILE` / `AST_DO_WHILE` | `cond; body; NameScope*; label?` | `WHILE_STAM` | `WHILE`/`DO_WHILE` | while / until (flag) |
+| `AST_FOR_C` | `init; test; update; body; label?` | — | `FOR_STATEMENT` | — |
+| `AST_FOR_ITER` | `target (L3 pattern); iterable; body; IterKind {of, in, range, await}` *(var.)*`; label?` | `FOR_STAM`, `LOOP` clause reuse | `FOR_OF`/`FOR_IN` | Py/Rb `for`/`each` |
+| `AST_BREAK` / `AST_CONTINUE` | `label?` | `BREAK_STAM`/`CONTINUE_STAM` | `BREAK`/`CONTINUE` | break/continue/next |
+| `AST_RETURN` | `value` | `RETURN_STAM` | `RETURN_STATEMENT` | return |
+| `AST_RAISE` | `value` | `RAISE_STAM`/`RAISE_EXPR` | `THROW_STATEMENT` | raise / raise |
+| `AST_TRY` | `block; catches; finalizer` | — (Lambda uses `T^E`; never produced) | `TRY`+`CATCH`+`FINALLY` | try/except, begin/rescue |
+| `AST_CATCH` | `param (L3 pattern); type_filter` *(var.— Py/Rb typed excepts)*`; body; next` | — | `CATCH_CLAUSE` | `except T as e` / `rescue T => e` |
+| `AST_IF`, `AST_ASSIGN`, `AST_SWITCH`, `AST_MATCH` | shared with L1 — same node in statement position (`AST_SWITCH` also gains `label?`) | | | |
+
+**Labels are a core *field*, not a node** (user decision): `String* label` lives on the labelable core statements — the loop family, `AST_BLOCK`, `AST_SWITCH` — and `break`/`continue` carry the target label. There is no `LABELED_STATEMENT` wrapper node; the JS builder folds `label: stmt` into the statement's field, and for the rare legal-but-exotic cases (labeled `if`, labeled expression statement) it normalizes by wrapping in a labeled `AST_BLOCK` — semantically equivalent, since `break label` continues after the labeled statement either way. Lambda doesn't have labels today but the core field is there if it ever wants them; Python/Ruby builders never set it.
+
+Language-range L2 nodes: **JS** — `WITH_STATEMENT`; **Lambda** — `PIPE_FILE_STAM`, `TYPE_STAM` (type declarations); **Bash** — redirection/pipeline statements (expected thick).
+
+**The variable story** (the care the level deserves) spans four layers, each defined once:
+
+1. **Declaration surface:** one `AST_VAR_DECL` + `AST_DECLARATOR` core; `DeclKind` covers Lambda `let/var/pub` and JS `var/let/const`. Python/Ruby have no declaration syntax — their builders **synthesize declarators at first assignment during binding** (the profile's scoping rule), so downstream passes see a uniform declared world.
+2. **Binding rules:** applied at build time by each builder on shared `NameScope`/`NameEntry` (§3.2): Lambda immutability + `var` mutability; JS `var` hoisting to function scope, `let/const` TDZ flags; Python function-scope + `global/nonlocal` (profile clause); Ruby local-on-assign.
+3. **`NameEntry` flag superset:** `{is_mutable, is_var_param, has_type_annotation, type_widened}` (Lambda) ∪ `{var_kind, tdz, is_private}` (JS) ∪ `{is_global_decl, is_nonlocal}` (Py).
+4. **Storage:** decided once in the shared emitter (§5.3): MIR register (native or boxed) / closure scope-env slot / module BSS slot — the unified `VarEntry` replaces `MirVarEntry` ≅ `JsMirVarEntry`.
+
+#### L3 — Binding & pattern core (proposed level)
+
+Binding targets recur in declarators, params, for-targets, catch params, and match arms — one shared vocabulary:
+
+| Core node | Fields | Lambda maps | JS maps | Py/Rb maps |
+|---|---|---|---|---|
+| `AST_DECLARATOR` | `target (ident or pattern); AST_TYPE_REF* type_annot; init; error_name` *(var.— Lambda `let a^err`)* | assign/decompose parts of let/var | `VARIABLE_DECLARATOR` | synthesized |
+| `AST_PARAM` | `target; type_annot; default_value; is_rest; is_mutable` *(var.— pn params)* | `AST_NODE_PARAM` | `PARAMETER`, `ASSIGNMENT_PATTERN` (default), `REST_ELEMENT` | params, `*args`/`**kwargs` |
+| `AST_PATTERN_ARRAY` | `elements` (patterns, holes, rest) | `AST_NODE_DECOMPOSE` (positional) | `ARRAY_PATTERN` | tuple unpack |
+| `AST_PATTERN_MAP` | `entries {key, value-pattern, default}` | `AST_NODE_DECOMPOSE` (named) | `OBJECT_PATTERN`+`REST_PROPERTY` | `**rest`, match mapping |
+| `AST_PATTERN_DEFAULT` | `pattern; fallback` | — | `ASSIGNMENT_PATTERN` | default |
+| `AST_PATTERN_REST` | `target` | — | `REST_ELEMENT/PROPERTY` | `*rest` |
+
+Match-arm patterns reuse these plus literals and `AST_TYPE_REF` type-tests; Lambda's string/symbol pattern sub-language stays Lambda-range (it compiles to `TypePattern`/RE2 at L0).
+
+Destructuring therefore goes **core from the start** (revising the earlier lean toward JS-range): 4 of 5 target languages destructure, and putting patterns at L3 is what makes `AST_VAR_DECL`, `AST_PARAM`, `AST_FOR_ITER`, `AST_CATCH`, and `AST_MATCH_ARM` uniformly pattern-carrying. One shared **destructuring lowering engine** in the driver then serves all five sites — today JS carries its own and Lambda's `DECOMPOSE` is separate.
+
+**L3 also owns the use/def facts on bindings** (user decision): beyond declaring names, the binding layer records how each binding is *used* — including **call-site argument facts**: for every call to a known function, the argument expressions' evidence is attached to the callee's parameter bindings. This is what makes call-site type propagation (§3.4) a *common* analysis rather than a JS-side pass: it is binding-level bookkeeping, language-independent by construction, with only the evidence *resolution* staying per-profile.
+
+#### L4 — Function & closure core
+
+| Core node | Fields | Lambda maps | JS maps | Py/Rb maps |
+|---|---|---|---|---|
+| `AST_FUNC` | `String* name; params (L3); body; NameScope* vars; FnAnalysis* analysis; clauses` *(tier 2 — decorators, Lambda method constraints)*`; FuncFlags flags` | `AST_NODE_FUNC`, `FUNC_EXPR`, `PROC` | `FUNCTION_DECLARATION`, `FUNCTION_EXPRESSION`, `ARROW_FUNCTION`, method values | def / lambda / do-blocks |
+| `FuncFlags` | `is_proc (pn); is_arrow; is_async; is_generator; is_anonymous; is_public; is_variadic; can_raise; strict; has_use_strict` | fn/pn, pub, `^E` | arrow/async/generator/strict | async def, generator (yield-detected) |
+| `AST_YIELD` | `argument; delegate` | — (Lambda `start`/streams lower differently per K-plan) | `YIELD_EXPRESSION` | yield / yield from |
+| `AST_AWAIT` | `argument` | — | `AWAIT_EXPRESSION` | await |
+
+The **fn/pn one-bit effect system is a core flag**, not a Lambda quirk: Lambda enforces it (safety analyzer as profile hook); JS/Python/Ruby builders mark everything `is_proc = true` (all-effectful), so shared passes can still exploit purity where a language declares it. This keeps the "color contracts, infer mechanics" doctrine intact on the shared spine.
+
+Captures/closures: `FnAnalysis` (§3.3) carries the unified capture list; the shared **scope-env** representation (heap `Item*` slot array — JS's current model, adopted by Lambda) is the runtime form; the resumable-function transform (K17 layer 1) consumes `yield/await` counts from `FnAnalysis` regardless of language. Calling conventions and resumption drivers stay per-language (K17 layers 3–4).
+
+#### L5 — Class & interface core
+
+| Core node | Fields | Lambda maps | JS maps | Py/Rb maps |
+|---|---|---|---|---|
+| `AST_CLASS` | `String* name; bases (list — single for JS, multiple for Py); members; clauses` *(tier 2 — decorators, Lambda constraints)* | `AST_NODE_OBJECT_TYPE` (with methods/base) | `CLASS_DECLARATION`/`CLASS_EXPRESSION` | class |
+| `AST_METHOD` | `key; AST_FUNC* value; MethodKind {method, ctor, getter, setter}; is_static; is_private; computed` *(var.)* | `TypeMethod` surface | `METHOD_DEFINITION` | def in class |
+| `AST_FIELD` | `key; value; is_static; is_private; computed` | object-type fields | `FIELD_DEFINITION` | class attrs |
+| `AST_INTERFACE` | `name; members; bases` — resolves to `TypeObject`/`Type*` (an L0 producer, like `AST_TYPE_REF`) | object-type sans implementation | TS `interface` | `Protocol` (advisory) |
+
+Language-range L5 nodes: **JS** — `STATIC_BLOCK`, private-name specifics beyond the flags; **Python** — class-body statements (arbitrary code in class scope), metaclass clause; **Lambda** — `OBJECT_LITERAL` (typed literal construction), constraint clauses (tier-2 on `AST_CLASS`). Instantiation: `AST_NEW` is core (L1 table) — JS produces it, Lambda never does, Python/Ruby instantiate via plain `AST_CALL` with the profile dispatching class-vs-function callees.
+
+Semantic depth here is deliberately *shallow in the AST*: prototype chains, MRO, method dispatch are LangProfile lowering concerns (§4.3) over the shared member structure — the AST records *what was declared*, not *how dispatch works*.
+
+#### L6 — Module core
+
+| Core node | Fields | Lambda maps | JS maps | Py/Rb maps |
+|---|---|---|---|---|
+| `AST_IMPORT` | `String* source; specifiers; default_alias; namespace_alias; flags {relative, cross_lang}` | `AST_NODE_IMPORT` | `IMPORT_DECLARATION`+`IMPORT_SPECIFIER` | import / require |
+| `AST_EXPORT` | `declaration?; specifiers; source?; is_default` | `pub` modifier — builder normalizes `pub` decls to `AST_EXPORT{declaration}` | `EXPORT_DECLARATION`+`EXPORT_SPECIFIER` | `__all__` (advisory) / module fns |
+| `AST_SCRIPT` | (shared with L2) — the module root, bound to `ModuleDescriptor` in the registry | | | |
+
+Module *resolution* (paths, node_modules, package.json vs Lambda relative imports vs Python site rules) is per-profile; module *representation* (descriptor, namespace Item map, circular-import guard, live bindings §6.5) is shared.
+
+### 2.4 Coverage — how much of each language lands in core
+
+Mapping the two existing enums against the catalog:
+
+- **JS (~57 node kinds):** everything maps to core except `WITH`, `STATIC_BLOCK`, `TAGGED_TEMPLATE`, `REGEX` — **~93% of kinds, >95% of occurrences** in ordinary code (labels became a core field and `new` a core node per the rev-3 confirmations).
+- **Lambda (~75 node kinds):** expressions/statements/functions/modules map to core; Lambda-range retains its document-and-query surface — type-syntax nodes (~11, L0 surface), pipe/query/path/current-item family (~9), element/content (~3), string/symbol patterns (~5), views (~3), for-clause extensions (~4). **~60% of kinds; occurrence-weighted coverage in typical scripts is much higher** (literals/idents/binary/call/if/for dominate). Lambda is the *host* language and semantic superset — its unique surface is the product, not accidental divergence; the 80% target is for *guests*.
+- **Python (projected):** comprehensions→`AST_FOR_EXPR` core clauses, f-strings→`AST_INTERP_STR`, tuple-unpack→L3 patterns, match→`AST_MATCH`, decorators→tier-2 clauses. Expected **≥85% of kinds**; residue: `global/nonlocal` (profile clause), `with` (context managers — maps to Lambda's R1–R5 scoped-resource model, likely a small core-promotable node later), slicing (an `AST_RANGE`-in-`AST_MEMBER` composition), metaclass edges.
+- **Ruby (projected):** blocks/procs→`AST_FUNC` values on calls, `case/in`→`AST_MATCH`, `case/when`→`AST_SWITCH`, interpolation→`AST_INTERP_STR`. Expected **~85%**; residue: mixins/refinements, method_missing-class dynamism (profile).
+- **Bash (projected):** the outlier — word expansion, redirection, pipelines are structurally alien. Expect **~50–60%** core (control flow, functions, variables) with a thick Bash range; it still gains the shared emitter/driver regardless.
+
+### 2.5 Language on the compilation unit
+
+`Script` gains the authoritative language descriptor: `const LangProfile* lang` — resolved from `ModuleDescriptor.source_lang` at load. Language is a property of the module, never of individual nodes; every pass receives the `Script*` and knows the grammar its `TSNode`s belong to. Mixed-language *programs* (Lambda importing JS) exist; mixed-language *modules* do not.
+
+### 2.6 Operator representation
+
+One superset `Operator` enum in core (merging Lambda's `Operator` and `JsOperator`): shared arithmetic/comparison/logical/bitwise/compound-assign ops, plus JS-only (`===/!==`, `>>>`, `in`, `instanceof`, `typeof`, `void`, `delete`, `??`, `??=/&&=/||=`) and Lambda-only (`to`, `is`, occurrence, pipe) members that other builders simply never produce. **Operator semantics are not encoded in the enum** — `OP_EQ` from a JS module lowers via the JS profile (coercing), from a Lambda module via the Lambda profile (structural). One shape, profile-dispatched meaning — the same trick `map_kind` already plays for the object model.
+
+### 2.7 Header layout
+
+New **`lambda/ast-core.hpp`**: base node, leveled core enum, core leaf structs (L1–L6 tables above), superset `Operator`, shared `NameScope`/`NameEntry`, `FnAnalysis`, clause-node base. `ast.hpp` and `js_ast.hpp` include it and keep only their language-range structs.
 
 ---
 
@@ -132,7 +262,7 @@ One superset `Operator` enum in core. Lambda's `Operator` (lambda-data.hpp:518) 
 
 ### 3.1 Pass architecture
 
-Per-language **builders** stay (this is essential — surface syntax and static-semantics quirks are absorbed here), but they emit the common AST and drive shared machinery:
+Per-language **builders** stay (surface syntax and static-semantics quirks are absorbed here), but they emit the common AST and drive shared machinery:
 
 ```
 source ──tree-sitter(lang grammar)──► CST
@@ -156,13 +286,13 @@ Today: Lambda binds authoritatively during the build pass (`NameScope`/`NameEntr
 
 - Lambda builder: binds as today.
 - JS builder: implements hoisting at bind time — `var` declarations walk up past BLOCK scopes to the nearest FUNCTION/GLOBAL scope (exactly what `js_scope_define` does today); `let/const` bind in the block scope with a TDZ flag on the entry. Function declarations hoist per-scope. This *promotes* the authoritative rules from MIR-time to build-time, eliminating the two-tier split.
-- `NameEntry` gains the union of flags both sides need: `{is_mutable, is_var_param, has_type_annotation, type_widened}` (Lambda) + `{var_kind: var|let|const, tdz, is_private}` (JS).
+- Python/Ruby builders (later): declare-on-first-assignment synthesis per §L2.
 
 Per-language *validation* passes (early errors, duplicate checks, strict rules) run on the bound tree via LangProfile hooks.
 
 ### 3.3 Function analysis side structure — `FnAnalysis`
 
-Both compilers accumulate per-function facts outside the node. Generalize JS's `JsFuncCollected` and Lambda's `CaptureInfo` into one structure referenced from the unified `AstFuncNode`:
+Both compilers accumulate per-function facts outside the node. Generalize JS's `JsFuncCollected` and Lambda's `CaptureInfo` into one structure referenced from the unified `AST_FUNC`:
 
 ```c
 struct FnAnalysis {
@@ -171,7 +301,7 @@ struct FnAnalysis {
                                    // scope_env_key, grandparent_slot, force_env
     int capture_count;
     bool has_scope_env;            // shared closure environment (JS model,
-                                   // adoptable by Lambda closures)
+                                   // adopted by Lambda closures)
     // inference results
     ParamEvidence params[MAX];     // §3.4 — unified evidence record
     Type* resolved_params[MAX];
@@ -205,7 +335,9 @@ Type* (*resolve_param_evidence)(const ParamEvidence*);
 // Python (later): int evidence → int64/BigInt policy per its number model
 ```
 
-This preserves each language's number model (a semantic property) while sharing the walk, the alias machinery, the caching (`infer_cache`), and the call-site propagation pass (`jm_callsite_propagate` generalizes to both — Lambda currently *lacks* call-site-aware inference and was deferred; it comes for free here).
+This preserves each language's number model (a semantic property) while sharing the walk, the alias machinery, and the caching (`infer_cache`).
+
+**Call-site propagation is common** (user decision — prior Lambda deferral lifted): `jm_callsite_propagate` generalizes into the shared analysis, anchored at the L3 binding layer (§L3 — caller-argument evidence attached to callee parameter bindings). Body evidence and call-site evidence merge into one `ParamEvidence` record; the profile's resolution policy runs last. Lambda thereby gains caller-aware native-param typing (params with no body evidence can still go native when all callers pass a consistent type); safe in this architecture because intra-module call sites are fully known at JIT time and cross-module calls cross through boxed wrappers.
 
 Both engines' hard-won fixes carry over once, not twice: the pn-param float-div rule (INFER_FLOAT_CONTEXT on division), the "comparisons aren't int evidence" rule, the container/reassignment demotions.
 
@@ -243,9 +375,10 @@ struct LangProfile {
     void (*emit_error_check)(MirEmitter*, Reg result);     // T^E propagation vs JS throw-completion
     // inference policy (§3.4)
     Type* (*resolve_param_evidence)(const ParamEvidence*);
-    // validation & extension-node lowering
+    // validation, clause & extension-node lowering
     int  (*validate)(Script*, AstNode* root);
-    Reg  (*lower_ext_node)(MirEmitter*, AstNode*);         // language-range nodes
+    Reg  (*lower_clause)(MirEmitter*, AstNode* clause, ...); // language clauses on core nodes
+    Reg  (*lower_ext_node)(MirEmitter*, AstNode*);           // language-range nodes
 };
 ```
 
@@ -257,10 +390,10 @@ Concrete divergences and where they land:
 | Number models (Lambda int/int64/float/decimal vs JS all-float64 + BigInt→decimal per N1–N9) | inference resolution policy + `emit_to_number`; the Item encoding already carries both |
 | `null` vs `undefined` | already solved in the value model (`LMD_TYPE_UNDEFINED`); Lambda code simply never produces it |
 | Object access: Lambda map field vs JS prototype chain + descriptors + ICs | `emit_member_get/set`; JS profile keeps its IC machinery (`JsLoadIC`/`JsStoreIC`), Lambda profile keeps direct shape access. `map_kind` already discriminates at runtime |
-| Errors: Lambda `T^E`/raise vs JS throw/try | Both lower to **error-values in MIR** (J3 already forces this at ABI level; JS's completion machinery is already value-based internally). Profile `emit_error_check` decides propagation style: Lambda `?`-style early-return vs JS try-context dispatch. Cross-language: an error crossing modules is an error Item — no unwinding, per J3 |
-| Mutability: Lambda immutable-by-default vs JS mutable | fn/pn flags + profile; assignment lowering consults the profile |
-| `this`, prototype, classes | JS-range nodes lowered by JS `lower_ext_node`; Lambda never sees them |
-| Iteration protocols (JS Symbol.iterator vs Lambda ranges/collections) | for-of core node, profile-dispatched iterator emission (`jm_emit_get_iterator` generalizes) |
+| Errors: Lambda `T^E`/raise vs JS throw/try vs Py/Rb exceptions | All lower to **error-values in MIR** (J3 already forces this at ABI level; JS's completion machinery is already value-based internally). Profile `emit_error_check` decides propagation style: Lambda `?`-style early-return vs try-context dispatch. Cross-language: an error crossing modules is an error Item — no unwinding, per J3 |
+| Mutability: Lambda immutable-by-default vs JS/Py/Rb mutable | DeclKind/fn-pn flags + profile; assignment lowering consults the profile |
+| `this`, prototype, MRO, classes | L5 records declarations; dispatch semantics live in profile `emit_member_get`/`emit_call`; JS-range/Py-range nodes for the genuinely unique parts |
+| Iteration protocols (JS Symbol.iterator vs Lambda ranges/collections vs Py `__iter__`) | `AST_FOR_ITER` core node, profile-dispatched iterator emission (`jm_emit_get_iterator` generalizes) |
 
 ### 4.4 Object model → already solved
 `map_kind` (MapKind = ECMAScript exotics, engine-owned; VMap = host objects, module-owned — per the native-module decision log) already unifies the object model at the data layer. Nothing new needed.
@@ -278,11 +411,12 @@ Concrete divergences and where they land:
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│ per-language lowering handlers (ext nodes + semantics) │  ← Lambda / JS / Py …
+│ per-language lowering handlers (ext nodes, clauses,    │
+│ semantic ops)                                          │  ← Lambda / JS / Py …
 ├────────────────────────────────────────────────────────┤
 │ shared lowering driver: dispatch on node_type,         │
-│ core control flow (if/while/for/switch), calls,        │
-│ closures & scope-env, destructuring engine,            │
+│ core control flow (if/while/for/switch/match), calls,  │
+│ closures & scope-env, destructuring engine (L3),       │
 │ resumable-function transform (K17 L1),                 │
 │ TCO, const materialization, error-value plumbing       │
 ├────────────────────────────────────────────────────────┤
@@ -309,7 +443,7 @@ Closure environments: adopt the JS **shared scope-env** model (`Item*` array, sl
 
 ### 5.4 Driver + handlers
 
-The shared driver owns the `switch(node_type)` over core nodes, delegating semantic decisions to the profile (§4.3) and unknown/language-range nodes to `lower_ext_node`. The existing 10-file `js_mir_*` body becomes: JS profile handlers (classes, generators driver, eval, with, regex, ICs) + shared driver contributions (statements, expressions, destructuring, iterators, completion). Lambda's `transpile-mir.cpp` becomes: Lambda profile handlers (query/for-clauses, elements, pipes, patterns, views) + the same shared driver.
+The shared driver owns the `switch(node_type)` over core nodes, delegating semantic decisions to the profile (§4.3), clause chains to `lower_clause`, and language-range nodes to `lower_ext_node`. The existing 10-file `js_mir_*` body becomes: JS profile handlers (classes' dispatch semantics, generators driver, eval, with, regex, ICs) + shared driver contributions (statements, expressions, destructuring, iterators, completion). Lambda's `transpile-mir.cpp` becomes: Lambda profile handlers (query/for-clause extensions, elements, pipes, patterns, views) + the same shared driver.
 
 **Native specialization** (JS's boxed+native dual emission, `has_native_version`) generalizes: it's the same mechanism as Lambda's unboxed-param path; the shared driver emits native variants when the profile's inference policy typed the params natively.
 
@@ -373,11 +507,11 @@ Current state (measured): each guest is a full parallel stack — own AST, own s
 | Ruby | build_rb_ast.cpp 87 KB | transpile_rb_mir.cpp **213 KB** | ~100 KB |
 | Bash | build_bash_ast.cpp 191 KB | transpile_bash_mir.cpp **296 KB** | ~350 KB |
 
-Under this design, a guest becomes: **grammar + builder (kept, per-language) + LangProfile (new, small) + runtime library (kept)** — the ~860 KB of parallel *lowering* code is the collapse target, since the shared driver + emitter absorb control flow, calls, closures, variables, boxing, consts, GC rooting.
+Under this design, a guest becomes: **grammar + builder (kept, per-language) + LangProfile (new, small) + runtime library (kept)** — the ~860 KB of parallel *lowering* code is the collapse target, since the shared driver + emitter absorb control flow, calls, closures, variables, boxing, consts, GC rooting. The §2.4 coverage projections (~85% core for Py/Rb) quantify the claim.
 
 Guest-specific notes:
-- **Python:** its comprehensions map naturally onto Lambda's for-expr clause family (for/where/order — Lambda-range nodes could be *shared* with the Python builder rather than core-promoted); its number model gets its own evidence-resolution policy (int→int64/BigInt); reference semantics + in-place mutation get **documented projection rules in the profile** — turning G7 (reference-vs-value impedance, "currently emergent transpiler behavior") into explicit policy code.
-- **Ruby:** blocks/procs map onto the shared closure/scope-env model; method dispatch is profile `emit_member_get`/`emit_call`.
+- **Python:** comprehensions are *exactly* core `AST_FOR_EXPR` clauses; f-strings→`AST_INTERP_STR`; tuple-unpack→L3 patterns; its number model gets its own evidence-resolution policy (int→int64/BigInt); reference semantics + in-place mutation get **documented projection rules in the profile** — turning G7 (reference-vs-value impedance, "currently emergent transpiler behavior") into explicit policy code; `with` maps toward the R1–R5 scoped-resource model.
+- **Ruby:** blocks/procs map onto the shared closure/scope-env model; method dispatch is profile `emit_member_get`/`emit_call`; `case/in`→`AST_MATCH`, `case/when`→`AST_SWITCH`.
 - **Bash:** most idiosyncratic (word expansion, redirection); expect a thicker profile and more language-range nodes; port last, or accept it staying on its own lowering indefinitely (it shares the emitter regardless).
 - **TS:** already on the JS AST; it renumbers into its range and otherwise rides along unchanged.
 
@@ -396,35 +530,34 @@ Method: K17's extract-after-convergence — never a big-bang rewrite; every phas
 4. Unify const-pool API on the emitter (`add_const/load_const`, per-module BSS).
 
 **Phase 1 — AST base formalization (mechanical)**
-5. Create `ast-core.hpp`: base node, unified `AstNodeType` ranges, superset `Operator` enum, shared `NameScope`/`NameEntry` extensions.
-6. Renumber JS/TS node kinds into their ranges (mechanical switch updates; `.bak`-style diff tests: AST dumps before/after must match modulo numbers).
+5. Create `ast-core.hpp`: base node, leveled core enum (§2.2), superset `Operator`, shared `NameScope`/`NameEntry` extensions, clause-node base.
+6. Renumber JS/TS node kinds into their ranges (mechanical switch updates; AST-dump equivalence tests before/after).
 7. `Script.lang` → `LangProfile*`; profiles exist but are pass-throughs to current code.
 
-**Phase 2 — leaf-struct unification (incremental, node-family at a time)**
-8. Merge shape-identical struct pairs (§2.3), family by family: literals+idents → binary/unary → control flow → calls/members → functions. After each family, both suites green.
-9. Unify `AstFuncNode` + introduce `FnAnalysis` (initially just wrapping each side's existing data).
+**Phase 2 — leaf-struct unification, level by level**
+8. Merge onto core structs following the level order: **L1 expressions first** (literal/ident → unary/binary → call/member → if/seq), then **L2 statements + L3 declarators/patterns together** (the variable story lands as one piece), then L4 `AST_FUNC`+`FnAnalysis` (initially wrapping each side's existing data), then L5/L6. After each level, both suites green.
 
 **Phase 3 — shared analysis**
-10. One capture analysis producing `FnAnalysis.captures`; Lambda closures move onto the shared scope-env representation.
-11. One evidence-based inference walk + per-profile resolution (§3.4); port both sides' inference fixes into it; delete `InferCtx` and `JsParamEvidence`. Call-site propagation becomes available to Lambda (previously deferred — revisit then).
-12. JS binding promoted to build time on shared scopes (§3.2); `JsFuncCollected`'s scope facts migrate into `FnAnalysis`; early errors become the JS profile validate hook.
+9. One capture analysis producing `FnAnalysis.captures`; Lambda closures move onto the shared scope-env representation.
+10. One evidence-based inference walk + per-profile resolution (§3.4); port both sides' inference fixes into it; delete `InferCtx` and `JsParamEvidence`. Call-site propagation ships as part of this step for both languages (U17 — Lambda's prior deferral lifted), gated on the lambda baseline + AWFY benchmarks.
+11. JS binding promoted to build time on shared scopes (§3.2); `JsFuncCollected`'s scope facts migrate into `FnAnalysis`; early errors become the JS profile validate hook.
 
 **Phase 4 — shared lowering driver**
-13. Stand up the driver on *core* nodes only, behind a per-module flag; Lambda first (simpler semantics), JS module-by-module (start with the node-baseline corpus).
-14. Move statements → expressions → destructuring → iterators into the driver; per-language handlers shrink correspondingly.
-15. Resumable-function transform extracted as the shared utility (K17 layer 1), consuming `FnAnalysis` — Lambda's `start`/concurrency Stage A work and JS generators/async converge on it (respecting layer-3/4 boundaries).
+12. Stand up the driver on *core* nodes only, behind a per-module flag; Lambda first (simpler semantics), JS module-by-module (start with the node-baseline corpus).
+13. Move statements → expressions → destructuring engine (L3) → iterators into the driver; per-language handlers shrink correspondingly.
+14. Resumable-function transform extracted as the shared utility (K17 layer 1), consuming `FnAnalysis` — Lambda's `start`/concurrency Stage A work and JS generators/async converge on it (respecting layer-3/4 boundaries).
 
 **Phase 5 — module system**
-16. AST-level cross-language import binding; retire `create_js_import_script`; live bindings for exported vars.
+15. AST-level cross-language import binding; retire `create_js_import_script`; live bindings for exported vars.
 
 **Phase 6 — first guest port (Python)**
-17. Python builder retargets to common AST + PyProfile; delete `transpile_py_mir.cpp` incrementally. This is the proof that the design generalizes — treat it as the acceptance test for the whole effort.
+16. Python builder retargets to common AST + PyProfile; delete `transpile_py_mir.cpp` incrementally. This is the proof that the design generalizes — treat it as the acceptance test for the whole effort, and the empirical check on the ≥80%-core target (§2.4).
 
 Risk register:
 - **G1 rooting** — addressed at Phase 0 by design; do not defer.
 - **JS perf cliffs** (ICs, native specialization, shape caches): Phase 4 must carry them into the profile intact; benchmark AWFY + LambdaJS perf suite per step.
 - **Double-boxing v2 interaction**: if S0–S3 of that plan proceeds concurrently, sequence it *after* Phase 0 so it lands in the shared emitter once.
-- **Enum renumber blast radius** (Phase 1): purely mechanical but wide; do it in one commit per language with AST-dump equivalence tests.
+- **Enum renumber blast radius** (Phase 1): purely mechanical but wide; one commit per language with AST-dump equivalence tests.
 - **`transpile.cpp` (C2MIR)**: frozen per U11; only the mechanical enum update touches it.
 
 ---
@@ -433,23 +566,62 @@ Risk register:
 
 | # | Decision | Status |
 |---|---|---|
-| **U1** | One AST node-kind space: core (0–499) + per-language ranges; generalizes the TS-at-1000 precedent. Structure-identical ⇒ core node; semantics divergence handled at lowering, not by node duplication | proposed |
+| **U1** | Common AST defined as a **leveled core-node catalog** — L0 type (in place, the model), L1 expr, L2 statement/variable, L3 binding/pattern, L4 fn/pn+closure, L5 class/interface, L6 module — with the concrete core node lists of §2.3; target ≥80% of any guest language in core nodes; language-unique nodes kept minimal | proposed |
 | **U2** | Language is a property of the compilation unit (`Script.lang → LangProfile*`), never of individual nodes; base node stays `{node_type, Type*, next, TSNode}` | proposed |
-| **U3** | Shape-identical leaf structs unify in `ast-core.hpp`; language-specific leaves stay in language headers; promotion to core allowed, demotion never | proposed |
+| **U3** | Per-language variance in exactly three tiers, in order of preference: (1) fields/flags on shared structs, (2) clause chains on clause-bearing nodes, (3) language-range node kinds as last resort. Promotion to core allowed, demotion never | proposed |
 | **U4** | One superset `Operator` enum; operator *semantics* dispatch through the LangProfile | proposed |
-| **U5** | Scope/binding converges on build-time authoritative binding over shared `NameScope`/`NameEntry` (JS hoisting/TDZ implemented at bind time; validation via profile hooks) | proposed |
+| **U5** | Scope/binding converges on build-time authoritative binding over shared `NameScope`/`NameEntry` (JS hoisting/TDZ at bind time; Py/Rb declare-on-first-assign synthesis; validation via profile hooks) | proposed |
 | **U6** | Per-function analysis unifies in `FnAnalysis` (captures on the JS shared scope-env model, unified evidence records); evidence-based inference shared with per-language resolution policies | proposed |
-| **U7** | Shared MIR transpiler = MirEmitter (bottom) + shared driver (core nodes) + LangProfile handlers (semantics + ext nodes); K17 layer boundaries respected (calling conventions and resumption drivers stay per-language) | proposed |
+| **U7** | Shared MIR transpiler = MirEmitter (bottom) + shared driver (core nodes, incl. one destructuring engine) + LangProfile handlers (semantics, clauses, ext nodes); K17 layer boundaries respected (calling conventions and resumption drivers stay per-language) | proposed |
 | **U8** | Substrate: ShapePool becomes the single shape store with a new transition API absorbing JS hidden classes; const pool adopts the Lambda `const_list`/BSS model; `VarEntry`/scope stacks unified in the emitter | proposed |
 | **U9** | Module registry: AST-level import binding; `create_js_import_script` synthetic bridge retired; live bindings implemented once for Lambda `pub` vars + ES live bindings; J2's Item/C-ABI call contract unchanged | proposed |
 | **U10** | J-ledger amendment **J2-R**: "each front-end transpiles itself" → "each front-end *builds* itself (grammar + builder + profile); in-tree front-ends share AST, analysis, and lowering infrastructure." J1/J3/J5/J6 unchanged; common AST is in-memory only, never a distribution format | proposed |
 | **U11** | C2MIR/`transpile.cpp` frozen as Lambda-only debug backend during migration; retirement decision deferred to post-Phase-4 | proposed |
 | **U12** | Migration follows K17 extract-after-convergence with per-phase green gates; **G1 GC-rooting fix is a Phase-0 prerequisite baked into MirEmitter**; Python is the first guest port and the design's acceptance test | proposed |
+| **U13** | **L3 = binding & pattern layer** fills the level gap: declarators/params/destructuring patterns are core from the start (4 of 5 languages destructure), giving `VAR_DECL`/`PARAM`/`FOR_ITER`/`CATCH`/`MATCH_ARM` one pattern vocabulary and one shared destructuring lowering engine | **confirmed** |
+| **U14** | fn/pn purity is a **core flag** on `AST_FUNC` (guest builders mark all-effectful); the one-bit effect system rides the shared spine rather than staying a Lambda-range concept | proposed |
+| **U15** | **Labels are core, as a field not a node**: `label?` on the loop family/`AST_BLOCK`/`AST_SWITCH` + on `break`/`continue`; no `LABELED_STATEMENT` wrapper; exotic labeled statements normalize to a labeled block. Lambda doesn't produce labels today but the field is core | **confirmed** |
+| **U16** | Promoted/confirmed core on cross-language commonality: `AST_MAP` (+`AST_MAP_ENTRY` — Lambda map / JS object / Py dict / Rb hash), `AST_NEW` (JS produces, Lambda never, Py/Rb use `AST_CALL`), `AST_INTERP_STR` (Lambda to adopt interpolation in some manner later), `AST_SEQ` unifying Lambda list / Python tuple / JS comma-expression via `SeqKind` + profile lowering | **confirmed** |
+| **U17** | **Call-site type propagation is common analysis, anchored at L3**: caller-argument evidence is binding-layer bookkeeping attached to callee parameter bindings; merges with body evidence into one `ParamEvidence`; profile resolves last. Lambda adopts it (prior deferral lifted), gated on lambda baseline + AWFY | **confirmed** |
+| **U18** | **CodeQL adopted as prior art** (§11): its guest-onto-host precedents (TS on JS libraries, Kotlin on the Java schema, C on C++), shared parameterized analysis libraries (dataflow/SSA/CFG with per-language input signatures), and flags-over-subclasses modeling corroborate U1/U3/U7 and the K17 method; its QL class taxonomy serves as a completeness checklist for the core catalog; "interfaces/views over language-range nodes" noted as a possible fourth variance tier (optional, not committed) | **confirmed** |
 
-## 10. Open Questions (need input)
+## 10. Open Questions
 
-1. **How far to normalize in builders vs preserve surface forms?** E.g. JS `for(;;)` and Lambda `for … in` could both desugar toward fewer core loop nodes, or stay distinct nodes. Recommendation: preserve surface forms as distinct core/range nodes initially (easier debugging, dump fidelity); desugar later only where the driver visibly benefits.
-2. **Destructuring: core or JS-range?** Lambda has `AST_NODE_DECOMPOSE`; JS has full patterns; Python will need them too. Recommendation: start JS-range, promote to core during the Python port (U3 allows this).
-3. **Should Lambda adopt any JS analysis strengths early** — specifically call-site type propagation (`jm_callsite_propagate`), previously deferred for Lambda? Phase 3 makes it nearly free; needs the earlier deferral revisited.
-4. **`FnAnalysis.lang_ext` vs typed unions** for profile-owned function facts (ctor shape caches, view state) — opaque pointer (loose, simple) or tagged union (checked, rigid)?
-5. **Timing vs concurrency work:** K-plan Stage A (fork-join) and the resumable-function transform both touch `transpile-mir.cpp`. Sequence the K17 layer-1 extraction inside Phase 4 here, or land Stage A first on the old code and extract after? (K17's own advice — "build the Lambda transform as an independent second implementation, extract after two clients" — argues Stage A first.)
+Resolved by user confirmation: L3 as its own level (U13); labels core-as-field (U15); `AST_MAP`/`AST_NEW`/`AST_INTERP_STR`/`AST_SEQ` core (U16); call-site propagation common at L3 (U17); CodeQL as prior art (U18).
+
+Still open:
+
+1. **Surface preservation confirmed as default?** The catalog preserves surface forms as distinct core nodes (`AST_FOR_C` vs `AST_FOR_ITER`, `AST_SWITCH` vs `AST_MATCH`) rather than desugaring — easier debugging and dump fidelity; desugar later only where the driver visibly benefits. Confirm.
+2. **`FnAnalysis.lang_ext` vs typed unions** for profile-owned function facts (ctor shape caches, view state) — opaque pointer (loose, simple) or tagged union (checked, rigid)?
+3. **Timing vs concurrency work:** K-plan Stage A (fork-join) and the resumable-function transform both touch `transpile-mir.cpp`. Sequence the K17 layer-1 extraction inside Phase 4 here, or land Stage A first on the old code and extract after? (K17's own advice — "build the Lambda transform as an independent second implementation, extract after two clients" — argues Stage A first.)
+4. **The "views" fourth variance tier** (from CodeQL, §11.3): should language-range nodes be able to implement core *interfaces* (e.g., Lambda `PIPE` exposing a call-like view) so shared passes handle them without node promotion? Optional machinery — adopt only if a real pass needs it.
+
+---
+
+## 11. Prior Art — CodeQL
+
+CodeQL is the closest large-scale precedent for "many languages, shared program representation and analysis" (user-directed reference). Its architecture: a per-language **extractor** parses source into a relational database over a per-language **schema** (dbscheme); per-language **QL standard libraries** define AST class hierarchies over the database; **queries and shared analysis libraries** run on top. Newer extractors (Ruby, QL-for-QL) are tree-sitter-based — the same parsing substrate we use.
+
+### 11.1 Level-by-level mapping
+
+| Our level | CodeQL analogue |
+|---|---|
+| L0 Type | per-language `Type` hierarchies (Java `Type`/`RefType`, C++ `Type`, TS type entities) — like us, types are a first-class layer the AST references |
+| L1 Expr | the `Expr` class hierarchy: `Literal`, `BinaryExpr`, `UnaryExpr`, `Call`/`MethodAccess`, `FieldAccess`/`PropAccess`/`Subscript`, `ConditionalExpr`, template/f-string classes, Python comprehension classes |
+| L2 Stmt | the `Stmt` hierarchy: `IfStmt`, `WhileStmt`/`ForStmt`/`ForEachStmt` (+ an abstract `LoopStmt` over them), `BreakStmt`/`ContinueStmt`, `ReturnStmt`, `ThrowStmt`, `TryStmt`/`CatchClause`, `SwitchStmt` |
+| L3 Binding | `Variable`, `Parameter`, JS `BindingPattern` (ident/array/object destructuring as one pattern family — direct precedent for our L3); the shared **SSA library** is built over bindings, as our use/def + call-site facts are |
+| L4 Fn | `Function`/`Callable`/`Method`; notably JS `Function` models generator/async as **boolean predicates on one class**, not separate node kinds — precedent for our `FuncFlags` tier-1 variance |
+| L5 Class | `Class`/`ClassOrInterface`, member declarations, `Method`/`Field` |
+| L6 Module | `Module`, `ImportDeclaration`/specifiers, `ExportDeclaration` |
+
+### 11.2 Precedents that corroborate this design
+
+- **Guest-onto-host AST:** TypeScript is analyzed with the JavaScript libraries (one AST family, two languages — exactly our TS-on-JS starting point); **Kotlin support was implemented on the Java schema/libraries**, with the Kotlin extractor lowering Kotlin constructs into Java-shaped ones — precisely our "builder normalizes into the shared AST" move; C and C++ share one schema. Multiple independent proofs that related languages can productively share one program representation, with impedance absorbed at extraction/build time.
+- **Shared analysis parameterized per language:** CodeQL's dataflow, SSA, and control-flow-graph libraries are language-agnostic modules instantiated per language via input signatures — structurally our LangProfile + shared-passes design. Their history also matches K17's doctrine: the shared dataflow library was **extracted after** years of mature per-language implementations, not designed up front.
+- **Flags over subclasses:** where CodeQL models variance as predicates/properties on one class (generator/async functions), it validates our tier-1 field/flag mechanism; where it subclasses, the subclass is usually structural — matching our core-if-structure-identical rule.
+
+### 11.3 Ideas to borrow (and one contrast)
+
+- **Taxonomy as completeness checklist:** CodeQL has exhaustively enumerated the AST surface of 10+ languages. When finalizing the core catalog per level (and again before each guest port), walk the corresponding QL class list (`Expr`/`Stmt`/`BindingPattern`/…) for that language as a coverage audit — cheap insurance against forgotten constructs.
+- **Interfaces/views over concrete nodes:** QL leans on abstract classes (`LoopStmt`, `Callable`) and cross-cutting "concepts" that concrete nodes *implement*. For us this suggests an optional **fourth variance tier**: a language-range node implementing a core view (Lambda `PIPE` exposing call-like structure) so shared passes can process it without promoting it to core. Recorded as open question 4 — adopt only when a real pass needs it.
+- **Contrast — why we go further:** CodeQL never unified its schemas across unrelated ecosystems; per-language fidelity and independent evolution mattered more for an analysis product covering code it doesn't control. We own every front-end (J6, curated in-tree) and need one *executable* lowering to MIR — which CodeQL, being analysis-only, has no analogue of. That is exactly why deeper unification is justified here, and why the LangProfile *lowering* surface (§4.3) is the novel part of this design with no CodeQL counterpart.

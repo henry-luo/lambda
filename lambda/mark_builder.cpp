@@ -208,14 +208,14 @@ Item MarkBuilder::createSymbolItem(const char* symbol) {
 
 Item MarkBuilder::createStringItem(const char* str) {
     String* s = createString(str);
-    // Empty string maps to null (createString returns nullptr for empty)
+    // createString returns nullptr only for null input; empty strings are real values.
     if (!s) return createNull();
     return (Item){.item = s2it(s)};
 }
 
 Item MarkBuilder::createStringItem(const char* str, size_t len) {
     String* s = createString(str, len);
-    // Empty string maps to null (createString returns nullptr for empty)
+    // createString returns nullptr only for null input; empty strings are real values.
     if (!s) return createNull();
     return (Item){.item = s2it(s)};
 }
@@ -690,8 +690,13 @@ bool MarkBuilder::is_in_arena(Item item) const {
     case LMD_TYPE_NULL:  case LMD_TYPE_BOOL:  case LMD_TYPE_INT:  case LMD_TYPE_ERROR:
         return true;
 
+    case LMD_TYPE_FLOAT:
+        // Self-tagged floats do not carry an arena pointer, so ownership is implicit.
+        if ((item.item & ITEM_DBL_MASK) || item.double_ptr <= 1) return true;
+        return is_pointer_in_arena_chain((void*)item.double_ptr);
+
     // Pointer types - check arena ownership
-    case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_INT64:  case LMD_TYPE_DECIMAL:
     case LMD_TYPE_STRING:  case LMD_TYPE_BINARY:  case LMD_TYPE_DTIME:
         return is_pointer_in_arena_chain((void*)item.string_ptr);
 
