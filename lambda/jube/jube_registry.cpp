@@ -74,26 +74,12 @@ extern "C" Item js_document_proxy_set_property(Item prop_name, Item value);
 extern "C" Item js_document_proxy_method(Item method_name, Item* args, int argc);
 extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
-extern "C" Item js_dom_range_get_property(Item obj, Item key);
-extern "C" Item js_dom_range_set_property(Item obj, Item key, Item value);
-extern "C" Item js_dom_selection_get_property(Item obj, Item key);
-extern "C" Item js_dom_selection_set_property(Item obj, Item key, Item value);
 extern "C" Item js_dom_range_get_prototype_value(void);
 extern "C" Item js_dom_selection_get_prototype_value(void);
-extern "C" bool js_dom_range_native_property(Item obj, Item key);
-extern "C" bool js_dom_selection_native_property(Item obj, Item key);
 extern "C" bool js_dom_expando_has_property(Item obj, Item key);
-extern "C" bool js_dom_range_expando_has_property(Item obj, Item key);
-extern "C" bool js_dom_selection_expando_has_property(Item obj, Item key);
 extern "C" Item js_dom_expando_get_own_property_descriptor(Item obj, Item key);
-extern "C" Item js_dom_range_expando_get_own_property_descriptor(Item obj, Item key);
-extern "C" Item js_dom_selection_expando_get_own_property_descriptor(Item obj, Item key);
 extern "C" Item js_dom_expando_delete_property(Item obj, Item key);
-extern "C" Item js_dom_range_expando_delete_property(Item obj, Item key);
-extern "C" Item js_dom_selection_expando_delete_property(Item obj, Item key);
 extern "C" Item js_dom_expando_own_property_names(Item obj);
-extern "C" Item js_dom_range_expando_own_property_names(Item obj);
-extern "C" Item js_dom_selection_expando_own_property_names(Item obj);
 extern "C" Item js_css_namespace_method(Item obj, Item method_name, Item* args, int argc);
 extern "C" Item js_cssom_stylesheet_method(Item sheet_item, Item method_name, Item* args, int argc);
 extern "C" Item js_cssom_rule_decl_method(Item decl_item, Item method_name, Item* args, int argc);
@@ -184,6 +170,61 @@ extern "C" Item js_dom_insert_adjacent_element_bridge(void* elem, Item position,
 extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem, Item position, Item html);
 extern "C" Item js_dom_append_variadic_bridge(void* elem, Item* args, int argc);
 extern "C" Item js_dom_prepend_variadic_bridge(void* elem, Item* args, int argc);
+// DOM3 Phase 1: receiver-explicit Range/Selection behavior entries
+extern "C" Item js_range_get_start_container(Item self);
+extern "C" Item js_range_get_start_offset(Item self);
+extern "C" Item js_range_get_end_container(Item self);
+extern "C" Item js_range_get_end_offset(Item self);
+extern "C" Item js_range_get_collapsed(Item self);
+extern "C" Item js_range_get_common_ancestor(Item self);
+extern "C" Item js_range_set_start(Item self, Item node, Item offset);
+extern "C" Item js_range_set_end(Item self, Item node, Item offset);
+extern "C" Item js_range_set_start_before(Item self, Item node);
+extern "C" Item js_range_set_start_after(Item self, Item node);
+extern "C" Item js_range_set_end_before(Item self, Item node);
+extern "C" Item js_range_set_end_after(Item self, Item node);
+extern "C" Item js_range_collapse(Item self, Item to_start);
+extern "C" Item js_range_select_node(Item self, Item node);
+extern "C" Item js_range_select_node_contents(Item self, Item node);
+extern "C" Item js_range_clone_range(Item self);
+extern "C" Item js_range_compare_boundary_points(Item self, Item how, Item other);
+extern "C" Item js_range_compare_point(Item self, Item node, Item offset);
+extern "C" Item js_range_is_point_in_range(Item self, Item node, Item offset);
+extern "C" Item js_range_intersects_node(Item self, Item node);
+extern "C" Item js_range_detach(Item self);
+extern "C" Item js_range_to_string(Item self);
+extern "C" Item js_range_get_client_rects(Item self);
+extern "C" Item js_range_get_bounding_client_rect(Item self);
+extern "C" Item js_range_delete_contents(Item self);
+extern "C" Item js_range_extract_contents(Item self);
+extern "C" Item js_range_clone_contents(Item self);
+extern "C" Item js_range_insert_node(Item self, Item node);
+extern "C" Item js_range_surround_contents(Item self, Item node);
+extern "C" Item js_selection_get_anchor_node(Item self);
+extern "C" Item js_selection_get_anchor_offset(Item self);
+extern "C" Item js_selection_get_focus_node(Item self);
+extern "C" Item js_selection_get_focus_offset(Item self);
+extern "C" Item js_selection_get_is_collapsed(Item self);
+extern "C" Item js_selection_get_range_count(Item self);
+extern "C" Item js_selection_get_type(Item self);
+extern "C" Item js_selection_get_direction(Item self);
+extern "C" Item js_selection_get_range_at(Item self, Item index);
+extern "C" Item js_selection_add_range(Item self, Item range);
+extern "C" Item js_selection_remove_range(Item self, Item range);
+extern "C" Item js_selection_remove_all_ranges(Item self);
+extern "C" Item js_selection_empty(Item self);
+extern "C" Item js_selection_collapse(Item self, Item node, Item offset);
+extern "C" Item js_selection_set_position(Item self, Item node, Item offset);
+extern "C" Item js_selection_collapse_to_start(Item self);
+extern "C" Item js_selection_collapse_to_end(Item self);
+extern "C" Item js_selection_extend(Item self, Item node, Item offset);
+extern "C" Item js_selection_set_base_and_extent(Item self, Item anchor_node, Item anchor_offset, Item focus_node, Item focus_offset);
+extern "C" Item js_selection_select_all_children(Item self, Item node);
+extern "C" Item js_selection_contains_node(Item self, Item node, Item allow_partial);
+extern "C" Item js_selection_delete_from_document(Item self);
+extern "C" Item js_selection_to_string(Item self);
+extern "C" Item js_selection_modify(Item self, Item alter, Item direction, Item granularity);
+extern "C" Item js_selection_force_direction(Item self, Item direction);
 extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
 
 static void jube_host_dom_notify_mutation(int kind, void* target, void* parent) {
@@ -255,26 +296,26 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_document_proxy_method,
     js_dom_item_is_range,
     js_dom_item_is_selection,
-    js_dom_range_get_property,
-    js_dom_range_set_property,
-    js_dom_selection_get_property,
-    js_dom_selection_set_property,
+    NULL,  // js_dom_range_get_property retired: range/selection are record-driven (DOM3)
+    NULL,  // js_dom_range_set_property retired: range/selection are record-driven (DOM3)
+    NULL,  // js_dom_selection_get_property retired: range/selection are record-driven (DOM3)
+    NULL,  // js_dom_selection_set_property retired: range/selection are record-driven (DOM3)
     js_dom_range_get_prototype_value,
     js_dom_selection_get_prototype_value,
-    js_dom_range_native_property,
-    js_dom_selection_native_property,
+    NULL,  // js_dom_range_native_property retired: range/selection are record-driven (DOM3)
+    NULL,  // js_dom_selection_native_property retired: range/selection are record-driven (DOM3)
     js_dom_expando_has_property,
-    js_dom_range_expando_has_property,
-    js_dom_selection_expando_has_property,
+    NULL,  // js_dom_range_expando_has_property retired: range/selection are record-driven (DOM3)
+    NULL,  // js_dom_selection_expando_has_property retired: range/selection are record-driven (DOM3)
     js_dom_expando_get_own_property_descriptor,
-    js_dom_range_expando_get_own_property_descriptor,
-    js_dom_selection_expando_get_own_property_descriptor,
+    NULL,  // js_dom_range_expando_get_own_property_descriptor retired: range/selection are record-driven (DOM3)
+    NULL,  // js_dom_selection_expando_get_own_property_descriptor retired: range/selection are record-driven (DOM3)
     js_dom_expando_delete_property,
-    js_dom_range_expando_delete_property,
-    js_dom_selection_expando_delete_property,
+    NULL,  // js_dom_range_expando_delete_property retired: range/selection are record-driven (DOM3)
+    NULL,  // js_dom_selection_expando_delete_property retired: range/selection are record-driven (DOM3)
     js_dom_expando_own_property_names,
-    js_dom_range_expando_own_property_names,
-    js_dom_selection_expando_own_property_names,
+    NULL,  // js_dom_range_expando_own_property_names retired: range/selection are record-driven (DOM3)
+    NULL,  // js_dom_selection_expando_own_property_names retired: range/selection are record-driven (DOM3)
     js_css_namespace_method,
     js_cssom_stylesheet_method,
     js_cssom_rule_decl_method,
@@ -364,6 +405,60 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_dom_append_variadic_bridge,
     js_dom_prepend_variadic_bridge,
     jube_host_dom_notify_mutation,
+    js_range_get_start_container,
+    js_range_get_start_offset,
+    js_range_get_end_container,
+    js_range_get_end_offset,
+    js_range_get_collapsed,
+    js_range_get_common_ancestor,
+    js_range_set_start,
+    js_range_set_end,
+    js_range_set_start_before,
+    js_range_set_start_after,
+    js_range_set_end_before,
+    js_range_set_end_after,
+    js_range_collapse,
+    js_range_select_node,
+    js_range_select_node_contents,
+    js_range_clone_range,
+    js_range_compare_boundary_points,
+    js_range_compare_point,
+    js_range_is_point_in_range,
+    js_range_intersects_node,
+    js_range_detach,
+    js_range_to_string,
+    js_range_get_client_rects,
+    js_range_get_bounding_client_rect,
+    js_range_delete_contents,
+    js_range_extract_contents,
+    js_range_clone_contents,
+    js_range_insert_node,
+    js_range_surround_contents,
+    js_selection_get_anchor_node,
+    js_selection_get_anchor_offset,
+    js_selection_get_focus_node,
+    js_selection_get_focus_offset,
+    js_selection_get_is_collapsed,
+    js_selection_get_range_count,
+    js_selection_get_type,
+    js_selection_get_direction,
+    js_selection_get_range_at,
+    js_selection_add_range,
+    js_selection_remove_range,
+    js_selection_remove_all_ranges,
+    js_selection_empty,
+    js_selection_collapse,
+    js_selection_set_position,
+    js_selection_collapse_to_start,
+    js_selection_collapse_to_end,
+    js_selection_extend,
+    js_selection_set_base_and_extent,
+    js_selection_select_all_children,
+    js_selection_contains_node,
+    js_selection_delete_from_document,
+    js_selection_to_string,
+    js_selection_modify,
+    js_selection_force_direction,
 };
 
 static JubeHostAPI jube_host_api = {

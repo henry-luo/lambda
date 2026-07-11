@@ -78,6 +78,12 @@ struct JubeNamespaceDef {
 // JubeModuleDef.interface_decl; behavior lives here as handler pointers.
 // Handlers return 1 when handled, 0 to fall through, and use the
 // pending-exception model (no unwinding across the module boundary).
+typedef enum JubeMemberFlags {
+    JUBE_MEMBER_NONE = 0,
+    JUBE_MEMBER_NON_ENUMERABLE = 1u << 0,  // excluded from own-key enumeration
+                                           //   (aliases like baseNode/extentNode)
+} JubeMemberFlags;
+
 typedef struct JubeMemberBind {
     const char* name;         // snake_case; must match a declared interface member
     const char* js_name;      // optional camelCase override for irregular names
@@ -89,6 +95,7 @@ typedef struct JubeMemberBind {
     int (*call)(Item receiver, Item* args, int argc, Item* out); // methods
     const char* reflect_attr; // attribute-reflected member: generic reflect routine
                               //   handles get/set; no handler functions needed
+    uint32_t flags;           // JubeMemberFlags
 } JubeMemberBind;
 
 typedef struct JubeTypeBinding {
@@ -101,6 +108,10 @@ typedef struct JubeTypeBinding {
     int (*named_set)(Item receiver, Item key, Item value, Item* out);
     int (*indexed_get)(Item receiver, int64_t index, Item* out);
     int (*indexed_set)(Item receiver, int64_t index, Item value, Item* out);
+    // optional existing prototype object for this type (e.g. the engine's
+    // Range.prototype); when set, jube_type_prototype adopts it instead of
+    // creating a fresh object so constructor/instanceof identity is preserved
+    Item (*prototype_seed)(void);
 } JubeTypeBinding;
 
 struct JubeHostGcAPI {
@@ -279,6 +290,66 @@ struct JubeHostDomAPI {
     Item (*append_variadic_bridge)(void* elem, Item* args, int argc);
     Item (*prepend_variadic_bridge)(void* elem, Item* args, int argc);
     void (*notify_mutation)(int kind, void* target, void* parent);
+
+    // -- DOM3 Phase 1 additive tail: receiver-explicit Range/Selection behavior.
+    // These carry the behavior the deleted strcmp chains used to reach through
+    // cached method objects; the radiant module's declared-interface bindings
+    // are their only callers.
+    Item (*range_get_start_container)(Item self);
+    Item (*range_get_start_offset)(Item self);
+    Item (*range_get_end_container)(Item self);
+    Item (*range_get_end_offset)(Item self);
+    Item (*range_get_collapsed)(Item self);
+    Item (*range_get_common_ancestor)(Item self);
+    Item (*range_set_start)(Item self, Item node, Item offset);
+    Item (*range_set_end)(Item self, Item node, Item offset);
+    Item (*range_set_start_before)(Item self, Item node);
+    Item (*range_set_start_after)(Item self, Item node);
+    Item (*range_set_end_before)(Item self, Item node);
+    Item (*range_set_end_after)(Item self, Item node);
+    Item (*range_collapse)(Item self, Item to_start);
+    Item (*range_select_node)(Item self, Item node);
+    Item (*range_select_node_contents)(Item self, Item node);
+    Item (*range_clone_range)(Item self);
+    Item (*range_compare_boundary_points)(Item self, Item how, Item other);
+    Item (*range_compare_point)(Item self, Item node, Item offset);
+    Item (*range_is_point_in_range)(Item self, Item node, Item offset);
+    Item (*range_intersects_node)(Item self, Item node);
+    Item (*range_detach)(Item self);
+    Item (*range_to_string)(Item self);
+    Item (*range_get_client_rects)(Item self);
+    Item (*range_get_bounding_client_rect)(Item self);
+    Item (*range_delete_contents)(Item self);
+    Item (*range_extract_contents)(Item self);
+    Item (*range_clone_contents)(Item self);
+    Item (*range_insert_node)(Item self, Item node);
+    Item (*range_surround_contents)(Item self, Item node);
+    Item (*selection_get_anchor_node)(Item self);
+    Item (*selection_get_anchor_offset)(Item self);
+    Item (*selection_get_focus_node)(Item self);
+    Item (*selection_get_focus_offset)(Item self);
+    Item (*selection_get_is_collapsed)(Item self);
+    Item (*selection_get_range_count)(Item self);
+    Item (*selection_get_type)(Item self);
+    Item (*selection_get_direction)(Item self);
+    Item (*selection_get_range_at)(Item self, Item index);
+    Item (*selection_add_range)(Item self, Item range);
+    Item (*selection_remove_range)(Item self, Item range);
+    Item (*selection_remove_all_ranges)(Item self);
+    Item (*selection_empty)(Item self);
+    Item (*selection_collapse)(Item self, Item node, Item offset);
+    Item (*selection_set_position)(Item self, Item node, Item offset);
+    Item (*selection_collapse_to_start)(Item self);
+    Item (*selection_collapse_to_end)(Item self);
+    Item (*selection_extend)(Item self, Item node, Item offset);
+    Item (*selection_set_base_and_extent)(Item self, Item anchor_node, Item anchor_offset,
+                                          Item focus_node, Item focus_offset);
+    Item (*selection_select_all_children)(Item self, Item node);
+    Item (*selection_contains_node)(Item self, Item node, Item allow_partial);
+    Item (*selection_delete_from_document)(Item self);
+    Item (*selection_to_string)(Item self);
+    Item (*selection_modify)(Item self, Item alter, Item direction, Item granularity);
+    Item (*selection_force_direction)(Item self, Item direction);
 };
 
 struct JubeHostAPI {

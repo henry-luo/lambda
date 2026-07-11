@@ -39,6 +39,10 @@ const JubeHostAPI* jube_internal_host_api(void);
 // Frees compiled records at process exit (before the memtrack leak report).
 void jube_interface_cleanup(void);
 
+// Drops cached prototypes/method Items when a JS runtime resets (batch mode
+// recreates globals per script; seeds must rebuild against the new runtime).
+void jube_interface_runtime_reset(void);
+
 // Size-gated accessors for the DOM3 additive tail of JubeModuleDef.
 const char* jube_module_interface_decl(const JubeModuleDef* module);
 const JubeTypeBinding* jube_module_type_bindings(const JubeModuleDef* module,

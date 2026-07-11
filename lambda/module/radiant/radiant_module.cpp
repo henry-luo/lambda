@@ -318,11 +318,16 @@ static const JubeFuncDef radiant_functions[] = {
 };
 #pragma clang diagnostic pop
 
+// DOM3 declared interface + binding tables (radiant_dom_iface.cpp)
+extern const char radiant_dom_interface_decl[];
+extern const JubeTypeBinding radiant_dom_type_bindings[];
+extern const int32_t radiant_dom_type_binding_count;
+
 static const JubeModuleDef radiant_module = {
     JUBE_ABI_VERSION,
     sizeof(JubeModuleDef),
     "radiant",
-    "0.1.0",
+    "0.2.0",
     "Radiant DOM and layout access",
     radiant_types,
     (int32_t)(sizeof(radiant_types) / sizeof(radiant_types[0])),
@@ -332,6 +337,9 @@ static const JubeModuleDef radiant_module = {
     0,
     radiant_module_init,
     NULL,
+    radiant_dom_interface_decl,
+    radiant_dom_type_bindings,
+    2,  // range + selection; registration cross-checks against interface_decl
 };
 
 RADIANT_C_API const JubeModuleDef* radiant_jube_module(void) {

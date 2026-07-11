@@ -1,6 +1,7 @@
 # Lambda Jube DOM — Stage 3 (DOM3): Table-Driven Property Dispatch — Review and Proposal
 
-> **Status**: Phase 0 implemented and green (2026-07-11); Phases 1+ not started.
+> **Status**: Phases 0–1 implemented and green (2026-07-11); Range/Selection are fully
+> record-driven. Phases 2+ (CSSOM, style hosts, element/document) not started.
 > **Parent design**: [Lambda_Desing_Native_Module.md](./Lambda_Desing_Native_Module.md) — Jube modules, signatures in Lambda type syntax, VMap projections.
 > **Predecessors**: [Lambda_Jube_DOM.md](./Lambda_Jube_DOM.md) (DOM1: carrier switch to branded VMaps),
 > [Lambda_Jube_DOM2.md](./Lambda_Jube_DOM2.md) (DOM2: generic host-object protocol, real host API,
@@ -556,6 +557,53 @@ range/selection branches inside the bridge host_ops.
 Gates: anchors; focused `dom_module_props` + WPT-shim selection tests; grep gate:
 `rg -c "strcmp" lambda/js/js_dom_selection.cpp` ≤ 10 (residual data compares only); full JS
 gtest; UI-automation (selection is editing-coupled).
+
+Progress (2026-07-11): **Phase 1 complete.**
+
+- **Interface**: `range` (6 props + 4 constants as default literals + 23 methods) and
+  `selection` (8 props + 4 non-enumerable aliases + 17 methods) declared in
+  `lambda/module/radiant/radiant_dom_iface.cpp`; methods are fn-typed fields; `'type'` uses
+  the symbol-name spelling (keyword as member name — the compiler strips quotes);
+  `__force_direction` carries a `js_name` override (`__forceDirection`, since snake→camel
+  cannot preserve the double-underscore spelling). Bindings are macro-generated thin adapters
+  onto 54 new receiver-explicit `JubeHostDomAPI` entries.
+- **Engine** (`js_dom_selection.cpp`, 2022 → 1606 lines): all 40 behavior functions refactored
+  receiver-first (no `js_get_this()` in behavior paths); 6+8 per-property getters added; both
+  `*_is_native_property` predicates, both strcmp getter/setter chains, both method
+  caches/binders, the expando side tables (+ their 8 extern wrappers and GC-root arrays), and
+  the prototype method publication block are **deleted**. strcmp count 130 → **5**, and the
+  survivors compare data values (tag content, direction enum names), not API names.
+- **Generic layer additions** driven by this phase: `JubeTypeBinding.prototype_seed` (the
+  engine's live `Range.prototype`/`Selection.prototype` identity is adopted, so
+  `r.__proto__ === Range.prototype` and instanceof hold), prototype-chain fallthrough on get
+  miss (prototype patching + Object.prototype methods stay reachable), `__proto__` key
+  handling, method function objects published onto the seeded prototype (same Items instance
+  reads return), `JUBE_MEMBER_NON_ENUMERABLE` flags, and `jube_interface_runtime_reset()` —
+  batch runs recreate globals per script, so cached prototypes/method Items drop in
+  `js_dom_selection_reset` and re-seed against the new runtime (this also fixed the same
+  latent staleness for `hostobj_demo`'s cached items).
+- **Bridge**: all range/selection branches deleted from get/set/call/projected/expando/
+  own-keys/prototype host ops plus 16 dead `#define` aliases; the retired `JubeHostDomAPI`
+  slots (get/set_property, native_property, expando triads — 14) are NULLed with layout
+  preserved. `js_dom.cpp`'s two routing arms deleted.
+- **Expandos** are now the generic backing-store expando (side tables gone); `__`-prefixed
+  key filtering from enumeration is preserved by the generic layer's declared-members-first
+  ordering (WPT-shim internals were only reachable through the deleted side tables' name
+  filter; the pinned tests pass unchanged).
+- Net diff: **+485 / −735** lines across 9 files — the conversion *shrinks* the codebase
+  while adding the whole declarative layer.
+- Verified gates: `make build` 0 errors; **`dom_module_props` diff exit 0** (its range/
+  selection section pins `__proto__` identity, prototype patching, expandos, descriptor
+  `.value`, keys ordering, instanceof, delete semantics, direction/backward flows); full JS
+  gtest **309/309** (suite wall-time 65s vs ~240s at Phase 0 — hash-index dispatch replaces
+  chain walks in DOM-heavy batch tests, build-cache variance notwithstanding); UI-automation
+  **233 passed / 2 known webview skips / 0 failed**; focused lambda gtests 6/6; direct
+  `radiant_poc` / `radiant_poc_uaf` / `hostobj_demo` goldens; `make test-lambda-baseline`
+  exit 0; strcmp budget: js_dom_selection.cpp = 5 (gate ≤ 10).
+- Carried to Phase 2+: `pn`-typed members in the type grammar (purity split for mutating
+  methods — all range/selection methods currently declare `fn`), the `reflect_attr` generic
+  routine, `applies_to` tag guards, O(1) typedef membership set, and radiant_dom_bridge.cpp's
+  own element chains (279 strcmps, Phase 4 scope).
 
 ### Phase 2 — CSSOM types (stylesheet, css_rule, rule_style_decl, CSS namespace)
 

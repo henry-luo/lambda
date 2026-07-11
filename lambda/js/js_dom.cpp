@@ -8914,10 +8914,6 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
 
 extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // Range / Selection wrappers also live under the DOM resource carrier and route here.
-    if (js_dom_item_is_range(elem_item))
-        return js_dom_range_get_property(elem_item, prop_name);
-    if (js_dom_item_is_selection(elem_item))
-        return js_dom_selection_get_property(elem_item, prop_name);
 
     if (js_is_inline_style(elem_item)) {
         DomElement* owner = js_inline_style_owner(elem_item);
@@ -10475,14 +10471,6 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
 }
 
 extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item value) {
-    // Range wrappers expose only read-only attributes; silently ignore writes.
-    if (js_dom_item_is_range(elem_item))
-        return value;
-    // Selection native attributes are read-only, but imported browser harnesses
-    // also attach helper expandos (document/window/computeLeft/etc.).
-    if (js_dom_item_is_selection(elem_item))
-        return js_dom_selection_set_property(elem_item, prop_name, value);
-
     if (js_is_inline_style(elem_item)) {
         DomElement* owner = js_inline_style_owner(elem_item);
         if (!owner) return ItemNull;

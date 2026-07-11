@@ -63,28 +63,12 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_document_proxy_get_property radiant_host_api->dom->document_proxy_get_property
 #define js_document_proxy_set_property radiant_host_api->dom->document_proxy_set_property
 #define js_document_proxy_method radiant_host_api->dom->document_proxy_method
-#define js_dom_item_is_range radiant_host_api->dom->item_is_range
-#define js_dom_item_is_selection radiant_host_api->dom->item_is_selection
-#define js_dom_range_get_property radiant_host_api->dom->range_get_property
-#define js_dom_range_set_property radiant_host_api->dom->range_set_property
-#define js_dom_selection_get_property radiant_host_api->dom->selection_get_property
-#define js_dom_selection_set_property radiant_host_api->dom->selection_set_property
 #define js_dom_range_get_prototype_value radiant_host_api->dom->range_get_prototype_value
 #define js_dom_selection_get_prototype_value radiant_host_api->dom->selection_get_prototype_value
-#define js_dom_range_native_property radiant_host_api->dom->range_native_property
-#define js_dom_selection_native_property radiant_host_api->dom->selection_native_property
 #define js_dom_expando_has_property radiant_host_api->dom->expando_has_property
-#define js_dom_range_expando_has_property radiant_host_api->dom->range_expando_has_property
-#define js_dom_selection_expando_has_property radiant_host_api->dom->selection_expando_has_property
 #define js_dom_expando_get_own_property_descriptor radiant_host_api->dom->expando_get_own_property_descriptor
-#define js_dom_range_expando_get_own_property_descriptor radiant_host_api->dom->range_expando_get_own_property_descriptor
-#define js_dom_selection_expando_get_own_property_descriptor radiant_host_api->dom->selection_expando_get_own_property_descriptor
 #define js_dom_expando_delete_property radiant_host_api->dom->expando_delete_property
-#define js_dom_range_expando_delete_property radiant_host_api->dom->range_expando_delete_property
-#define js_dom_selection_expando_delete_property radiant_host_api->dom->selection_expando_delete_property
 #define js_dom_expando_own_property_names radiant_host_api->dom->expando_own_property_names
-#define js_dom_range_expando_own_property_names radiant_host_api->dom->range_expando_own_property_names
-#define js_dom_selection_expando_own_property_names radiant_host_api->dom->selection_expando_own_property_names
 #define js_css_namespace_method radiant_host_api->dom->css_namespace_method
 #define js_cssom_stylesheet_method radiant_host_api->dom->cssom_stylesheet_method
 #define js_cssom_rule_decl_method radiant_host_api->dom->cssom_rule_decl_method
@@ -2410,12 +2394,6 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
 }
 
 RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
-    if (js_dom_item_is_range(elem_item)) {
-        return js_dom_range_get_property(elem_item, prop_name);
-    }
-    if (js_dom_item_is_selection(elem_item)) {
-        return js_dom_selection_get_property(elem_item, prop_name);
-    }
     Item result = ItemNull;
     if (radiant_dom_get_basic_property(elem_item, prop_name, &result)) {
         return result;
@@ -2424,12 +2402,6 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
 }
 
 RADIANT_C_API Item radiant_dom_set_property(Item elem_item, Item prop_name, Item value) {
-    if (js_dom_item_is_range(elem_item)) {
-        return js_dom_range_set_property(elem_item, prop_name, value);
-    }
-    if (js_dom_item_is_selection(elem_item)) {
-        return js_dom_selection_set_property(elem_item, prop_name, value);
-    }
     Item result = ItemNull;
     if (radiant_dom_set_basic_property(elem_item, prop_name, value, &result)) {
         return result;
@@ -2467,40 +2439,22 @@ static Item radiant_dom_data_descriptor(Item value, bool writable,
 
 static bool radiant_dom_projected_own_value(Item object, Item key, Item* out) {
     if (!out || get_type_id(key) != LMD_TYPE_STRING) return false;
-    if (js_dom_item_is_range(object)) {
-        if (!js_dom_range_native_property(object, key)) return false;
-        *out = js_dom_range_get_property(object, key);
-        return true;
-    }
-    if (js_dom_item_is_selection(object)) {
-        if (!js_dom_selection_native_property(object, key)) return false;
-        *out = js_dom_selection_get_property(object, key);
-        return true;
-    }
     return radiant_dom_get_basic_property(object, key, out);
 }
 
 static bool radiant_dom_has_expando(Item object, Item key) {
-    if (js_dom_item_is_range(object)) return js_dom_range_expando_has_property(object, key);
-    if (js_dom_item_is_selection(object)) return js_dom_selection_expando_has_property(object, key);
     return js_dom_expando_has_property(object, key);
 }
 
 static Item radiant_dom_expando_descriptor(Item object, Item key) {
-    if (js_dom_item_is_range(object)) return js_dom_range_expando_get_own_property_descriptor(object, key);
-    if (js_dom_item_is_selection(object)) return js_dom_selection_expando_get_own_property_descriptor(object, key);
     return js_dom_expando_get_own_property_descriptor(object, key);
 }
 
 static Item radiant_dom_delete_expando(Item object, Item key) {
-    if (js_dom_item_is_range(object)) return js_dom_range_expando_delete_property(object, key);
-    if (js_dom_item_is_selection(object)) return js_dom_selection_expando_delete_property(object, key);
     return js_dom_expando_delete_property(object, key);
 }
 
 static Item radiant_dom_expando_names(Item object) {
-    if (js_dom_item_is_range(object)) return js_dom_range_expando_own_property_names(object);
-    if (js_dom_item_is_selection(object)) return js_dom_selection_expando_own_property_names(object);
     return js_dom_expando_own_property_names(object);
 }
 
@@ -2549,16 +2503,6 @@ RADIANT_C_API int radiant_dom_host_call_method(Item object,
                                             int argc,
                                             Item* out) {
     if (!out) return 0;
-    if (js_dom_item_is_range(object)) {
-        Item fn = js_dom_range_get_property(object, method_name);
-        *out = js_call_function(fn, object, args, argc);
-        return 1;
-    }
-    if (js_dom_item_is_selection(object)) {
-        Item fn = js_dom_selection_get_property(object, method_name);
-        *out = js_call_function(fn, object, args, argc);
-        return 1;
-    }
     *out = radiant_dom_element_method(object, method_name, args, argc);
     return 1;
 }
@@ -2612,19 +2556,7 @@ RADIANT_C_API int radiant_dom_host_own_property_descriptor(Item object, Item key
 RADIANT_C_API int radiant_dom_host_own_property_names(Item object, Item* out) {
     if (!out) return 0;
     Item result = radiant_host_api->value->array_new(0);
-    if (js_dom_item_is_range(object)) {
-        static const char* const range_keys[] = {
-            "startContainer", "startOffset", "endContainer", "endOffset",
-            "collapsed", "commonAncestorContainer", nullptr
-        };
-        for (int i = 0; range_keys[i]; i++) radiant_dom_push_projected_key(result, object, range_keys[i]);
-    } else if (js_dom_item_is_selection(object)) {
-        static const char* const selection_keys[] = {
-            "anchorNode", "anchorOffset", "focusNode", "focusOffset",
-            "isCollapsed", "rangeCount", "type", "direction", nullptr
-        };
-        for (int i = 0; selection_keys[i]; i++) radiant_dom_push_projected_key(result, object, selection_keys[i]);
-    } else {
+    {
         DomNode* node = (DomNode*)radiant_dom_unwrap_node(object);
         if (node && node->is_element()) {
             static const char* const element_keys[] = {
@@ -2657,8 +2589,6 @@ RADIANT_C_API int radiant_dom_host_own_property_names(Item object, Item* out) {
 }
 
 RADIANT_C_API Item radiant_dom_host_prototype(Item object) {
-    if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
-    if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
     return js_dom_get_prototype_value(object);
 }
 
