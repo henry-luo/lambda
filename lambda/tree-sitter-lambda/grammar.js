@@ -513,6 +513,7 @@ module.exports = grammar({
     current_expr: _ => token(choice('~#', '~')),
 
     _at: _ => token(prec(2, 'at')),
+    _into: _ => token(prec(2, 'into')),
 
     // Unary expression: includes not, !, -, +, ^, * (spread)
     unary_expr: $ => prec.left(seq(
@@ -795,12 +796,19 @@ module.exports = grammar({
       repeat(seq(',', field('spec', $.order_spec)))
     ),
 
-    // group by clause: group by expr [, expr, ...] as name
-    for_group_clause: $ => seq(
-      'group', 'by', field('key', $._expr),
-      repeat(seq(',', field('key', $._expr))),
-      'as', field('name', $.identifier)
+    // group key spec: expr [as alias]
+    group_key_spec: $ => seq(
+      field('key', $.primary_expr),
+      optional(seq('as', field('alias', $.identifier)))
     ),
+
+    // group by clause: group by expr [as alias] [, expr [as alias], ...] into name
+    for_group_clause: $ => prec.dynamic(10, seq(
+      'group', 'by',
+      field('spec', $.group_key_spec),
+      repeat(seq(',', field('spec', $.group_key_spec))),
+      $._into, field('name', $.identifier)
+    )),
 
     // limit clause: limit expr or limit last expr
     for_limit_clause: $ => seq(

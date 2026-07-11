@@ -450,10 +450,16 @@ typedef struct AstOrderSpec : AstNode {
     bool descending;    // true if 'desc' or 'descending'
 } AstOrderSpec;
 
-// Group clause: group by expr, expr, ... as name
+typedef struct AstGroupKey : AstNode {
+    AstNode *expr;      // grouping key expression
+    String* alias;      // attribute name on the group element
+} AstGroupKey;
+
+// Group clause: group by expr [as alias], ... into name
 typedef struct AstGroupClause : AstNode {
-    AstNode *keys;      // linked list of key expressions
-    String* name;       // alias name (from 'as name')
+    AstGroupKey *keys;  // linked list of key specs
+    String* name;       // group binding name (from 'into name')
+    int key_count;
 } AstGroupClause;
 
 typedef struct AstForNode : AstNode {

@@ -810,6 +810,16 @@ void array_push(Array* arr, Item item);  // push item to array
 void array_push_spread(Array* arr, Item item);      // push item, spreading if spreadable array
 void array_push_spread_all(Array* arr, Item item);  // push item, spreading any array (for pipe exprs in array literals)
 Item array_end(Array* arr);  // finalize and return array as Item
+#ifdef __cplusplus
+extern "C" {
+#endif
+uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1);
+int lambda_item_compare(Item a, Item b);
+Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, int64_t alias_count);
+Array* fn_group_by_keys_items(Item rows_item, Item keys_item, Item aliases_item);
+#ifdef __cplusplus
+}
+#endif
 
 // Mark an item as spreadable (for spread operator *expr)
 Item item_spread(Item item);

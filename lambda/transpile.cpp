@@ -2393,6 +2393,43 @@ void transpile_let_clauses(Transpiler* tp, AstNode* let_clause) {
     }
 }
 
+static int count_group_keys(AstGroupClause* group) {
+    int count = 0;
+    for (AstGroupKey* key = group ? group->keys : NULL; key; key = (AstGroupKey*)key->next) count++;
+    return count;
+}
+
+static void transpile_group_key_item(Transpiler* tp, AstGroupClause* group) {
+    int key_count = count_group_keys(group);
+    if (key_count <= 1) {
+        AstGroupKey* key = group ? group->keys : NULL;
+        if (key && key->expr) transpile_box_item(tp, key->expr);
+        else strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        return;
+    }
+
+    strbuf_append_str(tp->code_buf, "({Array* group_key_tuple=array_plain();");
+    for (AstGroupKey* key = group->keys; key; key = (AstGroupKey*)key->next) {
+        strbuf_append_str(tp->code_buf, " array_push(group_key_tuple,");
+        transpile_box_item(tp, key->expr);
+        strbuf_append_str(tp->code_buf, ");");
+    }
+    strbuf_append_str(tp->code_buf, " (Item)group_key_tuple;})");
+}
+
+static void transpile_group_alias_array(Transpiler* tp, AstGroupClause* group, int alias_id) {
+    strbuf_append_format(tp->code_buf, " const char* group_aliases_%d[]={", alias_id);
+    bool first = true;
+    for (AstGroupKey* key = group ? group->keys : NULL; key; key = (AstGroupKey*)key->next) {
+        if (!first) strbuf_append_char(tp->code_buf, ',');
+        first = false;
+        strbuf_append_char(tp->code_buf, '"');
+        if (key->alias) strbuf_append_str_n(tp->code_buf, key->alias->chars, key->alias->len);
+        strbuf_append_char(tp->code_buf, '"');
+    }
+    strbuf_append_str(tp->code_buf, "};\n");
+}
+
 // Helper: count order specs for comparison function
 int count_order_specs(AstNode* order) {
     int count = 0;
@@ -2421,10 +2458,150 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
     bool has_offset = for_node->offset != NULL;
     bool has_let = for_node->let_clause != NULL;
 
-    // GROUP BY not yet fully implemented
     if (has_group) {
-        log_error("Error: GROUP BY clause not yet implemented");
-        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+        AstLoopNode* loop_node = (AstLoopNode*)for_node->loop;
+        if (!loop_node || loop_node->next) {
+            log_error("Error: group by currently supports one source; joined tuple grouping ships with join on");
+            strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+            return;
+        }
+
+        static int group_alias_counter = 0;
+        int alias_id = ++group_alias_counter;
+        int key_count = count_group_keys(for_node->group);
+        if (key_count <= 0) {
+            log_error("Error: group by requires at least one key");
+            strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+            return;
+        }
+
+        strbuf_append_str(tp->code_buf, "({\n Array* arr_out=array_spreadable();\n");
+        if (has_order) {
+            strbuf_append_str(tp->code_buf, " Array* arr_keys=array_plain();\n");
+        }
+        strbuf_append_str(tp->code_buf, " Array* group_rows=array_plain();\n Array* group_keys=array_plain();\n");
+
+        Type* expr_type = loop_node->as->type ? loop_node->as->type : &TYPE_ANY;
+        LoopKeyFilter key_filter = loop_node->key_filter;
+        bool has_index = (loop_node->index_name != NULL);
+        bool key_only = loop_node->key_only;
+        char filter_str[4];
+        snprintf(filter_str, sizeof(filter_str), "%d", (int)key_filter);
+
+        strbuf_append_str(tp->code_buf, " Item group_src=");
+        transpile_box_item(tp, loop_node->as);
+        strbuf_append_str(tp->code_buf, ";\n SymbolKeyList* group_iter_keys=item_keys(group_src);\n");
+        strbuf_append_str(tp->code_buf, " int64_t group_iter_n=iter_len(group_src, group_iter_keys, ");
+        strbuf_append_str(tp->code_buf, filter_str);
+        strbuf_append_str(tp->code_buf, ");\n for (int64_t group_idx=0; group_idx<group_iter_n; group_idx++) {\n");
+
+        if (has_index) {
+            if (key_filter == LOOP_KEY_INT) {
+                strbuf_append_str(tp->code_buf, "  int64_t _");
+                strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
+                strbuf_append_str(tp->code_buf, "=it2i(iter_key_at(group_src, group_iter_keys, group_idx, ");
+                strbuf_append_str(tp->code_buf, filter_str);
+                strbuf_append_str(tp->code_buf, "));\n");
+            } else {
+                strbuf_append_str(tp->code_buf, "  Item _");
+                strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
+                strbuf_append_str(tp->code_buf, "=iter_key_at(group_src, group_iter_keys, group_idx, ");
+                strbuf_append_str(tp->code_buf, filter_str);
+                strbuf_append_str(tp->code_buf, ");\n");
+            }
+        }
+
+        strbuf_append_str(tp->code_buf, "  Item group_row_item=");
+        strbuf_append_str(tp->code_buf, key_only ? "iter_key_at(group_src, group_iter_keys, group_idx, " : "iter_val_at(group_src, group_iter_keys, group_idx, ");
+        strbuf_append_str(tp->code_buf, filter_str);
+        strbuf_append_str(tp->code_buf, ");\n  ");
+        Type* item_type = loop_node->type ? loop_node->type : &TYPE_ANY;
+        write_type(tp->code_buf, item_type);
+        strbuf_append_str(tp->code_buf, " _");
+        strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
+        const TypeBoxInfo* info = get_box_info(item_type->type_id);
+        if (info && info->unbox_fn) {
+            strbuf_append_format(tp->code_buf, "=%s(group_row_item);\n", info->unbox_fn);
+        } else {
+            strbuf_append_str(tp->code_buf, "=group_row_item;\n");
+        }
+
+        if (has_let) {
+            transpile_let_clauses(tp, for_node->let_clause);
+        }
+        if (has_where) {
+            transpile_where_check(tp, for_node->where);
+        }
+
+        strbuf_append_str(tp->code_buf, "  array_push(group_rows, group_row_item);\n  array_push(group_keys,");
+        transpile_group_key_item(tp, for_node->group);
+        strbuf_append_str(tp->code_buf, ");\n }\n symbol_key_list_free(group_iter_keys);\n");
+
+        transpile_group_alias_array(tp, for_node->group, alias_id);
+        strbuf_append_format(tp->code_buf,
+            " Array* group_groups=fn_group_by_keys((Item)group_rows,(Item)group_keys,group_aliases_%d,%d);\n",
+            alias_id, key_count);
+        strbuf_append_str(tp->code_buf, " for (int64_t group_out_idx=0; group_out_idx<group_groups->length; group_out_idx++) {\n  Element* _");
+        strbuf_append_str_n(tp->code_buf, for_node->group->name->chars, for_node->group->name->len);
+        strbuf_append_str(tp->code_buf, "=it2elmt(group_groups->items[group_out_idx]);\n");
+
+        strbuf_append_str(tp->code_buf, "  array_push_spread(arr_out,");
+        transpile_box_item(tp, for_node->then);
+        strbuf_append_str(tp->code_buf, ");");
+
+        if (has_order) {
+            AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
+            strbuf_append_str(tp->code_buf, " array_push(arr_keys,");
+            transpile_box_item(tp, first_spec->expr);
+            strbuf_append_str(tp->code_buf, ");");
+        }
+        strbuf_append_str(tp->code_buf, " }\n");
+
+        if (has_order) {
+            AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
+            strbuf_append_str(tp->code_buf, " fn_sort_by_keys((Item)arr_out, (Item)arr_keys, ");
+            strbuf_append_str(tp->code_buf, first_spec->descending ? "1" : "0");
+            strbuf_append_str(tp->code_buf, ");\n");
+        }
+
+        if (has_order && (has_offset || has_limit)) {
+            if (has_offset) {
+                strbuf_append_str(tp->code_buf, " array_drop_inplace(arr_out, ");
+                transpile_box_item(tp, for_node->offset);
+                strbuf_append_str(tp->code_buf, " & 0x00FFFFFFFFFFFFFF);\n");
+            }
+            if (has_limit) {
+                strbuf_append_str(tp->code_buf, for_node->limit_from_end
+                    ? " array_limit_last_inplace(arr_out, "
+                    : " array_limit_inplace(arr_out, ");
+                transpile_box_item(tp, for_node->limit);
+                strbuf_append_str(tp->code_buf, " & 0x00FFFFFFFFFFFFFF);\n");
+            }
+            strbuf_append_str(tp->code_buf, " array_end(arr_out);})");
+        } else if (has_offset || has_limit) {
+            if (has_offset) {
+                strbuf_append_str(tp->code_buf, " Item offset_v = fn_drop((Item)arr_out, ");
+                transpile_box_item(tp, for_node->offset);
+                strbuf_append_str(tp->code_buf, ");\n");
+            }
+            if (has_limit) {
+                if (has_offset) {
+                    strbuf_append_str(tp->code_buf, for_node->limit_from_end
+                        ? " Item limited_v = fn_take_last(offset_v, "
+                        : " Item limited_v = fn_take(offset_v, ");
+                } else {
+                    strbuf_append_str(tp->code_buf, for_node->limit_from_end
+                        ? " Item limited_v = fn_take_last((Item)arr_out, "
+                        : " Item limited_v = fn_take((Item)arr_out, ");
+                }
+                transpile_box_item(tp, for_node->limit);
+                strbuf_append_str(tp->code_buf, ");\n");
+            }
+            if (has_limit) strbuf_append_str(tp->code_buf, " limited_v;})");
+            else strbuf_append_str(tp->code_buf, " offset_v;})");
+        } else {
+            strbuf_append_str(tp->code_buf, " array_end(arr_out);})");
+        }
         return;
     }
 
@@ -2893,7 +3070,8 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     strbuf_append_str(tp->code_buf, "      int64_t pipe_len = fn_len(pipe_collection);\n");
     strbuf_append_str(tp->code_buf, "      for (int64_t pipe_i = 0; pipe_i < pipe_len; pipe_i++) {\n");
     strbuf_append_str(tp->code_buf, "        Item pipe_index = i2it(pipe_i);\n");
-    strbuf_append_str(tp->code_buf, "        Item pipe_item = item_at(pipe_collection, pipe_i);\n");
+    // Element pipes must iterate children only; attributes remain addressable by name but are not row items.
+    strbuf_append_str(tp->code_buf, "        Item pipe_item = pipe_type == LMD_TYPE_ELEMENT ? iter_val_at(pipe_collection, NULL, pipe_i, 1) : item_at(pipe_collection, pipe_i);\n");
 
     if (pipe_node->op == OPERATOR_WHERE) {
         // filter

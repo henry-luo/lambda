@@ -1461,6 +1461,7 @@ JitImport jit_runtime_imports[] = {
     // Sort helper
     // ========================================================================
     {"fn_sort_by_keys", FPTR(fn_sort_by_keys)},
+    {"fn_group_by_keys_items", FPTR(fn_group_by_keys_items)},
 
     // ========================================================================
     // Array/map mutation (procedural)

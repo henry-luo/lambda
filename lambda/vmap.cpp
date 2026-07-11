@@ -208,70 +208,14 @@ struct HashMapData {
 // hash an Item key for use in the hash table
 static uint64_t vmap_hash_item(const void* entry, uint64_t seed0, uint64_t seed1) {
     const HashMapEntry* e = (const HashMapEntry*)entry;
-    Item key = e->key;
-    TypeId type_id = get_type_id(key);
-
-    switch (type_id) {
-    case LMD_TYPE_INT:
-    case LMD_TYPE_INT64:
-    case LMD_TYPE_UINT64:
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_DECIMAL:
-    case LMD_TYPE_NUM_SIZED: {
-        char num_buf[128];
-        if (lambda_numeric_to_canonical_string(key, num_buf, sizeof(num_buf))) {
-            return hashmap_sip(num_buf, strlen(num_buf), seed0, seed1);
-        }
-        return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
-    }
-    case LMD_TYPE_STRING: {
-        String* s = key.get_safe_string();
-        if (s) return hashmap_sip(s->chars, s->len, seed0, seed1);
-        return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
-    }
-    case LMD_TYPE_SYMBOL: {
-        Symbol* s = key.get_safe_symbol();
-        if (s) return hashmap_sip(s->chars, s->len, seed0, seed1);
-        return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
-    }
-    default:
-        // pointer-identity or packed-value: hash the raw 64-bit Item
-        return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
-    }
+    return lambda_item_hash(e->key, seed0, seed1);
 }
 
 // compare two Item keys for equality
 static int vmap_compare_item(const void* a, const void* b, void* udata) {
     const HashMapEntry* ea = (const HashMapEntry*)a;
     const HashMapEntry* eb = (const HashMapEntry*)b;
-    Item ka = ea->key, kb = eb->key;
-    TypeId ta = get_type_id(ka), tb = get_type_id(kb);
-    if (IS_NUMERIC_ID(ta) && IS_NUMERIC_ID(tb)) {
-        Bool eq = fn_eq(ka, kb);
-        return eq == BOOL_TRUE ? 0 : 1;
-    }
-    if (ta != tb) return 1;  // different non-numeric types → not equal
-
-    switch (ta) {
-    case LMD_TYPE_STRING: {
-        String* sa = ka.get_safe_string();
-        String* sb = kb.get_safe_string();
-        if (sa == sb) return 0;
-        if (!sa || !sb) return 1;
-        if (sa->len != sb->len) return 1;
-        return memcmp(sa->chars, sb->chars, sa->len);
-    }
-    case LMD_TYPE_SYMBOL: {
-        Symbol* sa = ka.get_safe_symbol();
-        Symbol* sb = kb.get_safe_symbol();
-        if (sa == sb) return 0;
-        if (!sa || !sb) return 1;
-        if (sa->len != sb->len) return 1;
-        return memcmp(sa->chars, sb->chars, sa->len);
-    }
-    default:
-        return (ka.item == kb.item) ? 0 : 1;  // RAW_ITEM_EQ_OK: non-numeric keys use pointer/sentinel identity after numeric value compare.
-    }
+    return lambda_item_compare(ea->key, eb->key);
 }
 
 // ============================================================================

@@ -1,0 +1,46 @@
+"=== For Group Clauses ==="
+[{
+    region: "west",
+    n: 2,
+    first: 10,
+    total: 15
+  }, {
+    region: "east",
+    n: 1,
+    first: 7,
+    total: 7
+  }]
+[{
+    value: 1,
+    n: 2
+  }, {
+    value: 2,
+    n: 1
+  }, {
+    value: null,
+    n: 2
+  }]
+[{
+    year: 2024,
+    month: 1,
+    total: 3
+  }, {
+    year: 2024,
+    month: 2,
+    total: 5
+  }]
+[{
+    length: 1,
+    n: 1,
+    first: "a"
+  }, {
+    length: 2,
+    n: 2,
+    first: "bb"
+  }, {
+    length: 3,
+    n: 1,
+    first: "ddd"
+  }]
+[error, error]
+"All for group clause tests completed!"

@@ -1,9 +1,11 @@
 
 #include "transpiler.hpp"
+#include "lambda-decimal.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
 #include "../lib/arraylist.hpp"
 #include "../lib/checked_math.hpp"
+#include "../lib/hashmap.h"
 #include "input/css/dom_element.hpp"  // DomElement, dom_element_to_element, element_to_dom_element
 #include "input/css/dom_node.hpp"     // DomText, dom_text_to_string, string_to_dom_text
 #include <math.h>
@@ -13,6 +15,7 @@ extern "C" void* heap_data_alloc(size_t size);
 extern "C" void* heap_data_calloc(size_t size);
 
 extern __thread EvalContext* context;
+extern "C" Context* _lambda_rt;
 void array_set(Array* arr, int64_t index, Item itm);
 void array_push(Array* arr, Item itm);
 void set_fields(TypeMap *map_type, void* map_data, va_list args);
@@ -1349,6 +1352,184 @@ void array_push_spread_all(Array* arr, Item item) {
     }
     // non-array types are pushed as single items (maps, elements, scalars, etc.)
     array_push(arr, item);
+}
+
+uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1) {
+    TypeId type_id = get_type_id(key);
+    switch (type_id) {
+    case LMD_TYPE_INT:
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64:
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_NUM_SIZED: {
+        char num_buf[128];
+        if (lambda_numeric_to_canonical_string(key, num_buf, sizeof(num_buf))) {
+            return hashmap_sip(num_buf, strlen(num_buf), seed0, seed1);
+        }
+        return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
+    }
+    case LMD_TYPE_STRING: {
+        String* s = key.get_safe_string();
+        if (s) return hashmap_sip(s->chars, s->len, seed0, seed1);
+        return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
+    }
+    case LMD_TYPE_SYMBOL: {
+        Symbol* s = key.get_safe_symbol();
+        if (s) return hashmap_sip(s->chars, s->len, seed0, seed1);
+        return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
+    }
+    case LMD_TYPE_ARRAY: {
+        uint64_t h = hashmap_sip(&type_id, sizeof(type_id), seed0, seed1);
+        Array* arr = key.array;
+        int64_t len = arr ? arr->length : 0;
+        h ^= hashmap_sip(&len, sizeof(len), seed0, seed1);
+        for (int64_t i = 0; arr && i < arr->length; i++) {
+            uint64_t child = lambda_item_hash(arr->items[i], seed0, seed1);
+            h ^= child + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+        }
+        return h;
+    }
+    default:
+        return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
+    }
+}
+
+int lambda_item_compare(Item a, Item b) {
+    TypeId ta = get_type_id(a), tb = get_type_id(b);
+    if (IS_NUMERIC_ID(ta) && IS_NUMERIC_ID(tb)) {
+        Bool eq = fn_eq(a, b);
+        return eq == BOOL_TRUE ? 0 : 1;
+    }
+    if (ta != tb) return 1;
+    switch (ta) {
+    case LMD_TYPE_STRING: {
+        String* sa = a.get_safe_string();
+        String* sb = b.get_safe_string();
+        if (sa == sb) return 0;
+        if (!sa || !sb) return 1;
+        if (sa->len != sb->len) return 1;
+        return memcmp(sa->chars, sb->chars, sa->len);
+    }
+    case LMD_TYPE_SYMBOL: {
+        Symbol* sa = a.get_safe_symbol();
+        Symbol* sb = b.get_safe_symbol();
+        if (sa == sb) return 0;
+        if (!sa || !sb) return 1;
+        if (sa->len != sb->len) return 1;
+        return memcmp(sa->chars, sb->chars, sa->len);
+    }
+    case LMD_TYPE_ARRAY: {
+        Array* aa = a.array;
+        Array* ab = b.array;
+        if (aa == ab) return 0;
+        if (!aa || !ab || aa->length != ab->length) return 1;
+        for (int64_t i = 0; i < aa->length; i++) {
+            if (lambda_item_compare(aa->items[i], ab->items[i]) != 0) return 1;
+        }
+        return 0;
+    }
+    default:
+        return (a.item == b.item) ? 0 : 1;  // RAW_ITEM_EQ_OK: non-numeric scalar/container fallback matches existing VMap key identity.
+    }
+}
+
+typedef struct GroupHashEntry {
+    Item key;
+    Array* members;
+} GroupHashEntry;
+
+static uint64_t group_hash_entry(const void* entry, uint64_t seed0, uint64_t seed1) {
+    const GroupHashEntry* e = (const GroupHashEntry*)entry;
+    return lambda_item_hash(e->key, seed0, seed1);
+}
+
+static int group_compare_entry(const void* a, const void* b, void* udata) {
+    const GroupHashEntry* ea = (const GroupHashEntry*)a;
+    const GroupHashEntry* eb = (const GroupHashEntry*)b;
+    return lambda_item_compare(ea->key, eb->key);
+}
+
+static Item group_key_part(Item key, int64_t index, int64_t alias_count) {
+    if (alias_count == 1) return key;
+    if (get_type_id(key) == LMD_TYPE_ARRAY) return item_at(key, index);
+    return ItemNull;
+}
+
+Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, int64_t alias_count) {
+    Array* out = array_plain();
+    if (get_type_id(rows_item) != LMD_TYPE_ARRAY || get_type_id(keys_item) != LMD_TYPE_ARRAY ||
+        !aliases || alias_count <= 0 || !_lambda_rt || !_lambda_rt->pool) {
+        log_error("group_by_keys: invalid rows/keys/aliases/runtime");
+        return out;
+    }
+
+    Array* rows = rows_item.array;
+    Array* keys = keys_item.array;
+    HashMap* table = hashmap_new(sizeof(GroupHashEntry), rows ? (size_t)rows->length : 8, 0, 0,
+        group_hash_entry, group_compare_entry, NULL, NULL);
+    Array* order = array_plain();
+    if (!table || !rows || !keys) return out;
+
+    int64_t row_count = rows->length < keys->length ? rows->length : keys->length;
+    for (int64_t i = 0; i < row_count; i++) {
+        Item key = keys->items[i];
+        GroupHashEntry probe = { .key = key, .members = NULL };
+        const GroupHashEntry* existing = (const GroupHashEntry*)hashmap_get(table, &probe);
+        if (!existing) {
+            // First appearance fixes deterministic group order; later hash iteration order is ignored.
+            GroupHashEntry entry = { .key = key, .members = array_plain() };
+            hashmap_set(table, &entry);
+            array_push(order, key);
+            existing = (const GroupHashEntry*)hashmap_get(table, &probe);
+        }
+        if (existing && existing->members) array_push(existing->members, rows->items[i]);
+    }
+
+    for (int64_t i = 0; i < order->length; i++) {
+        GroupHashEntry probe = { .key = order->items[i], .members = NULL };
+        const GroupHashEntry* entry = (const GroupHashEntry*)hashmap_get(table, &probe);
+        if (!entry) continue;
+
+        Element* group = elmt_pooled(_lambda_rt->pool);
+        TypeElmt* group_type = (TypeElmt*)alloc_type(_lambda_rt->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+        String* tag = heap_create_name("group", 5);
+        group_type->name.str = tag ? tag->chars : "group";
+        group_type->name.length = tag ? tag->len : 5;
+        group->type = group_type;
+
+        for (int64_t k = 0; k < alias_count; k++) {
+            String* attr = heap_create_name(aliases[k]);
+            elmt_put(group, attr, group_key_part(entry->key, k, alias_count), _lambda_rt->pool);
+        }
+        for (int64_t m = 0; entry->members && m < entry->members->length; m++) {
+            // Group members are existing Item handles; copying handles preserves source values without re-shaping rows.
+            array_append((Array*)group, entry->members->items[m], _lambda_rt->pool, NULL);
+        }
+        group_type->content_length = group->length;
+        array_push(out, (Item){.element = group});
+    }
+
+    hashmap_free(table);
+    return out;
+}
+
+Array* fn_group_by_keys_items(Item rows_item, Item keys_item, Item aliases_item) {
+    if (get_type_id(aliases_item) != LMD_TYPE_ARRAY || !aliases_item.array) {
+        log_error("group_by_keys_items: aliases must be an array");
+        return array_plain();
+    }
+    Array* aliases = aliases_item.array;
+    const char** alias_names = (const char**)mem_alloc(sizeof(char*) * aliases->length, MEM_CAT_CONTAINER);
+    if (!alias_names) return array_plain();
+    for (int64_t i = 0; i < aliases->length; i++) {
+        Item alias_item = aliases->items[i];
+        String* str = alias_item.get_safe_string();
+        alias_names[i] = str ? str->chars : "";
+    }
+    Array* result = fn_group_by_keys(rows_item, keys_item, alias_names, aliases->length);
+    mem_free(alias_names);
+    return result;
 }
 
 // mark an item as spreadable (for spread operator *expr)

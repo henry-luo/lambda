@@ -1,7 +1,7 @@
 # Lambda For-Expression Clauses 2 — `group by` and join `on`
 
-**Status:** settled design — ready to implement
-**Date:** 2026-07-10 (revised 2026-07-11 ×2: group-by surface reworked per user — `group by KEY [as ALIAS], ... into g` where **`g` is an element**: keys = attributes, members = children. The interim XQuery loop-var regrouping was withdrawn (loop var would change type item→list); FC1/FC3 finalized, FC9 tightened)
+**Status:** S1 implemented for single-source `group by ... into g`; join `on` remains deferred
+**Date:** 2026-07-10 (revised 2026-07-11 ×3: S1 implemented — group-by surface reworked per user as `group by KEY [as ALIAS], ... into g` where **`g` is an element**: keys = attributes, members = children. The interim XQuery loop-var regrouping was withdrawn (loop var would change type item→list); FC1/FC3 finalized, FC9 tightened)
 **Context:** extracted from `Lambda_Design_Data_Processing.md` (§4.1, §5.1) as the *settled, implement-first* subset of the relational layer. This doc covers only the **for-expression surface**: the `group by` clause and the join `on` clause. The DataFrame type, the pipe-verb surface (`group()`/`agg()`/`join()`), and window functions (`over(...)`) remain in the data-processing proposal — they need more consideration and are **not** part of this doc's scope. Successor to `Lambda_Expr_For_Clauses.md`, which shipped `where`/`order by`/`limit`/`offset` (implemented and tested, `test/lambda/for_clauses_test.ls`) and put `group by ... as` into the grammar.
 
 ---
@@ -11,10 +11,10 @@
 | Piece | Grammar | AST | Transpile/Eval | Tests |
 |---|---|---|---|---|
 | `where` / `order by` / `limit` / `offset` | ✅ `grammar.js` `for_*_clause` | ✅ | ✅ | ✅ `for_clauses_test.ls` |
-| `group by` (old form `K [, K] as g`) | ✅ `for_group_clause` (grammar.js:799) — **needs rework to the §2.1 form** | ✅ `build_group_clause` (build_ast.cpp:7055) — registers `g` as `TYPE_MAP`; needs per-key aliases + `g` as element type | ❌ `transpile.cpp:2425` errors "GROUP BY not yet implemented"; nothing in transpile-mir | ❌ none |
+| `group by ... into g` (single source) | ✅ `group_key_spec` + `into` form generated from `grammar.js` | ✅ per-key alias/inference, duplicate-name errors, `g` registered as `TYPE_ELMT`, post-group scope isolated | ✅ C and MIR transpilers materialize real `<group>` elements via shared canonical key hashing; groups emit in first-appearance order; post-group `order by`/`limit`/`offset` operate on groups | ✅ `test/lambda/for_group_test.ls` |
 | join `on` / optional side `?` | ❌ | ❌ | ❌ | ❌ |
 
-So `group by` is grammar rework (small — the clause shape changes but nothing depends on the old one, since it never transpiled) plus semantics/transpiler/tests, and join `on` is a **small grammar addition** plus a hash-join engine both features share.
+So S1 `group by` is now live for the single-source row engine. Join `on` is still a **small grammar addition** plus a hash-join engine both features share.
 
 ---
 
@@ -37,7 +37,7 @@ for ( BINDINGS [, let N = E ...]
 ```lambda
 // single key — inferred attr: g.region; members are g's children
 for (x in sales group by x.region into g)
-    { region: g.region, total: sum(g | ~.amount) }
+    { region: g.region, total: sum(g |> ~["amount"]) }
 
 // multiple keys — named attributes, no positional g.key[i]
 for (o in orders group by o.year, o.month into g)
@@ -78,7 +78,7 @@ for_group_clause: $ => seq(
 
 **FC1-F — the group binding form (final; supersedes FC1 v1 `as g`+`g.key`/`g.items` and the interim FC1-R regrouping form).** Design rationale:
 
-- **`g` is an element** — the group *is* one value with keys as named attributes (`g.year`, `g.month` — no positional `g.key[i]`) and members as children (`len(g)`, `g[0]`, `for m in g`, `g | ~.amount`). This reuses Lambda's signature dual-natured type instead of inventing a group shape; the earlier "no dual-natured group value" objection was about a *new* magic value, and an element is not new.
+- **`g` is an element** — the group *is* one value with keys as named attributes (`g.year`, `g.month` — no positional `g.key[i]`) and members as children (`len(g)`, `g[0]`, `g |> ~["amount"]` under the current pipe-projection syntax). This reuses Lambda's signature dual-natured type instead of inventing a group shape; the earlier "no dual-natured group value" objection was about a *new* magic value, and an element is not new.
 - **A group is a document node**: it formats, outputs, and query-expresses like any element. `group by` literally turns flat data into markup — the XML/XQuery heritage without XQuery's variable magic.
 - **Element tag**: fixed symbol `'group'` (predictable for formatting/validation; the binding name identifies it in code, the tag identifies it in output). *(user-confirmed 2026-07-11)*
 - `as` = per-key alias, `into` = group binding (LINQ's `into` keyword).
@@ -96,7 +96,7 @@ Why not generate names? Surveying SQL: the standard leaves unnamed derived colum
 ### 2.2 Semantics
 
 - **FC2 — key equality is C8 value equality with C2 numeric-tower coherence.** `1` and `1.0` land in the same group. Multi-key: grouping compares the key *tuple* element-wise by value equality; the keys surface as **named attributes** on `g` (FC1-F/FC9), not a positional list. **Null keys are allowed and form one group** (R/SQL-`GROUP BY` style; note the deliberate asymmetry with joins, where null keys never match — FC6).
-- **FC3-F — scoping after `group by` (final): loop variables and per-tuple `let` bindings go out of scope**; only the `into` binding (plus enclosing scope) is visible in `order by`/`limit`/`offset` and the body. The XQuery-regrouping alternative (loop var rebinds to the member list) was considered and **withdrawn** — a variable silently changing type from item to list across a clause boundary is a type instability Lambda should not carry. Members are reached through `g`'s children (`g | ~.amount`, `g that (~.amount > 0)`, `for m in g`). Multi-source comprehensions: children are the joined tuples (maps of the source bindings) — spec'd precisely with the join work in S3.
+- **FC3-F — scoping after `group by` (final): loop variables and per-tuple `let` bindings go out of scope**; only the `into` binding (plus enclosing scope) is visible in `order by`/`limit`/`offset` and the body. The XQuery-regrouping alternative (loop var rebinds to the member list) was considered and **withdrawn** — a variable silently changing type from item to list across a clause boundary is a type instability Lambda should not carry. Members are reached through `g`'s children (`g |> ~["amount"]`, `g[0]`). Multi-source comprehensions: children are the joined tuples (maps of the source bindings) — spec'd precisely with the join work in S3.
 - **FC4 — deterministic group order:** groups are emitted in **first-appearance order of their key** in the (post-`where`) input. `order by` then reorders groups explicitly. No hash-order leakage.
 - **Clause order** (already the grammar's documented fixed order): `where` filters *rows* before grouping; `order by`/`limit`/`offset` after `group by` apply to *groups*.
 - **Works over any sequence** — arrays of maps, ranges, element children, RDB rows: `for (p in doc? [para] group by p.style as g) ...`. No frame required.
@@ -173,7 +173,7 @@ loop_expr: seq(
 - **join `on`:** classic hash join — build a hash table on the **new source** keyed by its side of the equalities, then iterate the prior tuple stream in order and probe (FC7 for free). Left join emits the null-padded tuple on probe miss.
 - Both paths are row-engine only (tuples of Items) — no columnar/SIMD work in this doc; that arrives with the DataFrame track.
 
-Implementation lives in the transpiler paths (`transpile.cpp` + `transpile-mir.cpp`) with runtime helpers in `lambda-eval.cpp` (e.g. `fn_group_tuples`, `fn_hash_join_build/probe`), mirroring how `order by` is implemented today.
+S1 implementation lives in the transpiler paths (`transpile.cpp` + `transpile-mir.cpp`) with runtime helpers in `lambda-data-runtime.cpp` (`lambda_item_hash`, `lambda_item_compare`, `fn_group_by_keys*`). The future join path should reuse the same canonical key hash/compare helpers.
 
 ---
 
@@ -181,8 +181,8 @@ Implementation lives in the transpiler paths (`transpile.cpp` + `transpile-mir.c
 
 | Step | Contents | Gate |
 |---|---|---|
-| **S0** | Canonical value hash (C8/C2-consistent) as a runtime helper | hash/equality property tests |
-| **S1** | `group by ... into g`: grammar rework (`group_key_spec` + `into`; `make generate-grammar`); build_ast — FC9 name inference/collision errors, register `g` as element type, loop vars/lets invalid post-group (FC3-F); transpile.cpp + transpile-mir.cpp codegen with MarkBuilder group-element materialization | `test/lambda/for_group_test.ls` + expected `.txt`; FC9 rejection tests; baseline green |
+| **S0** | Canonical value hash (C8/C2-consistent) as a runtime helper | ✅ implemented as `lambda_item_hash` / `lambda_item_compare`; reused by `VMap` |
+| **S1** | `group by ... into g`: grammar rework (`group_key_spec` + `into`; `make generate-grammar`); build_ast — FC9 name inference/collision errors, register `g` as element type, loop vars/lets invalid post-group (FC3-F); transpile.cpp + transpile-mir.cpp codegen with real group-element materialization | ✅ `test/lambda/for_group_test.ls` + expected `.txt`; `make test-lambda-baseline` green (3298/3298) |
 | **S2** | Grammar: `?` marker + `on` condition on `loop_expr`; `make generate-grammar`; AST (`AstJoinOn` on the loop node, FC5 equi-conjunction validation with clear error) | parse + rejection tests |
 | **S3** | Hash-join codegen (inner + left), both transpilers | `test/lambda/for_join_test.ls` + expected `.txt`; baseline green |
 | **S4** | Docs: `doc/Lambda_Expr_Stam.md` query-expression section + cheatsheet | — |

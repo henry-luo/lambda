@@ -7051,31 +7051,86 @@ AstNode* build_for_let_clause(Transpiler* tp, TSNode let_node) {
     return (AstNode*)ast_node;
 }
 
+static String* infer_group_key_alias(Transpiler* tp, AstNode* key_expr) {
+    AstNode* scan = key_expr;
+    while (scan && scan->node_type == AST_NODE_PRIMARY) {
+        scan = ((AstPrimaryNode*)scan)->expr;
+    }
+    if (!scan || scan->node_type != AST_NODE_MEMBER_EXPR) {
+        return NULL;
+    }
+    AstNode* field = ((AstFieldNode*)scan)->field;
+    while (field && field->node_type == AST_NODE_PRIMARY) {
+        field = ((AstPrimaryNode*)field)->expr;
+    }
+    if (!field || field->node_type != AST_NODE_IDENT) {
+        return NULL;
+    }
+    return ((AstIdentNode*)field)->name;
+}
+
+static bool group_alias_exists(AstGroupKey* first, String* alias) {
+    for (AstGroupKey* key = first; key; key = (AstGroupKey*)key->next) {
+        if (key->alias == alias) return true;
+        if (key->alias && alias && key->alias->len == alias->len &&
+            memcmp(key->alias->chars, alias->chars, alias->len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void enter_for_group_scope(Transpiler* tp, AstForNode* for_node) {
+    NameScope* scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    scope->parent = for_node->vars ? for_node->vars->parent : tp->current_scope;
+    scope->is_proc = tp->current_scope ? tp->current_scope->is_proc : false;
+    tp->current_scope = scope;
+}
+
 // Helper: build group by clause
 AstNode* build_group_clause(Transpiler* tp, TSNode group_node) {
     log_debug("build group clause");
     AstGroupClause* ast_node = (AstGroupClause*)alloc_ast_node(tp, AST_NODE_GROUP_CLAUSE, group_node, sizeof(AstGroupClause));
 
-    // Get the group name (from 'as name')
+    // Get the group name (from 'into name')
     TSNode name_node = ts_node_child_by_field_id(group_node, FIELD_NAME);
     StrView name_view = ts_node_source(tp, name_node);
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
-    // Build key expressions (linked list)
+    // Build key specs (linked list)
     TSTreeCursor cursor = ts_tree_cursor_new(group_node);
     bool has_node = ts_tree_cursor_goto_first_child(&cursor);
-    AstNode* prev_key = NULL;
+    AstGroupKey* prev_key = NULL;
     while (has_node) {
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        if (field_id == FIELD_KEY) {
-            TSNode key_node = ts_tree_cursor_current_node(&cursor);
-            AstNode* key_expr = build_expr(tp, key_node);
-            if (prev_key == NULL) {
-                ast_node->keys = key_expr;
+        if (field_id == FIELD_SPEC) {
+            TSNode spec_node = ts_tree_cursor_current_node(&cursor);
+            AstGroupKey* key_spec = (AstGroupKey*)alloc_ast_node(tp, AST_NODE_GROUP_CLAUSE, spec_node, sizeof(AstGroupKey));
+            TSNode key_node = ts_node_child_by_field_id(spec_node, FIELD_KEY);
+            key_spec->expr = build_expr(tp, key_node);
+
+            TSNode alias_node = ts_node_child_by_field_id(spec_node, FIELD_ALIAS);
+            if (!ts_node_is_null(alias_node)) {
+                StrView alias_view = ts_node_source(tp, alias_node);
+                key_spec->alias = name_pool_create_strview(tp->name_pool, alias_view);
             } else {
-                prev_key->next = key_expr;
+                key_spec->alias = infer_group_key_alias(tp, key_spec->expr);
+                if (!key_spec->alias) {
+                    log_error("Error: group by computed key requires an explicit 'as' alias");
+                }
             }
-            prev_key = key_expr;
+            if (key_spec->alias && group_alias_exists(ast_node->keys, key_spec->alias)) {
+                log_error("Error: duplicate group by key name '%.*s'; use an explicit unique alias",
+                    (int)key_spec->alias->len, key_spec->alias->chars);
+            }
+
+            if (prev_key == NULL) {
+                ast_node->keys = key_spec;
+            } else {
+                prev_key->next = (AstNode*)key_spec;
+            }
+            prev_key = key_spec;
+            ast_node->key_count++;
         }
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }
@@ -7175,11 +7230,13 @@ void build_for_clauses(Transpiler* tp, TSNode for_node, AstForNode* ast_node) {
             else if (field_id == FIELD_GROUP) {
                 // Group by clause
                 ast_node->group = (AstGroupClause*)build_group_clause(tp, child);
-                // Register group name in scope (as a map with .key and .items)
+                // grouping starts a post-group scope so row/let bindings cannot leak into aggregate clauses.
+                enter_for_group_scope(tp, ast_node);
+                // Register group name in scope as an element; row bindings deliberately remain inaccessible after grouping.
                 if (ast_node->group && ast_node->group->name) {
                     AstNamedNode* group_var = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, child, sizeof(AstNamedNode));
                     group_var->name = ast_node->group->name;
-                    group_var->type = &TYPE_MAP;  // {key: ..., items: [...]}
+                    group_var->type = &TYPE_ELMT;
                     push_name(tp, group_var, NULL);
                 }
             }
