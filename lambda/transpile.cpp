@@ -30,12 +30,7 @@ void transpile_query_expr(Transpiler* tp, AstQueryNode *query_node);
 void infer_proc_param_types_from_callsites(Transpiler* tp, AstScript* script);
 void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_global);
 
-// forward declarations for direct map/object field access optimization
-static ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len);
-static bool has_fixed_shape(TypeMap* map_type);
-static bool is_direct_access_type(TypeId type_id);
 static bool expr_produces_native_ptr(AstNode* expr);
-static TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type);
 static void emit_direct_field_read(Transpiler* tp, AstNode* object, ShapeEntry* field);
 static void emit_direct_field_write(Transpiler* tp, AstNode* object, ShapeEntry* field, AstNode* value);
 static void emit_struct_typedefs(Transpiler* tp);
@@ -4872,58 +4867,6 @@ static bool has_spreadable_item(AstNode *item) {
     return false;
 }
 
-// Recursively determine if an AstArrayNode represents an N-D numeric literal
-// (e.g. [[1,2,3],[4,5,6]]).  Returns ndim (>=1) on success with shape and
-// elem_type filled in; returns 0 if not an N-D-eligible literal.  Inner items
-// must all be the same shape and numeric element type.  Spreadables disqualify.
-static int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
-                               ArrayNumElemType* elem_type_out) {
-    // Unwrap AST_NODE_PRIMARY wrappers (inner literals arrive wrapped)
-    while (node && node->node_type == AST_NODE_PRIMARY) {
-        node = ((AstPrimaryNode*)node)->expr;
-    }
-    if (!node || node->node_type != AST_NODE_ARRAY) return 0;
-    AstArrayNode* arr = (AstArrayNode*)node;
-    TypeArray* type = (TypeArray*)arr->type;
-    if (!type || type->length <= 0 || !type->nested) return 0;
-    if (has_spreadable_item(arr->item)) return 0;
-
-    TypeId nid = type->nested->type_id;
-    // Numeric leaf — this is a 1-D base case
-    if (nid == LMD_TYPE_INT)   { shape_out[0] = type->length; *elem_type_out = ELEM_INT;   return 1; }
-    if (nid == LMD_TYPE_INT64) { shape_out[0] = type->length; *elem_type_out = ELEM_INT64; return 1; }
-    if (nid == LMD_TYPE_FLOAT) { shape_out[0] = type->length; *elem_type_out = ELEM_FLOAT64; return 1; }
-    if (nid == LMD_TYPE_NUM_SIZED) {
-        shape_out[0] = type->length;
-        *elem_type_out = num_sized_to_elem_type(type_num_sized_kind(type->nested));
-        return 1;
-    }
-    // Nested array — recurse on first item and verify all siblings match
-    if (nid == LMD_TYPE_ARRAY) {
-        if (max_ndim <= 1) return 0;
-        int64_t inner_shape[32];
-        ArrayNumElemType inner_etype;
-        int inner_ndim = detect_ndim_literal(arr->item, inner_shape, max_ndim - 1, &inner_etype);
-        if (inner_ndim == 0) return 0;
-        AstNode* sib = arr->item->next;
-        while (sib) {
-            int64_t sib_shape[32];
-            ArrayNumElemType sib_etype;
-            int sib_ndim = detect_ndim_literal(sib, sib_shape, max_ndim - 1, &sib_etype);
-            if (sib_ndim != inner_ndim || sib_etype != inner_etype) return 0;
-            for (int i = 0; i < sib_ndim; i++) {
-                if (sib_shape[i] != inner_shape[i]) return 0;
-            }
-            sib = sib->next;
-        }
-        shape_out[0] = type->length;
-        for (int i = 0; i < inner_ndim; i++) shape_out[i + 1] = inner_shape[i];
-        *elem_type_out = inner_etype;
-        return inner_ndim + 1;
-    }
-    return 0;
-}
-
 // Emit code that walks the nested literal tree in row-major order, writing each
 // leaf element to arr via array_num_set_item at sequential flat indices.
 // Recursive: for inner arrays, descends; for numeric leaves, emits the set call.
@@ -6183,39 +6126,6 @@ static bool expr_produces_native_ptr(AstNode* expr) {
     return false;
 }
 
-// Find a named field in a map shape at compile time
-static ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len) {
-    ShapeEntry* field = map_type->shape;
-    while (field) {
-        if (field->name && (int)field->name->length == name_len &&
-            strncmp(field->name->str, name, name_len) == 0) {
-            return field;
-        }
-        field = field->next;
-    }
-    return NULL;
-}
-
-// Check if a map type has a fixed shape suitable for direct access:
-// - must be a named type (from `type Name = { ... }` declaration) so field types
-//   are guaranteed stable at runtime. Map literals can have fields mutated to a
-//   different type via fn_map_set, which rebuilds the shape and invalidates
-//   compile-time offsets/types.
-// - all fields are named (no spread entries)
-// - all byte offsets are 8-byte aligned (map type defs use sizeof(void*) stride;
-//   map literals may use packed offsets which can cause unaligned access issues in MIR)
-static bool has_fixed_shape(TypeMap* map_type) {
-    if (!map_type->struct_name) return false;
-    if (!map_type->shape || map_type->length == 0) return false;
-    ShapeEntry* field = map_type->shape;
-    while (field) {
-        if (!field->name) return false;
-        if (field->byte_offset % sizeof(void*) != 0) return false;
-        field = field->next;
-    }
-    return true;
-}
-
 // Write the C type name for a struct member field.
 // Maps Lambda TypeId to the C type used in the packed struct layout.
 static void write_c_field_type(StrBuf* buf, TypeId type_id) {
@@ -6280,36 +6190,6 @@ static void emit_struct_typedefs(Transpiler* tp) {
         }
         strbuf_append_format(tp->code_buf, "} _type_%s;\n", map_type->struct_name);
     }
-}
-
-// Check if a field type is eligible for direct access optimization
-static bool is_direct_access_type(TypeId type_id) {
-    switch (type_id) {
-    case LMD_TYPE_BOOL: case LMD_TYPE_INT: case LMD_TYPE_INT64:
-    case LMD_TYPE_FLOAT: case LMD_TYPE_DTIME: case LMD_TYPE_DECIMAL:
-    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
-    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
-    case LMD_TYPE_OBJECT: case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
-    case LMD_TYPE_PATH:
-        return true;
-    default:
-        return false;  // skip ANY, NULL, ERROR types
-    }
-}
-
-// Resolve the stored-data type for a shape field.
-// Type-defined maps (from `type Name = {x: int}`) have LMD_TYPE_TYPE wrapper
-// on shape entries; unwrap to get the actual data type (e.g., LMD_TYPE_INT).
-// For anonymous maps the shape entry type may be a plain Type — only unwrap
-// when struct_name is set on the map type (indicating it came from a type definition).
-static TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type) {
-    Type* t = field->type;
-    if (unwrap_type_type && t && t->type_id == LMD_TYPE_TYPE) {
-        Type* inner = ((TypeType*)t)->type;
-        if (inner) return inner->type_id;
-    }
-    return t ? t->type_id : LMD_TYPE_ANY;
 }
 
 // Emit direct field read that produces a native (unboxed) value for scalar types.

@@ -469,18 +469,7 @@ bool is_item_compatible_with_type(ConstItem item, Type* type) {
 const char* type_to_string(Type* type) {
     if (!type) return "unknown";
     if (type == &TYPE_NUMBER) return "number";
-
-    switch (type->type_id) {
-        case LMD_TYPE_STRING: return "string";
-        case LMD_TYPE_INT: return "int";
-        case LMD_TYPE_FLOAT: return "float";
-        case LMD_TYPE_BOOL: return "bool";
-        case LMD_TYPE_NULL: return "null";
-        case LMD_TYPE_ARRAY: return "array";
-        case LMD_TYPE_MAP: return "map";
-        case LMD_TYPE_ELEMENT: return "element";
-        default: return "unknown";
-    }
+    return get_type_name(type->type_id);
 }
 
 void merge_validation_results(ValidationResult* dest, ValidationResult* src, Pool* pool) {

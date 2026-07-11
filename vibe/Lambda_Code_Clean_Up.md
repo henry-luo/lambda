@@ -48,7 +48,7 @@ The codebase (~590k LOC surveyed) is not uniformly duplicative — several subsy
 
 Already good: `name_pool.cpp`/`shape_pool.cpp` use `lib/hashmap`; `lambda-eval.cpp` uses `str_utf8_*`; `main.cpp`/`runner.cpp` use `read_text_file`/`read_binary_file`. `lambda-data.cpp` vs `lambda-data-runtime.cpp` is a clean arena/GC split, not duplication.
 
-### 1.1 Duplicated analysis helpers between the two transpilers — C3, HIGH
+### ✅ 1.1 Duplicated analysis helpers between the two transpilers — C3, HIGH
 Byte-for-byte copies under a `mir_` prefix; all are pure functions of `TypeMap`/`ShapeEntry`/`AstNode` with zero backend dependency:
 
 | transpile.cpp | transpile-mir.cpp |
@@ -60,6 +60,8 @@ Byte-for-byte copies under a `mir_` prefix; all are pure functions of `TypeMap`/
 | `detect_ndim_literal` (4685–4730) | `mir_detect_ndim_literal` (4739–4785) |
 
 ~120 LOC. **Fix:** move into `transpile_shared.cpp` (exists for exactly this; only 103 lines today), delete the `mir_` twins. Only the emit siblings legitimately differ. Effort: low.
+
+**Implementation status (2026-07-11): done.** `find_shape_field_by_name`, `has_fixed_shape`, `is_direct_access_type`, `resolve_field_type_id`, and `detect_ndim_literal` now live in `lambda/transpile_shared.cpp` with declarations in `lambda/transpiler.hpp`. `transpile.cpp` and `transpile-mir.cpp` both call the shared helpers; MIR Direct preserves its stricter assignment-node fast-path guard through an explicit `disqualify_assign` flag.
 
 ### 1.2 Hand-rolled Item→number extractors vs canonical `it2d`/`it2i`/`it2l` — C1, HIGH
 Canonical converters live in `lambda-data.cpp:322–392+`. Reimplemented: `item_to_int_value`/`item_to_float_value` (`lambda-data-runtime.cpp:665–718`), `item_to_double`/`item_to_integral_index` (`lambda-vector.cpp:34–54, 161–172`). Copies differ only in NUM_SIZED/decimal/NaN edge handling — classic drift-bug territory. ~90 LOC. **Fix:** consolidate on `it2*` (add `_checked` variants if the extra semantics are needed); decide one canonical NUM_SIZED behavior. Effort: medium.
@@ -141,8 +143,10 @@ Every serializer opens with the identical `RecursionGuard` + `isNull/isBool/isIn
 ### 3.3 XML hand-rolled escape switch — C1, HIGH
 `format-xml.cpp:14–80` — 66-line manual switch duplicating `ESCAPE_RULES_XML_ATTR` (declared in `escape.h`/`format-utils.h:78`), the control-char handling in `format_escaped_string_ex(...ESCAPE_CTRL_XML_NUMERIC)`, and the entity-preservation logic in `format_html_string_safe` (`format-utils.cpp:202–279`). ~70 LOC. **Fix:** use the shared escaper; factor "don't double-encode entities" into one `format_markup_string_safe()` shared by HTML+XML. Verify against XML corpus (apostrophe handling differs).
 
-### 3.4 Three TypeId→name implementations — C4, HIGH (correctness)
+### ✅ 3.4 Three TypeId→name implementations — C4, HIGH (correctness)
 Canonical `get_type_name()` (`lambda-data.cpp:99`, uses `type_info[]`) vs `validator/error_reporting.cpp:22–28 get_type_name_str()` (same lookup, re-done) vs `validator/doc_validator.cpp:470–484 type_to_string()` (hand-written switch that silently drifts). **Fix:** delete both validator copies, delegate to `get_type_name(type->type_id)`; keep the `TYPE_NUMBER`→"number" special case.
+
+**Implementation status (2026-07-11): done.** Validator error reporting now calls canonical `get_type_name()` directly, and `type_to_string()` delegates to `get_type_name(type->type_id)` while preserving the `TYPE_NUMBER` language-level `"number"` special case.
 
 ### 3.5 Number/datetime formatting bypasses shared helpers — C1, MED
 - Shared `format_number()` (`format.cpp:41–95`, used by kv/toml/yaml/latex) is re-implemented inline in `format-json.cpp:163–171`, `format-text.cpp:22–36`, `format-html.cpp:33–43, 369–372`, `format-xml.cpp:108–116, 277–280`. Add a nan/inf-policy arg (JSON emits "null") and route all through it. ~40 LOC.

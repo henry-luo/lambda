@@ -18,15 +18,6 @@ List* suggest_corrections(ValidationError* error, Pool* pool);
 String* format_validation_path(PathSegment* path, Pool* pool);
 String* format_type_name(void* type, Pool* pool);
 
-// helper to get type name from type_info
-static const char* get_type_name_str(TypeId type_id) {
-    // type_info array is sized 32 in lambda-data.cpp
-    if (type_id >= 0 && type_id < 32) {
-        return type_info[type_id].name;
-    }
-    return "unknown";
-}
-
 static void stringbuf_append_string(StringBuf* sb, String* str) {
     if (str) {
         stringbuf_append_str_n(sb, str->chars, str->len);
@@ -107,14 +98,14 @@ String* format_error_with_context(ValidationError* error, Pool* pool) {
 
         if (error->expected) {
             Type* expected = (Type*)error->expected;
-            stringbuf_append_format(sb, "Expected: %s", get_type_name_str(expected->type_id));
+            stringbuf_append_format(sb, "Expected: %s", get_type_name(expected->type_id));
         }
 
         if (error->actual.item) {
             if (error->expected) {
                 stringbuf_append_str(sb, ", ");
             }
-            stringbuf_append_format(sb, "Actual: %s", get_type_name_str(error->actual.type_id()));
+            stringbuf_append_format(sb, "Actual: %s", get_type_name(error->actual.type_id()));
         }
     }
 

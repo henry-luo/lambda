@@ -8,6 +8,7 @@
 
 #include "transpiler.hpp"
 #include "../lib/log.h"
+#include <string.h>
 
 extern Type TYPE_ANY, TYPE_INT;
 
@@ -99,4 +100,111 @@ void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* impor
     // user var name starts with '_'
     strbuf_append_char(strbuf, '_');
     strbuf_append_str_n(strbuf, asn_node->name->chars, asn_node->name->len);
+}
+
+ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len) {
+    ShapeEntry* field = map_type->shape;
+    while (field) {
+        if (field->name && (int)field->name->length == name_len &&
+            strncmp(field->name->str, name, name_len) == 0) {
+            return field;
+        }
+        field = field->next;
+    }
+    return NULL;
+}
+
+bool has_fixed_shape(TypeMap* map_type) {
+    if (!map_type->struct_name) return false;
+    if (!map_type->shape || map_type->length == 0) return false;
+    ShapeEntry* field = map_type->shape;
+    while (field) {
+        if (!field->name) return false;
+        if (field->byte_offset % sizeof(void*) != 0) return false;
+        field = field->next;
+    }
+    return true;
+}
+
+bool is_direct_access_type(TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_BOOL: case LMD_TYPE_INT: case LMD_TYPE_INT64:
+    case LMD_TYPE_FLOAT: case LMD_TYPE_DTIME: case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
+    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_OBJECT: case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
+    case LMD_TYPE_PATH:
+        return true;
+    default:
+        return false;
+    }
+}
+
+TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type) {
+    Type* t = field->type;
+    if (unwrap_type_type && t && t->type_id == LMD_TYPE_TYPE) {
+        Type* inner = ((TypeType*)t)->type;
+        if (inner) return inner->type_id;
+    }
+    return t ? t->type_id : LMD_TYPE_ANY;
+}
+
+static bool has_disqualifying_array_item(AstNode* item, bool disqualify_assign) {
+    while (item) {
+        if (item->node_type == AST_NODE_FOR_EXPR || item->node_type == AST_NODE_SPREAD ||
+            item->node_type == AST_NODE_PIPE ||
+            (disqualify_assign && item->node_type == AST_NODE_ASSIGN)) {
+            return true;
+        }
+        item = item->next;
+    }
+    return false;
+}
+
+int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
+                        ArrayNumElemType* elem_type_out, bool disqualify_assign) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (!node || node->node_type != AST_NODE_ARRAY) return 0;
+    AstArrayNode* arr = (AstArrayNode*)node;
+    TypeArray* type = (TypeArray*)arr->type;
+    if (!type || type->length <= 0 || !type->nested) return 0;
+    if (has_disqualifying_array_item(arr->item, disqualify_assign)) return 0;
+
+    TypeId nid = type->nested->type_id;
+    if (nid == LMD_TYPE_INT)   { shape_out[0] = type->length; *elem_type_out = ELEM_INT;   return 1; }
+    if (nid == LMD_TYPE_INT64) { shape_out[0] = type->length; *elem_type_out = ELEM_INT64; return 1; }
+    if (nid == LMD_TYPE_FLOAT) { shape_out[0] = type->length; *elem_type_out = ELEM_FLOAT64; return 1; }
+    if (nid == LMD_TYPE_NUM_SIZED) {
+        shape_out[0] = type->length;
+        *elem_type_out = num_sized_to_elem_type(type_num_sized_kind(type->nested));
+        return 1;
+    }
+    if (nid == LMD_TYPE_ARRAY) {
+        if (max_ndim <= 1) return 0;
+        int64_t inner_shape[32];
+        ArrayNumElemType inner_etype;
+        int inner_ndim = detect_ndim_literal(arr->item, inner_shape, max_ndim - 1,
+                                             &inner_etype, disqualify_assign);
+        if (inner_ndim == 0) return 0;
+        AstNode* sib = arr->item->next;
+        while (sib) {
+            int64_t sib_shape[32];
+            ArrayNumElemType sib_etype;
+            int sib_ndim = detect_ndim_literal(sib, sib_shape, max_ndim - 1,
+                                               &sib_etype, disqualify_assign);
+            if (sib_ndim != inner_ndim || sib_etype != inner_etype) return 0;
+            for (int i = 0; i < sib_ndim; i++) {
+                if (sib_shape[i] != inner_shape[i]) return 0;
+            }
+            sib = sib->next;
+        }
+        shape_out[0] = type->length;
+        for (int i = 0; i < inner_ndim; i++) shape_out[i + 1] = inner_shape[i];
+        *elem_type_out = inner_etype;
+        return inner_ndim + 1;
+    }
+    return 0;
 }

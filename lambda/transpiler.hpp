@@ -124,6 +124,12 @@ const char* get_container_unbox_fn(TypeId type_id);
 bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node);
 bool has_typed_params(AstFuncNode* fn_node);
 Type* resolve_native_ret_type(AstFuncNode* fn_node);
+ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len);
+bool has_fixed_shape(TypeMap* map_type);
+bool is_direct_access_type(TypeId type_id);
+TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type);
+int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
+                        ArrayNumElemType* elem_type_out, bool disqualify_assign = false);
 
 extern"C" {
 MIR_context_t jit_init(unsigned int optimize_level);

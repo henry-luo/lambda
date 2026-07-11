@@ -1467,63 +1467,6 @@ static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_i
 // Phase 3: Direct Map/Struct Field Access helpers
 // ============================================================================
 
-// Check if a map type has a fixed shape suitable for direct field access:
-// - must be a named type (from `type Name = { ... }` declaration)
-// - all fields are named (no spread entries)
-// - all byte offsets are 8-byte aligned
-static bool mir_has_fixed_shape(TypeMap* map_type) {
-    if (!map_type->struct_name) return false;
-    if (!map_type->shape || map_type->length == 0) return false;
-    ShapeEntry* field = map_type->shape;
-    while (field) {
-        if (!field->name) return false;
-        if (field->byte_offset % sizeof(void*) != 0) return false;
-        field = field->next;
-    }
-    return true;
-}
-
-// Find a named field in a map shape at compile time
-static ShapeEntry* mir_find_shape_field(TypeMap* map_type, const char* name, int name_len) {
-    ShapeEntry* field = map_type->shape;
-    while (field) {
-        if (field->name && (int)field->name->length == name_len &&
-            strncmp(field->name->str, name, name_len) == 0) {
-            return field;
-        }
-        field = field->next;
-    }
-    return NULL;
-}
-
-// Resolve the stored-data type for a shape field.
-// Type-defined maps have LMD_TYPE_TYPE wrapper on shape entries; unwrap to
-// get the actual data type (e.g., LMD_TYPE_INT).
-static TypeId mir_resolve_field_type(ShapeEntry* field) {
-    Type* t = field->type;
-    if (t && t->type_id == LMD_TYPE_TYPE) {
-        Type* inner = ((TypeType*)t)->type;
-        if (inner) return inner->type_id;
-    }
-    return t ? t->type_id : LMD_TYPE_ANY;
-}
-
-// Check if a field type is eligible for direct access optimization
-static bool mir_is_direct_access_type(TypeId type_id) {
-    switch (type_id) {
-    case LMD_TYPE_BOOL: case LMD_TYPE_INT: case LMD_TYPE_INT64:
-    case LMD_TYPE_FLOAT: case LMD_TYPE_DTIME: case LMD_TYPE_DECIMAL:
-    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
-    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
-    case LMD_TYPE_OBJECT: case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
-    case LMD_TYPE_PATH:
-        return true;
-    default:
-        return false;
-    }
-}
-
 // Check if a type is a container type whose runtime storage format is a raw pointer
 // (not a tagged Item). The runtime's map_field_store stores raw Container* for these
 // types, so MIR direct read must re-tag and direct write must strip the tag.
@@ -5086,59 +5029,6 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
 // Array expressions
 // ============================================================================
 
-// Recursively determine if an AstArrayNode represents an N-D numeric literal
-// (mirror of detect_ndim_literal in transpile.cpp).  Returns ndim on success.
-static int mir_detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
-                                    ArrayNumElemType* elem_type_out) {
-    // Unwrap AST_NODE_PRIMARY wrappers (inner literals [1,2] arrive wrapped)
-    while (node && node->node_type == AST_NODE_PRIMARY) {
-        node = ((AstPrimaryNode*)node)->expr;
-    }
-    if (!node || node->node_type != AST_NODE_ARRAY) return 0;
-    AstArrayNode* arr = (AstArrayNode*)node;
-    TypeArray* type = (TypeArray*)arr->type;
-    if (!type || type->length <= 0 || !type->nested) return 0;
-    // Disqualify if any child requires runtime construction
-    AstNode* it = arr->item;
-    while (it) {
-        if (it->node_type == AST_NODE_FOR_EXPR || it->node_type == AST_NODE_SPREAD ||
-            it->node_type == AST_NODE_PIPE || it->node_type == AST_NODE_ASSIGN) return 0;
-        it = it->next;
-    }
-    TypeId nid = type->nested->type_id;
-    if (nid == LMD_TYPE_INT)   { shape_out[0] = type->length; *elem_type_out = ELEM_INT;   return 1; }
-    if (nid == LMD_TYPE_INT64) { shape_out[0] = type->length; *elem_type_out = ELEM_INT64; return 1; }
-    if (nid == LMD_TYPE_FLOAT) { shape_out[0] = type->length; *elem_type_out = ELEM_FLOAT64; return 1; }
-    if (nid == LMD_TYPE_NUM_SIZED) {
-        shape_out[0] = type->length;
-        *elem_type_out = num_sized_to_elem_type(type_num_sized_kind(type->nested));
-        return 1;
-    }
-    if (nid == LMD_TYPE_ARRAY) {
-        if (max_ndim <= 1) return 0;
-        int64_t inner_shape[32];
-        ArrayNumElemType inner_etype;
-        int inner_ndim = mir_detect_ndim_literal(arr->item, inner_shape, max_ndim - 1, &inner_etype);
-        if (inner_ndim == 0) return 0;
-        AstNode* sib = arr->item->next;
-        while (sib) {
-            int64_t sib_shape[32];
-            ArrayNumElemType sib_etype;
-            int sib_ndim = mir_detect_ndim_literal(sib, sib_shape, max_ndim - 1, &sib_etype);
-            if (sib_ndim != inner_ndim || sib_etype != inner_etype) return 0;
-            for (int i = 0; i < sib_ndim; i++) {
-                if (sib_shape[i] != inner_shape[i]) return 0;
-            }
-            sib = sib->next;
-        }
-        shape_out[0] = type->length;
-        for (int i = 0; i < inner_ndim; i++) shape_out[i + 1] = inner_shape[i];
-        *elem_type_out = inner_etype;
-        return inner_ndim + 1;
-    }
-    return 0;
-}
-
 // Emit MIR that walks nested literal leaves in row-major order, calling
 // array_num_set_item for each leaf at sequential flat indices.
 static void mir_emit_ndim_leaves(MirTranspiler* mt, AstNode* node, MIR_reg_t arr_reg, int* flat_idx_io) {
@@ -5197,7 +5087,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
     if (!any_spread && !has_let) {
         int64_t shape[32];
         ArrayNumElemType n_etype;
-        int ndim = mir_detect_ndim_literal((AstNode*)arr_node, shape, 32, &n_etype);
+        int ndim = detect_ndim_literal((AstNode*)arr_node, shape, 32, &n_etype, true);
         if (ndim >= 2) {
             int64_t total = 1;
             for (int i = 0; i < ndim; i++) total *= shape[i];
@@ -5851,7 +5741,7 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
     //   - set_fields() per-field type switch dispatch
     //   - runtime type checking for each field
     // =========================================================================
-    if (false && (mir_has_fixed_shape(map_type) || map_type->has_named_shape) &&
+    if (false && (has_fixed_shape(map_type) || map_type->has_named_shape) &&
         map_type->byte_size > 0 && val_count > 0 && val_count == (int)map_type->length) {
         // Check all fields: named, typed, 8-byte aligned offsets, supported types
         bool all_direct = true;
@@ -5862,7 +5752,7 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
                 all_direct = false;
                 break;
             }
-            TypeId ft = mir_resolve_field_type(check);
+            TypeId ft = resolve_field_type_id(check, true);
             if (ft == LMD_TYPE_ANY) {
                 all_direct = false;
                 break;
@@ -6019,7 +5909,7 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
             item = map_node->item;
             ShapeEntry* field = map_type->shape;
             while (item && field) {
-                TypeId field_type = mir_resolve_field_type(field);
+                TypeId field_type = resolve_field_type_id(field, true);
                 int64_t offset = field->byte_offset;
 
                 // Extract value AST node from key-value pair
@@ -6329,7 +6219,7 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
 // skip_null_guard: when true, omit the null check branch (caller guarantees non-null).
 static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_boxed,
     ShapeEntry* field, bool skip_null_guard) {
-    TypeId type_id = mir_resolve_field_type(field);
+    TypeId type_id = resolve_field_type_id(field, true);
     int64_t offset = field->byte_offset;
 
     // strip tag from boxed Item → raw Map*/Object*
@@ -6461,7 +6351,7 @@ static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_box
 // or tagged Item for containers.
 static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
     ShapeEntry* field, AstNode* value, bool skip_null_guard) {
-    TypeId type_id = mir_resolve_field_type(field);
+    TypeId type_id = resolve_field_type_id(field, true);
     int64_t offset = field->byte_offset;
 
     // get tagged Item for the object, strip tag → raw Map*/Object*
@@ -6594,14 +6484,14 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
         field_node->field->node_type == AST_NODE_IDENT &&
         field_node->object->type) {
         TypeMap* map_type = (TypeMap*)field_node->object->type;
-        if (mir_has_fixed_shape(map_type)) {
+        if (has_fixed_shape(map_type)) {
             AstIdentNode* ident = (AstIdentNode*)field_node->field;
-            ShapeEntry* se = mir_find_shape_field(map_type,
+            ShapeEntry* se = find_shape_field_by_name(map_type,
                 ident->name->chars, ident->name->len);
-            if (se && se->type && mir_is_direct_access_type(mir_resolve_field_type(se))) {
+            if (se && se->type && is_direct_access_type(resolve_field_type_id(se, true))) {
                 log_debug("mir: direct field read: %.*s (type=%d offset=%lld)",
                     (int)ident->name->len, ident->name->chars,
-                    mir_resolve_field_type(se), (long long)se->byte_offset);
+                    resolve_field_type_id(se, true), (long long)se->byte_offset);
                 bool skip_null_guard = false; // typed variables can still hold null
                 return emit_mir_direct_field_read(mt, boxed_obj, se, skip_null_guard);
             }
@@ -10395,14 +10285,14 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             TypeId obj_type_id = ca->object->type->type_id;
             if (obj_type_id == LMD_TYPE_MAP || obj_type_id == LMD_TYPE_OBJECT) {
                 TypeMap* map_type = (TypeMap*)ca->object->type;
-                if (mir_has_fixed_shape(map_type)) {
+                if (has_fixed_shape(map_type)) {
                     AstIdentNode* ident = (AstIdentNode*)ca->key;
-                    ShapeEntry* se = mir_find_shape_field(map_type,
+                    ShapeEntry* se = find_shape_field_by_name(map_type,
                         ident->name->chars, ident->name->len);
-                    if (se && se->type && mir_is_direct_access_type(mir_resolve_field_type(se))) {
+                    if (se && se->type && is_direct_access_type(resolve_field_type_id(se, true))) {
                         log_debug("mir: direct field write: %.*s (type=%d offset=%lld)",
                             (int)ident->name->len, ident->name->chars,
-                            mir_resolve_field_type(se), (long long)se->byte_offset);
+                            resolve_field_type_id(se, true), (long long)se->byte_offset);
                         bool skip_null_guard = false; // typed variables can still hold null
                         emit_mir_direct_field_write(mt, ca->object, se, ca->value, skip_null_guard);
                         // Return null (void statement)
