@@ -4,7 +4,11 @@
 #include "input-utils.hpp"
 #include "source_tracker.hpp"
 #include "../../lib/datetime.h"
+#include "../../lib/mem.h"
 #include "../../lib/str.h"
+#include "../lambda-decimal.hpp"
+
+#include <string.h>
 
 using namespace lambda;
 
@@ -26,47 +30,122 @@ static void skip_comments(const char **mark) {
     skip_whitespace_and_comment_markers(mark, "//", nullptr, true);
 }
 
-static String* parse_string(InputContext& ctx, const char **mark) {
-    if (**mark != '"') return NULL;
+static bool mark_n_literal_is_integer(const char* str, size_t len) {
+    bool has_dot = false;
+    bool has_negative_exponent = false;
+    for (size_t i = 0; i < len; i++) {
+        char ch = str[i];
+        if (ch == '.') {
+            has_dot = true;
+        } else if (ch == 'e' || ch == 'E') {
+            size_t exp = i + 1;
+            if (exp < len && (str[exp] == '+' || str[exp] == '-')) {
+                has_negative_exponent = (str[exp] == '-');
+            }
+            break;
+        }
+    }
+    return !has_dot && !has_negative_exponent;
+}
+
+static Item parse_mark_suffixed_number(InputContext& ctx, const char* start, size_t len,
+                                       char suffix) {
+    if (suffix == 'N') {
+        ctx.addError(ctx.tracker.location(),
+            "decimal literal suffix 'N' has been retired; use 'm' for decimal or 'n' for integer");
+        return {.item = ITEM_ERROR};
+    }
+    if (suffix == 'n' && !mark_n_literal_is_integer(start, len)) {
+        ctx.addError(ctx.tracker.location(),
+            "'n' literal must be integer-valued; use the 'm' suffix for decimal");
+        return {.item = ITEM_ERROR};
+    }
+
+    char stack_buf[128];
+    char* number = stack_buf;
+    bool heap_buf = false;
+    if (len >= sizeof(stack_buf)) {
+        number = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_OTHER);
+        if (!number) return {.item = ITEM_ERROR};
+        heap_buf = true;
+    }
+    memcpy(number, start, len);
+    number[len] = '\0';
+
+    // Mark suffixes share Lambda literal tier semantics; the old strtod path
+    // rounded exact integer/decimal intent before the formatter could see it.
+    Item result = decimal_from_literal_string_arena(number, ctx.builder.arena(), suffix == 'n');
+    if (heap_buf) mem_free(number);
+    return result.item != ITEM_NULL ? result : (Item){.item = ITEM_ERROR};
+}
+
+enum MarkQuotedEscapePolicy {
+    MARK_QUOTED_ESCAPE_STRING,
+    MARK_QUOTED_ESCAPE_SYMBOL
+};
+
+static void append_mark_string_escape(StringBuf* sb, const char** mark) {
+    switch (**mark) {
+        case '"': stringbuf_append_char(sb, '"'); break;
+        case '\\': stringbuf_append_char(sb, '\\'); break;
+        case '/': stringbuf_append_char(sb, '/'); break;
+        case 'b': stringbuf_append_char(sb, '\b'); break;
+        case 'f': stringbuf_append_char(sb, '\f'); break;
+        case 'n': stringbuf_append_char(sb, '\n'); break;
+        case 'r': stringbuf_append_char(sb, '\r'); break;
+        case 't': stringbuf_append_char(sb, '\t'); break;
+        case 'u': {
+            const char* h = *mark + 1;
+            uint32_t codepoint = parse_hex_codepoint(&h, 4);
+            if (codepoint != 0xFFFFFFFF) {
+                if (codepoint >= 0xD800 && codepoint <= 0xDBFF && h[0] == '\\' && h[1] == 'u') {
+                    const char* low_pos = h + 2;
+                    uint32_t low = parse_hex_codepoint(&low_pos, 4);
+                    uint32_t combined = decode_surrogate_pair((uint16_t)codepoint, (uint16_t)low);
+                    if (low != 0xFFFFFFFF && combined != 0) {
+                        codepoint = combined;
+                        h = low_pos;
+                    } else {
+                        codepoint = 0xFFFD;
+                    }
+                } else if (codepoint >= 0xDC00 && codepoint <= 0xDFFF) {
+                    codepoint = 0xFFFD;
+                }
+                append_codepoint_utf8(sb, codepoint);
+                *mark = h - 1; // trailing ++ moves past the escape.
+            }
+        } break;
+        default: break; // invalid escape
+    }
+}
+
+static void append_mark_symbol_escape(StringBuf* sb, const char** mark) {
+    switch (**mark) {
+        case '\'': stringbuf_append_char(sb, '\''); break;
+        case '\\': stringbuf_append_char(sb, '\\'); break;
+        case 'n': stringbuf_append_char(sb, '\n'); break;
+        case 'r': stringbuf_append_char(sb, '\r'); break;
+        case 't': stringbuf_append_char(sb, '\t'); break;
+        default: stringbuf_append_char(sb, **mark); break;
+    }
+}
+
+static String* parse_mark_quoted_string(InputContext& ctx, const char **mark, char quote,
+                                        bool stop_at_newline,
+                                        MarkQuotedEscapePolicy escape_policy) {
+    if (**mark != quote) return NULL;
     MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);  // Reset buffer before use
+    stringbuf_reset(sb);
 
-    (*mark)++; // Skip opening quote
-    while (**mark && **mark != '"') {
+    (*mark)++; // skip opening quote
+    while (**mark && **mark != quote && (!stop_at_newline || **mark != '\n')) {
         if (**mark == '\\') {
             (*mark)++;
-            switch (**mark) {
-                case '"': stringbuf_append_char(sb, '"'); break;
-                case '\\': stringbuf_append_char(sb, '\\'); break;
-                case '/': stringbuf_append_char(sb, '/'); break;
-                case 'b': stringbuf_append_char(sb, '\b'); break;
-                case 'f': stringbuf_append_char(sb, '\f'); break;
-                case 'n': stringbuf_append_char(sb, '\n'); break;
-                case 'r': stringbuf_append_char(sb, '\r'); break;
-                case 't': stringbuf_append_char(sb, '\t'); break;
-                case 'u': {
-                    const char* h = *mark + 1;
-                    uint32_t codepoint = parse_hex_codepoint(&h, 4);
-                    if (codepoint != 0xFFFFFFFF) {
-                        if (codepoint >= 0xD800 && codepoint <= 0xDBFF && h[0] == '\\' && h[1] == 'u') {
-                            const char* low_pos = h + 2;
-                            uint32_t low = parse_hex_codepoint(&low_pos, 4);
-                            uint32_t combined = decode_surrogate_pair((uint16_t)codepoint, (uint16_t)low);
-                            if (low != 0xFFFFFFFF && combined != 0) {
-                                codepoint = combined;
-                                h = low_pos;
-                            } else {
-                                codepoint = 0xFFFD;
-                            }
-                        } else if (codepoint >= 0xDC00 && codepoint <= 0xDFFF) {
-                            codepoint = 0xFFFD;
-                        }
-                        append_codepoint_utf8(sb, codepoint);
-                        *mark = h - 1; // trailing ++ moves past the escape.
-                    }
-                } break;
-                default: break; // invalid escape
+            if (escape_policy == MARK_QUOTED_ESCAPE_STRING) {
+                append_mark_string_escape(sb, mark);
+            } else {
+                append_mark_symbol_escape(sb, mark);
             }
         } else {
             stringbuf_append_char(sb, **mark);
@@ -74,41 +153,18 @@ static String* parse_string(InputContext& ctx, const char **mark) {
         (*mark)++;
     }
 
-    if (**mark == '"') {
+    if (**mark == quote) {
         (*mark)++; // skip closing quote
     }
     return builder.createString(sb->str->chars, sb->length);
 }
 
+static String* parse_string(InputContext& ctx, const char **mark) {
+    return parse_mark_quoted_string(ctx, mark, '"', false, MARK_QUOTED_ESCAPE_STRING);
+}
+
 static String* parse_symbol(InputContext& ctx, const char **mark) {
-    if (**mark != '\'') return NULL;
-    MarkBuilder& builder = ctx.builder;
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);  // Reset buffer before use
-
-    (*mark)++; // Skip opening quote
-    while (**mark && **mark != '\'' && **mark != '\n') {
-        if (**mark == '\\') {
-            (*mark)++;
-            switch (**mark) {
-                case '\'': stringbuf_append_char(sb, '\''); break;
-                case '\\': stringbuf_append_char(sb, '\\'); break;
-                case 'n': stringbuf_append_char(sb, '\n'); break;
-                case 'r': stringbuf_append_char(sb, '\r'); break;
-                case 't': stringbuf_append_char(sb, '\t'); break;
-                default: stringbuf_append_char(sb, **mark); break;
-            }
-        } else {
-            stringbuf_append_char(sb, **mark);
-        }
-        (*mark)++;
-    }
-
-    if (**mark == '\'') {
-        (*mark)++; // skip closing quote
-    }
-
-    return builder.createString(sb->str->chars, sb->length);
+    return parse_mark_quoted_string(ctx, mark, '\'', true, MARK_QUOTED_ESCAPE_SYMBOL);
 }
 
 static String* parse_unquoted_identifier(InputContext& ctx, const char **mark) {
@@ -219,17 +275,23 @@ static Item parse_datetime(InputContext& ctx, const char **mark) {
 }
 
 static Item parse_number(InputContext& ctx, const char **mark) {
+    const char* start = *mark;
     char* end;
-    double dval = strtod(*mark, &end);
-    *mark = end;
+    double dval = strtod(start, &end);
+    if (end == start) return {.item = ITEM_ERROR};
 
     // Check for numeric suffix (n = integer, m = decimal; N retired)
-    if (**mark == 'n' || **mark == 'N' || **mark == 'm') {
-        (*mark)++;
-        // For now, treat as regular double - could enhance for true decimal support
+    if (*end == 'n' || *end == 'N' || *end == 'm') {
+        char suffix = *end;
+        *mark = end + 1;
+        return parse_mark_suffixed_number(ctx, start, (size_t)(end - start), suffix);
+    } else {
+        *mark = end;
     }
 
-    return ctx.builder.createFloat(dval);
+    // Plain Mark numbers used to round-trip through strtod, losing exact integer spellings.
+    Item number = parse_scanned_decimal_number(ctx, start, (size_t)(end - start), false, true);
+    return number.item != ITEM_NULL ? number : ctx.builder.createFloat(dval);
 }
 
 static Array* parse_array(InputContext& ctx, const char **mark, int depth = 0) {

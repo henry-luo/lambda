@@ -13,6 +13,7 @@
 #include "render_profiler.hpp"
 #include "view.hpp"
 #include "layout.hpp"
+#include "layout_box.hpp"
 #include "font_face.h"
 
 #include "../lib/tagged.hpp"
@@ -1955,11 +1956,7 @@ static void pdf_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x
 
     float rule_height = block->height;
     if (block->bound) {
-        rule_height -= block->bound->padding.top + block->bound->padding.bottom;
-        if (block->bound->border) {
-            rule_height -= block->bound->border->width.top +
-                           block->bound->border->width.bottom;
-        }
+        rule_height -= layout_box_metrics(block).pad_border_v;
     }
 
     if (rule_height <= 0.0f) {

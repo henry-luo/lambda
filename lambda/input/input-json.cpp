@@ -3,7 +3,7 @@
 #include "input-utils.hpp"
 #include "../mark_builder.hpp"
 #include <cstring>
-#include <cmath>
+#include <cstdlib>
 
 #define MAX_PARSING_DEPTH 64                  // Max nesting depth
 using namespace lambda;
@@ -67,7 +67,7 @@ static Item parse_number(InputContext& ctx, const char **json) {
 
     char* end;
     const char* start = *json;
-    double value = strtod(*json, &end);
+    strtod(*json, &end);
 
     if (end == *json) {
         ctx.addError(tracker.location(), "Invalid number format");
@@ -78,24 +78,15 @@ static Item parse_number(InputContext& ctx, const char **json) {
     *json = end;
     tracker.advance(len);
 
-    bool has_float_marker = false;
-    for (size_t i = 0; i < len; i++) {
-        if (start[i] == '.' || start[i] == 'e' || start[i] == 'E') {
-            has_float_marker = true;
-            break;
-        }
+    Item number_item = parse_scanned_decimal_number(ctx, start, len, false, true);
+    if (number_item.item == ITEM_NULL) {
+        const char* msg = scanned_number_has_float_marker(start, len)
+            ? "Invalid number format"
+            : "Invalid integer decimal value";
+        ctx.addError(tracker.location(), msg);
+        return ctx.builder.createNull();
     }
-
-    if (!has_float_marker && !(value == 0.0 && signbit(value))) {
-        Item integer_item = parse_integer_token_exact(ctx, start, len);
-        if (integer_item.item == ITEM_NULL) {
-            ctx.addError(tracker.location(), "Invalid integer decimal value");
-            return ctx.builder.createNull();
-        }
-        return integer_item;
-    } else {
-        return ctx.builder.createFloat(value);
-    }
+    return number_item;
 }
 
 static Item parse_array(InputContext& ctx, const char **json, int depth) {

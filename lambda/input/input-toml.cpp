@@ -142,27 +142,19 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
 
 static Item parse_prefixed_integer(InputContext& ctx, const char** toml, int base,
                                    const char* kind, SourceLocation loc) {
-    Input* input = ctx.input();
     const char* start = *toml;
-    const char* digits = start + 2;
-    char* end;
-    int64_t val = strtol(digits, &end, base);
-    if (end == digits) {
-        ctx.addError(loc, "Invalid %s number: no digits after 0%c", kind, start[1]);
-        return {.item = ITEM_ERROR};
-    }
-
-    int64_t* lval = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
-    if (!lval) {
-        ctx.addError(loc, "Memory allocation failed for %s integer", kind);
-        return {.item = ITEM_ERROR};
-    }
-    *lval = val;
+    const char* end = nullptr;
+    Item result = parse_prefixed_integer_value(ctx, start, base, kind, loc, &end, true, true);
+    if (result.item == ITEM_ERROR) return result;
     size_t consumed = end - start;
     *toml = end;
     ctx.tracker.advance(consumed);
-    return {.item = l2it(lval)};
+    return result;
 }
+
+static String* parse_toml_single_line_string(InputContext& ctx, const char** toml,
+                                             char quote, bool allow_escapes,
+                                             const char* label, const char* content_name);
 
 static void skip_line(const char **toml, int *line_num) {
     while (**toml && **toml != '\n') {
@@ -218,157 +210,36 @@ static String* parse_bare_key(InputContext& ctx, const char **toml) {
 }
 
 static String* parse_quoted_key(InputContext& ctx, const char **toml) {
-    SourceTracker& tracker = ctx.tracker;
-
-    if (**toml != '"') return NULL;
-    MarkBuilder* builder = &ctx.builder;
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);
-    SourceLocation key_loc = tracker.location();
-
-    (*toml)++; // Skip opening quote
-    tracker.advance(1);
-
-    while (**toml && **toml != '"') {
-        if (**toml == '\\') {
-            if (!handle_escape_sequence(ctx, sb, toml, false, NULL)) {
-                return NULL;
-            }
-        } else {
-            if (**toml == '\n') {
-                ctx.addError(key_loc, "Unterminated quoted key: newline in key");
-                return NULL;
-            }
-            stringbuf_append_char(sb, **toml);
-            (*toml)++;
-            tracker.advance(1);
-        }
-    }
-
-    if (**toml == '"') {
-        (*toml)++; // skip closing quote
-        tracker.advance(1);
-    } else {
-        ctx.addError(key_loc, "Unterminated quoted key: missing closing quote");
-        return NULL;
-    }
-    return builder->createString(sb->str->chars, sb->length);
+    return parse_toml_single_line_string(ctx, toml, '"', true, "quoted key", "key");
 }
 
 static String* parse_literal_key(InputContext& ctx, const char **toml) {
-    if (**toml != '\'') return NULL;
-    SourceTracker& tracker = ctx.tracker;
-    MarkBuilder* builder = &ctx.builder;
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);
-    SourceLocation key_loc = tracker.location();
-
-    (*toml)++; // Skip opening quote
-    tracker.advance(1);
-
-    while (**toml && **toml != '\'') {
-        if (**toml == '\n') {
-            ctx.addError(key_loc, "Unterminated literal key: newline in key");
-            return NULL;
-        }
-        stringbuf_append_char(sb, **toml);
-        (*toml)++;
-        tracker.advance(1);
-    }
-
-    if (**toml == '\'') {
-        (*toml)++; // skip closing quote
-        tracker.advance(1);
-    } else {
-        ctx.addError(key_loc, "Unterminated literal key: missing closing quote");
-        return NULL;
-    }
-    return builder->createString(sb->str->chars, sb->length);
+    return parse_toml_single_line_string(ctx, toml, '\'', false, "literal key", "key");
 }
 
 static String* parse_basic_string(InputContext& ctx, const char **toml) {
-    SourceTracker& tracker = ctx.tracker;
-
-    if (**toml != '"') return NULL;
-    MarkBuilder* builder = &ctx.builder;
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);
-    SourceLocation str_loc = tracker.location();
-
-    (*toml)++; // Skip opening quote
-    tracker.advance(1);
-
-    while (**toml && **toml != '"') {
-        if (**toml == '\\') {
-            if (!handle_escape_sequence(ctx, sb, toml, false, NULL)) {
-                return NULL;
-            }
-        } else {
-            if (**toml == '\n') {
-                ctx.addError(str_loc, "Unterminated basic string: newline in string");
-                return NULL;
-            }
-            stringbuf_append_char(sb, **toml);
-            (*toml)++;
-            tracker.advance(1);
-        }
-    }
-
-    if (**toml == '"') {
-        (*toml)++; // skip closing quote
-        tracker.advance(1);
-    } else {
-        ctx.addError(str_loc, "Unterminated basic string: missing closing quote");
-        return NULL;
-    }
-    return builder->createString(sb->str->chars, sb->length);
+    return parse_toml_single_line_string(ctx, toml, '"', true, "basic string", "string");
 }
 
 static String* parse_literal_string(InputContext& ctx, const char **toml) {
-    SourceTracker& tracker = ctx.tracker;
-
-    if (**toml != '\'') return NULL;
-    MarkBuilder* builder = &ctx.builder;
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);
-    SourceLocation str_loc = tracker.location();
-
-    (*toml)++; // Skip opening quote
-    tracker.advance(1);
-
-    while (**toml && **toml != '\'') {
-        if (**toml == '\n') {
-            ctx.addError(str_loc, "Unterminated literal string: newline in string");
-            return NULL;
-        }
-        stringbuf_append_char(sb, **toml);
-        (*toml)++;
-        tracker.advance(1);
-    }
-
-    if (**toml == '\'') {
-        (*toml)++; // skip closing quote
-        tracker.advance(1);
-    } else {
-        ctx.addError(str_loc, "Unterminated literal string: missing closing quote");
-        return NULL;
-    }
-    return builder->createString(sb->str->chars, sb->length);
+    return parse_toml_single_line_string(ctx, toml, '\'', false, "literal string", "string");
 }
 
-static String* parse_multiline_basic_string(InputContext& ctx, const char **toml, int *line_num) {
+static String* parse_toml_multiline_string(InputContext& ctx, const char **toml,
+                                           const char* delimiter, bool allow_escapes,
+                                           const char* label, int *line_num) {
     SourceTracker& tracker = ctx.tracker;
 
-    if (strncmp(*toml, "\"\"\"", 3) != 0) return NULL;
+    if (strncmp(*toml, delimiter, 3) != 0) return NULL;
     MarkBuilder* builder = &ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     SourceLocation str_loc = tracker.location();
 
-    *toml += 3; // Skip opening triple quotes
+    *toml += 3; // skip opening triple quotes
     tracker.advance(3);
 
-    // Skip optional newline right after opening quotes
+    // skip optional newline right after opening quotes
     if (**toml == '\n') {
         (*toml)++;
         (*line_num)++;
@@ -380,14 +251,14 @@ static String* parse_multiline_basic_string(InputContext& ctx, const char **toml
 
     bool found_closing = false;
     while (**toml) {
-        if (strncmp(*toml, "\"\"\"", 3) == 0) {
-            *toml += 3; // Skip closing triple quotes
+        if (strncmp(*toml, delimiter, 3) == 0) {
+            *toml += 3; // skip closing triple quotes
             tracker.advance(3);
             found_closing = true;
             break;
         }
 
-        if (**toml == '\\') {
+        if (allow_escapes && **toml == '\\') {
             if (!handle_escape_sequence(ctx, sb, toml, true, line_num)) {
                 return NULL;
             }
@@ -402,58 +273,21 @@ static String* parse_multiline_basic_string(InputContext& ctx, const char **toml
     }
 
     if (!found_closing) {
-        ctx.addError(str_loc, "Unterminated multiline basic string: missing closing \"\"\"");
+        ctx.addError(str_loc, "Unterminated %s: missing closing %s", label, delimiter);
         return NULL;
     }
 
     return builder->createString(sb->str->chars, sb->length);
 }
 
+static String* parse_multiline_basic_string(InputContext& ctx, const char **toml, int *line_num) {
+    return parse_toml_multiline_string(ctx, toml, "\"\"\"", true,
+        "multiline basic string", line_num);
+}
+
 static String* parse_multiline_literal_string(InputContext& ctx, const char **toml, int *line_num) {
-    SourceTracker& tracker = ctx.tracker;
-
-    if (strncmp(*toml, "'''", 3) != 0) return NULL;
-    MarkBuilder* builder = &ctx.builder;
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);
-    SourceLocation str_loc = tracker.location();
-
-    *toml += 3; // Skip opening triple quotes
-    tracker.advance(3);
-
-    // Skip optional newline right after opening quotes
-    if (**toml == '\n') {
-        (*toml)++;
-        (*line_num)++;
-    } else if (**toml == '\r' && *(*toml + 1) == '\n') {
-        *toml += 2;
-        tracker.advance(1);
-        (*line_num)++;
-    }
-
-    bool found_closing = false;
-    while (**toml) {
-        if (strncmp(*toml, "'''", 3) == 0) {
-            *toml += 3; // Skip closing triple quotes
-            tracker.advance(3);
-            found_closing = true;
-            break;
-        }
-
-        if (**toml == '\n') {
-            (*line_num)++;
-        }
-        stringbuf_append_char(sb, **toml);
-        (*toml)++;
-        tracker.advance(1);
-    }
-
-    if (!found_closing) {
-        ctx.addError(str_loc, "Unterminated multiline literal string: missing closing '''");
-        return NULL;
-    }
-
-    return builder->createString(sb->str->chars, sb->length);
+    return parse_toml_multiline_string(ctx, toml, "'''", false,
+        "multiline literal string", line_num);
 }
 
 static String* parse_key(InputContext& ctx, const char **toml) {
@@ -466,10 +300,49 @@ static String* parse_key(InputContext& ctx, const char **toml) {
     }
 }
 
+static String* parse_toml_single_line_string(InputContext& ctx, const char** toml,
+                                             char quote, bool allow_escapes,
+                                             const char* label, const char* content_name) {
+    SourceTracker& tracker = ctx.tracker;
+
+    if (**toml != quote) return NULL;
+    MarkBuilder* builder = &ctx.builder;
+    StringBuf* sb = ctx.sb;
+    stringbuf_reset(sb);
+    SourceLocation str_loc = tracker.location();
+
+    (*toml)++; // skip opening quote
+    tracker.advance(1);
+
+    while (**toml && **toml != quote) {
+        if (allow_escapes && **toml == '\\') {
+            if (!handle_escape_sequence(ctx, sb, toml, false, NULL)) {
+                return NULL;
+            }
+            continue;
+        }
+        if (**toml == '\n') {
+            ctx.addError(str_loc, "Unterminated %s: newline in %s", label, content_name);
+            return NULL;
+        }
+        stringbuf_append_char(sb, **toml);
+        (*toml)++;
+        tracker.advance(1);
+    }
+
+    if (**toml == quote) {
+        (*toml)++; // skip closing quote
+        tracker.advance(1);
+    } else {
+        ctx.addError(str_loc, "Unterminated %s: missing closing quote", label);
+        return NULL;
+    }
+    return builder->createString(sb->str->chars, sb->length);
+}
+
 static Item parse_number(InputContext& ctx, const char **toml) {
     SourceTracker& tracker = ctx.tracker;
 
-    char* end;
     const char *start = *toml;
     SourceLocation num_loc = tracker.location();
 
@@ -506,8 +379,6 @@ static Item parse_number(InputContext& ctx, const char **toml) {
         return parse_prefixed_integer(ctx, toml, 2, "binary", num_loc);
     }
 
-    // Check if it's a float (contains . or e/E)
-    bool is_float = false;
     const char *temp = *toml;
 
     // Skip sign
@@ -515,56 +386,25 @@ static Item parse_number(InputContext& ctx, const char **toml) {
         temp++;
     }
 
-    // Remove underscores and check for float indicators
     while (*temp && (str_char_is_digit(*temp) || *temp == '.' || *temp == 'e' || *temp == 'E' || *temp == '+' || *temp == '-' || *temp == '_')) {
-        if (*temp == '.' || *temp == 'e' || *temp == 'E') {
-            is_float = true;
-        }
         temp++;
     }
 
-    if (is_float) {
-        double dval = strtod(start, &end);
-        if (end == start) {
-            ctx.addError(num_loc, "Invalid float number format");
-            return {.item = ITEM_ERROR};
-        }
-        size_t consumed = end - *toml;
-        *toml = end;
-        tracker.advance(consumed);
-        return ctx.builder.createFloat(dval);
-    } else {
-        const char* token_end = temp;
-        size_t token_len = (size_t)(token_end - start);
-        char stack_buf[128];
-        char* clean = stack_buf;
-        bool heap_buf = false;
-        if (token_len >= sizeof(stack_buf)) {
-            clean = (char*)mem_alloc(token_len + 1, MEM_CAT_INPUT_TOML);
-            if (!clean) {
-                ctx.addError(num_loc, "Memory allocation failed for integer");
-                return {.item = ITEM_ERROR};
-            }
-            heap_buf = true;
-        }
-        size_t clean_len = 0;
-        for (size_t i = 0; i < token_len; i++) {
-            if (start[i] != '_') clean[clean_len++] = start[i];
-        }
-        clean[clean_len] = '\0';
-
-        Item int_item = parse_integer_token_exact(ctx, clean, clean_len);
-        if (heap_buf) mem_free(clean);
-        if (int_item.item == ITEM_NULL) {
-            ctx.addError(num_loc, "Invalid integer number format");
-            return {.item = ITEM_ERROR};
-        }
-        // decimal TOML integers use the shared exact path so large IDs never pass through double.
-        size_t consumed = token_end - *toml;
-        *toml = token_end;
-        tracker.advance(consumed);
-        return int_item;
+    const char* token_end = temp;
+    size_t token_len = (size_t)(token_end - start);
+    Item number_item = parse_scanned_decimal_number(ctx, start, token_len, true, false);
+    if (number_item.item == ITEM_NULL) {
+        const char* msg = scanned_number_has_float_marker(start, token_len)
+            ? "Invalid float number format"
+            : "Invalid integer number format";
+        ctx.addError(num_loc, msg);
+        return {.item = ITEM_ERROR};
     }
+    // decimal TOML numbers use the shared exact path so large IDs never pass through double.
+    size_t consumed = token_end - *toml;
+    *toml = token_end;
+    tracker.advance(consumed);
+    return number_item;
 }
 
 static Array* parse_array(InputContext& ctx, const char **toml, int *line_num, int depth) {

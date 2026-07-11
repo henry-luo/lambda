@@ -12,6 +12,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include "../../lib/mem.h"
+#include <limits.h>
 #include <string.h>
 
 // ── Unicode Utilities ──────────────────────────────────────────────
@@ -45,6 +46,81 @@ uint32_t parse_hex_codepoint(const char** pos, int ndigits) {
 
 namespace lambda {
 
+bool scanned_number_has_float_marker(const char* str, size_t len) {
+    if (!str) return false;
+    for (size_t i = 0; i < len; i++) {
+        if (str[i] == '.' || str[i] == 'e' || str[i] == 'E') return true;
+    }
+    return false;
+}
+
+Item parse_prefixed_integer_value(InputContext& ctx, const char* str, int base,
+                                  const char* kind, SourceLocation loc,
+                                  const char** end_out, bool report_errors,
+                                  bool force_long) {
+    if (end_out) *end_out = str;
+    if (!str || !str[0] || !str[1]) return ItemNull;
+
+    const char* digits = str + 2;
+    char* end = nullptr;
+    errno = 0;
+    int64_t val = strtoll(digits, &end, base);
+    if (end_out) *end_out = end;
+    if (end == digits) {
+        if (report_errors) {
+            ctx.addError(loc, "Invalid %s number: no digits after 0%c", kind, str[1]);
+        }
+        return report_errors ? (Item){.item = ITEM_ERROR} : ItemNull;
+    }
+    if (errno == ERANGE) {
+        if (report_errors) {
+            ctx.addError(loc, "Invalid %s number: value out of int64 range", kind);
+        }
+        return report_errors ? (Item){.item = ITEM_ERROR} : ItemNull;
+    }
+
+    if (force_long || val < INT56_MIN || val > INT56_MAX) {
+        return ctx.builder.createLong(val);
+    }
+    return ctx.builder.createInt(val);
+}
+
+static bool scanned_number_is_negative_zero(const char* str, size_t len) {
+    if (!str || len < 2 || str[0] != '-') return false;
+    for (size_t i = 1; i < len; i++) {
+        if (str[i] == '_') continue;
+        if (str[i] != '0') return false;
+    }
+    return true;
+}
+
+static bool copy_scanned_number_token(const char* str, size_t len, bool allow_underscores,
+                                      char** out, size_t* out_len, bool* heap_buf) {
+    if (!str || !out || !out_len || !heap_buf) return false;
+    *out = nullptr;
+    *out_len = 0;
+    *heap_buf = false;
+
+    bool needs_copy = allow_underscores;
+    if (!needs_copy) {
+        *out = (char*)str;
+        *out_len = len;
+        return true;
+    }
+
+    char* clean = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_OTHER);
+    if (!clean) return false;
+    size_t clean_len = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (str[i] != '_') clean[clean_len++] = str[i];
+    }
+    clean[clean_len] = '\0';
+    *out = clean;
+    *out_len = clean_len;
+    *heap_buf = true;
+    return true;
+}
+
 Item parse_integer_token_exact(InputContext& ctx, const char* str, size_t len) {
     if (!str || len == 0) return ItemNull;
 
@@ -73,6 +149,37 @@ Item parse_integer_token_exact(InputContext& ctx, const char* str, size_t len) {
     Item decimal_item = decimal_from_integer_string_arena(num_str, ctx.builder.arena());
     if (heap_buf) mem_free(num_str);
     return decimal_item;
+}
+
+Item parse_scanned_decimal_number(InputContext& ctx, const char* str, size_t len,
+                                  bool allow_underscores, bool negative_zero_is_float) {
+    if (!str || len == 0) return ItemNull;
+
+    char* clean = nullptr;
+    size_t clean_len = 0;
+    bool heap_buf = false;
+    if (!copy_scanned_number_token(str, len, allow_underscores, &clean, &clean_len, &heap_buf)) {
+        return ItemNull;
+    }
+    if (clean_len == 0) {
+        if (heap_buf) mem_free(clean);
+        return ItemNull;
+    }
+
+    Item result = ItemNull;
+    if (scanned_number_has_float_marker(clean, clean_len) ||
+        (negative_zero_is_float && scanned_number_is_negative_zero(clean, clean_len))) {
+        const char* end = nullptr;
+        double value = 0.0;
+        if (str_to_double(clean, clean_len, &value, &end) && end == clean + clean_len) {
+            result = ctx.builder.createFloat(value);
+        }
+    } else {
+        result = parse_integer_token_exact(ctx, clean, clean_len);
+    }
+
+    if (heap_buf) mem_free(clean);
+    return result;
 }
 
 Item parse_typed_value(InputContext& ctx, const char* str, size_t len) {

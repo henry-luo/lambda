@@ -27,6 +27,8 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
 
 // Utility functions
 bool element_has_positioning(ViewBlock* block);
+ViewBlock* find_initial_containing_view_block(ViewBlock* element);
+ViewBlock* find_positioned_containing_block(ViewElement* view);
 ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type);
 
 // ============================================================================

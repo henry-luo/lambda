@@ -1,5 +1,7 @@
 #include "layout_multicol.hpp"
 #include "layout.hpp"
+#include "layout_box.hpp"
+#include "layout_positioned.hpp"
 #include "../lib/log.h"
 #include "../lib/tagged.hpp"
 #include <math.h>
@@ -235,10 +237,7 @@ static float multicol_content_box_height_limit(ViewBlock* block) {
     if (limit < 0) return -1;
 
     if (block->bound && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
-        float border_padding = block->bound->padding.top + block->bound->padding.bottom;
-        if (block->bound->border) {
-            border_padding += block->bound->border->width.top + block->bound->border->width.bottom;
-        }
+        float border_padding = layout_box_metrics(block).pad_border_v;
         limit -= border_padding;
         if (limit < 0) limit = 0;
     }
@@ -612,23 +611,6 @@ static bool multicol_has_spanner_ancestor(ViewBlock* multicol, ViewBlock* block)
     return false;
 }
 
-static ViewBlock* multicol_nearest_positioned_ancestor(ViewBlock* block) {
-    if (!block) return nullptr;
-
-    ViewElement* ancestor = block->parent_view();
-    while (ancestor) {
-        if (ancestor->is_block()) {
-            ViewBlock* ancestor_block = lam::view_require_block(ancestor);
-            if (ancestor_block->position &&
-                ancestor_block->position->position != CSS_VALUE_STATIC) {
-                return ancestor_block;
-            }
-        }
-        ancestor = ancestor->parent_view();
-    }
-    return nullptr;
-}
-
 static void multicol_viewport_size(LayoutContext* lycon, ViewBlock* multicol, float* out_width, float* out_height) {
     if (!out_width || !out_height) return;
 
@@ -660,7 +642,7 @@ static bool multicol_apply_spanner_containing_block_anchor(
     if (!multicol || !oof || !multicol_is_out_of_flow(oof)) return false;
     if (!multicol_has_spanner_ancestor(multicol, oof)) return false;
 
-    ViewBlock* containing_block = multicol_nearest_positioned_ancestor(oof);
+    ViewBlock* containing_block = find_positioned_containing_block(oof);
     float containing_abs_x = 0;
     float containing_abs_y = 0;
     if (containing_block) {
@@ -1781,10 +1763,7 @@ static float multicol_split_child_around_spanners(
     if (child->blk && child->blk->given_height >= 0 && first_group_target_height > 0) {
         float child_border_padding_height = 0;
         if (child->bound && child->blk->box_sizing != CSS_VALUE_BORDER_BOX) {
-            child_border_padding_height += child->bound->padding.top + child->bound->padding.bottom;
-            if (child->bound->border) {
-                child_border_padding_height += child->bound->border->width.top + child->bound->border->width.bottom;
-            }
+            child_border_padding_height = layout_box_metrics(child).pad_border_v;
         }
         float decorated_split_adjustment = child_border_padding_height > 0 ?
             child_border_padding_height + spanner_extent : 0;
@@ -2630,10 +2609,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                    final_height > multicol_content_box_height_limit(block)) {
             total_height = multicol_content_box_height_limit(block);
         } else if (block->bound) {
-            total_height += block->bound->padding.top + block->bound->padding.bottom;
-            if (block->bound->border) {
-                total_height += block->bound->border->width.top + block->bound->border->width.bottom;
-            }
+            total_height += layout_box_metrics(block).pad_border_v;
         }
         block->height = total_height;
         block->content_height = final_height + (block->bound ? block->bound->padding.bottom : 0);
@@ -2861,10 +2837,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         total_height = block->blk->given_height;
     } else {
         if (block->bound) {
-            total_height += block->bound->padding.top + block->bound->padding.bottom;
-            if (block->bound->border) {
-                total_height += block->bound->border->width.top + block->bound->border->width.bottom;
-            }
+            total_height += layout_box_metrics(block).pad_border_v;
         }
     }
     block->height = total_height;

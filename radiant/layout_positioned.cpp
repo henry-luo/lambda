@@ -365,14 +365,9 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
     // At scroll position 0, the visible area starts at the content box origin.
     float sp_content_h = (float)scroller->height;
     float sp_content_w = (float)scroller->width;
-    if (scroller->bound) {
-        sp_content_h -= scroller->bound->padding.top + scroller->bound->padding.bottom;
-        sp_content_w -= scroller->bound->padding.left + scroller->bound->padding.right;
-        if (scroller->bound->border) {
-            sp_content_h -= scroller->bound->border->width.top + scroller->bound->border->width.bottom;
-            sp_content_w -= scroller->bound->border->width.left + scroller->bound->border->width.right;
-        }
-    }
+    BoxMetrics scroller_box = layout_box_metrics(scroller);
+    sp_content_h -= scroller_box.pad_border_v;
+    sp_content_w -= scroller_box.pad_border_h;
     float sp_top = 0, sp_left = 0;
     float sp_bottom = sp_content_h;
     float sp_right = sp_content_w;
@@ -461,14 +456,9 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
         float cb_content_left = 0;
         float cb_content_bottom = (float)cb->height;
         float cb_content_right = (float)cb->width;
-        if (cb->bound) {
-            cb_content_bottom -= cb->bound->padding.top + cb->bound->padding.bottom;
-            cb_content_right -= cb->bound->padding.left + cb->bound->padding.right;
-            if (cb->bound->border) {
-                cb_content_bottom -= cb->bound->border->width.top + cb->bound->border->width.bottom;
-                cb_content_right -= cb->bound->border->width.left + cb->bound->border->width.right;
-            }
-        }
+        BoxMetrics cb_box = layout_box_metrics(cb);
+        cb_content_bottom -= cb_box.pad_border_v;
+        cb_content_right -= cb_box.pad_border_h;
 
         // clamp offset so element stays in containing block (in parent coords)
         float local_top = (float)block->y;
@@ -509,7 +499,7 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
  * For absolute: nearest positioned ancestor or initial containing block
  * For fixed: viewport (initial containing block)
  */
-static ViewBlock* find_initial_containing_block(ViewBlock* element) {
+ViewBlock* find_initial_containing_view_block(ViewBlock* element) {
     if (!element) return nullptr;
     ViewBlock* root = element;
     for (ViewElement* ancestor = element->parent_view(); ancestor; ancestor = ancestor->parent_view()) {
@@ -519,35 +509,40 @@ static ViewBlock* find_initial_containing_block(ViewBlock* element) {
     return root;
 }
 
+ViewBlock* find_positioned_containing_block(ViewElement* view) {
+    for (ViewElement* ancestor = view ? view->parent_view() : nullptr;
+         ancestor;
+         ancestor = ancestor->parent_view()) {
+        if (ancestor->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* ancestor_span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
+            if (ancestor_span->position &&
+                ancestor_span->position->position != CSS_VALUE_STATIC) {
+                return lam::unsafe_view_block_api_span(ancestor_span);
+            }
+        } else if (ancestor->is_block()) {
+            ViewBlock* ancestor_block = lam::view_require_block(ancestor);
+            if (ancestor_block->position &&
+                ancestor_block->position->position != CSS_VALUE_STATIC) {
+                return ancestor_block;
+            }
+        }
+    }
+    return nullptr;
+}
+
 ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type) {
     if (position_type == CSS_VALUE_FIXED) {
         // Fixed positioning uses viewport as containing block
         // For now, return the root block (will be enhanced for viewport support)
-        return find_initial_containing_block(element);
+        return find_initial_containing_view_block(element);
     }
 
     if (position_type == CSS_VALUE_ABSOLUTE) {
-        // Find nearest positioned ancestor
-        ViewElement* ancestor = element->parent_view();
-        while (ancestor) {
-            if (ancestor->view_type == RDT_VIEW_INLINE) {
-                ViewSpan* ancestor_span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
-                if (ancestor_span->position &&
-                    ancestor_span->position->position != CSS_VALUE_STATIC) {
-                    return lam::unsafe_view_block_api_span(ancestor_span);
-                }
-            } else if (ancestor->is_block()) {
-                ViewBlock* ancestor_block = lam::view_require_block(ancestor);
-                // Check if ancestor is positioned
-                if (ancestor_block->position && ancestor_block->position->position != CSS_VALUE_STATIC) {
-                    return ancestor_block;
-                }
-            }
-            ancestor = ancestor->parent_view();
-        }
+        ViewBlock* positioned_ancestor = find_positioned_containing_block(element);
+        if (positioned_ancestor) return positioned_ancestor;
 
         // No positioned ancestor found, use initial containing block (root)
-        return find_initial_containing_block(element);
+        return find_initial_containing_view_block(element);
     }
 
     // For relative positioning, use nearest block container
@@ -1117,10 +1112,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     bool is_border_box = block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
     float border_box_height = content_height;
     if (!is_border_box && block->bound) {
-        border_box_height += block->bound->padding.top + block->bound->padding.bottom;
-        if (block->bound->border) {
-            border_box_height += block->bound->border->width.top + block->bound->border->width.bottom;
-        }
+        border_box_height += layout_box_metrics(block).pad_border_v;
     }
 
     if (block->position->has_top) {
@@ -1150,10 +1142,9 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     lycon->block.content_width = content_width;  lycon->block.content_height = content_height;
 
     if (block->bound) {
-        block->width = content_width + block->bound->padding.left + block->bound->padding.right +
-            (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
-        block->height = content_height + block->bound->padding.top + block->bound->padding.bottom +
-            (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
+        BoxMetrics block_box = layout_box_metrics(block);
+        block->width = content_width + block_box.pad_border_h;
+        block->height = content_height + block_box.pad_border_v;
     } else {
         // no change to block->x, block->y, lycon->line.advance_x, lycon->block.advance_y
         block->width = content_width;  block->height = content_height;
@@ -1196,8 +1187,7 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
             }
 
             if (child->bound) {
-                child->height = content_height + child->bound->padding.top + child->bound->padding.bottom +
-                    (child->bound->border ? child->bound->border->width.top + child->bound->border->width.bottom : 0);
+                child->height = content_height + layout_box_metrics(child).pad_border_v;
             } else {
                 child->height = content_height;
             }
@@ -1373,10 +1363,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                     float cb_border_top = (cb->bound && cb->bound->border) ? cb->bound->border->width.top : 0;
                     float cb_border_bottom = (cb->bound && cb->bound->border) ? cb->bound->border->width.bottom : 0;
                     float cb_pad_height = cb->height - cb_border_top - cb_border_bottom;
-                    float v_bp = block->bound->padding.top + block->bound->padding.bottom;
-                    if (block->bound->border) {
-                        v_bp += block->bound->border->width.top + block->bound->border->width.bottom;
-                    }
+                    float v_bp = layout_box_metrics(block).pad_border_v;
                     float used_height = block->height + v_bp;
                     float remaining = cb_pad_height - block->position->top - block->position->bottom - used_height;
                     if (has_auto_mt && has_auto_mb) {
@@ -1407,10 +1394,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                     float cb_border_left = (cb->bound && cb->bound->border) ? cb->bound->border->width.left : 0;
                     float cb_border_right = (cb->bound && cb->bound->border) ? cb->bound->border->width.right : 0;
                     float cb_pad_width = cb->width - cb_border_left - cb_border_right;
-                    float h_bp = block->bound->padding.left + block->bound->padding.right;
-                    if (block->bound->border) {
-                        h_bp += block->bound->border->width.left + block->bound->border->width.right;
-                    }
+                    float h_bp = layout_box_metrics(block).pad_border_h;
                     float used_width = block->width + h_bp;
                     float remaining = cb_pad_width - block->position->left - block->position->right - used_width;
                     // Determine containing block direction for negative margin handling
@@ -1695,10 +1679,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // border/padding (the flex algorithm handles both cases now that layout_block_content
     // dispatches to flex even for empty containers).
     bool has_flex_calculated_width = is_flex_container &&
-        (block->first_child != nullptr || (block->bound && (
-            block->bound->padding.left + block->bound->padding.right +
-            (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0)
-        ) > 0));
+        (block->first_child != nullptr || layout_box_metrics(block).pad_border_h > 0);
     bool has_grid_calculated_width = is_grid_container;
     // Form controls (checkbox, radio, etc.) have intrinsic sizes set by layout_form_control.
     // Don't overwrite with flow-based auto-sizing (void elements have 0 flow content).
@@ -1751,8 +1732,6 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             // Note: max_width already includes left border + left padding from setup_inline
             // So we only need to add right padding and right border
             float flow_width = lycon->block.max_width;
-            float padding_left = block->bound ? block->bound->padding.left : 0;
-            float border_left = (block->bound && block->bound->border) ? block->bound->border->width.left : 0;
             float padding_right = block->bound ? block->bound->padding.right : 0;
             float border_right = (block->bound && block->bound->border) ? block->bound->border->width.right : 0;
 
@@ -1767,7 +1746,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             if (is_border_box) {
                 border_box_width = adjust_min_max_width(block, border_box_width);
             } else {
-                float total_pad_border = padding_left + border_left + padding_right + border_right;
+                float total_pad_border = layout_box_metrics(block).pad_border_h;
                 float content_width = max(border_box_width - total_pad_border, 0.0f);
                 content_width = adjust_min_max_width(block, content_width);
                 border_box_width = content_width + total_pad_border;
@@ -1805,10 +1784,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             if (lycon->block.text_align == CSS_VALUE_CENTER || lycon->block.text_align == CSS_VALUE_RIGHT) {
                 float final_content_width = block->width;
                 if (block->bound) {
-                    final_content_width -= (block->bound->padding.left + block->bound->padding.right);
-                    if (block->bound->border) {
-                        final_content_width -= (block->bound->border->width.left + block->bound->border->width.right);
-                    }
+                    final_content_width -= layout_box_metrics(block).pad_border_h;
                 }
 
                 View* child = block->first_child;

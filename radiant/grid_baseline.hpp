@@ -15,6 +15,7 @@
 
 #include "view.hpp"
 #include "grid.hpp"
+#include "layout_alignment.hpp"
 #include "../lib/tagged.hpp"
 
 namespace radiant {
@@ -129,39 +130,7 @@ inline bool item_participates_in_baseline(ViewBlock* item) {
  * Returns -1 if no baseline can be determined.
  */
 inline float compute_item_first_baseline(ViewBlock* view) {
-    if (!view) return -1.0f;
-
-    // If element has font metrics, use font baseline
-    if (view->font) {
-        // First baseline is at font ascent from top of content area
-        float padding_top = 0.0f;
-        if (view->bound) {
-            padding_top = view->bound->padding.top;
-            if (view->bound->border) {
-                padding_top += view->bound->border->width.top;
-            }
-        }
-        // Approximate: baseline at ~80% of font size from top
-        return padding_top + view->font->font_size * 0.8f;
-    }
-
-    // For containers, recursively find first baseline child
-    if (view->first_child) {
-        DomNode* child = view->first_child;
-        while (child) {
-            if (child->is_element()) {
-                ViewBlock* child_view = lam::unsafe_view_block_element_storage(child->as_element());
-                float child_baseline = compute_item_first_baseline(child_view);
-                if (child_baseline >= 0) {
-                    return child_view->y + child_baseline;
-                }
-            }
-            child = child->next_sibling;
-        }
-    }
-
-    // Fallback: use bottom margin edge as synthetic baseline
-    return view->height;
+    return radiant::compute_element_first_baseline(nullptr, view, true);
 }
 
 // ============================================================================

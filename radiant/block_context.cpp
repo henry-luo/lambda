@@ -11,6 +11,7 @@
  */
 
 #include "layout.hpp"
+#include "layout_box.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
@@ -80,10 +81,7 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
         } else {
             ctx->float_right_edge = element->width;
             if (element->bound) {
-                ctx->float_right_edge -= element->bound->padding.left + element->bound->padding.right;
-                if (element->bound->border) {
-                    ctx->float_right_edge -= element->bound->border->width.left + element->bound->border->width.right;
-                }
+                ctx->float_right_edge -= layout_box_metrics(element).pad_border_h;
             }
         }
         if (ctx->float_right_edge < 0) ctx->float_right_edge = element->width;

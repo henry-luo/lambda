@@ -3,6 +3,7 @@
 #include "render_border.hpp"
 #include "state_store.hpp"
 #include "state_machine.hpp"
+#include "layout_box.hpp"
 #include "../lib/log.h"
 
 struct ScrollConfig {
@@ -170,10 +171,11 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
     if (block->scroller->has_hz_scroll || block->scroller->has_vt_scroll) {
         Rect rect = {rdcon->block.x, rdcon->block.y, block->width * s, block->height * s};
         if (block->bound && block->bound->border) {
+            BoxMetrics block_box = layout_box_metrics(block);
             rect.x += block->bound->border->width.left * s;
             rect.y += block->bound->border->width.top * s;
-            rect.width -= (block->bound->border->width.left + block->bound->border->width.right) * s;
-            rect.height -= (block->bound->border->width.top + block->bound->border->width.bottom) * s;
+            rect.width -= block_box.border_h * s;
+            rect.height -= block_box.border_v * s;
         }
         if (block->scroller->pane) {
             DocState* state = block->doc ? block->doc->state : NULL;

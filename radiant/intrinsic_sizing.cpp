@@ -2384,19 +2384,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         resolved_width_view->blk && resolved_width_view->blk->given_width >= 0.0f) {
         float resolved_width = resolved_width_view->blk->given_width;
         bool is_border_box = resolved_width_view->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+        BoxMetrics resolved_box = layout_box_metrics(resolved_width_view);
 
         if (!is_border_box && resolved_width_view->bound) {
-            resolved_width += resolved_width_view->bound->padding.left + resolved_width_view->bound->padding.right;
-            if (resolved_width_view->bound->border) {
-                resolved_width += resolved_width_view->bound->border->width.left +
-                    resolved_width_view->bound->border->width.right;
-            }
+            resolved_width += resolved_box.pad_border_h;
         } else if (is_border_box && resolved_width_view->bound) {
-            float pb_w = resolved_width_view->bound->padding.left + resolved_width_view->bound->padding.right;
-            if (resolved_width_view->bound->border) {
-                pb_w += resolved_width_view->bound->border->width.left +
-                    resolved_width_view->bound->border->width.right;
-            }
+            float pb_w = resolved_box.pad_border_h;
             if (resolved_width < pb_w) resolved_width = pb_w;
         }
 
@@ -2465,10 +2458,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     // border-box: floor at padding+border (content-box >= 0)
                     ViewBlock* view_for_pb = lam::unsafe_view_block_element_storage(element);
                     if (view_for_pb->bound) {
-                        float pb_w = view_for_pb->bound->padding.left + view_for_pb->bound->padding.right;
-                        if (view_for_pb->bound->border) {
-                            pb_w += view_for_pb->bound->border->width.left + view_for_pb->bound->border->width.right;
-                        }
+                        BoxMetrics box = layout_box_metrics(view_for_pb);
+                        float pb_w = box.pad_border_h;
                         if (explicit_width < pb_w) {
                             log_debug("  -> explicit width: %.0f floored to %.0f (border-box, padding+border)", explicit_width, pb_w);
                             explicit_width = pb_w;
@@ -6004,9 +5995,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 ViewElement* child_ve = lam::view_require_element(static_cast<View*>(child_elem));
                 float child_padding_border = 0.0f;
                 if (child_ve->bound) {
-                    child_padding_border += child_ve->bound->padding.left + child_ve->bound->padding.right;
-                    if (child_ve->bound->border)
-                        child_padding_border += child_ve->bound->border->width.left + child_ve->bound->border->width.right;
+                    BoxMetrics child_box = layout_boundary_metrics(child_ve->bound);
+                    child_padding_border = child_box.pad_border_h;
                 } else if (child_elem->specified_style) {
                     float pad_left = 0.0f;
                     float pad_right = 0.0f;

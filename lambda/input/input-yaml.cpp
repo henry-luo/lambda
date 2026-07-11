@@ -66,6 +66,12 @@ struct YamlParser {
     int tag;
 };
 
+struct YamlCursor {
+    int pos;
+    int line;
+    int col;
+};
+
 // ============================================================================
 // Character utilities
 // ============================================================================
@@ -101,6 +107,16 @@ static inline void advance_n(YamlParser* p, int n) {
     for (int i = 0; i < n; i++) advance(p);
 }
 
+static inline YamlCursor save_cursor(YamlParser* p) {
+    return {p->pos, p->line, p->col};
+}
+
+static inline void restore_cursor(YamlParser* p, YamlCursor cursor) {
+    p->pos = cursor.pos;
+    p->line = cursor.line;
+    p->col = cursor.col;
+}
+
 static uint32_t yaml_parse_hex_codepoint(YamlParser* p, int ndigits) {
     const char* cur = p->src + p->pos;
     uint32_t codepoint = parse_hex_codepoint(&cur, ndigits);
@@ -130,9 +146,7 @@ static void skip_spaces_and_comments(YamlParser* p) {
 
 static bool skip_blank_lines(YamlParser* p) {
     while (!at_end(p)) {
-        int saved = p->pos;
-        int saved_line = p->line;
-        int saved_col = p->col;
+        YamlCursor saved = save_cursor(p);
         skip_spaces(p);
         if (at_end(p)) return false;
         if (peek(p) == '#') {
@@ -144,9 +158,7 @@ static bool skip_blank_lines(YamlParser* p) {
             advance(p);
             continue;
         }
-        p->pos = saved;
-        p->line = saved_line;
-        p->col = saved_col;
+        restore_cursor(p, saved);
         return true;
     }
     return false;
@@ -355,28 +367,24 @@ static Item make_scalar(YamlParser* p, const char* str, bool quoted) {
         return p->ctx->builder.createFloat(0.0 / 0.0);
     }
 
-    char* end;
+    const char* end;
     if (slen > 2 && buf[0] == '0' && (buf[1] == 'x' || buf[1] == 'X')) {
-        int64_t val = strtoll(buf, &end, 16);
-        if (*end == '\0') return p->ctx->builder.createInt(val);
+        Item val = parse_prefixed_integer_value(*p->ctx, buf, 16, "hexadecimal",
+            p->ctx->tracker.location(), &end, false, false);
+        if (val.item != ITEM_NULL && *end == '\0') return val;
     } else if (slen > 2 && buf[0] == '0' && (buf[1] == 'o' || buf[1] == 'O')) {
-        int64_t val = strtoll(buf + 2, &end, 8);
-        if (*end == '\0') return p->ctx->builder.createInt(val);
-    } else {
-        int64_t int_val = strtoll(buf, &end, 10);
-        if (*end == '\0') {
-            Item int_item = parse_integer_token_exact(*p->ctx, buf, slen);
-            if (int_item.item != ITEM_NULL) return int_item;
-            return p->ctx->builder.createInt(int_val);
-        }
-    }
-
-    double float_val = strtod(buf, &end);
-    if (*end == '\0' && buf[0] != '\0') {
-        bool has_dot = strchr(buf, '.') != NULL;
-        bool has_exp = strchr(buf, 'e') != NULL || strchr(buf, 'E') != NULL;
-        if (has_dot || has_exp) {
-            return p->ctx->builder.createFloat(float_val);
+        Item val = parse_prefixed_integer_value(*p->ctx, buf, 8, "octal",
+            p->ctx->tracker.location(), &end, false, false);
+        if (val.item != ITEM_NULL && *end == '\0') return val;
+    } else if (slen > 2 && buf[0] == '0' && (buf[1] == 'b' || buf[1] == 'B')) {
+        Item val = parse_prefixed_integer_value(*p->ctx, buf, 2, "binary",
+            p->ctx->tracker.location(), &end, false, false);
+        if (val.item != ITEM_NULL && *end == '\0') return val;
+    } else if (buf[0] != '\0') {
+        // Plain decimal YAML scalars share the exact integer/float scanner used by JSON/TOML.
+        Item number_item = parse_scanned_decimal_number(*p->ctx, buf, slen, false, false);
+        if (number_item.item != ITEM_NULL) {
+            return number_item;
         }
     }
 
@@ -786,9 +794,7 @@ static Item parse_plain_scalar(YamlParser* p, int min_indent, bool in_flow) {
 
         if (at_end(p) || peek(p) != '\n') break;
 
-        int saved_pos = p->pos;
-        int saved_line = p->line;
-        int saved_col = p->col;
+        YamlCursor saved = save_cursor(p);
         advance(p);
 
         int empty_lines = 0;
@@ -802,13 +808,13 @@ static Item parse_plain_scalar(YamlParser* p, int min_indent, bool in_flow) {
             break;
         }
 
-        if (at_end(p)) { p->pos = saved_pos; p->line = saved_line; p->col = saved_col; break; }
+        if (at_end(p)) { restore_cursor(p, saved); break; }
 
         // doc boundary
         {
             int lp = line_start_pos(p);
             if (is_doc_start_at(p, lp) || is_doc_end_at(p, lp)) {
-                p->pos = saved_pos; p->line = saved_line; p->col = saved_col; break;
+                restore_cursor(p, saved); break;
             }
         }
 
@@ -820,7 +826,7 @@ static Item parse_plain_scalar(YamlParser* p, int min_indent, bool in_flow) {
             if (check_pos < p->len) {
                 char nc = p->src[check_pos];
                 if (nc == '#' || nc == ']' || nc == '}' || nc == ',') {
-                    p->pos = saved_pos; p->line = saved_line; p->col = saved_col; break;
+                    restore_cursor(p, saved); break;
                 }
             }
             if (empty_lines > 0) {
@@ -833,7 +839,7 @@ static Item parse_plain_scalar(YamlParser* p, int min_indent, bool in_flow) {
         }
 
         if (next_indent <= min_indent) {
-            p->pos = saved_pos; p->line = saved_line; p->col = saved_col; break;
+            restore_cursor(p, saved); break;
         }
 
         // check for block indicators on next line
@@ -846,13 +852,13 @@ static Item parse_plain_scalar(YamlParser* p, int min_indent, bool in_flow) {
                     (p->src[check_pos + 1] == ' ' || p->src[check_pos + 1] == '\n' || p->src[check_pos + 1] == '\0')) {
                     // only treat as block sequence indicator if at parent indent or below
                     if (next_indent <= min_indent) {
-                        p->pos = saved_pos; p->line = saved_line; p->col = saved_col; break;
+                        restore_cursor(p, saved); break;
                     }
                 }
-                if (nc == '#') { p->pos = saved_pos; p->line = saved_line; p->col = saved_col; break; }
+                if (nc == '#') { restore_cursor(p, saved); break; }
                 if (nc == '?' && check_pos + 1 < p->len &&
                     (p->src[check_pos + 1] == ' ' || p->src[check_pos + 1] == '\n')) {
-                    p->pos = saved_pos; p->line = saved_line; p->col = saved_col; break;
+                    restore_cursor(p, saved); break;
                 }
                 // check for mapping key on next line
                 bool has_map_colon = false;
@@ -872,7 +878,7 @@ static Item parse_plain_scalar(YamlParser* p, int min_indent, bool in_flow) {
                     cpos++;
                 }
                 if (has_map_colon) {
-                    p->pos = saved_pos; p->line = saved_line; p->col = saved_col; break;
+                    restore_cursor(p, saved); break;
                 }
             }
         }
@@ -925,9 +931,7 @@ static Item parse_block_scalar(YamlParser* p, int base_indent) {
         content_indent = base_indent + explicit_indent;
     } else {
         // auto-detect: find first non-empty line
-        int saved = p->pos;
-        int saved_line = p->line;
-        int saved_col = p->col;
+        YamlCursor saved = save_cursor(p);
         bool found_content_line = false;
         while (!at_end(p)) {
             int spaces = 0;
@@ -946,9 +950,7 @@ static Item parse_block_scalar(YamlParser* p, int base_indent) {
             found_content_line = true;
             break;
         }
-        p->pos = saved;
-        p->line = saved_line;
-        p->col = saved_col;
+        restore_cursor(p, saved);
         if (!found_content_line) {
             // no non-empty content line: block scalar is empty.
             // set content_indent very high so whitespace-only lines are treated as
@@ -1488,9 +1490,7 @@ static Item parse_block_mapping(YamlParser* p, int map_indent) {
         if (key_anchor && (at_end(p) || peek(p) == '\n')) {
             if (!at_end(p)) advance(p);
             // look ahead for what follows
-            int saved = p->pos;
-            int saved_line = p->line;
-            int saved_col = p->col;
+            YamlCursor saved = save_cursor(p);
             skip_blank_lines(p);
             if (!at_end(p)) {
                 int ni = current_indent(p);
@@ -1509,7 +1509,7 @@ static Item parse_block_mapping(YamlParser* p, int map_indent) {
                     }
                 }
             }
-            p->pos = saved; p->line = saved_line; p->col = saved_col;
+            restore_cursor(p, saved);
             // the anchor might be a value itself, try to read block node
             Item val = parse_block_node(p, map_indent + 1);
             store_anchor(p, key_anchor, val);
@@ -1686,7 +1686,7 @@ static Item parse_block_node(YamlParser* p, int min_indent) {
         if (!at_end(p)) advance(p);
 
         // look ahead to see what follows at same or greater indent
-        int saved = p->pos; int saved_line = p->line; int saved_col = p->col;
+        YamlCursor saved = save_cursor(p);
         skip_blank_lines(p);
         if (!at_end(p)) {
             int ni = current_indent(p);
@@ -1717,13 +1717,13 @@ static Item parse_block_node(YamlParser* p, int min_indent) {
 
             // check for mapping or other content at same indent as anchor
             if (ni >= indent) {
-                p->pos = saved; p->line = saved_line; p->col = saved_col;
+                restore_cursor(p, saved);
                 Item value = parse_block_node(p, indent);
                 if (anchor_name) store_anchor(p, anchor_name, value);
                 return value;
             }
         }
-        p->pos = saved; p->line = saved_line; p->col = saved_col;
+        restore_cursor(p, saved);
 
         Item value = parse_block_node(p, indent + 1);
         if (anchor_name) store_anchor(p, anchor_name, value);
@@ -1965,9 +1965,7 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
         // but still fall through to parse_block_node for deeper-indented content
         if (!was_comment) {
             // check if next content is a sequence at same indent as parent
-            int saved_pos2 = p->pos;
-            int saved_line2 = p->line;
-            int saved_col2 = p->col;
+            YamlCursor saved2 = save_cursor(p);
             skip_blank_lines(p);
             if (!at_end(p)) {
                 int ni = current_indent(p);
@@ -1982,7 +1980,7 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
                     }
                 }
             }
-            p->pos = saved_pos2; p->line = saved_line2; p->col = saved_col2;
+            restore_cursor(p, saved2);
         }
 
         if (saved_tag == TAG_STR || saved_tag == TAG_NON_SPECIFIC) {
@@ -2009,9 +2007,7 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
         if (!at_end(p)) advance(p);
 
         // check for sequence at same indent after tag/anchor
-        int saved_pos2 = p->pos;
-        int saved_line2 = p->line;
-        int saved_col2 = p->col;
+        YamlCursor saved2 = save_cursor(p);
         skip_blank_lines(p);
         if (!at_end(p)) {
             int ni = current_indent(p);
@@ -2037,7 +2033,7 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
                 }
             }
         }
-        p->pos = saved_pos2; p->line = saved_line2; p->col = saved_col2;
+        restore_cursor(p, saved2);
 
         if (saved_tag == TAG_STR || saved_tag == TAG_NON_SPECIFIC) {
             Item next = parse_block_node(p, parent_indent + 1);
@@ -2415,42 +2411,36 @@ static Item parse_document(YamlParser* p, bool* has_content) {
         if (!at_end(p) && peek(p) == '\n') advance(p);
 
         // check for content before next boundary
-        int saved = p->pos;
-        int saved_line = p->line;
-        int saved_col = p->col;
+        YamlCursor saved = save_cursor(p);
         skip_blank_lines(p);
         if (at_end(p) || is_doc_start(p) || is_doc_end(p)) {
             *has_content = true;
-            p->pos = saved; p->line = saved_line; p->col = saved_col;
+            restore_cursor(p, saved);
             return p->ctx->builder.createNull();
         }
-        p->pos = saved; p->line = saved_line; p->col = saved_col;
+        restore_cursor(p, saved);
     }
 
     // check for actual content
     {
-        int saved = p->pos;
-        int saved_line = p->line;
-        int saved_col = p->col;
+        YamlCursor saved = save_cursor(p);
         skip_blank_lines(p);
         if (at_end(p)) {
-            p->pos = saved; p->line = saved_line; p->col = saved_col;
+            restore_cursor(p, saved);
             return p->ctx->builder.createNull();
         }
         if (is_doc_start(p) || is_doc_end(p)) {
-            p->pos = saved; p->line = saved_line; p->col = saved_col;
+            restore_cursor(p, saved);
             return p->ctx->builder.createNull();
         }
-        p->pos = saved; p->line = saved_line; p->col = saved_col;
+        restore_cursor(p, saved);
     }
 
     *has_content = true;
 
     // check for document-level block scalar (| or >) without ---
     {
-        int saved = p->pos;
-        int saved_line = p->line;
-        int saved_col = p->col;
+        YamlCursor saved = save_cursor(p);
         skip_blank_lines(p);
         if (!at_end(p)) {
             int ci = current_indent(p);
@@ -2462,7 +2452,7 @@ static Item parse_document(YamlParser* p, bool* has_content) {
                 return parse_block_scalar(p, -1);
             }
         }
-        p->pos = saved; p->line = saved_line; p->col = saved_col;
+        restore_cursor(p, saved);
     }
 
     return parse_block_node(p, 0);
@@ -2501,9 +2491,7 @@ void parse_yaml(Input *input, const char* yaml_str) {
 
     // check for empty input
     {
-        int saved = p->pos;
-        int saved_line = p->line;
-        int saved_col = p->col;
+        YamlCursor saved = save_cursor(p);
         skip_blank_lines(p);
         if (at_end(p)) {
             input->root = ctx.builder.createNull();
@@ -2512,7 +2500,7 @@ void parse_yaml(Input *input, const char* yaml_str) {
         }
         // check for only comments/whitespace
         bool only_comments = true;
-        p->pos = saved; p->line = saved_line; p->col = saved_col;
+        restore_cursor(p, saved);
         while (!at_end(p)) {
             skip_spaces(p);
             if (at_end(p)) break;
@@ -2533,7 +2521,7 @@ void parse_yaml(Input *input, const char* yaml_str) {
             ctx.logErrors();
             return;
         }
-        p->pos = saved; p->line = saved_line; p->col = saved_col;
+        restore_cursor(p, saved);
     }
 
     ArrayBuilder docs = ctx.builder.array();
