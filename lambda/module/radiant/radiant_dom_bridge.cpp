@@ -3,6 +3,7 @@
 #include "../../jube/jube_registry.h"
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
+#include "../../jube/jube_interface.h"
 #include "../../input/css/dom_node.hpp"
 #include "../../input/css/dom_element.hpp"
 #include "../../input/css/css_tokenizer.hpp"
@@ -1410,42 +1411,87 @@ static bool radiant_dom_get_select_option_property(Item elem_item, DomElement* e
     return false;
 }
 
+
+// ---- DOM3 Phase 4a: record-driven member getters (identity/navigation) ----
+// JubeMemberBind handler shapes; the strcmp arms these replace are deleted
+// from radiant_dom_get_element_property.
+
+RADIANT_C_API int radiant_dom_member_is_element(Item receiver) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    return node && node->is_element();
+}
+
+static DomElement* radiant_dom_member_elem(Item receiver) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    return (node && node->is_element()) ? node->as_element() : nullptr;
+}
+
+#define RADIANT_MEMBER_GET(name, expr)                                       \
+    RADIANT_C_API int name(Item receiver, Item* out) {                       \
+        DomElement* elem = radiant_dom_member_elem(receiver);                \
+        if (!elem || !out) return 0;                                         \
+        *out = (expr);                                                       \
+        return 1;                                                            \
+    }
+
+RADIANT_MEMBER_GET(radiant_dom_member_tag_name,
+    (Item){.item = s2it(radiant_dom_uppercase_name(elem->tag_name))})
+RADIANT_MEMBER_GET(radiant_dom_member_local_name,
+    radiant_dom_string_item(elem->tag_name))
+RADIANT_C_API int radiant_dom_member_namespace_uri(Item receiver, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    if (!elem || !out) return 0;
+    const char* ns = dom_element_get_attribute(elem, "__lambda_ns_uri");
+    *out = radiant_dom_string_item((ns && ns[0] != '\0') ? ns : "http://www.w3.org/1999/xhtml");
+    return 1;
+}
+RADIANT_MEMBER_GET(radiant_dom_member_prefix, ItemNull)
+RADIANT_MEMBER_GET(radiant_dom_member_id, radiant_dom_string_item(elem->id))
+RADIANT_MEMBER_GET(radiant_dom_member_class_name, radiant_dom_class_name_item(elem))
+RADIANT_MEMBER_GET(radiant_dom_member_node_type,
+    radiant_dom_int_item((int64_t)elem->node_type))
+RADIANT_C_API int radiant_dom_member_parent_node(Item receiver, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    if (!elem || !out) return 0;
+    DomNode* parent = elem->parent;
+    *out = (parent && parent->is_element()) ? radiant_dom_node_item(parent) : ItemNull;
+    return 1;
+}
+RADIANT_MEMBER_GET(radiant_dom_member_is_connected,
+    (Item){.item = b2it(radiant_dom_node_is_connected((DomNode*)elem) ? 1 : 0)})
+RADIANT_MEMBER_GET(radiant_dom_member_child_element_count,
+    radiant_dom_int_item(radiant_dom_script_visible_element_child_count(elem)))
+RADIANT_MEMBER_GET(radiant_dom_member_children,
+    js_dom_live_child_collection_bridge((void*)elem, true))
+RADIANT_MEMBER_GET(radiant_dom_member_attributes, radiant_dom_attributes_item(elem))
+RADIANT_MEMBER_GET(radiant_dom_member_owner_document,
+    radiant_dom_document_item(elem->doc))
+RADIANT_MEMBER_GET(radiant_dom_member_first_child,
+    radiant_dom_node_item(radiant_dom_first_script_visible_child(elem)))
+RADIANT_MEMBER_GET(radiant_dom_member_last_child,
+    radiant_dom_node_item(radiant_dom_last_script_visible_child(elem)))
+RADIANT_MEMBER_GET(radiant_dom_member_next_sibling,
+    radiant_dom_node_item(radiant_dom_next_script_visible_sibling((DomNode*)elem)))
+RADIANT_MEMBER_GET(radiant_dom_member_previous_sibling,
+    radiant_dom_node_item(radiant_dom_prev_script_visible_sibling((DomNode*)elem)))
+RADIANT_MEMBER_GET(radiant_dom_member_first_element_child,
+    radiant_dom_node_item(radiant_dom_first_script_visible_element_child(elem)))
+RADIANT_MEMBER_GET(radiant_dom_member_last_element_child,
+    radiant_dom_node_item(radiant_dom_last_script_visible_element_child(elem)))
+RADIANT_MEMBER_GET(radiant_dom_member_next_element_sibling,
+    radiant_dom_node_item(radiant_dom_next_script_visible_element_sibling((DomNode*)elem)))
+RADIANT_MEMBER_GET(radiant_dom_member_previous_element_sibling,
+    radiant_dom_node_item(radiant_dom_prev_script_visible_element_sibling((DomNode*)elem)))
+RADIANT_MEMBER_GET(radiant_dom_member_child_nodes,
+    js_dom_live_child_collection_bridge((void*)elem, false))
+
 static bool radiant_dom_get_element_property(DomElement* elem, const char* prop, Item* out) {
     if (!elem || !prop || !out) return false;
-    if (strcmp(prop, "tagName") == 0 || strcmp(prop, "nodeName") == 0) {
-        *out = (Item){.item = s2it(radiant_dom_uppercase_name(elem->tag_name))};
-        return true;
-    }
-    if (strcmp(prop, "localName") == 0) {
-        *out = radiant_dom_string_item(elem->tag_name);
-        return true;
-    }
     if (strcmp(prop, "content") == 0 &&
         elem->tag_name && strcasecmp(elem->tag_name, "template") == 0) {
         // current template support exposes parsed children through the template
         // wrapper itself; keep that compatibility shim at the module boundary.
         *out = radiant_dom_node_item((DomNode*)elem);
-        return true;
-    }
-    if (strcmp(prop, "namespaceURI") == 0) {
-        const char* ns = dom_element_get_attribute(elem, "__lambda_ns_uri");
-        *out = radiant_dom_string_item((ns && ns[0] != '\0') ? ns : "http://www.w3.org/1999/xhtml");
-        return true;
-    }
-    if (strcmp(prop, "prefix") == 0) {
-        *out = ItemNull;
-        return true;
-    }
-    if (strcmp(prop, "id") == 0) {
-        *out = radiant_dom_string_item(elem->id);
-        return true;
-    }
-    if (strcmp(prop, "className") == 0) {
-        *out = radiant_dom_class_name_item(elem);
-        return true;
-    }
-    if (strcmp(prop, "nodeType") == 0) {
-        *out = radiant_dom_int_item((int64_t)elem->node_type);
         return true;
     }
     const char* bool_attr = nullptr;
@@ -1494,15 +1540,6 @@ static bool radiant_dom_get_element_property(DomElement* elem, const char* prop,
         *out = (Item){.item = b2it(radiant_dom_is_content_editable(elem) ? 1 : 0)};
         return true;
     }
-    if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
-        DomNode* parent = elem->parent;
-        *out = (parent && parent->is_element()) ? radiant_dom_node_item(parent) : ItemNull;
-        return true;
-    }
-    if (strcmp(prop, "isConnected") == 0) {
-        *out = (Item){.item = b2it(radiant_dom_node_is_connected((DomNode*)elem) ? 1 : 0)};
-        return true;
-    }
     if (radiant_dom_is_tag(elem, "form") && strcmp(prop, "elements") == 0) {
         *out = js_dom_live_form_elements_bridge((void*)elem);
         return true;
@@ -1512,60 +1549,8 @@ static bool radiant_dom_get_element_property(DomElement* elem, const char* prop,
         *out = radiant_dom_int_item(controls.array ? controls.array->length : 0);
         return true;
     }
-    if (strcmp(prop, "childElementCount") == 0) {
-        *out = radiant_dom_int_item(radiant_dom_script_visible_element_child_count(elem));
-        return true;
-    }
     if (strcmp(prop, "length") == 0) {
         *out = radiant_dom_int_item(radiant_dom_script_visible_element_child_count(elem));
-        return true;
-    }
-    if (strcmp(prop, "children") == 0) {
-        *out = js_dom_live_child_collection_bridge((void*)elem, true);
-        return true;
-    }
-    if (strcmp(prop, "attributes") == 0) {
-        *out = radiant_dom_attributes_item(elem);
-        return true;
-    }
-    if (strcmp(prop, "ownerDocument") == 0) {
-        *out = radiant_dom_document_item(elem->doc);
-        return true;
-    }
-    if (strcmp(prop, "firstChild") == 0) {
-        *out = radiant_dom_node_item(radiant_dom_first_script_visible_child(elem));
-        return true;
-    }
-    if (strcmp(prop, "lastChild") == 0) {
-        *out = radiant_dom_node_item(radiant_dom_last_script_visible_child(elem));
-        return true;
-    }
-    if (strcmp(prop, "nextSibling") == 0) {
-        *out = radiant_dom_node_item(radiant_dom_next_script_visible_sibling((DomNode*)elem));
-        return true;
-    }
-    if (strcmp(prop, "previousSibling") == 0) {
-        *out = radiant_dom_node_item(radiant_dom_prev_script_visible_sibling((DomNode*)elem));
-        return true;
-    }
-    if (strcmp(prop, "firstElementChild") == 0) {
-        *out = radiant_dom_node_item(radiant_dom_first_script_visible_element_child(elem));
-        return true;
-    }
-    if (strcmp(prop, "lastElementChild") == 0) {
-        *out = radiant_dom_node_item(radiant_dom_last_script_visible_element_child(elem));
-        return true;
-    }
-    if (strcmp(prop, "nextElementSibling") == 0) {
-        *out = radiant_dom_node_item(radiant_dom_next_script_visible_element_sibling((DomNode*)elem));
-        return true;
-    }
-    if (strcmp(prop, "previousElementSibling") == 0) {
-        *out = radiant_dom_node_item(radiant_dom_prev_script_visible_element_sibling((DomNode*)elem));
-        return true;
-    }
-    if (strcmp(prop, "childNodes") == 0) {
-        *out = js_dom_live_child_collection_bridge((void*)elem, false);
         return true;
     }
     if (radiant_dom_form_named_getter(elem, prop, out)) {
@@ -2432,6 +2417,10 @@ static Item radiant_dom_data_descriptor(Item value, bool writable,
 
 static bool radiant_dom_projected_own_value(Item object, Item key, Item* out) {
     if (!out || get_type_id(key) != LMD_TYPE_STRING) return false;
+    // DOM3 Phase 4: converted members resolve through the record system, so
+    // own-keys projection and descriptors keep covering them after their
+    // legacy chain arms are deleted
+    if (jube_member_get(object, key, out)) return true;
     return radiant_dom_get_basic_property(object, key, out);
 }
 

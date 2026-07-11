@@ -1,8 +1,11 @@
 # Lambda Jube DOM — Stage 3 (DOM3): Table-Driven Property Dispatch — Review and Proposal
 
-> **Status**: Phases 0, 1, and 3 implemented and green (2026-07-12); Range/Selection and the
-> style hosts (inline/computed) are fully record-driven with `host_ops = NULL`, and the
-> open-name hooks are proven. Phase 2 (CSSOM) and Phase 4 (element/document) not started.
+> **Status**: Phases 0–3 and 4a implemented and green (2026-07-12). Eight of ten radiant
+> types are fully record-driven with `host_ops = NULL` (range, selection, inline/computed
+> style, stylesheet, css_rule, rule_style_decl); `dom_node` is migrating via the
+> `legacy_ops` fall-through with its 24-member identity/nav cluster converted. Remaining:
+> Phase 4b–4e (reflected attrs, tag-gated members, methods, catch-alls), document types,
+> Phase 5 convergence.
 > **Parent design**: [Lambda_Desing_Native_Module.md](./Lambda_Desing_Native_Module.md) — Jube modules, signatures in Lambda type syntax, VMap projections.
 > **Predecessors**: [Lambda_Jube_DOM.md](./Lambda_Jube_DOM.md) (DOM1: carrier switch to branded VMaps),
 > [Lambda_Jube_DOM2.md](./Lambda_Jube_DOM2.md) (DOM2: generic host-object protocol, real host API,
@@ -615,6 +618,30 @@ is deleted — `in` is now derived and cannot disagree with `get` again.
 
 Gates: anchors; `dom_style`, CSSOM-focused JS tests; grep gate on js_cssom.cpp; full JS gtest.
 
+Progress (2026-07-12): **Phase 2 complete** (implemented after Phase 3 at user direction).
+
+- **The drifted `js_cssom_resource_has_property` chain is deleted** — the scan showed the drift
+  was worse than recorded: stylesheet `has` and `get` were *nearly disjoint* (has claimed
+  ownerNode/insertRule/deleteRule; get served length/disabled/type/href/title/indices). Under
+  records both derive from one declaration; the has-only legacy names (`owner_node`,
+  `parent_style_sheet`) are declared with null getters so `in` stays true and reads stay null.
+- All three types (`stylesheet`, `css_rule`, `rule_style_decl`) registered with
+  **`host_ops = NULL`**; the shared `radiant_dom_cssom_host_ops` table and its eight bridge
+  impls are deleted. The CSS namespace (`CSS.supports`/`escape`) is untouched — it is a plain
+  map-kind object, not a branded VMAP, and dispatches through builtins.
+- Engine chains split into receiver-explicit functions (~18 new dom-API entries); the retired
+  chain slots are NULLed. `sheet[N]` proved the **`indexed_get`** hook (raw index incl.
+  charset rules, matching the legacy bracket path); rule declarations reuse the kept
+  `cssom_rule_decl_get/set_property` as their named hooks with a new CSS-table `named_has`.
+  `js_dom.cpp`'s rule-style routers now call the receiver-explicit `js_cssom_rule_get_style`.
+- js_cssom.cpp strcmp **41 → 7** (two are the kept declaration-getter's length/cssText backend
+  branches; five compare data values). Pinned: keys=[], no prototypes, descriptors undefined
+  for open names, unknown writes swallowed (sheet/rule) or parsed as declarations (decl),
+  setProperty still drops its priority argument.
+- Verified: `dom_module_props`/`dom_style`/`dom_v12b`/`dom_jquery_lib`/`css_namespace`/
+  `hostobj_demo` goldens diff-exact; full JS gtest **309/309**; UI-automation clean
+  (2 known webview skips); direct anchors; Lambda baseline green.
+
 ### Phase 3 — Style hosts (inline_style, computed_style)
 
 API surface (`cssText`, `length`, `getPropertyValue`, `setProperty`, `removeProperty`) → table;
@@ -666,6 +693,28 @@ pending).
 
 - **4a** Constants, aliases, identity/navigation cluster (nodeName/nodeType/parentNode/…,
   the DOM1 "first cluster" again) — pure rows, no guards.
+
+  Progress (2026-07-12): **4a complete** (suites recorded below). The migration mechanism is
+  `JubeTypeBinding.legacy_ops` — a transitional marker meaning *fall through on record miss*:
+  the generic dispatch returns unhandled and the caller's existing host_ops path runs, which
+  preserves key-conversion (vmap snake→camel), text/comment kinds, side-table expandos,
+  per-kind prototypes (Element/Node identity), own-keys, and live-collection semantics for
+  everything unconverted. Two lessons paid for during bring-up: (1) delegation-with-the-raw-key
+  is wrong — the Lambda path hands snake_case keys that only the caller's fallback converts,
+  hence fall-through-not-delegate; (2) `radiant_dom_projected_own_value` had to become
+  record-aware, since own-keys projection and descriptors filter by "does this name project"
+  and the converted arms no longer answer. `dom_node` declares the 24-member identity/nav
+  cluster (tag_name/node_name alias, local_name, namespace_uri with `js_name` override,
+  prefix, id, class_name, node_type, parent_node/parent_element alias, is_connected,
+  child_element_count, children, attributes, owner_document, first/last_child,
+  next/previous_sibling, first/last_element_child, next/previous_element_sibling,
+  child_nodes), every member guarded element-only (`radiant_dom_member_is_element`) so
+  text/comment reads flow legacy; converted getters without converted setters (id,
+  class_name) fall through on write so the legacy write chains keep working. 22 strcmp arms
+  deleted from the bridge element chain; excluded from 4a on purpose: `length`/`elements`
+  (form-gated, needs `applies_to`), `content` (template-gated), reflected attributes (4b),
+  editable-state trio (4b/4c). Goldens diff-exact: dom_module_props, dom_identity, dom_style,
+  dom_v12b, dom_jquery_lib, hostobj_demo, radiant_dom_read/mutate, proc_radiant_dom_set.
 - **4b** Reflected attributes: the four `_is_*_reflected`/`_idl_to_attr_name` helper chains and
   the bridge's parallel copies become `REFLECT_*` rows (~40 props). Enumerated attributes
   (`inputMode`, `contentEditable`, …) stay ACCESSOR rows over their canonicalizers.

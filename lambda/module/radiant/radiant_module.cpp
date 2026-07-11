@@ -177,7 +177,8 @@ static int radiant_module_init(const JubeHostAPI* host) {
     return 0;
 }
 
-static const JubeHostObjectOps radiant_dom_node_host_ops = {
+extern const JubeHostObjectOps radiant_dom_node_host_ops;
+const JubeHostObjectOps radiant_dom_node_host_ops = {
     radiant_dom_host_get_property,
     radiant_dom_host_set_property,
     radiant_dom_host_call_method,
@@ -298,7 +299,7 @@ static const JubeModuleDef radiant_module = {
     NULL,
     radiant_dom_interface_decl,
     radiant_dom_type_bindings,
-    7,  // range, selection, inline/computed style, stylesheet, css_rule, rule_style_decl
+    8,  // + dom_node (Phase 4a, migrating via legacy_ops)
 };
 
 RADIANT_C_API const JubeModuleDef* radiant_jube_module(void) {

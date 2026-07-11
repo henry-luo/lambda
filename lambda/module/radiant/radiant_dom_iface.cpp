@@ -118,6 +118,32 @@ const char radiant_dom_interface_decl[] =
     "    parent_rule: any,\n"
     "    parent_style_sheet: any\n"
     "}\n"
+    "type dom_node {\n"
+    "    tag_name: string,\n"
+    "    node_name: string,\n"
+    "    local_name: string,\n"
+    "    namespace_uri: string,\n"
+    "    prefix: any,\n"
+    "    id: string,\n"
+    "    class_name: string,\n"
+    "    node_type: int,\n"
+    "    parent_node: any,\n"
+    "    parent_element: any,\n"
+    "    is_connected: bool,\n"
+    "    child_element_count: int,\n"
+    "    children: any,\n"
+    "    attributes: any,\n"
+    "    owner_document: any,\n"
+    "    first_child: any,\n"
+    "    last_child: any,\n"
+    "    next_sibling: any,\n"
+    "    previous_sibling: any,\n"
+    "    first_element_child: any,\n"
+    "    last_element_child: any,\n"
+    "    next_element_sibling: any,\n"
+    "    previous_element_sibling: any,\n"
+    "    child_nodes: any\n"
+    "}\n"
     "type rule_style_decl {\n"
     "    length: int,\n"
     "    css_text: string,\n"
@@ -575,6 +601,72 @@ static const JubeMemberBind radiant_rule_decl_members[] = {
     BIND_CALL("remove_property", rd_remove_property),
 };
 
+
+// ---- dom_node Phase 4a: identity/navigation cluster ----
+// Transitional: legacy_ops carries everything unconverted (text/comment
+// kinds, reflected attrs, tag-gated members, methods, side-table expandos,
+// per-kind prototypes, own-keys). Members guard element-only so text/comment
+// reads fall through to the legacy chains unchanged.
+
+extern const JubeHostObjectOps radiant_dom_node_host_ops;
+extern "C" int radiant_dom_member_is_element(Item receiver);
+extern "C" int radiant_dom_member_tag_name(Item receiver, Item* out);
+extern "C" int radiant_dom_member_local_name(Item receiver, Item* out);
+extern "C" int radiant_dom_member_namespace_uri(Item receiver, Item* out);
+extern "C" int radiant_dom_member_prefix(Item receiver, Item* out);
+extern "C" int radiant_dom_member_id(Item receiver, Item* out);
+extern "C" int radiant_dom_member_class_name(Item receiver, Item* out);
+extern "C" int radiant_dom_member_node_type(Item receiver, Item* out);
+extern "C" int radiant_dom_member_parent_node(Item receiver, Item* out);
+extern "C" int radiant_dom_member_is_connected(Item receiver, Item* out);
+extern "C" int radiant_dom_member_child_element_count(Item receiver, Item* out);
+extern "C" int radiant_dom_member_children(Item receiver, Item* out);
+extern "C" int radiant_dom_member_attributes(Item receiver, Item* out);
+extern "C" int radiant_dom_member_owner_document(Item receiver, Item* out);
+extern "C" int radiant_dom_member_first_child(Item receiver, Item* out);
+extern "C" int radiant_dom_member_last_child(Item receiver, Item* out);
+extern "C" int radiant_dom_member_next_sibling(Item receiver, Item* out);
+extern "C" int radiant_dom_member_previous_sibling(Item receiver, Item* out);
+extern "C" int radiant_dom_member_first_element_child(Item receiver, Item* out);
+extern "C" int radiant_dom_member_last_element_child(Item receiver, Item* out);
+extern "C" int radiant_dom_member_next_element_sibling(Item receiver, Item* out);
+extern "C" int radiant_dom_member_previous_element_sibling(Item receiver, Item* out);
+extern "C" int radiant_dom_member_child_nodes(Item receiver, Item* out);
+
+#define BIND_NODE(n, fn) \
+    {n, NULL, NULL, radiant_dom_member_is_element, fn, NULL, NULL, NULL, \
+     JUBE_MEMBER_NON_ENUMERABLE}
+#define BIND_NODE_JS(n, js, fn) \
+    {n, js, NULL, radiant_dom_member_is_element, fn, NULL, NULL, NULL, \
+     JUBE_MEMBER_NON_ENUMERABLE}
+
+static const JubeMemberBind radiant_dom_node_members[] = {
+    BIND_NODE("tag_name", radiant_dom_member_tag_name),
+    BIND_NODE("node_name", radiant_dom_member_tag_name),
+    BIND_NODE("local_name", radiant_dom_member_local_name),
+    BIND_NODE_JS("namespace_uri", "namespaceURI", radiant_dom_member_namespace_uri),
+    BIND_NODE("prefix", radiant_dom_member_prefix),
+    BIND_NODE("id", radiant_dom_member_id),
+    BIND_NODE("class_name", radiant_dom_member_class_name),
+    BIND_NODE("node_type", radiant_dom_member_node_type),
+    BIND_NODE("parent_node", radiant_dom_member_parent_node),
+    BIND_NODE("parent_element", radiant_dom_member_parent_node),
+    BIND_NODE("is_connected", radiant_dom_member_is_connected),
+    BIND_NODE("child_element_count", radiant_dom_member_child_element_count),
+    BIND_NODE("children", radiant_dom_member_children),
+    BIND_NODE("attributes", radiant_dom_member_attributes),
+    BIND_NODE("owner_document", radiant_dom_member_owner_document),
+    BIND_NODE("first_child", radiant_dom_member_first_child),
+    BIND_NODE("last_child", radiant_dom_member_last_child),
+    BIND_NODE("next_sibling", radiant_dom_member_next_sibling),
+    BIND_NODE("previous_sibling", radiant_dom_member_previous_sibling),
+    BIND_NODE("first_element_child", radiant_dom_member_first_element_child),
+    BIND_NODE("last_element_child", radiant_dom_member_last_element_child),
+    BIND_NODE("next_element_sibling", radiant_dom_member_next_element_sibling),
+    BIND_NODE("previous_element_sibling", radiant_dom_member_previous_element_sibling),
+    BIND_NODE("child_nodes", radiant_dom_member_child_nodes),
+};
+
 extern const JubeTypeBinding radiant_dom_type_bindings[];
 const JubeTypeBinding radiant_dom_type_bindings[] = {
     {"range", NULL, radiant_range_members,
@@ -598,6 +690,9 @@ const JubeTypeBinding radiant_dom_type_bindings[] = {
     {"rule_style_decl", NULL, radiant_rule_decl_members,
      (int32_t)(sizeof(radiant_rule_decl_members) / sizeof(radiant_rule_decl_members[0])),
      rd_named_get, rd_named_set, NULL, NULL, radiant_style_no_prototype, rd_named_has},
+    {"dom_node", NULL, radiant_dom_node_members,
+     (int32_t)(sizeof(radiant_dom_node_members) / sizeof(radiant_dom_node_members[0])),
+     NULL, NULL, NULL, NULL, NULL, NULL, &radiant_dom_node_host_ops},
 };
 
 extern const int32_t radiant_dom_type_binding_count;
