@@ -25,15 +25,6 @@ RADIANT_C_API int radiant_dom_host_own_property_descriptor(Item object, Item key
 RADIANT_C_API int radiant_dom_host_own_property_names(Item object, Item* out);
 RADIANT_C_API Item radiant_dom_host_prototype(Item object);
 RADIANT_C_API void radiant_dom_host_invalidate(Item object);
-RADIANT_C_API int radiant_dom_style_host_get_property(Item object, Item key, Item* out);
-RADIANT_C_API int radiant_dom_style_host_set_property(Item object, Item key, Item value, Item* out);
-RADIANT_C_API int radiant_dom_style_host_call_method(Item object, Item method_name,
-                                                  Item* args, int argc, Item* out);
-RADIANT_C_API int radiant_dom_style_host_has_property(Item object, Item key, Item* out);
-RADIANT_C_API int radiant_dom_style_host_delete_property(Item object, Item key, Item* out);
-RADIANT_C_API int radiant_dom_style_host_own_property_descriptor(Item object, Item key, Item* out);
-RADIANT_C_API int radiant_dom_style_host_own_property_names(Item object, Item* out);
-RADIANT_C_API Item radiant_dom_style_host_prototype(Item object);
 RADIANT_C_API int radiant_dom_cssom_host_get_property(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_cssom_host_set_property(Item object, Item key, Item value, Item* out);
 RADIANT_C_API int radiant_dom_cssom_host_call_method(Item object, Item method_name,
@@ -208,18 +199,6 @@ static const JubeHostObjectOps radiant_dom_node_host_ops = {
     NULL,
 };
 
-static const JubeHostObjectOps radiant_dom_style_host_ops = {
-    radiant_dom_style_host_get_property,
-    radiant_dom_style_host_set_property,
-    radiant_dom_style_host_call_method,
-    radiant_dom_style_host_has_property,
-    radiant_dom_style_host_delete_property,
-    radiant_dom_style_host_own_property_descriptor,
-    radiant_dom_style_host_own_property_names,
-    radiant_dom_style_host_prototype,
-    NULL,
-    NULL,
-};
 
 static const JubeHostObjectOps radiant_dom_cssom_host_ops = {
     radiant_dom_cssom_host_get_property,
@@ -251,8 +230,9 @@ static const JubeTypeDef radiant_types[] = {
     {"dom_node", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_node_host_ops, NULL},
     {"range", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_node_host_ops, NULL},
     {"selection", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_node_host_ops, NULL},
-    {"inline_style", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_style_host_ops, NULL},
-    {"computed_style", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_style_host_ops, NULL},
+    // DOM3: style hosts are record-driven; no hand-written host ops remain
+    {"inline_style", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
+    {"computed_style", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
     {"stylesheet", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_cssom_host_ops, NULL},
     {"css_rule", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_cssom_host_ops, NULL},
     {"rule_style_decl", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_cssom_host_ops, NULL},
@@ -339,7 +319,7 @@ static const JubeModuleDef radiant_module = {
     NULL,
     radiant_dom_interface_decl,
     radiant_dom_type_bindings,
-    2,  // range + selection; registration cross-checks against interface_decl
+    4,  // range, selection, inline_style, computed_style
 };
 
 RADIANT_C_API const JubeModuleDef* radiant_jube_module(void) {

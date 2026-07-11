@@ -81,6 +81,20 @@ const char radiant_dom_interface_decl[] =
     "    to_string: fn() string,\n"
     "    modify: fn(alter: string, direction: string, granularity: string) null,\n"
     "    __force_direction: fn(direction: string) null\n"
+    "}\n"
+    "type inline_style {\n"
+    "    css_text: string,\n"
+    "    length: string,\n"
+    "    get_property_value: fn(prop: string) string,\n"
+    "    set_property: fn(prop: string, value: string, priority: string) null,\n"
+    "    remove_property: fn(prop: string) string\n"
+    "}\n"
+    "type computed_style {\n"
+    "    css_text: string,\n"
+    "    length: string,\n"
+    "    get_property_value: fn(prop: string) string,\n"
+    "    set_property: fn(prop: string, value: string, priority: string) null,\n"
+    "    remove_property: fn(prop: string) string\n"
     "}\n";
 
 // ---- adapters: JubeMemberBind handler shape -> host API behavior entries ----
@@ -271,6 +285,129 @@ static const JubeMemberBind radiant_selection_members[] = {
     BIND_CALL_JS("__force_direction", "__forceDirection", s_force_direction),
 };
 
+
+// ---- style hosts (inline_style / computed_style) ----
+// Pinned legacy behaviors preserved by construction: Object.keys = [] (all
+// members non-enumerable, expandos impossible), `length` reads as "" (a CSS
+// property-table miss, not a count), no prototype object, and non-CSS writes
+// are swallowed by the CSS parser rather than stored.
+
+extern "C" Item radiant_dom_wrap_node(void* dom_elem);
+
+static Item radiant_style_key(const char* name) {
+    return (Item){.item = s2it(heap_create_name(name))};
+}
+
+// inline-style wrappers carry the owner DomElement* as host_data; the engine
+// style entries take the owner ELEMENT item
+static Item radiant_style_owner_item(Item receiver) {
+    return radiant_dom_wrap_node(receiver.vmap->host_data);
+}
+
+static int st_css_text_get(Item r, Item* out) {
+    *out = radiant_host_api->dom->style_get_property(radiant_style_owner_item(r),
+                                                     radiant_style_key("cssText"));
+    return 1;
+}
+
+static int st_css_text_set(Item r, Item v, Item* out) {
+    *out = radiant_host_api->dom->style_set_property(radiant_style_owner_item(r),
+                                                     radiant_style_key("cssText"), v);
+    return 1;
+}
+
+static int st_length_get(Item r, Item* out) {
+    *out = radiant_host_api->dom->style_get_property(radiant_style_owner_item(r),
+                                                     radiant_style_key("length"));
+    return 1;
+}
+
+static int st_named_get(Item r, Item key, Item* out) {
+    *out = radiant_host_api->dom->style_get_property(radiant_style_owner_item(r), key);
+    return 1;
+}
+
+static int st_named_set(Item r, Item key, Item v, Item* out) {
+    *out = radiant_host_api->dom->style_set_property(radiant_style_owner_item(r), key, v);
+    return 1;
+}
+
+static int st_named_has(Item r, Item key, Item* out) {
+    *out = radiant_host_api->dom->style_css_has(r, key);
+    return 1;
+}
+
+static int st_get_property_value(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_host_api->dom->style_get_property(radiant_style_owner_item(r),
+        radiant_iface_arg(args, argc, 0));
+    return 1;
+}
+
+static int st_set_property(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_host_api->dom->style_set_property_bridge(r.vmap->host_data,
+        radiant_iface_arg(args, argc, 0), radiant_iface_arg(args, argc, 1),
+        radiant_iface_arg(args, argc, 2), argc >= 3);
+    return 1;
+}
+
+static int st_remove_property(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_host_api->dom->style_remove_property_bridge(r.vmap->host_data,
+        radiant_iface_arg(args, argc, 0));
+    return 1;
+}
+
+// computed style: read-only; the resolver entry takes the style item itself
+static int cs_get(Item r, Item key, Item* out) {
+    *out = radiant_host_api->dom->computed_style_get_property(r, key);
+    return 1;
+}
+
+static int cs_css_text_get(Item r, Item* out) {
+    return cs_get(r, radiant_style_key("cssText"), out);
+}
+
+static int cs_length_get(Item r, Item* out) {
+    return cs_get(r, radiant_style_key("length"), out);
+}
+
+static int cs_get_property_value(Item r, Item* args, int argc, Item* out) {
+    return cs_get(r, radiant_iface_arg(args, argc, 0), out);
+}
+
+static int cs_noop_method(Item r, Item* args, int argc, Item* out) {
+    (void)r; (void)args; (void)argc;
+    *out = ItemNull;
+    return 1;
+}
+
+static int cs_named_set(Item r, Item key, Item v, Item* out) {
+    (void)r; (void)key;
+    *out = v;
+    return 1;
+}
+
+// style objects have no prototype (a non-map seed records "none")
+static Item radiant_style_no_prototype(void) {
+    return ItemNull;
+}
+
+static const JubeMemberBind radiant_inline_style_members[] = {
+    {"css_text", NULL, NULL, NULL, st_css_text_get, st_css_text_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    BIND_GET_HIDDEN("length", st_length_get),
+    BIND_CALL("get_property_value", st_get_property_value),
+    BIND_CALL("set_property", st_set_property),
+    BIND_CALL("remove_property", st_remove_property),
+};
+
+static const JubeMemberBind radiant_computed_style_members[] = {
+    BIND_GET_HIDDEN("css_text", cs_css_text_get),
+    BIND_GET_HIDDEN("length", cs_length_get),
+    BIND_CALL("get_property_value", cs_get_property_value),
+    BIND_CALL("set_property", cs_noop_method),
+    BIND_CALL("remove_property", cs_noop_method),
+};
+
 extern const JubeTypeBinding radiant_dom_type_bindings[];
 const JubeTypeBinding radiant_dom_type_bindings[] = {
     {"range", NULL, radiant_range_members,
@@ -278,7 +415,13 @@ const JubeTypeBinding radiant_dom_type_bindings[] = {
      NULL, NULL, NULL, NULL, radiant_range_prototype_seed},
     {"selection", NULL, radiant_selection_members,
      (int32_t)(sizeof(radiant_selection_members) / sizeof(radiant_selection_members[0])),
-     NULL, NULL, NULL, NULL, radiant_selection_prototype_seed},
+     NULL, NULL, NULL, NULL, radiant_selection_prototype_seed, NULL},
+    {"inline_style", NULL, radiant_inline_style_members,
+     (int32_t)(sizeof(radiant_inline_style_members) / sizeof(radiant_inline_style_members[0])),
+     st_named_get, st_named_set, NULL, NULL, radiant_style_no_prototype, st_named_has},
+    {"computed_style", NULL, radiant_computed_style_members,
+     (int32_t)(sizeof(radiant_computed_style_members) / sizeof(radiant_computed_style_members[0])),
+     cs_get, cs_named_set, NULL, NULL, radiant_style_no_prototype, st_named_has},
 };
 
 extern const int32_t radiant_dom_type_binding_count;

@@ -1,7 +1,8 @@
 # Lambda Jube DOM — Stage 3 (DOM3): Table-Driven Property Dispatch — Review and Proposal
 
-> **Status**: Phases 0–1 implemented and green (2026-07-11); Range/Selection are fully
-> record-driven. Phases 2+ (CSSOM, style hosts, element/document) not started.
+> **Status**: Phases 0, 1, and 3 implemented and green (2026-07-12); Range/Selection and the
+> style hosts (inline/computed) are fully record-driven with `host_ops = NULL`, and the
+> open-name hooks are proven. Phase 2 (CSSOM) and Phase 4 (element/document) not started.
 > **Parent design**: [Lambda_Desing_Native_Module.md](./Lambda_Desing_Native_Module.md) — Jube modules, signatures in Lambda type syntax, VMap projections.
 > **Predecessors**: [Lambda_Jube_DOM.md](./Lambda_Jube_DOM.md) (DOM1: carrier switch to branded VMaps),
 > [Lambda_Jube_DOM2.md](./Lambda_Jube_DOM2.md) (DOM2: generic host-object protocol, real host API,
@@ -621,6 +622,45 @@ all CSS property names → hooks. `js_dom_style_resource_has_property` (this doc
 provocation) is deleted, replaced by derivation.
 
 Gates: anchors; `dom_style` + computed-style tests; full JS gtest; UI-automation.
+
+Progress (2026-07-12): **Phase 3 complete** (done before Phase 2 — the style hosts are
+independent of CSSOM and are the proving ground for the open-name hooks; Phase 2 remains
+pending).
+
+- **`js_dom_style_resource_has_property` — the function that provoked DOM3 — is deleted.**
+  `in` on style objects is now derived: declared members answer from records, CSS property
+  names from the new `named_has` hook (`js_style_css_has`: camel→css conversion + property
+  table, no getter invoked). `js_dom_style_method`, the bridge's `radiant_dom_style_method`
+  module dispatch, all eight `radiant_dom_style_host_*` ops, and their ops table are deleted;
+  `inline_style`/`computed_style` now register with **`host_ops = NULL`** — the first radiant
+  types running fully generic. The `style_resource_has_property`/`style_method` dom-API slots
+  are NULLed (layout preserved).
+- **Open-name hooks proven**: this is the first real use of `named_get`/`named_set`/
+  `named_has`. CSS property reads/writes flow through three new receiver-explicit dom-API
+  entries (`style_get_property`/`style_set_property` = the surviving engine implementations
+  taking the owner element item; `style_css_has`); inline adapters unwrap the owner
+  `DomElement*` from `host_data` and reuse the existing `style_set/remove_property_bridge`
+  entries for `setProperty`/`removeProperty` (mutation-notify hooks unchanged, one write
+  path). Computed-style adapters call the existing `computed_style_get_property` resolver;
+  its `setProperty`/`removeProperty` are bound no-ops returning null (pinned).
+- **Pinned quirks preserved by construction**, each mapped to a generic mechanism rather than
+  special-cased: `Object.keys(el.style)` = `[]` (all members `JUBE_MEMBER_NON_ENUMERABLE`;
+  expandos structurally impossible because `named_set` swallows every non-declared write into
+  the CSS parser exactly as before); `.length` reads as `""` (bound getter routes the name
+  through the CSS-table miss path — a pinned legacy wart, correct count deferred);
+  **no prototype** (a `prototype_seed` returning a non-map records "none": no publication, no
+  root, prototype op reports null); `style.__proto__` still reads `""` (named_get precedes the
+  `__proto__` special-case in generic get order); `delete style.color` returns false (generic
+  delete now consults `named_has` — projected non-configurable contract).
+- Generic layer additions: `JubeTypeBinding.named_has`, `named_has` consult in
+  `jube_member_has` and `jube_member_delete`, and non-map prototype seeds.
+- Known intentional refinements (same class as D0d, watched in goldens, no diffs appeared):
+  reading `computedStyle.setProperty` returns a function object instead of `""`;
+  `getOwnPropertyDescriptor(style, "cssText")` returns a real descriptor instead of undefined.
+- Verified gates: `make build` 0 errors; **`dom_style`, `dom_v12b`, `dom_module_props`,
+  `hostobj_demo` goldens all diff-exact**; full JS gtest **309/309**; UI-automation
+  **passed with only the 2 known webview skips**; direct `radiant_poc`/`radiant_poc_uaf`;
+  `make test-lambda-baseline` exit 0. Net diff for the phase: +198/−219 lines.
 
 ### Phase 4 — Element, text/comment, document (the big one; one cluster per checkpoint)
 

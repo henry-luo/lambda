@@ -57,8 +57,6 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name);
 extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item value);
 extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Item* args, int argc);
 extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name);
-extern "C" bool js_dom_style_resource_has_property(Item style_item, Item prop_name);
-extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args, int argc);
 extern "C" Item js_dom_get_prototype_value(Item obj);
 extern "C" bool js_cssom_resource_has_property(Item item, Item prop_name);
 extern "C" Item js_cssom_stylesheet_get_property(Item sheet_item, Item prop_name);
@@ -170,6 +168,10 @@ extern "C" Item js_dom_insert_adjacent_element_bridge(void* elem, Item position,
 extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem, Item position, Item html);
 extern "C" Item js_dom_append_variadic_bridge(void* elem, Item* args, int argc);
 extern "C" Item js_dom_prepend_variadic_bridge(void* elem, Item* args, int argc);
+// DOM3 Phase 3: style-host behavior entries
+extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name);
+extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item value);
+extern "C" Item js_style_css_has(Item style_item, Item prop_name);
 // DOM3 Phase 1: receiver-explicit Range/Selection behavior entries
 extern "C" Item js_range_get_start_container(Item self);
 extern "C" Item js_range_get_start_offset(Item self);
@@ -279,8 +281,8 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_dom_set_property_impl,
     js_dom_element_method_impl,
     js_computed_style_get_property,
-    js_dom_style_resource_has_property,
-    js_dom_style_method,
+    NULL,  // js_dom_style_resource_has_property retired: style hosts are record-driven (DOM3)
+    NULL,  // js_dom_style_method retired: style hosts are record-driven (DOM3)
     js_dom_get_prototype_value,
     js_cssom_resource_has_property,
     js_cssom_stylesheet_get_property,
@@ -459,6 +461,9 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_selection_to_string,
     js_selection_modify,
     js_selection_force_direction,
+    js_dom_get_style_property,
+    js_dom_set_style_property,
+    js_style_css_has,
 };
 
 static JubeHostAPI jube_host_api = {

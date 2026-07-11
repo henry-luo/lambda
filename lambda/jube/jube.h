@@ -112,6 +112,10 @@ typedef struct JubeTypeBinding {
     // Range.prototype); when set, jube_type_prototype adopts it instead of
     // creating a fresh object so constructor/instanceof identity is preserved
     Item (*prototype_seed)(void);
+    // open-name membership for `in`/has: answers whether a non-declared name
+    // exists (e.g. a CSS property name on a style object) without running the
+    // named getter; NULL = named names are not part of `has`
+    int (*named_has)(Item receiver, Item key, Item* out);
 } JubeTypeBinding;
 
 struct JubeHostGcAPI {
@@ -350,6 +354,13 @@ struct JubeHostDomAPI {
     Item (*selection_to_string)(Item self);
     Item (*selection_modify)(Item self, Item alter, Item direction, Item granularity);
     Item (*selection_force_direction)(Item self, Item direction);
+
+    // -- DOM3 Phase 3 additive tail: style-host behavior.
+    // style_get/set_property take the OWNER ELEMENT item (inline-style wrappers
+    // carry the owner as host_data; adapters wrap it before calling).
+    Item (*style_get_property)(Item owner_elem, Item prop);
+    Item (*style_set_property)(Item owner_elem, Item prop, Item value);
+    Item (*style_css_has)(Item style, Item prop);
 };
 
 struct JubeHostAPI {

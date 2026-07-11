@@ -48,7 +48,6 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_dom_element_method_impl radiant_host_api->dom->dom_element_method_impl
 #define js_computed_style_get_property radiant_host_api->dom->computed_style_get_property
 #define js_dom_style_resource_has_property radiant_host_api->dom->style_resource_has_property
-#define js_dom_style_method radiant_host_api->dom->style_method
 #define js_dom_get_prototype_value radiant_host_api->dom->dom_get_prototype_value
 #define js_get_intrinsic_prototype_for_class radiant_host_api->script->intrinsic_prototype_for_class
 #define js_cssom_resource_has_property radiant_host_api->dom->cssom_resource_has_property
@@ -2599,66 +2598,6 @@ RADIANT_C_API void radiant_dom_host_invalidate(Item object) {
     }
 }
 
-RADIANT_C_API int radiant_dom_style_host_get_property(Item object, Item key, Item* out) {
-    if (!out) return 0;
-    *out = js_is_computed_style_item(object)
-        ? js_computed_style_get_property(object, key)
-        : radiant_dom_get_property(object, key);
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_style_host_set_property(Item object, Item key, Item value, Item* out) {
-    if (!out) return 0;
-    *out = js_is_computed_style_item(object) ? value : radiant_dom_set_property(object, key, value);
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_style_host_call_method(Item object,
-                                                  Item method_name,
-                                                  Item* args,
-                                                  int argc,
-                                                  Item* out) {
-    if (!out) return 0;
-    if (js_is_computed_style_item(object)) {
-        const char* method = fn_to_cstr(method_name);
-        if (method && strcmp(method, "getPropertyValue") == 0) {
-            *out = argc >= 1 ? js_computed_style_get_property(object, args[0]) : radiant_dom_string_item("");
-            return 1;
-        }
-        *out = ItemNull;
-        return 1;
-    }
-    *out = js_dom_style_method(object, method_name, args, argc);
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_style_host_has_property(Item object, Item key, Item* out) {
-    if (!out) return 0;
-    *out = (Item){.item = b2it(js_dom_style_resource_has_property(object, key) ? 1 : 0)};
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_style_host_delete_property(Item object, Item key, Item* out) {
-    if (!out) return 0;
-    *out = (Item){.item = b2it(js_dom_style_resource_has_property(object, key) ? 0 : 1)};
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_style_host_own_property_descriptor(Item object, Item key, Item* out) {
-    if (!out) return 0;
-    *out = radiant_dom_undefined_item();
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_style_host_own_property_names(Item object, Item* out) {
-    if (!out) return 0;
-    *out = radiant_host_api->value->array_new(0);
-    return 1;
-}
-
-RADIANT_C_API Item radiant_dom_style_host_prototype(Item object) {
-    return ItemNull;
-}
 
 RADIANT_C_API int radiant_dom_cssom_host_get_property(Item object, Item key, Item* out) {
     if (!out) return 0;
@@ -3537,32 +3476,6 @@ RADIANT_C_API Item radiant_dom_window_dispatch_event(Item event_item) {
     return js_dom_dispatch_event_bridge(radiant_host_api->script->global_this(), event_item);
 }
 
-RADIANT_C_API int radiant_dom_style_method(Item elem_item, Item method_name, Item* args, int argc, Item* out) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element_impl(elem_item);
-    if (!elem || !out) return 0;
-
-    const char* method = fn_to_cstr(method_name);
-    if (!method) return 0;
-
-    if (strcmp(method, "setProperty") == 0) {
-        // CSS rule style declarations are not DOM elements and stay on CSSOM fallback.
-        *out = argc >= 2
-            ? js_dom_style_set_property_bridge((void*)elem, args[0], args[1],
-                argc >= 3 ? args[2] : radiant_dom_undefined_item(), argc >= 3)
-            : ItemNull;
-        return 1;
-    }
-
-    if (strcmp(method, "removeProperty") == 0) {
-        // CSS rule style declarations are not DOM elements and stay on CSSOM fallback.
-        *out = argc >= 1
-            ? js_dom_style_remove_property_bridge((void*)elem, args[0])
-            : radiant_dom_string_item("");
-        return 1;
-    }
-
-    return 0;
-}
 
 RADIANT_C_API int radiant_dom_cssom_method(Item obj, Item method_name, Item* args, int argc, Item* out) {
     if (!out) return 0;

@@ -287,9 +287,16 @@ static Item jube_type_prototype_for(JubeTypeRecord* trec) {
     if (trec->prototype_rooted) return trec->prototype;
     const JubeHostAPI* host = jube_internal_host_api();
     // adopt the module's existing prototype object when one is seeded, so
-    // constructor .prototype identity (instanceof) survives the conversion
+    // constructor .prototype identity (instanceof) survives the conversion.
+    // A seed returning a non-map means "this type has no prototype" (style
+    // objects): record ItemNull, publish nothing, register no root.
     if (trec->binding && trec->binding->prototype_seed) {
         trec->prototype = trec->binding->prototype_seed();
+        if (get_type_id(trec->prototype) != LMD_TYPE_MAP) {
+            trec->prototype = ItemNull;
+            trec->prototype_rooted = true;
+            return trec->prototype;
+        }
     } else {
         trec->prototype = host->value->new_object();
     }
@@ -447,6 +454,11 @@ int jube_member_has(Item receiver, Item key, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
     bool present = jube_resolve_member(trec, receiver, key) != NULL;
+    if (!present && trec->binding && trec->binding->named_has &&
+            receiver.vmap->host_data &&
+            trec->binding->named_has(receiver, key, out)) {
+        return 1;
+    }
     if (!present && receiver.vmap->host_data) {
         Item expando = jube_expando_object(receiver, false);
         if (get_type_id(expando) == LMD_TYPE_MAP) {
@@ -464,6 +476,16 @@ int jube_member_delete(Item receiver, Item key, Item* out) {
     if (jube_resolve_member(trec, receiver, key)) {
         *out = (Item){.item = b2it(false)};
         return 1;
+    }
+    // open-name members (CSS properties on style objects) refuse deletion,
+    // matching the projected-property non-configurable contract
+    if (trec->binding && trec->binding->named_has && receiver.vmap->host_data) {
+        Item present = ItemNull;
+        if (trec->binding->named_has(receiver, key, &present) &&
+                present.item == b2it(true)) {
+            *out = (Item){.item = b2it(false)};
+            return 1;
+        }
     }
     if (receiver.vmap->host_data) {
         Item expando = jube_expando_object(receiver, false);
