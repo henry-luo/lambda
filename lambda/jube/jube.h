@@ -361,6 +361,26 @@ struct JubeHostDomAPI {
     Item (*style_get_property)(Item owner_elem, Item prop);
     Item (*style_set_property)(Item owner_elem, Item prop, Item value);
     Item (*style_css_has)(Item style, Item prop);
+
+    // -- DOM3 Phase 2 additive tail: CSSOM behavior.
+    Item (*stylesheet_get_css_rules)(Item sheet);
+    Item (*stylesheet_get_length)(Item sheet);
+    Item (*stylesheet_get_disabled)(Item sheet);
+    Item (*stylesheet_get_type)(Item sheet);
+    Item (*stylesheet_get_href)(Item sheet);
+    Item (*stylesheet_get_title)(Item sheet);
+    Item (*stylesheet_index)(Item sheet, int64_t index);
+    Item (*stylesheet_insert_rule)(Item sheet, Item text, Item index);
+    Item (*stylesheet_delete_rule)(Item sheet, Item index);
+    Item (*rule_get_selector_text)(Item rule);
+    Item (*rule_set_selector_text)(Item rule, Item value);
+    Item (*rule_get_style)(Item rule);
+    Item (*rule_get_css_rules)(Item rule);
+    Item (*rule_get_css_text)(Item rule);
+    Item (*rule_get_type)(Item rule);
+    Item (*rule_get_parent_rule)(Item rule);
+    Item (*rule_decl_remove_property)(Item decl, Item prop);
+    Item (*rule_decl_css_has)(Item decl, Item prop);
 };
 
 struct JubeHostAPI {

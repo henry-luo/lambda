@@ -58,10 +58,6 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
 extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Item* args, int argc);
 extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name);
 extern "C" Item js_dom_get_prototype_value(Item obj);
-extern "C" bool js_cssom_resource_has_property(Item item, Item prop_name);
-extern "C" Item js_cssom_stylesheet_get_property(Item sheet_item, Item prop_name);
-extern "C" Item js_cssom_rule_get_property(Item rule_item, Item prop_name);
-extern "C" Item js_cssom_rule_set_property(Item rule_item, Item prop_name, Item value);
 extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name);
 extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value);
 extern "C" void* js_get_foreign_doc(Item item);
@@ -79,8 +75,6 @@ extern "C" Item js_dom_expando_get_own_property_descriptor(Item obj, Item key);
 extern "C" Item js_dom_expando_delete_property(Item obj, Item key);
 extern "C" Item js_dom_expando_own_property_names(Item obj);
 extern "C" Item js_css_namespace_method(Item obj, Item method_name, Item* args, int argc);
-extern "C" Item js_cssom_stylesheet_method(Item sheet_item, Item method_name, Item* args, int argc);
-extern "C" Item js_cssom_rule_decl_method(Item decl_item, Item method_name, Item* args, int argc);
 extern "C" Item js_dom_owner_document_for_node(void* node);
 extern "C" const char* js_dom_to_attribute_cstr(Item value);
 extern "C" void js_dom_after_set_attribute(void* elem, const char* attr_name, const char* attr_value);
@@ -168,6 +162,25 @@ extern "C" Item js_dom_insert_adjacent_element_bridge(void* elem, Item position,
 extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem, Item position, Item html);
 extern "C" Item js_dom_append_variadic_bridge(void* elem, Item* args, int argc);
 extern "C" Item js_dom_prepend_variadic_bridge(void* elem, Item* args, int argc);
+// DOM3 Phase 2: receiver-explicit CSSOM behavior entries
+extern "C" Item js_cssom_stylesheet_get_css_rules(Item sheet);
+extern "C" Item js_cssom_stylesheet_get_length(Item sheet);
+extern "C" Item js_cssom_stylesheet_get_disabled(Item sheet);
+extern "C" Item js_cssom_stylesheet_get_type(Item sheet);
+extern "C" Item js_cssom_stylesheet_get_href(Item sheet);
+extern "C" Item js_cssom_stylesheet_get_title(Item sheet);
+extern "C" Item js_cssom_stylesheet_index(Item sheet, int64_t index);
+extern "C" Item js_cssom_insert_rule(Item sheet, Item text, Item index);
+extern "C" Item js_cssom_delete_rule(Item sheet, Item index);
+extern "C" Item js_cssom_rule_get_selector_text(Item rule);
+extern "C" Item js_cssom_rule_set_selector_text(Item rule, Item value);
+extern "C" Item js_cssom_rule_get_style(Item rule);
+extern "C" Item js_cssom_rule_get_css_rules(Item rule);
+extern "C" Item js_cssom_rule_get_css_text(Item rule);
+extern "C" Item js_cssom_rule_get_type(Item rule);
+extern "C" Item js_cssom_rule_get_parent_rule(Item rule);
+extern "C" Item js_cssom_rule_decl_remove_property(Item decl, Item prop);
+extern "C" Item js_cssom_decl_css_has(Item decl, Item prop);
 // DOM3 Phase 3: style-host behavior entries
 extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name);
 extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item value);
@@ -284,10 +297,10 @@ static const JubeHostDomAPI jube_host_dom_api = {
     NULL,  // js_dom_style_resource_has_property retired: style hosts are record-driven (DOM3)
     NULL,  // js_dom_style_method retired: style hosts are record-driven (DOM3)
     js_dom_get_prototype_value,
-    js_cssom_resource_has_property,
-    js_cssom_stylesheet_get_property,
-    js_cssom_rule_get_property,
-    js_cssom_rule_set_property,
+    NULL,  // js_cssom_resource_has_property retired: CSSOM types are record-driven (DOM3)
+    NULL,  // js_cssom_stylesheet_get_property retired: CSSOM types are record-driven (DOM3)
+    NULL,  // js_cssom_rule_get_property retired: CSSOM types are record-driven (DOM3)
+    NULL,  // js_cssom_rule_set_property retired: CSSOM types are record-driven (DOM3)
     js_cssom_rule_decl_get_property,
     js_cssom_rule_decl_set_property,
     js_get_foreign_doc,
@@ -319,8 +332,8 @@ static const JubeHostDomAPI jube_host_dom_api = {
     NULL,  // js_dom_range_expando_own_property_names retired: range/selection are record-driven (DOM3)
     NULL,  // js_dom_selection_expando_own_property_names retired: range/selection are record-driven (DOM3)
     js_css_namespace_method,
-    js_cssom_stylesheet_method,
-    js_cssom_rule_decl_method,
+    NULL,  // js_cssom_stylesheet_method retired: CSSOM types are record-driven (DOM3)
+    NULL,  // js_cssom_rule_decl_method retired: CSSOM types are record-driven (DOM3)
     js_dom_owner_document_for_node,
     js_dom_to_attribute_cstr,
     js_dom_after_set_attribute,
@@ -464,6 +477,24 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_dom_get_style_property,
     js_dom_set_style_property,
     js_style_css_has,
+    js_cssom_stylesheet_get_css_rules,
+    js_cssom_stylesheet_get_length,
+    js_cssom_stylesheet_get_disabled,
+    js_cssom_stylesheet_get_type,
+    js_cssom_stylesheet_get_href,
+    js_cssom_stylesheet_get_title,
+    js_cssom_stylesheet_index,
+    js_cssom_insert_rule,
+    js_cssom_delete_rule,
+    js_cssom_rule_get_selector_text,
+    js_cssom_rule_set_selector_text,
+    js_cssom_rule_get_style,
+    js_cssom_rule_get_css_rules,
+    js_cssom_rule_get_css_text,
+    js_cssom_rule_get_type,
+    js_cssom_rule_get_parent_rule,
+    js_cssom_rule_decl_remove_property,
+    js_cssom_decl_css_has,
 };
 
 static JubeHostAPI jube_host_api = {

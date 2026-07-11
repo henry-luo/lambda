@@ -95,6 +95,35 @@ const char radiant_dom_interface_decl[] =
     "    get_property_value: fn(prop: string) string,\n"
     "    set_property: fn(prop: string, value: string, priority: string) null,\n"
     "    remove_property: fn(prop: string) string\n"
+    "}\n"
+    "type stylesheet {\n"
+    "    css_rules: any,\n"
+    "    rules: any,\n"
+    "    length: int,\n"
+    "    disabled: bool,\n"
+    "    'type': string,\n"
+    "    href: string,\n"
+    "    title: string,\n"
+    "    owner_node: any,\n"
+    "    insert_rule: fn(text: string, index: int) int,\n"
+    "    delete_rule: fn(index: int) null\n"
+    "}\n"
+    "type css_rule {\n"
+    "    selector_text: string,\n"
+    "    style: any,\n"
+    "    css_rules: any,\n"
+    "    rules: any,\n"
+    "    css_text: string,\n"
+    "    'type': int,\n"
+    "    parent_rule: any,\n"
+    "    parent_style_sheet: any\n"
+    "}\n"
+    "type rule_style_decl {\n"
+    "    length: int,\n"
+    "    css_text: string,\n"
+    "    get_property_value: fn(prop: string) string,\n"
+    "    set_property: fn(prop: string, value: string, priority: string) null,\n"
+    "    remove_property: fn(prop: string) string\n"
     "}\n";
 
 // ---- adapters: JubeMemberBind handler shape -> host API behavior entries ----
@@ -408,6 +437,144 @@ static const JubeMemberBind radiant_computed_style_members[] = {
     BIND_CALL("remove_property", cs_noop_method),
 };
 
+
+// ---- CSSOM (stylesheet / css_rule / rule_style_decl) ----
+// Pinned behaviors preserved: keys = [], descriptors undefined for open names,
+// no prototypes, unknown-name writes swallowed (stylesheet/rule) or parsed as
+// CSS declarations (rule_style_decl). The drifted has-chain is gone: `in` now
+// derives from the same declarations `get` serves, plus null-valued members
+// (owner_node, parent_style_sheet) that the legacy chain reported present.
+
+#define RADIANT_GETTER_D(name, entry)                                        \
+    static int name(Item receiver, Item* out) {                              \
+        *out = radiant_host_api->dom->entry(receiver);                       \
+        return 1;                                                            \
+    }
+
+RADIANT_GETTER_D(sh_css_rules, stylesheet_get_css_rules)
+RADIANT_GETTER_D(sh_length, stylesheet_get_length)
+RADIANT_GETTER_D(sh_disabled, stylesheet_get_disabled)
+RADIANT_GETTER_D(sh_type, stylesheet_get_type)
+RADIANT_GETTER_D(sh_href, stylesheet_get_href)
+RADIANT_GETTER_D(sh_title, stylesheet_get_title)
+
+static int cssom_null_get(Item receiver, Item* out) {
+    // has-only legacy members (ownerNode, parentStyleSheet): the old chain
+    // reported them present while reads returned null — declaring them with a
+    // null getter preserves both halves
+    (void)receiver;
+    *out = ItemNull;
+    return 1;
+}
+
+static int cssom_swallow_set(Item receiver, Item key, Item value, Item* out) {
+    (void)receiver; (void)key;
+    *out = value;
+    return 1;
+}
+
+static int sh_indexed_get(Item receiver, int64_t index, Item* out) {
+    *out = radiant_host_api->dom->stylesheet_index(receiver, index);
+    return 1;
+}
+
+static int sh_insert_rule(Item receiver, Item* args, int argc, Item* out) {
+    *out = radiant_host_api->dom->stylesheet_insert_rule(receiver,
+        radiant_iface_arg(args, argc, 0), radiant_iface_arg(args, argc, 1));
+    return 1;
+}
+
+static int sh_delete_rule(Item receiver, Item* args, int argc, Item* out) {
+    *out = radiant_host_api->dom->stylesheet_delete_rule(receiver,
+        radiant_iface_arg(args, argc, 0));
+    return 1;
+}
+
+RADIANT_GETTER_D(cr_selector_text, rule_get_selector_text)
+RADIANT_GETTER_D(cr_style, rule_get_style)
+RADIANT_GETTER_D(cr_css_rules, rule_get_css_rules)
+RADIANT_GETTER_D(cr_css_text, rule_get_css_text)
+RADIANT_GETTER_D(cr_type, rule_get_type)
+RADIANT_GETTER_D(cr_parent_rule, rule_get_parent_rule)
+
+static int cr_selector_text_set(Item receiver, Item value, Item* out) {
+    *out = radiant_host_api->dom->rule_set_selector_text(receiver, value);
+    return 1;
+}
+
+// rule declarations: CSS property names are the open-name surface
+static int rd_named_get(Item receiver, Item key, Item* out) {
+    *out = radiant_host_api->dom->cssom_rule_decl_get_property(receiver, key);
+    return 1;
+}
+
+static int rd_named_set(Item receiver, Item key, Item value, Item* out) {
+    *out = radiant_host_api->dom->cssom_rule_decl_set_property(receiver, key, value);
+    return 1;
+}
+
+static int rd_named_has(Item receiver, Item key, Item* out) {
+    *out = radiant_host_api->dom->rule_decl_css_has(receiver, key);
+    return 1;
+}
+
+static int rd_length_get(Item receiver, Item* out) {
+    return rd_named_get(receiver, radiant_style_key("length"), out);
+}
+
+static int rd_css_text_get(Item receiver, Item* out) {
+    return rd_named_get(receiver, radiant_style_key("cssText"), out);
+}
+
+static int rd_get_property_value(Item receiver, Item* args, int argc, Item* out) {
+    return rd_named_get(receiver, radiant_iface_arg(args, argc, 0), out);
+}
+
+static int rd_set_property(Item receiver, Item* args, int argc, Item* out) {
+    // the legacy method dispatcher dropped the priority argument; preserved
+    return rd_named_set(receiver, radiant_iface_arg(args, argc, 0),
+                        radiant_iface_arg(args, argc, 1), out);
+}
+
+static int rd_remove_property(Item receiver, Item* args, int argc, Item* out) {
+    *out = radiant_host_api->dom->rule_decl_remove_property(receiver,
+        radiant_iface_arg(args, argc, 0));
+    return 1;
+}
+
+static const JubeMemberBind radiant_stylesheet_members[] = {
+    BIND_GET_HIDDEN("css_rules", sh_css_rules),
+    BIND_GET_HIDDEN("rules", sh_css_rules),
+    BIND_GET_HIDDEN("length", sh_length),
+    BIND_GET_HIDDEN("disabled", sh_disabled),
+    BIND_GET_HIDDEN("type", sh_type),
+    BIND_GET_HIDDEN("href", sh_href),
+    BIND_GET_HIDDEN("title", sh_title),
+    BIND_GET_HIDDEN("owner_node", cssom_null_get),
+    BIND_CALL("insert_rule", sh_insert_rule),
+    BIND_CALL("delete_rule", sh_delete_rule),
+};
+
+static const JubeMemberBind radiant_css_rule_members[] = {
+    {"selector_text", NULL, NULL, NULL, cr_selector_text, cr_selector_text_set,
+     NULL, NULL, JUBE_MEMBER_NON_ENUMERABLE},
+    BIND_GET_HIDDEN("style", cr_style),
+    BIND_GET_HIDDEN("css_rules", cr_css_rules),
+    BIND_GET_HIDDEN("rules", cr_css_rules),
+    BIND_GET_HIDDEN("css_text", cr_css_text),
+    BIND_GET_HIDDEN("type", cr_type),
+    BIND_GET_HIDDEN("parent_rule", cr_parent_rule),
+    BIND_GET_HIDDEN("parent_style_sheet", cssom_null_get),
+};
+
+static const JubeMemberBind radiant_rule_decl_members[] = {
+    BIND_GET_HIDDEN("length", rd_length_get),
+    BIND_GET_HIDDEN("css_text", rd_css_text_get),
+    BIND_CALL("get_property_value", rd_get_property_value),
+    BIND_CALL("set_property", rd_set_property),
+    BIND_CALL("remove_property", rd_remove_property),
+};
+
 extern const JubeTypeBinding radiant_dom_type_bindings[];
 const JubeTypeBinding radiant_dom_type_bindings[] = {
     {"range", NULL, radiant_range_members,
@@ -422,6 +589,15 @@ const JubeTypeBinding radiant_dom_type_bindings[] = {
     {"computed_style", NULL, radiant_computed_style_members,
      (int32_t)(sizeof(radiant_computed_style_members) / sizeof(radiant_computed_style_members[0])),
      cs_get, cs_named_set, NULL, NULL, radiant_style_no_prototype, st_named_has},
+    {"stylesheet", NULL, radiant_stylesheet_members,
+     (int32_t)(sizeof(radiant_stylesheet_members) / sizeof(radiant_stylesheet_members[0])),
+     NULL, cssom_swallow_set, sh_indexed_get, NULL, radiant_style_no_prototype, NULL},
+    {"css_rule", NULL, radiant_css_rule_members,
+     (int32_t)(sizeof(radiant_css_rule_members) / sizeof(radiant_css_rule_members[0])),
+     NULL, cssom_swallow_set, NULL, NULL, radiant_style_no_prototype, NULL},
+    {"rule_style_decl", NULL, radiant_rule_decl_members,
+     (int32_t)(sizeof(radiant_rule_decl_members) / sizeof(radiant_rule_decl_members[0])),
+     rd_named_get, rd_named_set, NULL, NULL, radiant_style_no_prototype, rd_named_has},
 };
 
 extern const int32_t radiant_dom_type_binding_count;

@@ -371,6 +371,26 @@ int jube_member_get(Item receiver, Item key, Item* out) {
             return 1;
         }
     }
+    // array-index reads (sheet[0]) resolve through the indexed hook; JS index
+    // keys arrive as ints or all-digit strings depending on the access path
+    if (trec->binding && trec->binding->indexed_get) {
+        int64_t index = -1;
+        TypeId key_type = get_type_id(key);
+        if (key_type == LMD_TYPE_INT) {
+            index = it2i(key);
+        } else {
+            const char* digits = NULL;
+            uint32_t dlen = 0;
+            if (jube_item_key_chars(key, &digits, &dlen) && dlen > 0) {
+                index = 0;
+                for (uint32_t i = 0; i < dlen; i++) {
+                    if (digits[i] < '0' || digits[i] > '9') { index = -1; break; }
+                    index = index * 10 + (digits[i] - '0');
+                }
+            }
+        }
+        if (index >= 0 && trec->binding->indexed_get(receiver, index, out)) return 1;
+    }
     if (trec->binding && trec->binding->named_get &&
             trec->binding->named_get(receiver, key, out)) {
         return 1;

@@ -11060,8 +11060,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
         return js_cssom_rule_decl_set_property(elem_item, prop_name, value);
     }
     if (js_is_css_rule(elem_item)) {
-        Item style_key = (Item){.item = s2it(heap_create_name("style"))};
-        Item style_obj = js_cssom_rule_get_property(elem_item, style_key);
+        Item style_obj = js_cssom_rule_get_style(elem_item);
         if (js_is_rule_style_decl(style_obj)) {
             return js_cssom_rule_decl_set_property(style_obj, prop_name, value);
         }
@@ -11162,8 +11161,7 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
         return js_cssom_rule_decl_get_property(elem_item, prop_name);
     }
     if (js_is_css_rule(elem_item)) {
-        Item style_key = (Item){.item = s2it(heap_create_name("style"))};
-        Item style_obj = js_cssom_rule_get_property(elem_item, style_key);
+        Item style_obj = js_cssom_rule_get_style(elem_item);
         if (js_is_rule_style_decl(style_obj)) {
             return js_cssom_rule_decl_get_property(style_obj, prop_name);
         }

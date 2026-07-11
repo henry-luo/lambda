@@ -50,7 +50,6 @@ Item js_cssom_wrap_stylesheet(void* stylesheet);
  * @param prop_name   String Item with property name
  * @return Property value
  */
-Item js_cssom_stylesheet_get_property(Item sheet_item, Item prop_name);
 
 /**
  * Call method on a CSSStyleSheet wrapper.
@@ -61,7 +60,6 @@ Item js_cssom_stylesheet_get_property(Item sheet_item, Item prop_name);
  * @param argc         Argument count
  * @return Result Item
  */
-Item js_cssom_stylesheet_method(Item sheet_item, Item method_name, Item* args, int argc);
 
 // =============================================================================
 // CSSRule Wrapper
@@ -82,7 +80,7 @@ Item js_cssom_wrap_rule(void* rule, void* pool);
  * @param prop_name  String Item with property name
  * @return Property value
  */
-Item js_cssom_rule_get_property(Item rule_item, Item prop_name);
+Item js_cssom_rule_get_style(Item rule_item);
 
 /**
  * Set property on a CSSStyleRule wrapper.
@@ -92,7 +90,6 @@ Item js_cssom_rule_get_property(Item rule_item, Item prop_name);
  * @param value      Value to set
  * @return The value that was set
  */
-Item js_cssom_rule_set_property(Item rule_item, Item prop_name, Item value);
 
 // =============================================================================
 // CSSStyleDeclaration Wrapper (for rule declarations)
@@ -126,7 +123,6 @@ Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value)
  * @param argc         Argument count
  * @return Result Item
  */
-Item js_cssom_rule_decl_method(Item decl_item, Item method_name, Item* args, int argc);
 
 // =============================================================================
 // document.styleSheets Access
