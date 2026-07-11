@@ -16,6 +16,13 @@
 
 So S1-S3 are now live for the row engine. Cross-product-only comma sources remain unchanged. The current join lowering intentionally rejects index/key-only join bindings and mixed join/cross-product source lists instead of falling back to a silent O(n·m) path.
 
+**Known follow-up implementation gaps (not design exclusions):**
+
+- **Index/key-preserving joins:** `for (i, o in orders, c in customers on ...)` and `for (k at map, o in orders on ...)` should be valid. The shipped tuple materialization currently carries only value bindings (`o`, `c`, `r`, ...), so a follow-up needs to store and rebind index/key names in joined tuple elements as well.
+- **Mixed join/cross-product pipelines:** `for (o in orders, c in customers on ..., tag in tags)` should be valid. The shipped lowering handles either pure cross-product lists or all-joined source lists; a follow-up needs a unified tuple pipeline that composes hash-join stages with nested-loop cross-product stages.
+
+These gaps are deliberately rejected today so the implemented subset is honest and deterministic.
+
 ---
 
 ## 2. `group by` clause
@@ -185,6 +192,7 @@ S1-S3 implementation lives in the transpiler paths (`transpile.cpp` + `transpile
 | **S1** | `group by ... into g`: grammar rework (`group_key_spec` + `into`; `make generate-grammar`); build_ast — FC9 name inference/collision errors, register `g` as element type, loop vars/lets invalid post-group (FC3-F); transpile.cpp + transpile-mir.cpp codegen with real group-element materialization | ✅ `test/lambda/for_group_test.ls` + expected `.txt`; `make test-lambda-baseline` green (3298/3298) |
 | **S2** | Grammar: `?` marker + `on` condition on `loop_expr`; `make generate-grammar`; AST join metadata on `AstLoopNode`, FC5 equi-conjunction validation with clear error | ✅ parser regenerated; AST records prior/new equi-key pairs |
 | **S3** | Hash-join codegen (inner + left), both transpilers | ✅ `test/lambda/for_join_test.ls` + expected `.txt`; `make test-lambda-baseline` green (3299/3299) |
+| **S3b** | Complete join tuple pipeline: preserve index/key bindings in joined tuple elements; compose hash-join stages with nested-loop cross-product stages | follow-up tests for indexed joins, `at` joins, and mixed join/cross-product lists; baseline green |
 | **S4** | Docs: `doc/Lambda_Expr_Stam.md` query-expression section + cheatsheet | — |
 | **S5** | Phase 2: `VElmt` — new virtual element type (own vtable: `attr_get`/`attr_keys`/`attr_count` + `child_at`/`child_count`; `LMD_TYPE_VELMT` → `"element"`); dispatch in element-consuming paths; switch group construction to zero-copy `VElmt` over the bucket | element-semantics parity tests (same `.ls` goldens pass under Phase 1 and Phase 2); baseline green |
 
