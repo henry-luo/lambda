@@ -926,6 +926,23 @@ static MIR_reg_t emit_call_4(MirTranspiler* mt, const char* fn_name,
     return res;
 }
 
+static MIR_reg_t emit_call_6(MirTranspiler* mt, const char* fn_name,
+    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
+    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
+    MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5,
+    MIR_type_t a6t, MIR_op_t a6) {
+    MIR_var_t args[6] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0},
+        {a4t, "d", 0}, {a5t, "e", 0}, {a6t, "f", 0}};
+    MirImportEntry* ie = ensure_import(mt, fn_name, ret_type, 6, args, 1);
+    MIR_reg_t res = new_reg(mt, fn_name, ret_type);
+    emit_insn(mt, MIR_new_call_insn(mt->ctx, 9,
+        MIR_new_ref_op(mt->ctx, ie->proto),
+        MIR_new_ref_op(mt->ctx, ie->import),
+        MIR_new_reg_op(mt->ctx, res),
+        a1, a2, a3, a4, a5, a6));
+    return res;
+}
+
 // Call with no return value
 static void emit_call_void_0(MirTranspiler* mt, const char* fn_name) {
     MirImportEntry* ie = ensure_import(mt, fn_name, MIR_T_I64, 0, nullptr, 0);
@@ -3724,6 +3741,341 @@ static MIR_reg_t transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
 // For expressions
 // ============================================================================
 
+static bool mir_for_has_join_clause(AstForNode* for_node) {
+    for (AstNode* cur = for_node ? for_node->loop : NULL; cur; cur = cur->next) {
+        AstLoopNode* loop = (AstLoopNode*)cur;
+        if (loop->on || loop->optional) return true;
+    }
+    return false;
+}
+
+static bool mir_validate_join_sources(AstLoopNode* first) {
+    if (!first || !first->next) {
+        log_error("mir: join on requires at least two sources");
+        return false;
+    }
+    if (first->on || first->optional) {
+        log_error("mir: first for source cannot have a join on clause");
+        return false;
+    }
+    for (AstLoopNode* cur = first; cur; cur = (AstLoopNode*)cur->next) {
+        if (cur->index_name || cur->key_only) {
+            log_error("mir: join on currently supports value bindings only");
+            return false;
+        }
+        if (cur != first && !cur->on) {
+            log_error("mir: mixed join/cross-product sources are not implemented");
+            return false;
+        }
+        if (cur != first && cur->join_key_count <= 0) {
+            log_error("mir: join source has no valid equality keys");
+            return false;
+        }
+    }
+    return true;
+}
+
+static MIR_reg_t mir_join_name_item(MirTranspiler* mt, String* name) {
+    MIR_reg_t name_ptr = emit_load_string_literal(mt, name->chars);
+    MIR_reg_t str_ptr = emit_call_1(mt, "heap_create_name", MIR_T_P,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, name_ptr));
+    return emit_box_string(mt, str_ptr);
+}
+
+static void mir_join_bind_item_var(MirTranspiler* mt, String* name, Type* item_type, MIR_reg_t item_reg) {
+    TypeId tid = item_type ? item_type->type_id : LMD_TYPE_ANY;
+    MIR_type_t mtype = MIR_T_I64;
+    MIR_reg_t val_reg = item_reg;
+    if (tid == LMD_TYPE_FLOAT) {
+        val_reg = emit_unbox(mt, item_reg, LMD_TYPE_FLOAT);
+        mtype = MIR_T_D;
+    } else if (tid == LMD_TYPE_INT) {
+        val_reg = emit_unbox(mt, item_reg, LMD_TYPE_INT);
+    } else if (tid == LMD_TYPE_INT64) {
+        val_reg = emit_unbox(mt, item_reg, LMD_TYPE_INT64);
+    } else if (tid == LMD_TYPE_STRING) {
+        val_reg = emit_unbox(mt, item_reg, LMD_TYPE_STRING);
+        mtype = MIR_T_P;
+    }
+    char var_name[128];
+    snprintf(var_name, sizeof(var_name), "%.*s", (int)name->len, name->chars);
+    set_var(mt, var_name, val_reg, mtype, tid);
+}
+
+static void mir_join_bind_tuple_vars(MirTranspiler* mt, AstLoopNode* first, AstLoopNode* stop_before,
+        MIR_reg_t tuple_item) {
+    for (AstLoopNode* cur = first; cur && cur != stop_before; cur = (AstLoopNode*)cur->next) {
+        MIR_reg_t key_ptr = emit_load_string_literal(mt, cur->name->chars);
+        MIR_reg_t attr = emit_call_2(mt, "item_attr", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, tuple_item),
+            MIR_T_P, MIR_new_reg_op(mt->ctx, key_ptr));
+        mir_join_bind_item_var(mt, cur->name, cur->type, attr);
+    }
+}
+
+static MIR_reg_t mir_join_key_item(MirTranspiler* mt, AstLoopNode* loop, bool use_new_side) {
+    if (!loop || loop->join_key_count <= 0) return emit_null_item_reg(mt);
+    if (loop->join_key_count == 1) {
+        AstJoinKey* key = loop->join_keys;
+        AstNode* expr = use_new_side ? key->new_expr : key->prior_expr;
+        MIR_reg_t val = transpile_expr(mt, expr);
+        TypeId tid = get_effective_type(mt, expr);
+        return emit_box(mt, val, tid);
+    }
+    MIR_reg_t tuple = emit_call_0(mt, "array_plain", MIR_T_P);
+    for (AstJoinKey* key = loop->join_keys; key; key = (AstJoinKey*)key->next) {
+        AstNode* expr = use_new_side ? key->new_expr : key->prior_expr;
+        MIR_reg_t val = transpile_expr(mt, expr);
+        TypeId tid = get_effective_type(mt, expr);
+        MIR_reg_t boxed = emit_box(mt, val, tid);
+        emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, tuple),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+    }
+    return emit_box_container(mt, tuple);
+}
+
+static void mir_join_collect_source(MirTranspiler* mt, AstLoopNode* loop, MIR_reg_t rows,
+        MIR_reg_t row_keys, bool collect_keys) {
+    int key_filter = (int)loop->key_filter;
+    MIR_reg_t collection = transpile_expr(mt, loop->as);
+    TypeId coll_tid = get_effective_type(mt, loop->as);
+    MIR_reg_t boxed_coll = emit_box(mt, collection, coll_tid);
+    MIR_reg_t keys_al = emit_call_1(mt, "item_keys", MIR_T_P,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
+    MIR_reg_t len = emit_call_3(mt, "iter_len", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
+        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
+
+    MIR_reg_t idx = new_reg(mt, "jidx", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, idx),
+        MIR_new_int_op(mt->ctx, 0)));
+    MIR_label_t l_loop = new_label(mt);
+    MIR_label_t l_end = new_label(mt);
+    emit_label(mt, l_loop);
+    MIR_reg_t cmp = new_reg(mt, "jcmp", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, cmp),
+        MIR_new_reg_op(mt->ctx, idx), MIR_new_reg_op(mt->ctx, len)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
+        MIR_new_reg_op(mt->ctx, cmp)));
+
+    MIR_reg_t row = emit_call_4(mt, "iter_val_at", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
+        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
+    mir_join_bind_item_var(mt, loop->name, loop->type, row);
+    emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, rows),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, row));
+    if (collect_keys) {
+        MIR_reg_t key_item = mir_join_key_item(mt, loop, true);
+        emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, row_keys),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_item));
+    }
+
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, idx),
+        MIR_new_reg_op(mt->ctx, idx), MIR_new_int_op(mt->ctx, 1)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
+    emit_label(mt, l_end);
+    emit_call_void_1(mt, "symbol_key_list_free", MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al));
+}
+
+static MIR_reg_t mir_finalize_for_output(MirTranspiler* mt, AstForNode* for_node,
+        MIR_reg_t output, MIR_reg_t keys_arr) {
+    bool has_order = for_node->order != NULL;
+    bool has_limit = for_node->limit != NULL;
+    bool has_offset = for_node->offset != NULL;
+    MIR_reg_t final_reg;
+    if (has_order) {
+        AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
+        emit_call_void_3(mt, "fn_sort_by_keys",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, output),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, keys_arr),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, first_spec->descending ? 1 : 0));
+    }
+    if (has_order && (has_offset || has_limit)) {
+        if (has_offset) {
+            MIR_reg_t off_val = transpile_expr(mt, for_node->offset);
+            TypeId off_tid = get_effective_type(mt, for_node->offset);
+            MIR_reg_t off_raw = off_tid == LMD_TYPE_INT || off_tid == LMD_TYPE_INT64
+                ? off_val : emit_unbox(mt, emit_box(mt, off_val, off_tid), LMD_TYPE_INT);
+            MIR_reg_t off_masked = emit_unbox_int_mask(mt, off_raw);
+            emit_call_void_2(mt, "array_drop_inplace", MIR_T_P, MIR_new_reg_op(mt->ctx, output),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, off_masked));
+        }
+        if (has_limit) {
+            MIR_reg_t lim_val = transpile_expr(mt, for_node->limit);
+            TypeId lim_tid = get_effective_type(mt, for_node->limit);
+            MIR_reg_t lim_raw = lim_tid == LMD_TYPE_INT || lim_tid == LMD_TYPE_INT64
+                ? lim_val : emit_unbox(mt, emit_box(mt, lim_val, lim_tid), LMD_TYPE_INT);
+            MIR_reg_t lim_masked = emit_unbox_int_mask(mt, lim_raw);
+            emit_call_void_2(mt, for_node->limit_from_end ? "array_limit_last_inplace" : "array_limit_inplace",
+                MIR_T_P, MIR_new_reg_op(mt->ctx, output),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, lim_masked));
+        }
+        final_reg = emit_call_1(mt, "array_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, output));
+    } else if (has_offset || has_limit) {
+        MIR_reg_t cur_result = emit_box_container(mt, output);
+        if (has_offset) {
+            MIR_reg_t off_val = transpile_expr(mt, for_node->offset);
+            TypeId off_tid = get_effective_type(mt, for_node->offset);
+            cur_result = emit_call_2(mt, "fn_drop", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_result),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box(mt, off_val, off_tid)));
+        }
+        if (has_limit) {
+            MIR_reg_t lim_val = transpile_expr(mt, for_node->limit);
+            TypeId lim_tid = get_effective_type(mt, for_node->limit);
+            cur_result = emit_call_2(mt, for_node->limit_from_end ? "fn_take_last" : "fn_take", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_result),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box(mt, lim_val, lim_tid)));
+        }
+        final_reg = cur_result;
+    } else {
+        final_reg = emit_call_1(mt, "array_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, output));
+    }
+    return final_reg;
+}
+
+static MIR_reg_t transpile_for_join(MirTranspiler* mt, AstForNode* for_node, AstLoopNode* first) {
+    if (!mir_validate_join_sources(first)) {
+        MIR_reg_t r = new_reg(mt, "joinerr", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+            MIR_new_int_op(mt->ctx, (int64_t)ITEM_ERROR)));
+        return r;
+    }
+
+    MIR_reg_t output = emit_call_0(mt, "array_spreadable", MIR_T_P);
+    bool has_order = for_node->order != NULL;
+    MIR_reg_t keys_arr = has_order ? emit_call_0(mt, "array_plain", MIR_T_P) : 0;
+
+    MIR_reg_t seed_rows = emit_call_0(mt, "array_plain", MIR_T_P);
+    mir_join_collect_source(mt, first, seed_rows, 0, false);
+    MIR_reg_t tuples = emit_call_2(mt, "fn_join_seed_tuples", MIR_T_P,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, seed_rows)),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, mir_join_name_item(mt, first->name)));
+
+    for (AstLoopNode* cur = (AstLoopNode*)first->next; cur; cur = (AstLoopNode*)cur->next) {
+        MIR_reg_t rows = emit_call_0(mt, "array_plain", MIR_T_P);
+        MIR_reg_t row_keys = emit_call_0(mt, "array_plain", MIR_T_P);
+        mir_join_collect_source(mt, cur, rows, row_keys, true);
+
+        MIR_reg_t prior_keys = emit_call_0(mt, "array_plain", MIR_T_P);
+        MIR_reg_t tuple_stream_item = emit_box_container(mt, tuples);
+        MIR_reg_t tuple_len = emit_call_1(mt, "fn_len", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, tuple_stream_item));
+        MIR_reg_t pidx = new_reg(mt, "jpidx", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pidx),
+            MIR_new_int_op(mt->ctx, 0)));
+        MIR_label_t l_prior = new_label(mt);
+        MIR_label_t l_prior_end = new_label(mt);
+        emit_label(mt, l_prior);
+        MIR_reg_t pcmp = new_reg(mt, "jpcmp", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, pcmp),
+            MIR_new_reg_op(mt->ctx, pidx), MIR_new_reg_op(mt->ctx, tuple_len)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_prior_end),
+            MIR_new_reg_op(mt->ctx, pcmp)));
+        MIR_reg_t tuple_item = emit_call_2(mt, "item_at", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, tuple_stream_item),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, pidx));
+        mir_join_bind_tuple_vars(mt, first, cur, tuple_item);
+        MIR_reg_t prior_key = mir_join_key_item(mt, cur, false);
+        emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, prior_keys),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, prior_key));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, pidx),
+            MIR_new_reg_op(mt->ctx, pidx), MIR_new_int_op(mt->ctx, 1)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_prior)));
+        emit_label(mt, l_prior_end);
+
+        tuples = emit_call_6(mt, "fn_hash_join_tuples", MIR_T_P,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, tuples)),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, prior_keys)),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, rows)),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, row_keys)),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, mir_join_name_item(mt, cur->name)),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, cur->optional ? 1 : 0));
+    }
+
+    MIR_reg_t final_stream_item = emit_box_container(mt, tuples);
+    MIR_reg_t final_len = emit_call_1(mt, "fn_len", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, final_stream_item));
+    MIR_reg_t idx = new_reg(mt, "joutidx", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, idx),
+        MIR_new_int_op(mt->ctx, 0)));
+    MIR_label_t l_loop = new_label(mt);
+    MIR_label_t l_continue = new_label(mt);
+    MIR_label_t l_end = new_label(mt);
+    if (mt->loop_depth < 31) {
+        mt->loop_stack[mt->loop_depth].continue_label = l_continue;
+        mt->loop_stack[mt->loop_depth].break_label = l_end;
+        mt->loop_depth++;
+    }
+
+    emit_label(mt, l_loop);
+    MIR_reg_t cmp = new_reg(mt, "joutcmp", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, cmp),
+        MIR_new_reg_op(mt->ctx, idx), MIR_new_reg_op(mt->ctx, final_len)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
+        MIR_new_reg_op(mt->ctx, cmp)));
+    MIR_reg_t tuple_item = emit_call_2(mt, "item_at", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, final_stream_item),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
+    mir_join_bind_tuple_vars(mt, first, NULL, tuple_item);
+
+    if (for_node->let_clause) {
+        AstNode* lc = for_node->let_clause;
+        while (lc) {
+            AstNamedNode* let_node = (AstNamedNode*)lc;
+            if (let_node->as) {
+                MIR_reg_t val = transpile_expr(mt, let_node->as);
+                char lc_name[128];
+                snprintf(lc_name, sizeof(lc_name), "%.*s", (int)let_node->name->len, let_node->name->chars);
+                TypeId lc_tid = get_effective_type(mt, let_node->as);
+                MIR_type_t lc_mtype = type_to_mir(lc_tid);
+                set_var(mt, lc_name, val, lc_mtype, lc_tid);
+            }
+            lc = lc->next;
+        }
+    }
+
+    if (for_node->where) {
+        MIR_reg_t where_val = transpile_expr(mt, for_node->where);
+        TypeId where_tid = get_effective_type(mt, for_node->where);
+        MIR_reg_t where_test = where_val;
+        if (where_tid != LMD_TYPE_BOOL) {
+            MIR_reg_t boxw = emit_box(mt, where_val, where_tid);
+            where_test = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxw)));
+        }
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_continue),
+            MIR_new_reg_op(mt->ctx, where_test)));
+    }
+
+    MIR_reg_t body_result = transpile_expr(mt, for_node->then);
+    TypeId body_tid = get_effective_type(mt, for_node->then);
+    MIR_reg_t boxed_result = body_result ? emit_box(mt, body_result, body_tid) : emit_null_item_reg(mt);
+    emit_call_void_2(mt, "array_push_spread", MIR_T_P, MIR_new_reg_op(mt->ctx, output),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_result));
+
+    if (has_order) {
+        AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
+        MIR_reg_t key_val = transpile_expr(mt, first_spec->expr);
+        TypeId key_tid = get_effective_type(mt, first_spec->expr);
+        MIR_reg_t boxed_key = emit_box(mt, key_val, key_tid);
+        emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, keys_arr),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
+    }
+
+    emit_label(mt, l_continue);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, idx),
+        MIR_new_reg_op(mt->ctx, idx), MIR_new_int_op(mt->ctx, 1)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
+    emit_label(mt, l_end);
+    if (mt->loop_depth > 0) mt->loop_depth--;
+
+    return mir_finalize_for_output(mt, for_node, output, keys_arr);
+}
+
 static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
     push_scope(mt);
 
@@ -3736,6 +4088,12 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
             MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
         return r;
+    }
+
+    if (mir_for_has_join_clause(for_node)) {
+        MIR_reg_t result = transpile_for_join(mt, for_node, loop);
+        pop_scope(mt);
+        return result;
     }
 
     if (for_node->group) {

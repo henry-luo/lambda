@@ -817,6 +817,9 @@ uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1);
 int lambda_item_compare(Item a, Item b);
 Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, int64_t alias_count);
 Array* fn_group_by_keys_items(Item rows_item, Item keys_item, Item aliases_item);
+Array* fn_join_seed_tuples(Item rows_item, Item name_item);
+Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item rows_item,
+    Item row_keys_item, Item name_item, int64_t optional);
 #ifdef __cplusplus
 }
 #endif

@@ -6898,12 +6898,111 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
     return (AstNode*)ast_node;
 }
 
+static bool join_expr_mentions_name(AstNode* node, String* name) {
+    if (!node || !name) return false;
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (!node) return false;
+
+    switch (node->node_type) {
+    case AST_NODE_IDENT: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        return ident->name == name || (ident->name && ident->name->len == name->len &&
+            memcmp(ident->name->chars, name->chars, name->len) == 0);
+    }
+    case AST_NODE_MEMBER_EXPR: {
+        AstFieldNode* field = (AstFieldNode*)node;
+        // A field-name identifier is not a value binding; only the receiver can mention the loop var.
+        return join_expr_mentions_name(field->object, name);
+    }
+    case AST_NODE_INDEX_EXPR:
+    {
+        AstFieldNode* field = (AstFieldNode*)node;
+        return join_expr_mentions_name(field->object, name) ||
+               join_expr_mentions_name(field->field, name);
+    }
+    case AST_NODE_PATH_INDEX_EXPR: {
+        AstPathIndexNode* path_idx = (AstPathIndexNode*)node;
+        return join_expr_mentions_name(path_idx->base_path, name) ||
+               join_expr_mentions_name(path_idx->segment_expr, name);
+    }
+    case AST_NODE_BINARY: {
+        AstBinaryNode* bin = (AstBinaryNode*)node;
+        return join_expr_mentions_name(bin->left, name) ||
+               join_expr_mentions_name(bin->right, name);
+    }
+    case AST_NODE_UNARY:
+    case AST_NODE_SPREAD: {
+        AstUnaryNode* un = (AstUnaryNode*)node;
+        return join_expr_mentions_name(un->operand, name);
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        if (join_expr_mentions_name(call->function, name)) return true;
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            if (join_expr_mentions_name(arg, name)) return true;
+        }
+        return false;
+    }
+    default:
+        return false;
+    }
+}
+
+static void append_join_key_spec(Transpiler* tp, AstLoopNode* loop, AstNode* prior_expr, AstNode* new_expr) {
+    AstJoinKey* spec = (AstJoinKey*)alloc_ast_node(tp, AST_NODE_JOIN_KEY, loop->node, sizeof(AstJoinKey));
+    spec->prior_expr = prior_expr;
+    spec->new_expr = new_expr;
+    if (!loop->join_keys) {
+        loop->join_keys = spec;
+    } else {
+        AstJoinKey* tail = loop->join_keys;
+        while (tail->next) tail = (AstJoinKey*)tail->next;
+        tail->next = (AstNode*)spec;
+    }
+    loop->join_key_count++;
+}
+
+static void build_join_key_specs(Transpiler* tp, AstLoopNode* loop, AstNode* on_expr) {
+    AstNode* expr = on_expr;
+    while (expr && expr->node_type == AST_NODE_PRIMARY) {
+        expr = ((AstPrimaryNode*)expr)->expr;
+    }
+    if (!expr || expr->node_type != AST_NODE_BINARY) {
+        log_error("Error: join 'on' must be an equality or 'and' of equalities");
+        return;
+    }
+
+    AstBinaryNode* bin = (AstBinaryNode*)expr;
+    if (bin->op == OPERATOR_AND) {
+        build_join_key_specs(tp, loop, bin->left);
+        build_join_key_specs(tp, loop, bin->right);
+        return;
+    }
+    if (bin->op != OPERATOR_EQ) {
+        log_error("Error: join 'on' only supports equality conditions; put non-equi filters in 'where'");
+        return;
+    }
+
+    bool left_new = join_expr_mentions_name(bin->left, loop->name);
+    bool right_new = join_expr_mentions_name(bin->right, loop->name);
+    if (left_new == right_new) {
+        log_error("Error: each join equality must reference the new source '%.*s' on exactly one side",
+            (int)loop->name->len, loop->name->chars);
+        return;
+    }
+    if (left_new) append_join_key_spec(tp, loop, bin->right, bin->left);
+    else append_join_key_spec(tp, loop, bin->left, bin->right);
+}
+
 AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     log_debug("build loop expr");
     AstLoopNode* ast_node = (AstLoopNode*)alloc_ast_node(tp, AST_NODE_LOOP, loop_node, sizeof(AstLoopNode));
     ast_node->index_name = NULL;  // default: no index variable
     ast_node->key_filter = LOOP_KEY_ALL;  // default: iterate all entries
     ast_node->key_only = false;
+    ast_node->optional = false;
 
     TSNode op_node = ts_node_child_by_field_id(loop_node, FIELD_OP);
     if (!ts_node_is_null(op_node)) {
@@ -6945,6 +7044,9 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     int start_byte = ts_node_start_byte(name);
     StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name) - start_byte };
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
+
+    TSNode optional_node = ts_node_child_by_field_id(loop_node, FIELD_OPTIONAL);
+    ast_node->optional = !ts_node_is_null(optional_node);
 
     TSNode expr_node = ts_node_child_by_field_id(loop_node, FIELD_AS);
     ast_node->as = build_expr(tp, expr_node);
@@ -6991,6 +7093,16 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
 
     // push the main name to the name stack
     push_name(tp, (AstNamedNode*)ast_node, NULL);
+
+    TSNode on_node = ts_node_child_by_field_id(loop_node, FIELD_ON);
+    if (!ts_node_is_null(on_node)) {
+        ast_node->on = build_expr(tp, on_node);
+        if (ast_node->on) {
+            build_join_key_specs(tp, ast_node, ast_node->on);
+        }
+    } else if (ast_node->optional) {
+        log_error("Error: optional join marker '?' requires an 'on' condition");
+    }
     return (AstNode*)ast_node;
 }
 

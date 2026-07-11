@@ -2408,6 +2408,44 @@
           }
         ]
       },
+      "on": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "for_expr",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "let_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
+            "named": true
+          },
+          {
+            "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "raise_expr",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
+            "named": true
+          }
+        ]
+      },
       "op": {
         "multiple": false,
         "required": false,
@@ -2418,6 +2456,16 @@
           },
           {
             "type": "in",
+            "named": false
+          }
+        ]
+      },
+      "optional": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "?",
             "named": false
           }
         ]

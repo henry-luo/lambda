@@ -1532,6 +1532,141 @@ Array* fn_group_by_keys_items(Item rows_item, Item keys_item, Item aliases_item)
     return result;
 }
 
+typedef struct JoinHashEntry {
+    Item key;
+    Array* rows;
+} JoinHashEntry;
+
+static uint64_t join_hash_entry(const void* entry, uint64_t seed0, uint64_t seed1) {
+    const JoinHashEntry* e = (const JoinHashEntry*)entry;
+    return lambda_item_hash(e->key, seed0, seed1);
+}
+
+static int join_compare_entry(const void* a, const void* b, void* udata) {
+    const JoinHashEntry* ea = (const JoinHashEntry*)a;
+    const JoinHashEntry* eb = (const JoinHashEntry*)b;
+    return lambda_item_compare(ea->key, eb->key);
+}
+
+static bool join_key_is_matchable(Item key) {
+    return get_type_id(key) != LMD_TYPE_NULL;
+}
+
+static String* join_binding_name(Item name_item) {
+    String* str = name_item.get_safe_string();
+    if (str) return str;
+    Symbol* sym = name_item.get_safe_symbol();
+    if (sym) return heap_create_name(sym->chars, sym->len);
+    log_error("join_binding_name: binding name must be string or symbol");
+    return heap_create_name("");
+}
+
+static Element* join_tuple_new() {
+    if (!_lambda_rt || !_lambda_rt->pool) return NULL;
+    Element* tuple = elmt_pooled(_lambda_rt->pool);
+    TypeElmt* tuple_type = (TypeElmt*)alloc_type(_lambda_rt->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+    String* tag = heap_create_name("tuple", 5);
+    tuple_type->name.str = tag ? tag->chars : "tuple";
+    tuple_type->name.length = tag ? tag->len : 5;
+    tuple->type = tuple_type;
+    return tuple;
+}
+
+static Element* join_tuple_copy_with(Item prior_tuple, String* name, Item value) {
+    Element* out = join_tuple_new();
+    if (!out || !name) return out;
+
+    SymbolKeyList* keys = item_keys(prior_tuple);
+    int64_t len = symbol_key_list_len(keys);
+    for (int64_t i = 0; i < len; i++) {
+        Symbol* sym = symbol_key_list_at(keys, i);
+        if (!sym) continue;
+        Item attr = item_attr(prior_tuple, sym->chars);
+        // Join tuple maps are freshly materialized so later phases can bind names by normal member lookup.
+        elmt_put(out, heap_create_name(sym->chars, sym->len), attr, _lambda_rt->pool);
+    }
+    if (keys) symbol_key_list_free(keys);
+    elmt_put(out, name, value, _lambda_rt->pool);
+    return out;
+}
+
+Array* fn_join_seed_tuples(Item rows_item, Item name_item) {
+    Array* out = array_plain();
+    if (get_type_id(rows_item) != LMD_TYPE_ARRAY || !rows_item.array || !_lambda_rt || !_lambda_rt->pool) {
+        log_error("join_seed_tuples: invalid rows/runtime");
+        return out;
+    }
+    String* name = join_binding_name(name_item);
+    Array* rows = rows_item.array;
+    for (int64_t i = 0; i < rows->length; i++) {
+        Element* tuple = join_tuple_new();
+        if (!tuple) return out;
+        elmt_put(tuple, name, rows->items[i], _lambda_rt->pool);
+        array_push(out, (Item){.element = tuple});
+    }
+    return out;
+}
+
+Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item rows_item,
+        Item row_keys_item, Item name_item, int64_t optional) {
+    Array* out = array_plain();
+    if (get_type_id(prior_tuples_item) != LMD_TYPE_ARRAY || get_type_id(prior_keys_item) != LMD_TYPE_ARRAY ||
+        get_type_id(rows_item) != LMD_TYPE_ARRAY || get_type_id(row_keys_item) != LMD_TYPE_ARRAY ||
+        !prior_tuples_item.array || !prior_keys_item.array || !rows_item.array || !row_keys_item.array ||
+        !_lambda_rt || !_lambda_rt->pool) {
+        log_error("hash_join_tuples: invalid tuple/key rows");
+        return out;
+    }
+
+    Array* prior_tuples = prior_tuples_item.array;
+    Array* prior_keys = prior_keys_item.array;
+    Array* rows = rows_item.array;
+    Array* row_keys = row_keys_item.array;
+    String* name = join_binding_name(name_item);
+    HashMap* table = hashmap_new(sizeof(JoinHashEntry), rows ? (size_t)rows->length : 8, 0, 0,
+        join_hash_entry, join_compare_entry, NULL, NULL);
+    if (!table || !name) return out;
+
+    int64_t row_count = rows->length < row_keys->length ? rows->length : row_keys->length;
+    for (int64_t i = 0; i < row_count; i++) {
+        Item key = row_keys->items[i];
+        if (!join_key_is_matchable(key)) continue;
+        JoinHashEntry probe = { .key = key, .rows = NULL };
+        const JoinHashEntry* existing = (const JoinHashEntry*)hashmap_get(table, &probe);
+        if (!existing) {
+            JoinHashEntry entry = { .key = key, .rows = array_plain() };
+            hashmap_set(table, &entry);
+            existing = (const JoinHashEntry*)hashmap_get(table, &probe);
+        }
+        if (existing && existing->rows) array_push(existing->rows, rows->items[i]);
+    }
+
+    int64_t tuple_count = prior_tuples->length < prior_keys->length ? prior_tuples->length : prior_keys->length;
+    for (int64_t i = 0; i < tuple_count; i++) {
+        Item prior_tuple = prior_tuples->items[i];
+        Item key = prior_keys->items[i];
+        bool matched = false;
+        if (join_key_is_matchable(key)) {
+            JoinHashEntry probe = { .key = key, .rows = NULL };
+            const JoinHashEntry* entry = (const JoinHashEntry*)hashmap_get(table, &probe);
+            if (entry && entry->rows) {
+                for (int64_t r = 0; r < entry->rows->length; r++) {
+                    Element* tuple = join_tuple_copy_with(prior_tuple, name, entry->rows->items[r]);
+                    if (tuple) array_push(out, (Item){.element = tuple});
+                }
+                matched = entry->rows->length > 0;
+            }
+        }
+        if (!matched && optional) {
+            Element* tuple = join_tuple_copy_with(prior_tuple, name, ItemNull);
+            if (tuple) array_push(out, (Item){.element = tuple});
+        }
+    }
+
+    hashmap_free(table);
+    return out;
+}
+
 // mark an item as spreadable (for spread operator *expr)
 // works on arrays and lists - marks the is_spreadable flag
 // returns the item unchanged for spreading when used with push_spread functions

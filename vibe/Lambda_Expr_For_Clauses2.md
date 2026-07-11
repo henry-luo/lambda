@@ -1,20 +1,20 @@
 # Lambda For-Expression Clauses 2 — `group by` and join `on`
 
-**Status:** S1 implemented for single-source `group by ... into g`; join `on` remains deferred
-**Date:** 2026-07-10 (revised 2026-07-11 ×3: S1 implemented — group-by surface reworked per user as `group by KEY [as ALIAS], ... into g` where **`g` is an element**: keys = attributes, members = children. The interim XQuery loop-var regrouping was withdrawn (loop var would change type item→list); FC1/FC3 finalized, FC9 tightened)
+**Status:** S1-S3 implemented: single-source `group by ... into g`, plus value-binding inner/left join `on`
+**Date:** 2026-07-10 (revised 2026-07-11 ×4: S1 implemented — group-by surface reworked per user as `group by KEY [as ALIAS], ... into g` where **`g` is an element**: keys = attributes, members = children; S2/S3 implemented value-binding join `on` with inner/left hash joins, chained/multi-key joins, null non-match, deterministic order. The interim XQuery loop-var regrouping was withdrawn (loop var would change type item→list); FC1/FC3 finalized, FC9 tightened)
 **Context:** extracted from `Lambda_Design_Data_Processing.md` (§4.1, §5.1) as the *settled, implement-first* subset of the relational layer. This doc covers only the **for-expression surface**: the `group by` clause and the join `on` clause. The DataFrame type, the pipe-verb surface (`group()`/`agg()`/`join()`), and window functions (`over(...)`) remain in the data-processing proposal — they need more consideration and are **not** part of this doc's scope. Successor to `Lambda_Expr_For_Clauses.md`, which shipped `where`/`order by`/`limit`/`offset` (implemented and tested, `test/lambda/for_clauses_test.ls`) and put `group by ... as` into the grammar.
 
 ---
 
-## 1. Current state (audited 2026-07-10)
+## 1. Current state (audited 2026-07-11)
 
 | Piece | Grammar | AST | Transpile/Eval | Tests |
 |---|---|---|---|---|
 | `where` / `order by` / `limit` / `offset` | ✅ `grammar.js` `for_*_clause` | ✅ | ✅ | ✅ `for_clauses_test.ls` |
 | `group by ... into g` (single source) | ✅ `group_key_spec` + `into` form generated from `grammar.js` | ✅ per-key alias/inference, duplicate-name errors, `g` registered as `TYPE_ELMT`, post-group scope isolated | ✅ C and MIR transpilers materialize real `<group>` elements via shared canonical key hashing; groups emit in first-appearance order; post-group `order by`/`limit`/`offset` operate on groups | ✅ `test/lambda/for_group_test.ls` |
-| join `on` / optional side `?` | ❌ | ❌ | ❌ | ❌ |
+| join `on` / optional side `?` (value bindings) | ✅ `loop_expr` accepts `?` and `on` for both binding forms | ✅ `AstLoopNode::on`, `optional`, equi-key pairs; FC5 equality-conjunction validation | ✅ C and MIR transpilers materialize tuple elements and call shared runtime hash-join helpers; inner + left joins; chained/multi-key; null keys never match; deterministic probe/source order | ✅ `test/lambda/for_join_test.ls` |
 
-So S1 `group by` is now live for the single-source row engine. Join `on` is still a **small grammar addition** plus a hash-join engine both features share.
+So S1-S3 are now live for the row engine. Cross-product-only comma sources remain unchanged. The current join lowering intentionally rejects index/key-only join bindings and mixed join/cross-product source lists instead of falling back to a silent O(n·m) path.
 
 ---
 
@@ -170,10 +170,10 @@ loop_expr: seq(
 - **Two implementation phases (user-confirmed 2026-07-11):**
   - **Phase 1 — real Element.** Materialize as above. One handle-copy per member; every existing element code path (iteration, indexing, `len`, formatters, query expressions) works for free. This is what S1 ships.
   - **Phase 2 — `VElmt`, a separate virtual type.** Zero-copy group views over the hash bucket. **`VElmt` is its own type, not an extension of `VMap`** — mirroring how `Element` is separate from `Map` in the concrete world. The existing `VMap` (lambda.hpp:460) stays map-only (`get/set/count/keys/key_at/value_at/destroy`, presents as `"map"`); `VElmt` gets its own vtable covering both natures — attribute side (`attr_get`, `attr_keys`, `attr_count`) and child side (`child_at`, `child_count`) — its own `LMD_TYPE_VELMT` tag presenting as `"element"` (the same transparency pattern as `LMD_TYPE_VMAP` → `"map"`, lambda-data.cpp:117), and dispatch in every element-consuming path. Group backing: `data` = the bucket, `child_at` indexes it directly, attrs = the key values. Phase 2 switches group construction from MarkBuilder materialization to a `VElmt` over the bucket; it also serves the Jube native-module projection track and the columnar/frame work.
-- **join `on`:** classic hash join — build a hash table on the **new source** keyed by its side of the equalities, then iterate the prior tuple stream in order and probe (FC7 for free). Left join emits the null-padded tuple on probe miss.
+- **join `on`:** classic hash join — build a hash table on the **new source** keyed by its side of the equalities, then iterate the prior tuple stream in order and probe (FC7 for free). Left join emits the null-padded tuple on probe miss. S3 materializes tuple bindings as real `Element` handles with source names as attributes (`o`, `c`, `r`, ...), so later `where`/`let`/`order by`/body evaluation uses the same member-access path as ordinary values.
 - Both paths are row-engine only (tuples of Items) — no columnar/SIMD work in this doc; that arrives with the DataFrame track.
 
-S1 implementation lives in the transpiler paths (`transpile.cpp` + `transpile-mir.cpp`) with runtime helpers in `lambda-data-runtime.cpp` (`lambda_item_hash`, `lambda_item_compare`, `fn_group_by_keys*`). The future join path should reuse the same canonical key hash/compare helpers.
+S1-S3 implementation lives in the transpiler paths (`transpile.cpp` + `transpile-mir.cpp`) with runtime helpers in `lambda-data-runtime.cpp` (`lambda_item_hash`, `lambda_item_compare`, `fn_group_by_keys*`, `fn_join_seed_tuples`, `fn_hash_join_tuples`). Both group and join reuse the same canonical key hash/compare helpers.
 
 ---
 
@@ -183,8 +183,8 @@ S1 implementation lives in the transpiler paths (`transpile.cpp` + `transpile-mi
 |---|---|---|
 | **S0** | Canonical value hash (C8/C2-consistent) as a runtime helper | ✅ implemented as `lambda_item_hash` / `lambda_item_compare`; reused by `VMap` |
 | **S1** | `group by ... into g`: grammar rework (`group_key_spec` + `into`; `make generate-grammar`); build_ast — FC9 name inference/collision errors, register `g` as element type, loop vars/lets invalid post-group (FC3-F); transpile.cpp + transpile-mir.cpp codegen with real group-element materialization | ✅ `test/lambda/for_group_test.ls` + expected `.txt`; `make test-lambda-baseline` green (3298/3298) |
-| **S2** | Grammar: `?` marker + `on` condition on `loop_expr`; `make generate-grammar`; AST (`AstJoinOn` on the loop node, FC5 equi-conjunction validation with clear error) | parse + rejection tests |
-| **S3** | Hash-join codegen (inner + left), both transpilers | `test/lambda/for_join_test.ls` + expected `.txt`; baseline green |
+| **S2** | Grammar: `?` marker + `on` condition on `loop_expr`; `make generate-grammar`; AST join metadata on `AstLoopNode`, FC5 equi-conjunction validation with clear error | ✅ parser regenerated; AST records prior/new equi-key pairs |
+| **S3** | Hash-join codegen (inner + left), both transpilers | ✅ `test/lambda/for_join_test.ls` + expected `.txt`; `make test-lambda-baseline` green (3299/3299) |
 | **S4** | Docs: `doc/Lambda_Expr_Stam.md` query-expression section + cheatsheet | — |
 | **S5** | Phase 2: `VElmt` — new virtual element type (own vtable: `attr_get`/`attr_keys`/`attr_count` + `child_at`/`child_count`; `LMD_TYPE_VELMT` → `"element"`); dispatch in element-consuming paths; switch group construction to zero-copy `VElmt` over the bucket | element-semantics parity tests (same `.ls` goldens pass under Phase 1 and Phase 2); baseline green |
 

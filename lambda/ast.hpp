@@ -146,6 +146,7 @@ extern "C" {
 #define FIELD_MODULE field_module
 #define FIELD_PUB field_pub
 #define FIELD_KIND field_kind
+#define FIELD_ON field_on
 #define FIELD_OPTIONAL field_optional
 #define FIELD_DEFAULT field_default
 #define FIELD_VALUE field_value
@@ -251,6 +252,7 @@ typedef enum AstNodeType {
     AST_NODE_LOOP,
     AST_NODE_ORDER_SPEC,    // order by specification (expr [asc|desc])
     AST_NODE_GROUP_CLAUSE,  // group by clause
+    AST_NODE_JOIN_KEY,      // join on equi-key pair
     AST_NODE_IF_EXPR,
     AST_NODE_MATCH_EXPR,
     AST_NODE_MATCH_ARM,
@@ -411,12 +413,21 @@ enum LoopKeyFilter {
 };
 
 // for AST_NODE_LOOP - extended with index variable and key filter
+typedef struct AstJoinKey : AstNode {
+    AstNode* prior_expr;        // key expression evaluated against the tuple stream so far
+    AstNode* new_expr;          // key expression evaluated against this loop source
+} AstJoinKey;
+
 typedef struct AstLoopNode : AstNode {
     String* name;               // primary loop variable (v in 'for v in expr')
     String* index_name;         // optional index variable (k in 'for k, v in expr'), NULL if not present
     AstNode *as;                // collection expression
+    AstNode *on;                // optional join condition (`on a.k == b.k`)
+    AstJoinKey* join_keys;      // linked list of equi-join key pairs
     LoopKeyFilter key_filter;   // key type filter (ALL, INT, SYMBOL)
     bool key_only;              // for k at expr: bind primary variable to keys, not values
+    bool optional;              // true for null-padded left join (`name? in ... on ...`)
+    int join_key_count;
 } AstLoopNode;
 
 // for AST_NODE_ASSIGN with decomposition (let a, b = expr / let a, b at expr)

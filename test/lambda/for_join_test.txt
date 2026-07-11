@@ -1,0 +1,66 @@
+"=== For Join Clauses ==="
+[{
+    order: 101,
+    name: "Ada",
+    total: 50
+  }, {
+    order: 101,
+    name: "Ada-alt",
+    total: 50
+  }, {
+    order: 102,
+    name: "Ben",
+    total: 25
+  }, {
+    order: 105,
+    name: "Ada",
+    total: 7
+  }, {
+    order: 105,
+    name: "Ada-alt",
+    total: 7
+  }]
+[{
+    order: 101,
+    name: "Ada"
+  }, {
+    order: 101,
+    name: "Ada-alt"
+  }, {
+    order: 102,
+    name: "Ben"
+  }, {
+    order: 103,
+    name: "unknown"
+  }, {
+    order: 104,
+    name: "unknown"
+  }, {
+    order: 105,
+    name: "Ada"
+  }, {
+    order: 105,
+    name: "Ada-alt"
+  }]
+[{
+    order: 101,
+    name: "Ada",
+    region: "West"
+  }, {
+    order: 101,
+    name: "Ada-alt",
+    region: "West"
+  }, {
+    order: 102,
+    name: "Ben",
+    region: "East"
+  }, {
+    order: 105,
+    name: "Ada",
+    region: "West"
+  }, {
+    order: 105,
+    name: "Ada-alt",
+    region: "West"
+  }]
+"All for join clause tests completed!"

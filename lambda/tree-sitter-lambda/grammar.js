@@ -763,14 +763,20 @@ module.exports = grammar({
     loop_expr: $ => choice(
       // for value in expr
       seq(
-        field('name', $.identifier), field('op', choice('in', $._at)), field('as', $._expr)
+        field('name', $.identifier),
+        optional(field('optional', '?')),
+        field('op', choice('in', $._at)),
+        field('as', $._expr),
+        optional(seq('on', field('on', $._expr)))
       ),
       // for key, value in expr (with optional type annotation on key)
       seq(
         field('index', $.identifier),
         optional(seq(':', field('index_type', $.identifier))),
         ',', field('name', $.identifier),
-        'in', field('as', $._expr)
+        optional(field('optional', '?')),
+        'in', field('as', $._expr),
+        optional(seq('on', field('on', $._expr)))
       ),
     ),
 
