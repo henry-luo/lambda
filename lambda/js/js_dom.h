@@ -355,7 +355,6 @@ Item js_dom_contains(Item elem, Item other);
  * @param argc        Argument count
  * @return Result Item
  */
-Item js_dom_style_method(Item elem, Item method_name, Item* args, int argc);
 
 #ifdef __cplusplus
 }

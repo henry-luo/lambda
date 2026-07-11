@@ -46,6 +46,7 @@ struct JubeMemberRecord {
     char* camel_name;             // derived or js_name override (owned copy)
     uint8_t kind;                 // JubeMemberKind
     bool readonly;                // no set binding and not reflected
+    bool enumerable;              // fields only; aliases/constants/methods opt out
     bool can_raise;
     int arity;                    // methods: declared parameter count
     int64_t const_int;            // CONST int payload
@@ -282,15 +283,68 @@ bool jube_type_has_interface(const JubeTypeDef* type) {
     return jube_record_for_type((const void*)type) != NULL;
 }
 
+static Item jube_type_prototype_for(JubeTypeRecord* trec) {
+    if (trec->prototype_rooted) return trec->prototype;
+    const JubeHostAPI* host = jube_internal_host_api();
+    // adopt the module's existing prototype object when one is seeded, so
+    // constructor .prototype identity (instanceof) survives the conversion.
+    // A seed returning a non-map means "this type has no prototype" (style
+    // objects): record ItemNull, publish nothing, register no root.
+    if (trec->binding && trec->binding->prototype_seed) {
+        trec->prototype = trec->binding->prototype_seed();
+        if (get_type_id(trec->prototype) != LMD_TYPE_MAP) {
+            trec->prototype = ItemNull;
+            trec->prototype_rooted = true;
+            return trec->prototype;
+        }
+    } else {
+        trec->prototype = host->value->new_object();
+    }
+    host->gc->register_root(&trec->prototype.item);
+    trec->prototype_rooted = true;
+    // publish method function objects onto the prototype: scripts read them as
+    // Range.prototype.setStart (IDL shape / .length probes), and instance reads
+    // must return the identical Item (range.setStart === Range.prototype.setStart)
+    if (get_type_id(trec->prototype) == LMD_TYPE_MAP) {
+        for (int i = 0; i < trec->member_count; i++) {
+            JubeMemberRecord* rec = &trec->members[i];
+            if (rec->kind != JUBE_MEMBER_METHOD) continue;
+            host->value->property_set(trec->prototype, jube_name_item(rec->camel_name),
+                                      jube_member_method_item(rec));
+        }
+    }
+    return trec->prototype;
+}
+
+// per-JS-runtime reset: prototype seeds read the CURRENT global constructor's
+// .prototype, and batch runs recreate globals per script — cached prototypes
+// and method items must drop so the next access rebuilds against the new
+// runtime's globals (roots unregister while the old heap is still alive).
+extern "C" void jube_interface_runtime_reset(void) {
+    const JubeHostAPI* host = jube_internal_host_api();
+    for (int i = 0; i < s_type_record_count; i++) {
+        JubeTypeRecord* trec = s_type_records[i];
+        if (!trec) continue;
+        if (trec->prototype_rooted) {
+            host->gc->unregister_root(&trec->prototype.item);
+            trec->prototype = ItemNull;
+            trec->prototype_rooted = false;
+        }
+        for (int j = 0; j < trec->member_count; j++) {
+            JubeMemberRecord* rec = &trec->members[j];
+            if (rec->method_fn_rooted) {
+                host->gc->unregister_root(&rec->method_fn.item);
+                rec->method_fn = ItemNull;
+                rec->method_fn_rooted = false;
+            }
+        }
+    }
+}
+
 extern "C" Item jube_type_prototype(const JubeTypeDef* type) {
     JubeTypeRecord* trec = jube_record_for_type((const void*)type);
     if (!trec) return ItemNull;
-    if (trec->prototype_rooted) return trec->prototype;
-    const JubeHostAPI* host = jube_internal_host_api();
-    trec->prototype = host->value->new_object();
-    host->gc->register_root(&trec->prototype.item);
-    trec->prototype_rooted = true;
-    return trec->prototype;
+    return jube_type_prototype_for(trec);
 }
 
 int jube_member_get(Item receiver, Item key, Item* out) {
@@ -317,13 +371,50 @@ int jube_member_get(Item receiver, Item key, Item* out) {
             return 1;
         }
     }
+    // array-index reads (sheet[0]) resolve through the indexed hook; JS index
+    // keys arrive as ints or all-digit strings depending on the access path
+    if (trec->binding && trec->binding->indexed_get) {
+        int64_t index = -1;
+        TypeId key_type = get_type_id(key);
+        if (key_type == LMD_TYPE_INT) {
+            index = it2i(key);
+        } else {
+            const char* digits = NULL;
+            uint32_t dlen = 0;
+            if (jube_item_key_chars(key, &digits, &dlen) && dlen > 0) {
+                index = 0;
+                for (uint32_t i = 0; i < dlen; i++) {
+                    if (digits[i] < '0' || digits[i] > '9') { index = -1; break; }
+                    index = index * 10 + (digits[i] - '0');
+                }
+            }
+        }
+        if (index >= 0 && trec->binding->indexed_get(receiver, index, out)) return 1;
+    }
     if (trec->binding && trec->binding->named_get &&
             trec->binding->named_get(receiver, key, out)) {
         return 1;
     }
+    const char* key_chars = NULL;
+    uint32_t key_len = 0;
+    if (jube_item_key_chars(key, &key_chars, &key_len) && key_len == 9 &&
+            memcmp(key_chars, "__proto__", 9) == 0) {
+        *out = jube_type_prototype_for(trec);
+        return 1;
+    }
     Item expando = jube_expando_object(receiver, false);
     if (get_type_id(expando) == LMD_TYPE_MAP) {
-        *out = jube_internal_host_api()->value->property_get(expando, key);
+        Item value = jube_internal_host_api()->value->property_get(expando, key);
+        if (jube_expando_value_present(value)) {
+            *out = value;
+            return 1;
+        }
+    }
+    // prototype-chain fallthrough: patched prototype members and inherited
+    // Object.prototype methods must stay reachable on declared types
+    Item proto = jube_type_prototype_for(trec);
+    if (get_type_id(proto) == LMD_TYPE_MAP) {
+        *out = jube_internal_host_api()->value->property_get(proto, key);
         return 1;
     }
     *out = jube_undefined_item();
@@ -383,6 +474,11 @@ int jube_member_has(Item receiver, Item key, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
     bool present = jube_resolve_member(trec, receiver, key) != NULL;
+    if (!present && trec->binding && trec->binding->named_has &&
+            receiver.vmap->host_data &&
+            trec->binding->named_has(receiver, key, out)) {
+        return 1;
+    }
     if (!present && receiver.vmap->host_data) {
         Item expando = jube_expando_object(receiver, false);
         if (get_type_id(expando) == LMD_TYPE_MAP) {
@@ -400,6 +496,16 @@ int jube_member_delete(Item receiver, Item key, Item* out) {
     if (jube_resolve_member(trec, receiver, key)) {
         *out = (Item){.item = b2it(false)};
         return 1;
+    }
+    // open-name members (CSS properties on style objects) refuse deletion,
+    // matching the projected-property non-configurable contract
+    if (trec->binding && trec->binding->named_has && receiver.vmap->host_data) {
+        Item present = ItemNull;
+        if (trec->binding->named_has(receiver, key, &present) &&
+                present.item == b2it(true)) {
+            *out = (Item){.item = b2it(false)};
+            return 1;
+        }
     }
     if (receiver.vmap->host_data) {
         Item expando = jube_expando_object(receiver, false);
@@ -460,9 +566,7 @@ int jube_member_own_keys(Item receiver, Item* out) {
     Item keys = host->value->array_new(0);
     for (int i = 0; i < trec->member_count; i++) {
         JubeMemberRecord* rec = &trec->members[i];
-        // methods are non-enumerable (prototype-shaped surface); fields and
-        // constants enumerate in declaration order
-        if (rec->kind == JUBE_MEMBER_METHOD) continue;
+        if (!rec->enumerable) continue;
         if (rec->bind && rec->bind->guard && !rec->bind->guard(receiver)) continue;
         host->value->array_push(keys, jube_name_item(rec->camel_name));
     }
@@ -689,6 +793,16 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
         JubeParsedMember* member = &parsed[parsed_count];
         member->name = jube_node_text(source, attr_name);
         if (!member->name) continue;
+        // symbol-quoted member names ('type': ...) let keywords act as member
+        // names; strip the quotes so bindings match on the bare spelling
+        size_t name_len = strlen(member->name);
+        if (name_len >= 2 && member->name[0] == '\'' &&
+                member->name[name_len - 1] == '\'') {
+            char* bare = jube_strndup(member->name + 1, name_len - 2);
+            mem_free(member->name);
+            member->name = bare;
+            if (!member->name) continue;
+        }
         if (jube_node_is(attr_type, "fn_type")) {
             member->is_method = true;
             jube_parse_fn_type(source, attr_type, &member->arity, &member->can_raise);
@@ -781,6 +895,7 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
         dst->camel_name = jube_strndup(src->camel_name, strlen(src->camel_name));
         dst->kind = src->kind;
         dst->readonly = src->readonly;
+        dst->enumerable = src->enumerable;
         dst->can_raise = src->can_raise;
         dst->arity = src->arity;
         dst->const_int = src->const_int;
@@ -819,6 +934,10 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
             if (parsed[i].default_str) mem_free(parsed[i].default_str);
             parsed[i].default_str = NULL;
         }
+        // constants live on the prototype in WebIDL terms and aliases shadow a
+        // canonical member, so neither enumerates; fields may opt out via flags
+        rec->enumerable = rec->kind == JUBE_MEMBER_FIELD &&
+            !(bind && (bind->flags & JUBE_MEMBER_NON_ENUMERABLE));
     }
 
     HashMap* index = hashmap_new(sizeof(JubeMemberIndexEntry), 16, 0, 0,

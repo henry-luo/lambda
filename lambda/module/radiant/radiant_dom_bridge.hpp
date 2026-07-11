@@ -30,25 +30,7 @@ RADIANT_C_API int radiant_dom_host_own_property_names(Item object, Item* out);
 RADIANT_C_API Item radiant_dom_host_prototype(Item object);
 RADIANT_C_API void radiant_dom_host_invalidate(Item object);
 
-RADIANT_C_API int radiant_dom_style_host_get_property(Item object, Item key, Item* out);
-RADIANT_C_API int radiant_dom_style_host_set_property(Item object, Item key, Item value, Item* out);
-RADIANT_C_API int radiant_dom_style_host_call_method(Item object, Item method_name,
-                                                     Item* args, int argc, Item* out);
-RADIANT_C_API int radiant_dom_style_host_has_property(Item object, Item key, Item* out);
-RADIANT_C_API int radiant_dom_style_host_delete_property(Item object, Item key, Item* out);
-RADIANT_C_API int radiant_dom_style_host_own_property_descriptor(Item object, Item key, Item* out);
-RADIANT_C_API int radiant_dom_style_host_own_property_names(Item object, Item* out);
-RADIANT_C_API Item radiant_dom_style_host_prototype(Item object);
 
-RADIANT_C_API int radiant_dom_cssom_host_get_property(Item object, Item key, Item* out);
-RADIANT_C_API int radiant_dom_cssom_host_set_property(Item object, Item key, Item value, Item* out);
-RADIANT_C_API int radiant_dom_cssom_host_call_method(Item object, Item method_name,
-                                                     Item* args, int argc, Item* out);
-RADIANT_C_API int radiant_dom_cssom_host_has_property(Item object, Item key, Item* out);
-RADIANT_C_API int radiant_dom_cssom_host_delete_property(Item object, Item key, Item* out);
-RADIANT_C_API int radiant_dom_cssom_host_own_property_descriptor(Item object, Item key, Item* out);
-RADIANT_C_API int radiant_dom_cssom_host_own_property_names(Item object, Item* out);
-RADIANT_C_API Item radiant_dom_cssom_host_prototype(Item object);
 
 RADIANT_C_API int radiant_dom_document_host_get_property(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_document_host_set_property(Item object, Item key, Item value, Item* out);
@@ -65,8 +47,6 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
 RADIANT_C_API Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts);
 RADIANT_C_API Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
 RADIANT_C_API Item radiant_dom_window_dispatch_event(Item event_item);
-RADIANT_C_API int radiant_dom_style_method(Item elem_item, Item method_name, Item* args,
-                                           int argc, Item* out);
 RADIANT_C_API int radiant_dom_cssom_method(Item obj, Item method_name, Item* args,
                                            int argc, Item* out);
 

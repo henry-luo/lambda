@@ -356,44 +356,6 @@ static void cssom_camel_to_css_prop(const char* js_prop, char* css_buf, size_t b
     css_buf[pos] = '\0';
 }
 
-extern "C" bool js_cssom_resource_has_property(Item item, Item prop_name) {
-    const char* prop = fn_to_cstr(prop_name);
-    if (!prop || !prop[0]) return false;
-
-    if (js_is_stylesheet(item)) {
-        return strcmp(prop, "cssRules") == 0 ||
-               strcmp(prop, "rules") == 0 ||
-               strcmp(prop, "ownerNode") == 0 ||
-               strcmp(prop, "insertRule") == 0 ||
-               strcmp(prop, "deleteRule") == 0;
-    }
-
-    if (js_is_css_rule(item)) {
-        return strcmp(prop, "type") == 0 ||
-               strcmp(prop, "cssText") == 0 ||
-               strcmp(prop, "selectorText") == 0 ||
-               strcmp(prop, "style") == 0 ||
-               strcmp(prop, "parentRule") == 0 ||
-               strcmp(prop, "parentStyleSheet") == 0;
-    }
-
-    if (!js_is_rule_style_decl(item)) return false;
-
-    if (strcmp(prop, "length") == 0 ||
-        strcmp(prop, "cssText") == 0 ||
-        strcmp(prop, "getPropertyValue") == 0 ||
-        strcmp(prop, "setProperty") == 0 ||
-        strcmp(prop, "removeProperty") == 0) {
-        return true;
-    }
-
-    char css_prop[128];
-    cssom_camel_to_css_prop(prop, css_prop, sizeof(css_prop));
-    CssPropertyId prop_id = css_property_id_from_name(css_prop);
-    // CSSOM declaration VMaps have no ordinary shape; named support comes
-    // from the CSS property table, matching DOM style objects.
-    return prop_id != CSS_PROPERTY_UNKNOWN && prop_id != 0;
-}
 
 // =============================================================================
 // Helper: Create a string Item
@@ -728,157 +690,152 @@ static const char* serialize_style_rule_css_text(CssRule* rule, Pool* pool) {
 // CSSStyleSheet Property Access
 // =============================================================================
 
-extern "C" Item js_cssom_stylesheet_get_property(Item sheet_item, Item prop_name) {
+// Receiver-explicit per-property getters (DOM3 declared-interface bindings).
+extern "C" Item js_cssom_stylesheet_get_css_rules(Item sheet_item) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     if (!sheet) return ItemNull;
-
-    const char* prop = fn_to_cstr(prop_name);
-    if (!prop) return ItemNull;
-
-    log_debug("js_cssom_stylesheet_get_property: '%s'", prop);
-
     Pool* pool = get_document_pool();
-
-    if (strcmp(prop, "cssRules") == 0 || strcmp(prop, "rules") == 0) {
-        // return an array of wrapped CSSRule objects (excluding @charset per CSSOM spec)
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        for (size_t i = 0; i < sheet->rule_count; i++) {
-            if (sheet->rules[i] && sheet->rules[i]->type == CSS_RULE_CHARSET) continue;
-            array_push(arr, js_cssom_wrap_rule(sheet->rules[i], pool));
-        }
-        return (Item){.array = arr};
+    // array of wrapped CSSRule objects (excluding @charset per CSSOM spec)
+    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+    arr->type_id = LMD_TYPE_ARRAY;
+    arr->items = nullptr;
+    arr->length = 0;
+    arr->capacity = 0;
+    for (size_t i = 0; i < sheet->rule_count; i++) {
+        if (sheet->rules[i] && sheet->rules[i]->type == CSS_RULE_CHARSET) continue;
+        array_push(arr, js_cssom_wrap_rule(sheet->rules[i], pool));
     }
+    return (Item){.array = arr};
+}
 
-    if (strcmp(prop, "length") == 0) {
-        // exclude @charset rules from length count
-        size_t count = 0;
-        for (size_t i = 0; i < sheet->rule_count; i++) {
-            if (sheet->rules[i] && sheet->rules[i]->type == CSS_RULE_CHARSET) continue;
-            count++;
-        }
-        return (Item){.item = i2it((int64_t)count)};
+extern "C" Item js_cssom_stylesheet_get_length(Item sheet_item) {
+    CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
+    if (!sheet) return ItemNull;
+    // exclude @charset rules from length count
+    size_t count = 0;
+    for (size_t i = 0; i < sheet->rule_count; i++) {
+        if (sheet->rules[i] && sheet->rules[i]->type == CSS_RULE_CHARSET) continue;
+        count++;
     }
+    return (Item){.item = i2it((int64_t)count)};
+}
 
-    if (strcmp(prop, "disabled") == 0) {
-        return sheet->disabled ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE};
-    }
+extern "C" Item js_cssom_stylesheet_get_disabled(Item sheet_item) {
+    CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
+    if (!sheet) return ItemNull;
+    return sheet->disabled ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE};
+}
 
-    if (strcmp(prop, "type") == 0) {
-        return make_string_item("text/css");
-    }
+extern "C" Item js_cssom_stylesheet_get_type(Item sheet_item) {
+    return unwrap_stylesheet(sheet_item) ? make_string_item("text/css") : ItemNull;
+}
 
-    if (strcmp(prop, "href") == 0) {
-        return make_string_item(sheet->href);
-    }
+extern "C" Item js_cssom_stylesheet_get_href(Item sheet_item) {
+    CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
+    return sheet ? make_string_item(sheet->href) : ItemNull;
+}
 
-    if (strcmp(prop, "title") == 0) {
-        return make_string_item(sheet->title);
-    }
+extern "C" Item js_cssom_stylesheet_get_title(Item sheet_item) {
+    CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
+    return sheet ? make_string_item(sheet->title) : ItemNull;
+}
 
-    // numeric index access: sheet[0], sheet[1], etc.
-    // (when transpiler resolves bracket access as property)
-    {
-        char* endp;
-        long idx = strtol(prop, &endp, 10);
-        if (*endp == '\0' && idx >= 0 && (size_t)idx < sheet->rule_count) {
-            return js_cssom_wrap_rule(sheet->rules[idx], pool);
-        }
-    }
-
-    log_debug("js_cssom_stylesheet_get_property: unknown property '%s'", prop);
-    return ItemNull;
+extern "C" Item js_cssom_stylesheet_index(Item sheet_item, int64_t index) {
+    CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
+    if (!sheet) return ItemNull;
+    // raw index into the rules array (charset rules included), matching the
+    // legacy bracket-access path
+    if (index < 0 || (size_t)index >= sheet->rule_count) return ItemNull;
+    return js_cssom_wrap_rule(sheet->rules[index], get_document_pool());
 }
 
 // =============================================================================
 // CSSStyleSheet Method Dispatch
 // =============================================================================
 
-extern "C" Item js_cssom_stylesheet_method(Item sheet_item, Item method_name, Item* args, int argc) {
+extern "C" Item js_cssom_insert_rule(Item sheet_item, Item text_arg, Item index_arg) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     if (!sheet) return ItemNull;
+    // index omitted (undefined/null) defaults to append-at-end per CSSOM
+    TypeId index_type = get_type_id(index_arg);
+    bool has_index = index_type == LMD_TYPE_INT || index_type == LMD_TYPE_INT64 ||
+                     index_type == LMD_TYPE_FLOAT;
+    Item args[2] = {text_arg, index_arg};
+    int argc = has_index ? 2 : 1;
+    (void)args; (void)argc;
+    if (argc < 1) return ItemNull;
 
-    const char* method = fn_to_cstr(method_name);
-    if (!method) return ItemNull;
+    const char* rule_text = fn_to_cstr(args[0]);
+    if (!rule_text) return ItemNull;
 
-    log_debug("js_cssom_stylesheet_method: '%s' argc=%d", method, argc);
+    int index = (argc >= 2) ? (int)it2i(args[1]) : (int)sheet->rule_count;
 
-    if (strcmp(method, "insertRule") == 0) {
-        if (argc < 1) return ItemNull;
-
-        const char* rule_text = fn_to_cstr(args[0]);
-        if (!rule_text) return ItemNull;
-
-        int index = (argc >= 2) ? (int)it2i(args[1]) : (int)sheet->rule_count;
-
-        // validate index
-        if (index < 0 || (size_t)index > sheet->rule_count) {
-            log_error("js_cssom_stylesheet_method insertRule: index %d out of range [0, %zu]", index, sheet->rule_count);
-            return ItemNull;
-        }
-
-        // parse the rule text
-        Pool* pool = sheet->pool ? sheet->pool : get_document_pool();
-        if (!pool) return ItemNull;
-
-        size_t token_count = 0;
-        CssToken* tokens = css_tokenize(rule_text, strlen(rule_text), pool, &token_count);
-        if (!tokens || token_count == 0) {
-            log_error("js_cssom_stylesheet_method insertRule: failed to tokenize rule '%s'", rule_text);
-            return ItemNull;
-        }
-
-        CssRule* new_rule = css_parse_rule_from_tokens(tokens, (int)token_count, pool);
-        if (!new_rule) {
-            log_error("js_cssom_stylesheet_method insertRule: failed to parse rule '%s'", rule_text);
-            return ItemNull;
-        }
-
-        // ensure capacity
-        if (sheet->rule_count >= sheet->rule_capacity) {
-            size_t new_cap = sheet->rule_capacity ? sheet->rule_capacity * 2 : 8;
-            CssRule** new_rules = (CssRule**)pool_calloc(pool, new_cap * sizeof(CssRule*));
-            if (sheet->rules) {
-                memcpy(new_rules, sheet->rules, sheet->rule_count * sizeof(CssRule*));
-            }
-            sheet->rules = new_rules;
-            sheet->rule_capacity = new_cap;
-        }
-
-        // shift rules to make room
-        for (size_t i = sheet->rule_count; i > (size_t)index; i--) {
-            sheet->rules[i] = sheet->rules[i - 1];
-        }
-        sheet->rules[index] = new_rule;
-        sheet->rule_count++;
-
-        log_debug("js_cssom_stylesheet_method insertRule: inserted at index %d, count=%zu", index, sheet->rule_count);
-        return (Item){.item = i2it((int64_t)index)};
-    }
-
-    if (strcmp(method, "deleteRule") == 0) {
-        if (argc < 1) return ItemNull;
-
-        int index = (int)it2i(args[0]);
-        if (index < 0 || (size_t)index >= sheet->rule_count) {
-            log_error("js_cssom_stylesheet_method deleteRule: index %d out of range", index);
-            return ItemNull;
-        }
-
-        // shift rules down
-        for (size_t i = (size_t)index; i < sheet->rule_count - 1; i++) {
-            sheet->rules[i] = sheet->rules[i + 1];
-        }
-        sheet->rule_count--;
-
-        log_debug("js_cssom_stylesheet_method deleteRule: removed index %d, count=%zu", index, sheet->rule_count);
+    // validate index
+    if (index < 0 || (size_t)index > sheet->rule_count) {
+        log_error("js_cssom_stylesheet_method insertRule: index %d out of range [0, %zu]", index, sheet->rule_count);
         return ItemNull;
     }
 
-    log_debug("js_cssom_stylesheet_method: unknown method '%s'", method);
+    // parse the rule text
+    Pool* pool = sheet->pool ? sheet->pool : get_document_pool();
+    if (!pool) return ItemNull;
+
+    size_t token_count = 0;
+    CssToken* tokens = css_tokenize(rule_text, strlen(rule_text), pool, &token_count);
+    if (!tokens || token_count == 0) {
+        log_error("js_cssom_stylesheet_method insertRule: failed to tokenize rule '%s'", rule_text);
+        return ItemNull;
+    }
+
+    CssRule* new_rule = css_parse_rule_from_tokens(tokens, (int)token_count, pool);
+    if (!new_rule) {
+        log_error("js_cssom_stylesheet_method insertRule: failed to parse rule '%s'", rule_text);
+        return ItemNull;
+    }
+
+    // ensure capacity
+    if (sheet->rule_count >= sheet->rule_capacity) {
+        size_t new_cap = sheet->rule_capacity ? sheet->rule_capacity * 2 : 8;
+        CssRule** new_rules = (CssRule**)pool_calloc(pool, new_cap * sizeof(CssRule*));
+        if (sheet->rules) {
+            memcpy(new_rules, sheet->rules, sheet->rule_count * sizeof(CssRule*));
+        }
+        sheet->rules = new_rules;
+        sheet->rule_capacity = new_cap;
+    }
+
+    // shift rules to make room
+    for (size_t i = sheet->rule_count; i > (size_t)index; i--) {
+        sheet->rules[i] = sheet->rules[i - 1];
+    }
+    sheet->rules[index] = new_rule;
+    sheet->rule_count++;
+
+    log_debug("js_cssom_stylesheet_method insertRule: inserted at index %d, count=%zu", index, sheet->rule_count);
+    return (Item){.item = i2it((int64_t)index)};
+}
+
+extern "C" Item js_cssom_delete_rule(Item sheet_item, Item index_arg) {
+    CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
+    if (!sheet) return ItemNull;
+    Item args[1] = {index_arg};
+    int argc = 1;
+    (void)args; (void)argc;
+    if (argc < 1) return ItemNull;
+
+    int index = (int)it2i(args[0]);
+    if (index < 0 || (size_t)index >= sheet->rule_count) {
+        log_error("js_cssom_stylesheet_method deleteRule: index %d out of range", index);
+        return ItemNull;
+    }
+
+    // shift rules down
+    for (size_t i = (size_t)index; i < sheet->rule_count - 1; i++) {
+        sheet->rules[i] = sheet->rules[i + 1];
+    }
+    sheet->rule_count--;
+
+    log_debug("js_cssom_stylesheet_method deleteRule: removed index %d, count=%zu", index, sheet->rule_count);
     return ItemNull;
 }
 
@@ -886,129 +843,130 @@ extern "C" Item js_cssom_stylesheet_method(Item sheet_item, Item method_name, It
 // CSSStyleRule Property Access
 // =============================================================================
 
-extern "C" Item js_cssom_rule_get_property(Item rule_item, Item prop_name) {
+// Receiver-explicit per-property getters (DOM3 declared-interface bindings).
+extern "C" Item js_cssom_rule_get_selector_text(Item rule_item) {
     CssRule* rule = unwrap_rule(rule_item);
     if (!rule) return ItemNull;
-
-    const char* prop = fn_to_cstr(prop_name);
-    if (!prop) return ItemNull;
-
-    CssRule* rule_for_pool = unwrap_rule(rule_item);
-    Pool* pool = (rule_for_pool && rule_for_pool->pool) ? rule_for_pool->pool : get_document_pool();
-
-    log_debug("js_cssom_rule_get_property: '%s' (rule type=%d)", prop, rule->type);
-
-    if (strcmp(prop, "selectorText") == 0) {
-        if (rule->type != CSS_RULE_STYLE) return make_string_item("");
-        const char* sel_text = serialize_selector_text(rule, pool);
-        // CSS Nesting: nested rules get '& ' prefix
-        if (rule->parent && sel_text && sel_text[0] != '\0') {
-            // Always prepend '& ' for nested selectors
-            size_t len = strlen(sel_text);
-            char* nested_text = (char*)pool_calloc(pool, len + 3);
-            memcpy(nested_text, "& ", 2);
-            memcpy(nested_text + 2, sel_text, len + 1);
-            return make_string_item(nested_text);
-        }
-        return make_string_item(sel_text);
+    Pool* pool = (rule->pool) ? rule->pool : get_document_pool();
+    (void)pool;
+    if (rule->type != CSS_RULE_STYLE) return make_string_item("");
+    const char* sel_text = serialize_selector_text(rule, pool);
+    // CSS Nesting: nested rules get '& ' prefix
+    if (rule->parent && sel_text && sel_text[0] != '\0') {
+        // Always prepend '& ' for nested selectors
+        size_t len = strlen(sel_text);
+        char* nested_text = (char*)pool_calloc(pool, len + 3);
+        memcpy(nested_text, "& ", 2);
+        memcpy(nested_text + 2, sel_text, len + 1);
+        return make_string_item(nested_text);
     }
+    return make_string_item(sel_text);
+}
 
-    if (strcmp(prop, "style") == 0) {
-        if (rule->type == CSS_RULE_STYLE || rule->type == CSS_RULE_NESTED_DECLARATIONS) {
-            return wrap_rule_decl(rule, pool);
-        }
-        // font-face and page rules also expose .style
-        if (rule->type == CSS_RULE_FONT_FACE || rule->type == CSS_RULE_PAGE) {
-            CssRule* shadow = get_font_face_as_style_rule(rule);
-            if (shadow) {
-                return wrap_rule_decl(shadow, pool);
-            }
-        }
-        return ItemNull;
+extern "C" Item js_cssom_rule_get_style(Item rule_item) {
+    CssRule* rule = unwrap_rule(rule_item);
+    if (!rule) return ItemNull;
+    Pool* pool = (rule->pool) ? rule->pool : get_document_pool();
+    (void)pool;
+    if (rule->type == CSS_RULE_STYLE || rule->type == CSS_RULE_NESTED_DECLARATIONS) {
+        return wrap_rule_decl(rule, pool);
     }
-
-    // cssRules on CSSStyleRule — returns nested rules (CSS Nesting)
-    if (strcmp(prop, "cssRules") == 0 || strcmp(prop, "rules") == 0) {
-        if (rule->type == CSS_RULE_STYLE) {
-            Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-            arr->type_id = LMD_TYPE_ARRAY;
-            arr->items = nullptr;
-            arr->length = 0;
-            arr->capacity = 0;
-            size_t nr_count = rule->data.style_rule.nested_rule_count;
-            CssRule** nr = rule->data.style_rule.nested_rules;
-            for (size_t i = 0; i < nr_count; i++) {
-                if (!nr[i]) continue;
-                if (nr[i]->type == CSS_RULE_NESTED_DECLARATIONS) {
-                    Item style_decl = wrap_rule_decl(nr[i], pool);
-                    Item nd_obj = js_new_object();
-                    js_class_stamp(nd_obj, JS_CLASS_CSS_NESTED_DECLARATIONS);
-                    Item style_key = make_string_item("style");
-                    js_property_set(nd_obj, style_key, style_decl);
-                    array_push(arr, nd_obj);
-                } else {
-                    array_push(arr, js_cssom_wrap_rule(nr[i], pool));
-                }
-            }
-            return (Item){.array = arr};
+    // font-face and page rules also expose .style
+    if (rule->type == CSS_RULE_FONT_FACE || rule->type == CSS_RULE_PAGE) {
+        CssRule* shadow = get_font_face_as_style_rule(rule);
+        if (shadow) {
+            return wrap_rule_decl(shadow, pool);
         }
-        return ItemNull;
     }
-
-    if (strcmp(prop, "cssText") == 0) {
-        if (!pool) return make_string_item("");
-        if (rule->type == CSS_RULE_STYLE) {
-            return make_string_item(serialize_style_rule_css_text(rule, pool));
-        }
-        CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
-        if (!fmt) return make_string_item("");
-        const char* text = css_format_rule(fmt, rule);
-        return make_string_item(text);
-    }
-
-    if (strcmp(prop, "type") == 0) {
-        // CSSOM rule type constants
-        int type_num = 0;
-        switch (rule->type) {
-            case CSS_RULE_STYLE:     type_num = 1; break;
-            case CSS_RULE_CHARSET:   type_num = 2; break;
-            case CSS_RULE_IMPORT:    type_num = 3; break;
-            case CSS_RULE_MEDIA:     type_num = 4; break;
-            case CSS_RULE_FONT_FACE: type_num = 5; break;
-            case CSS_RULE_PAGE:      type_num = 6; break;
-            case CSS_RULE_KEYFRAMES: type_num = 7; break;
-            case CSS_RULE_KEYFRAME:  type_num = 8; break;
-            case CSS_RULE_NAMESPACE: type_num = 10; break;
-            case CSS_RULE_SUPPORTS:  type_num = 12; break;
-            case CSS_RULE_LAYER:     type_num = 16; break;
-            default:                 type_num = 0; break;
-        }
-        return (Item){.item = i2it((int64_t)type_num)};
-    }
-
-    if (strcmp(prop, "parentRule") == 0) {
-        if (rule->parent) {
-            return js_cssom_wrap_rule(rule->parent, pool);
-        }
-        return ItemNull;
-    }
-
-    log_debug("js_cssom_rule_get_property: unknown property '%s'", prop);
     return ItemNull;
 }
 
-// =============================================================================
-// CSSStyleRule Property Set (selectorText)
-// =============================================================================
+extern "C" Item js_cssom_rule_get_css_rules(Item rule_item) {
+    CssRule* rule = unwrap_rule(rule_item);
+    if (!rule) return ItemNull;
+    Pool* pool = (rule->pool) ? rule->pool : get_document_pool();
+    (void)pool;
+    if (rule->type == CSS_RULE_STYLE) {
+        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+        arr->type_id = LMD_TYPE_ARRAY;
+        arr->items = nullptr;
+        arr->length = 0;
+        arr->capacity = 0;
+        size_t nr_count = rule->data.style_rule.nested_rule_count;
+        CssRule** nr = rule->data.style_rule.nested_rules;
+        for (size_t i = 0; i < nr_count; i++) {
+            if (!nr[i]) continue;
+            if (nr[i]->type == CSS_RULE_NESTED_DECLARATIONS) {
+                Item style_decl = wrap_rule_decl(nr[i], pool);
+                Item nd_obj = js_new_object();
+                js_class_stamp(nd_obj, JS_CLASS_CSS_NESTED_DECLARATIONS);
+                Item style_key = make_string_item("style");
+                js_property_set(nd_obj, style_key, style_decl);
+                array_push(arr, nd_obj);
+            } else {
+                array_push(arr, js_cssom_wrap_rule(nr[i], pool));
+            }
+        }
+        return (Item){.array = arr};
+    }
+    return ItemNull;
+}
 
-extern "C" Item js_cssom_rule_set_property(Item rule_item, Item prop_name, Item value) {
+extern "C" Item js_cssom_rule_get_css_text(Item rule_item) {
+    CssRule* rule = unwrap_rule(rule_item);
+    if (!rule) return ItemNull;
+    Pool* pool = (rule->pool) ? rule->pool : get_document_pool();
+    (void)pool;
+    if (!pool) return make_string_item("");
+    if (rule->type == CSS_RULE_STYLE) {
+        return make_string_item(serialize_style_rule_css_text(rule, pool));
+    }
+    CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+    if (!fmt) return make_string_item("");
+    const char* text = css_format_rule(fmt, rule);
+    return make_string_item(text);
+}
+
+extern "C" Item js_cssom_rule_get_type(Item rule_item) {
+    CssRule* rule = unwrap_rule(rule_item);
+    if (!rule) return ItemNull;
+    Pool* pool = (rule->pool) ? rule->pool : get_document_pool();
+    (void)pool;
+    // CSSOM rule type constants
+    int type_num = 0;
+    switch (rule->type) {
+        case CSS_RULE_STYLE:     type_num = 1; break;
+        case CSS_RULE_CHARSET:   type_num = 2; break;
+        case CSS_RULE_IMPORT:    type_num = 3; break;
+        case CSS_RULE_MEDIA:     type_num = 4; break;
+        case CSS_RULE_FONT_FACE: type_num = 5; break;
+        case CSS_RULE_PAGE:      type_num = 6; break;
+        case CSS_RULE_KEYFRAMES: type_num = 7; break;
+        case CSS_RULE_KEYFRAME:  type_num = 8; break;
+        case CSS_RULE_NAMESPACE: type_num = 10; break;
+        case CSS_RULE_SUPPORTS:  type_num = 12; break;
+        case CSS_RULE_LAYER:     type_num = 16; break;
+        default:                 type_num = 0; break;
+    }
+    return (Item){.item = i2it((int64_t)type_num)};
+}
+
+extern "C" Item js_cssom_rule_get_parent_rule(Item rule_item) {
+    CssRule* rule = unwrap_rule(rule_item);
+    if (!rule) return ItemNull;
+    Pool* pool = (rule->pool) ? rule->pool : get_document_pool();
+    (void)pool;
+    if (rule->parent) {
+        return js_cssom_wrap_rule(rule->parent, pool);
+    }
+    return ItemNull;
+}
+
+extern "C" Item js_cssom_rule_set_selector_text(Item rule_item, Item value) {
     CssRule* rule = unwrap_rule(rule_item);
     if (!rule) return ItemNull;
 
-    const char* prop = fn_to_cstr(prop_name);
-    if (!prop) return ItemNull;
-
-    if (strcmp(prop, "selectorText") == 0 && rule->type == CSS_RULE_STYLE) {
+    if (rule->type == CSS_RULE_STYLE) {
         // Use String* to get actual length (handles embedded NULLs)
         String* val_string = it2s(value);
         const char* new_text = val_string ? val_string->chars : fn_to_cstr(value);
@@ -1056,7 +1014,6 @@ extern "C" Item js_cssom_rule_set_property(Item rule_item, Item prop_name, Item 
         return value;
     }
 
-    log_debug("js_cssom_rule_set_property: unknown/unsupported property '%s'", prop);
     return value;
 }
 
@@ -1254,62 +1211,60 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
 // CSSStyleDeclaration (rule) Method Dispatch
 // =============================================================================
 
-extern "C" Item js_cssom_rule_decl_method(Item decl_item, Item method_name, Item* args, int argc) {
-    CssRule* rule = unwrap_rule_decl(decl_item);
-    if (!rule || (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTED_DECLARATIONS)) return ItemNull;
-
-    const char* method = fn_to_cstr(method_name);
-    if (!method) return ItemNull;
-
-    if (strcmp(method, "getPropertyValue") == 0) {
-        if (argc < 1) return make_string_item("");
-        // delegate to property getter with CSS property name (not camelCase)
-        return js_cssom_rule_decl_get_property(decl_item, args[0]);
-    }
-
-    if (strcmp(method, "setProperty") == 0) {
-        if (argc < 2) return ItemNull;
-        // delegate to the property setter with the CSS property name
-        return js_cssom_rule_decl_set_property(decl_item, args[0], args[1]);
-    }
-
-    if (strcmp(method, "removeProperty") == 0) {
-        if (argc < 1) return make_string_item("");
-        const char* prop = fn_to_cstr(args[0]);
-        if (!prop) return make_string_item("");
-
-        CssRule* rm_rule = unwrap_rule_decl(decl_item);
-        if (!rm_rule || (rm_rule->type != CSS_RULE_STYLE && rm_rule->type != CSS_RULE_NESTED_DECLARATIONS)) return make_string_item("");
-
-        // convert camelCase if needed
-        char css_prop[128];
-        cssom_camel_to_css_prop(prop, css_prop, sizeof(css_prop));
-        CssPropertyId prop_id = css_property_id_from_name(css_prop);
-
-        // find and remove
-        for (size_t i = 0; i < rm_rule->data.style_rule.declaration_count; i++) {
-            CssDeclaration* d = rm_rule->data.style_rule.declarations[i];
-            if (!d) continue;
-            bool match = false;
-            if (prop_id != CSS_PROPERTY_UNKNOWN && d->property_id == prop_id) match = true;
-            else if (d->property_name && strcmp(d->property_name, css_prop) == 0) match = true;
-            if (match) {
-                const char* old_val = serialize_declaration_value(d, unwrap_rule_decl_pool(decl_item));
-                // shift remaining declarations
-                for (size_t j = i; j + 1 < rm_rule->data.style_rule.declaration_count; j++) {
-                    rm_rule->data.style_rule.declarations[j] = rm_rule->data.style_rule.declarations[j + 1];
-                }
-                rm_rule->data.style_rule.declaration_count--;
-                js_cssom_notify_stylesheet_mutation();
-                return make_string_item(old_val);
-            }
-        }
+extern "C" Item js_cssom_rule_decl_remove_property(Item decl_item, Item prop_arg) {
+    CssRule* guard_rule = unwrap_rule_decl(decl_item);
+    if (!guard_rule || (guard_rule->type != CSS_RULE_STYLE &&
+            guard_rule->type != CSS_RULE_NESTED_DECLARATIONS)) {
         return make_string_item("");
     }
+    Item args[1] = {prop_arg};
+    int argc = 1;
+    (void)args; (void)argc;
+    if (argc < 1) return make_string_item("");
+    const char* prop = fn_to_cstr(args[0]);
+    if (!prop) return make_string_item("");
 
-    log_debug("js_cssom_rule_decl_method: unknown method '%s'", method);
-    return ItemNull;
+    CssRule* rm_rule = unwrap_rule_decl(decl_item);
+    if (!rm_rule || (rm_rule->type != CSS_RULE_STYLE && rm_rule->type != CSS_RULE_NESTED_DECLARATIONS)) return make_string_item("");
+
+    // convert camelCase if needed
+    char css_prop[128];
+    cssom_camel_to_css_prop(prop, css_prop, sizeof(css_prop));
+    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+
+    // find and remove
+    for (size_t i = 0; i < rm_rule->data.style_rule.declaration_count; i++) {
+        CssDeclaration* d = rm_rule->data.style_rule.declarations[i];
+        if (!d) continue;
+        bool match = false;
+        if (prop_id != CSS_PROPERTY_UNKNOWN && d->property_id == prop_id) match = true;
+        else if (d->property_name && strcmp(d->property_name, css_prop) == 0) match = true;
+        if (match) {
+            const char* old_val = serialize_declaration_value(d, unwrap_rule_decl_pool(decl_item));
+            // shift remaining declarations
+            for (size_t j = i; j + 1 < rm_rule->data.style_rule.declaration_count; j++) {
+                rm_rule->data.style_rule.declarations[j] = rm_rule->data.style_rule.declarations[j + 1];
+            }
+            rm_rule->data.style_rule.declaration_count--;
+            js_cssom_notify_stylesheet_mutation();
+            return make_string_item(old_val);
+        }
+    }
+    return make_string_item("");
 }
+
+// open-name membership for rule declarations: `in` answers from the CSS
+// property table without invoking a getter
+extern "C" Item js_cssom_decl_css_has(Item decl_item, Item prop_name) {
+    (void)decl_item;
+    const char* prop = fn_to_cstr(prop_name);
+    if (!prop || !prop[0]) return (Item){.item = b2it(false)};
+    char css_prop[128];
+    cssom_camel_to_css_prop(prop, css_prop, sizeof(css_prop));
+    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    return (Item){.item = b2it(prop_id != CSS_PROPERTY_UNKNOWN && prop_id != 0)};
+}
+
 
 // =============================================================================
 // document.styleSheets

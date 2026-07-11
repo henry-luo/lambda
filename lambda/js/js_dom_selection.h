@@ -40,13 +40,6 @@ bool js_dom_is_selection_object(Item item);
 void* js_dom_unwrap_range(Item item);        // returns DomRange*
 void* js_dom_unwrap_selection(Item item);    // returns DomSelection*
 
-// Property dispatch hooks invoked from js_dom_get_property /
-// js_dom_set_property when the wrapper's Map::type matches a Range or
-// Selection sentinel. Returning ItemNull means "no such property".
-Item js_dom_range_get_property    (Item obj, Item key);
-Item js_dom_selection_get_property(Item obj, Item key);
-Item js_dom_selection_set_property(Item obj, Item key, Item value);
-
 // Identity check: does this Item have the Range / Selection marker in
 // Map::type? (Used by js_dom dispatch and by `instanceof`-style code.)
 bool js_dom_item_is_range    (Item item);

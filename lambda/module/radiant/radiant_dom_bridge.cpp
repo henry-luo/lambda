@@ -48,13 +48,8 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_dom_element_method_impl radiant_host_api->dom->dom_element_method_impl
 #define js_computed_style_get_property radiant_host_api->dom->computed_style_get_property
 #define js_dom_style_resource_has_property radiant_host_api->dom->style_resource_has_property
-#define js_dom_style_method radiant_host_api->dom->style_method
 #define js_dom_get_prototype_value radiant_host_api->dom->dom_get_prototype_value
 #define js_get_intrinsic_prototype_for_class radiant_host_api->script->intrinsic_prototype_for_class
-#define js_cssom_resource_has_property radiant_host_api->dom->cssom_resource_has_property
-#define js_cssom_stylesheet_get_property radiant_host_api->dom->cssom_stylesheet_get_property
-#define js_cssom_rule_get_property radiant_host_api->dom->cssom_rule_get_property
-#define js_cssom_rule_set_property radiant_host_api->dom->cssom_rule_set_property
 #define js_cssom_rule_decl_get_property radiant_host_api->dom->cssom_rule_decl_get_property
 #define js_cssom_rule_decl_set_property radiant_host_api->dom->cssom_rule_decl_set_property
 #define js_get_foreign_doc radiant_host_api->dom->get_foreign_doc
@@ -63,31 +58,13 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_document_proxy_get_property radiant_host_api->dom->document_proxy_get_property
 #define js_document_proxy_set_property radiant_host_api->dom->document_proxy_set_property
 #define js_document_proxy_method radiant_host_api->dom->document_proxy_method
-#define js_dom_item_is_range radiant_host_api->dom->item_is_range
-#define js_dom_item_is_selection radiant_host_api->dom->item_is_selection
-#define js_dom_range_get_property radiant_host_api->dom->range_get_property
-#define js_dom_range_set_property radiant_host_api->dom->range_set_property
-#define js_dom_selection_get_property radiant_host_api->dom->selection_get_property
-#define js_dom_selection_set_property radiant_host_api->dom->selection_set_property
 #define js_dom_range_get_prototype_value radiant_host_api->dom->range_get_prototype_value
 #define js_dom_selection_get_prototype_value radiant_host_api->dom->selection_get_prototype_value
-#define js_dom_range_native_property radiant_host_api->dom->range_native_property
-#define js_dom_selection_native_property radiant_host_api->dom->selection_native_property
 #define js_dom_expando_has_property radiant_host_api->dom->expando_has_property
-#define js_dom_range_expando_has_property radiant_host_api->dom->range_expando_has_property
-#define js_dom_selection_expando_has_property radiant_host_api->dom->selection_expando_has_property
 #define js_dom_expando_get_own_property_descriptor radiant_host_api->dom->expando_get_own_property_descriptor
-#define js_dom_range_expando_get_own_property_descriptor radiant_host_api->dom->range_expando_get_own_property_descriptor
-#define js_dom_selection_expando_get_own_property_descriptor radiant_host_api->dom->selection_expando_get_own_property_descriptor
 #define js_dom_expando_delete_property radiant_host_api->dom->expando_delete_property
-#define js_dom_range_expando_delete_property radiant_host_api->dom->range_expando_delete_property
-#define js_dom_selection_expando_delete_property radiant_host_api->dom->selection_expando_delete_property
 #define js_dom_expando_own_property_names radiant_host_api->dom->expando_own_property_names
-#define js_dom_range_expando_own_property_names radiant_host_api->dom->range_expando_own_property_names
-#define js_dom_selection_expando_own_property_names radiant_host_api->dom->selection_expando_own_property_names
 #define js_css_namespace_method radiant_host_api->dom->css_namespace_method
-#define js_cssom_stylesheet_method radiant_host_api->dom->cssom_stylesheet_method
-#define js_cssom_rule_decl_method radiant_host_api->dom->cssom_rule_decl_method
 #define js_dom_owner_document_for_node radiant_host_api->dom->owner_document_for_node
 #define js_dom_to_attribute_cstr radiant_host_api->dom->to_attribute_cstr
 #define js_is_truthy radiant_host_api->script->is_truthy
@@ -2410,12 +2387,6 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
 }
 
 RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
-    if (js_dom_item_is_range(elem_item)) {
-        return js_dom_range_get_property(elem_item, prop_name);
-    }
-    if (js_dom_item_is_selection(elem_item)) {
-        return js_dom_selection_get_property(elem_item, prop_name);
-    }
     Item result = ItemNull;
     if (radiant_dom_get_basic_property(elem_item, prop_name, &result)) {
         return result;
@@ -2424,12 +2395,6 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
 }
 
 RADIANT_C_API Item radiant_dom_set_property(Item elem_item, Item prop_name, Item value) {
-    if (js_dom_item_is_range(elem_item)) {
-        return js_dom_range_set_property(elem_item, prop_name, value);
-    }
-    if (js_dom_item_is_selection(elem_item)) {
-        return js_dom_selection_set_property(elem_item, prop_name, value);
-    }
     Item result = ItemNull;
     if (radiant_dom_set_basic_property(elem_item, prop_name, value, &result)) {
         return result;
@@ -2467,40 +2432,22 @@ static Item radiant_dom_data_descriptor(Item value, bool writable,
 
 static bool radiant_dom_projected_own_value(Item object, Item key, Item* out) {
     if (!out || get_type_id(key) != LMD_TYPE_STRING) return false;
-    if (js_dom_item_is_range(object)) {
-        if (!js_dom_range_native_property(object, key)) return false;
-        *out = js_dom_range_get_property(object, key);
-        return true;
-    }
-    if (js_dom_item_is_selection(object)) {
-        if (!js_dom_selection_native_property(object, key)) return false;
-        *out = js_dom_selection_get_property(object, key);
-        return true;
-    }
     return radiant_dom_get_basic_property(object, key, out);
 }
 
 static bool radiant_dom_has_expando(Item object, Item key) {
-    if (js_dom_item_is_range(object)) return js_dom_range_expando_has_property(object, key);
-    if (js_dom_item_is_selection(object)) return js_dom_selection_expando_has_property(object, key);
     return js_dom_expando_has_property(object, key);
 }
 
 static Item radiant_dom_expando_descriptor(Item object, Item key) {
-    if (js_dom_item_is_range(object)) return js_dom_range_expando_get_own_property_descriptor(object, key);
-    if (js_dom_item_is_selection(object)) return js_dom_selection_expando_get_own_property_descriptor(object, key);
     return js_dom_expando_get_own_property_descriptor(object, key);
 }
 
 static Item radiant_dom_delete_expando(Item object, Item key) {
-    if (js_dom_item_is_range(object)) return js_dom_range_expando_delete_property(object, key);
-    if (js_dom_item_is_selection(object)) return js_dom_selection_expando_delete_property(object, key);
     return js_dom_expando_delete_property(object, key);
 }
 
 static Item radiant_dom_expando_names(Item object) {
-    if (js_dom_item_is_range(object)) return js_dom_range_expando_own_property_names(object);
-    if (js_dom_item_is_selection(object)) return js_dom_selection_expando_own_property_names(object);
     return js_dom_expando_own_property_names(object);
 }
 
@@ -2549,16 +2496,6 @@ RADIANT_C_API int radiant_dom_host_call_method(Item object,
                                             int argc,
                                             Item* out) {
     if (!out) return 0;
-    if (js_dom_item_is_range(object)) {
-        Item fn = js_dom_range_get_property(object, method_name);
-        *out = js_call_function(fn, object, args, argc);
-        return 1;
-    }
-    if (js_dom_item_is_selection(object)) {
-        Item fn = js_dom_selection_get_property(object, method_name);
-        *out = js_call_function(fn, object, args, argc);
-        return 1;
-    }
     *out = radiant_dom_element_method(object, method_name, args, argc);
     return 1;
 }
@@ -2612,19 +2549,7 @@ RADIANT_C_API int radiant_dom_host_own_property_descriptor(Item object, Item key
 RADIANT_C_API int radiant_dom_host_own_property_names(Item object, Item* out) {
     if (!out) return 0;
     Item result = radiant_host_api->value->array_new(0);
-    if (js_dom_item_is_range(object)) {
-        static const char* const range_keys[] = {
-            "startContainer", "startOffset", "endContainer", "endOffset",
-            "collapsed", "commonAncestorContainer", nullptr
-        };
-        for (int i = 0; range_keys[i]; i++) radiant_dom_push_projected_key(result, object, range_keys[i]);
-    } else if (js_dom_item_is_selection(object)) {
-        static const char* const selection_keys[] = {
-            "anchorNode", "anchorOffset", "focusNode", "focusOffset",
-            "isCollapsed", "rangeCount", "type", "direction", nullptr
-        };
-        for (int i = 0; selection_keys[i]; i++) radiant_dom_push_projected_key(result, object, selection_keys[i]);
-    } else {
+    {
         DomNode* node = (DomNode*)radiant_dom_unwrap_node(object);
         if (node && node->is_element()) {
             static const char* const element_keys[] = {
@@ -2657,8 +2582,6 @@ RADIANT_C_API int radiant_dom_host_own_property_names(Item object, Item* out) {
 }
 
 RADIANT_C_API Item radiant_dom_host_prototype(Item object) {
-    if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
-    if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
     return js_dom_get_prototype_value(object);
 }
 
@@ -2669,149 +2592,7 @@ RADIANT_C_API void radiant_dom_host_invalidate(Item object) {
     }
 }
 
-RADIANT_C_API int radiant_dom_style_host_get_property(Item object, Item key, Item* out) {
-    if (!out) return 0;
-    *out = js_is_computed_style_item(object)
-        ? js_computed_style_get_property(object, key)
-        : radiant_dom_get_property(object, key);
-    return 1;
-}
 
-RADIANT_C_API int radiant_dom_style_host_set_property(Item object, Item key, Item value, Item* out) {
-    if (!out) return 0;
-    *out = js_is_computed_style_item(object) ? value : radiant_dom_set_property(object, key, value);
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_style_host_call_method(Item object,
-                                                  Item method_name,
-                                                  Item* args,
-                                                  int argc,
-                                                  Item* out) {
-    if (!out) return 0;
-    if (js_is_computed_style_item(object)) {
-        const char* method = fn_to_cstr(method_name);
-        if (method && strcmp(method, "getPropertyValue") == 0) {
-            *out = argc >= 1 ? js_computed_style_get_property(object, args[0]) : radiant_dom_string_item("");
-            return 1;
-        }
-        *out = ItemNull;
-        return 1;
-    }
-    *out = js_dom_style_method(object, method_name, args, argc);
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_style_host_has_property(Item object, Item key, Item* out) {
-    if (!out) return 0;
-    *out = (Item){.item = b2it(js_dom_style_resource_has_property(object, key) ? 1 : 0)};
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_style_host_delete_property(Item object, Item key, Item* out) {
-    if (!out) return 0;
-    *out = (Item){.item = b2it(js_dom_style_resource_has_property(object, key) ? 0 : 1)};
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_style_host_own_property_descriptor(Item object, Item key, Item* out) {
-    if (!out) return 0;
-    *out = radiant_dom_undefined_item();
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_style_host_own_property_names(Item object, Item* out) {
-    if (!out) return 0;
-    *out = radiant_host_api->value->array_new(0);
-    return 1;
-}
-
-RADIANT_C_API Item radiant_dom_style_host_prototype(Item object) {
-    return ItemNull;
-}
-
-RADIANT_C_API int radiant_dom_cssom_host_get_property(Item object, Item key, Item* out) {
-    if (!out) return 0;
-    if (js_is_stylesheet(object)) {
-        *out = js_cssom_stylesheet_get_property(object, key);
-        return 1;
-    }
-    if (js_is_css_rule(object)) {
-        *out = js_cssom_rule_get_property(object, key);
-        return 1;
-    }
-    if (js_is_rule_style_decl(object)) {
-        *out = js_cssom_rule_decl_get_property(object, key);
-        return 1;
-    }
-    return 0;
-}
-
-RADIANT_C_API int radiant_dom_cssom_host_set_property(Item object, Item key, Item value, Item* out) {
-    if (!out) return 0;
-    if (js_is_css_rule(object)) {
-        *out = js_cssom_rule_set_property(object, key, value);
-        return 1;
-    }
-    if (js_is_rule_style_decl(object)) {
-        *out = js_cssom_rule_decl_set_property(object, key, value);
-        return 1;
-    }
-    if (js_is_stylesheet(object)) {
-        *out = value;
-        return 1;
-    }
-    return 0;
-}
-
-RADIANT_C_API int radiant_dom_cssom_host_call_method(Item object,
-                                                  Item method_name,
-                                                  Item* args,
-                                                  int argc,
-                                                  Item* out) {
-    if (!out) return 0;
-    if (js_is_stylesheet(object)) {
-        *out = js_cssom_stylesheet_method(object, method_name, args, argc);
-        return 1;
-    }
-    if (js_is_rule_style_decl(object)) {
-        *out = js_cssom_rule_decl_method(object, method_name, args, argc);
-        return 1;
-    }
-    if (js_is_css_rule(object)) {
-        *out = ItemNull;
-        return 1;
-    }
-    return 0;
-}
-
-RADIANT_C_API int radiant_dom_cssom_host_has_property(Item object, Item key, Item* out) {
-    if (!out) return 0;
-    *out = (Item){.item = b2it(js_cssom_resource_has_property(object, key) ? 1 : 0)};
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_cssom_host_delete_property(Item object, Item key, Item* out) {
-    if (!out) return 0;
-    *out = (Item){.item = b2it(js_cssom_resource_has_property(object, key) ? 0 : 1)};
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_cssom_host_own_property_descriptor(Item object, Item key, Item* out) {
-    if (!out) return 0;
-    *out = radiant_dom_undefined_item();
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_cssom_host_own_property_names(Item object, Item* out) {
-    if (!out) return 0;
-    *out = radiant_host_api->value->array_new(0);
-    return 1;
-}
-
-RADIANT_C_API Item radiant_dom_cssom_host_prototype(Item object) {
-    return ItemNull;
-}
 
 static Item radiant_dom_call_foreign_window_global_method(Item object,
                                                           void* foreign_doc,
@@ -3607,32 +3388,6 @@ RADIANT_C_API Item radiant_dom_window_dispatch_event(Item event_item) {
     return js_dom_dispatch_event_bridge(radiant_host_api->script->global_this(), event_item);
 }
 
-RADIANT_C_API int radiant_dom_style_method(Item elem_item, Item method_name, Item* args, int argc, Item* out) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element_impl(elem_item);
-    if (!elem || !out) return 0;
-
-    const char* method = fn_to_cstr(method_name);
-    if (!method) return 0;
-
-    if (strcmp(method, "setProperty") == 0) {
-        // CSS rule style declarations are not DOM elements and stay on CSSOM fallback.
-        *out = argc >= 2
-            ? js_dom_style_set_property_bridge((void*)elem, args[0], args[1],
-                argc >= 3 ? args[2] : radiant_dom_undefined_item(), argc >= 3)
-            : ItemNull;
-        return 1;
-    }
-
-    if (strcmp(method, "removeProperty") == 0) {
-        // CSS rule style declarations are not DOM elements and stay on CSSOM fallback.
-        *out = argc >= 1
-            ? js_dom_style_remove_property_bridge((void*)elem, args[0])
-            : radiant_dom_string_item("");
-        return 1;
-    }
-
-    return 0;
-}
 
 RADIANT_C_API int radiant_dom_cssom_method(Item obj, Item method_name, Item* args, int argc, Item* out) {
     if (!out) return 0;
@@ -3643,17 +3398,6 @@ RADIANT_C_API int radiant_dom_cssom_method(Item obj, Item method_name, Item* arg
         return 1;
     }
 
-    if (js_is_stylesheet(obj)) {
-        // CSSOM parsing and mutation internals remain in js_cssom.cpp.
-        *out = js_cssom_stylesheet_method(obj, method_name, args, argc);
-        return 1;
-    }
-
-    if (js_is_rule_style_decl(obj)) {
-        // CSSOM parsing and mutation internals remain in js_cssom.cpp.
-        *out = js_cssom_rule_decl_method(obj, method_name, args, argc);
-        return 1;
-    }
 
     return 0;
 }
