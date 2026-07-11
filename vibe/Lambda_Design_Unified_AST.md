@@ -589,12 +589,42 @@ Risk register:
 
 Resolved by user confirmation: L3 as its own level (U13); labels core-as-field (U15); `AST_MAP`/`AST_NEW`/`AST_INTERP_STR`/`AST_SEQ` core (U16); call-site propagation common at L3 (U17); CodeQL as prior art (U18).
 
-Still open:
+Still open — elaborated trade space and recommendations (pending decision):
 
-1. **Surface preservation confirmed as default?** The catalog preserves surface forms as distinct core nodes (`AST_FOR_C` vs `AST_FOR_ITER`, `AST_SWITCH` vs `AST_MATCH`) rather than desugaring — easier debugging and dump fidelity; desugar later only where the driver visibly benefits. Confirm.
-2. **`FnAnalysis.lang_ext` vs typed unions** for profile-owned function facts (ctor shape caches, view state) — opaque pointer (loose, simple) or tagged union (checked, rigid)?
-3. **Timing vs concurrency work:** K-plan Stage A (fork-join) and the resumable-function transform both touch `transpile-mir.cpp`. Sequence the K17 layer-1 extraction inside Phase 4 here, or land Stage A first on the old code and extract after? (K17's own advice — "build the Lambda transform as an independent second implementation, extract after two clients" — argues Stage A first.)
-4. **The "views" fourth variance tier** (from CodeQL, §11.3): should language-range nodes be able to implement core *interfaces* (e.g., Lambda `PIPE` exposing a call-like view) so shared passes handle them without node promotion? Optional machinery — adopt only if a real pass needs it.
+### Q1 — Surface preservation vs desugaring
+
+When one construct reduces to another (`for(;;)`→while, `do-while`→while+flag, `switch`→if-chains, `x+=e`→`x=x+e`, `unless`→negated if): keep both surface forms as core nodes, or normalize to a minimal kernel?
+
+The kernel's promise (fewer cases per pass, optimizations written once) is weakened by three facts:
+1. **Desugaring is where semantic bugs live, and it is not language-independent.** `a[f()] += 1` must evaluate `a[f()]` once; correct expansion needs temporaries whose interaction with each language's evaluation order/TDZ/coercion differs — every desugar rule needs a per-language soundness argument anyway, forfeiting the sharing. A rewrite sound for Lambda can be unsound for JS.
+2. **Codegen prefers original shapes:** `switch`→jump table; `do-while` without synthetic flags; TCO/loop-idiom detection pattern-matches surface forms.
+3. **Debugging/goldens:** `emit_sexpr` dumps, golden tests, and errors map 1:1 to source — the Phase-1/2 AST-dump-equivalence safety net depends on this.
+
+Cost of preservation is bounded (~6–8 nodes saved by a kernel out of ~45); the per-pass case count is solved by category predicates (`is_loop()`) — CodeQL's abstract `LoopStmt` move.
+
+**Recommendation:** preserve surface as default. Two sanctioned exceptions: (a) builder-level *mapping* when a guest construct is literally an instance of a core node (Python comprehension → `AST_FOR_EXPR` clauses); (b) driver-internal canonicalization (the driver may reuse its while-machinery for `for(;;)` without rewriting the tree). Any future desugar requires: provably identical semantics under every producing profile + measurable simplification of a shared pass.
+
+### Q2 — `FnAnalysis.lang_ext`: opaque pointer vs tagged union
+
+Where do profile-private per-function facts live (JS ctor shape-cache ptr, class links, eval/`arguments` presence; Lambda view/state context, method-owner links)?
+
+- **Opaque `void*`:** full decoupling — core header never sees profile structs; guest ports touch nothing shared. Cost: casts, no generic dump, no checking.
+- **Tagged union:** checked and dumpable, but inverts the dependency direction (core header includes every front-end's struct; each guest port edits it and rebuilds the world) and is sized to the largest member — decisive, because the JS ext is "what remains of `JsFuncCollected` after shared fields move to `FnAnalysis`," which is large (today: `func_entries[32768]` of a fat struct). A union makes every Lambda function carry JS-sized dead weight.
+
+**Recommendation:** opaque pointer + discipline: a 2-byte `ext_kind` (lang id) beside the pointer, inline typed accessors asserting it in debug builds (`js_fn_ext(fa)` checks `ext_kind==LANG_JS`), a `dump_fn_ext` hook on `LangProfile` for complete AST dumps, allocation from the AST pool (lifetime moot). Side benefit: shared passes *cannot* peek at profile facts — the core/profile boundary stays honest.
+
+### Q3 — Sequencing vs concurrency Stage A
+
+Both concurrency (Stage A fork-join, Stage B M:N tasks) and Phase 4 here touch `transpile-mir.cpp` and claim the resumable-function transform (K17 layer 1). Three observations reshape either/or into an interleave:
+1. **Phase 0 is needed by both, urgently:** Stage A runs JIT'd frames concurrently — building that on the blanket-`MIR_T_I64` rooting hack (G1) would stack a headline feature on the known foundation crack. Emitter + honest rooting land before either track. Stage A written against the emitter API survives the later Phase-4 migration, defusing the rework worry.
+2. **Stage A likely doesn't need the transform** (fork-join can block; Stage B's M:N state machines need function-splitting). Remaining contention is file-level churn only, and Phases 1–3 live mostly outside the lowering file.
+3. **K17's two-client rule exists for a reason:** extracting the "shared" transform with JS async as the only prior client (layers 3–4 forbid touching JS's drivers) risks a JS-shaped utility Lambda then fights. A Lambda transform built first (for Stage B) gives extraction two green clients.
+
+**Recommendation — interleave:** Phase 0 (emitter + G1) → in parallel: concurrency Stage A ∥ unified-AST Phases 1–3 → Phase 4 extraction with Lambda's Stage-B transform as second client → Stage B ships on the shared transform. Honors K17, ships concurrency early, makes the shared prerequisite explicit.
+
+### Q4 — The "views" fourth variance tier (minor)
+
+From CodeQL (§11.3): let language-range nodes implement core *interfaces* (Lambda `PIPE` exposing a call-like view) so shared passes handle them without promotion. **Recommendation:** defer — adopt only when a real shared pass asks for it.
 
 ---
 

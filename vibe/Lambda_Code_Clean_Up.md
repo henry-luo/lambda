@@ -254,8 +254,10 @@ Already unified (the model to follow): libuv event loop (`lib/uv_loop.h`, both s
 ### 6.1 `js_double_to_string` ≡ `lambda_double_to_shortest` — C4/C2, TOP PRIORITY
 `lambda/js/js_runtime_value.cpp:333–470` vs `lambda/lambda-decimal.cpp:62–150`: the *same function* — identical shortest-round-trip search (`for prec 1..21 { snprintf("%.*e"); sscanf; roundtrip check }`), identical digit extraction, identical ES §7.1.12.1 case analysis. Only NaN/Inf spellings and JS-side buffer guards differ. Both on hot paths. ~135 LOC. **Fix:** extract `lib/dtoa.c` → `dbl_to_shortest_digits(double, char[32], int* k, int* e, bool* neg)` + two thin flavor formatters. Mechanical, low risk.
 
-### 6.2 Three hand-rolled base64 *decode* tables — C1, HIGH
+### ✅ 6.2 Three hand-rolled base64 *decode* tables — C1, HIGH
 `js_buffer.cpp:502–540`, `js_buffer.cpp:1630–1656` (base64url variant), `js_globals.cpp:14203–14290` (atob) — all three files `#include lib/base64.h` and use it for *encode*, but hand-roll decode with inline 256-entry tables, duplicating `base64_decode_variant` (`lib/base64.h:58`) that `js_crypto.cpp:1423` already uses correctly. ~90 LOC + 3 subtly-different padding/whitespace surfaces. Mechanical fix.
+
+**Implementation status (2026-07-11): done.** `Buffer.from(..., "base64")`, `buf.write(..., "base64"/"base64url")`, and `atob()` now delegate decode work to `base64_decode_variant()` instead of maintaining local decode tables. `atob()` keeps its DOMException path while using the shared decoder for byte reconstruction.
 
 ### 6.3 Static helper copy-paste across files — C3, HIGH (trivial effort)
 - `static Item make_string_item(...)` redefined in **22 files** (js_querystring, js_cssom, js_string_decoder, js_https, js_fs, js_util, js_net, js_crypto, js_fetch, js_http, js_path, js_os, js_globals, js_dns, js_zlib, js_readline, js_child_process, js_buffer, js_tls, js_url_module, js_events, js_stream). ~175 LOC.

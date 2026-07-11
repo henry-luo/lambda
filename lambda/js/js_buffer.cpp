@@ -72,6 +72,20 @@ static uint8_t* buffer_data(Item buf, int* out_len) {
     return data;
 }
 
+static int buffer_decode_base64_bytes(const char* str, int str_len, Base64Variant variant,
+                                      uint8_t* out_buf, int max_out) {
+    if (!str || str_len <= 0 || !out_buf || max_out <= 0) return 0;
+
+    size_t decoded_len = 0;
+    uint8_t* decoded = base64_decode_variant(str, (size_t)str_len, &decoded_len, variant);
+    if (!decoded) return 0;
+
+    int copy_len = decoded_len > (size_t)max_out ? max_out : (int)decoded_len;
+    if (copy_len > 0) memcpy(out_buf, decoded, (size_t)copy_len);
+    mem_free(decoded);
+    return copy_len;
+}
+
 extern "C" Item bigint_from_int64(int64_t val);
 extern "C" Item bigint_from_string(const char* str, int len);
 extern "C" int64_t bigint_to_int64(Item bi);
@@ -497,39 +511,15 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         }
 
         if (strcmp(enc_buf, "base64") == 0) {
-            // base64 decode — use atob-style decode
-            // simple base64 decode
-            static const int b64_table[256] = {
-                ['A']=0,['B']=1,['C']=2,['D']=3,['E']=4,['F']=5,['G']=6,['H']=7,
-                ['I']=8,['J']=9,['K']=10,['L']=11,['M']=12,['N']=13,['O']=14,['P']=15,
-                ['Q']=16,['R']=17,['S']=18,['T']=19,['U']=20,['V']=21,['W']=22,['X']=23,
-                ['Y']=24,['Z']=25,['a']=26,['b']=27,['c']=28,['d']=29,['e']=30,['f']=31,
-                ['g']=32,['h']=33,['i']=34,['j']=35,['k']=36,['l']=37,['m']=38,['n']=39,
-                ['o']=40,['p']=41,['q']=42,['r']=43,['s']=44,['t']=45,['u']=46,['v']=47,
-                ['w']=48,['x']=49,['y']=50,['z']=51,['0']=52,['1']=53,['2']=54,['3']=55,
-                ['4']=56,['5']=57,['6']=58,['7']=59,['8']=60,['9']=61,['+']=62,['/']=63
-            };
-            int in_len = (int)s->len;
-            int out_len = in_len * 3 / 4;
-            if (in_len > 0 && s->chars[in_len - 1] == '=') out_len--;
-            if (in_len > 1 && s->chars[in_len - 2] == '=') out_len--;
-
-            Item buf = create_buffer(out_len);
+            size_t decoded_len = 0;
+            uint8_t* decoded = base64_decode_variant(s->chars, s->len, &decoded_len, BASE64_STD);
+            Item buf = create_buffer(decoded ? (int)decoded_len : 0);
             int buf_byte_len = 0;
             uint8_t* bdata = buffer_data(buf, &buf_byte_len);
-            if (bdata) {
-                int j = 0;
-                for (int i = 0; i < in_len; i += 4) {
-                    uint32_t sextet_a = (i < in_len) ? b64_table[(unsigned char)s->chars[i]] : 0;
-                    uint32_t sextet_b = (i+1 < in_len) ? b64_table[(unsigned char)s->chars[i+1]] : 0;
-                    uint32_t sextet_c = (i+2 < in_len) ? b64_table[(unsigned char)s->chars[i+2]] : 0;
-                    uint32_t sextet_d = (i+3 < in_len) ? b64_table[(unsigned char)s->chars[i+3]] : 0;
-                    uint32_t triple = (sextet_a << 18) | (sextet_b << 12) | (sextet_c << 6) | sextet_d;
-                    if (j < out_len) bdata[j++] = (triple >> 16) & 0xFF;
-                    if (j < out_len) bdata[j++] = (triple >> 8) & 0xFF;
-                    if (j < out_len) bdata[j++] = triple & 0xFF;
-                }
+            if (decoded && bdata && buf_byte_len > 0) {
+                memcpy(bdata, decoded, (size_t)buf_byte_len);
             }
+            if (decoded) mem_free(decoded);
             return buf;
         }
 
@@ -1627,33 +1617,8 @@ static int encode_string_bytes(const char* str, int str_len, const char* enc,
     }
 
     if (strcmp(enc, "base64") == 0 || strcmp(enc, "base64url") == 0) {
-        static const int b64[256] = {
-            ['A']=0,['B']=1,['C']=2,['D']=3,['E']=4,['F']=5,['G']=6,['H']=7,
-            ['I']=8,['J']=9,['K']=10,['L']=11,['M']=12,['N']=13,['O']=14,['P']=15,
-            ['Q']=16,['R']=17,['S']=18,['T']=19,['U']=20,['V']=21,['W']=22,['X']=23,
-            ['Y']=24,['Z']=25,['a']=26,['b']=27,['c']=28,['d']=29,['e']=30,['f']=31,
-            ['g']=32,['h']=33,['i']=34,['j']=35,['k']=36,['l']=37,['m']=38,['n']=39,
-            ['o']=40,['p']=41,['q']=42,['r']=43,['s']=44,['t']=45,['u']=46,['v']=47,
-            ['w']=48,['x']=49,['y']=50,['z']=51,['0']=52,['1']=53,['2']=54,['3']=55,
-            ['4']=56,['5']=57,['6']=58,['7']=59,['8']=60,['9']=61,['+']=62,['/']=63,
-            ['-']=62,['_']=63 // base64url variants
-        };
-        int in_len = str_len;
-        while (in_len > 0 && str[in_len - 1] == '=') in_len--;
-        int out_len = (in_len * 3) / 4;
-        if (out_len > max_out) out_len = max_out;
-        int j = 0;
-        for (int i = 0; i < str_len && j < out_len; i += 4) {
-            uint32_t a = (i < str_len) ? b64[(unsigned char)str[i]] : 0;
-            uint32_t b = (i+1 < str_len) ? b64[(unsigned char)str[i+1]] : 0;
-            uint32_t c = (i+2 < str_len) ? b64[(unsigned char)str[i+2]] : 0;
-            uint32_t d = (i+3 < str_len) ? b64[(unsigned char)str[i+3]] : 0;
-            uint32_t triple = (a << 18) | (b << 12) | (c << 6) | d;
-            if (j < out_len) out_buf[j++] = (triple >> 16) & 0xFF;
-            if (j < out_len) out_buf[j++] = (triple >> 8) & 0xFF;
-            if (j < out_len) out_buf[j++] = triple & 0xFF;
-        }
-        return j;
+        Base64Variant variant = strcmp(enc, "base64url") == 0 ? BASE64_URL : BASE64_STD;
+        return buffer_decode_base64_bytes(str, str_len, variant, out_buf, max_out);
     }
 
     if (strcmp(enc, "ucs2") == 0 || strcmp(enc, "ucs-2") == 0 ||

@@ -24,6 +24,7 @@
 #include "../lambda.hpp"
 #include "../transpiler.hpp"
 #include "../jube/jube_registry.h"
+#include "../../lib/base64.h"
 
 extern "C" Item js_to_property_key(Item key);
 extern "C" int64_t js_key_is_symbol_c(Item key);
@@ -14199,26 +14200,6 @@ extern "C" Item js_delete_property_strict(Item obj, Item key) {
 // v12: encodeURIComponent / decodeURIComponent / atob / btoa
 // =============================================================================
 
-// Base64 decoding table
-static const unsigned char b64_decode_table[256] = {
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255, 62,255,255,255, 63,
-     52, 53, 54, 55, 56, 57, 58, 59, 60, 61,255,255,255,  0,255,255,
-    255,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14,
-     15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,255,255,255,255,255,
-    255, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
-     41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255
-};
-
 // helper: throw DOMException with InvalidCharacterError
 extern "C" Item js_domexception_new(Item message, Item name_arg);
 static Item js_throw_domexception_invalid_char(const char* msg) {
@@ -14258,33 +14239,16 @@ extern "C" Item js_atob(Item str_item) {
         return js_throw_domexception_invalid_char("Invalid character");
     }
 
-    // Step 4: validate all remaining characters are in base64 alphabet
-    for (int i = 0; i < clen; i++) {
-        unsigned char c = (unsigned char)cleaned[i];
-        if (b64_decode_table[c] == 255) {
-            mem_free(cleaned);
-            return js_throw_domexception_invalid_char("Invalid character");
-        }
+    size_t out_len = 0;
+    uint8_t* decoded = clen == 0 ? NULL :
+        base64_decode_variant(cleaned, (size_t)clen, &out_len, BASE64_STD);
+    if (clen != 0 && !decoded) {
+        mem_free(cleaned);
+        return js_throw_domexception_invalid_char("Invalid character");
     }
 
-    // Decode
-    char* buf = (char*)mem_alloc(clen, MEM_CAT_JS_RUNTIME);
-    if (!buf) { mem_free(cleaned); return (Item){.item = s2it(heap_create_name("", 0))}; }
-    int out = 0;
-    int bits = 0;
-    int val = 0;
-    for (int i = 0; i < clen; i++) {
-        unsigned char d = b64_decode_table[(unsigned char)cleaned[i]];
-        val = (val << 6) | d;
-        bits += 6;
-        if (bits >= 8) {
-            bits -= 8;
-            buf[out++] = (char)((val >> bits) & 0xFF);
-        }
-    }
-
-    String* result = heap_create_name(buf, out);
-    mem_free(buf);
+    String* result = heap_create_name(decoded ? (const char*)decoded : "", out_len);
+    if (decoded) mem_free(decoded);
     mem_free(cleaned);
     return (Item){.item = s2it(result)};
 }
