@@ -13,6 +13,8 @@ typedef struct BoxMetrics {
     BoxEdges margin;
     BoxEdges padding;
     BoxEdges border;
+    float margin_h;
+    float margin_v;
     float padding_h;
     float padding_v;
     float border_h;
@@ -22,19 +24,29 @@ typedef struct BoxMetrics {
 } BoxMetrics;
 
 BoxMetrics layout_box_metrics(ViewBlock* block);
+BoxMetrics layout_boundary_metrics(const BoundaryProp* bound);
 
 float layout_padding_border_width(ViewBlock* block);
 float layout_padding_border_height(ViewBlock* block);
+float layout_boundary_padding_border_axis(const BoundaryProp* bound, bool horizontal);
 
 float layout_content_width_from_border_box(ViewBlock* block, float border_width);
 float layout_content_height_from_border_box(ViewBlock* block, float border_height);
 float layout_border_width_from_content_box(ViewBlock* block, float content_width);
 float layout_border_height_from_content_box(ViewBlock* block, float content_height);
+float layout_padding_border_axis(ViewBlock* block, bool horizontal);
+float layout_content_size_from_border_box(ViewBlock* block, float border_size, bool horizontal);
+float layout_border_size_from_content_box(ViewBlock* block, float content_size, bool horizontal);
 float layout_floor_border_box_width(ViewBlock* block, float border_width);
 float layout_floor_border_box_height(ViewBlock* block, float border_height);
+float layout_floor_border_box_axis(ViewBlock* block, float border_size, bool horizontal);
 
 float layout_apply_min_max_width(ViewBlock* block, float width, bool width_is_border_box);
 float layout_apply_min_max_height(ViewBlock* block, float height, bool height_is_border_box);
+float layout_apply_min_max_axis(ViewBlock* block, float size, bool horizontal, bool size_is_border_box);
+float layout_clamp_min_max_width(ViewBlock* block, float width);
+float layout_clamp_min_max_height(ViewBlock* block, float height);
+float layout_clamp_min_max_axis(ViewBlock* block, float size, bool horizontal);
 
 static inline const CssValue* css_box_shorthand_side_value(const CssValue* value, int side) {
     if (!value) return nullptr;

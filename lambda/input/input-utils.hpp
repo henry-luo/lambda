@@ -33,6 +33,20 @@ Item parse_typed_value(InputContext& ctx, const char* str, size_t len);
  */
 Item parse_integer_token_exact(InputContext& ctx, const char* str, size_t len);
 
+/**
+ * Parse a scanner-delimited decimal number token.  Optional underscores are
+ * removed before conversion; integer tokens still use exact integer promotion.
+ */
+Item parse_scanned_decimal_number(InputContext& ctx, const char* str, size_t len,
+                                  bool allow_underscores, bool negative_zero_is_float);
+
+bool scanned_number_has_float_marker(const char* str, size_t len);
+
+Item parse_prefixed_integer_value(InputContext& ctx, const char* str, int base,
+                                  const char* kind, SourceLocation loc,
+                                  const char** end_out, bool report_errors,
+                                  bool force_long);
+
 static inline void skip_to_newline_raw(const char** p) {
     while (**p && **p != '\n' && **p != '\r') {
         (*p)++;

@@ -528,10 +528,7 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                         // All tracks are sized, use actual span width
                         int box_adjustment = 0;
                         if (item->bound) {
-                            box_adjustment += item->bound->padding.left + item->bound->padding.right;
-                            if (item->bound->border) {
-                                box_adjustment += (int)(item->bound->border->width.left + item->bound->border->width.right); // INT_CAST_OK: box model adjustment
-                            }
+                            box_adjustment = (int)layout_boundary_metrics(item->bound).pad_border_h; // INT_CAST_OK: integer track sizing adjustment
                         }
                         width = (float)(span_width - box_adjustment);
                         // Add a small subpixel margin to compensate for integer truncation
@@ -551,10 +548,7 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
 
                         // Subtract item's own padding/border
                         if (item->bound) {
-                            width -= item->bound->padding.left + item->bound->padding.right;
-                            if (item->bound->border) {
-                                width -= item->bound->border->width.left + item->bound->border->width.right;
-                            }
+                            width -= layout_boundary_metrics(item->bound).pad_border_h;
                         }
                         if (width < 10) width = 10;
                         log_debug("Row sizing: estimating width %.1f for %s (FR tracks, container=%d, cols=%d)",

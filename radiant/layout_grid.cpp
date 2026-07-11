@@ -3,6 +3,7 @@
 #include "view.hpp"
 #include "grid_enhanced_adapter.hpp"  // Enhanced grid integration
 #include "intrinsic_sizing.hpp"       // measure_text_intrinsic_widths
+#include "layout_box.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_grow.hpp"
 
@@ -237,15 +238,9 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     grid_layout->content_width = container->width;
     grid_layout->content_height = container->height;
 
-    if (container->bound && container->bound->border) {
-        grid_layout->content_width -= (container->bound->border->width.left + container->bound->border->width.right);
-        grid_layout->content_height -= (container->bound->border->width.top + container->bound->border->width.bottom);
-    }
-
-    if (container->bound) {
-        grid_layout->content_width -= (container->bound->padding.left + container->bound->padding.right);
-        grid_layout->content_height -= (container->bound->padding.top + container->bound->padding.bottom);
-    }
+    BoxMetrics container_box = layout_box_metrics(container);
+    grid_layout->content_width -= container_box.pad_border_h;
+    grid_layout->content_height -= container_box.pad_border_v;
 
     // Resolve percentage gaps against the container dimensions.
     // For definite containers, resolve immediately. For indefinite (shrink-to-fit),
@@ -296,13 +291,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             if (grid_layout->computed_row_count > 1) {
                 total_row_height += grid_layout->row_gap * (grid_layout->computed_row_count - 1);
             }
-            float new_h = total_row_height;
-            if (container->bound) {
-                new_h += container->bound->padding.top + container->bound->padding.bottom;
-                if (container->bound->border) {
-                    new_h += container->bound->border->width.top + container->bound->border->width.bottom;
-                }
-            }
+            float new_h = total_row_height + container_box.pad_border_v;
             if (new_h > (float)container->height) {
                 container->height = (int)new_h; // INT_CAST_OK: grid container height
                 log_debug("%s GRID: Updated empty-grid container height to %.1f from explicit rows", container->source_loc(), new_h);
@@ -549,13 +538,8 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             if (font_changed) lycon->font = saved_font;
 
             // Add padding and border in the block direction (horizontal)
-            if (item->bound) {
-                max_block_size += item->bound->padding.left + item->bound->padding.right;
-                if (item->bound->border) {
-                    max_block_size += item->bound->border->width.left +
-                                     item->bound->border->width.right;
-                }
-            }
+            BoxMetrics item_box = layout_box_metrics(item);
+            max_block_size += item_box.pad_border_h;
 
             if (max_block_size > 0) {
                 log_debug("%s orthogonal item %s: row_height=%.1f -> width=%.1f (was min=%.1f max=%.1f)",
@@ -577,14 +561,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         float total_column_width = grid_layout->content_width;
 
         // Add padding and border back to get container width
-        float container_width = total_column_width;
-        if (container->bound) {
-            container_width += container->bound->padding.left + container->bound->padding.right;
-            if (container->bound->border) {
-                container_width += container->bound->border->width.left +
-                                   container->bound->border->width.right;
-            }
-        }
+        float container_width = total_column_width + container_box.pad_border_h;
 
         container->width = container_width;
         grid_layout->container_width = (int)container->width; // INT_CAST_OK: grid container width

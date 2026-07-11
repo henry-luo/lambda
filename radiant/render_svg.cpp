@@ -5,6 +5,7 @@
 #include "render_geometry.hpp"
 #include "view.hpp"
 #include "layout.hpp"
+#include "layout_box.hpp"
 #include "paint_ir.h"
 #include "render_paint_boundary.hpp"
 #include "render_path.hpp"
@@ -1106,10 +1107,7 @@ static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
     // Rule height is the content area height
     float rule_height = block->height;
     if (block->bound) {
-        rule_height -= block->bound->padding.top + block->bound->padding.bottom;
-        if (block->bound->border) {
-            rule_height -= block->bound->border->width.top + block->bound->border->width.bottom;
-        }
+        rule_height -= layout_box_metrics(block).pad_border_v;
     }
 
     // Ensure minimum rule height - compute from children if needed

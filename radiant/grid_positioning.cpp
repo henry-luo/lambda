@@ -238,36 +238,10 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
             }
         }
 
-        // CSS Box Model: border-box minimum — the box cannot be smaller than padding+border
-        if (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
-            float h_pad_border = item->bound->padding.left + item->bound->padding.right;
-            float v_pad_border = item->bound->padding.top + item->bound->padding.bottom;
-            if (item->bound->border) {
-                h_pad_border += item->bound->border->width.left + item->bound->border->width.right;
-                v_pad_border += item->bound->border->width.top + item->bound->border->width.bottom;
-            }
-            if (item_width < h_pad_border) {
-                item_width = h_pad_border;
-            }
-            if (item_height < v_pad_border) {
-                item_height = v_pad_border;
-            }
-        }
-
-        // Apply min-width/max-width and min-height/max-height constraints
+        // apply min/max after resolving the item to border-box dimensions
         if (item->blk) {
-            if (item->blk->given_max_width > 0 && item_width > item->blk->given_max_width) {
-                item_width = item->blk->given_max_width;
-            }
-            if (item->blk->given_min_width > 0 && item_width < item->blk->given_min_width) {
-                item_width = item->blk->given_min_width;
-            }
-            if (item->blk->given_max_height > 0 && item_height > item->blk->given_max_height) {
-                item_height = item->blk->given_max_height;
-            }
-            if (item->blk->given_min_height > 0 && item_height < item->blk->given_min_height) {
-                item_height = item->blk->given_min_height;
-            }
+            item_width = layout_apply_min_max_width(item, item_width, true);
+            item_height = layout_apply_min_max_height(item, item_height, true);
         }
 
         // Apply container offset (borders and padding)
@@ -824,15 +798,11 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                     float bb_max = max_width;
                     bool is_border_box = (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX);
                     if (!is_border_box && item->bound) {
-                        bb_max += item->bound->padding.left + item->bound->padding.right;
-                        if (item->bound->border)
-                            bb_max += item->bound->border->width.left + item->bound->border->width.right;
+                        bb_max += layout_boundary_metrics(item->bound).pad_border_h;
                     }
                     // In border-box mode, width can't be less than padding+border
                     if (is_border_box && item->bound) {
-                        float pad_border = item->bound->padding.left + item->bound->padding.right;
-                        if (item->bound->border)
-                            pad_border += item->bound->border->width.left + item->bound->border->width.right;
+                        float pad_border = layout_boundary_metrics(item->bound).pad_border_h;
                         if (bb_max < pad_border) bb_max = pad_border;
                     }
                     if (item->width > bb_max) item->width = bb_max;
@@ -842,9 +812,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                     float bb_min = min_w;
                     bool is_border_box = (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX);
                     if (!is_border_box && item->bound) {
-                        bb_min += item->bound->padding.left + item->bound->padding.right;
-                        if (item->bound->border)
-                            bb_min += item->bound->border->width.left + item->bound->border->width.right;
+                        bb_min += layout_boundary_metrics(item->bound).pad_border_h;
                     }
                     if (item->width < bb_min) item->width = bb_min;
                 }
@@ -897,15 +865,11 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                     float bb_max = max_height;
                     bool is_border_box = (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX);
                     if (!is_border_box && item->bound) {
-                        bb_max += item->bound->padding.top + item->bound->padding.bottom;
-                        if (item->bound->border)
-                            bb_max += item->bound->border->width.top + item->bound->border->width.bottom;
+                        bb_max += layout_boundary_metrics(item->bound).pad_border_v;
                     }
                     // In border-box mode, height can't be less than padding+border
                     if (is_border_box && item->bound) {
-                        float pad_border = item->bound->padding.top + item->bound->padding.bottom;
-                        if (item->bound->border)
-                            pad_border += item->bound->border->width.top + item->bound->border->width.bottom;
+                        float pad_border = layout_boundary_metrics(item->bound).pad_border_v;
                         if (bb_max < pad_border) bb_max = pad_border;
                     }
                     if (item->height > bb_max) item->height = bb_max;
@@ -915,9 +879,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                     float bb_min = min_h;
                     bool is_border_box = (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX);
                     if (!is_border_box && item->bound) {
-                        bb_min += item->bound->padding.top + item->bound->padding.bottom;
-                        if (item->bound->border)
-                            bb_min += item->bound->border->width.top + item->bound->border->width.bottom;
+                        bb_min += layout_boundary_metrics(item->bound).pad_border_v;
                     }
                     if (item->height < bb_min) item->height = bb_min;
                 }

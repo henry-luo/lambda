@@ -1,6 +1,7 @@
 #include "layout.hpp"
 #include "form_control.hpp"
 #include "intrinsic_sizing.hpp"
+#include "layout_box.hpp"
 #include "../lib/log.h"
 #include <string.h>
 #include <math.h>
@@ -381,9 +382,10 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         // for padding=0 and border=1px are already accounted for in the overhead.)
         float pad_h = 0, border_h = 0;
         if (block->bound) {
-            pad_h = block->bound->padding.left + block->bound->padding.right;
+            BoxMetrics block_box = layout_box_metrics(block);
+            pad_h = block_box.padding_h;
             if (block->bound->border) {
-                border_h = block->bound->border->width.left + block->bound->border->width.right;
+                border_h = block_box.border_h;
                 // subtract the UA default 1px borders already implicit in the layout
                 border_h = border_h > 2.0f ? border_h - 2.0f : 0.0f;
             }
@@ -405,10 +407,9 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         }
         float pad_v = 0, border_v = 0;
         if (block->bound) {
-            pad_v = block->bound->padding.top + block->bound->padding.bottom;
-            if (block->bound->border) {
-                border_v = block->bound->border->width.top + block->bound->border->width.bottom;
-            }
+            BoxMetrics block_box = layout_box_metrics(block);
+            pad_v = block_box.padding_v;
+            border_v = block_box.border_v;
         }
         form->intrinsic_height = content_h + pad_v + border_v;
     }

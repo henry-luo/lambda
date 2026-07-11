@@ -337,89 +337,14 @@ void render_pool_dispatch(RenderPool* pool, TileJob* jobs, int count) {
 // Tile-aware display list replay
 // ============================================================================
 
-static uint32_t tile_glyph_sample_pixel(const GlyphBitmap* bitmap, int src_y, int src_x) {
-    if (!bitmap || !bitmap->buffer || src_y < 0 || src_y >= bitmap->height ||
-        src_x < 0 || src_x >= bitmap->width) return 0;
-    if (bitmap->pixel_mode == GLYPH_PIXEL_MONO) {
-        int byte_index = src_x / 8;
-        int bit_index = 7 - (src_x % 8);
-        uint8_t byte_val = bitmap->buffer[src_y * bitmap->pitch + byte_index];
-        return (byte_val & (1 << bit_index)) ? 255 : 0;
-    }
-    if (bitmap->pixel_mode == GLYPH_PIXEL_GRAY) {
-        return bitmap->buffer[src_y * bitmap->pitch + src_x];
-    }
-    if (bitmap->pixel_mode == GLYPH_PIXEL_LCD) {
-        const uint8_t* subpixel = bitmap->buffer + src_y * bitmap->pitch + src_x * 3;
-        return ((uint32_t)subpixel[0] + (uint32_t)subpixel[1] + (uint32_t)subpixel[2] + 1) / 3;
-    }
-    return 0;
-}
-
-static inline void tile_blend_glyph_coverage_pixel(uint8_t* p, Color color, uint32_t coverage) {
-    uint32_t src_a = (coverage * color.a + 127) / 255;
-    if (src_a == 0) return;
-    uint32_t inv_a = 255 - src_a;
-
-    if (p[3] == 255) {
-        if (color.c == 0xFF000000) {
-            p[0] = p[0] * inv_a / 255;
-            p[1] = p[1] * inv_a / 255;
-            p[2] = p[2] * inv_a / 255;
-            p[3] = 0xFF;
-        } else {
-            p[0] = (p[0] * inv_a + color.r * src_a) / 255;
-            p[1] = (p[1] * inv_a + color.g * src_a) / 255;
-            p[2] = (p[2] * inv_a + color.b * src_a) / 255;
-            p[3] = 0xFF;
-        }
-        return;
-    }
-
-    uint32_t dst_a = p[3];
-    uint32_t out_a = src_a + (dst_a * inv_a + 127) / 255;
-    uint32_t out_r = (color.r * src_a + 127) / 255 + (p[0] * inv_a + 127) / 255;
-    uint32_t out_g = (color.g * src_a + 127) / 255 + (p[1] * inv_a + 127) / 255;
-    uint32_t out_b = (color.b * src_a + 127) / 255 + (p[2] * inv_a + 127) / 255;
-    p[0] = (uint8_t)(out_r > 255 ? 255 : out_r);
-    p[1] = (uint8_t)(out_g > 255 ? 255 : out_g);
-    p[2] = (uint8_t)(out_b > 255 ? 255 : out_b);
-    p[3] = (uint8_t)(out_a > 255 ? 255 : out_a);
-}
-
 // Helper: translate a glyph to tile-local coordinates and render
 static void replay_tile_glyph(ImageSurface* tile_surface,
                                DlDrawGlyph* g, float tile_x, float tile_y) {
     GlyphBitmap* bitmap = &g->bitmap;
 
     if (g->has_transform && !g->is_color_emoji) {
-        for (int i = 0; i < (int)bitmap->height; i++) {
-            for (int j = 0; j < (int)bitmap->width; j++) {
-                uint32_t intensity = tile_glyph_sample_pixel(bitmap, i, j);
-                if (intensity == 0) continue;
-
-                float src_x = (float)(g->x + j) + 0.5f;
-                float src_y = (float)(g->y + i) + 0.5f;
-                float page_x = g->transform.e11 * src_x + g->transform.e12 * src_y + g->transform.e13;
-                float page_y = g->transform.e21 * src_x + g->transform.e22 * src_y + g->transform.e23;
-                if (page_x < g->clip.left || page_x >= g->clip.right ||
-                    page_y < g->clip.top || page_y >= g->clip.bottom ||
-                    page_x < tile_x || page_x >= tile_x + tile_surface->width ||
-                    page_y < tile_y || page_y >= tile_y + tile_surface->height) {
-                    continue;
-                }
-
-                int dst_x = (int)floorf(page_x - tile_x);
-                int dst_y = (int)floorf(page_y - tile_y);
-                if (dst_x < 0 || dst_x >= tile_surface->width || dst_y < 0 || dst_y >= tile_surface->height) {
-                    continue;
-                }
-
-                uint8_t* p = (uint8_t*)tile_surface->pixels + dst_y * tile_surface->pitch + dst_x * 4;
-                Color color = g->color;
-                tile_blend_glyph_coverage_pixel(p, color, intensity);
-            }
-        }
+        glyph_draw_transformed_coverage_bitmap(tile_surface, bitmap, g->x, g->y,
+            &g->clip, g->color, &g->transform, tile_x, tile_y);
         return;
     }
 
@@ -440,65 +365,11 @@ static void replay_tile_glyph(ImageSurface* tile_surface,
     if (clip.bottom > tile_surface->height) clip.bottom = (float)tile_surface->height;
 
     if (g->is_color_emoji) {
-        float bscale = bitmap->bitmap_scale;
-        if (bscale <= 0.0f) bscale = 1.0f;
-        int target_w = (int)(bitmap->width  * bscale + 0.5f);
-        int target_h = (int)(bitmap->height * bscale + 0.5f);
-        if (target_w <= 0 || target_h <= 0) return;
-
-        int left   = std::max((int)clip.left,  x);
-        int right  = std::min((int)clip.right,  x + target_w);
-        int top    = std::max((int)clip.top,    y);
-        int bottom = std::min((int)clip.bottom, y + target_h);
-        if (left >= right || top >= bottom) return;
-
-        float inv_scale = 1.0f / bscale;
-        for (int dy = top - y; dy < bottom - y; dy++) {
-            uint8_t* row_pixels = (uint8_t*)tile_surface->pixels + (y + dy) * tile_surface->pitch;
-            float src_y = dy * inv_scale;
-
-            for (int dx = left - x; dx < right - x; dx++) {
-                if (x + dx < 0 || x + dx >= tile_surface->width) continue;
-                float src_x = dx * inv_scale;
-                GlyphColorSample sample = glyph_sample_bgra_bilinear(bitmap, src_x, src_y);
-
-                if (sample.a > 0) {
-                    uint8_t* dst = (uint8_t*)(row_pixels + (x + dx) * 4);
-                    if (sample.a == 255) {
-                        dst[0] = sample.r; dst[1] = sample.g; dst[2] = sample.b; dst[3] = 255;
-                    } else {
-                        uint32_t inv_alpha = 255 - sample.a;
-                        dst[0] = (dst[0] * inv_alpha + sample.r * sample.a) / 255;
-                        dst[1] = (dst[1] * inv_alpha + sample.g * sample.a) / 255;
-                        dst[2] = (dst[2] * inv_alpha + sample.b * sample.a) / 255;
-                        dst[3] = 255;
-                    }
-                }
-            }
-        }
+        glyph_draw_color_bgra_bitmap(tile_surface, bitmap, x, y, &clip);
         return;
     }
 
-    // grayscale / monochrome / LCD glyph
-    int left   = std::max((int)clip.left,  x);
-    int right  = std::min((int)clip.right,  x + (int)bitmap->width);
-    int top    = std::max((int)clip.top,    y);
-    int bottom = std::min((int)clip.bottom, y + (int)bitmap->height);
-    if (left >= right || top >= bottom) return;
-
-    for (int i = top - y; i < bottom - y; i++) {
-        uint8_t* row_pixels = (uint8_t*)tile_surface->pixels + (y + i) * tile_surface->pitch;
-        for (int j = left - x; j < right - x; j++) {
-            if (x + j < 0 || x + j >= tile_surface->width) continue;
-
-            uint32_t intensity = tile_glyph_sample_pixel(bitmap, i, j);
-
-            if (intensity > 0) {
-                uint8_t* p = (uint8_t*)(row_pixels + (x + j) * 4);
-                tile_blend_glyph_coverage_pixel(p, color, intensity);
-            }
-        }
-    }
+    glyph_draw_coverage_bitmap(tile_surface, bitmap, x, y, &clip, color);
 }
 
 void dl_replay_tile(DisplayList* dl, RdtVector* vec,

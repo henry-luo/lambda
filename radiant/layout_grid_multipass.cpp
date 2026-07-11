@@ -658,11 +658,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             if (grid_layout->row_intrinsic_height > 0.0f) {
                 float capped_height = grid_layout->row_intrinsic_height;
                 if (grid_container->bound) {
-                    capped_height += grid_container->bound->padding.top + grid_container->bound->padding.bottom;
-                    if (grid_container->bound->border) {
-                        capped_height += grid_container->bound->border->width.top +
-                                         grid_container->bound->border->width.bottom;
-                    }
+                    capped_height += layout_box_metrics(grid_container).pad_border_v;
                 }
                 if (capped_height > grid_container->height) {
                     grid_container->height = capped_height;
@@ -718,11 +714,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
         // Add padding and border
         float container_height = total_row_height;
         if (grid_container->bound) {
-            container_height += grid_container->bound->padding.top + grid_container->bound->padding.bottom;
-            if (grid_container->bound->border) {
-                container_height += grid_container->bound->border->width.top +
-                                   grid_container->bound->border->width.bottom;
-            }
+            container_height += layout_box_metrics(grid_container).pad_border_v;
         }
 
         // Only update if calculated height is greater (content overflow case)
@@ -768,11 +760,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             // Use grid_layout->content_width which is already correct.
             float container_width = (float)grid_layout->content_width;
             if (grid_container->bound) {
-                container_width += grid_container->bound->padding.left + grid_container->bound->padding.right;
-                if (grid_container->bound->border) {
-                    container_width += grid_container->bound->border->width.left +
-                                       grid_container->bound->border->width.right;
-                }
+                container_width += layout_box_metrics(grid_container).pad_border_h;
             }
             grid_container->width = container_width;
         }

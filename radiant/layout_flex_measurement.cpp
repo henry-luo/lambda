@@ -388,11 +388,8 @@ static float flex_item_content_width_for_child_percentages(LayoutContext* lycon,
          width_decl->value->data.keyword == CSS_VALUE_AUTO)) {
         content_width = flex_layout->cross_axis_size;
         if (block->bound) {
-            content_width -= block->bound->margin.left + block->bound->margin.right;
-            content_width -= block->bound->padding.left + block->bound->padding.right;
-            if (block->bound->border) {
-                content_width -= block->bound->border->width.left + block->bound->border->width.right;
-            }
+            BoxMetrics block_box = layout_box_metrics(block);
+            content_width -= block_box.margin_h + block_box.pad_border_h;
         }
         return fmax(content_width, 0.0f);
     }
@@ -1072,10 +1069,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             // Add child's vertical padding and border (CSS box model)
                             float vert_extra = 0;
                             if (sub_view && sub_view->bound) {
-                                vert_extra += sub_view->bound->padding.top + sub_view->bound->padding.bottom;
-                                if (sub_view->bound->border) {
-                                    vert_extra += sub_view->bound->border->width.top + sub_view->bound->border->width.bottom;
-                                }
+                                vert_extra += layout_boundary_metrics(sub_view->bound).pad_border_v;
                             }
                             if (vert_extra == 0 && elem && elem->specified_style) {
                                 // Fallback: resolve from specified_style (handles shorthand)
@@ -1420,10 +1414,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         // Add padding and border to measured height for total height
         // CSS box model: total_height = content_height + padding + border
         if (elem && elem->bound) {
-            measured_height += elem->bound->padding.top + elem->bound->padding.bottom;
-            if (elem->bound->border) {
-                measured_height += elem->bound->border->width.top + elem->bound->border->width.bottom;
-            }
+            measured_height += layout_boundary_metrics(elem->bound).pad_border_v;
             log_debug("Added box model to height: content=%.1f, total=%.1f (padding+border)",
                       content_height, measured_height);
         }
@@ -2097,12 +2088,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             // stored intrinsic sizes are content-box — resolve_flex_item_constraints
             // adds padding+border when converting to border-box for comparison.
             if (item->bound) {
-                float hp = item->bound->padding.left + item->bound->padding.right;
-                float hb = 0;
-                if (item->bound->border)
-                    hb = item->bound->border->width.left + item->bound->border->width.right;
-                min_width -= (hp + hb);
-                max_width -= (hp + hb);
+                float hp = layout_boundary_metrics(item->bound).pad_border_h;
+                min_width -= hp;
+                max_width -= hp;
                 if (min_width < 0) min_width = 0;
                 if (max_width < 0) max_width = 0;
             }
@@ -2155,9 +2143,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     }
                     // Subtract item's padding+border to get content width
                     if (item->bound) {
-                        available_width -= item->bound->padding.left + item->bound->padding.right;
-                        if (item->bound->border)
-                            available_width -= item->bound->border->width.left + item->bound->border->width.right;
+                        available_width -= layout_boundary_metrics(item->bound).pad_border_h;
                     }
                     if (available_width <= 0) available_width = 10000.0f;
                 }
@@ -2169,12 +2155,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 // adds padding+border when converting to border-box for comparison.
                 // (Same conversion as done for width above.)
                 if (item->bound) {
-                    float vp = item->bound->padding.top + item->bound->padding.bottom;
-                    float vb = 0;
-                    if (item->bound->border)
-                        vb = item->bound->border->width.top + item->bound->border->width.bottom;
-                    min_height -= (vp + vb);
-                    max_height -= (vp + vb);
+                    float vp = layout_boundary_metrics(item->bound).pad_border_v;
+                    min_height -= vp;
+                    max_height -= vp;
                     if (min_height < 0) min_height = 0;
                     if (max_height < 0) max_height = 0;
                 }
@@ -2507,9 +2490,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 }
                             }
                             if (item->bound) {
-                                row_width -= item->bound->padding.left + item->bound->padding.right;
-                                if (item->bound->border)
-                                    row_width -= item->bound->border->width.left + item->bound->border->width.right;
+                                row_width -= layout_boundary_metrics(item->bound).pad_border_h;
                             }
                             if (item->blk && item->blk->box_sizing != CSS_VALUE_BORDER_BOX) {
                                 if (item->blk->given_width >= 0.0f) {
@@ -2541,9 +2522,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             // Subtract child's own padding+border to get content width
                             float child_content_w = child_share;
                             if (child_view->bound) {
-                                child_content_w -= child_view->bound->padding.left + child_view->bound->padding.right;
-                                if (child_view->bound->border)
-                                    child_content_w -= child_view->bound->border->width.left + child_view->bound->border->width.right;
+                                child_content_w -= layout_boundary_metrics(child_view->bound).pad_border_h;
                             } else if (child_view->specified_style) {
                                 // Fallback: resolve padding/border from CSS when bound not yet computed
                                 float cp = 0, cb = 0;
@@ -2628,9 +2607,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                         if (item->blk && item->blk->given_width >= 0) {
                                             parent_cw = item->blk->given_width;
                                             if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
-                                                parent_cw -= item->bound->padding.left + item->bound->padding.right;
-                                                if (item->bound->border)
-                                                    parent_cw -= item->bound->border->width.left + item->bound->border->width.right;
+                                                parent_cw = layout_content_width_from_border_box(lam::view_as_block(item), parent_cw);
                                             }
                                         } else if (flex_layout && flex_layout->cross_axis_size > 0 && item->specified_style) {
                                             // Try resolving percentage width against container cross-axis
@@ -2649,9 +2626,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                             }
                                             // Convert border-box to content-box
                                             if (parent_cw > 0 && item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
-                                                parent_cw -= item->bound->padding.left + item->bound->padding.right;
-                                                if (item->bound->border)
-                                                    parent_cw -= item->bound->border->width.left + item->bound->border->width.right;
+                                                parent_cw = layout_content_width_from_border_box(lam::view_as_block(item), parent_cw);
                                             }
                                         }
                                         if (parent_cw > 0) {
@@ -2673,18 +2648,14 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                     if (item->blk && item->blk->given_width >= 0) {
                                         parent_cw = item->blk->given_width;
                                         if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
-                                            parent_cw -= item->bound->padding.left + item->bound->padding.right;
-                                            if (item->bound->border)
-                                                parent_cw -= item->bound->border->width.left + item->bound->border->width.right;
+                                            parent_cw = layout_content_width_from_border_box(lam::view_as_block(item), parent_cw);
                                         }
                                     } else if (flex_layout && flex_layout->cross_axis_size > 0) {
                                         parent_cw = flex_layout->cross_axis_size;
                                         if (item->bound)
                                             parent_cw -= item->bound->margin.left + item->bound->margin.right;
                                         if (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
-                                            parent_cw -= item->bound->padding.left + item->bound->padding.right;
-                                            if (item->bound->border)
-                                                parent_cw -= item->bound->border->width.left + item->bound->border->width.right;
+                                            parent_cw = layout_content_width_from_border_box(lam::view_as_block(item), parent_cw);
                                         }
                                     }
                                     if (parent_cw > 0) {
@@ -2790,10 +2761,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         auto strip_padding_border = [&](float border_box_height) -> float {
             float content_h = border_box_height;
             if (item->bound) {
-                content_h -= item->bound->padding.top + item->bound->padding.bottom;
-                if (item->bound->border) {
-                    content_h -= item->bound->border->width.top + item->bound->border->width.bottom;
-                }
+                content_h -= layout_boundary_metrics(item->bound).pad_border_v;
             }
             return (content_h > 0) ? content_h : 0;
         };

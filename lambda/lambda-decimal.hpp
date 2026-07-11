@@ -100,6 +100,10 @@ Item decimal_deep_copy(Item item, void* arena, bool is_unlimited);
 // Returns ItemNull if str is null or parse fails.
 Item decimal_from_string_arena(const char* str, void* arena_ptr);
 
+// Create a decimal/integer literal Item from a numeric literal body, preserving
+// the same fixed/unlimited/BigInt tier policy used by parsed Lambda literals.
+Item decimal_from_literal_string_arena(const char* str, void* arena_ptr, bool is_integer_literal);
+
 // Create an exact extended decimal Item from an oversized integer token.
 Item decimal_from_integer_string_arena(const char* str, void* arena_ptr);
 

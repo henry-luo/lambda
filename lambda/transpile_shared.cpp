@@ -52,11 +52,7 @@ bool needs_fn_call_wrapper(AstFuncNode* fn_node) {
         if (!ret_type && fn_node->body) ret_type = fn_node->body->type;
         if (!ret_type) ret_type = &TYPE_ANY;
         TypeId ret_tid = ret_type->type_id;
-        if (is_integer_type_id(ret_tid) ||
-            ret_tid == LMD_TYPE_FLOAT || ret_tid == LMD_TYPE_BOOL ||
-            ret_tid == LMD_TYPE_STRING || ret_tid == LMD_TYPE_BINARY ||
-            ret_tid == LMD_TYPE_SYMBOL || ret_tid == LMD_TYPE_DECIMAL ||
-            ret_tid == LMD_TYPE_DTIME) {
+        if (is_fn_call_wrapper_return_type_id(ret_tid)) {
             return true;
         }
     }

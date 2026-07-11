@@ -993,6 +993,14 @@ static inline bool is_typed_wrapper_param_type_id(TypeId type_id) {
            type_id == LMD_TYPE_OBJECT || type_id == LMD_TYPE_ELEMENT;
 }
 
+static inline bool is_fn_call_wrapper_return_type_id(TypeId type_id) {
+    return is_integer_type_id(type_id) ||
+           type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_BOOL ||
+           type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_BINARY ||
+           type_id == LMD_TYPE_SYMBOL || type_id == LMD_TYPE_DECIMAL ||
+           type_id == LMD_TYPE_DTIME;
+}
+
 #define IS_NUMERIC_ID(t) is_numeric_type_id((TypeId)(t))
 
 #define ITEM_TRUE           (((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)1)

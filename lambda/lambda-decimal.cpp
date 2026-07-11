@@ -366,6 +366,52 @@ Item decimal_from_string_arena(const char* str, void* arena_ptr) {
     return result;
 }
 
+static int decimal_count_literal_significant_digits(const char* str) {
+    bool seen_nonzero = false;
+    bool saw_digit = false;
+    int digits = 0;
+    for (const char* p = str; p && *p; p++) {
+        char ch = *p;
+        if (ch == 'e' || ch == 'E') break;
+        if (ch < '0' || ch > '9') continue;
+        saw_digit = true;
+        if (ch != '0') seen_nonzero = true;
+        if (seen_nonzero) digits++;
+    }
+    return saw_digit ? (digits > 0 ? digits : 1) : 0;
+}
+
+Item decimal_from_literal_string_arena(const char* str, void* arena_ptr, bool is_integer_literal) {
+    if (!str || !arena_ptr) return ItemNull;
+
+    Arena* arena = (Arena*)arena_ptr;
+    bool needs_unlimited = is_integer_literal ||
+        decimal_count_literal_significant_digits(str) > DECIMAL_FIXED_PRECISION;
+    mpd_context_t* ctx = needs_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
+    mpd_t* dec_val = mpd_new(ctx);
+    if (!dec_val) return ItemNull;
+
+    uint32_t status = 0;
+    mpd_qset_string(dec_val, str, ctx, &status);
+    if (status != 0 || mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
+        mpd_del(dec_val);
+        return ItemNull;
+    }
+
+    Decimal* dec = (Decimal*)arena_alloc(arena, sizeof(Decimal));
+    if (!dec) {
+        mpd_del(dec_val);
+        return ItemNull;
+    }
+
+    dec->unlimited = is_integer_literal ? DECIMAL_BIGINT : (needs_unlimited ? 1 : 0);
+    dec->dec_val = dec_val;
+
+    Item result;
+    result.item = c2it(dec);
+    return result;
+}
+
 Item decimal_from_integer_string_arena(const char* str, void* arena_ptr) {
     if (!str || !arena_ptr) return ItemNull;
 

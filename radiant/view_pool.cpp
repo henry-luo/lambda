@@ -29,27 +29,6 @@ bool get_combine_text_nodes() {
     return g_combine_text_nodes;
 }
 
-static ViewBlock* view_positioned_containing_block_for_abspos(ViewElement* view) {
-    for (ViewElement* ancestor = view ? view->parent_view() : nullptr;
-         ancestor;
-         ancestor = ancestor->parent_view()) {
-        if (ancestor->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* ancestor_span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
-            if (ancestor_span->position &&
-                ancestor_span->position->position != CSS_VALUE_STATIC) {
-                return lam::unsafe_view_block_api_span(ancestor_span);
-            }
-        } else if (ancestor->is_block()) {
-            ViewBlock* ancestor_block = lam::view_require_block(ancestor);
-            if (ancestor_block->position &&
-                ancestor_block->position->position != CSS_VALUE_STATIC) {
-                return ancestor_block;
-            }
-        }
-    }
-    return nullptr;
-}
-
 // Helper function to get view type name for JSON
 const char* View::view_name() {
     switch (this->view_type) {
@@ -1332,7 +1311,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
         // Absolute: position is relative to containing block
         // Need to get the containing block's absolute position
 
-        ViewBlock* cb = view_positioned_containing_block_for_abspos(
+        ViewBlock* cb = find_positioned_containing_block(
             lam::view_require_element(view));
 
         if (cb) {
@@ -1347,7 +1326,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                 // Absolute containing block: recursively find ITS containing block chain
                 ViewBlock* current = cb;
                 while (true) {
-                    ViewBlock* cb_cb = view_positioned_containing_block_for_abspos(
+                    ViewBlock* cb_cb = find_positioned_containing_block(
                         reinterpret_cast<ViewElement*>(current));
 
                     if (!cb_cb) break;  // Reached root
@@ -1406,7 +1385,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                 if (parent_block->position &&
                     parent_block->position->position == CSS_VALUE_ABSOLUTE) {
                     ViewBlock* positioned_parent_cb =
-                        view_positioned_containing_block_for_abspos(parent_block);
+                        find_positioned_containing_block(parent_block);
                     if (!positioned_parent_cb) {
                         // No positioned ancestor - containing block is root (already at 0,0)
                         break;

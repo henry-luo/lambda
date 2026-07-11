@@ -780,7 +780,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     // Check if width was only set to padding (content_width is 0)
     float current_content_width = flex_container->width;
     if (flex_container->bound) {
-        current_content_width -= (flex_container->bound->padding.left + flex_container->bound->padding.right);
+        current_content_width -= layout_box_metrics(flex_container).padding_h;
     }
     if (flex_layout && !is_main_axis_horizontal(flex_layout) && !has_explicit_width && !has_flex_basis_width && current_content_width <= 0) {
         // Column flex with auto width: calculate width from widest flex item
@@ -810,8 +810,9 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
             // Add padding to content width for final container width
             float padding_left = 0, padding_right = 0;
             if (flex_container->bound) {
-                padding_left = flex_container->bound->padding.left;
-                padding_right = flex_container->bound->padding.right;
+                BoxMetrics container_box = layout_box_metrics(flex_container);
+                padding_left = container_box.padding.left;
+                padding_right = container_box.padding.right;
             }
             float total_width = max_item_width + padding_left + padding_right;
             flex_layout->cross_axis_size = max_item_width;  // Content width
@@ -886,13 +887,9 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
 
                 // Account for container padding and border
                 if (flex_container->bound) {
-                    container_width -= (flex_container->bound->padding.left + flex_container->bound->padding.right);
-                    container_height -= (flex_container->bound->padding.top + flex_container->bound->padding.bottom);
-
-                    if (flex_container->bound->border) {
-                        container_width -= (flex_container->bound->border->width.left + flex_container->bound->border->width.right);
-                        container_height -= (flex_container->bound->border->width.top + flex_container->bound->border->width.bottom);
-                    }
+                    BoxMetrics container_box = layout_box_metrics(flex_container);
+                    container_width -= container_box.pad_border_h;
+                    container_height -= container_box.pad_border_v;
                 }
 
                 // Center the item — ONLY in cross axis
@@ -972,14 +969,13 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
     if (flex_item->bound) {
         // Account for padding and border in content area
-        content_width -= (flex_item->bound->padding.left + flex_item->bound->padding.right);
-        content_height -= (flex_item->bound->padding.top + flex_item->bound->padding.bottom);
-        content_x_offset = flex_item->bound->padding.left;
-        content_y_offset = flex_item->bound->padding.top;
+        BoxMetrics item_box = layout_box_metrics(flex_item);
+        content_width -= item_box.pad_border_h;
+        content_height -= item_box.pad_border_v;
+        content_x_offset = item_box.padding.left;
+        content_y_offset = item_box.padding.top;
 
         if (flex_item->bound->border) {
-            content_width -= (flex_item->bound->border->width.left + flex_item->bound->border->width.right);
-            content_height -= (flex_item->bound->border->width.top + flex_item->bound->border->width.bottom);
             content_x_offset += flex_item->bound->border->width.left;
             content_y_offset += flex_item->bound->border->width.top;
         }
@@ -1487,15 +1483,14 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         float container_content_height = flex_container->height;
 
         if (flex_container->bound) {
-            container_content_x = flex_container->bound->padding.left;
-            container_content_y = flex_container->bound->padding.top;
-            container_content_width -= flex_container->bound->padding.left + flex_container->bound->padding.right;
-            container_content_height -= flex_container->bound->padding.top + flex_container->bound->padding.bottom;
+            BoxMetrics container_box = layout_box_metrics(flex_container);
+            container_content_x = container_box.padding.left;
+            container_content_y = container_box.padding.top;
+            container_content_width -= container_box.pad_border_h;
+            container_content_height -= container_box.pad_border_v;
             if (flex_container->bound->border) {
                 container_content_x += flex_container->bound->border->width.left;
                 container_content_y += flex_container->bound->border->width.top;
-                container_content_width -= flex_container->bound->border->width.left + flex_container->bound->border->width.right;
-                container_content_height -= flex_container->bound->border->width.top + flex_container->bound->border->width.bottom;
             }
         }
 
@@ -2294,11 +2289,9 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 float padding_height = 0.0f;
                 float border_height = 0.0f;
                 if (flex_container->bound) {
-                    padding_height = flex_container->bound->padding.top + flex_container->bound->padding.bottom;
-                    if (flex_container->bound->border) {
-                        border_height = flex_container->bound->border->width.top +
-                            flex_container->bound->border->width.bottom;
-                    }
+                    BoxMetrics container_box = layout_box_metrics(flex_container);
+                    padding_height = container_box.padding_v;
+                    border_height = container_box.border_v;
                 }
                 float new_height = recomputed_count > 0
                     ? recomputed_content_height + padding_height + border_height
@@ -2359,11 +2352,9 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 float padding_height = 0.0f;
                 float border_height = 0.0f;
                 if (flex_container->bound) {
-                    padding_height = flex_container->bound->padding.top + flex_container->bound->padding.bottom;
-                    if (flex_container->bound->border) {
-                        border_height = flex_container->bound->border->width.top +
-                            flex_container->bound->border->width.bottom;
-                    }
+                    BoxMetrics container_box = layout_box_metrics(flex_container);
+                    padding_height = container_box.padding_v;
+                    border_height = container_box.border_v;
                 }
                 float actual_border_height = actual_cross_height + padding_height + border_height;
                 actual_border_height = flex_apply_border_box_height_constraints(flex_container, actual_border_height);
@@ -2481,10 +2472,9 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     total_line_cross : max_line_cross;
                 float padding_height = 0, border_height = 0;
                 if (flex_container->bound) {
-                    padding_height = flex_container->bound->padding.top + flex_container->bound->padding.bottom;
-                    if (flex_container->bound->border) {
-                        border_height = flex_container->bound->border->width.top + flex_container->bound->border->width.bottom;
-                    }
+                    BoxMetrics container_box = layout_box_metrics(flex_container);
+                    padding_height = container_box.padding_v;
+                    border_height = container_box.border_v;
                 }
                 float new_height = new_cross_axis_size + padding_height + border_height;
                 float constrained_height = layout_apply_min_max_height(flex_container, new_height, true);
@@ -2586,20 +2576,16 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 }
                 float padding_height = 0, border_height = 0;
                 if (flex_container->bound) {
-                    padding_height = flex_container->bound->padding.top + flex_container->bound->padding.bottom;
-                    if (flex_container->bound->border) {
-                        border_height = flex_container->bound->border->width.top + flex_container->bound->border->width.bottom;
-                    }
+                    BoxMetrics container_box = layout_box_metrics(flex_container);
+                    padding_height = container_box.padding_v;
+                    border_height = container_box.border_v;
                 }
                 float new_height = total_line_cross + padding_height + border_height;
                 // CSS §10.7: Respect max-height constraint
                 if (flex_container->blk && flex_container->blk->given_max_height > 0) {
                     float max_box = flex_container->blk->given_max_height;
                     if (!flex_container->blk || flex_container->blk->box_sizing != CSS_VALUE_BORDER_BOX) {
-                        max_box += padding_height;
-                        if (flex_container->bound && flex_container->bound->border) {
-                            max_box += flex_container->bound->border->width.top + flex_container->bound->border->width.bottom;
-                        }
+                        max_box = layout_border_size_from_content_box(flex_container, max_box, false);
                     }
                     if (new_height > max_box) new_height = max_box;
                 }
@@ -2631,7 +2617,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 if (max_item_height > 0) {
                     float padding_height = 0;
                     if (flex_container->bound) {
-                        padding_height = flex_container->bound->padding.top + flex_container->bound->padding.bottom;
+                        padding_height = layout_box_metrics(flex_container).padding_v;
                     }
                     float new_height = max_item_height + padding_height;
 
@@ -2639,10 +2625,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     if (flex_container->blk && flex_container->blk->given_max_height > 0) {
                         float max_box = flex_container->blk->given_max_height;
                         if (!flex_container->blk || flex_container->blk->box_sizing != CSS_VALUE_BORDER_BOX) {
-                            max_box += padding_height;
-                            if (flex_container->bound && flex_container->bound->border) {
-                                max_box += flex_container->bound->border->width.top + flex_container->bound->border->width.bottom;
-                            }
+                            max_box = layout_border_size_from_content_box(flex_container, max_box, false);
                         }
                         if (new_height > max_box) {
                             log_debug("ROW FLEX HEIGHT FIX: clamping new_height %.1f to max-height %.1f",

@@ -27,12 +27,8 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
     View* saved_view = lycon->view;
 
     float content_width = cap->width;
-    if (cap->bound) {
-        content_width -= cap->bound->padding.left + cap->bound->padding.right;
-        if (cap->bound->border) {
-            content_width -= cap->bound->border->width.left + cap->bound->border->width.right;
-        }
-    }
+    BoxMetrics cap_box = layout_box_metrics(cap);
+    content_width -= cap_box.pad_border_h;
     content_width = max(content_width, 0.0f);
 
     lycon->view = static_cast<View*>(cap);
@@ -109,12 +105,7 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
         ? cap->blk->given_height : -1;
     if (caption_given_height >= 0) {
         cap->height = caption_given_height;
-        if (cap->bound) {
-            cap->height += cap->bound->padding.top + cap->bound->padding.bottom;
-            if (cap->bound->border) {
-                cap->height += cap->bound->border->width.top + cap->bound->border->width.bottom;
-            }
-        }
+        cap->height += cap_box.pad_border_v;
     } else {
         cap->height = caption_content_height;
         if (cap->bound) {

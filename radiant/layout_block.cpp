@@ -2991,12 +2991,8 @@ static void adjust_block_children_after_shrink(ViewBlock* parent, float new_pare
         cb->width = new_width;
 
         // compute padding+border for content area calculations
-        float pb = 0;
-        if (cb->bound) {
-            pb += cb->bound->padding.left + cb->bound->padding.right;
-            if (cb->bound->border)
-                pb += cb->bound->border->width.left + cb->bound->border->width.right;
-        }
+        BoxMetrics cb_box = layout_box_metrics(cb);
+        float pb = cb_box.pad_border_h;
         float new_avail_cw = new_width - pb;
 
         // text-align: use child's own value if it has blk, otherwise inherit from parent
@@ -3032,9 +3028,9 @@ static float compute_in_flow_child_margin_box_width(ViewBlock* parent) {
         max_right = max(max_right, child_right);
     }
 
-    if (max_right > 0 && parent->bound) {
-        max_right += parent->bound->padding.right;
-        if (parent->bound->border) max_right += parent->bound->border->width.right;
+    if (max_right > 0) {
+        BoxMetrics parent_box = layout_box_metrics(parent);
+        max_right += parent_box.padding.right + parent_box.border.right;
     }
 
     return max_right;
@@ -3043,6 +3039,7 @@ static float compute_in_flow_child_margin_box_width(ViewBlock* parent) {
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display) {
     // finalize the block size
     float flow_width, flow_height;
+    BoxMetrics block_box = layout_box_metrics(block);
     if (block->bound) {
         // max_width already includes padding.left and border.left
         block->content_width = lycon->block.max_width + block->bound->padding.right;
@@ -3064,8 +3061,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     if (block->view_type == RDT_VIEW_LIST_ITEM) {
         float content_area_height = lycon->block.advance_y;
         if (block->bound) {
-            content_area_height -= block->bound->padding.top;
-            if (block->bound->border) content_area_height -= block->bound->border->width.top;
+            content_area_height -= block_box.padding.top + block_box.border.top;
         }
         if (content_area_height <= 0) {
             bool has_marker = true;
@@ -3102,9 +3098,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         if (lycon->block.line_clamped && lycon->block.line_clamp_advance_y >= 0.0f) {
             float clamp_content_height = lycon->block.line_clamp_advance_y;
             if (block->bound) {
-                clamp_content_height += block->bound->padding.bottom;
-                flow_height = clamp_content_height +
-                    (block->bound->border ? block->bound->border->width.bottom : 0.0f);
+                clamp_content_height += block_box.padding.bottom;
+                flow_height = clamp_content_height + block_box.border.bottom;
             } else {
                 flow_height = clamp_content_height;
             }
@@ -3156,13 +3151,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                                         intrinsic.max_content);
 
         // CSS 2.1 §10.3.9: shrink-to-fit width cannot be less than border+padding
-        float min_bp_width = 0;
-        if (block->bound) {
-            min_bp_width = block->bound->padding.left + block->bound->padding.right;
-            if (block->bound->border) {
-                min_bp_width += block->bound->border->width.left + block->bound->border->width.right;
-            }
-        }
+        float min_bp_width = block_box.pad_border_h;
         // CSS 2.1 §10.3.9: Shrink-to-fit width = min(max(preferred_minimum_width,
         // available_width), preferred_width). After layout, flow_width captures the
         // actual content extent — if content has explicit wider widths, flow_width
@@ -3191,12 +3180,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         if (lycon->block.text_align == CSS_VALUE_CENTER || lycon->block.text_align == CSS_VALUE_RIGHT) {
             // Calculate content width (excluding border/padding)
             float final_content_width = block->width;
-            if (block->bound) {
-                final_content_width -= (block->bound->padding.left + block->bound->padding.right);
-                if (block->bound->border) {
-                    final_content_width -= (block->bound->border->width.left + block->bound->border->width.right);
-                }
-            }
+            final_content_width -= block_box.pad_border_h;
             align_deferred_inline_line_runs(lam::view_require_element(block),
                                             final_content_width,
                                             lycon->block.text_align);
@@ -3206,11 +3190,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         // pre-shrink available width. Compute the inline-block's new content width
         // and recursively update auto-width block children.
         float shrunk_cw = block->width;
-        if (block->bound) {
-            shrunk_cw -= block->bound->padding.left + block->bound->padding.right;
-            if (block->bound->border)
-                shrunk_cw -= block->bound->border->width.left + block->bound->border->width.right;
-        }
+        shrunk_cw -= block_box.pad_border_h;
         adjust_block_children_after_shrink(block, max(shrunk_cw, 0.0f), lycon->block.text_align);
     }
 
@@ -3233,13 +3213,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                 block->blk->given_width_type == CSS_VALUE_AUTO ||
                 block->blk->given_width_type == CSS_VALUE__UNDEF;
             if (is_first_legend && width_is_auto) {
-                float min_bp_width = 0;
-                if (block->bound) {
-                    min_bp_width = block->bound->padding.left + block->bound->padding.right;
-                    if (block->bound->border) {
-                        min_bp_width += block->bound->border->width.left + block->bound->border->width.right;
-                    }
-                }
+                float min_bp_width = block_box.pad_border_h;
                 float shrunk = min(max(flow_width, min_bp_width), block->width);
                 log_debug("%s legend shrink-to-fit: flow_width=%.1f, old_width=%.1f, new_width=%.1f", block->source_loc(),
                     flow_width, block->width, shrunk);
@@ -3247,11 +3221,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
 
                 // Adjust block children to match the shrunk legend width
                 float legend_cw = block->width;
-                if (block->bound) {
-                    legend_cw -= block->bound->padding.left + block->bound->padding.right;
-                    if (block->bound->border)
-                        legend_cw -= block->bound->border->width.left + block->bound->border->width.right;
-                }
+                legend_cw -= block_box.pad_border_h;
                 CssEnum ta = block->blk ? block->blk->text_align : CSS_VALUE__UNDEF;
                 adjust_block_children_after_shrink(block, max(legend_cw, 0.0f), ta);
             }
@@ -3375,10 +3345,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             float final_height;
             bool is_content_box = !block->blk || block->blk->box_sizing != CSS_VALUE_BORDER_BOX;
             if (is_content_box && block->bound) {
-                float pb = block->bound->padding.top + block->bound->padding.bottom;
-                if (block->bound->border) {
-                    pb += block->bound->border->width.top + block->bound->border->width.bottom;
-                }
+                float pb = block_box.pad_border_v;
                 float content_only = max(auto_height - pb, 0.0f);
                 content_only = adjust_min_max_height(block, content_only);
                 final_height = content_only + pb;
@@ -5523,12 +5490,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             if (block->blk && block->blk->given_height >= 0) {
                 // Explicit CSS height → compute border-box height
                 element_border_box_height = block->blk->given_height;
-                if (block->bound) {
-                    element_border_box_height += block->bound->padding.top + block->bound->padding.bottom;
-                    if (block->bound->border) {
-                        element_border_box_height += block->bound->border->width.top + block->bound->border->width.bottom;
-                    }
-                }
+                BoxMetrics block_box = layout_box_metrics(block);
+                element_border_box_height += block_box.pad_border_v;
             } else if (parent_bfc->lowest_float_bottom > y_in_bfc) {
                 // Auto-height: conservatively check from top to lowest float bottom.
                 // CSS 2.1 §9.5 requires no overlap with ANY float. Since we don't know
@@ -5655,12 +5618,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                         lycon, lam::dom_require<DOM_NODE_ELEMENT>(block), "block rigid min width");
                     min_required = isizes.min_content;
                     // Add border/padding (min_content is content-box width)
-                    if (block->bound) {
-                        min_required += block->bound->padding.left + block->bound->padding.right;
-                        if (block->bound->border) {
-                            min_required += block->bound->border->width.left + block->bound->border->width.right;
-                        }
-                    }
+                    BoxMetrics block_box = layout_box_metrics(block);
+                    min_required += block_box.pad_border_h;
 
                     if (min_required > available_beside_float + 0.5f) {
                         should_step_down = true;
@@ -6351,10 +6310,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
 
     if (block->bound) {
-        block->width = content_width + block->bound->padding.left + block->bound->padding.right +
-            (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
-        block->height = content_height + block->bound->padding.top + block->bound->padding.bottom +
-            (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
+        BoxMetrics block_box = layout_box_metrics(block);
+        block->width = content_width + block_box.pad_border_h;
+        block->height = content_height + block_box.pad_border_v;
         // todo: we should keep LENGTH_AUTO (may be in flags) for reflow
 
         CssEnum parent_legacy_block_align = CSS_VALUE__UNDEF;
@@ -6887,12 +6845,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
             // Also update content_width for child layout
             float new_content_width = block->width;
-            if (block->bound) {
-                new_content_width -= block->bound->padding.left + block->bound->padding.right;
-                if (block->bound->border) {
-                    new_content_width -= block->bound->border->width.left + block->bound->border->width.right;
-                }
-            }
+            BoxMetrics block_box = layout_box_metrics(block);
+            new_content_width -= block_box.pad_border_h;
             block->content_width = max(new_content_width, 0.0f);
             lycon->block.content_width = block->content_width;
 

@@ -99,7 +99,7 @@ public:
             handlers.null_value(item);
         } else if (item.isBool()) {
             handlers.bool_value(item);
-        } else if (item.isInt() || item.isFloat()) {
+        } else if (item.isInt() || item.isFloat() || item.getType() == LMD_TYPE_DECIMAL) {
             handlers.number_value(item);
         } else if (item.isString()) {
             handlers.string_value(item, item.asString());

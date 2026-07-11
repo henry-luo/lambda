@@ -1,5 +1,6 @@
 #include "render_columns.hpp"
 #include "render.hpp"
+#include "layout_box.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
@@ -29,10 +30,7 @@ void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
 
     float rule_height = block->height;
     if (block->bound) {
-        rule_height -= block->bound->padding.top + block->bound->padding.bottom;
-        if (block->bound->border) {
-            rule_height -= block->bound->border->width.top + block->bound->border->width.bottom;
-        }
+        rule_height -= layout_box_metrics(block).pad_border_v;
     }
 
     if (rule_height <= 0) {

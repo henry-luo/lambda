@@ -4,6 +4,7 @@
 
 #include "layout_alignment.hpp"
 #include "layout.hpp"
+#include "layout_box.hpp"
 #include "view.hpp"
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/css_value.hpp"
@@ -212,25 +213,25 @@ float compute_element_first_baseline(
     bool is_row_direction
 ) {
     if (!element) return -1.0f;
+    (void)lycon;
+    (void)is_row_direction;
 
-    // CSS 2.1 §10.8.1: The baseline of a box is the baseline of the first in-flow
-    // child that has one, or the bottom content edge if there is no such child.
-    // For flex containers, the baseline is the first flex item's baseline.
-    // For block boxes with no in-flow content, use the bottom content edge (= height).
+    if (element->font) {
+        BoxMetrics box = layout_box_metrics(element);
+        return box.padding.top + box.border.top + element->font->font_size * 0.8f;
+    }
 
-    // Try to find the first in-flow child with a baseline
-    View* child = element->first_placed_child();
-    if (ViewBlock* child_block = lam::view_as_block(child)) {
-        // Recurse into the first block-level child
-        float child_baseline = compute_element_first_baseline(
-            lycon, child_block, is_row_direction);
+    // CSS 2.1 §10.8.1: use the first in-flow child baseline when one exists.
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        ViewBlock* child_block = lam::unsafe_view_block_element_storage(child->as_element());
+        float child_baseline = compute_element_first_baseline(lycon, child_block, is_row_direction);
         if (child_baseline >= 0) {
-            return child->y + child_baseline;
+            return child_block->y + child_baseline;
         }
     }
 
-    // No child with baseline: use the element's height as baseline
-    // (equivalent to the bottom content edge of an empty block)
+    // No child with baseline: synthesize from the bottom border edge.
     return element->height;
 }
 
