@@ -140,6 +140,7 @@ DateTime* datetime_to_utc(Pool* pool, DateTime* dt);
 DateTime* datetime_to_local(Pool* pool, DateTime* dt);
 
 // Convert between DateTime and unix timestamp
+int64_t datetime_days_from_civil(int64_t year, unsigned month, unsigned day);
 int64_t datetime_to_unix(DateTime* dt);
 int64_t datetime_to_unix_ms(DateTime* dt);
 DateTime* datetime_from_unix(Pool* pool, int64_t unix_timestamp);

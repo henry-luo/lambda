@@ -4,6 +4,7 @@
 #include "input-utils.hpp"
 #include "source_tracker.hpp"
 #include "../../lib/datetime.h"
+#include "../../lib/str.h"
 
 using namespace lambda;
 
@@ -13,27 +14,16 @@ static Element* parse_element(InputContext& ctx, const char **mark, int depth = 
 static Item parse_value(InputContext& ctx, const char **mark, int depth = 0);
 static Item parse_content(InputContext& ctx, const char **mark, int depth = 0);
 
-static void skip_comments(const char **mark) {
-    skip_whitespace(mark);
-    while (**mark == '/' && *(*mark + 1) == '/') {
-        // Skip single-line comment
-        while (**mark && **mark != '\n' && **mark != '\r') {
-            (*mark)++;
-        }
-        skip_whitespace(mark);
-    }
+static inline bool mark_is_binary_space(char c) {
+    return c == ' ' || c == '\t' || c == '\n';
+}
 
-    // Handle multi-line comments /* ... */
-    while (**mark == '/' && *(*mark + 1) == '*') {
-        *mark += 2; // Skip /*
-        while (**mark && !(**mark == '*' && *(*mark + 1) == '/')) {
-            (*mark)++;
-        }
-        if (**mark == '*' && *(*mark + 1) == '/') {
-            *mark += 2; // Skip */
-        }
-        skip_whitespace(mark);
-    }
+static inline bool mark_is_base64_char(char c) {
+    return str_char_is_alnum(c) || c == '+' || c == '/' || c == '=';
+}
+
+static void skip_comments(const char **mark) {
+    skip_whitespace_and_comment_markers(mark, "//", nullptr, true);
 }
 
 static String* parse_string(InputContext& ctx, const char **mark) {
@@ -56,23 +46,25 @@ static String* parse_string(InputContext& ctx, const char **mark) {
                 case 'r': stringbuf_append_char(sb, '\r'); break;
                 case 't': stringbuf_append_char(sb, '\t'); break;
                 case 'u': {
-                    // peek 4 hex digits without advancing first; *mark points at 'u'.
-                    // short-circuit && stops at the first non-hex byte (including the NUL
-                    // terminator), so a truncated "\u"/"\uAB" at end-of-input never reads
-                    // or advances past the buffer. on success advance to the last hex digit;
-                    // the loop's trailing (*mark)++ then lands on the char after the escape.
                     const char* h = *mark + 1;
-                    auto is_hex = [](char c) {
-                        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-                    };
-                    if (is_hex(h[0]) && is_hex(h[1]) && is_hex(h[2]) && is_hex(h[3])) {
-                        char hex[5] = {0};
-                        strncpy(hex, h, 4);
-                        int codepoint = (int)strtol(hex, NULL, 16);
-                        append_codepoint_utf8(sb, (uint32_t)codepoint);
-                        (*mark) += 4; // 'u' -> last hex digit; trailing ++ moves past it
+                    uint32_t codepoint = parse_hex_codepoint(&h, 4);
+                    if (codepoint != 0xFFFFFFFF) {
+                        if (codepoint >= 0xD800 && codepoint <= 0xDBFF && h[0] == '\\' && h[1] == 'u') {
+                            const char* low_pos = h + 2;
+                            uint32_t low = parse_hex_codepoint(&low_pos, 4);
+                            uint32_t combined = decode_surrogate_pair((uint16_t)codepoint, (uint16_t)low);
+                            if (low != 0xFFFFFFFF && combined != 0) {
+                                codepoint = combined;
+                                h = low_pos;
+                            } else {
+                                codepoint = 0xFFFD;
+                            }
+                        } else if (codepoint >= 0xDC00 && codepoint <= 0xDFFF) {
+                            codepoint = 0xFFFD;
+                        }
+                        append_codepoint_utf8(sb, codepoint);
+                        *mark = h - 1; // trailing ++ moves past the escape.
                     }
-                    // else: invalid/truncated escape — leave *mark on 'u' (trailing ++ is safe)
                 } break;
                 default: break; // invalid escape
             }
@@ -155,11 +147,9 @@ static Item parse_binary(InputContext& ctx, const char **mark) {
     if (**mark == '\\' && *(*mark + 1) == 'x') {
         *mark += 2; // Skip \x
         while (**mark && **mark != '\'') {
-            if ((**mark >= '0' && **mark <= '9') ||
-                (**mark >= 'a' && **mark <= 'f') ||
-                (**mark >= 'A' && **mark <= 'F')) {
+            if (str_is_hex(**mark)) {
                 stringbuf_append_char(sb, **mark);
-            } else if (**mark != ' ' && **mark != '\t' && **mark != '\n') {
+            } else if (!mark_is_binary_space(**mark)) {
                 break; // Invalid hex character
             }
             (*mark)++;
@@ -169,12 +159,9 @@ static Item parse_binary(InputContext& ctx, const char **mark) {
     else if (**mark == '\\' && (*(*mark + 1) == '6' && *(*mark + 2) == '4')) {
         *mark += 3; // Skip \64
         while (**mark && **mark != '\'') {
-            if ((**mark >= 'A' && **mark <= 'Z') ||
-                (**mark >= 'a' && **mark <= 'z') ||
-                (**mark >= '0' && **mark <= '9') ||
-                **mark == '+' || **mark == '/' || **mark == '=') {
+            if (mark_is_base64_char(**mark)) {
                 stringbuf_append_char(sb, **mark);
-            } else if (**mark != ' ' && **mark != '\t' && **mark != '\n') {
+            } else if (!mark_is_binary_space(**mark)) {
                 break; // Invalid base64 character
             }
             (*mark)++;
@@ -183,11 +170,9 @@ static Item parse_binary(InputContext& ctx, const char **mark) {
     // Default hex format without \x prefix
     else {
         while (**mark && **mark != '\'') {
-            if ((**mark >= '0' && **mark <= '9') ||
-                (**mark >= 'a' && **mark <= 'f') ||
-                (**mark >= 'A' && **mark <= 'F')) {
+            if (str_is_hex(**mark)) {
                 stringbuf_append_char(sb, **mark);
-            } else if (**mark != ' ' && **mark != '\t' && **mark != '\n') {
+            } else if (!mark_is_binary_space(**mark)) {
                 break; // Invalid hex character
             }
             (*mark)++;
@@ -233,22 +218,18 @@ static Item parse_datetime(InputContext& ctx, const char **mark) {
     return {.item = s2it(content_str)};
 }
 
-static Item parse_number(Input *input, const char **mark) {
-    double *dval;
-    dval = (double*)pool_calloc(input->pool, sizeof(double));
-    if (dval == NULL) return {.item = ITEM_ERROR};
-
+static Item parse_number(InputContext& ctx, const char **mark) {
     char* end;
-    *dval = strtod(*mark, &end);
+    double dval = strtod(*mark, &end);
     *mark = end;
 
-    // Check for decimal suffix (n or N)
-    if (**mark == 'n' || **mark == 'N') {
+    // Check for numeric suffix (n = integer, m = decimal; N retired)
+    if (**mark == 'n' || **mark == 'N' || **mark == 'm') {
         (*mark)++;
         // For now, treat as regular double - could enhance for true decimal support
     }
 
-    return lambda_float_ptr_to_item(dval);
+    return ctx.builder.createFloat(dval);
 }
 
 static Array* parse_array(InputContext& ctx, const char **mark, int depth = 0) {
@@ -501,7 +482,6 @@ static Item parse_content(InputContext& ctx, const char **mark, int depth) {
 }
 
 static Item parse_value(InputContext& ctx, const char **mark, int depth) {
-    Input* input = ctx.input();
     skip_comments(mark);
 
     if (depth >= MARK_MAX_DEPTH) {
@@ -552,43 +532,27 @@ static Item parse_value(InputContext& ctx, const char **mark, int depth) {
                 return {.item = ITEM_NULL};
             } else if (strncmp(*mark, "nan", 3) == 0) {
                 *mark += 3;
-                double *dval;
-                dval = (double*)pool_calloc(input->pool, sizeof(double));
-                if (dval == NULL) return {.item = ITEM_ERROR};
-                *dval = NAN;
-                return lambda_float_ptr_to_item(dval);
+                return ctx.builder.createFloat(NAN);
             }
             goto UNQUOTED_IDENTIFIER;
         case 'i':
             if (strncmp(*mark, "inf", 3) == 0) {
                 *mark += 3;
-                double *dval;
-                dval = (double*)pool_calloc(input->pool, sizeof(double));
-                if (dval == NULL) return {.item = ITEM_ERROR};
-                *dval = INFINITY;
-                return lambda_float_ptr_to_item(dval);
+                return ctx.builder.createFloat(INFINITY);
             }
             goto UNQUOTED_IDENTIFIER;
         case '-':
             if (strncmp(*mark, "-inf", 4) == 0) {
                 *mark += 4;
-                double *dval;
-                dval = (double*)pool_calloc(input->pool, sizeof(double));
-                if (dval == NULL) return {.item = ITEM_ERROR};
-                *dval = -INFINITY;
-                return lambda_float_ptr_to_item(dval);
+                return ctx.builder.createFloat(-INFINITY);
             } else if (strncmp(*mark, "-nan", 4) == 0) {
                 *mark += 4;
-                double *dval;
-                dval = (double*)pool_calloc(input->pool, sizeof(double));
-                if (dval == NULL) return {.item = ITEM_ERROR};
-                *dval = -NAN;
-                return lambda_float_ptr_to_item(dval);
+                return ctx.builder.createFloat(-NAN);
             }
             // Fall through to number parsing
         default:
             if ((**mark >= '0' && **mark <= '9') || **mark == '-' || **mark == '+') {
-                return parse_number(input, mark);
+                return parse_number(ctx, mark);
             }
             else if ((**mark >= 'a' && **mark <= 'z') ||
                 (**mark >= 'A' && **mark <= 'Z') || **mark == '_') {

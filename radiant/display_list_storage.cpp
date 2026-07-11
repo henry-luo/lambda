@@ -7,6 +7,7 @@
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
 #include "../lib/checked_math.hpp"
+#include "../lib/mem_grow.hpp"
 #include <string.h>
 
 #define DL_INITIAL_CAPACITY 2048
@@ -15,16 +16,9 @@
 DisplayItem* dl_alloc_item(DisplayList* dl) {
     if (!dl) return nullptr;
     if (dl->count >= dl->capacity) {
-        int new_cap = dl->capacity ? dl->capacity * 2 : DL_INITIAL_CAPACITY;
-        size_t bytes;
-        if (new_cap <= dl->capacity ||                                  // int doubling overflow
-            !lam::checked_mul((size_t)new_cap, sizeof(DisplayItem), &bytes)) {
-            return nullptr;
-        }
-        DisplayItem* grown = (DisplayItem*)mem_realloc(dl->items, bytes, MEM_CAT_RENDER);
-        if (!grown) return nullptr;            // OOM — leave dl->items/capacity intact
-        dl->items = grown;
-        dl->capacity = new_cap;
+        // keep list state intact on overflow/OOM so callers never see a half-grown buffer
+        if (!lam::mem_grow_array(&dl->items, &dl->capacity, dl->count + 1,
+                                 DL_INITIAL_CAPACITY, MEM_CAT_RENDER)) return nullptr;
     }
     DisplayItem* item = &dl->items[dl->count++];
     memset(item, 0, sizeof(DisplayItem));

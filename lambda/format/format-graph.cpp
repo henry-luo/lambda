@@ -1,7 +1,10 @@
 #include "format.h"
 #include "../mark_reader.hpp"
+#include "../../lib/escape.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/log.h"
+
+#include <string.h>
 
 // ============================================================================
 // Escape rules (Problem 1 — already table-driven)
@@ -9,12 +12,13 @@
 
 struct GraphEscapeRules {
     const char* trigger_chars;  // chars that require quoting
-    bool escape_backslash;
+    const EscapeRule* rules;
+    int rule_count;
 };
 
-static const GraphEscapeRules GRAPH_ESCAPE_DOT     = {" ->{}\"",  true};
-static const GraphEscapeRules GRAPH_ESCAPE_MERMAID = {" -",       false};
-static const GraphEscapeRules GRAPH_ESCAPE_D2      = {" :{}\"->", false};
+static const GraphEscapeRules GRAPH_ESCAPE_DOT     = {" ->{}\"",  ESCAPE_RULES_GRAPH_DOT,    ESCAPE_RULES_GRAPH_DOT_COUNT};
+static const GraphEscapeRules GRAPH_ESCAPE_MERMAID = {" -",       ESCAPE_RULES_GRAPH_QUOTED, ESCAPE_RULES_GRAPH_QUOTED_COUNT};
+static const GraphEscapeRules GRAPH_ESCAPE_D2      = {" :{}\"->", ESCAPE_RULES_GRAPH_QUOTED, ESCAPE_RULES_GRAPH_QUOTED_COUNT};
 
 static void format_graph_string(StringBuf* sb, const char* str, const char* flavor) {
     if (!str) return;
@@ -24,11 +28,7 @@ static void format_graph_string(StringBuf* sb, const char* str, const char* flav
                                                       &GRAPH_ESCAPE_DOT;
     bool needs_quotes = (strpbrk(str, rules->trigger_chars) != NULL);
     if (needs_quotes) stringbuf_append_char(sb, '"');
-    for (const char* p = str; *p; p++) {
-        if (*p == '"')                             { stringbuf_append_str(sb, "\\\""); }
-        else if (*p == '\\' && rules->escape_backslash) { stringbuf_append_str(sb, "\\\\"); }
-        else                                       { stringbuf_append_char(sb, *p); }
-    }
+    escape_append_stringbuf(sb, str, strlen(str), rules->rules, rules->rule_count, ESCAPE_CTRL_NONE);
     if (needs_quotes) stringbuf_append_char(sb, '"');
 }
 

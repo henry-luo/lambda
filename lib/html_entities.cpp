@@ -7,7 +7,7 @@
  */
 
 #include "html_entities.h"
-#include "input-utils.h"
+#include "utf.h"
 #include <cstring>
 
 // ── Table entry type ───────────────────────────────────────────────
@@ -62,7 +62,7 @@ const char* html_entity_name_for_codepoint(uint32_t codepoint) {
 
     // Encode the target codepoint to UTF-8 for comparison
     char target[5];
-    int target_len = codepoint_to_utf8(codepoint, target);
+    size_t target_len = utf8_encode_z(codepoint, target);
     if (target_len == 0) return nullptr;
 
     // Linear scan — reverse lookups are rare (formatting path only)

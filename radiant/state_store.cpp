@@ -8,6 +8,7 @@
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
 #include "../lib/hashmap_helpers.h"
+#include "../lib/escape.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "event_state_log.hpp"
@@ -5385,6 +5386,31 @@ bool dirty_has_regions(DirtyTracker* tracker) {
     return tracker->dirty_list != NULL || tracker->full_repaint;
 }
 
+bool dirty_tracker_bounds(DirtyTracker* tracker, Bound* out_bounds, float scale) {
+    if (!tracker || !out_bounds || !tracker->dirty_list || tracker->full_repaint) {
+        return false;
+    }
+
+    DirtyRect* dirty = tracker->dirty_list;
+    float left = dirty->x * scale;
+    float top = dirty->y * scale;
+    float right = (dirty->x + dirty->width) * scale;
+    float bottom = (dirty->y + dirty->height) * scale;
+    for (dirty = dirty->next; dirty; dirty = dirty->next) {
+        float rect_left = dirty->x * scale;
+        float rect_top = dirty->y * scale;
+        float rect_right = (dirty->x + dirty->width) * scale;
+        float rect_bottom = (dirty->y + dirty->height) * scale;
+        if (rect_left < left) left = rect_left;
+        if (rect_top < top) top = rect_top;
+        if (rect_right > right) right = rect_right;
+        if (rect_bottom > bottom) bottom = rect_bottom;
+    }
+
+    *out_bounds = {left, top, right, bottom};
+    return true;
+}
+
 // ============================================================================
 // Reflow Scheduling
 // ============================================================================
@@ -8116,18 +8142,8 @@ static char* arena_copy_cstr(Arena* arena, const char* text) {
 
 static void append_html_escaped(StrBuf* sb, const char* text, size_t len) {
     if (!sb || !text) return;
-    const char* p = text;
-    const char* end = text + len;
-    while (p < end) {
-        char c = *p++;
-        switch (c) {
-            case '<': strbuf_append_str(sb, "&lt;"); break;
-            case '>': strbuf_append_str(sb, "&gt;"); break;
-            case '&': strbuf_append_str(sb, "&amp;"); break;
-            case '"': strbuf_append_str(sb, "&quot;"); break;
-            default: strbuf_append_char(sb, c); break;
-        }
-    }
+    escape_append(sb, text, len, ESCAPE_RULES_HTML_TEXT,
+                  ESCAPE_RULES_HTML_TEXT_COUNT, ESCAPE_CTRL_NONE);
 }
 
 static void append_html_attr_escaped(StrBuf* sb, const char* text) {
@@ -8292,19 +8308,8 @@ static void extract_html_recursive(View* view, StrBuf* sb) {
             TextRect* rect = text->rect;
             while (rect) {
                 if (rect->length > 0) {
-                    // HTML-escape text content
                     const char* p = text_data + rect->start_index;
-                    const char* end = p + rect->length;
-                    while (p < end) {
-                        char c = *p++;
-                        switch (c) {
-                            case '<': strbuf_append_str(sb, "&lt;"); break;
-                            case '>': strbuf_append_str(sb, "&gt;"); break;
-                            case '&': strbuf_append_str(sb, "&amp;"); break;
-                            case '"': strbuf_append_str(sb, "&quot;"); break;
-                            default: strbuf_append_char(sb, c); break;
-                        }
-                    }
+                    append_html_escaped(sb, p, (size_t)rect->length);
                 }
                 rect = rect->next;
             }

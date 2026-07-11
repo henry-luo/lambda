@@ -13,17 +13,6 @@
 
 #include <cstring>
 
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)(len > 0 ? len : 0));
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
 // Helper: get raw data pointer and length from a typed array Item
 static uint8_t* buffer_data(Item buf, int* out_len) {
     if (!js_is_typed_array(buf)) { *out_len = 0; return NULL; }

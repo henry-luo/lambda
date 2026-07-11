@@ -44,27 +44,12 @@ extern "C" void js_process_ipc_notify_handle_accepted(void);
 extern "C" void js_process_ipc_notify_socket_closed(void);
 extern Item js_make_number(double d);
 
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)(len > 0 ? len : 0));
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
 static Item make_undefined_item(void) {
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
 static bool is_undefined_item(Item item) {
     return item.item == ITEM_JS_UNDEFINED || get_type_id(item) == LMD_TYPE_UNDEFINED;
-}
-
-static bool is_callable(Item item) {
-    return get_type_id(item) == LMD_TYPE_FUNC;
 }
 
 static Item net_normalized_args_key(void) {
@@ -120,8 +105,6 @@ typedef struct PendingSocketWrite PendingSocketWrite;
 typedef struct SocketAutoAttemptTimerReq SocketAutoAttemptTimerReq;
 typedef struct JsServer JsServer;
 typedef struct JsBoundSocket JsBoundSocket;
-
-static Item make_string_item(const char* str);
 
 #define NET_ACTIVE_SOCKET_MAX 512
 #define NET_ACTIVE_SERVER_MAX 128

@@ -2,7 +2,7 @@
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
-#include "html_entities.h"
+#include "../../lib/html_entities.h"
 #include "input-utils.h"
 
 using namespace lambda;

@@ -107,6 +107,18 @@ TEST_F(StringBufTest, TestEscapeAppendStringBufJsonControls) {
     stringbuf_free(sb);
 }
 
+TEST_F(StringBufTest, TestEscapeAppendJsonStringBufQuotes) {
+    StringBuf *sb = stringbuf_new(test_pool);
+
+    escape_append_json_stringbuf(sb, "\"\\\x01", strlen("\"\\\x01"), true, false);
+
+    ASSERT_NE(sb->str, nullptr);
+    EXPECT_STREQ(sb->str->chars, "\"\\\"\\\\\\u0001\"");
+    EXPECT_EQ(sb->length, strlen("\"\\\"\\\\\\u0001\""));
+
+    stringbuf_free(sb);
+}
+
 TEST_F(StringBufTest, TestEscapeAppendStringBufFormatterTables) {
     StringBuf *sb = stringbuf_new(test_pool);
 

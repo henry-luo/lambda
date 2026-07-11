@@ -148,51 +148,31 @@ void add_graph_attribute(Input* input, Element* element, const char* name, const
     }
 }
 
-// Helper function to ensure graph has capacity for more items
-static void ensure_graph_capacity(Input* input, Element* graph) {
-    if (graph->items == NULL) {
-        // Initialize the items array if not already done
-        graph->capacity = 16;
-        graph->items = (Item*)pool_alloc(input->pool, sizeof(Item) * graph->capacity);
-        graph->length = 0;
-    } else if (graph->length >= graph->capacity) {
-        // Need to grow the array
-        size_t new_capacity = graph->capacity * 2;
-        Item* new_items = (Item*)pool_alloc(input->pool, sizeof(Item) * new_capacity);
-        memcpy(new_items, graph->items, sizeof(Item) * graph->length);
-        graph->items = new_items;
-        graph->capacity = new_capacity;
+static void add_child_to_graph_element(Input* input, Element* graph, Element* child) {
+    if (!graph || !child) return;
+
+    array_append((Array*)graph, (Item){.element = child}, input->pool, input->arena);
+    TypeElmt* graph_type = graph->type ? (TypeElmt*)graph->type : NULL;
+    if (graph_type && graph_type->type_id == LMD_TYPE_ELEMENT) {
+        // Graph parsers append children after ElementBuilder::final(); keep the
+        // finalized type's content count aligned with the list length.
+        graph_type->content_length = ((List*)graph)->length;
     }
 }
 
 // Helper function to add a node to a graph (as direct child)
 void add_node_to_graph(Input* input, Element* graph, Element* node) {
-    if (!graph || !node) return;
-
-    ensure_graph_capacity(input, graph);
-
-    Item node_item = {.element = node};
-    graph->items[graph->length++] = node_item;
+    add_child_to_graph_element(input, graph, node);
 }
 
 // Helper function to add an edge to a graph (as direct child)
 void add_edge_to_graph(Input* input, Element* graph, Element* edge) {
-    if (!graph || !edge) return;
-
-    ensure_graph_capacity(input, graph);
-
-    Item edge_item = {.element = edge};
-    graph->items[graph->length++] = edge_item;
+    add_child_to_graph_element(input, graph, edge);
 }
 
 // Helper function to add a cluster to a graph (as direct child)
 void add_cluster_to_graph(Input* input, Element* graph, Element* cluster) {
-    if (!graph || !cluster) return;
-
-    ensure_graph_capacity(input, graph);
-
-    Item cluster_item = {.element = cluster};
-    graph->items[graph->length++] = cluster_item;
+    add_child_to_graph_element(input, graph, cluster);
 }
 
 // Helper functions for attribute parsing with CSS-aligned naming

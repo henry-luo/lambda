@@ -15,6 +15,7 @@
 #include "../../lib/gc/gc_heap.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/utf.h"
 #ifndef _WIN32
 #include <unistd.h>
 #include <sys/socket.h>
@@ -7682,9 +7683,8 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
             cp = (cp << 6) | ((unsigned char)s->chars[pos + i] & 0x3F);
 
         if (cp > 0xFFFF) {
-            uint32_t pair_value = cp - 0x10000;
-            uint32_t high = 0xD800 + (pair_value >> 10);
-            uint32_t low = 0xDC00 + (pair_value & 0x3FF);
+            uint16_t units[2];
+            utf16_encode(cp, units);
             bool include_high = (cu >= start && cu < end);
             bool include_low = (cu + 1 >= start && cu + 1 < end);
             if (include_high && include_low) {
@@ -7692,11 +7692,11 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
             } else {
                 char out[3];
                 if (include_high) {
-                    int out_len = js_encode_utf16_unit_wtf8(out, high);
+                    int out_len = js_encode_utf16_unit_wtf8(out, units[0]);
                     strbuf_append_str_n(buf, out, (size_t)out_len);
                 }
                 if (include_low) {
-                    int out_len = js_encode_utf16_unit_wtf8(out, low);
+                    int out_len = js_encode_utf16_unit_wtf8(out, units[1]);
                     strbuf_append_str_n(buf, out, (size_t)out_len);
                 }
             }
@@ -7754,9 +7754,10 @@ static int js_utf16_code_unit_at(const char* chars, int str_len, bool is_ascii, 
         for (int i = 1; i < bytes && pos + i < str_len; i++)
             cp = (cp << 6) | ((unsigned char)chars[pos + i] & 0x3F);
         if (cp >= 0x10000) {
-            uint32_t pair_value = cp - 0x10000;
-            if (cu == index) return (int)(0xD800 + (pair_value >> 10));
-            if (cu + 1 == index) return (int)(0xDC00 + (pair_value & 0x3FF));
+            uint16_t units[2];
+            utf16_encode(cp, units);
+            if (cu == index) return (int)units[0];
+            if (cu + 1 == index) return (int)units[1];
             cu += 2;
         } else {
             if (cu == index) return (int)cp;
@@ -7771,9 +7772,9 @@ static int64_t js_regex_advance_string_index_units(String* s, int64_t index, boo
     if (!s || index < 0) return index + 1;
     if (!full_unicode) return index + 1;
     int first = js_utf16_code_unit_at(s->chars, (int)s->len, (bool)s->is_ascii, index);
-    if (first >= 0xD800 && first <= 0xDBFF) {
+    if (utf_is_high_surrogate((uint32_t)first)) {
         int second = js_utf16_code_unit_at(s->chars, (int)s->len, (bool)s->is_ascii, index + 1);
-        if (second >= 0xDC00 && second <= 0xDFFF) return index + 2;
+        if (utf_is_low_surrogate((uint32_t)second)) return index + 2;
     }
     return index + 1;
 }
@@ -7796,13 +7797,12 @@ static String* js_string_expand_utf16_subject(String* s) {
         for (int i = 1; i < bytes && pos + i < (int)s->len; i++)
             cp = (cp << 6) | ((unsigned char)s->chars[pos + i] & 0x3F);
         if (cp > 0xFFFF) {
-            uint32_t pair_value = cp - 0x10000;
-            uint32_t high = 0xD800 + (pair_value >> 10);
-            uint32_t low = 0xDC00 + (pair_value & 0x3FF);
+            uint16_t units[2];
+            utf16_encode(cp, units);
             char out[3];
-            int out_len = js_encode_utf16_unit_wtf8(out, high);
+            int out_len = js_encode_utf16_unit_wtf8(out, units[0]);
             strbuf_append_str_n(buf, out, (size_t)out_len);
-            out_len = js_encode_utf16_unit_wtf8(out, low);
+            out_len = js_encode_utf16_unit_wtf8(out, units[1]);
             strbuf_append_str_n(buf, out, (size_t)out_len);
         } else {
             strbuf_append_str_n(buf, s->chars + byte_start, (size_t)bytes);
@@ -15427,14 +15427,15 @@ static bool js_regex_append_decoded_name(const char* pat, int len, int* pi, std:
                     uint32_t u = (uint32_t)((h0 << 12) | (h1 << 8) | (h2 << 4) | h3);
                     consumed = 6;
                     // Combine a high+low surrogate pair into one code point.
-                    if (u >= 0xD800 && u <= 0xDBFF && i + 11 < len &&
+                    if (utf_is_high_surrogate(u) && i + 11 < len &&
                         pat[i + 6] == '\\' && pat[i + 7] == 'u') {
                         int l0 = js_regex_hex_value(pat[i + 8]), l1 = js_regex_hex_value(pat[i + 9]);
                         int l2 = js_regex_hex_value(pat[i + 10]), l3 = js_regex_hex_value(pat[i + 11]);
                         if (l0 >= 0 && l1 >= 0 && l2 >= 0 && l3 >= 0) {
                             uint32_t lo = (uint32_t)((l0 << 12) | (l1 << 8) | (l2 << 4) | l3);
-                            if (lo >= 0xDC00 && lo <= 0xDFFF) {
-                                u = 0x10000 + ((u - 0xD800) << 10) + (lo - 0xDC00);
+                            uint32_t pair_cp = utf16_decode_pair((uint16_t)u, (uint16_t)lo);
+                            if (pair_cp != 0) {
+                                u = pair_cp;
                                 consumed = 12;
                             }
                         }
@@ -16177,7 +16178,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                     }
                     if (all_hex) {
                         bool unicode_mode = compile_info.unicode || compile_info.unicode_sets;
-                        if (unicode_mode && value >= 0xD800 && value <= 0xDBFF &&
+                        if (unicode_mode && utf_is_high_surrogate((uint32_t)value) &&
                             i + 11 < effective_pattern_len &&
                             effective_pattern[i + 6] == '\\' &&
                             effective_pattern[i + 7] == 'u') {
@@ -16188,8 +16189,8 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                                 if (hv < 0) { low_hex = false; break; }
                                 low = (low << 4) | hv;
                             }
-                            if (low_hex && low >= 0xDC00 && low <= 0xDFFF) {
-                                int cp = 0x10000 + ((value - 0xD800) << 10) + (low - 0xDC00);
+                            uint32_t cp = low_hex ? utf16_decode_pair((uint16_t)value, (uint16_t)low) : 0;
+                            if (cp != 0) {
                                 char buf[16];
                                 snprintf(buf, sizeof(buf), "\\x{%X}", cp);
                                 processed_pattern += buf;
@@ -21139,7 +21140,7 @@ static bool js_string_append_full_case_map(StrBuf* sb, utf8proc_int32_t cp, bool
         char* normalized = normalize_utf8proc_nfc(mapped_buf->str, mapped_buf->length, &norm_len);
         if (normalized) {
             strbuf_append_str_n(sb, normalized, norm_len);
-            mem_free(normalized);
+            free_utf8proc_result(normalized);
         } else {
             strbuf_append_str_n(sb, mapped_buf->str, mapped_buf->length);
         }
@@ -21551,7 +21552,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             normalized = normalize_utf8proc_nfc(s->chars, s->len, &norm_len);
         if (!normalized) return str;
         String* result = heap_strcpy(normalized, norm_len);
-        mem_free(normalized);
+        free_utf8proc_result(normalized);
         return (Item){.item = s2it(result)};
     }
     if (method->len == 13 && strncmp(method->chars, "localeCompare", 13) == 0) {
@@ -21577,8 +21578,8 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         else if (left_len < right_len) result = -1;
         else if (left_len > right_len) result = 1;
 
-        if (left_norm) mem_free(left_norm);
-        if (right_norm) mem_free(right_norm);
+        if (left_norm) free_utf8proc_result(left_norm);
+        if (right_norm) free_utf8proc_result(right_norm);
         return (Item){.item = i2it(result)};
     }
     if (method->len == 5 && strncmp(method->chars, "split", 5) == 0) {
@@ -21850,13 +21851,13 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 cp = (cp << 6) | ((unsigned char)s->chars[byte_pos + i] & 0x3F);
             if (cp >= 0x10000) {
                 // surrogate pair: 2 UTF-16 code units
+                uint16_t units[2];
+                utf16_encode(cp, units);
                 if (utf16_idx == target_idx) {
-                    uint32_t hi = 0xD800 + ((cp - 0x10000) >> 10);
-                    return (Item){.item = i2it((int64_t)hi)};
+                    return (Item){.item = i2it((int64_t)units[0])};
                 }
                 if (utf16_idx + 1 == target_idx) {
-                    uint32_t lo = 0xDC00 + ((cp - 0x10000) & 0x3FF);
-                    return (Item){.item = i2it((int64_t)lo)};
+                    return (Item){.item = i2it((int64_t)units[1])};
                 }
                 utf16_idx += 2;
             } else {
@@ -21895,8 +21896,9 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                     return (Item){.item = i2it((int64_t)cp)};
                 }
                 if (utf16_idx + 1 == target_idx) {
-                    uint32_t lo = 0xDC00 + ((cp - 0x10000) & 0x3FF);
-                    return (Item){.item = i2it((int64_t)lo)};
+                    uint16_t units[2];
+                    utf16_encode(cp, units);
+                    return (Item){.item = i2it((int64_t)units[1])};
                 }
                 utf16_idx += 2;
             } else {
@@ -38855,8 +38857,7 @@ static void js_text_encoder_write_utf8(const char* chars, int byte_len, uint8_t*
                     if (next_second >= 0xB0 && next_second <= 0xBF) {
                         uint16_t hi = js_text_encoder_decode_wtf8_unit(chars, i);
                         uint16_t lo = js_text_encoder_decode_wtf8_unit(chars, next);
-                        uint32_t cp = 0x10000 + (((uint32_t)hi - 0xD800) << 10) +
-                                      ((uint32_t)lo - 0xDC00);
+                        uint32_t cp = utf16_decode_pair(hi, lo);
                         char encoded[4];
                         size_t n = utf8_encode(cp, encoded);
                         for (size_t j = 0; j < n; j++) out[out_pos++] = (uint8_t)encoded[j];
@@ -39065,18 +39066,19 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
                 ((uint16_t)bytes[i+1] << 8 | bytes[i]);
             i += 2;
             uint32_t cp;
-            if (cu >= 0xD800 && cu <= 0xDBFF && i + 1 < byte_len) {
+            if (utf_is_high_surrogate(cu) && i + 1 < byte_len) {
                 // High surrogate — read low surrogate
                 uint16_t low = is_utf16be ?
                     ((uint16_t)bytes[i] << 8 | bytes[i+1]) :
                     ((uint16_t)bytes[i+1] << 8 | bytes[i]);
-                if (low >= 0xDC00 && low <= 0xDFFF) {
-                    cp = 0x10000 + ((uint32_t)(cu - 0xD800) << 10) + (low - 0xDC00);
+                uint32_t pair_cp = utf16_decode_pair(cu, low);
+                if (pair_cp != 0) {
+                    cp = pair_cp;
                     i += 2;
                 } else {
                     cp = 0xFFFD; // replacement
                 }
-            } else if (cu >= 0xDC00 && cu <= 0xDFFF) {
+            } else if (utf_is_low_surrogate(cu)) {
                 cp = 0xFFFD; // lone low surrogate
             } else {
                 cp = cu;

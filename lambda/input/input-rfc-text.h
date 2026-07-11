@@ -31,18 +31,14 @@ static inline size_t parse_rfc_property_name(StringBuf* sb, const char** pos) {
     return sb->length;
 }
 
-/**
- * Parse an RFC-style property value: text after ':', with line folding.
- *
- * Expects **pos to point at ':'.  Consumes the colon, reads value bytes,
- * unfolds continuation lines (lines starting with SP/HT), and advances
- * *pos past the final line terminator.
- *
- * Returns the length written to @p sb (0 = nothing read / no colon found).
- */
-static inline size_t parse_rfc_property_value(StringBuf* sb, const char** pos) {
+static inline size_t parse_rfc_value_after_colon(StringBuf* sb, const char** pos,
+                                                  bool skip_initial_ws,
+                                                  bool trim_trailing_ws) {
     if (**pos != ':') return 0;
     (*pos)++; // skip ':'
+    if (skip_initial_ws) {
+        skip_line_whitespace(pos);
+    }
 
     stringbuf_reset(sb);
     const char* p = *pos;
@@ -69,7 +65,37 @@ static inline size_t parse_rfc_property_value(StringBuf* sb, const char** pos) {
         }
     }
     *pos = p;
+
+    if (trim_trailing_ws) {
+        while (sb->length > 0 &&
+               (sb->str->chars[sb->length - 1] == ' ' || sb->str->chars[sb->length - 1] == '\t')) {
+            sb->length--;
+            sb->str->len = sb->length;
+            sb->str->chars[sb->length] = '\0';
+        }
+    }
     return sb->length;
+}
+
+/**
+ * Parse an RFC-style property value: text after ':', with line folding.
+ *
+ * Expects **pos to point at ':'.  Consumes the colon, reads value bytes,
+ * unfolds continuation lines (lines starting with SP/HT), and advances
+ * *pos past the final line terminator.
+ *
+ * Returns the length written to @p sb (0 = nothing read / no colon found).
+ */
+static inline size_t parse_rfc_property_value(StringBuf* sb, const char** pos) {
+    return parse_rfc_value_after_colon(sb, pos, false, false);
+}
+
+/**
+ * Parse an RFC 5322-style header value: skip optional whitespace after ':',
+ * unfold continuation lines, and trim trailing horizontal whitespace.
+ */
+static inline size_t parse_rfc_header_value(StringBuf* sb, const char** pos) {
+    return parse_rfc_value_after_colon(sb, pos, true, true);
 }
 
 /**

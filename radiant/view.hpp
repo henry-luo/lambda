@@ -6,6 +6,7 @@
 #include "../lib/url.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
+#include "../lib/math_utils.h"
 #include "../lib/font/font.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/css/dom_node.hpp"
@@ -33,56 +34,41 @@
 
 #endif // LAMBDA_HEADLESS
 
-// Use inline functions instead of macros to avoid conflicts with std::max/min
-// Support mixed types (e.g., int and float) by using common_type
+// Keep Radiant's historical unqualified helpers, but delegate the math to lib
+// so layout/render code does not carry a second implementation of these rules.
 template<typename T, typename U>
-inline auto max(T a, U b) -> typename std::common_type<T, U>::type {
-    using Common = typename std::common_type<T, U>::type;
-    Common ca = static_cast<Common>(a);
-    Common cb = static_cast<Common>(b);
-    return (ca > cb) ? ca : cb;
+inline auto max(T a, U b) -> decltype(lib_math::max_mixed(a, b)) {
+    return lib_math::max_mixed(a, b);
 }
 
 template<typename T, typename U>
-inline auto min(T a, U b) -> typename std::common_type<T, U>::type {
-    using Common = typename std::common_type<T, U>::type;
-    Common ca = static_cast<Common>(a);
-    Common cb = static_cast<Common>(b);
-    return (ca < cb) ? ca : cb;
+inline auto min(T a, U b) -> decltype(lib_math::min_mixed(a, b)) {
+    return lib_math::min_mixed(a, b);
 }
 
-// Absolute value - works for any signed numeric type
 template<typename T>
 inline T abs(T a) {
-    return (a < 0) ? -a : a;
+    return lib_math::abs_val(a);
 }
 
-// Clamp value to range [lo, hi] - very useful for layout calculations
 template<typename T>
 inline T clamp(T value, T lo, T hi) {
-    return (value < lo) ? lo : ((value > hi) ? hi : value);
+    return lib_math::clamp(value, lo, hi);
 }
 
-// Mixed-type clamp for cases like clamp(int_val, 0.0f, float_max)
 template<typename T, typename U, typename V>
-inline auto clamp(T value, U lo, V hi) -> typename std::common_type<T, U, V>::type {
-    using Common = typename std::common_type<T, U, V>::type;
-    Common v = static_cast<Common>(value);
-    Common l = static_cast<Common>(lo);
-    Common h = static_cast<Common>(hi);
-    return (v < l) ? l : ((v > h) ? h : v);
+inline auto clamp(T value, U lo, V hi) -> decltype(lib_math::clamp_mixed(value, lo, hi)) {
+    return lib_math::clamp_mixed(value, lo, hi);
 }
 
-// Sign function: returns -1, 0, or 1
 template<typename T>
 inline int sign(T a) {
-    return (a > 0) - (a < 0);
+    return lib_math::sign(a);
 }
 
-// Linear interpolation: lerp(a, b, t) = a + t * (b - a)
 template<typename T>
 inline T lerp(T a, T b, float t) {
-    return a + t * (b - a);
+    return (T)lib_math::lerp(a, b, t);
 }
 
 // Forward declarations

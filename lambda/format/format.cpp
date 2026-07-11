@@ -4,39 +4,6 @@
 #include "../../lib/stringbuf.h"
 #include "../../lib/log.h"
 
-// Create a Lambda Item from raw field data with proper type tagging
-Item create_item_from_field_data(void* field_data, TypeId type_id) {
-    switch (type_id) {
-        case LMD_TYPE_BOOL:
-            return {.item = b2it(*(bool*)field_data)};
-        case LMD_TYPE_INT:
-            return {.item = i2it(*(int64_t*)field_data)};  // read full int64 to preserve 56-bit value
-        case LMD_TYPE_INT64:
-            return {.item = l2it((int64_t*)field_data)};
-        case LMD_TYPE_FLOAT:
-            return lambda_float_ptr_to_item((const double*)field_data);
-        case LMD_TYPE_STRING:
-        case LMD_TYPE_SYMBOL:
-        case LMD_TYPE_DTIME:
-        case LMD_TYPE_BINARY:
-            return {.item = s2it((String*)*(void**)field_data)};
-        case LMD_TYPE_ARRAY:
-            return {.item = (uint64_t)*(void**)field_data};
-        case LMD_TYPE_MAP:
-        case LMD_TYPE_OBJECT:
-            return {.item = (uint64_t)*(void**)field_data};
-        case LMD_TYPE_ELEMENT: {
-            Element* element = (Element*)*(void**)field_data;
-            return {.item = element ? ((((uint64_t)LMD_TYPE_ELEMENT)<<56) | (uint64_t)element) : ITEM_ERROR};
-        }
-        case LMD_TYPE_NULL:
-            return {.item = ITEM_NULL};
-        default:
-            // fallback for unknown types
-            return {.item = (uint64_t)field_data};
-    }
-}
-
 // Common number formatting function
 void format_number(StringBuf* sb, Item item) {
     TypeId type = get_type_id(item);
@@ -55,20 +22,13 @@ void format_number(StringBuf* sb, Item item) {
         } else {
             stringbuf_append_str(sb, "0");
         }
-    } else if (type == LMD_TYPE_FLOAT) {
-        // Double stored as pointer
-        double* dptr = (double*)item.double_ptr;
-        if (dptr) {
+    } else if (is_float_type_id(type)) {
+        double d = item.get_double();
+        // ItemReader can pass inline floats; get_double() handles both inline and heap encodings.
+        if (!isnan(d) && !isinf(d)) {
             char num_buf[32];
-            // Check for special values
-            if (isnan(*dptr)) {
-                stringbuf_append_str(sb, "null");
-            } else if (isinf(*dptr)) {
-                stringbuf_append_str(sb, "null");
-            } else {
-                lambda_double_to_shortest(*dptr, num_buf, sizeof(num_buf));
-                stringbuf_append_str(sb, num_buf);
-            }
+            lambda_double_to_shortest(d, num_buf, sizeof(num_buf));
+            stringbuf_append_str(sb, num_buf);
         } else {
             stringbuf_append_str(sb, "null");
         }

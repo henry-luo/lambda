@@ -957,6 +957,42 @@ static inline bool is_numeric_type_id(TypeId type_id) {
            type_id == LMD_TYPE_DECIMAL || type_id == LMD_TYPE_NUM_SIZED;
 }
 
+static inline bool is_native_numeric_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 ||
+           type_id == LMD_TYPE_FLOAT;
+}
+
+static inline bool is_integer_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64;
+}
+
+static inline bool is_float_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64;
+}
+
+static inline bool is_native_numeric_or_bool_type_id(TypeId type_id) {
+    return is_native_numeric_type_id(type_id) || type_id == LMD_TYPE_BOOL;
+}
+
+static inline bool is_text_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL;
+}
+
+static inline bool is_native_param_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_FLOAT ||
+           type_id == LMD_TYPE_BOOL || type_id == LMD_TYPE_STRING ||
+           type_id == LMD_TYPE_INT64;
+}
+
+static inline bool is_typed_wrapper_param_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 ||
+           type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_BOOL ||
+           type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_BINARY ||
+           type_id == LMD_TYPE_SYMBOL || type_id == LMD_TYPE_DECIMAL ||
+           type_id == LMD_TYPE_DTIME || type_id == LMD_TYPE_MAP ||
+           type_id == LMD_TYPE_OBJECT || type_id == LMD_TYPE_ELEMENT;
+}
+
 #define IS_NUMERIC_ID(t) is_numeric_type_id((TypeId)(t))
 
 #define ITEM_TRUE           (((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)1)
@@ -1365,6 +1401,8 @@ extern "C" {
     void array_float_set(ArrayNum *arr, int64_t index, double value);
     void array_int_set(ArrayNum *arr, int64_t index, int64_t value);
     void array_num_set_item(ArrayNum *arr, int64_t index, Item value);
+    Item array_num_read_item(ArrayNum *arr, int64_t index);
+    double array_num_read_double(ArrayNum *arr, int64_t index);
     double array_num_get_number_value(ArrayNum *arr, int64_t index);
     void array_num_set_int64_value(ArrayNum *arr, int64_t index, int64_t value);
     void array_num_set_double_value(ArrayNum *arr, int64_t index, double value);

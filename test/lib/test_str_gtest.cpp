@@ -1541,6 +1541,18 @@ TEST_F(UtfCodecTest, IsSurrogate) {
     EXPECT_TRUE(utf_is_surrogate(0xDBFF));
     EXPECT_TRUE(utf_is_surrogate(0xDC00));
     EXPECT_TRUE(utf_is_surrogate(0xDFFF));
+    EXPECT_TRUE(utf_is_high_surrogate(0xD800));
+    EXPECT_TRUE(utf_is_high_surrogate(0xDBFF));
+    EXPECT_FALSE(utf_is_high_surrogate(0xDC00));
+    EXPECT_FALSE(utf_is_high_surrogate(0xDFFF));
+    EXPECT_FALSE(utf_is_high_surrogate(0xD7FF));
+    EXPECT_FALSE(utf_is_high_surrogate(0xE000));
+    EXPECT_FALSE(utf_is_low_surrogate(0xD800));
+    EXPECT_FALSE(utf_is_low_surrogate(0xDBFF));
+    EXPECT_TRUE(utf_is_low_surrogate(0xDC00));
+    EXPECT_TRUE(utf_is_low_surrogate(0xDFFF));
+    EXPECT_FALSE(utf_is_low_surrogate(0xD7FF));
+    EXPECT_FALSE(utf_is_low_surrogate(0xE000));
     EXPECT_FALSE(utf_is_surrogate(0xD7FF));
     EXPECT_FALSE(utf_is_surrogate(0xE000));
     EXPECT_FALSE(utf_is_surrogate(0x0041));

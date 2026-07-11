@@ -13,6 +13,7 @@ extern "C" {
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lib/tagged.hpp"
+#include "../lib/mem_grow.hpp"
 
 #include <string.h>
 #include <stdlib.h>
@@ -496,8 +497,8 @@ KeyframeRegistry* keyframe_registry_create(DomDocument* doc, Pool* pool) {
 
     KeyframeRegistry* registry = (KeyframeRegistry*)pool_calloc(pool, sizeof(KeyframeRegistry));
     registry->pool = pool;
-    registry->capacity = 16;
-    registry->entries = (CssKeyframes**)pool_alloc(pool, sizeof(CssKeyframes*) * registry->capacity);
+    registry->capacity = 0;
+    registry->entries = nullptr;
     registry->count = 0;
 
     // scan all stylesheets for @keyframes rules
@@ -514,14 +515,9 @@ KeyframeRegistry* keyframe_registry_create(DomDocument* doc, Pool* pool) {
 
             CssKeyframes* kf = parse_keyframes_content(content, pool);
             if (kf) {
-                // grow array if needed
-                if (registry->count >= registry->capacity) {
-                    int new_cap = registry->capacity * 2;
-                    CssKeyframes** new_entries = (CssKeyframes**)pool_alloc(pool, sizeof(CssKeyframes*) * new_cap);
-                    memcpy(new_entries, registry->entries, sizeof(CssKeyframes*) * registry->count);
-                    registry->entries = new_entries;
-                    registry->capacity = new_cap;
-                }
+                // keyframe registries are pool-owned; failed growth leaves the previous table intact
+                if (!lam::pool_grow_array(pool, &registry->entries, &registry->capacity,
+                                          registry->count + 1, 16)) continue;
                 registry->entries[registry->count++] = kf;
                 log_debug("css-anim: registered @keyframes '%s' (%d stops)", kf->name, kf->stop_count);
             }
@@ -542,13 +538,9 @@ KeyframeRegistry* keyframe_registry_create(DomDocument* doc, Pool* pool) {
 
             CssKeyframes* kf = parse_keyframes_content(content, pool);
             if (kf) {
-                if (registry->count >= registry->capacity) {
-                    int new_cap = registry->capacity * 2;
-                    CssKeyframes** new_entries = (CssKeyframes**)pool_alloc(pool, sizeof(CssKeyframes*) * new_cap);
-                    memcpy(new_entries, registry->entries, sizeof(CssKeyframes*) * registry->count);
-                    registry->entries = new_entries;
-                    registry->capacity = new_cap;
-                }
+                // keyframe registries are pool-owned; failed growth leaves the previous table intact
+                if (!lam::pool_grow_array(pool, &registry->entries, &registry->capacity,
+                                          registry->count + 1, 16)) continue;
                 registry->entries[registry->count++] = kf;
             }
         }

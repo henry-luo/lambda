@@ -6,6 +6,7 @@
 #include "webview.h"
 #include "../lib/log.h"
 #include "../lib/mem.h"
+#include "../lib/mem_grow.hpp"
 #include "../lib/url.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/network/network_integration.h"
@@ -32,13 +33,10 @@ static void history_entry_free(HistoryEntry* entry) {
 // Ensure history array has room for one more entry
 static void history_ensure_capacity(BrowsingSession* session) {
     if (session->history_count < session->history_capacity) return;
-    int new_cap = session->history_capacity < 8 ? 8 : session->history_capacity * 2;
-    if (new_cap > BROWSE_HISTORY_MAX) new_cap = BROWSE_HISTORY_MAX;
-    HistoryEntry* new_arr = (HistoryEntry*)mem_realloc(session->history,
-        (size_t)new_cap * sizeof(HistoryEntry), MEM_CAT_TEMP);
-    if (!new_arr) return;
-    session->history = new_arr;
-    session->history_capacity = new_cap;
+    int target = session->history_count + 1;
+    if (target > BROWSE_HISTORY_MAX) target = BROWSE_HISTORY_MAX;
+    (void)lam::mem_grow_array(&session->history, &session->history_capacity,
+                              target, 8, MEM_CAT_TEMP);
 }
 
 // Walk DOM to find <title> element text content

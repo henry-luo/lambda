@@ -527,6 +527,19 @@ void str_trim(const char** s, size_t* len) {
     str_rtrim(s, len);
 }
 
+void str_rtrim_chars(const char** s, size_t* len,
+                     const char* chars, size_t chars_len) {
+    if (!s || !len || !*s || !chars || chars_len == 0) return;
+    StrByteSet set;
+    str_byteset_clear(&set);
+    str_byteset_add_many(&set, chars, chars_len);
+
+    const char* p = *s;
+    size_t n = *len;
+    while (n > 0 && str_byteset_test(&set, (unsigned char)p[n - 1])) { n--; }
+    *len = n;
+}
+
 void str_trim_chars(const char** s, size_t* len,
                     const char* chars, size_t chars_len) {
     if (!s || !len || !*s || !chars || chars_len == 0) return;
@@ -537,7 +550,7 @@ void str_trim_chars(const char** s, size_t* len,
     const char* p = *s;
     size_t n = *len;
     while (n > 0 && str_byteset_test(&set, (unsigned char)*p)) { p++; n--; }
-    while (n > 0 && str_byteset_test(&set, (unsigned char)p[n - 1])) { n--; }
+    str_rtrim_chars(&p, &n, chars, chars_len);
     *s = p;
     *len = n;
 }

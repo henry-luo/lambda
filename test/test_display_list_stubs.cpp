@@ -1,4 +1,6 @@
 #include "../radiant/rdt_vector.hpp"
+#include "../radiant/display_list_bounds.hpp"
+#include "../radiant/state_store.hpp"
 #include <string.h>
 
 static const RdtPath* g_test_path = nullptr;
@@ -162,4 +164,30 @@ void rdt_push_clip(RdtVector* vec, RdtPath* clip, const RdtMatrix* transform) {
 
 void rdt_pop_clip(RdtVector* vec) {
     (void)vec;
+}
+
+bool dirty_tracker_bounds(DirtyTracker* tracker, Bound* out_bounds, float scale) {
+    if (!tracker || !out_bounds || !tracker->dirty_list || tracker->full_repaint) {
+        return false;
+    }
+
+    // display-list tests link replay helpers without the full state store.
+    DirtyRect* dirty = tracker->dirty_list;
+    float left = dirty->x * scale;
+    float top = dirty->y * scale;
+    float right = (dirty->x + dirty->width) * scale;
+    float bottom = (dirty->y + dirty->height) * scale;
+    for (dirty = dirty->next; dirty; dirty = dirty->next) {
+        float rect_left = dirty->x * scale;
+        float rect_top = dirty->y * scale;
+        float rect_right = (dirty->x + dirty->width) * scale;
+        float rect_bottom = (dirty->y + dirty->height) * scale;
+        if (rect_left < left) left = rect_left;
+        if (rect_top < top) top = rect_top;
+        if (rect_right > right) right = rect_right;
+        if (rect_bottom > bottom) bottom = rect_bottom;
+    }
+
+    *out_bounds = {left, top, right, bottom};
+    return true;
 }

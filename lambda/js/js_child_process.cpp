@@ -55,21 +55,6 @@ extern "C" void js_net_complete_transferred_connection_account(void* account);
 // Helpers
 // =============================================================================
 
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)(len > 0 ? len : 0));
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
 static const char* item_to_cstr(Item value, char* buf, int buf_size) {
     if (get_type_id(value) != LMD_TYPE_STRING) return NULL;
     String* s = it2s(value);
@@ -82,10 +67,6 @@ static const char* item_to_cstr(Item value, char* buf, int buf_size) {
 
 static bool is_undefined_item(Item item) {
     return item.item == ITEM_JS_UNDEFINED || get_type_id(item) == LMD_TYPE_UNDEFINED;
-}
-
-static bool is_callable(Item item) {
-    return get_type_id(item) == LMD_TYPE_FUNC;
 }
 
 static bool is_object_item(Item item) {

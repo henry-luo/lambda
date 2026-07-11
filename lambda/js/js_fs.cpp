@@ -40,10 +40,6 @@ extern "C" Item js_domain_get_current(void);
 extern "C" Item js_domain_call_function(Item domain, Item fn, Item this_val, Item* args, int arg_count);
 
 // Helper: make JS undefined value
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
 // Helper: extract a null-terminated C string from an Item string
 // Returns a stack-allocated buffer (caller should not free)
 static const char* item_to_cstr(Item value, char* buf, int buf_size) {
@@ -352,17 +348,6 @@ static bool fs_validate_offset_length(Item offset_item, Item length_item, int by
 }
 
 // Helper: create a string Item from a C string
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)len);
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
 static Item internal_fs_binding_namespace = {0};
 static Item internal_fs_default_fstat = {0};
 

@@ -4,7 +4,7 @@
  */
 
 #include "symbol_resolver.h"
-#include "../lambda/input/html_entities.h"
+#include "../lib/html_entities.h"
 #include <cstring>
 
 // String structure from Lambda (for resolve_symbol_string)

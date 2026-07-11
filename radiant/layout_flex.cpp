@@ -7,7 +7,7 @@
 #include "intrinsic_sizing.hpp"
 #include "layout_alignment.hpp"
 #include "layout_axis.hpp"
-#include "../lib/checked_math.hpp"
+#include "../lib/mem_grow.hpp"
 #include "layout_measure.hpp"
 #include "layout_box.hpp"
 extern "C" {
@@ -2084,16 +2084,8 @@ static bool should_skip_flex_item(ViewElement* item) {
 // Returns false on overflow/OOM, leaving flex->flex_items and allocated_items unchanged
 // (still valid) so the caller can stop collecting instead of writing past the buffer.
 static bool ensure_flex_items_capacity(FlexContainerLayout* flex, int required) {
-    if (required > flex->allocated_items) {
-        int new_alloc = required * 2;
-        size_t bytes;
-        if (new_alloc < 0 || !lam::checked_mul((size_t)new_alloc, sizeof(View*), &bytes)) return false;
-        View** grown = (View**)mem_realloc(flex->flex_items, bytes, MEM_CAT_LAYOUT);
-        if (!grown) return false;
-        flex->flex_items = grown;
-        flex->allocated_items = new_alloc;
-    }
-    return true;
+    return lam::mem_grow_array(&flex->flex_items, &flex->allocated_items,
+                               required, 8, MEM_CAT_LAYOUT);
 }
 
 // UNIFIED: Single-pass collection that combines measurement + View creation + collection
@@ -3963,15 +3955,10 @@ static int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int
     while (current_item < item_count) {
         // Ensure we have space for another line
         if (line_count >= flex_layout->allocated_lines) {
-            int new_alloc = flex_layout->allocated_lines * 2;
-            size_t bytes;
-            if (new_alloc < 0 || !lam::checked_mul((size_t)new_alloc, sizeof(FlexLineInfo), &bytes)) {
-                return line_count;   // overflow — return lines collected so far
+            if (!lam::mem_grow_array(&flex_layout->lines, &flex_layout->allocated_lines,
+                                     line_count + 1, 4, MEM_CAT_LAYOUT)) {
+                return line_count;   // OOM/overflow — keep old buffer, return what we have
             }
-            FlexLineInfo* grown = (FlexLineInfo*)mem_realloc(flex_layout->lines, bytes, MEM_CAT_LAYOUT);
-            if (!grown) return line_count;   // OOM — keep old buffer, return what we have
-            flex_layout->lines = grown;
-            flex_layout->allocated_lines = new_alloc;
         }
 
         FlexLineInfo* line = &flex_layout->lines[line_count];
@@ -4061,6 +4048,18 @@ static int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int
     return line_count;
 }
 
+typedef struct FlexLengthScratch {
+    float flex_basis;
+    float hypothetical;
+    bool frozen;
+} FlexLengthScratch;
+
+typedef struct FlexIterationScratch {
+    float clamped_size;
+    bool has_min_violation;
+    bool has_max_violation;
+} FlexIterationScratch;
+
 // Resolve flexible lengths for a flex line (flex-grow/shrink) with iterative constraint resolution
 static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
     log_info("=== resolve_flexible_lengths CALLED ===");
@@ -4071,30 +4070,16 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
 
     float container_main_size = flex_layout->main_axis_size;
 
-    // CRITICAL: Store original flex basis for each item (needed for correct flex-shrink calculation)
-    // Per CSS Flexbox spec §9.7, scaled shrink factor uses the original flex base size
-    float* item_flex_basis = (float*)mem_calloc(line->item_count, sizeof(float), MEM_CAT_LAYOUT);
-    if (!item_flex_basis) return;
-
-    // Track which items are frozen (have flex factor 0 or hit constraints during distribution)
-    bool* frozen = (bool*)mem_calloc(line->item_count, sizeof(bool), MEM_CAT_LAYOUT);
-    if (!frozen) {
-        mem_free(item_flex_basis);
-        return;
-    }
+    // Flex state is indexed by line item; keeping it in one record prevents parallel
+    // scratch arrays from drifting when the §9.7 loop gains another per-item value.
+    FlexLengthScratch* scratch = (FlexLengthScratch*)mem_calloc(
+        line->item_count, sizeof(FlexLengthScratch), MEM_CAT_LAYOUT);
+    if (!scratch) return;
 
     float total_hypothetical_size = 0.0f;
     float total_base_size = 0.0f;
     float total_margin_size = 0.0f;
     bool is_horizontal = is_main_axis_horizontal(flex_layout);
-
-    // Store hypothetical sizes per-item for step 2 freezing decisions
-    float* item_hypothetical = (float*)mem_calloc(line->item_count, sizeof(float), MEM_CAT_LAYOUT);
-    if (!item_hypothetical) {
-        mem_free(item_flex_basis);
-        mem_free(frozen);
-        return;
-    }
 
     // CSS Flexbox §9.7 Step 1-3: Initialize items
     // Step 1: Determine grow vs shrink from sum of hypothetical sizes
@@ -4106,11 +4091,11 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
 
         // Store original flex-basis for scaled shrink calculation
         float basis = calculate_flex_basis(item, flex_layout);
-        item_flex_basis[i] = basis;
+        scratch[i].flex_basis = basis;
 
         // Calculate hypothetical main size (basis clamped by min/max constraints)
         float hypothetical = calculate_hypothetical_main_size(item, flex_layout);
-        item_hypothetical[i] = hypothetical;
+        scratch[i].hypothetical = hypothetical;
 
         // Set each item's target main size to its hypothetical main size (spec step 3)
         set_main_axis_size(item, hypothetical, flex_layout);
@@ -4133,7 +4118,7 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
         bool is_inflexible = !has_flex_props || (fg == 0 && fs == 0);
 
         if (is_inflexible) {
-            frozen[i] = true;
+            scratch[i].frozen = true;
             log_debug("ITERATIVE_FLEX - item %d: PRE-FROZEN (inflexible), size=%.1f", i, hypothetical);
         } else {
             log_debug("ITERATIVE_FLEX - item %d: FLEXIBLE (grow=%.2f, shrink=%.2f), hypothetical=%.1f (basis=%.1f)",
@@ -4160,24 +4145,24 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
     // - If using flex-grow: freeze items where flex_base_size > hypothetical (clamped to max)
     // - If using flex-shrink: freeze items where flex_base_size < hypothetical (clamped to min)
     for (int i = 0; i < line->item_count; i++) {
-        if (frozen[i]) continue;
+        if (scratch[i].frozen) continue;
         ViewElement* item = lam::view_as_element(line->items[i]);
         if (!item) continue;
         float fg = get_item_flex_grow(item);
         float fs = get_item_flex_shrink(item);
         if (use_grow_factor) {
             // Freeze items with flex-grow:0, or where basis > hypothetical (hit max)
-            if (fg == 0 || item_flex_basis[i] > item_hypothetical[i]) {
-                frozen[i] = true;
+            if (fg == 0 || scratch[i].flex_basis > scratch[i].hypothetical) {
+                scratch[i].frozen = true;
                 log_debug("ITERATIVE_FLEX - item %d: FROZEN (grow=0 or basis>hypo, basis=%.1f, hypo=%.1f)",
-                          i, item_flex_basis[i], item_hypothetical[i]);
+                          i, scratch[i].flex_basis, scratch[i].hypothetical);
             }
         } else {
             // Freeze items with flex-shrink:0, or where basis < hypothetical (hit min)
-            if (fs == 0 || item_flex_basis[i] < item_hypothetical[i]) {
-                frozen[i] = true;
+            if (fs == 0 || scratch[i].flex_basis < scratch[i].hypothetical) {
+                scratch[i].frozen = true;
                 log_debug("ITERATIVE_FLEX - item %d: FROZEN (shrink=0 or basis<hypo, basis=%.1f, hypo=%.1f)",
-                          i, item_flex_basis[i], item_hypothetical[i]);
+                          i, scratch[i].flex_basis, scratch[i].hypothetical);
             }
         }
     }
@@ -4193,9 +4178,7 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
               container_main_size, total_base_size, gap_space, free_space);
 
     if (free_space == 0.0f) {
-        mem_free(item_flex_basis);
-        mem_free(item_hypothetical);
-        mem_free(frozen);
+        mem_free(scratch);
         return;  // No space to distribute
     }
 
@@ -4215,11 +4198,11 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
         for (int i = 0; i < line->item_count; i++) {
             ViewElement* item = lam::view_as_element(line->items[i]);
             if (!item) continue;
-            if (frozen[i]) {
+            if (scratch[i].frozen) {
                 total_frozen_target += get_main_axis_size(item, flex_layout);
             } else {
                 // Use effective base (floored to padding+border) for outer size accounting
-                total_unfrozen_base += get_effective_flex_base(item, item_flex_basis[i], flex_layout);
+                total_unfrozen_base += get_effective_flex_base(item, scratch[i].flex_basis, flex_layout);
             }
         }
         float remaining_free_space = container_main_size - total_frozen_target - total_unfrozen_base - total_margin_size - gap_space;
@@ -4228,7 +4211,7 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
         // multiply initial free space by this sum and use if smaller magnitude
         double sum_unfrozen_flex = 0.0;
         for (int i = 0; i < line->item_count; i++) {
-            if (frozen[i]) continue;
+            if (scratch[i].frozen) continue;
             ViewElement* item = lam::view_as_element(line->items[i]);
             if (!item) continue;
             if (use_grow_factor) {
@@ -4279,7 +4262,7 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
         int unfrozen_count = 0;
 
         for (int i = 0; i < line->item_count; i++) {
-            if (frozen[i]) continue;
+            if (scratch[i].frozen) continue;
 
             ViewElement* item = lam::view_as_element(line->items[i]);
             if (!item) continue;
@@ -4293,11 +4276,11 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
             } else if (is_shrinking && fs > 0) {
                 // CRITICAL FIX: Use original flex_basis for scaled shrink factor
                 // Per CSS Flexbox spec: scaled_flex_shrink_factor = flex_shrink × flex_base_size
-                double scaled = (double)item_flex_basis[i] * fs;
+                double scaled = (double)scratch[i].flex_basis * fs;
                 total_scaled_shrink += scaled;
                 unfrozen_count++;
                 log_debug("FLEX_SHRINK - item %d: flex_shrink=%.2f, flex_basis=%.1f, scaled=%.2f",
-                          i, fs, item_flex_basis[i], scaled);
+                          i, fs, scratch[i].flex_basis, scaled);
             }
         }
 
@@ -4312,23 +4295,16 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
 
         // CSS Flexbox §9.7 Step 5: Calculate target sizes for unfrozen items
         // Store target sizes and violation info for two-phase freezing
-        float* target_sizes = (float*)mem_calloc(line->item_count, sizeof(float), MEM_CAT_LAYOUT);
-        float* clamped_sizes = (float*)mem_calloc(line->item_count, sizeof(float), MEM_CAT_LAYOUT);
-        bool* has_min_violation = (bool*)mem_calloc(line->item_count, sizeof(bool), MEM_CAT_LAYOUT);
-        bool* has_max_violation = (bool*)mem_calloc(line->item_count, sizeof(bool), MEM_CAT_LAYOUT);
-
-        if (!target_sizes || !clamped_sizes || !has_min_violation || !has_max_violation) {
-            mem_free(target_sizes);
-            mem_free(clamped_sizes);
-            mem_free(has_min_violation);
-            mem_free(has_max_violation);
+        FlexIterationScratch* iteration_scratch = (FlexIterationScratch*)mem_calloc(
+            line->item_count, sizeof(FlexIterationScratch), MEM_CAT_LAYOUT);
+        if (!iteration_scratch) {
             break;
         }
 
         float total_violation = 0.0f;
 
         for (int i = 0; i < line->item_count; i++) {
-            if (frozen[i]) continue;
+            if (scratch[i].frozen) continue;
 
             ViewElement* item = lam::view_as_element(line->items[i]);
             if (!item) continue;
@@ -4343,20 +4319,20 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
                 // Per CSS spec §9.7 step 4c: target = flex_base_size + fraction of remaining free space
                 // Use effective base (floored to p+b) so growth starts from the actual minimum border-box size.
                 // Note: remaining_free_space is already adjusted by step 4b for fractional flex factors
-                float effective_basis = get_effective_flex_base(item, item_flex_basis[i], flex_layout);
+                float effective_basis = get_effective_flex_base(item, scratch[i].flex_basis, flex_layout);
                 double grow_ratio = fg / total_flex_factor;
                 float grow_amount = (float)(grow_ratio * remaining_free_space);
                 target_size = effective_basis + grow_amount;
 
                 log_debug("ITERATIVE_FLEX - item %d: grow_ratio=%.4f, grow_amount=%.1f, basis=%.1f(eff=%.1f)→%.1f",
-                          i, grow_ratio, grow_amount, item_flex_basis[i], effective_basis, target_size);
+                          i, grow_ratio, grow_amount, scratch[i].flex_basis, effective_basis, target_size);
 
             } else if (is_shrinking && fs > 0) {
                 // FLEX-SHRINK: Distribute negative space using scaled shrink factor
                 // Per CSS spec §9.7 step 4c: scaled_shrink = inner_flex_base × flex_shrink
                 // Use ORIGINAL basis for scaled shrink factor (spec uses inner flex base)
                 // Use effective basis for the target starting point (border-box floor)
-                float flex_basis = item_flex_basis[i];
+                float flex_basis = scratch[i].flex_basis;
                 float effective_basis = get_effective_flex_base(item, flex_basis, flex_layout);
                 double scaled_shrink = (double)flex_basis * fs;
                 double shrink_ratio = scaled_shrink / total_scaled_shrink;
@@ -4367,20 +4343,18 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
                           i, shrink_ratio, shrink_amount, flex_basis, effective_basis, target_size);
             }
 
-            target_sizes[i] = target_size;
-
             // Step 5c: Clamp and detect violations
             bool hit_min = false, hit_max = false;
             float clamped = apply_flex_constraint(item, target_size, true, flex_layout, &hit_min, &hit_max);
-            clamped_sizes[i] = clamped;
+            iteration_scratch[i].clamped_size = clamped;
 
             // Track violation type and amount
             float adjustment = clamped - target_size;
             if (adjustment > 0.0f) {
-                has_min_violation[i] = true;  // Made larger by min constraint
+                iteration_scratch[i].has_min_violation = true;  // Made larger by min constraint
                 log_debug("ITERATIVE_FLEX - item %d: MIN violation, %.1f→%.1f (+%.1f)", i, target_size, clamped, adjustment);
             } else if (adjustment < 0.0f) {
-                has_max_violation[i] = true;  // Made smaller by max constraint
+                iteration_scratch[i].has_max_violation = true;  // Made smaller by max constraint
                 log_debug("ITERATIVE_FLEX - item %d: MAX violation, %.1f→%.1f (%.1f)", i, target_size, clamped, adjustment);
             }
             total_violation += adjustment;
@@ -4394,7 +4368,7 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
 
         bool any_frozen_this_iteration = false;
         for (int i = 0; i < line->item_count; i++) {
-            if (frozen[i]) continue;
+            if (scratch[i].frozen) continue;
 
             ViewElement* item = lam::view_as_element(line->items[i]);
             if (!item) continue;
@@ -4402,35 +4376,32 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
             bool should_freeze = false;
             if (total_violation == 0.0f) {
                 should_freeze = true;  // Converged - freeze all
-            } else if (total_violation > 0.0f && has_min_violation[i]) {
+            } else if (total_violation > 0.0f && iteration_scratch[i].has_min_violation) {
                 should_freeze = true;  // Positive total - freeze min violations
-            } else if (total_violation < 0.0f && has_max_violation[i]) {
+            } else if (total_violation < 0.0f && iteration_scratch[i].has_max_violation) {
                 should_freeze = true;  // Negative total - freeze max violations
             }
 
             // Per CSS spec §9.7: Only apply final sizes to items being frozen.
             // Unfrozen items will be recomputed in the next iteration from their flex base size.
             if (should_freeze) {
-                set_main_axis_size(item, clamped_sizes[i], flex_layout);
-                frozen[i] = true;
+                set_main_axis_size(item, iteration_scratch[i].clamped_size, flex_layout);
+                scratch[i].frozen = true;
                 any_frozen_this_iteration = true;
-                log_debug("ITERATIVE_FLEX - item %d: FROZEN at size %.1f", i, clamped_sizes[i]);
+                log_debug("ITERATIVE_FLEX - item %d: FROZEN at size %.1f", i, iteration_scratch[i].clamped_size);
 
                 // Adjust cross axis size based on aspect ratio
                 if (has_flex_item_prop(item) && item->fi->aspect_ratio > 0) {
                     if (is_main_axis_horizontal(flex_layout)) {
-                        item->height = clamped_sizes[i] / item->fi->aspect_ratio;
+                        item->height = iteration_scratch[i].clamped_size / item->fi->aspect_ratio;
                     } else {
-                        item->width = clamped_sizes[i] * item->fi->aspect_ratio;
+                        item->width = iteration_scratch[i].clamped_size * item->fi->aspect_ratio;
                     }
                 }
             }
         }
 
-        mem_free(target_sizes);
-        mem_free(clamped_sizes);
-        mem_free(has_min_violation);
-        mem_free(has_max_violation);
+        mem_free(iteration_scratch);
 
         // If no items were frozen this iteration (total_violation was 0), we're done
         if (!any_frozen_this_iteration) {
@@ -4444,10 +4415,10 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
             for (int i = 0; i < line->item_count; i++) {
                 ViewElement* item = lam::view_as_element(line->items[i]);
                 if (!item) continue;
-                if (frozen[i]) {
+                if (scratch[i].frozen) {
                     recalc_frozen += get_main_axis_size(item, flex_layout);
                 } else {
-                    recalc_unfrozen += item_flex_basis[i];
+                    recalc_unfrozen += scratch[i].flex_basis;
                 }
             }
             float recalc_free = container_main_size - recalc_frozen - recalc_unfrozen - total_margin_size - gap_space;
@@ -4464,11 +4435,11 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
     // This handles the case where the loop exits early (remaining_free_space == 0)
     // and unfrozen items still have their initial hypothetical sizes from setup
     for (int i = 0; i < line->item_count; i++) {
-        if (frozen[i]) continue;
+        if (scratch[i].frozen) continue;
         ViewElement* item = lam::view_as_element(line->items[i]);
         if (!item) continue;
-        set_main_axis_size(item, item_hypothetical[i], flex_layout);
-        log_debug("ITERATIVE_FLEX - item %d: UNFROZEN finalized at hypothetical=%.1f", i, item_hypothetical[i]);
+        set_main_axis_size(item, scratch[i].hypothetical, flex_layout);
+        log_debug("ITERATIVE_FLEX - item %d: UNFROZEN finalized at hypothetical=%.1f", i, scratch[i].hypothetical);
     }
 
     // Last-item rounding correction: after actual flex grow/shrink distribution,
@@ -4511,16 +4482,14 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
         ViewElement* item = lam::view_as_element(line->items[i]);
         if (!has_flex_item_prop(item)) continue;
         float final_size = get_main_axis_size(item, flex_layout);
-        float hypo = item_hypothetical[i];
+        float hypo = scratch[i].hypothetical;
         if (fabsf(final_size - hypo) > 0.5f) {
             item->fi->main_size_from_flex = 1;
             log_debug("FLEX_SIZED: item %d main_size_from_flex=1 (final=%.1f, hypo=%.1f)", i, final_size, hypo);
         }
     }
 
-    mem_free(frozen);
-    mem_free(item_flex_basis);
-    mem_free(item_hypothetical);
+    mem_free(scratch);
     log_info("ITERATIVE_FLEX COMPLETE - converged after %d iterations", iteration);
 }
 
@@ -4550,11 +4519,13 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         ViewElement* item = lam::view_as_element(line->items[i]);
         if (!item) continue;
         if (is_main_axis_horizontal(flex_layout)) {
-            if (item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO) auto_margin_count++;
-            if (item->bound && item->bound->margin.right_type == CSS_VALUE_AUTO) auto_margin_count++;
+            auto_margin_count += layout_count_auto_margins(
+                item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO,
+                item->bound && item->bound->margin.right_type == CSS_VALUE_AUTO);
         } else {
-            if (item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO) auto_margin_count++;
-            if (item->bound && item->bound->margin.bottom_type == CSS_VALUE_AUTO) auto_margin_count++;
+            auto_margin_count += layout_count_auto_margins(
+                item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO,
+                item->bound && item->bound->margin.bottom_type == CSS_VALUE_AUTO);
         }
     }
 
@@ -4567,10 +4538,8 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
     float total_size_with_gaps = total_item_size + gap_space;
     float free_space = container_size - total_size_with_gaps;
 
-    if (auto_margin_count > 0 && free_space > 0.0f) {
-        // Distribute free space among auto margins
-        auto_margin_size = free_space / auto_margin_count;
-    } else {
+    auto_margin_size = layout_auto_margin_share(free_space, auto_margin_count);
+    if (auto_margin_size == 0.0f) {
         // Apply justify-content if no auto margins
         // CRITICAL FIX: Use justify value directly - it's now stored as Lexbor constant
         int justify = flex_layout->justify;

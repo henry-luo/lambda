@@ -299,6 +299,16 @@ typedef struct TypeMapTransition {
     struct TypeMapTransition* next;
 } TypeMapTransition;
 
+static inline void* map_field_ptr(void* map_data, const ShapeEntry* field) {
+    return (uint8_t*)map_data + field->byte_offset;
+}
+
+Item map_field_to_item(void* field_ptr, TypeId type_id);
+
+static inline Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
+    return map_field_to_item(map_field_ptr(map_data, field), field->type->type_id);
+}
+
 // A1: FNV-1a 32-bit hash for property name lookup.
 // Thin alias over lib/hash.h so the algorithm choice lives in one place.
 static inline uint32_t typemap_fnv1a(const char* key, int len) {
@@ -808,6 +818,12 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
 // Shape finalization - deduplicate map/element shapes using shape pool
 void map_finalize_shape(TypeMap* type_map, Input* input);
 void elmt_finalize_shape(TypeElmt* type_elmt, Input* input);
+
+// Borrowed scalar read: boxed int64/float/uint64 Items point into ArrayNum storage.
+// Use only while the source ArrayNum is alive and not being mutated.
+Item array_num_read_borrowed_item(ArrayNum* array, int64_t offset);
+Item array_num_read_item(ArrayNum* array, int64_t offset);
+double array_num_read_double(ArrayNum* arr, int64_t offset);
 
 // Deep structural equality for Items (Phase 14: no-op elision)
 bool item_deep_equal(Item a, Item b);

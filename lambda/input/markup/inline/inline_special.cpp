@@ -508,7 +508,7 @@ Item parse_citation(MarkupParser* parser, const char** text) {
 // Entity Reference Parsing
 // ============================================================================
 
-#include "../../html_entities.h"
+#include "../../../../lib/html_entities.h"
 #include "../../input-utils.h"
 
 /**

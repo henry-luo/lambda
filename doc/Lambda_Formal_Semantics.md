@@ -150,9 +150,11 @@ int/float mixing, and the decimal×float lattice is costly. [C3]
 
 - An unsuffixed integer literal that exceeds the `int` range is a **compile
   error** — never a silent conversion. Suffixes (`i64`, `u64`, sized numeric
-  suffixes, `n`, float form) express intent explicitly. The `n` suffix is
-  lexical: integer-like spellings (`1n`, `1e3n`) are `integer`; spellings with
-  a decimal point or negative exponent (`1.0n`, `1e-3n`) are `decimal`.
+  suffixes, `n`, `m`, float form) express intent explicitly. The suffix alone
+  names the type: `n` is `integer` always (`1n`, `1e3n`), `m` is `decimal`
+  always (`100m`, `1.5m`, `1.5e-2m`). A fractional or negative-exponent
+  spelling with `n` (`1.0n`, `1e-3n`) is a **compile error** naming `m` —
+  `n` requires an integer-valued spelling.
 - **Data cannot be rejected**: input parsers place integer tokens in the
   smallest exact home — `int`, else `int64`, else `decimal` — never silently in
   float. [C3, C13]
@@ -172,8 +174,9 @@ the operation proceeds in decimal arithmetic. [C3, C8.5a, C13]
 the fixed decimal tier may use it; larger exact literals and results use the
 extended tier. Literal digits are preserved exactly regardless of tier. Precision
 control belongs on operations (`decimal(x, prec:, rounding:)`, `quantize`,
-`round`) rather than on a second literal suffix. The retired uppercase `N`
-suffix is not part of the grammar.
+`round`) rather than on a second literal suffix. The decimal literal suffix is
+`m` (all numeric spellings, including integer-valued: `100m`); the retired
+uppercase `N` suffix is not part of the grammar.
 
 Decimal `+`, `-`, and `*` are exact and may grow storage; division and other
 inexact operations round at the documented decimal context. `integer ÷ integer`
@@ -192,12 +195,12 @@ parse back to exactly the same double. This one conversion governs *every*
 mixed float↔decimal operation: `==`, ordering, the total order, arithmetic,
 hashing. Consequences:
 
-- `0.1n == 0.1` → true; `0.1 - 0.1n` → `0n`.
-- `0.1 + 0.2 == 0.3n` → **false**: the float sum *is* a different number
+- `0.1m == 0.1` → true; `0.1 - 0.1m` → `0m`.
+- `0.1 + 0.2 == 0.3m` → **false**: the float sum *is* a different number
   (`0.30000000000000004`); the convention aligns values with their decimal
   twins — it cannot make float arithmetic decimal.
 - **Decimal contagion is the escape**: one decimal operand promotes the whole
-  chain — `0.1n + 0.2 == 0.3n` → **true**.
+  chain — `0.1m + 0.2 == 0.3m` → **true**.
 
 *Rationale.* The naive alternative (round the decimal to a double and compare)
 destroys transitivity — many decimals map to one float. Shortest-round-trip is
@@ -273,7 +276,7 @@ an `if` branch silently; `error == error → false` mirrors `nan` by design.
 ### 5.2 Numbers
 
 Numeric equality is by mathematical value across all representations:
-`1 == 1.0 == 1n`; `0.1n == 0.1` per §4.5; `-0.0 == 0.0`. Decimal storage width
+`1 == 1.0 == 1n == 1m`; `0.1m == 0.1` per §4.5; `-0.0 == 0.0`. Decimal storage width
 is representation, not value identity. `nan != nan` (IEEE, and the poison rule).
 
 ### 5.3 Sequences
@@ -315,7 +318,7 @@ DISTINCT contradiction outright. [C8.6]
 
 Wherever values are hashed: `a == b ⟹ hash(a) == hash(b)`. Maps hash in
 canonically sorted key order; numbers hash via their canonical value across
-representations (`1`, `1.0`, `1n` hash equal). [C8.6-R, C8.5a]
+representations (`1`, `1.0`, `1n`, `1m` hash equal). [C8.6-R, C8.5a]
 
 ---
 

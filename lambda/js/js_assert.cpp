@@ -23,10 +23,6 @@
 #include <math.h>
 #include <time.h>
 
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
 extern "C" Item js_util_inspect(Item obj_item, Item options_item);
 extern "C" Item js_util_isDeepStrictEqual(Item a, Item b);
 extern "C" Item js_util_isDeepEqual(Item a, Item b);

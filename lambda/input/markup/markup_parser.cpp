@@ -12,7 +12,7 @@
 #include "format_adapter.hpp"
 #include "block/block_common.hpp"
 #include "../html5/html5_parser.h"
-#include "../html_entities.h"
+#include "../../../lib/html_entities.h"
 #include "../../../lib/memtrack.h"
 #include "../input-utils.h"
 #include "../markup-format.h"
@@ -643,10 +643,10 @@ void MarkupParser::normalizeLabel(const char* label, size_t len, char* out, size
         size_t copy_len = (size_t)folded_len < out_size - 1 ? (size_t)folded_len : out_size - 1;
         memcpy(out, folded, copy_len);
         out[copy_len] = '\0';
-        raw_free(folded);  // RAWALLOC_OK: utf8proc uses raw malloc internally
+        free_utf8proc_result(folded);
     } else {
         // Fallback: if case folding fails, do simple ASCII lowercase
-        if (folded) raw_free(folded);  // RAWALLOC_OK: utf8proc uses raw malloc internally
+        if (folded) free_utf8proc_result(folded);
         out[0] = '\0';
     }
 }

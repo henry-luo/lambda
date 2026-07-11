@@ -96,6 +96,10 @@ bool is_html_entity(const char* str, size_t len, size_t pos, size_t* entity_end)
 
 // format string with HTML entity escaping (prevents double-encoding)
 // is_attribute: if true, also escapes quotes
+void format_markup_string_safe(StringBuf* sb, String* str, bool is_attribute,
+                               bool escape_apostrophe_in_text,
+                               bool escape_apostrophe_in_attr,
+                               const char* log_prefix);
 void format_html_string_safe(StringBuf* sb, String* str, bool is_attribute);
 
 // ==============================================================================

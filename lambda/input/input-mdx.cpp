@@ -4,49 +4,32 @@
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
+#include "input-jsx-common.hpp"
 #include <string.h>
-
-#include <ctype.h>
 
 using namespace lambda;
 
 // Forward declarations
 static Element* parse_mdx_content(InputContext& ctx, const char* content);
 static Element* parse_mdx_element(InputContext& ctx, const char** pos, const char* end);
-static bool is_jsx_component_tag(const char* tag_name);
-static bool is_html_element_tag(const char* tag_name);
 static const char* extract_tag_name(const char* pos, const char* end, char* buffer, size_t buffer_size);
 static Element* parse_jsx_component(InputContext& ctx, const char** pos, const char* end);
 static Element* parse_html_element(InputContext& ctx, const char** pos, const char* end);
 static Element* create_mdx_document(InputContext& ctx, const char* content);
 
-// Utility function to check if a tag name represents a JSX component (starts with uppercase)
-static bool is_jsx_component_tag(const char* tag_name) {
-    return tag_name && tag_name[0] >= 'A' && tag_name[0] <= 'Z';
-}
-
-// Utility function to check if a tag name represents an HTML element (starts with lowercase)
-static bool is_html_element_tag(const char* tag_name) {
-    return tag_name && tag_name[0] >= 'a' && tag_name[0] <= 'z';
-}
-
 // Extract tag name from current position
 static const char* extract_tag_name(const char* pos, const char* end, char* buffer, size_t buffer_size) {
-    if (!pos || !buffer || buffer_size == 0 || pos >= end || *pos != '<') {
+    if (!buffer || buffer_size == 0) {
         return NULL;
     }
 
-    pos++; // Skip '<'
-    size_t i = 0;
-
-    // Extract tag name until we hit whitespace, '>', or '/'
-    while (pos < end && i < buffer_size - 1 &&
-           *pos != ' ' && *pos != '\t' && *pos != '\n' && *pos != '>' && *pos != '/') {
-        buffer[i++] = *pos++;
-    }
-
-    buffer[i] = '\0';
-    return i > 0 ? buffer : NULL;
+    const char* start = NULL;
+    size_t len = 0;
+    if (!jsx_scan_tag_name_after_lt(pos, end, &start, &len) || !start) return NULL;
+    if (len >= buffer_size) len = buffer_size - 1;
+    memcpy(buffer, start, len);
+    buffer[len] = '\0';
+    return len > 0 ? buffer : NULL;
 }
 
 // Parse JSX component using existing JSX parser
@@ -68,11 +51,10 @@ static Element* parse_jsx_component(InputContext& ctx, const char** pos, const c
         jsx_end++;
         tag_name_start = jsx_end;
 
-        // Extract tag name
-        while (jsx_end < end && *jsx_end != '>' && *jsx_end != '/' && !str_char_is_ascii_space(*jsx_end)) {
-            jsx_end++;
+        const char* scanned_name = NULL;
+        if (jsx_scan_tag_name_after_lt(jsx_start, end, &scanned_name, &tag_name_len)) {
+            tag_name_start = scanned_name;
         }
-        tag_name_len = jsx_end - tag_name_start;
         jsx_end = jsx_start; // Reset for full parsing
     }
 
@@ -176,10 +158,10 @@ static Element* parse_mdx_element(InputContext& ctx, const char** pos, const cha
         return NULL;
     }
 
-    if (is_jsx_component_tag(tag)) {
+    if (jsx_is_component_tag(tag)) {
         // Uppercase tag -> JSX component
         return parse_jsx_component(ctx, pos, end);
-    } else if (is_html_element_tag(tag)) {
+    } else if (jsx_is_html_tag(tag)) {
         // Lowercase tag -> HTML element
         return parse_html_element(ctx, pos, end);
     }

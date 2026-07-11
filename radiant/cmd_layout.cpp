@@ -25,6 +25,7 @@
 #include "../lib/mem.h"
 #include "../lib/mem_factory.h"
 #include "../lib/uv_loop.h"
+#include "../lib/escape.h"
 #include <chrono>       // timing - acceptable for profiling
 #include <limits.h>
 #include <signal.h>
@@ -3761,38 +3762,13 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
 static char* escape_image_document_html_attr(const char* value) {
     if (!value) return mem_strdup("", MEM_CAT_LAYOUT);
 
-    size_t escaped_len = 0;
-    for (size_t i = 0; value[i]; i++) {
-        char c = value[i];
-        if (c == '&') escaped_len += 5;
-        else if (c == '<' || c == '>') escaped_len += 4;
-        else if (c == '"') escaped_len += 6;
-        else if (c == '\'') escaped_len += 5;
-        else escaped_len++;
-    }
-
-    char* escaped = (char*)mem_alloc(escaped_len + 1, MEM_CAT_LAYOUT);
+    StrBuf* escaped = strbuf_new_cap(strlen(value) + 1);
     if (!escaped) return nullptr;
-
-    size_t out = 0;
-    for (size_t i = 0; value[i]; i++) {
-        char c = value[i];
-        if (c == '&') {
-            memcpy(escaped + out, "&amp;", 5); out += 5;
-        } else if (c == '<') {
-            memcpy(escaped + out, "&lt;", 4); out += 4;
-        } else if (c == '>') {
-            memcpy(escaped + out, "&gt;", 4); out += 4;
-        } else if (c == '"') {
-            memcpy(escaped + out, "&quot;", 6); out += 6;
-        } else if (c == '\'') {
-            memcpy(escaped + out, "&#39;", 5); out += 5;
-        } else {
-            escaped[out++] = c;
-        }
-    }
-    escaped[out] = '\0';
-    return escaped;
+    escape_append(escaped, value, strlen(value), ESCAPE_RULES_HTML_ATTR,
+                  ESCAPE_RULES_HTML_ATTR_COUNT, ESCAPE_CTRL_NONE);
+    char* result = mem_strdup(escaped->str, MEM_CAT_LAYOUT);
+    strbuf_free(escaped);
+    return result;
 }
 
 static DomDocument* load_dom_backed_image_document(Url* image_url, int viewport_width,
@@ -3925,46 +3901,23 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
     log_info("[TIMING] Step 1 - Read text file: %.1fms (%zu bytes)",
         std::chrono::duration<double, std::milli>(step1_end - step1_start).count(), content_len);
 
-    // Step 2: Escape HTML special characters for safe display
     auto step2_start = std::chrono::high_resolution_clock::now();
 
-    // count how many chars need escaping
-    size_t escaped_len = 0;
-    for (size_t i = 0; i < content_len; i++) {
-        char c = text_content[i];
-        if (c == '<') escaped_len += 4;       // &lt;
-        else if (c == '>') escaped_len += 4;  // &gt;
-        else if (c == '&') escaped_len += 5;  // &amp;
-        else escaped_len += 1;
-    }
-
-    // allocate escaped string
-    char* escaped_content = (char*)mem_alloc(escaped_len + 1, MEM_CAT_LAYOUT);
-    if (!escaped_content) {
+    StrBuf* escaped_buf = strbuf_new_cap(content_len + 1);
+    if (!escaped_buf) {
         log_error("Failed to allocate escaped content buffer");
         mem_free(text_content);  // from read_text_file, uses stdlib
         return nullptr;
     }
-
-    // escape content
-    size_t j = 0;
-    for (size_t i = 0; i < content_len; i++) {
-        char c = text_content[i];
-        if (c == '<') {
-            memcpy(escaped_content + j, "&lt;", 4);
-            j += 4;
-        } else if (c == '>') {
-            memcpy(escaped_content + j, "&gt;", 4);
-            j += 4;
-        } else if (c == '&') {
-            memcpy(escaped_content + j, "&amp;", 5);
-            j += 5;
-        } else {
-            escaped_content[j++] = c;
-        }
-    }
-    escaped_content[j] = '\0';
+    escape_append(escaped_buf, text_content, content_len, ESCAPE_RULES_HTML_TEXT,
+                  ESCAPE_RULES_HTML_TEXT_COUNT, ESCAPE_CTRL_NONE);
+    char* escaped_content = mem_strdup(escaped_buf->str, MEM_CAT_LAYOUT);
+    strbuf_free(escaped_buf);
     mem_free(text_content);  // from read_text_file, uses stdlib
+    if (!escaped_content) {
+        log_error("Failed to copy escaped content buffer");
+        return nullptr;
+    }
 
     auto step2_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 2 - Escape HTML: %.1fms",
@@ -4007,7 +3960,7 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
         "</html>\n";
 
     // Calculate buffer size and format HTML
-    size_t html_len = strlen(html_template) + strlen(filename) + escaped_len + 1;
+    size_t html_len = strlen(html_template) + strlen(filename) + strlen(escaped_content) + 1;
     char* html_content = (char*)mem_alloc(html_len, MEM_CAT_LAYOUT);
     if (!html_content) {
         log_error("Failed to allocate HTML buffer");

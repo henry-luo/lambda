@@ -10,28 +10,14 @@ DisplayReplayDirtyClip dl_replay_push_dirty_clip(RdtVector* vec,
         return clip;
     }
 
-    DirtyRect* dirty = dirty_tracker->dirty_list;
-    float left = dirty->x * scale;
-    float top = dirty->y * scale;
-    float right = (dirty->x + dirty->width) * scale;
-    float bottom = (dirty->y + dirty->height) * scale;
-    dirty = dirty->next;
-    while (dirty) {
-        float rect_left = dirty->x * scale;
-        float rect_top = dirty->y * scale;
-        float rect_right = (dirty->x + dirty->width) * scale;
-        float rect_bottom = (dirty->y + dirty->height) * scale;
-        if (rect_left < left) left = rect_left;
-        if (rect_top < top) top = rect_top;
-        if (rect_right > right) right = rect_right;
-        if (rect_bottom > bottom) bottom = rect_bottom;
-        dirty = dirty->next;
-    }
-
-    clip.bounds = {left, top, right, bottom};
+    if (!dirty_tracker_bounds(dirty_tracker, &clip.bounds, scale)) return clip;
     clip.active = true;
 
     clip.path = rdt_path_new();
+    float left = clip.bounds.left;
+    float top = clip.bounds.top;
+    float right = clip.bounds.right;
+    float bottom = clip.bounds.bottom;
     rdt_path_move_to(clip.path, left, top);
     rdt_path_line_to(clip.path, right, top);
     rdt_path_line_to(clip.path, right, bottom);

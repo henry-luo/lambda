@@ -50,20 +50,7 @@ static inline ViewBlock* layout_inline_unsafe_block_api_span(ViewSpan* span) {
 
 // Check if a view child is out of normal flow (absolute, fixed, or float)
 static inline bool is_out_of_flow_child(View* child) {
-    DomNode* node = child;
-    if (DomElement* elem = layout_inline_as_element(node)) {
-        if (elem->position) {
-            if (elem->position->position == CSS_VALUE_ABSOLUTE ||
-                elem->position->position == CSS_VALUE_FIXED) {
-                return true;
-            }
-            if (elem->position->float_prop == CSS_VALUE_LEFT ||
-                elem->position->float_prop == CSS_VALUE_RIGHT) {
-                return true;
-            }
-        }
-    }
-    return false;
+    return layout_view_is_out_of_flow(child);
 }
 
 static bool span_has_direct_visible_text(ViewSpan* span) {
@@ -859,13 +846,9 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         bool child_is_abspos = false;
         if (child->is_element()) {
             DomElement* ce = layout_inline_as_element(child);
-            if (ce->position &&
-                (ce->position->float_prop == CSS_VALUE_LEFT ||
-                 ce->position->float_prop == CSS_VALUE_RIGHT)) {
+            if (layout_position_is_floated(ce->position)) {
                 child_is_float = true;
-            } else if (ce->position &&
-                (ce->position->position == CSS_VALUE_ABSOLUTE ||
-                 ce->position->position == CSS_VALUE_FIXED)) {
+            } else if (layout_position_is_abs_fixed(ce->position)) {
                 child_is_abspos = true;
             } else if (ce->specified_style && ce->specified_style->tree) {
                 AvlNode* fn = avl_tree_search(ce->specified_style->tree, CSS_PROPERTY_FLOAT);
@@ -1493,12 +1476,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 DomElement* child_elem = layout_inline_as_element(scan);
                 bool child_is_out_of_flow = false;
                 if (child_elem->position) {
-                    if (child_elem->position->position == CSS_VALUE_ABSOLUTE ||
-                        child_elem->position->position == CSS_VALUE_FIXED) {
+                    if (layout_position_is_abs_fixed(child_elem->position)) {
                         child_is_out_of_flow = true;
                     }
-                    if (child_elem->position->float_prop == CSS_VALUE_LEFT ||
-                        child_elem->position->float_prop == CSS_VALUE_RIGHT) {
+                    if (layout_position_is_floated(child_elem->position)) {
                         child_is_out_of_flow = true;
                     }
                 }

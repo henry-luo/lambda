@@ -7,27 +7,6 @@
 #include <inttypes.h>  // for PRId64
 #include "ast.hpp"
 
-// inline reader for compact sized array elements (avoids cross-lib dependency on array_num_get)
-static Item read_compact_elem(ArrayNum* arr, int i) {
-    switch (arr->get_elem_type()) {
-    case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)arr->data)[i])};
-    case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)arr->data)[i])};
-    case ELEM_INT32:   return (Item){.item = i32_to_item(((int32_t*)arr->data)[i])};
-    case ELEM_UINT8:   return (Item){.item = u8_to_item(((uint8_t*)arr->data)[i])};
-    case ELEM_UINT8_CLAMPED: return (Item){.item = u8_to_item(((uint8_t*)arr->data)[i])};
-    case ELEM_UINT16:  return (Item){.item = u16_to_item(((uint16_t*)arr->data)[i])};
-    case ELEM_UINT32:  return (Item){.item = u32_to_item(((uint32_t*)arr->data)[i])};
-    case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)arr->data)[i]))};
-    case ELEM_FLOAT32: return (Item){.item = f32_to_item(((float*)arr->data)[i])};
-    case ELEM_UINT64:  return (Item){.item = i2it((int64_t)((uint64_t*)arr->data)[i])};
-    case ELEM_FLOAT64:
-        // double-lane arrays must print as floats; the old retired 0xC0 path truncated values.
-        return lambda_float_ptr_to_item(&((double*)arr->data)[i]);
-    case ELEM_BOOL:    return (Item){.item = b2it(((uint8_t*)arr->data)[i] ? BOOL_TRUE : BOOL_FALSE)};
-    default:           return ItemNull;
-    }
-}
-
 #define MAX_DEPTH 2000
 #define MAX_FIELD_COUNT 10000
 
@@ -222,7 +201,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
             break;
         }
         if (i) strbuf_append_char(strbuf, ',');
-        void* data = ((char*)map_data) + field->byte_offset;
+        void* data = map_field_ptr(map_data, field);
         if (!field->name) { // nested map
             log_debug("nested map at field %d: %p", i, data);
             Map *nest_map = *(Map**)data;
@@ -261,90 +240,9 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 strbuf_append_str(strbuf, " ");
             }
             strbuf_append_format(strbuf, "%.*s: ", (int)field->name->length, field->name->str);
-            switch (field->type->type_id) {
-            case LMD_TYPE_NULL:
-                strbuf_append_str(strbuf, "null");
-                break;
-            case LMD_TYPE_BOOL:
-                strbuf_append_format(strbuf, "%s", *(bool*)data ? "true" : "false");
-                break;
-            case LMD_TYPE_INT:
-                strbuf_append_format(strbuf, "%" PRId64, *(int64_t*)data);  // read full int64 to preserve 56-bit value
-                break;
-            case LMD_TYPE_INT64:
-                strbuf_append_format(strbuf, "%" PRId64, *(int64_t*)data);
-                break;
-            case LMD_TYPE_FLOAT:
-                print_double(strbuf, *(double*)data);
-                break;
-            case LMD_TYPE_NUM_SIZED: {
-                Item it = {.item = *(uint64_t*)data};
-                NumSizedType st = it.get_num_type();
-                if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
-                    print_double(strbuf, it.get_num_sized_as_double());
-                } else {
-                    strbuf_append_format(strbuf, "%" PRId64, it.get_num_sized_as_int64());
-                }
-                break;
-            }
-            case LMD_TYPE_UINT64:
-                strbuf_append_format(strbuf, "%" PRIu64, *(uint64_t*)data);
-                break;
-            case LMD_TYPE_DTIME: {
-                DateTime dt = *(DateTime*)data;
-                strbuf_append_str(strbuf, "t'");
-                datetime_format_lambda(strbuf, &dt);
-                strbuf_append_char(strbuf, '\'');
-                break;
-            }
-            case LMD_TYPE_DECIMAL: {
-                Decimal *decimal = *(Decimal**)data;
-                print_decimal(strbuf, decimal);
-                break;
-            }
-            case LMD_TYPE_STRING: {
-                String *string = *(String**)data;
-                if (string) {
-                    strbuf_append_format(strbuf, "\"%s\"", string->chars);
-                } else {
-                    strbuf_append_str(strbuf, "\"\"");
-                }
-                break;
-            }
-            case LMD_TYPE_SYMBOL: {
-                Symbol *symbol = *(Symbol**)data;
-                if (symbol) {
-                    strbuf_append_format(strbuf, "'%s'", symbol->chars);
-                } else {
-                    strbuf_append_str(strbuf, "''");
-                }
-                break;
-            }
-            case LMD_TYPE_BINARY: {
-                String *bin = *(String**)data;
-                if (bin) {
-                    strbuf_append_format(strbuf, "b'%s'", bin->chars);
-                } else {
-                    strbuf_append_str(strbuf, "b''");
-                }
-                break;
-            }
-            case LMD_TYPE_PATH: {
-                Path *path = *(Path**)data;
-                path_to_string(path, strbuf);
-                break;
-            }
-            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-            case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
-            case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
-                print_item(strbuf, *(Item*)data, depth, indent);
-                break;
-            case LMD_TYPE_ANY:
-                print_typeditem(strbuf, (TypedItem*)data, depth, indent);
-                break;
-            default:
-                strbuf_append_str(strbuf, "[unknown]");
-            }
+            // Read typed map slots the same way Map::get() does, so print output
+            // cannot drift from normal map access for dynamic or pointer fields.
+            print_item(strbuf, map_shape_field_to_item(map_data, field), depth, indent);
         }
 
         advance_field:
@@ -581,7 +479,7 @@ struct PrintItemVisitor {
         } else if (et == ELEM_INT || et == ELEM_INT64) {
             strbuf_append_format(sb, "%lld", array->items[flat_idx]);
         } else {
-            Item val = read_compact_elem(array, flat_idx);
+            Item val = array_num_read_borrowed_item(array, flat_idx);
             print_item(sb, val, depth + 1, indent);
         }
     }
@@ -639,7 +537,7 @@ struct PrintItemVisitor {
             // compact sized types: read and print each element
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_str(strbuf, ", ");
-                Item val = read_compact_elem(array, i);
+                Item val = array_num_read_borrowed_item(array, i);
                 print_item(strbuf, val, depth + 1, indent);
             }
         }
@@ -818,7 +716,7 @@ void print_root_item(StrBuf *strbuf, Item item, const char* indent) {
             // compact sized types
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_char(strbuf, '\n');
-                Item val = read_compact_elem(array, i);
+                Item val = array_num_read_borrowed_item(array, i);
                 print_item(strbuf, val, 0, indent);
             }
         }

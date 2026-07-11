@@ -1,14 +1,14 @@
 // Test: Decimal Basic Operations
 // Layer: 3 | Category: datatype | Covers: decimal literal, arithmetic, type
 
-123.456n
+123.456m
 0n
--99.99n
-type(123.456n)
-123.456n is decimal
-1.5n + 2.5n
-10.0n - 3.0n
-2.0n * 3.0n
-10.0n / 4.0n
-1.5n == 1.5n
-1.5n != 2.5n
+-99.99m
+type(123.456m)
+123.456m is decimal
+1.5m + 2.5m
+10.0m - 3.0m
+2.0m * 3.0m
+10.0m / 4.0m
+1.5m == 1.5m
+1.5m != 2.5m

@@ -59,16 +59,8 @@ mpd_context_t* decimal_unlimited_context() {
     return &g_unlimited_ctx;
 }
 
-void lambda_double_to_shortest(double d, char* out, int out_size) {
+void lambda_finite_double_to_shortest(double d, char* out, int out_size) {
     if (!out || out_size <= 0) return;
-    if (isnan(d)) {
-        snprintf(out, out_size, "nan");
-        return;
-    }
-    if (isinf(d)) {
-        snprintf(out, out_size, "%sinf", d < 0 ? "-" : "");
-        return;
-    }
     if (d == 0.0) {
         snprintf(out, out_size, "0");
         return;
@@ -150,6 +142,19 @@ void lambda_double_to_shortest(double d, char* out, int out_size) {
         if (e - 1 >= 0 && o < end) *o++ = '+';
         snprintf(o, (size_t)(end - o + 1), "%d", e - 1);
     }
+}
+
+void lambda_double_to_shortest(double d, char* out, int out_size) {
+    if (!out || out_size <= 0) return;
+    if (isnan(d)) {
+        snprintf(out, out_size, "nan");
+        return;
+    }
+    if (isinf(d)) {
+        snprintf(out, out_size, "%sinf", d < 0 ? "-" : "");
+        return;
+    }
+    lambda_finite_double_to_shortest(d, out, out_size);
 }
 
 bool lambda_numeric_to_canonical_string(Item item, char* out, int out_size) {

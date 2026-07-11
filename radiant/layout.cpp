@@ -240,9 +240,7 @@ static bool root_child_margins_are_self_collapsing(ViewBlock* block) {
         if (!child->view_type) continue;
         if (child->is_block()) {
             ViewBlock* child_block = lam::view_require_block(child);
-            bool abs_or_fixed = child_block->position &&
-                (child_block->position->position == CSS_VALUE_ABSOLUTE ||
-                 child_block->position->position == CSS_VALUE_FIXED);
+            bool abs_or_fixed = layout_block_is_out_of_flow_positioned(child_block);
             if (abs_or_fixed) continue;
             if (child_block->position && element_has_float(child_block)) return false;
             if (!root_child_margins_are_self_collapsing(child_block)) return false;
@@ -262,9 +260,7 @@ static float root_child_float_only_extent(ViewBlock* block, bool* has_float, boo
         if (!child->view_type) continue;
         if (child->is_block()) {
             ViewBlock* child_block = lam::view_require_block(child);
-            bool abs_or_fixed = child_block->position &&
-                (child_block->position->position == CSS_VALUE_ABSOLUTE ||
-                 child_block->position->position == CSS_VALUE_FIXED);
+            bool abs_or_fixed = layout_block_is_out_of_flow_positioned(child_block);
             if (abs_or_fixed) continue;
             if (child_block->position && element_has_float(child_block)) {
                 *has_float = true;
@@ -1083,11 +1079,7 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
 }
 
 static bool block_view_is_out_of_flow(ViewBlock* block) {
-    return block && block->position &&
-        (block->position->position == CSS_VALUE_ABSOLUTE ||
-         block->position->position == CSS_VALUE_FIXED ||
-         block->position->float_prop == CSS_VALUE_LEFT ||
-         block->position->float_prop == CSS_VALUE_RIGHT);
+    return layout_block_is_out_of_flow(block);
 }
 
 static bool inline_span_has_in_flow_block_child(ViewSpan* span) {
@@ -1580,13 +1572,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
 }
 
 static bool line_align_view_is_out_of_flow(View* view) {
-    if (!view) return false;
-    DomElement* elem = lam::dom_as<DOM_NODE_ELEMENT>(static_cast<DomNode*>(view));
-    if (!elem || !elem->position) return false;
-    return elem->position->position == CSS_VALUE_ABSOLUTE ||
-        elem->position->position == CSS_VALUE_FIXED ||
-        elem->position->float_prop == CSS_VALUE_LEFT ||
-        elem->position->float_prop == CSS_VALUE_RIGHT;
+    return layout_view_is_out_of_flow(view);
 }
 
 // CSS 2.1 §16.2: Shift current-line text rects inside a span that was laid out
@@ -2516,8 +2502,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     // CSS 2.1 §10.3, §9.3: Root element explicit sizing and positioning.
     // Detect if the root <html> element has explicit CSS width/height
     // or non-static positioning, and apply accordingly.
-    bool root_is_abspos = html->position &&
-        (html->position->position == CSS_VALUE_ABSOLUTE || html->position->position == CSS_VALUE_FIXED);
+    bool root_is_abspos = layout_block_is_out_of_flow_positioned(html);
     bool root_is_relative = html->position && (html->position->position == CSS_VALUE_RELATIVE ||
                                                     html->position->position == CSS_VALUE_STICKY);
 
@@ -2772,9 +2757,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         while (root_child) {
             if (root_child->is_block()) {
                 ViewBlock* child_block = lam::view_require_block(root_child);
-                bool out_of_flow = child_block->position &&
-                    (child_block->position->position == CSS_VALUE_ABSOLUTE ||
-	                     child_block->position->position == CSS_VALUE_FIXED);
+                bool out_of_flow = layout_block_is_out_of_flow_positioned(child_block);
                 if (!out_of_flow) {
                     float margin_top = child_block->bound ? child_block->bound->margin.top : 0.0f;
                     float margin_bottom = child_block->bound ? child_block->bound->margin.bottom : 0.0f;

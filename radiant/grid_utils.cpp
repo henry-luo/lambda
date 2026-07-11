@@ -2,6 +2,7 @@
 #include "intrinsic_sizing.hpp"
 #include "layout_box.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
+#include "../lib/mem_grow.hpp"
 #include "../lib/tagged.hpp"
 
 extern "C" {
@@ -164,9 +165,10 @@ void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_nu
 
     // Ensure we have space for more line names
     if (grid->line_name_count >= grid->allocated_line_names) {
-        grid->allocated_line_names *= 2;
-        grid->line_names = (GridLineName*)mem_realloc(grid->line_names,
-                                                 grid->allocated_line_names * sizeof(GridLineName), MEM_CAT_LAYOUT);
+        if (!lam::mem_grow_array(&grid->line_names, &grid->allocated_line_names,
+                                 grid->line_name_count + 1, 8, MEM_CAT_LAYOUT)) {
+            return;
+        }
     }
 
     GridLineName* line_name = &grid->line_names[grid->line_name_count];
@@ -317,8 +319,10 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string, Scratch
 
     // Ensure we have enough space for areas
     if (grid->allocated_areas < unique_count) {
-        grid->grid_areas = (GridArea*)mem_realloc(grid->grid_areas, unique_count * sizeof(GridArea), MEM_CAT_LAYOUT);
-        grid->allocated_areas = unique_count;
+        if (!lam::mem_grow_array(&grid->grid_areas, &grid->allocated_areas,
+                                 unique_count, 4, MEM_CAT_LAYOUT)) {
+            return;
+        }
     }
 
     // Calculate bounds for each unique area

@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "../lambda/input/css/dom_node.hpp"  // Color
+#include "../lib/math_utils.h"
 
 // ============================================================================
 // RdtVector — Radiant's Immediate-Mode Vector Rendering API
@@ -303,6 +304,35 @@ static inline RdtMatrix rdt_matrix_multiply(const RdtMatrix* a, const RdtMatrix*
     r.e32 = a->e31 * b->e12 + a->e32 * b->e22 + a->e33 * b->e32;
     r.e33 = a->e31 * b->e13 + a->e32 * b->e23 + a->e33 * b->e33;
     return r;
+}
+
+static inline void rdt_matrix_transform_point(const RdtMatrix* m,
+                                              float x, float y,
+                                              float* out_x, float* out_y) {
+    if (!m || !out_x || !out_y) return;
+    *out_x = m->e11 * x + m->e12 * y + m->e13;
+    *out_y = m->e21 * x + m->e22 * y + m->e23;
+}
+
+static inline void rdt_matrix_transform_rect_bounds(const RdtMatrix* m,
+                                                    float left, float top,
+                                                    float right, float bottom,
+                                                    float* out_left,
+                                                    float* out_top,
+                                                    float* out_right,
+                                                    float* out_bottom) {
+    if (!m || !out_left || !out_top || !out_right || !out_bottom) return;
+
+    float tx0, ty0, tx1, ty1, tx2, ty2, tx3, ty3;
+    rdt_matrix_transform_point(m, left, top, &tx0, &ty0);
+    rdt_matrix_transform_point(m, right, top, &tx1, &ty1);
+    rdt_matrix_transform_point(m, right, bottom, &tx2, &ty2);
+    rdt_matrix_transform_point(m, left, bottom, &tx3, &ty3);
+
+    *out_left = LMB_MIN(LMB_MIN(tx0, tx1), LMB_MIN(tx2, tx3));
+    *out_right = LMB_MAX(LMB_MAX(tx0, tx1), LMB_MAX(tx2, tx3));
+    *out_top = LMB_MIN(LMB_MIN(ty0, ty1), LMB_MIN(ty2, ty3));
+    *out_bottom = LMB_MAX(LMB_MAX(ty0, ty1), LMB_MAX(ty2, ty3));
 }
 
 // create a translation matrix

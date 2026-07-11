@@ -2,7 +2,8 @@
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
-#include <ctype.h>
+#include "../../lib/html_entities.h"
+#include "input-jsx-common.hpp"
 
 using namespace lambda;
 
@@ -23,25 +24,6 @@ static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const ch
 static String* parse_jsx_attribute_value(InputContext& ctx, const char** jsx, const char* end);
 static Element* parse_jsx_expression(InputContext& ctx, const char** jsx, const char* end);
 static String* parse_jsx_text_content(InputContext& ctx, const char** jsx, const char* end);
-
-// Utility functions
-static bool is_jsx_identifier_char(char c) {
-    return isalnum(c) || c == '_' || c == '$';
-}
-
-static bool is_jsx_whitespace(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-}
-
-static void skip_jsx_whitespace(const char** jsx, const char* end) {
-    while (*jsx < end && is_jsx_whitespace(**jsx)) {
-        (*jsx)++;
-    }
-}
-
-static bool is_jsx_component_name(const char* name) {
-    return name && name[0] >= 'A' && name[0] <= 'Z';
-}
 
 // JSX expression parsing functions
 static String* parse_jsx_expression_content(InputContext& ctx, const char** js_expr, const char* end) {
@@ -129,6 +111,37 @@ static Element* create_jsx_js_expression_element(InputContext& ctx, const char* 
     return js_elem.final().element;
 }
 
+static bool parse_jsx_named_entity(StringBuf* sb, const char** jsx, const char* end) {
+    const char* amp = *jsx;
+    const char* entity_start = amp + 1;
+    const char* entity_end = entity_start;
+
+    while (entity_end < end && *entity_end != ';' && *entity_end != ' ' &&
+           *entity_end != '<' && *entity_end != '&') {
+        entity_end++;
+    }
+
+    if (entity_end >= end || *entity_end != ';') {
+        return false;
+    }
+
+    size_t entity_len = (size_t)(entity_end - entity_start);
+    const char* replacement = html_entity_lookup(entity_start, entity_len);
+    if (replacement) {
+        // JSX text uses HTML entity syntax; decode known names through the shared table.
+        stringbuf_append_str(sb, replacement);
+        *jsx = entity_end + 1;
+        return true;
+    }
+
+    stringbuf_append_char(sb, '&');
+    for (const char* p = entity_start; p <= entity_end; p++) {
+        stringbuf_append_char(sb, *p);
+    }
+    *jsx = entity_end + 1;
+    return true;
+}
+
 // Parse JSX expression: {expression}
 static Element* parse_jsx_expression(InputContext& ctx, const char** jsx, const char* end) {
     if (*jsx >= end || **jsx != '{') {
@@ -161,22 +174,7 @@ static String* parse_jsx_text_content(InputContext& ctx, const char** jsx, const
 
         // Handle HTML entities in JSX text
         if (c == '&') {
-            const char* entity_start = *jsx + 1;
-            const char* entity_end = entity_start;
-
-            while (entity_end < end && *entity_end != ';' && *entity_end != ' ' &&
-                   *entity_end != '<' && *entity_end != '&') {
-                entity_end++;
-            }
-
-            if (entity_end < end && *entity_end == ';') {
-                // Simple entity handling - just preserve as-is for now
-                while (*jsx <= entity_end) {
-                    stringbuf_append_char(sb, **jsx);
-                    (*jsx)++;
-                }
-                continue;
-            }
+            if (parse_jsx_named_entity(sb, jsx, end)) continue;
         }
 
         stringbuf_append_char(sb, c);
@@ -193,7 +191,7 @@ static String* parse_jsx_tag_name(InputContext& ctx, const char** jsx, const cha
     stringbuf_reset(sb);
 
     // First character
-    if (*jsx < end && (isalpha((unsigned char)**jsx) || **jsx == '_')) {
+    if (*jsx < end && jsx_is_identifier_start(**jsx)) {
         stringbuf_append_char(sb, **jsx);
         (*jsx)++;
     } else {
@@ -201,7 +199,7 @@ static String* parse_jsx_tag_name(InputContext& ctx, const char** jsx, const cha
     }
 
     // Remaining characters
-    while (*jsx < end && is_jsx_identifier_char(**jsx)) {
+    while (*jsx < end && jsx_is_identifier_char(**jsx)) {
         stringbuf_append_char(sb, **jsx);
         (*jsx)++;
     }
@@ -211,7 +209,7 @@ static String* parse_jsx_tag_name(InputContext& ctx, const char** jsx, const cha
         stringbuf_append_char(sb, **jsx);
         (*jsx)++;
 
-        while (*jsx < end && is_jsx_identifier_char(**jsx)) {
+        while (*jsx < end && jsx_is_identifier_char(**jsx)) {
             stringbuf_append_char(sb, **jsx);
             (*jsx)++;
         }
@@ -222,7 +220,7 @@ static String* parse_jsx_tag_name(InputContext& ctx, const char** jsx, const cha
 
 // Parse JSX attribute value
 static String* parse_jsx_attribute_value(InputContext& ctx, const char** jsx, const char* end) {
-    skip_jsx_whitespace(jsx, end);
+    jsx_skip_whitespace(jsx, end);
 
     if (*jsx >= end) return NULL;
 
@@ -257,7 +255,7 @@ static String* parse_jsx_attribute_value(InputContext& ctx, const char** jsx, co
         StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
 
-        while (*jsx < end && !is_jsx_whitespace(**jsx) && **jsx != '>' && **jsx != '/') {
+        while (*jsx < end && !jsx_is_whitespace(**jsx) && **jsx != '>' && **jsx != '/') {
             stringbuf_append_char(sb, **jsx);
             (*jsx)++;
         }
@@ -269,7 +267,7 @@ static String* parse_jsx_attribute_value(InputContext& ctx, const char** jsx, co
 // Parse JSX attributes (mutates ElementBuilder)
 static void parse_jsx_attributes(InputContext& ctx, ElementBuilder& element, const char** jsx, const char* end) {
     while (*jsx < end) {
-        skip_jsx_whitespace(jsx, end);
+        jsx_skip_whitespace(jsx, end);
 
         if (*jsx >= end || **jsx == '>' || **jsx == '/') {
             break;
@@ -290,11 +288,11 @@ static void parse_jsx_attributes(InputContext& ctx, ElementBuilder& element, con
         String* attr_name = parse_jsx_tag_name(ctx, jsx, end);
         if (!attr_name) break;
 
-        skip_jsx_whitespace(jsx, end);
+        jsx_skip_whitespace(jsx, end);
 
         if (*jsx < end && **jsx == '=') {
             (*jsx)++; // Skip =
-            skip_jsx_whitespace(jsx, end);
+            jsx_skip_whitespace(jsx, end);
 
             if (*jsx < end && **jsx == '{') {
                 // JSX expression attribute value
@@ -334,7 +332,7 @@ static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const ch
 
     // Parse children until </>
     while (*jsx < end) {
-        skip_jsx_whitespace(jsx, end);
+        jsx_skip_whitespace(jsx, end);
 
         if (*jsx + 2 < end && strncmp(*jsx, "</>", 3) == 0) {
             *jsx += 3; // Skip </>
@@ -361,7 +359,7 @@ static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const ch
                 // Only add non-empty text
                 bool has_non_whitespace = false;
                 for (int i = 0; i < (int)text->len; i++) {
-                    if (!is_jsx_whitespace(text->chars[i])) {
+                    if (!jsx_is_whitespace(text->chars[i])) {
                         has_non_whitespace = true;
                         break;
                     }
@@ -405,19 +403,19 @@ static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const cha
     element.attr("type", "jsx_element");
 
     // Mark as component if starts with uppercase
-    if (is_jsx_component_name(tag_name->chars)) {
+    if (jsx_is_component_tag(tag_name->chars)) {
         element.attr("is_component", "true");
     }
 
     // Parse attributes
     parse_jsx_attributes(ctx, element, jsx, end);
 
-    skip_jsx_whitespace(jsx, end);
+    jsx_skip_whitespace(jsx, end);
 
     // Check for self-closing tag
     if (*jsx < end && **jsx == '/') {
         (*jsx)++; // Skip /
-        skip_jsx_whitespace(jsx, end);
+        jsx_skip_whitespace(jsx, end);
         if (*jsx < end && **jsx == '>') {
             (*jsx)++; // Skip >
             element.attr("self_closing", "true");
@@ -463,7 +461,7 @@ static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const cha
                 // Only add non-empty text
                 bool has_non_whitespace = false;
                 for (int i = 0; i < (int)text->len; i++) {
-                    if (!is_jsx_whitespace(text->chars[i])) {
+                    if (!jsx_is_whitespace(text->chars[i])) {
                         has_non_whitespace = true;
                         break;
                     }
@@ -491,7 +489,7 @@ Item input_jsx(Input* input, const char* jsx_string) {
     const char* end = jsx_string + strlen(jsx_string);
 
     // Skip any leading whitespace
-    skip_jsx_whitespace(&jsx, end);
+    jsx_skip_whitespace(&jsx, end);
 
     // Parse the root JSX element
     if (jsx < end) {

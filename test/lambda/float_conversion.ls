@@ -30,8 +30,8 @@ float(int64(-999999))
 '=== float() from decimal ==='
 
 // decimal to float
-float(3.14n)
-float(-0.001n)
+float(3.14m)
+float(-0.001m)
 float(100n)
 
 '=== float() from string ==='

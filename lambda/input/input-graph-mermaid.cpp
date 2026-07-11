@@ -4,7 +4,6 @@
 #include "input-utils.hpp"
 #include "source_tracker.hpp"
 #include "../../lib/log.h"
-#include <ctype.h>
 #include <string.h>
 
 using namespace lambda;
@@ -353,7 +352,7 @@ static void parse_mermaid_class_def(InputContext& ctx, Element* graph) {
     skip_whitespace_and_comments_mermaid(tracker);
 
     // parse node IDs (can be comma-separated)
-    while (!tracker.atEnd() && !isspace(tracker.current())) {
+    while (!tracker.atEnd() && !str_char_is_ascii_space(tracker.current())) {
         String* node_id = parse_mermaid_identifier(ctx);
         if (!node_id) break;
 
@@ -452,7 +451,7 @@ static void parse_mermaid_subgraph_content(InputContext& ctx, Element* subgraph_
         if (tracker.match("end")) {
             // Verify it's "end" and not "endpoint" or similar
             char next = tracker.peek(3);
-            if (!isalnum(next) && next != '_') {
+            if (!str_char_is_alnum(next) && next != '_') {
                 tracker.advance(3);
                 break;
             }

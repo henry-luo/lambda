@@ -33,16 +33,35 @@ Item parse_typed_value(InputContext& ctx, const char* str, size_t len);
  */
 Item parse_integer_token_exact(InputContext& ctx, const char* str, size_t len);
 
+static inline void skip_to_newline_raw(const char** p) {
+    while (**p && **p != '\n' && **p != '\r') {
+        (*p)++;
+    }
+    if (**p == '\r' && *(*p + 1) == '\n') {
+        (*p) += 2;
+    } else if (**p == '\n' || **p == '\r') {
+        (*p)++;
+    }
+}
+
+static inline void skip_to_newline_with_tracker(const char** p, SourceTracker* tracker) {
+    const char* start = *p;
+    skip_to_newline_raw(p);
+    if (tracker) tracker->advance((size_t)(*p - start));
+}
+
+static inline int encode_codepoint_utf8(uint32_t codepoint, char out[5]) {
+    return codepoint_to_utf8(codepoint, out);
+}
+
 /**
  * Encode a codepoint as UTF-8 and append to a StringBuf.
  * Convenience wrapper around codepoint_to_utf8().
  */
 static inline void append_codepoint_utf8(StringBuf* sb, uint32_t codepoint) {
     char buf[5];
-    int n = codepoint_to_utf8(codepoint, buf);
-    for (int i = 0; i < n; i++) {
-        stringbuf_append_char(sb, buf[i]);
-    }
+    int n = encode_codepoint_utf8(codepoint, buf);
+    if (n > 0) stringbuf_append_str_n(sb, buf, (size_t)n);
 }
 
 /**
@@ -51,10 +70,8 @@ static inline void append_codepoint_utf8(StringBuf* sb, uint32_t codepoint) {
  */
 static inline void append_codepoint_utf8_strbuf(StrBuf* sb, uint32_t codepoint) {
     char buf[5];
-    int n = codepoint_to_utf8(codepoint, buf);
-    for (int i = 0; i < n; i++) {
-        strbuf_append_char(sb, buf[i]);
-    }
+    int n = encode_codepoint_utf8(codepoint, buf);
+    if (n > 0) strbuf_append_str_n(sb, buf, (size_t)n);
 }
 
 /**
@@ -87,36 +104,26 @@ static inline int parse_escape_char(const char** pos, StringBuf* sb) {
         case 't':  stringbuf_append_char(sb, '\t'); (*pos)++; break;
         case 'u': {
             (*pos)++;  // skip 'u'
-            if (!(*pos)[0] || !(*pos)[1] || !(*pos)[2] || !(*pos)[3]) {
+            uint32_t cp = parse_hex_codepoint(pos, 4);
+            if (cp == 0xFFFFFFFF) {
                 // not enough digits — output replacement char
                 stringbuf_append_char(sb, (char)0xEF);
                 stringbuf_append_char(sb, (char)0xBF);
                 stringbuf_append_char(sb, (char)0xBD);
                 break;
             }
-            char hex[5] = {(*pos)[0], (*pos)[1], (*pos)[2], (*pos)[3], '\0'};
-            char* end;
-            unsigned long cp = strtoul(hex, &end, 16);
-            if (end != hex + 4) {
-                stringbuf_append_char(sb, (char)0xEF);
-                stringbuf_append_char(sb, (char)0xBF);
-                stringbuf_append_char(sb, (char)0xBD);
-                break;
-            }
-            (*pos) += 4;
 
             if (cp >= 0xD800 && cp <= 0xDBFF) {
                 // high surrogate — look for low surrogate \uXXXX
                 const char* la = *pos;
                 if (la[0] == '\\' && la[1] == 'u' &&
                     la[2] && la[3] && la[4] && la[5]) {
-                    char hex2[5] = {la[2], la[3], la[4], la[5], '\0'};
-                    char* end2;
-                    unsigned long lo = strtoul(hex2, &end2, 16);
+                    const char* low_pos = la + 2;
+                    uint32_t lo = parse_hex_codepoint(&low_pos, 4);
                     uint32_t combined = decode_surrogate_pair((uint16_t)cp, (uint16_t)lo);
-                    if (end2 == hex2 + 4 && combined != 0) {
+                    if (lo != 0xFFFFFFFF && combined != 0) {
                         cp = combined;
-                        (*pos) += 6;  // skip \uXXXX
+                        *pos = low_pos;
                     } else {
                         cp = 0xFFFD;
                     }
@@ -126,7 +133,7 @@ static inline int parse_escape_char(const char** pos, StringBuf* sb) {
             } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
                 cp = 0xFFFD;  // lone low surrogate
             }
-            append_codepoint_utf8(sb, (uint32_t)cp);
+            append_codepoint_utf8(sb, cp);
             break;
         }
         default:

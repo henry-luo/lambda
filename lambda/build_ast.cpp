@@ -520,7 +520,7 @@ static bool typed_array_element_compatible(Type* arg_elem, Type* expected_elem) 
     if (arg_tid == LMD_TYPE_ANY || arg_tid == LMD_TYPE_TYPE) return true;
     switch (expected_elem->type_id) {
     case LMD_TYPE_INT:
-        return arg_tid == LMD_TYPE_INT || arg_tid == LMD_TYPE_INT64 ||
+        return is_integer_type_id(arg_tid) ||
                arg_tid == LMD_TYPE_BOOL || type_is_sized_integer(arg_elem);
     case LMD_TYPE_FLOAT:
         return arg_tid == LMD_TYPE_FLOAT || arg_tid == LMD_TYPE_INT ||
@@ -528,7 +528,7 @@ static bool typed_array_element_compatible(Type* arg_elem, Type* expected_elem) 
                arg_tid == LMD_TYPE_BOOL || arg_tid == LMD_TYPE_NUM_SIZED ||
                arg_tid == LMD_TYPE_UINT64;
     case LMD_TYPE_INT64:
-        return arg_tid == LMD_TYPE_INT || arg_tid == LMD_TYPE_INT64 ||
+        return is_integer_type_id(arg_tid) ||
                arg_tid == LMD_TYPE_BOOL || type_is_sized_integer(arg_elem);
     default:
         return false;
@@ -2050,7 +2050,7 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
             if (resolved_type) {
                 TypeId rid = resolved_type->type_id;
                 // only resolve scalar types that have matching unbox functions
-                if (rid == LMD_TYPE_INT || rid == LMD_TYPE_INT64 || rid == LMD_TYPE_FLOAT
+                if (is_native_numeric_type_id(rid)
                     || rid == LMD_TYPE_BOOL || rid == LMD_TYPE_STRING) {
                     ast_node->type = alloc_type(tp->pool, rid, sizeof(Type));
                 } else {
@@ -3239,28 +3239,38 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     char suffix_char = num_sv.str[num_sv.length - 1];
     if (suffix_char == 'N') {
         record_semantic_error(tp, node, ERR_INVALID_NUMBER,
-            "decimal literal suffix 'N' has been retired; use 'n'");
+            "decimal literal suffix 'N' has been retired; use 'm' for decimal or 'n' for integer");
         mem_free(num_str);
         return &TYPE_ERROR;
     }
-    if (suffix_char == 'n') {
-        num_str[num_sv.length - 1] = '\0';  // clear suffix 'n'
+    if (suffix_char == 'n' || suffix_char == 'm') {
+        num_str[num_sv.length - 1] = '\0';  // clear the suffix
     }
     log_debug("build lit decimal: %s", num_str);
+
+    // A.5 suffix split (Lambda_Semantics_Number_Model.md): the suffix alone
+    // names the type — 'n' is integer always, 'm' is decimal always. The old
+    // lexical test survives only as the validity guard on 'n': a fractional
+    // or negative-exponent spelling cannot be an integer.
+    bool is_integer_literal = (suffix_char == 'n');
+    if (is_integer_literal && !n_literal_is_integer(num_str)) {
+        record_semantic_error(tp, node, ERR_INVALID_NUMBER,
+            "'n' literal must be integer-valued; use the 'm' suffix for decimal (e.g. 1.5m)");
+        mem_free(num_str);
+        return &TYPE_ERROR;
+    }
 
     // Allocate heap-allocated Decimal structure
     Decimal* decimal;
     decimal = (Decimal*)pool_alloc(tp->pool, sizeof(Decimal));
     item_type->decimal = decimal;
 
-    bool is_integer_literal = n_literal_is_integer(num_str);
     bool needs_unlimited_decimal =
         decimal_literal_significant_digits(num_str) > DECIMAL_FIXED_PRECISION;
     decimal->unlimited = is_integer_literal ? DECIMAL_BIGINT :
         (needs_unlimited_decimal ? 1 : 0);
 
-    // `n` is lexical: integer-like spellings become integer/BigInt; decimal
-    // spellings preserve all literal digits by selecting the necessary tier.
+    // literal digits are preserved exactly by selecting the necessary tier.
     decimal->dec_val = decimal_parse_str(num_str,
         decimal->unlimited ? decimal_unlimited_context() : decimal_fixed_context());
     if (!decimal->dec_val) {
@@ -4050,7 +4060,7 @@ static void lint_condition_expr(Transpiler* tp, TSNode cond_node, AstNode* cond,
 }
 
 static bool is_magnitude_numeric_type(TypeId type_id) {
-    return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 ||
+    return is_integer_type_id(type_id) ||
            type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_DECIMAL ||
            type_id == LMD_TYPE_NUM_SIZED || type_id == LMD_TYPE_UINT64;
 }
@@ -4426,8 +4436,8 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         // Keyword comparisons are the explicit element-wise family.  Symbolic
         // < <= > >= stay scalar so array masks cannot leak into control flow.
         if (ast_node->op >= OPERATOR_LT && ast_node->op <= OPERATOR_GE) {
-            bool l_native = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT);
-            bool r_native = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 || right_type == LMD_TYPE_FLOAT);
+            bool l_native = (is_native_numeric_type_id(left_type));
+            bool r_native = (is_native_numeric_type_id(right_type));
             if (l_native && r_native) type_id = LMD_TYPE_BOOL;
             else if (left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) type_id = LMD_TYPE_ANY;
             else                           type_id = LMD_TYPE_ANY;
@@ -7851,9 +7861,9 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
                     if (!compatible) compatible = types_compatible(ast_node->value->type, entry->node->type);
                     // also allow numeric narrowing (e.g., float -> int) for var assignment
                     if (!compatible) {
-                        bool var_numeric = (var_tid == LMD_TYPE_INT || var_tid == LMD_TYPE_INT64 ||
+                        bool var_numeric = (is_integer_type_id(var_tid) ||
                                             var_tid == LMD_TYPE_FLOAT || var_tid == LMD_TYPE_DECIMAL);
-                        bool val_numeric = (val_tid == LMD_TYPE_INT || val_tid == LMD_TYPE_INT64 ||
+                        bool val_numeric = (is_integer_type_id(val_tid) ||
                                             val_tid == LMD_TYPE_FLOAT || val_tid == LMD_TYPE_DECIMAL);
                         compatible = var_numeric && val_numeric;
                     }

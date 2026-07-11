@@ -11,6 +11,7 @@ extern "C" {
 #endif
 
 #include "../lambda.h"
+#include <string.h>
 
 static inline bool js_map_kind_uses_default_object_to_primitive(uint8_t map_kind) {
     return map_kind == MAP_KIND_WEB_API_RESOURCE ||
@@ -23,6 +24,13 @@ static inline bool js_map_kind_is_ordinary_shape(uint8_t map_kind) {
 }
 
 void js_map_promote_descriptor_kind(Map* m);
+
+Item js_undefined(void);
+Item make_js_undefined(void);
+Item js_make_string_len(const char* str, int len);
+Item js_make_string(const char* str);
+bool js_is_callable(Item value);
+bool is_callable(Item value);
 
 // Sentinel value for dense array holes. Uses non-double tag 0x9E (unused), so
 // it cannot collide with any valid JS value. Ordinary object deletes use
@@ -1093,4 +1101,7 @@ void js_array_runtime_items_cleanup_all(void);
 
 #ifdef __cplusplus
 }
+
+Item make_string_item(const char* str, int len);
+Item make_string_item(const char* str);
 #endif

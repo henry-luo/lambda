@@ -10,7 +10,7 @@
  * - Org-mode: #+BEGIN_SRC / #+END_SRC
  */
 #include "block_common.hpp"
-#include "../../html_entities.h"
+#include "../../../../lib/html_entities.h"
 #include "../../input-utils.h"
 #include "../../../../lib/mem.h"
 #include "lib/str.h"

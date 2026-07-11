@@ -10,6 +10,7 @@
 #include "js_bt_regex.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/utf.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -127,10 +128,11 @@ static int bt_utf8_decode_prev(const char* s, int pos, uint32_t* cp) {
 // classes, and backreferences honour code-point semantics under /u).
 static int bt_decode_fwd(const char* s, int len, int pos, uint32_t* cp, bool uni) {
     int adv = bt_utf8_decode(s, len, pos, cp);
-    if (uni && adv && *cp >= 0xD800 && *cp <= 0xDBFF) {
+    if (uni && adv && utf_is_high_surrogate(*cp)) {
         uint32_t lo; int adv2 = bt_utf8_decode(s, len, pos + adv, &lo);
-        if (adv2 && lo >= 0xDC00 && lo <= 0xDFFF) {
-            *cp = 0x10000 + ((*cp - 0xD800) << 10) + (lo - 0xDC00);
+        uint32_t combined = adv2 ? utf16_decode_pair((uint16_t)*cp, (uint16_t)lo) : 0;
+        if (combined != 0) {
+            *cp = combined;
             return adv + adv2;
         }
     }
@@ -138,10 +140,11 @@ static int bt_decode_fwd(const char* s, int len, int pos, uint32_t* cp, bool uni
 }
 static int bt_decode_bwd(const char* s, int pos, uint32_t* cp, bool uni) {
     int adv = bt_utf8_decode_prev(s, pos, cp);
-    if (uni && adv && *cp >= 0xDC00 && *cp <= 0xDFFF && pos - adv > 0) {
+    if (uni && adv && utf_is_low_surrogate(*cp) && pos - adv > 0) {
         uint32_t hi; int adv2 = bt_utf8_decode_prev(s, pos - adv, &hi);
-        if (adv2 && hi >= 0xD800 && hi <= 0xDBFF) {
-            *cp = 0x10000 + ((hi - 0xD800) << 10) + (*cp - 0xDC00);
+        uint32_t combined = adv2 ? utf16_decode_pair((uint16_t)hi, (uint16_t)*cp) : 0;
+        if (combined != 0) {
+            *cp = combined;
             return adv + adv2;
         }
     }

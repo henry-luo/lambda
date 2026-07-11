@@ -3,13 +3,13 @@
 Generate the unified HTML entity table from the WHATWG spec.
 
 Downloads entities.json from the WHATWG spec and generates:
-  - lambda/input/html_entities_table.inc : sorted HtmlEntityEntry array
+  - lib/html_entities_table.inc : sorted HtmlEntityEntry array
 
 Usage:
     python3 utils/generate_html5_entities.py                  # fetch from web
     python3 utils/generate_html5_entities.py entities.json     # use local file
 
-Output is written to: lambda/input/html_entities_table.inc
+Output is written to: lib/html_entities_table.inc
 """
 
 import json
@@ -76,7 +76,7 @@ def main():
 
     # Determine output path
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    out_path = os.path.join(script_dir, '..', 'lambda', 'input', 'html_entities_table.inc')
+    out_path = os.path.join(script_dir, '..', 'lib', 'html_entities_table.inc')
     out_path = os.path.normpath(out_path)
 
     with open(out_path, 'w') as f:

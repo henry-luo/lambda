@@ -255,23 +255,14 @@ static RenderOutputClearResult render_output_clear_surface(RenderContext* rdcon,
         }
 
         rdcon->dirty_tracker = &state->dirty_tracker;
-        DirtyRect* first = state->dirty_tracker.dirty_list;
-        float du_l = first->x;
-        float du_t = first->y;
-        float du_r = first->x + first->width;
-        float du_b = first->y + first->height;
-        for (DirtyRect* d = first->next; d; d = d->next) {
-            if (d->x < du_l) du_l = d->x;
-            if (d->y < du_t) du_t = d->y;
-            if (d->x + d->width > du_r) du_r = d->x + d->width;
-            if (d->y + d->height > du_b) du_b = d->y + d->height;
-        }
-        rdcon->dirty_union = {du_l, du_t, du_r, du_b};
+        Bound dirty_bounds = {};
+        dirty_tracker_bounds(&state->dirty_tracker, &dirty_bounds, 1.0f);
+        rdcon->dirty_union = dirty_bounds;
         rdcon->has_dirty_union = true;
         result.selective = true;
         result.replay_dirty = &state->dirty_tracker;
         log_debug("render_output_clear_surface: selective clear (dirty union: %.0f,%.0f - %.0f,%.0f)",
-                  du_l, du_t, du_r, du_b);
+                  dirty_bounds.left, dirty_bounds.top, dirty_bounds.right, dirty_bounds.bottom);
         return result;
     }
 

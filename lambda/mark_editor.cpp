@@ -11,9 +11,6 @@
 // Maximum number of batch updates supported
 #define MAX_BATCH_UPDATES 64
 
-// Forward declarations of helper functions from input.cpp
-extern void map_put(Map* mp, String* key, Item value, Input *input);
-extern void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
 extern TypeMap EmptyMap;
 extern TypeElmt EmptyElmt;
 extern TypeInfo type_info[];

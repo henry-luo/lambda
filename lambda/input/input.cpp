@@ -298,6 +298,41 @@ static TypeMap* map_clone_typemap_for_mutation(Map* mp, Input* input) {
     return clone;
 }
 
+static TypeElmt* elmt_clone_type_for_mutation(Element* elmt, Pool* pool) {
+    if (!elmt || !pool) return NULL;
+    TypeElmt* tm = (TypeElmt*)elmt->type;
+    if (!tm) return NULL;
+    if (tm->is_private_clone) return tm;
+
+    TypeElmt* clone = (TypeElmt*)alloc_type(pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+    if (!clone) return NULL;
+    clone->length = tm->length;
+    clone->byte_size = tm->byte_size;
+    clone->type_index = tm->type_index;
+    clone->has_named_shape = tm->has_named_shape;
+    clone->struct_name = tm->struct_name;
+    clone->is_private_clone = true;
+    clone->is_shared_constructor_shape = false;
+    clone->is_transition_shared_shape = false;
+    clone->transitions = NULL;
+    clone->js_class = tm->js_class;
+    clone->has_array_index_shape = tm->has_array_index_shape;
+    clone->name = tm->name;
+    clone->content_length = tm->content_length;
+    clone->ns = tm->ns;
+
+    ShapeEntry* last_clone = NULL;
+    clone->shape = clone_shape_chain_for_transition(pool, (TypeMap*)tm, &last_clone);
+    if (tm->shape && !clone->shape) return NULL;
+    clone->last = last_clone;
+    typemap_hash_build((TypeMap*)clone, pool);
+
+    elmt->type = clone;
+    log_debug("elmt_clone_type_for_mutation: cloned TypeElmt %p -> %p for Element %p",
+        (void*)tm, (void*)clone, (void*)elmt);
+    return clone;
+}
+
 static bool map_transition_prefix_matches_parent(TypeMap* parent, TypeMap* target) {
     if (!parent || !target) return false;
     ShapeEntry* parent_entry = parent->shape;
@@ -562,6 +597,13 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     assert(elmt->type != &EmptyElmt);
     TypeId type_id = get_type_id(value);
     TypeElmt* elmt_type = (TypeElmt*)elmt->type;
+    if (elmt_type->shape && !elmt_type->is_private_clone) {
+        // ElementBuilder::final() pools shape chains; appending attrs after that
+        // must not mutate the shared pooled ShapeEntry list.
+        TypeElmt* clone = elmt_clone_type_for_mutation(elmt, pool);
+        if (!clone) return;
+        elmt_type = clone;
+    }
     ShapeEntry* shape_entry = alloc_shape_entry(pool, key, type_id, elmt_type->last);
     if (!elmt_type->shape) { elmt_type->shape = shape_entry; }
     elmt_type->last = shape_entry;
@@ -721,6 +763,7 @@ void elmt_finalize_shape(TypeElmt* type_elmt, Input* input) {
         struct ShapeEntry* last = pooled_shape;
         while (last->next) { last = last->next; }
         type_elmt->last = last;
+        type_elmt->is_private_clone = false;
     }
 
     // free temporary arrays
@@ -729,44 +772,173 @@ void elmt_finalize_shape(TypeElmt* type_elmt, Input* input) {
 }
 
 
-// Helper function to map MIME types to parser types
+typedef void (*InputParserFn)(Input* input, const char* source);
+
+struct MimeParserMapping {
+    const char* mime_type;
+    const char* parser_type;
+};
+
+struct MarkupFlavorMapping {
+    const char* flavor;
+    MarkupFormat format;
+};
+
+struct InputParserMapping {
+    const char* type;
+    InputParserFn parse;
+};
+
+static void parse_markdown_input(Input* input, const char* source) {
+    input->root = input_markup_modular(input, source);
+}
+
+static void parse_rst_input(Input* input, const char* source) {
+    input->root = input_markup_with_format(input, source, MARKUP_RST);
+}
+
+static void parse_wiki_input(Input* input, const char* source) {
+    input->root = input_markup_with_format(input, source, MARKUP_WIKI);
+}
+
+static void parse_asciidoc_input(Input* input, const char* source) {
+    input->root = input_markup_with_format(input, source, MARKUP_ASCIIDOC);
+}
+
+static void parse_man_input(Input* input, const char* source) {
+    input->root = input_markup_with_format(input, source, MARKUP_MAN);
+}
+
+static void parse_org_input(Input* input, const char* source) {
+    input->root = input_markup_with_format(input, source, MARKUP_ORG);
+}
+
+static void parse_typst_input(Input* input, const char* source) {
+    input->root = input_markup_with_format(input, source, MARKUP_TYPST);
+}
+
+static void parse_textile_input(Input* input, const char* source) {
+    input->root = input_markup_modular(input, source);
+}
+
+static void parse_html_input(Input* input, const char* source) {
+    Element* doc = html5_parse(input, source);
+    input->root = (Item){.element = doc};
+}
+
+static void parse_latex_input(Input* input, const char* source) {
+    parse_latex_ts(input, source);
+}
+
+static void parse_mdx_input(Input* input, const char* source) {
+    input->root = input_mdx(input, source);
+}
+
+static const MimeParserMapping MIME_PARSER_MAPPINGS[] = {
+    {"application/json", "json"},
+    {"text/csv", "csv"},
+    {"application/xml", "xml"},
+    {"text/html", "html"},
+    {"text/markdown", "markdown"},
+    {"text/mdx", "mdx"},
+    {"text/x-rst", "rst"},
+    {"application/rtf", "rtf"},
+    {"application/pdf", "pdf"},
+    {"application/x-tex", "latex"},
+    {"application/x-latex", "latex"},
+    {"application/toml", "toml"},
+    {"application/x-yaml", "yaml"},
+    {"text/x-java-properties", "properties"},
+    {"application/x-java-properties", "properties"},
+    {"message/rfc822", "eml"},
+    {"application/eml", "eml"},
+    {"message/eml", "eml"},
+    {"text/vcard", "vcf"},
+    {"text/calendar", "ics"},
+    {"application/ics", "ics"},
+    {"text/textile", "textile"},
+    {"application/textile", "textile"},
+    {"text/x-org", "org"},
+    {"text/x-asciidoc", "asciidoc"},
+    {"text/x-wiki", "wiki"},
+    {"text/troff", "man"},
+    {"text/typst", "typst"},
+    {"application/typst", "typst"},
+    {"text/x-mark", "mark"},
+    {"application/x-mark", "mark"},
+    {"text/css", "css"},
+    {"application/css", "css"},
+};
+
+static const MarkupFlavorMapping MARKUP_FLAVOR_MAPPINGS[] = {
+    {"rst", MARKUP_RST},
+    {"wiki", MARKUP_WIKI},
+    {"asciidoc", MARKUP_ASCIIDOC},
+    {"adoc", MARKUP_ASCIIDOC},
+    {"man", MARKUP_MAN},
+    {"org", MARKUP_ORG},
+    {"textile", MARKUP_TEXTILE},
+};
+
+static const InputParserMapping INPUT_PARSER_MAPPINGS[] = {
+    {"json", parse_json},
+    {"csv", parse_csv},
+    {"ini", parse_ini},
+    {"properties", parse_properties},
+    {"toml", parse_toml},
+    {"yaml", parse_yaml},
+    {"xml", parse_xml},
+    {"markdown", parse_markdown_input},
+    {"rst", parse_rst_input},
+    {"html", parse_html_input},
+    {"html5", parse_html_input},
+    {"latex", parse_latex_input},
+    {"latex-ts", parse_latex_input},
+    {"rtf", parse_rtf},
+    {"wiki", parse_wiki_input},
+    {"asciidoc", parse_asciidoc_input},
+    {"adoc", parse_asciidoc_input},
+    {"man", parse_man_input},
+    {"eml", parse_eml},
+    {"vcf", parse_vcf},
+    {"ics", parse_ics},
+    {"textile", parse_textile_input},
+    {"mark", parse_mark},
+    {"org", parse_org_input},
+    {"typst", parse_typst_input},
+    {"css", parse_css},
+    {"jsx", parse_jsx},
+    {"mdx", parse_mdx_input},
+};
+
+static bool markup_flavor_to_format(const char* flavor, MarkupFormat* format) {
+    for (size_t i = 0; i < sizeof(MARKUP_FLAVOR_MAPPINGS) / sizeof(MARKUP_FLAVOR_MAPPINGS[0]); i++) {
+        if (strcmp(flavor, MARKUP_FLAVOR_MAPPINGS[i].flavor) == 0) {
+            *format = MARKUP_FLAVOR_MAPPINGS[i].format;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool dispatch_exact_input_parser(const char* effective_type, Input* input, const char* source) {
+    for (size_t i = 0; i < sizeof(INPUT_PARSER_MAPPINGS) / sizeof(INPUT_PARSER_MAPPINGS[0]); i++) {
+        if (strcmp(effective_type, INPUT_PARSER_MAPPINGS[i].type) == 0) {
+            INPUT_PARSER_MAPPINGS[i].parse(input, source);
+            return true;
+        }
+    }
+    return false;
+}
+
 static const char* mime_to_parser_type(const char* mime_type) {
     if (!mime_type) return "text";
 
-    // Direct mappings
-    if (strcmp(mime_type, "application/json") == 0) return "json";
-    if (strcmp(mime_type, "text/csv") == 0) return "csv";
-    if (strcmp(mime_type, "application/xml") == 0) return "xml";
-    if (strcmp(mime_type, "text/html") == 0) return "html";
-    if (strcmp(mime_type, "text/markdown") == 0) return "markdown";
-    if (strcmp(mime_type, "text/mdx") == 0) return "mdx";
-    if (strcmp(mime_type, "text/x-rst") == 0) return "rst";
-    if (strcmp(mime_type, "application/rtf") == 0) return "rtf";
-    if (strcmp(mime_type, "application/pdf") == 0) return "pdf";
-    if (strcmp(mime_type, "application/x-tex") == 0) return "latex";
-    if (strcmp(mime_type, "application/x-latex") == 0) return "latex";
-    if (strcmp(mime_type, "application/toml") == 0) return "toml";
-    if (strcmp(mime_type, "application/x-yaml") == 0) return "yaml";
-    if (strcmp(mime_type, "text/x-java-properties") == 0) return "properties";
-    if (strcmp(mime_type, "application/x-java-properties") == 0) return "properties";
-    if (strcmp(mime_type, "message/rfc822") == 0) return "eml";
-    if (strcmp(mime_type, "application/eml") == 0) return "eml";
-    if (strcmp(mime_type, "message/eml") == 0) return "eml";
-    if (strcmp(mime_type, "text/vcard") == 0) return "vcf";
-    if (strcmp(mime_type, "text/calendar") == 0) return "ics";
-    if (strcmp(mime_type, "application/ics") == 0) return "ics";
-    if (strcmp(mime_type, "text/textile") == 0) return "textile";
-    if (strcmp(mime_type, "application/textile") == 0) return "textile";
-    if (strcmp(mime_type, "text/x-org") == 0) return "org";
-    if (strcmp(mime_type, "text/x-asciidoc") == 0) return "asciidoc";
-    if (strcmp(mime_type, "text/x-wiki") == 0) return "wiki";
-    if (strcmp(mime_type, "text/troff") == 0) return "man";
-    if (strcmp(mime_type, "text/typst") == 0) return "typst";
-    if (strcmp(mime_type, "application/typst") == 0) return "typst";
-    if (strcmp(mime_type, "text/x-mark") == 0) return "mark";
-    if (strcmp(mime_type, "application/x-mark") == 0) return "mark";
-    if (strcmp(mime_type, "text/css") == 0) return "css";
-    if (strcmp(mime_type, "application/css") == 0) return "css";
+    for (size_t i = 0; i < sizeof(MIME_PARSER_MAPPINGS) / sizeof(MIME_PARSER_MAPPINGS[0]); i++) {
+        if (strcmp(mime_type, MIME_PARSER_MAPPINGS[i].mime_type) == 0) {
+            return MIME_PARSER_MAPPINGS[i].parser_type;
+        }
+    }
 
     // Check for XML-based formats
     if (strstr(mime_type, "+xml") || strstr(mime_type, "xml")) return "xml";
@@ -849,46 +1021,13 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
         context.disable_string_merging = false;  // default: allow string merging
         input_context = &context;
 
-        if (strcmp(effective_type, "json") == 0) {
-            parse_json(input, source);
-        }
-        else if (strcmp(effective_type, "csv") == 0) {
-            parse_csv(input, source);
-        }
-        else if (strcmp(effective_type, "ini") == 0) {
-            parse_ini(input, source);
-        }
-        else if (strcmp(effective_type, "properties") == 0) {
-            parse_properties(input, source);
-        }
-        else if (strcmp(effective_type, "toml") == 0) {
-            parse_toml(input, source);
-        }
-        else if (strcmp(effective_type, "yaml") == 0) {
-            parse_yaml(input, source);
-        }
-        else if (strcmp(effective_type, "xml") == 0) {
-            parse_xml(input, source);
-        }
-        else if (strcmp(effective_type, "markdown") == 0) {
-            input->root = input_markup_modular(input, source);
-        }
-        else if (strcmp(effective_type, "markup") == 0) {
+        if (strcmp(effective_type, "markup") == 0) {
             // Generic markup type - use flavor to select format
             const char* markup_flavor = (flavor) ? flavor->chars : "markdown";
             log_debug("input_from_source markup: flavor='%s'", markup_flavor);
-            if (strcmp(markup_flavor, "rst") == 0) {
-                input->root = input_markup_with_format(input, source, MARKUP_RST);
-            } else if (strcmp(markup_flavor, "wiki") == 0) {
-                input->root = input_markup_with_format(input, source, MARKUP_WIKI);
-            } else if (strcmp(markup_flavor, "asciidoc") == 0 || strcmp(markup_flavor, "adoc") == 0) {
-                input->root = input_markup_with_format(input, source, MARKUP_ASCIIDOC);
-            } else if (strcmp(markup_flavor, "man") == 0) {
-                input->root = input_markup_with_format(input, source, MARKUP_MAN);
-            } else if (strcmp(markup_flavor, "org") == 0) {
-                input->root = input_markup_with_format(input, source, MARKUP_ORG);
-            } else if (strcmp(markup_flavor, "textile") == 0) {
-                input->root = input_markup_with_format(input, source, MARKUP_TEXTILE);
+            MarkupFormat markup_format;
+            if (markup_flavor_to_format(markup_flavor, &markup_format)) {
+                input->root = input_markup_with_format(input, source, markup_format);
             } else if (strcmp(markup_flavor, "commonmark") == 0) {
                 // Strict CommonMark mode - no GFM extensions
                 log_debug("input_from_source: using commonmark mode");
@@ -899,65 +1038,11 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
                 input->root = input_markup_modular(input, source);
             }
         }
-        else if (strcmp(effective_type, "rst") == 0) {
-            log_debug("input_from_source: matched 'rst' type, calling input_markup_with_format");
-            input->root = input_markup_with_format(input, source, MARKUP_RST);
-        }
-        else if (strcmp(effective_type, "html") == 0 || strcmp(effective_type, "html5") == 0) {
-            // Use HTML5 compliant parser
-            Element* doc = html5_parse(input, source);
-            input->root = (Item){.element = doc};
-        }
-        else if (strcmp(effective_type, "latex") == 0 || strcmp(effective_type, "latex-ts") == 0) {
-            // Tree-sitter LaTeX parser (default)
-            parse_latex_ts(input, source);
-        }
-        else if (strcmp(effective_type, "rtf") == 0) {
-            parse_rtf(input, source);
-        }
+        else if (dispatch_exact_input_parser(effective_type, input, source)) {}
         else if (strcmp(effective_type, "pdf") == 0) {
             // PDF is binary; use the explicit length we received instead of strlen,
             // which would truncate at the first null byte inside the binary stream.
             parse_pdf(input, source, source_len);
-        }
-        else if (strcmp(effective_type, "wiki") == 0) {
-            input->root = input_markup_with_format(input, source, MARKUP_WIKI);
-        }
-        else if (strcmp(effective_type, "asciidoc") == 0 || strcmp(effective_type, "adoc") == 0) {
-            input->root = input_markup_with_format(input, source, MARKUP_ASCIIDOC);
-        }
-        else if (strcmp(effective_type, "man") == 0) {
-            input->root = input_markup_with_format(input, source, MARKUP_MAN);
-        }
-        else if (strcmp(effective_type, "eml") == 0) {
-            parse_eml(input, source);
-        }
-        else if (strcmp(effective_type, "vcf") == 0) {
-            parse_vcf(input, source);
-        }
-        else if (strcmp(effective_type, "ics") == 0) {
-            parse_ics(input, source);
-        }
-        else if (strcmp(effective_type, "textile") == 0) {
-            input->root = input_markup_modular(input, source);
-        }
-        else if (strcmp(effective_type, "mark") == 0) {
-            parse_mark(input, source);
-        }
-        else if (strcmp(effective_type, "org") == 0) {
-            input->root = input_markup_with_format(input, source, MARKUP_ORG);
-        }
-        else if (strcmp(effective_type, "typst") == 0) {
-            input->root = input_markup_with_format(input, source, MARKUP_TYPST);
-        }
-        else if (strcmp(effective_type, "css") == 0) {
-            parse_css(input, source);
-        }
-        else if (strcmp(effective_type, "jsx") == 0) {
-            parse_jsx(input, source);
-        }
-        else if (strcmp(effective_type, "mdx") == 0) {
-            input->root = input_mdx(input, source);
         }
         else if (strcmp(effective_type, "math") == 0) {
             const char* math_flavor = (flavor) ? flavor->chars : "latex";
@@ -968,14 +1053,6 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
             // Handle compound math formats like "math-ascii", "math-latex", etc.
             const char* math_flavor = effective_type + 5; // Skip "math-" prefix
             parse_math(input, source, math_flavor);
-        }
-        else if (strncmp(effective_type, "math-", 5) == 0) {
-            // Handle compound math formats like "math-ascii", "math-latex", etc.
-            const char* math_flavor = effective_type + 5; // Skip "math-" prefix
-            parse_math(input, source, math_flavor);
-        }
-        else if (strcmp(effective_type, "markup") == 0) {
-            input->root = input_markup_modular(input, source);
         }
         else if (strcmp(effective_type, "graph") == 0) {
             const char* graph_flavor = (flavor) ? flavor->chars : "dot";

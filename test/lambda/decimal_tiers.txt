@@ -1,8 +1,10 @@
-"=== n suffix classification ==="
+"=== suffix classification ==="
 integer
 integer
 decimal
 decimal
+decimal
+true
 "=== integer arithmetic ==="
 3
 integer

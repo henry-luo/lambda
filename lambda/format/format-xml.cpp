@@ -12,70 +12,19 @@ void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 static void format_item_reader(XmlContext& ctx, const ItemReader& item, const char* tag_name);
 
 static void format_xml_string(XmlContext& ctx, String* str, bool is_attribute = false) {
-    if (!str) return;
+    format_markup_string_safe(ctx.output(), str, is_attribute, true, true, "xml");
+}
 
-    if (((uintptr_t)str & 0x7) != 0) {
-        log_error("xml_string_guard: skipping misaligned XML string ptr=%p", (void*)str);
-        return;
-    }
-
-    if (str->len == 0) return;
-
-    const char* s = str->chars;
-    size_t len = str->len;
-    const size_t max_xml_string_len = 1024 * 1024;
-    const size_t max_xml_attribute_len = 32 * 1024 * 1024;
-    bool large_attr = is_attribute && len <= max_xml_attribute_len;
-    if (!s || (len > max_xml_string_len && !large_attr)) {
-        log_error("xml_string_guard: skipping suspicious XML string len=%zu ptr=%p", len, (void*)s);
-        return;
-    }
-
-    for (size_t i = 0; i < len; i++) {
-        char c = s[i];
-        switch (c) {
-        case '<':
-            stringbuf_append_str(ctx.output(), "&lt;");
-            break;
-        case '>':
-            stringbuf_append_str(ctx.output(), "&gt;");
-            break;
-        case '&':
-            // Check if this is already an entity reference
-            if (i + 1 < len && (s[i + 1] == '#' || str_char_is_alpha(s[i + 1]))) {
-                // Look for closing semicolon
-                size_t j = i + 1;
-                while (j < len && s[j] != ';' && s[j] != ' ' && s[j] != '<' && s[j] != '&') {
-                    j++;
-                }
-                if (j < len && s[j] == ';') {
-                    // This looks like an entity, preserve it as-is
-                    for (size_t k = i; k <= j; k++) {
-                        stringbuf_append_char(ctx.output(), s[k]);
-                    }
-                    i = j; // Skip past the entity
-                    break;
-                }
-            }
-            stringbuf_append_str(ctx.output(), "&amp;");
-            break;
-        case '"':
-            stringbuf_append_str(ctx.output(), "&quot;");
-            break;
-        case '\'':
-            stringbuf_append_str(ctx.output(), "&apos;");
-            break;
-        default:
-            if (c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
-                // Control characters - encode as numeric character reference
-                char hex_buf[10];
-                snprintf(hex_buf, sizeof(hex_buf), "&#x%02x;", (unsigned char)c);
-                stringbuf_append_str(ctx.output(), hex_buf);
-            } else {
-                stringbuf_append_char(ctx.output(), c);
-            }
-            break;
+static void xml_emit_attr_value(XmlContext& ctx, const ItemReader& value) {
+    if (value.isString()) {
+        String* str = value.asString();
+        if (str) {
+            format_xml_string(ctx, str, true);
         }
+    } else if (value.isInt() || value.isFloat()) {
+        format_number(ctx.output(), value.item());
+    } else if (value.isBool()) {
+        ctx.emit("%b", value.asBool());
     }
 }
 
@@ -89,61 +38,6 @@ static void format_array_reader(XmlContext& ctx, const ArrayReader& arr, const c
     }
 }
 
-static void format_map_attributes(XmlContext& ctx, const MapReader& map_reader) {
-    auto iter = map_reader.entries();
-    const char* key;
-    ItemReader value;
-
-    while (iter.next(&key, &value)) {
-        // Only output simple types as attributes
-        if (value.isString() || value.isInt() || value.isFloat() || value.isBool()) {
-            ctx.emit(" %N=\"", key);
-
-            if (value.isString()) {
-                String* str = value.asString();
-                if (str) {
-                    format_xml_string(ctx, str, true);
-                }
-            } else if (value.isInt()) {
-                int64_t int_val = value.asInt();
-                char num_buf[32];
-                snprintf(num_buf, sizeof(num_buf), "%" PRId64, int_val);
-                stringbuf_append_str(ctx.output(), num_buf);
-            } else if (value.isFloat()) {
-                double float_val = value.asFloat();
-                char num_buf[32];
-                snprintf(num_buf, sizeof(num_buf), "%.15g", float_val);
-                stringbuf_append_str(ctx.output(), num_buf);
-            } else if (value.isBool()) {
-                ctx.emit("%b", value.asBool());
-            }
-
-            ctx.write_char('"');
-        }
-    }
-}
-
-static void format_map_elements(XmlContext& ctx, const MapReader& map_reader) {
-    log_debug("format_map_elements: formatting map elements");
-
-    auto iter = map_reader.entries();
-    const char* key;
-    ItemReader value;
-
-    while (iter.next(&key, &value)) {
-        // Only output complex types as child elements (not simple attributes)
-        if (!value.isString() && !value.isInt() && !value.isFloat() && !value.isBool()) {
-            if (value.isNull()) {
-                // Create empty element for null
-                ctx.emit("<%N/>", key);
-            } else {
-                // Format complex types as child elements
-                format_item_reader(ctx, value, key);
-            }
-        }
-    }
-}
-
 static void format_map_reader(XmlContext& ctx, const MapReader& map_reader, const char* tag_name) {
     log_debug("format_map_reader: formatting map");
 
@@ -151,27 +45,31 @@ static void format_map_reader(XmlContext& ctx, const MapReader& map_reader, cons
 
     ctx.emit("<%N", tag_name);
 
-    // Add simple types as attributes for better XML structure
-    format_map_attributes(ctx, map_reader);
+    StringBuf* child_buf = stringbuf_new(ctx.pool());
+    XmlContext child_ctx(ctx.pool(), child_buf);
+    bool has_non_null_complex_child = false;
 
-    // Check if there are complex child elements
-    bool has_children = false;
-    auto check_iter = map_reader.entries();
-    const char* check_key;
-    ItemReader check_value;
-    while (check_iter.next(&check_key, &check_value)) {
-        if (!check_value.isString() && !check_value.isInt() && !check_value.isFloat() && !check_value.isBool() && !check_value.isNull()) {
-            has_children = true;
-            break;
+    auto iter = map_reader.entries();
+    const char* key;
+    ItemReader value;
+    while (iter.next(&key, &value)) {
+        if (value.isString() || value.isInt() || value.isFloat() || value.isBool()) {
+            ctx.emit(" %N=\"", key);
+            xml_emit_attr_value(ctx, value);
+            ctx.write_char('"');
+        } else if (value.isNull()) {
+            // Preserve legacy null-field behavior: nulls are emitted only when
+            // the map has at least one non-null complex child.
+            child_ctx.emit("<%N/>", key);
+        } else {
+            has_non_null_complex_child = true;
+            format_item_reader(child_ctx, value, key);
         }
     }
 
-    if (has_children) {
+    if (has_non_null_complex_child) {
         ctx.write_char('>');
-
-        // Add complex types as child elements
-        format_map_elements(ctx, map_reader);
-
+        stringbuf_append_str_n(ctx.output(), child_buf->str->chars, child_buf->length);
         ctx.emit("</%N>", tag_name);
     } else {
         // Self-closing tag if no children
@@ -182,173 +80,172 @@ static void format_map_reader(XmlContext& ctx, const MapReader& map_reader, cons
 static void format_item_reader(XmlContext& ctx, const ItemReader& item, const char* tag_name) {
     if (!tag_name) tag_name = "value";
 
-    FormatterContextCpp::RecursionGuard guard(ctx);
-    if (guard.exceeded()) {
-        ctx.emit("<%N/><!-- max_depth -->", tag_name);
-        return;
-    }
+    class XmlItemHandlers : public FormatItemHandlersDefault {
+    public:
+        XmlItemHandlers(XmlContext& ctx, const char* tag_name)
+            : ctx_(ctx), tag_name_(tag_name) {}
 
-    // Check if item is null
-    if (item.isNull()) {
-        ctx.emit("<%N/>", tag_name);
-        return;
-    }
-
-    log_debug("format_item_reader: formatting item, tag_name '%s'", tag_name);
-
-    if (item.isBool()) {
-        ctx.emit("<%N>%b</%N>", tag_name, item.asBool(), tag_name);
-    }
-    else if (item.isInt()) {
-        ctx.emit("<%N>%l</%N>", tag_name, item.asInt(), tag_name);
-    }
-    else if (item.isFloat()) {
-        ctx.emit("<%N>%f</%N>", tag_name, item.asFloat(), tag_name);
-    }
-    else if (item.isString()) {
-        ctx.emit("<%N>", tag_name);
-        String* str = item.asString();
-        if (str) format_xml_string(ctx, str);
-        ctx.emit("</%N>", tag_name);
-    }
-    else if (item.isArray()) {
-        ctx.emit("<%N>", tag_name);
-        format_array_reader(ctx, item.asArray(), "item");
-        ctx.emit("</%N>", tag_name);
-    }
-    else if (item.isMap()) {
-        MapReader mp = item.asMap();
-        format_map_reader(ctx, mp, tag_name);
-    }
-    else if (item.isElement()) {
-        log_debug("format_item_reader: handling element");
-        ElementReader elem = item.asElement();
-
-        const char* elem_name = elem.tagName();
-        if (!elem_name || elem_name[0] == '\0') {
-            log_debug("format_item_reader: element has no name");
-            ctx.emit("<%N/>", tag_name);
-            return;
+        void max_depth(const ItemReader& item) override {
+            (void)item;
+            ctx_.emit("<%N/><!-- max_depth -->", tag_name_);
+        }
+        void null_value(const ItemReader& item) override {
+            (void)item;
+            ctx_.emit("<%N/>", tag_name_);
+        }
+        void bool_value(const ItemReader& item) override {
+            ctx_.emit("<%N>%b</%N>", tag_name_, item.asBool(), tag_name_);
+        }
+        void number_value(const ItemReader& item) override {
+            ctx_.emit("<%N>", tag_name_);
+            format_number(ctx_.output(), item.item());
+            ctx_.emit("</%N>", tag_name_);
+        }
+        void string_value(const ItemReader& item, String* str) override {
+            (void)item;
+            ctx_.emit("<%N>", tag_name_);
+            if (str) format_xml_string(ctx_, str);
+            ctx_.emit("</%N>", tag_name_);
+        }
+        void array_value(const ItemReader& item, ArrayReader arr) override {
+            if (!item.isArray()) {
+                unknown_value(item);
+                return;
+            }
+            ctx_.emit("<%N>", tag_name_);
+            format_array_reader(ctx_, arr, "item");
+            ctx_.emit("</%N>", tag_name_);
+        }
+        void map_value(const ItemReader& item, MapReader mp) override {
+            (void)item;
+            format_map_reader(ctx_, mp, tag_name_);
+        }
+        void element_value(const ItemReader& item, ElementReader elem) override {
+            (void)item;
+            log_debug("format_item_reader: handling element");
+            format_element(elem);
+        }
+        void unknown_value(const ItemReader& item) override {
+            (void)item;
+            log_debug("format_item_reader: unknown type, outputting empty element");
+            ctx_.emit("<%N/>", tag_name_);
         }
 
-        log_debug("format_item_reader: element name='%s', attr_count=%lld, child_count=%lld",
-               elem_name, (long long)elem.attrCount(), (long long)elem.childCount());
-
-        // Special handling for XML declaration
-        if (strcmp(elem_name, "?xml") == 0) {
-            ctx.write_text("<?xml");
-
-            // Handle XML declaration content as attributes
-            auto child_iter = elem.children();
-            ItemReader child;
-            while (child_iter.next(&child)) {
-                if (child.isString()) {
-                    String* str = child.asString();
-                    if (str) {
-                        ctx.emit(" %N", str->chars);
-                    }
-                }
+    private:
+        void format_element(const ElementReader& elem) {
+            const char* elem_name = elem.tagName();
+            if (!elem_name || elem_name[0] == '\0') {
+                log_debug("format_item_reader: element has no name");
+                ctx_.emit("<%N/>", tag_name_);
+                return;
             }
 
-            ctx.write_text("?>");
-            return; // Early return for XML declaration
-        }
+            log_debug("format_item_reader: element name='%s', attr_count=%lld, child_count=%lld",
+                elem_name, (long long)elem.attrCount(), (long long)elem.childCount());
 
-        ctx.emit("<%N", elem_name);
+            // Special handling for XML declaration
+            if (strcmp(elem_name, "?xml") == 0) {
+                ctx_.write_text("<?xml");
 
-        // Handle attributes
-        if (elem.attrCount() > 0) {
-            log_debug("format_item_reader: element has attributes, formatting");
-            // Access attributes directly from ElementReader
-            const TypeMap* map_type = (const TypeMap*)elem.element()->type;
-            const ShapeEntry* field = map_type->shape;
-
-            while (field) {
-                const char* key = field->name->str;
-                ItemReader value = elem.get_attr(key);
-
-                ctx.emit(" %N=\"", key);
-
-                if (value.isString()) {
-                    String* str = value.asString();
-                    if (str) {
-                        format_xml_string(ctx, str, true);
-                    }
-                } else if (value.isInt()) {
-                    stringbuf_append_format(ctx.output(), "%lld", (long long)value.asInt());
-                } else if (value.isFloat()) {
-                    stringbuf_append_format(ctx.output(), "%g", value.asFloat());
-                } else if (value.isBool()) {
-                    ctx.emit("%b", value.asBool());
-                }
-
-                ctx.write_char('"');
-
-                field = field->next;
-            }
-        }
-
-        ctx.write_char('>');
-
-        // Raw-text elements (<style>, <script>, etc.) carry plain CSS/JS;
-        // entity-escaping their content (especially " → &quot;, ' → &apos;)
-        // breaks downstream parsers — e.g. an injected
-        // `@font-face { src: url("data:font/ttf;base64,...") }` block
-        // becomes invalid CSS once quotes are entity-escaped.
-        bool is_raw_text = html_is_raw_text_element(elem_name, strlen(elem_name));
-
-        // Handle element content (text/child elements)
-        if (elem.childCount() > 0) {
-            log_debug("format_item_reader: element has %lld children", (long long)elem.childCount());
-
-            auto child_iter = elem.children();
-            ItemReader child;
-            while (child_iter.next(&child)) {
-                if (child.isString()) {
-                    String* str = child.asString();
-                    if (str) {
-                        if (is_raw_text) {
-                            stringbuf_append_format(ctx.output(), "%.*s",
-                                (int)str->len, str->chars);
-                        } else {
-                            format_xml_string(ctx, str);
+                // Handle XML declaration content as attributes
+                auto child_iter = elem.children();
+                ItemReader child;
+                while (child_iter.next(&child)) {
+                    if (child.isString()) {
+                        String* str = child.asString();
+                        if (str) {
+                            ctx_.emit(" %N", str->chars);
                         }
                     }
-                } else if (child.isSymbol()) {
-                    // Symbol items (named entities) - output as &name;
-                    Symbol* sym = child.asSymbol();
-                    if (sym) {
-                        ctx.emit("&%N;", sym->chars);
-                    }
-                } else if (child.isArray()) {
-                    // flatten array children: render each item directly
-                    // without wrapping in a <value> tag (needed for SVG groups etc.)
-                    ArrayReader arr = child.asArray();
-                    auto arr_iter = arr.items();
-                    ItemReader arr_item;
-                    while (arr_iter.next(&arr_item)) {
-                        format_item_reader(ctx, arr_item, NULL);
-                    }
-                } else {
-                    // For child elements, format them recursively
-                    format_item_reader(ctx, child, NULL);
+                }
+
+                ctx_.write_text("?>");
+                return; // Early return for XML declaration
+            }
+
+            ctx_.emit("<%N", elem_name);
+
+            // Handle attributes
+            if (elem.attrCount() > 0) {
+                log_debug("format_item_reader: element has attributes, formatting");
+                auto attrs = elem.attrs();
+                const char* key;
+                ItemReader value;
+                while (attrs.next(&key, &value)) {
+                    if (!key) continue;
+
+                    ctx_.emit(" %N=\"", key);
+                    xml_emit_attr_value(ctx_, value);
+                    ctx_.write_char('"');
                 }
             }
+
+            ctx_.write_char('>');
+
+            // Raw-text elements (<style>, <script>, etc.) carry plain CSS/JS;
+            // entity-escaping their content (especially " → &quot;, ' → &apos;)
+            // breaks downstream parsers — e.g. an injected
+            // `@font-face { src: url("data:font/ttf;base64,...") }` block
+            // becomes invalid CSS once quotes are entity-escaped.
+            bool is_raw_text = html_is_raw_text_element(elem_name, strlen(elem_name));
+
+            // Handle element content (text/child elements)
+            if (elem.childCount() > 0) {
+                log_debug("format_item_reader: element has %lld children", (long long)elem.childCount());
+
+                auto child_iter = elem.children();
+                ItemReader child;
+                while (child_iter.next(&child)) {
+                    if (child.isString()) {
+                        String* str = child.asString();
+                        if (str) {
+                            if (is_raw_text) {
+                                stringbuf_append_format(ctx_.output(), "%.*s",
+                                    (int)str->len, str->chars);
+                            } else {
+                                format_xml_string(ctx_, str);
+                            }
+                        }
+                    } else if (child.isSymbol()) {
+                        // Symbol items (named entities) - output as &name;
+                        Symbol* sym = child.asSymbol();
+                        if (sym) {
+                            ctx_.emit("&%N;", sym->chars);
+                        }
+                    } else if (child.isArray()) {
+                        // flatten array children: render each item directly
+                        // without wrapping in a <value> tag (needed for SVG groups etc.)
+                        ArrayReader arr = child.asArray();
+                        auto arr_iter = arr.items();
+                        ItemReader arr_item;
+                        while (arr_iter.next(&arr_item)) {
+                            format_item_reader(ctx_, arr_item, NULL);
+                        }
+                    } else {
+                        // For child elements, format them recursively
+                        format_item_reader(ctx_, child, NULL);
+                    }
+                }
+            }
+
+            ctx_.emit("</%N>", elem_name);
         }
 
-        ctx.emit("</%N>", elem_name);
+        XmlContext& ctx_;
+        const char* tag_name_;
+    };
+
+    if (!item.isNull()) {
+        log_debug("format_item_reader: formatting item, tag_name '%s'", tag_name);
     }
-    else {
-        // Unknown type or null
-        log_debug("format_item_reader: unknown type, outputting empty element");
-        ctx.emit("<%N/>", tag_name);
-    }
+    XmlItemHandlers handlers(ctx, tag_name);
+    ctx.dispatch_item(item, handlers);
 }
 
 String* format_xml(Pool* pool, Item root_item) {
-    Pool* ctx_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.xml");
+    ScopedFormatPool ctx_pool("format.xml");
     StringBuf* sb = stringbuf_new(pool);
-    XmlContext ctx(ctx_pool, sb);
+    XmlContext ctx(ctx_pool.get(), sb);
 
     ItemReader reader(root_item.to_const());
 
@@ -386,7 +283,6 @@ String* format_xml(Pool* pool, Item root_item) {
                 }
             }
 
-            mem_pool_destroy(ctx_pool);
             return stringbuf_to_string(sb);
         }
     }
@@ -406,15 +302,13 @@ String* format_xml(Pool* pool, Item root_item) {
 
     format_item_reader(ctx, reader, tag_name);
 
-    mem_pool_destroy(ctx_pool);
     return stringbuf_to_string(sb);
 }
 
 // Convenience function that formats XML to a provided StringBuf
 void format_xml_to_stringbuf(StringBuf* sb, Item root_item) {
-    Pool* pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.xml");
-    XmlContext ctx(pool, sb);
+    ScopedFormatPool pool("format.xml");
+    XmlContext ctx(pool.get(), sb);
     ItemReader reader(root_item.to_const());
     format_item_reader(ctx, reader, "root");
-    mem_pool_destroy(pool);
 }

@@ -56,17 +56,6 @@ static const char* item_to_cstr(Item value, char* buf, int buf_size) {
 }
 
 // Helper: create a string Item from a C string
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)len);
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
 // =============================================================================
 // Internal helper: normalize a path string in-place
 // Resolves '.' and '..' segments, collapses duplicate separators

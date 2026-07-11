@@ -10,6 +10,7 @@
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lib/mem.h"
+#include "../lib/mem_grow.hpp"
 
 // ---------------------------------------------------------------------------
 // WebViewManager
@@ -40,20 +41,14 @@ WebViewManager* webview_manager_create(GLFWwindow* window) {
     return mgr;
 }
 
-static void mgr_track_handle(WebViewManager* mgr, WebViewHandle* handle, int mode) {
+static bool mgr_track_handle(WebViewManager* mgr, WebViewHandle* handle, int mode) {
     if (mgr->handle_count >= mgr->handle_capacity) {
-        int new_cap = mgr->handle_capacity * 2;
-        auto* new_arr = (WebViewManager::TrackedHandle*)mem_calloc(
-            new_cap, sizeof(WebViewManager::TrackedHandle), MEM_CAT_LAYOUT);
-        for (int i = 0; i < mgr->handle_count; i++) {
-            new_arr[i] = mgr->tracked[i];
-        }
-        mem_free(mgr->tracked);
-        mgr->tracked = new_arr;
-        mgr->handle_capacity = new_cap;
+        if (!lam::mem_grow_array(&mgr->tracked, &mgr->handle_capacity,
+                                 mgr->handle_count + 1, 4, MEM_CAT_LAYOUT)) return false;
     }
     mgr->tracked[mgr->handle_count] = { handle, mode };
     mgr->handle_count++;
+    return true;
 }
 
 static void mgr_untrack_handle(WebViewManager* mgr, WebViewHandle* handle) {
@@ -83,7 +78,11 @@ WebViewHandle* webview_handle_create(WebViewManager* mgr, float w, float h, floa
     if (!mgr) return nullptr;
     WebViewHandle* handle = webview_platform_create(mgr->window, 0, 0, w, h, pixel_ratio);
     if (handle) {
-        mgr_track_handle(mgr, handle, WEBVIEW_MODE_WINDOW);
+        if (!mgr_track_handle(mgr, handle, WEBVIEW_MODE_WINDOW)) {
+            // tracking owns lifecycle; destroy immediately if the registry cannot grow
+            webview_platform_destroy(handle);
+            return nullptr;
+        }
         log_info("webview child handle created (%p), total=%d", (void*)handle, mgr->handle_count);
     }
     return handle;
@@ -97,7 +96,11 @@ static WebViewHandle* webview_layer_handle_create(WebViewManager* mgr, float w, 
     if (!mgr) return nullptr;
     WebViewHandle* handle = webview_layer_platform_create(w, h, pixel_ratio);
     if (handle) {
-        mgr_track_handle(mgr, handle, WEBVIEW_MODE_LAYER);
+        if (!mgr_track_handle(mgr, handle, WEBVIEW_MODE_LAYER)) {
+            // tracking owns lifecycle; destroy immediately if the registry cannot grow
+            webview_layer_platform_destroy(handle);
+            return nullptr;
+        }
         log_info("webview layer handle created (%p), total=%d", (void*)handle, mgr->handle_count);
     }
     return handle;

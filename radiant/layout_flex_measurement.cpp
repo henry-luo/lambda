@@ -259,13 +259,6 @@ static float get_explicit_css_height(LayoutContext* lycon, ViewElement* elem) {
 }
 
 static CssValue* flex_margin_side_value(const CssValue* value, CssPropertyId property_id) {
-    if (!value) return nullptr;
-    if (value->type != CSS_VALUE_TYPE_LIST) return (CssValue*)value;
-
-    int cnt = value->data.list.count;
-    CssValue** vals = value->data.list.values;
-    if (cnt <= 0 || !vals) return nullptr;
-
     int side = 0;
     if (property_id == CSS_PROPERTY_MARGIN_TOP) {
         side = 0;
@@ -276,18 +269,7 @@ static CssValue* flex_margin_side_value(const CssValue* value, CssPropertyId pro
     } else {
         side = 3;
     }
-
-    int idx = 0;
-    if (side == 0) {
-        idx = 0;
-    } else if (side == 1) {
-        idx = (cnt >= 2) ? 1 : 0;
-    } else if (side == 2) {
-        idx = (cnt >= 3) ? 2 : 0;
-    } else {
-        idx = (cnt >= 4) ? 3 : ((cnt >= 2) ? 1 : 0);
-    }
-    return (idx < cnt) ? vals[idx] : nullptr;
+    return (CssValue*)css_box_shorthand_side_value(value, side);
 }
 
 static bool resolve_flex_margin_value(LayoutContext* lycon, CssPropertyId property_id,
@@ -1107,16 +1089,13 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                 if (pad_top == 0 && pad_bottom == 0) {
                                     CssDeclaration* pad_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_PADDING);
                                     if (pad_sh && pad_sh->value) {
-                                        if (pad_sh->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                            pad_top = pad_bottom = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_sh->value);
-                                        } else if (pad_sh->value->type == CSS_VALUE_TYPE_LIST) {
-                                            int cnt = pad_sh->value->data.list.count;
-                                            CssValue** vals = pad_sh->value->data.list.values;
-                                            if (cnt >= 1 && vals[0]->type == CSS_VALUE_TYPE_LENGTH) {
-                                                pad_top = resolve_length_value(lycon, CSS_PROPERTY_PADDING, vals[0]);
-                                                pad_bottom = (cnt >= 3 && vals[2]->type == CSS_VALUE_TYPE_LENGTH)
-                                                    ? resolve_length_value(lycon, CSS_PROPERTY_PADDING, vals[2]) : pad_top;
-                                            }
+                                        const CssValue* top_value = css_box_shorthand_side_value(pad_sh->value, 0);
+                                        const CssValue* bottom_value = css_box_shorthand_side_value(pad_sh->value, 2);
+                                        if (top_value) {
+                                            pad_top = resolve_length_value(lycon, CSS_PROPERTY_PADDING, top_value);
+                                        }
+                                        if (bottom_value) {
+                                            pad_bottom = resolve_length_value(lycon, CSS_PROPERTY_PADDING, bottom_value);
                                         }
                                     }
                                 }
@@ -1130,16 +1109,13 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                 if (brd_top == 0 && brd_bottom == 0) {
                                     CssDeclaration* bw_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER_WIDTH);
                                     if (bw_sh && bw_sh->value) {
-                                        if (bw_sh->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                            brd_top = brd_bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bw_sh->value);
-                                        } else if (bw_sh->value->type == CSS_VALUE_TYPE_LIST) {
-                                            int cnt = bw_sh->value->data.list.count;
-                                            CssValue** vals = bw_sh->value->data.list.values;
-                                            if (cnt >= 1 && vals[0]->type == CSS_VALUE_TYPE_LENGTH) {
-                                                brd_top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[0]);
-                                                brd_bottom = (cnt >= 3 && vals[2]->type == CSS_VALUE_TYPE_LENGTH)
-                                                    ? resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[2]) : brd_top;
-                                            }
+                                        const CssValue* top_value = css_box_shorthand_side_value(bw_sh->value, 0);
+                                        const CssValue* bottom_value = css_box_shorthand_side_value(bw_sh->value, 2);
+                                        if (top_value) {
+                                            brd_top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, top_value);
+                                        }
+                                        if (bottom_value) {
+                                            brd_bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bottom_value);
                                         }
                                     }
                                     if (brd_top == 0 && brd_bottom == 0) {

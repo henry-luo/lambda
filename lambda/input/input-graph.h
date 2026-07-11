@@ -7,7 +7,7 @@
 
 #include "source_tracker.hpp"
 #include "input-context.hpp"
-#include <cctype>
+#include "../../lib/str.h"
 #include <cstring>
 
 // Shared helper: skip to end of current line (used by all graph parsers).
@@ -33,7 +33,7 @@ static inline void skip_wsc(lambda::SourceTracker& tracker,
                              bool block_comments) {
     while (!tracker.atEnd()) {
         char c = tracker.current();
-        if (isspace(c)) { tracker.advance(); continue; }
+        if (str_char_is_ascii_space(c)) { tracker.advance(); continue; }
         if (block_comments && c == '/' && tracker.peek(1) == '*') {
             tracker.advance(); tracker.advance(); // skip /*
             while (!tracker.atEnd() &&
@@ -62,14 +62,14 @@ static inline String* read_graph_identifier(lambda::InputContext& ctx,
     lambda::SourceTracker& tracker = ctx.tracker;
     if (tracker.atEnd()) return nullptr;
     char c = tracker.current();
-    bool start_ok = (isalpha(c) || c == '_') ||
-                    (!require_alpha_start && (isdigit(c) || (extra && strchr(extra, c))));
+    bool start_ok = (str_char_is_alpha(c) || c == '_') ||
+                    (!require_alpha_start && (str_char_is_digit(c) || (extra && strchr(extra, c))));
     if (!start_ok) return nullptr;
     const char* start = tracker.rest();
     size_t len = 0;
     while (!tracker.atEnd()) {
         c = tracker.current();
-        if (isalnum(c) || c == '_' || (extra && strchr(extra, c))) {
+        if (str_char_is_alnum(c) || c == '_' || (extra && strchr(extra, c))) {
             tracker.advance(); len++;
         } else {
             break;

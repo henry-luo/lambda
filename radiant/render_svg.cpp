@@ -18,6 +18,7 @@
 #include "../lib/mem_factory.h"
 #include "../lib/font/font.h"
 #include "../lib/utf.h"
+#include "../lib/escape.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/mark_reader.hpp"
 extern "C" {
@@ -488,20 +489,10 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         return;
     }
 
-    // Escape XML entities in text
     size_t transformed_len = strlen(text_content);
     StrBuf* escaped_text = strbuf_new_cap(transformed_len * 2);
-    for (size_t i = 0; i < transformed_len; i++) {
-        char c = text_content[i];
-        switch (c) {
-            case '<': strbuf_append_str(escaped_text, "&lt;"); break;
-            case '>': strbuf_append_str(escaped_text, "&gt;"); break;
-            case '&': strbuf_append_str(escaped_text, "&amp;"); break;
-            case '"': strbuf_append_str(escaped_text, "&quot;"); break;
-            case '\'': strbuf_append_str(escaped_text, "&#39;"); break;
-            default: strbuf_append_char(escaped_text, c); break;
-        }
-    }
+    escape_append(escaped_text, text_content, transformed_len, ESCAPE_RULES_HTML_TEXT,
+                  ESCAPE_RULES_HTML_TEXT_COUNT, ESCAPE_CTRL_NONE);
 
     svg_indent(ctx);
 
@@ -1582,18 +1573,10 @@ static void svg_cb_render_marker(void* vctx, ViewSpan* marker, float abs_x, floa
             // text markers (decimal, roman, alpha, etc.)
             if (marker_prop->text_content && *marker_prop->text_content) {
                 float baseline_y = y + (font->style && font->style->ascender > 0 ? font->style->ascender : font_size * 0.8f);
-                // escape XML entities
                 const char* src = marker_prop->text_content;
                 StrBuf* escaped = strbuf_new_cap(strlen(src) * 2);
-                while (*src) {
-                    switch (*src) {
-                        case '<': strbuf_append_str(escaped, "&lt;"); break;
-                        case '>': strbuf_append_str(escaped, "&gt;"); break;
-                        case '&': strbuf_append_str(escaped, "&amp;"); break;
-                        default: strbuf_append_char(escaped, *src); break;
-                    }
-                    src++;
-                }
+                escape_append(escaped, src, strlen(src), ESCAPE_RULES_HTML_TEXT,
+                              ESCAPE_RULES_HTML_TEXT_COUNT, ESCAPE_CTRL_NONE);
                 const char* family = font->font_handle
                     ? font_handle_get_family_name(font->font_handle) : "Arial";
                 // right-align text in marker box

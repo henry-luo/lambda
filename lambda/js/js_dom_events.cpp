@@ -239,10 +239,6 @@ static void report_exception_to_window_onerror(Item err, const char* type) {
     (void)type;
 }
 
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
 static DomElement* js_dom_find_element_by_id(DomNode* node, const char* id) {
     while (node) {
         if (node->is_element()) {

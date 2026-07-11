@@ -44,25 +44,6 @@ extern "C" void js_fetch_set_base_path(const char* dir_path) {
     g_fetch_base_dir = dup;
 }
 
-// =============================================================================
-// Helpers (shared with js_fs.cpp pattern)
-// =============================================================================
-
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
-static Item make_string_item(const char* str, int len) {
-    if (!str || len <= 0) return ItemNull;
-    String* s = heap_create_name(str, (size_t)len);
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
 static const char* item_to_cstr(Item value, char* buf, int buf_size) {
     if (get_type_id(value) != LMD_TYPE_STRING) return NULL;
     String* s = it2s(value);

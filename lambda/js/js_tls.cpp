@@ -32,25 +32,6 @@ extern "C" Item js_tls_socket_getSession(void);
 extern "C" uv_tcp_t* js_net_socket_adopt_for_tls(Item socket_obj, Item tls_obj);
 extern "C" void js_net_socket_tls_closed(Item socket_obj, bool had_error);
 
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)(len > 0 ? len : 0));
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
-static bool is_callable(Item item) {
-    return get_type_id(item) == LMD_TYPE_FUNC;
-}
-
 static bool tls_is_missing(Item item) {
     TypeId type = get_type_id(item);
     return type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED;

@@ -4,6 +4,7 @@
 #include "../mark_builder.hpp"
 #include "../../lib/mem.h"
 #include "../../lib/strbuf.h"
+#include "../../lib/str.h"
 #include "../../lib/log.h"
 
 using namespace lambda;
@@ -35,6 +36,15 @@ static Item parse_block_sequence(YamlParser* p, int seq_indent);
 #define TAG_SEQ  6
 #define TAG_MAP  7
 #define TAG_NON_SPECIFIC 8
+
+static void yaml_rtrim_line_space(StrBuf* sb, size_t min_len = 0) {
+    const char* text = sb->str;
+    size_t len = sb->length;
+    str_rtrim_chars(&text, &len, " \t", 2);
+    if (len < min_len) len = min_len;
+    sb->length = len;
+    sb->str[len] = '\0';
+}
 
 // anchor entry
 struct AnchorEntry {
@@ -91,6 +101,14 @@ static inline void advance_n(YamlParser* p, int n) {
     for (int i = 0; i < n; i++) advance(p);
 }
 
+static uint32_t yaml_parse_hex_codepoint(YamlParser* p, int ndigits) {
+    const char* cur = p->src + p->pos;
+    uint32_t codepoint = parse_hex_codepoint(&cur, ndigits);
+    int consumed = (int)(cur - (p->src + p->pos));
+    advance_n(p, consumed);
+    return codepoint;
+}
+
 static void skip_spaces(YamlParser* p) {
     while (!at_end(p)) {
         char c = peek(p);
@@ -143,8 +161,9 @@ static int current_indent(YamlParser* p) {
 }
 
 static void skip_line(YamlParser* p) {
-    while (!at_end(p) && peek(p) != '\n') advance(p);
-    if (!at_end(p)) advance(p);
+    const char* current = p->src + p->pos;
+    skip_to_newline_raw(&current);
+    advance_n(p, (int)(current - (p->src + p->pos)));
 }
 
 // get start of current line
@@ -291,9 +310,8 @@ static Item make_scalar(YamlParser* p, const char* str, bool quoted) {
     }
 
     const char* start = str;
-    while (*start == ' ' || *start == '\t') start++;
     size_t slen = strlen(start);
-    while (slen > 0 && (start[slen - 1] == ' ' || start[slen - 1] == '\t')) slen--;
+    str_trim_chars(&start, &slen, " \t", 2);
 
     if (slen == 0) return p->ctx->builder.createNull();
 
@@ -411,24 +429,18 @@ static Item parse_double_quoted(YamlParser* p) {
                     strbuf_append_char(sb, '\xa9');
                     break;
                 case 'x': {
-                    char hex[3] = {0};
-                    for (int i = 0; i < 2 && !at_end(p); i++) { hex[i] = peek(p); advance(p); }
-                    unsigned int val = strtoul(hex, NULL, 16);
-                    append_codepoint_utf8_strbuf(sb, val);
+                    uint32_t val = yaml_parse_hex_codepoint(p, 2);
+                    if (val != 0xFFFFFFFF) append_codepoint_utf8_strbuf(sb, val);
                     break;
                 }
                 case 'u': {
-                    char hex[5] = {0};
-                    for (int i = 0; i < 4 && !at_end(p); i++) { hex[i] = peek(p); advance(p); }
-                    unsigned int val = strtoul(hex, NULL, 16);
-                    append_codepoint_utf8_strbuf(sb, val);
+                    uint32_t val = yaml_parse_hex_codepoint(p, 4);
+                    if (val != 0xFFFFFFFF) append_codepoint_utf8_strbuf(sb, val);
                     break;
                 }
                 case 'U': {
-                    char hex[9] = {0};
-                    for (int i = 0; i < 8 && !at_end(p); i++) { hex[i] = peek(p); advance(p); }
-                    unsigned int val = strtoul(hex, NULL, 16);
-                    append_codepoint_utf8_strbuf(sb, val);
+                    uint32_t val = yaml_parse_hex_codepoint(p, 8);
+                    if (val != 0xFFFFFFFF) append_codepoint_utf8_strbuf(sb, val);
                     break;
                 }
                 case '\n': {
@@ -447,9 +459,7 @@ static Item parse_double_quoted(YamlParser* p) {
             // line folding in double-quoted: trim trailing LITERAL whitespace only
             // do not trim past safe_length (escape-produced characters)
             {
-                int blen = sb->length;
-                while (blen > safe_length && (sb->str[blen - 1] == ' ' || sb->str[blen - 1] == '\t')) blen--;
-                sb->length = blen; sb->str[blen] = '\0';
+                yaml_rtrim_line_space(sb, safe_length);
             }
             advance(p);
             int empty_lines = 0;
@@ -504,9 +514,7 @@ static Item parse_single_quoted(YamlParser* p) {
         } else if (peek(p) == '\n') {
             // line folding
             {
-                int blen = sb->length;
-                while (blen > 0 && (sb->str[blen - 1] == ' ' || sb->str[blen - 1] == '\t')) blen--;
-                sb->length = blen; sb->str[blen] = '\0';
+                yaml_rtrim_line_space(sb);
             }
             advance(p);
             int empty_lines = 0;
@@ -773,9 +781,7 @@ static Item parse_plain_scalar(YamlParser* p, int min_indent, bool in_flow) {
 
         // trim trailing spaces
         {
-            int blen = sb->length;
-            while (blen > 0 && (sb->str[blen - 1] == ' ' || sb->str[blen - 1] == '\t')) blen--;
-            sb->length = blen; sb->str[blen] = '\0';
+            yaml_rtrim_line_space(sb);
         }
 
         if (at_end(p) || peek(p) != '\n') break;
@@ -1128,9 +1134,10 @@ static Item parse_block_scalar(YamlParser* p, int base_indent) {
     // apply chomping
     if (indicator == '>') {
         // remove trailing spaces from folding
-        int blen = sb->length;
-        while (blen > 0 && sb->str[blen - 1] == ' ') blen--;
-        sb->length = blen; sb->str[blen] = '\0';
+        const char* text = sb->str;
+        size_t len = sb->length;
+        str_rtrim_chars(&text, &len, " ", 1);
+        sb->length = len; sb->str[len] = '\0';
     }
 
     bool has_content = (sb->length > 0);
@@ -1577,9 +1584,7 @@ static Item parse_block_mapping(YamlParser* p, int map_indent) {
                     strbuf_append_char(ksb, peek(p));
                     advance(p);
                 }
-                int klen = ksb->length;
-                while (klen > 0 && (ksb->str[klen-1] == ' ' || ksb->str[klen-1] == '\t')) klen--;
-                ksb->length = klen; ksb->str[klen] = '\0';
+                yaml_rtrim_line_space(ksb);
 
                 if (key_tag == TAG_STR || key_tag == TAG_NON_SPECIFIC) {
                     key_item = p->ctx->builder.createStringItem(ksb->str);
@@ -1881,9 +1886,7 @@ static Item parse_block_mapping_inline(YamlParser* p, int map_indent) {
                     strbuf_append_char(ksb, peek(p));
                     advance(p);
                 }
-                int klen = ksb->length;
-                while (klen > 0 && (ksb->str[klen-1] == ' ' || ksb->str[klen-1] == '\t')) klen--;
-                ksb->length = klen; ksb->str[klen] = '\0';
+                yaml_rtrim_line_space(ksb);
 
                 if (key_tag == TAG_STR || key_tag == TAG_NON_SPECIFIC) {
                     key_item = p->ctx->builder.createStringItem(ksb->str);

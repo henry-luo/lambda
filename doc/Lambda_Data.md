@@ -53,7 +53,7 @@ Lambda Script has a rich type system with both primitive and composite types:
 | `u64`      | 64-bit unsigned integer     | `1000u64`             |
 | `f16` `f32`| Sized floating point        | `0.5f16`, `3.14f32`   |
 | `f64`      | 64-bit float (alias for `float`) | `2.7f64`         |
-| `decimal`  | Arbitrary precision decimal | `123.456n`, `1e-3n`   |
+| `decimal`  | Arbitrary precision decimal | `123.456m`, `1e-3m`   |
 | `string`   | UTF-8 text strings          | `"hello"`             |
 | `symbol`   | Interned identifiers        | `'symbol'`            |
 | `binary`   | Binary data                 | `b'\xDEADBEEF'`       |
@@ -111,8 +111,9 @@ nan
 -inf
 
 // Decimals (exact decimal)
-123.456n       // decimal
--789.012n      // decimal
+123.456m       // decimal
+-789.012m      // decimal
+100m           // integer-valued decimal (the money literal)
 
 // Sized integers (postfix suffix)
 42i8           // 8-bit signed  [-128, 127]

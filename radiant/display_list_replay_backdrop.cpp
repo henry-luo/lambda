@@ -1,15 +1,8 @@
 #include "display_list_replay_backdrop.hpp"
 
+#include "display_list_surface_region.hpp"
 #include "render_composite.hpp"
 #include <string.h>
-
-static int dl_replay_max_i(int a, int b) {
-    return a > b ? a : b;
-}
-
-static int dl_replay_min_i(int a, int b) {
-    return a < b ? a : b;
-}
 
 void dl_replay_backdrop_init(DisplayReplayBackdropStack* stack) {
     if (!stack) return;
@@ -29,40 +22,21 @@ void dl_replay_backdrop_save(DisplayReplayBackdropStack* stack,
         return;
     }
 
-    int x0 = dl_replay_max_i(0, backdrop->x0);
-    int y0 = dl_replay_max_i(0, backdrop->y0);
-    int x1 = dl_replay_min_i(surface->width, backdrop->x0 + backdrop->w);
-    int y1 = dl_replay_min_i(surface->height, backdrop->y0 + backdrop->h);
-    int w = x1 - x0;
-    int h = y1 - y0;
-    if (w <= 0 || h <= 0) {
+    int region[4] = {};
+    uint32_t* buf = surface_region_save(surface, scratch,
+                                        backdrop->x0, backdrop->y0,
+                                        backdrop->w, backdrop->h,
+                                        region);
+    if (!buf) {
         stack->stack[stack->sp] = nullptr;
-        stack->region[stack->sp][0] = 0;
-        stack->region[stack->sp][1] = 0;
-        stack->region[stack->sp][2] = 0;
-        stack->region[stack->sp][3] = 0;
+        memcpy(stack->region[stack->sp], region, sizeof(region));
         stack->sp++;
         return;
     }
 
-    int pitch = surface->pitch / 4;
-    int sz = w * h;
-    uint32_t* buf = (uint32_t*)scratch_alloc(scratch, sz * sizeof(uint32_t));
-    uint32_t* px = (uint32_t*)surface->pixels;
-    for (int row = 0; row < h; row++) {
-        memcpy(buf + row * w,
-               px + (y0 + row) * pitch + x0,
-               w * sizeof(uint32_t));
-    }
-    for (int row = 0; row < h; row++) {
-        memset(px + (y0 + row) * pitch + x0, 0, w * sizeof(uint32_t));
-    }
-
+    surface_region_clear(surface, region);
     stack->stack[stack->sp] = buf;
-    stack->region[stack->sp][0] = x0;
-    stack->region[stack->sp][1] = y0;
-    stack->region[stack->sp][2] = w;
-    stack->region[stack->sp][3] = h;
+    memcpy(stack->region[stack->sp], region, sizeof(region));
     stack->sp++;
 }
 

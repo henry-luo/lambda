@@ -41,9 +41,6 @@
 
 // Forward declarations for internal functions in input.cpp
 extern Element* input_create_element_internal(Input *input, const char* tag_name);
-extern void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
-extern void map_put(Map* mp, String* key, Item value, Input *input);
-extern Item _map_field_to_item(void* field_ptr, TypeId type_id);
 
 extern TypeMap EmptyMap;
 
@@ -372,6 +369,7 @@ ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
             element->type = element_type;
             arraylist_append(input->type_list, element_type);
             element_type->type_index = input->type_list->length - 1;
+            element_type->is_private_clone = true;
             // initialize with no attributes
 
             // set element name (use name pool for structural identifier)
@@ -769,7 +767,7 @@ bool MarkBuilder::is_in_arena(Item item) const {
             while (attr) {
                 if (attr->name) {
                     void* attr_data = (char*)elem->data + attr->byte_offset;
-                    Item attr_item = _map_field_to_item(attr_data, attr->type->type_id);
+                    Item attr_item = map_field_to_item(attr_data, attr->type->type_id);
                     if (!is_in_arena(attr_item)) return false;  // External attribute found
                 }
                 attr = lam::shape_next(attr);
@@ -974,7 +972,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
             lam::ShapeRef attr = lam::shape_borrow(elem_type->shape);
             while (attr) {
                 void* field_ptr = (char*)elem->data + attr->byte_offset;
-                Item attr_item = _map_field_to_item(field_ptr, attr->type->type_id);
+                Item attr_item = map_field_to_item(field_ptr, attr->type->type_id);
                 Item copied_item = deep_copy_internal(attr_item);
                 if (attr->name) {
                     // Copy attribute name bytes from external NamePool

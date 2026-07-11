@@ -32,8 +32,7 @@ Item push_c(int64_t cval) {
 #define IS_VECTOR_TYPE(t) ((t) == LMD_TYPE_ARRAY_NUM || (t) == LMD_TYPE_ARRAY || \
                            (t) == LMD_TYPE_ARRAY || (t) == LMD_TYPE_RANGE)
 
-#define IS_SCALAR_NUMERIC(t) ((t) == LMD_TYPE_INT || (t) == LMD_TYPE_INT64 || \
-                              (t) == LMD_TYPE_FLOAT || (t) == LMD_TYPE_FLOAT64 || \
+#define IS_SCALAR_NUMERIC(t) (is_integer_type_id((TypeId)(t)) || is_float_type_id((TypeId)(t)) || \
                               (t) == LMD_TYPE_DECIMAL || \
                               (t) == LMD_TYPE_NUM_SIZED || (t) == LMD_TYPE_UINT64)
 
@@ -459,7 +458,7 @@ static bool aggregate_number_value(Item item, double* out, bool* is_float) {
         *out = (double)item.get_int64();
         return true;
     }
-    if (type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64) {
+    if (is_float_type_id(type)) {
         *out = item.get_double();
         *is_float = true;
         return true;
@@ -1130,7 +1129,7 @@ Item fn_round(Item item) {
     // round() - round to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
     normalize_sized(item, type);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
+    if (is_integer_type_id(type)) {
         // Already an integer, return as-is
         return item;
     }
@@ -1177,7 +1176,7 @@ Item fn_floor(Item item) {
     // floor() - round down to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
     normalize_sized(item, type);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
+    if (is_integer_type_id(type)) {
         return item;  // return as-is
     }
     else if (type == LMD_TYPE_FLOAT) {
@@ -1223,7 +1222,7 @@ Item fn_ceil(Item item) {
     // ceil() - round up to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
     normalize_sized(item, type);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
+    if (is_integer_type_id(type)) {
         return item;  // return as-is
     }
     else if (type == LMD_TYPE_FLOAT) {
@@ -1357,7 +1356,7 @@ Item fn_min1(Item item_a) {
     // single argument min case
     TypeId type_id = get_type_id(item_a);
     // string/symbol passthrough: strings are singular, not iterable
-    if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) return item_a;
+    if (is_text_type_id(type_id)) return item_a;
     if (type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = item_a.array_num;
         if (arr->length == 0) {
@@ -1545,7 +1544,7 @@ Item fn_max1(Item item_a) {
     // single argument max case
     TypeId type_id = get_type_id(item_a);
     // string/symbol passthrough: strings are singular, not iterable
-    if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) return item_a;
+    if (is_text_type_id(type_id)) return item_a;
     if (type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = item_a.array_num;
         if (arr->length == 0) {
@@ -2641,7 +2640,7 @@ extern "C" double js_math_round(double x) {
 // These operate on boxed Items and return boxed Items.
 extern "C" Item js_math_trunc(Item x) {
     TypeId t = get_type_id(x);
-    if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) return x;
+    if (is_integer_type_id(t)) return x;
     if (t == LMD_TYPE_FLOAT) {
         double d = it2d(x);
         if (d != d) return push_d(NAN);              // NaN
@@ -2658,7 +2657,7 @@ extern "C" Item js_math_trunc(Item x) {
 
 extern "C" Item js_math_sign(Item x) {
     TypeId t = get_type_id(x);
-    if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) {
+    if (is_integer_type_id(t)) {
         int64_t v = it2i(x);
         if (v > 0) return (Item){.item = i2it(1)};
         if (v < 0) return (Item){.item = i2it(-1)};
@@ -2675,7 +2674,7 @@ extern "C" Item js_math_sign(Item x) {
 
 extern "C" Item js_math_floor(Item x) {
     TypeId t = get_type_id(x);
-    if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) return x;
+    if (is_integer_type_id(t)) return x;
     if (t == LMD_TYPE_FLOAT) {
         double d = it2d(x);
         if (d != d || !isfinite(d) || d == 0.0) return push_d(d);
@@ -2697,7 +2696,7 @@ extern "C" double js_math_ceil_d(double d) {
 
 extern "C" Item js_math_ceil(Item x) {
     TypeId t = get_type_id(x);
-    if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) return x;
+    if (is_integer_type_id(t)) return x;
     if (t == LMD_TYPE_FLOAT) {
         double d = it2d(x);
         if (d != d || !isfinite(d) || d == 0.0) return push_d(d);
@@ -2713,7 +2712,7 @@ extern "C" Item js_math_ceil(Item x) {
 
 extern "C" Item js_math_round_item(Item x) {
     TypeId t = get_type_id(x);
-    if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) return x;
+    if (is_integer_type_id(t)) return x;
     if (t == LMD_TYPE_FLOAT) {
         double d = it2d(x);
         if (d != d || !isfinite(d) || d == 0.0) return push_d(d);

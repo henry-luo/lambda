@@ -8,8 +8,8 @@ extern "C" {
 #include "../../lib/str.h"
 }
 
-// line-oriented helpers (skip_to_newline, skip_line_whitespace, is_folded_line) from input-utils.h
-#include "input-utils.h"
+// line-oriented helpers and folded RFC header parsing
+#include "input-rfc-text.h"
 
 using namespace lambda;
 
@@ -24,57 +24,6 @@ static String* parse_header_name(InputContext& ctx, const char **eml) {
     while (**eml && **eml != ':' && **eml != '\n' && **eml != '\r') {
         stringbuf_append_char(sb, **eml);
         (*eml)++;
-    }
-
-    if (sb->str && sb->str->len > 0) {
-        return ctx.builder.createString(sb->str->chars, sb->length);
-    }
-    return NULL;
-}
-
-// Helper function to parse header value (including continuation lines)
-static String* parse_header_value(InputContext& ctx, const char **eml) {
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);
-
-    // Skip the colon and initial whitespace
-    if (**eml == ':') {
-        (*eml)++;
-        skip_line_whitespace(eml);
-    }
-
-    // Read the header value, handling continuation lines
-    while (**eml) {
-        if (**eml == '\n' || **eml == '\r') {
-            // Check if next line is a continuation
-            const char* next_line = *eml;
-            if (*next_line == '\r' && *(next_line + 1) == '\n') {
-                next_line += 2;
-            } else if (*next_line == '\n' || *next_line == '\r') {
-                next_line++;
-            }
-
-            if (is_continuation_line(next_line)) {
-                // Replace line break with space and continue
-                stringbuf_append_char(sb, ' ');
-                skip_to_newline(eml);
-                skip_line_whitespace(eml);
-            } else {
-                // End of header value
-                break;
-            }
-        } else {
-            stringbuf_append_char(sb, **eml);
-            (*eml)++;
-        }
-    }
-
-    // Trim trailing whitespace using proper StringBuf API
-    while (sb->length > 0 &&
-           (sb->str->chars[sb->length - 1] == ' ' || sb->str->chars[sb->length - 1] == '\t')) {
-        sb->length--;
-        sb->str->len = sb->length;
-        sb->str->chars[sb->length] = '\0';
     }
 
     if (sb->str && sb->str->len > 0) {
@@ -216,7 +165,11 @@ void parse_eml(Input* input, const char* eml_string) {
         }
 
         // Parse header value
-        String* header_value = parse_header_value(ctx, &eml);
+        StringBuf* header_sb = ctx.sb;
+        size_t header_value_len = parse_rfc_header_value(header_sb, &eml);
+        String* header_value = header_value_len > 0
+            ? ctx.builder.createString(header_sb->str->chars, header_value_len)
+            : NULL;
         if (!header_value) {
             skip_to_newline(&eml);
             continue;

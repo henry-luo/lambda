@@ -22,23 +22,8 @@
 #include <cstring>
 #include <cstdlib>
 
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
 static const int64_t JS_BUFFER_MAX_LENGTH = (1LL << 30) - 1;
 static const int64_t JS_BUFFER_MAX_STRING_LENGTH = (1LL << 28) - 16;
-
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)len);
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
 
 extern "C" Item js_get_current_this(void);
 extern "C" Item js_blob_new(Item parts, Item options);
@@ -294,8 +279,7 @@ static void buffer_write_utf8_encoded(const char* chars, int byte_len, uint8_t* 
                     if (next_second >= 0xB0 && next_second <= 0xBF) {
                         uint16_t hi = buffer_decode_wtf8_unit(chars, i);
                         uint16_t lo = buffer_decode_wtf8_unit(chars, next);
-                        uint32_t cp = 0x10000 + (((uint32_t)hi - 0xD800) << 10) +
-                                      ((uint32_t)lo - 0xDC00);
+                        uint32_t cp = utf16_decode_pair(hi, lo);
                         char encoded[4];
                         size_t n = utf8_encode(cp, encoded);
                         for (size_t j = 0; j < n; j++) out[out_pos++] = (uint8_t)encoded[j];
@@ -609,13 +593,13 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
                         cp = ((c & 0x07) << 18) | ((q[1] & 0x3F) << 12) | ((q[2] & 0x3F) << 6) | (q[3] & 0x3F); q += 4;
                         // surrogate pair for code points > 0xFFFF
                         if (cp > 0xFFFF && j + 3 < out_bytes + 1) {
-                            cp -= 0x10000;
-                            uint16_t hi = 0xD800 + (uint16_t)(cp >> 10);
-                            uint16_t lo = 0xDC00 + (uint16_t)(cp & 0x3FF);
-                            bdata[j++] = (uint8_t)(hi & 0xFF);
-                            bdata[j++] = (uint8_t)(hi >> 8);
-                            bdata[j++] = (uint8_t)(lo & 0xFF);
-                            bdata[j++] = (uint8_t)(lo >> 8);
+                            uint16_t units[2];
+                            if (utf16_encode(cp, units) == 2) {
+                                bdata[j++] = (uint8_t)(units[0] & 0xFF);
+                                bdata[j++] = (uint8_t)(units[0] >> 8);
+                                bdata[j++] = (uint8_t)(units[1] & 0xFF);
+                                bdata[j++] = (uint8_t)(units[1] >> 8);
+                            }
                             continue;
                         }
                     } else { q += 1; }

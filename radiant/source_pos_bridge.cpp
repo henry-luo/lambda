@@ -68,6 +68,13 @@ extern "C" __attribute__((weak)) bool state_store_set_selection(
 }
 
 static bool source_item_is_editor_text_leaf(Item item) {
+    uintptr_t raw = (uintptr_t)item.item;
+    if (raw == 0 || item._type_id != 0 || (raw & ITEM_DBL_MASK) ||
+        raw < 0x10000ULL || (raw & (sizeof(void*) - 1)) != 0) {
+        // render-map tests and handler dispatch can use synthetic Item keys;
+        // only real direct-pointer map Items are safe to inspect as maps here.
+        return false;
+    }
     MapReader m = MapReader::fromItem(item);
     if (!m.isValid()) return false;
     ItemReader kind = m.get("kind");

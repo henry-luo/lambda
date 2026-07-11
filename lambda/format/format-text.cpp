@@ -21,18 +21,10 @@ static void format_scalar_value_reader(TextContext& ctx, const ItemReader& item)
         ctx.write_text(val ? "true" : "false");
     }
     else if (item.isInt()) {
-        int val = item.asInt();
-        char num_buf[32];
-        snprintf(num_buf, sizeof(num_buf), "%d", val);
-        ctx.write_text(num_buf);
+        format_number(ctx.output(), item.item());
     }
     else if (item.isFloat()) {
-        double val = item.asFloat();
-        if (!isnan(val) && !isinf(val)) {
-            char num_buf[32];
-            lambda_double_to_shortest(val, num_buf, sizeof(num_buf));
-            ctx.write_text(num_buf);
-        }
+        format_number(ctx.output(), item.item());
     }
     else if (item.isString()) {
         String* str = item.asString();
@@ -49,15 +41,7 @@ static void format_scalar_value_reader(TextContext& ctx, const ItemReader& item)
         if (type == LMD_TYPE_DTIME) {
             DateTime* dt_ptr = (DateTime*)raw_item.datetime_ptr;
             if (dt_ptr) {
-                char date_buf[32];
-                // Extract date components using DateTime macros
-                int year = DATETIME_GET_YEAR(dt_ptr);
-                int month = DATETIME_GET_MONTH(dt_ptr);
-                int day = dt_ptr->day;
-                // Format as ISO 8601 string without quotes
-                snprintf(date_buf, sizeof(date_buf), "%04d-%02d-%02d",
-                        year, month, day);
-                ctx.write_text(date_buf);
+                format_write_datetime_iso8601(ctx.output(), dt_ptr);
             }
         } else {
             // For non-scalar types, recursively process them
@@ -130,33 +114,44 @@ static void format_element_text_reader(TextContext& ctx, const ElementReader& el
 
 // MarkReader-based version: main recursive function to extract scalar values
 static void format_item_text_reader(TextContext& ctx, const ItemReader& item) {
-    FormatterContextCpp::RecursionGuard guard(ctx);
-    if (guard.exceeded()) return;
+    class TextItemHandlers : public FormatItemHandlersDefault {
+    public:
+        explicit TextItemHandlers(TextContext& ctx) : ctx_(ctx) {}
 
-    if (item.isNull()) {
-        // skip null values
-        return;
-    }
-    else if (item.isBool() || item.isInt() || item.isFloat() || item.isString()) {
-        // handle common scalar types
-        format_scalar_value_reader(ctx, item);
-    }
-    else if (item.isArray()) {
-        ArrayReader arr = item.asArray();
-        format_array_text_reader(ctx, arr);
-    }
-    else if (item.isMap()) {
-        MapReader mp = item.asMap();
-        format_map_text_reader(ctx, mp);
-    }
-    else if (item.isElement()) {
-        ElementReader elem = item.asElement();
-        format_element_text_reader(ctx, elem);
-    }
-    else {
-        // for other types (like DateTime), try format_scalar_value_reader
-        format_scalar_value_reader(ctx, item);
-    }
+        void max_depth(const ItemReader& item) override { (void)item; }
+        void null_value(const ItemReader& item) override { (void)item; }
+        void bool_value(const ItemReader& item) override { format_scalar_value_reader(ctx_, item); }
+        void number_value(const ItemReader& item) override { format_scalar_value_reader(ctx_, item); }
+        void string_value(const ItemReader& item, String* str) override {
+            (void)str;
+            format_scalar_value_reader(ctx_, item);
+        }
+        void array_value(const ItemReader& item, ArrayReader arr) override {
+            (void)item;
+            format_array_text_reader(ctx_, arr);
+        }
+        void map_value(const ItemReader& item, MapReader mp) override {
+            (void)item;
+            format_map_text_reader(ctx_, mp);
+        }
+        void element_value(const ItemReader& item, ElementReader elem) override {
+            (void)item;
+            format_element_text_reader(ctx_, elem);
+        }
+        void datetime_value(const ItemReader& item, DateTime* dt) override {
+            (void)dt;
+            format_scalar_value_reader(ctx_, item);
+        }
+        void unknown_value(const ItemReader& item) override {
+            format_scalar_value_reader(ctx_, item);
+        }
+
+    private:
+        TextContext& ctx_;
+    };
+
+    TextItemHandlers handlers(ctx);
+    ctx.dispatch_item(item, handlers);
 }
 
 // Public interface function that formats a Lambda Item as plain text
@@ -164,14 +159,13 @@ void format_text(StringBuf* sb, Item root_item) {
     if (!sb) return;
 
     // Create a temporary pool for context operations
-    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.text");
-    TextContext ctx(temp_pool, sb);
+    ScopedFormatPool temp_pool("format.text");
+    TextContext ctx(temp_pool.get(), sb);
 
     // use MarkReader API for type-safe traversal
     ItemReader root(root_item.to_const());
     format_item_text_reader(ctx, root);
 
-    mem_pool_destroy(temp_pool);
 }
 
 // String variant that returns a String* allocated from the pool

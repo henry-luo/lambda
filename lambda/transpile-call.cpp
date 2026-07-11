@@ -30,12 +30,12 @@ Type* resolve_native_ret_type(AstFuncNode* fn_node);
 
 // Helper to check if type is numeric (int, int64, or float)
 static inline bool is_numeric_type(TypeId t) {
-    return t == LMD_TYPE_INT || t == LMD_TYPE_INT64 || t == LMD_TYPE_FLOAT;
+    return is_native_numeric_type_id(t);
 }
 
 // Helper to check if type is integer (int or int64)
 static inline bool is_integer_type(TypeId t) {
-    return t == LMD_TYPE_INT || t == LMD_TYPE_INT64;
+    return is_integer_type_id(t);
 }
 
 // Helper to check if an expression produces a native C type (not a tagged Item).
@@ -44,7 +44,7 @@ static inline bool is_integer_type(TypeId t) {
 static inline bool is_native_type(AstNode* arg) {
     if (!arg->type) return false;
     TypeId t = arg->type->type_id;
-    return t == LMD_TYPE_INT || t == LMD_TYPE_INT64 || t == LMD_TYPE_FLOAT || t == LMD_TYPE_BOOL;
+    return is_native_numeric_or_bool_type_id(t);
 }
 
 static inline bool is_compact_integer_type(Type* type) {
@@ -172,8 +172,7 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
             transpile_expr(tp, value);
         }
         else if (param_type->type_id == LMD_TYPE_FLOAT) {
-            if ((value->type->type_id == LMD_TYPE_INT || value->type->type_id == LMD_TYPE_INT64 ||
-                value->type->type_id == LMD_TYPE_FLOAT)) {
+            if (is_integer_type_id(value->type->type_id) || value->type->type_id == LMD_TYPE_FLOAT) {
                 transpile_expr(tp, value);
             }
             else if (value->type->type_id == LMD_TYPE_ANY) {
@@ -186,7 +185,7 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
             }
         }
         else if (param_type->type_id == LMD_TYPE_INT64) {
-            if (value->type->type_id == LMD_TYPE_INT || value->type->type_id == LMD_TYPE_INT64) {
+            if (is_integer_type_id(value->type->type_id)) {
                 transpile_expr(tp, value);
             }
             else if (value->type->type_id == LMD_TYPE_FLOAT) {
@@ -552,7 +551,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                     strbuf_append_str(tp->code_buf, "))");
                     return;
                 }
-                if (arg_type == LMD_TYPE_STRING || arg_type == LMD_TYPE_SYMBOL) {
+                if (is_text_type_id(arg_type)) {
                     strbuf_append_str(tp->code_buf, "fn_len_s(");
                     transpile_expr(tp, first_arg);
                     strbuf_append_char(tp->code_buf, ')');

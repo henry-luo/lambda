@@ -627,6 +627,42 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block);
 bool element_has_positioning(ViewBlock* block);
 bool element_has_float(ViewBlock* block);
 
+static inline bool layout_position_is_abs_fixed(const PositionProp* position) {
+    return position &&
+           (position->position == CSS_VALUE_ABSOLUTE ||
+            position->position == CSS_VALUE_FIXED);
+}
+
+static inline bool layout_position_is_floated(const PositionProp* position) {
+    return position &&
+           (position->float_prop == CSS_VALUE_LEFT ||
+            position->float_prop == CSS_VALUE_RIGHT);
+}
+
+static inline bool layout_view_is_out_of_flow_positioned(const View* view) {
+    const DomNode* node = static_cast<const DomNode*>(view);
+    const DomElement* element = node ? node->as_element() : nullptr;
+    return element && layout_position_is_abs_fixed(element->position);
+}
+
+static inline bool layout_view_is_out_of_flow(const View* view) {
+    const DomNode* node = static_cast<const DomNode*>(view);
+    const DomElement* element = node ? node->as_element() : nullptr;
+    return element &&
+           (layout_position_is_abs_fixed(element->position) ||
+            layout_position_is_floated(element->position));
+}
+
+static inline bool layout_block_is_out_of_flow_positioned(const ViewBlock* block) {
+    return block && layout_position_is_abs_fixed(block->position);
+}
+
+static inline bool layout_block_is_out_of_flow(const ViewBlock* block) {
+    return block &&
+           (layout_position_is_abs_fixed(block->position) ||
+            layout_position_is_floated(block->position));
+}
+
 void line_init(LayoutContext* lycon, float left, float right);
 void line_reset(LayoutContext* lycon);
 float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline, float valign_offset = 0);

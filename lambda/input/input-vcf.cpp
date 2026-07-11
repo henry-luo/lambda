@@ -211,7 +211,8 @@ void parse_vcf(Input* input, const char* vcf_string) {
             Map* name_struct = parse_structured_name(ctx, property_value->chars);
             if (name_struct) {
                 String* name_key = builder.createName("name");
-                Item name_value = {.item = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(name_struct))};
+                // containers are direct typed pointers; high-byte tagging corrupts Map* addresses.
+                Item name_value = {.map = name_struct};
                 ctx.builder.putToMap(lam::gc_borrow(contact_map), name_key, name_value);
             }
         }
@@ -232,7 +233,8 @@ void parse_vcf(Input* input, const char* vcf_string) {
             Map* addr_struct = parse_address(ctx, property_value->chars);
             if (addr_struct) {
                 String* addr_key = builder.createName("address");
-                Item addr_value = {.item = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(addr_struct))};
+                // containers are direct typed pointers; high-byte tagging corrupts Map* addresses.
+                Item addr_value = {.map = addr_struct};
                 ctx.builder.putToMap(lam::gc_borrow(contact_map), addr_key, addr_value);
             }
         }
@@ -276,11 +278,12 @@ void parse_vcf(Input* input, const char* vcf_string) {
 
     // Store properties map in contact
     String* properties_key = builder.createName("properties");
-    Item properties_value = {.item = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(properties_map))};
+    // containers are direct typed pointers; high-byte tagging corrupts Map* addresses.
+    Item properties_value = {.map = properties_map};
     ctx.builder.putToMap(lam::gc_borrow(contact_map), properties_key, properties_value);
 
     // Set the contact map as the root of the input
-    input->root = {.item = ((uint64_t)LMD_TYPE_MAP << 56) | (uint64_t)contact_map};
+    input->root = {.map = contact_map};
 
     if (ctx.hasErrors()) {
         ctx.logErrors();

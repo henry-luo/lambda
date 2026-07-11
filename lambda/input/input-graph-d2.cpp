@@ -67,10 +67,10 @@ static String* parse_d2_label(InputContext& ctx) {
         len++;
     }
 
-    // trim trailing whitespace
-    while (len > 0 && str_char_is_ascii_space(start[len - 1])) {
-        len--;
-    }
+    const char* trimmed = start;
+    size_t trimmed_len = len;
+    str_rtrim(&trimmed, &trimmed_len);
+    len = trimmed_len;
 
     if (len == 0) return nullptr;
 

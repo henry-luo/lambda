@@ -252,9 +252,13 @@ module.exports = grammar({
 
     float: _ => token(float_literal),
 
+    // 'n' = integer, 'm' = decimal (A.5 suffix split). The grammar accepts
+    // both suffixes on every numeric spelling so that fractional 'n'
+    // (e.g. 1.5n) reaches the AST builder and gets a targeted error
+    // pointing at 'm', instead of an opaque parse error.
     decimal: $ => token(seq(
       choice(float_literal, decimal_literal, integer_literal),
-      'n'
+      choice('n', 'm')
     )),
 
     // sized integer: integer literal with type suffix (i8, i16, i32, i64, u8, u16, u32, u64)

@@ -403,6 +403,19 @@ public:
     const char* get_attr_string(const char* key) const;
     ItemReader get_attr(const char* key) const;
 
+    class AttributeIterator {
+    private:
+        const ElementReader* reader_;
+        lam::ConstShapeRef current_field_;
+
+    public:
+        explicit AttributeIterator(const ElementReader* reader);
+        bool next(const char** key, ItemReader* value);
+        void reset();
+    };
+
+    AttributeIterator attrs() const;
+
     // Typed attribute accessors
     String* get_string_attr(const char* attr_name) const;
     int64_t get_int_attr(const char* attr_name, int64_t default_val = 0) const;

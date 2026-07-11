@@ -327,7 +327,7 @@ double it2d(Item itm) {
     else if (type_id == LMD_TYPE_INT64) {
         return (double)itm.get_int64();
     }
-    else if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
+    else if (is_float_type_id(type_id)) {
         return itm.get_double();
     }
     else if (type_id == LMD_TYPE_DECIMAL) {
@@ -358,7 +358,7 @@ bool it2b(Item itm) {
     else if (type_id == LMD_TYPE_INT) {
         return itm.get_int56() != 0;
     }
-    else if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
+    else if (is_float_type_id(type_id)) {
         // Lambda truthiness treats every number as truthy; inline floats must not
         // inherit JS-style zero/NaN falsiness from their raw double payload.
         return true;
@@ -379,11 +379,19 @@ int64_t it2i(Item itm) {
     else if (type_id == LMD_TYPE_INT64) {
         return itm.get_int64();
     }
-    else if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
+    else if (is_float_type_id(type_id)) {
         return (int64_t)itm.get_double();
     }
     else if (type_id == LMD_TYPE_BOOL) {
         return itm.bool_val ? 1 : 0;
+    }
+    else if (type_id == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = itm.get_num_type();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) return (int64_t)itm.get_num_sized_as_double();
+        return itm.get_num_sized_as_int64();
+    }
+    else if (type_id == LMD_TYPE_UINT64) {
+        return (int64_t)itm.get_uint64();
     }
     else if (type_id == LMD_TYPE_ERROR) {
         return 0;  // error items return 0 (callers should check type before calling it2i)
@@ -405,11 +413,19 @@ int64_t it2l(Item itm) {
     else if (type_id == LMD_TYPE_INT64) {
         return itm.get_int64();
     }
-    else if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
+    else if (is_float_type_id(type_id)) {
         return (int64_t)itm.get_double();
     }
     else if (type_id == LMD_TYPE_BOOL) {
         return itm.bool_val ? 1 : 0;
+    }
+    else if (type_id == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = itm.get_num_type();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) return (int64_t)itm.get_num_sized_as_double();
+        return itm.get_num_sized_as_int64();
+    }
+    else if (type_id == LMD_TYPE_UINT64) {
+        return (int64_t)itm.get_uint64();
     }
     return INT64_MAX;  // error sentinel
 }
@@ -432,7 +448,7 @@ String* it2s(Item itm) {
 // For other types, returns empty string (path segments must be strings)
 const char* fn_to_cstr(Item itm) {
     TypeId type_id = itm._type_id;
-    if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
+    if (is_text_type_id(type_id)) {
         return itm.get_chars();
     }
     if (type_id == LMD_TYPE_ERROR) {
@@ -548,7 +564,7 @@ void expand_list(List *list, Arena* arena = nullptr) {
                 if (old_items <= old_pointer && old_pointer < old_items + list->capacity/2) {
                     int offset = old_items + list->capacity/2 - old_pointer;
                     void* new_pointer = list->items + list->capacity - offset;
-                    list->items[i] = {.item = (itm._type_id == LMD_TYPE_FLOAT || itm._type_id == LMD_TYPE_FLOAT64) ? d2it(new_pointer) :
+                    list->items[i] = {.item = is_float_type_id(itm._type_id) ? d2it(new_pointer) :
                         itm._type_id == LMD_TYPE_INT64 ? l2it(new_pointer) : k2it(new_pointer)};
                 }
                 // if the pointer is not in the old buffer, it should not be updated
@@ -919,6 +935,27 @@ void list_push_spread(List *list, Item item) {
     list_push(list, item);
 }
 
+Item array_num_read_borrowed_item(ArrayNum* array, int64_t offset) {
+    if (!array || offset < 0 || offset >= array->length) return ItemNull;
+    switch (array->get_elem_type()) {
+        case ELEM_INT:     return (Item){.item = i2it(array->items[offset])};
+        case ELEM_INT64:   return (Item){.item = l2it(&array->items[offset])};
+        case ELEM_FLOAT64: return lambda_float_ptr_to_item(&array->float_items[offset]);
+        case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)array->data)[offset])};
+        case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)array->data)[offset])};
+        case ELEM_INT32:   return (Item){.item = i32_to_item(((int32_t*)array->data)[offset])};
+        case ELEM_UINT8:   return (Item){.item = u8_to_item(((uint8_t*)array->data)[offset])};
+        case ELEM_UINT8_CLAMPED: return (Item){.item = u8_to_item(((uint8_t*)array->data)[offset])};
+        case ELEM_UINT16:  return (Item){.item = u16_to_item(((uint16_t*)array->data)[offset])};
+        case ELEM_UINT32:  return (Item){.item = u32_to_item(((uint32_t*)array->data)[offset])};
+        case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)array->data)[offset]))};
+        case ELEM_FLOAT32: return (Item){.item = f32_to_item(((float*)array->data)[offset])};
+        case ELEM_UINT64:  return (Item){.item = u64_to_item(&((uint64_t*)array->data)[offset])};
+        case ELEM_BOOL:    return (Item){.item = b2it(((uint8_t*)array->data)[offset] ? BOOL_TRUE : BOOL_FALSE)};
+        default:           return ItemError;
+    }
+}
+
 ConstItem List::get(int index) const {
     if (!this) { return null_result; }
     if (index < 0 || index >= this->length) {
@@ -934,7 +971,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
     for (long i = 0; i < count; i++) {
         // printf("set field of type: %d, offset: %ld, name:%.*s\n", field->type->type_id, field->byte_offset,
         //     field->name ? (int)field->name->length:4, field->name ? field->name->str : "null");
-        void* field_ptr = ((uint8_t*)map_data) + field->byte_offset;
+        void* field_ptr = map_field_ptr(map_data, field);
         // always read an Item (uint64_t) from varargs - transpiler now passes Items via box functions like i2it()
         Item item = {.item = va_arg(args, uint64_t)};
         if (!field->name) { // nested map
@@ -965,7 +1002,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 // handle type coercion: float → int, bool → int
                 TypeId item_type = get_type_id(item);
                 int64_t val;
-                if (item_type == LMD_TYPE_FLOAT || item_type == LMD_TYPE_FLOAT64) {
+                if (is_float_type_id(item_type)) {
                     val = (int64_t)item.get_double();
                 } else if (item_type == LMD_TYPE_BOOL) {
                     val = item.bool_val ? 1 : 0;
@@ -1184,7 +1221,7 @@ Item typeditem_to_item(TypedItem *titem) {
     }
 }
 
-Item _map_field_to_item(void* field_ptr, TypeId type_id) {
+Item map_field_to_item(void* field_ptr, TypeId type_id) {
     Item result = (Item){._type_id = type_id};
     void* ptr_val = nullptr;
     switch (type_id) {
@@ -1206,6 +1243,9 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
         break;
     case LMD_TYPE_INT64:
         result = {.item = l2it(field_ptr)};  // points to long directly
+        break;
+    case LMD_TYPE_UINT64:
+        result = {.item = u64_to_item((uint64_t*)field_ptr)};
         break;
     case LMD_TYPE_FLOAT:
         result = lambda_float_ptr_to_item((const double*)field_ptr);
@@ -1283,10 +1323,10 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
             target_equal(field->ns, key_ns)) {
             *is_found = true;
             TypeId type_id = field->type->type_id;
-            void* field_ptr = (char*)map_data + field->byte_offset;
+            void* field_ptr = map_field_ptr(map_data, field);
             log_debug("_map_get_const: key='%s' type_id=%d byte_offset=%d field_ptr=%p raw_8bytes=0x%016lx map_type=%p map_data=%p",
                 key, type_id, field->byte_offset, field_ptr, *(uint64_t*)field_ptr, map_type, map_data);
-            Item result = _map_field_to_item(field_ptr, type_id);
+            Item result = map_field_to_item(field_ptr, type_id);
             return *(ConstItem*)&result;
         }
         field = field->next;

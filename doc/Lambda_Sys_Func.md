@@ -27,7 +27,7 @@ Functions for type conversion and inspection.
 | `int(x)` | Convert to integer | `int("42")` | `42` |
 | `int64(x)` | Convert to 64-bit integer | `int64("9999999999")` | `9999999999` |
 | `float(x)` | Convert to float | `float("3.14")` | `3.14` |
-| `decimal(x)` | Convert to arbitrary precision decimal | `decimal("123.456")` | `123.456n` |
+| `decimal(x)` | Convert to arbitrary precision decimal | `decimal("123.456")` | `123.456m` |
 | `string(x)` | Convert to string | `string(42)` | `"42"` |
 | `symbol(x)` | Convert to symbol | `symbol("text")` | `'text'` |
 | `binary(x)` | Convert to binary | `binary("hello")` | `b'...'` |
@@ -124,8 +124,8 @@ avg([1, 2, 3, 4])       // 2.5
 | `math.e` | Euler's number (e) | `2.7182818285` |
 | `math.max_int` | Largest compact `int` with exact float64 round-trip | `9007199254740991` |
 
-Compact `int` is bounded to ±(2^53 - 1). Use `n` literals for exact integer or
-decimal arithmetic beyond this compact boundary.
+Compact `int` is bounded to ±(2^53 - 1). Use `n` (integer) or `m` (decimal)
+literals for exact arithmetic beyond this compact boundary.
 
 #### Trigonometric
 

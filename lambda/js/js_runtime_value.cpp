@@ -1,8 +1,45 @@
 #include "js_runtime_internal.hpp"
+#include "../lambda-decimal.hpp"
 
 extern "C" bool js_ordinary_has_property(Item object, const char* name, int name_len);
 extern "C" void* js_dom_unwrap_element(Item item);
 extern "C" bool js_is_proxy(Item obj);
+
+extern "C" Item js_undefined(void) {
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+extern "C" Item make_js_undefined(void) {
+    return js_undefined();
+}
+
+extern "C" Item js_make_string_len(const char* str, int len) {
+    if (!str) return ItemNull;
+    if (len < 0) len = 0;
+    String* s = heap_create_name(str, (size_t)len);
+    return (Item){.item = s2it(s)};
+}
+
+extern "C" Item js_make_string(const char* str) {
+    if (!str) return ItemNull;
+    return js_make_string_len(str, (int)strlen(str));
+}
+
+extern "C" bool js_is_callable(Item value) {
+    return get_type_id(value) == LMD_TYPE_FUNC;
+}
+
+extern "C" bool is_callable(Item value) {
+    return js_is_callable(value);
+}
+
+Item make_string_item(const char* str, int len) {
+    return js_make_string_len(str, len);
+}
+
+Item make_string_item(const char* str) {
+    return js_make_string(str);
+}
 
 static inline bool js_number_like_type(TypeId type) {
     return type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT ||
@@ -331,6 +368,7 @@ static inline Item js_numeric_operand(Item val) {
 // - No scientific notation for exponents in [-6, 20]
 // - Scientific notation uses 'e+' or 'e-' (no leading zeros in exponent)
 void js_double_to_string(double d, char* out, int out_size) {
+    if (!out || out_size <= 0) return;
     if (isnan(d)) {
         snprintf(out, out_size, "NaN");
         return;
@@ -344,107 +382,7 @@ void js_double_to_string(double d, char* out, int out_size) {
         return;
     }
 
-    // Handle negative numbers
-    int neg = 0;
-    if (d < 0) { neg = 1; d = -d; }
-
-    // Try increasing precision to find shortest round-trip representation
-    char buf[64];
-    int best_len = 0;
-    for (int prec = 1; prec <= 21; prec++) {
-        snprintf(buf, sizeof(buf), "%.*e", prec - 1, d);
-        double roundtrip;
-        sscanf(buf, "%lf", &roundtrip);
-        if (roundtrip == d) {
-            best_len = prec;
-            break;
-        }
-    }
-    if (best_len == 0) best_len = 17; // fallback: 17 digits always round-trips
-
-    // Format with the minimal precision in scientific notation
-    snprintf(buf, sizeof(buf), "%.*e", best_len - 1, d);
-
-    // Parse the scientific notation: digits, decimal point, exponent
-    // Format from snprintf: [-]d.dddde[+-]dd
-    char digits[32];
-    int digit_count = 0;
-    int exp_val = 0;
-
-    char* p = buf;
-    // Skip sign (we handle separately)
-    if (*p == '-') p++;
-
-    // Collect digits (skip decimal point)
-    while (*p && *p != 'e' && *p != 'E') {
-        if (*p != '.') {
-            digits[digit_count++] = *p;
-        }
-        p++;
-    }
-    digits[digit_count] = '\0';
-
-    // Remove trailing zeros from digit string
-    while (digit_count > 1 && digits[digit_count - 1] == '0') {
-        digit_count--;
-        digits[digit_count] = '\0';
-    }
-
-    // Parse exponent
-    if (*p == 'e' || *p == 'E') {
-        p++;
-        exp_val = atoi(p);
-    }
-
-    // n = number of significant digits (k in ES spec)
-    int k = digit_count;
-    // e = exponent such that value = 0.digits * 10^e  =>  e = exp_val + 1
-    int e = exp_val + 1;
-
-    // Now format according to ES spec §7.1.12.1
-    char* o = out;
-    if (neg) *o++ = '-';
-
-    if (k <= e && e <= 21) {
-        // Case: integer-like, e.g. 120, 1000000
-        // digits followed by (e-k) zeros
-        memcpy(o, digits, k);
-        o += k;
-        for (int i = 0; i < e - k; i++) *o++ = '0';
-        *o = '\0';
-    } else if (0 < e && e <= 21) {
-        // Case: decimal point within digits, e.g. 1.5, 12.34
-        // first e digits, then '.', then remaining digits
-        memcpy(o, digits, e);
-        o += e;
-        *o++ = '.';
-        memcpy(o, digits + e, k - e);
-        o += (k - e);
-        *o = '\0';
-    } else if (-6 < e && e <= 0) {
-        // Case: 0.00...0digits, e.g. 0.5, 0.001
-        *o++ = '0';
-        *o++ = '.';
-        for (int i = 0; i < -e; i++) *o++ = '0';
-        memcpy(o, digits, k);
-        o += k;
-        *o = '\0';
-    } else if (k == 1) {
-        // Scientific notation with single digit
-        *o++ = digits[0];
-        *o++ = 'e';
-        if (e - 1 >= 0) *o++ = '+';
-        snprintf(o, out_size - (int)(o - out), "%d", e - 1);
-    } else {
-        // Scientific notation with multiple digits
-        *o++ = digits[0];
-        *o++ = '.';
-        memcpy(o, digits + 1, k - 1);
-        o += (k - 1);
-        *o++ = 'e';
-        if (e - 1 >= 0) *o++ = '+';
-        snprintf(o, out_size - (int)(o - out), "%d", e - 1);
-    }
+    lambda_finite_double_to_shortest(d, out, out_size);
 }
 
 extern "C" Item js_to_string(Item value) {

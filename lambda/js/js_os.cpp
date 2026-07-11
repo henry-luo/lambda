@@ -52,17 +52,6 @@ extern Item js_make_number(double d);
 #endif
 
 // Helper: create a string Item from a C string
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)len);
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
 static Item make_node_number_i64(int64_t value) {
     // Node os APIs expose host counters as JS Number; avoid compact-int packing,
     // which turns values outside Lambda's safe-int band into ITEM_ERROR.

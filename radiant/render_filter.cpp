@@ -24,35 +24,21 @@
  * - SVG Filter Effects: https://www.w3.org/TR/SVG11/filters.html
  */
 
-// Helper: Clamp value to 0-255 range
-static inline uint8_t clamp_byte(float v) {
-    if (v < 0) return 0;
-    if (v > 255) return 255;
-    return (uint8_t)(v + 0.5f);  // Round to nearest
-}
-
-static inline uint32_t clamp_u8_uint(uint32_t v) {
-    return v > 255u ? 255u : v;
-}
-
-// Alias for lib/math_utils.h clamp_unit (same semantics).
-static inline float clamp_01(float v) { return clamp_unit(v); }
-
 /**
  * grayscale(amount)
  * Converts to grayscale. amount=0 is no effect, amount=1 is full grayscale.
  * Uses luminance formula: 0.2126*R + 0.7152*G + 0.0722*B
  */
 static void filter_grayscale(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
-    amount = clamp_01(amount);
+    amount = clamp_unit(amount);
     if (amount == 0) return;
 
     float gray = 0.2126f * (*r) + 0.7152f * (*g) + 0.0722f * (*b);
 
     // Interpolate between original and grayscale
-    *r = clamp_byte(*r + amount * (gray - *r));
-    *g = clamp_byte(*g + amount * (gray - *g));
-    *b = clamp_byte(*b + amount * (gray - *b));
+    *r = clamp_byte((int)(*r + amount * (gray - *r) + 0.5f));
+    *g = clamp_byte((int)(*g + amount * (gray - *g) + 0.5f));
+    *b = clamp_byte((int)(*b + amount * (gray - *b) + 0.5f));
 }
 
 /**
@@ -63,9 +49,9 @@ static void filter_grayscale(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
 static void filter_brightness(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     if (amount < 0) amount = 0;  // Clamp negative to 0
 
-    *r = clamp_byte(*r * amount);
-    *g = clamp_byte(*g * amount);
-    *b = clamp_byte(*b * amount);
+    *r = clamp_byte((int)(*r * amount + 0.5f));
+    *g = clamp_byte((int)(*g * amount + 0.5f));
+    *b = clamp_byte((int)(*b * amount + 0.5f));
 }
 
 /**
@@ -80,9 +66,9 @@ static void filter_contrast(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     float gf = (*g / 255.0f - 0.5f) * amount + 0.5f;
     float bf = (*b / 255.0f - 0.5f) * amount + 0.5f;
 
-    *r = clamp_byte(rf * 255.0f);
-    *g = clamp_byte(gf * 255.0f);
-    *b = clamp_byte(bf * 255.0f);
+    *r = clamp_byte((int)(rf * 255.0f + 0.5f));
+    *g = clamp_byte((int)(gf * 255.0f + 0.5f));
+    *b = clamp_byte((int)(bf * 255.0f + 0.5f));
 }
 
 /**
@@ -91,7 +77,7 @@ static void filter_contrast(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
  * Uses standard sepia transformation matrix.
  */
 static void filter_sepia(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
-    amount = clamp_01(amount);
+    amount = clamp_unit(amount);
     if (amount == 0) return;
 
     float rf = *r, gf = *g, bf = *b;
@@ -102,9 +88,9 @@ static void filter_sepia(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     float sb = 0.272f * rf + 0.534f * gf + 0.131f * bf;
 
     // Interpolate between original and sepia
-    *r = clamp_byte(rf + amount * (sr - rf));
-    *g = clamp_byte(gf + amount * (sg - gf));
-    *b = clamp_byte(bf + amount * (sb - bf));
+    *r = clamp_byte((int)(rf + amount * (sr - rf) + 0.5f));
+    *g = clamp_byte((int)(gf + amount * (sg - gf) + 0.5f));
+    *b = clamp_byte((int)(bf + amount * (sb - bf) + 0.5f));
 }
 
 /**
@@ -140,9 +126,9 @@ static void filter_hue_rotate(uint8_t* r, uint8_t* g, uint8_t* b, float angle) {
     float new_g = mat[1][0] * rf + mat[1][1] * gf + mat[1][2] * bf;
     float new_b = mat[2][0] * rf + mat[2][1] * gf + mat[2][2] * bf;
 
-    *r = clamp_byte(new_r * 255.0f);
-    *g = clamp_byte(new_g * 255.0f);
-    *b = clamp_byte(new_b * 255.0f);
+    *r = clamp_byte((int)(new_r * 255.0f + 0.5f));
+    *g = clamp_byte((int)(new_g * 255.0f + 0.5f));
+    *b = clamp_byte((int)(new_b * 255.0f + 0.5f));
 }
 
 /**
@@ -150,13 +136,13 @@ static void filter_hue_rotate(uint8_t* r, uint8_t* g, uint8_t* b, float angle) {
  * Inverts colors. amount=0 is no effect, amount=1 is full inversion.
  */
 static void filter_invert(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
-    amount = clamp_01(amount);
+    amount = clamp_unit(amount);
     if (amount == 0) return;
 
     // Interpolate between original and inverted
-    *r = clamp_byte(*r + amount * (255 - 2 * (*r)));
-    *g = clamp_byte(*g + amount * (255 - 2 * (*g)));
-    *b = clamp_byte(*b + amount * (255 - 2 * (*b)));
+    *r = clamp_byte((int)(*r + amount * (255 - 2 * (*r)) + 0.5f));
+    *g = clamp_byte((int)(*g + amount * (255 - 2 * (*g)) + 0.5f));
+    *b = clamp_byte((int)(*b + amount * (255 - 2 * (*b)) + 0.5f));
 }
 
 /**
@@ -181,9 +167,9 @@ static void filter_saturate(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     float new_g = mat[1][0] * rf + mat[1][1] * gf + mat[1][2] * bf;
     float new_b = mat[2][0] * rf + mat[2][1] * gf + mat[2][2] * bf;
 
-    *r = clamp_byte(new_r * 255.0f);
-    *g = clamp_byte(new_g * 255.0f);
-    *b = clamp_byte(new_b * 255.0f);
+    *r = clamp_byte((int)(new_r * 255.0f + 0.5f));
+    *g = clamp_byte((int)(new_g * 255.0f + 0.5f));
+    *b = clamp_byte((int)(new_b * 255.0f + 0.5f));
 }
 
 /**
@@ -191,8 +177,8 @@ static void filter_saturate(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
  * Adjusts opacity. amount=1 is no effect, 0 is transparent.
  */
 static void filter_opacity(uint8_t* a, float amount) {
-    amount = clamp_01(amount);
-    *a = clamp_byte(*a * amount);
+    amount = clamp_unit(amount);
+    *a = clamp_byte((int)(*a * amount + 0.5f));
 }
 
 static bool render_filter_apply_native_backend(const RenderBackendCaps* caps,
@@ -574,10 +560,10 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
                     uint32_t new_g = ((ep >> 8) & 0xFF) + (((sp >> 8) & 0xFF) * inv_ea + 127) / 255;
                     uint32_t new_b = ((ep >> 16) & 0xFF) + (((sp >> 16) & 0xFF) * inv_ea + 127) / 255;
 
-                    *dst = (clamp_u8_uint(new_a) << 24) |
-                           (clamp_u8_uint(new_b) << 16) |
-                           (clamp_u8_uint(new_g) << 8) |
-                           clamp_u8_uint(new_r);
+                    *dst = (LMB_MIN(new_a, 255u) << 24) |
+                           (LMB_MIN(new_b, 255u) << 16) |
+                           (LMB_MIN(new_g, 255u) << 8) |
+                           LMB_MIN(new_r, 255u);
                 }
             }
 

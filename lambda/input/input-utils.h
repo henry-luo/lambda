@@ -6,7 +6,6 @@
  *   - Unicode codepoint → UTF-8 encoding
  *   - UTF-16 surrogate pair decoding
  *   - Hex-digit → codepoint parsing
- *   - Numeric string parsing helpers
  */
 
 #ifndef LAMBDA_INPUT_UTILS_H
@@ -43,28 +42,6 @@ uint32_t decode_surrogate_pair(uint16_t high, uint16_t low);
  */
 uint32_t parse_hex_codepoint(const char** pos, int ndigits);
 
-// ── Numeric Parsing ────────────────────────────────────────────────
-
-/**
- * Try to parse a decimal integer from str[0..len-1].
- * @return true on success (value written to *out).
- */
-bool try_parse_int64(const char* str, size_t len, int64_t* out);
-
-/**
- * Try to parse a decimal floating-point number from str[0..len-1].
- * @return true on success (value written to *out).
- */
-bool try_parse_double(const char* str, size_t len, double* out);
-
-// ── String Classification ──────────────────────────────────────────
-
-/**
- * Case-insensitive comparison of exactly @p n bytes.
- * @return 0 if equal, non-zero otherwise.
- */
-int input_strncasecmp(const char* s1, const char* s2, size_t n);
-
 // ── Whitespace & Line Utilities ────────────────────────────────────
 
 // NOTE: skip_whitespace() and skip_tab_pace() are declared in input.hpp
@@ -79,15 +56,6 @@ bool input_is_empty_line(const char* line);
 
 /** Count consecutive leading occurrences of @p ch in @p str. */
 int input_count_leading_chars(const char* str, char ch);
-
-/** Return a malloc'd trimmed copy of @p str (caller must free). */
-char* input_trim_whitespace(const char* str);
-
-/** Split @p text into malloc'd array of lines. Sets *line_count. Caller must free via input_free_lines(). */
-char** input_split_lines(const char* text, int* line_count);
-
-/** Free line array returned by input_split_lines(). */
-void input_free_lines(char** lines, int line_count);
 
 // ── Line-Oriented Parsing ──────────────────────────────────────────
 
@@ -110,6 +78,46 @@ static inline void skip_to_newline(const char** p) {
         (*p) += 2; // skip \r\n
     } else if (**p == '\n' || **p == '\r') {
         (*p)++; // skip \n or \r
+    }
+}
+
+static inline bool input_match_marker(const char* p, const char* marker) {
+    if (!p || !marker) return false;
+    while (*marker) {
+        if (*p != *marker) return false;
+        p++;
+        marker++;
+    }
+    return true;
+}
+
+static inline void skip_whitespace_and_comment_markers(const char** p,
+                                                       const char* line_comment1,
+                                                       const char* line_comment2,
+                                                       bool block_comments) {
+    if (!p || !*p) return;
+    while (**p) {
+        while (**p && (**p == ' ' || **p == '\n' || **p == '\r' || **p == '\t')) {
+            (*p)++;
+        }
+        if (block_comments && **p == '/' && *(*p + 1) == '*') {
+            *p += 2;
+            while (**p && !(**p == '*' && *(*p + 1) == '/')) {
+                (*p)++;
+            }
+            if (**p == '*' && *(*p + 1) == '/') {
+                *p += 2;
+            }
+            continue;
+        }
+        if ((line_comment1 && input_match_marker(*p, line_comment1)) ||
+            (line_comment2 && input_match_marker(*p, line_comment2))) {
+            while (**p && **p != '\n' && **p != '\r') {
+                (*p)++;
+            }
+            continue;
+        }
+        break;
     }
 }
 

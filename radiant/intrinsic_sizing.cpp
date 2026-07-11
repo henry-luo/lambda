@@ -13,6 +13,7 @@
 #include "layout_pass.hpp"
 #include "layout_measure.hpp"
 #include "layout_table.hpp"
+#include "layout_box.hpp"
 #include "rdt_video.h"
 #include "retained_fields.hpp"
 #include "font_face.h"
@@ -409,18 +410,7 @@ static float intrinsic_border_width_from_spacing_value(LayoutContext* lycon, Css
                                                        const CssValue* value, bool right_side) {
     if (!value) return 0.0f;
 
-    const CssValue* side_value = value;
-    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 1) {
-        int count = value->data.list.count;
-        CssValue** values = value->data.list.values;
-        if (count == 1) {
-            side_value = values[0];
-        } else if (count == 2 || count == 3) {
-            side_value = values[1];
-        } else {
-            side_value = values[right_side ? 1 : 3];
-        }
-    }
+    const CssValue* side_value = css_box_shorthand_side_value(value, right_side ? 1 : 3);
 
     return resolve_length_value(lycon, property, side_value);
 }
@@ -521,32 +511,12 @@ static void get_horizontal_padding_widths_from_css(LayoutContext* lycon, DomElem
     CssDeclaration* padding_decl = style_tree_get_declaration(
         element->specified_style, CSS_PROPERTY_PADDING);
     if (padding_decl && padding_decl->value) {
-        const CssValue* value = padding_decl->value;
-        if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 1) {
-            int count = value->data.list.count;
-            CssValue** values = value->data.list.values;
-            if (count == 1) {
-                float padding = intrinsic_resolve_box_length(
-                    lycon, CSS_PROPERTY_PADDING, values[0], inline_base);
-                *padding_left = padding;
-                *padding_right = padding;
-            } else if (count == 2 || count == 3) {
-                float padding = intrinsic_resolve_box_length(
-                    lycon, CSS_PROPERTY_PADDING, values[1], inline_base);
-                *padding_left = padding;
-                *padding_right = padding;
-            } else {
-                *padding_right = intrinsic_resolve_box_length(
-                    lycon, CSS_PROPERTY_PADDING_RIGHT, values[1], inline_base);
-                *padding_left = intrinsic_resolve_box_length(
-                    lycon, CSS_PROPERTY_PADDING_LEFT, values[3], inline_base);
-            }
-        } else {
-            float padding = intrinsic_resolve_box_length(
-                lycon, CSS_PROPERTY_PADDING, value, inline_base);
-            *padding_left = padding;
-            *padding_right = padding;
-        }
+        const CssValue* right_value = css_box_shorthand_side_value(padding_decl->value, 1);
+        const CssValue* left_value = css_box_shorthand_side_value(padding_decl->value, 3);
+        if (right_value) *padding_right = intrinsic_resolve_box_length(
+            lycon, CSS_PROPERTY_PADDING_RIGHT, right_value, inline_base);
+        if (left_value) *padding_left = intrinsic_resolve_box_length(
+            lycon, CSS_PROPERTY_PADDING_LEFT, left_value, inline_base);
     }
 
     CssDeclaration* left_decl = style_tree_get_declaration(
@@ -706,27 +676,6 @@ typedef struct IntrinsicSpacingCandidate {
     int64_t priority;
 } IntrinsicSpacingCandidate;
 
-static CssValue* intrinsic_box_side_value(const CssValue* value, int side) {
-    if (!value) return nullptr;
-    if (value->type != CSS_VALUE_TYPE_LIST) return (CssValue*)value;
-
-    int cnt = value->data.list.count;
-    CssValue** vals = value->data.list.values;
-    if (cnt <= 0 || !vals) return nullptr;
-
-    int idx = 0;
-    if (side == 0) {
-        idx = 0;
-    } else if (side == 1) {
-        idx = (cnt >= 2) ? 1 : 0;
-    } else if (side == 2) {
-        idx = (cnt >= 3) ? 2 : 0;
-    } else {
-        idx = (cnt >= 4) ? 3 : ((cnt >= 2) ? 1 : 0);
-    }
-    return (idx < cnt) ? vals[idx] : nullptr;
-}
-
 static CssValue* intrinsic_pair_side_value(const CssValue* value, bool end_side) {
     if (!value) return nullptr;
     if (value->type != CSS_VALUE_TYPE_LIST) return (CssValue*)value;
@@ -775,8 +724,8 @@ static bool intrinsic_resolve_vertical_margins(LayoutContext* lycon, DomElement*
 
     CssDeclaration* margin = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN);
     if (margin && margin->value) {
-        intrinsic_consider_spacing_candidate(&top, margin, intrinsic_box_side_value(margin->value, 0));
-        intrinsic_consider_spacing_candidate(&bottom, margin, intrinsic_box_side_value(margin->value, 2));
+        intrinsic_consider_spacing_candidate(&top, margin, (CssValue*)css_box_shorthand_side_value(margin->value, 0));
+        intrinsic_consider_spacing_candidate(&bottom, margin, (CssValue*)css_box_shorthand_side_value(margin->value, 2));
     }
 
     CssDeclaration* mt_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN_TOP);
@@ -869,10 +818,9 @@ static bool intrinsic_should_skip_height_child(DomElement* elem) {
         return true;
     }
     ViewBlock* block = lam::view_as_block(elem);
-    if (block && block->position &&
-        (block->position->position == CSS_VALUE_ABSOLUTE ||
-         block->position->position == CSS_VALUE_FIXED ||
-         element_has_float(block))) {
+    if (block &&
+        (layout_block_is_out_of_flow_positioned(block) ||
+         (block->position && element_has_float(block)))) {
         return true;
     }
     return false;
@@ -1946,9 +1894,7 @@ static void intrinsic_prepare_anonymous_table_children(LayoutContext* lycon,
 
 static bool intrinsic_element_is_float(DomElement* element) {
     if (!element) return false;
-    if (element->position &&
-        (element->position->float_prop == CSS_VALUE_LEFT ||
-         element->position->float_prop == CSS_VALUE_RIGHT)) {
+    if (layout_position_is_floated(element->position)) {
         return true;
     }
     if (!element->specified_style) return false;
@@ -1964,9 +1910,7 @@ static bool intrinsic_element_is_float(DomElement* element) {
 
 static bool intrinsic_element_is_abs_or_fixed(DomElement* element) {
     if (!element) return false;
-    if (element->position &&
-        (element->position->position == CSS_VALUE_ABSOLUTE ||
-         element->position->position == CSS_VALUE_FIXED)) {
+    if (layout_position_is_abs_fixed(element->position)) {
         return true;
     }
     if (!element->specified_style) return false;
@@ -2496,22 +2440,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     CssDeclaration* pad_decl = style_tree_get_declaration(
                         element->specified_style, CSS_PROPERTY_PADDING);
                     if (pad_decl && pad_decl->value) {
-                        if (pad_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                            float pad = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_decl->value);
-                            pad_left = pad_right = pad;
-                        } else if (pad_decl->value->type == CSS_VALUE_TYPE_LIST) {
-                            int cnt = pad_decl->value->data.list.count;
-                            CssValue** vals = pad_decl->value->data.list.values;
-                            if (cnt == 1) {
-                                float p = resolve_length_value(lycon, CSS_PROPERTY_PADDING, vals[0]);
-                                pad_left = pad_right = p;
-                            } else if (cnt >= 2) {
-                                float lr = resolve_length_value(lycon, CSS_PROPERTY_PADDING, vals[1]);
-                                pad_left = pad_right = lr;
-                                if (cnt >= 4) {
-                                    pad_left = resolve_length_value(lycon, CSS_PROPERTY_PADDING, vals[3]);
-                                }
-                            }
+                        const CssValue* right = css_box_shorthand_side_value(pad_decl->value, 1);
+                        const CssValue* left = css_box_shorthand_side_value(pad_decl->value, 3);
+                        if (right) {
+                            pad_right = resolve_length_value(lycon, CSS_PROPERTY_PADDING, right);
+                        }
+                        if (left) {
+                            pad_left = resolve_length_value(lycon, CSS_PROPERTY_PADDING, left);
                         }
                     }
                     // Read border: prefer resolved bound, fall back to CSS shorthand
@@ -3100,22 +3035,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     child_elem->specified_style, CSS_PROPERTY_MARGIN);
                 if (!margin_decl || !margin_decl->value) return 0.0f;
                 const CssValue* val = margin_decl->value;
-                if (val->type == CSS_VALUE_TYPE_LENGTH) {
-                    float margin = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, val);
-                    return margin + margin;
-                }
-                if (val->type == CSS_VALUE_TYPE_LIST && val->data.list.count >= 1) {
-                    CssValue** vals = val->data.list.values;
-                    if (val->data.list.count == 1) {
-                        float margin = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[0]);
-                        return margin + margin;
-                    }
-                    if (val->data.list.count == 2 || val->data.list.count == 3) {
-                        float margin = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
-                        return margin + margin;
-                    }
-                    float right = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
-                    float left = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[3]);
+                const CssValue* right_value = css_box_shorthand_side_value(val, 1);
+                const CssValue* left_value = css_box_shorthand_side_value(val, 3);
+                if (right_value && left_value) {
+                    float right = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, right_value);
+                    float left = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, left_value);
                     return left + right;
                 }
                 return 0.0f;
@@ -4215,9 +4139,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
             // CSS 2.1 §9.3.1: Absolutely positioned elements are out of normal flow
             // and do not contribute to the containing block's intrinsic size.
-            if (child_vb->position &&
-                (child_vb->position->position == CSS_VALUE_ABSOLUTE ||
-                 child_vb->position->position == CSS_VALUE_FIXED)) {
+            if (layout_block_is_out_of_flow_positioned(child_vb)) {
                 log_debug("  skipping absolute/fixed child %s in intrinsic sizing", child_elem->node_name());
                 continue;
             }
@@ -4275,18 +4197,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             child_elem->specified_style, CSS_PROPERTY_MARGIN);
                         if (m_decl && m_decl->value) {
                             const CssValue* val = m_decl->value;
-                            if (val->type == CSS_VALUE_TYPE_LENGTH) {
-                                ml = mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, val);
-                            } else if (val->type == CSS_VALUE_TYPE_LIST && val->data.list.count >= 1) {
-                                int cnt = val->data.list.count;
-                                CssValue** vals = val->data.list.values;
-                                if (cnt <= 3) {
-                                    float lr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[cnt >= 2 ? 1 : 0]);
-                                    ml = mr = lr;
-                                } else {
-                                    mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
-                                    ml = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[3]);
-                                }
+                            const CssValue* mr_value = css_box_shorthand_side_value(val, 1);
+                            const CssValue* ml_value = css_box_shorthand_side_value(val, 3);
+                            if (mr_value) {
+                                mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, mr_value);
+                            }
+                            if (ml_value) {
+                                ml = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, ml_value);
                             }
                         }
                     }
@@ -4306,9 +4223,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 DomElement* child_elem = child->as_element();
                 ViewBlock* child_block = lam::unsafe_view_block_element_storage(child_elem);
                 bool child_is_absolute = false;
-                if (child_block && child_block->position &&
-                    (child_block->position->position == CSS_VALUE_ABSOLUTE ||
-                     child_block->position->position == CSS_VALUE_FIXED)) {
+                if (layout_block_is_out_of_flow_positioned(child_block)) {
                     child_is_absolute = true;
                 } else if (child_elem->specified_style) {
                     CssDeclaration* pos_decl = style_tree_get_declaration(
@@ -4375,18 +4290,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             child_elem->specified_style, CSS_PROPERTY_MARGIN);
                         if (m_decl && m_decl->value) {
                             const CssValue* val = m_decl->value;
-                            if (val->type == CSS_VALUE_TYPE_LENGTH) {
-                                ml = mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, val);
-                            } else if (val->type == CSS_VALUE_TYPE_LIST && val->data.list.count >= 1) {
-                                int cnt = val->data.list.count;
-                                CssValue** vals = val->data.list.values;
-                                if (cnt <= 3) {
-                                    float lr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[cnt >= 2 ? 1 : 0]);
-                                    ml = mr = lr;
-                                } else {
-                                    mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
-                                    ml = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[3]);
-                                }
+                            const CssValue* mr_value = css_box_shorthand_side_value(val, 1);
+                            const CssValue* ml_value = css_box_shorthand_side_value(val, 3);
+                            if (mr_value) {
+                                mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, mr_value);
+                            }
+                            if (ml_value) {
+                                ml = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, ml_value);
                             }
                         }
                     }
@@ -4528,10 +4438,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 ViewBlock* child_view = lam::unsafe_view_block_element_storage(child_elem);
                 // Check resolved position first
                 if (child_view->position &&
-                    child_view->position->position != CSS_VALUE_ABSOLUTE &&
-                    child_view->position->position != CSS_VALUE_FIXED &&
-                    (child_view->position->float_prop == CSS_VALUE_LEFT ||
-                     child_view->position->float_prop == CSS_VALUE_RIGHT)) {
+                    !layout_position_is_abs_fixed(child_view->position) &&
+                    layout_position_is_floated(child_view->position)) {
                     child_is_float = true;
                 } else if (child_elem->specified_style) {
                     // Fall back to specified CSS style
@@ -4611,32 +4519,15 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         if (margin_decl && margin_decl->value) {
                             // Handle shorthand: margin: value or margin: v1 v2 v3 v4
                             const CssValue* val = margin_decl->value;
-                            if (val->type == CSS_VALUE_TYPE_LENGTH) {
-                                // Single value applies to all sides
-                                float margin_val = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, val);
-                                margin_left = margin_val;
-                                margin_right = margin_val;
-                                child_width += margin_left + margin_right;
-                            } else if (val->type == CSS_VALUE_TYPE_LIST && val->data.list.count >= 1) {
-                                // Multi-value: 1=all, 2=TB LR, 3=T LR B, 4=T R B L
-                                int cnt = val->data.list.count;
-                                CssValue** vals = val->data.list.values;
-                                if (cnt == 1) {
-                                    float m = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[0]);
-                                    margin_left = margin_right = m;
-                                } else if (cnt == 2) {
-                                    // vals[1] = left/right
-                                    float lr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
-                                    margin_left = margin_right = lr;
-                                } else if (cnt == 3) {
-                                    // vals[1] = left/right
-                                    float lr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
-                                    margin_left = margin_right = lr;
-                                } else if (cnt >= 4) {
-                                    // vals[1] = right, vals[3] = left
-                                    margin_right = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
-                                    margin_left = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[3]);
-                                }
+                            const CssValue* right_value = css_box_shorthand_side_value(val, 1);
+                            const CssValue* left_value = css_box_shorthand_side_value(val, 3);
+                            if (right_value) {
+                                margin_right = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, right_value);
+                            }
+                            if (left_value) {
+                                margin_left = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, left_value);
+                            }
+                            if (right_value || left_value) {
                                 child_width += margin_left + margin_right;
                             }
                         }
@@ -4841,14 +4732,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             bool bw_found = false;
             CssDeclaration* bw_decl = style_tree_get_declaration(ps, CSS_PROPERTY_BORDER_WIDTH);
             if (bw_decl && bw_decl->value) {
-                if (bw_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                    float v = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bw_decl->value);
-                    if (!isnan(v)) { border_l = border_r = v; bw_found = true; }
-                } else if (bw_decl->value->type == CSS_VALUE_TYPE_LIST && bw_decl->value->data.list.count >= 2) {
-                    int cnt = bw_decl->value->data.list.count;
-                    CssValue** vals = bw_decl->value->data.list.values;
-                    border_r = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[1]);
-                    border_l = (cnt >= 4) ? resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[3]) : border_r;
+                const CssValue* right_value = css_box_shorthand_side_value(bw_decl->value, 1);
+                const CssValue* left_value = css_box_shorthand_side_value(bw_decl->value, 3);
+                if (right_value && left_value) {
+                    border_r = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, right_value);
+                    border_l = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, left_value);
                     bw_found = true;
                 }
             }
@@ -5004,16 +4892,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // Fallback: read padding from CSS styles if bound hasn't been allocated yet
         CssDeclaration* pad_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING);
         if (pad_decl && pad_decl->value) {
-            if (pad_decl->value->type == CSS_VALUE_TYPE_LIST && pad_decl->value->data.list.count >= 2) {
-                // Multi-value padding: top right [bottom] [left]
-                CssValue** values = pad_decl->value->data.list.values;
-                pad_right = resolve_length_value(lycon, CSS_PROPERTY_PADDING, values[1]);
-                pad_left = (pad_decl->value->data.list.count >= 4) ?
-                    resolve_length_value(lycon, CSS_PROPERTY_PADDING, values[3]) : pad_right;
-            } else if (pad_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                // Single padding value (shorthand)
-                float pad = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_decl->value);
-                pad_left = pad_right = pad;
+            const CssValue* right_value = css_box_shorthand_side_value(pad_decl->value, 1);
+            const CssValue* left_value = css_box_shorthand_side_value(pad_decl->value, 3);
+            if (right_value) {
+                pad_right = resolve_length_value(lycon, CSS_PROPERTY_PADDING, right_value);
+            }
+            if (left_value) {
+                pad_left = resolve_length_value(lycon, CSS_PROPERTY_PADDING, left_value);
             }
         }
 
@@ -6091,10 +5976,9 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     continue;
                 }
                 ViewBlock* child_block = lam::view_as_block(child_ve);
-                if (child_block && child_block->position &&
-                    (child_block->position->position == CSS_VALUE_ABSOLUTE ||
-                     child_block->position->position == CSS_VALUE_FIXED ||
-                     element_has_float(child_block))) {
+                if (child_block &&
+                    (layout_block_is_out_of_flow_positioned(child_block) ||
+                     (child_block->position && element_has_float(child_block)))) {
                     continue;
                 }
                 if ((!child_block || !child_block->position) && child_elem->specified_style) {

@@ -1,7 +1,7 @@
 // Data types
 let int_val = 42;
 let float_val = 3.14159;
-let decimal_val = 123.456n;
+let decimal_val = 123.456m;
 let string_val = "hello world";
 let symbol_val = 'symbol;
 let bool_true = true;

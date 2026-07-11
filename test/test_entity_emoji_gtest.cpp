@@ -18,7 +18,7 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/mark_builder.hpp"
-#include "../lambda/input/html_entities.h"
+#include "../lib/html_entities.h"
 #include "../lambda/input/input-utils.h"
 #include "../lib/log.h"
 #include "../lib/url.h"

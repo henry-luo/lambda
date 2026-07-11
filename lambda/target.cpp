@@ -154,7 +154,7 @@ Target* item_to_target(uint64_t item, Url* cwd) {
         return NULL;
     }
 
-    if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
+    if (is_text_type_id(type_id)) {
         // Parse as URL - extract chars from tagged pointer (high byte is type tag)
         const char* url_str;
         if (type_id == LMD_TYPE_SYMBOL) {

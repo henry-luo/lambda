@@ -493,51 +493,101 @@ static void format_symbol_impl(StringBuf* sb, Symbol* sym) {
 // Dispatch
 // ============================================================================
 
+enum MathAsciiSlot {
+    MATH_ASCII_UNKNOWN,
+    MATH_ASCII_ROOT,
+    MATH_ASCII_OPERATOR,
+    MATH_ASCII_RELATION,
+    MATH_ASCII_PUNCTUATION,
+    MATH_ASCII_SUBSUP,
+    MATH_ASCII_GROUP,
+    MATH_ASCII_RADICAL,
+    MATH_ASCII_FRACTION,
+    MATH_ASCII_FRAC_LIKE,
+    MATH_ASCII_INFIX_FRAC,
+    MATH_ASCII_COMMAND,
+    MATH_ASCII_SYMBOL_COMMAND,
+    MATH_ASCII_DELIMITER_GROUP,
+    MATH_ASCII_ACCENT,
+    MATH_ASCII_ENVIRONMENT,
+    MATH_ASCII_CHILDREN_SPACE,
+    MATH_ASCII_TEXT_COMMAND,
+    MATH_ASCII_SPACE_COMMAND,
+    MATH_ASCII_CHILDREN_NONE,
+    MATH_ASCII_PAREN_SCRIPT,
+    MATH_ASCII_BIG_OPERATOR,
+    MATH_ASCII_LIMITS_MODIFIER,
+    MATH_ASCII_DELIMITER,
+    MATH_ASCII_SIZED_DELIMITER,
+};
+
+static const MathTagDispatch MATH_ASCII_TAGS[] = {
+    {"math", MATH_ASCII_ROOT},
+    {"operator", MATH_ASCII_OPERATOR},
+    {"relation", MATH_ASCII_RELATION},
+    {"punctuation", MATH_ASCII_PUNCTUATION},
+    {"subsup", MATH_ASCII_SUBSUP},
+    {"group", MATH_ASCII_GROUP},
+    {"brack_group", MATH_ASCII_GROUP},
+    {"radical", MATH_ASCII_RADICAL},
+    {"fraction", MATH_ASCII_FRACTION},
+    {"binomial", MATH_ASCII_FRACTION},
+    {"genfrac", MATH_ASCII_FRACTION},
+    {"frac_like", MATH_ASCII_FRAC_LIKE},
+    {"infix_frac", MATH_ASCII_INFIX_FRAC},
+    {"command", MATH_ASCII_COMMAND},
+    {"symbol_command", MATH_ASCII_SYMBOL_COMMAND},
+    {"delimiter_group", MATH_ASCII_DELIMITER_GROUP},
+    {"accent", MATH_ASCII_ACCENT},
+    {"environment", MATH_ASCII_ENVIRONMENT},
+    {"env_body", MATH_ASCII_CHILDREN_SPACE},
+    {"text_command", MATH_ASCII_TEXT_COMMAND},
+    {"textstyle_command", MATH_ASCII_TEXT_COMMAND},
+    {"style_command", MATH_ASCII_TEXT_COMMAND},
+    {"space_command", MATH_ASCII_SPACE_COMMAND},
+    {"spacing_command", MATH_ASCII_SPACE_COMMAND},
+    {"hspace_command", MATH_ASCII_SPACE_COMMAND},
+    {"skip_command", MATH_ASCII_SPACE_COMMAND},
+    {"ascii_operator", MATH_ASCII_CHILDREN_NONE},
+    {"quoted_text", MATH_ASCII_CHILDREN_NONE},
+    {"paren_script", MATH_ASCII_PAREN_SCRIPT},
+    {"big_operator", MATH_ASCII_BIG_OPERATOR},
+    {"limits_modifier", MATH_ASCII_LIMITS_MODIFIER},
+    {"delimiter", MATH_ASCII_DELIMITER},
+    {"sized_delimiter", MATH_ASCII_SIZED_DELIMITER},
+    {nullptr, MATH_ASCII_UNKNOWN},
+};
+
 static void format_element_impl(StringBuf* sb, const ElementReader& elem, int depth) {
     const char* tag = elem.tagName();
     if (!tag) return;
 
     log_debug("format-math-ascii: element '%s' depth=%d", tag, depth);
 
-    if (strcmp(tag, "math") == 0) return format_math_root(sb, elem, depth);
-    if (strcmp(tag, "operator") == 0) return format_operator(sb, elem);
-    if (strcmp(tag, "relation") == 0) return format_relation(sb, elem);
-    if (strcmp(tag, "punctuation") == 0) return format_punctuation(sb, elem);
-    if (strcmp(tag, "subsup") == 0) return format_subsup(sb, elem, depth);
-    if (strcmp(tag, "group") == 0) return format_group(sb, elem, depth);
-    if (strcmp(tag, "brack_group") == 0) return format_group(sb, elem, depth);
-    if (strcmp(tag, "radical") == 0) return format_radical(sb, elem, depth);
-    if (strcmp(tag, "fraction") == 0) return format_fraction(sb, elem, depth);
-    if (strcmp(tag, "frac_like") == 0) return format_frac_like(sb, elem, depth);
-    if (strcmp(tag, "binomial") == 0) return format_fraction(sb, elem, depth); // fallback
-    if (strcmp(tag, "genfrac") == 0) return format_fraction(sb, elem, depth);  // fallback
-    if (strcmp(tag, "infix_frac") == 0) return format_infix_frac(sb, elem, depth);
-    if (strcmp(tag, "command") == 0) return format_command(sb, elem, depth);
-    if (strcmp(tag, "symbol_command") == 0) return format_symbol_command(sb, elem);
-    if (strcmp(tag, "delimiter_group") == 0) return format_delimiter_group(sb, elem, depth);
-    if (strcmp(tag, "accent") == 0) return format_accent(sb, elem, depth);
-    if (strcmp(tag, "environment") == 0) return format_environment(sb, elem, depth);
-    if (strcmp(tag, "env_body") == 0) return format_children(sb, elem, depth, " ");
-    if (strcmp(tag, "text_command") == 0) return format_text_command(sb, elem, depth);
-    if (strcmp(tag, "textstyle_command") == 0) return format_text_command(sb, elem, depth);
-    if (strcmp(tag, "style_command") == 0) return format_text_command(sb, elem, depth);
-    if (strcmp(tag, "space_command") == 0) return format_space_command(sb, elem);
-    if (strcmp(tag, "spacing_command") == 0) return format_space_command(sb, elem);
-    if (strcmp(tag, "hspace_command") == 0) return format_space_command(sb, elem);
-    if (strcmp(tag, "skip_command") == 0) return format_space_command(sb, elem);
-
-    // ASCII-specific nodes
-    if (strcmp(tag, "ascii_operator") == 0) { format_children(sb, elem, depth, ""); return; }
-    if (strcmp(tag, "quoted_text") == 0) { format_children(sb, elem, depth, ""); return; }
-    if (strcmp(tag, "paren_script") == 0) {
-        // paren_script children already include literal "(" and ")" punctuation,
-        // so just emit all children without adding extra parens
-        format_children(sb, elem, depth, " ");
-        return;
-    }
-
-    // Other elements: emit children with fallback
-    if (strcmp(tag, "big_operator") == 0) {
+    switch (lookup_math_tag_slot(MATH_ASCII_TAGS, tag, MATH_ASCII_UNKNOWN)) {
+    case MATH_ASCII_ROOT: return format_math_root(sb, elem, depth);
+    case MATH_ASCII_OPERATOR: return format_operator(sb, elem);
+    case MATH_ASCII_RELATION: return format_relation(sb, elem);
+    case MATH_ASCII_PUNCTUATION: return format_punctuation(sb, elem);
+    case MATH_ASCII_SUBSUP: return format_subsup(sb, elem, depth);
+    case MATH_ASCII_GROUP: return format_group(sb, elem, depth);
+    case MATH_ASCII_RADICAL: return format_radical(sb, elem, depth);
+    case MATH_ASCII_FRACTION: return format_fraction(sb, elem, depth);
+    case MATH_ASCII_FRAC_LIKE: return format_frac_like(sb, elem, depth);
+    case MATH_ASCII_INFIX_FRAC: return format_infix_frac(sb, elem, depth);
+    case MATH_ASCII_COMMAND: return format_command(sb, elem, depth);
+    case MATH_ASCII_SYMBOL_COMMAND: return format_symbol_command(sb, elem);
+    case MATH_ASCII_DELIMITER_GROUP: return format_delimiter_group(sb, elem, depth);
+    case MATH_ASCII_ACCENT: return format_accent(sb, elem, depth);
+    case MATH_ASCII_ENVIRONMENT: return format_environment(sb, elem, depth);
+    case MATH_ASCII_CHILDREN_SPACE: return format_children(sb, elem, depth, " ");
+    case MATH_ASCII_TEXT_COMMAND: return format_text_command(sb, elem, depth);
+    case MATH_ASCII_SPACE_COMMAND: return format_space_command(sb, elem);
+    case MATH_ASCII_CHILDREN_NONE: return format_children(sb, elem, depth, "");
+    case MATH_ASCII_PAREN_SCRIPT:
+        // paren_script children already include literal "(" and ")" punctuation
+        return format_children(sb, elem, depth, " ");
+    case MATH_ASCII_BIG_OPERATOR: {
         ItemReader op = elem.get_attr("op");
         if (!op.isNull() && op.isString()) {
             const char* name = op.asString()->chars;
@@ -546,14 +596,17 @@ static void format_element_impl(StringBuf* sb, const ElementReader& elem, int de
         }
         return;
     }
-
-    // Limits modifier, middle_delim, sized_delimiter, etc: skip or emit value
-    if (strcmp(tag, "limits_modifier") == 0) return; // handled by subsup
-    if (strcmp(tag, "delimiter") == 0) return format_delimiter(sb, elem);
-    if (strcmp(tag, "sized_delimiter") == 0) {
+    case MATH_ASCII_LIMITS_MODIFIER:
+        return;
+    case MATH_ASCII_DELIMITER:
+        return format_delimiter(sb, elem);
+    case MATH_ASCII_SIZED_DELIMITER: {
         ItemReader delim = elem.get_attr("delim");
         if (!delim.isNull() && delim.isString()) stringbuf_append_str(sb, delim.asString()->chars);
         return;
+    }
+    default:
+        break;
     }
 
     // Generic fallback: emit all children

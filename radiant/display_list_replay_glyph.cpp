@@ -1,4 +1,5 @@
 #include "display_list_replay_glyph.hpp"
+#include "glyph_sampling.hpp"
 
 #include <algorithm>
 #include <math.h>
@@ -94,22 +95,9 @@ void dl_replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* glyph) {
             float sy0 = (float)y;
             float sx1 = (float)(x + bitmap->width);
             float sy1 = (float)(y + bitmap->height);
-            float px[4] = {
-                m->e11 * sx0 + m->e12 * sy0 + m->e13,
-                m->e11 * sx1 + m->e12 * sy0 + m->e13,
-                m->e11 * sx1 + m->e12 * sy1 + m->e13,
-                m->e11 * sx0 + m->e12 * sy1 + m->e13
-            };
-            float py[4] = {
-                m->e21 * sx0 + m->e22 * sy0 + m->e23,
-                m->e21 * sx1 + m->e22 * sy0 + m->e23,
-                m->e21 * sx1 + m->e22 * sy1 + m->e23,
-                m->e21 * sx0 + m->e22 * sy1 + m->e23
-            };
-            float min_x = std::min(std::min(px[0], px[1]), std::min(px[2], px[3]));
-            float max_x = std::max(std::max(px[0], px[1]), std::max(px[2], px[3]));
-            float min_y = std::min(std::min(py[0], py[1]), std::min(py[2], py[3]));
-            float max_y = std::max(std::max(py[0], py[1]), std::max(py[2], py[3]));
+            float min_x, min_y, max_x, max_y;
+            rdt_matrix_transform_rect_bounds(m, sx0, sy0, sx1, sy1,
+                                             &min_x, &min_y, &max_x, &max_y);
 
             int left = std::max((int)clip->left, (int)floorf(min_x));
             int right = std::min((int)clip->right, (int)ceilf(max_x));
@@ -187,45 +175,21 @@ void dl_replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* glyph) {
         for (int dy = top - y; dy < bottom - y; dy++) {
             uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + dy - surface->tile_offset_y) * surface->pitch;
             float src_y = dy * inv_scale;
-            int sy0 = (int)src_y;
-            int sy1 = sy0 + 1;
-            float fy = src_y - sy0;
-            if (sy0 >= (int)bitmap->height) sy0 = bitmap->height - 1;
-            if (sy1 >= (int)bitmap->height) sy1 = bitmap->height - 1;
 
             for (int dx = left - x; dx < right - x; dx++) {
                 if (x + dx < 0 || x + dx >= surface->width) continue;
                 float src_x = dx * inv_scale;
-                int sx0 = (int)src_x;
-                int sx1 = sx0 + 1;
-                float fx = src_x - sx0;
-                if (sx0 >= (int)bitmap->width) sx0 = bitmap->width - 1;
-                if (sx1 >= (int)bitmap->width) sx1 = bitmap->width - 1;
+                GlyphColorSample sample = glyph_sample_bgra_bilinear(bitmap, src_x, src_y);
 
-                uint8_t* s00 = bitmap->buffer + sy0 * bitmap->pitch + sx0 * 4;
-                uint8_t* s10 = bitmap->buffer + sy0 * bitmap->pitch + sx1 * 4;
-                uint8_t* s01 = bitmap->buffer + sy1 * bitmap->pitch + sx0 * 4;
-                uint8_t* s11 = bitmap->buffer + sy1 * bitmap->pitch + sx1 * 4;
-
-                float w00 = (1 - fx) * (1 - fy);
-                float w10 = fx * (1 - fy);
-                float w01 = (1 - fx) * fy;
-                float w11 = fx * fy;
-
-                uint8_t src_b = (uint8_t)(s00[0]*w00 + s10[0]*w10 + s01[0]*w01 + s11[0]*w11 + 0.5f);
-                uint8_t src_g = (uint8_t)(s00[1]*w00 + s10[1]*w10 + s01[1]*w01 + s11[1]*w11 + 0.5f);
-                uint8_t src_r = (uint8_t)(s00[2]*w00 + s10[2]*w10 + s01[2]*w01 + s11[2]*w11 + 0.5f);
-                uint8_t src_a = (uint8_t)(s00[3]*w00 + s10[3]*w10 + s01[3]*w01 + s11[3]*w11 + 0.5f);
-
-                if (src_a > 0) {
+                if (sample.a > 0) {
                     uint8_t* dst = (uint8_t*)(row_pixels + (x + dx) * 4);
-                    if (src_a == 255) {
-                        dst[0] = src_r; dst[1] = src_g; dst[2] = src_b; dst[3] = 255;
+                    if (sample.a == 255) {
+                        dst[0] = sample.r; dst[1] = sample.g; dst[2] = sample.b; dst[3] = 255;
                     } else {
-                        uint32_t inv_alpha = 255 - src_a;
-                        dst[0] = (dst[0] * inv_alpha + src_r * src_a) / 255;
-                        dst[1] = (dst[1] * inv_alpha + src_g * src_a) / 255;
-                        dst[2] = (dst[2] * inv_alpha + src_b * src_a) / 255;
+                        uint32_t inv_alpha = 255 - sample.a;
+                        dst[0] = (dst[0] * inv_alpha + sample.r * sample.a) / 255;
+                        dst[1] = (dst[1] * inv_alpha + sample.g * sample.a) / 255;
+                        dst[2] = (dst[2] * inv_alpha + sample.b * sample.a) / 255;
                         dst[3] = 255;
                     }
                 }

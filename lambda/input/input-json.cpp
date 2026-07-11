@@ -172,47 +172,16 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
     }
 
     while (**json && !ctx.shouldStopParsing()) {
-        // Parse key as a raw string to get the name
+        // parse object keys with the same JSON string routine as values so
+        // escape and control-character validation cannot drift.
         if (**json != '"') {
             ctx.addError(tracker.location(), "Expected '\"' for object key");
             break;
         }
 
-        StringBuf* sb = ctx.sb;
-        stringbuf_reset(sb);
-        (*json)++; // Skip opening quote
-        tracker.advance(1);
-
-        // Parse key content
-        while (**json && **json != '"') {
-            unsigned char kc = (unsigned char)**json;
-            // JSON does not allow unescaped control characters U+0000-U+001F in keys
-            if (kc < 0x20) {
-                ctx.addError(tracker.location(), "Unexpected control character in string");
-                return ctx.builder.createNull();
-            }
-            if (**json == '\\') {
-                (*json)++;
-                tracker.advance(1);
-                if (**json) {
-                    int consumed = parse_escape_char(json, sb);
-                    tracker.advance(consumed);
-                    continue;
-                }
-            } else {
-                stringbuf_append_char(sb, **json);
-            }
-            (*json)++;
-            tracker.advance(1);
-        }
-
-        if (**json == '"') {
-            (*json)++; // skip closing quote
-            tracker.advance(1);
-        }
-
         // JSON keys are strings; preserve empty/non-identifier keys instead of symbol spelling.
-        String* key = ctx.builder.createName(sb->str->chars, sb->length);
+        String* key_str = parse_string(ctx, json);
+        String* key = key_str ? ctx.builder.createName(key_str->chars, key_str->len) : nullptr;
         if (!key) {
             // Error recovery: skip to next comma or closing brace
             while (**json && **json != ',' && **json != '}') {

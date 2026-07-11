@@ -36,6 +36,7 @@ char* normalize_utf8proc_nfd(const char* str, int len, int* out_len);
 char* normalize_utf8proc_nfkc(const char* str, int len, int* out_len);
 char* normalize_utf8proc_nfkd(const char* str, int len, int* out_len);
 char* normalize_utf8proc_casefold(const char* str, int len, int* out_len);
+void free_utf8proc_result(char* str);
 
 #ifdef __cplusplus
 }

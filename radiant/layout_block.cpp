@@ -959,8 +959,7 @@ static void adjust_abs_descendants_y(ViewElement* parent, float delta) {
             bool is_positioned = vb->position &&
                 vb->position->position != CSS_VALUE_STATIC;
             if (is_positioned) {
-                bool is_abs_fixed = vb->position->position == CSS_VALUE_ABSOLUTE ||
-                                    vb->position->position == CSS_VALUE_FIXED;
+                bool is_abs_fixed = layout_block_is_out_of_flow_positioned(vb);
                 if (is_abs_fixed && !vb->position->has_top && !vb->position->has_bottom) {
                     // Static-position abs/fixed element whose parent-to-CB walk
                     // includes the ancestor that was adjusted → needs correction
@@ -1634,8 +1633,7 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
          block->scroller->overflow_y != CSS_VALUE_VISIBLE);
     if (!creates_bfc && block->position) {
         if (element_has_float(block) ||
-            block->position->position == CSS_VALUE_ABSOLUTE ||
-            block->position->position == CSS_VALUE_FIXED) {
+            layout_position_is_abs_fixed(block->position)) {
             creates_bfc = true;
         }
     }
@@ -1655,10 +1653,9 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
         if (child->view_type && child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
             bool is_inline_block = (vb->view_type == RDT_VIEW_INLINE_BLOCK);
-            bool is_out_of_flow = is_inline_block || (vb->position &&
-                (vb->position->position == CSS_VALUE_ABSOLUTE ||
-                 vb->position->position == CSS_VALUE_FIXED ||
-                 element_has_float(vb)));
+            bool is_out_of_flow = is_inline_block ||
+                layout_block_is_out_of_flow_positioned(vb) ||
+                (vb->position && element_has_float(vb));
             if (!is_out_of_flow) last_in_flow = child;
         } else if (child->view_type) {
             last_in_flow = child;
@@ -1705,10 +1702,9 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
         if (sibling->view_type) {
             if (sibling->is_block()) {
                 ViewBlock* sb = lam::view_require_block(sibling);
-                bool is_truly_out_of_flow = sb->position &&
-                    (sb->position->position == CSS_VALUE_ABSOLUTE ||
-                     sb->position->position == CSS_VALUE_FIXED ||
-                     element_has_float(sb));
+                bool is_truly_out_of_flow =
+                    layout_block_is_out_of_flow_positioned(sb) ||
+                    (sb->position && element_has_float(sb));
                 bool is_inline_level = (sb->view_type == RDT_VIEW_INLINE_BLOCK);
                 if (is_inline_level) return 0;  // content separates margins
                 if (!is_truly_out_of_flow && sb->height > 0) return 0;
@@ -1785,12 +1781,7 @@ static float compute_block_lead_y(ViewBlock* block) {
 
 // Check if a block view is out-of-flow (absolutely positioned, fixed, or floated)
 static bool is_out_of_flow_block(ViewBlock* vb) {
-    if (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
-                          vb->position->position == CSS_VALUE_FIXED)) {
-        return true;
-    }
-    if (element_has_float(vb)) return true;
-    return false;
+    return layout_block_is_out_of_flow(vb);
 }
 
 static bool is_inline_level_atomic_block(View* child, ViewBlock* block) {
@@ -2412,8 +2403,7 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
             bool skip = false;
             if (child->is_block()) {
                 ViewBlock* vb = lam::view_require_block(child);
-                if (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
-                                      vb->position->position == CSS_VALUE_FIXED)) {
+                if (layout_block_is_out_of_flow_positioned(vb)) {
                     skip = true;
                 }
             }
@@ -2737,11 +2727,7 @@ static float apply_text_box_trim(ViewBlock* block, float end_trim_limit) {
 }
 
 static bool block_recompute_view_is_out_of_flow(ViewBlock* block) {
-    return block && block->position &&
-        (block->position->position == CSS_VALUE_ABSOLUTE ||
-         block->position->position == CSS_VALUE_FIXED ||
-         block->position->float_prop == CSS_VALUE_LEFT ||
-         block->position->float_prop == CSS_VALUE_RIGHT);
+    return layout_block_is_out_of_flow(block);
 }
 
 static bool inline_span_has_in_flow_block_child_for_recompute(ViewSpan* span) {
@@ -2985,9 +2971,7 @@ static void adjust_block_children_after_shrink(ViewBlock* parent, float new_pare
         // skip floats and out-of-flow elements
         if (element_has_float(cb))
             continue;
-        if (cb->position &&
-            (cb->position->position == CSS_VALUE_ABSOLUTE ||
-             cb->position->position == CSS_VALUE_FIXED))
+        if (layout_block_is_out_of_flow_positioned(cb))
             continue;
 
         // compute child's new border-box width = containing block - margins
@@ -3292,8 +3276,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             // flow and their overflow should not propagate to the parent's
             // shrink-to-fit width calculation.
             bool is_max_width_overflow = block->blk && block->blk->given_max_width >= 0;
-            bool is_abs_pos = block->position &&
-                (block->position->position == CSS_VALUE_ABSOLUTE || block->position->position == CSS_VALUE_FIXED);
+            bool is_abs_pos = layout_block_is_out_of_flow_positioned(block);
             if (display != CSS_VALUE_INLINE_BLOCK && !is_max_width_overflow && !is_abs_pos && lycon->block.parent) {
                 lycon->block.parent->max_width = max(lycon->block.parent->max_width, flow_width);
             }
@@ -3368,8 +3351,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                     if (last_child->view_type && last_child->is_block()) {
                         ViewBlock* vb = lam::view_require_block(last_child);
                         bool is_out_of_flow = (vb->view_type == RDT_VIEW_INLINE_BLOCK) ||
-                            (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
-                             vb->position->position == CSS_VALUE_FIXED || element_has_float(vb)));
+                            layout_block_is_out_of_flow_positioned(vb) ||
+                            (vb->position && element_has_float(vb));
                         if (!is_out_of_flow) last_in_flow = last_child;
                     }
                     last_child = static_cast<View*>(last_child->next_sibling);
@@ -3493,18 +3476,11 @@ static void resolve_table_auto_margins_after_shrink(ViewBlock* block, float cont
     float available_width = containing_width > 0.0f ? containing_width : 0.0f;
     float old_margin_left = block->bound->margin.left;
 
-    if (block->bound->margin.left_type == CSS_VALUE_AUTO &&
-        block->bound->margin.right_type == CSS_VALUE_AUTO) {
-        float used_margin = max((available_width - block->width) / 2.0f, 0.0f);
-        block->bound->margin.left = used_margin;
-        block->bound->margin.right = used_margin;
-    } else if (block->bound->margin.left_type == CSS_VALUE_AUTO) {
-        block->bound->margin.left = max(
-            available_width - block->width - block->bound->margin.right, 0.0f);
-    } else {
-        block->bound->margin.right = max(
-            available_width - block->width - block->bound->margin.left, 0.0f);
-    }
+    layout_resolve_auto_margin_pair(
+        available_width, block->width,
+        block->bound->margin.left_type == CSS_VALUE_AUTO,
+        block->bound->margin.right_type == CSS_VALUE_AUTO,
+        &block->bound->margin.left, &block->bound->margin.right);
 
     block->x += block->bound->margin.left - old_margin_left;
     log_debug("%s TABLE-AUTO-MARGIN resolved after shrink: containing=%.1f, width=%.1f, margin-left=%.1f, margin-right=%.1f, x=%.1f",
@@ -4040,10 +4016,8 @@ static bool prescan_node_has_in_flow_inline_content(DomNode* node) {
     DisplayValue display = resolve_display_value(node);
     if (display.outer == CSS_VALUE_NONE) return false;
     if (elem->position &&
-        (elem->position->position == CSS_VALUE_ABSOLUTE ||
-         elem->position->position == CSS_VALUE_FIXED ||
-         elem->position->float_prop == CSS_VALUE_LEFT ||
-         elem->position->float_prop == CSS_VALUE_RIGHT)) {
+        (layout_position_is_abs_fixed(elem->position) ||
+         layout_position_is_floated(elem->position))) {
         return false;
     }
     if (display.outer != CSS_VALUE_INLINE) return false;
@@ -4598,9 +4572,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                             if (item) {
                                 // Skip absolutely positioned children (not flex items per §4.1)
                                 ViewBlock* vb = lam::view_require_block(child);
-                                if (vb->position && vb->position->position &&
-                                    (vb->position->position == CSS_VALUE_ABSOLUTE ||
-                                     vb->position->position == CSS_VALUE_FIXED)) {
+                                if (layout_block_is_out_of_flow_positioned(vb)) {
                                     continue;
                                 }
                                 float right = item->x + item->width;
@@ -4654,9 +4626,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                             if (item) {
                                 // Skip absolutely positioned children (not grid items)
                                 ViewBlock* vb = lam::view_require_block(child);
-                                if (vb->position && vb->position->position &&
-                                    (vb->position->position == CSS_VALUE_ABSOLUTE ||
-                                     vb->position->position == CSS_VALUE_FIXED)) {
+                                if (layout_block_is_out_of_flow_positioned(vb)) {
                                     continue;
                                 }
                                 float right = item->x + item->width;
@@ -4804,9 +4774,8 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             // skip floats and abspos from the end to find last in-flow child
             while (last && last->is_block()) {
                 ViewBlock* lvb = lam::view_require_block(last);
-                if (lvb->position && (element_has_float(lvb) ||
-                    lvb->position->position == CSS_VALUE_ABSOLUTE ||
-                    lvb->position->position == CSS_VALUE_FIXED)) {
+                if ((lvb->position && element_has_float(lvb)) ||
+                    layout_block_is_out_of_flow_positioned(lvb)) {
                     last = last->prev_placed_view();
                     continue;
                 }
@@ -4834,9 +4803,8 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                             View* p = prev->prev_placed_view();
                             while (p && p->is_block()) {
                                 ViewBlock* pb = lam::view_require_block(p);
-                                if (pb->position && (element_has_float(pb) ||
-                                    pb->position->position == CSS_VALUE_ABSOLUTE ||
-                                    pb->position->position == CSS_VALUE_FIXED)) {
+                                if ((pb->position && element_has_float(pb)) ||
+                                    layout_block_is_out_of_flow_positioned(pb)) {
                                     p = p->prev_placed_view();
                                     continue;
                                 }
@@ -5191,8 +5159,7 @@ static bool is_block_self_collapsing(ViewBlock* vb) {
         if (child->is_block()) {
             ViewBlock* cvb = lam::view_require_block(child);
             bool is_out_of_flow = (cvb->position && element_has_float(cvb)) ||
-                (cvb->position && (cvb->position->position == CSS_VALUE_ABSOLUTE ||
-                                   cvb->position->position == CSS_VALUE_FIXED));
+                layout_block_is_out_of_flow_positioned(cvb);
             if (!is_out_of_flow && !is_block_self_collapsing(cvb)) return false;
         } else {
             // CSS 2.1 §9.4.2: Line boxes that contain no text, no preserved
@@ -5451,9 +5418,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
     block->x = pa_line->left;  block->y = pa_block->advance_y;
 
-    bool is_float = block->position &&
-        (block->position->float_prop == CSS_VALUE_LEFT ||
-         block->position->float_prop == CSS_VALUE_RIGHT);
+    bool is_float = layout_position_is_floated(block->position);
 
     log_debug("%s block init position (%s): x=%f, y=%f, pa_block.advance_y=%f, display: outer=%d, inner=%d", block->source_loc(),
         block->node_name(), block->x, block->y, pa_block->advance_y, block->display.outer, block->display.inner);
@@ -6459,14 +6424,20 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             // containing block width. This ensures the element is centered/aligned
             // within the space not occupied by floats.
             float margin_available = pa_block->content_width - bfc_available_width_reduction;
-            block->bound->margin.left = block->bound->margin.right = max((margin_available - block->width) / 2, 0);
+            layout_resolve_auto_margin_pair(
+                margin_available, block->width, true, true,
+                &block->bound->margin.left, &block->bound->margin.right);
         } else if (block->bound->margin.left_type == CSS_VALUE_AUTO) {
             // CSS 2.1 §10.3.3: Single auto margin absorbs the remaining space
             float margin_available = pa_block->content_width - bfc_available_width_reduction;
-            block->bound->margin.left = max(margin_available - block->width - block->bound->margin.right, 0.0f);
+            layout_resolve_auto_margin_pair(
+                margin_available, block->width, true, false,
+                &block->bound->margin.left, &block->bound->margin.right);
         } else if (block->bound->margin.right_type == CSS_VALUE_AUTO) {
             float margin_available = pa_block->content_width - bfc_available_width_reduction;
-            block->bound->margin.right = max(margin_available - block->width - block->bound->margin.left, 0.0f);
+            layout_resolve_auto_margin_pair(
+                margin_available, block->width, false, true,
+                &block->bound->margin.left, &block->bound->margin.right);
         } else if (is_rtl) {
             // CSS 2.1 §10.3.3: Over-constrained with direction:rtl — margin-left gets the residual
             block->bound->margin.left = pa_block->content_width - bfc_available_width_reduction - block->width - block->bound->margin.right;
@@ -6638,9 +6609,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                             ViewBlock* child_vb = lam::view_as_block(static_cast<View*>(child_elem));
                             if (!child_vb) break;
                             // Skip floats — they don't participate in normal flow margins
-                            bool child_is_float = child_vb->position &&
-                                (child_vb->position->float_prop == CSS_VALUE_LEFT ||
-                                 child_vb->position->float_prop == CSS_VALUE_RIGHT);
+                            bool child_is_float = layout_position_is_floated(child_vb->position);
                             if (!child_is_float) {
                                 // Found first in-flow element child
                                 float child_mt = child_vb->bound ? child_vb->bound->margin.top : 0;
@@ -6735,8 +6704,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     if (vb->position && element_has_float(vb)) {
                         prev_view = prev_view->prev_placed_view(); continue;
                     }
-                    if (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
-                                          vb->position->position == CSS_VALUE_FIXED)) {
+                    if (layout_block_is_out_of_flow_positioned(vb)) {
                         prev_view = prev_view->prev_placed_view(); continue;
                     }
                     break;
@@ -6982,13 +6950,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             (block->bound->margin.left_type == CSS_VALUE_AUTO || block->bound->margin.right_type == CSS_VALUE_AUTO)) {
             float old_margin_left = block->bound->margin.left;
             float margin_available = pa_block->content_width - bfc_available_width_reduction;
-            if (block->bound->margin.left_type == CSS_VALUE_AUTO && block->bound->margin.right_type == CSS_VALUE_AUTO) {
-                block->bound->margin.left = block->bound->margin.right = max((margin_available - block->width) / 2, 0.0f);
-            } else if (block->bound->margin.left_type == CSS_VALUE_AUTO) {
-                block->bound->margin.left = max(margin_available - block->width - block->bound->margin.right, 0.0f);
-            } else {
-                block->bound->margin.right = max(margin_available - block->width - block->bound->margin.left, 0.0f);
-            }
+            layout_resolve_auto_margin_pair(
+                margin_available, block->width,
+                block->bound->margin.left_type == CSS_VALUE_AUTO,
+                block->bound->margin.right_type == CSS_VALUE_AUTO,
+                &block->bound->margin.left, &block->bound->margin.right);
             block->x += block->bound->margin.left - old_margin_left;
             log_debug("%s Re-resolved auto margins after shrink-to-fit: margin_left=%.1f, margin_right=%.1f, width=%.1f, x=%.1f",
                 block->source_loc(), block->bound->margin.left, block->bound->margin.right, block->width, block->x);
@@ -7074,15 +7040,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         (block->bound->margin.left_type == CSS_VALUE_AUTO || block->bound->margin.right_type == CSS_VALUE_AUTO)) {
         float margin_available = pa_block->content_width;
         float old_margin_left = block->bound->margin.left;
-        if (block->bound->margin.left_type == CSS_VALUE_AUTO && block->bound->margin.right_type == CSS_VALUE_AUTO) {
-            float m = max((margin_available - block->width) / 2, 0.0f);
-            block->bound->margin.left = block->bound->margin.right = m;
+        bool left_auto = block->bound->margin.left_type == CSS_VALUE_AUTO;
+        bool right_auto = block->bound->margin.right_type == CSS_VALUE_AUTO;
+        layout_resolve_auto_margin_pair(
+            margin_available, block->width, left_auto, right_auto,
+            &block->bound->margin.left, &block->bound->margin.right);
+        if (left_auto && right_auto) {
             log_debug("%s re-finalized replaced element auto margins: left=right=%f (avail=%f, width=%f)", block->source_loc(),
-                      m, margin_available, block->width);
-        } else if (block->bound->margin.left_type == CSS_VALUE_AUTO) {
-            block->bound->margin.left = max(margin_available - block->width - block->bound->margin.right, 0.0f);
-        } else {
-            block->bound->margin.right = max(margin_available - block->width - block->bound->margin.left, 0.0f);
+                      block->bound->margin.left, margin_available, block->width);
         }
         block->x += block->bound->margin.left - old_margin_left;
     }
@@ -7125,10 +7090,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 // CSS 2.1 Section 8.3.1: Only block-level boxes participate in margin collapsing
                 // Inline-blocks are inline-level boxes in inline formatting context - they don't collapse
                 bool is_inline_block = (vb->view_type == RDT_VIEW_INLINE_BLOCK);
-                bool is_out_of_flow = is_inline_block || (vb->position &&
-                    (vb->position->position == CSS_VALUE_ABSOLUTE ||
-                     vb->position->position == CSS_VALUE_FIXED ||
-                     element_has_float(vb)));
+                bool is_out_of_flow = is_inline_block ||
+                    layout_block_is_out_of_flow_positioned(vb) ||
+                    (vb->position && element_has_float(vb));
                 if (!is_out_of_flow) {
                     last_in_flow = child;
                 }
@@ -7193,10 +7157,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                         // Except for absolutely/fixed positioned elements and floats which are out of flow
                         if (sibling->is_block()) {
                             ViewBlock* sb = lam::view_require_block(sibling);
-                            bool is_truly_out_of_flow = sb->position &&
-                                (sb->position->position == CSS_VALUE_ABSOLUTE ||
-                                 sb->position->position == CSS_VALUE_FIXED ||
-                                 element_has_float(sb));
+                            bool is_truly_out_of_flow =
+                                layout_block_is_out_of_flow_positioned(sb) ||
+                                (sb->position && element_has_float(sb));
                             // Inline-blocks ARE inline-level content that separates margins
                             bool is_inline_level = (sb->view_type == RDT_VIEW_INLINE_BLOCK);
                             if (is_inline_level) {
@@ -7292,8 +7255,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 if (sc_child->is_block()) {
                     ViewBlock* vb = lam::view_require_block(sc_child);
                     bool oof = (vb->position && element_has_float(vb)) ||
-                        (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
-                                          vb->position->position == CSS_VALUE_FIXED));
+                        layout_block_is_out_of_flow_positioned(vb);
                     if (!oof) {
                         has_any_in_flow = true;
                         if (!is_block_self_collapsing(vb)) {
@@ -7350,8 +7312,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     if (fix_child->is_block()) {
                         ViewBlock* vb = lam::view_require_block(fix_child);
                         bool oof = (vb->position && element_has_float(vb)) ||
-                            (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
-                                              vb->position->position == CSS_VALUE_FIXED));
+                            layout_block_is_out_of_flow_positioned(vb);
                         if (!oof) {
                             float child_delta = -vb->y;  // resetting to 0
                             vb->y = 0;
@@ -7611,8 +7572,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
         }
         if (elem->position) {
-            is_abspos = (elem->position->position == CSS_VALUE_ABSOLUTE ||
-                         elem->position->position == CSS_VALUE_FIXED);
+            is_abspos = layout_position_is_abs_fixed(elem->position);
         } else if (elem->specified_style && elem->specified_style->tree) {
             AvlNode* pos_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_POSITION);
             if (pos_node) {
@@ -7765,7 +7725,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     }
 
-    if (block->position && (block->position->position == CSS_VALUE_ABSOLUTE || block->position->position == CSS_VALUE_FIXED)) {
+    if (layout_block_is_out_of_flow_positioned(block)) {
         layout_abs_block(lycon, elmt, block, &pa_block, &pa_line);
         lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
     } else {
@@ -7979,11 +7939,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                     DomNode* fn = static_cast<DomNode*>(fc);
                                     if (fn->is_element()) {
                                         DomElement* fe = lam::dom_require_element(fn);
-                                        if (fe->position &&
-                                            (fe->position->position == CSS_VALUE_ABSOLUTE ||
-                                             fe->position->position == CSS_VALUE_FIXED ||
-                                             fe->position->float_prop == CSS_VALUE_LEFT ||
-                                             fe->position->float_prop == CSS_VALUE_RIGHT)) {
+                                        if (layout_position_is_abs_fixed(fe->position) ||
+                                            layout_position_is_floated(fe->position)) {
                                             oof = true;
                                         }
                                     }
@@ -8204,9 +8161,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         // inline-level flex/grid containers can have inline
                         // pseudo children; only block-capable children can be abspos.
                         ViewBlock* cb = lam::view_as_block(static_cast<View*>(fc->as_element()));
-                        if (cb && cb->position &&
-                            (cb->position->position == CSS_VALUE_ABSOLUTE ||
-                             cb->position->position == CSS_VALUE_FIXED)) {
+                        if (layout_block_is_out_of_flow_positioned(cb)) {
                             has_abs_children = true;
                         }
                     }
@@ -8240,9 +8195,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     while (fc) {
                         if (fc->is_element()) {
                             ViewBlock* cb = lam::view_require_block(static_cast<View*>(fc->as_element()));
-                            if (cb->position &&
-                                (cb->position->position == CSS_VALUE_ABSOLUTE ||
-                                 cb->position->position == CSS_VALUE_FIXED)) {
+                            if (layout_block_is_out_of_flow_positioned(cb)) {
                                 if (!cb->position->has_left && !cb->position->has_right) {
                                     cb->x += container_to_cb_x;
                                     cb->position->static_x_needs_parent_offset = false;
@@ -8764,8 +8717,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                 prev_view = prev_view->prev_placed_view();
                                 continue;
                             }
-                            if (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
-                                                  vb->position->position == CSS_VALUE_FIXED)) {
+                            if (layout_block_is_out_of_flow_positioned(vb)) {
                                 prev_view = prev_view->prev_placed_view();
                                 continue;
                             }
@@ -8875,8 +8827,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             while (pv && pv->is_block()) {
                                 ViewBlock* vb = lam::view_require_block(pv);
                                 if (vb->position && element_has_float(vb)) { pv = pv->prev_placed_view(); continue; }
-                                if (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
-                                                      vb->position->position == CSS_VALUE_FIXED)) { pv = pv->prev_placed_view(); continue; }
+                                if (layout_block_is_out_of_flow_positioned(vb)) { pv = pv->prev_placed_view(); continue; }
                                 // CSS 2.1 §8.3.1: Skip zero-height no-bound blocks
                                 if (vb->height == 0 && !vb->bound) { pv = pv->prev_placed_view(); continue; }
                                 break;

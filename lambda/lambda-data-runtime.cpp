@@ -180,6 +180,20 @@ ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
     return arr;
 }
 
+static bool array_num_prepare_fill(ArrayNum* arr, ArrayNumElemType elem_type,
+                                   int count, size_t elem_size) {
+    if (!arr || count <= 0) return false;
+    arr->type_id = LMD_TYPE_ARRAY_NUM;
+    arr->set_elem_type(elem_type);
+    size_t bytes;
+    if (!lam::checked_mul((size_t)count, elem_size, &bytes)) return false;
+    arr->data = heap_data_alloc(bytes);
+    if (!arr->data) return false;
+    arr->length = count;
+    arr->capacity = count;
+    return true;
+}
+
 ArrayNum* array_num_new_external_view(Container* base, void* data_base,
         ArrayNumElemType elem_type, int64_t byte_offset, int64_t length, bool mutable_view) {
     if (byte_offset < 0 || length < 0) return NULL;
@@ -235,9 +249,9 @@ ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim
 }
 
 // Read a single scalar from ArrayNum's flat data buffer at the given offset.
-// Bypasses array_num_get's leading-axis-view logic — used by multi-dim access
-// where we've already computed the flat scalar offset via stride math.
-static Item array_num_read_scalar_at(ArrayNum* array, int64_t offset) {
+// Bypasses array_num_get's leading-axis-view logic for callers that already
+// computed a flat scalar offset via stride math.
+Item array_num_read_item(ArrayNum* array, int64_t offset) {
     if (!array || offset < 0) return ItemNull;
     switch (array->get_elem_type()) {
         case ELEM_INT:     return (Item){.item = i2it(array->items[offset])};
@@ -263,6 +277,40 @@ static Item array_num_read_scalar_at(ArrayNum* array, int64_t offset) {
     }
 }
 
+double array_num_read_double(ArrayNum* arr, int64_t offset) {
+    if (!arr || offset < 0) return 0.0;
+    switch (arr->get_elem_type()) {
+    case ELEM_INT:
+    case ELEM_INT64:
+        return (double)arr->items[offset];
+    case ELEM_FLOAT64:
+        return arr->float_items[offset];
+    case ELEM_INT8:
+        return (double)((int8_t*)arr->data)[offset];
+    case ELEM_INT16:
+        return (double)((int16_t*)arr->data)[offset];
+    case ELEM_INT32:
+        return (double)((int32_t*)arr->data)[offset];
+    case ELEM_UINT8:
+    case ELEM_UINT8_CLAMPED:
+        return (double)((uint8_t*)arr->data)[offset];
+    case ELEM_UINT16:
+        return (double)((uint16_t*)arr->data)[offset];
+    case ELEM_UINT32:
+        return (double)((uint32_t*)arr->data)[offset];
+    case ELEM_FLOAT16:
+        return (double)f16_bits_to_f32(((uint16_t*)arr->data)[offset]);
+    case ELEM_FLOAT32:
+        return (double)((float*)arr->data)[offset];
+    case ELEM_UINT64:
+        return (double)((uint64_t*)arr->data)[offset];
+    case ELEM_BOOL:
+        return ((uint8_t*)arr->data)[offset] ? 1.0 : 0.0;
+    default:
+        return 0.0;
+    }
+}
+
 // Multi-dim scalar access: arr[i, j, k] on N-D ArrayNum.
 // Walks strides to compute a flat offset, then reads the scalar at that offset.
 // On any out-of-range index or dim mismatch, returns ItemNull.
@@ -274,7 +322,7 @@ Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices) {
         int64_t i = indices[0];
         // c15 keeps negative indexes absent for ArrayNum; use last for tail-relative reads.
         if (i < 0 || i >= arr->length) return ItemNull;
-        return array_num_read_scalar_at(arr, i);
+        return array_num_read_item(arr, i);
     }
     // N-D access via stride dot product
     ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
@@ -288,7 +336,7 @@ Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices) {
         if (i < 0 || i >= shp[ax]) return ItemNull;
         offset += i * str[ax];
     }
-    return array_num_read_scalar_at(arr, offset);
+    return array_num_read_item(arr, offset);
 }
 
 // Multi-dim write: arr[i, j, k] = value on N-D ArrayNum.
@@ -408,44 +456,11 @@ Item array_num_get(ArrayNum *array, int64_t index) {
     if (index < 0 || index >= array->length) {
         return ItemNull;
     }
-    switch (array->get_elem_type()) {
-    case ELEM_INT: {
-        int64_t val = array->items[index];
-        Item item = (Item){.item = i2it(val)};
-        return item;
-    }
-    case ELEM_INT64:
-        return push_l(array->items[index]);
-    case ELEM_FLOAT64:
-        return push_d(array->float_items[index]);
-    // compact sized types
-    case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)array->data)[index])};
-    case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)array->data)[index])};
-    case ELEM_INT32:   return (Item){.item = i32_to_item(((int32_t*)array->data)[index])};
-    case ELEM_UINT8:   return (Item){.item = u8_to_item(((uint8_t*)array->data)[index])};
-    case ELEM_UINT8_CLAMPED: return (Item){.item = u8_to_item(((uint8_t*)array->data)[index])};
-    case ELEM_UINT16:  return (Item){.item = u16_to_item(((uint16_t*)array->data)[index])};
-    case ELEM_UINT32:  return (Item){.item = u32_to_item(((uint32_t*)array->data)[index])};
-    case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)array->data)[index]))};
-    case ELEM_FLOAT32: return (Item){.item = f32_to_item(((float*)array->data)[index])};
-    case ELEM_UINT64: {
-        uint64_t val = ((uint64_t*)array->data)[index];
-        uint64_t* heap_val = (uint64_t*)heap_calloc(sizeof(uint64_t), LMD_TYPE_UINT64);
-        *heap_val = val;
-        return (Item){.item = u64_to_item(heap_val)};
-    }
-    case ELEM_BOOL:
-        return (Item){.item = b2it(((uint8_t*)array->data)[index] ? BOOL_TRUE : BOOL_FALSE)};
-    default:
-        return ItemNull;
-    }
+    return array_num_read_item(array, index);
 }
 
 ArrayNum* array_int() {
-    ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
-    arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->set_elem_type(ELEM_INT);
-    return arr;
+    return array_num_new(ELEM_INT, 0);
 }
 
 // used when there's no interleaving with transpiled code
@@ -454,20 +469,13 @@ ArrayNum* array_int_new(int64_t length) {
 }
 
 ArrayNum* array_int_fill(ArrayNum *arr, int count, ...) {
-    if (count > 0) {
-        size_t bytes;
-        if (lam::checked_mul((size_t)count, sizeof(int64_t), &bytes)) {
-            arr->items = (int64_t*)heap_data_alloc(bytes);
+    if (array_num_prepare_fill(arr, ELEM_INT, count, sizeof(int64_t))) {
+        va_list args;
+        va_start(args, count);
+        for (int i = 0; i < count; i++) {
+            arr->items[i] = va_arg(args, int64_t);
         }
-        if (arr->items) {                     // skip on overflow/OOM — array stays empty
-            arr->length = count;  arr->capacity = count;
-            va_list args;
-            va_start(args, count);
-            for (int i = 0; i < count; i++) {
-                arr->items[i] = va_arg(args, int64_t);
-            }
-            va_end(args);
-        }
+        va_end(args);
     }
     return arr;
 }
@@ -494,10 +502,7 @@ int64_t array_int_get_raw(ArrayNum *array, int64_t index) {
 }
 
 ArrayNum* array_int64() {
-    ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
-    arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->set_elem_type(ELEM_INT64);
-    return arr;
+    return array_num_new(ELEM_INT64, 0);
 }
 
 // used when there's no interleaving with transpiled code
@@ -506,20 +511,13 @@ ArrayNum* array_int64_new(int64_t length) {
 }
 
 ArrayNum* array_int64_fill(ArrayNum *arr, int count, ...) {
-    if (count > 0) {
-        size_t bytes;
-        if (lam::checked_mul((size_t)count, sizeof(int64_t), &bytes)) {
-            arr->items = (int64_t*)heap_data_alloc(bytes);
+    if (array_num_prepare_fill(arr, ELEM_INT64, count, sizeof(int64_t))) {
+        va_list args;
+        va_start(args, count);
+        for (int i = 0; i < count; i++) {
+            arr->items[i] = va_arg(args, int64_t);
         }
-        if (arr->items) {                     // skip on overflow/OOM — array stays empty
-            arr->length = count;  arr->capacity = count;
-            va_list args;
-            va_start(args, count);
-            for (int i = 0; i < count; i++) {
-                arr->items[i] = va_arg(args, int64_t);
-            }
-            va_end(args);
-        }
+        va_end(args);
     }
     return arr;
 }
@@ -544,10 +542,7 @@ int64_t array_int64_get_raw(ArrayNum *array, int64_t index) {
 }
 
 ArrayNum* array_float() {
-    ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
-    arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->set_elem_type(ELEM_FLOAT64);
-    return arr;
+    return array_num_new(ELEM_FLOAT64, 0);
 }
 
 // used when there's no interleaving with transpiled code
@@ -556,22 +551,13 @@ ArrayNum* array_float_new(int64_t length) {
 }
 
 ArrayNum* array_float_fill(ArrayNum *arr, int count, ...) {
-    if (count > 0) {
-        arr->type_id = LMD_TYPE_ARRAY_NUM;
-        arr->set_elem_type(ELEM_FLOAT64);
-        size_t bytes;
-        if (lam::checked_mul((size_t)count, sizeof(double), &bytes)) {
-            arr->float_items = (double*)heap_data_alloc(bytes);
+    if (array_num_prepare_fill(arr, ELEM_FLOAT64, count, sizeof(double))) {
+        va_list args;
+        va_start(args, count);
+        for (int i = 0; i < count; i++) {
+            arr->float_items[i] = va_arg(args, double);
         }
-        if (arr->float_items) {               // skip on overflow/OOM — array stays empty
-            arr->length = count;  arr->capacity = count;
-            va_list args;
-            va_start(args, count);
-            for (int i = 0; i < count; i++) {
-                arr->float_items[i] = va_arg(args, double);
-            }
-            va_end(args);
-        }
+        va_end(args);
     }
     return arr;
 }
@@ -663,63 +649,18 @@ void array_float_set_item(ArrayNum *arr, int64_t index, Item value) {
 
 // helper: extract any numeric Item as int64_t for compact integer store
 static int64_t item_to_int_value(Item value) {
-    TypeId tid = get_type_id(value);
-    switch (tid) {
-    case LMD_TYPE_INT:       return value.get_int56();
-    case LMD_TYPE_INT64:     return value.get_int64();
-    case LMD_TYPE_BOOL:      return value.bool_val ? 1 : 0;
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:   return (int64_t)value.get_double();
-    case LMD_TYPE_NUM_SIZED: {
-        NumSizedType st = (NumSizedType)NUM_SIZED_SUBTYPE(value.item);
-        switch (st) {
-        case NUM_INT8:    return item_to_i8(value.item);
-        case NUM_INT16:   return item_to_i16(value.item);
-        case NUM_INT32:   return item_to_i32(value.item);
-        case NUM_UINT8:   return item_to_u8(value.item);
-        case NUM_UINT16:  return item_to_u16(value.item);
-        case NUM_UINT32:  return item_to_u32(value.item);
-        case NUM_FLOAT16: return (int64_t)item_to_f16(value.item);
-        case NUM_FLOAT32: return (int64_t)item_to_f32(value.item);
-        default:          return 0;
-        }
-    }
-    case LMD_TYPE_UINT64:    return (int64_t)value.get_uint64();
-    default:                 return 0;
-    }
+    return it2i(value);
 }
 
 // helper: extract any numeric Item as double for compact float store
 static double item_to_float_value(Item value) {
-    TypeId tid = get_type_id(value);
-    switch (tid) {
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:   return value.get_double();
-    case LMD_TYPE_INT:       return (double)value.get_int56();
-    case LMD_TYPE_INT64:     return (double)value.get_int64();
-    case LMD_TYPE_BOOL:      return value.bool_val ? 1.0 : 0.0;
-    case LMD_TYPE_NUM_SIZED: {
-        NumSizedType st = (NumSizedType)NUM_SIZED_SUBTYPE(value.item);
-        switch (st) {
-        case NUM_FLOAT32: return (double)item_to_f32(value.item);
-        case NUM_FLOAT16: return (double)item_to_f16(value.item);
-        case NUM_INT8:    return (double)item_to_i8(value.item);
-        case NUM_INT16:   return (double)item_to_i16(value.item);
-        case NUM_INT32:   return (double)item_to_i32(value.item);
-        case NUM_UINT8:   return (double)item_to_u8(value.item);
-        case NUM_UINT16:  return (double)item_to_u16(value.item);
-        case NUM_UINT32:  return (double)item_to_u32(value.item);
-        default:          return 0.0;
-        }
-    }
-    case LMD_TYPE_UINT64:    return (double)value.get_uint64();
-    default:                 return 0.0;
-    }
+    if (get_type_id(value) == LMD_TYPE_BOOL) return value.bool_val ? 1.0 : 0.0;
+    return it2d(value);
 }
 
 static bool item_is_integer_typed_array_source(Item value) {
     TypeId tid = get_type_id(value);
-    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_BOOL) return true;
+    if (is_integer_type_id(tid) || tid == LMD_TYPE_BOOL) return true;
     if (tid != LMD_TYPE_NUM_SIZED) return false;
     NumSizedType st = value.get_num_type();
     return st != NUM_FLOAT16 && st != NUM_FLOAT32;
@@ -749,36 +690,7 @@ extern "C" Item coerce_uint64(Item value) {
 
 double array_num_get_number_value(ArrayNum *arr, int64_t index) {
     if (!arr || index < 0 || index >= arr->length) return 0.0;
-    switch (arr->get_elem_type()) {
-    case ELEM_INT:
-    case ELEM_INT64:
-        return (double)arr->items[index];
-    case ELEM_FLOAT64:
-        return arr->float_items[index];
-    case ELEM_INT8:
-        return (double)((int8_t*)arr->data)[index];
-    case ELEM_INT16:
-        return (double)((int16_t*)arr->data)[index];
-    case ELEM_INT32:
-        return (double)((int32_t*)arr->data)[index];
-    case ELEM_UINT8:
-    case ELEM_UINT8_CLAMPED:
-        return (double)((uint8_t*)arr->data)[index];
-    case ELEM_UINT16:
-        return (double)((uint16_t*)arr->data)[index];
-    case ELEM_UINT32:
-        return (double)((uint32_t*)arr->data)[index];
-    case ELEM_FLOAT16:
-        return (double)f16_bits_to_f32(((uint16_t*)arr->data)[index]);
-    case ELEM_FLOAT32:
-        return (double)((float*)arr->data)[index];
-    case ELEM_UINT64:
-        return (double)((uint64_t*)arr->data)[index];
-    case ELEM_BOOL:
-        return ((uint8_t*)arr->data)[index] ? 1.0 : 0.0;
-    default:
-        return 0.0;
-    }
+    return array_num_read_double(arr, index);
 }
 
 void array_num_set_int64_value(ArrayNum *arr, int64_t index, int64_t value) {
@@ -1004,7 +916,7 @@ void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
         uint8_t b;
         if (vt == LMD_TYPE_BOOL) {
             b = (value.bool_val == BOOL_TRUE) ? 1 : 0;
-        } else if (vt == LMD_TYPE_INT || vt == LMD_TYPE_INT64) {
+        } else if (is_integer_type_id(vt)) {
             b = item_to_int_value(value) ? 1 : 0;
         } else if (vt == LMD_TYPE_FLOAT) {
             b = item_to_float_value(value) != 0.0 ? 1 : 0;
@@ -1253,7 +1165,7 @@ static ArrayNum* try_promote_scalars_to_1d(Array* arr) {
             NumSizedType st = arr->items[i].get_num_type();
             if (st == NUM_FLOAT16 || st == NUM_FLOAT32) any_float = true;
             num_count++;
-        } else if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) {
+        } else if (is_integer_type_id(t)) {
             num_count++;
         } else {
             return NULL;  // a non-numeric, non-bool element — keep generic
@@ -1873,7 +1785,7 @@ Item map_get(Map* map, Item key) {
     if (!map || !key.item) { return ItemNull;}
     bool is_found;
     char *key_str = NULL;
-    if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+    if (is_text_type_id(key._type_id)) {
         key_str = (char*)key.get_chars();
     } else {
         log_error("map_get: key must be string or symbol, got type %s", get_type_name(key._type_id));
@@ -2012,7 +1924,7 @@ Item object_get(Object* obj, Item key) {
     if (!obj || !key.item) { return ItemNull; }
     bool is_found;
     char *key_str = NULL;
-    if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+    if (is_text_type_id(key._type_id)) {
         key_str = (char*)key.get_chars();
     } else {
         log_error("object_get: key must be string or symbol, got type %s", get_type_name(key._type_id));
@@ -2086,7 +1998,7 @@ Item elmt_get(Element* elmt, Item key) {
     if (!elmt || !key.item) { return ItemNull;}
     bool is_found;
     char *key_str = NULL;
-    if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+    if (is_text_type_id(key._type_id)) {
         key_str = (char*)key.get_chars();
     } else {
         return ItemNull;  // only string or symbol keys are supported

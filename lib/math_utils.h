@@ -16,6 +16,15 @@ namespace lib_math {
     template<typename T>
     static inline T clamp(T v, T lo, T hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
+    template<typename T, typename U, typename V>
+    static inline auto clamp_mixed(T v, U lo, V hi) -> decltype(v + lo + hi) {
+        typedef decltype(v + lo + hi) Common;
+        Common cv = (Common)v;
+        Common clo = (Common)lo;
+        Common chi = (Common)hi;
+        return cv < clo ? clo : (cv > chi ? chi : cv);
+    }
+
     template<typename T>
     static inline int sign(T v) { return (v > T(0)) - (v < T(0)); }
 
@@ -30,6 +39,22 @@ namespace lib_math {
 
     template<typename T>
     static inline T max_val(T a, T b) { return a > b ? a : b; }
+
+    template<typename T, typename U>
+    static inline auto min_mixed(T a, U b) -> decltype(a + b) {
+        typedef decltype(a + b) Common;
+        Common ca = (Common)a;
+        Common cb = (Common)b;
+        return ca < cb ? ca : cb;
+    }
+
+    template<typename T, typename U>
+    static inline auto max_mixed(T a, U b) -> decltype(a + b) {
+        typedef decltype(a + b) Common;
+        Common ca = (Common)a;
+        Common cb = (Common)b;
+        return ca > cb ? ca : cb;
+    }
 }
 
 #endif

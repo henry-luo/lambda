@@ -52,7 +52,7 @@ static bool item_to_integral_index(Item item, int64_t* out) {
         *out = item.get_int64();
         return true;
     }
-    if (type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64) {
+    if (is_float_type_id(type)) {
         double val = item.get_double();
         if (isnan(val) || isinf(val)) return false;
         if (val < (double)LLONG_MIN || val > (double)LLONG_MAX) return false;
@@ -476,18 +476,16 @@ Item fn_normalize(Item str_item, Item type_item) {
     memcpy(result->chars, normalized, normalized_len);
     result->chars[normalized_len] = '\0';
 
-    // Free the utf8proc allocated buffer
-    mem_free(normalized);
+    // utf8proc_map allocates outside Lambda memtrack; keep the allocator pair matched.
+    free_utf8proc_result((char*)normalized);
     return (Item){.item = s2it(result)};
 }
 
 Range* fn_to(Item item_a, Item item_b) {
     TypeId item_a_type = get_type_id(item_a);
     TypeId item_b_type = get_type_id(item_b);
-    if ((item_a_type == LMD_TYPE_INT || item_a_type == LMD_TYPE_INT64 ||
-            item_a_type == LMD_TYPE_FLOAT || item_a_type == LMD_TYPE_FLOAT64) &&
-        (item_b_type == LMD_TYPE_INT || item_b_type == LMD_TYPE_INT64 ||
-            item_b_type == LMD_TYPE_FLOAT || item_b_type == LMD_TYPE_FLOAT64)) {
+    if ((is_integer_type_id(item_a_type) || is_float_type_id(item_a_type)) &&
+        (is_integer_type_id(item_b_type) || is_float_type_id(item_b_type))) {
         int64_t start = item_a_type == LMD_TYPE_INT ? item_a.get_int56() :
             item_a_type == LMD_TYPE_INT64 ? item_a.get_int64() : (int64_t)item_a.get_double();
         int64_t end = item_b_type == LMD_TYPE_INT ? item_b.get_int56() :
@@ -916,7 +914,7 @@ Bool fn_is(Item a, Item b) {
     // Handle pattern matching: "str" is pattern
     if (b_type->kind == TYPE_KIND_PATTERN) {
         TypeId a_type_id = get_type_id(a);
-        if (a_type_id != LMD_TYPE_STRING && a_type_id != LMD_TYPE_SYMBOL) {
+        if (!is_text_type_id(a_type_id)) {
             log_error("pattern matching requires string or symbol, got type: %s", get_type_name(a_type_id));
             return BOOL_ERROR;
         }
@@ -1098,7 +1096,7 @@ Bool fn_is(Item a, Item b) {
 // IEEE NaN check: expr is nan
 Bool fn_is_nan(Item a) {
     TypeId tid = get_type_id(a);
-    if (tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_FLOAT64) {
+    if (is_float_type_id(tid)) {
         double val = a.get_double();
         return __builtin_isnan(val) ? BOOL_TRUE : BOOL_FALSE;
     }
@@ -1234,31 +1232,6 @@ static bool array_num_shape_eq(ArrayNum* a, ArrayNum* b) {
     return true;
 }
 
-static Item array_num_flat_item_for_eq(ArrayNum* array, int64_t index) {
-    switch (array->get_elem_type()) {
-    case ELEM_INT:     return (Item){.item = i2it(array->items[index])};
-    case ELEM_INT64:   return push_l(array->items[index]);
-    case ELEM_FLOAT64: return push_d(array->float_items[index]);
-    case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)array->data)[index])};
-    case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)array->data)[index])};
-    case ELEM_INT32:   return (Item){.item = i32_to_item(((int32_t*)array->data)[index])};
-    case ELEM_UINT8:   return (Item){.item = u8_to_item(((uint8_t*)array->data)[index])};
-    case ELEM_UINT8_CLAMPED: return (Item){.item = u8_to_item(((uint8_t*)array->data)[index])};
-    case ELEM_UINT16:  return (Item){.item = u16_to_item(((uint16_t*)array->data)[index])};
-    case ELEM_UINT32:  return (Item){.item = u32_to_item(((uint32_t*)array->data)[index])};
-    case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)array->data)[index]))};
-    case ELEM_FLOAT32: return (Item){.item = f32_to_item(((float*)array->data)[index])};
-    case ELEM_UINT64: {
-        uint64_t val = ((uint64_t*)array->data)[index];
-        uint64_t* heap_val = (uint64_t*)heap_calloc(sizeof(uint64_t), LMD_TYPE_UINT64);
-        *heap_val = val;
-        return (Item){.item = u64_to_item(heap_val)};
-    }
-    case ELEM_BOOL:    return (Item){.item = b2it(((uint8_t*)array->data)[index] ? BOOL_TRUE : BOOL_FALSE)};
-    default:           return ItemNull;
-    }
-}
-
 static inline bool array_num_elem_type_is_float(ArrayNumElemType et) {
     return et == ELEM_FLOAT16 || et == ELEM_FLOAT32 || et == ELEM_FLOAT64;
 }
@@ -1274,8 +1247,8 @@ static Bool array_num_eq(ArrayNum* a, ArrayNum* b, int depth) {
     if (a->get_elem_type() != b->get_elem_type()) {
         // different elem types compare as values; double promotion loses high int64/u64 bits.
         for (int64_t i = 0; i < a->length; i++) {
-            Item val_a = array_num_flat_item_for_eq(a, i);
-            Item val_b = array_num_flat_item_for_eq(b, i);
+            Item val_a = array_num_read_item(a, i);
+            Item val_b = array_num_read_item(b, i);
             Bool r = fn_eq_depth(val_a, val_b, depth + 1);
             if (r != BOOL_TRUE) return r;
         }
@@ -1290,8 +1263,8 @@ static Bool array_num_eq(ArrayNum* a, ArrayNum* b, int depth) {
     }
     if (array_num_elem_type_is_float(a->get_elem_type())) {
         for (int64_t i = 0; i < a->length; i++) {
-            Item val_a = array_num_flat_item_for_eq(a, i);
-            Item val_b = array_num_flat_item_for_eq(b, i);
+            Item val_a = array_num_read_item(a, i);
+            Item val_b = array_num_read_item(b, i);
             Bool r = fn_eq_depth(val_a, val_b, depth + 1);
             if (r != BOOL_TRUE) return r;
         }
@@ -1536,7 +1509,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
     else if (a_type_id == LMD_TYPE_INT64) {
         return (a_item.get_int64() == b_item.get_int64()) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_type_id == LMD_TYPE_FLOAT || a_type_id == LMD_TYPE_FLOAT64) {
+    else if (is_float_type_id(a_type_id)) {
         return (a_item.get_double() == b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_type_id == LMD_TYPE_NUM_SIZED) {
@@ -1685,7 +1658,7 @@ Bool fn_ne(Item a_item, Item b_item) {
 
 static int total_type_rank(Item item) {
     TypeId tid = get_type_id(item);
-    if ((tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_FLOAT64) && isnan(item.get_double())) return 14;
+    if (is_float_type_id(tid) && isnan(item.get_double())) return 14;
     switch (tid) {
     case LMD_TYPE_NULL: return 0;
     case LMD_TYPE_BOOL: return item.bool_val ? 2 : 1;
@@ -1903,7 +1876,7 @@ Bool fn_lt_scalar(Item a_item, Item b_item) {
     else if (a_type_id == LMD_TYPE_INT64) {
         return (a_item.get_int64() < b_item.get_int64()) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_type_id == LMD_TYPE_FLOAT || a_type_id == LMD_TYPE_FLOAT64) {
+    else if (is_float_type_id(a_type_id)) {
         return (a_item.get_double() < b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_type_id == LMD_TYPE_NUM_SIZED) {
@@ -1964,7 +1937,7 @@ Bool fn_gt_scalar(Item a_item, Item b_item) {
     else if (a_type_id == LMD_TYPE_INT64) {
         return (a_item.get_int64() > b_item.get_int64()) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_type_id == LMD_TYPE_FLOAT || a_type_id == LMD_TYPE_FLOAT64) {
+    else if (is_float_type_id(a_type_id)) {
         return (a_item.get_double() > b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_type_id == LMD_TYPE_NUM_SIZED) {
@@ -2133,11 +2106,7 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
             field = field->next;
         }
     } else if (type_id == LMD_TYPE_ARRAY) {
-        List* lst = data.array;
-        for (int64_t i = 0; i < lst->length; i++) {
-            query_collect(lst->items[i], type_val, true, result, depth + 1);
-        }
-    } else if (type_id == LMD_TYPE_ARRAY) {
+        // runtime lists and arrays share LMD_TYPE_ARRAY, so one branch must cover both.
         Array* arr = (Array*)data.array;
         for (int64_t i = 0; i < arr->length; i++) {
             query_collect(arr->items[i], type_val, true, result, depth + 1);
@@ -2205,6 +2174,7 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
             field = field->next;
         }
     } else if (type_id == LMD_TYPE_ARRAY) {
+        // runtime lists and arrays share LMD_TYPE_ARRAY; keep spreadable query arrays here too.
         Array* arr = (Array*)data.array;
         if (arr->is_spreadable) {
             // spreadable array (from previous query): distribute child query to each item
@@ -2217,14 +2187,6 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
                 if (child.item && fn_is(child, type_val) == BOOL_TRUE) {
                     array_push(result, child);
                 }
-            }
-        }
-    } else if (type_id == LMD_TYPE_ARRAY) {
-        List* lst = data.array;
-        for (int64_t i = 0; i < lst->length; i++) {
-            Item child = lst->items[i];
-            if (child.item && fn_is(child, type_val) == BOOL_TRUE) {
-                array_push(result, child);
             }
         }
     } else if (type_id == LMD_TYPE_ARRAY_NUM) {
@@ -2381,7 +2343,7 @@ static bool item_to_possession_index(Item item, int64_t* out) {
 
 static bool shape_has_named_key(TypeMap* map_type, Item key_item) {
     TypeId key_type = get_type_id(key_item);
-    if (key_type != LMD_TYPE_STRING && key_type != LMD_TYPE_SYMBOL) return false;
+    if (!is_text_type_id(key_type)) return false;
     const char* key = key_item.get_chars();
     uint32_t key_len = key_item.get_len();
     if (!key) return false;
@@ -2848,7 +2810,7 @@ RetItem fn_input2(Item target_item, Item type) {
         const char* content = "{\"name\": \"dry-run\", \"version\": \"1.0\", \"items\": [1, 2, 3], \"active\": true}";
         // check type hint for more realistic fabrication
         TypeId tid = get_type_id(type);
-        if (tid == LMD_TYPE_STRING || tid == LMD_TYPE_SYMBOL) {
+        if (is_text_type_id(tid)) {
             String* ts = fn_string(type);
             if (ts) {
                 if (strcmp(ts->chars, "html") == 0) content = "<html><head><title>Mock</title></head><body><p>Dry-run</p></body></html>";
@@ -2866,7 +2828,7 @@ RetItem fn_input2(Item target_item, Item type) {
 
     // Validate target type: must be string, symbol, or path
     TypeId target_type_id = get_type_id(target_item);
-    if (target_type_id != LMD_TYPE_STRING && target_type_id != LMD_TYPE_SYMBOL && target_type_id != LMD_TYPE_PATH) {
+    if (!is_text_type_id(target_type_id) && target_type_id != LMD_TYPE_PATH) {
         log_debug("input target must be a string, symbol, or path, got type: %s", get_type_name(target_type_id));
         return ri_ok(ItemNull);  // todo: push error
     }
@@ -2886,7 +2848,7 @@ RetItem fn_input2(Item target_item, Item type) {
         // No type specified
         type_str = NULL;
     }
-    else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
+    else if (is_text_type_id(type_id)) {
         // Legacy behavior: type is a simple string/symbol
         type_str = fn_string(type);
     }
@@ -2902,7 +2864,7 @@ RetItem fn_input2(Item target_item, Item type) {
             type_str = NULL;
         } else {
             TypeId type_value_type = get_type_id(input_type);
-            if (type_value_type == LMD_TYPE_STRING || type_value_type == LMD_TYPE_SYMBOL) {
+            if (is_text_type_id(type_value_type)) {
                 type_str = fn_string(input_type);
             }
             else {
@@ -2918,7 +2880,7 @@ RetItem fn_input2(Item target_item, Item type) {
             flavor_str = NULL;
         } else {
             TypeId flavor_value_type = get_type_id(input_flavor);
-            if (flavor_value_type == LMD_TYPE_STRING || flavor_value_type == LMD_TYPE_SYMBOL) {
+            if (is_text_type_id(flavor_value_type)) {
                 flavor_str = fn_string(input_flavor);
             }
             else {
@@ -2981,7 +2943,7 @@ RetItem fn_parse2(Item str_item, Item type) {
     if (type_id == LMD_TYPE_NULL) {
         type_str = NULL;  // auto-detect
     }
-    else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
+    else if (is_text_type_id(type_id)) {
         type_str = fn_string(type);
     }
     else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT) {
@@ -2992,7 +2954,7 @@ RetItem fn_parse2(Item str_item, Item type) {
         Item input_type = _map_get((TypeMap*)options_map->type, options_map->data, "type", &is_found);
         if (is_found && input_type.item && input_type._type_id != LMD_TYPE_NULL) {
             TypeId type_value_type = get_type_id(input_type);
-            if (type_value_type == LMD_TYPE_STRING || type_value_type == LMD_TYPE_SYMBOL) {
+            if (is_text_type_id(type_value_type)) {
                 type_str = fn_string(input_type);
             }
         }
@@ -3001,7 +2963,7 @@ RetItem fn_parse2(Item str_item, Item type) {
         Item input_flavor = _map_get((TypeMap*)options_map->type, options_map->data, "flavor", &is_found);
         if (is_found && input_flavor.item && input_flavor._type_id != LMD_TYPE_NULL) {
             TypeId flavor_value_type = get_type_id(input_flavor);
-            if (flavor_value_type == LMD_TYPE_STRING || flavor_value_type == LMD_TYPE_SYMBOL) {
+            if (is_text_type_id(flavor_value_type)) {
                 flavor_str = fn_string(input_flavor);
             }
         }
@@ -3155,7 +3117,7 @@ String* fn_format2(Item item, Item type) {
             // default: ISO 8601 format
             datetime_format_lambda(buf, &dt);
         }
-        else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
+        else if (is_text_type_id(type_id)) {
             const char* pattern_chars = type.get_chars();
             // check for named format presets
             if (strcmp(pattern_chars, "iso") == 0 || strcmp(pattern_chars, "iso8601") == 0) {
@@ -3196,7 +3158,7 @@ String* fn_format2(Item item, Item type) {
     if (type_id == LMD_TYPE_NULL) {
         type_str = NULL;  // use default
     }
-    else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
+    else if (is_text_type_id(type_id)) {
         // Legacy behavior: type is a simple string or symbol
         type_str = fn_string(type);
     }
@@ -3212,7 +3174,7 @@ String* fn_format2(Item item, Item type) {
             type_str = NULL;
         } else {
             TypeId type_value_type = get_type_id(format_type);
-            if (type_value_type == LMD_TYPE_STRING || type_value_type == LMD_TYPE_SYMBOL) {
+            if (is_text_type_id(type_value_type)) {
                 type_str = fn_string(format_type);
             }
             else {
@@ -3228,7 +3190,7 @@ String* fn_format2(Item item, Item type) {
             flavor_str = NULL;
         } else {
             TypeId flavor_value_type = get_type_id(format_flavor);
-            if (flavor_value_type == LMD_TYPE_STRING || flavor_value_type == LMD_TYPE_SYMBOL) {
+            if (is_text_type_id(flavor_value_type)) {
                 flavor_str = fn_string(format_flavor);
             }
             else {
@@ -3716,7 +3678,7 @@ extern "C" int64_t fn_len_e(Element* elmt) {
 Item fn_substring(Item str_item, Item start_item, Item end_item) {
     GUARD_ERROR3(str_item, start_item, end_item);
     TypeId str_tid = get_type_id(str_item);
-    if (str_tid != LMD_TYPE_STRING && str_tid != LMD_TYPE_SYMBOL) {
+    if (!is_text_type_id(str_tid)) {
         log_debug("fn_substring: first argument must be a string or symbol");
         return ItemError;
     }
@@ -3929,8 +3891,8 @@ Bool fn_starts_with(Item str_item, Item prefix_item) {
     if (str_type == LMD_TYPE_NULL) return BOOL_FALSE;
     if (prefix_type == LMD_TYPE_NULL) return BOOL_TRUE;
 
-    if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
-        (prefix_type != LMD_TYPE_STRING && prefix_type != LMD_TYPE_SYMBOL)) {
+    if ((!is_text_type_id(str_type)) ||
+        (!is_text_type_id(prefix_type))) {
         log_debug("fn_starts_with: arguments must be strings or symbols");
         return BOOL_ERROR;
     }
@@ -3965,8 +3927,8 @@ Bool fn_ends_with(Item str_item, Item suffix_item) {
     if (str_type == LMD_TYPE_NULL) return BOOL_FALSE;
     if (suffix_type == LMD_TYPE_NULL) return BOOL_TRUE;
 
-    if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
-        (suffix_type != LMD_TYPE_STRING && suffix_type != LMD_TYPE_SYMBOL)) {
+    if ((!is_text_type_id(str_type)) ||
+        (!is_text_type_id(suffix_type))) {
         log_debug("fn_ends_with: arguments must be strings or symbols");
         return BOOL_ERROR;
     }
@@ -4024,8 +3986,8 @@ int64_t fn_index_of(Item str_item, Item sub_item) {
     // --- String/Symbol: substring search ---
     TypeId sub_type = get_type_id(sub_item);
 
-    if ((coll_type != LMD_TYPE_STRING && coll_type != LMD_TYPE_SYMBOL) ||
-        (sub_type != LMD_TYPE_STRING && sub_type != LMD_TYPE_SYMBOL)) {
+    if ((!is_text_type_id(coll_type)) ||
+        (!is_text_type_id(sub_type))) {
         log_debug("fn_index_of: arguments must be strings/symbols or first arg must be a list");
         return -1;
     }
@@ -4109,8 +4071,8 @@ int64_t fn_last_index_of(Item str_item, Item sub_item) {
     // --- String/Symbol: substring search from end ---
     TypeId sub_type = get_type_id(sub_item);
 
-    if ((coll_type != LMD_TYPE_STRING && coll_type != LMD_TYPE_SYMBOL) ||
-        (sub_type != LMD_TYPE_STRING && sub_type != LMD_TYPE_SYMBOL)) {
+    if ((!is_text_type_id(coll_type)) ||
+        (!is_text_type_id(sub_type))) {
         log_debug("fn_last_index_of: arguments must be strings/symbols or first arg must be a list");
         return -1;
     }
@@ -4180,7 +4142,7 @@ Item fn_trim(Item str_item) {
     // null trims to empty string
     if (str_type == LMD_TYPE_NULL) return ItemNull;
 
-    if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+    if (!is_text_type_id(str_type)) {
         log_debug("fn_trim: argument must be a string or symbol");
         return ItemError;
     }
@@ -4231,7 +4193,7 @@ Item fn_trim_start(Item str_item) {
     // null trims to null
     if (str_type == LMD_TYPE_NULL) return ItemNull;
 
-    if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+    if (!is_text_type_id(str_type)) {
         log_debug("fn_trim_start: argument must be a string or symbol");
         return ItemError;
     }
@@ -4279,7 +4241,7 @@ Item fn_trim_end(Item str_item) {
     // null trims to null
     if (str_type == LMD_TYPE_NULL) return ItemNull;
 
-    if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+    if (!is_text_type_id(str_type)) {
         log_debug("fn_trim_end: argument must be a string or symbol");
         return ItemError;
     }
@@ -4327,7 +4289,7 @@ Item fn_lower(Item str_item) {
     // null lowercased is null
     if (str_type == LMD_TYPE_NULL) return ItemNull;
 
-    if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+    if (!is_text_type_id(str_type)) {
         log_debug("fn_lower: argument must be a string or symbol");
         return ItemError;
     }
@@ -4384,7 +4346,7 @@ Item fn_upper(Item str_item) {
     // null uppercased is null
     if (str_type == LMD_TYPE_NULL) return ItemNull;
 
-    if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+    if (!is_text_type_id(str_type)) {
         log_debug("fn_upper: argument must be a string or symbol");
         return ItemError;
     }
@@ -4439,8 +4401,8 @@ Item fn_url_resolve(Item base_item, Item relative_item) {
     TypeId base_type = get_type_id(base_item);
     TypeId rel_type = get_type_id(relative_item);
 
-    if ((base_type != LMD_TYPE_STRING && base_type != LMD_TYPE_SYMBOL) ||
-        (rel_type != LMD_TYPE_STRING && rel_type != LMD_TYPE_SYMBOL)) {
+    if ((!is_text_type_id(base_type)) ||
+        (!is_text_type_id(rel_type))) {
         log_debug("fn_url_resolve: arguments must be strings");
         return ItemError;
     }
@@ -4514,7 +4476,7 @@ Item fn_split(Item str_item, Item sep_item) {
     if (sep_type == LMD_TYPE_TYPE) {
         Type* type = (Type*)(sep_item.item & 0x00FFFFFFFFFFFFFF);
         if (type && type->kind == TYPE_KIND_PATTERN) {
-            if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+            if (!is_text_type_id(str_type)) {
                 log_debug("fn_split: first argument must be a string for pattern split");
                 return ItemError;
             }
@@ -4527,8 +4489,8 @@ Item fn_split(Item str_item, Item sep_item) {
         }
     }
 
-    if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
-        (!null_sep && sep_type != LMD_TYPE_STRING && sep_type != LMD_TYPE_SYMBOL)) {
+    if ((!is_text_type_id(str_type)) ||
+        (!null_sep && !is_text_type_id(sep_type))) {
         log_debug("fn_split: arguments must be strings or symbols");
         return ItemError;
     }
@@ -4669,7 +4631,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     if (sep_type == LMD_TYPE_TYPE) {
         Type* type = (Type*)(sep_item.item & 0x00FFFFFFFFFFFFFF);
         if (type && type->kind == TYPE_KIND_PATTERN) {
-            if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+            if (!is_text_type_id(str_type)) {
                 log_debug("fn_split3: first argument must be a string for pattern split");
                 return ItemError;
             }
@@ -4689,8 +4651,8 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     }
 
     // keep_delim string split
-    if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
-        (sep_type != LMD_TYPE_STRING && sep_type != LMD_TYPE_SYMBOL)) {
+    if ((!is_text_type_id(str_type)) ||
+        (!is_text_type_id(sep_type))) {
         log_debug("fn_split3: arguments must be strings or symbols");
         return ItemError;
     }
@@ -4769,7 +4731,7 @@ int64_t fn_ord_str(String* str) {
 int64_t fn_ord(Item str_item) {
     TypeId type = get_type_id(str_item);
 
-    if (type != LMD_TYPE_STRING && type != LMD_TYPE_SYMBOL) {
+    if (!is_text_type_id(type)) {
         log_debug("fn_ord: argument must be a string or symbol, got type %d", type);
         return 0;
     }
@@ -4836,7 +4798,7 @@ Item fn_join2(Item list_item, Item sep_item) {
     const char* sep_chars = nullptr;
     size_t sep_len = 0;
 
-    if (sep_type == LMD_TYPE_STRING || sep_type == LMD_TYPE_SYMBOL) {
+    if (is_text_type_id(sep_type)) {
         sep_chars = sep_item.get_chars();
         sep_len = sep_chars ? sep_item.get_len() : 0;
     } else if (sep_type != LMD_TYPE_NULL) {
@@ -4854,7 +4816,7 @@ Item fn_join2(Item list_item, Item sep_item) {
         for (int64_t i = 0; i < count; i++) {
             Item item = lst->items[i];
             TypeId item_type = get_type_id(item);
-            if (item_type == LMD_TYPE_STRING || item_type == LMD_TYPE_SYMBOL) {
+            if (is_text_type_id(item_type)) {
                 total_len += item.get_len();
             }
         }
@@ -4864,7 +4826,7 @@ Item fn_join2(Item list_item, Item sep_item) {
         for (int64_t i = 0; i < count; i++) {
             Item item = arr->items[i];
             TypeId item_type = get_type_id(item);
-            if (item_type == LMD_TYPE_STRING || item_type == LMD_TYPE_SYMBOL) {
+            if (is_text_type_id(item_type)) {
                 total_len += item.get_len();
             }
         }
@@ -4891,7 +4853,7 @@ Item fn_join2(Item list_item, Item sep_item) {
             }
             Item item = lst->items[i];
             TypeId item_type = get_type_id(item);
-            if (item_type == LMD_TYPE_STRING || item_type == LMD_TYPE_SYMBOL) {
+            if (is_text_type_id(item_type)) {
                 const char* s_chars = item.get_chars();
                 uint32_t s_len = item.get_len();
                 if (s_chars && s_len > 0) {
@@ -4909,7 +4871,7 @@ Item fn_join2(Item list_item, Item sep_item) {
             }
             Item item = arr->items[i];
             TypeId item_type = get_type_id(item);
-            if (item_type == LMD_TYPE_STRING || item_type == LMD_TYPE_SYMBOL) {
+            if (is_text_type_id(item_type)) {
                 const char* s_chars = item.get_chars();
                 uint32_t s_len = item.get_len();
                 if (s_chars && s_len > 0) {
@@ -5082,11 +5044,11 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
     if (old_type == LMD_TYPE_TYPE) {
         Type* type = (Type*)(old_item.item & 0x00FFFFFFFFFFFFFF);
         if (type && type->kind == TYPE_KIND_PATTERN) {
-            if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+            if (!is_text_type_id(str_type)) {
                 log_debug("fn_replace: first argument must be a string for pattern replace");
                 return ItemError;
             }
-            if (new_type != LMD_TYPE_STRING && new_type != LMD_TYPE_SYMBOL) {
+            if (!is_text_type_id(new_type)) {
                 log_debug("fn_replace: third argument must be a string for pattern replace");
                 return ItemError;
             }
@@ -5112,9 +5074,9 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
         }
     }
 
-    if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
-        (old_type != LMD_TYPE_STRING && old_type != LMD_TYPE_SYMBOL) ||
-        (new_type != LMD_TYPE_STRING && new_type != LMD_TYPE_SYMBOL)) {
+    if ((!is_text_type_id(str_type)) ||
+        (!is_text_type_id(old_type)) ||
+        (!is_text_type_id(new_type))) {
         log_debug("fn_replace: all arguments must be strings or symbols");
         return ItemError;
     }
@@ -5210,7 +5172,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     // null source -> empty list
     if (source_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.array = e}; }
 
-    if (source_type != LMD_TYPE_STRING && source_type != LMD_TYPE_SYMBOL) {
+    if (!is_text_type_id(source_type)) {
         log_debug("fn_find: first argument must be a string or symbol");
         return ItemError;
     }
@@ -5239,7 +5201,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     }
 
     // plain string search
-    if (pattern_type != LMD_TYPE_STRING && pattern_type != LMD_TYPE_SYMBOL) {
+    if (!is_text_type_id(pattern_type)) {
         log_debug("fn_find: second argument must be a string, symbol, or pattern");
         return ItemError;
     }
@@ -5336,7 +5298,7 @@ DateTime fn_datetime1(Item arg) {
     // propagate error inputs
     if (arg_type == LMD_TYPE_ERROR) return DATETIME_MAKE_ERROR();
 
-    if (arg_type == LMD_TYPE_STRING || arg_type == LMD_TYPE_SYMBOL) {
+    if (is_text_type_id(arg_type)) {
         const char* chars = arg.get_chars();
         uint32_t len = arg.get_len();
         DateTime* parsed = datetime_parse_lambda(context->pool, chars);
@@ -5347,7 +5309,7 @@ DateTime fn_datetime1(Item arg) {
         }
         log_error("datetime: failed to parse string '%.*s'", (int)len, chars);
     }
-    else if (arg_type == LMD_TYPE_INT || arg_type == LMD_TYPE_INT64) {
+    else if (is_integer_type_id(arg_type)) {
         // interpret as unix milliseconds
         int64_t ms = arg_type == LMD_TYPE_INT ? (int64_t)arg.get_int56() : arg.get_int64();
         DateTime* parsed = datetime_from_unix_ms(context->pool, ms);
@@ -5392,7 +5354,7 @@ DateTime fn_date1(Item arg) {
         dt.precision = DATETIME_PRECISION_DATE_ONLY;
         return dt;
     }
-    else if (arg_type == LMD_TYPE_STRING || arg_type == LMD_TYPE_SYMBOL) {
+    else if (is_text_type_id(arg_type)) {
         const char* chars = arg.get_chars();
         uint32_t len = arg.get_len();
         DateTime* parsed = datetime_parse_lambda(context->pool, chars);
@@ -5483,7 +5445,7 @@ DateTime fn_time1(Item arg) {
         dt.format_hint = src.format_hint;
         return dt;
     }
-    else if (arg_type == LMD_TYPE_STRING || arg_type == LMD_TYPE_SYMBOL) {
+    else if (is_text_type_id(arg_type)) {
         const char* chars = arg.get_chars();
         DateTime* parsed = datetime_parse_lambda(context->pool, chars);
         if (parsed) {

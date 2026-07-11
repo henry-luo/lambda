@@ -28,29 +28,10 @@ extern "C" void heap_register_gc_root(uint64_t* slot);
 
 static bool dns_is_object_like(Item item);
 
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)(len > 0 ? len : 0));
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
 static bool is_nullish_item(Item value) {
     TypeId type = get_type_id(value);
     return value.item == ITEM_NULL || value.item == ITEM_JS_UNDEFINED ||
         type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED;
-}
-
-static bool is_callable(Item value) {
-    return get_type_id(value) == LMD_TYPE_FUNC;
 }
 
 static bool is_symbol_item(Item value) {

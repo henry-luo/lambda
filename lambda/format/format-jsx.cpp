@@ -53,63 +53,43 @@ static bool try_format_js_expr(StringBuf* sb, const ElementReader& elem) {
 }
 
 // Format JSX attributes from element shape data
-// NOTE: uses raw Element* via elem.element() because ElementReader
-// lacks a generic attribute iterator. All other code is Gen3.
 static void format_jsx_attributes(StringBuf* sb, const ElementReader& elem) {
-    const Element* raw = elem.element();
-    if (!raw || !raw->data) return;
+    if (!elem.element() || !elem.element()->data) return;
 
-    TypeElmt* elem_type = (TypeElmt*)raw->type;
-    if (!elem_type) return;
+    auto attrs = elem.attrs();
+    const char* attr_name;
+    ItemReader value;
+    while (attrs.next(&attr_name, &value)) {
+        if (!attr_name) continue;
 
-    TypeMap* map_type = (TypeMap*)elem_type;
-    if (!map_type->shape) return;
+        // Skip internal markers
+        if (strcmp(attr_name, "is_component") == 0 || strcmp(attr_name, "self_closing") == 0) {
+            continue;
+        }
 
-    ShapeEntry* field = map_type->shape;
-    for (int i = 0; i < map_type->length && field; i++) {
-        if (field->name) {
-            const char* attr_name = field->name->str;
-
-            // Skip internal markers
-            if (strcmp(attr_name, "is_component") == 0 || strcmp(attr_name, "self_closing") == 0) {
-                field = field->next;
+        // Skip internal JSX type marker
+        if (strcmp(attr_name, "type") == 0 && value.isString()) {
+            String* type_value = value.asString();
+            if (type_value && strcmp(type_value->chars, "jsx_element") == 0) {
                 continue;
             }
+        }
 
-            // Skip internal JSX type marker
-            if (strcmp(attr_name, "type") == 0) {
-                void* data = ((char*)raw->data) + field->byte_offset;
-                if (field->type && field->type->type_id == LMD_TYPE_STRING) {
-                    String* type_value = *(String**)data;
-                    if (type_value && strcmp(type_value->chars, "jsx_element") == 0) {
-                        field = field->next;
-                        continue;
-                    }
-                }
+        stringbuf_append_format(sb, " %s", attr_name);
+
+        if (value.isString()) {
+            String* attr_value = value.asString();
+            if (attr_value && strcmp(attr_value->chars, "true") != 0) {
+                stringbuf_append_char(sb, '=');
+                format_jsx_attribute_value(sb, attr_value);
             }
-
-            stringbuf_append_format(sb, " %s", attr_name);
-
-            void* data = ((char*)raw->data) + field->byte_offset;
-
-            if (field->type && field->type->type_id == LMD_TYPE_STRING) {
-                String* attr_value = *(String**)data;
-                if (attr_value && strcmp(attr_value->chars, "true") != 0) {
-                    stringbuf_append_char(sb, '=');
-                    format_jsx_attribute_value(sb, attr_value);
-                }
-            } else if (field->type && field->type->type_id == LMD_TYPE_ELEMENT) {
-                Element* expr_elem = *(Element**)data;
-                if (expr_elem) {
-                    ElementReader expr(expr_elem);
-                    if (expr.tagName() && strcmp(expr.tagName(), "js") == 0) {
-                        stringbuf_append_char(sb, '=');
-                        try_format_js_expr(sb, expr);
-                    }
-                }
+        } else if (value.isElement()) {
+            ElementReader expr = value.asElement();
+            if (expr.tagName() && strcmp(expr.tagName(), "js") == 0) {
+                stringbuf_append_char(sb, '=');
+                try_format_js_expr(sb, expr);
             }
         }
-        field = field->next;
     }
 }
 

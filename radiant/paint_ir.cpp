@@ -9,6 +9,8 @@
 #include "paint_ir.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/mem_grow.hpp"
+#include "../lib/escape.h"
 #include <math.h>
 #include <string.h>
 
@@ -461,9 +463,9 @@ bool paint_ir_validate_or_log(const PaintList* pl, const char* context) {
 static PaintCmd* paint_alloc_cmd(PaintList* pl, PaintOp op) {
     if (!pl) return nullptr;
     if (pl->count >= pl->capacity) {
-        int new_cap = pl->capacity ? pl->capacity * 2 : PAINT_LIST_INITIAL_CAPACITY;
-        pl->cmds = (PaintCmd*)mem_realloc(pl->cmds, new_cap * sizeof(PaintCmd), MEM_CAT_RENDER);
-        pl->capacity = new_cap;
+        // keep the PaintList unchanged if growth fails; callers already handle null commands
+        if (!lam::mem_grow_array(&pl->cmds, &pl->capacity, pl->count + 1,
+                                 PAINT_LIST_INITIAL_CAPACITY, MEM_CAT_RENDER)) return nullptr;
     }
     PaintCmd* cmd = &pl->cmds[pl->count++];
     memset(cmd, 0, sizeof(PaintCmd));
@@ -1204,28 +1206,15 @@ static void paint_svg_append_color(StrBuf* out, Color color) {
 
 static void paint_svg_append_attr_escaped(StrBuf* out, const char* value) {
     if (!out || !value) return;
-    for (const char* p = value; *p; p++) {
-        switch (*p) {
-        case '<': strbuf_append_str(out, "&lt;"); break;
-        case '>': strbuf_append_str(out, "&gt;"); break;
-        case '&': strbuf_append_str(out, "&amp;"); break;
-        case '"': strbuf_append_str(out, "&quot;"); break;
-        default: strbuf_append_char(out, *p); break;
-        }
-    }
+    escape_append(out, value, strlen(value), ESCAPE_RULES_XML_ATTR,
+                  ESCAPE_RULES_XML_ATTR_COUNT, ESCAPE_CTRL_XML_NUMERIC);
 }
 
 static void paint_svg_append_text_escaped(StrBuf* out, const char* value, int len) {
     if (!out || !value) return;
     if (len < 0) len = (int)strlen(value); // INT_CAST_OK: text run byte length is bounded by source string.
-    for (int i = 0; i < len; i++) {
-        switch (value[i]) {
-        case '<': strbuf_append_str(out, "&lt;"); break;
-        case '>': strbuf_append_str(out, "&gt;"); break;
-        case '&': strbuf_append_str(out, "&amp;"); break;
-        default: strbuf_append_char(out, value[i]); break;
-        }
-    }
+    escape_append(out, value, (size_t)len, ESCAPE_RULES_HTML_TEXT,
+                  ESCAPE_RULES_HTML_TEXT_COUNT, ESCAPE_CTRL_NONE);
 }
 
 static void paint_svg_append_matrix_attr(StrBuf* out, const RdtMatrix* matrix) {

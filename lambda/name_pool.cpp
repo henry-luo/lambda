@@ -1,6 +1,7 @@
 #include "../lib/log.h"
 #include "../lib/string.h"
 #include "../lib/hashmap_helpers.h"
+#include "../lib/ref_counted_pool.hpp"
 #include "lambda-data.hpp"
 
 // Entry structure for the hashmap
@@ -61,10 +62,7 @@ NamePool* name_pool_create(Pool* memory_pool, NamePool* parent) {
 }
 
 NamePool* name_pool_retain(NamePool* pool) {
-    if (!pool) return nullptr;
-
-    pool->ref_count++;
-    return pool;
+    return ref_counted_pool_retain(pool);
 }
 
 void name_pool_release(NamePool* pool) {
@@ -72,23 +70,8 @@ void name_pool_release(NamePool* pool) {
 
     pool->ref_count--;
     if (pool->ref_count == 0) {
-        // unlink from the memory context if registered (struct memory itself is
-        // freed later when the backing Pool is destroyed)
-        if (pool->mem_node && g_name_pool_node_release) {
-            g_name_pool_node_release(pool->mem_node);
-            pool->mem_node = nullptr;
-        }
-
-        // Release parent pool
-        if (pool->parent) {
-            name_pool_release(pool->parent);
-        }
-
-        // Free the hashmap
-        if (pool->names) {
-            hashmap_free(pool->names);
-        }
-
+        ref_counted_pool_finalize_zero(pool, g_name_pool_node_release,
+                                       name_pool_release, pool->names);
         // Note: pool memory itself will be freed when the VariableMemPool is destroyed
     }
 }

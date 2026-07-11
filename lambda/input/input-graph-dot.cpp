@@ -15,6 +15,11 @@ static String* parse_identifier(InputContext& ctx);
 static String* parse_quoted_string(InputContext& ctx);
 static String* parse_attribute_value(InputContext& ctx);
 static void parse_attribute_list(InputContext& ctx, Element* element);
+static bool dot_statement_is_edge(SourceTracker& tracker);
+static bool dot_statement_is_assignment(SourceTracker& tracker);
+static bool dot_statement_is_default_attributes(SourceTracker& tracker);
+static bool parse_dot_attribute_assignment(InputContext& ctx, Element* element);
+static bool parse_dot_default_attributes(InputContext& ctx, Element* graph);
 static const int DOT_MAX_DEPTH = 256;
 
 static Element* parse_node_statement(InputContext& ctx);
@@ -49,6 +54,102 @@ static String* parse_attribute_value(InputContext& ctx) {
     } else {
         return parse_identifier(ctx);
     }
+}
+
+static const char* dot_skip_ascii_space(const char* pos) {
+    while (*pos && (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r')) {
+        pos++;
+    }
+    return pos;
+}
+
+static const char* dot_skip_statement_id(const char* pos) {
+    if (*pos == '"') {
+        pos++;
+        while (*pos && *pos != '"') {
+            if (*pos == '\\' && pos[1]) pos++;
+            pos++;
+        }
+        if (*pos == '"') pos++;
+        return pos;
+    }
+    if (!(str_char_is_alpha(*pos) || *pos == '_')) {
+        return pos;
+    }
+    while (*pos && (str_char_is_alnum(*pos) || *pos == '_')) {
+        pos++;
+    }
+    return pos;
+}
+
+static bool dot_statement_is_edge(SourceTracker& tracker) {
+    const char* lookahead_pos = dot_skip_statement_id(tracker.rest());
+    lookahead_pos = dot_skip_ascii_space(lookahead_pos);
+    return *lookahead_pos == '-' && (lookahead_pos[1] == '>' || lookahead_pos[1] == '-');
+}
+
+static bool dot_statement_is_assignment(SourceTracker& tracker) {
+    const char* lookahead_pos = dot_skip_statement_id(tracker.rest());
+    lookahead_pos = dot_skip_ascii_space(lookahead_pos);
+    return *lookahead_pos == '=';
+}
+
+static bool dot_statement_is_default_attributes(SourceTracker& tracker) {
+    const char* start = tracker.rest();
+    const char* after_id = dot_skip_statement_id(start);
+    size_t id_len = (size_t)(after_id - start);
+    if (id_len != 4 && id_len != 5) return false;
+    bool is_default_scope =
+        (id_len == 4 && (strncmp(start, "node", 4) == 0 || strncmp(start, "edge", 4) == 0)) ||
+        (id_len == 5 && strncmp(start, "graph", 5) == 0);
+    if (!is_default_scope) return false;
+    after_id = dot_skip_ascii_space(after_id);
+    return *after_id == '[';
+}
+
+static bool parse_dot_attribute_assignment(InputContext& ctx, Element* element) {
+    String* attr_name = parse_identifier(ctx);
+    if (!attr_name) {
+        attr_name = parse_quoted_string(ctx);
+    }
+    if (!attr_name) {
+        ctx.addError(ctx.tracker.location(), "Expected graph attribute name");
+        return false;
+    }
+
+    skip_whitespace_and_comments(ctx.tracker);
+    if (ctx.tracker.atEnd() || ctx.tracker.current() != '=') {
+        ctx.addError(ctx.tracker.location(), "Expected '=' after graph attribute name");
+        return false;
+    }
+    ctx.tracker.advance();
+
+    String* attr_value = parse_attribute_value(ctx);
+    if (!attr_value) {
+        ctx.addError(ctx.tracker.location(), "Expected graph attribute value");
+        return false;
+    }
+    add_graph_attribute(ctx.input(), element, attr_name->chars, attr_value->chars);
+    return true;
+}
+
+static bool parse_dot_default_attributes(InputContext& ctx, Element* graph) {
+    String* scope = parse_identifier(ctx);
+    if (!scope) {
+        ctx.addError(ctx.tracker.location(), "Expected DOT default attribute scope");
+        return false;
+    }
+
+    MarkBuilder builder(ctx.input());
+    ElementBuilder defaults = builder.element("defaults");
+    defaults.attr("scope", scope->chars);
+    Element* defaults_el = defaults.final().element;
+
+    // DOT default-attribute statements are not nodes; representing them
+    // separately avoids corrupting the pooled node element shape.
+    parse_attribute_list(ctx, defaults_el);
+    add_node_to_graph(ctx.input(), graph, defaults_el);
+    return true;
 }
 
 // Parse attribute list [attr1=value1, attr2=value2, ...]
@@ -257,25 +358,16 @@ static void parse_subgraph(InputContext& ctx, Element* graph, int depth) {
             break;
         }
 
-        // try to parse node or edge statement
+        // DOT lookahead must not consume parser state; consuming the first id
+        // here made subgraph nodes restart at the following ';' or '=' token.
         SourceLocation checkpoint = tracker.location();
 
-        // look ahead to determine if this is an edge statement
-        String* first_id = parse_identifier(ctx);
-        if (!first_id) {
-            first_id = parse_quoted_string(ctx);
-        }
-
-        if (first_id) {
-            skip_whitespace_and_comments(tracker);
-
-            // check for edge operator
-            bool is_edge = !tracker.atEnd() && tracker.current() == '-' &&
-                          (tracker.peek(1) == '>' || tracker.peek(1) == '-');
-
-            // restore position
-            // tracker.reset(checkpoint);
-
+        if (dot_statement_is_default_attributes(tracker)) {
+            parse_dot_default_attributes(ctx, cluster);
+        } else if (dot_statement_is_assignment(tracker)) {
+            parse_dot_attribute_assignment(ctx, cluster);
+        } else {
+            bool is_edge = dot_statement_is_edge(tracker);
             if (is_edge) {
                 // this is an edge statement
                 Element* edge = parse_edge_statement(ctx);
@@ -407,35 +499,11 @@ void parse_graph_dot(Input* input, const char* dot_string) {
         // try to parse node or edge statement
         SourceLocation checkpoint = tracker.location();
 
-        // Simple lookahead: scan forward to check for edge operator without parsing
-        const char* lookahead_pos = tracker.rest();
-        bool is_edge = false;
-
-        // Skip identifier/quoted string
-        while (*lookahead_pos && (str_char_is_alnum(*lookahead_pos) || *lookahead_pos == '_')) {
-            lookahead_pos++;
-        }
-        if (*lookahead_pos == '"') {
-            lookahead_pos++;
-            while (*lookahead_pos && *lookahead_pos != '"') {
-                if (*lookahead_pos == '\\') lookahead_pos++;  // skip escaped char
-                lookahead_pos++;
-            }
-            if (*lookahead_pos == '"') lookahead_pos++;
-        }
-
-        // Skip whitespace
-        while (*lookahead_pos && (*lookahead_pos == ' ' || *lookahead_pos == '\t' ||
-                                   *lookahead_pos == '\n' || *lookahead_pos == '\r')) {
-            lookahead_pos++;
-        }
-
-        // Check for edge operator (-> or --)
-        if (*lookahead_pos == '-' && (lookahead_pos[1] == '>' || lookahead_pos[1] == '-')) {
-            is_edge = true;
-        }
-
-        if (is_edge) {
+        if (dot_statement_is_default_attributes(tracker)) {
+            parse_dot_default_attributes(ctx, graph);
+        } else if (dot_statement_is_assignment(tracker)) {
+            parse_dot_attribute_assignment(ctx, graph);
+        } else if (dot_statement_is_edge(tracker)) {
             // this is an edge statement
             Element* edge = parse_edge_statement(ctx);
             if (edge) {

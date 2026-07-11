@@ -41,7 +41,7 @@ static const JubeHostObjectOps* vmap_host_ops(VMap* vm) {
 
 static bool item_key_chars(Item key, const char** chars, uint32_t* len) {
     TypeId type_id = get_type_id(key);
-    if (type_id != LMD_TYPE_STRING && type_id != LMD_TYPE_SYMBOL) return false;
+    if (!is_text_type_id(type_id)) return false;
     const char* key_chars = key.get_chars();
     if (!key_chars) return false;
     *chars = key_chars;

@@ -1,8 +1,16 @@
 // lambda/lambda-decimal.hpp - Centralized decimal handling for Lambda
 // =====================================================================
-// This module handles all decimal operations including:
-// - Fixed-precision decimals (34 digits, suffix 'n')
-// - Unlimited-precision decimals (arbitrary precision, suffix 'N')
+// Backs both the `decimal` and `integer` value types on libmpdec.
+// `decimal` is ONE user-visible type with invisible storage tiers
+// (decimal128 layout for values that fit, unbounded above); `integer`
+// (BigInt counterpart) uses the unlimited context. The old n/N suffix
+// split is gone: `n` literals type by the lexical rule of
+// vibe/Lambda_Semantics_Number_Model.md §2.2 (no '.' and no negative
+// exponent → integer, otherwise decimal); `N` was retired from the
+// grammar. The two contexts below are arithmetic tools, not types:
+// the fixed context is the §2.4 division precision floor (34 digits
+// = IEEE 754-2008 decimal128, matching the TC39 Decimal proposal),
+// the unlimited context serves exact +/-/* and `integer` arithmetic.
 #pragma once
 
 // Forward declarations for mpdecimal types - mpdecimal.h is only included in lambda-decimal.cpp
@@ -45,6 +53,9 @@ mpd_context_t* decimal_unlimited_context();
 
 // Convert a double to its shortest round-trip decimal spelling.
 void lambda_double_to_shortest(double d, char* out, int out_size);
+
+// Convert a finite double to its shortest round-trip decimal spelling.
+void lambda_finite_double_to_shortest(double d, char* out, int out_size);
 
 // Convert numeric Items to the canonical decimal spelling used for hash keys.
 bool lambda_numeric_to_canonical_string(Item item, char* out, int out_size);

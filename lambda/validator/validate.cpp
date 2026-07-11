@@ -414,6 +414,73 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
     return result;
 }
 
+template <typename HasValueFn, typename GetValueFn>
+static void validate_shape_entries(SchemaValidator* validator, ValidationResult* result,
+                                   ShapeEntry* shape, HasValueFn has_value, GetValueFn get_value,
+                                   bool report_missing, bool check_null, bool push_name_scope) {
+    for (ShapeEntry* shape_entry = shape; shape_entry; shape_entry = shape_entry->next) {
+        if (!shape_entry->name) {
+            log_error("[VALIDATOR] ShapeEntry has NULL name pointer");
+            continue;
+        }
+        const char* field_name = shape_entry->name->str;
+
+        if (push_name_scope) {
+            PathScope scope(validator, *shape_entry->name);
+            bool field_exists = has_value(field_name);
+            if (!field_exists) {
+                if (report_missing && !is_type_optional(shape_entry->type)) {
+                    add_missing_field_error(result, validator, field_name);
+                    result->valid = false;
+                }
+                continue;
+            }
+
+            ItemReader field_value = get_value(field_name);
+            ConstItem field_item = field_value.item().to_const();
+            if (check_null && field_item.type_id() == LMD_TYPE_NULL) {
+                if (!is_type_optional(shape_entry->type)) {
+                    add_null_value_error(result, validator, field_name);
+                    result->valid = false;
+                }
+                continue;
+            }
+
+            log_debug("[VALIDATOR] Validating shape field '%s'", field_name);
+            ValidationResult* field_result = validate_against_type(validator, field_item, shape_entry->type);
+            if (field_result && !field_result->valid) {
+                merge_errors(result, field_result, validator);
+            }
+            continue;
+        }
+
+        bool field_exists = has_value(field_name);
+        if (!field_exists) {
+            if (report_missing && !is_type_optional(shape_entry->type)) {
+                add_missing_field_error(result, validator, field_name);
+                result->valid = false;
+            }
+            continue;
+        }
+
+        ItemReader field_value = get_value(field_name);
+        ConstItem field_item = field_value.item().to_const();
+        if (check_null && field_item.type_id() == LMD_TYPE_NULL) {
+            if (!is_type_optional(shape_entry->type)) {
+                add_null_value_error(result, validator, field_name);
+                result->valid = false;
+            }
+            continue;
+        }
+
+        log_debug("[VALIDATOR] Validating shape field '%s'", field_name);
+        ValidationResult* field_result = validate_against_type(validator, field_item, shape_entry->type);
+        if (field_result && !field_result->valid) {
+            merge_errors(result, field_result, validator);
+        }
+    }
+}
+
 ValidationResult* validate_against_map_type(SchemaValidator* validator, ConstItem item, TypeMap* map_type) {
     ValidationResult* result = create_validation_result(validator->get_pool());
 
@@ -434,56 +501,11 @@ ValidationResult* validate_against_map_type(SchemaValidator* validator, ConstIte
 
     // Use MapReader for type-safe access
     MapReader map = item_reader.asMap();
-    const Map* raw_map = item.map;
 
-    // Validate each field in the map shape
-    ShapeEntry* shape_entry = map_type->shape;
-    while (shape_entry) {
-        if (!shape_entry->name) {
-            log_error("[VALIDATOR] ShapeEntry has NULL name pointer");
-            shape_entry = shape_entry->next;
-            continue;
-        }
-        const char* field_name = shape_entry->name->str;
-
-        // Use PathScope for automatic path management
-        PathScope scope(validator, *shape_entry->name);
-
-        // Check if field exists in the map's structure
-        bool field_exists = raw_map && raw_map->has_field(field_name);
-
-        if (!field_exists) {
-            // Field is missing - check if it's optional
-            if (!is_type_optional(shape_entry->type)) {
-                add_missing_field_error(result, validator, field_name);
-                result->valid = false;
-            }
-        } else {
-            // Field exists - check if it's null
-            log_debug("[VALIDATOR] About to read map field '%s', raw_map=%p raw_map->type=%p raw_map->data=%p",
-                field_name, raw_map, raw_map ? raw_map->type : nullptr, raw_map ? raw_map->data : nullptr);
-            ItemReader field_value = map.get(field_name);
-            ConstItem field_item = field_value.item().to_const();
-
-            if (field_item.type_id() == LMD_TYPE_NULL) {
-                // Field is null - check if null is allowed
-                if (!is_type_optional(shape_entry->type)) {
-                    add_null_value_error(result, validator, field_name);
-                    result->valid = false;
-                }
-            } else {
-                // Field exists and is not null - validate its value
-                log_debug("[VALIDATOR] Validating map field '%s'", field_name);
-                ValidationResult* field_result = validate_against_type(validator, field_item, shape_entry->type);
-
-                if (field_result && !field_result->valid) {
-                    merge_errors(result, field_result, validator);
-                }
-            }
-        }
-
-        shape_entry = shape_entry->next;
-    }
+    validate_shape_entries(validator, result, map_type->shape,
+        [&map](const char* name) { return map.has(name); },
+        [&map](const char* name) { return map.get(name); },
+        true, true, true);
 
     return result;
 }
@@ -520,30 +542,10 @@ ValidationResult* validate_against_element_type(SchemaValidator* validator, Cons
     if (map_part->shape) {
         PathScope attr_scope(validator, PATH_ATTRIBUTE, (StrView){"attrs", 5});
 
-        // Validate each attribute
-        ShapeEntry* shape_entry = map_part->shape;
-        while (shape_entry) {
-            if (!shape_entry->name) {
-                log_error("[VALIDATOR] ShapeEntry has NULL name pointer");
-                shape_entry = shape_entry->next;
-                continue;
-            }
-            const char* attr_name = shape_entry->name->str;
-
-            if (element.has_attr(attr_name)) {
-                ItemReader attr_value = element.get_attr(attr_name);
-                ConstItem attr_item = attr_value.item().to_const();
-
-                log_debug("[VALIDATOR] Validating element attribute '%s'", attr_name);
-                ValidationResult* attr_result = validate_against_type(validator, attr_item, shape_entry->type);
-
-                if (attr_result && !attr_result->valid) {
-                    merge_errors(result, attr_result, validator);
-                }
-            }
-
-            shape_entry = shape_entry->next;
-        }
+        validate_shape_entries(validator, result, map_part->shape,
+            [&element](const char* name) { return element.has_attr(name); },
+            [&element](const char* name) { return element.get_attr(name); },
+            false, false, false);
     }
 
     // Validate element content length

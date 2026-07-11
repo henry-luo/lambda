@@ -50,50 +50,30 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
             (*toml)++; // skip 'u'
             tracker.advance(1);
 
-            // Validate we have 4 hex digits
-            for (int i = 0; i < 4; i++) {
-                if (!isxdigit((unsigned char)*(*toml + i))) {
-                    ctx.addError(esc_loc, "Invalid \\u escape sequence: expected 4 hex digits");
-                    return false;
-                }
+            const char* hex_start = *toml;
+            uint32_t codepoint = parse_hex_codepoint(toml, 4);
+            if (codepoint == 0xFFFFFFFF) {
+                ctx.addError(esc_loc, "Invalid \\u escape sequence: expected 4 hex digits");
+                return false;
             }
-
-            char hex[5] = {0};
-            strncpy(hex, *toml, 4);
-            (*toml) += 4; // skip 4 hex digits
-            tracker.advance(4);
-
-            int codepoint = (int)strtol(hex, NULL, 16);
+            tracker.advance((int)(*toml - hex_start));
 
             // check for surrogate pairs (used for characters > U+FFFF like emojis)
             // high surrogate: 0xD800-0xDBFF, low surrogate: 0xDC00-0xDFFF
             if (codepoint >= 0xD800 && codepoint <= 0xDBFF) {
                 // this is a high surrogate, look for low surrogate
                 if (**toml == '\\' && *(*toml + 1) == 'u') {
-                    // validate next 4 hex digits
-                    bool valid_low = true;
-                    for (int i = 0; i < 4; i++) {
-                        if (!isxdigit((unsigned char)*(*toml + 2 + i))) {
-                            valid_low = false;
-                            break;
-                        }
-                    }
-                    if (valid_low) {
-                        char hex_low[5] = {0};
-                        strncpy(hex_low, *toml + 2, 4);
-                        int low_surrogate = (int)strtol(hex_low, NULL, 16);
-                        uint32_t combined = decode_surrogate_pair((uint16_t)codepoint, (uint16_t)low_surrogate);
-                        if (combined != 0) {
-                            // valid surrogate pair - combine into full codepoint
-                            codepoint = (int)combined;
-                            (*toml) += 6; // skip \uXXXX for low surrogate
-                            tracker.advance(6);
-                        } else {
-                            // not a valid low surrogate, output replacement char
-                            codepoint = 0xFFFD;
-                        }
+                    const char* low_start = *toml;
+                    const char* low_pos = *toml + 2;
+                    uint32_t low_surrogate = parse_hex_codepoint(&low_pos, 4);
+                    uint32_t combined = decode_surrogate_pair((uint16_t)codepoint, (uint16_t)low_surrogate);
+                    if (low_surrogate != 0xFFFFFFFF && combined != 0) {
+                        // valid surrogate pair - combine into full codepoint
+                        codepoint = combined;
+                        *toml = low_pos;
+                        tracker.advance((int)(*toml - low_start));
                     } else {
-                        // lone high surrogate - output replacement character
+                        // not a valid low surrogate - output replacement char
                         codepoint = 0xFFFD;
                     }
                 } else {
@@ -111,26 +91,19 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
             (*toml)++; // skip 'U'
             tracker.advance(1);
 
-            // Validate we have 8 hex digits
-            for (int i = 0; i < 8; i++) {
-                if (!isxdigit((unsigned char)*(*toml + i))) {
-                    ctx.addError(esc_loc, "Invalid \\U escape sequence: expected 8 hex digits");
-                    return false;
-                }
+            const char* hex_start = *toml;
+            uint32_t codepoint = parse_hex_codepoint(toml, 8);
+            if (codepoint == 0xFFFFFFFF) {
+                ctx.addError(esc_loc, "Invalid \\U escape sequence: expected 8 hex digits");
+                return false;
             }
-
-            char hex[9] = {0};
-            strncpy(hex, *toml, 8);
-            (*toml) += 8; // skip 8 hex digits
-            tracker.advance(8);
-
-            long codepoint = strtol(hex, NULL, 16);
+            tracker.advance((int)(*toml - hex_start));
             if (codepoint > 0x10FFFF) {
-                ctx.addError(esc_loc, "Invalid Unicode codepoint: U+%08lX exceeds maximum U+10FFFF", codepoint);
+                ctx.addError(esc_loc, "Invalid Unicode codepoint: U+%08X exceeds maximum U+10FFFF", codepoint);
                 return false;
             }
 
-            append_codepoint_utf8(sb, (uint32_t)codepoint);
+            append_codepoint_utf8(sb, codepoint);
             (*toml)--; // Back up one since we'll increment at end
             tracker.advance(-1);
         } break;
@@ -165,6 +138,30 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
     (*toml)++; // move to next character
     tracker.advance(1);
     return true;
+}
+
+static Item parse_prefixed_integer(InputContext& ctx, const char** toml, int base,
+                                   const char* kind, SourceLocation loc) {
+    Input* input = ctx.input();
+    const char* start = *toml;
+    const char* digits = start + 2;
+    char* end;
+    int64_t val = strtol(digits, &end, base);
+    if (end == digits) {
+        ctx.addError(loc, "Invalid %s number: no digits after 0%c", kind, start[1]);
+        return {.item = ITEM_ERROR};
+    }
+
+    int64_t* lval = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
+    if (!lval) {
+        ctx.addError(loc, "Memory allocation failed for %s integer", kind);
+        return {.item = ITEM_ERROR};
+    }
+    *lval = val;
+    size_t consumed = end - start;
+    *toml = end;
+    ctx.tracker.advance(consumed);
+    return {.item = l2it(lval)};
 }
 
 static void skip_line(const char **toml, int *line_num) {
@@ -204,7 +201,7 @@ static String* parse_bare_key(InputContext& ctx, const char **toml) {
     SourceLocation key_loc = tracker.location();
 
     // Bare keys can contain A-Z, a-z, 0-9, -, _ (including pure numeric keys)
-    while (**toml && (isalnum((unsigned char)**toml) || **toml == '-' || **toml == '_')) {
+    while (**toml && (str_char_is_alnum(**toml) || **toml == '-' || **toml == '_')) {
         (*toml)++;
         tracker.advance(1);
     }
@@ -472,115 +469,41 @@ static String* parse_key(InputContext& ctx, const char **toml) {
 static Item parse_number(InputContext& ctx, const char **toml) {
     SourceTracker& tracker = ctx.tracker;
 
-    Input* input = ctx.input();
     char* end;
     const char *start = *toml;
     SourceLocation num_loc = tracker.location();
 
     // Handle special float values
     if (strncmp(*toml, "inf", 3) == 0) {
-        double *dval;
-        dval = (double*)pool_calloc(input->pool, sizeof(double));
-        if (dval == NULL) {
-            ctx.addError(num_loc, "Memory allocation failed for infinity value");
-            return {.item = ITEM_ERROR};
-        }
-        *dval = INFINITY;
         *toml += 3;
         tracker.advance(3);
-        return lambda_float_ptr_to_item(dval);
+        return ctx.builder.createFloat(INFINITY);
     }
     if (strncmp(*toml, "-inf", 4) == 0) {
-        double *dval;
-        dval = (double*)pool_calloc(input->pool, sizeof(double));
-        if (dval == NULL) {
-            ctx.addError(num_loc, "Memory allocation failed for negative infinity value");
-            return {.item = ITEM_ERROR};
-        }
-        *dval = -INFINITY;
         *toml += 4;
         tracker.advance(4);
-        return lambda_float_ptr_to_item(dval);
+        return ctx.builder.createFloat(-INFINITY);
     }
     if (strncmp(*toml, "nan", 3) == 0) {
-        double *dval;
-        dval = (double*)pool_calloc(input->pool, sizeof(double));
-        if (dval == NULL) {
-            ctx.addError(num_loc, "Memory allocation failed for NaN value");
-            return {.item = ITEM_ERROR};
-        }
-        *dval = NAN;
         *toml += 3;
         tracker.advance(3);
-        return lambda_float_ptr_to_item(dval);
+        return ctx.builder.createFloat(NAN);
     }
     if (strncmp(*toml, "-nan", 4) == 0) {
-        double *dval;
-        dval = (double*)pool_calloc(input->pool, sizeof(double));
-        if (dval == NULL) {
-            ctx.addError(num_loc, "Memory allocation failed for negative NaN value");
-            return {.item = ITEM_ERROR};
-        }
-        *dval = NAN;
         *toml += 4;
         tracker.advance(4);
-        return lambda_float_ptr_to_item(dval);
+        return ctx.builder.createFloat(NAN);
     }
 
     // Handle hex, octal, binary integers
     if (**toml == '0' && (*(*toml + 1) == 'x' || *(*toml + 1) == 'X')) {
-        int64_t val = strtol(start, &end, 16);
-        if (end == start + 2) {
-            ctx.addError(num_loc, "Invalid hexadecimal number: no digits after 0x");
-            return {.item = ITEM_ERROR};
-        }
-        int64_t *lval;
-        lval = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
-        if (lval == NULL) {
-            ctx.addError(num_loc, "Memory allocation failed for hexadecimal integer");
-            return {.item = ITEM_ERROR};
-        }
-        *lval = val;
-        size_t consumed = end - *toml;
-        *toml = end;
-        tracker.advance(consumed);
-        return {.item = l2it(lval)};
+        return parse_prefixed_integer(ctx, toml, 16, "hexadecimal", num_loc);
     }
     if (**toml == '0' && (*(*toml + 1) == 'o' || *(*toml + 1) == 'O')) {
-        int64_t val = strtol(start + 2, &end, 8);
-        if (end == start + 2) {
-            ctx.addError(num_loc, "Invalid octal number: no digits after 0o");
-            return {.item = ITEM_ERROR};
-        }
-        int64_t *lval;
-        lval = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
-        if (lval == NULL) {
-            ctx.addError(num_loc, "Memory allocation failed for octal integer");
-            return {.item = ITEM_ERROR};
-        }
-        *lval = val;
-        size_t consumed = end - *toml;
-        *toml = end;
-        tracker.advance(consumed);
-        return {.item = l2it(lval)};
+        return parse_prefixed_integer(ctx, toml, 8, "octal", num_loc);
     }
     if (**toml == '0' && (*(*toml + 1) == 'b' || *(*toml + 1) == 'B')) {
-        int64_t val = strtol(start + 2, &end, 2);
-        if (end == start + 2) {
-            ctx.addError(num_loc, "Invalid binary number: no digits after 0b");
-            return {.item = ITEM_ERROR};
-        }
-        int64_t *lval;
-        lval = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
-        if (lval == NULL) {
-            ctx.addError(num_loc, "Memory allocation failed for binary integer");
-            return {.item = ITEM_ERROR};
-        }
-        *lval = val;
-        size_t consumed = end - *toml;
-        *toml = end;
-        tracker.advance(consumed);
-        return {.item = l2it(lval)};
+        return parse_prefixed_integer(ctx, toml, 2, "binary", num_loc);
     }
 
     // Check if it's a float (contains . or e/E)
@@ -601,13 +524,7 @@ static Item parse_number(InputContext& ctx, const char **toml) {
     }
 
     if (is_float) {
-        double *dval;
-        dval = (double*)pool_calloc(input->pool, sizeof(double));
-        if (dval == NULL) {
-            ctx.addError(num_loc, "Memory allocation failed for float");
-            return {.item = ITEM_ERROR};
-        }
-        *dval = strtod(start, &end);
+        double dval = strtod(start, &end);
         if (end == start) {
             ctx.addError(num_loc, "Invalid float number format");
             return {.item = ITEM_ERROR};
@@ -615,7 +532,7 @@ static Item parse_number(InputContext& ctx, const char **toml) {
         size_t consumed = end - *toml;
         *toml = end;
         tracker.advance(consumed);
-        return lambda_float_ptr_to_item(dval);
+        return ctx.builder.createFloat(dval);
     } else {
         const char* token_end = temp;
         size_t token_len = (size_t)(token_end - start);
@@ -811,7 +728,7 @@ static Item parse_value(InputContext& ctx, const char **toml, int *line_num, int
             return (Item){.item = s2it(str)};
         }
         case 't':
-            if (strncmp(*toml, "true", 4) == 0 && !isalnum((unsigned char)*(*toml + 4))) {
+            if (strncmp(*toml, "true", 4) == 0 && !str_char_is_alnum(*(*toml + 4))) {
                 *toml += 4;
                 tracker.advance(4);
                 return {.item = b2it(true)};
@@ -819,7 +736,7 @@ static Item parse_value(InputContext& ctx, const char **toml, int *line_num, int
             ctx.addError(value_loc, "Invalid boolean: expected 'true'");
             return {.item = ITEM_ERROR};
         case 'f':
-            if (strncmp(*toml, "false", 5) == 0 && !isalnum((unsigned char)*(*toml + 5))) {
+            if (strncmp(*toml, "false", 5) == 0 && !str_char_is_alnum(*(*toml + 5))) {
                 *toml += 5;
                 tracker.advance(5);
                 return {.item = b2it(false)};
@@ -839,13 +756,13 @@ static Item parse_value(InputContext& ctx, const char **toml, int *line_num, int
             ctx.addError(value_loc, "Invalid value starting with 'n'");
             return {.item = ITEM_ERROR};
         case '-':
-            if (*((*toml) + 1) == 'i' || *((*toml) + 1) == 'n' || isdigit((unsigned char)*((*toml) + 1))) {
+            if (*((*toml) + 1) == 'i' || *((*toml) + 1) == 'n' || str_char_is_digit(*((*toml) + 1))) {
                 return parse_number(ctx, toml);
             }
             ctx.addError(value_loc, "Invalid negative number");
             return {.item = ITEM_ERROR};
         case '+':
-            if (isdigit((unsigned char)*((*toml) + 1))) {
+            if (str_char_is_digit(*((*toml) + 1))) {
                 return parse_number(ctx, toml);
             }
             ctx.addError(value_loc, "Invalid positive number");

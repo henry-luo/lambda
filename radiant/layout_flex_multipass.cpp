@@ -903,7 +903,10 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
 
                 if (!is_horizontal && item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO && item->bound->margin.right_type == CSS_VALUE_AUTO) {
                     // Cross-axis centering for column flex (horizontal is cross axis)
-                    float center_x = (container_width - item->width) / 2;
+                    float margin_start = 0.0f, margin_end = 0.0f;
+                    layout_resolve_auto_margin_pair(
+                        container_width, item->width, true, true, &margin_start, &margin_end);
+                    float center_x = margin_start;
                     if (flex_container->bound) {
                         center_x += flex_container->bound->padding.left;
                         if (flex_container->bound->border) {
@@ -915,7 +918,10 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
 
                 if (is_horizontal && item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO && item->bound->margin.bottom_type == CSS_VALUE_AUTO) {
                     // Cross-axis centering for row flex (vertical is cross axis)
-                    float center_y = (container_height - item->height) / 2;
+                    float margin_start = 0.0f, margin_end = 0.0f;
+                    layout_resolve_auto_margin_pair(
+                        container_height, item->height, true, true, &margin_start, &margin_end);
+                    float center_y = margin_start;
                     if (flex_container->bound) {
                         center_y += flex_container->bound->padding.top;
                         if (flex_container->bound->border) {

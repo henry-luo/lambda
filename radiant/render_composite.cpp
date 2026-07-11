@@ -1,11 +1,8 @@
 #include "render_composite.hpp"
 
+#include "../lib/math_utils.h"
 #include <math.h>
 #include <string.h>
-
-static inline uint32_t render_composite_clamp_u8(uint32_t value) {
-    return value > 255u ? 255u : value;
-}
 
 // --- CSS Blend Mode Functions (CSS Compositing and Blending Level 1) ---
 // All operate on normalized [0,1] channel values.
@@ -161,10 +158,10 @@ void render_composite_source_over_premul(ImageSurface* surface, const uint32_t* 
             uint32_t rg = ((src >> 8) & 0xFF) + ((((dst >> 8) & 0xFF) * inv_sa + 127) / 255);
             uint32_t rb = ((src >> 16) & 0xFF) + ((((dst >> 16) & 0xFF) * inv_sa + 127) / 255);
             pixels[(y0 + row) * pitch + (x0 + col)] =
-                (render_composite_clamp_u8(ra) << 24) |
-                (render_composite_clamp_u8(rb) << 16) |
-                (render_composite_clamp_u8(rg) << 8) |
-                render_composite_clamp_u8(rr);
+                (LMB_MIN(ra, 255u) << 24) |
+                (LMB_MIN(rb, 255u) << 16) |
+                (LMB_MIN(rg, 255u) << 8) |
+                LMB_MIN(rr, 255u);
         }
     }
 }
@@ -220,10 +217,10 @@ void render_composite_opacity(ImageSurface* surface, const uint32_t* backdrop,
             uint32_t rg = (rgp * 255u + ra / 2u) / ra;
             uint32_t rb = (rbp * 255u + ra / 2u) / ra;
             pixels[(y0 + row) * pitch + (x0 + col)] =
-                (render_composite_clamp_u8(ra) << 24) |
-                (render_composite_clamp_u8(rb) << 16) |
-                (render_composite_clamp_u8(rg) << 8) |
-                render_composite_clamp_u8(rr);
+                (LMB_MIN(ra, 255u) << 24) |
+                (LMB_MIN(rb, 255u) << 16) |
+                (LMB_MIN(rg, 255u) << 8) |
+                LMB_MIN(rr, 255u);
         }
     }
 }

@@ -50,21 +50,6 @@ struct JsUtilFunctionView {
 #define JS_UTIL_FUNC_FLAG_ASYNC 128
 
 // Helper: make JS undefined
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)len);
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
 // =============================================================================
 // util.format(...args) — simplified printf-style formatting
 // =============================================================================

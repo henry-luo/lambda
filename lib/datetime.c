@@ -60,30 +60,15 @@ DateTime* datetime_from_unix(Pool* pool, int64_t unix_timestamp) {
     return dt;
 }
 
-/* Helper to calculate days since Unix epoch (1970-01-01) */
-static int64_t days_since_epoch(int year, int month, int day) {
-    /* Days in each month (non-leap year) */
-    static const int month_days[] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
-
-    int64_t days = 0;
-
-    /* Add days for complete years */
-    for (int y = 1970; y < year; y++) {
-        days += is_leap_year(y) ? 366 : 365;
-    }
-
-    /* Add days for complete months in the current year */
-    days += month_days[month - 1];
-
-    /* Add extra day if it's a leap year and we're past February */
-    if (is_leap_year(year) && month > 2) {
-        days++;
-    }
-
-    /* Add the day of month (subtract 1 because day is 1-based) */
-    days += day - 1;
-
-    return days;
+int64_t datetime_days_from_civil(int64_t year, unsigned month, unsigned day) {
+    // O(1) civil-date conversion handles pre-1970 years; the old forward loop
+    // produced 0 day offset for every valid date before the Unix epoch.
+    year -= month <= 2;
+    const int64_t era = (year >= 0 ? year : year - 399) / 400;
+    const unsigned yoe = (unsigned)(year - era * 400);
+    const unsigned doy = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + (int64_t)doe - 719468;
 }
 
 int64_t datetime_to_unix(DateTime* dt) {
@@ -94,7 +79,7 @@ int64_t datetime_to_unix(DateTime* dt) {
     int day = dt->day;
 
     /* Calculate days since Unix epoch */
-    int64_t days = days_since_epoch(year, month, day);
+    int64_t days = datetime_days_from_civil(year, (unsigned)month, (unsigned)day);
 
     /* Convert to seconds and add time components */
     int64_t seconds = days * 86400; /* 24 * 60 * 60 */

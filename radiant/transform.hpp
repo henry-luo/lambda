@@ -45,23 +45,6 @@ inline RdtMatrix compute_transform_matrix(TransformFunction* functions,
 
     if (!functions) return result;
 
-    // Matrix multiplication helper: result = a * b
-    auto matrix_multiply = [](const RdtMatrix& a, const RdtMatrix& b) -> RdtMatrix {
-        return {
-            a.e11 * b.e11 + a.e12 * b.e21 + a.e13 * b.e31,
-            a.e11 * b.e12 + a.e12 * b.e22 + a.e13 * b.e32,
-            a.e11 * b.e13 + a.e12 * b.e23 + a.e13 * b.e33,
-
-            a.e21 * b.e11 + a.e22 * b.e21 + a.e23 * b.e31,
-            a.e21 * b.e12 + a.e22 * b.e22 + a.e23 * b.e32,
-            a.e21 * b.e13 + a.e22 * b.e23 + a.e23 * b.e33,
-
-            a.e31 * b.e11 + a.e32 * b.e21 + a.e33 * b.e31,
-            a.e31 * b.e12 + a.e32 * b.e22 + a.e33 * b.e32,
-            a.e31 * b.e13 + a.e32 * b.e23 + a.e33 * b.e33
-        };
-    };
-
     if (perspective_distance > 0.0f) {
         bool has_projected_3d = false;
         for (TransformFunction* tf = functions; tf; tf = tf->next) {
@@ -175,7 +158,7 @@ inline RdtMatrix compute_transform_matrix(TransformFunction* functions,
                 0.0f, 1.0f / height, -y0 / height,
                 0.0f, 0.0f, 1.0f
             };
-            return matrix_multiply(unit_to_quad, rect_to_unit);
+            return rdt_matrix_multiply(&unit_to_quad, &rect_to_unit);
         }
     }
 
@@ -348,11 +331,11 @@ inline RdtMatrix compute_transform_matrix(TransformFunction* functions,
                 break;
         }
 
-        result = matrix_multiply(result, m);
+        result = rdt_matrix_multiply(&result, &m);
     }
 
     // Apply to_origin (translate back by -origin)
-    result = matrix_multiply(result, to_origin);
+    result = rdt_matrix_multiply(&result, &to_origin);
 
     return result;
 }

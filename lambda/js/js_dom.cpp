@@ -64,9 +64,6 @@ extern Item js_make_number(double d);
 #include "../../lib/mem.h"
 
 // JS undefined helpers (matching js_runtime.cpp encoding)
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
 static inline bool is_js_undefined(Item val) {
     return get_type_id(val) == LMD_TYPE_UNDEFINED;
 }

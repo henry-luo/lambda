@@ -1498,13 +1498,7 @@ void line_init(LayoutContext* lycon, float left, float right) {
 }
 
 static bool fixup_view_is_out_of_flow(View* view) {
-    if (!view) return false;
-    DomElement* elem = lam::dom_as<DOM_NODE_ELEMENT>(static_cast<DomNode*>(view));
-    if (!elem || !elem->position) return false;
-    return elem->position->position == CSS_VALUE_ABSOLUTE ||
-        elem->position->position == CSS_VALUE_FIXED ||
-        elem->position->float_prop == CSS_VALUE_LEFT ||
-        elem->position->float_prop == CSS_VALUE_RIGHT;
+    return layout_view_is_out_of_flow(view);
 }
 
 static void align_forced_break_rect_to_line_baseline(LayoutContext* lycon) {

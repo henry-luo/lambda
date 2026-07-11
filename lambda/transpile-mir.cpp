@@ -671,16 +671,7 @@ static void register_native_func_info(MirTranspiler* mt, const char* name, Nativ
 // Check if a parameter type qualifies for native (unboxed) representation.
 // Only types that map to a different native type than boxed Item are worth unboxing.
 static bool mir_is_native_param_type(TypeId tid) {
-    switch (tid) {
-    case LMD_TYPE_INT:
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_BOOL:
-    case LMD_TYPE_STRING:
-    case LMD_TYPE_INT64:
-        return true;
-    default:
-        return false;
-    }
+    return is_native_param_type_id(tid);
 }
 
 static TypeId resolve_declared_param_type(AstNamedNode* param, TypeParam* type_param) {
@@ -1390,7 +1381,7 @@ static MIR_reg_t emit_coerce_value_to_declared(MirTranspiler* mt, MIR_reg_t val,
 }
 
 static MIR_reg_t emit_bitwise_i64_arg(MirTranspiler* mt, MIR_reg_t val, TypeId tid) {
-    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64) return val;
+    if (is_integer_type_id(tid)) return val;
     MIR_reg_t boxed = emit_box(mt, val, tid);
     return emit_call_1(mt, "_barg", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
 }
@@ -2367,8 +2358,7 @@ static inline bool comparison_vectorizes(int op, TypeId lt, TypeId rt) {
 }
 
 static inline bool eq_is_numeric_type(TypeId tid) {
-    return tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT ||
-        tid == LMD_TYPE_DECIMAL || tid == LMD_TYPE_NUM_SIZED || tid == LMD_TYPE_UINT64;
+    return is_numeric_type_id(tid);
 }
 
 static inline bool eq_is_sequence_type(TypeId tid) {
@@ -2584,8 +2574,8 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
                 op_ck == OPERATOR_IN || op_ck == OPERATOR_AT)
                 return LMD_TYPE_BOOL;
             if (op_ck >= OPERATOR_LT && op_ck <= OPERATOR_GE) {
-                bool l_native = (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64 || lt == LMD_TYPE_FLOAT);
-                bool r_native = (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64 || rt == LMD_TYPE_FLOAT);
+                bool l_native = (is_native_numeric_type_id(lt));
+                bool r_native = (is_native_numeric_type_id(rt));
                 return (l_native && r_native) ? LMD_TYPE_BOOL : LMD_TYPE_ANY;
             }
         }
@@ -2600,8 +2590,7 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         // transpile_assign_stam to treat the tagged Item as a raw int → infinite loops.
         {
             bool has_int64 = (lt == LMD_TYPE_INT64 || rt == LMD_TYPE_INT64);
-            bool other_int = (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64) &&
-                             (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64);
+            bool other_int = is_integer_type_id(lt) && is_integer_type_id(rt);
             if (has_int64 && other_int) {
                 int op64 = bi->op;
                 if (op64 == OPERATOR_ADD || op64 == OPERATOR_SUB || op64 == OPERATOR_MUL ||
@@ -2659,8 +2648,7 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         AstFieldNode* fn = (AstFieldNode*)node;
         TypeId obj_eff = get_effective_type(mt, fn->object);
         TypeId idx_eff = get_effective_type(mt, fn->field);
-        if (obj_eff == LMD_TYPE_ARRAY_NUM &&
-            (idx_eff == LMD_TYPE_INT || idx_eff == LMD_TYPE_INT64)) {
+        if (obj_eff == LMD_TYPE_ARRAY_NUM && is_integer_type_id(idx_eff)) {
             // try to determine element type from the object variable
             AstNode* obj_unwrapped = fn->object;
             while (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_PRIMARY)
@@ -2701,7 +2689,7 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         } else if (un->op == OPERATOR_NOT) {
             return LMD_TYPE_BOOL;
         } else if (un->op == OPERATOR_POS) {
-            if (operand_eff == LMD_TYPE_INT || operand_eff == LMD_TYPE_INT64 ||
+            if (is_integer_type_id(operand_eff) ||
                 operand_eff == LMD_TYPE_NUM_SIZED || operand_eff == LMD_TYPE_UINT64 ||
                 operand_eff == LMD_TYPE_FLOAT)
                 return operand_eff;
@@ -3332,7 +3320,7 @@ static MIR_reg_t transpile_unary(MirTranspiler* mt, AstUnaryNode* un) {
         return emit_uext8(mt, bool_result);
     }
     case OPERATOR_POS: {
-        if (operand_tid == LMD_TYPE_INT || operand_tid == LMD_TYPE_INT64 || operand_tid == LMD_TYPE_FLOAT) {
+        if (is_native_numeric_type_id(operand_tid)) {
             // No-op for numeric types
             MIR_reg_t operand = transpile_expr(mt, un->operand);
             return operand;
@@ -3840,7 +3828,7 @@ static MIR_reg_t mir_finalize_for_output(MirTranspiler* mt, AstForNode* for_node
         if (has_offset) {
             MIR_reg_t off_val = transpile_expr(mt, for_node->offset);
             TypeId off_tid = get_effective_type(mt, for_node->offset);
-            MIR_reg_t off_raw = off_tid == LMD_TYPE_INT || off_tid == LMD_TYPE_INT64
+            MIR_reg_t off_raw = is_integer_type_id(off_tid)
                 ? off_val : emit_unbox(mt, emit_box(mt, off_val, off_tid), LMD_TYPE_INT);
             MIR_reg_t off_masked = emit_unbox_int_mask(mt, off_raw);
             emit_call_void_2(mt, "array_drop_inplace", MIR_T_P, MIR_new_reg_op(mt->ctx, output),
@@ -3849,7 +3837,7 @@ static MIR_reg_t mir_finalize_for_output(MirTranspiler* mt, AstForNode* for_node
         if (has_limit) {
             MIR_reg_t lim_val = transpile_expr(mt, for_node->limit);
             TypeId lim_tid = get_effective_type(mt, for_node->limit);
-            MIR_reg_t lim_raw = lim_tid == LMD_TYPE_INT || lim_tid == LMD_TYPE_INT64
+            MIR_reg_t lim_raw = is_integer_type_id(lim_tid)
                 ? lim_val : emit_unbox(mt, emit_box(mt, lim_val, lim_tid), LMD_TYPE_INT);
             MIR_reg_t lim_masked = emit_unbox_int_mask(mt, lim_raw);
             emit_call_void_2(mt, for_node->limit_from_end ? "array_limit_last_inplace" : "array_limit_inplace",
@@ -4255,7 +4243,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
             if (has_offset) {
                 MIR_reg_t off_val = transpile_expr(mt, for_node->offset);
                 TypeId off_tid = get_effective_type(mt, for_node->offset);
-                MIR_reg_t off_raw = off_tid == LMD_TYPE_INT || off_tid == LMD_TYPE_INT64
+                MIR_reg_t off_raw = is_integer_type_id(off_tid)
                     ? off_val : emit_unbox(mt, emit_box(mt, off_val, off_tid), LMD_TYPE_INT);
                 MIR_reg_t off_masked = emit_unbox_int_mask(mt, off_raw);
                 emit_call_void_2(mt, "array_drop_inplace", MIR_T_P, MIR_new_reg_op(mt->ctx, output),
@@ -4264,7 +4252,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
             if (has_limit) {
                 MIR_reg_t lim_val = transpile_expr(mt, for_node->limit);
                 TypeId lim_tid = get_effective_type(mt, for_node->limit);
-                MIR_reg_t lim_raw = lim_tid == LMD_TYPE_INT || lim_tid == LMD_TYPE_INT64
+                MIR_reg_t lim_raw = is_integer_type_id(lim_tid)
                     ? lim_val : emit_unbox(mt, emit_box(mt, lim_val, lim_tid), LMD_TYPE_INT);
                 MIR_reg_t lim_masked = emit_unbox_int_mask(mt, lim_raw);
                 emit_call_void_2(mt, for_node->limit_from_end ? "array_limit_last_inplace" : "array_limit_inplace",
@@ -4751,7 +4739,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                                 AstNode* arg2 = call->argument ? call->argument->next : nullptr;
                                 if (arg2) {
                                     TypeId fill_val_tid = get_effective_type(mt, arg2);
-                                    if (fill_val_tid == LMD_TYPE_INT || fill_val_tid == LMD_TYPE_INT64) {
+                                    if (is_integer_type_id(fill_val_tid)) {
                                         var_tid = LMD_TYPE_ARRAY_NUM;
                                         fill_elem_type = LMD_TYPE_INT;
                                     } else if (fill_val_tid == LMD_TYPE_FLOAT) {
@@ -5931,7 +5919,7 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
                     MIR_reg_t val;
                     if (val_tid == LMD_TYPE_FLOAT) {
                         val = transpile_expr(mt, value_node);
-                    } else if (val_tid == LMD_TYPE_INT || val_tid == LMD_TYPE_INT64) {
+                    } else if (is_integer_type_id(val_tid)) {
                         MIR_reg_t int_val = transpile_expr(mt, value_node);
                         val = new_reg(mt, "i2d", MIR_T_D);
                         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D,
@@ -5949,13 +5937,11 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_D, (int)offset, live_data, 0, 1),
                         MIR_new_reg_op(mt->ctx, val)));
-                } else if (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64 ||
-                           field_type == LMD_TYPE_BOOL) {
+                } else if (is_integer_type_id(field_type) || field_type == LMD_TYPE_BOOL) {
                     // Store native int/bool at data + offset
                     TypeId val_tid = get_effective_type(mt, value_node);
                     MIR_reg_t val;
-                    if (val_tid == LMD_TYPE_INT || val_tid == LMD_TYPE_INT64 ||
-                        val_tid == LMD_TYPE_BOOL) {
+                    if (is_integer_type_id(val_tid) || val_tid == LMD_TYPE_BOOL) {
                         val = transpile_expr(mt, value_node);
                     } else {
                         MIR_reg_t boxed = transpile_box_item(mt, value_node);
@@ -6378,7 +6364,7 @@ static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
         MIR_reg_t val;
         if (val_tid == LMD_TYPE_FLOAT) {
             val = transpile_expr(mt, value);
-        } else if (val_tid == LMD_TYPE_INT || val_tid == LMD_TYPE_INT64) {
+        } else if (is_integer_type_id(val_tid)) {
             // int → float promotion
             MIR_reg_t int_val = transpile_expr(mt, value);
             val = new_reg(mt, "i2d", MIR_T_D);
@@ -6396,11 +6382,11 @@ static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
         return;
     }
 
-    if (type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_BOOL) {
+    if (is_integer_type_id(type_id) || type_id == LMD_TYPE_BOOL) {
         // store native int64 value
         TypeId val_tid = get_effective_type(mt, value);
         MIR_reg_t val;
-        if (val_tid == LMD_TYPE_INT || val_tid == LMD_TYPE_INT64 || val_tid == LMD_TYPE_BOOL) {
+        if (is_integer_type_id(val_tid) || val_tid == LMD_TYPE_BOOL) {
             val = transpile_expr(mt, value);
         } else {
             // fallback: box then unbox
@@ -6663,8 +6649,8 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     // Returns NATIVE INT (not boxed), enabling native arithmetic downstream.
     // ======================================================================
     if (obj_tid == LMD_TYPE_ARRAY_NUM &&
-        (obj_elem_type == LMD_TYPE_INT || obj_elem_type == LMD_TYPE_INT64) &&
-        (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64 || idx_tid == LMD_TYPE_ANY)) {
+        is_integer_type_id(obj_elem_type) &&
+        (is_integer_type_id(idx_tid) || idx_tid == LMD_TYPE_ANY)) {
         MIR_reg_t idx_native;
         if (idx_tid == LMD_TYPE_ANY) {
             MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
@@ -6738,7 +6724,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     // ======================================================================
     if (obj_tid == LMD_TYPE_ARRAY_NUM &&
         obj_elem_type == LMD_TYPE_FLOAT &&
-        (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64 || idx_tid == LMD_TYPE_ANY)) {
+        (is_integer_type_id(idx_tid) || idx_tid == LMD_TYPE_ANY)) {
         MIR_reg_t idx_native;
         if (idx_tid == LMD_TYPE_ANY) {
             MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
@@ -6810,8 +6796,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     // to generic Array in-place (e.g., arr[1] = 3.14 on an int array).
     // P4-3.2: nested_int now returns NATIVE INT (matching get_effective_type).
     // ======================================================================
-    if (obj_tid == LMD_TYPE_ARRAY &&
-        (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64)) {
+    if (obj_tid == LMD_TYPE_ARRAY && is_integer_type_id(idx_tid)) {
         // Check if AST nested type suggests this was originally an int array
         Type* obj_type = field_node->object ? field_node->object->type : nullptr;
         bool nested_int = false;
@@ -7077,7 +7062,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     // Returns NATIVE INT (AST type for ARRAY_NUM[*] is always INT).
     // ======================================================================
     if (obj_tid == LMD_TYPE_ARRAY_NUM &&
-        (obj_elem_type == LMD_TYPE_INT || obj_elem_type == LMD_TYPE_INT64) &&
+        is_integer_type_id(obj_elem_type) &&
         idx_tid == LMD_TYPE_ANY) {
         MIR_reg_t boxed_field = transpile_box_item(mt, field_node->field);
         MIR_reg_t idx_native = emit_unbox(mt, boxed_field, LMD_TYPE_INT);  // it2i
@@ -7655,7 +7640,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                 MIR_reg_t a1 = emit_unbox_container(mt, transpile_expr(mt, arg));
                 return emit_call_1(mt, "fn_len_a", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }
-            if (arg_tid == LMD_TYPE_STRING || arg_tid == LMD_TYPE_SYMBOL) {
+            if (is_text_type_id(arg_tid)) {
                 MIR_reg_t a1 = transpile_expr(mt, arg);
                 return emit_call_1(mt, "fn_len_s", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }
@@ -7901,7 +7886,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             if (c_ret_tid == LMD_TYPE_ANY && \
                 (call_expr_tid == LMD_TYPE_FLOAT || call_expr_tid == LMD_TYPE_INT || \
                  call_expr_tid == LMD_TYPE_BOOL || call_expr_tid == LMD_TYPE_INT64 || \
-                 call_expr_tid == LMD_TYPE_STRING || call_expr_tid == LMD_TYPE_SYMBOL)) { \
+                 is_text_type_id(call_expr_tid))) { \
                 result = emit_unbox(mt, result, call_expr_tid); \
             }
 
@@ -9188,8 +9173,7 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
         // INT and INT64 are both raw int64 in MIR registers (MIR_T_I64) —
         // treat them as compatible for direct move. This prevents re-boxing
         // when e.g. len() (INT64) result participates in INT arithmetic.
-        bool same_int_family = (var_tid == LMD_TYPE_INT || var_tid == LMD_TYPE_INT64) &&
-                               (val_tid == LMD_TYPE_INT || val_tid == LMD_TYPE_INT64);
+        bool same_int_family = is_integer_type_id(var_tid) && is_integer_type_id(val_tid);
         if (var_tid == LMD_TYPE_NUM_SIZED) {
             MIR_reg_t boxed = emit_box(mt, val, val_tid);
             MIR_reg_t coerced = emit_call_2(mt, "coerce_num_sized", MIR_T_I64,
@@ -9253,7 +9237,7 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
                 var->mir_type = MIR_T_I64;
             }
         } else if (val_tid == LMD_TYPE_ANY &&
-                   (var_tid == LMD_TYPE_INT || var_tid == LMD_TYPE_INT64 ||
+                   (is_integer_type_id(var_tid) ||
                     var_tid == LMD_TYPE_FLOAT || var_tid == LMD_TYPE_BOOL ||
                     var_tid == LMD_TYPE_STRING)) {
             // Value is boxed (e.g., from IDIV/MOD runtime call) but variable
@@ -9511,8 +9495,8 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             }
             if (is_elementwise_comparison_op(op)) return val;  // scalar keyword compare returns boxed bool
             if (op == OPERATOR_EQ || op == OPERATOR_NE) return emit_box_bool(mt, val);
-            bool l_native = (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64 || lt == LMD_TYPE_FLOAT);
-            bool r_native = (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64 || rt == LMD_TYPE_FLOAT);
+            bool l_native = (is_native_numeric_type_id(lt));
+            bool r_native = (is_native_numeric_type_id(rt));
             if (l_native && r_native) return emit_box_bool(mt, val);
             return val;  // fn_lt/gt/le/ge fallback already returned a boxed Item
         }
@@ -9901,7 +9885,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             MIR_reg_t idx = transpile_expr(mt, ca->key);
             TypeId idx_tid = get_effective_type(mt, ca->key);
             MIR_reg_t idx_int;
-            if (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64) {
+            if (is_integer_type_id(idx_tid)) {
                 idx_int = idx;
             } else {
                 idx_int = emit_unbox(mt, idx, LMD_TYPE_INT);
@@ -9941,7 +9925,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         MIR_reg_t idx = transpile_expr(mt, ca->key);
         TypeId idx_tid = get_effective_type(mt, ca->key);
         MIR_reg_t idx_int;
-        if (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64) {
+        if (is_integer_type_id(idx_tid)) {
             idx_int = idx;
         } else {
             idx_int = emit_unbox(mt, idx, LMD_TYPE_INT);
@@ -9970,8 +9954,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         // No runtime type check — direct inline store to items[idx].
         // ==================================================================
         if (obj_tid == LMD_TYPE_ARRAY_NUM &&
-            (assign_obj_elem == LMD_TYPE_INT || assign_obj_elem == LMD_TYPE_INT64) &&
-            (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64) &&
+            is_integer_type_id(assign_obj_elem) &&
+            is_integer_type_id(idx_tid) &&
             val_tid == LMD_TYPE_INT) {
             MIR_reg_t val_native = transpile_expr(mt, ca->value);
 
@@ -10037,7 +10021,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         // ==================================================================
         // Runtime type-check path: INT index + INT value, unknown container type
         // ==================================================================
-        else if ((idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64) &&
+        else if (is_integer_type_id(idx_tid) &&
                  val_tid == LMD_TYPE_INT) {
             MIR_reg_t val_native = transpile_expr(mt, ca->value);
 
@@ -10151,7 +10135,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         // ==================================================================
         else if (obj_tid == LMD_TYPE_ARRAY_NUM &&
                  assign_obj_elem == LMD_TYPE_FLOAT &&
-                 (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64) &&
+                 is_integer_type_id(idx_tid) &&
                  val_tid == LMD_TYPE_FLOAT) {
             MIR_reg_t val_native = transpile_expr(mt, ca->value);
 
@@ -12068,7 +12052,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 
                 // Unbox to native type if known
                 TypeId ftid = se->type ? se->type->type_id : LMD_TYPE_ANY;
-                if (ftid == LMD_TYPE_INT || ftid == LMD_TYPE_INT64 || ftid == LMD_TYPE_BOOL) {
+                if (is_integer_type_id(ftid) || ftid == LMD_TYPE_BOOL) {
                     MIR_reg_t unboxed = emit_unbox(mt, field_val, ftid);
                     set_var(mt, field_name, unboxed, type_to_mir(ftid), ftid);
                 } else if (ftid == LMD_TYPE_FLOAT) {

@@ -12,7 +12,6 @@
 #endif
 
 // Common function declarations
-Item create_item_from_field_data(void* field_data, TypeId type_id);
 void format_number(StringBuf* sb, Item item);
 
 // Format function declarations — all return String* (canonical public API)

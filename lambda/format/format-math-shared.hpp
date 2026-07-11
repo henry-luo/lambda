@@ -68,4 +68,17 @@ static void format_math_root(StringBuf* sb, const ElementReader& elem, int depth
     format_children(sb, elem, depth, " ");
 }
 
+struct MathTagDispatch {
+    const char* tag;
+    int slot;
+};
+
+static int lookup_math_tag_slot(const MathTagDispatch* table, const char* tag, int fallback_slot) {
+    if (!table || !tag) return fallback_slot;
+    for (const MathTagDispatch* entry = table; entry->tag; entry++) {
+        if (strcmp(tag, entry->tag) == 0) return entry->slot;
+    }
+    return fallback_slot;
+}
+
 #endif // FORMAT_MATH_SHARED_HPP

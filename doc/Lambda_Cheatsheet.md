@@ -113,8 +113,8 @@ type Vec {
 42n       // Arbitrary precision integer
 3.14      // Float
 1.5e-10   // Scientific notation
-123.45n   // Decimal
-1e-3n     // Decimal (negative exponent)
+123.45m   // Decimal
+1e-3m     // Decimal (negative exponent)
 inf  nan  // Special values
 0xFF      // hexdecimal literal for int value
 

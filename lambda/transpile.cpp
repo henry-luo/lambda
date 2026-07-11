@@ -170,15 +170,14 @@ static void emit_current_func_error_return(Transpiler* tp) {
     }
     Type* ret = fn_type ? fn_type->returned : nullptr;
     TypeId ret_tid = ret ? ret->type_id : LMD_TYPE_ANY;
-    if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_INT64) {
-        strbuf_append_str(tp->code_buf, "return 0;");
-    } else if (ret_tid == LMD_TYPE_FLOAT) {
-        strbuf_append_str(tp->code_buf, "return 0.0;");
-    } else if (ret_tid == LMD_TYPE_BOOL) {
-        strbuf_append_str(tp->code_buf, "return false;");
-    } else {
-        strbuf_append_str(tp->code_buf, "return ITEM_ERROR;");
+    const TypeBoxInfo* info = get_box_info(ret_tid);
+    if (info && info->zero_value) {
+        strbuf_append_str(tp->code_buf, "return ");
+        strbuf_append_str(tp->code_buf, info->zero_value);
+        strbuf_append_char(tp->code_buf, ';');
+        return;
     }
+    strbuf_append_str(tp->code_buf, "return ITEM_ERROR;");
 }
 
 // Check if the callee of a call node returns RetItem.
@@ -322,7 +321,7 @@ static bool can_use_native_comparison(AstBinaryNode* bi_node, bool is_equality_o
 
     // Fast path for same types
     if (left_type == right_type) {
-        if (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT) {
+        if (is_native_numeric_type_id(left_type)) {
             return true;
         }
         // Bool only allowed for equality (==, !=), not ordering (<, <=, >, >=)
@@ -333,8 +332,8 @@ static bool can_use_native_comparison(AstBinaryNode* bi_node, bool is_equality_o
     }
 
     // Fast path for int/int64/float combinations (C handles promotion)
-    bool left_numeric = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT);
-    bool right_numeric = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 || right_type == LMD_TYPE_FLOAT);
+    bool left_numeric = is_native_numeric_type_id(left_type);
+    bool right_numeric = is_native_numeric_type_id(right_type);
 
     return left_numeric && right_numeric;
 }
@@ -344,9 +343,7 @@ static bool can_use_native_comparison(AstBinaryNode* bi_node, bool is_equality_o
 // Type helpers, bitwise arg emission, and native math checks are in transpile-call.cpp
 
 // Helper to check if type is numeric (int, int64, or float) — also used in comparison transpilation
-static inline bool is_numeric_type(TypeId t) {
-    return t == LMD_TYPE_INT || t == LMD_TYPE_INT64 || t == LMD_TYPE_FLOAT;
-}
+static inline bool is_numeric_type(TypeId t) { return is_native_numeric_type_id(t); }
 
 static inline bool is_elementwise_comparison_op(Operator op) {
     return op >= OPERATOR_ELEM_EQ && op <= OPERATOR_ELEM_GE;
@@ -953,7 +950,7 @@ static bool binary_already_returns_item(AstNode* node) {
     case OPERATOR_SUB:
     case OPERATOR_MUL: {
         // Same numeric type → native C op → returns raw value
-        if (lt == rt && (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64 || lt == LMD_TYPE_FLOAT)) {
+        if (lt == rt && (is_native_numeric_type_id(lt))) {
             return false;
         }
         // Both in numeric range → native C op
@@ -1472,7 +1469,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                             write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node,
                                 (AstImportNode*)ident_node->entry->import);
                             strbuf_append_char(tp->code_buf, ')');
-                        } else if (expected_tid == LMD_TYPE_STRING || expected_tid == LMD_TYPE_SYMBOL ||
+                        } else if (is_text_type_id(expected_tid) ||
                                    expected_tid == LMD_TYPE_BINARY) {
                             strbuf_append_str(tp->code_buf, "it2s(");
                             write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node,
@@ -1693,7 +1690,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     }
     else if (bi_node->op == OPERATOR_ADD) {
         if (left_type == right_type) {
-            if (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT) {
+            if (is_native_numeric_type_id(left_type)) {
                 strbuf_append_str(tp->code_buf, "(");
                 transpile_expr(tp, bi_node->left);
                 strbuf_append_char(tp->code_buf, '+');
@@ -2083,7 +2080,7 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
         // at the C level (e.g., fn_string() returns String* but fn_join2() returns Item),
         // causing "incompatible types in cond-expression" errors in C2MIR.
         TypeId tid = then_type->type_id;
-        if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL) {
+        if (is_native_numeric_type_id(tid) || tid == LMD_TYPE_BOOL) {
             need_boxing = false;
         }
     }
@@ -2846,7 +2843,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 const char* arr_decl;
                 if (is_range) {
                     arr_decl = " Range *rng=";
-                } else if (expr_type->type_id == LMD_TYPE_ARRAY_NUM || nested_type_id == LMD_TYPE_INT || nested_type_id == LMD_TYPE_INT64 || nested_type_id == LMD_TYPE_FLOAT) {
+                } else if (expr_type->type_id == LMD_TYPE_ARRAY_NUM || is_native_numeric_type_id(nested_type_id)) {
                     arr_decl = " ArrayNum *arr=";
                 } else if (is_generic_array) {
                     arr_decl = " Array *arr=";
@@ -4697,7 +4694,7 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
                         strbuf_append_str(tp->code_buf, "_");
                     }
                     strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
-                    if (ftype == LMD_TYPE_INT || ftype == LMD_TYPE_INT64 || ftype == LMD_TYPE_FLOAT || ftype == LMD_TYPE_BOOL) {
+                    if (is_native_numeric_type_id(ftype) || ftype == LMD_TYPE_BOOL) {
                         strbuf_append_char(tp->code_buf, ')');
                     }
                     strbuf_append_str(tp->code_buf, ");");
@@ -5878,7 +5875,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     // Check if field type is numeric (addressing the TODO comment)
     // Allow ANY-typed fields through when object is a known array type —
     // the fast paths below will unbox the index with it2i()
-    bool field_is_numeric = (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64 || field_type == LMD_TYPE_FLOAT);
+    bool field_is_numeric = (is_native_numeric_type_id(field_type));
     bool object_is_typed_array = (object_type == LMD_TYPE_ARRAY_NUM
         || object_type == LMD_TYPE_ARRAY);
     if (!field_is_numeric && field_type != LMD_TYPE_ANY) {
@@ -6815,7 +6812,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
                     strbuf_append_str(tp->code_buf, "fn_member(self_item, s2it(heap_create_name(\"");
                     strbuf_append_str_n(tp->code_buf, fname, flen);
                     strbuf_append_str(tp->code_buf, "\")))");
-                    if (ftid == LMD_TYPE_INT || ftid == LMD_TYPE_INT64 || ftid == LMD_TYPE_FLOAT ||
+                    if (is_native_numeric_type_id(ftid) ||
                         ftid == LMD_TYPE_BOOL || ftid == LMD_TYPE_STRING) {
                         strbuf_append_char(tp->code_buf, ')');  // close unbox call
                     }
@@ -6968,7 +6965,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
             // Box scalar types when returning as Item
             needs_boxing = (body_type_id == LMD_TYPE_INT || body_type_id == LMD_TYPE_INT64 ||
                            body_type_id == LMD_TYPE_FLOAT || body_type_id == LMD_TYPE_BOOL ||
-                           body_type_id == LMD_TYPE_STRING || body_type_id == LMD_TYPE_SYMBOL ||
+                           is_text_type_id(body_type_id) ||
                            body_type_id == LMD_TYPE_BINARY || body_type_id == LMD_TYPE_DECIMAL ||
                            body_type_id == LMD_TYPE_DTIME);
             // Also box for CONTENT blocks — our single-value optimization may produce

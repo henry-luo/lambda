@@ -27,7 +27,7 @@ The everyday integer, per the ADR's **two-tier model** (`Lambda_Formal_Semantics
 ### 2.2 `integer` — arbitrary precision, the BigInt counterpart
 
 - **Backing: libmpdec's unlimited-precision context** (`g_unlimited_ctx`) — *not* decimal128: BigInt is unbounded, and 2¹²⁸ is 39 digits, already past 34. With unlimited backing, `integer ⇔ BigInt` is faithful in both directions.
-- **Literal:** the `n` suffix, typed by the **lexical rule**: a `n` literal is `integer` iff it has no `.` and no negative exponent (`1n`, `1e3n` → integer; `1.0n`, `1.5e-2n` → decimal). Predictable from source text alone.
+- **Literal:** the `n` suffix — **`integer` always** (A.5 decision, 2026-07-11, supersedes the ON2 lexical rule): `1n`, `1e3n` → integer; fractional or negative-exponent spellings (`1.0n`, `1.5e-2n`) are a **compile error** pointing at the `m` suffix. The suffix alone names the type; `n` matches JS BigInt exactly in both directions (every valid Lambda `n` literal is a valid JS BigInt literal and vice versa).
 - **Arithmetic:** `+`, `-`, `×` stay in `integer`; **`integer ÷ integer → decimal`** (P4 — no JS-BigInt-style floor). Mixing: `integer op float → decimal`, `integer op decimal → decimal` (§2.4 tower table). JS's throw-on-mix is rejected — JS throws because it lacks an exact meeting type; Lambda has one.
 - **Why a distinct type rather than an `int` tier:** P2 — its FFI face (`BigInt`) differs from `int`'s (`number`); folding it into `int` would make egress value-dependent, violating P1.
 
@@ -41,7 +41,7 @@ The everyday integer, per the ADR's **two-tier model** (`Lambda_Formal_Semantics
 
 *(Amends the ADR's §4.4 decimal tiers [C13] — the tiering survives, the source-level `n`/`N` split does not; and §4.5 float↔decimal [C8.5a] governs the embedding edge this section builds on. The §4.7 division rules gain the ON1 precision formula.)*
 
-- **One type, one literal suffix.** Storage tiers invisibly: decimal128 layout for values that fit, unbounded above. The source-level `n`/`N` split is removed (`N` retires from the grammar). **Literal digits are always preserved exactly regardless of tier** — the `N` suffix only ever controlled arithmetic-context participation, and context control belongs on operations: `decimal(x, prec:, rounding:)` for the advanced case, **`quantize` / `round(x, places)` as the everyday money tool**. `type()` reports `decimal` at every tier; `==` holds across tiers (P3).
+- **One type, one literal suffix: `m`** (A.5 decision, 2026-07-11 — `100m`, `1.5m`, `1.5e-2m`; integer-valued spellings included, giving money its natural literal). Storage tiers invisibly: decimal128 layout for values that fit, unbounded above. The source-level `n`/`N` split is removed (`N` retires from the grammar; fractional `n` spellings retire under A.5). **Literal digits are always preserved exactly regardless of tier** — the `N` suffix only ever controlled arithmetic-context participation, and context control belongs on operations: `decimal(x, prec:, rounding:)` for the advanced case, **`quantize` / `round(x, places)` as the everyday money tool**. `type()` reports `decimal` at every tier; `==` holds across tiers (P3).
 - **Arithmetic is BigDecimal-family, not IEEE-context-family.** `+`, `-`, `×`: **exact, auto-growing** (digit growth bounded per op; promotion is mere storage tiering). `÷` and other inexact ops (roots): **round at `max(34, digits(a), digits(b)) + 4` guard digits, round-half-even.** Lineage of the division rule:
   - the floor of 34 = the **IEEE/TC39 parent** (IEEE 754-2008 decimal128; TC39 JS Decimal; Python `decimal` at 28) — everyday money division behaves exactly like decimal128 and like JS's future Decimal;
   - the proportional term + 4 guard digits = the **PostgreSQL parent** (PG `numeric`: derived scale + 4 guard; SQL Server/DB2 guard-6 formulas; Oracle full 38+) — the battle-tested database family, fitting Lambda's relational identity;
@@ -247,6 +247,7 @@ Deliberately informal — a snapshot of divergences found while designing v2, ea
 - **W6** — Done per §5.3: `js_to_number` warns once per native caller when a regular Lambda `decimal` crosses into JS `Number` through the lossy `decimal_to_double` path, while JS BigInt (`DECIMAL_BIGINT`) still throws before any warning. The warning site table is mutex-protected, resets with the JS batch lifecycle, and the LambdaJS audit found no direct decimal-egress bypass outside `js_to_number`.
 - **W7** — Done for current docs: parser literals, AST range checks, MIR/runtime arithmetic, conversions, `is`/`type()`, the number-specific doc, public type/data/cheatsheet/formal docs, the typed-array note, and the core runtime number dev doc now align with §3.3–§3.4 and the BigInt/egress fixes. Older historical proposals may still preserve their original design context; they are not normative.
 - **W8** — Done: the §3.5 ArrayNum lane merge now uses `ELEM_FLOAT64` as the single double tag at `0x10`, keeps `ELEM_FLOAT` only as a compatibility alias, retires the duplicate `0xC0` slot, closes the JS `Float64Array` seam, and removes doubled branches.
+- **W9** — Suffix split migration (A.5): grammar gains `m` (all numeric spellings) and restricts `n` to integer-valued spellings (fractional/negative-exponent `n` → compile error naming `m`); AST literal typing drops the lexical *typing* rule (`n` → `integer`, `m` → `decimal`, unconditionally); fractional-`n` scripts and goldens migrate to `m`; docs (`Lambda_Data.md`, cheatsheet, reference) follow.
 
 ### 9.1 Verification snapshot (2026-07-10)
 
@@ -256,3 +257,58 @@ Deliberately informal — a snapshot of divergences found while designing v2, ea
 - Focused Node official fs/http set — pass: `test-file-write-stream.js`, `test-http-max-sockets.js`, `test-http-client-race.js`, `test-http-default-encoding.js`, `test-http-write-callbacks.js`.
 - `make test-lambda-baseline` — pass: 3282/3282.
 - Full `test_node_gtest --baseline-only` — number-model/fs/http regressions from this slice are cleared; remaining failures are the pre-existing non-number pockets observed before closeout (`test-async-hooks-recursive-stack-runInAsyncScope.js`, `test-async-wrap-pop-id-during-load.js`, `test-global-console-exists.js`, `test-util-getcallsites-preparestacktrace.js`).
+
+---
+
+# Appendix A — Lambda `decimal` × TC39 Decimal (comparison, informative)
+
+*Snapshot of the proposal as of 2026-07-11 ([tc39/proposal-decimal](https://github.com/tc39/proposal-decimal)); revisit if it advances past Stage 1.*
+
+## A.1 The proposal in brief
+
+- **Stage 1**, with a draft spec; Stage 2 advancement was attempted (April/June 2024) and has not landed.
+- **Representation: strict IEEE 754-2019 Decimal128** — 34 significant digits, exponent ±6143, every operation rounds into that format. The champions **explicitly rejected unlimited-precision BigDecimal** designs.
+- **API: a `Decimal` class with method arithmetic** (`add`/`subtract`/`multiply`/`divide`/`remainder`, comparison methods, `toString`/`toFixed`/`toPrecision`/`toExponential`/`toLocaleString`, mantissa/exponent accessors). The arithmetic **operators deliberately throw** — no operator overloading, no implicit mixing with Number or BigInt.
+- **No literal syntax in v1.** The suffix contemplated for a future version is **`m`** (`123.456m` — the C# `decimal` suffix), never `n`: in JS, `n` is BigInt, which maps to Lambda's `integer` (§2.2), not to `decimal`.
+
+## A.2 Where the designs agree — by construction
+
+The overlap is not coincidental; §2.4 names IEEE/TC39 as the "parent" of the division rule.
+
+- **The everyday-money envelope is identical**: Lambda's division precision floor of 34 digits was chosen *so that* money-scale division behaves exactly like decimal128 — and therefore exactly like JS's future Decimal.
+- **Same special values**: decimal NaN/±Inf per IEEE 754-2008 (both sides; Lambda needs them for the `float → decimal` embedding edge).
+- **Same arithmetic engine family**: libmpdec implements the IEEE decimal arithmetic the proposal specifies; Lambda's fixed context (`g_fixed_ctx`, `lambda-decimal.cpp:21`) *is* a decimal128 context.
+- **Same value-type stance**: immutable values, equality by numeric value, no exact-rational detour (both reject Raku/Racket-style rationals).
+
+## A.3 Where they differ — deliberately
+
+| Dimension | Lambda `decimal` (§2.4) | TC39 Decimal | Consequence |
+|---|---|---|---|
+| Precision model | Tiered: decimal128 layout when it fits, **unbounded above**; tiers invisible to `type()`/`==` (P2/P3) | Strict decimal128, always | Lambda's value set is a strict superset |
+| `+` `−` `×` | **Exact** (BigDecimal-family) | Rounded to 34 digits | Exact chains diverge from decimal128 — the accepted cost on record in §2.4; `quantize`/`round(x, places)` at interop boundaries |
+| `÷` | Rounds by the §2.4 precision rule (floor 34) | Rounds to 34 | Identical in the everyday envelope |
+| Operators | Native `+ − × ÷`, total order, `sort`/`order by` participation | Method calls only; operators **throw** | Ergonomics vs. host-language constraint (JS can't overload) |
+| Mixing | `int ⊂ integer ⊂ decimal`, `float ⊂ decimal` — the tower (§2.5) is the exact meeting type | Throws on mixing with Number/BigInt | Same reasoning as §6's BigInt note: JS throws *for lack of* a meeting type; Lambda has one |
+| Literal | `m` suffix, all spellings (`100m`, `1.5m` — A.5) | None in v1; future candidate is `m`, not `n` | Aligned by A.5: Lambda's `m` = TC39's future `m` |
+| Precision control | On operations: `decimal(x, prec:, rounding:)`, `quantize` | Implicit in the format | Same capability, different home |
+
+## A.4 Interop when JS Decimal ships (forward note, not scheduled work)
+
+Today `decimal` egresses to JS `Number` through the lossy warn-once `decimal_to_double` path (W6). If Decimal128 lands in engines, the type-directed egress table (§5.3) gains a natural row: `decimal` values within the decimal128 envelope map losslessly to `Decimal`; above-tier values need `quantize` or a throw — the same shape as the BigInt egress policy. Ingress `Decimal → decimal` is always lossless (decimal128 ⊂ Lambda's tier 1). Nothing to build until the proposal reaches engines.
+
+## A.5 Decimal literal suffix: `n`, `m`, or both — **DECIDED: split (`n` = `integer`, `m` = `decimal`)**
+
+*Status: **decided 2026-07-11** (user-confirmed, option B). Amends §2.2/§2.4; supersedes the ON2 lexical rule; migration = W9. Recorded here because A.1 changed the landscape the lexical rule was designed in.*
+
+The prior rule (§2.2 as of W1) made `n` serve two types by spelling: `1n`/`1e3n` → `integer`, `1.5n`/`1.5e-2n` → `decimal`. That was the right repair of the old `n`/`N` precision split — at that time `n` had to carry decimal, and the lexical rule was the least-surprising way to carve `integer` out of it. But with `integer` established as a first-class type, three options were weighed:
+
+- **A — keep `n` double-duty (the then-status quo).** No migration. Rejected: the suffix alone doesn't name the type — `1n` and `1.0n` differ in type *by their digits*, a genuine reviewer trap (the type of a literal should not require inspecting its mantissa); and JS alignment is only half-true (`1n` matches BigInt, but `1.5n` is a JS SyntaxError, so "Lambda `n` = JS `n`" cannot be stated cleanly).
+- **B — split: `n` = `integer` always, `m` = `decimal` always.** ✅ **Adopted**, on four arguments:
+  1. **The suffix names the type.** One-suffix-one-type is the simpler contract than any lexical rule — no digit inspection, no reviewer trap, `grep`-able. This is the same P1 instinct (predictable, never value/spelling-dependent) applied to literals.
+  2. **Full JS parity in both directions.** `n` ⇔ BigInt becomes exact: every valid Lambda `n` literal is a valid JS BigInt literal and vice versa. And `m` is TC39's contemplated future decimal literal (A.1), so if/when JS grows decimal literals, Lambda source is already spelling-compatible with *both* JS numeric literal families.
+  3. **`100m` — integer-valued decimal literals.** The money spelling the lexical rule structurally could not express (`100.0n` was the workaround, and it reads as a float-ism). With `m`, the everyday-money type gets the everyday-money literal.
+  4. **Precedent.** `m` is C#'s `decimal` suffix — the one mainstream language with a first-class decimal literal — and TC39's candidate; there is no competing convention for `m`, and no language uses `n` for decimal.
+  - Cost accepted: a small W-style migration (grammar + fractional-`n` goldens); the `N` retirement (W1) already exercised exactly this path.
+- **C — both `n` and `m` accepted for decimal.** Rejected on sight: two spellings for one type is review noise and settles nothing — it keeps A's trap and adds a synonym.
+
+Consequences: fractional/negative-exponent `n` spellings (`1.5n`, `1e-3n`) are **compile errors** whose message points at `m`; `n` requires an integer-valued spelling (no `.`, no negative exponent — the old lexical test survives as the *validity* rule for `n` rather than a *typing* rule); `m` accepts every numeric spelling. The lexical rule is thereby superseded, not deleted — it demoted from "picks the type" to "guards the suffix."

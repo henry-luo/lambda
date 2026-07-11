@@ -3,6 +3,8 @@
 #include "../lib/log.h"
 #include "../lib/lambda_alloca.h"
 #include "../lib/string.h"
+#include "../lib/hashmap_helpers.h"
+#include "../lib/ref_counted_pool.hpp"
 #include <string.h>
 
 // Hook to release a memory-context node when a registered shape pool is freed
@@ -17,34 +19,8 @@ typedef struct ShapePoolEntry {
     CachedShape* cached;
 } ShapePoolEntry;
 
-// Hash function for shape signatures
-static uint64_t shape_signature_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const ShapePoolEntry* entry = (const ShapePoolEntry*)item;
-    // Use the pre-calculated hash from signature
-    return hashmap_sip(&entry->signature.hash, sizeof(uint64_t), seed0, seed1);
-}
-
-// Compare function for shape signatures
-static int shape_signature_compare(const void *a, const void *b, void *udata) {
-    const ShapePoolEntry* entry_a = (const ShapePoolEntry*)a;
-    const ShapePoolEntry* entry_b = (const ShapePoolEntry*)b;
-    
-    const ShapeSignature* sig_a = &entry_a->signature;
-    const ShapeSignature* sig_b = &entry_b->signature;
-    
-    // Compare all signature fields
-    if (sig_a->hash != sig_b->hash) {
-        return (sig_a->hash < sig_b->hash) ? -1 : 1;
-    }
-    if (sig_a->length != sig_b->length) {
-        return (sig_a->length < sig_b->length) ? -1 : 1;
-    }
-    if (sig_a->byte_size != sig_b->byte_size) {
-        return (sig_a->byte_size < sig_b->byte_size) ? -1 : 1;
-    }
-    
-    return 0;
-}
+HASHMAP_DEFINE_FIELD3_KEY(shape_entry, ShapePoolEntry,
+    signature.hash, signature.length, signature.byte_size)
 
 // ========== Signature Calculation ==========
 
@@ -96,15 +72,7 @@ ShapePool* shape_pool_create(Pool* memory_pool, Arena* arena, ShapePool* parent)
     pool->ref_count = 1;
     
     // Create hashmap for shape lookup
-    pool->shapes = hashmap_new(
-        sizeof(ShapePoolEntry),
-        SHAPE_POOL_INITIAL_CAPACITY,
-        0x123456789abcdefULL,
-        0xfedcba0987654321ULL,
-        shape_signature_hash,
-        shape_signature_compare,
-        NULL, NULL
-    );
+    pool->shapes = shape_entry_new(SHAPE_POOL_INITIAL_CAPACITY);
     
     if (!pool->shapes) {
         if (pool->parent) shape_pool_release(pool->parent);
@@ -116,8 +84,8 @@ ShapePool* shape_pool_create(Pool* memory_pool, Arena* arena, ShapePool* parent)
 }
 
 ShapePool* shape_pool_retain(ShapePool* pool) {
+    pool = ref_counted_pool_retain(pool);
     if (!pool) return NULL;
-    pool->ref_count++;
     log_debug("shape_pool_retain: pool=%p, ref_count=%u", pool, pool->ref_count);
     return pool;
 }
@@ -129,16 +97,8 @@ void shape_pool_release(ShapePool* pool) {
     log_debug("shape_pool_release: pool=%p, ref_count=%u", pool, pool->ref_count);
     
     if (pool->ref_count == 0) {
-        if (pool->mem_node && g_shape_pool_node_release) {
-            g_shape_pool_node_release(pool->mem_node);
-            pool->mem_node = nullptr;
-        }
-        if (pool->parent) {
-            shape_pool_release(pool->parent);
-        }
-        if (pool->shapes) {
-            hashmap_free(pool->shapes);
-        }
+        ref_counted_pool_finalize_zero(pool, g_shape_pool_node_release,
+                                       shape_pool_release, pool->shapes);
         // Note: pool memory freed when Pool is destroyed
     }
 }

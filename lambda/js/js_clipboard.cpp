@@ -68,10 +68,6 @@ static inline Item make_str(const char* s) {
 static inline Item make_str_n(const char* s, size_t n) {
     return (Item){.item = s2it(heap_create_name(s, (int)n))};
 }
-static inline Item make_js_undefined(void) {
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
 static inline void mark_class(Item obj, const char* name) {
     JsClass cls = js_class_from_name(name, (int)strlen(name));
     if (cls != JS_CLASS_NONE) js_class_stamp(obj, cls);

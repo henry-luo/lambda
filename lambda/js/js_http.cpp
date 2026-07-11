@@ -49,21 +49,6 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_symbol_for(Item key);
 extern Item js_make_number(double d);
 
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)(len > 0 ? len : 0));
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
 static Item http_server_prototype = {0};
 // release LTO binds these constructor prototypes from helper-created objects;
 // keeping concrete definitions avoids unresolved optimized references.

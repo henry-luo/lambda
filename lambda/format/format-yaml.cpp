@@ -18,6 +18,34 @@ static void format_map_reader(YamlContext& ctx, const MapReader& map_reader, int
 static void format_element_reader(YamlContext& ctx, const ElementReader& elem, int indent_level);
 static void format_yaml_string(YamlContext& ctx, String* str);
 
+static bool yaml_scalar_needs_quotes(const char* s, size_t len) {
+    if (!s) return false;
+
+    if (len == 0 || strchr(s, ':') || strchr(s, '\n') || strchr(s, '"') ||
+        strchr(s, '\'') || strchr(s, '#') || strchr(s, '-') || strchr(s, '[') ||
+        strchr(s, ']') || strchr(s, '{') || strchr(s, '}') || strchr(s, '|') ||
+        strchr(s, '>') || strchr(s, '&') || strchr(s, '*') || strchr(s, '!') ||
+        (len > 0 && (str_char_is_ascii_space(s[0]) || str_char_is_ascii_space(s[len-1])))) {
+        return true;
+    }
+
+    if (strcmp(s, "true") == 0 || strcmp(s, "false") == 0 ||
+        strcmp(s, "null") == 0 || strcmp(s, "yes") == 0 ||
+        strcmp(s, "no") == 0 || strcmp(s, "on") == 0 ||
+        strcmp(s, "off") == 0 || strcmp(s, "~") == 0 ||
+        strcmp(s, ".inf") == 0 || strcmp(s, "-.inf") == 0 ||
+        strcmp(s, ".nan") == 0 || strcmp(s, ".Inf") == 0 ||
+        strcmp(s, "-.Inf") == 0 || strcmp(s, ".NaN") == 0) {
+        return true;
+    }
+
+    char* end;
+    strtol(s, &end, 10);
+    if (*end == '\0' && len > 0) return true;
+    strtod(s, &end);
+    return *end == '\0' && len > 0;
+}
+
 // format a string value for YAML - handle quoting and escaping
 static void format_yaml_string(YamlContext& ctx, String* str) {
     if (!str) {
@@ -27,36 +55,7 @@ static void format_yaml_string(YamlContext& ctx, String* str) {
 
     const char* s = str->chars;
     size_t len = str->len;
-    bool needs_quotes = false;
-
-    // check if string needs quotes (contains special chars, starts with special chars, etc.)
-    if (len == 0 || strchr(s, ':') || strchr(s, '\n') || strchr(s, '"') ||
-        strchr(s, '\'') || strchr(s, '#') || strchr(s, '-') || strchr(s, '[') ||
-        strchr(s, ']') || strchr(s, '{') || strchr(s, '}') || strchr(s, '|') ||
-        strchr(s, '>') || strchr(s, '&') || strchr(s, '*') || strchr(s, '!') ||
-        (len > 0 && (str_char_is_ascii_space(s[0]) || str_char_is_ascii_space(s[len-1])))) {
-        needs_quotes = true;
-    }
-
-    // check for yaml reserved words and special values
-    if (!needs_quotes && (strcmp(s, "true") == 0 || strcmp(s, "false") == 0 ||
-                         strcmp(s, "null") == 0 || strcmp(s, "yes") == 0 ||
-                         strcmp(s, "no") == 0 || strcmp(s, "on") == 0 ||
-                         strcmp(s, "off") == 0 || strcmp(s, "~") == 0 ||
-                         strcmp(s, ".inf") == 0 || strcmp(s, "-.inf") == 0 ||
-                         strcmp(s, ".nan") == 0 || strcmp(s, ".Inf") == 0 ||
-                         strcmp(s, "-.Inf") == 0 || strcmp(s, ".NaN") == 0)) {
-        needs_quotes = true;
-    }
-
-    // check if it looks like a number
-    if (!needs_quotes) {
-        char* end;
-        strtol(s, &end, 10);
-        if (*end == '\0' && len > 0) needs_quotes = true; // integer
-        strtod(s, &end);
-        if (*end == '\0' && len > 0) needs_quotes = true; // float
-    }
+    bool needs_quotes = yaml_scalar_needs_quotes(s, len);
 
     if (needs_quotes) {
         stringbuf_append_char(ctx.output(), '"');
@@ -144,22 +143,18 @@ static void format_element_reader(YamlContext& ctx, const ElementReader& elem, i
     // add attributes if any
     if (elem.attrCount() > 0) {
         ctx.write_char('\n');
-        // create MapReader from element attributes
-        // note: for now we'll iterate manually, but ElementReader could provide attribute iteration
-        const TypeMap* map_type = (const TypeMap*)elem.element()->type;
-        const ShapeEntry* field = map_type->shape;
+        auto attrs = elem.attrs();
+        const char* key;
+        ItemReader attr_value;
         bool first_attr = true;
 
-        while (field) {
-            const char* key = field->name->str;
-            ItemReader attr_value = elem.get_attr(key);
+        while (attrs.next(&key, &attr_value)) {
+            if (!key) continue;
 
             if (!first_attr) ctx.write_char('\n');
             first_attr = false;
             ctx.emit("%i%N: ", indent_level, key);
             format_item_reader(ctx, attr_value, 0);
-
-            field = field->next;
         }
     }
 
@@ -191,53 +186,56 @@ static void format_element_reader(YamlContext& ctx, const ElementReader& elem, i
 
 // centralized function to format any Lambda Item with proper type handling using MarkReader
 static void format_item_reader(YamlContext& ctx, const ItemReader& item, int indent_level) {
-    // prevent infinite recursion
-    FormatterContextCpp::RecursionGuard guard(ctx);
-    if (guard.exceeded()) {
-        ctx.write_text("\"[max_depth]\"");
-        return;
-    }
+    class YamlItemHandlers : public FormatItemHandlersDefault {
+    public:
+        YamlItemHandlers(YamlContext& ctx, int indent_level)
+            : ctx_(ctx), indent_level_(indent_level) {}
 
-    if (item.isNull()) {
-        ctx.write_text("null");
-    } else if (item.isBool()) {
-        ctx.emit("%b", item.asBool());
-    } else if (item.isInt() || item.isFloat()) {
-        // use centralized number formatting
-        format_number(ctx.output(), item.item());
-    } else if (item.getType() == LMD_TYPE_DTIME) {
-        // format datetime as ISO 8601 string for YAML output
-        DateTime* dt = (DateTime*)item.item().datetime_ptr;
-        if (dt) {
-            ctx.write_char('"');
-            StrBuf* temp = strbuf_new();
-            datetime_format_iso8601(temp, dt);
-            ctx.write_text(temp->str);
-            strbuf_free(temp);
-            ctx.write_char('"');
-        } else {
-            ctx.write_text("null");
+        void max_depth(const ItemReader& item) override { (void)item; ctx_.write_text("\"[max_depth]\""); }
+        void null_value(const ItemReader& item) override { (void)item; ctx_.write_text("null"); }
+        void bool_value(const ItemReader& item) override { ctx_.emit("%b", item.asBool()); }
+        void number_value(const ItemReader& item) override { format_number(ctx_.output(), item.item()); }
+        void string_value(const ItemReader& item, String* str) override {
+            (void)item;
+            if (str) {
+                format_yaml_string(ctx_, str);
+            } else {
+                ctx_.write_text("null");
+            }
         }
-    } else if (item.isString()) {
-        String* str = item.asString();
-        if (str) {
-            format_yaml_string(ctx, str);
-        } else {
-            ctx.write_text("null");
+        void array_value(const ItemReader& item, ArrayReader arr) override {
+            (void)item;
+            format_array_reader(ctx_, arr, indent_level_);
         }
-    } else if (item.isArray() || item.isList()) {
-        ArrayReader arr = item.asArray();
-        format_array_reader(ctx, arr, indent_level);
-    } else if (item.isMap()) {
-        MapReader mp = item.asMap();
-        format_map_reader(ctx, mp, indent_level);
-    } else if (item.isElement()) {
-        ElementReader elem = item.asElement();
-        format_element_reader(ctx, elem, indent_level);
-    } else {
-        // fallback for unknown types
-        ctx.emit("\"[type_%d]\"", (int)item.getType());
-    }
+        void map_value(const ItemReader& item, MapReader mp) override {
+            (void)item;
+            format_map_reader(ctx_, mp, indent_level_);
+        }
+        void element_value(const ItemReader& item, ElementReader elem) override {
+            (void)item;
+            format_element_reader(ctx_, elem, indent_level_);
+        }
+        void datetime_value(const ItemReader& item, DateTime* dt) override {
+            (void)item;
+            if (dt) {
+                ctx_.write_char('"');
+                format_write_datetime_iso8601(ctx_.output(), dt);
+                ctx_.write_char('"');
+            } else {
+                ctx_.write_text("null");
+            }
+        }
+        void unknown_value(const ItemReader& item) override {
+            ctx_.emit("\"[type_%d]\"", (int)item.getType());
+        }
+
+    private:
+        YamlContext& ctx_;
+        int indent_level_;
+    };
+
+    YamlItemHandlers handlers(ctx, indent_level);
+    ctx.dispatch_item(item, handlers);
 }
 
 // yaml formatter that produces proper YAML output
@@ -251,8 +249,8 @@ String* format_yaml(Pool* pool, Item root_item) {
     }
 
     // Create YAML context
-    Pool* ctx_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.yaml");
-    YamlContext ctx(ctx_pool, sb);
+    ScopedFormatPool ctx_pool("format.yaml");
+    YamlContext ctx(ctx_pool.get(), sb);
 
     ItemReader reader(root_item.to_const());
 
@@ -295,6 +293,5 @@ String* format_yaml(Pool* pool, Item root_item) {
         stringbuf_append_char(ctx.output(), '\n');
     }
 
-    mem_pool_destroy(ctx_pool);
     return stringbuf_to_string(sb);
 }

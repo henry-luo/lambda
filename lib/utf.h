@@ -87,6 +87,16 @@ static inline bool utf_is_surrogate(uint32_t cp) {
     return cp >= 0xD800 && cp <= 0xDFFF;
 }
 
+/** True if cp is a UTF-16 high surrogate (0xD800–0xDBFF). */
+static inline bool utf_is_high_surrogate(uint32_t cp) {
+    return cp >= 0xD800 && cp <= 0xDBFF;
+}
+
+/** True if cp is a UTF-16 low surrogate (0xDC00–0xDFFF). */
+static inline bool utf_is_low_surrogate(uint32_t cp) {
+    return cp >= 0xDC00 && cp <= 0xDFFF;
+}
+
 /** True if cp is a valid Unicode scalar value (0–0x10FFFF, not surrogate). */
 static inline bool utf_is_valid_codepoint(uint32_t cp) {
     return cp <= 0x10FFFF && !utf_is_surrogate(cp);

@@ -3,21 +3,6 @@
 #include "transform.hpp"
 #include "../lib/log.h"
 
-static RdtMatrix render_state_multiply_matrix(const RdtMatrix* left, const RdtMatrix* right) {
-    RdtMatrix combined = {
-        left->e11 * right->e11 + left->e12 * right->e21 + left->e13 * right->e31,
-        left->e11 * right->e12 + left->e12 * right->e22 + left->e13 * right->e32,
-        left->e11 * right->e13 + left->e12 * right->e23 + left->e13 * right->e33,
-        left->e21 * right->e11 + left->e22 * right->e21 + left->e23 * right->e31,
-        left->e21 * right->e12 + left->e22 * right->e22 + left->e23 * right->e32,
-        left->e21 * right->e13 + left->e22 * right->e23 + left->e23 * right->e33,
-        left->e31 * right->e11 + left->e32 * right->e21 + left->e33 * right->e31,
-        left->e31 * right->e12 + left->e32 * right->e22 + left->e33 * right->e32,
-        left->e31 * right->e13 + left->e32 * right->e23 + left->e33 * right->e33
-    };
-    return combined;
-}
-
 RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock* block,
                                                  const BlockBlot* parent_block) {
     RenderTransformScope scope = {
@@ -61,7 +46,7 @@ RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock
         rdcon->perspective_distance, rdcon->perspective_origin_x, rdcon->perspective_origin_y);
 
     if (scope.previous_has_transform) {
-        rdcon->transform = render_state_multiply_matrix(&scope.previous_transform, &next_transform);
+        rdcon->transform = rdt_matrix_multiply(&scope.previous_transform, &next_transform);
     } else {
         rdcon->transform = next_transform;
     }

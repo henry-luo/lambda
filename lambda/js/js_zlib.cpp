@@ -37,20 +37,6 @@ enum ZlibTransformMode {
     ZLIB_TRANSFORM_UNZIP
 };
 
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, strlen(str));
-    return (Item){.item = s2it(s)};
-}
-
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
-static bool is_callable(Item value) {
-    return get_type_id(value) == LMD_TYPE_FUNC;
-}
-
 static bool zlib_item_is_undefined(Item value) {
     return value.item == 0 || value.item == ITEM_JS_UNDEFINED ||
            get_type_id(value) == LMD_TYPE_UNDEFINED;

@@ -1,4 +1,5 @@
 #include "stacking_order.hpp"
+#include "layout.hpp"
 #include "../lib/tagged.hpp"
 extern "C" {
 #include "../lib/log.h"
@@ -17,10 +18,7 @@ bool radiant_stack_is_positive_z_positioned(View* view) {
 }
 
 bool radiant_stack_is_out_of_flow_positioned(View* view) {
-    ViewElement* element = lam::view_as_element(view);
-    return element && element->position &&
-        (element->position->position == CSS_VALUE_ABSOLUTE ||
-         element->position->position == CSS_VALUE_FIXED);
+    return layout_view_is_out_of_flow_positioned(view);
 }
 
 bool radiant_stack_is_deferred_from_normal_flow(View* view) {
@@ -101,4 +99,3 @@ void radiant_stack_sort_in_paint_order(ArrayList* views) {
         views->data[j + 1] = key;
     }
 }
-

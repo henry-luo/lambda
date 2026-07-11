@@ -670,11 +670,6 @@ static inline bool js_check_bigint_arithmetic(Item left, Item right) {
     return false;
 }
 
-// Helper to make JS undefined value
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
 static inline bool js_is_deleted_sentinel(Item val) {
     return lam::is_hole_sentinel(val);
 }

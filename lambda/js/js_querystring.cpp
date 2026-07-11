@@ -16,21 +16,6 @@
 #include <cstring>
 #include <math.h>
 
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)len);
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
 // ─── querystring.escape(str) ─────────────────────────────────────────────────
 // Percent-encodes a string matching Node.js querystring.escape() semantics.
 // Implements Node's encodeStr() logic which handles surrogate pairs by blindly

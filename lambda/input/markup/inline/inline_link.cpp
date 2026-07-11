@@ -12,7 +12,7 @@
  * Extracted from input-markup.cpp parse_link() (lines 2142-2224)
  */
 #include "inline_common.hpp"
-#include "../../html_entities.h"
+#include "../../../../lib/html_entities.h"
 #include "../../input-utils.h"
 #include <cstring>
 

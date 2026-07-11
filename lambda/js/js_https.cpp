@@ -17,17 +17,6 @@
 #include <cstdio>
 #include <cstring>
 
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)(len > 0 ? len : 0));
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
 // Forward decls from js_http.cpp
 extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler);
 extern "C" Item js_http_request(Item options_item, Item callback);
@@ -50,14 +39,6 @@ static Item https_agent_prototype = {0};
 static bool is_missing_value(Item value) {
     TypeId type = get_type_id(value);
     return type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED;
-}
-
-static bool is_callable(Item value) {
-    return get_type_id(value) == LMD_TYPE_FUNC;
-}
-
-static Item make_js_undefined(void) {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
 }
 
 static int append_bytes(char* out, int pos, int cap, const char* data, int len) {

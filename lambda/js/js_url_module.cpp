@@ -21,10 +21,6 @@ extern "C" Item js_throw_invalid_arg_type(const char* name, const char* expected
 extern "C" Item js_throw_type_error(const char* message);
 
 // Helper: make JS undefined value
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
 // Helper: extract C string from Item
 static const char* item_to_cstr(Item value, char* buf, int buf_size) {
     if (get_type_id(value) != LMD_TYPE_STRING) return NULL;
@@ -37,17 +33,6 @@ static const char* item_to_cstr(Item value, char* buf, int buf_size) {
 }
 
 // Helper: create string Item
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)len);
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
 #define JS_BLOB_URL_MAX 1024
 static Item js_blob_url_values[JS_BLOB_URL_MAX];
 static char js_blob_url_ids[JS_BLOB_URL_MAX][64];

@@ -1,10 +1,9 @@
 // Key-Value Formatter — unified INI & Properties output
 // Parameterized by KeyValueFormatConfig for format-specific behavior
 #include "format.h"
-#include "format-utils.h"
+#include "format-utils.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/log.h"
-#include "../mark_reader.hpp"
 #include <string.h>
 
 // ==============================================================================
@@ -64,13 +63,20 @@ static const KeyValueFormatConfig PROP_CONFIG = {
     NULL,
 };
 
+class KeyValueContext : public FormatterContextCpp {
+public:
+    KeyValueContext(Pool* pool, StringBuf* output)
+        : FormatterContextCpp(pool, output, 50)
+    {}
+};
+
 // ==============================================================================
 // Forward declarations
 // ==============================================================================
 
-static void format_kv_item(StringBuf* sb, const ItemReader& item,
+static void format_kv_item(KeyValueContext& ctx, const ItemReader& item,
                            const KeyValueFormatConfig* cfg);
-static void format_kv_section(StringBuf* sb, const MapReader& map,
+static void format_kv_section(KeyValueContext& ctx, const MapReader& map,
                               const char* section_name, const KeyValueFormatConfig* cfg);
 
 // ==============================================================================
@@ -86,60 +92,70 @@ static void format_kv_string(StringBuf* sb, String* str, const KeyValueFormatCon
 // Item dispatch (shared)
 // ==============================================================================
 
-static void format_kv_item(StringBuf* sb, const ItemReader& item,
+static void format_kv_item(KeyValueContext& ctx, const ItemReader& item,
                            const KeyValueFormatConfig* cfg) {
-    if (item.isNull()) return;
+    class KeyValueItemHandlers : public FormatItemHandlersDefault {
+    public:
+        KeyValueItemHandlers(KeyValueContext& ctx, const KeyValueFormatConfig* cfg)
+            : ctx_(ctx), cfg_(cfg) {}
 
-    if (item.isBool()) {
-        stringbuf_emit(sb, "%b", item.asBool());
-    }
-    else if (item.isInt() || item.isFloat()) {
-        format_number(sb, item.item());
-    }
-    else if (item.isString()) {
-        String* str = item.asString();
-        if (str) format_kv_string(sb, str, cfg);
-    }
-    else if (item.isArray()) {
-        // arrays are comma-separated values
-        ArrayReader arr = item.asArray();
-        auto it = arr.items();
-        ItemReader arr_item;
-        bool first = true;
+        void null_value(const ItemReader& item) override { (void)item; }
+        void bool_value(const ItemReader& item) override { ctx_.emit("%b", item.asBool()); }
+        void number_value(const ItemReader& item) override { format_number(ctx_.output(), item.item()); }
+        void string_value(const ItemReader& item, String* str) override {
+            (void)item;
+            if (str) format_kv_string(ctx_.output(), str, cfg_);
+        }
+        void array_value(const ItemReader& item, ArrayReader arr) override {
+            if (!item.isArray()) {
+                unknown_value(item);
+                return;
+            }
 
-        while (it.next(&arr_item)) {
-            if (!first) stringbuf_append_str(sb, ",");
-            first = false;
+            auto it = arr.items();
+            ItemReader arr_item;
+            bool first = true;
+            while (it.next(&arr_item)) {
+                if (!first) ctx_.write_char(',');
+                first = false;
 
-            if (arr_item.isNull() || arr_item.isBool() || arr_item.isInt() ||
-                arr_item.isFloat() || arr_item.isString()) {
-                format_kv_item(sb, arr_item, cfg);
-            } else {
-                stringbuf_append_str(sb, "[complex]");
+                if (arr_item.isNull() || arr_item.isBool() || arr_item.isInt() ||
+                    arr_item.isFloat() || arr_item.isString()) {
+                    format_kv_item(ctx_, arr_item, cfg_);
+                } else {
+                    ctx_.write_text("[complex]");
+                }
             }
         }
-    }
-    else if (item.isMap()) {
-        stringbuf_append_str(sb, "[map]");
-    }
-    else if (item.isElement()) {
-        ElementReader elem = item.asElement();
-        const char* tag = elem.tagName();
-        stringbuf_append_str(sb, tag ? tag : "[element]");
-    }
-    else {
-        stringbuf_append_str(sb, "[unknown]");
-    }
+        void map_value(const ItemReader& item, MapReader map) override {
+            (void)item;
+            (void)map;
+            ctx_.write_text("[map]");
+        }
+        void element_value(const ItemReader& item, ElementReader elem) override {
+            (void)item;
+            const char* tag = elem.tagName();
+            ctx_.write_text(tag ? tag : "[element]");
+        }
+        void unknown_value(const ItemReader& item) override { (void)item; ctx_.write_text("[unknown]"); }
+
+    private:
+        KeyValueContext& ctx_;
+        const KeyValueFormatConfig* cfg_;
+    };
+
+    KeyValueItemHandlers handlers(ctx, cfg);
+    ctx.dispatch_item(item, handlers);
 }
 
 // ==============================================================================
 // Section formatting (INI-specific, called only when support_sections == true)
 // ==============================================================================
 
-static void format_kv_section(StringBuf* sb, const MapReader& map,
+static void format_kv_section(KeyValueContext& ctx, const MapReader& map,
                               const char* section_name, const KeyValueFormatConfig* cfg) {
     if (section_name && strlen(section_name) > 0) {
-        stringbuf_append_format(sb, "[%s]\n", section_name);
+        ctx.emit("[%s]\n", section_name);
     }
 
     auto entries = map.entries();
@@ -147,9 +163,9 @@ static void format_kv_section(StringBuf* sb, const MapReader& map,
     ItemReader value;
 
     while (entries.next(&key, &value)) {
-        stringbuf_append_format(sb, "%s=", key);
-        format_kv_item(sb, value, cfg);
-        stringbuf_append_char(sb, '\n');
+        ctx.emit("%s=", key);
+        format_kv_item(ctx, value, cfg);
+        ctx.write_char('\n');
     }
 }
 
@@ -164,9 +180,11 @@ static String* format_kv(Pool* pool, Item root_item, const KeyValueFormatConfig*
         return NULL;
     }
 
+    KeyValueContext ctx(pool, sb);
+
     // header comment
-    stringbuf_append_str(sb, cfg->header_comment);
-    stringbuf_append_char(sb, '\n');
+    ctx.write_text(cfg->header_comment);
+    ctx.write_char('\n');
 
     ItemReader root(root_item.to_const());
 
@@ -194,25 +212,25 @@ static String* format_kv(Pool* pool, Item root_item, const KeyValueFormatConfig*
 
                 while (entries.next(&key, &value)) {
                     if (value.isMap()) {
-                        if (!first) stringbuf_append_char(sb, '\n');
+                        if (!first) ctx.write_char('\n');
                         MapReader section_map = value.asMap();
-                        format_kv_section(sb, section_map, key, cfg);
+                        format_kv_section(ctx, section_map, key, cfg);
                         first = false;
                     } else {
                         if (!has_global) {
-                            if (!first) stringbuf_append_char(sb, '\n');
-                            stringbuf_append_format(sb, "[%s]\n", cfg->global_section);
+                            if (!first) ctx.write_char('\n');
+                            ctx.emit("[%s]\n", cfg->global_section);
                             has_global = true;
                             first = false;
                         }
-                        stringbuf_append_format(sb, "%s=", key);
-                        format_kv_item(sb, value, cfg);
-                        stringbuf_append_char(sb, '\n');
+                        ctx.emit("%s=", key);
+                        format_kv_item(ctx, value, cfg);
+                        ctx.write_char('\n');
                     }
                 }
             } else {
                 // no nested maps — flat section
-                format_kv_section(sb, root_map, NULL, cfg);
+                format_kv_section(ctx, root_map, NULL, cfg);
             }
         } else {
             // Properties path: flat key=value
@@ -221,23 +239,23 @@ static String* format_kv(Pool* pool, Item root_item, const KeyValueFormatConfig*
             ItemReader value;
 
             while (entries.next(&key, &value)) {
-                stringbuf_append_format(sb, "%s=", key);
-                format_kv_item(sb, value, cfg);
-                stringbuf_append_char(sb, '\n');
+                ctx.emit("%s=", key);
+                format_kv_item(ctx, value, cfg);
+                ctx.write_char('\n');
             }
         }
     }
     else if (root.isNull() || root.isBool() || root.isInt() ||
              root.isFloat() || root.isString()) {
         // single scalar → value=...
-        stringbuf_append_str(sb, "value=");
-        format_kv_item(sb, root, cfg);
-        stringbuf_append_char(sb, '\n');
+        ctx.write_text("value=");
+        format_kv_item(ctx, root, cfg);
+        ctx.write_char('\n');
     }
     else {
         // unsupported root type
-        stringbuf_append_str(sb, cfg->header_comment[0] == ';' ? "; " : "# ");
-        stringbuf_append_str(sb, "Unsupported root type\n");
+        ctx.write_text(cfg->header_comment[0] == ';' ? "; " : "# ");
+        ctx.write_text("Unsupported root type\n");
     }
 
     return stringbuf_to_string(sb);

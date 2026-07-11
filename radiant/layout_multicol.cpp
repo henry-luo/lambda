@@ -260,9 +260,7 @@ static float multicol_normal_gap_size(ViewBlock* block) {
 }
 
 static bool multicol_is_out_of_flow(ViewBlock* block) {
-    return block && block->position &&
-           (block->position->position == CSS_VALUE_ABSOLUTE ||
-            block->position->position == CSS_VALUE_FIXED);
+    return layout_block_is_out_of_flow_positioned(block);
 }
 
 static bool multicol_uses_static_x(ViewBlock* block) {
@@ -529,12 +527,7 @@ static void multicol_absolute_normal_origin(ViewBlock* block, float* out_x, floa
             ViewBlock* parent_block = lam::view_require_block(parent);
             abs_x += parent_block->x;
             abs_y += parent_block->y;
-            if (parent_block->position &&
-                parent_block->position->position == CSS_VALUE_FIXED) {
-                break;
-            }
-            if (parent_block->position &&
-                parent_block->position->position == CSS_VALUE_ABSOLUTE) {
+            if (layout_block_is_out_of_flow_positioned(parent_block)) {
                 break;
             }
         }

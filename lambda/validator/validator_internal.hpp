@@ -183,7 +183,7 @@ static inline bool validator_numeric_type_embeds(TypeId actual_tid, NumSizedType
     if (!target) return false;
     if (target == &TYPE_NUMBER) return IS_NUMERIC_ID(actual_tid);
     if (target == &TYPE_INTEGER) {
-        return actual_tid == LMD_TYPE_INT || actual_tid == LMD_TYPE_INT64 ||
+        return is_integer_type_id(actual_tid) ||
                actual_tid == LMD_TYPE_UINT64 ||
                (actual_tid == LMD_TYPE_NUM_SIZED && validator_sized_kind_is_integer(actual_kind));
     }

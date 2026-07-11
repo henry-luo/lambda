@@ -691,6 +691,18 @@ TEST_F(StrBufTest, EscapeAppendJsonControls) {
     strbuf_free(sb);
 }
 
+TEST_F(StrBufTest, EscapeAppendJsonStringQuotesAndSurrogates) {
+    StrBuf* sb = strbuf_new();
+    const char surrogate[] = {(char)0xed, (char)0xa0, (char)0x80, 0};
+    escape_append_json_string(sb, "\"\\\x01", strlen("\"\\\x01"), true, false);
+    EXPECT_STREQ(sb->str, "\"\\\"\\\\\\u0001\"");
+
+    strbuf_reset(sb);
+    escape_append_json_string(sb, surrogate, 3, true, true);
+    EXPECT_STREQ(sb->str, "\"\\ud800\"");
+    strbuf_free(sb);
+}
+
 TEST_F(StrBufTest, EscapeAppendXmlAttr) {
     StrBuf* sb = strbuf_new();
     const char* raw = "a&b <c> \"d\"";

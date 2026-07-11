@@ -15,6 +15,7 @@
 #include "input-context.hpp"
 #include "input-utils.hpp"
 #include "source_tracker.hpp"
+#include "../../lib/str.h"
 
 extern "C" {
 #include "../../lib/log.h"
@@ -107,9 +108,10 @@ static String* ini_parse_raw_value(InputContext& ctx, const char** pos) {
             tracker.advance(1);
             (*pos)++;
         }
-        // trim trailing whitespace
-        while (sb->length > 0 && isspace((unsigned char)sb->str->chars[sb->length - 1]))
-            sb->length--;
+        const char* trimmed = sb->str->chars;
+        size_t trimmed_len = sb->length;
+        str_rtrim(&trimmed, &trimmed_len);
+        sb->length = trimmed_len;
     }
 
     return (sb->length > 0) ? ctx.builder.createString(sb->str->chars, sb->length) : NULL;
@@ -141,9 +143,10 @@ static String* prop_parse_raw_value(InputContext& ctx, const char** pos) {
         (*pos)++;
     }
 
-    // trim trailing whitespace
-    while (sb->length > 0 && isspace((unsigned char)sb->str->chars[sb->length - 1]))
-        sb->length--;
+    const char* trimmed = sb->str->chars;
+    size_t trimmed_len = sb->length;
+    str_rtrim(&trimmed, &trimmed_len);
+    sb->length = trimmed_len;
 
     return (sb->length > 0) ? ctx.builder.createString(sb->str->chars, sb->length) : NULL;
 }

@@ -3,8 +3,44 @@
 
 #include "../../lib/stringbuf.h"
 #include "../../lib/str.h"
+#include "../../lib/mem_factory.h"
 #include "../lambda-data.hpp"
+#include "../mark_reader.hpp"
 #include "format-utils.h"
+
+class FormatItemHandlersDefault {
+public:
+    virtual ~FormatItemHandlersDefault() = default;
+
+    virtual void max_depth(const ItemReader& item) { (void)item; }
+    virtual void null_value(const ItemReader& item) { (void)item; }
+    virtual void bool_value(const ItemReader& item) { (void)item; }
+    virtual void number_value(const ItemReader& item) { (void)item; }
+    virtual void string_value(const ItemReader& item, String* str) { (void)item; (void)str; }
+    virtual void symbol_value(const ItemReader& item, Symbol* sym) { (void)sym; unknown_value(item); }
+    virtual void array_value(const ItemReader& item, ArrayReader arr) { (void)arr; unknown_value(item); }
+    virtual void map_value(const ItemReader& item, MapReader map) { (void)map; unknown_value(item); }
+    virtual void object_value(const ItemReader& item, Object* obj) { (void)obj; unknown_value(item); }
+    virtual void element_value(const ItemReader& item, ElementReader elem) { (void)elem; unknown_value(item); }
+    virtual void datetime_value(const ItemReader& item, DateTime* dt) { (void)dt; unknown_value(item); }
+    virtual void unknown_value(const ItemReader& item) { (void)item; }
+};
+
+class ScopedFormatPool {
+public:
+    explicit ScopedFormatPool(const char* name)
+        : pool_(mem_pool_create(NULL, MEM_ROLE_TEMP, name)) {}
+
+    ~ScopedFormatPool() {
+        if (pool_) mem_pool_destroy(pool_);
+    }
+
+    Pool* get() const { return pool_; }
+    operator Pool*() const { return pool_; }
+
+private:
+    Pool* pool_;
+};
 
 // C++ FormatterContext base class for object-oriented formatter architecture
 // Note: Named FormatterContextCpp to avoid conflict with C struct FormatterContext in format-utils.h
@@ -51,6 +87,39 @@ public:
         FormatterContextCpp& ctx_;
         bool exceeded_;
     };
+
+    inline void dispatch_item(const ItemReader& item, FormatItemHandlersDefault& handlers) {
+        RecursionGuard guard(*this);
+        if (guard.exceeded()) {
+            handlers.max_depth(item);
+            return;
+        }
+
+        if (item.isNull()) {
+            handlers.null_value(item);
+        } else if (item.isBool()) {
+            handlers.bool_value(item);
+        } else if (item.isInt() || item.isFloat()) {
+            handlers.number_value(item);
+        } else if (item.isString()) {
+            handlers.string_value(item, item.asString());
+        } else if (item.isSymbol()) {
+            handlers.symbol_value(item, item.asSymbol());
+        } else if (item.isArray() || item.isList()) {
+            handlers.array_value(item, item.asArray());
+        } else if (item.isMap()) {
+            handlers.map_value(item, item.asMap());
+        } else if (auto object = item.asItem<LMD_TYPE_OBJECT>()) {
+            handlers.object_value(item, object.ptr());
+        } else if (item.isElement()) {
+            handlers.element_value(item, item.asElement());
+        } else if (item.isDatetime()) {
+            DateTime* dt = (DateTime*)item.item().datetime_ptr;
+            handlers.datetime_value(item, dt);
+        } else {
+            handlers.unknown_value(item);
+        }
+    }
 
     // Common formatting operations (utility methods)
     inline void write_text(const char* text) {
@@ -279,5 +348,14 @@ public:
         : FormatterContextCpp(pool, output, 20)
     {}
 };
+
+static inline void format_write_datetime_iso8601(StringBuf* output, DateTime* dt) {
+    if (!output || !dt) return;
+    StrBuf* temp = strbuf_new();
+    if (!temp) return;
+    datetime_format_iso8601(temp, dt);
+    stringbuf_append_str_n(output, temp->str, temp->length);
+    strbuf_free(temp);
+}
 
 #endif // FORMAT_UTILS_HPP

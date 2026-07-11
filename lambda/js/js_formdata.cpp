@@ -52,10 +52,6 @@ extern "C" bool js_dom_is_disabled(void* dom_elem);
 // Helpers
 // ============================================================================
 
-static inline Item make_js_undefined() {
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
 static inline Item make_bool(bool v) {
     return (Item){.item = b2it(v ? 1 : 0)};
 }

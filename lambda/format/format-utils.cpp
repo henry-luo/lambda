@@ -151,12 +151,15 @@ bool is_html_entity(const char* str, size_t len, size_t pos, size_t* entity_end)
     return false;
 }
 
-// format string with HTML entity escaping (prevents double-encoding)
-void format_html_string_safe(StringBuf* sb, String* str, bool is_attribute) {
+void format_markup_string_safe(StringBuf* sb, String* str, bool is_attribute,
+                               bool escape_apostrophe_in_text,
+                               bool escape_apostrophe_in_attr,
+                               const char* log_prefix) {
     if (!sb || !str) return;
 
     if (((uintptr_t)str & 0x7) != 0) {
-        log_error("html_string_guard: skipping misaligned HTML string ptr=%p", (void*)str);
+        log_error("%s_string_guard: skipping misaligned string ptr=%p",
+            log_prefix ? log_prefix : "markup", (void*)str);
         return;
     }
 
@@ -168,7 +171,8 @@ void format_html_string_safe(StringBuf* sb, String* str, bool is_attribute) {
     const size_t max_html_attribute_len = 32 * 1024 * 1024;
     bool large_attr = is_attribute && len <= max_html_attribute_len;
     if (len > max_html_string_len && !large_attr) {
-        log_error("html_string_guard: skipping suspicious HTML string len=%zu ptr=%p", len, (void*)s);
+        log_error("%s_string_guard: skipping suspicious string len=%zu ptr=%p",
+            log_prefix ? log_prefix : "markup", len, (void*)s);
         return;
     }
 
@@ -209,9 +213,12 @@ void format_html_string_safe(StringBuf* sb, String* str, bool is_attribute) {
                 }
                 break;
             case '\'':
-                // apostrophes don't need to be encoded in text content (only in attributes)
-                // for HTML5, apostrophes in text are safe and don't need encoding
-                stringbuf_append_char(sb, '\'');
+                if ((is_attribute && escape_apostrophe_in_attr) ||
+                        (!is_attribute && escape_apostrophe_in_text)) {
+                    stringbuf_append_str(sb, "&apos;");
+                } else {
+                    stringbuf_append_char(sb, '\'');
+                }
                 break;
             default:
                 // use unsigned char for comparison to handle UTF-8 multibyte sequences correctly
@@ -228,6 +235,11 @@ void format_html_string_safe(StringBuf* sb, String* str, bool is_attribute) {
             }
         }
     }
+}
+
+// format string with HTML entity escaping (prevents double-encoding)
+void format_html_string_safe(StringBuf* sb, String* str, bool is_attribute) {
+    format_markup_string_safe(sb, str, is_attribute, false, false, "html");
 }
 
 // ==============================================================================

@@ -32,28 +32,6 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
 // Forward declarations for static functions
 static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewBlock* grid_item);
 
-static CssValue* grid_spacing_shorthand_side_value(const CssValue* value, int side) {
-    if (!value) return nullptr;
-    if (value->type != CSS_VALUE_TYPE_LIST) {
-        return (CssValue*)value;
-    }
-    int cnt = value->data.list.count;
-    CssValue** vals = value->data.list.values;
-    if (cnt <= 0 || !vals) return nullptr;
-
-    int idx = 0;
-    if (side == 0) {
-        idx = 0;  // top
-    } else if (side == 1) {
-        idx = (cnt >= 2) ? 1 : 0;  // right
-    } else if (side == 2) {
-        idx = (cnt >= 3) ? 2 : 0;  // bottom
-    } else {
-        idx = (cnt >= 4) ? 3 : ((cnt >= 2) ? 1 : 0);  // left
-    }
-    return (idx < cnt) ? vals[idx] : nullptr;
-}
-
 static bool grid_resolve_percentage_spacing_value(const CssValue* value, float inline_base, float* out) {
     if (!value || !out || inline_base < 0.0f) return false;
     if (value->type != CSS_VALUE_TYPE_PERCENTAGE) return false;
@@ -124,10 +102,10 @@ static void grid_re_resolve_item_percentage_padding(ViewBlock* item, float inlin
 
     CssDeclaration* padding = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_PADDING);
     if (padding && padding->value) {
-        grid_consider_padding_candidate(&top, padding, grid_spacing_shorthand_side_value(padding->value, 0));
-        grid_consider_padding_candidate(&right, padding, grid_spacing_shorthand_side_value(padding->value, 1));
-        grid_consider_padding_candidate(&bottom, padding, grid_spacing_shorthand_side_value(padding->value, 2));
-        grid_consider_padding_candidate(&left, padding, grid_spacing_shorthand_side_value(padding->value, 3));
+        grid_consider_padding_candidate(&top, padding, (CssValue*)css_box_shorthand_side_value(padding->value, 0));
+        grid_consider_padding_candidate(&right, padding, (CssValue*)css_box_shorthand_side_value(padding->value, 1));
+        grid_consider_padding_candidate(&bottom, padding, (CssValue*)css_box_shorthand_side_value(padding->value, 2));
+        grid_consider_padding_candidate(&left, padding, (CssValue*)css_box_shorthand_side_value(padding->value, 3));
     }
 
     CssDeclaration* pt = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_PADDING_TOP);
@@ -207,10 +185,10 @@ static void grid_re_resolve_item_percentage_margin(ViewBlock* item, float inline
 
     CssDeclaration* margin = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_MARGIN);
     if (margin && margin->value) {
-        grid_consider_padding_candidate(&top, margin, grid_spacing_shorthand_side_value(margin->value, 0));
-        grid_consider_padding_candidate(&right, margin, grid_spacing_shorthand_side_value(margin->value, 1));
-        grid_consider_padding_candidate(&bottom, margin, grid_spacing_shorthand_side_value(margin->value, 2));
-        grid_consider_padding_candidate(&left, margin, grid_spacing_shorthand_side_value(margin->value, 3));
+        grid_consider_padding_candidate(&top, margin, (CssValue*)css_box_shorthand_side_value(margin->value, 0));
+        grid_consider_padding_candidate(&right, margin, (CssValue*)css_box_shorthand_side_value(margin->value, 1));
+        grid_consider_padding_candidate(&bottom, margin, (CssValue*)css_box_shorthand_side_value(margin->value, 2));
+        grid_consider_padding_candidate(&left, margin, (CssValue*)css_box_shorthand_side_value(margin->value, 3));
     }
 
     CssDeclaration* mt = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_MARGIN_TOP);

@@ -372,14 +372,12 @@ MapReader::EntryIterator::EntryIterator(const MapReader* reader)
     }
 }
 
-Item _map_field_to_item(void* field_ptr, TypeId type_id);
-
 bool MapReader::EntryIterator::next(const char** key, ItemReader* value) {
     if (!current_field_) { return false; }
     *key = current_field_->name ? current_field_->name->str : nullptr;
     // get field value based on offset
     void* field_ptr = (char*)reader_->map_->data + current_field_->byte_offset;
-    Item result = _map_field_to_item(field_ptr, current_field_->type->type_id);
+    Item result = map_field_to_item(field_ptr, current_field_->type->type_id);
     *value = ItemReader(result.to_const());
     current_field_ = lam::shape_next(current_field_);
     return true;
@@ -717,6 +715,35 @@ const char* ElementReader::get_attr_string(const char* key) const {
 ItemReader ElementReader::get_attr(const char* key) const {
     if (!element_) return ItemReader();
     return ItemReader(element_->get_attr(key));
+}
+
+ElementReader::AttributeIterator::AttributeIterator(const ElementReader* reader)
+    : reader_(reader), current_field_() {
+    reset();
+}
+
+bool ElementReader::AttributeIterator::next(const char** key, ItemReader* value) {
+    if (!reader_ || !reader_->element_ || !reader_->element_->data || !current_field_) {
+        return false;
+    }
+
+    *key = current_field_->name ? current_field_->name->str : nullptr;
+    void* field_ptr = (char*)reader_->element_->data + current_field_->byte_offset;
+    Item result = map_field_to_item(field_ptr, current_field_->type->type_id);
+    *value = ItemReader(result.to_const());
+    current_field_ = lam::shape_next(current_field_);
+    return true;
+}
+
+void ElementReader::AttributeIterator::reset() {
+    current_field_ = {};
+    if (!reader_ || !reader_->element_type_) return;
+    const TypeMap* map_type = (const TypeMap*)reader_->element_type_;
+    current_field_ = lam::shape_borrow((const ShapeEntry*)map_type->shape);
+}
+
+ElementReader::AttributeIterator ElementReader::attrs() const {
+    return AttributeIterator(this);
 }
 
 // Typed attribute accessors

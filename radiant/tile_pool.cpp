@@ -6,10 +6,12 @@
 
 #include "tile_pool.h"
 #include "display_list_bounds.hpp"
+#include "display_list_surface_region.hpp"
 #include "render_filter.hpp"
 #include "render_background.hpp"
 #include "render_composite.hpp"
 #include "render_raster.hpp"
+#include "glyph_sampling.hpp"
 #include "clip_shape.h"
 #include "../lib/log.h"
 #include "../lib/mem_factory.h"
@@ -454,45 +456,21 @@ static void replay_tile_glyph(ImageSurface* tile_surface,
         for (int dy = top - y; dy < bottom - y; dy++) {
             uint8_t* row_pixels = (uint8_t*)tile_surface->pixels + (y + dy) * tile_surface->pitch;
             float src_y = dy * inv_scale;
-            int sy0 = (int)src_y;
-            int sy1 = sy0 + 1;
-            float fy = src_y - sy0;
-            if (sy0 >= (int)bitmap->height) sy0 = bitmap->height - 1;
-            if (sy1 >= (int)bitmap->height) sy1 = bitmap->height - 1;
 
             for (int dx = left - x; dx < right - x; dx++) {
                 if (x + dx < 0 || x + dx >= tile_surface->width) continue;
                 float src_x = dx * inv_scale;
-                int sx0 = (int)src_x;
-                int sx1 = sx0 + 1;
-                float fx = src_x - sx0;
-                if (sx0 >= (int)bitmap->width) sx0 = bitmap->width - 1;
-                if (sx1 >= (int)bitmap->width) sx1 = bitmap->width - 1;
+                GlyphColorSample sample = glyph_sample_bgra_bilinear(bitmap, src_x, src_y);
 
-                uint8_t* s00 = bitmap->buffer + sy0 * bitmap->pitch + sx0 * 4;
-                uint8_t* s10 = bitmap->buffer + sy0 * bitmap->pitch + sx1 * 4;
-                uint8_t* s01 = bitmap->buffer + sy1 * bitmap->pitch + sx0 * 4;
-                uint8_t* s11 = bitmap->buffer + sy1 * bitmap->pitch + sx1 * 4;
-
-                float w00 = (1 - fx) * (1 - fy);
-                float w10 = fx * (1 - fy);
-                float w01 = (1 - fx) * fy;
-                float w11 = fx * fy;
-
-                uint8_t src_b = (uint8_t)(s00[0]*w00 + s10[0]*w10 + s01[0]*w01 + s11[0]*w11 + 0.5f);
-                uint8_t src_g = (uint8_t)(s00[1]*w00 + s10[1]*w10 + s01[1]*w01 + s11[1]*w11 + 0.5f);
-                uint8_t src_r = (uint8_t)(s00[2]*w00 + s10[2]*w10 + s01[2]*w01 + s11[2]*w11 + 0.5f);
-                uint8_t src_a = (uint8_t)(s00[3]*w00 + s10[3]*w10 + s01[3]*w01 + s11[3]*w11 + 0.5f);
-
-                if (src_a > 0) {
+                if (sample.a > 0) {
                     uint8_t* dst = (uint8_t*)(row_pixels + (x + dx) * 4);
-                    if (src_a == 255) {
-                        dst[0] = src_r; dst[1] = src_g; dst[2] = src_b; dst[3] = 255;
+                    if (sample.a == 255) {
+                        dst[0] = sample.r; dst[1] = sample.g; dst[2] = sample.b; dst[3] = 255;
                     } else {
-                        uint32_t inv_alpha = 255 - src_a;
-                        dst[0] = (dst[0] * inv_alpha + src_r * src_a) / 255;
-                        dst[1] = (dst[1] * inv_alpha + src_g * src_a) / 255;
-                        dst[2] = (dst[2] * inv_alpha + src_b * src_a) / 255;
+                        uint32_t inv_alpha = 255 - sample.a;
+                        dst[0] = (dst[0] * inv_alpha + sample.r * sample.a) / 255;
+                        dst[1] = (dst[1] * inv_alpha + sample.g * sample.a) / 255;
+                        dst[2] = (dst[2] * inv_alpha + sample.b * sample.a) / 255;
                         dst[3] = 255;
                     }
                 }
@@ -797,39 +775,19 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             DlSaveBackdrop* r = &item->save_backdrop;
             if (backdrop_sp < DL_MAX_BACKDROP_DEPTH) {
                 // translate to tile-local
-                int lx = r->x0 - (int)tile_x;
-                int ly = r->y0 - (int)tile_y;
-                int lw = r->w;
-                int lh = r->h;
-                // clamp to tile
-                if (lx < 0) { lw += lx; lx = 0; }
-                if (ly < 0) { lh += ly; ly = 0; }
-                if (lx + lw > tile_surface->width)  lw = tile_surface->width - lx;
-                if (ly + lh > tile_surface->height) lh = tile_surface->height - ly;
-
-                if (lw > 0 && lh > 0) {
-                    uint32_t* buf = (uint32_t*)scratch_alloc(scratch, lw * lh * sizeof(uint32_t));
-                    uint32_t* px = (uint32_t*)tile_surface->pixels;
-                    int pitch = tile_surface->pitch / 4;
-                    for (int row = 0; row < lh; row++) {
-                        memcpy(buf + row * lw,
-                               px + (ly + row) * pitch + lx,
-                               lw * sizeof(uint32_t));
-                    }
-                    for (int row = 0; row < lh; row++) {
-                        memset(px + (ly + row) * pitch + lx, 0, lw * sizeof(uint32_t));
-                    }
+                int region[4] = {};
+                uint32_t* buf = surface_region_save(tile_surface, scratch,
+                                                    r->x0 - (int)tile_x,
+                                                    r->y0 - (int)tile_y,
+                                                    r->w, r->h,
+                                                    region);
+                if (buf) {
+                    surface_region_clear(tile_surface, region);
                     backdrop_stack[backdrop_sp] = buf;
-                    backdrop_region[backdrop_sp][0] = lx;
-                    backdrop_region[backdrop_sp][1] = ly;
-                    backdrop_region[backdrop_sp][2] = lw;
-                    backdrop_region[backdrop_sp][3] = lh;
+                    memcpy(backdrop_region[backdrop_sp], region, sizeof(region));
                 } else {
                     backdrop_stack[backdrop_sp] = nullptr;
-                    backdrop_region[backdrop_sp][0] = 0;
-                    backdrop_region[backdrop_sp][1] = 0;
-                    backdrop_region[backdrop_sp][2] = 0;
-                    backdrop_region[backdrop_sp][3] = 0;
+                    memcpy(backdrop_region[backdrop_sp], region, sizeof(region));
                 }
                 backdrop_sp++;
             }
@@ -891,18 +849,10 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                                                   r->rw, r->rh, r->tint_color);
             }
             if (r->clip_type && tile_surface && tile_surface->pixels) {
-                int sw = tile_surface->width, sh = tile_surface->height;
-                int x0 = std::max(0, rx), y0 = std::max(0, ry);
-                int x1 = std::min(sw, rx + r->rw), y1 = std::min(sh, ry + r->rh);
-                int w = x1 - x0, h = y1 - y0;
-                uint32_t* saved = nullptr;
-                if (w > 0 && h > 0) {
-                    saved = (uint32_t*)scratch_alloc(scratch, (size_t)w * h * sizeof(uint32_t));
-                    uint32_t* px = (uint32_t*)tile_surface->pixels;
-                    int pitch = tile_surface->pitch / 4;
-                    for (int row = 0; row < h; row++)
-                        memcpy(saved + row * w, px + (y0 + row) * pitch + x0, w * sizeof(uint32_t));
-                }
+                int region[4] = {};
+                uint32_t* saved = surface_region_save(tile_surface, scratch,
+                                                      rx, ry, r->rw, r->rh,
+                                                      region);
                 box_blur_region(scratch, tile_surface, rx, ry, r->rw, r->rh, r->blur_radius);
                 if (saved) {
                     // reconstruct clip shape with tile-relative coordinates
@@ -920,16 +870,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                         default: break;
                     }
                     ClipShape cs = clip_shape_from_params(r->clip_type, adj_params);
-                    uint32_t* px = (uint32_t*)tile_surface->pixels;
-                    int pitch = tile_surface->pitch / 4;
-                    for (int row = 0; row < h; row++) {
-                        for (int col = 0; col < w; col++) {
-                            float fx = (float)(x0 + col) + 0.5f;
-                            float fy = (float)(y0 + row) + 0.5f;
-                            if (!clip_point_in_shape(&cs, fx, fy))
-                                px[(y0 + row) * pitch + (x0 + col)] = saved[row * w + col];
-                        }
-                    }
+                    surface_region_restore_masked(tile_surface, saved, region, &cs, false);
                 }
             } else {
                 box_blur_region(scratch, tile_surface, rx, ry, r->rw, r->rh, r->blur_radius);
@@ -954,21 +895,9 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             if (tile_surface && tile_surface->pixels) {
                 int rx = r->rx - (int)tile_x;
                 int ry = r->ry - (int)tile_y;
-                int sw = tile_surface->width, sh = tile_surface->height;
-                int x0 = std::max(0, rx), y0 = std::max(0, ry);
-                int x1 = std::min(sw, rx + r->rw), y1 = std::min(sh, ry + r->rh);
-                int w = x1 - x0, h = y1 - y0;
-                if (w > 0 && h > 0) {
-                    shadow_clip_saved = (uint32_t*)scratch_alloc(scratch, (size_t)w * h * sizeof(uint32_t));
-                    uint32_t* px = (uint32_t*)tile_surface->pixels;
-                    int pitch = tile_surface->pitch / 4;
-                    for (int row = 0; row < h; row++)
-                        memcpy(shadow_clip_saved + row * w, px + (y0 + row) * pitch + x0, w * sizeof(uint32_t));
-                    shadow_clip_region[0] = x0;
-                    shadow_clip_region[1] = y0;
-                    shadow_clip_region[2] = w;
-                    shadow_clip_region[3] = h;
-                }
+                shadow_clip_saved = surface_region_save(tile_surface, scratch,
+                                                        rx, ry, r->rw, r->rh,
+                                                        shadow_clip_region);
             }
             break;
         }
@@ -977,8 +906,6 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             rdt_vector_flush_batch(vec);
             DlShadowClipRestore* r = &item->shadow_clip_restore;
             if (shadow_clip_saved && tile_surface && tile_surface->pixels && r->exclude_type) {
-                int x0 = shadow_clip_region[0], y0 = shadow_clip_region[1];
-                int w = shadow_clip_region[2], h = shadow_clip_region[3];
                 // reconstruct exclude shape with tile-relative coordinates
                 float adj_params[8];
                 memcpy(adj_params, r->exclude_params, 8 * sizeof(float));
@@ -994,17 +921,9 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                     default: break;
                 }
                 ClipShape ex = clip_shape_from_params(r->exclude_type, adj_params);
-                uint32_t* px = (uint32_t*)tile_surface->pixels;
-                int pitch = tile_surface->pitch / 4;
-                for (int row = 0; row < h; row++) {
-                    for (int col = 0; col < w; col++) {
-                        float fx = (float)(x0 + col) + 0.5f;
-                        float fy = (float)(y0 + row) + 0.5f;
-                        bool inside = clip_point_in_shape(&ex, fx, fy);
-                        if (r->restore_inside ? inside : !inside)
-                            px[(y0 + row) * pitch + (x0 + col)] = shadow_clip_saved[row * w + col];
-                    }
-                }
+                surface_region_restore_masked(tile_surface, shadow_clip_saved,
+                                              shadow_clip_region, &ex,
+                                              r->restore_inside);
             }
             shadow_clip_saved = nullptr;
             break;

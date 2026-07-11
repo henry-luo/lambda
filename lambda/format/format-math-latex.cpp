@@ -642,61 +642,142 @@ static void format_symbol_impl(StringBuf* sb, Symbol* sym) {
 // Dispatch
 // ============================================================================
 
+enum MathLatexSlot {
+    MATH_LATEX_UNKNOWN,
+    MATH_LATEX_ROOT,
+    MATH_LATEX_OPERATOR,
+    MATH_LATEX_RELATION,
+    MATH_LATEX_PUNCTUATION,
+    MATH_LATEX_SUBSUP,
+    MATH_LATEX_GROUP,
+    MATH_LATEX_BRACK_GROUP,
+    MATH_LATEX_RADICAL,
+    MATH_LATEX_FRACTION,
+    MATH_LATEX_FRAC_LIKE,
+    MATH_LATEX_BINOMIAL,
+    MATH_LATEX_GENFRAC,
+    MATH_LATEX_INFIX_FRAC,
+    MATH_LATEX_COMMAND,
+    MATH_LATEX_SYMBOL_COMMAND,
+    MATH_LATEX_DELIMITER_GROUP,
+    MATH_LATEX_DELIMITER,
+    MATH_LATEX_ACCENT,
+    MATH_LATEX_BIG_OPERATOR,
+    MATH_LATEX_ENVIRONMENT,
+    MATH_LATEX_ENV_BODY,
+    MATH_LATEX_TEXT_COMMAND,
+    MATH_LATEX_STYLE_COMMAND,
+    MATH_LATEX_SPACE_COMMAND,
+    MATH_LATEX_OVERUNDER_COMMAND,
+    MATH_LATEX_EXTENSIBLE_ARROW,
+    MATH_LATEX_SIZED_DELIMITER,
+    MATH_LATEX_COLOR_COMMAND,
+    MATH_LATEX_BOX_COMMAND,
+    MATH_LATEX_PHANTOM_COMMAND,
+    MATH_LATEX_MATHOP_COMMAND,
+    MATH_LATEX_MATRIX_COMMAND,
+    MATH_LATEX_CHILDREN_SPACE,
+    MATH_LATEX_RULE_COMMAND,
+    MATH_LATEX_LIMITS_MODIFIER,
+    MATH_LATEX_CHILDREN_NONE,
+};
+
+static const MathTagDispatch MATH_LATEX_TAGS[] = {
+    {"math", MATH_LATEX_ROOT},
+    {"operator", MATH_LATEX_OPERATOR},
+    {"relation", MATH_LATEX_RELATION},
+    {"punctuation", MATH_LATEX_PUNCTUATION},
+    {"subsup", MATH_LATEX_SUBSUP},
+    {"group", MATH_LATEX_GROUP},
+    {"brack_group", MATH_LATEX_BRACK_GROUP},
+    {"radical", MATH_LATEX_RADICAL},
+    {"fraction", MATH_LATEX_FRACTION},
+    {"frac_like", MATH_LATEX_FRAC_LIKE},
+    {"binomial", MATH_LATEX_BINOMIAL},
+    {"genfrac", MATH_LATEX_GENFRAC},
+    {"infix_frac", MATH_LATEX_INFIX_FRAC},
+    {"command", MATH_LATEX_COMMAND},
+    {"symbol_command", MATH_LATEX_SYMBOL_COMMAND},
+    {"delimiter_group", MATH_LATEX_DELIMITER_GROUP},
+    {"delimiter", MATH_LATEX_DELIMITER},
+    {"accent", MATH_LATEX_ACCENT},
+    {"big_operator", MATH_LATEX_BIG_OPERATOR},
+    {"environment", MATH_LATEX_ENVIRONMENT},
+    {"env_body", MATH_LATEX_ENV_BODY},
+    {"text_command", MATH_LATEX_TEXT_COMMAND},
+    {"textstyle_command", MATH_LATEX_TEXT_COMMAND},
+    {"style_command", MATH_LATEX_STYLE_COMMAND},
+    {"space_command", MATH_LATEX_SPACE_COMMAND},
+    {"spacing_command", MATH_LATEX_SPACE_COMMAND},
+    {"hspace_command", MATH_LATEX_SPACE_COMMAND},
+    {"skip_command", MATH_LATEX_SPACE_COMMAND},
+    {"overunder_command", MATH_LATEX_OVERUNDER_COMMAND},
+    {"extensible_arrow", MATH_LATEX_EXTENSIBLE_ARROW},
+    {"sized_delimiter", MATH_LATEX_SIZED_DELIMITER},
+    {"color_command", MATH_LATEX_COLOR_COMMAND},
+    {"box_command", MATH_LATEX_BOX_COMMAND},
+    {"phantom_command", MATH_LATEX_PHANTOM_COMMAND},
+    {"mathop_command", MATH_LATEX_MATHOP_COMMAND},
+    {"matrix_command", MATH_LATEX_MATRIX_COMMAND},
+    {"matrix_body", MATH_LATEX_CHILDREN_SPACE},
+    {"rule_command", MATH_LATEX_RULE_COMMAND},
+    {"limits_modifier", MATH_LATEX_LIMITS_MODIFIER},
+    {"ascii_operator", MATH_LATEX_CHILDREN_NONE},
+    {"quoted_text", MATH_LATEX_CHILDREN_NONE},
+    {"paren_script", MATH_LATEX_CHILDREN_SPACE},
+    {nullptr, MATH_LATEX_UNKNOWN},
+};
+
 static void format_element_impl(StringBuf* sb, const ElementReader& elem, int depth) {
     const char* tag = elem.tagName();
     if (!tag) return;
 
     log_debug("format-math-latex: element '%s' depth=%d", tag, depth);
 
-    if (strcmp(tag, "math") == 0) return format_math_root(sb, elem, depth);
-    if (strcmp(tag, "operator") == 0) return format_operator(sb, elem);
-    if (strcmp(tag, "relation") == 0) return format_relation(sb, elem);
-    if (strcmp(tag, "punctuation") == 0) return format_punctuation(sb, elem);
-    if (strcmp(tag, "subsup") == 0) return format_subsup(sb, elem, depth);
-    if (strcmp(tag, "group") == 0) return format_group(sb, elem, depth);
-    if (strcmp(tag, "brack_group") == 0) {
+    switch (lookup_math_tag_slot(MATH_LATEX_TAGS, tag, MATH_LATEX_UNKNOWN)) {
+    case MATH_LATEX_ROOT: return format_math_root(sb, elem, depth);
+    case MATH_LATEX_OPERATOR: return format_operator(sb, elem);
+    case MATH_LATEX_RELATION: return format_relation(sb, elem);
+    case MATH_LATEX_PUNCTUATION: return format_punctuation(sb, elem);
+    case MATH_LATEX_SUBSUP: return format_subsup(sb, elem, depth);
+    case MATH_LATEX_GROUP: return format_group(sb, elem, depth);
+    case MATH_LATEX_BRACK_GROUP:
         stringbuf_append_str(sb, "[");
         format_children(sb, elem, depth, " ");
         stringbuf_append_str(sb, "]");
         return;
+    case MATH_LATEX_RADICAL: return format_radical(sb, elem, depth);
+    case MATH_LATEX_FRACTION: return format_fraction(sb, elem, depth);
+    case MATH_LATEX_FRAC_LIKE: return format_frac_like(sb, elem, depth);
+    case MATH_LATEX_BINOMIAL: return format_binomial(sb, elem, depth);
+    case MATH_LATEX_GENFRAC: return format_genfrac(sb, elem, depth);
+    case MATH_LATEX_INFIX_FRAC: return format_infix_frac(sb, elem, depth);
+    case MATH_LATEX_COMMAND: return format_command(sb, elem, depth);
+    case MATH_LATEX_SYMBOL_COMMAND: return format_symbol_command(sb, elem);
+    case MATH_LATEX_DELIMITER_GROUP: return format_delimiter_group(sb, elem, depth);
+    case MATH_LATEX_DELIMITER: return format_delimiter(sb, elem);
+    case MATH_LATEX_ACCENT: return format_accent(sb, elem, depth);
+    case MATH_LATEX_BIG_OPERATOR: return format_big_operator(sb, elem, depth);
+    case MATH_LATEX_ENVIRONMENT: return format_environment(sb, elem, depth);
+    case MATH_LATEX_ENV_BODY: return format_env_body(sb, elem, depth);
+    case MATH_LATEX_TEXT_COMMAND: return format_text_command(sb, elem, depth);
+    case MATH_LATEX_STYLE_COMMAND: return format_style_command(sb, elem, depth);
+    case MATH_LATEX_SPACE_COMMAND: return format_space_command(sb, elem);
+    case MATH_LATEX_OVERUNDER_COMMAND: return format_overunder_command(sb, elem, depth);
+    case MATH_LATEX_EXTENSIBLE_ARROW: return format_extensible_arrow(sb, elem, depth);
+    case MATH_LATEX_SIZED_DELIMITER: return format_sized_delimiter(sb, elem);
+    case MATH_LATEX_COLOR_COMMAND: return format_color_command(sb, elem, depth);
+    case MATH_LATEX_BOX_COMMAND: return format_box_command(sb, elem, depth);
+    case MATH_LATEX_PHANTOM_COMMAND: return format_phantom_command(sb, elem, depth);
+    case MATH_LATEX_MATHOP_COMMAND: return format_mathop_command(sb, elem, depth);
+    case MATH_LATEX_MATRIX_COMMAND: return format_matrix_command(sb, elem, depth);
+    case MATH_LATEX_CHILDREN_SPACE: return format_children(sb, elem, depth, " ");
+    case MATH_LATEX_RULE_COMMAND: return format_rule_command(sb, elem, depth);
+    case MATH_LATEX_LIMITS_MODIFIER: return;
+    case MATH_LATEX_CHILDREN_NONE: return format_children(sb, elem, depth, "");
+    default:
+        break;
     }
-    if (strcmp(tag, "radical") == 0) return format_radical(sb, elem, depth);
-    if (strcmp(tag, "fraction") == 0) return format_fraction(sb, elem, depth);
-    if (strcmp(tag, "frac_like") == 0) return format_frac_like(sb, elem, depth);
-    if (strcmp(tag, "binomial") == 0) return format_binomial(sb, elem, depth);
-    if (strcmp(tag, "genfrac") == 0) return format_genfrac(sb, elem, depth);
-    if (strcmp(tag, "infix_frac") == 0) return format_infix_frac(sb, elem, depth);
-    if (strcmp(tag, "command") == 0) return format_command(sb, elem, depth);
-    if (strcmp(tag, "symbol_command") == 0) return format_symbol_command(sb, elem);
-    if (strcmp(tag, "delimiter_group") == 0) return format_delimiter_group(sb, elem, depth);
-    if (strcmp(tag, "delimiter") == 0) return format_delimiter(sb, elem);
-    if (strcmp(tag, "accent") == 0) return format_accent(sb, elem, depth);
-    if (strcmp(tag, "big_operator") == 0) return format_big_operator(sb, elem, depth);
-    if (strcmp(tag, "environment") == 0) return format_environment(sb, elem, depth);
-    if (strcmp(tag, "env_body") == 0) return format_env_body(sb, elem, depth);
-    if (strcmp(tag, "text_command") == 0) return format_text_command(sb, elem, depth);
-    if (strcmp(tag, "textstyle_command") == 0) return format_text_command(sb, elem, depth);
-    if (strcmp(tag, "style_command") == 0) return format_style_command(sb, elem, depth);
-    if (strcmp(tag, "space_command") == 0) return format_space_command(sb, elem);
-    if (strcmp(tag, "spacing_command") == 0) return format_space_command(sb, elem);
-    if (strcmp(tag, "hspace_command") == 0) return format_space_command(sb, elem);
-    if (strcmp(tag, "skip_command") == 0) return format_space_command(sb, elem);
-    if (strcmp(tag, "overunder_command") == 0) return format_overunder_command(sb, elem, depth);
-    if (strcmp(tag, "extensible_arrow") == 0) return format_extensible_arrow(sb, elem, depth);
-    if (strcmp(tag, "sized_delimiter") == 0) return format_sized_delimiter(sb, elem);
-    if (strcmp(tag, "color_command") == 0) return format_color_command(sb, elem, depth);
-    if (strcmp(tag, "box_command") == 0) return format_box_command(sb, elem, depth);
-    if (strcmp(tag, "phantom_command") == 0) return format_phantom_command(sb, elem, depth);
-    if (strcmp(tag, "mathop_command") == 0) return format_mathop_command(sb, elem, depth);
-    if (strcmp(tag, "matrix_command") == 0) return format_matrix_command(sb, elem, depth);
-    if (strcmp(tag, "matrix_body") == 0) return format_children(sb, elem, depth, " ");
-    if (strcmp(tag, "rule_command") == 0) return format_rule_command(sb, elem, depth);
-    if (strcmp(tag, "limits_modifier") == 0) return; // handled by subsup
-
-    // ASCII-specific nodes that might appear (handle gracefully)
-    if (strcmp(tag, "ascii_operator") == 0) { format_children(sb, elem, depth, ""); return; }
-    if (strcmp(tag, "quoted_text") == 0) { format_children(sb, elem, depth, ""); return; }
-    if (strcmp(tag, "paren_script") == 0) { format_children(sb, elem, depth, " "); return; }
 
     // Generic fallback: emit all children
     log_debug("format-math-latex: unknown element '%s', using fallback", tag);

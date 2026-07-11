@@ -25,6 +25,8 @@
 #include "../transpiler.hpp"
 #include "../jube/jube_registry.h"
 #include "../../lib/base64.h"
+#include "../../lib/escape.h"
+#include "../../lib/utf.h"
 
 extern "C" Item js_to_property_key(Item key);
 extern "C" int64_t js_key_is_symbol_c(Item key);
@@ -251,8 +253,6 @@ static int js_get_parent_pid_win32(void) {
 extern Item parse_json_to_item(Input* input, const char* json_string);
 extern Item parse_json_to_item_strict(Input* input, const char* json_string, bool* ok);
 
-// forward declarations for functions used by ES2020 descriptor helpers below
-static inline Item make_js_undefined();
 extern "C" void js_defprop_set_internal_state(Item obj, Item key, Item value);
 static bool js_require_object_type(Item arg, const char* method_name);
 static Item js_defprop_get_internal_state(Item obj, const char* key, int keylen, bool* found);
@@ -1010,10 +1010,6 @@ static bool js_ta_define_own_numeric_index(Item obj, Item key, Item desc, bool* 
 #include <mach/task_info.h>
 #endif
 
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
 static bool js_regexp_virtual_prop_name(const char* name, int len) {
     return (len == 6 && (strncmp(name, "source", 6) == 0 || strncmp(name, "global", 6) == 0 ||
                          strncmp(name, "dotAll", 6) == 0 || strncmp(name, "sticky", 6) == 0)) ||
@@ -1550,9 +1546,6 @@ extern "C" Item js_performance_observer_new(Item callback) {
     return observer;
 }
 
-// Date.now() — returns milliseconds since Unix epoch
-static int64_t js_date_days_from_civil(int64_t year, unsigned month, unsigned day);
-
 static double js_date_time_clip(double value) {
     if (isnan(value) || isinf(value) || fabs(value) > 8.64e15) return NAN;
     double clipped = value < 0 ? -floor(-value) : floor(value);
@@ -1593,7 +1586,7 @@ static double js_date_make_day_double(double year, double month, double day) {
     if (normalized_year < (double)INT64_MIN || normalized_year > (double)INT64_MAX) return NAN;
     int64_t y = (int64_t)normalized_year;
     unsigned m = (unsigned)normalized_month + 1;
-    return (double)js_date_days_from_civil(y, m, 1) + day - 1.0;
+    return (double)datetime_days_from_civil(y, m, 1) + day - 1.0;
 }
 
 static double js_date_make_time_double(double hour, double min, double sec, double millis) {
@@ -1635,15 +1628,6 @@ static int64_t js_date_floor_div(int64_t value, int64_t divisor) {
     return quotient;
 }
 
-static int64_t js_date_days_from_civil(int64_t year, unsigned month, unsigned day) {
-    year -= month <= 2;
-    const int64_t era = (year >= 0 ? year : year - 399) / 400;
-    const unsigned yoe = (unsigned)(year - era * 400);
-    const unsigned doy = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
-    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return era * 146097 + (int64_t)doe - 719468;
-}
-
 static double js_date_local_fallback_offset_ms(void) {
     struct tm ref = {};
     ref.tm_year = 70;
@@ -1660,7 +1644,7 @@ static double js_date_make_civil_ms_from_parts(int year, int month, int day,
     int64_t year_adjust = js_date_floor_div(month_index, 12);
     int normalized_month = (int)(month_index - year_adjust * 12);
     int64_t normalized_year = (int64_t)year + year_adjust;
-    int64_t days = js_date_days_from_civil(normalized_year, (unsigned)(normalized_month + 1), 1)
+    int64_t days = datetime_days_from_civil(normalized_year, (unsigned)(normalized_month + 1), 1)
         + (int64_t)day - 1;
     return (((((double)days * 24.0 + (double)hour) * 60.0 + (double)minute) * 60.0)
         + (double)second) * 1000.0 + (double)millis;
@@ -5567,10 +5551,10 @@ extern "C" Item js_string_fromCharCode2(Item first_item, Item second_item) {
 
     char buf[8];
     int pos = 0;
-    if (first >= 0xD800 && first <= 0xDBFF && second >= 0xDC00 && second <= 0xDFFF) {
-        int cp = 0x10000 + ((first - 0xD800) << 10) + (second - 0xDC00);
+    if (utf_is_high_surrogate((uint32_t)first) && utf_is_low_surrogate((uint32_t)second)) {
+        uint32_t cp = utf16_decode_pair((uint16_t)first, (uint16_t)second);
         if (g_uri_last_four_byte_string.item &&
-            g_uri_last_four_byte_cp == (uint32_t)cp &&
+            g_uri_last_four_byte_cp == cp &&
             g_uri_last_four_byte_epoch == js_get_heap_epoch()) {
             return g_uri_last_four_byte_string;
         }
@@ -5597,11 +5581,8 @@ extern "C" Item js_uri_decode_equals_from_char_code(Item str_item, Item first_it
         int second = js_from_char_code_to_uint16(second_item);
         if (js_exception_pending) return ItemNull;
         bool matched = false;
-        if (first >= 0xD800 && first <= 0xDBFF && second >= 0xDC00 && second <= 0xDFFF) {
-            uint32_t pair_cp = 0x10000 + (((uint32_t)first - 0xD800) << 10) +
-                               ((uint32_t)second - 0xDC00);
-            matched = pair_cp == cp;
-        }
+        uint32_t pair_cp = utf16_decode_pair((uint16_t)first, (uint16_t)second);
+        matched = pair_cp != 0 && pair_cp == cp;
         return (Item){.item = b2it(matched)};
     }
 
@@ -5669,11 +5650,11 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
             Item code_item = js_typed_array_get(arr_item, (Item){.item = i2it(i)});
             int code = js_from_char_code_to_uint16(code_item);
             // combine adjacent surrogate pairs into a single supplementary codepoint
-            if (code >= 0xD800 && code <= 0xDBFF && i + 1 < len) {
+            if (utf_is_high_surrogate((uint32_t)code) && i + 1 < len) {
                 Item lo_item = js_typed_array_get(arr_item, (Item){.item = i2it(i + 1)});
                 int lo = js_from_char_code_to_uint16(lo_item);
-                if (lo >= 0xDC00 && lo <= 0xDFFF) {
-                    int cp = 0x10000 + ((code - 0xD800) << 10) + (lo - 0xDC00);
+                uint32_t cp = utf16_decode_pair((uint16_t)code, (uint16_t)lo);
+                if (cp != 0) {
                     pos += encode_charcode_full_utf8(buf + pos, cp);
                     i++; // skip the low surrogate
                     continue;
@@ -5698,10 +5679,10 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
     for (int i = 0; i < len; i++) {
         int code = js_from_char_code_to_uint16(arr->items[i]);
         // combine adjacent surrogate pairs into a single supplementary codepoint
-        if (code >= 0xD800 && code <= 0xDBFF && i + 1 < len) {
+        if (utf_is_high_surrogate((uint32_t)code) && i + 1 < len) {
             int lo = js_from_char_code_to_uint16(arr->items[i + 1]);
-            if (lo >= 0xDC00 && lo <= 0xDFFF) {
-                int cp = 0x10000 + ((code - 0xD800) << 10) + (lo - 0xDC00);
+            uint32_t cp = utf16_decode_pair((uint16_t)code, (uint16_t)lo);
+            if (cp != 0) {
                 pos += encode_charcode_full_utf8(buf + pos, cp);
                 i++; // skip the low surrogate
                 continue;
@@ -13349,47 +13330,7 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
 static void js_stringify_escape_string(StrBuf* sb, const char* s, int len);
 
 static void js_stringify_escape_string(StrBuf* sb, const char* s, int len) {
-    strbuf_append_char(sb, '"');
-    for (int i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)s[i];
-        switch (c) {
-            case '"': strbuf_append_str_n(sb, "\\\"", 2); break;
-            case '\\': strbuf_append_str_n(sb, "\\\\", 2); break;
-            case '\b': strbuf_append_str_n(sb, "\\b", 2); break;
-            case '\f': strbuf_append_str_n(sb, "\\f", 2); break;
-            case '\n': strbuf_append_str_n(sb, "\\n", 2); break;
-            case '\r': strbuf_append_str_n(sb, "\\r", 2); break;
-            case '\t': strbuf_append_str_n(sb, "\\t", 2); break;
-            default:
-                if (c < 0x20) {
-                    char esc[8];
-                    snprintf(esc, sizeof(esc), "\\u%04x", c);
-                    strbuf_append_str_n(sb, esc, 6);
-                } else if (c >= 0xED && c <= 0xEF && i + 2 < len) {
-                    // Possible UTF-8 surrogate sequence (U+D800-U+DFFF) or BMP chars
-                    unsigned char c2 = (unsigned char)s[i + 1];
-                    unsigned char c3 = (unsigned char)s[i + 2];
-                    if ((c2 & 0xC0) == 0x80 && (c3 & 0xC0) == 0x80) {
-                        unsigned int cp = ((c & 0x0F) << 12) | ((c2 & 0x3F) << 6) | (c3 & 0x3F);
-                        if (cp >= 0xD800 && cp <= 0xDFFF) {
-                            // ES2019: lone surrogate → \uXXXX escape
-                            char esc[8];
-                            snprintf(esc, sizeof(esc), "\\u%04x", cp);
-                            strbuf_append_str_n(sb, esc, 6);
-                            i += 2;
-                        } else {
-                            strbuf_append_char(sb, (char)c);
-                        }
-                    } else {
-                        strbuf_append_char(sb, (char)c);
-                    }
-                } else {
-                    strbuf_append_char(sb, (char)c);
-                }
-                break;
-        }
-    }
-    strbuf_append_char(sb, '"');
+    escape_append_json_string(sb, s, (size_t)len, true, true);
 }
 
 static bool js_json_is_raw_json_object(Item value) {
@@ -14786,14 +14727,14 @@ extern "C" Item js_escape(Item str_item) {
 
         if (cp > 0xFFFF) {
             // encode as surrogate pair: %uD800-style
-            uint32_t hi = 0xD800 + ((cp - 0x10000) >> 10);
-            uint32_t lo = 0xDC00 + ((cp - 0x10000) & 0x3FF);
+            uint16_t units[2];
+            utf16_encode(cp, units);
             buf[out++] = '%'; buf[out++] = 'u';
-            buf[out++] = hex[(hi >> 12) & 0xF]; buf[out++] = hex[(hi >> 8) & 0xF];
-            buf[out++] = hex[(hi >> 4) & 0xF]; buf[out++] = hex[hi & 0xF];
+            buf[out++] = hex[(units[0] >> 12) & 0xF]; buf[out++] = hex[(units[0] >> 8) & 0xF];
+            buf[out++] = hex[(units[0] >> 4) & 0xF]; buf[out++] = hex[units[0] & 0xF];
             buf[out++] = '%'; buf[out++] = 'u';
-            buf[out++] = hex[(lo >> 12) & 0xF]; buf[out++] = hex[(lo >> 8) & 0xF];
-            buf[out++] = hex[(lo >> 4) & 0xF]; buf[out++] = hex[lo & 0xF];
+            buf[out++] = hex[(units[1] >> 12) & 0xF]; buf[out++] = hex[(units[1] >> 8) & 0xF];
+            buf[out++] = hex[(units[1] >> 4) & 0xF]; buf[out++] = hex[units[1] & 0xF];
         } else if (cp > 0xFF) {
             // %uXXXX
             buf[out++] = '%'; buf[out++] = 'u';
@@ -14914,10 +14855,6 @@ extern "C" void js_globals_batch_reset() {
 // =============================================================================
 // AbortController / AbortSignal implementation
 // =============================================================================
-
-static Item make_string_item(const char* str) {
-    return (Item){.item = s2it(heap_create_name(str, strlen(str)))};
-}
 
 // AbortSignal constructor — creates an AbortSignal object
 static Item js_make_abort_signal() {

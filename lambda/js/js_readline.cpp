@@ -36,17 +36,6 @@ extern "C" void js_set_function_name(Item fn_item, Item name_item);
 extern "C" void js_stream_flush_data_now(Item self);
 extern Item js_make_number(double d);
 
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)(len > 0 ? len : 0));
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
 static Item readline_namespace = {0};
 static Item readline_promises_namespace = {0};
 static Item readline_completion_rl = {0};

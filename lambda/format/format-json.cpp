@@ -37,11 +37,7 @@ static void format_map_reader_contents(JsonContext& ctx, const MapReader& map_re
         ctx.write_indent(indent + 1);
 
         // Format the key (always quoted in JSON, with proper escaping)
-        ctx.write_char('"');
-        format_escaped_string_ex(ctx.output(), key, strlen(key),
-            JSON_ESCAPE_RULES, JSON_ESCAPE_RULES_COUNT,
-            ESCAPE_CTRL_JSON_UNICODE);
-        ctx.write_char('"');
+        escape_append_json_stringbuf(ctx.output(), key, strlen(key), true, false);
         ctx.write_text(": ");
 
         // Format the value
@@ -60,11 +56,7 @@ static void format_string(JsonContext& ctx, String* str) {
         return;
     }
 
-    ctx.write_char('"');
-    format_escaped_string_ex(ctx.output(), str->chars, str->len,
-        JSON_ESCAPE_RULES, JSON_ESCAPE_RULES_COUNT,
-        ESCAPE_CTRL_JSON_UNICODE);
-    ctx.write_char('"');
+    escape_append_json_stringbuf(ctx.output(), str->chars, str->len, true, false);
 }
 
 static void format_array_reader_with_indent(JsonContext& ctx, const ArrayReader& arr, int indent) {
@@ -104,18 +96,14 @@ static void format_element_reader_with_indent(JsonContext& ctx, const ElementRea
 
     // Add attributes as direct properties
     if (elem.attrCount() > 0) {
-        // Access attributes directly from ElementReader
-        const TypeMap* map_type = (const TypeMap*)elem.element()->type;
-        const ShapeEntry* field = map_type->shape;
-
-        while (field) {
-            const char* key = field->name->str;
-            ItemReader value = elem.get_attr(key);
+        auto attrs = elem.attrs();
+        const char* key;
+        ItemReader value;
+        while (attrs.next(&key, &value)) {
+            if (!key) continue;
 
             ctx.emit(",%n%i\"%N\": ", indent + 1, key);
             format_item_reader_with_indent(ctx, value, indent + 1);
-
-            field = field->next;
         }
     }
 
@@ -149,106 +137,96 @@ static void format_element_reader_with_indent(JsonContext& ctx, const ElementRea
 }
 
 static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& item, int indent) {
-    FormatterContextCpp::RecursionGuard guard(ctx);
-    if (guard.exceeded()) {
-        ctx.write_text("\"[max_depth]\"");
-        return;
-    }
+    class JsonItemHandlers : public FormatItemHandlersDefault {
+    public:
+        JsonItemHandlers(JsonContext& ctx, int indent) : ctx_(ctx), indent_(indent) {}
 
-    if (item.isNull()) {
-        ctx.write_text("null");
-    } else if (item.isBool()) {
-        ctx.emit("%b", item.asBool());
-    } else if (item.isInt()) {
-        stringbuf_append_format(ctx.output(), "%" PRId64, item.asInt());
-    } else if (item.isFloat()) {
-        double val = item.asFloat();
-        if (isnan(val) || isinf(val)) {
-            ctx.write_text("null");
-        } else {
-            char num_buf[64];
-            lambda_double_to_shortest(val, num_buf, sizeof(num_buf));
-            ctx.write_text(num_buf);
+        void max_depth(const ItemReader& item) override { (void)item; ctx_.write_text("\"[max_depth]\""); }
+        void null_value(const ItemReader& item) override { (void)item; ctx_.write_text("null"); }
+        void bool_value(const ItemReader& item) override { ctx_.emit("%b", item.asBool()); }
+        void number_value(const ItemReader& item) override { format_number(ctx_.output(), item.item()); }
+        void string_value(const ItemReader& item, String* str) override {
+            (void)item;
+            if (str) {
+                format_string(ctx_, str);
+            } else {
+                ctx_.write_text("null");
+            }
         }
-    } else if (item.isString()) {
-        String* str = item.asString();
-        if (str) {
-            format_string(ctx, str);
-        } else {
-            ctx.write_text("null");
+        void symbol_value(const ItemReader& item, Symbol* sym) override {
+            (void)item;
+            if (sym) {
+                ctx_.write_char('"');
+                stringbuf_append_str_n(ctx_.output(), sym->chars, sym->len);
+                ctx_.write_char('"');
+            } else {
+                ctx_.write_text("null");
+            }
         }
-    } else if (item.isSymbol()) {
-        // Format symbols as strings (they represent identifiers/keywords in CSS)
-        Symbol* sym = item.asSymbol();
-        if (sym) {
-            // Format symbol chars as a JSON string
-            ctx.write_char('"');
-            stringbuf_append_str_n(ctx.output(), sym->chars, sym->len);
-            ctx.write_char('"');
-        } else {
-            ctx.write_text("null");
+        void array_value(const ItemReader& item, ArrayReader arr) override {
+            (void)item;
+            // isArray() covers typed ArrayNum; the reader walks every backing.
+            format_array_reader_with_indent(ctx_, arr, indent_);
         }
-    } else if (item.isArray() || item.isList()) {
-        // isArray() now covers typed ArrayNum (1-D / N-D) too — the reader walks
-        // it transparently, so the same path handles every array backing.
-        ArrayReader arr = item.asArray();
-        format_array_reader_with_indent(ctx, arr, indent);
-    } else if (item.isMap()) {
-        MapReader mp = item.asMap();
-        format_map_reader_with_indent(ctx, mp, indent);
-    } else if (auto object = item.asItem<LMD_TYPE_OBJECT>()) {
-        // Object: format as map with "@" type discriminator key
-        Object* obj = object.ptr();
-        TypeObject* obj_type = (TypeObject*)obj->type;
-        ctx.emit("{%n%i\"@\": \"", indent + 1);
-        if (obj_type->type_name.str) {
-            stringbuf_append_str_n(ctx.output(), obj_type->type_name.str, obj_type->type_name.length);
+        void map_value(const ItemReader& item, MapReader mp) override {
+            (void)item;
+            format_map_reader_with_indent(ctx_, mp, indent_);
         }
-        ctx.write_char('"');
-        // Format fields using MapReader (Object has same field layout as Map)
-        MapReader mp = MapReader::fromItem(item.item());
-        auto iter = mp.entries();
-        const char* key;
-        ItemReader value;
-        while (iter.next(&key, &value)) {
-            ctx.emit(",%n%i\"%N\": ", indent + 1, key);
-            format_item_reader_with_indent(ctx, value, indent + 1);
+        void object_value(const ItemReader& item, Object* obj) override {
+            TypeObject* obj_type = (TypeObject*)obj->type;
+            ctx_.emit("{%n%i\"@\": \"", indent_ + 1);
+            if (obj_type->type_name.str) {
+                stringbuf_append_str_n(ctx_.output(), obj_type->type_name.str, obj_type->type_name.length);
+            }
+            ctx_.write_char('"');
+            // Object fields use the same packed layout as maps, so reuse MapReader.
+            MapReader mp = MapReader::fromItem(item.item());
+            auto iter = mp.entries();
+            const char* key;
+            ItemReader value;
+            while (iter.next(&key, &value)) {
+                ctx_.emit(",%n%i\"%N\": ", indent_ + 1, key);
+                format_item_reader_with_indent(ctx_, value, indent_ + 1);
+            }
+            ctx_.emit("%n%i}", indent_);
         }
-        ctx.emit("%n%i}", indent);
-    } else if (item.isElement()) {
-        ElementReader elem = item.asElement();
-        format_element_reader_with_indent(ctx, elem, indent);
-    } else if (item.isDatetime()) {
-        // format datetime as ISO 8601 string in JSON
-        DateTime dt = item.asDatetime();
-        StrBuf* buf = strbuf_new();
-        datetime_format_iso8601(buf, &dt);
-        stringbuf_append_format(ctx.output(), "\"%.*s\"", (int)buf->length, buf->str);
-        strbuf_free(buf);
-    } else {
-        // Unknown type
-        ctx.write_text("null");
-    }
+        void element_value(const ItemReader& item, ElementReader elem) override {
+            (void)item;
+            format_element_reader_with_indent(ctx_, elem, indent_);
+        }
+        void datetime_value(const ItemReader& item, DateTime* dt) override {
+            (void)item;
+            ctx_.write_char('"');
+            format_write_datetime_iso8601(ctx_.output(), dt);
+            ctx_.write_char('"');
+        }
+        void unknown_value(const ItemReader& item) override { (void)item; ctx_.write_text("null"); }
+
+    private:
+        JsonContext& ctx_;
+        int indent_;
+    };
+
+    JsonItemHandlers handlers(ctx, indent);
+    ctx.dispatch_item(item, handlers);
 }
 
 String* format_json(Pool* pool, const Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
 
-    Pool* ctx_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.json");
-    JsonContext ctx(ctx_pool, sb);
+    ScopedFormatPool ctx_pool("format.json");
+    JsonContext ctx(ctx_pool.get(), sb);
     ItemReader reader(root_item.to_const());
     format_item_reader_with_indent(ctx, reader, 0);
-    mem_pool_destroy(ctx_pool);
 
     return stringbuf_to_string(sb);
 }
 
 // Convenience function that formats JSON to a provided StringBuf
 void format_json_to_strbuf(StringBuf* sb, Item root_item) {
-    Pool* pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.json");
-    JsonContext ctx(pool, sb);
+    ScopedFormatPool pool("format.json");
+    JsonContext ctx(pool.get(), sb);
     ItemReader reader(root_item.to_const());
     format_item_reader_with_indent(ctx, reader, 0);
-    mem_pool_destroy(pool);
 }

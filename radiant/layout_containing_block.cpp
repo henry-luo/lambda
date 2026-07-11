@@ -2,13 +2,8 @@
 #include "layout.hpp"
 
 #include "../lib/log.h"
-#include "../lib/math_utils.h"
 #include "../lib/tagged.hpp"
 #include <cmath>
-
-static inline float clamp_non_negative(float value) {
-    return lib_math::max_val(value, 0.0f);
-}
 
 bool layout_view_is_abs_or_fixed(ViewBlock* block) {
     return block && block->position &&
@@ -33,18 +28,18 @@ LayoutContainingBlock layout_containing_block_for_view(ViewBlock* block) {
 
     cb.border_x = 0.0f;
     cb.border_y = 0.0f;
-    cb.border_width = clamp_non_negative(block->width);
-    cb.border_height = clamp_non_negative(block->height);
+    cb.border_width = max(block->width, 0.0f);
+    cb.border_height = max(block->height, 0.0f);
 
     cb.padding_x = box.border.left;
     cb.padding_y = box.border.top;
-    cb.padding_width = clamp_non_negative(cb.border_width - box.border_h);
-    cb.padding_height = clamp_non_negative(cb.border_height - box.border_v);
+    cb.padding_width = max(cb.border_width - box.border_h, 0.0f);
+    cb.padding_height = max(cb.border_height - box.border_v, 0.0f);
 
     cb.content_x = box.border.left + box.padding.left;
     cb.content_y = box.border.top + box.padding.top;
-    cb.content_width = clamp_non_negative(cb.border_width - box.pad_border_h);
-    cb.content_height = clamp_non_negative(cb.border_height - box.pad_border_v);
+    cb.content_width = max(cb.border_width - box.pad_border_h, 0.0f);
+    cb.content_height = max(cb.border_height - box.pad_border_v, 0.0f);
 
     cb.has_definite_width = block->blk && block->blk->given_width >= 0.0f;
     cb.has_definite_height = block->blk && block->blk->given_height >= 0.0f;

@@ -65,9 +65,7 @@ Item push_l(int64_t val);
 
 // check if type is a scalar numeric type
 static inline bool is_scalar_numeric(TypeId type) {
-    return type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
-           type == LMD_TYPE_FLOAT || type == LMD_TYPE_DECIMAL ||
-           type == LMD_TYPE_NUM_SIZED || type == LMD_TYPE_UINT64;
+    return is_numeric_type_id(type);
 }
 
 // check if type is a collection that supports vectorized operations
@@ -97,29 +95,7 @@ static Item vector_get(Item item, int64_t index) {
     TypeId type = get_type_id(item);
     switch (type) {
         case LMD_TYPE_ARRAY_NUM: {
-            ArrayNum* arr = item.array_num;
-            switch (arr->get_elem_type()) {
-                case ELEM_FLOAT64: return push_d(arr->float_items[index]);
-                case ELEM_INT64:   return push_l(arr->items[index]);
-                case ELEM_INT:     return { .item = i2it(arr->items[index]) };
-                case ELEM_INT8:    return { .item = i8_to_item(((int8_t*)arr->data)[index]) };
-                case ELEM_INT16:   return { .item = i16_to_item(((int16_t*)arr->data)[index]) };
-                case ELEM_INT32:   return { .item = i32_to_item(((int32_t*)arr->data)[index]) };
-                case ELEM_UINT8:   return { .item = u8_to_item(((uint8_t*)arr->data)[index]) };
-                case ELEM_UINT8_CLAMPED: return { .item = u8_to_item(((uint8_t*)arr->data)[index]) };
-                case ELEM_UINT16:  return { .item = u16_to_item(((uint16_t*)arr->data)[index]) };
-                case ELEM_UINT32:  return { .item = u32_to_item(((uint32_t*)arr->data)[index]) };
-                case ELEM_FLOAT16: return { .item = f16_to_item(f16_bits_to_f32(((uint16_t*)arr->data)[index])) };
-                case ELEM_FLOAT32: return { .item = f32_to_item(((float*)arr->data)[index]) };
-                case ELEM_UINT64: {
-                    uint64_t val = ((uint64_t*)arr->data)[index];
-                    uint64_t* heap_val = (uint64_t*)heap_calloc(sizeof(uint64_t), LMD_TYPE_UINT64);
-                    *heap_val = val;
-                    return { .item = u64_to_item(heap_val) };
-                }
-                case ELEM_BOOL:    return { .item = b2it(((uint8_t*)arr->data)[index] ? BOOL_TRUE : BOOL_FALSE) };
-                default:           return ItemError;
-            }
+            return array_num_read_item(item.array_num, index);
         }
         case LMD_TYPE_ARRAY:
             return item.array->items[index];
@@ -159,41 +135,12 @@ static void stable_sort_items_by_total_order(Item* items, int64_t len, bool desc
 
 // convert item to double for arithmetic (returns NAN on error)
 static double item_to_double(Item item) {
-    TypeId type = get_type_id(item);
-    switch (type) {
-        case LMD_TYPE_INT:       return (double)item.get_int56();
-        case LMD_TYPE_INT64:     return (double)item.get_int64();
-        case LMD_TYPE_FLOAT:     return item.get_double();
-        case LMD_TYPE_UINT64:    return (double)item.get_uint64();
-        case LMD_TYPE_NUM_SIZED: return item.get_num_sized_as_double();
-        case LMD_TYPE_DECIMAL:   return item.get_double();
-        default:                 return NAN;
-    }
+    return it2d(item);
 }
 
 // check if an elem_type represents a float variant
 static inline bool is_float_elem_type(ArrayNumElemType et) {
     return et == ELEM_FLOAT16 || et == ELEM_FLOAT32 || et == ELEM_FLOAT64;
-}
-
-// read compact array element as double without boxing to Item
-static inline double compact_elem_to_double(ArrayNum* arr, int64_t index) {
-    switch (arr->get_elem_type()) {
-        case ELEM_INT:     return (double)arr->items[index];
-        case ELEM_INT64:   return (double)arr->items[index];
-        case ELEM_FLOAT64: return arr->float_items[index];
-        case ELEM_INT8:    return (double)((int8_t*)arr->data)[index];
-        case ELEM_INT16:   return (double)((int16_t*)arr->data)[index];
-        case ELEM_INT32:   return (double)((int32_t*)arr->data)[index];
-        case ELEM_UINT8:   return (double)((uint8_t*)arr->data)[index];
-        case ELEM_UINT8_CLAMPED: return (double)((uint8_t*)arr->data)[index];
-        case ELEM_UINT16:  return (double)((uint16_t*)arr->data)[index];
-        case ELEM_UINT32:  return (double)((uint32_t*)arr->data)[index];
-        case ELEM_FLOAT16: return (double)f16_bits_to_f32(((uint16_t*)arr->data)[index]);
-        case ELEM_FLOAT32: return (double)((float*)arr->data)[index];
-        case ELEM_UINT64:  return (double)((uint64_t*)arr->data)[index];
-        default:           return NAN;
-    }
 }
 
 // check if result should be float (any operand is float)
@@ -415,7 +362,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
         for (int64_t i = 0; i < len; i++) {
             double elem_val;
             if (vec_type == LMD_TYPE_ARRAY_NUM)
-                elem_val = compact_elem_to_double(vec.array_num, i);
+                elem_val = array_num_read_double(vec.array_num, i);
             else
                 elem_val = item_to_double(vector_get(vec, i));
             double res;
@@ -556,24 +503,6 @@ static int compute_broadcast_shape(
 
 // Read one numeric element from an ArrayNum at a flat-byte offset (in elements).
 // Handles all ELEM_* element kinds, converting to double for uniform processing.
-static inline double read_arr_elem_as_double(ArrayNum* arr, int64_t off) {
-    switch (arr->get_elem_type()) {
-        case ELEM_INT:   case ELEM_INT64:  return (double)arr->items[off];
-        case ELEM_FLOAT64: return arr->float_items[off];
-        case ELEM_INT8:    return (double)((int8_t*)arr->data)[off];
-        case ELEM_INT16:   return (double)((int16_t*)arr->data)[off];
-        case ELEM_INT32:   return (double)((int32_t*)arr->data)[off];
-        case ELEM_UINT8:   return (double)((uint8_t*)arr->data)[off];
-        case ELEM_UINT8_CLAMPED: return (double)((uint8_t*)arr->data)[off];
-        case ELEM_UINT16:  return (double)((uint16_t*)arr->data)[off];
-        case ELEM_UINT32:  return (double)((uint32_t*)arr->data)[off];
-        case ELEM_FLOAT32: return (double)((float*)arr->data)[off];
-        case ELEM_UINT64:  return (double)((uint64_t*)arr->data)[off];
-        case ELEM_BOOL:    return ((uint8_t*)arr->data)[off] ? 1.0 : 0.0;
-        default:           return 0.0;
-    }
-}
-
 static inline uint8_t clamp_uint8_even(double value) {
     if (isnan(value) || value <= 0.0) return 0;
     if (value >= 255.0) return 255;
@@ -590,7 +519,7 @@ static inline uint8_t clamp_uint8_even(double value) {
 }
 
 // Write a double into element `off`, rounding + clamping to the elem type's range
-// (the counterpart to read_arr_elem_as_double).  Float types store the value raw.
+// (the counterpart to array_num_read_double).  Float types store the value raw.
 static inline void write_arr_elem_from_double(ArrayNum* arr, int64_t off, double v) {
     switch (arr->get_elem_type()) {
         case ELEM_INT:   case ELEM_INT64:   arr->items[off] = (int64_t)llround(v); return;
@@ -685,8 +614,8 @@ static Item vec_broadcast_op(ArrayNum* a, ArrayNum* b, int op) {
             off_a += idx[axis] * eff_a[axis];
             off_b += idx[axis] * eff_b[axis];
         }
-        double va = read_arr_elem_as_double(a, off_a);
-        double vb = read_arr_elem_as_double(b, off_b);
+        double va = array_num_read_double(a, off_a);
+        double vb = array_num_read_double(b, off_b);
         double res;
         switch (op) {
             case 0: res = va + vb; break;
@@ -764,7 +693,7 @@ static Item vec_cmp_broadcast(ArrayNum* a, ArrayNum* b, int op) {
     for (int64_t k = 0; k < total; k++) {
         int64_t oa = 0, ob = 0;
         for (int ax = 0; ax < out_ndim; ax++) { oa += idx[ax] * eff_a[ax]; ob += idx[ax] * eff_b[ax]; }
-        out[k] = cmp_apply(read_arr_elem_as_double(a, oa), read_arr_elem_as_double(b, ob), op) ? 1 : 0;
+        out[k] = cmp_apply(array_num_read_double(a, oa), array_num_read_double(b, ob), op) ? 1 : 0;
         for (int ax = out_ndim - 1; ax >= 0; ax--) { idx[ax]++; if (idx[ax] < out_shp[ax]) break; idx[ax] = 0; }
     }
     return { .array_num = result };
@@ -954,8 +883,8 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
     if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM && use_float) {
         ArrayNum* result = array_float_new(len);
         for (int64_t i = 0; i < len; i++) {
-            double a = compact_elem_to_double(vec_a.array_num, i);
-            double b = compact_elem_to_double(vec_b.array_num, i);
+            double a = array_num_read_double(vec_a.array_num, i);
+            double b = array_num_read_double(vec_b.array_num, i);
             switch (op) {
                 case 0: result->float_items[i] = a + b; break;
                 case 1: result->float_items[i] = a - b; break;
@@ -976,8 +905,8 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         if (a_is_num || b_is_num) {
             ArrayNum* result = array_int64_new(len);
             for (int64_t i = 0; i < len; i++) {
-                double a = a_is_num ? compact_elem_to_double(vec_a.array_num, i) : item_to_double(vector_get(vec_a, i));
-                double b = b_is_num ? compact_elem_to_double(vec_b.array_num, i) : item_to_double(vector_get(vec_b, i));
+                double a = a_is_num ? array_num_read_double(vec_a.array_num, i) : item_to_double(vector_get(vec_a, i));
+                double b = b_is_num ? array_num_read_double(vec_b.array_num, i) : item_to_double(vector_get(vec_b, i));
                 int64_t ia = (int64_t)a, ib = (int64_t)b;
                 switch (op) {
                     case 0: result->items[i] = ia + ib; break;
@@ -1192,14 +1121,14 @@ Item fn_math_prod(Item item) {
         } else if (is_float_elem_type(arr->get_elem_type())) {
             double prod = 1.0;
             for (int64_t i = 0; i < arr->length; i++) {
-                prod *= compact_elem_to_double(arr, i);
+                prod *= array_num_read_double(arr, i);
             }
             return push_d(prod);
         } else {
             // compact integer types
             int64_t prod = 1;
             for (int64_t i = 0; i < arr->length; i++) {
-                prod *= (int64_t)compact_elem_to_double(arr, i);
+                prod *= (int64_t)array_num_read_double(arr, i);
             }
             return push_l(prod);
         }
@@ -1274,7 +1203,7 @@ Item fn_math_cumsum(Item item) {
             ArrayNum* result = array_float_new(len);
             double sum = 0.0;
             for (int64_t i = 0; i < len; i++) {
-                sum += compact_elem_to_double(arr, i);
+                sum += array_num_read_double(arr, i);
                 result->float_items[i] = sum;
             }
             return { .array_num = result };
@@ -1283,7 +1212,7 @@ Item fn_math_cumsum(Item item) {
             ArrayNum* result = array_int64_new(len);
             int64_t sum = 0;
             for (int64_t i = 0; i < len; i++) {
-                sum += (int64_t)compact_elem_to_double(arr, i);
+                sum += (int64_t)array_num_read_double(arr, i);
                 result->items[i] = sum;
             }
             return { .array_num = result };
@@ -1342,7 +1271,7 @@ Item fn_math_cumprod(Item item) {
             ArrayNum* result = array_float_new(len);
             double prod = 1.0;
             for (int64_t i = 0; i < len; i++) {
-                prod *= compact_elem_to_double(arr, i);
+                prod *= array_num_read_double(arr, i);
                 result->float_items[i] = prod;
             }
             return { .array_num = result };
@@ -1351,7 +1280,7 @@ Item fn_math_cumprod(Item item) {
             ArrayNum* result = array_int64_new(len);
             int64_t prod = 1;
             for (int64_t i = 0; i < len; i++) {
-                prod *= (int64_t)compact_elem_to_double(arr, i);
+                prod *= (int64_t)array_num_read_double(arr, i);
                 result->items[i] = prod;
             }
             return { .array_num = result };
@@ -1446,7 +1375,7 @@ Item fn_fill(Item n_item, Item value) {
 
     TypeId val_type = get_type_id(value);
 
-    if (val_type == LMD_TYPE_INT || val_type == LMD_TYPE_INT64) {
+    if (is_integer_type_id(val_type)) {
         int64_t val = (val_type == LMD_TYPE_INT) ? value.get_int56() : value.get_int64();
         ArrayNum* result = array_int_new(n);
         for (int64_t i = 0; i < n; i++) {
@@ -1903,7 +1832,7 @@ Item fn_math_sqrt(Item item) {
     GUARD_ERROR1(item);
     // Check if scalar
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(sqrt(val));
     }
@@ -1914,7 +1843,7 @@ Item fn_math_sqrt(Item item) {
 Item fn_math_log(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(log(val));
     }
@@ -1925,7 +1854,7 @@ Item fn_math_log(Item item) {
 Item fn_math_log10(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(log10(val));
     }
@@ -1936,7 +1865,7 @@ Item fn_math_log10(Item item) {
 Item fn_math_exp(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(exp(val));
     }
@@ -1947,7 +1876,7 @@ Item fn_math_exp(Item item) {
 Item fn_math_sin(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(sin(val));
     }
@@ -1958,7 +1887,7 @@ Item fn_math_sin(Item item) {
 Item fn_math_cos(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(cos(val));
     }
@@ -1969,7 +1898,7 @@ Item fn_math_cos(Item item) {
 Item fn_math_tan(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(tan(val));
     }
@@ -1980,7 +1909,7 @@ Item fn_math_tan(Item item) {
 Item fn_math_asin(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(asin(val));
     }
@@ -1991,7 +1920,7 @@ Item fn_math_asin(Item item) {
 Item fn_math_acos(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(acos(val));
     }
@@ -2002,7 +1931,7 @@ Item fn_math_acos(Item item) {
 Item fn_math_atan(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(atan(val));
     }
@@ -2027,7 +1956,7 @@ Item fn_math_atan2(Item item_y, Item item_x) {
 Item fn_math_sinh(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(sinh(val));
     }
@@ -2038,7 +1967,7 @@ Item fn_math_sinh(Item item) {
 Item fn_math_cosh(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(cosh(val));
     }
@@ -2049,7 +1978,7 @@ Item fn_math_cosh(Item item) {
 Item fn_math_tanh(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(tanh(val));
     }
@@ -2060,7 +1989,7 @@ Item fn_math_tanh(Item item) {
 Item fn_math_asinh(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(asinh(val));
     }
@@ -2071,7 +2000,7 @@ Item fn_math_asinh(Item item) {
 Item fn_math_acosh(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(acosh(val));
     }
@@ -2082,7 +2011,7 @@ Item fn_math_acosh(Item item) {
 Item fn_math_atanh(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(atanh(val));
     }
@@ -2093,7 +2022,7 @@ Item fn_math_atanh(Item item) {
 Item fn_math_exp2(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(exp2(val));
     }
@@ -2104,7 +2033,7 @@ Item fn_math_exp2(Item item) {
 Item fn_math_expm1(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(expm1(val));
     }
@@ -2115,7 +2044,7 @@ Item fn_math_expm1(Item item) {
 Item fn_math_log2(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(log2(val));
     }
@@ -2131,7 +2060,7 @@ Item fn_math_pow(Item item_a, Item item_b) {
 Item fn_math_cbrt(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(cbrt(val));
     }
@@ -2142,7 +2071,7 @@ Item fn_math_cbrt(Item item) {
 Item fn_trunc(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(trunc(val));
     }
@@ -2278,7 +2207,7 @@ Item fn_math_hypot(Item item_y, Item item_x) {
 Item fn_math_log1p(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         return push_d(log1p(val));
     }
@@ -2289,7 +2218,7 @@ Item fn_math_log1p(Item item) {
 Item fn_sign(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+    if (is_native_numeric_type_id(type)) {
         double val = item_to_double(item);
         int64_t s = (val > 0) ? 1 : (val < 0) ? -1 : 0;
         return { .item = i2it(s) };
@@ -2343,7 +2272,7 @@ Item fn_math_random(Item seed_item) {
 Item fn_reverse(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) return item;
+    if (is_text_type_id(type)) return item;
 
     int64_t len = vector_length(item);
     if (len == 0) {
@@ -2392,7 +2321,7 @@ Item fn_reverse(Item item) {
 Item fn_sort1(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) return item;
+    if (is_text_type_id(type)) return item;
 
     int64_t len = vector_length(item);
     if (len == 0) {
@@ -2463,7 +2392,7 @@ void fn_sort_by_keys(Item values, Item keys, int64_t descending) {
 Item fn_sort2(Item item, Item dir_item) {
     GUARD_ERROR2(item, dir_item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) return item;
+    if (is_text_type_id(type)) return item;
 
     int64_t len = vector_length(item);
     if (len == 0) {
@@ -2606,7 +2535,7 @@ Item fn_reduce(Item collection, Item func_item) {
 Item fn_unique(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) return item;
+    if (is_text_type_id(type)) return item;
 
     int64_t len = vector_length(item);
 
@@ -2688,7 +2617,7 @@ Item fn_take(Item vec, Item n_item) {
 
     TypeId type = get_type_id(vec);
     // string/symbol: take = substring(str, 0, n)
-    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) {
+    if (is_text_type_id(type)) {
         Item zero = {.item = i2it(0)};
         return fn_substring(vec, zero, n_item);
     }
@@ -2767,7 +2696,7 @@ Item fn_drop(Item vec, Item n_item) {
 
     TypeId type = get_type_id(vec);
     // string/symbol: drop = substring(str, n, char_count)
-    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) {
+    if (is_text_type_id(type)) {
         int64_t char_count = fn_len(vec);
         Item end = {.item = i2it(char_count)};
         return fn_substring(vec, n_item, end);
@@ -2828,7 +2757,7 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
     if (type == LMD_TYPE_NULL) return ItemNull;
 
     // Handle strings - delegate to fn_substring
-    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) {
+    if (is_text_type_id(type)) {
         return fn_substring(vec, start_item, end_item);
     }
 
@@ -3133,7 +3062,7 @@ static void arr_num_copy_into(ArrayNum* src, ArrayNum* dst, int64_t dst_base) {
     int64_t off = 0;
     bool dst_float = !elem_is_int(det);
     for (int64_t i = 0; i < src->length; i++) {
-        double v = read_arr_elem_as_double(src, off);
+        double v = array_num_read_double(src, off);
         array_num_set_item(dst, dst_base + i, dst_float ? push_d(v) : push_l((int64_t)v));
         for (int ax = ndim - 1; ax >= 0; ax--) {
             idx[ax]++; off += str[ax];
@@ -3267,7 +3196,7 @@ Item fn_matmul(Item a_item, Item b_item) {
         if (a_shp[0] != b_shp[0]) { log_error("fn_matmul: length mismatch %lld vs %lld", (long long)a_shp[0], (long long)b_shp[0]); return ItemError; }
         double sum = 0;
         for (int64_t k = 0; k < a_shp[0]; k++)
-            sum += read_arr_elem_as_double(A, k * a_str[0]) * read_arr_elem_as_double(B, k * b_str[0]);
+            sum += array_num_read_double(A, k * a_str[0]) * array_num_read_double(B, k * b_str[0]);
         return rf ? push_d(sum) : push_l((int64_t)sum);
     }
     if (a_ndim == 2 && b_ndim == 2) {           // (m,k)·(k,n) → (m,n)
@@ -3280,8 +3209,8 @@ Item fn_matmul(Item a_item, Item b_item) {
             for (int64_t j = 0; j < n; j++) {
                 double sum = 0;
                 for (int64_t p = 0; p < k; p++)
-                    sum += read_arr_elem_as_double(A, i * a_str[0] + p * a_str[1])
-                         * read_arr_elem_as_double(B, p * b_str[0] + j * b_str[1]);
+                    sum += array_num_read_double(A, i * a_str[0] + p * a_str[1])
+                         * array_num_read_double(B, p * b_str[0] + j * b_str[1]);
                 if (rf) R->float_items[i * n + j] = sum; else R->items[i * n + j] = (int64_t)sum;
             }
         return { .array_num = R };
@@ -3294,7 +3223,7 @@ Item fn_matmul(Item a_item, Item b_item) {
         for (int64_t j = 0; j < n; j++) {
             double sum = 0;
             for (int64_t p = 0; p < k; p++)
-                sum += read_arr_elem_as_double(A, p * a_str[0]) * read_arr_elem_as_double(B, p * b_str[0] + j * b_str[1]);
+                sum += array_num_read_double(A, p * a_str[0]) * array_num_read_double(B, p * b_str[0] + j * b_str[1]);
             if (rf) R->float_items[j] = sum; else R->items[j] = (int64_t)sum;
         }
         return { .array_num = R };
@@ -3307,7 +3236,7 @@ Item fn_matmul(Item a_item, Item b_item) {
         for (int64_t i = 0; i < m; i++) {
             double sum = 0;
             for (int64_t p = 0; p < k; p++)
-                sum += read_arr_elem_as_double(A, i * a_str[0] + p * a_str[1]) * read_arr_elem_as_double(B, p * b_str[0]);
+                sum += array_num_read_double(A, i * a_str[0] + p * a_str[1]) * array_num_read_double(B, p * b_str[0]);
             if (rf) R->float_items[i] = sum; else R->items[i] = (int64_t)sum;
         }
         return { .array_num = R };
@@ -3523,9 +3452,9 @@ static double reduce_lane(ArrayNum* arr, int64_t base_off, int64_t stride, int64
     if (stride == 1 && is_contig_reducible(arr->get_elem_type())) {
         return reduce_contig_dispatch(arr, base_off, len, op);
     }
-    double acc = read_arr_elem_as_double(arr, base_off);
+    double acc = array_num_read_double(arr, base_off);
     for (int64_t k = 1; k < len; k++) {
-        double v = read_arr_elem_as_double(arr, base_off + k * stride);
+        double v = array_num_read_double(arr, base_off + k * stride);
         switch (op) {
             case RED_SUM: case RED_AVG: acc += v; break;
             case RED_PROD:              acc *= v; break;
@@ -3555,14 +3484,14 @@ double array_num_reduce_double(ArrayNum* arr, int op) {
     int ndim = get_shape_strides(arr, shp, str);
     int64_t idx[32] = {0};
     int64_t off = 0;
-    double acc = read_arr_elem_as_double(arr, 0);
+    double acc = array_num_read_double(arr, 0);
     for (int64_t cnt = 1; cnt < n; cnt++) {
         for (int d = ndim - 1; d >= 0; d--) {
             idx[d]++; off += str[d];
             if (idx[d] < shp[d]) break;
             idx[d] = 0; off -= shp[d] * str[d];
         }
-        double v = read_arr_elem_as_double(arr, off);
+        double v = array_num_read_double(arr, off);
         switch (op) {
             case RED_SUM: case RED_AVG: acc += v; break;
             case RED_PROD:              acc *= v; break;
@@ -3693,7 +3622,7 @@ static Item array_num_cumulative_axis(Item arr_item, Item axis_item, bool is_pro
     for (int64_t lane = 0; lane < na_total; lane++) {
         double running = is_prod ? 1.0 : 0.0;
         for (int64_t a = 0; a < axis_len; a++) {
-            double v = read_arr_elem_as_double(arr, src_base + a * src_axis_str);
+            double v = array_num_read_double(arr, src_base + a * src_axis_str);
             running = is_prod ? running * v : running + v;
             int64_t ro = res_base + a * res_axis_str;
             if (result_float) result->float_items[ro] = running;
@@ -3748,7 +3677,7 @@ Item fn_mask_index(Item arr_item, Item mask_item) {
         int64_t k = 0;
         { int64_t idx[32] = {0}, mk_off = 0;
           for (int64_t o = 0; o < total; o++) {
-            if (read_arr_elem_as_double(mask, mk_off) != 0.0) k++;
+            if (array_num_read_double(mask, mk_off) != 0.0) k++;
             for (int d = a_ndim - 1; d >= 0; d--) {
                 idx[d]++; mk_off += m_str[d];
                 if (idx[d] < a_shape[d]) break;
@@ -3762,7 +3691,7 @@ Item fn_mask_index(Item arr_item, Item mask_item) {
         char* sbase = (char*)arr->data;
         { int64_t idx[32] = {0}, a_off = 0, mk_off = 0, w = 0;
           for (int64_t o = 0; o < total; o++) {
-            if (read_arr_elem_as_double(mask, mk_off) != 0.0) {
+            if (array_num_read_double(mask, mk_off) != 0.0) {
                 memcpy(dbase + (size_t)w * esz, sbase + (size_t)a_off * esz, esz); w++;
             }
             for (int d = a_ndim - 1; d >= 0; d--) {
@@ -3778,7 +3707,7 @@ Item fn_mask_index(Item arr_item, Item mask_item) {
     if (m_ndim == 1 && m_shape[0] == a_shape[0]) {
         int64_t k = 0;
         for (int64_t i = 0; i < a_shape[0]; i++)
-            if (read_arr_elem_as_double(mask, i * m_str[0]) != 0.0) k++;
+            if (array_num_read_double(mask, i * m_str[0]) != 0.0) k++;
 
         if (a_ndim == 1) {
             ArrayNum* result = array_num_new(et, k);
@@ -3787,7 +3716,7 @@ Item fn_mask_index(Item arr_item, Item mask_item) {
             char* sbase = (char*)arr->data;
             int64_t w = 0;
             for (int64_t i = 0; i < a_shape[0]; i++)
-                if (read_arr_elem_as_double(mask, i * m_str[0]) != 0.0)
+                if (array_num_read_double(mask, i * m_str[0]) != 0.0)
                     memcpy(dbase + (size_t)(w++) * esz, sbase + (size_t)(i * a_str[0]) * esz, esz);
             return { .array_num = result };
         }
@@ -3801,7 +3730,7 @@ Item fn_mask_index(Item arr_item, Item mask_item) {
         char* sbase = (char*)arr->data;
         int64_t w = 0;
         for (int64_t i = 0; i < a_shape[0]; i++) {
-            if (read_arr_elem_as_double(mask, i * m_str[0]) == 0.0) continue;
+            if (array_num_read_double(mask, i * m_str[0]) == 0.0) continue;
             int64_t tidx[32] = {0}, s_off = i * a_str[0];
             for (int64_t e = 0; e < slab; e++) {
                 memcpy(dbase + (size_t)(w * slab + e) * esz, sbase + (size_t)s_off * esz, esz);
@@ -3833,7 +3762,7 @@ void fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
         TypeId arr_tid = get_type_id(arr_item);
         TypeId idx_tid = get_type_id(idx_item);
         if (arr_tid == LMD_TYPE_ARRAY &&
-            (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64)) {
+            is_integer_type_id(idx_tid)) {
             int64_t i = (idx_tid == LMD_TYPE_INT) ? idx_item.get_int56() : idx_item.get_int64();
             fn_array_set(arr_item.array, i, val_item);
             return;
@@ -3851,7 +3780,7 @@ void fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
     TypeId it = get_type_id(idx_item);
     // plain integer index — element write (this path is reached when the index is
     // dynamically typed (ANY), e.g. an index variable, that turns out to be an int).
-    if (it == LMD_TYPE_INT || it == LMD_TYPE_INT64) {
+    if (is_integer_type_id(it)) {
         int64_t i = (it == LMD_TYPE_INT) ? idx_item.get_int56() : idx_item.get_int64();
         if (i >= 0 && i < arr->length) array_num_set_item(arr, i, val_item);
         return;
@@ -3882,7 +3811,7 @@ void fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
     ArrayNum* vals = block ? val_item.array_num : nullptr;
     int64_t idx[32] = {0}, a_off = 0, m_off = 0, w = 0;
     for (int64_t o = 0; o < total; o++) {
-        if (read_arr_elem_as_double(mask, m_off) != 0.0) {
+        if (array_num_read_double(mask, m_off) != 0.0) {
             Item v;
             if (block) {
                 if (w >= vals->length) break;  // array RHS exhausted
@@ -3944,7 +3873,7 @@ static inline double stencil_sample(ArrayNum* in, int64_t ii, int64_t jj, int64_
     int64_t rj = stencil_border_index(jj, W, border);
     if (ri < 0 || rj < 0) return bval;
     int64_t off = ri * str[0] + rj * str[1] + ((ndim == 3) ? c * str[2] : 0);
-    return read_arr_elem_as_double(in, off);
+    return array_num_read_double(in, off);
 }
 
 #define STENCIL_MEDIAN_CAP 4096
@@ -3994,7 +3923,7 @@ Item array_num_stencil(Item in_item, Item kernel_item, int op, int border,
                 for (int64_t ki = 0; ki < Kh; ki++) {
                     int64_t ii = ci + ki - ph;
                     for (int64_t kj = 0; kj < Kw; kj++) {
-                        double kval = read_arr_elem_as_double(ker, ki * kstr[0] + kj * kstr[1]);
+                        double kval = array_num_read_double(ker, ki * kstr[0] + kj * kstr[1]);
                         double sval = stencil_sample(in, ii, cj + kj - pw, c, H, W, indim, istr, border, border_value);
                         if (op == STENCIL_DOT) { acc += kval * sval; continue; }
                         if (kval == 0.0) continue;       // structuring element: 0 = not part of window
@@ -4089,7 +4018,7 @@ static Item array_num_convert(ArrayNum* in, ArrayNumElemType out_etype, double s
     for (int64_t lin = 0; lin < total; lin++) {
         int64_t off = 0;
         for (int d = 0; d < ndim; d++) off += idx[d] * str[d];
-        double v = read_arr_elem_as_double(in, off) * scale;
+        double v = array_num_read_double(in, off) * scale;
         if (clamp_round) { v = round(v); if (v < lo) v = lo; if (v > hi) v = hi; }
         if (fout) fout[lin] = v; else if (bout) bout[lin] = (uint8_t)v;
         for (int d = ndim - 1; d >= 0; d--) { if (++idx[d] < shp[d]) break; idx[d] = 0; }
@@ -4204,7 +4133,7 @@ static Item array_num_point_op(ArrayNum* in, Fn fn) {
     int64_t idx[32]; for (int d = 0; d < ndim; d++) idx[d] = 0;
     for (int64_t lin = 0; lin < total; lin++) {
         int64_t off = 0; for (int d = 0; d < ndim; d++) off += idx[d] * str[d];
-        write_arr_elem_from_double(out, lin, fn(read_arr_elem_as_double(in, off)));
+        write_arr_elem_from_double(out, lin, fn(array_num_read_double(in, off)));
         for (int d = ndim - 1; d >= 0; d--) { if (++idx[d] < shp[d]) break; idx[d] = 0; }
     }
     return { .array_num = out };
@@ -4252,11 +4181,11 @@ Item fn_grayscale(Item img) {
             int64_t base = i * str[0] + j * str[1];
             double gray;
             if (C >= 3) {
-                gray = 0.299 * read_arr_elem_as_double(in, base)
-                     + 0.587 * read_arr_elem_as_double(in, base + str[2])
-                     + 0.114 * read_arr_elem_as_double(in, base + 2 * str[2]);
+                gray = 0.299 * array_num_read_double(in, base)
+                     + 0.587 * array_num_read_double(in, base + str[2])
+                     + 0.114 * array_num_read_double(in, base + 2 * str[2]);
             } else {
-                gray = read_arr_elem_as_double(in, base);  // single channel
+                gray = array_num_read_double(in, base);  // single channel
             }
             write_arr_elem_from_double(out, lin++, gray);
         }
@@ -4277,7 +4206,7 @@ static Item array_num_remap(ArrayNum* in, int ndim, const int64_t* str, int64_t 
             int64_t base = si * str[0] + sj * str[1];
             for (int64_t c = 0; c < C; c++) {
                 int64_t off = base + ((ndim == 3) ? c * str[2] : 0);
-                write_arr_elem_from_double(out, lin++, read_arr_elem_as_double(in, off));
+                write_arr_elem_from_double(out, lin++, array_num_read_double(in, off));
             }
         }
     }
@@ -4375,7 +4304,7 @@ Item fn_histogram(Item img, Item bins_item) {
     int64_t idx[32]; for (int d = 0; d < ndim; d++) idx[d] = 0;
     for (int64_t n = 0; n < total; n++) {
         int64_t off = 0; for (int d = 0; d < ndim; d++) off += idx[d] * str[d];
-        double v = read_arr_elem_as_double(in, off);
+        double v = array_num_read_double(in, off);
         int64_t bin = is_float ? (int64_t)floor(v * bins) : (int64_t)llround(v);
         if (bin < 0) bin = 0; else if (bin >= bins) bin = bins - 1;
         counts->items[bin]++;
@@ -4399,7 +4328,7 @@ Item fn_otsu(Item img) {
     int64_t idx[32]; for (int d = 0; d < ndim; d++) idx[d] = 0;
     for (int64_t n = 0; n < total; n++) {
         int64_t off = 0; for (int d = 0; d < ndim; d++) off += idx[d] * str[d];
-        double v = read_arr_elem_as_double(in, off);
+        double v = array_num_read_double(in, off);
         int64_t bin = is_float ? (int64_t)floor(v * BINS) : (int64_t)llround(v);
         if (bin < 0) bin = 0; else if (bin >= BINS) bin = BINS - 1;
         h[bin]++;
@@ -4447,7 +4376,7 @@ Item fn_label(Item mask_item) {
         for (int64_t j = 0; j < W; j++) {
             int64_t oidx = i * W + j;
             if (lab[oidx] != 0) continue;
-            if (read_arr_elem_as_double(in, i * str[0] + j * str[1]) == 0.0) continue;
+            if (array_num_read_double(in, i * str[0] + j * str[1]) == 0.0) continue;
             int64_t sp = 0; stack[sp++] = oidx; lab[oidx] = next;        // flood fill
             while (sp > 0) {
                 int64_t cur = stack[--sp], ci = cur / W, cj = cur % W;
@@ -4456,7 +4385,7 @@ Item fn_label(Item mask_item) {
                     if (ni < 0 || ni >= H || nj < 0 || nj >= W) continue;
                     int64_t nidx = ni * W + nj;
                     if (lab[nidx] != 0) continue;
-                    if (read_arr_elem_as_double(in, ni * str[0] + nj * str[1]) == 0.0) continue;
+                    if (array_num_read_double(in, ni * str[0] + nj * str[1]) == 0.0) continue;
                     lab[nidx] = next; stack[sp++] = nidx;
                 }
             }
@@ -4479,10 +4408,10 @@ static inline double bilinear_sample(ArrayNum* in, double y, double x, int64_t c
     auto cl = [](int64_t v, int64_t n) { return v < 0 ? (int64_t)0 : v >= n ? n - 1 : v; };
     int64_t cy0 = cl(y0, H), cy1 = cl(y0 + 1, H), cx0 = cl(x0, W), cx1 = cl(x0 + 1, W);
     int64_t cc = (ndim == 3) ? c * str[2] : 0;
-    double p00 = read_arr_elem_as_double(in, cy0 * str[0] + cx0 * str[1] + cc);
-    double p01 = read_arr_elem_as_double(in, cy0 * str[0] + cx1 * str[1] + cc);
-    double p10 = read_arr_elem_as_double(in, cy1 * str[0] + cx0 * str[1] + cc);
-    double p11 = read_arr_elem_as_double(in, cy1 * str[0] + cx1 * str[1] + cc);
+    double p00 = array_num_read_double(in, cy0 * str[0] + cx0 * str[1] + cc);
+    double p01 = array_num_read_double(in, cy0 * str[0] + cx1 * str[1] + cc);
+    double p10 = array_num_read_double(in, cy1 * str[0] + cx0 * str[1] + cc);
+    double p11 = array_num_read_double(in, cy1 * str[0] + cx1 * str[1] + cc);
     return (p00 * (1 - fx) + p01 * fx) * (1 - fy) + (p10 * (1 - fx) + p11 * fx) * fy;
 }
 
@@ -4556,8 +4485,8 @@ Item fn_affine_warp(Item img, Item m_item) {
     if (ndim != 2 && ndim != 3) { log_error("affine_warp: image must be 2-D or 3-D"); return ItemError; }
     if (mndim != 2 || mshp[0] != 2 || mshp[1] != 3) { log_error("affine_warp: matrix must be 2x3"); return ItemError; }
     int64_t H = shp[0], W = shp[1], C = (ndim == 3) ? shp[2] : 1;
-    double a = read_arr_elem_as_double(M, 0), b = read_arr_elem_as_double(M, mstr[1]), c0 = read_arr_elem_as_double(M, 2 * mstr[1]);
-    double d = read_arr_elem_as_double(M, mstr[0]), e = read_arr_elem_as_double(M, mstr[0] + mstr[1]), f = read_arr_elem_as_double(M, mstr[0] + 2 * mstr[1]);
+    double a = array_num_read_double(M, 0), b = array_num_read_double(M, mstr[1]), c0 = array_num_read_double(M, 2 * mstr[1]);
+    double d = array_num_read_double(M, mstr[0]), e = array_num_read_double(M, mstr[0] + mstr[1]), f = array_num_read_double(M, mstr[0] + 2 * mstr[1]);
     return bilinear_gather(in, ndim, str, H, W, C, H, W, false,
         [a, b, c0, d, e, f](int64_t oi, int64_t oj, double* sy, double* sx) {
             *sx = a * (double)oj + b * (double)oi + c0;

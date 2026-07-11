@@ -25,6 +25,7 @@
 #include "../lib/str.h"
 #include "../lib/file.h"
 #include "../lib/escape.h"
+#include "../lib/color.h"
 #include <string.h>
 #include "../lib/mem.h"
 #include "../lib/base64.h"
@@ -644,13 +645,6 @@ static const struct { const char* name; uint32_t rgb; } svg_named_colors[] = {
     {nullptr, 0}
 };
 
-static int hex_digit(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
 static Color parse_svg_color(const char* value) {
     Color c;
     c.r = 0; c.g = 0; c.b = 0; c.a = 255;  // default black
@@ -673,38 +667,10 @@ static Color parse_svg_color(const char* value) {
 
     // hex color: #rgb, #rrggbb, #rgba, #rrggbbaa
     if (*value == '#') {
-        value++;
-        int len = strlen(value);
-
-        if (len == 3) {
-            // #rgb
-            int r = hex_digit(value[0]);
-            int g = hex_digit(value[1]);
-            int b = hex_digit(value[2]);
-            if (r >= 0 && g >= 0 && b >= 0) {
-                c.r = r * 17; c.g = g * 17; c.b = b * 17;
-            }
-        } else if (len == 4) {
-            // #rgba
-            int r = hex_digit(value[0]);
-            int g = hex_digit(value[1]);
-            int b = hex_digit(value[2]);
-            int a = hex_digit(value[3]);
-            if (r >= 0 && g >= 0 && b >= 0 && a >= 0) {
-                c.r = r * 17; c.g = g * 17; c.b = b * 17; c.a = a * 17;
-            }
-        } else if (len == 6) {
-            // #rrggbb
-            int r = hex_digit(value[0]) * 16 + hex_digit(value[1]);
-            int g = hex_digit(value[2]) * 16 + hex_digit(value[3]);
-            int b = hex_digit(value[4]) * 16 + hex_digit(value[5]);
-            c.r = r; c.g = g; c.b = b;
-        } else if (len == 8) {
-            // #rrggbbaa
-            int r = hex_digit(value[0]) * 16 + hex_digit(value[1]);
-            int g = hex_digit(value[2]) * 16 + hex_digit(value[3]);
-            int b = hex_digit(value[4]) * 16 + hex_digit(value[5]);
-            int a = hex_digit(value[6]) * 16 + hex_digit(value[7]);
+        uint8_t r, g, b, a;
+        // Shared parser rejects malformed long hex colors instead of folding
+        // invalid nibbles into negative channel math.
+        if (color_parse_hex(value, &r, &g, &b, &a)) {
             c.r = r; c.g = g; c.b = b; c.a = a;
         }
         return c;

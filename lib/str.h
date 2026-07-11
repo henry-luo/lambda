@@ -156,6 +156,10 @@ void str_trim(const char** s, size_t* len);
 void str_ltrim(const char** s, size_t* len);
 void str_rtrim(const char** s, size_t* len);
 
+/** trim specific characters from the right side only. */
+void str_rtrim_chars(const char** s, size_t* len,
+                     const char* chars, size_t chars_len);
+
 /** trim specific characters from both ends. */
 void str_trim_chars(const char** s, size_t* len,
                     const char* chars, size_t chars_len);

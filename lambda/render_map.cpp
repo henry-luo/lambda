@@ -25,12 +25,10 @@ static render_map_path_recorder_fn s_path_recorder = NULL;
 
 // forward declarations
 static Item find_parent_of(Item node, Item target, int* out_index, int depth = 0);
-extern Item _map_field_to_item(void* field_ptr, TypeId type_id);
 
 static Item render_map_read_field(ShapeEntry* field, void* map_data) {
     if (!field || !field->type || !map_data) return ItemNull;
-    void* field_ptr = (char*)map_data + field->byte_offset;
-    return _map_field_to_item(field_ptr, field->type->type_id);
+    return map_shape_field_to_item(map_data, field);
 }
 
 static Item render_map_get_field_from_type(TypeMap* map_type, void* map_data, const char* key, bool* is_found) {

@@ -18,13 +18,7 @@ bool has_typed_params(AstFuncNode* fn_node) {
         TypeParam* pt = (TypeParam*)param->type;
         if (pt) {
             TypeId tid = pt->type_id;
-            if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 ||
-                tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL ||
-                tid == LMD_TYPE_STRING || tid == LMD_TYPE_BINARY ||
-                tid == LMD_TYPE_SYMBOL || tid == LMD_TYPE_DECIMAL ||
-                tid == LMD_TYPE_DTIME ||
-                tid == LMD_TYPE_MAP || tid == LMD_TYPE_OBJECT ||
-                tid == LMD_TYPE_ELEMENT) {
+            if (is_typed_wrapper_param_type_id(tid)) {
                 return true;
             }
             // typed array parameters (int[], float[], etc.)
@@ -58,7 +52,7 @@ bool needs_fn_call_wrapper(AstFuncNode* fn_node) {
         if (!ret_type && fn_node->body) ret_type = fn_node->body->type;
         if (!ret_type) ret_type = &TYPE_ANY;
         TypeId ret_tid = ret_type->type_id;
-        if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_INT64 ||
+        if (is_integer_type_id(ret_tid) ||
             ret_tid == LMD_TYPE_FLOAT || ret_tid == LMD_TYPE_BOOL ||
             ret_tid == LMD_TYPE_STRING || ret_tid == LMD_TYPE_BINARY ||
             ret_tid == LMD_TYPE_SYMBOL || ret_tid == LMD_TYPE_DECIMAL ||

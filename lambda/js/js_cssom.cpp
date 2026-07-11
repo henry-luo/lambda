@@ -399,10 +399,6 @@ extern "C" bool js_cssom_resource_has_property(Item item, Item prop_name) {
 // Helper: Create a string Item
 // =============================================================================
 
-static Item make_string_item(const char* str) {
-    return (Item){.item = s2it(heap_create_name(str ? str : ""))};
-}
-
 // =============================================================================
 // CSSStyleSheet Wrapper
 // =============================================================================

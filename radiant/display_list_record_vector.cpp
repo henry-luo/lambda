@@ -1,27 +1,16 @@
 #include "display_list.h"
 
 #include "display_list_storage.hpp"
+#include "display_list_bounds.hpp"
+#include "../lib/math_utils.h"
 #include <math.h>
-
-static Bound dl_default_vector_clip() {
-    Bound clip = {0, 0, 99999, 99999};
-    return clip;
-}
-
-static float dl_record_min_f(float a, float b) {
-    return a < b ? a : b;
-}
-
-static float dl_record_max_f(float a, float b) {
-    return a > b ? a : b;
-}
 
 static void dl_record_set_unbounded(DisplayItem* item) {
     if (!item) return;
     item->bounds[0] = 0.0f;
     item->bounds[1] = 0.0f;
-    item->bounds[2] = 99999.0f;
-    item->bounds[3] = 99999.0f;
+    item->bounds[2] = DL_UNBOUNDED_EXTENT;
+    item->bounds[3] = DL_UNBOUNDED_EXTENT;
 }
 
 static void dl_record_set_bounds_xyxy(DisplayItem* item,
@@ -70,27 +59,8 @@ static void dl_record_set_rect_bounds(DisplayItem* item,
         return;
     }
 
-    float x0 = left;
-    float y0 = top;
-    float x1 = right;
-    float y1 = top;
-    float x2 = right;
-    float y2 = bottom;
-    float x3 = left;
-    float y3 = bottom;
-    float tx0 = transform->e11 * x0 + transform->e12 * y0 + transform->e13;
-    float ty0 = transform->e21 * x0 + transform->e22 * y0 + transform->e23;
-    float tx1 = transform->e11 * x1 + transform->e12 * y1 + transform->e13;
-    float ty1 = transform->e21 * x1 + transform->e22 * y1 + transform->e23;
-    float tx2 = transform->e11 * x2 + transform->e12 * y2 + transform->e13;
-    float ty2 = transform->e21 * x2 + transform->e22 * y2 + transform->e23;
-    float tx3 = transform->e11 * x3 + transform->e12 * y3 + transform->e13;
-    float ty3 = transform->e21 * x3 + transform->e22 * y3 + transform->e23;
-
-    left = dl_record_min_f(dl_record_min_f(tx0, tx1), dl_record_min_f(tx2, tx3));
-    right = dl_record_max_f(dl_record_max_f(tx0, tx1), dl_record_max_f(tx2, tx3));
-    top = dl_record_min_f(dl_record_min_f(ty0, ty1), dl_record_min_f(ty2, ty3));
-    bottom = dl_record_max_f(dl_record_max_f(ty0, ty1), dl_record_max_f(ty2, ty3));
+    rdt_matrix_transform_rect_bounds(transform, left, top, right, bottom,
+                                     &left, &top, &right, &bottom);
     dl_record_set_bounds_xyxy(item, left, top, right, bottom, pad);
 }
 
@@ -111,10 +81,10 @@ static void dl_record_intersect_bounds_with_clip(DisplayItem* item, const Bound*
     float top = item->bounds[1];
     float right = left + item->bounds[2];
     float bottom = top + item->bounds[3];
-    left = dl_record_max_f(left, clip->left);
-    top = dl_record_max_f(top, clip->top);
-    right = dl_record_min_f(right, clip->right);
-    bottom = dl_record_min_f(bottom, clip->bottom);
+    left = LMB_MAX(left, clip->left);
+    top = LMB_MAX(top, clip->top);
+    right = LMB_MIN(right, clip->right);
+    bottom = LMB_MIN(bottom, clip->bottom);
     if (right <= left || bottom <= top) {
         item->bounds[0] = left;
         item->bounds[1] = top;
@@ -261,7 +231,7 @@ void dl_draw_glyph(DisplayList* dl, GlyphBitmap* bitmap, int x, int y,
     if (transform) {
         item->draw_glyph.transform = *transform;
     }
-    item->draw_glyph.clip = clip ? *clip : dl_default_vector_clip();
+    item->draw_glyph.clip = clip ? *clip : dl_unbounded_clip();
 }
 
 void dl_draw_picture(DisplayList* dl, RdtPicture* picture,

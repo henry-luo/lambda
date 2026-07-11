@@ -41,7 +41,7 @@ type(e)
 2.5f32 is number
 123 is number
 1.5 is number
-1.5n is number
+1.5m is number
 "123" is number
 number
 

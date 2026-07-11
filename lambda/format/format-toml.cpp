@@ -37,41 +37,48 @@ static bool should_format_as_table_section_reader(MapReader map) {
 
 // central function to format any Lambda Item with proper type handling
 static void format_item_reader(TomlContext& ctx, ItemReader item, const char* parent_context) {
-    TomlContext::RecursionGuard guard(ctx);
-    if (guard.exceeded()) {
-        ctx.write_text("\"[max_depth]\"");
-        return;
-    }
+    class TomlItemHandlers : public FormatItemHandlersDefault {
+    public:
+        explicit TomlItemHandlers(TomlContext& ctx) : ctx_(ctx) {}
 
-    if (item.isNull()) {
-        ctx.write_text("\"\"");
-    } else if (item.isBool()) {
-        ctx.emit("%b", item.asBool());
-    } else if (item.isInt() || item.isFloat()) {
-        format_number(ctx.output(), item.item());
-    } else if (item.isString()) {
-        ctx.emit("%Q", item.asString());
-    } else if (item.isArray() || item.isList()) {
-        // isArray() covers typed ArrayNum (1-D / N-D) too; the reader walks it
-        // transparently via get(i), so one path handles every array backing.
-        ArrayReader arr = item.asArray();
-        if (arr.length() > 0) {
-            ctx.write_char('[');
-            format_array_items_reader(ctx, arr);
-            ctx.write_char(']');
-        } else {
-            ctx.write_text("[]");
+        void max_depth(const ItemReader& item) override { (void)item; ctx_.write_text("\"[max_depth]\""); }
+        void null_value(const ItemReader& item) override { (void)item; ctx_.write_text("\"\""); }
+        void bool_value(const ItemReader& item) override { ctx_.emit("%b", item.asBool()); }
+        void number_value(const ItemReader& item) override { format_number(ctx_.output(), item.item()); }
+        void string_value(const ItemReader& item, String* str) override {
+            (void)item;
+            ctx_.emit("%Q", str);
         }
-    } else if (item.isMap()) {
-        MapReader map = item.asMap();
-        if (map.isValid()) {
-            format_inline_table_reader(ctx, map);
-        } else {
-            ctx.write_text("{}");
+        void array_value(const ItemReader& item, ArrayReader arr) override {
+            (void)item;
+            // ArrayReader hides typed ArrayNum backing, so the TOML list path is shared.
+            if (arr.length() > 0) {
+                ctx_.write_char('[');
+                format_array_items_reader(ctx_, arr);
+                ctx_.write_char(']');
+            } else {
+                ctx_.write_text("[]");
+            }
         }
-    } else {
-        ctx.emit("\"[type_%d]\"", (int)item.getType());
-    }
+        void map_value(const ItemReader& item, MapReader map) override {
+            (void)item;
+            if (map.isValid()) {
+                format_inline_table_reader(ctx_, map);
+            } else {
+                ctx_.write_text("{}");
+            }
+        }
+        void unknown_value(const ItemReader& item) override {
+            ctx_.emit("\"[type_%d]\"", (int)item.getType());
+        }
+
+    private:
+        TomlContext& ctx_;
+    };
+
+    (void)parent_context;
+    TomlItemHandlers handlers(ctx);
+    ctx.dispatch_item(item, handlers);
 }
 
 // format array items with proper item processing

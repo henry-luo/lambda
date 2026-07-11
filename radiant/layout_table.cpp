@@ -1,6 +1,7 @@
 #include "layout_table.hpp"
 #include "layout_text.hpp"
 #include "layout.hpp"
+#include "layout_box.hpp"
 #include "intrinsic_sizing.hpp"
 #include "form_control.hpp"  // For FormDefaults (radio/checkbox margin constants)
 #include "layout_measure.hpp"
@@ -334,9 +335,7 @@ static bool table_has_direct_float(ViewTable* table) {
     for (View* child = table->first_child; child; child = child->next_sibling) {
         if (!child->is_block()) continue;
         ViewBlock* floating = lam::view_require_block(child);
-        if (floating->position &&
-            (floating->position->float_prop == CSS_VALUE_LEFT ||
-             floating->position->float_prop == CSS_VALUE_RIGHT)) {
+        if (layout_position_is_floated(floating->position)) {
             return true;
         }
     }
@@ -599,9 +598,7 @@ static float find_descendant_float_max_y(ViewElement* parent, float y_offset) {
             ViewBlock* block = lam::view_require_block(child);
             float abs_y = y_offset + child->y;
             // check if this child is a float
-            if (block->position &&
-                (block->position->float_prop == CSS_VALUE_LEFT ||
-                 block->position->float_prop == CSS_VALUE_RIGHT)) {
+            if (layout_position_is_floated(block->position)) {
                 float bottom = abs_y + child->height;
                 if (bottom > max_y) max_y = bottom;
             }
@@ -2261,9 +2258,7 @@ static bool is_out_of_flow_table_cell_slot(View* view) {
     uintptr_t tag = elem->tag();
     if (tag != HTM_TAG_TD && tag != HTM_TAG_TH) return false;
 
-    return elem->position &&
-           (elem->position->position == CSS_VALUE_ABSOLUTE ||
-            elem->position->position == CSS_VALUE_FIXED);
+    return layout_view_is_out_of_flow_positioned(view);
 }
 
 // Resolve collapsed borders for all cells in table
@@ -3488,8 +3483,7 @@ static bool is_abspos_or_fixed(DomElement* elem) {
 
     // Check resolved position prop first (if styles already resolved)
     if (elem->position) {
-        if (elem->position->position == CSS_VALUE_ABSOLUTE ||
-            elem->position->position == CSS_VALUE_FIXED) {
+        if (layout_position_is_abs_fixed(elem->position)) {
             return true;
         }
     }
@@ -4489,9 +4483,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 // Apply CSS vertical-align positioning to cell content
 static bool table_cell_vertical_align_skips_child(View* child) {
     ViewElement* element = lam::view_as_element(child);
-    return element && element->position &&
-        (element->position->position == CSS_VALUE_ABSOLUTE ||
-         element->position->position == CSS_VALUE_FIXED);
+    return element && layout_position_is_abs_fixed(element->position);
 }
 
 static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* tcell, float content_height) {
@@ -4838,8 +4830,7 @@ static void align_table_cell_block_child(ViewTableCell* cell, ViewBlock* child,
     if (!cell || !child || !cell->blk || content_width <= 0.0f) return;
     CssEnum align = cell->blk->legacy_block_align;
     if (align != CSS_VALUE_CENTER && align != CSS_VALUE_RIGHT) return;
-    if (child->position && (child->position->position == CSS_VALUE_ABSOLUTE ||
-                            child->position->position == CSS_VALUE_FIXED)) {
+    if (layout_block_is_out_of_flow_positioned(child)) {
         return;
     }
     if (element_has_float(child)) return;
@@ -5428,12 +5419,10 @@ static bool table_element_is_floated(DomElement* element) {
     if (!element) return false;
 
     if (element->position) {
-        if (element->position->position == CSS_VALUE_ABSOLUTE ||
-            element->position->position == CSS_VALUE_FIXED) {
+        if (layout_position_is_abs_fixed(element->position)) {
             return false;
         }
-        return element->position->float_prop == CSS_VALUE_LEFT ||
-               element->position->float_prop == CSS_VALUE_RIGHT;
+        return layout_position_is_floated(element->position);
     }
 
     if (!element->specified_style) return false;
@@ -5749,12 +5738,11 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
                         if (m && m->value) {
                             if (m->value->type == CSS_VALUE_TYPE_LENGTH) {
                                 margin_h = 2 * resolve_length_value(lycon, CSS_PROPERTY_MARGIN, m->value);
-                            } else if (m->value->type == CSS_VALUE_TYPE_LIST && m->value->data.list.count >= 2) {
-                                int cnt = m->value->data.list.count;
-                                CssValue** vals = m->value->data.list.values;
-                                float ml_val = (cnt >= 4) ? resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[3])
-                                                          : resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
-                                float mr_val = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
+                            } else if (m->value->type == CSS_VALUE_TYPE_LIST) {
+                                const CssValue* ml = css_box_shorthand_side_value(m->value, 3);
+                                const CssValue* mr = css_box_shorthand_side_value(m->value, 1);
+                                float ml_val = ml ? resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, ml) : 0.0f;
+                                float mr_val = mr ? resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, mr) : 0.0f;
                                 margin_h = ml_val + mr_val;
                             }
                         }
@@ -6317,20 +6305,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 for (View* ch = table->first_child; ch; ch = ch->next_sibling) {
                     if (ch->node_type != DOM_NODE_ELEMENT) continue;
                     ViewBlock* vb = lam::view_require_block(ch);
-                    if (vb->position &&
-                        (vb->position->float_prop == CSS_VALUE_LEFT ||
-                         vb->position->float_prop == CSS_VALUE_RIGHT)) {
+                    if (layout_position_is_floated(vb->position)) {
                         has_float_children = true;
                         break;
                     }
                 }
-                bool is_floated = table->position &&
-                    (table->position->float_prop == CSS_VALUE_LEFT ||
-                     table->position->float_prop == CSS_VALUE_RIGHT);
+                bool is_floated = layout_position_is_floated(table->position);
                 bool is_inline_table = (table->display.outer == CSS_VALUE_INLINE);
-                bool is_abspos = table->position &&
-                    (table->position->position == CSS_VALUE_ABSOLUTE ||
-                     table->position->position == CSS_VALUE_FIXED);
+                bool is_abspos = layout_position_is_abs_fixed(table->position);
                 if (has_float_children && !is_floated && !is_inline_table && !is_abspos) {
                     // Block-level table in normal flow with float children: use containing block width
                     float container_width = lycon->block.content_width;
@@ -6387,8 +6369,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     for (View* rch = tblk->first_child; rch; rch = rch->next_sibling) {
                         if (!rch->view_type || !rch->is_block()) continue;
                         ViewBlock* rvb = lam::view_require_block(rch);
-                        if (rvb->position && (rvb->position->float_prop == CSS_VALUE_LEFT ||
-                                              rvb->position->float_prop == CSS_VALUE_RIGHT)) {
+                        if (layout_position_is_floated(rvb->position)) {
                             float bottom = rvb->y + rvb->height;
                             if (bottom > max_float_bottom) max_float_bottom = bottom;
                         }
@@ -6409,8 +6390,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         for (View* cch = row->first_child; cch; cch = cch->next_sibling) {
                             if (!cch->view_type || !cch->is_block()) continue;
                             ViewBlock* cvb = lam::view_require_block(cch);
-                            if (cvb->position && (cvb->position->float_prop == CSS_VALUE_LEFT ||
-                                                  cvb->position->float_prop == CSS_VALUE_RIGHT)) {
+                            if (layout_position_is_floated(cvb->position)) {
                                 float bottom = cvb->y + cvb->height;
                                 if (bottom > max_float_bottom) max_float_bottom = bottom;
                             }
@@ -8282,8 +8262,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 	                        if (!rchild->is_element()) continue;
 	                        ViewBlock* rvb = lam::view_as_block(static_cast<View*>(rchild));
 	                        if (!rvb) continue;
-	                        if (rvb->position && (rvb->position->float_prop == CSS_VALUE_LEFT ||
-	                                              rvb->position->float_prop == CSS_VALUE_RIGHT)) {
+	                        if (layout_position_is_floated(rvb->position)) {
                             float float_bottom = rvb->height;
                             if (float_bottom > row_height) {
                                 log_debug("%s Row float containment: expanding height %.1f -> %.1f for floated child", table->source_loc(),

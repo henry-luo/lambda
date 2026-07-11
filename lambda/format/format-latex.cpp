@@ -15,41 +15,50 @@ static void format_latex_element(LaTeXContext& ctx, const ElementReader& elem, i
 // ---------------------------------------------------------------------------
 
 static void format_latex_value(LaTeXContext& ctx, const ItemReader& value) {
-    if (value.isNull()) return;
+    class LaTeXItemHandlers : public FormatItemHandlersDefault {
+    public:
+        explicit LaTeXItemHandlers(LaTeXContext& ctx) : ctx_(ctx) {}
 
-    FormatterContextCpp::RecursionGuard guard(ctx);
-    if (guard.exceeded()) {
-        ctx.write_text("[max\\_depth]");
-        return;
-    }
+        void max_depth(const ItemReader& item) override { (void)item; ctx_.write_text("[max\\_depth]"); }
+        void null_value(const ItemReader& item) override { (void)item; }
+        void number_value(const ItemReader& item) override { format_number(ctx_.output(), item.item()); }
+        void string_value(const ItemReader& item, String* str) override {
+            (void)item;
+            write_latex_text(str);
+        }
+        void symbol_value(const ItemReader& item, Symbol* sym) override {
+            (void)sym;
+            write_latex_text(item.asString());
+        }
+        void array_value(const ItemReader& item, ArrayReader arr) override {
+            (void)item;
+            auto items = arr.items();
+            ItemReader child;
+            bool first = true;
+            while (items.next(&child)) {
+                if (!first) ctx_.write_char(' ');
+                first = false;
+                format_latex_value(ctx_, child);
+            }
+        }
+        void element_value(const ItemReader& item, ElementReader elem) override {
+            (void)item;
+            format_latex_element(ctx_, elem, 0);
+        }
+        void unknown_value(const ItemReader& item) override { (void)item; ctx_.write_text("[unknown]"); }
 
-    if (value.isElement()) {
-        format_latex_element(ctx, value.asElement(), 0);
-    } else if (value.isString()) {
-        String* str = value.asString();
-        if (str && str->len > 0 && str->len < 65536) {
-            stringbuf_append_str_n(ctx.output(), str->chars, str->len);
+    private:
+        void write_latex_text(String* str) {
+            if (str && str->len > 0 && str->len < 65536) {
+                stringbuf_append_str_n(ctx_.output(), str->chars, str->len);
+            }
         }
-    } else if (value.isArray()) {
-        ArrayReader arr = value.asArray();
-        auto items = arr.items();
-        ItemReader item;
-        bool first = true;
-        while (items.next(&item)) {
-            if (!first) ctx.write_char(' ');
-            first = false;
-            format_latex_value(ctx, item);
-        }
-    } else if (value.isInt() || value.isFloat()) {
-        format_number(ctx.output(), value.item());
-    } else if (value.isSymbol()) {
-        String* str = value.asString();
-        if (str && str->len > 0 && str->len < 65536) {
-            stringbuf_append_str_n(ctx.output(), str->chars, str->len);
-        }
-    } else {
-        ctx.write_text("[unknown]");
-    }
+
+        LaTeXContext& ctx_;
+    };
+
+    LaTeXItemHandlers handlers(ctx);
+    ctx.dispatch_item(value, handlers);
 }
 
 // ---------------------------------------------------------------------------
@@ -180,8 +189,8 @@ String* format_latex(Pool* pool, Item item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
 
-    Pool* ctx_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.latex");
-    LaTeXContext ctx(ctx_pool, sb);
+    ScopedFormatPool ctx_pool("format.latex");
+    LaTeXContext ctx(ctx_pool.get(), sb);
     ItemReader root(item.to_const());
 
     if (root.isArray()) {
@@ -208,7 +217,6 @@ String* format_latex(Pool* pool, Item item) {
         format_latex_value(ctx, root);
     }
 
-    mem_pool_destroy(ctx_pool);
     String* result = stringbuf_to_string(sb);
     stringbuf_free(sb);
     return result;

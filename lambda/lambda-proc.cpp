@@ -147,7 +147,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
 
     // Validate target type: must be string, symbol, or path
     TypeId target_type = get_type_id(target_item);
-    if (target_type != LMD_TYPE_STRING && target_type != LMD_TYPE_SYMBOL && target_type != LMD_TYPE_PATH) {
+    if (!is_text_type_id(target_type) && target_type != LMD_TYPE_PATH) {
         log_error("pn_output_internal: target must be string, symbol, or path, got type %s", get_type_name(target_type));
         return item_to_ri(ItemError);
     }
@@ -633,7 +633,7 @@ RetItem pn_fetch(Item url, Item options) {
         // Extract timeout
         Item timeout_key = create_string_item("timeout");
         Item timeout_item = map_get(options_map, timeout_key);
-        if (timeout_item.item && (timeout_item._type_id == LMD_TYPE_INT || timeout_item._type_id == LMD_TYPE_INT64)) {
+        if (timeout_item.item && is_integer_type_id(timeout_item._type_id)) {
             config.timeout_seconds = it2l(timeout_item);
         }
     }
@@ -1216,7 +1216,7 @@ RetItem pn_io_chmod(Item path_item, Item mode_item) {
     // Parse mode
     int mode = 0;
     TypeId mode_type = get_type_id(mode_item);
-    if (mode_type == LMD_TYPE_INT || mode_type == LMD_TYPE_INT64) {
+    if (is_integer_type_id(mode_type)) {
         mode = (int)it2l(mode_item);
     } else if (mode_type == LMD_TYPE_STRING) {
         String* mode_str = mode_item.get_string();

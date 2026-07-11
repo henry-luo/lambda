@@ -19,6 +19,7 @@ struct EventStateLog;
 struct StateDumpLog;
 struct SelectorMatcher;
 struct SmTransitionScope;
+typedef struct Bound Bound;
 
 /**
  * Radiant State Store - Centralized UI state management
@@ -1299,6 +1300,7 @@ void dirty_clear(DirtyTracker* tracker);
  * Check if any regions are dirty
  */
 bool dirty_has_regions(DirtyTracker* tracker);
+bool dirty_tracker_bounds(DirtyTracker* tracker, Bound* out_bounds, float scale);
 
 // ============================================================================
 // Reflow Scheduling API

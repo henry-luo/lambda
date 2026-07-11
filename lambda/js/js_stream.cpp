@@ -93,21 +93,6 @@ extern "C" Item js_get_this(void);
 extern "C" Item js_writable_stream_new(Item underlying_sink);
 extern "C" Item js_get_global_property(Item key);
 
-static Item make_string_item(const char* str, int len) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, (size_t)(len > 0 ? len : 0));
-    return (Item){.item = s2it(s)};
-}
-
-static Item make_string_item(const char* str) {
-    if (!str) return ItemNull;
-    return make_string_item(str, (int)strlen(str));
-}
-
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
 // noop function for use as callbacks
 extern "C" Item js_noop(void) {
     return make_js_undefined();

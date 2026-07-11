@@ -3,7 +3,7 @@
 #include "../../../lib/log.h"
 #include "../../../lib/str.h"
 #include "../../mark_builder.hpp"
-#include "../html_entities.h"
+#include "../../../lib/html_entities.h"
 #include "../input-utils.h"
 #include <string.h>
 #include <ctype.h>

@@ -1244,13 +1244,12 @@ void format_markup(StringBuf* sb, Item root_item, const MarkupOutputRules* rules
     if (!sb || !rules) return;
     if (root_item.item == ITEM_NULL) return;
 
-    Pool* pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.markup");
-    MarkupEmitter emitter(rules, pool, sb);
+    ScopedFormatPool pool("format.markup");
+    MarkupEmitter emitter(rules, pool.get(), sb);
 
     ItemReader root(root_item.to_const());
     emitter.format_item(root);
 
-    mem_pool_destroy(pool);
 }
 
 String* format_markup_string(Pool* pool, Item root_item, const MarkupOutputRules* rules) {
