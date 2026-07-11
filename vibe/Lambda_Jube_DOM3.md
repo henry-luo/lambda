@@ -1,11 +1,14 @@
 # Lambda Jube DOM — Stage 3 (DOM3): Table-Driven Property Dispatch — Review and Proposal
 
-> **Status**: Phases 0–3 and 4a implemented and green (2026-07-12). Eight of ten radiant
-> types are fully record-driven with `host_ops = NULL` (range, selection, inline/computed
-> style, stylesheet, css_rule, rule_style_decl); `dom_node` is migrating via the
-> `legacy_ops` fall-through with its 24-member identity/nav cluster converted. Remaining:
-> Phase 4b–4e (reflected attrs, tag-gated members, methods, catch-alls), document types,
-> Phase 5 convergence.
+> **Status**: Phases 0–3 and 4a–4d implemented and green (2026-07-12). Eight of ten radiant
+> types are fully record-driven with `host_ops = NULL`; `dom_node` is migrating via the
+> `legacy_ops` fall-through with **141 declared members** (identity/nav, reflected
+> attributes, live form controls, and all node methods with D0d function-object reads —
+> `get_attribute` deferred with bisect evidence). Remaining: Phase 4e (catch-alls → named
+> hooks, engine js_dom.cpp sweep incl. get_attribute alignment, `legacy_ops` → NULL flip,
+> document/foreign_document types, classList/Location/DOMImplementation), then Phase 5
+> convergence. Suite gates green at every sub-step: JS gtest 309/309, UI-automation clean,
+> Lambda baseline exit 0.
 > **Parent design**: [Lambda_Desing_Native_Module.md](./Lambda_Desing_Native_Module.md) — Jube modules, signatures in Lambda type syntax, VMap projections.
 > **Predecessors**: [Lambda_Jube_DOM.md](./Lambda_Jube_DOM.md) (DOM1: carrier switch to branded VMaps),
 > [Lambda_Jube_DOM2.md](./Lambda_Jube_DOM2.md) (DOM2: generic host-object protocol, real host API,
@@ -718,13 +721,71 @@ pending).
 - **4b** Reflected attributes: the four `_is_*_reflected`/`_idl_to_attr_name` helper chains and
   the bridge's parallel copies become `REFLECT_*` rows (~40 props). Enumerated attributes
   (`inputMode`, `contentEditable`, …) stay ACCESSOR rows over their canonicalizers.
+
+  Progress (2026-07-12): **4b complete on the bridge side** — 38 members generated from one
+  spec (10 bools incl. the `readonly` alias and split-guard `multiple`/`size` rows, 7 ints
+  with defaults, 13 strings incl. `htmlFor`/`acceptCharset`/`formTarget` overrides and the
+  `wrap`→"soft" default, 2 keyword-canonicalized hints, `contentEditable` get+set with
+  SyntaxError path, `isContentEditable`). The four bridge reflection predicate chains and all
+  their get/set consumer arms are deleted; live-state hooks (`after_disabled_attribute_set`,
+  `after_default_checked_set`, `after_default_selected_set`, `after_select_multiple_removed`)
+  ride the converted setters unchanged. `dom_node` registers **62 members**. Deviations from
+  the doc's original sketch, recorded: guards are module-side tag-set functions (not the
+  declarative `applies_to` column — keeps DOM knowledge out of the generic layer, same
+  layering rule that evicted `setAttribute` from vmap.cpp) and reflection handlers are
+  macro-generated module code (not the generic `reflect_attr` routine — revisit when a second
+  module needs reflection). The engine's parallel `_is_*_reflected` chains in js_dom.cpp
+  remain (shadowed for dispatch, reachable by internal callers) — they go in the 4e engine
+  sweep. Suites: recorded below with 4c.
+
+  Continuation plan for 4c–4e (precise state for the next checkpoint): **4c** set-side arms
+  (checked, select value/selectedIndex/length, option selected/value/text, text-control
+  value/selection*/defaultValue, non-tc input value) have bridge-local bodies read and ready
+  to convert; get-side rows bind thin adapters onto `dom->dom_get_property_impl` (the
+  select/option get chain already just delegates there — behavior unchanged, dispatch
+  converted), with `radiant_dom_get_select_option_property` deleted once its names are rows.
+  **4d** methods: split `radiant_dom_element_method_basic` arms (59 names, mostly one-line
+  `*_bridge` calls) into call handlers; ITEM_TRUE alignment happens engine-side afterwards.
+  **4e** catch-alls (form named getter, attribute fallback, on*, collections) become
+  named/indexed hooks; then the engine-chain sweep and the final legacy_ops → NULL flip with
+  document/foreign_document types converted last.
 - **4c** Tag-gated form-control cluster (`value`, `type`, `checked`, `selected`,
   `selectedIndex`, size/rows/cols, …) via `applies_to` + guards — the 90 `_is_tag` dispatch
   sites become data; behavior bodies unchanged.
+
+  Progress (2026-07-12): **4c complete** — 19 guarded rows over 16 declared members
+  (`value` alone carries four same-name guard variants: select / text-control /
+  non-text-control input / option, each with its distinct live setter and hooks —
+  `set_checked_dirty`, `select_set_value/selected_index/length`,
+  `set_option_selected_dirty/text`, the five text-control selection/default bridges, and the
+  non-tc input attribute+form-value write). Get side binds thin adapters onto
+  `dom->dom_get_property_impl` — the deleted `radiant_dom_get_select_option_property` chain
+  already just delegated there, so behavior is unchanged while dispatch converts; body
+  extraction is 4e's engine sweep. The whole 4c set-arm block and the select/option get
+  chain are deleted from the bridge. `dom_node` registers **78 members**; bridge strcmp
+  is down to **176** (from 279 pre-DOM3; the survivors are the element method chain — 4d —
+  plus data-value compares). Suites recorded with 4b: full JS gtest 309/309, UI-automation
+  clean, Lambda baseline green, all nine focused goldens diff-exact.
 - **4d** Methods: element (58), document (40), classList, Location, DOMImplementation — small
   types get their own `JubeTypeDef` + table where they are host-branded, or stay stamped objects
   where they are ordinary maps today. `dom_methods[]`/`doc_methods[]` deleted; feature-detect
   behavior aligned per §2.6 (golden updates isolated to this sub-step).
+
+  Progress (2026-07-12): **4d node methods complete** — 64 method rows over the union of the
+  bridge and engine method-name inventories (select's `namedItem`/`add`/`remove` override rows
+  declared before the generic node `remove` — the ordering-dependent overload as visible
+  declaration order; 5 CharacterData methods text-guarded; 6 all-node methods node-guarded;
+  the rest element-guarded; `insertAdjacentHTML`/`__lambda*` internals via `js_name`). Call
+  handlers delegate into `radiant_dom_element_method` (dispatch converted, arms keep exact
+  behavior; extraction = 4e). This lands **D0d incrementally**: method-name property reads now
+  return real cached function objects. One name deliberately deferred with the bisect evidence
+  in-code: **`get_attribute`** — flipping its read from `ITEM_TRUE` to a function enables
+  jQuery/Sizzle's `support.attributes` path (its probe *relies* on `true(...)` throwing), and
+  our `getAttribute` doesn't yet satisfy that path (`dom_jquery_lib` line 39 flips). It
+  converts in the 4e engine sweep with deliberate golden updates. `dom_node` registers
+  **141 members**. Document/classList/Location/DOMImplementation methods remain legacy
+  (document types not yet declared). All nine focused goldens diff-exact; suites recorded
+  below.
 - **4e** Catch-alls: form named getter, attribute fallback, `on*` handlers, dataset →
   `named_get/named_set`; live collections → `indexed_/named_` hooks with refresh inside;
   delete the residual direct `js_dom_*` calls from `js_runtime.cpp`/`js_globals.cpp`/

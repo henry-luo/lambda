@@ -142,7 +142,124 @@ const char radiant_dom_interface_decl[] =
     "    last_element_child: any,\n"
     "    next_element_sibling: any,\n"
     "    previous_element_sibling: any,\n"
-    "    child_nodes: any\n"
+    "    child_nodes: any,\n"
+    "    disabled: bool,\n"
+    "    required: bool,\n"
+    "    multiple: bool,\n"
+    "    read_only: bool,\n"
+    "    readonly: bool,\n"
+    "    no_validate: bool,\n"
+    "    form_no_validate: bool,\n"
+    "    open: bool,\n"
+    "    default_checked: bool,\n"
+    "    default_selected: bool,\n"
+    "    autofocus: bool,\n"
+    "    max_length: int,\n"
+    "    min_length: int,\n"
+    "    size: int,\n"
+    "    width: int,\n"
+    "    height: int,\n"
+    "    rows: int,\n"
+    "    cols: int,\n"
+    "    src: string,\n"
+    "    href: string,\n"
+    "    alt: string,\n"
+    "    name: string,\n"
+    "    placeholder: string,\n"
+    "    autocomplete: string,\n"
+    "    pattern: string,\n"
+    "    min: string,\n"
+    "    max: string,\n"
+    "    step: string,\n"
+    "    accept: string,\n"
+    "    html_for: string,\n"
+    "    target: string,\n"
+    "    accept_charset: string,\n"
+    "    form_target: string,\n"
+    "    wrap: string,\n"
+    "    input_mode: string,\n"
+    "    enter_key_hint: string,\n"
+    "    content_editable: string,\n"
+    "    checked: bool,\n"
+    "    value: string,\n"
+    "    selected_index: int,\n"
+    "    length: int,\n"
+    "    selected: bool,\n"
+    "    text: string,\n"
+    "    selection_start: string,\n"
+    "    selection_end: string,\n"
+    "    selection_direction: string,\n"
+    "    default_value: string,\n"
+    "    options: any,\n"
+    "    selected_options: any,\n"
+    "    'type': string,\n"
+    "    index: int,\n"
+    "    label: string,\n"
+    "    form: any,\n"
+    "    is_content_editable: bool,\n"
+    "    named_item: fn(a0: any) any,\n"
+    "    add: fn(a0: any, a1: any) any,\n"
+    "    remove: fn(a0: any) any,\n"
+    "    contains: fn(a0: any) any,\n"
+    "    compare_document_position: fn(a0: any) any,\n"
+    "    replace_with: fn(a0: any) any,\n"
+    "    has_child_nodes: fn() any,\n"
+    "    clone_node: fn(a0: any) any,\n"
+    "    replace_data: fn(a0: any, a1: any, a2: any) any,\n"
+    "    insert_data: fn(a0: any, a1: any) any,\n"
+    "    append_data: fn(a0: any) any,\n"
+    "    delete_data: fn(a0: any, a1: any) any,\n"
+    "    substring_data: fn(a0: any, a1: any) any,\n"
+    "    set_attribute: fn(a0: any, a1: any) any,\n"
+    "    remove_attribute: fn(a0: any) any,\n"
+    "    toggle_attribute: fn(a0: any, a1: any) any,\n"
+    "    has_attribute: fn(a0: any) any,\n"
+    "    get_attribute_names: fn() any,\n"
+    "    matches: fn(a0: any) any,\n"
+    "    query_selector: fn(a0: any) any,\n"
+    "    query_selector_all: fn(a0: any) any,\n"
+    "    closest: fn(a0: any) any,\n"
+    "    get_elements_by_tag_name: fn(a0: any) any,\n"
+    "    get_elements_by_class_name: fn(a0: any) any,\n"
+    "    get_element_by_id: fn(a0: any) any,\n"
+    "    add_event_listener: fn(a0: any, a1: any, a2: any) any,\n"
+    "    remove_event_listener: fn(a0: any, a1: any, a2: any) any,\n"
+    "    dispatch_event: fn(a0: any) any,\n"
+    "    append_child: fn(a0: any) any,\n"
+    "    remove_child: fn(a0: any) any,\n"
+    "    insert_before: fn(a0: any, a1: any) any,\n"
+    "    replace_child: fn(a0: any, a1: any) any,\n"
+    "    normalize: fn() any,\n"
+    "    append: fn(a0: any) any,\n"
+    "    prepend: fn(a0: any) any,\n"
+    "    insert_adjacent_element: fn(a0: any, a1: any) any,\n"
+    "    insert_adjacent_html: fn(a0: any, a1: any) any,\n"
+    "    get_bounding_client_rect: fn() any,\n"
+    "    get_client_rects: fn() any,\n"
+    "    scroll_into_view: fn(a0: any) any,\n"
+    "    scroll: fn(a0: any, a1: any) any,\n"
+    "    scroll_to: fn(a0: any, a1: any) any,\n"
+    "    scroll_by: fn(a0: any, a1: any) any,\n"
+    "    focus: fn() any,\n"
+    "    blur: fn() any,\n"
+    "    click: fn() any,\n"
+    "    reset: fn() any,\n"
+    "    submit: fn() any,\n"
+    "    request_submit: fn(a0: any) any,\n"
+    "    check_validity: fn() any,\n"
+    "    report_validity: fn() any,\n"
+    "    set_custom_validity: fn(a0: any) any,\n"
+    "    set_selection_range: fn(a0: any, a1: any, a2: any) any,\n"
+    "    set_range_text: fn(a0: any, a1: any, a2: any, a3: any) any,\n"
+    "    select: fn() any,\n"
+    "    item: fn(a0: any) any,\n"
+    "    toggle: fn(a0: any, a1: any) any,\n"
+    "    replace: fn(a0: any, a1: any) any,\n"
+    "    attach_shadow: fn(a0: any) any,\n"
+    "    to_string: fn() any,\n"
+    "    __lambda_boundary_from_point: fn(a0: any, a1: any, a2: any) any,\n"
+    "    __lambda_text_control_boundary_from_point: fn(a0: any, a1: any) any,\n"
+    "    __lambda_text_control_caret_bounds: fn() any\n"
     "}\n"
     "type rule_style_decl {\n"
     "    length: int,\n"
@@ -632,6 +749,200 @@ extern "C" int radiant_dom_member_last_element_child(Item receiver, Item* out);
 extern "C" int radiant_dom_member_next_element_sibling(Item receiver, Item* out);
 extern "C" int radiant_dom_member_previous_element_sibling(Item receiver, Item* out);
 extern "C" int radiant_dom_member_child_nodes(Item receiver, Item* out);
+extern "C" int radiant_dom_guard_dis(Item receiver);
+extern "C" int radiant_dom_guard_ist(Item receiver);
+extern "C" int radiant_dom_guard_it(Item receiver);
+extern "C" int radiant_dom_guard_ib(Item receiver);
+extern "C" int radiant_dom_guard_fist(Item receiver);
+extern "C" int radiant_dom_guard_input(Item receiver);
+extern "C" int radiant_dom_guard_select(Item receiver);
+extern "C" int radiant_dom_guard_textarea(Item receiver);
+extern "C" int radiant_dom_guard_form(Item receiver);
+extern "C" int radiant_dom_guard_details(Item receiver);
+extern "C" int radiant_dom_guard_option(Item receiver);
+extern "C" int radiant_dom_guard_img(Item receiver);
+extern "C" int radiant_dom_guard_srct(Item receiver);
+extern "C" int radiant_dom_guard_hreft(Item receiver);
+extern "C" int radiant_dom_guard_namet(Item receiver);
+extern "C" int radiant_dom_guard_lblout(Item receiver);
+extern "C" int radiant_dom_m4b_disabled_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_disabled_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_required_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_required_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_multiple_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_multiple_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_multiple2_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_multiple2_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_read_only_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_read_only_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_readonly_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_readonly_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_no_validate_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_no_validate_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_form_no_validate_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_form_no_validate_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_open_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_open_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_default_checked_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_default_checked_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_default_selected_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_default_selected_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_autofocus_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_autofocus_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_max_length_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_max_length_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_min_length_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_min_length_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_size_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_size_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_size2_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_size2_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_width_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_width_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_height_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_height_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_rows_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_rows_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_cols_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_cols_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_src_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_src_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_href_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_href_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_alt_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_alt_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_name_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_name_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_placeholder_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_placeholder_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_autocomplete_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_autocomplete_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_pattern_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_pattern_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_min_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_min_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_max_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_max_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_step_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_step_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_accept_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_accept_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_html_for_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_html_for_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_target_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_target_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_accept_charset_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_accept_charset_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_form_target_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_form_target_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_wrap_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_wrap_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_input_mode_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_input_mode_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_enter_key_hint_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_enter_key_hint_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_content_editable_get(Item r, Item* out);
+extern "C" int radiant_dom_m4b_content_editable_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4b_is_content_editable_get(Item r, Item* out);
+extern "C" int radiant_dom_guard_tc(Item receiver);
+extern "C" int radiant_dom_guard_input_nontc(Item receiver);
+extern "C" int radiant_dom_guard_node(Item receiver);
+extern "C" int radiant_dom_guard_text(Item receiver);
+extern "C" Item radiant_dom_element_method(Item elem_item, Item method_name, Item* args, int argc);
+extern "C" int radiant_dom_m4d_named_item(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_add(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_remove(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_contains(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_compare_document_position(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_remove2(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_replace_with(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_has_child_nodes(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_clone_node(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_replace_data(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_insert_data(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_append_data(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_delete_data(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_substring_data(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_get_attribute(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_set_attribute(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_remove_attribute(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_toggle_attribute(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_has_attribute(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_get_attribute_names(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_matches(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_query_selector(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_query_selector_all(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_closest(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_get_elements_by_tag_name(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_get_elements_by_class_name(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_get_element_by_id(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_add_event_listener(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_remove_event_listener(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_dispatch_event(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_append_child(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_remove_child(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_insert_before(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_replace_child(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_normalize(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_append(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_prepend(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_insert_adjacent_element(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_insert_adjacent_html(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_get_bounding_client_rect(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_get_client_rects(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_scroll_into_view(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_scroll(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_scroll_to(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_scroll_by(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_focus(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_blur(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_click(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_reset(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_submit(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_request_submit(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_check_validity(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_report_validity(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_set_custom_validity(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_set_selection_range(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_set_range_text(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_select(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_item(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_toggle(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_replace(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_attach_shadow(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_to_string(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d___lambda_boundary_from_point(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d___lambda_text_control_boundary_from_point(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d___lambda_text_control_caret_bounds(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4c_get_checked(Item r, Item* out);
+extern "C" int radiant_dom_m4c_checked_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4c_get_value(Item r, Item* out);
+extern "C" int radiant_dom_m4c_value_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4c_value2_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4c_value3_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4c_value4_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4c_get_selectedIndex(Item r, Item* out);
+extern "C" int radiant_dom_m4c_selected_index_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4c_get_length(Item r, Item* out);
+extern "C" int radiant_dom_m4c_length_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4c_get_selected(Item r, Item* out);
+extern "C" int radiant_dom_m4c_selected_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4c_get_text(Item r, Item* out);
+extern "C" int radiant_dom_m4c_text_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4c_get_selectionStart(Item r, Item* out);
+extern "C" int radiant_dom_m4c_selection_start_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4c_get_selectionEnd(Item r, Item* out);
+extern "C" int radiant_dom_m4c_selection_end_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4c_get_selectionDirection(Item r, Item* out);
+extern "C" int radiant_dom_m4c_selection_direction_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4c_get_defaultValue(Item r, Item* out);
+extern "C" int radiant_dom_m4c_default_value_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_m4c_get_options(Item r, Item* out);
+extern "C" int radiant_dom_m4c_get_selectedOptions(Item r, Item* out);
+extern "C" int radiant_dom_m4c_get_type(Item r, Item* out);
+extern "C" int radiant_dom_m4c_get_index(Item r, Item* out);
+extern "C" int radiant_dom_m4c_get_label(Item r, Item* out);
+extern "C" int radiant_dom_m4c_get_form(Item r, Item* out);
 
 #define BIND_NODE(n, fn) \
     {n, NULL, NULL, radiant_dom_member_is_element, fn, NULL, NULL, NULL, \
@@ -665,6 +976,192 @@ static const JubeMemberBind radiant_dom_node_members[] = {
     BIND_NODE("next_element_sibling", radiant_dom_member_next_element_sibling),
     BIND_NODE("previous_element_sibling", radiant_dom_member_previous_element_sibling),
     BIND_NODE("child_nodes", radiant_dom_member_child_nodes),
+    {"disabled", NULL, NULL, radiant_dom_guard_dis, radiant_dom_m4b_disabled_get, radiant_dom_m4b_disabled_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"required", NULL, NULL, radiant_dom_guard_ist, radiant_dom_m4b_required_get, radiant_dom_m4b_required_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"multiple", NULL, NULL, radiant_dom_guard_input, radiant_dom_m4b_multiple_get, radiant_dom_m4b_multiple_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"multiple", NULL, NULL, radiant_dom_guard_select, radiant_dom_m4b_multiple2_get, radiant_dom_m4b_multiple2_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"read_only", "readOnly", NULL, radiant_dom_guard_it, radiant_dom_m4b_read_only_get, radiant_dom_m4b_read_only_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"readonly", NULL, NULL, radiant_dom_guard_it, radiant_dom_m4b_readonly_get, radiant_dom_m4b_readonly_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"no_validate", "noValidate", NULL, radiant_dom_guard_form, radiant_dom_m4b_no_validate_get, radiant_dom_m4b_no_validate_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"form_no_validate", "formNoValidate", NULL, radiant_dom_guard_ib, radiant_dom_m4b_form_no_validate_get, radiant_dom_m4b_form_no_validate_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"open", NULL, NULL, radiant_dom_guard_details, radiant_dom_m4b_open_get, radiant_dom_m4b_open_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"default_checked", "defaultChecked", NULL, radiant_dom_guard_input, radiant_dom_m4b_default_checked_get, radiant_dom_m4b_default_checked_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"default_selected", "defaultSelected", NULL, radiant_dom_guard_option, radiant_dom_m4b_default_selected_get, radiant_dom_m4b_default_selected_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"autofocus", NULL, NULL, radiant_dom_member_is_element, radiant_dom_m4b_autofocus_get, radiant_dom_m4b_autofocus_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"max_length", "maxLength", NULL, radiant_dom_guard_it, radiant_dom_m4b_max_length_get, radiant_dom_m4b_max_length_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"min_length", "minLength", NULL, radiant_dom_guard_it, radiant_dom_m4b_min_length_get, radiant_dom_m4b_min_length_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"size", NULL, NULL, radiant_dom_guard_input, radiant_dom_m4b_size_get, radiant_dom_m4b_size_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"size", NULL, NULL, radiant_dom_guard_select, radiant_dom_m4b_size2_get, radiant_dom_m4b_size2_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"width", NULL, NULL, radiant_dom_guard_input, radiant_dom_m4b_width_get, radiant_dom_m4b_width_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"height", NULL, NULL, radiant_dom_guard_input, radiant_dom_m4b_height_get, radiant_dom_m4b_height_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"rows", NULL, NULL, radiant_dom_guard_textarea, radiant_dom_m4b_rows_get, radiant_dom_m4b_rows_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"cols", NULL, NULL, radiant_dom_guard_textarea, radiant_dom_m4b_cols_get, radiant_dom_m4b_cols_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"src", NULL, NULL, radiant_dom_guard_srct, radiant_dom_m4b_src_get, radiant_dom_m4b_src_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"href", NULL, NULL, radiant_dom_guard_hreft, radiant_dom_m4b_href_get, radiant_dom_m4b_href_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"alt", NULL, NULL, radiant_dom_guard_img, radiant_dom_m4b_alt_get, radiant_dom_m4b_alt_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"name", NULL, NULL, radiant_dom_guard_namet, radiant_dom_m4b_name_get, radiant_dom_m4b_name_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"placeholder", NULL, NULL, radiant_dom_guard_it, radiant_dom_m4b_placeholder_get, radiant_dom_m4b_placeholder_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"autocomplete", NULL, NULL, radiant_dom_guard_fist, radiant_dom_m4b_autocomplete_get, radiant_dom_m4b_autocomplete_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"pattern", NULL, NULL, radiant_dom_guard_input, radiant_dom_m4b_pattern_get, radiant_dom_m4b_pattern_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"min", NULL, NULL, radiant_dom_guard_input, radiant_dom_m4b_min_get, radiant_dom_m4b_min_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"max", NULL, NULL, radiant_dom_guard_input, radiant_dom_m4b_max_get, radiant_dom_m4b_max_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"step", NULL, NULL, radiant_dom_guard_input, radiant_dom_m4b_step_get, radiant_dom_m4b_step_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"accept", NULL, NULL, radiant_dom_guard_input, radiant_dom_m4b_accept_get, radiant_dom_m4b_accept_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"html_for", "htmlFor", NULL, radiant_dom_guard_lblout, radiant_dom_m4b_html_for_get, radiant_dom_m4b_html_for_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"target", NULL, NULL, radiant_dom_guard_form, radiant_dom_m4b_target_get, radiant_dom_m4b_target_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"accept_charset", "acceptCharset", NULL, radiant_dom_guard_form, radiant_dom_m4b_accept_charset_get, radiant_dom_m4b_accept_charset_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"form_target", "formTarget", NULL, radiant_dom_guard_ib, radiant_dom_m4b_form_target_get, radiant_dom_m4b_form_target_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"wrap", NULL, NULL, radiant_dom_guard_textarea, radiant_dom_m4b_wrap_get, radiant_dom_m4b_wrap_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"input_mode", "inputMode", NULL, radiant_dom_member_is_element, radiant_dom_m4b_input_mode_get, radiant_dom_m4b_input_mode_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"enter_key_hint", "enterKeyHint", NULL, radiant_dom_member_is_element, radiant_dom_m4b_enter_key_hint_get, radiant_dom_m4b_enter_key_hint_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"content_editable", "contentEditable", NULL, radiant_dom_member_is_element, radiant_dom_m4b_content_editable_get, radiant_dom_m4b_content_editable_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"is_content_editable", "isContentEditable", NULL, radiant_dom_member_is_element, radiant_dom_m4b_is_content_editable_get, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"checked", NULL, NULL, radiant_dom_guard_input, radiant_dom_m4c_get_checked, radiant_dom_m4c_checked_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"value", NULL, NULL, radiant_dom_guard_select, radiant_dom_m4c_get_value, radiant_dom_m4c_value_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"value", NULL, NULL, radiant_dom_guard_tc, radiant_dom_m4c_get_value, radiant_dom_m4c_value2_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"value", NULL, NULL, radiant_dom_guard_input_nontc, radiant_dom_m4c_get_value, radiant_dom_m4c_value3_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"value", NULL, NULL, radiant_dom_guard_option, radiant_dom_m4c_get_value, radiant_dom_m4c_value4_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"selected_index", "selectedIndex", NULL, radiant_dom_guard_select, radiant_dom_m4c_get_selectedIndex, radiant_dom_m4c_selected_index_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"length", NULL, NULL, radiant_dom_guard_select, radiant_dom_m4c_get_length, radiant_dom_m4c_length_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"selected", NULL, NULL, radiant_dom_guard_option, radiant_dom_m4c_get_selected, radiant_dom_m4c_selected_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"text", NULL, NULL, radiant_dom_guard_option, radiant_dom_m4c_get_text, radiant_dom_m4c_text_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"selection_start", "selectionStart", NULL, radiant_dom_guard_tc, radiant_dom_m4c_get_selectionStart, radiant_dom_m4c_selection_start_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"selection_end", "selectionEnd", NULL, radiant_dom_guard_tc, radiant_dom_m4c_get_selectionEnd, radiant_dom_m4c_selection_end_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"selection_direction", "selectionDirection", NULL, radiant_dom_guard_tc, radiant_dom_m4c_get_selectionDirection, radiant_dom_m4c_selection_direction_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"default_value", "defaultValue", NULL, radiant_dom_guard_tc, radiant_dom_m4c_get_defaultValue, radiant_dom_m4c_default_value_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"options", NULL, NULL, radiant_dom_guard_select, radiant_dom_m4c_get_options, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"selected_options", "selectedOptions", NULL, radiant_dom_guard_select, radiant_dom_m4c_get_selectedOptions, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"type", NULL, NULL, radiant_dom_guard_select, radiant_dom_m4c_get_type, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"index", NULL, NULL, radiant_dom_guard_option, radiant_dom_m4c_get_index, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"label", NULL, NULL, radiant_dom_guard_option, radiant_dom_m4c_get_label, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"form", NULL, NULL, radiant_dom_guard_option, radiant_dom_m4c_get_form, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"named_item", "namedItem", NULL, radiant_dom_guard_select, NULL, NULL, radiant_dom_m4d_named_item, NULL, 0},
+    {"add", NULL, NULL, radiant_dom_guard_select, NULL, NULL, radiant_dom_m4d_add, NULL, 0},
+    {"remove", NULL, NULL, radiant_dom_guard_select, NULL, NULL, radiant_dom_m4d_remove, NULL, 0},
+    {"contains", NULL, NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_contains, NULL, 0},
+    {"compare_document_position", "compareDocumentPosition", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_compare_document_position, NULL, 0},
+    {"remove", NULL, NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_remove2, NULL, 0},
+    {"replace_with", "replaceWith", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_replace_with, NULL, 0},
+    {"has_child_nodes", "hasChildNodes", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_has_child_nodes, NULL, 0},
+    {"clone_node", "cloneNode", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_clone_node, NULL, 0},
+    {"replace_data", "replaceData", NULL, radiant_dom_guard_text, NULL, NULL, radiant_dom_m4d_replace_data, NULL, 0},
+    {"insert_data", "insertData", NULL, radiant_dom_guard_text, NULL, NULL, radiant_dom_m4d_insert_data, NULL, 0},
+    {"append_data", "appendData", NULL, radiant_dom_guard_text, NULL, NULL, radiant_dom_m4d_append_data, NULL, 0},
+    {"delete_data", "deleteData", NULL, radiant_dom_guard_text, NULL, NULL, radiant_dom_m4d_delete_data, NULL, 0},
+    {"substring_data", "substringData", NULL, radiant_dom_guard_text, NULL, NULL, radiant_dom_m4d_substring_data, NULL, 0},
+    // get_attribute deliberately NOT converted yet: flipping its
+    // property read from ITEM_TRUE to a function enables jQuery/Sizzle's
+    // support.attributes path (the probe relies on `true(...)` throwing);
+    // align in the 4e engine sweep with deliberate golden updates.
+    {"set_attribute", "setAttribute", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_set_attribute, NULL, 0},
+    {"remove_attribute", "removeAttribute", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_remove_attribute, NULL, 0},
+    {"toggle_attribute", "toggleAttribute", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_toggle_attribute, NULL, 0},
+    {"has_attribute", "hasAttribute", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_has_attribute, NULL, 0},
+    {"get_attribute_names", "getAttributeNames", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_get_attribute_names, NULL, 0},
+    {"matches", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_matches, NULL, 0},
+    {"query_selector", "querySelector", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_query_selector, NULL, 0},
+    {"query_selector_all", "querySelectorAll", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_query_selector_all, NULL, 0},
+    {"closest", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_closest, NULL, 0},
+    {"get_elements_by_tag_name", "getElementsByTagName", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_get_elements_by_tag_name, NULL, 0},
+    {"get_elements_by_class_name", "getElementsByClassName", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_get_elements_by_class_name, NULL, 0},
+    {"get_element_by_id", "getElementById", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_get_element_by_id, NULL, 0},
+    {"add_event_listener", "addEventListener", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_add_event_listener, NULL, 0},
+    {"remove_event_listener", "removeEventListener", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_remove_event_listener, NULL, 0},
+    {"dispatch_event", "dispatchEvent", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_dispatch_event, NULL, 0},
+    {"append_child", "appendChild", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_append_child, NULL, 0},
+    {"remove_child", "removeChild", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_remove_child, NULL, 0},
+    {"insert_before", "insertBefore", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_insert_before, NULL, 0},
+    {"replace_child", "replaceChild", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_replace_child, NULL, 0},
+    {"normalize", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_normalize, NULL, 0},
+    {"append", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_append, NULL, 0},
+    {"prepend", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_prepend, NULL, 0},
+    {"insert_adjacent_element", "insertAdjacentElement", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_insert_adjacent_element, NULL, 0},
+    {"insert_adjacent_html", "insertAdjacentHTML", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_insert_adjacent_html, NULL, 0},
+    {"get_bounding_client_rect", "getBoundingClientRect", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_get_bounding_client_rect, NULL, 0},
+    {"get_client_rects", "getClientRects", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_get_client_rects, NULL, 0},
+    {"scroll_into_view", "scrollIntoView", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_scroll_into_view, NULL, 0},
+    {"scroll", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_scroll, NULL, 0},
+    {"scroll_to", "scrollTo", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_scroll_to, NULL, 0},
+    {"scroll_by", "scrollBy", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_scroll_by, NULL, 0},
+    {"focus", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_focus, NULL, 0},
+    {"blur", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_blur, NULL, 0},
+    {"click", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_click, NULL, 0},
+    {"reset", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_reset, NULL, 0},
+    {"submit", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_submit, NULL, 0},
+    {"request_submit", "requestSubmit", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_request_submit, NULL, 0},
+    {"check_validity", "checkValidity", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_check_validity, NULL, 0},
+    {"report_validity", "reportValidity", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_report_validity, NULL, 0},
+    {"set_custom_validity", "setCustomValidity", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_set_custom_validity, NULL, 0},
+    {"set_selection_range", "setSelectionRange", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_set_selection_range, NULL, 0},
+    {"set_range_text", "setRangeText", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_set_range_text, NULL, 0},
+    {"select", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_select, NULL, 0},
+    {"item", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_item, NULL, 0},
+    {"toggle", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_toggle, NULL, 0},
+    {"replace", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_replace, NULL, 0},
+    {"attach_shadow", "attachShadow", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_attach_shadow, NULL, 0},
+    {"to_string", "toString", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_to_string, NULL, 0},
+    {"__lambda_boundary_from_point", "__lambdaBoundaryFromPoint", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d___lambda_boundary_from_point, NULL, 0},
+    {"__lambda_text_control_boundary_from_point", "__lambdaTextControlBoundaryFromPoint", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d___lambda_text_control_boundary_from_point, NULL, 0},
+    {"__lambda_text_control_caret_bounds", "__lambdaTextControlCaretBounds", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d___lambda_text_control_caret_bounds, NULL, 0},
 };
 
 extern const JubeTypeBinding radiant_dom_type_bindings[];

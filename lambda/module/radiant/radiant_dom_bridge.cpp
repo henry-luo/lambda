@@ -334,133 +334,6 @@ static bool radiant_dom_is_tag(DomElement* elem, const char* tag) {
     return elem && elem->tag_name && tag && strcasecmp(elem->tag_name, tag) == 0;
 }
 
-static bool radiant_dom_bool_reflected(DomElement* elem, const char* prop, const char** attr_name) {
-    if (!elem || !prop || !attr_name) return false;
-    bool input = radiant_dom_is_tag(elem, "input");
-    bool button = radiant_dom_is_tag(elem, "button");
-    bool select = radiant_dom_is_tag(elem, "select");
-    bool textarea = radiant_dom_is_tag(elem, "textarea");
-    bool form = radiant_dom_is_tag(elem, "form");
-    bool details = radiant_dom_is_tag(elem, "details");
-    bool fieldset = radiant_dom_is_tag(elem, "fieldset");
-    bool option = radiant_dom_is_tag(elem, "option");
-    bool optgroup = radiant_dom_is_tag(elem, "optgroup");
-    if (strcmp(prop, "disabled") == 0 &&
-        (input || button || select || textarea || fieldset || option || optgroup)) {
-        *attr_name = "disabled";
-        return true;
-    }
-    if (strcmp(prop, "required") == 0 && (input || select || textarea)) {
-        *attr_name = "required";
-        return true;
-    }
-    if (strcmp(prop, "multiple") == 0 && (input || select)) {
-        *attr_name = "multiple";
-        return true;
-    }
-    if ((strcmp(prop, "readOnly") == 0 || strcmp(prop, "readonly") == 0) &&
-        (input || textarea)) {
-        *attr_name = "readonly";
-        return true;
-    }
-    if (strcmp(prop, "noValidate") == 0 && form) {
-        *attr_name = "novalidate";
-        return true;
-    }
-    if (strcmp(prop, "formNoValidate") == 0 && (input || button)) {
-        *attr_name = "formnovalidate";
-        return true;
-    }
-    if (strcmp(prop, "open") == 0 && details) {
-        *attr_name = "open";
-        return true;
-    }
-    if (strcmp(prop, "defaultChecked") == 0 && input) {
-        *attr_name = "checked";
-        return true;
-    }
-    if (strcmp(prop, "defaultSelected") == 0 && option) {
-        *attr_name = "selected";
-        return true;
-    }
-    if (strcmp(prop, "autofocus") == 0) {
-        *attr_name = "autofocus";
-        return true;
-    }
-    return false;
-}
-
-static bool radiant_dom_simple_bool_setter(DomElement* elem, const char* prop, const char** attr_name) {
-    if (!elem || !prop || !attr_name) return false;
-    bool input = radiant_dom_is_tag(elem, "input");
-    bool button = radiant_dom_is_tag(elem, "button");
-    bool select = radiant_dom_is_tag(elem, "select");
-    bool textarea = radiant_dom_is_tag(elem, "textarea");
-    bool form = radiant_dom_is_tag(elem, "form");
-    bool details = radiant_dom_is_tag(elem, "details");
-    if (strcmp(prop, "required") == 0 && (input || select || textarea)) {
-        *attr_name = "required";
-        return true;
-    }
-    if (strcmp(prop, "multiple") == 0 && input) {
-        *attr_name = "multiple";
-        return true;
-    }
-    if ((strcmp(prop, "readOnly") == 0 || strcmp(prop, "readonly") == 0) &&
-        (input || textarea)) {
-        *attr_name = "readonly";
-        return true;
-    }
-    if (strcmp(prop, "noValidate") == 0 && form) {
-        *attr_name = "novalidate";
-        return true;
-    }
-    if (strcmp(prop, "formNoValidate") == 0 && (input || button)) {
-        *attr_name = "formnovalidate";
-        return true;
-    }
-    if (strcmp(prop, "open") == 0 && details) {
-        *attr_name = "open";
-        return true;
-    }
-    if (strcmp(prop, "autofocus") == 0) {
-        *attr_name = "autofocus";
-        return true;
-    }
-    return false;
-}
-
-static bool radiant_dom_disabled_setter(DomElement* elem, const char* prop, const char** attr_name) {
-    if (!elem || !prop || !attr_name || strcmp(prop, "disabled") != 0) return false;
-    bool input = radiant_dom_is_tag(elem, "input");
-    bool button = radiant_dom_is_tag(elem, "button");
-    bool select = radiant_dom_is_tag(elem, "select");
-    bool textarea = radiant_dom_is_tag(elem, "textarea");
-    bool fieldset = radiant_dom_is_tag(elem, "fieldset");
-    bool option = radiant_dom_is_tag(elem, "option");
-    bool optgroup = radiant_dom_is_tag(elem, "optgroup");
-    if (!(input || button || select || textarea || fieldset || option || optgroup)) return false;
-    *attr_name = "disabled";
-    return true;
-}
-
-static bool radiant_dom_live_bool_setter(DomElement* elem, const char* prop, const char** attr_name) {
-    if (!elem || !prop || !attr_name) return false;
-    if (strcmp(prop, "multiple") == 0 && radiant_dom_is_tag(elem, "select")) {
-        *attr_name = "multiple";
-        return true;
-    }
-    if (strcmp(prop, "defaultChecked") == 0 && radiant_dom_is_tag(elem, "input")) {
-        *attr_name = "checked";
-        return true;
-    }
-    if (strcmp(prop, "defaultSelected") == 0 && radiant_dom_is_tag(elem, "option")) {
-        *attr_name = "selected";
-        return true;
-    }
-    return false;
-}
-
 static const char* radiant_dom_item_to_html_bool_string(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) {
@@ -468,39 +341,6 @@ static const char* radiant_dom_item_to_html_bool_string(Item value) {
         return text ? text : "";
     }
     return js_is_truthy(value) ? "true" : "false";
-}
-
-static bool radiant_dom_int_reflected(DomElement* elem, const char* prop,
-                                      const char** attr_name, int* default_value) {
-    if (!elem || !prop || !attr_name || !default_value) return false;
-    bool input = radiant_dom_is_tag(elem, "input");
-    bool textarea = radiant_dom_is_tag(elem, "textarea");
-    bool select = radiant_dom_is_tag(elem, "select");
-    if (strcmp(prop, "maxLength") == 0 && (input || textarea)) {
-        *attr_name = "maxlength"; *default_value = -1; return true;
-    }
-    if (strcmp(prop, "minLength") == 0 && (input || textarea)) {
-        *attr_name = "minlength"; *default_value = 0; return true;
-    }
-    if (strcmp(prop, "size") == 0 && input) {
-        *attr_name = "size"; *default_value = 20; return true;
-    }
-    if (strcmp(prop, "width") == 0 && input) {
-        *attr_name = "width"; *default_value = 0; return true;
-    }
-    if (strcmp(prop, "height") == 0 && input) {
-        *attr_name = "height"; *default_value = 0; return true;
-    }
-    if (strcmp(prop, "size") == 0 && select) {
-        *attr_name = "size"; *default_value = 0; return true;
-    }
-    if (strcmp(prop, "rows") == 0 && textarea) {
-        *attr_name = "rows"; *default_value = 2; return true;
-    }
-    if (strcmp(prop, "cols") == 0 && textarea) {
-        *attr_name = "cols"; *default_value = 20; return true;
-    }
-    return false;
 }
 
 static int64_t radiant_dom_reflected_int_value(DomElement* elem, const char* attr_name,
@@ -533,78 +373,6 @@ static long radiant_dom_item_to_reflected_int(Item value, int default_value) {
         }
     }
     return out < 0 ? default_value : out;
-}
-
-static bool radiant_dom_string_reflected(DomElement* elem, const char* prop, const char** attr_name) {
-    if (!elem || !prop || !attr_name) return false;
-    if (strcmp(prop, "src") == 0 &&
-        (radiant_dom_is_tag(elem, "img") || radiant_dom_is_tag(elem, "script") ||
-         radiant_dom_is_tag(elem, "iframe") || radiant_dom_is_tag(elem, "embed") ||
-         radiant_dom_is_tag(elem, "source") || radiant_dom_is_tag(elem, "track") ||
-         radiant_dom_is_tag(elem, "audio") || radiant_dom_is_tag(elem, "video") ||
-         radiant_dom_is_tag(elem, "input"))) {
-        *attr_name = "src";
-        return true;
-    }
-    if (strcmp(prop, "href") == 0 &&
-        (radiant_dom_is_tag(elem, "a") || radiant_dom_is_tag(elem, "area") ||
-         radiant_dom_is_tag(elem, "link") || radiant_dom_is_tag(elem, "base"))) {
-        *attr_name = "href";
-        return true;
-    }
-    if (strcmp(prop, "alt") == 0 && radiant_dom_is_tag(elem, "img")) {
-        *attr_name = "alt";
-        return true;
-    }
-    if (strcmp(prop, "name") == 0 &&
-        (radiant_dom_is_tag(elem, "input") || radiant_dom_is_tag(elem, "button") ||
-         radiant_dom_is_tag(elem, "select") || radiant_dom_is_tag(elem, "textarea") ||
-         radiant_dom_is_tag(elem, "form") || radiant_dom_is_tag(elem, "fieldset") ||
-         radiant_dom_is_tag(elem, "output") || radiant_dom_is_tag(elem, "object"))) {
-        *attr_name = "name";
-        return true;
-    }
-    if (strcmp(prop, "placeholder") == 0 &&
-        (radiant_dom_is_tag(elem, "input") || radiant_dom_is_tag(elem, "textarea"))) {
-        *attr_name = "placeholder";
-        return true;
-    }
-    if (strcmp(prop, "autocomplete") == 0 &&
-        (radiant_dom_is_tag(elem, "form") || radiant_dom_is_tag(elem, "input") ||
-         radiant_dom_is_tag(elem, "select") || radiant_dom_is_tag(elem, "textarea"))) {
-        *attr_name = "autocomplete";
-        return true;
-    }
-    if (radiant_dom_is_tag(elem, "input") &&
-        (strcmp(prop, "pattern") == 0 || strcmp(prop, "min") == 0 ||
-         strcmp(prop, "max") == 0 || strcmp(prop, "step") == 0 ||
-         strcmp(prop, "accept") == 0)) {
-        *attr_name = prop;
-        return true;
-    }
-    if (strcmp(prop, "htmlFor") == 0 &&
-        (radiant_dom_is_tag(elem, "label") || radiant_dom_is_tag(elem, "output"))) {
-        *attr_name = "for";
-        return true;
-    }
-    if (strcmp(prop, "target") == 0 && radiant_dom_is_tag(elem, "form")) {
-        *attr_name = "target";
-        return true;
-    }
-    if (strcmp(prop, "acceptCharset") == 0 && radiant_dom_is_tag(elem, "form")) {
-        *attr_name = "accept-charset";
-        return true;
-    }
-    if (strcmp(prop, "formTarget") == 0 &&
-        (radiant_dom_is_tag(elem, "input") || radiant_dom_is_tag(elem, "button"))) {
-        *attr_name = "formtarget";
-        return true;
-    }
-    if (strcmp(prop, "wrap") == 0 && radiant_dom_is_tag(elem, "textarea")) {
-        *attr_name = "wrap";
-        return true;
-    }
-    return false;
 }
 
 static const char* radiant_dom_canonical_token_attr(DomElement* elem, const char* attr_name,
@@ -654,18 +422,6 @@ static bool radiant_dom_is_content_editable(DomElement* elem) {
             }
         }
         node = node->parent;
-    }
-    return false;
-}
-
-static bool radiant_dom_hint_reflected(const char* prop, const char** attr_name) {
-    if (strcmp(prop, "inputMode") == 0) {
-        *attr_name = "inputmode";
-        return true;
-    }
-    if (strcmp(prop, "enterKeyHint") == 0) {
-        *attr_name = "enterkeyhint";
-        return true;
     }
     return false;
 }
@@ -1371,46 +1127,6 @@ static bool radiant_dom_get_comment_property(DomComment* comment_node, const cha
     return false;
 }
 
-static bool radiant_dom_get_select_option_property(Item elem_item, DomElement* elem,
-                                                   Item prop_name, Item* out) {
-    if (!elem || !out) return false;
-    const char* prop = fn_to_cstr(prop_name);
-    if (radiant_dom_is_tag(elem, "select")) {
-        bool numeric = false;
-        if (get_type_id(prop_name) == LMD_TYPE_INT) {
-            numeric = it2i(prop_name) >= 0;
-        } else if (prop && prop[0] >= '0' && prop[0] <= '9') {
-            char* end = nullptr;
-            long idx = strtol(prop, &end, 10);
-            numeric = end && *end == '\0' && idx >= 0;
-        }
-        if (numeric ||
-            (prop && (
-                strcmp(prop, "options") == 0 ||
-                strcmp(prop, "length") == 0 ||
-                strcmp(prop, "selectedOptions") == 0 ||
-                strcmp(prop, "selectedIndex") == 0 ||
-                strcmp(prop, "value") == 0 ||
-                strcmp(prop, "type") == 0))) {
-            // select collection/value properties must beat generic element
-            // length/reflection fallbacks, otherwise options become stale.
-            *out = js_dom_get_property_impl(elem_item, prop_name);
-            return true;
-        }
-    }
-    if (radiant_dom_is_tag(elem, "option") && prop &&
-        (strcmp(prop, "value") == 0 ||
-         strcmp(prop, "text") == 0 ||
-         strcmp(prop, "label") == 0 ||
-         strcmp(prop, "selected") == 0 ||
-         strcmp(prop, "index") == 0 ||
-         strcmp(prop, "form") == 0)) {
-        *out = js_dom_get_property_impl(elem_item, prop_name);
-        return true;
-    }
-    return false;
-}
-
 
 // ---- DOM3 Phase 4a: record-driven member getters (identity/navigation) ----
 // JubeMemberBind handler shapes; the strcmp arms these replace are deleted
@@ -1485,6 +1201,1284 @@ RADIANT_MEMBER_GET(radiant_dom_member_previous_element_sibling,
 RADIANT_MEMBER_GET(radiant_dom_member_child_nodes,
     js_dom_live_child_collection_bridge((void*)elem, false))
 
+
+// ---- DOM3 Phase 4b: reflected-attribute members ----
+// Generated cluster: the bool/int/string/hint reflection predicate chains and
+// their get/set arms collapse into guarded record rows. Live-state booleans
+// keep their centralized invariant hooks.
+RADIANT_C_API int radiant_dom_guard_dis(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "input") ||
+        radiant_dom_is_tag(elem, "button") ||
+        radiant_dom_is_tag(elem, "select") ||
+        radiant_dom_is_tag(elem, "textarea") ||
+        radiant_dom_is_tag(elem, "fieldset") ||
+        radiant_dom_is_tag(elem, "option") ||
+        radiant_dom_is_tag(elem, "optgroup"));
+}
+RADIANT_C_API int radiant_dom_guard_ist(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "input") ||
+        radiant_dom_is_tag(elem, "select") ||
+        radiant_dom_is_tag(elem, "textarea"));
+}
+RADIANT_C_API int radiant_dom_guard_it(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "input") ||
+        radiant_dom_is_tag(elem, "textarea"));
+}
+RADIANT_C_API int radiant_dom_guard_ib(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "input") ||
+        radiant_dom_is_tag(elem, "button"));
+}
+RADIANT_C_API int radiant_dom_guard_fist(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "form") ||
+        radiant_dom_is_tag(elem, "input") ||
+        radiant_dom_is_tag(elem, "select") ||
+        radiant_dom_is_tag(elem, "textarea"));
+}
+RADIANT_C_API int radiant_dom_guard_input(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "input"));
+}
+RADIANT_C_API int radiant_dom_guard_select(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "select"));
+}
+RADIANT_C_API int radiant_dom_guard_textarea(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "textarea"));
+}
+RADIANT_C_API int radiant_dom_guard_form(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "form"));
+}
+RADIANT_C_API int radiant_dom_guard_details(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "details"));
+}
+RADIANT_C_API int radiant_dom_guard_option(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "option"));
+}
+RADIANT_C_API int radiant_dom_guard_img(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "img"));
+}
+RADIANT_C_API int radiant_dom_guard_srct(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "img") ||
+        radiant_dom_is_tag(elem, "script") ||
+        radiant_dom_is_tag(elem, "iframe") ||
+        radiant_dom_is_tag(elem, "embed") ||
+        radiant_dom_is_tag(elem, "source") ||
+        radiant_dom_is_tag(elem, "track") ||
+        radiant_dom_is_tag(elem, "audio") ||
+        radiant_dom_is_tag(elem, "video") ||
+        radiant_dom_is_tag(elem, "input"));
+}
+RADIANT_C_API int radiant_dom_guard_hreft(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "a") ||
+        radiant_dom_is_tag(elem, "area") ||
+        radiant_dom_is_tag(elem, "link") ||
+        radiant_dom_is_tag(elem, "base"));
+}
+RADIANT_C_API int radiant_dom_guard_namet(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "input") ||
+        radiant_dom_is_tag(elem, "button") ||
+        radiant_dom_is_tag(elem, "select") ||
+        radiant_dom_is_tag(elem, "textarea") ||
+        radiant_dom_is_tag(elem, "form") ||
+        radiant_dom_is_tag(elem, "fieldset") ||
+        radiant_dom_is_tag(elem, "output") ||
+        radiant_dom_is_tag(elem, "object"));
+}
+RADIANT_C_API int radiant_dom_guard_lblout(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "label") ||
+        radiant_dom_is_tag(elem, "output"));
+}
+RADIANT_C_API int radiant_dom_m4b_disabled_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "disabled") ? 1 : 0)};
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_disabled_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    if (js_is_truthy(v)) {
+        dom_element_set_attribute(elem, "disabled", "");
+        js_dom_after_disabled_attribute_set((void*)elem);
+    } else {
+        dom_element_remove_attribute(elem, "disabled");
+    }
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_required_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "required") ? 1 : 0)};
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_required_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    if (js_is_truthy(v)) dom_element_set_attribute(elem, "required", "");
+    else dom_element_remove_attribute(elem, "required");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_multiple_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "multiple") ? 1 : 0)};
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_multiple_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    if (js_is_truthy(v)) dom_element_set_attribute(elem, "multiple", "");
+    else dom_element_remove_attribute(elem, "multiple");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_multiple2_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "multiple") ? 1 : 0)};
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_multiple2_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    bool truthy = js_is_truthy(v);
+    if (truthy) dom_element_set_attribute(elem, "multiple", "");
+    else dom_element_remove_attribute(elem, "multiple");
+    // live checked/selected invariants remain centralized in js_dom.cpp
+    if (!truthy) js_dom_after_select_multiple_removed((void*)elem);
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_read_only_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "readonly") ? 1 : 0)};
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_read_only_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    if (js_is_truthy(v)) dom_element_set_attribute(elem, "readonly", "");
+    else dom_element_remove_attribute(elem, "readonly");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_readonly_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "readonly") ? 1 : 0)};
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_readonly_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    if (js_is_truthy(v)) dom_element_set_attribute(elem, "readonly", "");
+    else dom_element_remove_attribute(elem, "readonly");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_no_validate_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "novalidate") ? 1 : 0)};
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_no_validate_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    if (js_is_truthy(v)) dom_element_set_attribute(elem, "novalidate", "");
+    else dom_element_remove_attribute(elem, "novalidate");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_form_no_validate_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "formnovalidate") ? 1 : 0)};
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_form_no_validate_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    if (js_is_truthy(v)) dom_element_set_attribute(elem, "formnovalidate", "");
+    else dom_element_remove_attribute(elem, "formnovalidate");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_open_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "open") ? 1 : 0)};
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_open_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    if (js_is_truthy(v)) dom_element_set_attribute(elem, "open", "");
+    else dom_element_remove_attribute(elem, "open");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_default_checked_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "checked") ? 1 : 0)};
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_default_checked_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    bool truthy = js_is_truthy(v);
+    if (truthy) dom_element_set_attribute(elem, "checked", "");
+    else dom_element_remove_attribute(elem, "checked");
+    // live checked/selected invariants remain centralized in js_dom.cpp
+    js_dom_after_default_checked_set((void*)elem, truthy);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_default_selected_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "selected") ? 1 : 0)};
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_default_selected_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    bool truthy = js_is_truthy(v);
+    if (truthy) dom_element_set_attribute(elem, "selected", "");
+    else dom_element_remove_attribute(elem, "selected");
+    // live checked/selected invariants remain centralized in js_dom.cpp
+    js_dom_after_default_selected_set((void*)elem, truthy);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_autofocus_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "autofocus") ? 1 : 0)};
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_autofocus_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    if (js_is_truthy(v)) dom_element_set_attribute(elem, "autofocus", "");
+    else dom_element_remove_attribute(elem, "autofocus");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_max_length_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "maxlength", -1));
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_max_length_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    long reflected = radiant_dom_item_to_reflected_int(v, -1);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%ld", reflected);
+    dom_element_set_attribute(elem, "maxlength", buf);
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_min_length_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "minlength", 0));
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_min_length_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    long reflected = radiant_dom_item_to_reflected_int(v, 0);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%ld", reflected);
+    dom_element_set_attribute(elem, "minlength", buf);
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_size_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "size", 20));
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_size_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    long reflected = radiant_dom_item_to_reflected_int(v, 20);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%ld", reflected);
+    dom_element_set_attribute(elem, "size", buf);
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_size2_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "size", 0));
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_size2_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    long reflected = radiant_dom_item_to_reflected_int(v, 0);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%ld", reflected);
+    dom_element_set_attribute(elem, "size", buf);
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_width_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "width", 0));
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_width_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    long reflected = radiant_dom_item_to_reflected_int(v, 0);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%ld", reflected);
+    dom_element_set_attribute(elem, "width", buf);
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_height_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "height", 0));
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_height_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    long reflected = radiant_dom_item_to_reflected_int(v, 0);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%ld", reflected);
+    dom_element_set_attribute(elem, "height", buf);
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_rows_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "rows", 2));
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_rows_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    long reflected = radiant_dom_item_to_reflected_int(v, 2);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%ld", reflected);
+    dom_element_set_attribute(elem, "rows", buf);
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_cols_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "cols", 20));
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_cols_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    long reflected = radiant_dom_item_to_reflected_int(v, 20);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%ld", reflected);
+    dom_element_set_attribute(elem, "cols", buf);
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_src_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "src");
+    *out = radiant_dom_string_item(value ? value : "");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_src_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "src", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_href_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "href");
+    *out = radiant_dom_string_item(value ? value : "");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_href_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "href", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_alt_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "alt");
+    *out = radiant_dom_string_item(value ? value : "");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_alt_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "alt", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_name_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "name");
+    *out = radiant_dom_string_item(value ? value : "");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_name_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "name", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_placeholder_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "placeholder");
+    *out = radiant_dom_string_item(value ? value : "");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_placeholder_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "placeholder", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_autocomplete_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "autocomplete");
+    *out = radiant_dom_string_item(value ? value : "");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_autocomplete_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "autocomplete", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_pattern_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "pattern");
+    *out = radiant_dom_string_item(value ? value : "");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_pattern_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "pattern", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_min_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "min");
+    *out = radiant_dom_string_item(value ? value : "");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_min_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "min", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_max_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "max");
+    *out = radiant_dom_string_item(value ? value : "");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_max_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "max", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_step_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "step");
+    *out = radiant_dom_string_item(value ? value : "");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_step_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "step", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_accept_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "accept");
+    *out = radiant_dom_string_item(value ? value : "");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_accept_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "accept", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_html_for_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "for");
+    *out = radiant_dom_string_item(value ? value : "");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_html_for_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "for", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_target_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "target");
+    *out = radiant_dom_string_item(value ? value : "");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_target_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "target", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_accept_charset_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "accept-charset");
+    *out = radiant_dom_string_item(value ? value : "");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_accept_charset_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "accept-charset", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_form_target_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "formtarget");
+    *out = radiant_dom_string_item(value ? value : "");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_form_target_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "formtarget", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_wrap_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* value = dom_element_get_attribute(elem, "wrap");
+    *out = radiant_dom_string_item(value ? value : "soft");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_wrap_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "wrap", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_input_mode_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    static const char* const keywords[] = { "none", "text", "decimal", "numeric", "tel", "search", "email", "url", nullptr };
+    *out = radiant_dom_string_item(radiant_dom_canonical_token_attr(elem, "inputmode", keywords));
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_input_mode_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "inputmode", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_enter_key_hint_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    static const char* const keywords[] = { "enter", "done", "go", "next", "previous", "search", "send", nullptr };
+    *out = radiant_dom_string_item(radiant_dom_canonical_token_attr(elem, "enterkeyhint", keywords));
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_enter_key_hint_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = js_dom_to_attribute_cstr(v);
+    dom_element_set_attribute(elem, "enterkeyhint", text ? text : "");
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_content_editable_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    if (!dom_element_has_attribute(elem, "contenteditable")) {
+        *out = radiant_dom_string_item("inherit");
+        return 1;
+    }
+    const char* normalized = radiant_dom_normalize_contenteditable(
+        dom_element_get_attribute(elem, "contenteditable"));
+    *out = radiant_dom_string_item(normalized ? normalized : "inherit");
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_content_editable_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = nullptr;
+    if (get_type_id(v) == LMD_TYPE_BOOL) {
+        text = it2b(v) ? "true" : "false";
+    } else {
+        text = fn_to_cstr(v);
+    }
+    if (!text) text = "";
+    if (*text == '\0') {
+        dom_element_remove_attribute(elem, "contenteditable");
+    } else {
+        const char* normalized = radiant_dom_normalize_contenteditable(text);
+        if (!normalized) {
+            js_dom_throw_contenteditable_syntax_error();
+            *out = v;
+            return 1;
+        }
+        if (strcmp(normalized, "inherit") == 0) {
+            dom_element_remove_attribute(elem, "contenteditable");
+        } else {
+            dom_element_set_attribute(elem, "contenteditable", normalized);
+        }
+    }
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4b_is_content_editable_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = (Item){.item = b2it(radiant_dom_is_content_editable(elem) ? 1 : 0)};
+    return 1;
+}
+
+
+// ---- DOM3 Phase 4c: live form-control members ----
+RADIANT_C_API int radiant_dom_guard_tc(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && tc_is_text_control(elem);
+}
+
+RADIANT_C_API int radiant_dom_guard_input_nontc(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && radiant_dom_is_tag(elem, "input") && !tc_is_text_control(elem);
+}
+RADIANT_C_API int radiant_dom_m4c_get_checked(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("checked"))});
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_checked_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    js_dom_set_checked_dirty((void*)elem, js_is_truthy(v));
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_get_value(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("value"))});
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_value_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = fn_to_cstr(v);
+    js_dom_select_set_value_bridge((void*)elem, text ? text : "");
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_value2_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    (void)elem;
+    *out = js_dom_text_control_set_value_bridge((void*)elem, v);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_value3_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = fn_to_cstr(v);
+    dom_element_set_attribute(elem, "value", text ? text : "");
+    if (elem->form) {
+        elem->form->value = dom_element_get_attribute(elem, "value");
+    }
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_value4_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = fn_to_cstr(v);
+    dom_element_set_attribute(elem, "value", text ? text : "");
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_get_selectedIndex(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("selectedIndex"))});
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_selected_index_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    js_dom_select_set_selected_index_bridge((void*)elem, v);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_get_length(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("length"))});
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_length_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    js_dom_select_set_length_bridge((void*)elem, v);
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_get_selected(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("selected"))});
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_selected_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    js_dom_set_option_selected_dirty((void*)elem, js_is_truthy(v));
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_get_text(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("text"))});
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_text_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = fn_to_cstr(v);
+    js_dom_set_option_text_bridge((void*)elem, text ? text : "");
+    *out = v;
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_get_selectionStart(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("selectionStart"))});
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_selection_start_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    (void)elem;
+    *out = js_dom_text_control_set_selection_start_bridge((void*)elem, v);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_get_selectionEnd(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("selectionEnd"))});
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_selection_end_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    (void)elem;
+    *out = js_dom_text_control_set_selection_end_bridge((void*)elem, v);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_get_selectionDirection(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("selectionDirection"))});
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_selection_direction_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    (void)elem;
+    *out = js_dom_text_control_set_selection_direction_bridge((void*)elem, v);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_get_defaultValue(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("defaultValue"))});
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_default_value_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    (void)elem;
+    *out = js_dom_text_control_set_default_value_bridge((void*)elem, v);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_get_options(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("options"))});
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_get_selectedOptions(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("selectedOptions"))});
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_get_type(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("type"))});
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_get_index(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("index"))});
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_get_label(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("label"))});
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4c_get_form(Item r, Item* out) {
+    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("form"))});
+    return 1;
+}
+
+
+// ---- DOM3 Phase 4d: method members (dispatch conversion) ----
+// Call handlers delegate into radiant_dom_element_method so every arm keeps
+// its exact behavior; body extraction is the 4e engine sweep. Method-name
+// property reads now return real cached function objects (D0d).
+RADIANT_C_API int radiant_dom_guard_node(Item receiver) {
+    return radiant_dom_unwrap_node(receiver) != nullptr;
+}
+
+RADIANT_C_API int radiant_dom_guard_text(Item receiver) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    return node && node->is_text();
+}
+RADIANT_C_API int radiant_dom_m4d_named_item(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("namedItem"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_add(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("add"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_remove(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("remove"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_contains(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("contains"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_compare_document_position(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("compareDocumentPosition"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_remove2(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("remove"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_replace_with(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("replaceWith"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_has_child_nodes(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("hasChildNodes"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_clone_node(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("cloneNode"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_replace_data(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("replaceData"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_insert_data(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("insertData"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_append_data(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("appendData"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_delete_data(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("deleteData"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_substring_data(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("substringData"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_get_attribute(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("getAttribute"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_set_attribute(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("setAttribute"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_remove_attribute(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("removeAttribute"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_toggle_attribute(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("toggleAttribute"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_has_attribute(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("hasAttribute"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_get_attribute_names(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("getAttributeNames"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_matches(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("matches"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_query_selector(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("querySelector"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_query_selector_all(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("querySelectorAll"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_closest(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("closest"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_get_elements_by_tag_name(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("getElementsByTagName"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_get_elements_by_class_name(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("getElementsByClassName"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_get_element_by_id(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("getElementById"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_add_event_listener(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("addEventListener"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_remove_event_listener(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("removeEventListener"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_dispatch_event(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("dispatchEvent"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_append_child(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("appendChild"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_remove_child(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("removeChild"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_insert_before(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("insertBefore"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_replace_child(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("replaceChild"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_normalize(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("normalize"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_append(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("append"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_prepend(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("prepend"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_insert_adjacent_element(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("insertAdjacentElement"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_insert_adjacent_html(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("insertAdjacentHTML"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_get_bounding_client_rect(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("getBoundingClientRect"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_get_client_rects(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("getClientRects"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_scroll_into_view(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("scrollIntoView"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_scroll(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("scroll"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_scroll_to(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("scrollTo"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_scroll_by(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("scrollBy"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_focus(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("focus"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_blur(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("blur"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_click(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("click"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_reset(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("reset"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_submit(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("submit"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_request_submit(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("requestSubmit"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_check_validity(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("checkValidity"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_report_validity(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("reportValidity"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_set_custom_validity(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("setCustomValidity"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_set_selection_range(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("setSelectionRange"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_set_range_text(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("setRangeText"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_select(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("select"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_item(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("item"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_toggle(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("toggle"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_replace(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("replace"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_attach_shadow(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("attachShadow"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_to_string(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("toString"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d___lambda_boundary_from_point(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("__lambdaBoundaryFromPoint"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d___lambda_text_control_boundary_from_point(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("__lambdaTextControlBoundaryFromPoint"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d___lambda_text_control_caret_bounds(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("__lambdaTextControlCaretBounds"))}, args, argc);
+    return 1;
+}
+
 static bool radiant_dom_get_element_property(DomElement* elem, const char* prop, Item* out) {
     if (!elem || !prop || !out) return false;
     if (strcmp(prop, "content") == 0 &&
@@ -1492,52 +2486,6 @@ static bool radiant_dom_get_element_property(DomElement* elem, const char* prop,
         // current template support exposes parsed children through the template
         // wrapper itself; keep that compatibility shim at the module boundary.
         *out = radiant_dom_node_item((DomNode*)elem);
-        return true;
-    }
-    const char* bool_attr = nullptr;
-    if (radiant_dom_bool_reflected(elem, prop, &bool_attr)) {
-        *out = (Item){.item = b2it(dom_element_has_attribute(elem, bool_attr) ? 1 : 0)};
-        return true;
-    }
-    const char* int_attr = nullptr;
-    int int_default = 0;
-    if (radiant_dom_int_reflected(elem, prop, &int_attr, &int_default)) {
-        *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, int_attr, int_default));
-        return true;
-    }
-    const char* string_attr = nullptr;
-    if (radiant_dom_string_reflected(elem, prop, &string_attr)) {
-        const char* value = dom_element_get_attribute(elem, string_attr);
-        *out = radiant_dom_string_item(value ? value :
-            (radiant_dom_is_tag(elem, "textarea") && strcmp(prop, "wrap") == 0 ? "soft" : ""));
-        return true;
-    }
-    if (strcmp(prop, "inputMode") == 0) {
-        static const char* const keywords[] = {
-            "none", "text", "decimal", "numeric", "tel", "search", "email", "url", nullptr
-        };
-        *out = radiant_dom_string_item(radiant_dom_canonical_token_attr(elem, "inputmode", keywords));
-        return true;
-    }
-    if (strcmp(prop, "enterKeyHint") == 0) {
-        static const char* const keywords[] = {
-            "enter", "done", "go", "next", "previous", "search", "send", nullptr
-        };
-        *out = radiant_dom_string_item(radiant_dom_canonical_token_attr(elem, "enterkeyhint", keywords));
-        return true;
-    }
-    if (strcmp(prop, "contentEditable") == 0) {
-        if (!dom_element_has_attribute(elem, "contenteditable")) {
-            *out = radiant_dom_string_item("inherit");
-            return true;
-        }
-        const char* normalized = radiant_dom_normalize_contenteditable(
-            dom_element_get_attribute(elem, "contenteditable"));
-        *out = radiant_dom_string_item(normalized ? normalized : "inherit");
-        return true;
-    }
-    if (strcmp(prop, "isContentEditable") == 0) {
-        *out = (Item){.item = b2it(radiant_dom_is_content_editable(elem) ? 1 : 0)};
         return true;
     }
     if (radiant_dom_is_tag(elem, "form") && strcmp(prop, "elements") == 0) {
@@ -1563,11 +2511,6 @@ static bool radiant_dom_get_basic_property(Item elem_item, Item prop_name, Item*
     if (!out) return false;
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
     if (!node) return false;
-    if (node->is_element() &&
-        radiant_dom_get_select_option_property(elem_item, node->as_element(), prop_name, out)) {
-        return true;
-    }
-
     const char* prop = fn_to_cstr(prop_name);
     if (!prop) return false;
 
@@ -1618,35 +2561,6 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
         *out = value;
         return true;
     }
-    if (strcmp(prop, "contentEditable") == 0) {
-        const char* text = nullptr;
-        if (get_type_id(value) == LMD_TYPE_BOOL) {
-            text = it2b(value) ? "true" : "false";
-        } else {
-            text = fn_to_cstr(value);
-        }
-        if (!text) text = "";
-        if (*text == '\0') {
-            dom_element_remove_attribute(elem, "contenteditable");
-            js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-            *out = value;
-            return true;
-        }
-        const char* normalized = radiant_dom_normalize_contenteditable(text);
-        if (!normalized) {
-            js_dom_throw_contenteditable_syntax_error();
-            *out = value;
-            return true;
-        }
-        if (strcmp(normalized, "inherit") == 0) {
-            dom_element_remove_attribute(elem, "contenteditable");
-        } else {
-            dom_element_set_attribute(elem, "contenteditable", normalized);
-        }
-        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        *out = value;
-        return true;
-    }
     if (strcmp(prop, "srcdoc") == 0 && radiant_dom_is_tag(elem, "iframe")) {
         const char* text = fn_to_cstr(value);
         dom_element_set_attribute(elem, "srcdoc", text ? text : "");
@@ -1676,154 +2590,6 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
     }
     if (strcmp(prop, "writingSuggestions") == 0) {
         dom_element_set_attribute(elem, "writingsuggestions", radiant_dom_item_to_html_bool_string(value));
-        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        *out = value;
-        return true;
-    }
-    const char* disabled_attr = nullptr;
-    if (radiant_dom_disabled_setter(elem, prop, &disabled_attr)) {
-        if (js_is_truthy(value)) {
-            dom_element_set_attribute(elem, disabled_attr, "");
-            js_dom_after_disabled_attribute_set((void*)elem);
-        } else {
-            dom_element_remove_attribute(elem, disabled_attr);
-        }
-        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        *out = value;
-        return true;
-    }
-    const char* live_bool_attr = nullptr;
-    if (radiant_dom_live_bool_setter(elem, prop, &live_bool_attr)) {
-        bool truthy = js_is_truthy(value);
-        if (truthy) {
-            dom_element_set_attribute(elem, live_bool_attr, "");
-        } else {
-            dom_element_remove_attribute(elem, live_bool_attr);
-        }
-        // These reflected booleans carry live checked/selected invariants that
-        // remain centralized in js_dom.cpp while dispatch moves into the module.
-        if (strcmp(prop, "defaultChecked") == 0) {
-            js_dom_after_default_checked_set((void*)elem, truthy);
-        } else if (strcmp(prop, "defaultSelected") == 0) {
-            js_dom_after_default_selected_set((void*)elem, truthy);
-        } else if (!truthy) {
-            js_dom_after_select_multiple_removed((void*)elem);
-        }
-        if (strcmp(prop, "multiple") == 0) {
-            js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        }
-        *out = value;
-        return true;
-    }
-    if (strcmp(prop, "checked") == 0 && radiant_dom_is_tag(elem, "input")) {
-        js_dom_set_checked_dirty((void*)elem, js_is_truthy(value));
-        *out = value;
-        return true;
-    }
-    if (radiant_dom_is_tag(elem, "select")) {
-        if (strcmp(prop, "value") == 0) {
-            const char* text = fn_to_cstr(value);
-            js_dom_select_set_value_bridge((void*)elem, text ? text : "");
-            *out = value;
-            return true;
-        }
-        if (strcmp(prop, "selectedIndex") == 0) {
-            js_dom_select_set_selected_index_bridge((void*)elem, value);
-            *out = value;
-            return true;
-        }
-        if (strcmp(prop, "length") == 0) {
-            js_dom_select_set_length_bridge((void*)elem, value);
-            *out = value;
-            return true;
-        }
-    }
-    if (strcmp(prop, "selected") == 0 && radiant_dom_is_tag(elem, "option")) {
-        js_dom_set_option_selected_dirty((void*)elem, js_is_truthy(value));
-        *out = value;
-        return true;
-    }
-    if (strcmp(prop, "value") == 0 && radiant_dom_is_tag(elem, "option")) {
-        const char* text = fn_to_cstr(value);
-        dom_element_set_attribute(elem, "value", text ? text : "");
-        *out = value;
-        return true;
-    }
-    if (strcmp(prop, "text") == 0 && radiant_dom_is_tag(elem, "option")) {
-        const char* text = fn_to_cstr(value);
-        js_dom_set_option_text_bridge((void*)elem, text ? text : "");
-        *out = value;
-        return true;
-    }
-    if (tc_is_text_control(elem)) {
-        if (strcmp(prop, "value") == 0) {
-            *out = js_dom_text_control_set_value_bridge((void*)elem, value);
-            return true;
-        }
-        if (strcmp(prop, "selectionStart") == 0) {
-            *out = js_dom_text_control_set_selection_start_bridge((void*)elem, value);
-            return true;
-        }
-        if (strcmp(prop, "selectionEnd") == 0) {
-            *out = js_dom_text_control_set_selection_end_bridge((void*)elem, value);
-            return true;
-        }
-        if (strcmp(prop, "selectionDirection") == 0) {
-            *out = js_dom_text_control_set_selection_direction_bridge((void*)elem, value);
-            return true;
-        }
-        if (strcmp(prop, "defaultValue") == 0) {
-            *out = js_dom_text_control_set_default_value_bridge((void*)elem, value);
-            return true;
-        }
-    }
-    if (strcmp(prop, "value") == 0 && radiant_dom_is_tag(elem, "input") &&
-        !tc_is_text_control(elem)) {
-        const char* text = fn_to_cstr(value);
-        dom_element_set_attribute(elem, "value", text ? text : "");
-        if (elem->form) {
-            elem->form->value = dom_element_get_attribute(elem, "value");
-        }
-        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        *out = value;
-        return true;
-    }
-    const char* bool_attr = nullptr;
-    if (radiant_dom_simple_bool_setter(elem, prop, &bool_attr)) {
-        // only side-effect-free boolean reflections move here; live-state
-        // booleans stay on the JS fallback until their invariants move too.
-        if (js_is_truthy(value)) {
-            dom_element_set_attribute(elem, bool_attr, "");
-        } else {
-            dom_element_remove_attribute(elem, bool_attr);
-        }
-        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        *out = value;
-        return true;
-    }
-    const char* int_attr = nullptr;
-    int int_default = 0;
-    if (radiant_dom_int_reflected(elem, prop, &int_attr, &int_default)) {
-        long reflected = radiant_dom_item_to_reflected_int(value, int_default);
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%ld", reflected);
-        dom_element_set_attribute(elem, int_attr, buf);
-        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        *out = value;
-        return true;
-    }
-    const char* string_attr = nullptr;
-    if (radiant_dom_string_reflected(elem, prop, &string_attr)) {
-        const char* text = js_dom_to_attribute_cstr(value);
-        dom_element_set_attribute(elem, string_attr, text ? text : "");
-        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        *out = value;
-        return true;
-    }
-    const char* hint_attr = nullptr;
-    if (radiant_dom_hint_reflected(prop, &hint_attr)) {
-        const char* text = js_dom_to_attribute_cstr(value);
-        dom_element_set_attribute(elem, hint_attr, text ? text : "");
         js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
         *out = value;
         return true;
