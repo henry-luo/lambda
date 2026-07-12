@@ -1253,11 +1253,10 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     }
     log_debug("script directory: %s", new_script->directory);
     new_script->source = script_source;
-    capture_script_file_stat(new_script, lookup_path, source == NULL);
+    capture_script_file_stat(new_script, lookup_path, source == NULL || is_import);
     if (canonical_path) mem_free(canonical_path);
     log_debug("script source length: %d", (int)strlen(new_script->source));
     new_script->is_main = !is_import;  // main script is not an import
-    // cached retention stays off until Phase 2 zeroes BSS roots before cone init
     new_script->cache_retain = false;
 
     // Initialize decimal context (use shared unlimited context for transpiler)
@@ -1289,6 +1288,10 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     if (!new_script->jit_context) {
         log_error("Error: Failed to compile script %s", script_path);
         return NULL;
+    }
+    new_script->cache_retain = is_import && runtime->use_mir_direct && !new_script->cache_cross_lang_tainted;
+    if (new_script->cache_retain) {
+        log_info("mir cache index: retaining import path=%s index=%d", new_script->reference, new_script->index);
     }
     runtime->mir_cache_compiles++;
 
@@ -1392,7 +1395,7 @@ void runner_setup_context(Runner* runner) {
 extern "C" Item path_resolve_for_iteration(Path* path);
 
 // Forward declare BSS root registration from mir.c
-extern "C" void register_bss_gc_roots(void* mir_ctx);
+extern "C" void reset_and_register_bss_gc_roots(void* mir_ctx);
 
 void resolve_sys_paths_recursive(Item item) {
     TypeId type_id = get_type_id(item);
@@ -1434,7 +1437,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
 
     // Register BSS global variables as GC roots (module-level let bindings)
     if (runner->script->jit_context) {
-        register_bss_gc_roots((void*)runner->script->jit_context);
+        reset_and_register_bss_gc_roots((void*)runner->script->jit_context);
     }
 
     // set the run_main flag in the execution context

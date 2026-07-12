@@ -668,6 +668,7 @@ struct Script : Input {
     bool is_loading;            // true while script is being loaded (for circular import detection)
     bool cache_retain;          // true when an imported module may survive per-script teardown
     bool cache_retired;         // true when a retained cache slot has been invalidated
+    bool cache_cross_lang_tainted;  // true when the import subtree contains a cross-language module
     const char* source;
     time_t src_mtime;           // file timestamp captured when loaded
     off_t src_size;             // file size captured when loaded

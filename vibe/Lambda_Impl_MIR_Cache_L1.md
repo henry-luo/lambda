@@ -1,11 +1,11 @@
 # Level 1 MIR Cache — Implementation Plan (In-Process Persistent Module Cache)
 
-**Status:** Phase 1 foundation implemented; module retention still disabled pending Phase 2
+**Status:** Phase 2 implemented; retained Lambda MIR imports enabled pending Phase 3 invalidation
 **Date:** 2026-07-12
 **Design:** realizes **MC1** of `vibe/Lambda_Design_MIR_Cache.md` §3. Read that first for the why; this doc is the how.
 **Scope:** Lambda modules under MIR Direct, in `test-batch` (and any long-lived Runtime). Main scripts are never cached. JS / C2MIR / cross-language modules excluded from v1 (§8).
 
-**Implementation checkpoint (2026-07-12):** Phase 1 registry mechanics are landed: `Script` cache metadata, `Runtime::script_index`, path-index lookup in `load_script`/`precompile_imports`, null-safe batch teardown with stable slots, synthetic module registration through the same registry helper, and cache hit/miss summary logging. `cache_retain` is deliberately hard-disabled until Phase 2 replaces whole-registry module init with cone init and zero-then-root BSS handling.
+**Implementation checkpoint (2026-07-12):** Phase 1 registry mechanics are landed: `Script` cache metadata, `Runtime::script_index`, path-index lookup in `load_script`/`precompile_imports`, null-safe batch teardown with stable slots, synthetic module registration through the same registry helper, and cache hit/miss summary logging. Phase 2 adds direct-import cone initialization, zero-then-root BSS handling, cross-language taint gating, and enables retained Lambda MIR imports.
 
 ---
 
@@ -110,6 +110,9 @@ Registry slots are **never compacted**: retiring a script NULLs its `runtime->sc
 6. **Exit gate:** `make test-lambda-baseline` 100% — at this point results must be *identical* because Phase 2 hasn't landed, so run Phase 1 with a temporary hard `cache_retain = false` default, flipping it on only in Phase 2. (Keeps the mechanical refactor separately bisectable.)
 
 ### Phase 2 — Correct execution with cached modules (the heart)
+
+**Checkpoint 2026-07-12:** direct-import cone execution, `reset_and_register_bss_gc_roots`, D6 taint gating, and retained Lambda MIR imports are implemented. Phase 3 invalidation is still pending, so changed imported files in a long-lived batch are not yet reloaded.
+
 1. **`direct_imports` population** in `compile_script_as_mir_direct` (`transpile-mir.cpp:13981-13992`), plus the cross-lang taint bit for D6.
 2. **Rewrite module init in `run_script_mir`** (`:14258-14297`). Replace the AST-walk `has_imports` check + two whole-registry loops with:
    ```c
@@ -192,6 +195,7 @@ Registry slots are **never compacted**: retiring a script NULLs its `runtime->sc
 ## 9. Measurements (fill during implementation)
 - Baseline batch wall-time (Phase 0): _TBD_
 - Phase 1 regression gate (retention disabled): `make test-lambda-baseline` passed 3299/3299 on 2026-07-12 (Input 2105/2105, Lambda Runtime 1194/1194).
+- Phase 2 regression gate (retained imports enabled): `make test-lambda-baseline` passed 3299/3299 on 2026-07-12 (Input 2105/2105, Lambda Runtime 1194/1194). Manual 3-entry `test-batch` of `test/lambda/import_vars.ls` retained `mod_vars.ls` once and logged two cache hits with byte-identical script output.
 - Post-Phase-2 wall-time: _TBD_
 - Hit rate over `test-lambda-baseline` corpus: _TBD_
 - Retained modules / RSS delta at batch end: _TBD_

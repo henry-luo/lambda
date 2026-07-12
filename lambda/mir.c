@@ -367,7 +367,7 @@ void jit_cleanup(MIR_context_t ctx) {
 
 extern void heap_register_gc_root(uint64_t* slot);
 
-void register_bss_gc_roots(void* mir_ctx) {
+static void walk_bss_gc_roots(void* mir_ctx, bool reset_slots) {
     if (!mir_ctx) return;
     MIR_context_t ctx = (MIR_context_t)mir_ctx;
 #ifndef NDEBUG
@@ -382,6 +382,9 @@ void register_bss_gc_roots(void* mir_ctx) {
              item = DLIST_NEXT(MIR_item_t, item)) {
             if (item->item_type == MIR_bss_item && item->u.bss->name && item->addr &&
                 strncmp(item->u.bss->name, "_gvar_", 6) == 0) {
+                if (reset_slots) {
+                    memset(item->addr, 0, item->u.bss->len);
+                }
                 heap_register_gc_root((uint64_t*)item->addr);
 #ifndef NDEBUG
                 count++;
@@ -389,7 +392,17 @@ void register_bss_gc_roots(void* mir_ctx) {
             }
         }
     }
-    log_debug("register_bss_gc_roots: registered %d BSS global roots", count);
+    log_debug("%s: registered %d BSS global roots",
+              reset_slots ? "reset_and_register_bss_gc_roots" : "register_bss_gc_roots",
+              count);
+}
+
+void register_bss_gc_roots(void* mir_ctx) {
+    walk_bss_gc_roots(mir_ctx, false);
+}
+
+void reset_and_register_bss_gc_roots(void* mir_ctx) {
+    walk_bss_gc_roots(mir_ctx, true);
 }
 
 // ============================================================================
