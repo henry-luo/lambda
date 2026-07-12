@@ -59,12 +59,11 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             float img_h = (float)img->height;
             float ix = x + width - font_size - img_w / 2.0f;
             float iy = y + marker->height / 2.0f - img_h / 2.0f;
-            // display-list image replay expects decoded dimensions and byte
-            // stride; marker images share the same paint path as content images.
+            // display-list image replay expects decoded dimensions and uint32_t row stride.
             int src_w = img->decoded_width > 0 ? img->decoded_width : img->width;
             int src_h = img->decoded_height > 0 ? img->decoded_height : img->height;
             rc_draw_image(rdcon, (uint32_t*)img->pixels, src_w, src_h,
-                          img->pitch, ix, iy, img_w, img_h, 255, nullptr, img);
+                          img->pitch / 4, ix, iy, img_w, img_h, 255, nullptr, img);
             log_debug("[MARKER RENDER] Drew list-style-image at (%.1f, %.1f) size %.0fx%.0f",
                       ix, iy, img_w, img_h);
             return;

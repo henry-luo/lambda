@@ -100,9 +100,8 @@ static bool paint_ir_image_resource_pixels(ImageSurface* image,
 
     int width = image->decoded_width > 0 ? image->decoded_width : image->width;
     int height = image->decoded_height > 0 ? image->decoded_height : image->height;
-    // display-list image replay expects byte stride; passing pixel stride makes
-    // ThorVG copy past scaled image buffers when resources are decoded smaller.
-    int stride = image->pitch > 0 ? image->pitch : width * 4;
+    // display-list image commands store uint32_t row stride; ImageSurface::pitch is bytes.
+    int stride = image->pitch > 0 ? image->pitch / 4 : width;
     if (!image->pixels || width <= 0 || height <= 0 || stride <= 0) {
         return false;
     }

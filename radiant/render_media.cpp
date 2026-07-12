@@ -220,11 +220,11 @@ static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", img_rect.x, img_rect.y, img_rect.width, img_rect.height);
         if (rdcon->has_transform) {
             // scaled image decodes may replace pixels with a smaller buffer;
-            // display-list image commands must use decoded dimensions.
+            // display-list image commands store decoded dimensions and uint32_t row stride.
             int src_w = img->decoded_width > 0 ? img->decoded_width : img->width;
             int src_h = img->decoded_height > 0 ? img->decoded_height : img->height;
             render_painter_draw_pixels_rect(rdcon, (uint32_t*)img->pixels,
-                                            src_w, src_h, img->pitch,
+                                            src_w, src_h, img->pitch / 4,
                                             &img_rect, &image_clip,
                                             content_opacity, img);
         } else {

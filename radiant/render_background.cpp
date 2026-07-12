@@ -591,8 +591,8 @@ static void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGr
         pushed_clip = true;
     }
 
-    // Draw through rc_draw_image (DL-aware: copies pixels into DL in DL mode)
-    rc_draw_image(rdcon, pixels, w, h, w * 4,
+    // rc_draw_image records uint32_t row stride; the generated buffer is tightly packed.
+    rc_draw_image(rdcon, pixels, w, h, w,
                   rect.x, rect.y, rect.width, rect.height, 255, NULL);
 
     if (pushed_clip) {
@@ -1320,7 +1320,8 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                     exclude_type, exclude_params,
                     &sh_x, &sh_y, &sh_w, &sh_h);
                 if (shadow_pixels && sh_w > 0 && sh_h > 0) {
-                    rc_draw_image(rdcon, shadow_pixels, sh_w, sh_h, sh_w * 4,
+                    // rc_draw_image records uint32_t row stride; shadow pixels are tightly packed.
+                    rc_draw_image(rdcon, shadow_pixels, sh_w, sh_h, sh_w,
                                   (float)sh_x, (float)sh_y, (float)sh_w, (float)sh_h,
                                   255, xform);
                 }
