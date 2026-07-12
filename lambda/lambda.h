@@ -980,6 +980,19 @@ static inline bool is_text_type_id(TypeId type_id) {
     return type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL;
 }
 
+static inline bool is_array_family_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_NUM;
+}
+
+static inline bool is_map_family_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP ||
+           type_id == LMD_TYPE_ELEMENT || type_id == LMD_TYPE_OBJECT;
+}
+
+static inline bool is_container_type_id(TypeId type_id) {
+    return type_id >= LMD_TYPE_CONTAINER && type_id < LMD_TYPE_ANY;
+}
+
 static inline bool is_native_param_type_id(TypeId type_id) {
     return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_FLOAT ||
            type_id == LMD_TYPE_BOOL || type_id == LMD_TYPE_STRING ||

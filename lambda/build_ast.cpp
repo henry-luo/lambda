@@ -523,10 +523,7 @@ static bool typed_array_element_compatible(Type* arg_elem, Type* expected_elem) 
         return is_integer_type_id(arg_tid) ||
                arg_tid == LMD_TYPE_BOOL || type_is_sized_integer(arg_elem);
     case LMD_TYPE_FLOAT:
-        return arg_tid == LMD_TYPE_FLOAT || arg_tid == LMD_TYPE_INT ||
-               arg_tid == LMD_TYPE_INT64 || arg_tid == LMD_TYPE_DECIMAL ||
-               arg_tid == LMD_TYPE_BOOL || arg_tid == LMD_TYPE_NUM_SIZED ||
-               arg_tid == LMD_TYPE_UINT64;
+        return is_numeric_type_id(arg_tid) || arg_tid == LMD_TYPE_BOOL;
     case LMD_TYPE_INT64:
         return is_integer_type_id(arg_tid) ||
                arg_tid == LMD_TYPE_BOOL || type_is_sized_integer(arg_elem);
@@ -637,6 +634,22 @@ static bool is_global_simple_type(const Type* type) {
            type == &TYPE_UINT64;
 }
 
+static inline bool is_param_full_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT ||
+           type_id == LMD_TYPE_ELEMENT;
+}
+
+static inline bool is_static_spread_scalar_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_NULL || type_id == LMD_TYPE_BOOL ||
+           is_numeric_type_id(type_id) || type_id == LMD_TYPE_DTIME ||
+           is_text_type_id(type_id);
+}
+
+static inline bool is_assignment_numeric_type_id(TypeId type_id) {
+    return is_integer_type_id(type_id) ||
+           type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_DECIMAL;
+}
+
 static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* param_full_type) {
     if (!arg_type || !param_type) return true;  // unknown types are compatible
     if (param_type->type_id == LMD_TYPE_ANY) return true;  // any accepts all
@@ -650,8 +663,7 @@ static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* p
 
     bool can_read_extended_kind = actual_param && !is_global_simple_type(actual_param);
 
-    if (can_read_extended_kind &&
-        (actual_param->type_id == LMD_TYPE_ARRAY || actual_param->type_id == LMD_TYPE_ARRAY_NUM) &&
+    if (can_read_extended_kind && is_array_family_type_id(actual_param->type_id) &&
         typed_array_annotation_compatible(arg_type, actual_param)) {
         return true;
     }
@@ -672,17 +684,14 @@ static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* p
 
     // Numeric coercion: int → int64, int → float, int64 → float
     if (param_type->type_id == LMD_TYPE_FLOAT) {
-        if (arg_type->type_id == LMD_TYPE_INT ||
-            arg_type->type_id == LMD_TYPE_INT64 ||
+        if (is_integer_type_id(arg_type->type_id) ||
             arg_type->type_id == LMD_TYPE_FLOAT64 ||
             arg_type->type_id == LMD_TYPE_NUM_SIZED ||
             arg_type->type_id == LMD_TYPE_UINT64) return true;
     }
     if (param_type->type_id == LMD_TYPE_FLOAT64) {
-        if (arg_type->type_id == LMD_TYPE_INT ||
-            arg_type->type_id == LMD_TYPE_INT64 ||
-            arg_type->type_id == LMD_TYPE_FLOAT ||
-            arg_type->type_id == LMD_TYPE_FLOAT64 ||
+        if (is_integer_type_id(arg_type->type_id) ||
+            is_float_type_id(arg_type->type_id) ||
             arg_type->type_id == LMD_TYPE_NUM_SIZED ||
             arg_type->type_id == LMD_TYPE_UINT64) return true;
     }
@@ -696,17 +705,14 @@ static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* p
         if (IS_NUMERIC_ID(arg_type->type_id)) return true;
     }
     if (param_type == &TYPE_INTEGER) {
-        if (arg_type->type_id == LMD_TYPE_INT ||
-            arg_type->type_id == LMD_TYPE_INT64 ||
+        if (is_integer_type_id(arg_type->type_id) ||
             arg_type->type_id == LMD_TYPE_UINT64 ||
             arg_type->type_id == LMD_TYPE_NUM_SIZED) return true;
     }
     // Sized numeric coercion: NUM_SIZED and UINT64 are compatible with each other
     // and with standard numeric types for parameter passing
     if (param_type->type_id == LMD_TYPE_NUM_SIZED || param_type->type_id == LMD_TYPE_UINT64) {
-        if (arg_type->type_id == LMD_TYPE_INT ||
-            arg_type->type_id == LMD_TYPE_INT64 ||
-            arg_type->type_id == LMD_TYPE_FLOAT ||
+        if (is_native_numeric_type_id(arg_type->type_id) ||
             arg_type->type_id == LMD_TYPE_NUM_SIZED ||
             arg_type->type_id == LMD_TYPE_UINT64) return true;
     }
@@ -2033,8 +2039,7 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
             && ast_node->field && ast_node->field->node_type == AST_NODE_IDENT) {
             AstIdentNode* field_id = (AstIdentNode*)ast_node->field;
             Type* resolved_type = NULL;
-            ShapeEntry* se = map_type->shape;
-            while (se) {
+            FOR_EACH_MAP_FIELD(map_type, se) {
                 if (se->name && (int)se->name->length == (int)field_id->name->len
                     && strncmp(se->name->str, field_id->name->chars, se->name->length) == 0) {
                     // found — unwrap TypeType for type-defined maps
@@ -2045,7 +2050,6 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                     resolved_type = ft;
                     break;
                 }
-                se = se->next;
             }
             if (resolved_type) {
                 TypeId rid = resolved_type->type_id;
@@ -2363,10 +2367,9 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         if (method_object && method_object->type) {
             TypeId tid = obj_type_id;
             // Check shape entries (fields) for map, vmap, element, and object types
-            if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_VMAP ||
-                tid == LMD_TYPE_ELEMENT || tid == LMD_TYPE_OBJECT) {
+            if (is_map_family_type_id(tid)) {
                 TypeMap* map_type = (TypeMap*)method_object->type;
-                for (ShapeEntry* se = map_type->shape; se; se = se->next) {
+                FOR_EACH_MAP_FIELD(map_type, se) {
                     if (se->name && se->name->length == method_name.length &&
                         strncmp(se->name->str, method_name.str, method_name.length) == 0) {
                         has_user_member = true;
@@ -2797,7 +2800,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
             if (entry->node->node_type == AST_NODE_PARAM && entry->node->type) {
                 TypeId ptid = entry->node->type->type_id;
                 if (entry->node->type->kind == TYPE_KIND_UNARY ||
-                    ptid == LMD_TYPE_MAP || ptid == LMD_TYPE_OBJECT || ptid == LMD_TYPE_ELEMENT) {
+                    is_param_full_type_id(ptid)) {
                     TypeParam* pt = (TypeParam*)entry->node->type;
                     if (pt->full_type) {
                         ast_node->type = pt->full_type;
@@ -4007,9 +4010,7 @@ AstNode* build_spread_expr(Transpiler* tp, TSNode sp_node) {
         Type* op_type = ast_node->operand->type;
         if (op_type && op_type->is_literal) {
             TypeId tid = op_type->type_id;
-            if (tid == LMD_TYPE_NULL || tid == LMD_TYPE_BOOL ||
-                IS_NUMERIC_ID(tid) || tid == LMD_TYPE_DTIME ||
-                tid == LMD_TYPE_SYMBOL || tid == LMD_TYPE_STRING) {
+            if (is_static_spread_scalar_type_id(tid)) {
                 record_semantic_error(tp, sp_node, ERR_SEMANTIC_ERROR,
                     "Spread operator '*' is redundant on scalar value");
             }
@@ -4027,10 +4028,6 @@ static inline bool is_relational_op(Operator op) {
 
 static inline bool is_elementwise_comparison_op(Operator op) {
     return op >= OPERATOR_ELEM_EQ && op <= OPERATOR_ELEM_GE;
-}
-
-static inline bool is_container_type_id(TypeId type_id) {
-    return type_id >= LMD_TYPE_CONTAINER && type_id < LMD_TYPE_ANY;
 }
 
 static bool is_direct_elementwise_comparison(AstNode* node) {
@@ -4060,9 +4057,7 @@ static void lint_condition_expr(Transpiler* tp, TSNode cond_node, AstNode* cond,
 }
 
 static bool is_magnitude_numeric_type(TypeId type_id) {
-    return is_integer_type_id(type_id) ||
-           type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_DECIMAL ||
-           type_id == LMD_TYPE_NUM_SIZED || type_id == LMD_TYPE_UINT64;
+    return is_numeric_type_id(type_id);
 }
 
 static bool known_magnitude_comparable(TypeId left_type, TypeId right_type) {
@@ -4443,8 +4438,8 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
             else                           type_id = LMD_TYPE_ANY;
         }
         else if (is_elementwise_comparison_op(ast_node->op)) {
-            bool l_arr = (left_type == LMD_TYPE_ARRAY_NUM || left_type == LMD_TYPE_ARRAY);
-            bool r_arr = (right_type == LMD_TYPE_ARRAY_NUM || right_type == LMD_TYPE_ARRAY);
+            bool l_arr = is_array_family_type_id(left_type);
+            bool r_arr = is_array_family_type_id(right_type);
             type_id = (l_arr || r_arr) ? LMD_TYPE_ARRAY_NUM : LMD_TYPE_ANY;
         }
 
@@ -5800,7 +5795,7 @@ static TypeObject* resolve_base_type(Transpiler* tp, TSNode base_node, TypeObjec
 // ============================================================================
 static void push_inherited_fields_to_scope(Transpiler* tp, TypeObject* base_type) {
     if (!base_type) return;
-    for (ShapeEntry* se = base_type->shape; se; se = se->next) {
+    FOR_EACH_MAP_FIELD(base_type, se) {
         if (!se->name) continue;
         // create a lightweight AstNamedNode to push field into scope
         AstNamedNode* field_ref = (AstNamedNode*)pool_calloc(tp->pool, sizeof(AstNamedNode));
@@ -7861,10 +7856,8 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
                     if (!compatible) compatible = types_compatible(ast_node->value->type, entry->node->type);
                     // also allow numeric narrowing (e.g., float -> int) for var assignment
                     if (!compatible) {
-                        bool var_numeric = (is_integer_type_id(var_tid) ||
-                                            var_tid == LMD_TYPE_FLOAT || var_tid == LMD_TYPE_DECIMAL);
-                        bool val_numeric = (is_integer_type_id(val_tid) ||
-                                            val_tid == LMD_TYPE_FLOAT || val_tid == LMD_TYPE_DECIMAL);
+                        bool var_numeric = is_assignment_numeric_type_id(var_tid);
+                        bool val_numeric = is_assignment_numeric_type_id(val_tid);
                         compatible = var_numeric && val_numeric;
                     }
                     if (!compatible) {
@@ -7955,9 +7948,7 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
                            type_type->type->kind == TYPE_KIND_UNARY) {
                     param_type->full_type = type_type->type;
                     log_debug("parameter has occurrence type, storing full_type pointer");
-                } else if (type_type->type->type_id == LMD_TYPE_MAP ||
-                           type_type->type->type_id == LMD_TYPE_OBJECT ||
-                           type_type->type->type_id == LMD_TYPE_ELEMENT) {
+                } else if (is_param_full_type_id(type_type->type->type_id)) {
                     // Phase 7: store full TypeMap/TypeObject/TypeElmt so direct
                     // struct access (Phase 2/3) works on typed function params
                     param_type->full_type = type_type->type;
