@@ -1,11 +1,11 @@
 # Level 1 MIR Cache — Implementation Plan (In-Process Persistent Module Cache)
 
-**Status:** Phase 2 implemented; retained Lambda MIR imports enabled pending Phase 3 invalidation
+**Status:** Phase 3 implemented; retained Lambda MIR imports include file-change invalidation
 **Date:** 2026-07-12
 **Design:** realizes **MC1** of `vibe/Lambda_Design_MIR_Cache.md` §3. Read that first for the why; this doc is the how.
 **Scope:** Lambda modules under MIR Direct, in `test-batch` (and any long-lived Runtime). Main scripts are never cached. JS / C2MIR / cross-language modules excluded from v1 (§8).
 
-**Implementation checkpoint (2026-07-12):** Phase 1 registry mechanics are landed: `Script` cache metadata, `Runtime::script_index`, path-index lookup in `load_script`/`precompile_imports`, null-safe batch teardown with stable slots, synthetic module registration through the same registry helper, and cache hit/miss summary logging. Phase 2 adds direct-import cone initialization, zero-then-root BSS handling, cross-language taint gating, and enables retained Lambda MIR imports.
+**Implementation checkpoint (2026-07-12):** Phase 1 registry mechanics are landed: `Script` cache metadata, `Runtime::script_index`, path-index lookup in `load_script`/`precompile_imports`, null-safe batch teardown with stable slots, synthetic module registration through the same registry helper, and cache hit/miss summary logging. Phase 2 adds direct-import cone initialization, zero-then-root BSS handling, cross-language taint gating, and enables retained Lambda MIR imports. Phase 3 adds mtime/size invalidation for changed file-backed modules and retained dependents.
 
 ---
 
@@ -111,7 +111,7 @@ Registry slots are **never compacted**: retiring a script NULLs its `runtime->sc
 
 ### Phase 2 — Correct execution with cached modules (the heart)
 
-**Checkpoint 2026-07-12:** direct-import cone execution, `reset_and_register_bss_gc_roots`, D6 taint gating, and retained Lambda MIR imports are implemented. Phase 3 invalidation is still pending, so changed imported files in a long-lived batch are not yet reloaded.
+**Checkpoint 2026-07-12:** direct-import cone execution, `reset_and_register_bss_gc_roots`, D6 taint gating, cross-language taint gating, and retained Lambda MIR imports are implemented. Phase 3 now handles changed imported files in a long-lived batch by retiring the stale module and retained dependents before recompilation.
 
 1. **`direct_imports` population** in `compile_script_as_mir_direct` (`transpile-mir.cpp:13981-13992`), plus the cross-lang taint bit for D6.
 2. **Rewrite module init in `run_script_mir`** (`:14258-14297`). Replace the AST-walk `has_imports` check + two whole-registry loops with:
@@ -137,6 +137,9 @@ Registry slots are **never compacted**: retiring a script NULLs its `runtime->sc
    - A manual 3-run batch of the same import-heavy test shows: run 1 compiles module cone, runs 2-3 log cache hits and produce byte-identical output.
 
 ### Phase 3 — Invalidation (D5)
+
+**Checkpoint 2026-07-12:** file-backed cache hits now compare cached mtime/size against `stat(lookup_path)`. A changed module retires its retained dependent cone, removes matching `Script*` entries from `script_index`, and falls through to a fresh compile. Freeing an old retired slot only removes the index entry when it still points at that exact `Script*`, so a freshly recompiled replacement keeps its cache entry.
+
 1. On `script_index` hit for file-backed scripts: `stat(lookup_path)`; on mtime/size mismatch, call `retire_script_cone(runtime, script)` — marks `cache_retired` on the script and every transitive **dependent** (computed by scanning retained scripts' `direct_imports` for edges into the retired set, iterating to fixpoint — registry is small, O(n·e) is fine), removes them from `script_index` — then fall through to the miss path (fresh stub gets a fresh slot + index).
 2. Retired entries are freed by the Phase 1 teardown guard at the next boundary.
 3. **Exit gate:** test that edits a module file between two batch entries (touch + content change) and asserts the second run sees the new behavior; ASAN-clean.
@@ -196,6 +199,7 @@ Registry slots are **never compacted**: retiring a script NULLs its `runtime->sc
 - Baseline batch wall-time (Phase 0): _TBD_
 - Phase 1 regression gate (retention disabled): `make test-lambda-baseline` passed 3299/3299 on 2026-07-12 (Input 2105/2105, Lambda Runtime 1194/1194).
 - Phase 2 regression gate (retained imports enabled): `make test-lambda-baseline` passed 3299/3299 on 2026-07-12 (Input 2105/2105, Lambda Runtime 1194/1194). Manual 3-entry `test-batch` of `test/lambda/import_vars.ls` retained `mod_vars.ls` once and logged two cache hits with byte-identical script output.
+- Phase 3 invalidation check: manual single-process `test-batch` over `temp/mir_cache_phase3_main.ls` saw `"phase3-before"`, then after editing the imported module saw `stale`/`retired` logs, recompiled to `"phase3-after"`, and a third run logged a hit on the replacement retained module (`invalidations=1`, `retained=1`).
 - Post-Phase-2 wall-time: _TBD_
 - Hit rate over `test-lambda-baseline` corpus: _TBD_
 - Retained modules / RSS delta at batch end: _TBD_

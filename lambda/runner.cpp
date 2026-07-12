@@ -338,6 +338,12 @@ static void runtime_script_index_delete(Runtime* runtime, const char* path) {
     hashmap_delete(runtime->script_index, &probe);
 }
 
+static void runtime_script_index_delete_script(Runtime* runtime, Script* script) {
+    if (!runtime || !runtime->script_index || !script || !script->reference) return;
+    if (runtime_script_index_get(runtime, script->reference) != script) return;
+    runtime_script_index_delete(runtime, script->reference);
+}
+
 static void capture_script_file_stat(Script* script, const char* path, bool file_backed) {
     if (!script || !path || !file_backed) return;
     struct stat st;
@@ -345,6 +351,73 @@ static void capture_script_file_stat(Script* script, const char* path, bool file
         script->src_mtime = st.st_mtime;
         script->src_size = st.st_size;
     }
+}
+
+static bool script_file_stat_changed(Script* script, const char* path) {
+    if (!script || !path) return false;
+    if (script->src_mtime == 0 && script->src_size == 0) return false;
+    struct stat st;
+    if (stat(path, &st) != 0) return false;
+    return st.st_mtime != script->src_mtime || st.st_size != script->src_size;
+}
+
+static bool script_ptr_list_contains(ArrayList* list, Script* script) {
+    if (!list || !script) return false;
+    for (int i = 0; i < list->length; i++) {
+        if ((Script*)list->data[i] == script) return true;
+    }
+    return false;
+}
+
+static bool script_imports_retired_dep(Script* script, ArrayList* retired) {
+    if (!script || !script->direct_imports || !retired) return false;
+    for (int i = 0; i < script->direct_imports->length; i++) {
+        Script* dep = (Script*)script->direct_imports->data[i];
+        if (script_ptr_list_contains(retired, dep)) return true;
+    }
+    return false;
+}
+
+static void retire_script_cache_entry(Runtime* runtime, Script* script, ArrayList* retired, const char* reason) {
+    if (!runtime || !script || script->cache_retired) return;
+    script->cache_retired = true;
+    runtime_script_index_delete_script(runtime, script);
+    arraylist_append(retired, script);
+    runtime->mir_cache_invalidations++;
+    log_info("mir cache index: retired path=%s index=%d reason=%s",
+             script->reference ? script->reference : "<unknown>", script->index,
+             reason ? reason : "changed dependency");
+}
+
+static void retire_script_cone(Runtime* runtime, Script* root) {
+    if (!runtime || !runtime->scripts || !root) return;
+    ArrayList* retired = arraylist_new(8);
+    retire_script_cache_entry(runtime, root, retired, "source changed");
+
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (int i = 0; i < runtime->scripts->length; i++) {
+            Script* candidate = (Script*)runtime->scripts->data[i];
+            if (!candidate || candidate->cache_retired || !candidate->cache_retain) continue;
+            if (script_imports_retired_dep(candidate, retired)) {
+                retire_script_cache_entry(runtime, candidate, retired, "dependent of changed module");
+                changed = true;
+            }
+        }
+    }
+    arraylist_free(retired);
+}
+
+static Script* runtime_script_index_get_current(Runtime* runtime, const char* path) {
+    Script* script = runtime_script_index_get(runtime, path);
+    if (!script) return NULL;
+    if (script_file_stat_changed(script, path)) {
+        log_info("mir cache index: stale path=%s index=%d", path, script->index);
+        retire_script_cone(runtime, script);
+        return NULL;
+    }
+    return script;
 }
 
 // Persistent last error (survives beyond runner lifetime)
@@ -1064,7 +1137,7 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
             for (int i = 1; i < count; i++) {
                 if (nodes[i].depth != level || !nodes[i].source) continue;
                 // check if already in cache
-                bool cached = runtime_script_index_get(runtime, nodes[i].path) != NULL;
+                bool cached = runtime_script_index_get_current(runtime, nodes[i].path) != NULL;
                 if (!cached) {
                     args[actual].runtime = runtime;
                     args[actual].node = &nodes[i];
@@ -1185,7 +1258,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 #ifndef _WIN32
     pthread_mutex_lock(&scripts_mutex);
 #endif
-    Script* cached_script = runtime_script_index_get(runtime, lookup_path);
+    Script* cached_script = runtime_script_index_get_current(runtime, lookup_path);
     if (cached_script) {
         // circular import detection: script is in list but still being loaded
         if (cached_script->is_loading) {
@@ -1586,7 +1659,7 @@ void runtime_register_script(Runtime* runtime, Script* script) {
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     if (!script) return;
     if (remove_index && script->reference) {
-        runtime_script_index_delete(runtime, script->reference);
+        runtime_script_index_delete_script(runtime, script);
     }
     if (script->reference) mem_free((void*)script->reference);
     if (script->source) mem_free((void*)script->source);
@@ -1615,9 +1688,9 @@ void runtime_teardown_batch_scripts(Runtime* runtime) {
 
 void runtime_log_mir_cache_summary(Runtime* runtime) {
     if (!runtime) return;
-    log_info("mir cache index: summary compiles=%d hits=%d misses=%d retained=%zu",
+    log_info("mir cache index: summary compiles=%d hits=%d misses=%d invalidations=%d retained=%zu",
              runtime->mir_cache_compiles, runtime->mir_cache_hits,
-             runtime->mir_cache_misses,
+             runtime->mir_cache_misses, runtime->mir_cache_invalidations,
              runtime->script_index ? hashmap_count(runtime->script_index) : 0);
 }
 

@@ -86,6 +86,7 @@ struct Runtime {
     int mir_cache_hits;
     int mir_cache_misses;
     int mir_cache_compiles;
+    int mir_cache_invalidations;
 };
 
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)
