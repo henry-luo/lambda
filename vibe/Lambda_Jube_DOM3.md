@@ -1,17 +1,24 @@
 # Lambda Jube DOM — Stage 3 (DOM3): Table-Driven Property Dispatch — Review and Proposal
 
-> **Status**: Phases 0–3 and 4a–4e implemented and green (2026-07-12). The Phase 4e
+> **Status**: Phases 0–3, 4a–4e, and Phase 5 are implemented
+> and green (2026-07-12). The Phase 4e
 > DOM/document family is record-driven with `host_ops = NULL`; `dom_node` has **142 declared
 > members** (identity/nav, reflected attributes, live form controls, and all node methods
 > with D0d function-object reads, including restored `get_attribute`) and now routes the
 > residual DOM object behavior through record-owned Jube hooks instead of `legacy_ops`.
 > `document`/`foreign_document` are binding-hook driven, the residual engine switchboards
-> were swept, and the original jQuery/Sizzle `.call` repro stays true in release. Remaining:
-> Phase 5 convergence. Phase 4e gates: `make build`, `make build-test`, direct
+> were swept, and the original jQuery/Sizzle `.call` repro stays true in release. Phase 5
+> removed VMap's DOM-specific snake/camel and dashed-attribute shortcuts, moved Lambda
+> projection keys to declared Jube snake-case rows, widened `document` and character-data
+> projection records, and added a Lambda-native Jube method closure path for non-JS runtime
+> method reads. Phase 4e gates: `make build`, `make build-test`, direct
 > `jq_find_repro` (`PRE: true`, `LEN: 3`, `POST: true`), direct `dom_module_props`
 > diff-exact, focused DOM GTests 4/4, full JS GTest 309/309, UI-automation 233 passed
 > with two native-webview tests skipped, `make release`, and release `jq_find_repro`
-> (`POST: true`).
+> (`POST: true`). Phase 5 slice gates: `make build`, `radiant_dom_read` diff-exact,
+> `radiant_dom_mutate`, procedural `radiant_dom_set`, `make test-lambda-baseline`
+> (3299/3299), UI automation (233 passed, 2 native-webview skips), `make release`,
+> and release wrap-sweep benchmark (`query_ms=9/7/8`, `walk_ms=901/773/807`).
 > **Parent design**: [Lambda_Desing_Native_Module.md](./Lambda_Desing_Native_Module.md) — Jube modules, signatures in Lambda type syntax, VMap projections.
 > **Predecessors**: [Lambda_Jube_DOM.md](./Lambda_Jube_DOM.md) (DOM1: carrier switch to branded VMaps),
 > [Lambda_Jube_DOM2.md](./Lambda_Jube_DOM2.md) (DOM2: generic host-object protocol, real host API,
@@ -871,9 +878,28 @@ guard-filtered table entries with precomputed snake names; extend
 `radiant_dom_read/mutate/set` `.ls` tests to cover the widened surface; cross-front-end
 coherence re-pinned.
 
-Gates: anchors; `make test-lambda-baseline`; the DOM2 Phase-6 release-build wrap-sweep benchmark
-re-run — property-walk time must improve or hold (expected: improve; §2.4 removes per-hop
-transforms and chains).
+Progress (2026-07-12, projection-convergence slice): VMap no longer owns DOM-specific
+string rewrites or dashed-attribute writes. `vmap_keys_for_item()` now asks Jube for
+guard-filtered projection keys, `jube_member_projection_keys()` emits declared snake-case
+field rows plus expandos, and DOM named setters own attr-name writes before JS property
+fallback. `document`/`foreign_document` now inherit a declared document surface with
+bound getters/methods, shared Node fields are record-owned for text/comment wrappers, and
+getter-only reflected rows pass the canonical JS name into `named_set` after the VMap
+fallback removal. Jube method property reads outside JS runtime now allocate a Lambda
+closure capturing receiver + method name instead of calling `js_new_method_function`
+without a `js_input` pool. The strengthened `radiant_dom_read` golden covers document
+projection keys, text-node `data`/`text_content`, and `document.query_selector()`;
+procedural `radiant_dom_set` covers `id`, `class_name`, and dashed `data-phase` writes.
+
+Gates run for this slice: `make build`; `radiant_dom_read` diff-exact; `radiant_dom_mutate`;
+procedural `radiant_dom_set`; `make test-lambda-baseline` (3299/3299); UI automation
+(233 passed, 2 native-webview skips); `make release`; release wrap-sweep benchmark on
+the 4,255-element / 4,602,200-hop fixture (`query_ms=9/7/8`, `walk_ms=901/773/807`,
+versus the DOM2 Phase-6 checkpoint `query_ms=3/3/3`, `walk_ms=3119/3092/3252`).
+
+Phase 5 exit gates are satisfied: anchors, `make test-lambda-baseline`, and the DOM2
+Phase-6 release-build wrap-sweep benchmark re-run. Property-walk time improved on the
+same 4,602,200-hop shape after §2.4 removed per-hop transforms and chains.
 
 ### Phase 6 (stretch) — measurement and the deferred fast paths
 

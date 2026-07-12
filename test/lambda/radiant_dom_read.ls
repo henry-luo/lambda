@@ -18,8 +18,13 @@ let intro = main.first_element_child
   parent_name: main.parent_node.node_name,
   text_name: intro.first_child.node_name,
   text_value: intro.first_child.node_value,
+  text_data: intro.first_child.data,
+  text_content: intro.first_child.text_content,
   document_root: root.owner_document.document_element.node_name,
+  document_query: root.owner_document.query_selector("#intro").node_name,
   keys: [for (k at root where k == 'node_name' or k == 'class_name' or k == 'first_child' or k == 'owner_document') k],
+  document_keys: [for (k at root.owner_document where k == 'document_element' or k == 'ready_state' or k == 'node_name') k],
+  text_keys: [for (k at intro.first_child where k == 'node_name' or k == 'data' or k == 'node_value' or k == 'text_content') k],
   node: type(root),
   free: radiant.free(doc)
 }
