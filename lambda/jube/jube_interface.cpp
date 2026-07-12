@@ -161,6 +161,12 @@ static JubeTypeRecord* jube_record_for(Item receiver) {
     return jube_record_for_type(receiver.vmap->host_type);
 }
 
+void* jube_host_identity(Item item) {
+    JubeTypeRecord* trec = jube_record_for(item);
+    if (!trec) return NULL;
+    return item.vmap->host_data;
+}
+
 // resolve a key against the type's index; guard chains evaluate in
 // declaration order (first matching guard wins)
 static JubeMemberRecord* jube_resolve_member(JubeTypeRecord* trec, Item receiver, Item key) {
@@ -466,6 +472,13 @@ int jube_member_set(Item receiver, Item key, Item value, Item* out) {
             // migrating types: a converted getter without a converted setter
             // must keep the legacy write behavior (id/className writes)
             if (jube_legacy_ops(trec)) return 0;
+            if (trec->binding && trec->binding->named_set && receiver.vmap->host_data &&
+                    trec->binding->named_set(receiver, key, value, out)) {
+                // Getter-only projected DOM rows still need the record-owned
+                // named setter for reflected attrs like id/className after
+                // legacy_ops is removed.
+                return 1;
+            }
             // declared read-only surface swallows writes (pinned DOM1 behavior:
             // no expando shadowing of projected members)
             *out = value;
@@ -501,6 +514,10 @@ int jube_member_call(Item receiver, Item name, Item* args, int argc, Item* out) 
         rec->bind->call(receiver, args, argc, out);
         return 1;
     }
+    if (trec->binding && trec->binding->object_call && receiver.vmap->host_data &&
+            trec->binding->object_call(receiver, name, args, argc, out)) {
+        return 1;
+    }
     // not a declared method: fall through so the engine can read the property
     // (expando-stored functions) and call it
     return 0;
@@ -510,6 +527,11 @@ int jube_member_has(Item receiver, Item key, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
     bool present = jube_resolve_member(trec, receiver, key) != NULL;
+    if (!present && trec->binding && trec->binding->object_has &&
+            receiver.vmap->host_data &&
+            trec->binding->object_has(receiver, key, out)) {
+        return 1;
+    }
     if (!present && jube_legacy_ops(trec)) return 0;
     if (!present && trec->binding && trec->binding->named_has &&
             receiver.vmap->host_data &&
@@ -532,6 +554,10 @@ int jube_member_delete(Item receiver, Item key, Item* out) {
     if (!trec || !out) return 0;
     if (jube_resolve_member(trec, receiver, key)) {
         *out = (Item){.item = b2it(false)};
+        return 1;
+    }
+    if (trec->binding && trec->binding->object_delete && receiver.vmap->host_data &&
+            trec->binding->object_delete(receiver, key, out)) {
         return 1;
     }
     if (jube_legacy_ops(trec)) return 0;
@@ -560,6 +586,10 @@ int jube_member_descriptor(Item receiver, Item key, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
     const JubeHostAPI* host = jube_internal_host_api();
+    if (trec->binding && trec->binding->object_descriptor && receiver.vmap->host_data &&
+            trec->binding->object_descriptor(receiver, key, out)) {
+        return 1;
+    }
     JubeMemberRecord* rec = jube_resolve_member(trec, receiver, key);
     if (rec && rec->kind != JUBE_MEMBER_METHOD && receiver.vmap->host_data) {
         Item value = jube_undefined_item();
@@ -601,6 +631,10 @@ int jube_member_descriptor(Item receiver, Item key, Item* out) {
 int jube_member_own_keys(Item receiver, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
+    if (trec->binding && trec->binding->object_own_keys && receiver.vmap->host_data &&
+            trec->binding->object_own_keys(receiver, out)) {
+        return 1;
+    }
     if (jube_legacy_ops(trec)) return 0;
     const JubeHostAPI* host = jube_internal_host_api();
     Item keys = host->value->array_new(0);
@@ -629,6 +663,12 @@ int jube_member_own_keys(Item receiver, Item* out) {
 int jube_member_prototype(Item receiver, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
+    if (trec->binding && trec->binding->object_prototype && receiver.vmap->host_data &&
+            trec->binding->object_prototype(receiver, out)) {
+        // DOM nodes need receiver-specific Element/Text/Document prototypes;
+        // a static prototype_seed cannot preserve that WebIDL identity.
+        return 1;
+    }
     // migrating types keep their legacy per-kind prototypes (Element/Node/...)
     if (jube_legacy_ops(trec)) return 0;
     *out = jube_type_prototype_for(trec);

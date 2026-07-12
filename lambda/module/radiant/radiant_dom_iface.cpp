@@ -269,6 +269,10 @@ const char radiant_dom_interface_decl[] =
     "    get_property_value: fn(prop: string) string,\n"
     "    set_property: fn(prop: string, value: string, priority: string) null,\n"
     "    remove_property: fn(prop: string) string\n"
+    "}\n"
+    "type document {\n"
+    "}\n"
+    "type foreign_document {\n"
     "}\n";
 
 // ---- adapters: JubeMemberBind handler shape -> host API behavior entries ----
@@ -721,13 +725,10 @@ static const JubeMemberBind radiant_rule_decl_members[] = {
 };
 
 
-// ---- dom_node Phase 4a: identity/navigation cluster ----
-// Transitional: legacy_ops carries everything unconverted (text/comment
-// kinds, reflected attrs, tag-gated members, methods, side-table expandos,
-// per-kind prototypes, own-keys). Members guard element-only so text/comment
-// reads fall through to the legacy chains unchanged.
+// ---- dom_node Phase 4a-4e: identity/navigation + named hooks ----
+// The residual open-name/property-object semantics are explicit binding hooks;
+// dom_node no longer depends on the transitional legacy_ops fallback.
 
-extern const JubeHostObjectOps radiant_dom_node_host_ops;
 extern "C" int radiant_dom_member_is_element(Item receiver);
 extern "C" int radiant_dom_member_tag_name(Item receiver, Item* out);
 extern "C" int radiant_dom_member_local_name(Item receiver, Item* out);
@@ -1167,29 +1168,50 @@ extern const JubeTypeBinding radiant_dom_type_bindings[];
 const JubeTypeBinding radiant_dom_type_bindings[] = {
     {"range", NULL, radiant_range_members,
      (int32_t)(sizeof(radiant_range_members) / sizeof(radiant_range_members[0])),
-     NULL, NULL, NULL, NULL, radiant_range_prototype_seed},
+     NULL, NULL, NULL, NULL, radiant_range_prototype_seed, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL},
     {"selection", NULL, radiant_selection_members,
      (int32_t)(sizeof(radiant_selection_members) / sizeof(radiant_selection_members[0])),
-     NULL, NULL, NULL, NULL, radiant_selection_prototype_seed, NULL},
+     NULL, NULL, NULL, NULL, radiant_selection_prototype_seed, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL},
     {"inline_style", NULL, radiant_inline_style_members,
      (int32_t)(sizeof(radiant_inline_style_members) / sizeof(radiant_inline_style_members[0])),
-     st_named_get, st_named_set, NULL, NULL, radiant_style_no_prototype, st_named_has},
+     st_named_get, st_named_set, NULL, NULL, radiant_style_no_prototype, st_named_has,
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL},
     {"computed_style", NULL, radiant_computed_style_members,
      (int32_t)(sizeof(radiant_computed_style_members) / sizeof(radiant_computed_style_members[0])),
-     cs_get, cs_named_set, NULL, NULL, radiant_style_no_prototype, st_named_has},
+     cs_get, cs_named_set, NULL, NULL, radiant_style_no_prototype, st_named_has,
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL},
     {"stylesheet", NULL, radiant_stylesheet_members,
      (int32_t)(sizeof(radiant_stylesheet_members) / sizeof(radiant_stylesheet_members[0])),
-     NULL, cssom_swallow_set, sh_indexed_get, NULL, radiant_style_no_prototype, NULL},
+     NULL, cssom_swallow_set, sh_indexed_get, NULL, radiant_style_no_prototype, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL},
     {"css_rule", NULL, radiant_css_rule_members,
      (int32_t)(sizeof(radiant_css_rule_members) / sizeof(radiant_css_rule_members[0])),
-     NULL, cssom_swallow_set, NULL, NULL, radiant_style_no_prototype, NULL},
+     NULL, cssom_swallow_set, NULL, NULL, radiant_style_no_prototype, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL},
     {"rule_style_decl", NULL, radiant_rule_decl_members,
      (int32_t)(sizeof(radiant_rule_decl_members) / sizeof(radiant_rule_decl_members[0])),
-     rd_named_get, rd_named_set, NULL, NULL, radiant_style_no_prototype, rd_named_has},
+     rd_named_get, rd_named_set, NULL, NULL, radiant_style_no_prototype, rd_named_has,
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL},
     {"dom_node", NULL, radiant_dom_node_members,
      (int32_t)(sizeof(radiant_dom_node_members) / sizeof(radiant_dom_node_members[0])),
      radiant_dom_node_named_get, radiant_dom_node_named_set, NULL, NULL, NULL,
-     NULL, &radiant_dom_node_host_ops},
+     NULL, radiant_dom_host_call_method, radiant_dom_host_has_property, radiant_dom_host_delete_property,
+     radiant_dom_host_own_property_descriptor, radiant_dom_host_own_property_names,
+     radiant_dom_node_prototype, NULL},
+    {"document", NULL, NULL, 0,
+     radiant_dom_document_host_get_property, radiant_dom_document_host_set_property,
+     NULL, NULL, NULL, NULL, radiant_dom_document_host_call_method,
+     radiant_dom_document_host_has_property, radiant_dom_document_host_delete_property,
+     radiant_dom_document_host_own_property_descriptor, radiant_dom_document_host_own_property_names,
+     radiant_dom_document_prototype, NULL},
+    {"foreign_document", NULL, NULL, 0,
+     radiant_dom_document_host_get_property, radiant_dom_document_host_set_property,
+     NULL, NULL, NULL, NULL, radiant_dom_document_host_call_method,
+     radiant_dom_document_host_has_property, radiant_dom_document_host_delete_property,
+     radiant_dom_document_host_own_property_descriptor, radiant_dom_document_host_own_property_names,
+     radiant_dom_document_prototype, NULL},
 };
 
 extern const int32_t radiant_dom_type_binding_count;

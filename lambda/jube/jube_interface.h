@@ -32,6 +32,7 @@ int jube_member_delete(Item receiver, Item key, Item* out);
 int jube_member_descriptor(Item receiver, Item key, Item* out);
 int jube_member_own_keys(Item receiver, Item* out);
 int jube_member_prototype(Item receiver, Item* out);
+void* jube_host_identity(Item item);
 
 // Engine host-API table, for internal consumers of the same services modules
 // receive at init (function objects, GC roots, value construction).

@@ -32,6 +32,7 @@ RADIANT_C_API void radiant_dom_host_invalidate(Item object);
 
 RADIANT_C_API int radiant_dom_node_named_get(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_node_named_set(Item object, Item key, Item value, Item* out);
+RADIANT_C_API int radiant_dom_node_prototype(Item object, Item* out);
 
 
 
@@ -44,6 +45,7 @@ RADIANT_C_API int radiant_dom_document_host_delete_property(Item object, Item ke
 RADIANT_C_API int radiant_dom_document_host_own_property_descriptor(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_document_host_own_property_names(Item object, Item* out);
 RADIANT_C_API Item radiant_dom_document_host_prototype(Item object);
+RADIANT_C_API int radiant_dom_document_prototype(Item object, Item* out);
 
 RADIANT_C_API int radiant_dom_document_get_property(Item prop_name, Item* out);
 RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int argc, Item* out);

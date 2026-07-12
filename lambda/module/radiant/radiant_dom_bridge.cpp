@@ -3258,6 +3258,12 @@ RADIANT_C_API int radiant_dom_node_named_set(Item object, Item key, Item value, 
     return radiant_dom_host_set_property(object, key, value, out);
 }
 
+RADIANT_C_API int radiant_dom_node_prototype(Item object, Item* out) {
+    if (!out || !radiant_dom_unwrap_node(object)) return 0;
+    *out = radiant_dom_host_prototype(object);
+    return 1;
+}
+
 RADIANT_C_API int radiant_dom_host_call_method(Item object,
                                             Item method_name,
                                             Item* args,
@@ -3552,6 +3558,12 @@ RADIANT_C_API Item radiant_dom_document_host_prototype(Item object) {
     // Object surface in the registered host op instead of an engine-side brand check.
     Item proto = js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
+}
+
+RADIANT_C_API int radiant_dom_document_prototype(Item object, Item* out) {
+    if (!out) return 0;
+    *out = radiant_dom_document_host_prototype(object);
+    return 1;
 }
 
 static DomElement* radiant_dom_document_child_by_tag(DomDocument* doc, const char* tag) {
