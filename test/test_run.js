@@ -16,9 +16,20 @@ const args = process.argv.slice(2);
 let targetSuite = '';
 let excludeSuite = '';
 let targetCategory = '';
+let excludeTests = new Set();
 let rawOutput = false;
 let parallelExecution = true;
 let inputResultsFile = '';
+
+function addExcludedTests(value) {
+    if (!value) return;
+    for (const name of value.split(',')) {
+        const trimmed = name.trim();
+        if (trimmed) {
+            excludeTests.add(trimmed.replace(/\.exe$/, ''));
+        }
+    }
+}
 
 for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -26,6 +37,8 @@ for (let i = 0; i < args.length; i++) {
     else if (arg === '--target')            targetSuite = args[++i];
     else if (arg.startsWith('--exclude-target=')) excludeSuite = arg.split('=')[1];
     else if (arg === '--exclude-target')    excludeSuite = args[++i];
+    else if (arg.startsWith('--exclude-test=')) addExcludedTests(arg.substring('--exclude-test='.length));
+    else if (arg === '--exclude-test')       addExcludedTests(args[++i]);
     else if (arg.startsWith('--category=')) targetCategory = arg.split('=')[1];
     else if (arg === '--category')          targetCategory = args[++i];
     else if (arg.startsWith('--input-results=')) inputResultsFile = arg.split('=').slice(1).join('=');
@@ -37,6 +50,7 @@ for (let i = 0; i < args.length; i++) {
         console.log(`Usage: node test/test_run.js [OPTIONS]
   --target=SUITE       Run only tests from specified suite (library, input, mir, lambda, validator, radiant, jube, extended)
   --exclude-target=S   Exclude tests from specified suite (e.g. jube)
+  --exclude-test=NAME  Exclude test executable base name (repeatable or comma-separated)
   --category=CAT       Run only tests from specified category (baseline, extended)
   --raw                Show raw test output without formatting
   --sequential         Run tests sequentially (default: parallel)
@@ -319,6 +333,7 @@ function filterTests(tests) {
     let result = tests;
     if (targetSuite)    result = result.filter(t => t.suite === targetSuite);
     if (excludeSuite)   result = result.filter(t => t.suite !== excludeSuite);
+    if (excludeTests.size) result = result.filter(t => !excludeTests.has(t.baseName));
     if (targetCategory) result = result.filter(t => t.category === targetCategory);
     return result;
 }

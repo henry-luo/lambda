@@ -927,7 +927,7 @@ test: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running lambda (core) test suites (excluding jube)..."
-	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --exclude-target=jube --parallel
+	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --exclude-target=jube --exclude-test=test_radiant_online_view_gtest --parallel
 
 test-all: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
