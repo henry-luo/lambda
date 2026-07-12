@@ -30,6 +30,9 @@ RADIANT_C_API int radiant_dom_host_own_property_names(Item object, Item* out);
 RADIANT_C_API Item radiant_dom_host_prototype(Item object);
 RADIANT_C_API void radiant_dom_host_invalidate(Item object);
 
+RADIANT_C_API int radiant_dom_node_named_get(Item object, Item key, Item* out);
+RADIANT_C_API int radiant_dom_node_named_set(Item object, Item key, Item value, Item* out);
+
 
 
 RADIANT_C_API int radiant_dom_document_host_get_property(Item object, Item key, Item* out);

@@ -432,6 +432,27 @@ int jube_member_get(Item receiver, Item key, Item* out) {
     return 1;
 }
 
+int jube_member_projected_get(Item receiver, Item key, Item* out) {
+    JubeTypeRecord* trec = jube_record_for(receiver);
+    if (!trec || !out || !receiver.vmap->host_data) return 0;
+    JubeMemberRecord* rec = jube_resolve_member(trec, receiver, key);
+    if (!rec) return 0;
+    // Host own-property descriptors need declared record members only; full
+    // jube_member_get may now continue into named hooks and expando fallback.
+    switch (rec->kind) {
+    case JUBE_MEMBER_CONST:
+        *out = jube_member_const_item(rec);
+        return 1;
+    case JUBE_MEMBER_METHOD:
+        *out = jube_member_method_item(rec);
+        return 1;
+    default:
+        if (rec->bind && rec->bind->get && rec->bind->get(receiver, out)) return 1;
+        *out = jube_undefined_item();
+        return 1;
+    }
+}
+
 int jube_member_set(Item receiver, Item key, Item value, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;

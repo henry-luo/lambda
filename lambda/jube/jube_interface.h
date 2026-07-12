@@ -24,6 +24,7 @@ bool jube_type_has_interface(const JubeTypeDef* type);
 // compiled interface and the operation was handled (out is set), 0 to fall
 // through to the type's host_ops / legacy paths.
 int jube_member_get(Item receiver, Item key, Item* out);
+int jube_member_projected_get(Item receiver, Item key, Item* out);
 int jube_member_set(Item receiver, Item key, Item value, Item* out);
 int jube_member_call(Item receiver, Item name, Item* args, int argc, Item* out);
 int jube_member_has(Item receiver, Item key, Item* out);

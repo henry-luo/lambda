@@ -4,11 +4,13 @@
 > types are fully record-driven with `host_ops = NULL`; `dom_node` is migrating via the
 > `legacy_ops` fall-through with **142 declared members** (identity/nav, reflected
 > attributes, live form controls, and all node methods with D0d function-object reads,
-> including restored `get_attribute`). Remaining: Phase 4e (catch-alls → named
+> including restored `get_attribute`). Phase 4e is **not yet complete**: catch-all hooks,
+> residual engine switchboards, document-family records, and the final `legacy_ops` flip
+> remain open. Remaining: Phase 4e (catch-alls → named
 > hooks, engine js_dom.cpp sweep, `legacy_ops` → NULL flip,
 > document/foreign_document types, classList/Location/DOMImplementation), then Phase 5
-> convergence. Suite gates green at every sub-step: JS gtest 309/309, UI-automation clean,
-> Lambda baseline exit 0.
+> convergence. Last recorded 4e slice: JS gtest 309/309 green; UI-automation 233/233
+> selected tests green with the two native-webview tests skipped as expected.
 > **Parent design**: [Lambda_Desing_Native_Module.md](./Lambda_Desing_Native_Module.md) — Jube modules, signatures in Lambda type syntax, VMap projections.
 > **Predecessors**: [Lambda_Jube_DOM.md](./Lambda_Jube_DOM.md) (DOM1: carrier switch to branded VMaps),
 > [Lambda_Jube_DOM2.md](./Lambda_Jube_DOM2.md) (DOM2: generic host-object protocol, real host API,
@@ -804,9 +806,39 @@ pending).
   per record. Repro now stays true across direct, saved, and member `.call` paths after
   `$app.find(".item")`; `get_attribute` is restored in the radiant interface and binding row.
   Verification for this slice: `make release` green; `dom_jquery_lib` direct diff-exact;
-  focused `dom_jquery_lib` GTest green; full `test_js_gtest` green 309/309. The UI-automation
-  gate currently fails three unrelated form hit-testing/drag state cases
-  (`test_form_state_drag`, `test_form_state_li_drag`, `test_form_textarea_scrolled_hit_test`).
+  focused `dom_jquery_lib` GTest green; full `test_js_gtest` green 309/309.
+
+  Progress (2026-07-12, 4e named get/set slice): `dom_node` now wires Jube
+  `named_get`/`named_set` to the existing Radiant DOM bridge, so open-name DOM reads/writes
+  enter through the record path before the transitional `legacy_ops` fallback. This keeps
+  the large legacy property implementation as the semantic source while moving the dispatch
+  boundary one step toward Phase 4e. A descriptor regression during the slice exposed the
+  boundary invariant: host own-property descriptors need declared record/basic DOM members,
+  not full property reads after named-hook/prototype/expando fallback. `jube_member_projected_get`
+  captures that declared-member-only probe for the host descriptor/delete path. Verification:
+  `make build` green; `temp/jq_find_repro.js` still prints `POST: true`;
+  `dom_jquery_lib`, `dom_v12b`, `dom_identity`, and `dom_module_props` focused GTests green;
+  full `test_js_gtest` green 309/309; UI-automation green with 233 selected tests passed
+  and two native-webview tests skipped.
+
+  Audit (2026-07-12): **4e is still open**. The opening engine fix landed, but the rest of
+  the 4e checklist has not been implemented in the live tree:
+  - `dom_node` now routes open-name get/set through Jube named hooks, but it still registers
+    with `&radiant_dom_node_host_ops` as `legacy_ops`; the final `legacy_ops -> NULL` flip is
+    not done.
+  - `document` and `foreign_document` are declared as Jube host types, but they still use
+    `radiant_dom_document_host_ops` and have no record table in `radiant_dom_type_bindings`.
+  - `dom_methods[]`, `doc_methods[]`, and `form_idl_props[]` still exist in `js_dom.cpp`;
+    the phase-end grep gate is not satisfied.
+  - `js_runtime.cpp`/`js_runtime_value.cpp` still call DOM helper hooks directly for live
+    collections/options and DOM equality; the residual engine sweep is not done.
+  - form named getter, attribute fallback, `on*` handler lookup, and `dataset` still live in
+    the legacy property implementation reached by the Jube named hooks, rather than as split
+    record-owned hook bodies.
+  - live collections still depend on runtime-side refresh calls instead of record
+    `indexed_/named_` hooks.
+  - classList, Location, and DOMImplementation remain in the legacy JS DOM helpers rather
+    than as dedicated record-driven Jube bindings.
 
 Gates per sub-step: anchors + full JS gtest + `dom_jquery_lib`/`dom_v12b`/`dom_identity` direct
 diffs; 4c/4e additionally UI-automation + `make test-radiant-baseline` vs the DOM2 Phase-0

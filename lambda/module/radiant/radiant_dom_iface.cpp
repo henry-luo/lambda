@@ -8,6 +8,7 @@
 
 #include "../../lambda.hpp"
 #include "radiant_host_api.hpp"
+#include "radiant_dom_bridge.hpp"
 #include "../../jube/jube.h"
 
 extern const JubeHostAPI* radiant_host_api;
@@ -1187,7 +1188,8 @@ const JubeTypeBinding radiant_dom_type_bindings[] = {
      rd_named_get, rd_named_set, NULL, NULL, radiant_style_no_prototype, rd_named_has},
     {"dom_node", NULL, radiant_dom_node_members,
      (int32_t)(sizeof(radiant_dom_node_members) / sizeof(radiant_dom_node_members[0])),
-     NULL, NULL, NULL, NULL, NULL, NULL, &radiant_dom_node_host_ops},
+     radiant_dom_node_named_get, radiant_dom_node_named_set, NULL, NULL, NULL,
+     NULL, &radiant_dom_node_host_ops},
 };
 
 extern const int32_t radiant_dom_type_binding_count;
