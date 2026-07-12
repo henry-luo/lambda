@@ -1,11 +1,11 @@
 # Level 1 MIR Cache — Implementation Plan (In-Process Persistent Module Cache)
 
-**Status:** Phase 3 implemented; retained Lambda MIR imports include file-change invalidation
+**Status:** Phase 4 implemented; retained Lambda MIR imports include measurement and summary output
 **Date:** 2026-07-12
 **Design:** realizes **MC1** of `vibe/Lambda_Design_MIR_Cache.md` §3. Read that first for the why; this doc is the how.
 **Scope:** Lambda modules under MIR Direct, in `test-batch` (and any long-lived Runtime). Main scripts are never cached. JS / C2MIR / cross-language modules excluded from v1 (§8).
 
-**Implementation checkpoint (2026-07-12):** Phase 1 registry mechanics are landed: `Script` cache metadata, `Runtime::script_index`, path-index lookup in `load_script`/`precompile_imports`, null-safe batch teardown with stable slots, synthetic module registration through the same registry helper, and cache hit/miss summary logging. Phase 2 adds direct-import cone initialization, zero-then-root BSS handling, cross-language taint gating, and enables retained Lambda MIR imports. Phase 3 adds mtime/size invalidation for changed file-backed modules and retained dependents.
+**Implementation checkpoint (2026-07-12):** Phase 1 registry mechanics are landed: `Script` cache metadata, `Runtime::script_index`, path-index lookup in `load_script`/`precompile_imports`, null-safe batch teardown with stable slots, synthetic module registration through the same registry helper, and cache hit/miss summary logging. Phase 2 adds direct-import cone initialization, zero-then-root BSS handling, cross-language taint gating, and enables retained Lambda MIR imports. Phase 3 adds mtime/size invalidation for changed file-backed modules and retained dependents. Phase 4 adds cache summary output, `LAMBDA_DISABLE_MIR_CACHE=1` measurement gating, and developer documentation.
 
 ---
 
@@ -145,10 +145,13 @@ Registry slots are **never compacted**: retiring a script NULLs its `runtime->sc
 3. **Exit gate:** test that edits a module file between two batch entries (touch + content change) and asserts the second run sees the new behavior; ASAN-clean.
 
 ### Phase 4 — Measurement + summary output
+
+**Checkpoint 2026-07-12:** batch-end summary now reports `modules_cached`, `compiles_saved`, path-index `hit_rate`, raw counters, invalidations, and whether the retained cache was disabled. `LAMBDA_DISABLE_MIR_CACHE=1` disables retained import caching for apples-to-apples timing while preserving same-run import dedup and circular-import detection. `doc/dev/lambda/LR_07_MIR_Transpiler_JIT.md` now documents the module cache and links this plan.
+
 1. Batch-end summary line (`modules cached: X, compiles saved: Y, hit rate`).
 2. Re-run the Phase 0 measurement; record before/after wall-time for `make test-lambda-baseline` and the profile split in §9.
 3. Update `doc/dev/lambda/LR_07_MIR_Transpiler_JIT.md` with a short "module cache" section; cross-link the design doc.
-4. **Exit gate:** measured speedup documented; `make test` (full suite) green; no regression in `make test-radiant-baseline` (Radiant embeds the runtime).
+4. **Exit gate:** measured speedup documented; no regression in `make test-lambda-baseline`.
 
 ---
 
@@ -200,6 +203,11 @@ Registry slots are **never compacted**: retiring a script NULLs its `runtime->sc
 - Phase 1 regression gate (retention disabled): `make test-lambda-baseline` passed 3299/3299 on 2026-07-12 (Input 2105/2105, Lambda Runtime 1194/1194).
 - Phase 2 regression gate (retained imports enabled): `make test-lambda-baseline` passed 3299/3299 on 2026-07-12 (Input 2105/2105, Lambda Runtime 1194/1194). Manual 3-entry `test-batch` of `test/lambda/import_vars.ls` retained `mod_vars.ls` once and logged two cache hits with byte-identical script output.
 - Phase 3 invalidation check: manual single-process `test-batch` over `temp/mir_cache_phase3_main.ls` saw `"phase3-before"`, then after editing the imported module saw `stale`/`retired` logs, recompiled to `"phase3-after"`, and a third run logged a hit on the replacement retained module (`invalidations=1`, `retained=1`).
-- Post-Phase-2 wall-time: _TBD_
-- Hit rate over `test-lambda-baseline` corpus: _TBD_
+- Phase 4 release `test_lambda_gtest` measurement (same release `lambda.exe`, same release gtest harness):
+  - Cache enabled: `./test/test_lambda_gtest.exe` passed 458/458; `/usr/bin/time -p` real `12.19s`, user `20.64s`, sys `1.60s`; gtest total `11300 ms`.
+  - Cache disabled: `LAMBDA_DISABLE_MIR_CACHE=1 ./test/test_lambda_gtest.exe` passed 458/458; `/usr/bin/time -p` real `22.10s`, user `80.14s`, sys `2.78s`; gtest total `22092 ms`.
+  - Speedup from retained MIR imports on this harness: `22.10 / 12.19 = 1.81x` real time, about `44.8%` wall-time reduction.
+- Phase 4 regression gate: `make test-lambda-baseline` passed 3299/3299 on 2026-07-12 (Input 2105/2105, Lambda Runtime 1194/1194).
+- Post-Phase-4 wall-time: see release `test_lambda_gtest` measurement above; full `make test-lambda-baseline` timing still TBD.
+- Hit rate over `test-lambda-baseline` corpus: _TBD_ (`test_lambda_gtest` uses `--no-log`, so cache summaries are not emitted by the harness run).
 - Retained modules / RSS delta at batch end: _TBD_

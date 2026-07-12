@@ -1362,7 +1362,9 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         log_error("Error: Failed to compile script %s", script_path);
         return NULL;
     }
-    new_script->cache_retain = is_import && runtime->use_mir_direct && !new_script->cache_cross_lang_tainted;
+    // L1 cache can be disabled for timing runs while preserving same-run import dedup.
+    new_script->cache_retain = is_import && runtime->use_mir_direct &&
+        !runtime->mir_cache_disabled && !new_script->cache_cross_lang_tainted;
     if (new_script->cache_retain) {
         log_info("mir cache index: retaining import path=%s index=%d", new_script->reference, new_script->index);
     }
@@ -1644,6 +1646,12 @@ void runtime_init(Runtime* runtime) {
     runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
     runtime->transpile_dir = NULL;  // default: no file output; set via --transpile-dir
     runtime->dry_run = false;  // default: real IO
+    const char* disable_mir_cache = shell_getenv("LAMBDA_DISABLE_MIR_CACHE");
+    runtime->mir_cache_disabled = disable_mir_cache &&
+        (strcmp(disable_mir_cache, "1") == 0 || strcmp(disable_mir_cache, "true") == 0);
+    if (runtime->mir_cache_disabled) {
+        log_info("mir cache index: retained module cache disabled by LAMBDA_DISABLE_MIR_CACHE");
+    }
     module_registry_init();
     jube_register_builtin_modules();
     dom_set_runtime_cleanup_hook(runtime_cleanup);  // wire DOM-layer cleanup hook
@@ -1688,10 +1696,16 @@ void runtime_teardown_batch_scripts(Runtime* runtime) {
 
 void runtime_log_mir_cache_summary(Runtime* runtime) {
     if (!runtime) return;
-    log_info("mir cache index: summary compiles=%d hits=%d misses=%d invalidations=%d retained=%zu",
+    int lookups = runtime->mir_cache_hits + runtime->mir_cache_misses;
+    double hit_rate = lookups > 0 ? (100.0 * (double)runtime->mir_cache_hits / (double)lookups) : 0.0;
+    size_t retained = runtime->script_index ? hashmap_count(runtime->script_index) : 0;
+    log_info("mir cache index: summary modules_cached=%zu compiles_saved=%d hit_rate=%.1f%% compiles=%d hits=%d misses=%d invalidations=%d disabled=%d",
+             retained, runtime->mir_cache_hits, hit_rate,
              runtime->mir_cache_compiles, runtime->mir_cache_hits,
              runtime->mir_cache_misses, runtime->mir_cache_invalidations,
-             runtime->script_index ? hashmap_count(runtime->script_index) : 0);
+             runtime->mir_cache_disabled ? 1 : 0);
+    (void)retained;
+    (void)hit_rate;
 }
 
 // Reset the retained heap, nursery, and name_pool on a Runtime.

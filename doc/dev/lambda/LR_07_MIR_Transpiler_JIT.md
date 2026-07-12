@@ -88,7 +88,19 @@ The C2MIR compile entry `jit_compile_to_mir` (`:151`) also lives here but is who
 
 ---
 
-## 8. Naming & the shared helpers
+## 8. Level 1 module cache
+
+MIR Direct has a process-local Level 1 module cache for long-lived `Runtime` instances, primarily `lambda.exe test-batch`. Main scripts are still compiled per batch entry, but cacheable Lambda imports retain their `Script`, AST pool, type list, MIR context, generated `main_func`, and direct-import list across per-script heap resets. On a later import of the same canonical file path, `load_script` returns the retained script instead of parsing, AST-building, lowering, linking, and generating it again.
+
+The cache is intentionally narrow: it applies only to MIR Direct Lambda imports. JS, C2MIR, and cross-language-tainted module subtrees are not retained. Runtime heap state is not retained; before each module init, module-level BSS globals are zeroed and registered as GC roots so cached code recomputes heap-backed values for the current script run. Execution uses the current main script's direct-import cone, not the whole registry, so unrelated cached modules are neither rooted nor initialized.
+
+Invalidation is mtime/size based. A file-backed cache hit stats the canonical path; if the source changed, the stale script and retained dependents are retired from the index and the current load falls through to a fresh compile. `LAMBDA_DISABLE_MIR_CACHE=1` disables retained import caching for timing comparisons while keeping normal import deduplication and circular-import detection within a single compilation.
+
+Design and rollout details live in [Level 1 MIR Cache — Implementation Plan](../../../vibe/Lambda_Impl_MIR_Cache_L1.md).
+
+---
+
+## 9. Naming & the shared helpers
 
 Both backends share `transpile_shared.cpp`, which was extracted precisely so the C-text backend can be excluded from the core build. It provides the generated-identifier naming used by both: `write_var_name` (`:95`, the `_`-prefix for user variables), `write_fn_name_ex`/`write_fn_name` (`:72`/`:91`, name + `ts_node_start_byte` offset for uniqueness, with an `m<index>.` prefix for imported functions), plus `has_typed_params` (`:14`) and `needs_fn_call_wrapper` (`:39`). Both backends also share the `sys_func_defs[]` table, the runtime function set, and the `mir.c` import resolver — so a runtime function added once is reachable from either path.
 

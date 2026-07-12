@@ -83,6 +83,7 @@ struct Runtime {
 
     // level 1 MIR cache counters. Phase 1 records index hits/misses while module
     // retention stays disabled until cone-based initialization lands.
+    bool mir_cache_disabled;
     int mir_cache_hits;
     int mir_cache_misses;
     int mir_cache_compiles;
