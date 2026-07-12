@@ -63,6 +63,16 @@ static Color form_text_color(ViewBlock* block, FormControlProp* form,
     return text_color;
 }
 
+static Color form_accent_color(ViewBlock* block, bool disabled) {
+    if (disabled) {
+        return make_color(128, 128, 128);
+    }
+    if (block && block->in_line && block->in_line->has_accent_color) {
+        return block->in_line->accent_color;
+    }
+    return make_color(0, 0, 0);
+}
+
 static float form_text_align_offset(ViewBlock* block, float content_w,
                                     float text_w) {
     if (!block || !block->blk || text_w <= 0.0f || text_w >= content_w) {
@@ -717,7 +727,8 @@ static void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlP
         rdt_path_line_to(p, cx2, cy2);
         rdt_path_line_to(p, cx3, cy3);
 
-        Color check_color = disabled ? make_color(128, 128, 128) : make_color(0, 0, 0);
+        // checked form controls use CSS accent-color; ignoring it made browser-blue controls render black.
+        Color check_color = form_accent_color(block, disabled);
         rc_stroke_path(rdcon, p, check_color, 2.0f * s, RDT_CAP_ROUND, RDT_JOIN_ROUND, NULL, 0, NULL);
         rdt_path_free(p);
     }
@@ -768,13 +779,15 @@ static void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp
     fill_circle(rdcon, cx, cy, radius, bg);
 
     // Border circle
-    Color border_color = make_color(118, 118, 118);
+    // checked form controls use CSS accent-color; ignoring it made browser-blue controls render black.
+    Color accent = form_accent_color(block, disabled);
+    Color border_color = checked ? accent : make_color(118, 118, 118);
     float bw = 1 * s;
     stroke_circle(rdcon, cx, cy, radius - bw / 2, border_color, bw);
 
     // Inner dot if checked
     if (checked) {
-        Color dot_color = make_color(0, 0, 0);
+        Color dot_color = accent;
         float dot_radius = radius * 0.4f;  // inner dot is ~40% of radio size
         fill_circle(rdcon, cx, cy, dot_radius, dot_color);
     }
