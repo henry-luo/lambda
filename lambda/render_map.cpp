@@ -35,10 +35,9 @@ static Item render_map_get_field_from_type(TypeMap* map_type, void* map_data, co
     Item result = ItemNull;
     *is_found = false;
     if (!map_type || !map_data || !key) return result;
-    ShapeEntry* field = map_type->shape;
-    while (field) {
+    FOR_EACH_MAP_FIELD(map_type, field) {
         if (!field->name) {
-            Map* nested_map = *(Map**)((char*)map_data + field->byte_offset);
+            Map* nested_map = map_shape_field_to_map(map_data, field);
             if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
                 bool nested_found = false;
                 Item nested_result = render_map_get_field_from_type(
@@ -53,7 +52,6 @@ static Item render_map_get_field_from_type(TypeMap* map_type, void* map_data, co
             *is_found = true;
             result = render_map_read_field(field, map_data);
         }
-        field = field->next;
     }
     return result;
 }

@@ -12,6 +12,7 @@
 #include "format_adapter.hpp"
 #include "block/block_common.hpp"
 #include "../html5/html5_parser.h"
+#include "../line_counter.hpp"
 #include "../../../lib/html_entities.h"
 #include "../../../lib/memtrack.h"
 #include "../input-utils.h"
@@ -122,10 +123,8 @@ void MarkupParser::splitLines(const char* content) {
     }
 
     // Count lines
-    int count = 1;
-    for (const char* p = content; *p; p++) {
-        if (*p == '\n') count++;
-    }
+    size_t content_len = strlen(content);
+    int count = line_counter_count_lf(content, content_len) + 1;
 
     // Allocate line array
     lines = (char**)mem_calloc(count + 1, sizeof(char*), MEM_CAT_INPUT_MARKUP);

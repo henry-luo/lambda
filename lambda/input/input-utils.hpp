@@ -64,6 +64,47 @@ static inline void skip_to_newline_with_tracker(const char** p, SourceTracker* t
     if (tracker) tracker->advance((size_t)(*p - start));
 }
 
+static inline void input_skip_to_eol(SourceTracker& tracker) {
+    while (!tracker.atEnd() && tracker.current() != '\n') {
+        tracker.advance();
+    }
+}
+
+static inline void input_skip_whitespace_and_comment_markers(SourceTracker& tracker,
+                                                            const char* line_comment1,
+                                                            const char* line_comment2,
+                                                            bool block_comments) {
+    while (!tracker.atEnd()) {
+        char c = tracker.current();
+        if (input_is_whitespace_char(c)) {
+            tracker.advance();
+            continue;
+        }
+        if (block_comments && c == '/' && tracker.peek(1) == '*') {
+            tracker.advance();
+            tracker.advance();
+            while (!tracker.atEnd() &&
+                   !(tracker.current() == '*' && tracker.peek(1) == '/')) {
+                tracker.advance();
+            }
+            if (!tracker.atEnd()) {
+                tracker.advance();
+                tracker.advance();
+            }
+            continue;
+        }
+        if (line_comment1 && tracker.match(line_comment1)) {
+            input_skip_to_eol(tracker);
+            continue;
+        }
+        if (line_comment2 && tracker.match(line_comment2)) {
+            input_skip_to_eol(tracker);
+            continue;
+        }
+        break;
+    }
+}
+
 static inline int encode_codepoint_utf8(uint32_t codepoint, char out[5]) {
     return codepoint_to_utf8(codepoint, out);
 }

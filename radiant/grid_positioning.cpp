@@ -220,7 +220,7 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
             if (!isnan(item->blk->given_width_percent)) {
                 float content_width = track_width * item->blk->given_width_percent / 100.0f;
                 item->blk->given_width = content_width;
-                item_width = item->blk->box_sizing == CSS_VALUE_BORDER_BOX
+                item_width = layout_uses_border_box(item)
                     ? layout_floor_border_box_width(item, content_width)
                     : layout_border_width_from_content_box(item, content_width);
             } else if (item->blk->given_width > 0) {
@@ -230,7 +230,7 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
             if (!isnan(item->blk->given_height_percent)) {
                 float content_height = track_height * item->blk->given_height_percent / 100.0f;
                 item->blk->given_height = content_height;
-                item_height = item->blk->box_sizing == CSS_VALUE_BORDER_BOX
+                item_height = layout_uses_border_box(item)
                     ? layout_floor_border_box_height(item, content_height)
                     : layout_border_height_from_content_box(item, content_height);
             } else if (item->blk->given_height > 0) {
@@ -402,7 +402,7 @@ void align_grid_items(GridContainerLayout* grid_layout) {
             if (row_idx < 0 || row_idx >= row_count) continue;
 
             float baseline = radiant::compute_element_first_baseline(
-                (radiant::LayoutContext*)grid_layout->lycon, item, true);
+                grid_layout->lycon, item, true);
             if (baseline < 0) baseline = item->height;
 
             float below = item->height - baseline;
@@ -485,7 +485,7 @@ void align_grid_items(GridContainerLayout* grid_layout) {
             if (row_idx < 0 || row_idx >= row_count) continue;
 
             float baseline = radiant::compute_element_first_baseline(
-                (radiant::LayoutContext*)grid_layout->lycon, item, true);
+                grid_layout->lycon, item, true);
             if (baseline < 0) baseline = item->height;
 
             float shift = row_max_baseline[row_idx] - baseline;
@@ -796,7 +796,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                 // Convert max-width to border-box coordinates for comparison with item->width
                 if (max_width > 0) {
                     float bb_max = max_width;
-                    bool is_border_box = (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+                    bool is_border_box = layout_uses_border_box(item);
                     if (!is_border_box && item->bound) {
                         bb_max += layout_boundary_metrics(item->bound).pad_border_h;
                     }
@@ -810,7 +810,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                 float min_w = (item->blk && item->blk->given_min_width > 0) ? item->blk->given_min_width : 0;
                 if (min_w > 0) {
                     float bb_min = min_w;
-                    bool is_border_box = (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+                    bool is_border_box = layout_uses_border_box(item);
                     if (!is_border_box && item->bound) {
                         bb_min += layout_boundary_metrics(item->bound).pad_border_h;
                     }
@@ -863,7 +863,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                 // Convert max-height to border-box coordinates for comparison with item->height
                 if (max_height > 0) {
                     float bb_max = max_height;
-                    bool is_border_box = (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+                    bool is_border_box = layout_uses_border_box(item);
                     if (!is_border_box && item->bound) {
                         bb_max += layout_boundary_metrics(item->bound).pad_border_v;
                     }
@@ -877,7 +877,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                 float min_h = (item->blk && item->blk->given_min_height > 0) ? item->blk->given_min_height : 0;
                 if (min_h > 0) {
                     float bb_min = min_h;
-                    bool is_border_box = (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+                    bool is_border_box = layout_uses_border_box(item);
                     if (!is_border_box && item->bound) {
                         bb_min += layout_boundary_metrics(item->bound).pad_border_v;
                     }

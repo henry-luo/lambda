@@ -1,7 +1,6 @@
 #include "css_value_parser.hpp"
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include "../../../lib/str.h"

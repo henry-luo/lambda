@@ -4,6 +4,7 @@
 #include "safety_analyzer.hpp"
 #include "module_registry.h"
 #include "template_registry.h"
+#include "mir_emitter_shared.hpp"
 #include "js/js_runtime.h"
 #include "../lib/log.h"
 #include "../lib/lambda_alloca.h"
@@ -427,27 +428,21 @@ static bool mir_var_rhs_keeps_mutable_alias(AstNode* rhs) {
     return root && root->entry && root->entry->is_mutable;
 }
 
-// Convert type for MIR register allocation (no MIR_T_P allowed for registers)
-static MIR_type_t reg_type(MIR_type_t t) {
-    return (t == MIR_T_P || t == MIR_T_F) ? MIR_T_I64 : t;
-}
-
 static MIR_reg_t new_reg(MirTranspiler* mt, const char* prefix, MIR_type_t type) {
-    char name[64];
-    snprintf(name, sizeof(name), "%s_%d", prefix, mt->reg_counter++);
-    return MIR_new_func_reg(mt->ctx, mt->current_func, reg_type(type), name);
+    return mir_new_numbered_reg(mt->ctx, mt->current_func, &mt->reg_counter,
+                                prefix, type, true);
 }
 
 static MIR_label_t new_label(MirTranspiler* mt) {
-    return MIR_new_label(mt->ctx);
+    return mir_new_emit_label(mt->ctx);
 }
 
 static void emit_insn(MirTranspiler* mt, MIR_insn_t insn) {
-    MIR_append_insn(mt->ctx, mt->current_func_item, insn);
+    mir_append_emit_insn(mt->ctx, mt->current_func_item, insn);
 }
 
 static void emit_label(MirTranspiler* mt, MIR_label_t label) {
-    MIR_append_insn(mt->ctx, mt->current_func_item, label);
+    mir_append_emit_label(mt->ctx, mt->current_func_item, label);
 }
 
 // emit a register holding the boxed null Item. Used as the "value" of statements that
@@ -457,8 +452,7 @@ static void emit_label(MirTranspiler* mt, MIR_label_t label) {
 static MIR_reg_t emit_null_item_reg(MirTranspiler* mt) {
     MIR_reg_t r = new_reg(mt, "stmt_null", MIR_T_I64);
     uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-        MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+    mir_emit_i64_const_to_reg(mt->ctx, mt->current_func_item, r, (int64_t)NULL_VAL);
     return r;
 }
 
@@ -715,22 +709,20 @@ static MirImportEntry* ensure_import(MirTranspiler* mt, const char* name,
     MIR_type_t ret_type, int nargs, MIR_var_t* args, int nres) {
     ImportCacheEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
+    mir_format_import_key(key.name, sizeof(key.name), name,
+        ret_type, nargs, args, nres, false);
 
     ImportCacheEntry* found = (ImportCacheEntry*)hashmap_get(mt->import_cache, &key);
     if (found) return &found->entry;
 
-    // Create proto and import
-    char proto_name[140];
-    snprintf(proto_name, sizeof(proto_name), "%s_p", name);
-
-    MIR_type_t res_types[1] = { ret_type };
-    MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, nres, res_types, nargs, args);
-    MIR_item_t imp = MIR_new_import(mt->ctx, name);
+    MIR_item_t proto = NULL;
+    MIR_item_t imp = NULL;
+    mir_create_import_proto_pair(mt->ctx, name, ret_type, nargs, args, nres,
+        false, &proto, &imp);
 
     ImportCacheEntry new_entry;
     memset(&new_entry, 0, sizeof(new_entry));
-    snprintf(new_entry.name, sizeof(new_entry.name), "%s", name);
+    snprintf(new_entry.name, sizeof(new_entry.name), "%s", key.name);
     new_entry.entry.proto = proto;
     new_entry.entry.import = imp;
     hashmap_set(mt->import_cache, &new_entry);
@@ -851,87 +843,84 @@ static MIR_reg_t emit_vararg_call_2(MirTranspiler* mt, const char* fn_name,
 // Emit runtime function calls
 // ============================================================================
 
+static MIR_reg_t emit_call_with_args(MirTranspiler* mt, const char* fn_name,
+    MIR_type_t ret_type, int nargs, MIR_type_t* arg_types, MIR_op_t* arg_ops) {
+    if (nargs < 0 || nargs > MIR_SHARED_MAX_CALL_ARGS) {
+        log_error("[MIR_CALL] unsupported return-call arity %d for %s", nargs, fn_name);
+        return 0;
+    }
+    MIR_var_t args[MIR_SHARED_MAX_CALL_ARGS];
+    if (nargs > 0) {
+        mir_prepare_call_args(args, arg_types, nargs);
+    }
+    MirImportEntry* ie = ensure_import(mt, fn_name, ret_type, nargs,
+        nargs ? args : NULL, 1);
+    MIR_reg_t res = new_reg(mt, fn_name, ret_type);
+    emit_insn(mt, mir_new_call_with_args(mt->ctx, ie->proto, ie->import,
+        res, nargs, arg_ops));
+    return res;
+}
+
+static void emit_call_void_with_args(MirTranspiler* mt, const char* fn_name,
+    int nargs, MIR_type_t* arg_types, MIR_op_t* arg_ops) {
+    if (nargs < 0 || nargs > MIR_SHARED_MAX_CALL_ARGS) {
+        log_error("[MIR_CALL] unsupported void-call arity %d for %s", nargs, fn_name);
+        return;
+    }
+    MIR_var_t args[MIR_SHARED_MAX_CALL_ARGS];
+    if (nargs > 0) {
+        mir_prepare_call_args(args, arg_types, nargs);
+    }
+    MirImportEntry* ie = ensure_import(mt, fn_name, MIR_T_I64, nargs,
+        nargs ? args : NULL, 0);
+    emit_insn(mt, mir_new_call_with_args(mt->ctx, ie->proto, ie->import,
+        0, nargs, arg_ops));
+}
+
 static MIR_reg_t emit_call_0(MirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type) {
-    MirImportEntry* ie = ensure_import(mt, fn_name, ret_type, 0, NULL, 1);
-    MIR_reg_t res = new_reg(mt, fn_name, ret_type);
-    emit_insn(mt, MIR_new_call_insn(mt->ctx, 3,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        MIR_new_reg_op(mt->ctx, res)));
-    return res;
+    return emit_call_with_args(mt, fn_name, ret_type, 0, NULL, NULL);
 }
 
 static MIR_reg_t emit_call_1(MirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t arg1_type, MIR_op_t arg1) {
-    MIR_var_t args[1] = {{arg1_type, "a", 0}};
-    MirImportEntry* ie = ensure_import(mt, fn_name, ret_type, 1, args, 1);
-    MIR_reg_t res = new_reg(mt, fn_name, ret_type);
-    emit_insn(mt, MIR_new_call_insn(mt->ctx, 4,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        MIR_new_reg_op(mt->ctx, res),
-        arg1));
-    return res;
+    MIR_type_t types[1] = {arg1_type};
+    MIR_op_t ops[1] = {arg1};
+    return emit_call_with_args(mt, fn_name, ret_type, 1, types, ops);
 }
 
 static MIR_reg_t emit_call_2(MirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
     MIR_type_t a2t, MIR_op_t a2) {
-    MIR_var_t args[2] = {{a1t, "a", 0}, {a2t, "b", 0}};
-    MirImportEntry* ie = ensure_import(mt, fn_name, ret_type, 2, args, 1);
-    MIR_reg_t res = new_reg(mt, fn_name, ret_type);
-    emit_insn(mt, MIR_new_call_insn(mt->ctx, 5,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        MIR_new_reg_op(mt->ctx, res),
-        a1, a2));
-    return res;
+    MIR_type_t types[2] = {a1t, a2t};
+    MIR_op_t ops[2] = {a1, a2};
+    return emit_call_with_args(mt, fn_name, ret_type, 2, types, ops);
 }
 
 static MIR_reg_t emit_call_3(MirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
     MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3) {
-    MIR_var_t args[3] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}};
-    MirImportEntry* ie = ensure_import(mt, fn_name, ret_type, 3, args, 1);
-    MIR_reg_t res = new_reg(mt, fn_name, ret_type);
-    emit_insn(mt, MIR_new_call_insn(mt->ctx, 6,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        MIR_new_reg_op(mt->ctx, res),
-        a1, a2, a3));
-    return res;
+    MIR_type_t types[3] = {a1t, a2t, a3t};
+    MIR_op_t ops[3] = {a1, a2, a3};
+    return emit_call_with_args(mt, fn_name, ret_type, 3, types, ops);
 }
 
 static MIR_reg_t emit_call_4(MirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
     MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
     MIR_type_t a4t, MIR_op_t a4) {
-    MIR_var_t args[4] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}};
-    MirImportEntry* ie = ensure_import(mt, fn_name, ret_type, 4, args, 1);
-    MIR_reg_t res = new_reg(mt, fn_name, ret_type);
-    emit_insn(mt, MIR_new_call_insn(mt->ctx, 7,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        MIR_new_reg_op(mt->ctx, res),
-        a1, a2, a3, a4));
-    return res;
+    MIR_type_t types[4] = {a1t, a2t, a3t, a4t};
+    MIR_op_t ops[4] = {a1, a2, a3, a4};
+    return emit_call_with_args(mt, fn_name, ret_type, 4, types, ops);
 }
 
 static MIR_reg_t emit_call_5(MirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
     MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
     MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5) {
-    MIR_var_t args[5] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0},
-        {a4t, "d", 0}, {a5t, "e", 0}};
-    MirImportEntry* ie = ensure_import(mt, fn_name, ret_type, 5, args, 1);
-    MIR_reg_t res = new_reg(mt, fn_name, ret_type);
-    emit_insn(mt, MIR_new_call_insn(mt->ctx, 8,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        MIR_new_reg_op(mt->ctx, res),
-        a1, a2, a3, a4, a5));
-    return res;
+    MIR_type_t types[5] = {a1t, a2t, a3t, a4t, a5t};
+    MIR_op_t ops[5] = {a1, a2, a3, a4, a5};
+    return emit_call_with_args(mt, fn_name, ret_type, 5, types, ops);
 }
 
 static MIR_reg_t emit_call_8(MirTranspiler* mt, const char* fn_name,
@@ -940,55 +929,36 @@ static MIR_reg_t emit_call_8(MirTranspiler* mt, const char* fn_name,
     MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5,
     MIR_type_t a6t, MIR_op_t a6, MIR_type_t a7t, MIR_op_t a7,
     MIR_type_t a8t, MIR_op_t a8) {
-    MIR_var_t args[8] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0},
-        {a5t, "e", 0}, {a6t, "f", 0}, {a7t, "g", 0}, {a8t, "h", 0}};
-    MirImportEntry* ie = ensure_import(mt, fn_name, ret_type, 8, args, 1);
-    MIR_reg_t res = new_reg(mt, fn_name, ret_type);
-    emit_insn(mt, MIR_new_call_insn(mt->ctx, 11,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        MIR_new_reg_op(mt->ctx, res),
-        a1, a2, a3, a4, a5, a6, a7, a8));
-    return res;
+    MIR_type_t types[8] = {a1t, a2t, a3t, a4t, a5t, a6t, a7t, a8t};
+    MIR_op_t ops[8] = {a1, a2, a3, a4, a5, a6, a7, a8};
+    return emit_call_with_args(mt, fn_name, ret_type, 8, types, ops);
 }
 
 // Call with no return value
 static void emit_call_void_0(MirTranspiler* mt, const char* fn_name) {
-    MirImportEntry* ie = ensure_import(mt, fn_name, MIR_T_I64, 0, nullptr, 0);
-    emit_insn(mt, MIR_new_call_insn(mt->ctx, 2,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import)));
+    emit_call_void_with_args(mt, fn_name, 0, NULL, NULL);
 }
 
 static void emit_call_void_1(MirTranspiler* mt, const char* fn_name,
     MIR_type_t arg1_type, MIR_op_t arg1) {
-    MIR_var_t args[1] = {{arg1_type, "a", 0}};
-    MirImportEntry* ie = ensure_import(mt, fn_name, MIR_T_I64, 1, args, 0);
-    emit_insn(mt, MIR_new_call_insn(mt->ctx, 3,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        arg1));
+    MIR_type_t types[1] = {arg1_type};
+    MIR_op_t ops[1] = {arg1};
+    emit_call_void_with_args(mt, fn_name, 1, types, ops);
 }
 
 static void emit_call_void_2(MirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2) {
-    MIR_var_t args[2] = {{a1t, "a", 0}, {a2t, "b", 0}};
-    MirImportEntry* ie = ensure_import(mt, fn_name, MIR_T_I64, 2, args, 0);
-    emit_insn(mt, MIR_new_call_insn(mt->ctx, 4,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        a1, a2));
+    MIR_type_t types[2] = {a1t, a2t};
+    MIR_op_t ops[2] = {a1, a2};
+    emit_call_void_with_args(mt, fn_name, 2, types, ops);
 }
 
 static void emit_call_void_3(MirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
     MIR_type_t a3t, MIR_op_t a3) {
-    MIR_var_t args[3] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}};
-    MirImportEntry* ie = ensure_import(mt, fn_name, MIR_T_I64, 3, args, 0);
-    emit_insn(mt, MIR_new_call_insn(mt->ctx, 5,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        a1, a2, a3));
+    MIR_type_t types[3] = {a1t, a2t, a3t};
+    MIR_op_t ops[3] = {a1, a2, a3};
+    emit_call_void_with_args(mt, fn_name, 3, types, ops);
 }
 
 // ============================================================================

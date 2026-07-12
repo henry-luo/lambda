@@ -5,6 +5,7 @@
 #include "intrinsic_sizing.hpp"
 #include "layout_box.hpp"
 #include "layout_measure.hpp"
+#include "layout_percentages.hpp"
 #include "form_control.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -173,12 +174,14 @@ static float resolve_flex_line_height_for_owner(LayoutContext* lycon, const CssV
         return 0;
     }
 
+    float resolved_percentage = 0.0f;
     if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
         float owner_font_size = target_font_size;
         if (owner && owner->font && owner->font->font_size > 0) {
             owner_font_size = owner->font->font_size;
         }
-        return (float)(value->data.percentage.value * owner_font_size / 100.0);
+        return layout_resolve_percentage_value(value, owner_font_size, &resolved_percentage)
+            ? resolved_percentage : 0.0f;
     }
 
     if (value->type == CSS_VALUE_TYPE_LENGTH) {
@@ -275,11 +278,8 @@ static CssValue* flex_margin_side_value(const CssValue* value, CssPropertyId pro
 static bool resolve_flex_margin_value(LayoutContext* lycon, CssPropertyId property_id,
                                       CssValue* value, float inline_base, float* out) {
     if (!value || !out) return false;
-    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        if (inline_base < 0.0f) return false;
-        *out = (float)(value->data.percentage.value / 100.0) * inline_base;
-        return true;
-    }
+    if (layout_resolve_percentage_value(value, inline_base, out)) return true;
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return false;
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
         *out = 0.0f;
         return true;
@@ -353,32 +353,25 @@ static float flex_item_content_width_for_child_percentages(LayoutContext* lycon,
     ViewBlock* block = lam::view_as_block(item);
     if (!block) return -1.0f;
 
-    if (block->width > 0.0f) {
-        return layout_content_width_from_border_box(block, block->width);
-    }
+    float content_width = layout_block_used_content_size(block, true, true);
+    if (content_width >= 0.0f) return content_width;
+
     if (block->content_width > 0.0f) {
         return block->content_width;
     }
 
-    float content_width = -1.0f;
-    if (block->blk && block->blk->given_width >= 0.0f) {
-        content_width = block->blk->given_width;
-        if (block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
-            content_width = layout_content_width_from_border_box(block, content_width);
-        }
-        return fmax(content_width, 0.0f);
-    }
+    content_width = layout_block_given_content_size(block, true);
+    if (content_width >= 0.0f) return content_width;
 
     if (!flex_layout || flex_layout->cross_axis_size <= 0.0f) return -1.0f;
 
     CssDeclaration* width_decl = item->specified_style
         ? style_tree_get_declaration(item->specified_style, CSS_PROPERTY_WIDTH) : nullptr;
     if (width_decl && width_decl->value &&
-        width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        content_width = flex_layout->cross_axis_size *
-            (float)(width_decl->value->data.percentage.value / 100.0);
-        if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
-            content_width = layout_content_width_from_border_box(block, content_width);
+        layout_resolve_percentage_value(width_decl->value, flex_layout->cross_axis_size, &content_width)) {
+        if (block->blk) {
+            content_width = layout_css_size_to_content_box(
+                block->bound, layout_box_sizing(block), content_width, true);
         }
         return fmax(content_width, 0.0f);
     }
@@ -386,24 +379,11 @@ static float flex_item_content_width_for_child_percentages(LayoutContext* lycon,
     if (!width_decl || !width_decl->value ||
         (width_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
          width_decl->value->data.keyword == CSS_VALUE_AUTO)) {
-        content_width = flex_layout->cross_axis_size;
-        if (block->bound) {
-            BoxMetrics block_box = layout_box_metrics(block);
-            content_width -= block_box.margin_h + block_box.pad_border_h;
-        }
-        return fmax(content_width, 0.0f);
+        return layout_block_auto_content_width_from_inline_base(block, flex_layout->cross_axis_size);
     }
 
-    if (lycon && width_decl && width_decl->value) {
-        float resolved_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
-        if (!isnan(resolved_width) && resolved_width >= 0.0f) {
-            content_width = resolved_width;
-            if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
-                content_width = layout_content_width_from_border_box(block, content_width);
-            }
-            return fmax(content_width, 0.0f);
-        }
-    }
+    content_width = layout_block_declared_content_size(lycon, block, CSS_PROPERTY_WIDTH, true);
+    if (content_width >= 0.0f) return content_width;
 
     return -1.0f;
 }
@@ -726,27 +706,13 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         if (child_elem) {
             DomNode* sub_child = child_elem->first_child;
             while (sub_child) {
-                if (sub_child->is_text()) {
-                    // Text content - skip whitespace-only text, estimate lines for real content
-                    const char* text = (const char*)sub_child->text_data();
-                    if (text && strlen(text) > 0) {
-                        // Check if text is only whitespace
-                        bool is_whitespace_only = true;
-                        for (const char* p = text; *p; p++) {
-                            if (!is_space((unsigned char)*p)) {
-                                is_whitespace_only = false;
-                                break;
-                            }
-                        }
-                        if (!is_whitespace_only) {
-                            // Use computed line height based on element's font-size
-                            int text_height = text_line_height;
-                            // Text content is always inline - use MAX, not SUM
-                            // Text flows horizontally and should not stack heights
-                            if (text_height > max_child_height) {
-                                max_child_height = text_height;
-                            }
-                        }
+                if (layout_text_node_has_content(sub_child)) {
+                    // Use computed line height based on element's font-size
+                    int text_height = text_line_height;
+                    // Text content is always inline - use MAX, not SUM
+                    // Text flows horizontally and should not stack heights
+                    if (text_height > max_child_height) {
+                        max_child_height = text_height;
                     }
                 } else if (sub_child->is_element()) {
                     // Element - check for block-level element heights
@@ -905,16 +871,8 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             if (elem) {
                                 DomNode* content = elem->first_child;
                                 while (content) {
-                                    if (content->is_text()) {
-                                        const char* text = (const char*)content->text_data();
-                                        if (text) {
-                                            for (const char* p = text; *p; p++) {
-                                                if (!is_space((unsigned char)*p)) {
-                                                    has_text_content = true;
-                                                    break;
-                                                }
-                                            }
-                                        }
+                                    if (layout_text_node_has_content(content)) {
+                                        has_text_content = true;
                                     } else if (content->is_element()) {
                                         has_element_content = true;
                                         // Check if this nested element has explicit height
@@ -1002,17 +960,8 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                         } else {
                                             has_block_element = true;
                                         }
-                                    } else if (content->is_text()) {
-                                        // Check if text is non-whitespace
-                                        const char* text = (const char*)content->text_data();
-                                        if (text) {
-                                            for (const char* p = text; *p; p++) {
-                                                if (!is_space((unsigned char)*p)) {
-                                                    has_text_content = true;
-                                                    break;
-                                                }
-                                            }
-                                        }
+                                    } else if (layout_text_node_has_content(content)) {
+                                        has_text_content = true;
                                     }
                                     content = content->next_sibling;
                                 }
@@ -1039,16 +988,8 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                         if (elem) {
                             DomNode* content = elem->first_child;
                             while (content) {
-                                if (content->is_text()) {
-                                    const char* text = (const char*)content->text_data();
-                                    if (text) {
-                                        for (const char* p = text; *p; p++) {
-                                            if (!is_space((unsigned char)*p)) {
-                                                has_text_content = true;
-                                                break;
-                                            }
-                                        }
-                                    }
+                                if (layout_text_node_has_content(content)) {
+                                    has_text_content = true;
                                 }
                                 if (has_text_content) break;
                                 content = content->next_sibling;
@@ -1620,7 +1561,7 @@ void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
     // not have a View created. Without this check, a ViewBlock is allocated and
     // linked into the view tree, causing display:none children (e.g. hidden
     // dropdown menus) to be rendered.
-    if (display.outer == CSS_VALUE_NONE) {
+    if (layout_display_is_none(display)) {
         log_debug("init_flex_item_view: skipping display:none element %s", node->node_name());
         return;
     }
@@ -2132,14 +2073,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         if (item->blk->given_width >= 0.0f) {
                             available_width = item->blk->given_width;
                         }
-                        if (item->blk->given_max_width > 0.0f &&
-                            available_width > item->blk->given_max_width) {
-                            available_width = item->blk->given_max_width;
-                        }
-                        if (item->blk->given_min_width > 0.0f &&
-                            available_width < item->blk->given_min_width) {
-                            available_width = item->blk->given_min_width;
-                        }
+                        available_width = layout_clamp_positive_min_max_width(
+                            lam::view_as_block(item), available_width);
                     }
                     // Subtract item's padding+border to get content width
                     if (item->bound) {
@@ -2228,97 +2163,85 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             }
 
             while (c) {
-                if (c->is_text()) {
+                if (layout_text_node_has_content(c)) {
                     const char* text = (const char*)c->text_data();
-                    if (text) {
-                        bool is_whitespace_only = true;
-                        for (const char* p = text; *p; p++) {
-                            if (!is_space((unsigned char)*p)) {
-                                is_whitespace_only = false;
-                                break;
-                            }
+                    int text_len = strlen(text);
+                    float text_min_width, text_max_width, text_height;
+                    if (lycon) {
+                        // CRITICAL FIX: Normalize whitespace according to CSS white-space property
+                        CssEnum ws = get_white_space_value(c);
+                        const char* measure_text = text;
+                        size_t measure_len = text_len;
+                        static thread_local char normalized_buffer2[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
+
+                        if (should_collapse_whitespace(ws)) {
+                            measure_len = normalize_whitespace_for_flex(text, text_len,
+                                                                         normalized_buffer2, sizeof(normalized_buffer2));
+                            measure_text = normalized_buffer2;
                         }
 
-                        if (!is_whitespace_only) {
-                            int text_len = strlen(text);
-                            float text_min_width, text_max_width, text_height;
-                            if (lycon) {
-                                // CRITICAL FIX: Normalize whitespace according to CSS white-space property
-                                CssEnum ws = get_white_space_value(c);
-                                const char* measure_text = text;
-                                size_t measure_len = text_len;
-                                static thread_local char normalized_buffer2[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
-
-                                if (should_collapse_whitespace(ws)) {
-                                    measure_len = normalize_whitespace_for_flex(text, text_len,
-                                                                                 normalized_buffer2, sizeof(normalized_buffer2));
-                                    measure_text = normalized_buffer2;
+                        // Get text-transform from parent element chain
+                        CssEnum text_transform = CSS_VALUE_NONE;
+                        DomNode* tt_node = item;
+                        while (tt_node) {
+                            if (tt_node->is_element()) {
+                                DomElement* tt_elem = lam::dom_require<DOM_NODE_ELEMENT>(tt_node);
+                                ViewBlock* tt_view = lam::view_as_block(tt_elem);
+                                if (tt_view && tt_view->blk && tt_view->blk->text_transform != 0 &&
+                                    tt_view->blk->text_transform != CSS_VALUE_INHERIT) {
+                                    text_transform = tt_view->blk->text_transform;
+                                    break;
                                 }
-
-                                // Get text-transform from parent element chain
-                                CssEnum text_transform = CSS_VALUE_NONE;
-                                DomNode* tt_node = item;
-                                while (tt_node) {
-                                    if (tt_node->is_element()) {
-                                        DomElement* tt_elem = lam::dom_require<DOM_NODE_ELEMENT>(tt_node);
-                                        ViewBlock* tt_view = lam::view_as_block(tt_elem);
-                                        if (tt_view && tt_view->blk && tt_view->blk->text_transform != 0 &&
-                                            tt_view->blk->text_transform != CSS_VALUE_INHERIT) {
-                                            text_transform = tt_view->blk->text_transform;
+                                if (tt_elem->specified_style) {
+                                    CssDeclaration* decl = style_tree_get_declaration(
+                                        tt_elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
+                                    if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                                        CssEnum val = decl->value->data.keyword;
+                                        if (val != CSS_VALUE_INHERIT && val != CSS_VALUE_NONE) {
+                                            text_transform = val;
                                             break;
                                         }
-                                        if (tt_elem->specified_style) {
-                                            CssDeclaration* decl = style_tree_get_declaration(
-                                                tt_elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
-                                            if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                                                CssEnum val = decl->value->data.keyword;
-                                                if (val != CSS_VALUE_INHERIT && val != CSS_VALUE_NONE) {
-                                                    text_transform = val;
-                                                    break;
-                                                }
-                                            }
-                                        }
                                     }
-                                    tt_node = tt_node->parent;
                                 }
-
-                                TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len, text_transform);
-                                text_min_width = widths.min_content;
-                                text_max_width = widths.max_content;
-                                // BUGFIX: Use line height instead of font size for text height
-                                // This matches browser behavior where text takes up line-height space
-                                if (lycon->font.font_handle) {
-                                    text_height = calc_normal_line_height(lycon->font.font_handle);
-                                } else if (lycon->font.style && lycon->font.style->font_size > 0) {
-                                    text_height = lycon->font.style->font_size;  // Fallback to font-size
-                                } else {
-                                    text_height = 20.0f;  // Ultimate fallback
-                                }
-                            } else {
-                                text_max_width = text_len * 10.0f;
-                                text_min_width = text_max_width;  // Fallback: same as max
-                                text_height = 20.0f;
                             }
-
-                            // CRITICAL FIX: For row flex containers, text nodes should be summed
-                            // into total_child_width just like element children. Previously text
-                            // was only MAX'd which caused incorrect intrinsic width calculation
-                            // for inline-flex containers with both text and element children.
-                            if (is_row_flex_container) {
-                                total_child_width += text_max_width;  // Row flex: sum for max-content
-                                child_count++;  // Count text as a child for gap calculation
-                            } else {
-                                min_child_width = max(min_child_width, text_min_width);
-                                max_child_width = max(max_child_width, text_max_width);
-                            }
-
-                            // For height, row flex takes max, column flex sums
-                            if (is_row_flex_container) {
-                                total_child_height = max(total_child_height, text_height);
-                            } else {
-                                total_child_height += text_height;
-                            }
+                            tt_node = tt_node->parent;
                         }
+
+                        TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len, text_transform);
+                        text_min_width = widths.min_content;
+                        text_max_width = widths.max_content;
+                        // BUGFIX: Use line height instead of font size for text height
+                        // This matches browser behavior where text takes up line-height space
+                        if (lycon->font.font_handle) {
+                            text_height = calc_normal_line_height(lycon->font.font_handle);
+                        } else if (lycon->font.style && lycon->font.style->font_size > 0) {
+                            text_height = lycon->font.style->font_size;  // Fallback to font-size
+                        } else {
+                            text_height = 20.0f;  // Ultimate fallback
+                        }
+                    } else {
+                        text_max_width = text_len * 10.0f;
+                        text_min_width = text_max_width;  // Fallback: same as max
+                        text_height = 20.0f;
+                    }
+
+                    // CRITICAL FIX: For row flex containers, text nodes should be summed
+                    // into total_child_width just like element children. Previously text
+                    // was only MAX'd which caused incorrect intrinsic width calculation
+                    // for inline-flex containers with both text and element children.
+                    if (is_row_flex_container) {
+                        total_child_width += text_max_width;  // Row flex: sum for max-content
+                        child_count++;  // Count text as a child for gap calculation
+                    } else {
+                        min_child_width = max(min_child_width, text_min_width);
+                        max_child_width = max(max_child_width, text_max_width);
+                    }
+
+                    // For height, row flex takes max, column flex sums
+                    if (is_row_flex_container) {
+                        total_child_height = max(total_child_height, text_height);
+                    } else {
+                        total_child_height += text_height;
                     }
                 } else if (c->is_element()) {
                     ViewElement* child_view = lam::view_require_element(c);
@@ -2329,7 +2252,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         // CSS Flexbox §4.1: Absolutely positioned children and display:none
                         // elements are not flex items and should not contribute to intrinsic sizing.
                         DisplayValue child_display = resolve_display_value((void*)c);
-                        if (child_display.outer == CSS_VALUE_NONE) {
+                        if (layout_display_is_none(child_display)) {
                             c = c->next_sibling;
                             continue;
                         }
@@ -2476,34 +2399,20 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             if (item->bound) {
                                 row_width -= item->bound->margin.left + item->bound->margin.right;
                             }
-                            if (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+                            if (layout_uses_border_box(lam::view_as_block(item))) {
                                 if (item->blk->given_width >= 0.0f) {
                                     row_width = item->blk->given_width;
                                 }
-                                if (item->blk->given_max_width > 0.0f &&
-                                    row_width > item->blk->given_max_width) {
-                                    row_width = item->blk->given_max_width;
-                                }
-                                if (item->blk->given_min_width > 0.0f &&
-                                    row_width < item->blk->given_min_width) {
-                                    row_width = item->blk->given_min_width;
-                                }
+                                row_width = layout_clamp_positive_min_max_width(
+                                    lam::view_as_block(item), row_width);
                             }
-                            if (item->bound) {
-                                row_width -= layout_boundary_metrics(item->bound).pad_border_h;
-                            }
-                            if (item->blk && item->blk->box_sizing != CSS_VALUE_BORDER_BOX) {
+                            row_width = layout_boundary_content_size_from_border_box(item->bound, row_width, true);
+                            if (item->blk && !layout_uses_border_box(lam::view_as_block(item))) {
                                 if (item->blk->given_width >= 0.0f) {
                                     row_width = item->blk->given_width;
                                 }
-                                if (item->blk->given_max_width > 0.0f &&
-                                    row_width > item->blk->given_max_width) {
-                                    row_width = item->blk->given_max_width;
-                                }
-                                if (item->blk->given_min_width > 0.0f &&
-                                    row_width < item->blk->given_min_width) {
-                                    row_width = item->blk->given_min_width;
-                                }
+                                row_width = layout_clamp_positive_min_max_width(
+                                    lam::view_as_block(item), row_width);
                             }
                             if (row_width <= 0.0f) row_width = flex_layout->cross_axis_size;
                             // Estimate each child's share of the row (assumes flex:1 equal split)
@@ -2522,7 +2431,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             // Subtract child's own padding+border to get content width
                             float child_content_w = child_share;
                             if (child_view->bound) {
-                                child_content_w -= layout_boundary_metrics(child_view->bound).pad_border_h;
+                                child_content_w = layout_boundary_content_size_from_border_box(
+                                    child_view->bound, child_content_w, true);
                             } else if (child_view->specified_style) {
                                 // Fallback: resolve padding/border from CSS when bound not yet computed
                                 float cp = 0, cb = 0;
@@ -2605,28 +2515,26 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                     if (!is_row_flex_container) {
                                         float parent_cw = -1;
                                         if (item->blk && item->blk->given_width >= 0) {
-                                            parent_cw = item->blk->given_width;
-                                            if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
-                                                parent_cw = layout_content_width_from_border_box(lam::view_as_block(item), parent_cw);
-                                            }
+                                            parent_cw = layout_css_size_to_content_box(
+                                                item->bound, layout_box_sizing(lam::view_as_block(item)), item->blk->given_width, true);
                                         } else if (flex_layout && flex_layout->cross_axis_size > 0 && item->specified_style) {
                                             // Try resolving percentage width against container cross-axis
                                             CssDeclaration* w_decl = style_tree_get_declaration(
                                                 item->specified_style, CSS_PROPERTY_WIDTH);
-                                            if (w_decl && w_decl->value && w_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                                                float pct = w_decl->value->data.percentage.value;
-                                                parent_cw = flex_layout->cross_axis_size * pct / 100.0f;
-                                            } else if (!w_decl || !w_decl->value ||
-                                                       (w_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-                                                        w_decl->value->data.keyword == CSS_VALUE_AUTO)) {
+                                            bool resolved_percent_width = w_decl && w_decl->value &&
+                                                layout_resolve_percentage_value(w_decl->value, flex_layout->cross_axis_size, &parent_cw);
+                                            if (!resolved_percent_width && (!w_decl || !w_decl->value ||
+                                                (w_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                                                 w_decl->value->data.keyword == CSS_VALUE_AUTO))) {
                                                 // Auto width → stretch to cross-axis minus margins
                                                 parent_cw = flex_layout->cross_axis_size;
                                                 if (item->bound)
                                                     parent_cw -= item->bound->margin.left + item->bound->margin.right;
                                             }
                                             // Convert border-box to content-box
-                                            if (parent_cw > 0 && item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
-                                                parent_cw = layout_content_width_from_border_box(lam::view_as_block(item), parent_cw);
+                                            if (parent_cw > 0 && item->blk) {
+                                                parent_cw = layout_css_size_to_content_box(
+                                                    item->bound, layout_box_sizing(lam::view_as_block(item)), parent_cw, true);
                                             }
                                         }
                                         if (parent_cw > 0) {
@@ -2646,16 +2554,15 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 if (!is_row_flex_container) {
                                     float parent_cw = -1;
                                     if (item->blk && item->blk->given_width >= 0) {
-                                        parent_cw = item->blk->given_width;
-                                        if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
-                                            parent_cw = layout_content_width_from_border_box(lam::view_as_block(item), parent_cw);
-                                        }
+                                        parent_cw = layout_css_size_to_content_box(
+                                            item->bound, layout_box_sizing(lam::view_as_block(item)), item->blk->given_width, true);
                                     } else if (flex_layout && flex_layout->cross_axis_size > 0) {
                                         parent_cw = flex_layout->cross_axis_size;
                                         if (item->bound)
                                             parent_cw -= item->bound->margin.left + item->bound->margin.right;
-                                        if (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
-                                            parent_cw = layout_content_width_from_border_box(lam::view_as_block(item), parent_cw);
+                                        if (item->blk) {
+                                            parent_cw = layout_css_size_to_content_box(
+                                                item->bound, layout_box_sizing(lam::view_as_block(item)), parent_cw, true);
                                         }
                                     }
                                     if (parent_cw > 0) {

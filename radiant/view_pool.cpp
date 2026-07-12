@@ -2,6 +2,7 @@
 #include "layout_text.hpp"
 #include "layout_positioned.hpp"
 #include "layout_flex.hpp"
+#include "layout_box.hpp"
 #include "grid.hpp"
 #include "transform.hpp"
 #include "state_store.hpp"
@@ -964,7 +965,7 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
         if (block->blk->given_height >= 0) {
             strbuf_append_format(buf, "given-hg:%.1f, ", block->blk->given_height);
         }
-        if (block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+        if (layout_uses_border_box(block)) {
             strbuf_append_str(buf, "box-sizing:border-box");
         } else {
             strbuf_append_str(buf, "box-sizing:content-box");
@@ -2594,7 +2595,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
         strbuf_append_format(buf, "\"max_height\": %.1f,\n", block->blk->given_max_height);
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_format(buf, "\"box_sizing\": \"%s\",\n",
-            block->blk->box_sizing == CSS_VALUE_BORDER_BOX ? "border-box" : "content-box");
+            layout_uses_border_box(block) ? "border-box" : "content-box");
 
         if (block->blk->given_width >= 0) {
             strbuf_append_char_n(buf, ' ', indent + 4);

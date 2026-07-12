@@ -1280,13 +1280,11 @@ static ShapeEntry* map_find_matching_field(TypeMap* map_type, ShapeEntry* needle
     if (hit && target_equal(needle->ns, hit->ns)) return hit;
 
     // hash lookup is name-only; namespace collisions must fall back to the full shape chain.
-    ShapeEntry* field = map_type->shape;
-    while (field) {
+    FOR_EACH_MAP_FIELD(map_type, field) {
         if (strview_equal(needle->name, field->name->str) &&
             target_equal(needle->ns, field->ns)) {
             return field;
         }
-        field = field->next;
     }
     return NULL;
 }
@@ -1299,21 +1297,18 @@ static Bool map_data_eq(TypeMap* type_a, void* data_a, TypeMap* type_b, void* da
 
     // same-shape fast path: keys are identical in same order, compare values by slot
     if (type_a == type_b) {
-        ShapeEntry* field = type_a->shape;
-        while (field) {
+        FOR_EACH_MAP_FIELD(type_a, field) {
             Item val_a = _map_field_value(type_a, data_a, field);
             Item val_b = _map_field_value(type_b, data_b, field);
             Bool r = fn_eq_depth(val_a, val_b, depth + 1);
             if (r == BOOL_ERROR) return BOOL_ERROR;
             if (r == BOOL_FALSE) return BOOL_FALSE;
-            field = field->next;
         }
         return BOOL_TRUE;
     }
 
     // different shapes: for each key in A, look up in B by name+namespace
-    ShapeEntry* field_a = type_a->shape;
-    while (field_a) {
+    FOR_EACH_MAP_FIELD(type_a, field_a) {
         ShapeEntry* field_b = map_find_matching_field(type_b, field_a);
         if (!field_b) return BOOL_FALSE;
 
@@ -1322,7 +1317,6 @@ static Bool map_data_eq(TypeMap* type_a, void* data_a, TypeMap* type_b, void* da
         Bool r = fn_eq_depth(val_a, val_b, depth + 1);
         if (r == BOOL_ERROR) return BOOL_ERROR;
         if (r == BOOL_FALSE) return BOOL_FALSE;
-        field_a = field_a->next;
     }
     // key-count check already done above — no extra keys in B
     return BOOL_TRUE;
@@ -1724,7 +1718,7 @@ static int strview_total_cmp(StrView a, StrView b) {
 
 static ShapeEntry* map_next_sorted_field(TypeMap* type, ShapeEntry* previous) {
     ShapeEntry* best = NULL;
-    for (ShapeEntry* field = type ? type->shape : NULL; field; field = field->next) {
+    FOR_EACH_MAP_FIELD(type, field) {
         if (previous && shape_entry_name_cmp(field, previous) <= 0) continue;
         if (!best || shape_entry_name_cmp(field, best) < 0) best = field;
     }
@@ -2033,33 +2027,11 @@ Item fn_or(Item a_item, Item b_item) {
 
 // helper: get field value from a map/element's packed data by shape entry
 static Item _map_field_value(TypeMap* map_type, void* data, ShapeEntry* field) {
-    if (!data || !field) return ItemNull;
-    TypeId type_id = field->type->type_id;
-    void* field_ptr = (char*)data + field->byte_offset;
-    switch (type_id) {
-    case LMD_TYPE_NULL: {
-        void* ptr = *(void**)field_ptr;
-        if (ptr) return {.container = (Container*)ptr};
-        return ItemNull;
-    }
-    case LMD_TYPE_BOOL:   return {.item = b2it(*(bool*)field_ptr)};
-    case LMD_TYPE_INT:    return {.item = i2it(*(int64_t*)field_ptr)};
-    case LMD_TYPE_INT64:  return push_l(*(int64_t*)field_ptr);
-    case LMD_TYPE_FLOAT:  return push_d(*(double*)field_ptr);
-    case LMD_TYPE_FLOAT64:  return lambda_float_ptr_to_item((const double*)field_ptr);
-    case LMD_TYPE_DTIME:  return push_k(*(DateTime*)field_ptr);
-    case LMD_TYPE_DECIMAL: return {.item = c2it(*(char**)field_ptr)};
-    case LMD_TYPE_STRING: return {.item = s2it(*(char**)field_ptr)};
-    case LMD_TYPE_SYMBOL: return {.item = y2it(*(char**)field_ptr)};
-    case LMD_TYPE_BINARY: return {.item = x2it(*(char**)field_ptr)};
-    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
-        Container* c = *(Container**)field_ptr;
-        if (!c) return ItemNull;
-        return {.container = c};
-    }
-    default: return ItemNull;
-    }
+    (void)map_type;
+    if (!data || !field || !field->type) return ItemNull;
+    // packed map slots must use the canonical reader so query/equality handle
+    // every scalar field type the same way as MapReader and serializers.
+    return map_shape_field_to_item(data, field);
 }
 
 // recursive helper: collect all items matching type_val into result array
@@ -2081,14 +2053,12 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
         Element* elmt = data.element;
         // recurse into attributes
         TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-        ShapeEntry* field = elmt_type->shape;
-        while (field) {
+        FOR_EACH_MAP_FIELD(elmt_type, field) {
             if (field->name) {
                 Item val = _map_field_value((TypeMap*)elmt_type, elmt->data, field);
                 // always recurse with self_inclusive=true so descendants are fully searched
                 if (val.item) query_collect(val, type_val, true, result, depth + 1);
             }
-            field = field->next;
         }
         // recurse into content items
         for (int64_t i = 0; i < elmt->length; i++) {
@@ -2097,13 +2067,11 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
     } else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT) {
         Map* map = data.map;
         TypeMap* map_type = (TypeMap*)map->type;
-        ShapeEntry* field = map_type->shape;
-        while (field) {
+        FOR_EACH_MAP_FIELD(map_type, field) {
             if (field->name) {
                 Item val = _map_field_value(map_type, map->data, field);
                 if (val.item) query_collect(val, type_val, true, result, depth + 1);
             }
-            field = field->next;
         }
     } else if (type_id == LMD_TYPE_ARRAY) {
         // runtime lists and arrays share LMD_TYPE_ARRAY, so one branch must cover both.
@@ -2143,15 +2111,13 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
         Element* elmt = data.element;
         // check attribute values
         TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-        ShapeEntry* field = elmt_type->shape;
-        while (field) {
+        FOR_EACH_MAP_FIELD(elmt_type, field) {
             if (field->name) {
                 Item val = _map_field_value((TypeMap*)elmt_type, elmt->data, field);
                 if (val.item && fn_is(val, type_val) == BOOL_TRUE) {
                     array_push(result, val);
                 }
             }
-            field = field->next;
         }
         // check direct children
         for (int64_t i = 0; i < elmt->length; i++) {
@@ -2163,15 +2129,13 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
     } else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT) {
         Map* map = data.map;
         TypeMap* map_type = (TypeMap*)map->type;
-        ShapeEntry* field = map_type->shape;
-        while (field) {
+        FOR_EACH_MAP_FIELD(map_type, field) {
             if (field->name) {
                 Item val = _map_field_value(map_type, map->data, field);
                 if (val.item && fn_is(val, type_val) == BOOL_TRUE) {
                     array_push(result, val);
                 }
             }
-            field = field->next;
         }
     } else if (type_id == LMD_TYPE_ARRAY) {
         // runtime lists and arrays share LMD_TYPE_ARRAY; keep spreadable query arrays here too.
@@ -2265,13 +2229,11 @@ Bool fn_in(Item a_item, Item b_item) {
             Map *map = b_item.map;
             TypeMap* map_type = (TypeMap*)map->type;
             if (!map_type) return false;
-            ShapeEntry* field = map_type->shape;
-            while (field) {
+            FOR_EACH_MAP_FIELD(map_type, field) {
                 Item val = _map_field_value(map_type, map->data, field);
                 if (fn_eq(val, a_item) == BOOL_TRUE) {
                     return true;
                 }
-                field = field->next;
             }
             return false;
         }
@@ -2292,13 +2254,11 @@ Bool fn_in(Item a_item, Item b_item) {
             TypeElmt* elmt_type = (TypeElmt*)elmt->type;
             // check attribute values
             if (elmt_type) {
-                ShapeEntry* field = elmt_type->shape;
-                while (field) {
+                FOR_EACH_MAP_FIELD(elmt_type, field) {
                     Item val = _map_field_value((TypeMap*)elmt_type, elmt->data, field);
                     if (fn_eq(val, a_item) == BOOL_TRUE) {
                         return true;
                     }
-                    field = field->next;
                 }
             }
             // check children (value membership)
@@ -2354,13 +2314,11 @@ static bool shape_has_named_key(TypeMap* map_type, Item key_item) {
         return true;
     }
 
-    ShapeEntry* field = map_type ? map_type->shape : NULL;
-    while (field) {
+    FOR_EACH_MAP_FIELD(map_type, field) {
         if (field->name && field->name->length == key_len &&
             memcmp(field->name->str, key, key_len) == 0) {
             return true;
         }
-        field = field->next;
     }
     return false;
 }
@@ -3305,7 +3263,7 @@ Item fn_member(Item item, Item key) {
             }
 
             // path metadata and structural property access
-            if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+            if (is_text_type_id(key._type_id)) {
                 const char* k = key.get_chars();
                 if (k) {
 
@@ -3485,7 +3443,7 @@ Item fn_member(Item item, Item key) {
         // First try field access
         bool is_found = false;
         char* key_str = NULL;
-        if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+        if (is_text_type_id(key._type_id)) {
             key_str = (char*)key.get_chars();
         }
         if (key_str) {
@@ -3540,7 +3498,7 @@ Item fn_member(Item item, Item key) {
     }
     case LMD_TYPE_ARRAY: {
         // Handle built-in properties for List type
-        if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+        if (is_text_type_id(key._type_id)) {
             const char* k = key.get_chars();
             if (k && strcmp(k, "length") == 0) {
                 List *list = item.array;
@@ -4458,7 +4416,7 @@ Item fn_split(Item str_item, Item sep_item) {
 
     // typed array split: split(arr, n) → n equal parts along axis 0
     if (str_type == LMD_TYPE_ARRAY_NUM) {
-        if (sep_type != LMD_TYPE_INT && sep_type != LMD_TYPE_INT64) {
+        if (!is_integer_type_id(sep_type)) {
             log_error("split: section count must be an integer");
             return ItemError;
         }
@@ -4612,8 +4570,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
 
     // typed array split with explicit axis: split(arr, n, axis)
     if (str_type == LMD_TYPE_ARRAY_NUM) {
-        if ((sep_type != LMD_TYPE_INT && sep_type != LMD_TYPE_INT64) ||
-            (keep_type != LMD_TYPE_INT && keep_type != LMD_TYPE_INT64)) {
+        if (!is_integer_type_id(sep_type) || !is_integer_type_id(keep_type)) {
             log_error("split: section count and axis must be integers");
             return ItemError;
         }
@@ -5924,7 +5881,7 @@ static void clone_mutable_shape_data(TypeMap* map_type, void* dst_data, void* sr
             // Map spread slots are recursive raw Map* links, not normal typed
             // fields; storing a TypedItem here makes _map_get treat tag bytes
             // as a nested map pointer.
-            Map* nested_src = *(Map**)((char*)src_data + entry->byte_offset);
+            Map* nested_src = map_shape_field_to_map(src_data, entry);
             Item field_clone = nested_src ? clone_mutable_item({.map = nested_src}, clone_ctx) : ItemNull;
             *(Map**)dst_field = get_type_id(field_clone) == LMD_TYPE_MAP ?
                 field_clone.map : NULL;
@@ -6493,13 +6450,13 @@ void fn_map_set(Item map_item, Item key, Item value) {
                     field_type == LMD_TYPE_VMAP ||
                     field_type == LMD_TYPE_ELEMENT || field_type == LMD_TYPE_OBJECT ||
                     field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_ARRAY_NUM ||
-                    field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_RANGE ||
+                    field_type == LMD_TYPE_RANGE ||
                     field_type == LMD_TYPE_UNDEFINED || field_type == LMD_TYPE_BOOL);
                 bool new_is_ptr = (value_type == LMD_TYPE_NULL || value_type == LMD_TYPE_MAP ||
                     value_type == LMD_TYPE_VMAP ||
                     value_type == LMD_TYPE_ELEMENT || value_type == LMD_TYPE_OBJECT ||
                     value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_NUM ||
-                    value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_RANGE ||
+                    value_type == LMD_TYPE_RANGE ||
                     value_type == LMD_TYPE_UNDEFINED || value_type == LMD_TYPE_BOOL);
                 if (old_is_ptr && new_is_ptr) {
                     // safety: only do in-place update when byte sizes match.

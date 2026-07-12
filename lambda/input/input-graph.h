@@ -5,15 +5,12 @@
 
 #ifdef __cplusplus
 
-#include "source_tracker.hpp"
-#include "input-context.hpp"
+#include "input-utils.hpp"
 #include "../../lib/str.h"
 #include <cstring>
 
-// Shared helper: skip to end of current line (used by all graph parsers).
 static inline void skip_to_eol(lambda::SourceTracker& tracker) {
-    while (!tracker.atEnd() && tracker.current() != '\n')
-        tracker.advance();
+    lambda::input_skip_to_eol(tracker);
 }
 
 // Shared helper: skip whitespace, optional line comments, and optional C-style
@@ -31,21 +28,8 @@ static inline void skip_wsc(lambda::SourceTracker& tracker,
                              const char* line_comment1,
                              const char* line_comment2,
                              bool block_comments) {
-    while (!tracker.atEnd()) {
-        char c = tracker.current();
-        if (str_char_is_ascii_space(c)) { tracker.advance(); continue; }
-        if (block_comments && c == '/' && tracker.peek(1) == '*') {
-            tracker.advance(); tracker.advance(); // skip /*
-            while (!tracker.atEnd() &&
-                   !(tracker.current() == '*' && tracker.peek(1) == '/'))
-                tracker.advance();
-            if (!tracker.atEnd()) { tracker.advance(); tracker.advance(); } // skip */
-            continue;
-        }
-        if (line_comment1 && tracker.match(line_comment1)) { skip_to_eol(tracker); continue; }
-        if (line_comment2 && tracker.match(line_comment2)) { skip_to_eol(tracker); continue; }
-        break;
-    }
+    lambda::input_skip_whitespace_and_comment_markers(
+        tracker, line_comment1, line_comment2, block_comments);
 }
 
 // Shared identifier reader for graph parsers.

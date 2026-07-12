@@ -4,7 +4,6 @@
 #include "../../../lib/stringbuf.h"
 #include <stdio.h>
 #include <string.h>
-#include <ctype.h>
 
 // Create a CSS formatter with default style
 CssFormatter* css_formatter_create(Pool* pool, CssFormatStyle style) {

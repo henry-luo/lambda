@@ -5187,22 +5187,20 @@ static void svg_subscene_serialize_element(StrBuf* out, Element* root,
     const Element* e = elem.element();
     if (e && e->type && e->data) {
         TypeMap* map_type = (TypeMap*)e->type;
-        ShapeEntry* field = map_type->shape;
-        while (field) {
+        FOR_EACH_MAP_FIELD(map_type, field) {
             if (field->name && field->name->str && field->type) {
                 if (svg_subscene_attr_name_equals(field, "data-pdf-root") ||
                     (is_image &&
                      (svg_subscene_attr_name_equals(field, "href") ||
                       svg_subscene_attr_name_equals(field, "xlink:href")))) {
-                    field = field->next;
                     continue;
                 }
 
-                void* field_ptr = ((char*)e->data) + field->byte_offset;
                 TypeId ftype = field->type->type_id;
+                Item attr_item = map_shape_field_to_item(e->data, field);
 
                 if (ftype == LMD_TYPE_STRING) {
-                    String* str = *(String**)field_ptr;
+                    String* str = attr_item.get_safe_string();
                     if (str) {
                         strbuf_append_char(out, ' ');
                         strbuf_append_str_n(out, field->name->str, field->name->length);
@@ -5211,18 +5209,17 @@ static void svg_subscene_serialize_element(StrBuf* out, Element* root,
                         strbuf_append_char(out, '"');
                     }
                 } else if (ftype == LMD_TYPE_INT) {
-                    int64_t val = *(int64_t*)field_ptr;
+                    int64_t val = it2i(attr_item);
                     strbuf_append_char(out, ' ');
                     strbuf_append_str_n(out, field->name->str, field->name->length);
                     strbuf_append_format(out, "=\"%" PRId64 "\"", val);
                 } else if (ftype == LMD_TYPE_FLOAT) {
-                    double val = *(double*)field_ptr;
+                    double val = it2d(attr_item);
                     strbuf_append_char(out, ' ');
                     strbuf_append_str_n(out, field->name->str, field->name->length);
                     strbuf_append_format(out, "=\"%g\"", val);
                 }
             }
-            field = field->next;
         }
     }
 

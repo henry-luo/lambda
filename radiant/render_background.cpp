@@ -145,11 +145,11 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     ImageSurface* surface = rdcon->ui_context->surface;
     int blend_x0 = 0, blend_y0 = 0, blend_w = 0, blend_h = 0;
     if (has_blend && has_upper_layers) {
-        RenderPixelBounds blend_bounds = render_geometry_clip_to_pixel_bounds(rdcon->block.clip, surface);
+        IRect blend_bounds = render_geometry_clip_to_pixel_bounds(rdcon->block.clip, surface);
         blend_x0 = blend_bounds.x;
         blend_y0 = blend_bounds.y;
-        blend_w = blend_bounds.width;
-        blend_h = blend_bounds.height;
+        blend_w = blend_bounds.w;
+        blend_h = blend_bounds.h;
         if (!render_geometry_pixel_bounds_empty(blend_bounds)) {
             rc_save_backdrop(rdcon, blend_x0, blend_y0, blend_w, blend_h);
         }

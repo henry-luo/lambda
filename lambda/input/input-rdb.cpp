@@ -24,9 +24,7 @@
 #include "../../lib/mem.h"
 #include <string.h>
 
-// helper: get a map attribute by key using direct shape lookup.
-// Reconstructs tagged-pointer Items from the map's packed data buffer.
-// The data buffer stores raw C values (map_put strips tags); we must re-tag.
+// helper: get a map attribute by key using the shared packed-slot reader.
 static Item rdb_map_attr(Item data, const char* key) {
     if (!data.item || !key) return ItemNull;
     int key_len = (int)strlen(key);
@@ -47,48 +45,7 @@ static Item rdb_map_attr(Item data, const char* key) {
     ShapeEntry* se = typemap_hash_lookup(tm, key, key_len);
     if (!se) return ItemNull;
 
-    void* field_ptr = (char*)map_data + se->byte_offset;
-    TypeId field_tid = se->type->type_id;
-    Item result;
-    switch (field_tid) {
-        case LMD_TYPE_NULL:
-        case LMD_TYPE_UNDEFINED:
-            return ItemNull;
-        case LMD_TYPE_BOOL:
-            result.item = b2it(*(bool*)field_ptr);
-            return result;
-        case LMD_TYPE_INT:
-            result.item = i2it(*(int64_t*)field_ptr);
-            return result;
-        // tagged-pointer scalars: buffer stores raw value, re-tag via pointer to buffer
-        case LMD_TYPE_INT64:
-            result.item = l2it((int64_t*)field_ptr);
-            return result;
-        case LMD_TYPE_FLOAT:
-            result = lambda_float_ptr_to_item((const double*)field_ptr);
-            return result;
-        case LMD_TYPE_DTIME:
-            result.item = k2it((DateTime*)field_ptr);
-            return result;
-        // tagged-pointer heap types: buffer stores a raw pointer, re-tag it
-        case LMD_TYPE_DECIMAL:
-            result.item = c2it(*(Decimal**)field_ptr);
-            return result;
-        case LMD_TYPE_STRING:
-            result.item = s2it(*(String**)field_ptr);
-            return result;
-        case LMD_TYPE_SYMBOL:
-            result.item = y2it(*(Symbol**)field_ptr);
-            return result;
-        case LMD_TYPE_BINARY:
-            result.item = x2it(*(String**)field_ptr);
-            return result;
-        default:
-            // container types (array, map, element, etc.) are self-describing:
-            // their structs start with TypeId, so raw pointers are valid Items
-            result.item = *(uint64_t*)field_ptr;
-            return result;
-    }
+    return map_shape_field_to_item(map_data, se);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

@@ -1,6 +1,7 @@
 #include "js_mir_internal.hpp"
 #include "../lambda-error.h"
 #include "../../lib/mem_factory.h"
+#include "../../lib/path_str.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -367,10 +368,7 @@ JsPreambleState* g_jm_preamble_out = NULL;      // output: preamble snapshot (pr
 const JsPreambleState* g_jm_preamble_in = NULL;  // input: pre-seed from preamble (test mode)
 
 void js_normalize_path_separators(char* path) {
-    if (!path) return;
-    for (char* p = path; *p; p++) {
-        if (*p == '\\') *p = '/';
-    }
+    path_str_normalize_separators(path);
 }
 
 // ============================================================================
@@ -1328,54 +1326,9 @@ static void js_require_normalize_lexical_path(char* path_buf, int path_buf_size)
     if (!path_buf || path_buf_size <= 0) return;
 
     js_normalize_path_separators(path_buf);
-    char input[512];
-    snprintf(input, sizeof(input), "%s", path_buf);
-
-    const char* parts[128];
-    int part_lens[128];
-    int part_count = 0;
-    bool absolute = (input[0] == '/');
-    const char* p = input;
-    while (*p) {
-        while (*p == '/') p++;
-        const char* start = p;
-        while (*p && *p != '/') p++;
-        int len = (int)(p - start);
-        if (len == 0 || (len == 1 && start[0] == '.')) continue;
-        if (len == 2 && start[0] == '.' && start[1] == '.') {
-            if (part_count > 0) {
-                bool prev_parent = (part_lens[part_count - 1] == 2 &&
-                                    parts[part_count - 1][0] == '.' &&
-                                    parts[part_count - 1][1] == '.');
-                if (!prev_parent) {
-                    part_count--;
-                    continue;
-                }
-            }
-            if (!absolute && part_count < 128) {
-                parts[part_count] = start;
-                part_lens[part_count] = len;
-                part_count++;
-            }
-            continue;
-        }
-        if (part_count < 128) {
-            parts[part_count] = start;
-            part_lens[part_count] = len;
-            part_count++;
-        }
-    }
-
-    int pos = 0;
-    if (absolute && pos < path_buf_size - 1) path_buf[pos++] = '/';
-    for (int i = 0; i < part_count; i++) {
-        if (i > 0 && pos < path_buf_size - 1) path_buf[pos++] = '/';
-        for (int j = 0; j < part_lens[i] && pos < path_buf_size - 1; j++) {
-            path_buf[pos++] = parts[i][j];
-        }
-    }
-    if (pos == 0 && absolute && path_buf_size > 1) path_buf[pos++] = '/';
-    path_buf[pos] = '\0';
+    char normalized[512];
+    path_str_normalize_lexical_posix(path_buf, normalized, sizeof(normalized), false);
+    snprintf(path_buf, path_buf_size, "%s", normalized);
 }
 
 static void js_require_canonicalize_existing_path(char* path_buf, int path_buf_size) {

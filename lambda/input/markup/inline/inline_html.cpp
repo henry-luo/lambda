@@ -14,7 +14,6 @@
 #include "lib/log.h"
 #include "lib/str.h"
 #include <cstring>
-#include <cctype>
 
 namespace lambda {
 namespace markup {
@@ -38,14 +37,14 @@ static inline void increment_element_content_length(Element* elem) {
  * is_ascii_letter - Check if character is ASCII letter
  */
 static inline bool is_ascii_letter(char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    return str_char_is_alpha(c);
 }
 
 /**
  * is_tag_name_char - Check if character is valid in a tag name
  */
 static inline bool is_tag_name_char(char c) {
-    return isalnum((unsigned char)c) || c == '-';
+    return str_char_is_alnum(c) || c == '-';
 }
 
 /**
@@ -61,7 +60,7 @@ static inline bool is_attribute_name_start_char(char c) {
  * Per CommonMark spec: [A-Za-z0-9_.:-]
  */
 static inline bool is_attribute_name_char(char c) {
-    return isalnum((unsigned char)c) || c == '_' || c == '.' || c == ':' || c == '-';
+    return str_char_is_alnum(c) || c == '_' || c == '.' || c == ':' || c == '-';
 }
 
 /**
@@ -296,7 +295,7 @@ static const char* try_parse_html_tag(const char* start) {
  * Per CommonMark: [A-Za-z][A-Za-z0-9+.-]{0,31}
  */
 static inline bool is_uri_scheme_char(char c) {
-    return isalnum((unsigned char)c) || c == '+' || c == '.' || c == '-';
+    return str_char_is_alnum(c) || c == '+' || c == '.' || c == '-';
 }
 
 /**
@@ -354,7 +353,7 @@ static const char* try_parse_autolink_email(const char* start, const char** emai
 
     // Local part: [a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+
     bool has_local = false;
-    while (*p && (isalnum((unsigned char)*p) ||
+    while (*p && (str_char_is_alnum(*p) ||
            *p == '.' || *p == '!' || *p == '#' || *p == '$' || *p == '%' ||
            *p == '&' || *p == '\'' || *p == '*' || *p == '+' || *p == '/' ||
            *p == '=' || *p == '?' || *p == '^' || *p == '_' || *p == '`' ||
@@ -369,7 +368,7 @@ static const char* try_parse_autolink_email(const char* start, const char** emai
     // Domain: [a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*
     bool has_domain = false;
     while (*p && *p != '>') {
-        if (isalnum((unsigned char)*p) || *p == '-' || *p == '.') {
+        if (str_char_is_alnum(*p) || *p == '-' || *p == '.') {
             has_domain = true;
             p++;
         } else {

@@ -620,6 +620,33 @@ void layout_text(LayoutContext* lycon, DomNode* text_node);
 void layout_inline(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_flex_container(LayoutContext* lycon, ViewBlock* container);
 void layout_html_root(LayoutContext* lycon, DomNode* elmt);
+bool is_only_whitespace(const char* str);
+
+static inline bool layout_suppress_ignorable_container_text(DomNode* node) {
+    if (!node || !node->is_text()) return false;
+    const char* text = (const char*)node->text_data();
+    if (text && !is_only_whitespace(text)) return false;
+    node->view_type = RDT_VIEW_NONE;
+    return true;
+}
+
+static inline bool layout_text_node_has_content(DomNode* node) {
+    if (!node || !node->is_text()) return false;
+    const char* text = (const char*)node->text_data();
+    return text && !is_only_whitespace(text);
+}
+
+static inline bool layout_display_is_none(DisplayValue display) {
+    return display.outer == CSS_VALUE_NONE || display.inner == CSS_VALUE_NONE;
+}
+
+static inline bool layout_block_is_display_none(const ViewBlock* block) {
+    return !block || layout_display_is_none(block->display);
+}
+
+static inline bool layout_element_is_display_none(const DomElement* element) {
+    return !element || layout_display_is_none(element->display);
+}
 
 // CSS Positioning functions
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
@@ -661,6 +688,17 @@ static inline bool layout_block_is_out_of_flow(const ViewBlock* block) {
     return block &&
            (layout_position_is_abs_fixed(block->position) ||
             layout_position_is_floated(block->position));
+}
+
+static inline bool layout_block_is_hidden_or_display_none(const ViewBlock* block) {
+    return !block ||
+           layout_block_is_display_none(block) ||
+           (block->in_line && block->in_line->visibility == VIS_HIDDEN);
+}
+
+static inline bool layout_block_is_skipped_container_item(const ViewBlock* block) {
+    return layout_block_is_hidden_or_display_none(block) ||
+           layout_block_is_out_of_flow_positioned(block);
 }
 
 void line_init(LayoutContext* lycon, float left, float right);

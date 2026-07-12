@@ -66,6 +66,35 @@ static inline void skip_line_whitespace(const char** p) {
     }
 }
 
+static inline bool input_match_marker(const char* p, const char* marker) {
+    if (!p || !marker) return false;
+    while (*marker) {
+        if (*p != *marker) return false;
+        p++;
+        marker++;
+    }
+    return true;
+}
+
+static inline void skip_line_comment_markers(const char** p,
+                                             const char* line_comment1,
+                                             const char* line_comment2) {
+    if (!p || !*p) return;
+    if ((line_comment1 && input_match_marker(*p, line_comment1)) ||
+        (line_comment2 && input_match_marker(*p, line_comment2))) {
+        while (**p && **p != '\n' && **p != '\r') {
+            (*p)++;
+        }
+    }
+}
+
+static inline void skip_line_whitespace_and_comment_markers(const char** p,
+                                                            const char* line_comment1,
+                                                            const char* line_comment2) {
+    skip_line_whitespace(p);
+    skip_line_comment_markers(p, line_comment1, line_comment2);
+}
+
 /**
  * Skip to end of current line and past the line terminator.
  * Handles \n, \r, and \r\n.
@@ -79,16 +108,6 @@ static inline void skip_to_newline(const char** p) {
     } else if (**p == '\n' || **p == '\r') {
         (*p)++; // skip \n or \r
     }
-}
-
-static inline bool input_match_marker(const char* p, const char* marker) {
-    if (!p || !marker) return false;
-    while (*marker) {
-        if (*p != *marker) return false;
-        p++;
-        marker++;
-    }
-    return true;
 }
 
 static inline void skip_whitespace_and_comment_markers(const char** p,

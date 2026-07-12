@@ -2223,7 +2223,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
         if (float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT) {
             // Float transforms most display values to block
-            if (display.outer != CSS_VALUE_NONE) {
+            if (!layout_display_is_none(display)) {
                 log_debug("%s Float on %s: transforming display from outer=%d to BLOCK (float=%d)", node->source_loc(),
                           node->node_name(), display.outer, float_value);
                 display.outer = CSS_VALUE_BLOCK;
@@ -2675,7 +2675,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             const char* tag_name = child->node_name();
             log_debug("  Checking html child element: %s", tag_name);
             DisplayValue child_display = resolve_display_value(child);
-            if (child_display.outer != CSS_VALUE_NONE) {
+            if (!layout_display_is_none(child_display)) {
                 log_debug("  Laying out html child <%s> (display outer=%d, inner=%d)",
                     tag_name, child_display.outer, child_display.inner);
                 layout_block(lycon, child, child_display);

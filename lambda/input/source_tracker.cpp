@@ -1,7 +1,7 @@
 #include "source_tracker.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include <cstring>
-#include <cctype>
 
 namespace lambda {
 
@@ -95,7 +95,7 @@ bool SourceTracker::advanceChar() {
 
 size_t SourceTracker::skipWhitespace() {
     size_t count = 0;
-    while (!atEnd() && std::isspace((unsigned char)*current_)) {
+    while (!atEnd() && str_char_is_ascii_space(*current_)) {
         advance(1);
         count++;
     }

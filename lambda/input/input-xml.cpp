@@ -3,6 +3,7 @@
 #include "input-context.hpp"
 #include "source_tracker.hpp"
 #include "../../lib/html_entities.h"
+#include "../../lib/str.h"
 #include "input-utils.h"
 
 using namespace lambda;
@@ -127,7 +128,7 @@ static String* parse_tag_name(InputContext& ctx, const char **xml) {
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
-    while (**xml && (isalnum((unsigned char)**xml) || **xml == '_' || **xml == '-' || **xml == ':')) {
+    while (**xml && (str_char_is_alnum(**xml) || **xml == '_' || **xml == '-' || **xml == ':')) {
         stringbuf_append_char(sb, **xml);
         (*xml)++;
     }

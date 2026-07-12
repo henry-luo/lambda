@@ -660,8 +660,7 @@ static bool element_has_in_flow_intrinsic_content(DomElement* element) {
         if (!child->is_element()) continue;
         ViewBlock* child_block = lam::view_as_block(child->as_element());
         if (!child_block) return true;
-        if (child_block->display.outer == CSS_VALUE_NONE ||
-            child_block->display.inner == CSS_VALUE_NONE ||
+        if (layout_block_is_display_none(child_block) ||
             layout_view_is_abs_or_fixed(child_block)) {
             continue;
         }
@@ -814,7 +813,7 @@ static bool intrinsic_is_table_row_box(DomElement* elem) {
 
 static bool intrinsic_should_skip_height_child(DomElement* elem) {
     if (!elem) return true;
-    if (elem->display.outer == CSS_VALUE_NONE || elem->display.inner == CSS_VALUE_NONE) {
+    if (layout_element_is_display_none(elem)) {
         return true;
     }
     ViewBlock* block = lam::view_as_block(elem);
@@ -2343,7 +2342,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // and contribute zero intrinsic size.
     {
         ViewBlock* check_none = lam::unsafe_view_block_element_storage(element);
-        if (check_none->display.outer == CSS_VALUE_NONE || check_none->display.inner == CSS_VALUE_NONE) {
+        if (layout_block_is_display_none(check_none)) {
             return sizes;
         }
     }
@@ -2383,7 +2382,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     if (!content_only && !is_table_display && !is_inline_non_replaced &&
         resolved_width_view->blk && resolved_width_view->blk->given_width >= 0.0f) {
         float resolved_width = resolved_width_view->blk->given_width;
-        bool is_border_box = resolved_width_view->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+        bool is_border_box = layout_uses_border_box(resolved_width_view);
         BoxMetrics resolved_box = layout_box_metrics(resolved_width_view);
 
         if (!is_border_box && resolved_width_view->bound) {
@@ -2414,7 +2413,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // Check box-sizing first
                 bool is_border_box = false;
                 ViewBlock* view_for_box = lam::unsafe_view_block_element_storage(element);
-                if (view_for_box->blk && view_for_box->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+                if (layout_uses_border_box(view_for_box)) {
                     is_border_box = true;
                 } else {
                     CssDeclaration* box_decl = style_tree_get_declaration(
@@ -3107,8 +3106,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     DisplayValue item_display = resolve_display_value((void*)item_elem);
                     bool item_is_float = intrinsic_element_is_float(item_elem);
                     if (!item_is_float && item_display.inner == CSS_VALUE_TABLE_CELL) break;
-                    if (item_display.outer == CSS_VALUE_NONE ||
-                        item_display.inner == CSS_VALUE_NONE ||
+                    if (layout_display_is_none(item_display) ||
                         intrinsic_element_is_abs_or_fixed(item_elem)) {
                         continue;
                     }
@@ -4124,7 +4122,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
             // CSS 2.1 §9.2.4: Skip display:none children — they generate no boxes
             ViewBlock* child_vb = lam::unsafe_view_block_element_storage(child_elem);
-            if (child_vb->display.outer == CSS_VALUE_NONE || child_vb->display.inner == CSS_VALUE_NONE) {
+            if (layout_block_is_display_none(child_vb)) {
                 continue;
             }
 
@@ -4149,7 +4147,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
 
             // Re-check display:none after measurement (display may be resolved during measurement)
-            if (child_vb->display.outer == CSS_VALUE_NONE || child_vb->display.inner == CSS_VALUE_NONE) {
+            if (layout_block_is_display_none(child_vb)) {
                 continue;
             }
 
@@ -4935,8 +4933,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // so its intrinsic sizes must reflect this constraint.
     // max-width constrains the preferred (max-content) width.
     ViewBlock* view_for_minmax = lam::unsafe_view_block_element_storage(element);
-    bool view_is_border_box = view_for_minmax->blk &&
-                              view_for_minmax->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+    bool view_is_border_box = layout_uses_border_box(view_for_minmax);
     // Fallback: check CSS if blk hasn't been set up yet
     if (!view_is_border_box && element->specified_style) {
         CssDeclaration* bs_decl = style_tree_get_declaration(
@@ -5243,7 +5240,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 	    // CSS 2.1 §9.2.4: Elements with display: none do not generate boxes
 	    // and contribute zero height.
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
-    if (view->display.outer == CSS_VALUE_NONE || view->display.inner == CSS_VALUE_NONE) {
+    if (layout_block_is_display_none(view)) {
         return 0;
     }
 
@@ -5298,7 +5295,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 
         // Check box-sizing: if border-box, the height already includes padding/border
         // Only add padding/border for content-box (default)
-        bool is_border_box = (view->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+        bool is_border_box = layout_uses_border_box(view);
 
         if (!is_border_box && view->bound) {
             // content-box: height is content only, add padding and border
@@ -5748,7 +5745,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 DomElement* child_elem = c->as_element();
                 // Skip display:none elements — they generate no boxes (CSS 2.1 §9.2.4)
                 ViewElement* child_ve = lam::view_require_element(static_cast<View*>(child_elem));
-                if (child_ve->display.outer == CSS_VALUE_NONE || child_ve->display.inner == CSS_VALUE_NONE) {
+                if (layout_display_is_none(child_ve->display)) {
                     continue;
                 }
                 // Resolve display.outer if not yet resolved (may happen during early
@@ -5963,7 +5960,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             if (child->is_element()) {
                 DomElement* child_elem = child->as_element();
                 ViewElement* child_ve = lam::view_require_element(static_cast<View*>(child_elem));
-                if (child_ve->display.outer == CSS_VALUE_NONE || child_ve->display.inner == CSS_VALUE_NONE) {
+                if (layout_display_is_none(child_ve->display)) {
                     continue;
                 }
                 ViewBlock* child_block = lam::view_as_block(child_ve);

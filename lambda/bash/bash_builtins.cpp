@@ -13,6 +13,7 @@
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/utf.h"
 #include <cstring>

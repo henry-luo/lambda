@@ -9,6 +9,7 @@
 #define MARKUP_COMMON_HPP
 
 #include "../../lambda-data.hpp"
+#include "../../../lib/str.h"
 #include "../input-context.hpp"
 #include "../parse_error.hpp"
 #include <cstring>
@@ -350,7 +351,12 @@ inline bool starts_with(const char* str, const char* prefix) {
  */
 inline bool starts_with_icase(const char* str, const char* prefix) {
     while (*prefix) {
-        if (tolower((unsigned char)*str) != tolower((unsigned char)*prefix)) {
+        if (*str == '\0') return false;
+        char str_ch = *str;
+        char prefix_ch = *prefix;
+        str_to_lower(&str_ch, &str_ch, 1);
+        str_to_lower(&prefix_ch, &prefix_ch, 1);
+        if (str_ch != prefix_ch) {
             return false;
         }
         str++;

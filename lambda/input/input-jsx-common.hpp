@@ -1,6 +1,7 @@
 #ifndef LAMBDA_INPUT_JSX_COMMON_HPP
 #define LAMBDA_INPUT_JSX_COMMON_HPP
 
+#include "input-utils.h"
 #include "../../lib/str.h"
 #include <stddef.h>
 
@@ -13,7 +14,7 @@ static inline bool jsx_is_identifier_char(char c) {
 }
 
 static inline bool jsx_is_whitespace(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+    return input_is_whitespace_char(c);
 }
 
 static inline void jsx_skip_whitespace(const char** p, const char* end) {

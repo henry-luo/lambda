@@ -18,6 +18,9 @@ extern "C" Item rb_call_spaceship(Item left, Item right);
 
 // push_d boxes a double into an Item via GC nursery allocation (C linkage)
 extern "C" Item push_d(double dval);
+extern "C" void* heap_data_alloc(size_t size);
+extern "C" void heap_register_gc_root(uint64_t* slot);
+extern "C" void heap_unregister_gc_root(uint64_t* slot);
 
 // forward declarations
 extern String* heap_create_name(const char* str, size_t len);
@@ -33,6 +36,14 @@ static Item rb_module_vars[RB_MODULE_VAR_MAX];
 // exception state — simple flag-based model (same pattern as Python transpiler)
 static bool rb_exception_pending = false;
 static Item rb_exception_value = {0};
+
+static inline bool rb_is_numeric_type(TypeId type) {
+    return type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT || type == LMD_TYPE_INT64;
+}
+
+static inline bool rb_are_numeric_types(TypeId left, TypeId right) {
+    return rb_is_numeric_type(left) && rb_is_numeric_type(right);
+}
 
 // ============================================================================
 // Runtime initialization
@@ -208,8 +219,7 @@ extern "C" Item rb_add(Item left, Item right) {
         return (Item){.item = i2it(it2i(left) + it2i(right))};
     }
     // float arithmetic
-    if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_INT64) &&
-        (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_INT64)) {
+    if (rb_are_numeric_types(lt, rt)) {
         return (Item)push_d(rb_get_number(left) + rb_get_number(right));
     }
     // string concatenation
@@ -243,8 +253,7 @@ extern "C" Item rb_subtract(Item left, Item right) {
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         return (Item){.item = i2it(it2i(left) - it2i(right))};
     }
-    if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_INT64) &&
-        (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_INT64)) {
+    if (rb_are_numeric_types(lt, rt)) {
         return (Item)push_d(rb_get_number(left) - rb_get_number(right));
     }
     log_error("rb: TypeError: no implicit conversion in rb_subtract");
@@ -257,8 +266,7 @@ extern "C" Item rb_multiply(Item left, Item right) {
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         return (Item){.item = i2it(it2i(left) * it2i(right))};
     }
-    if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_INT64) &&
-        (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_INT64)) {
+    if (rb_are_numeric_types(lt, rt)) {
         return (Item)push_d(rb_get_number(left) * rb_get_number(right));
     }
     // string * int → repetition
@@ -285,8 +293,7 @@ extern "C" Item rb_divide(Item left, Item right) {
         if ((a ^ b) < 0 && q * b != a) q--;
         return (Item){.item = i2it(q)};
     }
-    if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_INT64) &&
-        (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_INT64)) {
+    if (rb_are_numeric_types(lt, rt)) {
         double d = rb_get_number(right);
         if (d == 0.0) {
             log_error("rb: ZeroDivisionError: divided by 0");
@@ -312,8 +319,7 @@ extern "C" Item rb_modulo(Item left, Item right) {
         if ((r != 0) && ((r ^ b) < 0)) r += b;
         return (Item){.item = i2it(r)};
     }
-    if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_INT64) &&
-        (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_INT64)) {
+    if (rb_are_numeric_types(lt, rt)) {
         double b = rb_get_number(right);
         if (b == 0.0) {
             log_error("rb: ZeroDivisionError: divided by 0");
@@ -395,8 +401,7 @@ extern "C" Item rb_eq(Item left, Item right) {
     if (lt == LMD_TYPE_NULL && rt == LMD_TYPE_NULL) return (Item){.item = b2it(true)};
     if (lt == LMD_TYPE_NULL || rt == LMD_TYPE_NULL) return (Item){.item = b2it(false)};
     if (lt == LMD_TYPE_BOOL && rt == LMD_TYPE_BOOL) return (Item){.item = b2it(it2b(left) == it2b(right))};
-    if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_INT64) &&
-        (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_INT64)) {
+    if (rb_are_numeric_types(lt, rt)) {
         return (Item){.item = b2it(rb_get_number(left) == rb_get_number(right))};
     }
     if (lt == LMD_TYPE_STRING && rt == LMD_TYPE_STRING) {
@@ -419,8 +424,7 @@ extern "C" Item rb_ne(Item left, Item right) {
 extern "C" Item rb_lt(Item left, Item right) {
     TypeId lt = get_type_id(left);
     TypeId rt = get_type_id(right);
-    if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_INT64) &&
-        (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_INT64)) {
+    if (rb_are_numeric_types(lt, rt)) {
         return (Item){.item = b2it(rb_get_number(left) < rb_get_number(right))};
     }
     if (lt == LMD_TYPE_STRING && rt == LMD_TYPE_STRING) {
@@ -443,8 +447,7 @@ extern "C" Item rb_lt(Item left, Item right) {
 extern "C" Item rb_le(Item left, Item right) {
     TypeId lt = get_type_id(left);
     TypeId rt = get_type_id(right);
-    if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_INT64) &&
-        (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_INT64)) {
+    if (rb_are_numeric_types(lt, rt)) {
         return (Item){.item = b2it(rb_get_number(left) <= rb_get_number(right))};
     }
     if (lt == LMD_TYPE_STRING && rt == LMD_TYPE_STRING) {
@@ -475,8 +478,7 @@ extern "C" Item rb_ge(Item left, Item right) {
 extern "C" Item rb_cmp(Item left, Item right) {
     TypeId lt = get_type_id(left);
     TypeId rt = get_type_id(right);
-    if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_INT64) &&
-        (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_INT64)) {
+    if (rb_are_numeric_types(lt, rt)) {
         double a = rb_get_number(left);
         double b = rb_get_number(right);
         if (a < b) return (Item){.item = i2it(-1)};
@@ -572,14 +574,38 @@ extern "C" Item rb_array_new(void) {
     return (Item){.array = arr};
 }
 
+extern "C" bool rb_array_ensure_capacity(Array* arr, int64_t min_capacity) {
+    if (!arr || min_capacity <= arr->capacity) return true;
+    int64_t new_capacity = arr->capacity < 8 ? 8 : arr->capacity * 2;
+    while (new_capacity < min_capacity) {
+        if (new_capacity > INT64_MAX / 2) return false;
+        new_capacity *= 2;
+    }
+    if (new_capacity > (int64_t)(SIZE_MAX / sizeof(Item))) return false;
+
+    uint64_t arr_root = (uint64_t)(uintptr_t)arr;
+    heap_register_gc_root(&arr_root);
+    // Ruby arrays are GC containers; keeping their item buffers in the GC data zone
+    // prevents tracked side allocations from surviving until process shutdown.
+    Item* new_items = (Item*)heap_data_alloc((size_t)new_capacity * sizeof(Item));
+    arr = (Array*)(uintptr_t)arr_root;
+    if (!new_items) {
+        heap_unregister_gc_root(&arr_root);
+        return false;
+    }
+    if (arr->items && arr->capacity > 0) {
+        memcpy(new_items, arr->items, (size_t)arr->capacity * sizeof(Item));
+    }
+    arr->items = new_items;
+    arr->capacity = new_capacity;
+    heap_unregister_gc_root(&arr_root);
+    return true;
+}
+
 extern "C" Item rb_array_push(Item array, Item value) {
     Array* arr = it2arr(array);
     if (!arr) return array;
-    if (arr->length >= arr->capacity) {
-        int64_t new_cap = arr->capacity < 8 ? 8 : arr->capacity * 2;
-        arr->items = (Item*)mem_realloc(arr->items, new_cap * sizeof(Item), MEM_CAT_RB_RUNTIME);
-        arr->capacity = new_cap;
-    }
+    if (!rb_array_ensure_capacity(arr, arr->length + 1)) return array;
     arr->items[arr->length++] = value;
     return array;
 }

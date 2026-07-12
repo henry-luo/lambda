@@ -826,7 +826,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         float left_edge = block->position->left + margin_left;
         float right_edge = cb_width - block->position->right - margin_right;
         float border_box_width = max(right_edge - left_edge, 0.0f);
-        bool is_border_box = block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+        bool is_border_box = layout_uses_border_box(block);
         content_width = is_border_box ? border_box_width :
             layout_content_width_from_border_box(block, border_box_width);
         // CRITICAL: Store constraint-calculated width so finalize_block_flow knows width is fixed
@@ -847,13 +847,10 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         // CSS Sizing Level 4: abs-pos with aspect-ratio, auto width/height, and max-height
         // Derive width from max-height * aspect-ratio
         float max_h = block->blk->given_max_height;
-        float content_h = max_h;
-        bool is_border_box = block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
-        if (is_border_box) {
-            content_h = layout_content_height_from_border_box(block, max_h);
-        }
+        float content_h = layout_css_size_to_content_box(
+            block->bound, layout_box_sizing(block), max_h, false);
         float derived_width = content_h * block->fi->aspect_ratio;
-        if (is_border_box) {
+        if (layout_uses_border_box(block)) {
             content_width = layout_border_width_from_content_box(block, derived_width);
         } else {
             content_width = derived_width;
@@ -903,7 +900,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         // for border-box elements. So we must set content_width appropriately:
         // - border-box: content_width = border-box value (adjustment will subtract border+padding)
         // - content-box: content_width = content-box value (no adjustment)
-        bool is_border_box = block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+        bool is_border_box = layout_uses_border_box(block);
         if (is_border_box) {
             content_width = max(shrink_to_fit, 0.0f);
         } else {
@@ -932,7 +929,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     if (has_width && block->position->has_left && block->position->has_right) {
         // For box-sizing: border-box, content_width is already the border-box width
         float used_width = content_width + h_border_padding;
-        if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+        if (layout_uses_border_box(block)) {
             used_width = content_width;  // already includes padding+border
         }
         float remaining = cb_width - block->position->left - block->position->right - used_width;
@@ -980,7 +977,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // Note: with box-sizing: border-box, content_width already IS the border-box width
     // (CSS width = border-box width), so don't add h_border_padding again.
     float h_border_box_width = content_width + h_border_padding;
-    if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+    if (layout_uses_border_box(block)) {
         h_border_box_width = content_width;  // CSS width is already the border-box width
     }
     if (block->position->has_left) {
@@ -1034,7 +1031,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         float top_edge = block->position->top + margin_top;
         float bottom_edge = cb_height - block->position->bottom - margin_bottom;
         float border_box_height = max(bottom_edge - top_edge, 0.0f);
-        bool is_border_box = block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+        bool is_border_box = layout_uses_border_box(block);
         content_height = is_border_box ? border_box_height :
             layout_content_height_from_border_box(block, border_box_height);
         // CRITICAL: Store constraint-calculated height so finalize_block_flow knows height is fixed
@@ -1078,7 +1075,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     if (has_height && block->position->has_top && block->position->has_bottom) {
         // For box-sizing: border-box, content_height is already the border-box height
         float used_height = content_height + v_border_padding;
-        if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+        if (layout_uses_border_box(block)) {
             used_height = content_height;  // already includes padding+border
         }
         float remaining = cb_height - block->position->top - block->position->bottom - used_height;
@@ -1109,7 +1106,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 
     // Now determine y position (relative to padding box, then add border offset)
     // CRITICAL: For bottom positioning, we need the border-box height (including padding/border)
-    bool is_border_box = block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+    bool is_border_box = layout_uses_border_box(block);
     float border_box_height = content_height;
     if (!is_border_box && block->bound) {
         border_box_height += layout_box_metrics(block).pad_border_v;
@@ -1128,7 +1125,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     }
     assert(content_height >= 0);
 
-    if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+    if (layout_uses_border_box(block)) {
         // for border-box, CSS width includes padding and border, so subtract them to get content width
         content_width = adjust_min_max_width(block, content_width);
         if (block->bound) content_width = adjust_border_padding_width(block, content_width);
@@ -1181,7 +1178,7 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
             child->blk->given_height = new_given_height;
 
             float content_height = new_given_height;
-            bool is_border_box = child->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+            bool is_border_box = layout_uses_border_box(child);
             if (is_border_box && child->bound) {
                 content_height = adjust_border_padding_height(child, content_height);
             }
@@ -1742,7 +1739,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             // Must handle border-box vs content-box correctly:
             // - border-box: min/max are in border-box terms, compare against border-box
             // - content-box: min/max are in content terms, extract content first
-            bool is_border_box = block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+            bool is_border_box = layout_uses_border_box(block);
             if (is_border_box) {
                 border_box_width = adjust_min_max_width(block, border_box_width);
             } else {

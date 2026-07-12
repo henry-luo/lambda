@@ -6,6 +6,7 @@
 #include "layout.hpp"
 #include "layout_box.hpp"
 #include "view.hpp"
+#include "../lib/font/font.h"
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/css_value.hpp"
 
@@ -209,8 +210,50 @@ int32_t resolve_justify_self(int32_t justify_self, int32_t justify_items) {
 // Baseline Calculation
 // ============================================================================
 
+float compute_font_baseline_ascender(
+    ::LayoutContext* lycon,
+    FontProp* font,
+    bool use_normal_line_height,
+    float fallback_ascender
+) {
+    if (!font) return fallback_ascender;
+
+    if (!lycon) {
+        if (font->ascender > 0.0f) return font->ascender;
+        if (font->font_size > 0.0f) return font->font_size * 0.8f;
+        return fallback_ascender;
+    }
+
+    FontBox fbox = {};
+    setup_font(lycon->ui_context, &fbox, font);
+    if (!fbox.font_handle) {
+        if (font->ascender > 0.0f) return font->ascender;
+        if (font->font_size > 0.0f) return font->font_size * 0.8f;
+        return fallback_ascender;
+    }
+
+    if (use_normal_line_height) {
+        float split_asc = 0.0f;
+        float split_desc = 0.0f;
+        font_get_normal_lh_split(fbox.font_handle, &split_asc, &split_desc);
+        return split_asc;
+    }
+
+    TypoMetrics typo = get_os2_typo_metrics(fbox.font_handle);
+    if (typo.valid && typo.use_typo_metrics) {
+        return typo.ascender;
+    }
+
+    const FontMetrics* metrics = font_get_metrics(fbox.font_handle);
+    if (metrics) return metrics->hhea_ascender;
+
+    if (font->ascender > 0.0f) return font->ascender;
+    if (font->font_size > 0.0f) return font->font_size * 0.8f;
+    return fallback_ascender;
+}
+
 float compute_element_first_baseline(
-    LayoutContext* lycon,
+    ::LayoutContext* lycon,
     ViewBlock* element,
     bool is_row_direction
 ) {
@@ -220,7 +263,9 @@ float compute_element_first_baseline(
 
     if (element->font) {
         BoxMetrics box = layout_box_metrics(element);
-        return box.padding.top + box.border.top + element->font->font_size * 0.8f;
+        float fallback = element->font->font_size * 0.8f;
+        return box.padding.top + box.border.top +
+            compute_font_baseline_ascender(lycon, element->font, false, fallback);
     }
 
     // CSS 2.1 §10.8.1: use the first in-flow child baseline when one exists.
@@ -238,7 +283,7 @@ float compute_element_first_baseline(
 }
 
 float compute_element_last_baseline(
-    LayoutContext* lycon,
+    ::LayoutContext* lycon,
     ViewBlock* element,
     bool is_row_direction
 ) {

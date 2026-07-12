@@ -200,11 +200,9 @@ extern "C" Item py_to_str(Item value) {
         StrBuf* sb = strbuf_new();
         strbuf_append_char(sb, '{');
         int idx = 0;
-        ShapeEntry* field = tm->shape;
-        while (field) {
+        FOR_EACH_MAP_FIELD(tm, field) {
             if (field->name && field->name->length >= 2 &&
                 field->name->str[0] == '_' && field->name->str[1] == '_') {
-                field = field->next;
                 continue;
             }
             if (idx > 0) strbuf_append_str(sb, ", ");
@@ -217,7 +215,6 @@ extern "C" Item py_to_str(Item value) {
                 String* s = it2s(val_str);
                 strbuf_append_str_n(sb, s->chars, s->len);
             }
-            field = field->next;
             idx++;
         }
         strbuf_append_char(sb, '}');
@@ -1091,10 +1088,9 @@ extern "C" Item py_match_mapping_rest(Item obj, Item excluded_keys) {
     if (!m || !m->type || !m->data) return result;
 
     TypeMap* tm = (TypeMap*)m->type;
-    uint64_t* data = (uint64_t*)m->data;
 
     // Walk shape linked list to iterate all fields
-    for (ShapeEntry* e = tm->shape; e; e = e->next) {
+    FOR_EACH_MAP_FIELD(tm, e) {
         if (!e->name || !e->name->str) continue;
         // skip dunder keys (internal metadata)
         if (e->name->length >= 2 && e->name->str[0] == '_' && e->name->str[1] == '_') continue;
@@ -1118,9 +1114,8 @@ extern "C" Item py_match_mapping_rest(Item obj, Item excluded_keys) {
         if (!excluded) {
             // key item
             Item key_item = (Item){.item = s2it(heap_strcpy((char*)e->name->str, (int64_t)e->name->length))};
-            // value item: read from data at byte_offset
-            int slot = (int)(e->byte_offset / 8);
-            Item val = {.item = data[slot]};
+            // packed map slots are not all Item-shaped; use the canonical slot reader.
+            Item val = _map_read_field(e, m->data);
             py_dict_set(result, key_item, val);
         }
     }
@@ -1397,7 +1392,14 @@ extern "C" Item py_dict_new(void) {
 }
 
 extern "C" Item py_dict_get(Item dict, Item key) {
-    return py_getattr(dict, key);
+    if (get_type_id(dict) != LMD_TYPE_MAP || get_type_id(key) != LMD_TYPE_STRING) return ItemNull;
+    Map* m = it2map(dict);
+    String* name = it2s(key);
+    if (!m || !name || !m->type || m->type == &EmptyMap) return ItemNull;
+
+    bool found = false;
+    // plain Python dict lookup must not route empty maps through JS object lookup.
+    return _map_get((TypeMap*)m->type, m->data, name->chars, &found);
 }
 
 extern "C" Item py_dict_set(Item dict, Item key, Item value) {
@@ -1996,14 +1998,12 @@ extern "C" Item py_dict_merge(Item dst, Item src) {
     Map* dst_map = it2map(dst);
     if (!dst_map) return dst;
     TypeMap* stm = (TypeMap*)src_map->type;
-    ShapeEntry* field = stm->shape;
-    while (field) {
+    FOR_EACH_MAP_FIELD(stm, field) {
         Item val = _map_read_field(field, src_map->data);
         if (field->name && py_input) {
             String* key_name = heap_create_name(field->name->str);
             map_put(dst_map, key_name, val, py_input);
         }
-        field = field->next;
     }
     return dst;
 }

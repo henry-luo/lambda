@@ -1844,19 +1844,13 @@ static const char* rdt_picture_elem_attr(Element* element, const char* attr_name
     if (!map_type->shape) return nullptr;
 
     size_t attr_len = strlen(attr_name);
-    ShapeEntry* field = map_type->shape;
-    for (int i = 0; i < map_type->length && field; i++) {
-        if (field->name && field->name->str &&
-            field->name->length == attr_len &&
-            strncmp(field->name->str, attr_name, attr_len) == 0 &&
-            field->type && field->type->type_id == LMD_TYPE_STRING) {
-            void* data = ((char*)element->data) + field->byte_offset;
-            String* str_val = *(String**)data;
-            return str_val ? str_val->chars : nullptr;
-        }
-        field = field->next;
-    }
-    return nullptr;
+    // INT_CAST_OK: attribute names in parsed SVG markup fit the shape-key API.
+    ShapeEntry* field = typemap_hash_lookup(map_type, attr_name, (int)attr_len);
+    if (!field || !field->type || field->type->type_id != LMD_TYPE_STRING) return nullptr;
+
+    Item value = map_shape_field_to_item(element->data, field);
+    String* str_val = value.get_safe_string();
+    return str_val ? str_val->chars : nullptr;
 }
 
 static Element* rdt_picture_find_id_recursive(Element* elem, const char* id) {

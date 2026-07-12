@@ -18,7 +18,6 @@ extern "C" {
 // Forward declarations
 void expand_auto_repeat_tracks(GridContainerLayout* grid_layout);
 void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout);
-extern bool is_only_whitespace(const char* str);
 
 static ViewBlock** grid_item_array_alloc(int count) {
     return reinterpret_cast<ViewBlock**>(mem_calloc(count, sizeof(ViewBlock*), MEM_CAT_LAYOUT));
@@ -661,24 +660,13 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
         // CRITICAL FIX: Only process element nodes, skip text nodes
         // CSS Grid §8.1: whitespace-only text in grid containers is not rendered
         if (!child_node->is_element()) {
-            if (child_node->is_text()) {
-                const char* text = (const char*)child_node->text_data();
-                if (!text || is_only_whitespace(text)) {
-                    child_node->view_type = RDT_VIEW_NONE;
-                }
-            }
+            layout_suppress_ignorable_container_text(child_node);
             child_node = child_node->next_sibling;
             continue;
         }
 
         ViewBlock* child = lam::view_require_block(child_node);
-        // Filter out absolutely positioned, hidden, and display:none items
-        bool is_absolute = child->position &&
-                          (child->position->position == CSS_VALUE_ABSOLUTE ||
-                           child->position->position == CSS_VALUE_FIXED);
-        bool is_hidden = child->in_line && child->in_line->visibility == VIS_HIDDEN;
-        bool is_display_none = (child->display.outer == CSS_VALUE_NONE);
-        if (!is_absolute && !is_hidden && !is_display_none) {
+        if (!layout_block_is_skipped_container_item(child)) {
             count++;
         }
         child_node = child_node->next_sibling;
@@ -713,13 +701,7 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
         }
 
         ViewBlock* child = lam::view_require_block(child_node);
-        // Filter out absolutely positioned, hidden, and display:none items
-        bool is_absolute = child->position &&
-                          (child->position->position == CSS_VALUE_ABSOLUTE ||
-                           child->position->position == CSS_VALUE_FIXED);
-        bool is_hidden = child->in_line && child->in_line->visibility == VIS_HIDDEN;
-        bool is_display_none = (child->display.outer == CSS_VALUE_NONE);
-        if (!is_absolute && !is_hidden && !is_display_none) {
+        if (!layout_block_is_skipped_container_item(child)) {
             grid_layout->grid_items[count] = child;
 
             // Initialize grid item placement properties with defaults if not set

@@ -437,15 +437,8 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                 log_debug("Using pre-computed height for %s: min=%.1f, max=%.1f",
                           item->node_name(), sizes.min_content, sizes.max_content);
 
-                // Apply height constraints from BlockProp
-                if (item->blk) {
-                    if (item->blk->given_min_height > 0) {
-                        sizes.min_content = fmax(sizes.min_content, item->blk->given_min_height);
-                    }
-                    if (item->blk->given_max_height > 0) {
-                        sizes.max_content = fmin(sizes.max_content, item->blk->given_max_height);
-                    }
-                }
+                layout_apply_positive_min_max_contribution(item, false,
+                    &sizes.min_content, &sizes.max_content);
                 return sizes;
             }
         } else {
@@ -463,15 +456,8 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                 log_debug("Using pre-computed width for %s: min=%.1f, max=%.1f",
                           item->node_name(), sizes.min_content, sizes.max_content);
 
-                // Apply width constraints from BlockProp
-                if (item->blk) {
-                    if (item->blk->given_min_width > 0) {
-                        sizes.min_content = fmax(sizes.min_content, item->blk->given_min_width);
-                    }
-                    if (item->blk->given_max_width > 0) {
-                        sizes.max_content = fmin(sizes.max_content, item->blk->given_max_width);
-                    }
-                }
+                layout_apply_positive_min_max_contribution(item, true,
+                    &sizes.min_content, &sizes.max_content);
                 return sizes;
             }
         }
@@ -602,21 +588,8 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
         }
     }
 
-    // Consider constraints from BlockProp
-    if (item->blk) {
-        if (item->blk->given_min_width > 0 && !is_row_axis) {
-            sizes.min_content = fmax(sizes.min_content, item->blk->given_min_width);
-        }
-        if (item->blk->given_max_width > 0 && !is_row_axis) {
-            sizes.max_content = fmin(sizes.max_content, item->blk->given_max_width);
-        }
-        if (item->blk->given_min_height > 0 && is_row_axis) {
-            sizes.min_content = fmax(sizes.min_content, item->blk->given_min_height);
-        }
-        if (item->blk->given_max_height > 0 && is_row_axis) {
-            sizes.max_content = fmin(sizes.max_content, item->blk->given_max_height);
-        }
-    }
+    layout_apply_positive_min_max_contribution(item, !is_row_axis,
+        &sizes.min_content, &sizes.max_content);
 
     // CSS Grid §6.4: if the item has aspect-ratio and no explicit height,
     // use (effective_column_width / aspect_ratio) as the row contribution.

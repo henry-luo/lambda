@@ -9,7 +9,6 @@
 #include "../../lib/log.h"
 #include "../../lib/str.h"
 #include "../../lib/utf.h"
-#include <ctype.h>
 #include <errno.h>
 #include "../../lib/mem.h"
 #include <limits.h>
@@ -31,7 +30,7 @@ uint32_t parse_hex_codepoint(const char** pos, int ndigits) {
     if (!pos || !*pos) return 0xFFFFFFFF;
 
     for (int i = 0; i < ndigits; i++) {
-        if (!isxdigit((unsigned char)(*pos)[i])) return 0xFFFFFFFF;
+        if (!str_is_hex((*pos)[i])) return 0xFFFFFFFF;
     }
 
     char buf[9] = {0};

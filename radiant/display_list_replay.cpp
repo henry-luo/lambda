@@ -7,6 +7,7 @@
 #include "display_list_replay_raster.hpp"
 #include "display_list_replay_shadow.hpp"
 #include "display_list_replay_state.hpp"
+#include "display_list_replay_vector.hpp"
 #include "render_backend_caps.hpp"
 #include "../lib/log.h"
 
@@ -82,60 +83,23 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             }
         }
 
+        if (dl_replay_vector_item(vec, item, false) != DL_REPLAY_VECTOR_NOT_HANDLED) {
+            continue;
+        }
+
         switch (item->op) {
-        case DL_FILL_RECT: {
-            DlFillRect* r = &item->fill_rect;
-            rdt_fill_rect(vec, r->x, r->y, r->w, r->h, r->color);
+        // vector ops are handled before this switch by dl_replay_vector_item().
+        case DL_FILL_RECT:
+        case DL_FILL_ROUNDED_RECT:
+        case DL_FILL_PATH:
+        case DL_STROKE_PATH:
+        case DL_FILL_LINEAR_GRADIENT:
+        case DL_FILL_RADIAL_GRADIENT:
+        case DL_DRAW_IMAGE:
+        case DL_DRAW_PICTURE:
+        case DL_PUSH_CLIP:
+        case DL_POP_CLIP:
             break;
-        }
-
-        case DL_FILL_ROUNDED_RECT: {
-            DlFillRoundedRect* r = &item->fill_rounded_rect;
-            rdt_fill_rounded_rect(vec, r->x, r->y, r->w, r->h, r->rx, r->ry, r->color);
-            break;
-        }
-
-        case DL_FILL_PATH: {
-            DlFillPath* r = &item->fill_path;
-            rdt_fill_path(vec, r->path, r->color, r->rule,
-                          r->has_transform ? &r->transform : nullptr);
-            break;
-        }
-
-        case DL_STROKE_PATH: {
-            DlStrokePath* r = &item->stroke_path;
-            rdt_stroke_path(vec, r->path, r->color, r->width, r->cap, r->join,
-                            r->dash_array, r->dash_count, r->dash_phase,
-                            r->has_transform ? &r->transform : nullptr);
-            break;
-        }
-
-        case DL_FILL_LINEAR_GRADIENT: {
-            DlFillLinearGradient* r = &item->fill_linear_gradient;
-            rdt_fill_linear_gradient(vec, r->path, r->x1, r->y1, r->x2, r->y2,
-                                     r->stops, r->stop_count, r->rule,
-                                     r->has_transform ? &r->transform : nullptr,
-                                     r->has_gradient_transform ? &r->gradient_transform : nullptr);
-            break;
-        }
-
-        case DL_FILL_RADIAL_GRADIENT: {
-            DlFillRadialGradient* r = &item->fill_radial_gradient;
-            rdt_fill_radial_gradient(vec, r->path, r->cx, r->cy, r->r,
-                                     r->stops, r->stop_count, r->rule,
-                                     r->has_transform ? &r->transform : nullptr,
-                                     r->has_gradient_transform ? &r->gradient_transform : nullptr);
-            break;
-        }
-
-        case DL_DRAW_IMAGE: {
-            DlDrawImage* r = &item->draw_image;
-            rdt_draw_image(vec, r->pixels, r->src_w, r->src_h, r->src_stride,
-                           r->dst_x, r->dst_y, r->dst_w, r->dst_h, r->opacity,
-                           r->has_transform ? &r->transform : nullptr,
-                           r->resource_generation);
-            break;
-        }
 
         case DL_DRAW_GLYPH: {
             rdt_vector_flush_batch(vec);
@@ -148,24 +112,6 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             }
             break;
         }
-
-        case DL_DRAW_PICTURE: {
-            DlDrawPicture* r = &item->draw_picture;
-            rdt_picture_draw(vec, r->picture, r->opacity,
-                             r->has_transform ? &r->transform : nullptr);
-            break;
-        }
-
-        case DL_PUSH_CLIP: {
-            DlPushClip* r = &item->push_clip;
-            rdt_push_clip(vec, r->path,
-                          r->has_transform ? &r->transform : nullptr);
-            break;
-        }
-
-        case DL_POP_CLIP:
-            rdt_pop_clip(vec);
-            break;
 
         case DL_FILL_SURFACE_RECT: {
             rdt_vector_flush_batch(vec);
@@ -184,7 +130,7 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
         case DL_COMPOSITE_OPACITY: {
             rdt_vector_flush_batch(vec);
             DlCompositeOpacity* r = &item->composite_opacity;
-            dl_replay_backdrop_composite_opacity(&backdrop_stack, surface, r);
+            dl_replay_backdrop_composite_opacity(&backdrop_stack, surface, scratch, r);
             break;
         }
 
@@ -198,7 +144,7 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
         case DL_APPLY_BLEND_MODE: {
             rdt_vector_flush_batch(vec);
             DlApplyBlendMode* r = &item->apply_blend_mode;
-            dl_replay_backdrop_apply_blend_mode(&backdrop_stack, surface, r);
+            dl_replay_backdrop_apply_blend_mode(&backdrop_stack, surface, scratch, r);
             break;
         }
 

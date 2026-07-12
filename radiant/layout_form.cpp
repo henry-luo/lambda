@@ -490,7 +490,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     BoxMetrics box = layout_box_metrics(block);
 
     // Check box-sizing model (default is content-box per CSS spec)
-    bool is_border_box = (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+    bool is_border_box = layout_uses_border_box(block);
 
     // Apply CSS width/height if specified, otherwise use intrinsic
     // Note: intrinsic sizes are CONTENT-AREA (no border/padding included).
@@ -501,13 +501,10 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
 
     if (block->blk && block->blk->given_width >= 0) {
         // CSS specifies width
-        if (is_border_box) {
-            width = block->blk->given_width;
-            content_width = layout_content_width_from_border_box(block, width);
-        } else {
-            content_width = block->blk->given_width;
-            width = layout_border_width_from_content_box(block, content_width);
-        }
+        content_width = layout_css_size_to_content_box(
+            block->bound, layout_box_sizing(block), block->blk->given_width, true);
+        width = layout_css_size_to_border_box(
+            block->bound, layout_box_sizing(block), block->blk->given_width, true);
     } else {
         // Use intrinsic content size + actual CSS border/padding
         width = layout_border_width_from_content_box(block, content_width);
@@ -515,13 +512,10 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
 
     if (block->blk && block->blk->given_height >= 0) {
         // CSS specifies height
-        if (is_border_box) {
-            height = block->blk->given_height;
-            content_height = layout_content_height_from_border_box(block, height);
-        } else {
-            content_height = block->blk->given_height;
-            height = layout_border_height_from_content_box(block, content_height);
-        }
+        content_height = layout_css_size_to_content_box(
+            block->bound, layout_box_sizing(block), block->blk->given_height, false);
+        height = layout_css_size_to_border_box(
+            block->bound, layout_box_sizing(block), block->blk->given_height, false);
     } else {
         // Use intrinsic content size + actual CSS border/padding
         height = layout_border_height_from_content_box(block, content_height);

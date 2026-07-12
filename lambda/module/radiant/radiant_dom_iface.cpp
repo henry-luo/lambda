@@ -1034,6 +1034,8 @@ extern "C" int radiant_dom_m4c_get_form(Item r, Item* out);
 
 static const JubeMemberBind radiant_dom_node_members[] = {
     BIND_NODE("tag_name", radiant_dom_member_tag_name),
+    // nodeName spans Element and CharacterData wrappers; resolving it in the
+    // record table keeps text/comment nodes out of legacy VMap fallback.
     {"node_name", NULL, NULL, radiant_dom_guard_node, radiant_dom_member_node_name, NULL, NULL, NULL,
      JUBE_MEMBER_NON_ENUMERABLE},
     BIND_NODE("local_name", radiant_dom_member_local_name),

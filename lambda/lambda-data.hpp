@@ -309,6 +309,10 @@ static inline Item map_shape_field_to_item(void* map_data, const ShapeEntry* fie
     return map_field_to_item(map_field_ptr(map_data, field), field->type->type_id);
 }
 
+static inline Map* map_shape_field_to_map(void* map_data, const ShapeEntry* field) {
+    return map_data && field ? *(Map**)map_field_ptr(map_data, field) : nullptr;
+}
+
 // A1: FNV-1a 32-bit hash for property name lookup.
 // Thin alias over lib/hash.h so the algorithm choice lives in one place.
 static inline uint32_t typemap_fnv1a(const char* key, int len) {
@@ -455,6 +459,18 @@ static inline void typemap_hash_build(TypeMap* tm, Pool* pool) {
         typemap_hash_insert(tm, e);
     }
 }
+
+static inline ShapeEntry* typemap_first_field(TypeMap* tm) {
+    return tm ? tm->shape : NULL;
+}
+
+static inline ShapeEntry* typemap_next_field(ShapeEntry* entry) {
+    return entry ? entry->next : NULL;
+}
+
+#define FOR_EACH_MAP_FIELD(map_type, field_var) \
+    for (ShapeEntry* field_var = typemap_first_field((TypeMap*)(map_type)); \
+         field_var; field_var = typemap_next_field(field_var))
 
 static inline void typemap_hash_insert_owned(TypeMap* tm, ShapeEntry* entry, Pool* pool) {
     if (!tm || !entry) return;

@@ -3,7 +3,6 @@
 #include "input-context.hpp"
 #include "source_tracker.hpp"
 #include "../../lib/str.h"
-#include <ctype.h>
 
 // line-oriented helpers from input-utils.h (included transitively via input-rfc-text.h)
 #include "input-rfc-text.h"
@@ -34,10 +33,7 @@ static String* parse_property_value(InputContext& ctx, const char **ics) {
 
 // Helper function to normalize property name to uppercase
 static void normalize_property_name(char* name) {
-    while (*name) {
-        *name = toupper(*name);
-        name++;
-    }
+    str_upper_inplace(name, strlen(name));
 }
 
 // Helper function to parse date-time values

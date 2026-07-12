@@ -1567,31 +1567,25 @@ extern "C" Item py_dict_method(Item dict_item, Item method_name, Item* args, int
     TypeMap* tm = (TypeMap*)m->type;
     if (strcmp(method->chars, "keys") == 0) {
         Array* result = array();
-        ShapeEntry* field = tm->shape;
-        while (field) {
+        FOR_EACH_MAP_FIELD(tm, field) {
             if (field->name) array_push(result, (Item){.item = s2it(heap_create_name(field->name->str))});
-            field = field->next;
         }
         return (Item){.array = result};
     }
     if (strcmp(method->chars, "values") == 0) {
         Array* result = array();
-        ShapeEntry* field = tm->shape;
-        while (field) {
+        FOR_EACH_MAP_FIELD(tm, field) {
             array_push(result, _map_read_field(field, m->data));
-            field = field->next;
         }
         return (Item){.array = result};
     }
     if (strcmp(method->chars, "items") == 0) {
         Array* result = array();
-        ShapeEntry* field = tm->shape;
-        while (field) {
+        FOR_EACH_MAP_FIELD(tm, field) {
             Item tuple = py_tuple_new(2);
             if (field->name) py_tuple_set(tuple, 0, (Item){.item = s2it(heap_create_name(field->name->str))});
             py_tuple_set(tuple, 1, _map_read_field(field, m->data));
             array_push(result, tuple);
-            field = field->next;
         }
         return (Item){.array = result};
     }
@@ -1608,14 +1602,12 @@ extern "C" Item py_dict_method(Item dict_item, Item method_name, Item* args, int
             Map* other = it2map(args[0]);
             if (other && other->type) {
                 TypeMap* otm = (TypeMap*)other->type;
-                ShapeEntry* field = otm->shape;
-                while (field) {
+                FOR_EACH_MAP_FIELD(otm, field) {
                     Item val = _map_read_field(field, other->data);
                     if (field->name) {
                         String* key_name = heap_create_name(field->name->str);
                         if (py_input) map_put(m, key_name, val, py_input);
                     }
-                    field = field->next;
                 }
             }
         }
@@ -1640,14 +1632,12 @@ extern "C" Item py_dict_method(Item dict_item, Item method_name, Item* args, int
         // shallow copy via walking shape entries
         Item new_dict = py_dict_new();
         Map* nm = it2map(new_dict);
-        ShapeEntry* field = tm->shape;
-        while (field) {
+        FOR_EACH_MAP_FIELD(tm, field) {
             Item val = _map_read_field(field, m->data);
             if (field->name && py_input) {
                 String* key_name = heap_create_name(field->name->str);
                 map_put(nm, key_name, val, py_input);
             }
-            field = field->next;
         }
         return new_dict;
     }

@@ -104,23 +104,16 @@ JsMirImportEntry* jm_ensure_import(JsMirTranspiler* mt, const char* name,
 #endif
     JsImportCacheEntry key;
     memset(&key, 0, sizeof(key));
-    int key_len = snprintf(key.name, sizeof(key.name), "%s#r%d#n%d#a%d",
-        name, (int)ret_type, nres, nargs);
-    for (int i = 0; i < nargs && key_len > 0 && key_len < (int)sizeof(key.name); i++) {
-        key_len += snprintf(key.name + key_len, sizeof(key.name) - key_len,
-            "#%d", (int)args[i].type);
-    }
+    mir_format_import_key(key.name, sizeof(key.name), name,
+        ret_type, nargs, args, nres, true);
 
     JsImportCacheEntry* found = (JsImportCacheEntry*)hashmap_get(mt->import_cache, &key);
     if (found) return &found->entry;
 
-    char proto_name[140];
-    snprintf(proto_name, sizeof(proto_name), "%s_p_r%d_n%d_a%d",
-        name, (int)ret_type, nres, nargs);
-
-    MIR_type_t res_types[1] = { ret_type };
-    MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, nres, res_types, nargs, args);
-    MIR_item_t imp = MIR_new_import(mt->ctx, name);
+    MIR_item_t proto = NULL;
+    MIR_item_t imp = NULL;
+    mir_create_import_proto_pair(mt->ctx, name, ret_type, nargs, args, nres,
+        true, &proto, &imp);
 
     JsImportCacheEntry new_entry;
     memset(&new_entry, 0, sizeof(new_entry));
@@ -154,86 +147,92 @@ JsMirImportEntry* jm_ensure_import_v_i(JsMirTranspiler* mt, const char* name) {
 // Emit call helpers
 // ============================================================================
 
-MIR_reg_t jm_call_0(JsMirTranspiler* mt, const char* fn_name, MIR_type_t ret_type) {
+static MIR_reg_t jm_call_with_args(JsMirTranspiler* mt,
+                                   const char* fn_name,
+                                   MIR_type_t ret_type,
+                                   int nargs,
+                                   MIR_type_t* arg_types,
+                                   MIR_op_t* arg_ops) {
+    if (nargs < 0 || nargs > MIR_SHARED_MAX_CALL_ARGS) {
+        log_error("[JS_MIR_CALL] unsupported return-call arity %d for %s", nargs, fn_name);
+        return 0;
+    }
     js_exec_profile_note_mir_call(fn_name);
-    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 0, NULL, 1);
+    MIR_var_t args[MIR_SHARED_MAX_CALL_ARGS];
+    if (nargs > 0) {
+        mir_prepare_call_args(args, arg_types, nargs);
+    }
+    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, nargs,
+                                            nargs ? args : NULL, 1);
     MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
-    jm_emit(mt, MIR_new_call_insn(mt->ctx, 3,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        MIR_new_reg_op(mt->ctx, res)));
+    jm_emit(mt, mir_new_call_with_args(mt->ctx, ie->proto, ie->import,
+        res, nargs, arg_ops));
     return res;
+}
+
+static void jm_call_void_with_args(JsMirTranspiler* mt,
+                                   const char* fn_name,
+                                   int nargs,
+                                   MIR_type_t* arg_types,
+                                   MIR_op_t* arg_ops) {
+    if (nargs < 0 || nargs > MIR_SHARED_MAX_CALL_ARGS) {
+        log_error("[JS_MIR_CALL] unsupported void-call arity %d for %s", nargs, fn_name);
+        return;
+    }
+    js_exec_profile_note_mir_call(fn_name);
+    MIR_var_t args[MIR_SHARED_MAX_CALL_ARGS];
+    if (nargs > 0) {
+        mir_prepare_call_args(args, arg_types, nargs);
+    }
+    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, nargs,
+                                            nargs ? args : NULL, 0);
+    jm_emit(mt, mir_new_call_with_args(mt->ctx, ie->proto, ie->import,
+        0, nargs, arg_ops));
+}
+
+MIR_reg_t jm_call_0(JsMirTranspiler* mt, const char* fn_name, MIR_type_t ret_type) {
+    return jm_call_with_args(mt, fn_name, ret_type, 0, NULL, NULL);
 }
 
 MIR_reg_t jm_call_1(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1) {
-    js_exec_profile_note_mir_call(fn_name);
-    MIR_var_t args[1] = {{a1t, "a", 0}};
-    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 1, args, 1);
-    MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
-    jm_emit(mt, MIR_new_call_insn(mt->ctx, 4,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        MIR_new_reg_op(mt->ctx, res), a1));
-    return res;
+    MIR_type_t types[1] = {a1t};
+    MIR_op_t ops[1] = {a1};
+    return jm_call_with_args(mt, fn_name, ret_type, 1, types, ops);
 }
 
 MIR_reg_t jm_call_2(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
     MIR_type_t a2t, MIR_op_t a2) {
-    js_exec_profile_note_mir_call(fn_name);
-    MIR_var_t args[2] = {{a1t, "a", 0}, {a2t, "b", 0}};
-    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 2, args, 1);
-    MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
-    jm_emit(mt, MIR_new_call_insn(mt->ctx, 5,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        MIR_new_reg_op(mt->ctx, res), a1, a2));
-    return res;
+    MIR_type_t types[2] = {a1t, a2t};
+    MIR_op_t ops[2] = {a1, a2};
+    return jm_call_with_args(mt, fn_name, ret_type, 2, types, ops);
 }
 
 MIR_reg_t jm_call_3(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
     MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3) {
-    js_exec_profile_note_mir_call(fn_name);
-    MIR_var_t args[3] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}};
-    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 3, args, 1);
-    MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
-    jm_emit(mt, MIR_new_call_insn(mt->ctx, 6,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        MIR_new_reg_op(mt->ctx, res), a1, a2, a3));
-    return res;
+    MIR_type_t types[3] = {a1t, a2t, a3t};
+    MIR_op_t ops[3] = {a1, a2, a3};
+    return jm_call_with_args(mt, fn_name, ret_type, 3, types, ops);
 }
 
 MIR_reg_t jm_call_4(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
     MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
     MIR_type_t a4t, MIR_op_t a4) {
-    js_exec_profile_note_mir_call(fn_name);
-    MIR_var_t args[4] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}};
-    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 4, args, 1);
-    MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
-    jm_emit(mt, MIR_new_call_insn(mt->ctx, 7,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        MIR_new_reg_op(mt->ctx, res), a1, a2, a3, a4));
-    return res;
+    MIR_type_t types[4] = {a1t, a2t, a3t, a4t};
+    MIR_op_t ops[4] = {a1, a2, a3, a4};
+    return jm_call_with_args(mt, fn_name, ret_type, 4, types, ops);
 }
 
 MIR_reg_t jm_call_5(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
     MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
     MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5) {
-    js_exec_profile_note_mir_call(fn_name);
-    MIR_var_t args[5] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}, {a5t, "e", 0}};
-    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 5, args, 1);
-    MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
-    jm_emit(mt, MIR_new_call_insn(mt->ctx, 8,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        MIR_new_reg_op(mt->ctx, res), a1, a2, a3, a4, a5));
-    return res;
+    MIR_type_t types[5] = {a1t, a2t, a3t, a4t, a5t};
+    MIR_op_t ops[5] = {a1, a2, a3, a4, a5};
+    return jm_call_with_args(mt, fn_name, ret_type, 5, types, ops);
 }
 
 // v20: 6-argument call helper (used for Date setter dispatch with up to 4 args + obj + method_id)
@@ -242,98 +241,71 @@ MIR_reg_t jm_call_6(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
     MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5,
     MIR_type_t a6t, MIR_op_t a6) {
-    js_exec_profile_note_mir_call(fn_name);
-    MIR_var_t args[6] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}, {a5t, "e", 0}, {a6t, "f", 0}};
-    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 6, args, 1);
-    MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
-    jm_emit(mt, MIR_new_call_insn(mt->ctx, 9,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import),
-        MIR_new_reg_op(mt->ctx, res), a1, a2, a3, a4, a5, a6));
-    return res;
+    MIR_type_t types[6] = {a1t, a2t, a3t, a4t, a5t, a6t};
+    MIR_op_t ops[6] = {a1, a2, a3, a4, a5, a6};
+    return jm_call_with_args(mt, fn_name, ret_type, 6, types, ops);
 }
 
 void jm_call_void_0(JsMirTranspiler* mt, const char* fn_name) {
-    js_exec_profile_note_mir_call(fn_name);
-    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, 0, NULL, 0);
-    jm_emit(mt, MIR_new_call_insn(mt->ctx, 2,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import)));
+    jm_call_void_with_args(mt, fn_name, 0, NULL, NULL);
 }
 
 void jm_call_void_1(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1) {
-    js_exec_profile_note_mir_call(fn_name);
-    MIR_var_t args[1] = {{a1t, "a", 0}};
-    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, 1, args, 0);
-    jm_emit(mt, MIR_new_call_insn(mt->ctx, 3,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import), a1));
+    MIR_type_t types[1] = {a1t};
+    MIR_op_t ops[1] = {a1};
+    jm_call_void_with_args(mt, fn_name, 1, types, ops);
 }
 
 void jm_call_void_2(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2) {
-    js_exec_profile_note_mir_call(fn_name);
-    MIR_var_t args[2] = {{a1t, "a", 0}, {a2t, "b", 0}};
-    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, 2, args, 0);
-    jm_emit(mt, MIR_new_call_insn(mt->ctx, 4,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import), a1, a2));
+    MIR_type_t types[2] = {a1t, a2t};
+    MIR_op_t ops[2] = {a1, a2};
+    jm_call_void_with_args(mt, fn_name, 2, types, ops);
 }
 
 void jm_call_void_3(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
     MIR_type_t a3t, MIR_op_t a3) {
-    js_exec_profile_note_mir_call(fn_name);
-    MIR_var_t args[3] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}};
-    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, 3, args, 0);
-    jm_emit(mt, MIR_new_call_insn(mt->ctx, 5,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import), a1, a2, a3));
+    MIR_type_t types[3] = {a1t, a2t, a3t};
+    MIR_op_t ops[3] = {a1, a2, a3};
+    jm_call_void_with_args(mt, fn_name, 3, types, ops);
 }
 
 void jm_call_void_4(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
     MIR_type_t a3t, MIR_op_t a3, MIR_type_t a4t, MIR_op_t a4) {
-    js_exec_profile_note_mir_call(fn_name);
-    MIR_var_t args[4] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}};
-    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, 4, args, 0);
-    jm_emit(mt, MIR_new_call_insn(mt->ctx, 6,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import), a1, a2, a3, a4));
+    MIR_type_t types[4] = {a1t, a2t, a3t, a4t};
+    MIR_op_t ops[4] = {a1, a2, a3, a4};
+    jm_call_void_with_args(mt, fn_name, 4, types, ops);
 }
 
 void jm_call_void_5(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
     MIR_type_t a3t, MIR_op_t a3, MIR_type_t a4t, MIR_op_t a4,
     MIR_type_t a5t, MIR_op_t a5) {
-    js_exec_profile_note_mir_call(fn_name);
-    MIR_var_t args[5] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}, {a5t, "e", 0}};
-    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, 5, args, 0);
-    jm_emit(mt, MIR_new_call_insn(mt->ctx, 7,
-        MIR_new_ref_op(mt->ctx, ie->proto),
-        MIR_new_ref_op(mt->ctx, ie->import), a1, a2, a3, a4, a5));
+    MIR_type_t types[5] = {a1t, a2t, a3t, a4t, a5t};
+    MIR_op_t ops[5] = {a1, a2, a3, a4, a5};
+    jm_call_void_with_args(mt, fn_name, 5, types, ops);
 }
 
 MIR_reg_t jm_emit_null(JsMirTranspiler* mt) {
     MIR_reg_t r = jm_new_reg(mt, "null", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+    mir_emit_i64_const_to_reg(mt->ctx, mt->current_func_item, r, (int64_t)ITEM_NULL_VAL);
     return r;
 }
 
 // v17: emit JS undefined value (for strict mode this coercion)
 MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt) {
     MIR_reg_t r = jm_new_reg(mt, "undef", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+    mir_emit_i64_const_to_reg(mt->ctx, mt->current_func_item, r, (int64_t)ITEM_JS_UNDEFINED);
     return r;
 }
 
 MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt) {
     MIR_reg_t r = jm_new_reg(mt, "item_error", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-        MIR_new_int_op(mt->ctx, (int64_t)(((uint64_t)LMD_TYPE_ERROR) << 56))));
+    mir_emit_i64_const_to_reg(mt->ctx, mt->current_func_item, r,
+        (int64_t)(((uint64_t)LMD_TYPE_ERROR) << 56));
     return r;
 }
 

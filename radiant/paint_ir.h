@@ -40,57 +40,45 @@ extern "C" {
 // PaintIR op codes
 // ---------------------------------------------------------------------------
 
+// keep the op set in one source list so enum values and diagnostics cannot drift.
+#define PAINT_OP_LIST(X) \
+    X(PAINT_FILL_RECT) \
+    X(PAINT_FILL_ROUNDED_RECT) \
+    X(PAINT_FILL_PATH) \
+    X(PAINT_STROKE_PATH) \
+    X(PAINT_FILL_LINEAR_GRADIENT) \
+    X(PAINT_FILL_RADIAL_GRADIENT) \
+    X(PAINT_DRAW_IMAGE) \
+    X(PAINT_DRAW_IMAGE_RESOURCE) \
+    X(PAINT_DRAW_GLYPH) \
+    X(PAINT_DRAW_PICTURE) \
+    X(PAINT_VIDEO_PLACEHOLDER) \
+    X(PAINT_WEBVIEW_LAYER_PLACEHOLDER) \
+    X(PAINT_PUSH_CLIP) \
+    X(PAINT_POP_CLIP) \
+    X(PAINT_PUSH_TRANSFORM) \
+    X(PAINT_POP_TRANSFORM) \
+    X(PAINT_SAVE_BACKDROP) \
+    X(PAINT_COMPOSITE_OPACITY) \
+    X(PAINT_APPLY_BLEND_MODE) \
+    X(PAINT_APPLY_FILTER) \
+    X(PAINT_BOX_BLUR_REGION) \
+    X(PAINT_BOX_BLUR_INSET) \
+    X(PAINT_SHADOW_CLIP_SAVE) \
+    X(PAINT_SHADOW_CLIP_RESTORE) \
+    X(PAINT_OUTER_SHADOW) \
+    X(PAINT_FILL_SURFACE_RECT) \
+    X(PAINT_BLIT_SURFACE_SCALED) \
+    X(PAINT_GLYPH_RUN) \
+    X(PAINT_BEGIN_EFFECT_GROUP) \
+    X(PAINT_END_EFFECT_GROUP) \
+    X(PAINT_SVG_SUBSCENE)
+
 typedef enum {
-    // ── Vector primitives (lowered 1:1 to DisplayList; byte-identical) ──────
-    PAINT_FILL_RECT,
-    PAINT_FILL_ROUNDED_RECT,
-    PAINT_FILL_PATH,
-    PAINT_STROKE_PATH,
-    PAINT_FILL_LINEAR_GRADIENT,
-    PAINT_FILL_RADIAL_GRADIENT,
-    PAINT_DRAW_IMAGE,
-    PAINT_DRAW_IMAGE_RESOURCE,
-    PAINT_DRAW_GLYPH,
-    PAINT_DRAW_PICTURE,
-    PAINT_VIDEO_PLACEHOLDER,
-    PAINT_WEBVIEW_LAYER_PLACEHOLDER,
-    PAINT_PUSH_CLIP,
-    PAINT_POP_CLIP,
-    PAINT_PUSH_TRANSFORM,
-    PAINT_POP_TRANSFORM,
-
-    // ── Raster-lowering tier (pixel-domain ops) ────────────────────────────
-    // These mirror the pixel-domain DisplayList commands 1:1. Per the design
-    // doc §1 they are *not* the semantic contract — they are the raster
-    // lowering of the higher-level PAINT_*_EFFECT_GROUP op below. Routing them
-    // through the PaintBuilder during migration gives the raster path a single
-    // emission gateway (Phase C) while the effect-group op is fleshed out; a
-    // vector backend consumes the effect group, not these.
-    PAINT_SAVE_BACKDROP,
-    PAINT_COMPOSITE_OPACITY,
-    PAINT_APPLY_BLEND_MODE,
-    PAINT_APPLY_FILTER,
-    PAINT_BOX_BLUR_REGION,
-    PAINT_BOX_BLUR_INSET,
-    PAINT_SHADOW_CLIP_SAVE,
-    PAINT_SHADOW_CLIP_RESTORE,
-    PAINT_OUTER_SHADOW,
-    PAINT_FILL_SURFACE_RECT,
-    PAINT_BLIT_SURFACE_SCALED,
-
-    // ── Higher-level semantic ops (incrementally lowered by target) ─────────
-    // A run of glyphs sharing a font/colour — NOT rasterised bitmaps. Raster
-    // lowering still ignores semantic text runs; SVG lowering emits native
-    // <text> when the run carries a UTF-8 text payload.
-    PAINT_GLYPH_RUN,
-    // CSS stacking effect (opacity, blend, filter, backdrop, clip, transform,
-    // isolation). Raster lowering becomes save-backdrop / composite / blur
-    // sequences; vector lowerings use native constructs or raster fallback.
-    PAINT_BEGIN_EFFECT_GROUP,
-    PAINT_END_EFFECT_GROUP,
-    // A nested SVG subscene (inline <svg> or external .svg picture) carrying
-    // the inherited paint + viewBox transform needed by every backend. (Phase F.)
-    PAINT_SVG_SUBSCENE,
+#define PAINT_OP_ENUM(op) op,
+    PAINT_OP_LIST(PAINT_OP_ENUM)
+#undef PAINT_OP_ENUM
+    PAINT_OP_COUNT
 } PaintOp;
 
 // ---------------------------------------------------------------------------

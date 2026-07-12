@@ -697,8 +697,7 @@ Item pn_splice(Item arr_item, Item start_item, Item count_item) {
         return arr_item;
     }
     TypeId st = get_type_id(start_item), ct = get_type_id(count_item);
-    if ((st != LMD_TYPE_INT && st != LMD_TYPE_INT64) ||
-        (ct != LMD_TYPE_INT && ct != LMD_TYPE_INT64)) {
+    if (!is_integer_type_id(st) || !is_integer_type_id(ct)) {
         log_error("splice: start and count must be integers");
         return arr_item;
     }
@@ -1306,7 +1305,7 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
     ShapeEntry *field = map_type->shape;
     while (field) {
         if (!field->name) { // nested map, skip
-            Map* nested_map = *(Map**)((char*)map_data + field->byte_offset);
+            Map* nested_map = map_shape_field_to_map(map_data, field);
             bool nested_is_found;
             ConstItem result = _map_get_const((TypeMap*)nested_map->type, nested_map->data, key, &nested_is_found, key_ns);
             if (nested_is_found) {

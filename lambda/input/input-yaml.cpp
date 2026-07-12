@@ -117,6 +117,11 @@ static inline void restore_cursor(YamlParser* p, YamlCursor cursor) {
     p->col = cursor.col;
 }
 
+static inline void move_to_line_start(YamlParser* p, int line_start) {
+    p->pos = line_start;
+    p->col = 0;
+}
+
 static uint32_t yaml_parse_hex_codepoint(YamlParser* p, int ndigits) {
     const char* cur = p->src + p->pos;
     uint32_t codepoint = parse_hex_codepoint(&cur, ndigits);
@@ -126,22 +131,22 @@ static uint32_t yaml_parse_hex_codepoint(YamlParser* p, int ndigits) {
 }
 
 static void skip_spaces(YamlParser* p) {
-    while (!at_end(p)) {
-        char c = peek(p);
-        if (c == ' ' || c == '\t') advance(p);
-        else break;
-    }
+    const char* current = p->src + p->pos;
+    skip_line_whitespace(&current);
+    advance_n(p, (int)(current - (p->src + p->pos)));
 }
 
 static void skip_comment(YamlParser* p) {
-    if (peek(p) == '#') {
-        while (!at_end(p) && peek(p) != '\n') advance(p);
-    }
+    const char* current = p->src + p->pos;
+    skip_line_comment_markers(&current, "#", nullptr);
+    advance_n(p, (int)(current - (p->src + p->pos)));
 }
 
 static void skip_spaces_and_comments(YamlParser* p) {
-    skip_spaces(p);
-    if (peek(p) == '#') skip_comment(p);
+    const char* current = p->src + p->pos;
+    // YAML block parsing needs the following newline to remain visible to callers.
+    skip_line_whitespace_and_comment_markers(&current, "#", nullptr);
+    advance_n(p, (int)(current - (p->src + p->pos)));
 }
 
 static bool skip_blank_lines(YamlParser* p) {
@@ -1440,8 +1445,7 @@ static Item parse_block_sequence(YamlParser* p, int seq_indent) {
         char after_dash = (dash_pos + 1 < p->len) ? p->src[dash_pos + 1] : '\0';
         if (after_dash != ' ' && after_dash != '\t' && after_dash != '\n' && after_dash != '\0') break;
 
-        p->pos = lstart;
-        p->col = 0;
+        move_to_line_start(p, lstart);
         advance_n(p, indent);
         advance(p); // skip -
         if (!at_end(p) && (peek(p) == ' ' || peek(p) == '\t')) advance(p);
@@ -1479,8 +1483,7 @@ static Item parse_block_mapping(YamlParser* p, int map_indent) {
         if (indent != map_indent) break;
 
         int lstart = line_start_pos(p);
-        p->pos = lstart;
-        p->col = 0;
+        move_to_line_start(p, lstart);
         advance_n(p, indent);
 
         const char* key_anchor = parse_node_properties(p);
@@ -1500,7 +1503,7 @@ static Item parse_block_mapping(YamlParser* p, int map_indent) {
                     char ad = (nlp + ni + 1 < p->len) ? p->src[nlp + ni + 1] : '\0';
                     if (ad == ' ' || ad == '\t' || ad == '\n' || ad == '\0') {
                         // sequence follows anchor
-                        p->pos = nlp; p->col = 0;
+                        move_to_line_start(p, nlp);
                         Item seq = parse_block_sequence(p, ni);
                         store_anchor(p, key_anchor, seq);
                         // now continue to check if this is a mapping entry
@@ -1621,7 +1624,7 @@ static Item parse_block_mapping(YamlParser* p, int map_indent) {
                 if (vpos < p->len && p->src[vpos] == ':') {
                     char vnc = (vpos + 1 < p->len) ? p->src[vpos + 1] : '\0';
                     if (vnc == ' ' || vnc == '\t' || vnc == '\n' || vnc == '\0') {
-                        p->pos = vlp; p->col = 0;
+                        move_to_line_start(p, vlp);
                         advance_n(p, vi);
                         advance(p); // skip :
                         value = parse_inline_block_node(p, map_indent);
@@ -1670,8 +1673,7 @@ static Item parse_block_node(YamlParser* p, int min_indent) {
     }
 
     int lstart = line_start_pos(p);
-    p->pos = lstart;
-    p->col = 0;
+    move_to_line_start(p, lstart);
 
     // skip to actual indent position
     advance_n(p, indent);
@@ -1698,7 +1700,7 @@ static Item parse_block_node(YamlParser* p, int min_indent) {
                 if (nc == '-') {
                     char ad = (nlp + ni + 1 < p->len) ? p->src[nlp + ni + 1] : '\0';
                     if (ad == ' ' || ad == '\t' || ad == '\n' || ad == '\0') {
-                        p->pos = nlp; p->col = 0;
+                        move_to_line_start(p, nlp);
                         Item seq = parse_block_sequence(p, ni);
                         if (anchor_name) store_anchor(p, anchor_name, seq);
                         return seq;
@@ -1747,7 +1749,7 @@ static Item parse_block_node(YamlParser* p, int min_indent) {
         result = parse_double_quoted(p);
         skip_spaces(p);
         if (!at_end(p) && is_mapping_indicator(p)) {
-            p->pos = lstart; p->col = 0;
+            move_to_line_start(p, lstart);
             result = parse_block_mapping(p, indent);
         } else {
             skip_spaces_and_comments(p);
@@ -1757,7 +1759,7 @@ static Item parse_block_node(YamlParser* p, int min_indent) {
         result = parse_single_quoted(p);
         skip_spaces(p);
         if (!at_end(p) && is_mapping_indicator(p)) {
-            p->pos = lstart; p->col = 0;
+            move_to_line_start(p, lstart);
             result = parse_block_mapping(p, indent);
         } else {
             skip_spaces_and_comments(p);
@@ -1767,24 +1769,21 @@ static Item parse_block_node(YamlParser* p, int min_indent) {
         result = parse_alias(p);
         skip_spaces(p);
         if (!at_end(p) && is_mapping_indicator(p)) {
-            p->pos = lstart; p->col = 0;
+            move_to_line_start(p, lstart);
             result = parse_block_mapping(p, indent);
         } else {
             skip_spaces_and_comments(p);
             if (!at_end(p) && peek(p) == '\n') advance(p);
         }
     } else if (first == '-' && (peek_at(p, 1) == ' ' || peek_at(p, 1) == '\t' || peek_at(p, 1) == '\n' || peek_at(p, 1) == '\0')) {
-        p->pos = lstart;
-        p->col = 0;
+        move_to_line_start(p, lstart);
         result = parse_block_sequence(p, indent);
     } else if (first == '?' && (peek_at(p, 1) == ' ' || peek_at(p, 1) == '\t' || peek_at(p, 1) == '\n' || peek_at(p, 1) == '\0')) {
-        p->pos = lstart;
-        p->col = 0;
+        move_to_line_start(p, lstart);
         result = parse_block_mapping(p, indent);
     } else {
         if (is_block_mapping_key(p, 0)) {
-            p->pos = lstart;
-            p->col = 0;
+            move_to_line_start(p, lstart);
             result = parse_block_mapping(p, indent);
         } else {
             result = parse_plain_scalar(p, indent - 1, false);
@@ -1816,7 +1815,7 @@ static Item parse_block_mapping_inline(YamlParser* p, int map_indent) {
             if (is_doc_start_at(p, lp) || is_doc_end_at(p, lp)) break;
             int indent = current_indent(p);
             if (indent != map_indent) break;
-            p->pos = lp; p->col = 0;
+            move_to_line_start(p, lp);
             advance_n(p, indent);
         }
         first_entry = false;
@@ -1922,7 +1921,7 @@ static Item parse_block_mapping_inline(YamlParser* p, int map_indent) {
                 if (vpos < p->len && p->src[vpos] == ':') {
                     char vnc = (vpos + 1 < p->len) ? p->src[vpos + 1] : '\0';
                     if (vnc == ' ' || vnc == '\t' || vnc == '\n' || vnc == '\0') {
-                        p->pos = vlp; p->col = 0;
+                        move_to_line_start(p, vlp);
                         advance_n(p, vi);
                         advance(p);
                         value = parse_inline_block_node(p, map_indent);
@@ -1975,7 +1974,7 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
                 if (ni == parent_indent && check_pos < p->len && p->src[check_pos] == '-') {
                     char after = (check_pos + 1 < p->len) ? p->src[check_pos + 1] : '\0';
                     if (after == ' ' || after == '\t' || after == '\n' || after == '\0') {
-                        p->pos = lp; p->col = 0;
+                        move_to_line_start(p, lp);
                         return parse_block_sequence(p, ni);
                     }
                 }
@@ -2016,7 +2015,7 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
             if (ni == parent_indent && check_pos < p->len && p->src[check_pos] == '-') {
                 char after = (check_pos + 1 < p->len) ? p->src[check_pos + 1] : '\0';
                 if (after == ' ' || after == '\t' || after == '\n' || after == '\0') {
-                    p->pos = lp; p->col = 0;
+                    move_to_line_start(p, lp);
                     Item seq = parse_block_sequence(p, ni);
                     if (anchor_name) store_anchor(p, anchor_name, seq);
                     return seq;
@@ -2026,7 +2025,7 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
             if (ni > parent_indent) {
                 int lp2 = line_start_pos(p);
                 if (is_block_mapping_key(p, ni)) {
-                    p->pos = lp2; p->col = 0;
+                    move_to_line_start(p, lp2);
                     Item mp = parse_block_mapping(p, ni);
                     if (anchor_name) store_anchor(p, anchor_name, mp);
                     return mp;
@@ -2081,15 +2080,15 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
                 if (ni <= parent_indent) break;
                 int lp = line_start_pos(p);
                 if (is_doc_start_at(p, lp) || is_doc_end_at(p, lp)) break;
-                p->pos = lp; p->col = 0;
+                move_to_line_start(p, lp);
                 advance_n(p, ni);
                 if (peek(p) == '-' && (peek_at(p, 1) == ' ' || peek_at(p, 1) == '\n' || peek_at(p, 1) == '\0')) {
-                    p->pos = lp; p->col = 0; break;
+                    move_to_line_start(p, lp); break;
                 }
                 if (!is_block_mapping_key(p, 0) && peek(p) != '?') {
-                    p->pos = lp; p->col = 0; break;
+                    move_to_line_start(p, lp); break;
                 }
-                p->pos = lp; p->col = 0;
+                move_to_line_start(p, lp);
                 advance_n(p, ni);
                 // parse single mapping entry inline
                 const char* ka = parse_node_properties(p);
@@ -2152,12 +2151,12 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
                 if (ni <= parent_indent) break;
                 int lp = line_start_pos(p);
                 if (is_doc_start_at(p, lp) || is_doc_end_at(p, lp)) break;
-                p->pos = lp; p->col = 0;
+                move_to_line_start(p, lp);
                 advance_n(p, ni);
                 if (!is_block_mapping_key(p, 0) && peek(p) != '?') {
-                    p->pos = lp; p->col = 0; break;
+                    move_to_line_start(p, lp); break;
                 }
-                p->pos = lp; p->col = 0;
+                move_to_line_start(p, lp);
                 advance_n(p, ni);
                 const char* ka = parse_node_properties(p);
                 Item ki;
@@ -2213,12 +2212,12 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
                 if (ni <= parent_indent) break;
                 int lp = line_start_pos(p);
                 if (is_doc_start_at(p, lp) || is_doc_end_at(p, lp)) break;
-                p->pos = lp; p->col = 0;
+                move_to_line_start(p, lp);
                 advance_n(p, ni);
                 if (!is_block_mapping_key(p, 0) && peek(p) != '?' && peek(p) != '*') {
-                    p->pos = lp; p->col = 0; break;
+                    move_to_line_start(p, lp); break;
                 }
-                p->pos = lp; p->col = 0;
+                move_to_line_start(p, lp);
                 advance_n(p, ni);
                 const char* ka = parse_node_properties(p);
                 Item ki;
@@ -2276,12 +2275,12 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
             int lp = line_start_pos(p);
             if (is_doc_start_at(p, lp) || is_doc_end_at(p, lp)) { p->pos = sg; break; }
             int ni = current_indent(p);
-            if (ni != seq_indent) { p->pos = lp; p->col = 0; break; }
+            if (ni != seq_indent) { move_to_line_start(p, lp); break; }
             int dp = lp + ni;
-            if (dp >= p->len || p->src[dp] != '-') { p->pos = lp; p->col = 0; break; }
+            if (dp >= p->len || p->src[dp] != '-') { move_to_line_start(p, lp); break; }
             char ad = (dp + 1 < p->len) ? p->src[dp + 1] : '\0';
-            if (ad != ' ' && ad != '\t' && ad != '\n' && ad != '\0') { p->pos = lp; p->col = 0; break; }
-            p->pos = lp; p->col = 0;
+            if (ad != ' ' && ad != '\t' && ad != '\n' && ad != '\0') { move_to_line_start(p, lp); break; }
+            move_to_line_start(p, lp);
             advance_n(p, ni);
             advance(p); // skip -
             if (!at_end(p) && (peek(p) == ' ' || peek(p) == '\t')) advance(p);
@@ -2297,8 +2296,7 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
         int line_indent = 0;
         for (int i = ls; i < p->len && p->src[i] == ' '; i++) line_indent++;
         if (line_indent == map_indent2) {
-            p->pos = ls;
-            p->col = 0;
+            move_to_line_start(p, ls);
             result = parse_block_mapping(p, map_indent2);
         } else {
             // inline context: parse mapping entries directly
@@ -2311,8 +2309,7 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
             int line_indent = 0;
             for (int i = ls; i < p->len && p->src[i] == ' '; i++) line_indent++;
             if (line_indent == map_indent2) {
-                p->pos = ls;
-                p->col = 0;
+                move_to_line_start(p, ls);
                 result = parse_block_mapping(p, map_indent2);
             } else {
                 // inline context: parse mapping entries directly
@@ -2448,7 +2445,7 @@ static Item parse_document(YamlParser* p, bool* has_content) {
             char fc = (lp + ci < p->len) ? p->src[lp + ci] : '\0';
             if ((fc == '|' || fc == '>') && ci == 0) {
                 // position at the block scalar indicator
-                p->pos = lp; p->col = 0;
+                move_to_line_start(p, lp);
                 return parse_block_scalar(p, -1);
             }
         }

@@ -28,11 +28,7 @@ extern TypeMap EmptyMap;
 
 // helper: push to array (avoids linker issues with array_push linkage)
 static inline void rb_arr_push(Array* arr, Item value) {
-    if (arr->length >= arr->capacity) {
-        int64_t new_cap = arr->capacity < 8 ? 8 : arr->capacity * 2;
-        arr->items = (Item*)mem_realloc(arr->items, new_cap * sizeof(Item), MEM_CAT_RB_RUNTIME);
-        arr->capacity = new_cap;
-    }
+    if (!rb_array_ensure_capacity(arr, arr->length + 1)) return;
     arr->items[arr->length++] = value;
 }
 
@@ -571,11 +567,7 @@ extern "C" Item rb_array_method(Item self, Item method_name, Item* args, int arg
     if ((strcmp(m, "unshift") == 0 || strcmp(m, "prepend") == 0) && argc >= 1) {
         // expand capacity
         int64_t new_len = arr->length + argc;
-        if (new_len > arr->capacity) {
-            int64_t new_cap = new_len < 8 ? 8 : new_len * 2;
-            arr->items = (Item*)mem_realloc(arr->items, new_cap * sizeof(Item), MEM_CAT_RB_RUNTIME);
-            arr->capacity = new_cap;
-        }
+        if (!rb_array_ensure_capacity(arr, new_len)) return self;
         // shift right
         for (int64_t i = arr->length - 1; i >= 0; i--) arr->items[i + argc] = arr->items[i];
         for (int i = 0; i < argc; i++) arr->items[i] = args[i];
@@ -855,13 +847,11 @@ extern "C" Item rb_hash_method(Item self, Item method_name, Item* args, int argc
     // if so, don't intercept — let dynamic dispatch handle it
     if (map->type && map->type != &EmptyMap) {
         TypeMap* tm = (TypeMap*)map->type;
-        ShapeEntry* field = tm->shape;
-        while (field) {
+        FOR_EACH_MAP_FIELD(tm, field) {
             if (field->name && (strcmp(field->name->str, "__rb_class__") == 0 ||
                 strcmp(field->name->str, "__class__") == 0)) {
                 return RB_METHOD_NOT_FOUND; // let dynamic dispatch handle
             }
-            field = field->next;
         }
     }
 
@@ -873,10 +863,8 @@ extern "C" Item rb_hash_method(Item self, Item method_name, Item* args, int argc
         Array* result = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
         result->type_id = LMD_TYPE_ARRAY;
         if (tm) {
-            ShapeEntry* field = tm->shape;
-            while (field) {
+            FOR_EACH_MAP_FIELD(tm, field) {
                 if (field->name) rb_arr_push(result, rb_sitem(field->name->str));
-                field = field->next;
             }
         }
         return (Item){.array = result};
@@ -887,10 +875,8 @@ extern "C" Item rb_hash_method(Item self, Item method_name, Item* args, int argc
         Array* result = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
         result->type_id = LMD_TYPE_ARRAY;
         if (tm) {
-            ShapeEntry* field = tm->shape;
-            while (field) {
+            FOR_EACH_MAP_FIELD(tm, field) {
                 rb_arr_push(result, _map_read_field(field, map->data));
-                field = field->next;
             }
         }
         return (Item){.array = result};
@@ -901,14 +887,12 @@ extern "C" Item rb_hash_method(Item self, Item method_name, Item* args, int argc
         Array* result = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
         result->type_id = LMD_TYPE_ARRAY;
         if (tm) {
-            ShapeEntry* field = tm->shape;
-            while (field) {
+            FOR_EACH_MAP_FIELD(tm, field) {
                 Array* pair = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
                 pair->type_id = LMD_TYPE_ARRAY;
                 if (field->name) rb_arr_push(pair, rb_sitem(field->name->str));
                 rb_arr_push(pair, _map_read_field(field, map->data));
                 rb_arr_push(result, (Item){.array = pair});
-                field = field->next;
             }
         }
         return (Item){.array = result};
@@ -918,8 +902,7 @@ extern "C" Item rb_hash_method(Item self, Item method_name, Item* args, int argc
     if (strcmp(m, "length") == 0 || strcmp(m, "size") == 0) {
         int64_t count = 0;
         if (tm) {
-            ShapeEntry* field = tm->shape;
-            while (field) { count++; field = field->next; }
+            FOR_EACH_MAP_FIELD(tm, field) { count++; }
         }
         return rb_iitem(count);
     }
@@ -946,11 +929,9 @@ extern "C" Item rb_hash_method(Item self, Item method_name, Item* args, int argc
     if ((strcmp(m, "value?") == 0 || strcmp(m, "has_value?") == 0 ||
          strcmp(m, "has_value") == 0 || strcmp(m, "value") == 0) && argc >= 1) {
         if (!tm) return rb_bitem(false);
-        ShapeEntry* field = tm->shape;
-        while (field) {
+        FOR_EACH_MAP_FIELD(tm, field) {
             Item val = _map_read_field(field, map->data);
             if (it2b(rb_eq(val, args[0]))) return rb_bitem(true);
-            field = field->next;
         }
         return rb_bitem(false);
     }
@@ -967,20 +948,16 @@ extern "C" Item rb_hash_method(Item self, Item method_name, Item* args, int argc
         Item result = rb_new_object();
         // copy self
         if (tm) {
-            ShapeEntry* field = tm->shape;
-            while (field) {
+            FOR_EACH_MAP_FIELD(tm, field) {
                 if (field->name) rb_setattr(result, rb_sitem(field->name->str), _map_read_field(field, map->data));
-                field = field->next;
             }
         }
         // merge other
         Map* other = it2map(args[0]);
         if (other && other->type) {
             TypeMap* otm = (TypeMap*)other->type;
-            ShapeEntry* field = otm->shape;
-            while (field) {
+            FOR_EACH_MAP_FIELD(otm, field) {
                 if (field->name) rb_setattr(result, rb_sitem(field->name->str), _map_read_field(field, other->data));
-                field = field->next;
             }
         }
         return result;

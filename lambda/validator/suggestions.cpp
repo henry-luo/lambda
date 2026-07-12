@@ -130,8 +130,8 @@ List* generate_field_suggestions(const char* typo_field, TypeMap* map_type, Pool
     Suggestion suggestions[max_suggestions];
     int suggestion_count = 0;
 
-    ShapeEntry* entry = map_type->shape;
-    while (entry && suggestion_count < max_suggestions) {
+    FOR_EACH_MAP_FIELD(map_type, entry) {
+        if (suggestion_count >= max_suggestions) break;
         if (entry->name) {
             const char* field_name = entry->name->str;
             int distance = levenshtein_distance(typo_field, field_name);
@@ -143,7 +143,6 @@ List* generate_field_suggestions(const char* typo_field, TypeMap* map_type, Pool
                 suggestion_count++;
             }
         }
-        entry = entry->next;
     }
 
     // Sort by distance

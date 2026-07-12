@@ -14,6 +14,7 @@
 #include "js_event_loop.h"
 #include "../lambda-data.hpp"
 #include "../lambda-decimal.hpp"
+#include "../mir_emitter_shared.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/hashmap.h"
