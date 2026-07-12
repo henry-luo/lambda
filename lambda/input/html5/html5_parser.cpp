@@ -226,7 +226,7 @@ Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input) {
 
     // source line tracking (disabled by default)
     parser->track_source_lines = false;
-    parser->current_line = 1;
+    line_counter_init(&parser->source_line_counter);
     parser->line_scan_pos = 0;
 
     return parser;

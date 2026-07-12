@@ -16,8 +16,9 @@
 static void html5_update_line_count(Html5Parser* parser) {
     const char* html = parser->html;
     size_t end = parser->pos;
-    parser->current_line += line_counter_count_lf(html + parser->line_scan_pos,
-                                                  end - parser->line_scan_pos);
+    // source-line attributes track only tag start lines, so LF counting preserves the legacy policy.
+    parser->source_line_counter.line += line_counter_count_lf(html + parser->line_scan_pos,
+                                                              end - parser->line_scan_pos);
     parser->line_scan_pos = end;
 }
 
@@ -1103,7 +1104,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     // track the line of the opening '<' for this start tag
                     if (parser->track_source_lines) {
                         html5_update_line_count(parser);
-                        parser->current_token->source_line = parser->current_line;
+                        parser->current_token->source_line = parser->source_line_counter.line;
                     }
                     html5_clear_temp_buffer(parser);
                     html5_reconsume(parser);

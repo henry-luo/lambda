@@ -345,6 +345,18 @@ static bool can_use_native_comparison(AstBinaryNode* bi_node, bool is_equality_o
 // Helper to check if type is numeric (int, int64, or float) — also used in comparison transpilation
 static inline bool is_numeric_type(TypeId t) { return is_native_numeric_type_id(t); }
 
+static inline bool c_transpile_native_scalar_value_type(TypeId t) {
+    return t == LMD_TYPE_INT || t == LMD_TYPE_FLOAT || t == LMD_TYPE_BOOL;
+}
+
+static inline bool c_transpile_keyed_loop_type(TypeId t) {
+    return t == LMD_TYPE_MAP || t == LMD_TYPE_OBJECT || t == LMD_TYPE_VMAP;
+}
+
+static inline bool c_transpile_direct_struct_type(TypeId t) {
+    return t == LMD_TYPE_MAP || t == LMD_TYPE_OBJECT;
+}
+
 static inline bool is_elementwise_comparison_op(Operator op) {
     return op >= OPERATOR_ELEM_EQ && op <= OPERATOR_ELEM_GE;
 }
@@ -379,9 +391,7 @@ bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node) {
 
     // If declared return is already a specific scalar, transpile_box_item handles
     // boxing at the call site — no need for i2it wrapping here.
-    if (declared_ret && (declared_ret->type_id == LMD_TYPE_INT ||
-                         declared_ret->type_id == LMD_TYPE_FLOAT ||
-                         declared_ret->type_id == LMD_TYPE_BOOL)) {
+    if (declared_ret && c_transpile_native_scalar_value_type(declared_ret->type_id)) {
         log_debug("can_use_unboxed_call: false (declared scalar, transpile_box_item handles)");
         return false;
     }
@@ -2751,8 +2761,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
             bool is_any_array = is_typed_array || is_generic_array;
             bool is_range = (expr_type->type_id == LMD_TYPE_RANGE);
             bool is_known_indexed = is_range || is_any_array || expr_type->type_id == LMD_TYPE_ARRAY;
-            bool is_known_keyed = (expr_type->type_id == LMD_TYPE_MAP || expr_type->type_id == LMD_TYPE_OBJECT ||
-                                   expr_type->type_id == LMD_TYPE_VMAP);
+            bool is_known_keyed = c_transpile_keyed_loop_type(expr_type->type_id);
             bool uses_attr_keys = is_known_keyed && key_filter != LOOP_KEY_INT;
             bool uses_iter_keys = !is_known_indexed && !uses_attr_keys;
 
@@ -4717,7 +4726,7 @@ void transpile_member_assign_stam(Transpiler* tp, AstCompoundAssignNode *node) {
     if (node->object->type && node->key->node_type == AST_NODE_IDENT
         && expr_produces_native_ptr(node->object)) {
         TypeId obj_type_id = node->object->type->type_id;
-        if (obj_type_id == LMD_TYPE_MAP || obj_type_id == LMD_TYPE_OBJECT) {
+        if (c_transpile_direct_struct_type(obj_type_id)) {
             TypeMap* map_type = (TypeMap*)node->object->type;
             if (has_fixed_shape(map_type)) {
                 AstIdentNode* ident = (AstIdentNode*)node->key;
@@ -6078,10 +6087,10 @@ static void emit_struct_typedefs(Transpiler* tp) {
         TypeMap* map_type = NULL;
         if (t->type_id == LMD_TYPE_TYPE) {
             Type* inner = ((TypeType*)t)->type;
-            if (inner && (inner->type_id == LMD_TYPE_MAP || inner->type_id == LMD_TYPE_OBJECT)) {
+            if (inner && c_transpile_direct_struct_type(inner->type_id)) {
                 map_type = (TypeMap*)inner;
             }
-        } else if (t->type_id == LMD_TYPE_MAP || t->type_id == LMD_TYPE_OBJECT) {
+        } else if (c_transpile_direct_struct_type(t->type_id)) {
             map_type = (TypeMap*)t;
         }
         if (!map_type || !map_type->struct_name || !map_type->shape) continue;

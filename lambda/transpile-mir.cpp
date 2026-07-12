@@ -669,6 +669,10 @@ static bool mir_is_native_param_type(TypeId tid) {
     return is_native_param_type_id(tid);
 }
 
+static bool mir_is_native_scalar_value_type(TypeId tid) {
+    return tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL;
+}
+
 static TypeId resolve_declared_param_type(AstNamedNode* param, TypeParam* type_param) {
     if (!param) return LMD_TYPE_ANY;
     TypeId tid = param->type ? param->type->type_id : LMD_TYPE_ANY;
@@ -8243,7 +8247,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             // Import calls return boxed Items. Unbox to native type to match
             // local/system call behavior, so callers can re-box consistently.
             TypeId call_tid = get_effective_type(mt, (AstNode*)call_node);
-            if (call_tid == LMD_TYPE_FLOAT || call_tid == LMD_TYPE_INT || call_tid == LMD_TYPE_BOOL) {
+            if (mir_is_native_scalar_value_type(call_tid)) {
                 result = emit_unbox(mt, result, call_tid);
             }
 
@@ -8617,7 +8621,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                 // Native function returns native value directly
                 if (call_tid == call_nfi->return_type) {
                     // Perfect match — no conversion needed
-                } else if (call_tid == LMD_TYPE_FLOAT || call_tid == LMD_TYPE_INT || call_tid == LMD_TYPE_BOOL) {
+                } else if (mir_is_native_scalar_value_type(call_tid)) {
                     // Caller expects different native type — box then unbox
                     MIR_reg_t boxed = emit_box(mt, result, call_nfi->return_type);
                     result = emit_unbox(mt, boxed, call_tid);
@@ -8627,7 +8631,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                 }
             } else {
                 // Standard boxed return — unbox if caller expects native type
-                if (call_tid == LMD_TYPE_FLOAT || call_tid == LMD_TYPE_INT || call_tid == LMD_TYPE_BOOL) {
+                if (mir_is_native_scalar_value_type(call_tid)) {
                     result = emit_unbox(mt, result, call_tid);
                 }
             }
@@ -8703,7 +8707,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
     // Unbox to native type to match direct call behavior, so callers
     // can re-box consistently based on AST type.
     TypeId call_tid = get_effective_type(mt, (AstNode*)call_node);
-    if (call_tid == LMD_TYPE_FLOAT || call_tid == LMD_TYPE_INT || call_tid == LMD_TYPE_BOOL) {
+    if (mir_is_native_scalar_value_type(call_tid)) {
         dyn_result = emit_unbox(mt, dyn_result, call_tid);
     }
     return dyn_result;
@@ -11590,8 +11594,7 @@ static TypeId infer_return_type(AstFuncNode* fn_node) {
         if (ft->returned) {
             TypeId ret_tid = ft->returned->type_id;
             // Only accept simple native types for now
-            if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_FLOAT ||
-                ret_tid == LMD_TYPE_BOOL) {
+            if (mir_is_native_scalar_value_type(ret_tid)) {
                 log_debug("mir: infer_return_type - declared type_id=%d (proc=%d)", ret_tid, is_proc);
                 return ret_tid;
             }
@@ -11605,8 +11608,7 @@ static TypeId infer_return_type(AstFuncNode* fn_node) {
     if (!is_proc && fn_node->body && fn_node->body->type) {
         TypeId body_tid = fn_node->body->type->type_id;
         // Only accept simple native scalar types
-        if (body_tid == LMD_TYPE_INT || body_tid == LMD_TYPE_FLOAT ||
-            body_tid == LMD_TYPE_BOOL) {
+        if (mir_is_native_scalar_value_type(body_tid)) {
             log_debug("mir: infer_return_type - body type_id=%d", body_tid);
             return body_tid;
         }
@@ -11646,7 +11648,7 @@ static bool has_inferred_native_params(AstFuncNode* fn_node) {
     // Examples: fn starts_with(s, prefix) returns bool from 'false'/'slice == prefix'.
     if (fn_node->param) {
         TypeId ret_tid = infer_return_type(fn_node);
-        if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_FLOAT || ret_tid == LMD_TYPE_BOOL) {
+        if (mir_is_native_scalar_value_type(ret_tid)) {
             return true;
         }
     }
@@ -11855,8 +11857,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         // avoid boxing/unboxing return values at call sites.
         if (!generate_native) {
             TypeId ret_tid = infer_return_type(fn_node);
-            if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_FLOAT ||
-                ret_tid == LMD_TYPE_BOOL) {
+            if (mir_is_native_scalar_value_type(ret_tid)) {
                 generate_native = true;
             }
         }
@@ -12274,7 +12275,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                 TypeType* ft = (TypeType*)field->type;
                 if (ft->type) field_tid = ft->type->type_id;
             }
-            if (field_tid == LMD_TYPE_INT || field_tid == LMD_TYPE_FLOAT || field_tid == LMD_TYPE_BOOL) {
+            if (mir_is_native_scalar_value_type(field_tid)) {
                 MIR_reg_t unboxed = emit_unbox(mt, field_val, field_tid);
                 MIR_type_t mtype = type_to_mir(field_tid);
                 set_var(mt, field_name, unboxed, mtype, field_tid);
@@ -12657,8 +12658,7 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                     // P4-3.4: Also enable native version when return type alone is native
                     if (!has_native && !has_typed_array_param) {
                         TypeId fwd_ret_tid = infer_return_type(fn_node);
-                        if (fwd_ret_tid == LMD_TYPE_INT || fwd_ret_tid == LMD_TYPE_FLOAT ||
-                            fwd_ret_tid == LMD_TYPE_BOOL) {
+                        if (mir_is_native_scalar_value_type(fwd_ret_tid)) {
                             // Forward-declare the _b wrapper
                             StrBuf* wrapper_buf = strbuf_new_cap(64);
                             write_fn_name_ex(wrapper_buf, fn_node, NULL, "_b");

@@ -2,6 +2,7 @@
 #define CSS_PARSER_H
 
 #include "css_style.hpp"
+#include "../line_counter.hpp"
 #include "../../../lib/mempool.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -138,8 +139,7 @@ typedef struct CssTokenizer {
     const char* input;
     size_t length;
     size_t position;
-    int line;
-    int column;
+    LineCounter line_counter;
     bool supports_unicode;
     bool supports_css3;
 } CssTokenizer;

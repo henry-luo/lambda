@@ -4,6 +4,7 @@
 #include "../../lambda-data.hpp"
 #include "html5_token.h"
 #include "../../../lib/stringbuf.h"
+#include "../line_counter.hpp"
 
 // ============================================================================
 // UTF-8 ITERATOR
@@ -225,7 +226,7 @@ typedef struct Html5Parser {
 
     // Source line tracking (optional, enabled via Html5ParseOptions)
     bool track_source_lines;    // whether to record source line numbers on elements
-    int current_line;           // running line counter (1-based)
+    LineCounter source_line_counter; // running source-line counter for __source_line
     size_t line_scan_pos;       // byte position up to which lines have been counted
 } Html5Parser;
 
