@@ -756,7 +756,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
                 // For column flex with wrap and indefinite height (auto), set wrapping
                 // boundary to infinite per CSS Flexbox §9.3 (items don't wrap when the
                 // main axis can grow indefinitely). Phase 7 computes final height.
-                bool has_max_height = flex_container->blk && flex_container->blk->given_max_height > 0;
+                bool has_max_height = layout_positive_max_height_or(flex_container, 0.0f) > 0.0f;
                 if (flex_layout->wrap != WRAP_NOWRAP && !has_max_height) {
                     flex_layout->main_axis_size = 1e9f;
                     log_debug("AUTO-HEIGHT: column flex with wrap, using infinite main_axis_size for wrapping");
@@ -2581,8 +2581,8 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 }
                 float new_height = total_line_cross + padding_height + border_height;
                 // CSS §10.7: Respect max-height constraint
-                if (flex_container->blk && flex_container->blk->given_max_height > 0) {
-                    float max_box = flex_container->blk->given_max_height;
+                float max_box = layout_positive_max_height_or(flex_container, -1.0f);
+                if (max_box > 0.0f) {
                     if (!layout_uses_border_box(flex_container)) {
                         max_box = layout_border_size_from_content_box(flex_container, max_box, false);
                     }
@@ -2621,8 +2621,8 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     float new_height = max_item_height + padding_height;
 
                     // CSS §10.7: Respect max-height constraint on the container.
-                    if (flex_container->blk && flex_container->blk->given_max_height > 0) {
-                        float max_box = flex_container->blk->given_max_height;
+                    float max_box = layout_positive_max_height_or(flex_container, -1.0f);
+                    if (max_box > 0.0f) {
                         if (!layout_uses_border_box(flex_container)) {
                             max_box = layout_border_size_from_content_box(flex_container, max_box, false);
                         }

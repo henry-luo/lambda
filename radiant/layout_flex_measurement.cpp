@@ -1679,8 +1679,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     item->blk->given_height : -1;
 
                 // Also check max-width as constraint
-                float max_width_constraint = (item->blk && item->blk->given_max_width > 0) ?
-                    item->blk->given_max_width : -1;
+                float max_width_constraint = layout_positive_max_width_or(
+                    lam::view_as_block(item), -1.0f);
 
                 if (explicit_width > 0 && explicit_height > 0) {
                     // Both dimensions specified

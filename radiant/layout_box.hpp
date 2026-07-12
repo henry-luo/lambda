@@ -90,6 +90,42 @@ static inline float layout_clamp_positive_min_max_axis(ViewBlock* block, float s
         : layout_clamp_positive_min_max_height(block, size);
 }
 
+static inline float layout_positive_min_width(ViewBlock* block) {
+    return (block && block->blk && block->blk->given_min_width > 0.0f)
+        ? block->blk->given_min_width
+        : 0.0f;
+}
+
+static inline float layout_positive_min_height(ViewBlock* block) {
+    return (block && block->blk && block->blk->given_min_height > 0.0f)
+        ? block->blk->given_min_height
+        : 0.0f;
+}
+
+static inline float layout_positive_min_axis(ViewBlock* block, bool horizontal) {
+    return horizontal
+        ? layout_positive_min_width(block)
+        : layout_positive_min_height(block);
+}
+
+static inline float layout_positive_max_width_or(ViewBlock* block, float fallback) {
+    return (block && block->blk && block->blk->given_max_width > 0.0f)
+        ? block->blk->given_max_width
+        : fallback;
+}
+
+static inline float layout_positive_max_height_or(ViewBlock* block, float fallback) {
+    return (block && block->blk && block->blk->given_max_height > 0.0f)
+        ? block->blk->given_max_height
+        : fallback;
+}
+
+static inline float layout_positive_max_axis_or(ViewBlock* block, bool horizontal, float fallback) {
+    return horizontal
+        ? layout_positive_max_width_or(block, fallback)
+        : layout_positive_max_height_or(block, fallback);
+}
+
 static inline float layout_floor_min_width(ViewBlock* block, float width) {
     if (!block || !block->blk || block->blk->given_min_width < 0.0f) return width;
     return width < block->blk->given_min_width ? block->blk->given_min_width : width;

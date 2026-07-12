@@ -37,28 +37,33 @@ The codebase (~590k LOC surveyed) is not uniformly duplicative — several subsy
 - ✅ Radiant paint: §5.2 glyph rasterization, §5.4 lib-reuse batch, §5.5 helper extractions incl. `IRect`/`render_rect.hpp` (`RenderPixelBounds` and `int region[4]` fully gone), §5.6 math templates.
 - ✅ JS↔core: §6.1 dtoa, §6.2 base64 decode, §6.3 static-helper dedup, §6.5 civil-date math, §6.6 JSON escaping / percent-encoding / UTF-16 pair math / inspect-vs-print audit.
 
-**Partial** (helpers landed; quantified remainder):
-- §4.2 min/max clamps — ~111 raw `given_min/max_*` clamp sites remain vs ~18 helper calls; 76 of the raw sites are in `layout_flex.cpp` (deferred for FLT_MAX/auto-min subtleties); grid is clean.
-- §4.5 baselines — shared `compute_font_baseline_ascender()` used by flex/table/grid, but the three recursive first-baseline walkers remain separate.
-- §4.6 percentages — `layout_percentages.{hpp,cpp}` exists; `layout_reresolve_percentage_box()` is grid-only (flex uses the lower-level shared primitives); the two containing-content-width wrappers remain separate over shared primitives.
-- §4.8 layout_axis — ~62 `is_horizontal` conditional branches + 31 adapter calls + 10 direction branches left in flex vs 45 axis-helper uses.
-- §4.8 child iteration — skip helpers adopted; one raw predicate left (`grid_utils.cpp:32`); shared `collect_in_flow_children()` never built.
-- §5.1 replay clone — `dl_replay_tile` 566→207 LOC, `dl_replay` 226→171; all helper families shared; the two outer dispatch switches (30 vs 43 `case DL_`) remain parallel, no single parameterized replay core.
-- §5.3 paint-op table — `PAINT_OP_LIST` drives the enum + `paint_op_name()`; validate/lower-raster/lower-svg remain 3 explicit switches (79 `case PAINT_`, down from 108).
-- §5.5 rect zoo — `IRect` slice done; broader `Rect`/`Bound`/`DirtyRect`/`Point2D` consolidation not started.
-- §2.4 line/col tracking — `LineCounter` shared by CSS/HTML5/markup byte-cursors; YAML keeps its parser-local cursor (`YamlCursor` helpers), CSS parser/engine structs keep their own line/col fields.
-- §2.5/§2.6 ctype remainder — `input-pdf.cpp` (11 calls) + `input-pdf-postprocess.cpp` (10), and 28 calls across 13 `markup/` files incl. the link-reference `tolower` comparisons (`inline_format_specific.cpp:335`, `inline_spans.cpp:216`).
-- §1.4 map-field walks — `FOR_EACH_MAP_FIELD` adopted ~18 sites; the 3 read-only `build_ast.cpp` walks are now migrated; residual `->shape` loops are mostly mutation/codegen/copy paths.
-- §1.5 type predicates — broadly adopted; the `build_ast.cpp` quick sweep is done, with local names for AST-specific memberships; remaining replaceable single-variable chains are concentrated in `transpile-mir.cpp`/`transpile.cpp` and still need a refreshed count before the next pass.
-- §6.4 MirEmitter — mechanical bodies shared via `mir_emitter_shared.hpp`; the embedded base struct was not built — each transpiler keeps its own reg counter, import cache, and thin wrapper shims.
-- §6.6 builtin registration — registry strncmp ladders → spec-map tables done; the giant `switch(builtin_id)` (`js_runtime.cpp` ~9470) and 357 `strncmp`s in `js_mir_expression_lowering.cpp` remain; adding a builtin still touches 3 places.
-- §6.6 path_str — `lib/path_str.h` with `js_path.cpp` fully routed; `require()` lightly routed (2 calls), remaining local code is intentional policy.
-- §6.6 RE2 glue — `lib/re2_glue.hpp` now centralizes default options, compile/failure ownership, release, and Lambda find/replace match-window selection; JS capture remap/filter lifecycle and Lambda pattern cache policy remain wrapper-local.
-- §5.7 deep-audit flags — SVG/event audits are written below; both need targeted helper extraction, not broad file merges.
-- §4.8 resolve_htm_style overlap — audited below; the files own different policy layers, with small presentational-hint/property-writer helpers as the next safe slice.
+**Partial** (helpers landed; quantified remainder): see the "Partial — real progress, quantified remainder" table below.
 
 **Not started:**
 - §5.7/§4.8 follow-up code extractions from the new audit notes.
+
+### Partial — real progress, quantified remainder
+
+| Item | Landed | Remaining (quantified) |
+|---|---|---|
+| §4.2 min/max clamps | Shared clamp/floor/positive-constraint helper family in `layout_box.{hpp,cpp}`; grid clean; flex positive-axis readers routed through helpers | Flex core raw `given_min/max_*` mentions down 76→60 (`layout_flex.cpp`), 64 across the flex files; remaining sites are mostly `>= 0` auto/explicit-min semantics, percentage mutation, and border/content conversion policy |
+| §4.5 baseline walkers | `compute_font_baseline_ascender()` shared by flex/table/grid | The 3 recursive first-baseline walkers (flex/table/grid+shared) remain separate |
+| §4.6 percentages | `layout_percentages.{hpp,cpp}`; grid fully on `layout_reresolve_percentage_box()`; both engines on shared scalar primitives | Flex bypasses the box re-resolver; 2 containing-content-width wrappers remain separate over shared primitives |
+| §4.8 layout_axis | 45 axis-helper uses in flex | ~62 `is_horizontal` conditional branches + 31 `is_main_axis_horizontal()` adapter calls + 10 direction branches in `layout_flex.cpp` |
+| §4.8 child iteration | Skip helpers (`layout_display_is_none`, `layout_text_node_has_content`, whitespace suppression) adopted ~17 sites | 1 raw predicate (`grid_utils.cpp:32`); shared `collect_in_flow_children()` never built |
+| §5.1 replay clone | `dl_replay_tile` 566→207 LOC, `dl_replay` 226→171; vector/raster/glyph/effects/backdrop/shadow helper families shared by both | Two parallel dispatch switches (30 vs 43 `case DL_`) incl. duplicated cull pre-pass; no single parameterized replay core |
+| §5.3 paint-op table | `PAINT_OP_LIST` drives the enum + `paint_op_name()` + `PAINT_OP_COUNT` assertion | 3 explicit op switches remain (validate / lower-raster / lower-svg), 79 `case PAINT_` (down from 108); no descriptor table |
+| §5.5 rect zoo | `IRect` in `render_rect.hpp`; `RenderPixelBounds` and `int region[4]` fully gone | Broader `Rect`/`Bound`/`DirtyRect`/`Point2D` consolidation in `view.hpp` |
+| §2.4 line/col tracking | `LineCounter` shared by CSS/HTML5/markup byte-cursors; YAML speculative state behind `YamlCursor` | YAML keeps its parser-local cursor (no `SourceTracker` migration); `css_parser.hpp`/`css_engine.hpp` structs keep their own line/col fields |
+| §2.5/§2.6 ctype | All doc-named parser hot spots + shared helpers migrated to `lib/str.h` classifiers | `input-pdf.cpp` (11 calls) + `input-pdf-postprocess.cpp` (10); 28 calls across 13 `markup/` files incl. link-reference `tolower` (`inline_format_specific.cpp:335`, `inline_spans.cpp:216`) |
+| §1.4 map-field walks | `FOR_EACH_MAP_FIELD` adopted ~18 sites; read-only `build_ast.cpp` walks migrated | Residual `->shape` loops are mutation/codegen/copy paths — review case-by-case, most are legitimately excluded |
+| §1.5 type predicates | Shared TypeId predicates broadly adopted; `build_ast.cpp` sweep done with local names for AST-specific memberships | Replaceable single-variable chains concentrated in `transpile-mir.cpp`/`transpile.cpp`; needs a refreshed count before the next pass |
+| §6.4 MirEmitter | Mechanical bodies (reg alloc, call assembly, labels, imports, immediates) shared via `mir_emitter_shared.hpp` | No embedded base struct — each transpiler keeps its own reg counter, import cache, and thin wrapper shims |
+| §6.6 builtin registration | Registry strncmp ladders → static spec-map tables in `js_runtime_builtin_registry.cpp` | Giant `switch(builtin_id)` (`js_runtime.cpp` ~9470) + 357 `strncmp`s in `js_mir_expression_lowering.cpp`; adding a builtin still touches 3 places |
+| §6.6 path_str | `lib/path_str.h` (17 fns); `js_path.cpp` fully routed | `require()` lightly routed (2 calls); remaining local code is intentional policy |
+| §6.6 RE2 glue | `lib/re2_glue.hpp` centralizes default options, compile/failure ownership, release, Lambda find/replace match-window selection | JS capture remap/filter lifecycle + Lambda pattern cache policy remain wrapper-local |
+| §5.7 deep audits | SVG dual-path and event/event_sim audits written (see §5.7) | Targeted helper extractions from the audit notes, not broad file merges |
+| §4.8 htm/css style overlap | Audited (see §4.8) — files own different policy layers | Small presentational-hint/property-writer helper slice is the next safe step |
 
 ### Top 10 highest-leverage actions
 
@@ -66,7 +71,7 @@ The codebase (~590k LOC surveyed) is not uniformly duplicative — several subsy
 |---|--------|------|------|--------|------|
 | 1 | ✅ Extract `lib/dtoa` from `lambda_double_to_shortest` ≡ `js_double_to_string` | JS↔core | 135 | Low | Low |
 | 2 | ✅ Resolve INI/Properties triple implementation (wire `input-kv.cpp`, delete `input-ini`/`input-prop`) | input | 480 | Med | Med |
-| 3 | 🔶 Migrate radiant layout to existing `layout_box_metrics`/`layout_apply_min_max_*` helpers — box metrics (§4.1) done; min/max (§4.2) partial, ~111 raw clamp sites left (76 in flex) | radiant | 450–750 | Med | Low |
+| 3 | 🔶 Migrate radiant layout to existing `layout_box_metrics`/`layout_apply_min_max_*` helpers — box metrics (§4.1) done; min/max (§4.2) partial, flex positive-axis readers now shared (60 raw core flex mentions left) | radiant | 450–750 | Med | Low |
 | 4 | 🔶 De-clone `dl_replay_tile` vs `dl_replay` + shared glyph raster — glyph (§5.2) done; replay helper families shared, two parallel dispatch switches remain (§5.1) | radiant | 530 | High | Med |
 | 5 | ✅ Kill the 22×/21×/8× static helper copies in lambda/js | JS | 270 | Trivial | Low |
 | 6 | 🔶 `MirEmitter` base shared by `transpile-mir.cpp` and `js_mir_*` — mechanical bodies shared via `mir_emitter_shared.hpp`; embedded base struct not built (§6.4) | JS↔core | 300–500 | Med-High | Med |
@@ -279,6 +284,8 @@ Helper at `layout_box.cpp:79–131` (incl. min-overrides-max precedence + border
 ✅ Partial (2026-07-12): added min-only floor helpers (`layout_floor_min_width/height/axis()`) for layout sites whose comments explicitly say max constraints must not shrink natural/intrinsic content, then routed the block auto-width table floors and table final natural-content floors through them. Verified with `make build`, `make check-int-cast`, `git diff --check`, and table/caption layout comparisons for `radiant_table_caption_box_width`, `table_caption_variations`, and `table_017_caption_bottom`. The WPT `min-max-size-table-content-box` fixture still exposes the pre-existing row/cell height propagation gap for min/max-height tables: table boxes match browser dimensions, but `tbody`/`tr`/`td` heights do not expand with the table.
 
 ✅ Partial (2026-07-12): routed flex hypothetical-main-size clamping through the existing `apply_flex_constraint()` path instead of maintaining a second min/max ladder for regular flex items and a third form-control-specific clamp. The form-control guard now explicitly allows `ITEM_PROP_FORM` items without `fi`, preserving their intrinsic min-size policy while sharing min-over-max precedence with the rest of flex. Verified with `make build`, `make check-int-cast`, `git diff --check`, `make layout test=flex_basis_flex_shrink_row`, `make layout test=flex_grow_to_min`, `make layout test=min_max_percent_no_width_height`, and `./lambda.exe layout temp/cleanup_flex_form_hypothetical.html`; the temp smoke still emits the known cache-layout memtrack shutdown diagnostic while completing with `1 success, 0 failed`.
+
+✅ Partial (2026-07-12): added positive min/max reader helpers (`layout_positive_min_*`, `layout_positive_max_*_or`) for code paths that intentionally treat `<= 0` as no constraint, then routed flex aspect-ratio transferred constraints, form-control positive max constraints, image intrinsic max-width measurement, column-wrap max-height caps, and flex shrink-to-fit definiteness checks through them. This leaves the `>= 0` flex auto-min/explicit-zero paths untouched. Flex core raw `given_min/max_*` mentions are now 60 in `layout_flex.cpp` (64 across the flex files). Verified with `make build`, `make check-int-cast`, `git diff --check`, and layout smokes for `flex_basis_flex_shrink_row`, `wrapped_column_max_height_flex`, `flex_wrap_children_with_min_main_overriding_flex_basis`, `min_max_percent_no_width_height`, `aspect_ratio_flex_row_fill_max_height`, `aspect_ratio_flex_column_stretch_fill_max_width`, `radiant_form_replaced_measure_cache`, and `image_001_basic_layout`.
 
 ### ✅ 4.3 Seven+ `is_out_of_flow` clones + 96 raw inline checks — C3/C4, HIGH
 Defs at `layout.cpp:1085, 1582`, `layout_inline.cpp:52`, `layout_multicol.cpp:262`, `layout_block.cpp:1787, 2739`, `layout_text.cpp:1500`, `layout_table.cpp:2257`, `stacking_order.cpp:19` — all test `ABSOLUTE || FIXED` (some also float). Plus parallel float-detection helpers (`intrinsic_sizing.cpp:1947`, `layout_table.cpp:5427`, `layout_block.cpp:5234`). **Done:** added canonical `layout_position_is_abs_fixed()`, `layout_position_is_floated()`, `layout_view_is_out_of_flow[_positioned]()` and `layout_block_is_out_of_flow[_positioned]()` in `layout.hpp`; routed the named clone helpers and most raw resolved-position call sites across block/inline/multicol/table/text/intrinsic/stacking code through them. Remaining explicit checks distinguish fixed vs absolute scroll behavior or include relative/sticky containing-block semantics. Verified with `make build` plus layout smokes for fixed abs/z-index blending, block-in-inline floats, inline table content, and table out-of-flow border collapse.

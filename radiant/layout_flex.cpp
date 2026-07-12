@@ -264,8 +264,8 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     // 1. Absolutely positioned with auto width (no explicit width/min/max)
     // 2. Inline-flex (display: inline-flex) with auto width
     // Both cases use shrink-to-fit sizing per CSS Display §3 / CSS 2.1 §10.3.9
-    bool has_min_width = container->blk && container->blk->given_min_width > 0;
-    bool has_max_width = container->blk && container->blk->given_max_width > 0;
+    bool has_min_width = layout_positive_min_width(container) > 0.0f;
+    bool has_max_width = layout_positive_max_width_or(container, 0.0f) > 0.0f;
     bool is_absolute_no_width = false;
     if (container->position &&
         (container->position->position == CSS_VALUE_ABSOLUTE || container->position->position == CSS_VALUE_FIXED)) {
@@ -320,8 +320,8 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     bool is_absolute = container->position &&
         (container->position->position == CSS_VALUE_ABSOLUTE || container->position->position == CSS_VALUE_FIXED);
 
-    bool has_min_height = container->blk && container->blk->given_min_height > 0;
-    bool has_max_height = container->blk && container->blk->given_max_height > 0;
+    bool has_min_height = layout_positive_min_height(container) > 0.0f;
+    bool has_max_height = layout_positive_max_height_or(container, 0.0f) > 0.0f;
 
     // If this container is a flex/grid item and its parent actually assigned a
     // height, that height is definite. A positive content/measured height alone
@@ -392,7 +392,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // This means: container.width equals max-width AND there was more available space
         // For simplicity, we check if container.width == max-width (meaning it was clamped)
         if (has_max_width && content_width > 0) {
-            float max_width_value = container->blk->given_max_width;
+            float max_width_value = layout_positive_max_width_or(container, 0.0f);
             // The container's content_width would have been clamped to max_width if max_width < available
             // We consider it definite if the actual content_width equals (approximately) the max_width content area
             // Account for border-box vs content-box
@@ -454,7 +454,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
         // Check if max-height is actually constraining
         if (has_max_height && content_height > 0) {
-            float max_height_value = container->blk->given_max_height;
+            float max_height_value = layout_positive_max_height_or(container, 0.0f);
             float max_content_height = layout_css_size_to_content_box(
                 container->bound, layout_box_sizing(container), max_height_value, false);
             if (fabs(content_height - max_content_height) < 1.0f) {
@@ -469,7 +469,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // without min-height indefinite; this is what prevents normal content
         // columns from distributing against the large wrap sentinel.
         if (!has_definite_height && has_min_height) {
-            float min_height_value = container->blk->given_min_height;
+            float min_height_value = layout_positive_min_height(container);
             float min_content_height = layout_css_size_to_content_box(
                 container->bound, layout_box_sizing(container), min_height_value, false);
             if (min_content_height > 0.0f && (float)content_height <= min_content_height + 0.5f) {
@@ -607,8 +607,8 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                 // For shrink-to-fit, calculate width from flex items
                 bool has_explicit_width = container->blk && container->blk->given_width >= 0;
                 // Also check for min-width/max-width constraints
-                bool has_min_width = container->blk && container->blk->given_min_width > 0;
-                bool has_max_width = container->blk && container->blk->given_max_width > 0;
+                bool has_min_width = layout_positive_min_width(container) > 0.0f;
+                bool has_max_width = layout_positive_max_width_or(container, 0.0f) > 0.0f;
                 bool is_absolute = container->position &&
                     (container->position->position == CSS_VALUE_ABSOLUTE ||
                      container->position->position == CSS_VALUE_FIXED);
@@ -839,7 +839,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         // (auto height), per CSS Flexbox §9.3 items should not wrap since the
                         // main axis can grow indefinitely. Set main_axis_size to a very large
                         // value for wrapping purposes. Phase 7 will compute the final height.
-                        bool has_max_height = container->blk && container->blk->given_max_height > 0;
+                        bool has_max_height = layout_positive_max_height_or(container, 0.0f) > 0.0f;
                         if (flex_layout->wrap != WRAP_NOWRAP && !has_max_height) {
                             flex_layout->main_axis_size = 1e9f;
                             log_debug("COLUMN FLEX: auto-height with wrap, using infinite main_axis_size for wrapping");
@@ -1096,11 +1096,12 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     // For column flex with wrap: use max-height as wrapping constraint.
     // Per CSS Flexbox §9.3, when the container has no definite main size but has
     // a max main size (max-height for column flex), use it for line breaking.
+    float column_wrap_max_height = layout_positive_max_height_or(container, -1.0f);
     if (!is_main_axis_horizontal(flex_layout) && flex_layout->wrap != WRAP_NOWRAP &&
-        container->blk && container->blk->given_max_height > 0 &&
+        column_wrap_max_height > 0.0f &&
         !(container->blk->given_height >= 0)) {
         float max_content_height = layout_css_size_to_content_box(
-            container->bound, layout_box_sizing(container), container->blk->given_max_height, false);
+            container->bound, layout_box_sizing(container), column_wrap_max_height, false);
         if (max_content_height > 0 && flex_layout->main_axis_size > max_content_height) {
             log_debug("COLUMN WRAP: capping main_axis_size from %.1f to %.1f (max-height constraint)",
                       flex_layout->main_axis_size, max_content_height);
@@ -1119,7 +1120,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     if (!is_main_axis_horizontal(flex_layout) &&
         flex_layout->main_axis_is_indefinite &&
         flex_layout->wrap != WRAP_NOWRAP &&
-        !(container->blk && container->blk->given_max_height > 0)) {
+        !(layout_positive_max_height_or(container, -1.0f) > 0.0f)) {
         float natural_main_size = 0.0f;
         for (int i = 0; i < line_count; i++) {
             if (flex_layout->lines[i].main_size > natural_main_size) {
@@ -1488,8 +1489,8 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // For single-line, cross-axis = max outer item width.
         {
             bool has_explicit_width_p7 = container->blk && container->blk->given_width >= 0;
-            bool has_min_width_p7 = container->blk && container->blk->given_min_width > 0;
-            bool has_max_width_p7 = container->blk && container->blk->given_max_width > 0;
+            bool has_min_width_p7 = layout_positive_min_width(container) > 0.0f;
+            bool has_max_width_p7 = layout_positive_max_width_or(container, 0.0f) > 0.0f;
             bool is_abs_p7 = container->position &&
                 (container->position->position == CSS_VALUE_ABSOLUTE ||
                  container->position->position == CSS_VALUE_FIXED);
@@ -1537,8 +1538,8 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     // Phase 7b: Apply min-height constraint to container
     // This must happen AFTER content-based height calculation but BEFORE align_content
     // so that justify-content/align-content have the correct container size to work with
-    if (container->blk && container->blk->given_min_height > 0) {
-        float min_height = container->blk->given_min_height;
+    float min_height = layout_positive_min_height(container);
+    if (min_height > 0.0f) {
         if (container->height < min_height) {
             log_debug("%s Phase 7b: Applying min-height constraint: %.1f -> %.1f", container->source_loc(), container->height, min_height);
             container->height = min_height;
@@ -2495,20 +2496,12 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
     // derive the flex base size (main axis) from the inferred cross dimension.
     if (item->fi && item->fi->aspect_ratio > 0) {
         float r = item->fi->aspect_ratio;
+        ViewBlock* item_block = lam::view_as_block(item);
 
         // cross-axis min/max for this flex direction
-        float cross_min = 0, cross_max = -1; // -1 = none
-        if (item->blk) {
-            if (is_horizontal) {
-                // row flex: cross = height
-                cross_min = item->blk->given_min_height > 0 ? item->blk->given_min_height : 0.0f;
-                cross_max = item->blk->given_max_height > 0 ? item->blk->given_max_height : -1.0f;
-            } else {
-                // column flex: cross = width
-                cross_min = item->blk->given_min_width > 0 ? item->blk->given_min_width : 0.0f;
-                cross_max = item->blk->given_max_width > 0 ? item->blk->given_max_width : -1.0f;
-            }
-        }
+        bool cross_is_horizontal = !is_horizontal;
+        float cross_min = layout_positive_min_axis(item_block, cross_is_horizontal);
+        float cross_max = layout_positive_max_axis_or(item_block, cross_is_horizontal, -1.0f);
 
         // determine alignment type for this item
         int align_type = ((int)item->fi->align_self != ALIGN_AUTO) ?
@@ -2540,18 +2533,12 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
             } else if (cross_min > 0.0f) {
                 // min-cross transfers to a min-main: size to the constraint floor
                 effective_cross = cross_min;
-            } else if (item->blk) {
+            } else if (item_block) {
                 // No cross-axis constraints: check main-axis constraints and transfer via ratio.
                 // For column flex (main=height): max-height → cross = max-height * ratio.
                 // For row flex (main=width): max-width → cross = max-width / ratio.
-                float main_max = -1.0f, main_min = 0.0f;
-                if (is_horizontal) {
-                    main_max = item->blk->given_max_width > 0 ? item->blk->given_max_width : -1.0f;
-                    main_min = item->blk->given_min_width > 0 ? item->blk->given_min_width : 0.0f;
-                } else {
-                    main_max = item->blk->given_max_height > 0 ? item->blk->given_max_height : -1.0f;
-                    main_min = item->blk->given_min_height > 0 ? item->blk->given_min_height : 0.0f;
-                }
+                float main_max = layout_positive_max_axis_or(item_block, is_horizontal, -1.0f);
+                float main_min = layout_positive_min_axis(item_block, is_horizontal);
                 if (main_max > 0.0f) {
                     effective_cross = is_horizontal ? main_max / r : main_max * r;
                 } else if (main_min > 0.0f) {
@@ -2648,11 +2635,9 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
 
     // Get specified constraints from BlockProp (CSS values)
     float min_width = item->blk ? item->blk->given_min_width : -1;
-    float max_width = item->blk && item->blk->given_max_width > 0 ?
-        item->blk->given_max_width : FLT_MAX;
+    float max_width = layout_positive_max_width_or(lam::view_as_block(item), FLT_MAX);
     float min_height = item->blk ? item->blk->given_min_height : -1;
-    float max_height = item->blk && item->blk->given_max_height > 0 ?
-        item->blk->given_max_height : FLT_MAX;
+    float max_height = layout_positive_max_height_or(lam::view_as_block(item), FLT_MAX);
 
     log_debug("%s resolve_flex_item_constraints: item %p, given_min_width=%.2f, min_width=%.1f, has_explicit_width=%d", item->source_loc(),
               item, item->blk ? item->blk->given_min_width : -1.0f, min_width, item->fi->has_explicit_width);
@@ -2975,8 +2960,9 @@ float apply_flex_constraint(
         // cross-axis branch was a no-op which let a column-flex stretch
         // bypass max-width entirely.
         bool axis_is_horizontal = is_main_axis ? is_horizontal : !is_horizontal;
+        ViewBlock* item_block = lam::view_as_block(item);
         float min_size = 0;
-        float max_size = FLT_MAX;
+        float max_size = layout_positive_max_axis_or(item_block, axis_is_horizontal, FLT_MAX);
 
         if (axis_is_horizontal) {
             if (item->blk && item->blk->given_min_width >= 0) {
@@ -2991,7 +2977,6 @@ float apply_flex_constraint(
                     min_size += layout_boundary_metrics(item->bound).pad_border_h;
                 }
             }
-            if (item->blk && item->blk->given_max_width > 0) max_size = item->blk->given_max_width;
         } else {
             if (item->blk && item->blk->given_min_height >= 0) {
                 min_size = item->blk->given_min_height;
@@ -3001,7 +2986,6 @@ float apply_flex_constraint(
                     min_size += layout_boundary_metrics(item->bound).pad_border_v;
                 }
             }
-            if (item->blk && item->blk->given_max_height > 0) max_size = item->blk->given_max_height;
         }
 
         if (hit_min) *hit_min = false;
