@@ -4,7 +4,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#define MIR_SHARED_MAX_CALL_ARGS 6
+// Max positional args for an emitted MIR call. 8 accommodates fn_hash_join_tuples
+// (join tuple stream + prior keys + rows + row keys + name + optional + index name/values).
+#define MIR_SHARED_MAX_CALL_ARGS 8
 
 static inline MIR_type_t mir_reg_type_for_alloc(MIR_type_t type,
                                                 bool coerce_float32) {
@@ -49,7 +51,7 @@ static inline void mir_emit_i64_const_to_reg(MIR_context_t ctx,
 static inline void mir_prepare_call_args(MIR_var_t* args,
                                          MIR_type_t* arg_types,
                                          int nargs) {
-    static const char* ARG_NAMES[MIR_SHARED_MAX_CALL_ARGS] = {"a", "b", "c", "d", "e", "f"};
+    static const char* ARG_NAMES[MIR_SHARED_MAX_CALL_ARGS] = {"a", "b", "c", "d", "e", "f", "g", "h"};
     for (int i = 0; i < nargs; i++) {
         args[i].type = arg_types[i];
         args[i].name = ARG_NAMES[i];
