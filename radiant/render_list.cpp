@@ -34,18 +34,20 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     if (marker_prop->image_url && strcmp(marker_prop->image_url, "none") != 0) {
         if (!marker_prop->loaded_image) {
             marker_prop->loaded_image = load_image(rdcon->ui_context, marker_prop->image_url);
-            if (marker_prop->loaded_image && marker_prop->loaded_image->pic) {
-                float iw, ih;
-                rdt_picture_get_size(marker_prop->loaded_image->pic, &iw, &ih);
-                if (iw > 0 && ih > 0) {
-                    int target_w = (int)(iw + 0.5f); // INT_CAST_OK: SVG marker intrinsic width rounded to pixels.
-                    int target_h = (int)(ih + 0.5f); // INT_CAST_OK: SVG marker intrinsic height rounded to pixels.
-                    if (target_w < 1) target_w = 1;
-                    if (target_h < 1) target_h = 1;
-                    marker_prop->loaded_image->max_render_width = target_w;
-                    render_media_rasterize_svg_picture(marker_prop->loaded_image,
-                                                       target_w, target_h);
-                }
+        }
+        if (marker_prop->loaded_image && marker_prop->loaded_image->pic) {
+            float iw, ih;
+            rdt_picture_get_size(marker_prop->loaded_image->pic, &iw, &ih);
+            if (iw > 0 && ih > 0) {
+                int target_w = (int)(iw + 0.5f); // INT_CAST_OK: SVG marker intrinsic width rounded to pixels.
+                int target_h = (int)(ih + 0.5f); // INT_CAST_OK: SVG marker intrinsic height rounded to pixels.
+                if (target_w < 1) target_w = 1;
+                if (target_h < 1) target_h = 1;
+                // list markers are often loaded during layout; rasterize any
+                // vector marker that reaches paint without decoded pixels.
+                marker_prop->loaded_image->max_render_width = target_w;
+                render_media_rasterize_svg_picture(marker_prop->loaded_image,
+                                                   target_w, target_h);
             }
         }
         ImageSurface* img = marker_prop->loaded_image;
