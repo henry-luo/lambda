@@ -4330,7 +4330,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
             }
         }
 
-        log_debug("JUSTIFY_CONTENT - justify=%d, container_size=%d, total_size_with_gaps=%d, free_space=%d, direction=%d",
+        log_debug("JUSTIFY_CONTENT - justify=%d, container_size=%.1f, total_size_with_gaps=%.1f, free_space=%.1f, direction=%d",
                justify, container_size, total_size_with_gaps, free_space, flex_layout->direction);
 
         // CSS Alignment: 'start'/'end' are writing-mode aware, not flex-direction aware
@@ -4341,65 +4341,26 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         bool is_reverse = (flex_layout->direction == CSS_VALUE_ROW_REVERSE ||
                           flex_layout->direction == CSS_VALUE_COLUMN_REVERSE);
 
-        switch (justify) {
-            case CSS_VALUE_START:  // Writing-mode 'start' - always physical start
-                if (is_reverse) {
-                    // In reverse, physical start is at free_space
-                    current_pos = free_space;
-                } else {
-                    current_pos = 0;
-                }
-                break;
-            case CSS_VALUE_END:  // Writing-mode 'end' - always physical end
-                if (is_reverse) {
-                    // In reverse, physical end is at 0
-                    current_pos = 0;
-                } else {
-                    current_pos = free_space;
-                }
-                break;
-            case CSS_VALUE_FLEX_START:
-                current_pos = 0;
-                break;
-            case CSS_VALUE_FLEX_END:
-                current_pos = free_space;
-                break;
-            case CSS_VALUE_CENTER:
-                current_pos = free_space / 2;
-                break;
-            case CSS_VALUE_SPACE_BETWEEN:
-                current_pos = 0;
-                if (line->item_count > 1) {
-                    // Space-between distributes remaining space evenly between items
-                    // Don't include gaps in calculation - space-between absorbs gaps into spacing
-                    int remaining_space = container_size - total_item_size;
-                    spacing = remaining_space / (line->item_count - 1);
-                    log_debug("SPACE_BETWEEN - remaining_space=%d, spacing=%d",
-                           remaining_space, spacing);
-                } else {
-                    spacing = 0; // Single item: no spacing needed
-                }
-                break;
-            case CSS_VALUE_SPACE_AROUND:
-                if (line->item_count > 0) {
-                    int remaining_space = container_size - total_size_with_gaps;
-                    spacing = remaining_space / line->item_count;
-                    current_pos = spacing / 2;
-                }
-                break;
-            case CSS_VALUE_SPACE_EVENLY:
-                if (line->item_count > 0) {
-                    int remaining_space = container_size - total_size_with_gaps;
-                    spacing = remaining_space / (line->item_count + 1);
-                    current_pos = spacing;
-                    log_debug("SPACE_EVENLY - remaining=%d, spacing=%d, current_pos=%d",
-                           remaining_space, spacing, current_pos);
-                }
-                break;
-            default:
-                log_debug("Using DEFAULT justify-content (value=%d)", justify);
-                current_pos = 0;
-                break;
+        int distribution_justify = justify;
+        if (justify == CSS_VALUE_START) {
+            distribution_justify = is_reverse ? CSS_VALUE_FLEX_END : CSS_VALUE_FLEX_START;
+        } else if (justify == CSS_VALUE_END) {
+            distribution_justify = is_reverse ? CSS_VALUE_FLEX_START : CSS_VALUE_FLEX_END;
+        }
+
+        radiant::SpaceDistribution distribution = radiant::compute_space_distribution(
+            distribution_justify, free_space, line->item_count, 0.0f);
+        current_pos = distribution.gap_before_first;
+        spacing = distribution.gap_between;
+
+        if (justify == CSS_VALUE_SPACE_BETWEEN && line->item_count > 1 && free_space >= 0) {
+            log_debug("SPACE_BETWEEN - remaining_space=%.1f, spacing=%.1f",
+                      container_size - total_item_size, spacing);
+        } else if (justify == CSS_VALUE_SPACE_EVENLY && free_space >= 0) {
+            log_debug("SPACE_EVENLY - remaining=%.1f, spacing=%.1f, current_pos=%.1f",
+                      free_space, spacing, current_pos);
+        } else if (distribution_justify != justify) {
+            log_debug("JUSTIFY_CONTENT physical mapping: %d -> %d", justify, distribution_justify);
         }
     }
 
@@ -4420,7 +4381,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
 
             // Add non-auto start margin
             if (!left_auto && item->bound) {
-                int margin_start = is_main_axis_horizontal(flex_layout) ?
+                float margin_start = is_main_axis_horizontal(flex_layout) ?
                     item->bound->margin.left : item->bound->margin.top;
                 current_pos += margin_start;
             }
@@ -4482,12 +4443,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
             }
 
             // Add gap between items.
-            // For space-between with positive free space, gaps are already absorbed into
-            // the spacing value (spacing = remaining_space / (n-1) which implicitly includes gap).
-            // But when space-between overflows (free_space < 0), it falls back to flex-start
-            // via alignment_fallback_for_overflow, and gaps should still apply between items.
-            bool skip_gap = (flex_layout->justify == CSS_VALUE_SPACE_BETWEEN && free_space >= 0);
-            if (i < line->item_count - 1 && !skip_gap) {
+            if (i < line->item_count - 1) {
                 float gap = is_main_axis_horizontal(flex_layout) ?
                          flex_layout->column_gap : flex_layout->row_gap;
                 if (gap > 0) {
@@ -4713,128 +4669,93 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                 }
             }
 
-            // Regular alignment (handle both flex-specific and generic alignment keywords)
-            switch (effective_align) {
-                case ALIGN_START:
-                case CSS_VALUE_START:  // Handle 'start' same as 'flex-start'
-                    cross_pos = margin_cross_start;
-                    break;
-                case ALIGN_END:
-                case CSS_VALUE_END:  // Handle 'end' same as 'flex-end'
-                    cross_pos = available_cross_size - item_cross_size - margin_cross_end;
-                    break;
-                case ALIGN_CENTER:
-                    cross_pos = margin_cross_start +
-                        (available_cross_size - item_cross_size - (margin_cross_start + margin_cross_end)) / 2;
-                    break;
-                case ALIGN_STRETCH:
-                    // For stretch, check if item has explicit cross-axis size from CSS
-                    // The blk->given_* fields are ONLY set when CSS explicitly specifies the size
-                    // (in resolve_css_style.cpp). Form control intrinsic sizes use lycon->block.given_*
-                    // which is a different field, so checking blk->given_* > 0 correctly identifies
-                    // CSS-specified sizes without false positives from form control defaults.
-                    {
-                        bool has_explicit_cross_size = false;
-                        if (is_main_axis_horizontal(flex_layout)) {
-                            // Row direction: cross-axis is height
-                            // blk->given_height is set only by CSS height property
-                            has_explicit_cross_size = (item->blk && item->blk->given_height >= 0);
-                        } else {
-                            // Column direction: cross-axis is width
-                            // blk->given_width is set only by CSS width property
-                            has_explicit_cross_size = (item->blk && item->blk->given_width >= 0);
-                        }
+            if (effective_align == ALIGN_STRETCH) {
+                // For stretch, check if item has explicit cross-axis size from CSS
+                // The blk->given_* fields are ONLY set when CSS explicitly specifies the size
+                // (in resolve_css_style.cpp). Form control intrinsic sizes use lycon->block.given_*
+                // which is a different field, so checking blk->given_* > 0 correctly identifies
+                // CSS-specified sizes without false positives from form control defaults.
+                bool has_explicit_cross_size = false;
+                if (is_main_axis_horizontal(flex_layout)) {
+                    // Row direction: cross-axis is height
+                    // blk->given_height is set only by CSS height property
+                    has_explicit_cross_size = (item->blk && item->blk->given_height >= 0);
+                } else {
+                    // Column direction: cross-axis is width
+                    // blk->given_width is set only by CSS width property
+                    has_explicit_cross_size = (item->blk && item->blk->given_width >= 0);
+                }
 
-                        log_debug("ALIGN_STRETCH item %d (%s): has_explicit=%d, available=%d, item_cross=%d, blk=%p, given_width=%.1f, type=%d",
-                                  i, item->node_name(), has_explicit_cross_size, available_cross_size, item_cross_size,
-                                  item->blk, item->blk ? item->blk->given_width : -999.0f,
-                                  item->blk ? item->blk->given_width_type : -1);
+                log_debug("ALIGN_STRETCH item %d (%s): has_explicit=%d, available=%.1f, item_cross=%.1f, blk=%p, given_width=%.1f, type=%d",
+                          i, item->node_name(), has_explicit_cross_size, available_cross_size, item_cross_size,
+                          item->blk, item->blk ? item->blk->given_width : -999.0f,
+                          item->blk ? item->blk->given_width_type : -1);
 
-                        if (has_explicit_cross_size) {
-                            // Item has explicit size - set item dimension to border-box value
-                            // item_cross_size is already the border-box size (from get_cross_axis_size)
-                            set_cross_axis_size(item, item_cross_size, flex_layout);
+                if (has_explicit_cross_size) {
+                    // Item has explicit size - set item dimension to border-box value
+                    // item_cross_size is already the border-box size (from get_cross_axis_size)
+                    set_cross_axis_size(item, item_cross_size, flex_layout);
 
-                            // Per CSS Flexbox §9.5: position item with its margin edge
-                            // Even items with explicit cross size must respect cross-axis margins
-                            float margin_cross_start = 0, margin_cross_end = 0;
-                            if (item->bound) {
-                                if (is_main_axis_horizontal(flex_layout)) {
-                                    margin_cross_start = item->bound->margin.top;
-                                    margin_cross_end = item->bound->margin.bottom;
-                                } else {
-                                    margin_cross_start = item->bound->margin.left;
-                                    margin_cross_end = item->bound->margin.right;
-                                }
-                            }
-
-                            // For wrap-reverse, position at end of line
-                            if (is_wrap_reverse) {
-                                cross_pos = available_cross_size - item_cross_size - margin_cross_end;
-                            } else {
-                                cross_pos = margin_cross_start;
-                            }
-                        } else {
-                            // Item can be stretched - stretch margin box to fill available space
-                            // CSS Flexbox spec: stretched item's margin box equals line cross size
-                            // So content box = available_cross_size - cross-axis margins
-                            float margin_cross_start = 0, margin_cross_end = 0;
-                            if (item->bound) {
-                                if (is_main_axis_horizontal(flex_layout)) {
-                                    margin_cross_start = item->bound->margin.top;
-                                    margin_cross_end = item->bound->margin.bottom;
-                                } else {
-                                    margin_cross_start = item->bound->margin.left;
-                                    margin_cross_end = item->bound->margin.right;
-                                }
-                            }
-                            float target_cross_size = available_cross_size - (margin_cross_start + margin_cross_end);
-                            if (target_cross_size < 0) target_cross_size = 0;
-
-                            cross_pos = margin_cross_start;
-                            // ALWAYS apply stretch constraint and set actual cross-axis size
-                            // get_cross_axis_size may return a min-height/min-width adjusted value
-                            // but the actual item->height/width may not have been set yet
-                            {
-                                int constrained_cross_size = apply_stretch_constraint(
-                                    item, target_cross_size, flex_layout);
-                                set_cross_axis_size(item, constrained_cross_size, flex_layout);
-                                item_cross_size = constrained_cross_size;
-                                log_debug("ALIGN_STRETCH - item %d: stretched to %d (available=%d, margins=%.1f+%.1f)",
-                                          i, constrained_cross_size, available_cross_size, margin_cross_start, margin_cross_end);
-                            }
-                        }
-                    }
-                    break;
-                case ALIGN_BASELINE:
-                    if (is_main_axis_horizontal(flex_layout)) {
-                        // Calculate this item's baseline offset using the same function
-                        float item_baseline = calculate_item_baseline(item);
-                        // Position item so its baseline aligns with max baseline:
-                        //   (max_baseline - item_baseline) gives margin-box top offset.
-                        // Add margin_cross_start so item->y is the BORDER-BOX top, consistent
-                        // with all other alignment cases (ALIGN_START, ALIGN_STRETCH, etc.).
-                        cross_pos = max_baseline - item_baseline + margin_cross_start;
-                        if (cross_pos < margin_cross_start) {
-                            cross_pos = margin_cross_start;
-                        }
-                        log_debug("ALIGN_BASELINE - item %d: item_baseline=%.1f, max_baseline=%.1f, margin_top=%.0f, cross_pos=%.1f",
-                                  i, item_baseline, max_baseline, margin_cross_start, cross_pos);
+                    // For wrap-reverse, position at end of line
+                    if (is_wrap_reverse) {
+                        cross_pos = available_cross_size - item_cross_size - margin_cross_end;
                     } else {
-                        // For column direction, baseline is equivalent to start
                         cross_pos = margin_cross_start;
                     }
-                    break;
-                default:
-                    cross_pos = 0;
-                    break;
+                } else {
+                    // Item can be stretched - stretch margin box to fill available space
+                    // CSS Flexbox spec: stretched item's margin box equals line cross size
+                    // So content box = available_cross_size - cross-axis margins
+                    float target_cross_size = available_cross_size - (margin_cross_start + margin_cross_end);
+                    if (target_cross_size < 0) target_cross_size = 0;
+
+                    cross_pos = margin_cross_start;
+                    // ALWAYS apply stretch constraint and set actual cross-axis size
+                    // get_cross_axis_size may return a min-height/min-width adjusted value
+                    // but the actual item->height/width may not have been set yet
+                    float constrained_cross_size = apply_stretch_constraint(
+                        item, target_cross_size, flex_layout);
+                    set_cross_axis_size(item, constrained_cross_size, flex_layout);
+                    item_cross_size = constrained_cross_size;
+                    log_debug("ALIGN_STRETCH - item %d: stretched to %.1f (available=%.1f, margins=%.1f+%.1f)",
+                              i, constrained_cross_size, available_cross_size, margin_cross_start, margin_cross_end);
+                }
+            } else if (effective_align == ALIGN_BASELINE) {
+                if (is_main_axis_horizontal(flex_layout)) {
+                    // Calculate this item's baseline offset using the same function
+                    float item_baseline = calculate_item_baseline(item);
+                    // Position item so its baseline aligns with max baseline:
+                    //   (max_baseline - item_baseline) gives margin-box top offset.
+                    // Add margin_cross_start so item->y is the BORDER-BOX top, consistent
+                    // with all other alignment cases (ALIGN_START, ALIGN_STRETCH, etc.).
+                    cross_pos = max_baseline - item_baseline + margin_cross_start;
+                    if (cross_pos < margin_cross_start) {
+                        cross_pos = margin_cross_start;
+                    }
+                    log_debug("ALIGN_BASELINE - item %d: item_baseline=%.1f, max_baseline=%.1f, margin_top=%.0f, cross_pos=%.1f",
+                              i, item_baseline, max_baseline, margin_cross_start, cross_pos);
+                } else {
+                    // For column direction, baseline is equivalent to start
+                    cross_pos = margin_cross_start;
+                }
+            } else if (effective_align == ALIGN_START || effective_align == CSS_VALUE_START ||
+                       effective_align == ALIGN_END || effective_align == CSS_VALUE_END ||
+                       effective_align == ALIGN_CENTER) {
+                // Alignment is applied to the item's margin box, so the shared
+                // offset sees only the remaining space after both cross margins.
+                float margin_box_free_space = available_cross_size - item_cross_size -
+                    (margin_cross_start + margin_cross_end);
+                cross_pos = margin_cross_start +
+                    radiant::compute_alignment_offset_simple(effective_align, margin_box_free_space);
+            } else {
+                cross_pos = 0.0f;
             }
         }
 
         // CRITICAL: Add line's cross position to get absolute position
         // line->cross_position is set by align_content for multi-line layouts
         float absolute_cross_pos = line->cross_position + cross_pos;
-        log_debug("FINAL_CROSS_POS - item %d: line_pos=%d + cross_pos=%.1f = %.1f",
+        log_debug("FINAL_CROSS_POS - item %d: line_pos=%.1f + cross_pos=%.1f = %.1f",
                   i, line->cross_position, cross_pos, absolute_cross_pos);
         set_cross_axis_position(item, absolute_cross_pos, flex_layout);
     }
@@ -4849,23 +4770,23 @@ void align_content(FlexContainerLayout* flex_layout) {
     // (for row: height, for column: width)
     float container_cross_size = flex_layout->cross_axis_size;
 
-    int total_lines_size = 0;
+    float total_lines_size = 0.0f;
     for (int i = 0; i < flex_layout->line_count; i++) {
         total_lines_size += flex_layout->lines[i].cross_size;
     }
 
-    int gap_space = calculate_gap_space(flex_layout, flex_layout->line_count, false);
+    float gap_space = calculate_gap_space(flex_layout, flex_layout->line_count, false);
     total_lines_size += gap_space;
 
     float free_space = container_cross_size - total_lines_size;
-    int start_pos = 0;
-    int line_spacing = 0;
+    float start_pos = 0.0f;
+    float line_spacing = 0.0f;
 
     // Apply overflow fallback - when free_space < 0, space-* alignments fall back to start
     int effective_align = flex_layout->align_content;
     if (free_space < 0) {
         effective_align = radiant::alignment_fallback_for_overflow(effective_align, (float)free_space);
-        log_debug("ALIGN_CONTENT overflow fallback: %d -> %d (free_space=%d)",
+        log_debug("ALIGN_CONTENT overflow fallback: %d -> %d (free_space=%.1f)",
                  flex_layout->align_content, effective_align, free_space);
     }
 
@@ -4885,58 +4806,29 @@ void align_content(FlexContainerLayout* flex_layout) {
         // Note: space-* and stretch (with positive free_space) keep their behavior, just with reversed line order
     }
 
-    // CRITICAL FIX: Use align_content value directly - it's now stored as Lexbor constant
-    // Handle both flex-specific (flex-start/flex-end) and generic (start/end) alignment values
-    switch (effective_align) {
-        case ALIGN_START:
-        case CSS_VALUE_START:  // Handle 'start' keyword same as 'flex-start'
-            start_pos = 0;
-            break;
-        case ALIGN_END:
-        case CSS_VALUE_END:  // Handle 'end' keyword same as 'flex-end'
-            start_pos = free_space;
-            break;
-        case ALIGN_CENTER:
-            start_pos = free_space / 2;
-            break;
-        case ALIGN_SPACE_BETWEEN:
-            start_pos = 0;
-            line_spacing = flex_layout->line_count > 1 ? free_space / (flex_layout->line_count - 1) : 0;
-            break;
-        case ALIGN_SPACE_AROUND:
-            line_spacing = flex_layout->line_count > 0 ? free_space / flex_layout->line_count : 0;
-            start_pos = line_spacing / 2;
-            break;
-        case CSS_VALUE_SPACE_EVENLY:
-            // Distribute space evenly: equal spacing before, between, and after lines
-            if (flex_layout->line_count > 0) {
-                line_spacing = free_space / (flex_layout->line_count + 1);
-                start_pos = line_spacing;
+    if (effective_align == ALIGN_STRETCH) {
+        // Distribute extra space equally among all lines
+        if (free_space > 0 && flex_layout->line_count > 0) {
+            float extra_per_line = free_space / flex_layout->line_count;
+            log_debug("ALIGN_STRETCH: container=%.1f, total_lines=%.1f, free=%.1f, extra_per_line=%.1f",
+                      container_cross_size, total_lines_size, free_space, extra_per_line);
+            for (int i = 0; i < flex_layout->line_count; i++) {
+                float old_size = flex_layout->lines[i].cross_size;
+                flex_layout->lines[i].cross_size += extra_per_line;
+                log_debug("ALIGN_STRETCH: line %d: %g + %.1f = %g",
+                          i, old_size, extra_per_line, flex_layout->lines[i].cross_size);
             }
-            break;
-        case ALIGN_STRETCH:
-            // Distribute extra space equally among all lines
-            if (free_space > 0 && flex_layout->line_count > 0) {
-                int extra_per_line = free_space / flex_layout->line_count;
-                log_debug("ALIGN_STRETCH: container=%d, total_lines=%d, free=%d, extra_per_line=%d",
-                          container_cross_size, total_lines_size, free_space, extra_per_line);
-                for (int i = 0; i < flex_layout->line_count; i++) {
-                    float old_size = flex_layout->lines[i].cross_size;
-                    flex_layout->lines[i].cross_size += extra_per_line;
-                    log_debug("ALIGN_STRETCH: line %d: %g + %d = %g",
-                              i, old_size, extra_per_line, flex_layout->lines[i].cross_size);
-                }
-            }
-            start_pos = 0;
-            break;
-        default:
-            start_pos = 0;
-            break;
+        }
+    } else {
+        radiant::SpaceDistribution distribution = radiant::compute_space_distribution(
+            effective_align, free_space, flex_layout->line_count, gap_space);
+        start_pos = distribution.gap_before_first;
+        line_spacing = distribution.gap_between;
     }
 
     // Position lines
-    int current_pos = start_pos;
-    log_debug("ALIGN_CONTENT - lines: %d, start_pos: %d, free_space: %d",
+    float current_pos = start_pos;
+    log_debug("ALIGN_CONTENT - lines: %d, start_pos: %.1f, free_space: %.1f",
            flex_layout->line_count, start_pos, free_space);
 
     // WRAP-REVERSE FIX: Reverse line order for wrap-reverse
@@ -4950,7 +4842,7 @@ void align_content(FlexContainerLayout* flex_layout) {
         // CRITICAL: Store line's cross position for use in align_items_cross_axis
         line->cross_position = current_pos;
 
-        log_debug("POSITION_LINE %d (order %d) - cross_pos: %d, cross_size: %d",
+        log_debug("POSITION_LINE %d (order %d) - cross_pos: %.1f, cross_size: %.1f",
                i, line_idx, current_pos, line->cross_size);
 
         // NOTE: We no longer set item positions here. Instead, align_items_cross_axis
@@ -4961,10 +4853,10 @@ void align_content(FlexContainerLayout* flex_layout) {
 
         // Add gap between lines
         if (line_idx < flex_layout->line_count - 1) {
-            int gap_between_lines = is_main_axis_horizontal(flex_layout) ?
+            float gap_between_lines = is_main_axis_horizontal(flex_layout) ?
                           flex_layout->row_gap : flex_layout->column_gap;
 
-            log_debug("Adding gap between lines %d and %d: %d", i, i+1, gap_between_lines);
+            log_debug("Adding gap between lines %d and %d: %.1f", i, i+1, gap_between_lines);
             current_pos += gap_between_lines;
         }
     }

@@ -67,6 +67,7 @@ SpaceDistribution compute_space_distribution(
     int32_t item_count,
     float existing_gap
 ) {
+    (void)existing_gap;
     SpaceDistribution dist = {0.0f, 0.0f, 0.0f};
 
     // No items or single item - no distribution needed
@@ -74,8 +75,9 @@ SpaceDistribution compute_space_distribution(
         return dist;
     }
 
-    // Negative free space - fall back to flex-start
-    if (free_space < 0) {
+    // space-* has no useful interval to distribute during overflow; other
+    // alignments still use their signed offset so flex-end/center can overflow.
+    if (free_space < 0 && alignment_is_space_distribution(alignment)) {
         return dist;
     }
 
@@ -105,9 +107,9 @@ SpaceDistribution compute_space_distribution(
             if (gap_count > 0) {
                 dist.gap_between = free_space / gap_count;
             } else {
-                // Single item: center it (CSS spec)
-                dist.gap_before_first = free_space / 2.0f;
-                dist.gap_after_last = free_space / 2.0f;
+                // With only one subject there is no interval, so space-between
+                // falls back to start instead of inventing centered edge space.
+                dist.gap_after_last = free_space;
             }
             break;
 
