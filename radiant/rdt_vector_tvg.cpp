@@ -1590,7 +1590,9 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
     if (!vec || !vec->impl || !pixels) return;
     RdtVectorImpl* impl = vec->impl;
     int tight_stride = src_w * 4;
-    if (src_w <= 0 || src_h <= 0 || src_stride < tight_stride) return;
+    // rdt_draw_image receives uint32_t row stride; ThorVG raw upload needs byte rows.
+    int src_stride_bytes = src_stride * 4;
+    if (src_w <= 0 || src_h <= 0 || src_stride < src_w) return;
 
     if (resource_generation != 0) {
         pthread_mutex_lock(&g_image_paint_cache_mutex);
@@ -1619,7 +1621,7 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
 
     const uint32_t* raw_pixels = pixels;
     uint32_t* tight_pixels = nullptr;
-    if (src_stride != tight_stride) {
+    if (src_stride_bytes != tight_stride) {
         // ThorVG raw images have no stride parameter; copy strided rows tightly
         // so clipped/offset image draws cannot make ThorVG read past each row.
         tight_pixels = (uint32_t*)mem_alloc((size_t)src_w * src_h * 4, MEM_CAT_IMAGE);
@@ -1630,7 +1632,7 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
         const unsigned char* src = (const unsigned char*)pixels;
         unsigned char* dst = (unsigned char*)tight_pixels;
         for (int y = 0; y < src_h; y++) {
-            memcpy(dst + (size_t)y * tight_stride, src + (size_t)y * src_stride, (size_t)tight_stride);
+            memcpy(dst + (size_t)y * tight_stride, src + (size_t)y * src_stride_bytes, (size_t)tight_stride);
         }
         raw_pixels = tight_pixels;
     }

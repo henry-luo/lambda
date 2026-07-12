@@ -90,19 +90,10 @@ static inline void glyph_blend_coverage_pixel(uint8_t* p, Color color, uint32_t 
         return;
     }
 
-    // opacity groups composite straight-alpha pixels; keep glyph fringes from being premultiplied twice.
-    uint32_t src_rp = (color.r * src_a + 127) / 255;
-    uint32_t src_gp = (color.g * src_a + 127) / 255;
-    uint32_t src_bp = (color.b * src_a + 127) / 255;
-    uint32_t dst_rp = (p[0] * dst_a + 127) / 255;
-    uint32_t dst_gp = (p[1] * dst_a + 127) / 255;
-    uint32_t dst_bp = (p[2] * dst_a + 127) / 255;
-    uint32_t out_rp = src_rp + (dst_rp * inv_a + 127) / 255;
-    uint32_t out_gp = src_gp + (dst_gp * inv_a + 127) / 255;
-    uint32_t out_bp = src_bp + (dst_bp * inv_a + 127) / 255;
-    uint32_t out_r = (out_rp * 255 + out_a / 2) / out_a;
-    uint32_t out_g = (out_gp * 255 + out_a / 2) / out_a;
-    uint32_t out_b = (out_bp * 255 + out_a / 2) / out_a;
+    // glyph replay surfaces are premultiplied; transparent fringes must not store straight white.
+    uint32_t out_r = (color.r * src_a + 127) / 255 + (p[0] * inv_a + 127) / 255;
+    uint32_t out_g = (color.g * src_a + 127) / 255 + (p[1] * inv_a + 127) / 255;
+    uint32_t out_b = (color.b * src_a + 127) / 255 + (p[2] * inv_a + 127) / 255;
     p[0] = (uint8_t)(out_r > 255 ? 255 : out_r);
     p[1] = (uint8_t)(out_g > 255 ? 255 : out_g);
     p[2] = (uint8_t)(out_b > 255 ? 255 : out_b);
