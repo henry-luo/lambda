@@ -1573,27 +1573,12 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     // so items shrink to fit within the clamped size.
     // Same logic applies to max-width for row flex with auto-width.
     {
-        float max_main = -1;
-        float max_cross = -1;
-        bool is_horizontal = is_main_axis_horizontal(flex_layout);
-
-        // Get max-height and max-width constraints
-        if (container->blk) {
-            if (container->blk->given_max_height > 0) {
-                if (is_horizontal) {
-                    max_cross = container->blk->given_max_height;
-                } else {
-                    max_main = container->blk->given_max_height;
-                }
-            }
-            if (container->blk->given_max_width > 0) {
-                if (is_horizontal) {
-                    max_main = container->blk->given_max_width;
-                } else {
-                    max_cross = container->blk->given_max_width;
-                }
-            }
-        }
+        LayoutAxis main_axis = flex_main_axis(flex_layout);
+        LayoutAxis cross_axis = flex_cross_axis(flex_layout);
+        bool main_is_horizontal = layout_axis_is_horizontal(main_axis);
+        bool cross_is_horizontal = layout_axis_is_horizontal(cross_axis);
+        float max_main = layout_axis_given_max_size(container->blk, main_axis);
+        float max_cross = layout_axis_given_max_size(container->blk, cross_axis);
 
         // Check main-axis max constraint (e.g., max-height for column flex, max-width for row flex)
         if (max_main > 0) {
@@ -1601,7 +1586,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
             // since main_axis_size is content-box (consistent with init_flex_container)
             float main_content = max_main;
             if (container->blk->box_sizing == CSS_VALUE_BORDER_BOX && container->bound) {
-                main_content = layout_content_size_from_border_box(container, max_main, is_horizontal);
+                main_content = layout_content_size_from_border_box(container, max_main, main_is_horizontal);
             }
             if (flex_layout->main_axis_size > main_content) {
                 log_debug("%s Phase 7c: main_axis_size %.1f exceeds max %.1f (content=%.1f), clamping and re-distributing", container->source_loc(),
@@ -1610,11 +1595,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                 flex_layout->main_axis_is_indefinite = false;
 
                 // Update container dimension
-                if (is_horizontal) {
-                    container->width = max_main;
-                } else {
-                    container->height = max_main;
-                }
+                layout_axis_set_size(container, main_axis, max_main);
 
                 // Re-run flex distribution with the clamped definite size
                 for (int i = 0; i < line_count; i++) {
@@ -1630,26 +1611,17 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
         // Check cross-axis max constraint (e.g., max-height for row flex)
         if (max_cross > 0) {
-            if (is_horizontal && container->height > max_cross) {
-                log_debug("%s Phase 7c: cross_axis height %.1f exceeds max %.1f, clamping", container->source_loc(),
-                          container->height, max_cross);
-                container->height = max_cross;
+            float container_cross_size = layout_axis_size(container, cross_axis);
+            if (container_cross_size > max_cross) {
+                log_debug("%s Phase 7c: cross_axis size %.1f exceeds max %.1f, clamping", container->source_loc(),
+                          container_cross_size, max_cross);
+                layout_axis_set_size(container, cross_axis, max_cross);
                 // cross_axis_size is content-box (consistent with init_flex_container).
-                // max_cross is the raw given_max_height which is border-box when
+                // max_cross is the raw given max-size which is border-box when
                 // box-sizing: border-box. Subtract padding+border to get content-box.
                 float cross_content = max_cross;
                 if (container->blk->box_sizing == CSS_VALUE_BORDER_BOX && container->bound) {
-                    cross_content = layout_content_size_from_border_box(container, max_cross, false);
-                }
-                flex_layout->cross_axis_size = cross_content;
-            } else if (!is_horizontal && container->width > max_cross) {
-                log_debug("%s Phase 7c: cross_axis width %.1f exceeds max %.1f, clamping", container->source_loc(),
-                          container->width, max_cross);
-                container->width = max_cross;
-                // Same content-box conversion for column flex cross-axis (width)
-                float cross_content = max_cross;
-                if (container->blk->box_sizing == CSS_VALUE_BORDER_BOX && container->bound) {
-                    cross_content = layout_content_size_from_border_box(container, max_cross, true);
+                    cross_content = layout_content_size_from_border_box(container, max_cross, cross_is_horizontal);
                 }
                 flex_layout->cross_axis_size = cross_content;
             }
@@ -3746,6 +3718,7 @@ static int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int
 
         float main_size = 0.0f;
         float container_main_size = flex_layout->main_axis_size;
+        LayoutAxis main_axis = flex_main_axis(flex_layout);
 
         // Add items to line until we need to wrap
         while (current_item < item_count) {
@@ -3760,17 +3733,14 @@ static int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int
             // (hypothetical main size + main-axis margins)
             float item_margin_main = 0.0f;
             if (item->bound) {
-                if (is_main_axis_horizontal(flex_layout)) {
-                    item_margin_main = item->bound->margin.left + item->bound->margin.right;
-                } else {
-                    item_margin_main = item->bound->margin.top + item->bound->margin.bottom;
-                }
+                item_margin_main = layout_axis_margin_start(item->bound, main_axis) +
+                    layout_axis_margin_end(item->bound, main_axis);
             }
             float item_outer_hypothetical = item_hypothetical + item_margin_main;
 
             // Add gap space if not the first item
             float gap_space = line->item_count > 0 ?
-                (is_main_axis_horizontal(flex_layout) ? flex_layout->column_gap : flex_layout->row_gap) : 0;
+                flex_gap_for_axis(flex_layout, main_axis) : 0.0f;
 
             log_debug("LINE %d - item %d: hypothetical=%.1f, outer=%.1f, gap=%.1f, line_size=%.1f, container=%.1f",
                    flex_layout->line_count, current_item, item_hypothetical, item_outer_hypothetical, gap_space, main_size, container_main_size);
@@ -4273,6 +4243,7 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
 void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
     if (!flex_layout || !line || line->item_count == 0) return;
 
+    LayoutAxis main_axis = flex_main_axis(flex_layout);
     float container_size = flex_layout->main_axis_size;
     log_info("MAIN_AXIS_ALIGN - container_size=%.1f, item_count=%d, justify=%d",
              container_size, line->item_count, flex_layout->justify);
@@ -4294,15 +4265,9 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
     for (int i = 0; i < line->item_count; i++) {
         ViewElement* item = lam::view_as_element(line->items[i]);
         if (!item) continue;
-        if (is_main_axis_horizontal(flex_layout)) {
-            auto_margin_count += layout_count_auto_margins(
-                item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO,
-                item->bound && item->bound->margin.right_type == CSS_VALUE_AUTO);
-        } else {
-            auto_margin_count += layout_count_auto_margins(
-                item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO,
-                item->bound && item->bound->margin.bottom_type == CSS_VALUE_AUTO);
-        }
+        auto_margin_count += layout_count_auto_margins(
+            item->bound && layout_axis_margin_start_type(&item->bound->margin, main_axis) == CSS_VALUE_AUTO,
+            item->bound && layout_axis_margin_end_type(&item->bound->margin, main_axis) == CSS_VALUE_AUTO);
     }
 
     float current_pos = 0.0f;
@@ -4371,42 +4336,37 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
 
         // Handle auto margins
         if (auto_margin_count > 0) {
-            bool left_auto = is_main_axis_horizontal(flex_layout) ?
-                item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO : item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO;
-            bool right_auto = is_main_axis_horizontal(flex_layout) ?
-                item->bound && item->bound->margin.right_type == CSS_VALUE_AUTO : item->bound && item->bound->margin.bottom_type == CSS_VALUE_AUTO;
+            bool start_auto = item->bound &&
+                layout_axis_margin_start_type(&item->bound->margin, main_axis) == CSS_VALUE_AUTO;
+            bool end_auto = item->bound &&
+                layout_axis_margin_end_type(&item->bound->margin, main_axis) == CSS_VALUE_AUTO;
 
-            log_debug("MAIN_ALIGN_ITEM %d - auto margins: left=%d, right=%d, auto_margin_size=%.1f",
-                   i, left_auto, right_auto, auto_margin_size);
+            log_debug("MAIN_ALIGN_ITEM %d - auto margins: start=%d, end=%d, auto_margin_size=%.1f",
+                   i, start_auto, end_auto, auto_margin_size);
 
             // Add non-auto start margin
-            if (!left_auto && item->bound) {
-                float margin_start = is_main_axis_horizontal(flex_layout) ?
-                    item->bound->margin.left : item->bound->margin.top;
-                current_pos += margin_start;
+            if (!start_auto && item->bound) {
+                current_pos += layout_axis_margin_start(item->bound, main_axis);
             }
 
             // Add auto margin space before item
-            if (left_auto) current_pos += auto_margin_size;
+            if (start_auto) current_pos += auto_margin_size;
 
             log_debug("MAIN_ALIGN_ITEM %d - positioning at: %.0f", i, current_pos);
             set_main_axis_position(item, current_pos, flex_layout);
             current_pos += get_main_axis_size(item, flex_layout);
 
             // Add auto margin space after item
-            if (right_auto) current_pos += auto_margin_size;
+            if (end_auto) current_pos += auto_margin_size;
 
             // Add non-auto end margin
-            if (!right_auto && item->bound) {
-                float margin_end = is_main_axis_horizontal(flex_layout) ?
-                    item->bound->margin.right : item->bound->margin.bottom;
-                current_pos += margin_end;
+            if (!end_auto && item->bound) {
+                current_pos += layout_axis_margin_end(item->bound, main_axis);
             }
 
             // Add gap to next item
             if (i < line->item_count - 1) {
-                current_pos += is_main_axis_horizontal(flex_layout) ?
-                    flex_layout->column_gap : flex_layout->row_gap;
+                current_pos += flex_gap_for_axis(flex_layout, main_axis);
             }
         } else {
             // *** FIX 5: Set position with margins ***
@@ -4414,15 +4374,11 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
             float item_size = get_main_axis_size(item, flex_layout);
 
             // Get item margins in main axis direction
-            float margin_start = 0, margin_end = 0;
+            float margin_start = 0.0f;
+            float margin_end = 0.0f;
             if (item->bound) {
-                if (is_main_axis_horizontal(flex_layout)) {
-                    margin_start = item->bound->margin.left;
-                    margin_end = item->bound->margin.right;
-                } else {
-                    margin_start = item->bound->margin.top;
-                    margin_end = item->bound->margin.bottom;
-                }
+                margin_start = layout_axis_margin_start(item->bound, main_axis);
+                margin_end = layout_axis_margin_end(item->bound, main_axis);
             }
 
             // Add margin-start before positioning
@@ -4444,8 +4400,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
 
             // Add gap between items.
             if (i < line->item_count - 1) {
-                float gap = is_main_axis_horizontal(flex_layout) ?
-                         flex_layout->column_gap : flex_layout->row_gap;
+                float gap = flex_gap_for_axis(flex_layout, main_axis);
                 if (gap > 0) {
                     current_pos += gap;
                     log_debug("Added gap=%.1f between items %d and %d", gap, i, i+1);
@@ -4471,6 +4426,7 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
     // This is because align-content affects line sizes, and items should align within their line
     bool use_line_cross = (flex_layout->wrap != WRAP_NOWRAP);
     bool is_wrap_reverse = (flex_layout->wrap == WRAP_WRAP_REVERSE);
+    LayoutAxis cross_axis = flex_cross_axis(flex_layout);
 
     for (int i = 0; i < line->item_count; i++) {
         log_debug("align_items_cross_axis: Processing item %d", i);
@@ -4570,12 +4526,10 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
         }
 
         bool is_horizontal_main = is_main_axis_horizontal(flex_layout);
-        bool cross_start_auto = is_horizontal_main ?
-            item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO :
-            item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO;
-        bool cross_end_auto = is_horizontal_main ?
-            item->bound && item->bound->margin.bottom_type == CSS_VALUE_AUTO :
-            item->bound && item->bound->margin.right_type == CSS_VALUE_AUTO;
+        bool cross_start_auto = item->bound &&
+            layout_axis_margin_start_type(&item->bound->margin, cross_axis) == CSS_VALUE_AUTO;
+        bool cross_end_auto = item->bound &&
+            layout_axis_margin_end_type(&item->bound->margin, cross_axis) == CSS_VALUE_AUTO;
         bool has_cross_auto_margin = cross_start_auto || cross_end_auto;
         bool has_explicit_cross_size_for_auto = is_horizontal_main ?
             (item->blk && item->blk->given_height >= 0.0f) :
@@ -4658,15 +4612,11 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
 
             // Calculate cross-axis margins for alignment positioning
             // Per CSS Flexbox §9.5: alignment positions the item's margin edge
-            float margin_cross_start = 0, margin_cross_end = 0;
+            float margin_cross_start = 0.0f;
+            float margin_cross_end = 0.0f;
             if (item->bound) {
-                if (is_main_axis_horizontal(flex_layout)) {
-                    margin_cross_start = item->bound->margin.top;
-                    margin_cross_end = item->bound->margin.bottom;
-                } else {
-                    margin_cross_start = item->bound->margin.left;
-                    margin_cross_end = item->bound->margin.right;
-                }
+                margin_cross_start = layout_axis_margin_start(item->bound, cross_axis);
+                margin_cross_end = layout_axis_margin_end(item->bound, cross_axis);
             }
 
             if (effective_align == ALIGN_STRETCH) {
@@ -4765,6 +4715,7 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
 // Note: This applies to both single-line and multi-line wrapping containers
 void align_content(FlexContainerLayout* flex_layout) {
     if (!flex_layout || flex_layout->line_count == 0) return;
+    LayoutAxis cross_axis = flex_cross_axis(flex_layout);
 
     // FIXED: Always use cross_axis_size - it's already set correctly based on direction
     // (for row: height, for column: width)
@@ -4853,8 +4804,7 @@ void align_content(FlexContainerLayout* flex_layout) {
 
         // Add gap between lines
         if (line_idx < flex_layout->line_count - 1) {
-            float gap_between_lines = is_main_axis_horizontal(flex_layout) ?
-                          flex_layout->row_gap : flex_layout->column_gap;
+            float gap_between_lines = flex_gap_for_axis(flex_layout, cross_axis);
 
             log_debug("Adding gap between lines %d and %d: %.1f", i, i+1, gap_between_lines);
             current_pos += gap_between_lines;
@@ -4892,7 +4842,9 @@ float get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
 
 // Get the outer size including margins - used for justify-content calculations
 float get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layout) {
-    float base_size = is_main_axis_horizontal(flex_layout) ? get_border_box_width(item) : get_border_box_height(item);
+    LayoutAxis main_axis = flex_main_axis(flex_layout);
+    float base_size = layout_axis_is_horizontal(main_axis) ?
+        get_border_box_width(item) : get_border_box_height(item);
 
     // defensive check: if base_size is NaN, use 0
     if (isnan(base_size)) {
@@ -4902,197 +4854,122 @@ float get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layo
 
     // Include margins in main axis size for positioning calculations
     if (item->bound) {
-        if (is_main_axis_horizontal(flex_layout)) {
-            float margin_left = isnan(item->bound->margin.left) ? 0.0f : item->bound->margin.left;
-            float margin_right = isnan(item->bound->margin.right) ? 0.0f : item->bound->margin.right;
-            base_size += margin_left + margin_right;
-        } else {
-            float margin_top = isnan(item->bound->margin.top) ? 0.0f : item->bound->margin.top;
-            float margin_bottom = isnan(item->bound->margin.bottom) ? 0.0f : item->bound->margin.bottom;
-            base_size += margin_top + margin_bottom;
-        }
+        float margin_start = layout_axis_margin_start(item->bound, main_axis);
+        float margin_end = layout_axis_margin_end(item->bound, main_axis);
+        if (isnan(margin_start)) margin_start = 0.0f;
+        if (isnan(margin_end)) margin_end = 0.0f;
+        base_size += margin_start + margin_end;
     }
 
     return base_size;
 }
 
 float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
-    if (is_main_axis_horizontal(flex_layout)) {
-        // Cross-axis is height for horizontal flex containers
-        // CRITICAL FIX: Check CSS height first and clamp against max-height
-        if (item->blk && item->blk->given_height >= 0) {
-            float height = item->blk->given_height;
-            ViewBlock* item_block = lam::view_as_block(item);
+    LayoutAxis cross_axis = flex_cross_axis(flex_layout);
+    bool cross_is_horizontal = layout_axis_is_horizontal(cross_axis);
+    ViewBlock* item_block = lam::view_as_block(item);
 
-            // For content-box, given_height is content height - add padding/border for border-box
-            if (item->blk->box_sizing != CSS_VALUE_BORDER_BOX && item->bound) {
-                height += layout_boundary_metrics(item->bound).pad_border_v;
-                log_debug("get_cross_axis_size: content-box, added padding/border to height: %.1f", height);
-            }
-
-            if (item_block) {
-                height = layout_apply_min_max_height(item_block, height, true);
-            }
-
-            log_debug("Using CSS height for cross-axis (clamped): %.1f", height);
-            return height;
-        }
-        // Also check min-height constraint
-        float height = item->height;
-        ViewBlock* item_block = lam::view_as_block(item);
-        if (item_block) {
-            height = layout_apply_min_max_height(item_block, height, true);
-        }
-        return height;
-    } else {
-        // Cross-axis is width for vertical flex containers
+    if (cross_is_horizontal) {
         log_debug("get_cross_axis_size (vertical flex): item->width=%.1f, blk=%p", item->width, item->blk);
-
         if (item->blk) {
             log_debug("  given_width=%.1f, given_max_width=%.1f, given_min_width=%.1f",
                      item->blk->given_width, item->blk->given_max_width, item->blk->given_min_width);
         }
-
-        // CRITICAL FIX: Check CSS width first and clamp against max-width
-        if (item->blk && item->blk->given_width >= 0) {
-            float width = item->blk->given_width;
-            ViewBlock* item_block = lam::view_as_block(item);
-
-            // For content-box, given_width is content width - add padding/border for border-box
-            if (item->blk->box_sizing != CSS_VALUE_BORDER_BOX && item->bound) {
-                width += layout_boundary_metrics(item->bound).pad_border_h;
-                log_debug("get_cross_axis_size: content-box, added padding/border to width: %.1f", width);
-            }
-
-            if (item_block) {
-                width = layout_apply_min_max_width(item_block, width, true);
-            }
-
-            log_debug("Using CSS width for cross-axis (clamped): %.1f", width);
-            return width;
-        }
-
-        // Fallback: use item->width but check max-width constraint
-        float width = item->width;
-        ViewBlock* item_block = lam::view_as_block(item);
-        if (item_block) {
-            width = layout_apply_min_max_width(item_block, width, true);
-        }
-
-        log_debug("Using item->width for cross-axis (clamped): %.1f", width);
-        return width;
     }
+
+    // CRITICAL FIX: Check CSS cross size first and clamp against cross-axis min/max.
+    float explicit_cross_size = layout_axis_given_size(item->blk, cross_axis);
+    if (explicit_cross_size >= 0.0f) {
+        float size = explicit_cross_size;
+
+        // For content-box, given cross size is content size; add padding/border for border-box.
+        if (item->blk->box_sizing != CSS_VALUE_BORDER_BOX && item->bound) {
+            size += layout_boundary_padding_border_axis(item->bound, cross_is_horizontal);
+            log_debug("get_cross_axis_size: content-box, added padding/border to cross size: %.1f", size);
+        }
+
+        if (item_block) {
+            size = layout_apply_min_max_axis(item_block, size, cross_is_horizontal, true);
+        }
+
+        log_debug("Using CSS cross size (clamped): %.1f", size);
+        return size;
+    }
+
+    // Fallback: use the laid-out cross size but still honor min/max constraints.
+    float size = layout_axis_size(item, cross_axis);
+    if (item_block) {
+        size = layout_apply_min_max_axis(item_block, size, cross_is_horizontal, true);
+    }
+
+    log_debug("Using item cross size (clamped): %.1f", size);
+    return size;
 }
 
 float get_cross_axis_position(ViewElement* item, FlexContainerLayout* flex_layout) {
     // CRITICAL FIX: Return position relative to container content area, not absolute position
     ViewBlock* container = lam::view_as_block(item->parent);
-    float border_offset = 0;
+    LayoutAxis cross_axis = flex_cross_axis(flex_layout);
+    float border_offset = 0.0f;
 
     if (container && container->bound && container->bound->border) {
-        if (is_main_axis_horizontal(flex_layout)) {
-            border_offset = container->bound->border->width.top;
-        } else {
-            border_offset = container->bound->border->width.left;
-        }
+        border_offset = layout_axis_border_start(container->bound->border, cross_axis);
     }
 
     // Return position relative to content area (subtract border offset)
-    if (is_main_axis_horizontal(flex_layout)) {
-        return item->y - border_offset;
-    } else {
-        return item->x - border_offset;
-    }
+    return layout_axis_pos(item, cross_axis) - border_offset;
 }
 
 void set_main_axis_position(ViewElement* item, float position, FlexContainerLayout* flex_layout) {
     // ENHANCED: Account for container border AND padding offset
     ViewElement* container = lam::view_as_element(item->parent);
-    float offset = 0;  // Combined border + padding offset
+    LayoutAxis main_axis = flex_main_axis(flex_layout);
+    float offset = 0.0f;  // Combined border + padding offset
 
     if (container && container->bound) {
         if (container->bound->border) {
-            if (is_main_axis_horizontal(flex_layout)) {
-                offset += container->bound->border->width.left;
-            } else {
-                offset += container->bound->border->width.top;
-            }
+            offset += layout_axis_border_start(container->bound->border, main_axis);
         }
         // Add padding offset
-        if (is_main_axis_horizontal(flex_layout)) {
-            offset += container->bound->padding.left;
-        } else {
-            offset += container->bound->padding.top;
-        }
+        offset += layout_axis_padding_start(container->bound, main_axis);
     }
 
     log_debug("set_main_axis_position: item=%p, position=%.1f, offset=%.1f (border+padding)", item, position, offset);
 
-    if (is_main_axis_horizontal(flex_layout)) {
-        log_debug("DIRECTION_CHECK - flex_layout->direction=%d, CSS_VALUE_ROW_REVERSE=%d",
-               flex_layout->direction, CSS_VALUE_ROW_REVERSE);
-        if (flex_layout->direction == CSS_VALUE_ROW_REVERSE) {
-            // ROW-REVERSE: Position from right edge
-            float container_width = flex_layout->main_axis_size;
-            float item_width = get_main_axis_size(item, flex_layout);
-            float calculated_x = container_width - position - item_width + offset;
-            item->x = calculated_x;
-            log_debug("ROW_REVERSE - container_width=%.1f, position=%.1f, item_width=%.1f, offset=%.1f, calculated_x=%.1f, final_x=%.1f",
-                   container_width, position, item_width, offset, calculated_x, item->x);
-        } else {
-            // Normal left-to-right positioning
-            float final_x = position + offset;
-            log_debug("set_main_axis_position: Setting item->x to %.1f (before: %.1f)", final_x, item->x);
-            item->x = final_x;
-            log_debug("set_main_axis_position: After setting, item->x = %.1f", item->x);
-            log_debug("NORMAL_ROW - position=%.1f, offset=%.1f, final_x=%.1f",
-                   position, offset, item->x);
-        }
+    bool reverse = flex_layout->direction == CSS_VALUE_ROW_REVERSE ||
+        flex_layout->direction == CSS_VALUE_COLUMN_REVERSE;
+    if (reverse) {
+        float container_main_size = flex_layout->main_axis_size;
+        float item_main_size = get_main_axis_size(item, flex_layout);
+        float calculated_pos = container_main_size - position - item_main_size + offset;
+        layout_axis_set_pos(item, main_axis, calculated_pos);
+        log_debug("MAIN_REVERSE - container=%.1f, position=%.1f, item=%.1f, offset=%.1f, final=%.1f",
+                  container_main_size, position, item_main_size, offset, calculated_pos);
     } else {
-        if (flex_layout->direction == CSS_VALUE_COLUMN_REVERSE) {
-            // COLUMN-REVERSE: Position from bottom edge
-            float container_height = flex_layout->main_axis_size;
-            float item_height = get_main_axis_size(item, flex_layout);
-            float calculated_y = container_height - position - item_height + offset;
-            item->y = calculated_y;
-            log_debug("COLUMN_REVERSE - container_height=%.1f, position=%.1f, item_height=%.1f, offset=%.1f, calculated_y=%.1f, final_y=%.1f",
-                   container_height, position, item_height, offset, calculated_y, item->y);
-        } else {
-            // Normal top-to-bottom positioning
-            item->y = position + offset;
-        }
+        float final_pos = position + offset;
+        log_debug("MAIN_NORMAL - position=%.1f, offset=%.1f, final=%.1f", position, offset, final_pos);
+        layout_axis_set_pos(item, main_axis, final_pos);
     }
 }
 
 void set_cross_axis_position(ViewElement* item, float position, FlexContainerLayout* flex_layout) {
     // CRITICAL FIX: Account for container border AND padding offset on cross axis
     ViewElement* container = lam::view_as_element(item->parent);
-    float offset = 0;  // Combined border + padding offset
+    LayoutAxis cross_axis = flex_cross_axis(flex_layout);
+    float offset = 0.0f;  // Combined border + padding offset
 
     if (container && container->bound) {
         if (container->bound->border) {
-            if (is_main_axis_horizontal(flex_layout)) {
-                offset += container->bound->border->width.top;
-            } else {
-                offset += container->bound->border->width.left;
-            }
+            offset += layout_axis_border_start(container->bound->border, cross_axis);
         }
         // Add padding offset
-        if (is_main_axis_horizontal(flex_layout)) {
-            offset += container->bound->padding.top;
-        } else {
-            offset += container->bound->padding.left;
-        }
+        offset += layout_axis_padding_start(container->bound, cross_axis);
     }
 
     log_debug("SET_CROSS_POS - position=%.1f, offset=%.1f (border+padding), final=%.1f",
            position, offset, position + offset);
 
-    if (is_main_axis_horizontal(flex_layout)) {
-        item->y = position + offset;
-    } else {
-        item->x = position + offset;
-    }
+    layout_axis_set_pos(item, cross_axis, position + offset);
 }
 
 void set_main_axis_size(ViewElement* item, float size, FlexContainerLayout* flex_layout) {
@@ -5115,9 +4992,8 @@ void set_cross_axis_size(ViewElement* item, float size, FlexContainerLayout* fle
 float calculate_gap_space(FlexContainerLayout* flex_layout, int item_count, bool is_main_axis) {
     if (item_count <= 1) return 0;
 
-    float gap = is_main_axis ?
-              (is_main_axis_horizontal(flex_layout) ? flex_layout->column_gap : flex_layout->row_gap) :
-              (is_main_axis_horizontal(flex_layout) ? flex_layout->row_gap : flex_layout->column_gap);
+    LayoutAxis axis = is_main_axis ? flex_main_axis(flex_layout) : flex_cross_axis(flex_layout);
+    float gap = flex_gap_for_axis(flex_layout, axis);
 
     return gap * (item_count - 1);
 }
