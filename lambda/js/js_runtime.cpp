@@ -3221,7 +3221,7 @@ Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_found) 
     bool found = false;
     while (field) {
         if (!field->name) {
-            Map* nested_map = *(Map**)((char*)m->data + field->byte_offset);
+            Map* nested_map = map_shape_field_to_map(m->data, field);
             if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
                 bool nested_found;
                 Item nested_result = _map_get((TypeMap*)nested_map->type, nested_map->data, (char*)key_str, &nested_found);

@@ -548,6 +548,7 @@
             "source_dirs": [
                 "lib",
                 "lambda",
+                "lambda/jube",
                 "lambda/input",
                 "lambda/input/css",
                 "lambda/input/html5",
@@ -620,6 +621,7 @@
                 "lib/font",
                 "lib/font/woff2",
                 "lambda",
+                "lambda/jube",
                 "lambda/input",
                 "lambda/input/css",
                 "lambda/input/html5",
@@ -630,6 +632,8 @@
                 "lambda/format",
                 "lambda/validator",
                 "lambda/js",
+                "lambda/module/radiant",
+                "lambda/module/hostobj_demo",
                 "lambda/py",
                 "lambda/bash",
                 "lambda/ts",
@@ -686,7 +690,6 @@
             ],
             "build_dir": "build_jube",
             "exclude_source_files": [
-                "lambda/transpile_shared.cpp",
                 "radiant/radiant.cpp",
                 "radiant/rdt_vector_cg.mm",
                 "lambda/format/format_latex_html_v2.cpp",

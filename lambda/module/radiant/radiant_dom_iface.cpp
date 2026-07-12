@@ -730,6 +730,7 @@ static const JubeMemberBind radiant_rule_decl_members[] = {
 extern const JubeHostObjectOps radiant_dom_node_host_ops;
 extern "C" int radiant_dom_member_is_element(Item receiver);
 extern "C" int radiant_dom_member_tag_name(Item receiver, Item* out);
+extern "C" int radiant_dom_member_node_name(Item receiver, Item* out);
 extern "C" int radiant_dom_member_local_name(Item receiver, Item* out);
 extern "C" int radiant_dom_member_namespace_uri(Item receiver, Item* out);
 extern "C" int radiant_dom_member_prefix(Item receiver, Item* out);
@@ -955,7 +956,9 @@ extern "C" int radiant_dom_m4c_get_form(Item r, Item* out);
 
 static const JubeMemberBind radiant_dom_node_members[] = {
     BIND_NODE("tag_name", radiant_dom_member_tag_name),
-    BIND_NODE("node_name", radiant_dom_member_tag_name),
+    // nodeName is element-only here; character nodes must miss this guard and
+    // fall through to the legacy text/comment property hook.
+    BIND_NODE("node_name", radiant_dom_member_node_name),
     BIND_NODE("local_name", radiant_dom_member_local_name),
     BIND_NODE_JS("namespace_uri", "namespaceURI", radiant_dom_member_namespace_uri),
     BIND_NODE("prefix", radiant_dom_member_prefix),

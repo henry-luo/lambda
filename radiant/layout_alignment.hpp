@@ -20,14 +20,10 @@
 // CSS_VALUE_SPACE_BETWEEN, CSS_VALUE_SPACE_AROUND, CSS_VALUE_SPACE_EVENLY,
 // CSS_VALUE_STRETCH, CSS_VALUE_BASELINE, CSS_VALUE_START, CSS_VALUE_END
 
-namespace radiant {
-
-// Forward declarations
-struct LayoutContext;
-} // namespace radiant
-
 // ViewBlock is defined in view.hpp (global namespace)
+struct LayoutContext;
 struct ViewBlock;
+struct FontProp;
 
 namespace radiant {
 
@@ -146,12 +142,22 @@ int32_t resolve_justify_self(int32_t justify_self, int32_t justify_items);
 // ============================================================================
 
 /**
+ * Compute the ascender used for synthesized first baselines.
+ */
+float compute_font_baseline_ascender(
+    ::LayoutContext* lycon,
+    FontProp* font,
+    bool use_normal_line_height,
+    float fallback_ascender
+);
+
+/**
  * Compute first baseline position for an element.
  * Returns distance from element's top edge to first baseline.
  * Returns -1 if element has no baseline.
  */
 float compute_element_first_baseline(
-    LayoutContext* lycon,
+    ::LayoutContext* lycon,
     ViewBlock* element,
     bool is_row_direction
 );
@@ -160,7 +166,7 @@ float compute_element_first_baseline(
  * Compute last baseline position for an element.
  */
 float compute_element_last_baseline(
-    LayoutContext* lycon,
+    ::LayoutContext* lycon,
     ViewBlock* element,
     bool is_row_direction
 );

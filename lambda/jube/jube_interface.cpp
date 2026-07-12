@@ -398,14 +398,14 @@ int jube_member_get(Item receiver, Item key, Item* out) {
         }
         if (index >= 0 && trec->binding->indexed_get(receiver, index, out)) return 1;
     }
-    if (trec->binding && trec->binding->named_get &&
-            trec->binding->named_get(receiver, key, out)) {
-        return 1;
-    }
     // transitional: unconverted names on a migrating type fall through to the
     // caller's host_ops path, which owns key conversion (vmap snake->camel)
     // and the legacy chains/side-table expandos/per-kind prototypes
     if (jube_legacy_ops(trec)) return 0;
+    if (trec->binding && trec->binding->named_get &&
+            trec->binding->named_get(receiver, key, out)) {
+        return 1;
+    }
     const char* key_chars = NULL;
     uint32_t key_len = 0;
     if (jube_item_key_chars(key, &key_chars, &key_len) && key_len == 9 &&
@@ -475,11 +475,11 @@ int jube_member_set(Item receiver, Item key, Item value, Item* out) {
         *out = value;
         return 1;
     }
+    if (jube_legacy_ops(trec)) return 0;
     if (trec->binding && trec->binding->named_set &&
             trec->binding->named_set(receiver, key, value, out)) {
         return 1;
     }
-    if (jube_legacy_ops(trec)) return 0;
     Item expando = jube_expando_object(receiver, true);
     if (get_type_id(expando) == LMD_TYPE_MAP) {
         *out = jube_internal_host_api()->value->property_set(expando, key, value);

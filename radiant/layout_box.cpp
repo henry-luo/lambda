@@ -81,6 +81,20 @@ float layout_padding_border_axis(ViewBlock* block, bool horizontal) {
     return horizontal ? layout_padding_border_width(block) : layout_padding_border_height(block);
 }
 
+float layout_boundary_content_size_from_border_box(const BoundaryProp* bound, float border_size, bool horizontal) {
+    BoxMetrics metrics = layout_boundary_metrics(bound);
+    float padding_border = horizontal ? metrics.pad_border_h : metrics.pad_border_v;
+    float content_size = border_size - padding_border;
+    return content_size > 0 ? content_size : 0;
+}
+
+float layout_boundary_border_size_from_content_box(const BoundaryProp* bound, float content_size, bool horizontal) {
+    BoxMetrics metrics = layout_boundary_metrics(bound);
+    float padding_border = horizontal ? metrics.pad_border_h : metrics.pad_border_v;
+    float clamped_content_size = content_size > 0 ? content_size : 0;
+    return clamped_content_size + padding_border;
+}
+
 float layout_content_size_from_border_box(ViewBlock* block, float border_size, bool horizontal) {
     return horizontal
         ? layout_content_width_from_border_box(block, border_size)
@@ -91,6 +105,18 @@ float layout_border_size_from_content_box(ViewBlock* block, float content_size, 
     return horizontal
         ? layout_border_width_from_content_box(block, content_size)
         : layout_border_height_from_content_box(block, content_size);
+}
+
+float layout_css_size_to_content_box(const BoundaryProp* bound, CssEnum box_sizing, float css_size, bool horizontal) {
+    return box_sizing == CSS_VALUE_BORDER_BOX
+        ? layout_boundary_content_size_from_border_box(bound, css_size, horizontal)
+        : css_size;
+}
+
+float layout_css_size_to_border_box(const BoundaryProp* bound, CssEnum box_sizing, float css_size, bool horizontal) {
+    return box_sizing == CSS_VALUE_BORDER_BOX
+        ? css_size
+        : layout_boundary_border_size_from_content_box(bound, css_size, horizontal);
 }
 
 float layout_floor_border_box_width(ViewBlock* block, float border_width) {
@@ -149,7 +175,7 @@ float layout_apply_min_max_width(ViewBlock* block, float width, bool width_is_bo
     if (!block || !block->blk) return width;
 
     float constrained_width = layout_clamp_min_max_width(block, width);
-    if (width_is_border_box || block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+    if (width_is_border_box || layout_uses_border_box(block)) {
         BoxMetrics metrics = layout_box_metrics(block);
         if (constrained_width < metrics.pad_border_h) {
             log_debug("[LAYOUT_BOX] width border-box floor: %.2f -> %.2f (padding+border)",
@@ -164,7 +190,7 @@ float layout_apply_min_max_height(ViewBlock* block, float height, bool height_is
     if (!block || !block->blk) return height;
 
     float constrained_height = layout_clamp_min_max_height(block, height);
-    if (height_is_border_box || block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+    if (height_is_border_box || layout_uses_border_box(block)) {
         BoxMetrics metrics = layout_box_metrics(block);
         if (constrained_height < metrics.pad_border_v) {
             constrained_height = metrics.pad_border_v;

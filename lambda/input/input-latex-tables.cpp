@@ -1,7 +1,6 @@
 #include "input-latex-tables.h"
 #include "../../lib/sort.h"
 #include <string.h>
-#include <ctype.h>
 #include <stdlib.h>
 #include <stdbool.h>
 

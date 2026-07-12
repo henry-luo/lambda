@@ -14,8 +14,8 @@
  */
 #include "block_common.hpp"
 #include "../../../../lib/mem.h"
+#include "../../../../lib/str.h"
 #include <cstring>
-#include <cctype>
 
 namespace lambda {
 namespace markup {
@@ -49,7 +49,12 @@ static const char* type6_tags[] = {
 // Case-insensitive prefix match
 static bool starts_with_ci(const char* str, const char* prefix) {
     while (*prefix) {
-        if (tolower((unsigned char)*str) != tolower((unsigned char)*prefix)) {
+        if (*str == '\0') return false;
+        char str_ch = *str;
+        char prefix_ch = *prefix;
+        str_to_lower(&str_ch, &str_ch, 1);
+        str_to_lower(&prefix_ch, &prefix_ch, 1);
+        if (str_ch != prefix_ch) {
             return false;
         }
         str++;
@@ -99,7 +104,7 @@ static bool is_blank(const char* line) {
  * Per CommonMark spec: [A-Za-z_:]
  */
 static inline bool is_attribute_name_start(char c) {
-    return isalpha((unsigned char)c) || c == '_' || c == ':';
+    return str_char_is_alpha(c) || c == '_' || c == ':';
 }
 
 /**
@@ -107,7 +112,7 @@ static inline bool is_attribute_name_start(char c) {
  * Per CommonMark spec: [A-Za-z0-9_.:-]
  */
 static inline bool is_attribute_name_char(char c) {
-    return isalnum((unsigned char)c) || c == '_' || c == '.' || c == ':' || c == '-';
+    return str_char_is_alnum(c) || c == '_' || c == '.' || c == ':' || c == '-';
 }
 
 /**
@@ -133,10 +138,10 @@ static const char* try_parse_complete_tag(const char* start) {
     }
 
     // Must have a tag name starting with ASCII letter
-    if (!isalpha((unsigned char)*p)) return nullptr;
+    if (!str_char_is_alpha(*p)) return nullptr;
 
     // Parse tag name
-    while (isalnum((unsigned char)*p) || *p == '-') p++;
+    while (str_char_is_alnum(*p) || *p == '-') p++;
 
     if (is_closing) {
         // Closing tag: optional whitespace then >
@@ -254,7 +259,7 @@ HtmlBlockType detect_html_block_type(const char* line) {
     }
 
     // Type 4: <! followed by ASCII letter (DOCTYPE, etc.)
-    if (*p == '!' && isalpha((unsigned char)p[1])) {
+    if (*p == '!' && str_char_is_alpha(p[1])) {
         return HtmlBlockType::TYPE_4;
     }
 
@@ -271,13 +276,13 @@ HtmlBlockType detect_html_block_type(const char* line) {
     }
 
     // Must have a tag name starting with ASCII letter
-    if (!isalpha((unsigned char)*p)) {
+    if (!str_char_is_alpha(*p)) {
         return HtmlBlockType::NONE;
     }
 
     // Extract tag name
     const char* tag_start = p;
-    while (isalnum((unsigned char)*p) || *p == '-') {
+    while (str_char_is_alnum(*p) || *p == '-') {
         p++;
     }
     size_t tag_len = p - tag_start;
@@ -291,7 +296,7 @@ HtmlBlockType detect_html_block_type(const char* line) {
     char tag_name[32];
     if (tag_len >= sizeof(tag_name)) tag_len = sizeof(tag_name) - 1;
     for (size_t i = 0; i < tag_len; i++) {
-        tag_name[i] = tolower((unsigned char)tag_start[i]);
+        str_to_lower(&tag_name[i], &tag_start[i], 1);
     }
     tag_name[tag_len] = '\0';
 

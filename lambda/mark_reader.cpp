@@ -375,9 +375,7 @@ MapReader::EntryIterator::EntryIterator(const MapReader* reader)
 bool MapReader::EntryIterator::next(const char** key, ItemReader* value) {
     if (!current_field_) { return false; }
     *key = current_field_->name ? current_field_->name->str : nullptr;
-    // get field value based on offset
-    void* field_ptr = (char*)reader_->map_->data + current_field_->byte_offset;
-    Item result = map_field_to_item(field_ptr, current_field_->type->type_id);
+    Item result = map_shape_field_to_item(reader_->map_->data, current_field_.get());
     *value = ItemReader(result.to_const());
     current_field_ = lam::shape_next(current_field_);
     return true;
@@ -728,8 +726,7 @@ bool ElementReader::AttributeIterator::next(const char** key, ItemReader* value)
     }
 
     *key = current_field_->name ? current_field_->name->str : nullptr;
-    void* field_ptr = (char*)reader_->element_->data + current_field_->byte_offset;
-    Item result = map_field_to_item(field_ptr, current_field_->type->type_id);
+    Item result = map_shape_field_to_item(reader_->element_->data, current_field_.get());
     *value = ItemReader(result.to_const());
     current_field_ = lam::shape_next(current_field_);
     return true;

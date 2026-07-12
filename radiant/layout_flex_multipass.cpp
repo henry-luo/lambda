@@ -161,7 +161,7 @@ static void flex_normalize_direct_br_boxes(ViewBlock* flex_container) {
 
 static float flex_border_box_height_constraint(ViewBlock* block, float css_height) {
     if (!block || css_height < 0.0f) return css_height;
-    if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+    if (layout_uses_border_box(block)) {
         return layout_floor_border_box_height(block, css_height);
     }
     return layout_border_height_from_content_box(block, css_height);
@@ -196,8 +196,7 @@ static float flex_in_flow_content_bottom(ViewElement* elem) {
             child->view_type == RDT_VIEW_LIST_ITEM ||
             child->view_type == RDT_VIEW_TABLE) {
             ViewElement* child_elem = lam::view_require_element(child);
-            if (!child_elem || child_elem->display.outer == CSS_VALUE_NONE ||
-                child_elem->display.inner == CSS_VALUE_NONE) {
+            if (layout_element_is_display_none(child_elem)) {
                 continue;
             }
             ViewBlock* child_block = lam::view_as_block(child_elem);
@@ -2584,7 +2583,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 // CSS §10.7: Respect max-height constraint
                 if (flex_container->blk && flex_container->blk->given_max_height > 0) {
                     float max_box = flex_container->blk->given_max_height;
-                    if (!flex_container->blk || flex_container->blk->box_sizing != CSS_VALUE_BORDER_BOX) {
+                    if (!layout_uses_border_box(flex_container)) {
                         max_box = layout_border_size_from_content_box(flex_container, max_box, false);
                     }
                     if (new_height > max_box) new_height = max_box;
@@ -2624,7 +2623,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     // CSS §10.7: Respect max-height constraint on the container.
                     if (flex_container->blk && flex_container->blk->given_max_height > 0) {
                         float max_box = flex_container->blk->given_max_height;
-                        if (!flex_container->blk || flex_container->blk->box_sizing != CSS_VALUE_BORDER_BOX) {
+                        if (!layout_uses_border_box(flex_container)) {
                             max_box = layout_border_size_from_content_box(flex_container, max_box, false);
                         }
                         if (new_height > max_box) {

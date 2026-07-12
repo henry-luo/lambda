@@ -2,6 +2,7 @@
 #include "layout_text.hpp"
 #include "layout.hpp"
 #include "layout_box.hpp"
+#include "layout_alignment.hpp"
 #include "intrinsic_sizing.hpp"
 #include "form_control.hpp"  // For FormDefaults (radio/checkbox margin constants)
 #include "layout_measure.hpp"
@@ -431,7 +432,7 @@ static float get_cell_css_width(LayoutContext* lycon, ViewTableCell* tcell, floa
 
     // Check box-sizing model
     bool is_border_box = html_width_hint ||
-        (tcell->blk && tcell->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+        layout_uses_border_box(tcell);
 
     if (is_border_box) {
         // CSS width already includes padding and border — cell_width is the border-box width
@@ -842,7 +843,7 @@ static float calculate_cell_height(LayoutContext* lycon, ViewTableCell* tcell, V
     // The CSS 'height' property sets the content height (content-box) or total height (border-box)
 
     // Check box-sizing mode
-    bool is_border_box = (tcell->blk && tcell->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+    bool is_border_box = layout_uses_border_box(tcell);
 
     // Compute padding
     float pad_top = 0, pad_bottom = 0;
@@ -898,28 +899,10 @@ float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cu
 
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
-            // Get font ascent for this text node
-            float ascent = 0;
-            if (text->font) {
-                FontBox fbox = {};
-                setup_font(lycon->ui_context, &fbox, text->font);
-                if (fbox.font_handle) {
-                    if (use_normal_lh) {
-                        float split_asc = 0, split_desc = 0;
-                        font_get_normal_lh_split(fbox.font_handle, &split_asc, &split_desc);
-                        ascent = split_asc;
-                    } else {
-                        TypoMetrics typo = get_os2_typo_metrics(fbox.font_handle);
-                        if (typo.valid && typo.use_typo_metrics) {
-                            ascent = typo.ascender;
-                        } else {
-                            const FontMetrics* m = font_get_metrics(fbox.font_handle);
-                            if (m) ascent = m->hhea_ascender;
-                        }
-                    }
-                }
-            }
-            // Baseline = accumulated Y offset + text's Y position + font ascent
+            float fallback_ascent = text->font ? text->font->font_size * 0.8f : 0.0f;
+            float ascent = radiant::compute_font_baseline_ascender(
+                lycon, text->font, use_normal_lh, fallback_ascent);
+            // baseline = accumulated Y offset + text's Y position + font ascent
             float baseline = cumulative_y + child->y + ascent;
             log_debug("find_first_baseline: found text at cumulative_y=%.1f, text.y=%.1f, ascent=%.1f -> baseline=%.1f",
                       cumulative_y, child->y, ascent, baseline);
@@ -979,19 +962,11 @@ static float find_cell_baseline(LayoutContext* lycon, ViewTableCell* tcell) {
             }
         }
         if (has_line_box && tcell->font) {
-            FontBox fbox = {};
-            setup_font(lycon->ui_context, &fbox, tcell->font);
-            if (fbox.font_handle) {
-                TypoMetrics typo = get_os2_typo_metrics(fbox.font_handle);
-                if (typo.valid && typo.use_typo_metrics) {
-                    baseline = typo.ascender;
-                } else {
-                    const FontMetrics* m = font_get_metrics(fbox.font_handle);
-                    if (m) baseline = m->hhea_ascender;
-                }
-                log_debug("find_cell_baseline: cell col=%d row=%d -> strut baseline=%.1f (inline children, no text)",
-                          tcell->td->col_index, tcell->td->row_index, baseline);
-            }
+            float fallback_ascent = tcell->font->font_size * 0.8f;
+            baseline = radiant::compute_font_baseline_ascender(
+                lycon, tcell->font, false, fallback_ascent);
+            log_debug("find_cell_baseline: cell col=%d row=%d -> strut baseline=%.1f (inline children, no text)",
+                      tcell->td->col_index, tcell->td->row_index, baseline);
         }
 
         if (baseline < 0) {
@@ -3542,7 +3517,7 @@ static bool table_anonymous_run_allows_preserved_whitespace(ArrayList* run) {
         }
         if (node->is_element()) {
             DisplayValue display = resolve_display_value(node);
-            if (display.outer == CSS_VALUE_NONE || display.inner == CSS_VALUE_NONE) {
+            if (layout_display_is_none(display)) {
                 continue;
             }
             return false;
@@ -4289,7 +4264,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             // Apply min-height/max-height constraints (CSS 2.1 §10.7)
             // caption->height includes content+padding+border; coordinate system must match box-sizing
             if (caption->blk) {
-                bool is_border_box = caption->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+                bool is_border_box = layout_uses_border_box(caption);
                 if (is_border_box) {
                     // border-box: caption->height is total, given_min/max are also border-box
                     caption->height = adjust_min_max_height(caption, caption->height);
@@ -5009,7 +4984,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     if (lycon->block.given_height < 0 && table && table->blk && table->blk->given_height > 0) {
         float table_h = table->blk->given_height;
         // Adjust for border-box: subtract table borders
-        if (table->blk->box_sizing == CSS_VALUE_BORDER_BOX && table->bound && table->bound->border) {
+        if (layout_uses_border_box(table) && table->bound && table->bound->border) {
             table_h -= layout_box_metrics(table).border_v;
         }
         // Subtract vertical border-spacing (top + bottom)
@@ -5243,7 +5218,7 @@ static float table_cell_width_constraint_border_box(ViewTableCell* cell, float c
                                                     bool border_collapse) {
     if (!cell || !cell->blk || css_width < 0.0f) return css_width;
 
-    if (cell->blk->box_sizing == CSS_VALUE_BORDER_BOX) return css_width;
+    if (layout_uses_border_box(cell)) return css_width;
 
     BoxMetrics box = layout_box_metrics(cell);
     float border_horizontal = border_collapse ? 0.0f : box.border_h;
@@ -6268,7 +6243,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
             // Use explicit width if given
             if (table->blk && table->blk->given_width > 0) {
-                if (table->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+                if (layout_uses_border_box(table)) {
                     table->width = table->blk->given_width;
                 } else {
                     // content-box: given_width is content width, add padding+border
@@ -6320,7 +6295,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
             table->height = bp_top + bp_bottom;
             if (table->blk && table->blk->given_height > 0) {
-                if (table->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+                if (layout_uses_border_box(table)) {
                     table->height = table->blk->given_height;
                 } else {
                     // content-box: given_height is content height, add padding+border
@@ -6511,7 +6486,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // Note: HTML <table> elements get box-sizing:border-box from UA stylesheet
         // (set in resolve_css_style.cpp), so no need to check tag() here.
         bool table_width_is_border_box = table->tb->border_collapse ||
-            (table->blk && table->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+            layout_uses_border_box(table);
         if (table_width_is_border_box && table->bound && table->bound->border) {
             BoxMetrics table_box = layout_box_metrics(table);
             table_content_width -= table_box.border_h;
@@ -6824,7 +6799,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // CSS 2.1 §10.2: In separate borders mode, CSS width is content-box — border is additional.
         // Exception: box-sizing:border-box makes width border-box.
         bool fixed_width_is_border_box = table->tb->border_collapse ||
-            (table->blk && table->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+            layout_uses_border_box(table);
         if (fixed_width_is_border_box) {
             float table_border_h = 0;
             if (table->bound && table->bound->border) {
@@ -6968,7 +6943,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     // (in separate-border mode). CSS width is content-box by default.
                     // For border-box cells, the CSS width already includes padding+border.
                     if (cell_width > 0.0f) {
-                        bool is_border_box = (cell->blk && cell->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+                        bool is_border_box = layout_uses_border_box(cell);
                         if (!is_border_box) {
                             if (cell->bound && cell->bound->padding.left >= 0 && cell->bound->padding.right >= 0) {
                                 cell_width += layout_box_metrics(cell).padding_h;
@@ -7080,7 +7055,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // CSS 2.1 §10.2: In separate borders, CSS height is content-box — border is additional.
             // Exception: box-sizing:border-box makes height border-box.
             bool height_is_border_box = table->tb->border_collapse ||
-                (table->blk && table->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+                layout_uses_border_box(table);
             if (height_is_border_box && table->bound && table->bound->border) {
                 content_height -= layout_box_metrics(table).border_v;
             }
@@ -7173,7 +7148,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // For explicit width (border-box): given_width is already border-box.
         // For intrinsic sizing: min_content already includes caption border+padding.
         if (caption->blk && caption->blk->given_width > 0) {
-            bool is_border_box = (caption->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+            bool is_border_box = layout_uses_border_box(caption);
             if (!is_border_box && caption->bound) {
                 BoxMetrics caption_box = layout_box_metrics(caption);
                 caption_width_contribution += caption_box.border_h;
@@ -7333,7 +7308,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // CSS 2.1 §10.2: In separate borders mode, CSS width is content-box.
             // Do NOT subtract border — it is additional to the content width.
             // Exception: box-sizing:border-box makes CSS width border-box.
-            bool is_border_box = (table->blk && table->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+            bool is_border_box = layout_uses_border_box(table);
             if (is_border_box && table->bound && table->bound->border) {
                 explicit_content_area -= layout_box_metrics(table).border_h;
             }
@@ -7649,7 +7624,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED && fixed_table_width > 0) {
         float css_padding_box = (float)fixed_table_width;
         bool fixed_is_border_box = table->tb->border_collapse ||
-            (table->blk && table->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+            layout_uses_border_box(table);
         if (fixed_is_border_box) {
             if (table->bound && table->bound->border) {
                 css_padding_box -= layout_box_metrics(table).border_h;
@@ -7703,7 +7678,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         float border_box_width = table_width + early_border_width;
         // For content-box, min/max values are content-box — add padding+border to get border-box
         bool minmax_is_border_box = table->tb->border_collapse ||
-            (table->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+            layout_uses_border_box(table);
         float minmax_extra = 0;
         if (!minmax_is_border_box) {
             minmax_extra = early_border_width + table_padding_horizontal;
@@ -8660,29 +8635,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         log_debug("%s Table has explicit HTML height attribute: %.1fpx", table->source_loc(), explicit_css_height);
     }
 
-    // CSS 2.1 §10.7: Apply min-height as a floor for the explicit height.
-    // If no explicit height is set but min-height is, treat min-height as the
-    // explicit height so rows are expanded to fill the min-height.
-    if (table->blk && table->blk->given_min_height >= 0) {
-        float min_h = table->blk->given_min_height;
-        if (min_h > explicit_css_height) {
-            explicit_css_height = min_h;
-            log_debug("%s Table min-height applied: explicit_css_height raised to %.1fpx", table->source_loc(), explicit_css_height);
-        }
-    }
-    // CSS 2.1 §10.7: Apply max-height as a cap for the explicit height.
-    // CSS 2.1 §10.7: "If min-height is greater than max-height, max-height is
-    // set to the value of min-height." — min-height always wins.
-    if (table->blk && table->blk->given_max_height >= 0) {
-        float max_h = table->blk->given_max_height;
-        // min-height overrides max-height per CSS 2.1 §10.7
-        if (table->blk->given_min_height >= 0 && max_h < table->blk->given_min_height) {
-            max_h = table->blk->given_min_height;
-        }
-        if (explicit_css_height > max_h) {
-            explicit_css_height = max_h;
-            log_debug("%s Table max-height applied: explicit_css_height capped at %.1fpx", table->source_loc(), explicit_css_height);
-        }
+    float constrained_css_height = layout_clamp_min_max_height(table, explicit_css_height);
+    if (constrained_css_height != explicit_css_height) {
+        log_debug("%s Table min/max-height applied: explicit_css_height %.1fpx -> %.1fpx",
+                  table->source_loc(), explicit_css_height, constrained_css_height);
+        explicit_css_height = constrained_css_height;
     }
 
     // Calculate what the minimum content height would be (including padding, borders, spacing)
@@ -8723,7 +8680,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // CSS 2.1 §10.2: In separate borders, CSS height is content-box — border is additional.
         // Exception: box-sizing:border-box makes height border-box.
         bool auto_height_is_border_box = table->tb->border_collapse ||
-            (table->blk && table->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+            layout_uses_border_box(table);
         float available_for_content = auto_height_is_border_box
             ? explicit_css_height - table_border_vert
             : explicit_css_height;
@@ -9171,7 +9128,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (explicit_css_height > 0) {
         float css_height_comparable = explicit_css_height;
         bool height_css_is_border_box = table->tb->border_collapse ||
-            (table->blk && table->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+            layout_uses_border_box(table);
         if (height_css_is_border_box) {
             if (!table->tb->border_collapse && table->bound && table->bound->border) {
                 css_height_comparable -= table->bound->border->width.bottom;
@@ -9279,7 +9236,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // below the natural content. Only min-width/min-height act as a floor here.
     // For content-box, given_min values are content-box — convert to content-box
     // for comparison, then convert back to border-box.
-    bool table_is_content_box = !table->blk || table->blk->box_sizing != CSS_VALUE_BORDER_BOX;
+    bool table_is_content_box = !layout_uses_border_box(table);
     if (table_is_content_box && table->bound && !table->tb->border_collapse) {
         BoxMetrics table_box = layout_box_metrics(table);
         float pb_w = table_box.pad_border_h;
@@ -9287,21 +9244,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         float content_w = max(table->width - pb_w, 0.0f);
         float content_h = max(table->height - pb_h, 0.0f);
         // Only apply min as a floor (not max)
-        if (table->blk && table->blk->given_min_width >= 0 && content_w < table->blk->given_min_width)
-            content_w = table->blk->given_min_width;
-        if (table->blk && table->blk->given_min_height >= 0 && content_h < table->blk->given_min_height)
-            content_h = table->blk->given_min_height;
+        content_w = layout_floor_min_width(table, content_w);
+        content_h = layout_floor_min_height(table, content_h);
         table->width = content_w + pb_w;
         table->height = content_h + pb_h;
     } else {
         // Border-box: only apply min as a floor
         if (table->blk) {
-            if (table->blk->given_min_width >= 0 && table->width < table->blk->given_min_width)
-                table->width = table->blk->given_min_width;
-            if (table->blk->given_min_height >= 0 && table->height < table->blk->given_min_height)
-                table->height = table->blk->given_min_height;
+            table->width = layout_floor_min_width(table, table->width);
+            table->height = layout_floor_min_height(table, table->height);
             // CSS Box Model: In border-box, the box width cannot be smaller than padding+border
-            if (table->blk->box_sizing == CSS_VALUE_BORDER_BOX && table->bound) {
+            if (layout_uses_border_box(table) && table->bound) {
                 BoxMetrics table_box = layout_box_metrics(table);
                 float pad_border_w = table_box.pad_border_h;
                 float pad_border_h = table_box.pad_border_v;

@@ -782,29 +782,12 @@ String* format_cmd_args(String* cmd, Item args) {
                 continue;
             }
 
-            // Get field value by reconstructing the item from the field data
-            void* field_ptr = (char*)arg_map->data + field->byte_offset;
-            Item value_item = {.item = 0};
-
-            switch (field->type->type_id) {
-            case LMD_TYPE_NULL:
-                value_item._type_id = LMD_TYPE_NULL;
-                break;
-            case LMD_TYPE_BOOL:
-                value_item._type_id = LMD_TYPE_BOOL;
-                value_item.bool_val = *(bool*)field_ptr;
-                break;
-            case LMD_TYPE_INT:
-                value_item = {.item = i2it(*(int64_t*)field_ptr)};  // read full int64 to preserve 56-bit value
-                break;
-            case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
-                String* str = *(String**)field_ptr;
-                value_item = {.item = s2it(str)};
-                break;
-            }
-            default:
+            Item value_item = map_shape_field_to_item(arg_map->data, field);
+            TypeId value_type = get_type_id(value_item);
+            if (value_type != LMD_TYPE_NULL && value_type != LMD_TYPE_BOOL &&
+                    value_type != LMD_TYPE_INT && value_type != LMD_TYPE_STRING &&
+                    value_type != LMD_TYPE_SYMBOL) {
                 value_item = ItemNull;
-                break;
             }
 
             // format as --key=value or --key value depending on convention

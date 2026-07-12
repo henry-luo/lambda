@@ -236,7 +236,7 @@ static float multicol_content_box_height_limit(ViewBlock* block) {
 
     if (limit < 0) return -1;
 
-    if (block->bound && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+    if (block->bound && layout_uses_border_box(block)) {
         float border_padding = layout_box_metrics(block).pad_border_v;
         limit -= border_padding;
         if (limit < 0) limit = 0;
@@ -1762,7 +1762,7 @@ static float multicol_split_child_around_spanners(
     float new_height = flow_height;
     if (child->blk && child->blk->given_height >= 0 && first_group_target_height > 0) {
         float child_border_padding_height = 0;
-        if (child->bound && child->blk->box_sizing != CSS_VALUE_BORDER_BOX) {
+        if (child->bound && !layout_uses_border_box(child)) {
             child_border_padding_height = layout_box_metrics(child).pad_border_v;
         }
         float decorated_split_adjustment = child_border_padding_height > 0 ?

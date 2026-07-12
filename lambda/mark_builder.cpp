@@ -766,8 +766,7 @@ bool MarkBuilder::is_in_arena(Item item) const {
             lam::ShapeRef attr = lam::shape_borrow(elem_type->shape);
             while (attr) {
                 if (attr->name) {
-                    void* attr_data = (char*)elem->data + attr->byte_offset;
-                    Item attr_item = map_field_to_item(attr_data, attr->type->type_id);
+                    Item attr_item = map_shape_field_to_item(elem->data, attr.get());
                     if (!is_in_arena(attr_item)) return false;  // External attribute found
                 }
                 attr = lam::shape_next(attr);
@@ -971,8 +970,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         if (elem_type->length > 0) {
             lam::ShapeRef attr = lam::shape_borrow(elem_type->shape);
             while (attr) {
-                void* field_ptr = (char*)elem->data + attr->byte_offset;
-                Item attr_item = map_field_to_item(field_ptr, attr->type->type_id);
+                Item attr_item = map_shape_field_to_item(elem->data, attr.get());
                 Item copied_item = deep_copy_internal(attr_item);
                 if (attr->name) {
                     // Copy attribute name bytes from external NamePool

@@ -194,8 +194,8 @@ static size_t extract_leading_command(const char* source, uint32_t start, uint32
     if (len < 2 || text[0] != '\\') return 0;
     // scan the command: \backslash + letters (or a single non-letter like \, or \;)
     size_t i = 1;
-    if (i < len && isalpha((unsigned char)text[i])) {
-        while (i < len && isalpha((unsigned char)text[i])) i++;
+    if (i < len && str_char_is_alpha(text[i])) {
+        while (i < len && str_char_is_alpha(text[i])) i++;
     } else if (i < len) {
         i++; // single non-letter command like \, \; \!
     }
@@ -225,8 +225,8 @@ static size_t extract_infix_frac_command(const char* source, uint32_t start, uin
         const char* found = (const char*)memmem(text, len, cmd, cmd_len);
         if (!found) continue;
         size_t offset = (size_t)(found - text);
-        bool left_ok = (offset == 0) || !isalpha((unsigned char)text[offset - 1]);
-        bool right_ok = (offset + cmd_len >= len) || !isalpha((unsigned char)text[offset + cmd_len]);
+        bool left_ok = (offset == 0) || !str_char_is_alpha(text[offset - 1]);
+        bool right_ok = (offset + cmd_len >= len) || !str_char_is_alpha(text[offset + cmd_len]);
         if (!left_ok || !right_ok) continue;
         size_t copy_len = cmd_len;
         if (copy_len > out_max - 1) copy_len = out_max - 1;

@@ -1450,7 +1450,7 @@ static DomText* find_first_text_node(DomNode* node, bool* suppressed) {
         // Only descend into inline-level elements, not blocks
         // (::first-letter of a block is the first letter of its first inline content)
         if (elem->display.outer != CSS_VALUE_INLINE &&
-            elem->display.outer != CSS_VALUE_NONE &&
+            !layout_element_is_display_none(elem) &&
             elem != lam::dom_require<DOM_NODE_ELEMENT>(node)) {
             // It's a block-level child — first-letter comes from first formed line
             // For simplicity, skip block children (browser does too for nested blocks)
@@ -3343,7 +3343,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             // padding+border from flow_height). Convert to content-box space for
             // the min/max comparison, then add padding+border back.
             float final_height;
-            bool is_content_box = !block->blk || block->blk->box_sizing != CSS_VALUE_BORDER_BOX;
+            bool is_content_box = !layout_uses_border_box(block);
             if (is_content_box && block->bound) {
                 float pb = block_box.pad_border_v;
                 float content_only = max(auto_height - pb, 0.0f);
@@ -3662,7 +3662,7 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
                     block->blk->given_height_type != CSS_VALUE_AUTO)
         ? block->blk->given_height : -1.0f;
 
-    bool is_border_box = block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+    bool is_border_box = layout_uses_border_box(block);
     float content_width = -1.0f;
     float content_height = -1.0f;
     bool width_is_specified = width >= 0.0f;
@@ -3981,7 +3981,7 @@ static bool prescan_node_has_in_flow_inline_content(DomNode* node) {
 
     DomElement* elem = node->as_element();
     DisplayValue display = resolve_display_value(node);
-    if (display.outer == CSS_VALUE_NONE) return false;
+    if (layout_display_is_none(display)) return false;
     if (elem->position &&
         (layout_position_is_abs_fixed(elem->position) ||
          layout_position_is_floated(elem->position))) {
@@ -4151,7 +4151,7 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
 
         // Check display:none first - hidden elements should not participate in float layout
         DisplayValue display = resolve_display_value(child);
-        if (display.outer == CSS_VALUE_NONE) continue;
+        if (layout_display_is_none(display)) continue;
 
         CssEnum float_value = get_element_float_value(elem);
 
@@ -4647,8 +4647,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                         (block->bound && block->bound->border ? block->bound->border->width.right : 0);
                     // CSS Tables 3: table layout already handles max-width during column
                     // distribution (respecting min-content floor). Only apply min-width here.
-                    if (block->blk && block->blk->given_min_width >= 0 && shrink_width < block->blk->given_min_width)
-                        shrink_width = block->blk->given_min_width;
+                    shrink_width = layout_floor_min_width(block, shrink_width);
                     block->width = shrink_width;
                     resolve_table_auto_margins_after_shrink(
                         block, table_margin_containing_width, block->position && element_has_float(block));
@@ -6150,7 +6149,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         content_width = available_width;
         log_debug("%s Float auto-width: initial layout with available_width=%.2f (will shrink post-layout)", block->source_loc(), content_width);
         content_width = adjust_min_max_width(block, content_width);
-        if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+        if (layout_uses_border_box(block)) {
             if (block->bound) content_width = adjust_border_padding_width(block, content_width);
         }
     }
@@ -6179,7 +6178,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // width is the used width (content-box). box-sizing: border-box only applies
         // to explicitly set CSS widths, not to intrinsic dimensions. However, when
         // min/max-width constrains the width, the constraint IS in border-box terms.
-        if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+        if (layout_uses_border_box(block)) {
             if (!image_width_auto_derived || width_was_clamped) {
                 if (block->bound) content_width = adjust_border_padding_width(block, content_width);
                 log_debug("%s After adjust_border_padding (border-box): content_width=%.2f", block->source_loc(), content_width);
@@ -6212,11 +6211,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // Only apply min-width as a floor.
         bool is_auto_width_table = (block->view_type == RDT_VIEW_TABLE) &&
             (!block->blk || block->blk->given_width < 0 || block->blk->given_width_type == CSS_VALUE_AUTO);
-        if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+        if (layout_uses_border_box(block)) {
             if (is_auto_width_table) {
                 // Only apply min-width, skip max-width
-                if (block->blk->given_min_width >= 0 && content_width < block->blk->given_min_width)
-                    content_width = block->blk->given_min_width;
+                content_width = layout_floor_min_width(block, content_width);
             } else {
                 content_width = adjust_min_max_width(block, content_width);
             }
@@ -6225,8 +6223,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             if (block->bound) content_width = adjust_border_padding_width(block, content_width);
             if (is_auto_width_table) {
                 // Only apply min-width, skip max-width
-                if (block->blk && block->blk->given_min_width >= 0 && content_width < block->blk->given_min_width)
-                    content_width = block->blk->given_min_width;
+                content_width = layout_floor_min_width(block, content_width);
             } else {
                 content_width = adjust_min_max_width(block, content_width);
             }
@@ -6260,7 +6257,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // CSS 2.1 §10.6.2: For replaced elements with 'height: auto', the intrinsic
         // height is the used height (content-box). box-sizing: border-box only applies
         // to explicitly set CSS heights, not to intrinsic dimensions.
-        if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+        if (layout_uses_border_box(block)) {
             if (!image_height_auto_derived || height_was_clamped) {
                 if (block->bound) content_height = adjust_border_padding_height(block, content_height);
             } else {
@@ -6281,7 +6278,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         if (content_height < 0.0f) content_height = 0.0f;
         // Don't inherit parent's content_height for auto height blocks
         // The height will be finalized after content is laid out in finalize_block_flow
-        if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+        if (layout_uses_border_box(block)) {
             content_height = adjust_min_max_height(block, content_height);
             if (block->bound) content_height = adjust_border_padding_height(block, content_height);
         } else {
@@ -6929,7 +6926,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // after inner layout so parent min/available width does not leak into the
     // SVG viewport.
     if (block->tag() == HTM_TAG_SVG && block->blk) {
-        bool is_border_box = block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+        bool is_border_box = layout_uses_border_box(block);
         if (block->blk->given_width >= 0.0f) {
             block->content_width = is_border_box
                 ? layout_content_width_from_border_box(block, block->blk->given_width)

@@ -5,8 +5,8 @@
 #include "../../mark_builder.hpp"
 #include "../../../lib/html_entities.h"
 #include "../input-utils.h"
+#include "../line_counter.hpp"
 #include <string.h>
-#include <ctype.h>
 
 // ============================================================================
 // SOURCE LINE TRACKING
@@ -16,11 +16,8 @@
 static void html5_update_line_count(Html5Parser* parser) {
     const char* html = parser->html;
     size_t end = parser->pos;
-    for (size_t i = parser->line_scan_pos; i < end; i++) {
-        if (html[i] == '\n') {
-            parser->current_line++;
-        }
-    }
+    parser->current_line += line_counter_count_lf(html + parser->line_scan_pos,
+                                                  end - parser->line_scan_pos);
     parser->line_scan_pos = end;
 }
 
@@ -183,14 +180,12 @@ static void html5_utf8iter_read_char(Html5Utf8Iterator* iter) {
 // Update position after consuming a character
 static void html5_utf8iter_update_position(Html5Utf8Iterator* iter) {
     iter->pos.offset += iter->width;
-    if (iter->current == '\n') {
-        iter->pos.line++;
-        iter->pos.column = 1;
-    } else if (iter->current == '\t') {
-        // Tab stop at every 8 columns (configurable)
-        iter->pos.column = ((iter->pos.column / 8) + 1) * 8;
-    } else if (iter->current != -1) {
-        iter->pos.column++;
+    if (iter->current != -1) {
+        LineCounter counter = {iter->pos.line, iter->pos.column};
+        char current_char = iter->current <= 0x7F ? (char)iter->current : '\0';
+        line_counter_advance_char(&counter, current_char, iter->current == '\n', true);
+        iter->pos.line = counter.line;
+        iter->pos.column = counter.column;
     }
 }
 
@@ -921,7 +916,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
 
             case HTML5_TOK_RCDATA_END_TAG_OPEN: {
                 // Saw '</' in RCDATA, check if this starts a valid end tag
-                if (isalpha(c)) {
+                if (str_char_is_alpha(c)) {
                     parser->current_token = html5_token_create_end_tag(parser->pool, parser->arena, nullptr);
                     html5_reconsume(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA_END_TAG_NAME);
@@ -964,7 +959,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     } else {
                         goto rcdata_emit_as_text;
                     }
-                } else if (isalpha(c)) {
+                } else if (str_char_is_alpha(c)) {
                     // Store ORIGINAL case in temp_buffer (for text emission if not valid end tag)
                     html5_append_to_temp_buffer(parser, c);
                 } else {
@@ -1020,7 +1015,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
             }
 
             case HTML5_TOK_RAWTEXT_END_TAG_OPEN: {
-                if (isalpha(c)) {
+                if (str_char_is_alpha(c)) {
                     parser->current_token = html5_token_create_end_tag(parser->pool, parser->arena, nullptr);
                     html5_reconsume(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT_END_TAG_NAME);
@@ -1060,7 +1055,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     } else {
                         goto rawtext_emit_as_text;
                     }
-                } else if (isalpha(c)) {
+                } else if (str_char_is_alpha(c)) {
                     // Store ORIGINAL case in temp_buffer (for text emission if not valid end tag)
                     html5_append_to_temp_buffer(parser, c);
                 } else {
@@ -1103,7 +1098,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_MARKUP_DECLARATION_OPEN);
                 } else if (c == '/') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_END_TAG_OPEN);
-                } else if (isalpha(c)) {
+                } else if (str_char_is_alpha(c)) {
                     parser->current_token = html5_token_create_start_tag(parser->pool, parser->arena, nullptr);
                     // track the line of the opening '<' for this start tag
                     if (parser->track_source_lines) {
@@ -1138,7 +1133,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
             }
 
             case HTML5_TOK_END_TAG_OPEN: {
-                if (isalpha(c)) {
+                if (str_char_is_alpha(c)) {
                     parser->current_token = html5_token_create_end_tag(parser->pool, parser->arena, nullptr);
                     html5_clear_temp_buffer(parser);
                     html5_reconsume(parser);

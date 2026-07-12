@@ -127,8 +127,9 @@ static bool vmap_host_get_by_item(VMap* vm, Item key, Item* out) {
                 *out = result;
                 return true;
             }
-            *out = ItemNull;
-            return true;
+            // camel-case probing can miss guard-gated host members; fall back
+            // to the original key so text/comment DOM nodes reach legacy hooks.
+            result = ItemNull;
         }
     }
 

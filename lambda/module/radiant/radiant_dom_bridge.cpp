@@ -1152,6 +1152,8 @@ static DomElement* radiant_dom_member_elem(Item receiver) {
 
 RADIANT_MEMBER_GET(radiant_dom_member_tag_name,
     (Item){.item = s2it(radiant_dom_uppercase_name(elem->tag_name))})
+RADIANT_MEMBER_GET(radiant_dom_member_node_name,
+    (Item){.item = s2it(radiant_dom_uppercase_name(elem->tag_name))})
 RADIANT_MEMBER_GET(radiant_dom_member_local_name,
     radiant_dom_string_item(elem->tag_name))
 RADIANT_C_API int radiant_dom_member_namespace_uri(Item receiver, Item* out) {

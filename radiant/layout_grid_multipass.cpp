@@ -11,6 +11,7 @@
 #include "layout_abs_children.hpp"
 #include "layout_measure.hpp"
 #include "layout_box.hpp"
+#include "layout_percentages.hpp"
 #include "grid_baseline.hpp"
 #include "../lib/tagged.hpp"
 
@@ -32,244 +33,25 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
 // Forward declarations for static functions
 static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewBlock* grid_item);
 
-static bool grid_resolve_percentage_spacing_value(const CssValue* value, float inline_base, float* out) {
-    if (!value || !out || inline_base < 0.0f) return false;
-    if (value->type != CSS_VALUE_TYPE_PERCENTAGE) return false;
-    *out = (float)(value->data.percentage.value / 100.0) * inline_base;
-    return true;
-}
-
-static CssValue* grid_pair_spacing_value(const CssValue* value, bool end_side) {
-    if (!value) return nullptr;
-    if (value->type != CSS_VALUE_TYPE_LIST) return (CssValue*)value;
-    int cnt = value->data.list.count;
-    CssValue** vals = value->data.list.values;
-    if (cnt <= 0 || !vals) return nullptr;
-    int idx = (end_side && cnt >= 2) ? 1 : 0;
-    return (idx < cnt) ? vals[idx] : nullptr;
-}
-
-typedef struct GridPaddingCandidate {
-    CssDeclaration* decl;
-    CssValue* value;
-    int64_t priority;
-} GridPaddingCandidate;
-
-static void grid_consider_padding_candidate(GridPaddingCandidate* candidate,
-                                            CssDeclaration* decl, CssValue* value) {
-    if (!candidate || !decl || !value) return;
-    int64_t priority = get_cascade_priority(decl);
-    if (!candidate->decl || priority >= candidate->priority) {
-        candidate->decl = decl;
-        candidate->value = value;
-        candidate->priority = priority;
-    }
-}
-
-static void grid_apply_padding_candidate(ViewBlock* item, int side,
-                                         GridPaddingCandidate* candidate, float inline_base) {
-    if (!item || !item->bound || !candidate || !candidate->decl || !candidate->value) return;
-    float resolved = 0.0f;
-    if (!grid_resolve_percentage_spacing_value(candidate->value, inline_base, &resolved)) return;
-
-    switch (side) {
-        case 0:
-            item->bound->padding.top = resolved;
-            item->bound->padding.top_specificity = candidate->priority;
-            break;
-        case 1:
-            item->bound->padding.right = resolved;
-            item->bound->padding.right_specificity = candidate->priority;
-            break;
-        case 2:
-            item->bound->padding.bottom = resolved;
-            item->bound->padding.bottom_specificity = candidate->priority;
-            break;
-        case 3:
-            item->bound->padding.left = resolved;
-            item->bound->padding.left_specificity = candidate->priority;
-            break;
-    }
-}
-
-static void grid_re_resolve_item_percentage_padding(ViewBlock* item, float inline_base) {
-    if (!item || !item->bound || !item->specified_style || inline_base < 0.0f) return;
-
-    GridPaddingCandidate top = {};
-    GridPaddingCandidate right = {};
-    GridPaddingCandidate bottom = {};
-    GridPaddingCandidate left = {};
-
-    CssDeclaration* padding = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_PADDING);
-    if (padding && padding->value) {
-        grid_consider_padding_candidate(&top, padding, (CssValue*)css_box_shorthand_side_value(padding->value, 0));
-        grid_consider_padding_candidate(&right, padding, (CssValue*)css_box_shorthand_side_value(padding->value, 1));
-        grid_consider_padding_candidate(&bottom, padding, (CssValue*)css_box_shorthand_side_value(padding->value, 2));
-        grid_consider_padding_candidate(&left, padding, (CssValue*)css_box_shorthand_side_value(padding->value, 3));
-    }
-
-    CssDeclaration* pt = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_PADDING_TOP);
-    grid_consider_padding_candidate(&top, pt, pt ? pt->value : nullptr);
-    CssDeclaration* pr = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_PADDING_RIGHT);
-    grid_consider_padding_candidate(&right, pr, pr ? pr->value : nullptr);
-    CssDeclaration* pb = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_PADDING_BOTTOM);
-    grid_consider_padding_candidate(&bottom, pb, pb ? pb->value : nullptr);
-    CssDeclaration* pl = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_PADDING_LEFT);
-    grid_consider_padding_candidate(&left, pl, pl ? pl->value : nullptr);
-
-    CssDeclaration* p_inline = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_PADDING_INLINE);
-    if (p_inline && p_inline->value) {
-        grid_consider_padding_candidate(&left, p_inline, grid_pair_spacing_value(p_inline->value, false));
-        grid_consider_padding_candidate(&right, p_inline, grid_pair_spacing_value(p_inline->value, true));
-    }
-    CssDeclaration* pis = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_PADDING_INLINE_START);
-    grid_consider_padding_candidate(&left, pis, pis ? pis->value : nullptr);
-    CssDeclaration* pie = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_PADDING_INLINE_END);
-    grid_consider_padding_candidate(&right, pie, pie ? pie->value : nullptr);
-
-    CssDeclaration* p_block = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_PADDING_BLOCK);
-    if (p_block && p_block->value) {
-        grid_consider_padding_candidate(&top, p_block, grid_pair_spacing_value(p_block->value, false));
-        grid_consider_padding_candidate(&bottom, p_block, grid_pair_spacing_value(p_block->value, true));
-    }
-    CssDeclaration* pbs = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_PADDING_BLOCK_START);
-    grid_consider_padding_candidate(&top, pbs, pbs ? pbs->value : nullptr);
-    CssDeclaration* pbe = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_PADDING_BLOCK_END);
-    grid_consider_padding_candidate(&bottom, pbe, pbe ? pbe->value : nullptr);
-
-    grid_apply_padding_candidate(item, 0, &top, inline_base);
-    grid_apply_padding_candidate(item, 1, &right, inline_base);
-    grid_apply_padding_candidate(item, 2, &bottom, inline_base);
-    grid_apply_padding_candidate(item, 3, &left, inline_base);
-}
-
-typedef GridPaddingCandidate GridMarginCandidate;
-
-static void grid_apply_margin_candidate(ViewBlock* item, int side,
-                                        GridMarginCandidate* candidate, float inline_base) {
-    if (!item || !item->bound || !candidate || !candidate->decl || !candidate->value) return;
-    float resolved = 0.0f;
-    if (!grid_resolve_percentage_spacing_value(candidate->value, inline_base, &resolved)) return;
-
-    switch (side) {
-        case 0:
-            item->bound->margin.top = resolved;
-            item->bound->margin.top_specificity = candidate->priority;
-            item->bound->margin.top_type = CSS_VALUE__PERCENTAGE;
-            break;
-        case 1:
-            item->bound->margin.right = resolved;
-            item->bound->margin.right_specificity = candidate->priority;
-            item->bound->margin.right_type = CSS_VALUE__PERCENTAGE;
-            break;
-        case 2:
-            item->bound->margin.bottom = resolved;
-            item->bound->margin.bottom_specificity = candidate->priority;
-            item->bound->margin.bottom_type = CSS_VALUE__PERCENTAGE;
-            break;
-        case 3:
-            item->bound->margin.left = resolved;
-            item->bound->margin.left_specificity = candidate->priority;
-            item->bound->margin.left_type = CSS_VALUE__PERCENTAGE;
-            break;
-    }
-}
-
-static void grid_re_resolve_item_percentage_margin(ViewBlock* item, float inline_base) {
-    if (!item || !item->bound || !item->specified_style || inline_base < 0.0f) return;
-
-    GridMarginCandidate top = {};
-    GridMarginCandidate right = {};
-    GridMarginCandidate bottom = {};
-    GridMarginCandidate left = {};
-
-    CssDeclaration* margin = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_MARGIN);
-    if (margin && margin->value) {
-        grid_consider_padding_candidate(&top, margin, (CssValue*)css_box_shorthand_side_value(margin->value, 0));
-        grid_consider_padding_candidate(&right, margin, (CssValue*)css_box_shorthand_side_value(margin->value, 1));
-        grid_consider_padding_candidate(&bottom, margin, (CssValue*)css_box_shorthand_side_value(margin->value, 2));
-        grid_consider_padding_candidate(&left, margin, (CssValue*)css_box_shorthand_side_value(margin->value, 3));
-    }
-
-    CssDeclaration* mt = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_MARGIN_TOP);
-    grid_consider_padding_candidate(&top, mt, mt ? mt->value : nullptr);
-    CssDeclaration* mr = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_MARGIN_RIGHT);
-    grid_consider_padding_candidate(&right, mr, mr ? mr->value : nullptr);
-    CssDeclaration* mb = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_MARGIN_BOTTOM);
-    grid_consider_padding_candidate(&bottom, mb, mb ? mb->value : nullptr);
-    CssDeclaration* ml = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_MARGIN_LEFT);
-    grid_consider_padding_candidate(&left, ml, ml ? ml->value : nullptr);
-
-    CssDeclaration* m_inline = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_MARGIN_INLINE);
-    if (m_inline && m_inline->value) {
-        grid_consider_padding_candidate(&left, m_inline, grid_pair_spacing_value(m_inline->value, false));
-        grid_consider_padding_candidate(&right, m_inline, grid_pair_spacing_value(m_inline->value, true));
-    }
-    CssDeclaration* mis = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_MARGIN_INLINE_START);
-    grid_consider_padding_candidate(&left, mis, mis ? mis->value : nullptr);
-    CssDeclaration* mie = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_MARGIN_INLINE_END);
-    grid_consider_padding_candidate(&right, mie, mie ? mie->value : nullptr);
-
-    CssDeclaration* m_block = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_MARGIN_BLOCK);
-    if (m_block && m_block->value) {
-        grid_consider_padding_candidate(&top, m_block, grid_pair_spacing_value(m_block->value, false));
-        grid_consider_padding_candidate(&bottom, m_block, grid_pair_spacing_value(m_block->value, true));
-    }
-    CssDeclaration* mbs = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_MARGIN_BLOCK_START);
-    grid_consider_padding_candidate(&top, mbs, mbs ? mbs->value : nullptr);
-    CssDeclaration* mbe = style_tree_get_declaration(item->specified_style, CSS_PROPERTY_MARGIN_BLOCK_END);
-    grid_consider_padding_candidate(&bottom, mbe, mbe ? mbe->value : nullptr);
-
-    grid_apply_margin_candidate(item, 0, &top, inline_base);
-    grid_apply_margin_candidate(item, 1, &right, inline_base);
-    grid_apply_margin_candidate(item, 2, &bottom, inline_base);
-    grid_apply_margin_candidate(item, 3, &left, inline_base);
-}
-
-static void grid_re_resolve_item_percentage_box(ViewBlock* item, float inline_base) {
-    grid_re_resolve_item_percentage_padding(item, inline_base);
-    grid_re_resolve_item_percentage_margin(item, inline_base);
-}
-
 static float grid_container_content_width_for_item_percentages(LayoutContext* lycon, ViewBlock* grid_container) {
     if (!grid_container) return 0.0f;
 
-    float content_width = layout_content_width_from_border_box(grid_container, grid_container->width);
-    if (grid_container->blk && grid_container->blk->given_width >= 0.0f) {
-        if (grid_container->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
-            content_width = layout_content_width_from_border_box(grid_container, grid_container->blk->given_width);
-        } else {
-            content_width = grid_container->blk->given_width;
-        }
-        return content_width;
-    }
+    float content_width = layout_block_used_content_size(grid_container, true, false);
+    if (content_width < 0.0f) content_width = 0.0f;
 
-    CssDeclaration* width_decl = grid_container->specified_style
-        ? style_tree_get_declaration(grid_container->specified_style, CSS_PROPERTY_WIDTH) : nullptr;
-    if (width_decl && width_decl->value) {
-        float declared_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
-        if (!isnan(declared_width) && declared_width >= 0.0f) {
-            if (grid_container->blk && grid_container->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
-                content_width = layout_content_width_from_border_box(grid_container, declared_width);
-            } else {
-                content_width = declared_width;
-            }
-        }
-    }
-    return content_width;
+    float given_width = layout_block_given_content_size(grid_container, true);
+    if (given_width >= 0.0f) return given_width;
+
+    float declared_width = layout_block_declared_content_size(lycon, grid_container, CSS_PROPERTY_WIDTH, true);
+    return declared_width >= 0.0f ? declared_width : content_width;
 }
 
 static float grid_container_content_height_for_item_percentages(ViewBlock* grid_container) {
     if (!grid_container) return -1.0f;
 
-    float content_height = layout_content_height_from_border_box(grid_container, grid_container->height);
-    if (grid_container->blk && grid_container->blk->given_height >= 0.0f) {
-        if (grid_container->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
-            content_height = layout_content_height_from_border_box(grid_container, grid_container->blk->given_height);
-        } else {
-            content_height = grid_container->blk->given_height;
-        }
-    }
+    float content_height = layout_block_used_content_size(grid_container, false, false);
+    float given_height = layout_block_given_content_size(grid_container, false);
+    if (given_height >= 0.0f) content_height = given_height;
     return content_height > 0.0f ? content_height : -1.0f;
 }
 
@@ -325,8 +107,7 @@ static float grid_flex_container_auto_border_height(ViewBlock* flex_container,
             if (!child->is_element()) continue;
             ViewBlock* child_block = lam::view_as_block(child->as_element());
             if (!child_block) continue;
-            if (child_block->display.outer == CSS_VALUE_NONE ||
-                child_block->display.inner == CSS_VALUE_NONE ||
+            if (layout_block_is_display_none(child_block) ||
                 layout_view_is_abs_or_fixed(child_block)) {
                 continue;
             }
@@ -346,8 +127,7 @@ static float grid_flex_container_auto_border_height(ViewBlock* flex_container,
             if (!child->is_element()) continue;
             ViewBlock* child_block = lam::view_as_block(child->as_element());
             if (!child_block) continue;
-            if (child_block->display.outer == CSS_VALUE_NONE ||
-                child_block->display.inner == CSS_VALUE_NONE ||
+            if (layout_block_is_display_none(child_block) ||
                 layout_view_is_abs_or_fixed(child_block)) {
                 continue;
             }
@@ -540,12 +320,9 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                 float h = item->content_height;
                 // CSS Grid: if item has max-height, its contribution to the row is capped
                 if (item->blk && item->blk->given_max_height >= 0) {
-                    float bb_max = item->blk->given_max_height;
-                    bool is_border_box = (item->blk->box_sizing == CSS_VALUE_BORDER_BOX);
-                    if (!is_border_box) {
-                        bb_max = layout_border_height_from_content_box(item, bb_max);
-                    }
-                    if (is_border_box) {
+                    float bb_max = layout_css_size_to_border_box(
+                        item->bound, layout_box_sizing(item), item->blk->given_max_height, false);
+                    if (layout_uses_border_box(item)) {
                         bb_max = layout_floor_border_box_height(item, bb_max);
                     }
                     if (h > bb_max) h = bb_max;
@@ -830,7 +607,7 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
 
             // Always resolve styles first (position:absolute may not be known until after cascade)
             init_grid_item_view(lycon, child);
-            grid_re_resolve_item_percentage_box(lam::view_as_block(elem), container_content_width);
+            layout_reresolve_percentage_box(lam::view_as_block(elem), container_content_width);
 
             // Re-check absolute positioning AFTER style resolution
             ViewBlock* elem_block = lam::view_as_block(elem);
@@ -838,7 +615,7 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
 
             if (!is_absolute) {
                 // check display:none AFTER style resolution (display may be set via cascade)
-                if (elem->display.outer == CSS_VALUE_NONE) {
+                if (layout_element_is_display_none(elem)) {
                     log_debug("Skipping display:none child after style resolution: %s", child->node_name());
                 } else {
                     item_count++;
@@ -962,13 +739,11 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
 
             // Skip absolute positioned and display:none items
             bool is_absolute = layout_view_is_abs_or_fixed(item);
-            bool is_display_none = (item->display.outer == CSS_VALUE_NONE);
-
-            if (!is_absolute && !is_display_none) {
+            if (!is_absolute && !layout_block_is_display_none(item)) {
                 float min_width = 0, max_width = 0, min_height = 0, max_height = 0;
                 measure_grid_item_intrinsic(lycon, item, &min_width, &max_width,
                                             &min_height, &max_height);
-                grid_re_resolve_item_percentage_box(item, container_content_width);
+                layout_reresolve_percentage_box(item, container_content_width);
 
                 // Store only WIDTH measurements in the item for later use
                 // HEIGHT measurements are intentionally NOT stored here because:
@@ -1031,7 +806,7 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     if (item->blk) {
         if (item->blk->given_width > 0) {
             float w = item->blk->given_width;
-            if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+            if (layout_uses_border_box(item)) {
                 w = layout_floor_border_box_width(item, w);
             }
             *min_width = *max_width = w;
@@ -1039,7 +814,7 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
         }
         if (item->blk->given_height > 0) {
             float h = item->blk->given_height;
-            if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+            if (layout_uses_border_box(item)) {
                 h = layout_floor_border_box_height(item, h);
             }
             *min_height = *max_height = h;
@@ -1150,7 +925,7 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     FontBox pa_font = lycon->font;
 
     float grid_item_percentage_base = grid_item_percentage_base_from_parent(lycon, grid_item);
-    grid_re_resolve_item_percentage_box(grid_item, grid_item_percentage_base);
+    layout_reresolve_percentage_box(grid_item, grid_item_percentage_base);
 
     // Update font context to use the grid item's own computed font
     // This ensures text nodes inside the item inherit the correct font-size
@@ -1239,7 +1014,7 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     // Update grid item content dimensions
     // Note: max_width and advance_y are relative to the content box
     // We need to add padding for the full content dimensions
-    grid_re_resolve_item_percentage_box(grid_item, grid_item_percentage_base);
+    layout_reresolve_percentage_box(grid_item, grid_item_percentage_base);
     grid_item->content_width = lycon->block.max_width;
     if (grid_item->display.inner != CSS_VALUE_FLEX) {
         if (grid_item->bound) {

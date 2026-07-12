@@ -413,6 +413,11 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
                                                 shadow_clip_depth, effect_depth);
             }
             break;
+        case PAINT_OP_COUNT:
+        default:
+            return paint_ir_validation_fail(result, i, "unknown paint op",
+                                            clip_depth, backdrop_depth,
+                                            shadow_clip_depth, effect_depth);
         }
     }
 
@@ -1169,6 +1174,11 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
                 g_glyph_run_raster_lowerer(&cmd->glyph_run, dl);
             }
             break;
+        case PAINT_OP_COUNT:
+        default:
+            log_error("[PAINT_IR_RASTER] unsupported paint op %d at command %d",
+                      (int)cmd->op, i);
+            break;
         }
     }
 }
@@ -1350,40 +1360,16 @@ static bool paint_svg_path_to_string(RdtPath* path, StrBuf* out) {
 }
 
 static const char* paint_op_name(PaintOp op) {
-    switch (op) {
-    case PAINT_FILL_RECT: return "PAINT_FILL_RECT";
-    case PAINT_FILL_ROUNDED_RECT: return "PAINT_FILL_ROUNDED_RECT";
-    case PAINT_FILL_PATH: return "PAINT_FILL_PATH";
-    case PAINT_STROKE_PATH: return "PAINT_STROKE_PATH";
-    case PAINT_FILL_LINEAR_GRADIENT: return "PAINT_FILL_LINEAR_GRADIENT";
-    case PAINT_FILL_RADIAL_GRADIENT: return "PAINT_FILL_RADIAL_GRADIENT";
-    case PAINT_DRAW_IMAGE: return "PAINT_DRAW_IMAGE";
-    case PAINT_DRAW_IMAGE_RESOURCE: return "PAINT_DRAW_IMAGE_RESOURCE";
-    case PAINT_DRAW_GLYPH: return "PAINT_DRAW_GLYPH";
-    case PAINT_DRAW_PICTURE: return "PAINT_DRAW_PICTURE";
-    case PAINT_VIDEO_PLACEHOLDER: return "PAINT_VIDEO_PLACEHOLDER";
-    case PAINT_WEBVIEW_LAYER_PLACEHOLDER: return "PAINT_WEBVIEW_LAYER_PLACEHOLDER";
-    case PAINT_PUSH_CLIP: return "PAINT_PUSH_CLIP";
-    case PAINT_POP_CLIP: return "PAINT_POP_CLIP";
-    case PAINT_PUSH_TRANSFORM: return "PAINT_PUSH_TRANSFORM";
-    case PAINT_POP_TRANSFORM: return "PAINT_POP_TRANSFORM";
-    case PAINT_SAVE_BACKDROP: return "PAINT_SAVE_BACKDROP";
-    case PAINT_COMPOSITE_OPACITY: return "PAINT_COMPOSITE_OPACITY";
-    case PAINT_APPLY_BLEND_MODE: return "PAINT_APPLY_BLEND_MODE";
-    case PAINT_APPLY_FILTER: return "PAINT_APPLY_FILTER";
-    case PAINT_BOX_BLUR_REGION: return "PAINT_BOX_BLUR_REGION";
-    case PAINT_BOX_BLUR_INSET: return "PAINT_BOX_BLUR_INSET";
-    case PAINT_SHADOW_CLIP_SAVE: return "PAINT_SHADOW_CLIP_SAVE";
-    case PAINT_SHADOW_CLIP_RESTORE: return "PAINT_SHADOW_CLIP_RESTORE";
-    case PAINT_OUTER_SHADOW: return "PAINT_OUTER_SHADOW";
-    case PAINT_FILL_SURFACE_RECT: return "PAINT_FILL_SURFACE_RECT";
-    case PAINT_BLIT_SURFACE_SCALED: return "PAINT_BLIT_SURFACE_SCALED";
-    case PAINT_GLYPH_RUN: return "PAINT_GLYPH_RUN";
-    case PAINT_BEGIN_EFFECT_GROUP: return "PAINT_BEGIN_EFFECT_GROUP";
-    case PAINT_END_EFFECT_GROUP: return "PAINT_END_EFFECT_GROUP";
-    case PAINT_SVG_SUBSCENE: return "PAINT_SVG_SUBSCENE";
-    }
-    return "PAINT_UNKNOWN";
+    static const char* names[] = {
+#define PAINT_OP_NAME_ENTRY(op) #op,
+        PAINT_OP_LIST(PAINT_OP_NAME_ENTRY)
+#undef PAINT_OP_NAME_ENTRY
+    };
+    static_assert((int)(sizeof(names) / sizeof(names[0])) == (int)PAINT_OP_COUNT,
+                  "PaintOp name table must match PAINT_OP_LIST");
+    int op_index = (int)op;
+    if (op_index < 0 || op_index >= (int)PAINT_OP_COUNT) return "PAINT_UNKNOWN";
+    return names[op_index];
 }
 
 static void paint_svg_note_unsupported(StrBuf* out, int indent_level, PaintOp op,

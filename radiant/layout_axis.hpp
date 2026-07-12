@@ -89,12 +89,19 @@ inline float layout_axis_margin_end(const BoundaryProp* bound, LayoutAxis axis) 
     return bound ? layout_axis_spacing_end(&bound->margin, axis) : 0.0f;
 }
 
-inline LayoutAxis flex_main_axis(FlexContainerLayout* flex) {
+inline LayoutAxis flex_main_axis_from_props(const FlexProp* flex) {
     if (!flex) return LAYOUT_AXIS_X;
-    return (flex->direction == CSS_VALUE_COLUMN ||
-            flex->direction == CSS_VALUE_COLUMN_REVERSE)
-        ? LAYOUT_AXIS_Y
-        : LAYOUT_AXIS_X;
+    bool column_direction = flex->direction == CSS_VALUE_COLUMN ||
+                            flex->direction == CSS_VALUE_COLUMN_REVERSE;
+    if (flex->writing_mode == WM_VERTICAL_RL ||
+        flex->writing_mode == WM_VERTICAL_LR) {
+        return column_direction ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
+    }
+    return column_direction ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
+}
+
+inline LayoutAxis flex_main_axis(FlexContainerLayout* flex) {
+    return flex_main_axis_from_props(flex);
 }
 
 inline LayoutAxis flex_cross_axis(FlexContainerLayout* flex) {

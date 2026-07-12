@@ -68,6 +68,7 @@ Item rb_new_object(void);               // create empty hash-map object
 // Collection operations
 // ============================================================================
 Item rb_array_new(void);
+bool rb_array_ensure_capacity(Array* arr, int64_t min_capacity);
 Item rb_array_push(Item array, Item value);
 Item rb_array_get(Item array, Item index);
 Item rb_array_set(Item array, Item index, Item value);

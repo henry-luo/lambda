@@ -3,7 +3,7 @@
 #include <string.h>
 #include "../../../lib/str.h"
 #include "../input-utils.hpp"
-#include <ctype.h>
+#include "../line_counter.hpp"
 #include <assert.h>
 
 // Helper function to parse CSS unit from string
@@ -251,7 +251,7 @@ static inline void css_consume_escape_seq(const char* input, size_t length, size
 static inline void css_consume_name(const char* input, size_t length, size_t* pos) {
     while (*pos < length) {
         unsigned char b = (unsigned char)input[*pos];
-        if (isalnum(b) || b == '-' || b == '_') {
+        if (str_char_is_alnum((char)b) || b == '-' || b == '_') {
             (*pos)++;
         } else if (css_starts_escape(input, length, *pos)) {
             css_consume_escape_seq(input, length, pos);
@@ -637,6 +637,26 @@ bool css_is_newline(int c) {
     return c == '\n' || c == '\r' || c == '\f';
 }
 
+static bool css_line_counter_is_newline(char c) {
+    return css_is_newline((unsigned char)c);
+}
+
+static void css_sync_line_counter(LineCounter* counter,
+                                  const char* input,
+                                  size_t* tracked_pos,
+                                  size_t pos) {
+    if (!counter || !input || !tracked_pos || pos <= *tracked_pos) return;
+    line_counter_advance_bytes(counter, input + *tracked_pos, pos - *tracked_pos,
+                               css_line_counter_is_newline, true);
+    *tracked_pos = pos;
+}
+
+static void css_stamp_token_location(CssToken* token, const LineCounter* counter) {
+    if (!token || !counter) return;
+    token->line = counter->line;
+    token->column = counter->column;
+}
+
 // Enhanced tokenizer implementation
 CSSTokenizer* css_tokenizer_create(Pool* pool) {
     if (!pool) return NULL;
@@ -910,10 +930,14 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
 
     size_t token_count = 0;
     size_t pos = 0;
+    size_t line_tracked_pos = 0;
+    LineCounter line_counter;
+    line_counter_init(&line_counter);
 
     while (pos < length && token_count < max_tokens - 1) {
         // Skip leading whitespace and track it
         size_t ws_start = pos;
+        css_sync_line_counter(&line_counter, input, &line_tracked_pos, ws_start);
         while (pos < length && css_is_whitespace(input[pos])) {
             pos++;
         }
@@ -925,18 +949,22 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
             token->start = input + ws_start;
             token->length = pos - ws_start;
             token->value = NULL;
+            css_stamp_token_location(token, &line_counter);
             css_token_set_value(token, tokenizer->pool);
             token_count++;
+            css_sync_line_counter(&line_counter, input, &line_tracked_pos, pos);
         }
 
         if (pos >= length) break;
 
+        css_sync_line_counter(&line_counter, input, &line_tracked_pos, pos);
         char ch = input[pos];
         CssToken* token = &token_array[token_count];
         token->start = input + pos;
         token->length = 1;
         token->value = NULL;
         token->value = NULL;
+        css_stamp_token_location(token, &line_counter);
 
         // Basic character classification
         switch (ch) {
@@ -1016,11 +1044,11 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                 bool is_id_type = false;
                 if (pos < length) {
                     unsigned char c = (unsigned char)input[pos];
-                    if (isalpha(c) || c == '_' || c >= 0x80) {
+                    if (str_char_is_alpha((char)c) || c == '_' || c >= 0x80) {
                         is_id_type = true;
                     } else if (c == '-' && pos + 1 < length) {
                         unsigned char c2 = (unsigned char)input[pos + 1];
-                        if (isalpha(c2) || c2 == '_' || c2 == '-' || c2 >= 0x80 ||
+                        if (str_char_is_alpha((char)c2) || c2 == '_' || c2 == '-' || c2 >= 0x80 ||
                             css_starts_escape(input, length, pos + 1)) {
                             is_id_type = true;
                         }
@@ -1257,15 +1285,18 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
         // Set token value and increment count
         css_token_set_value(token, tokenizer->pool);
         token_count++;
+        css_sync_line_counter(&line_counter, input, &line_tracked_pos, pos);
     }
 
     // Add EOF token
     if (token_count < max_tokens) {
+        css_sync_line_counter(&line_counter, input, &line_tracked_pos, length);
         CssToken* eof_token = &token_array[token_count];
         eof_token->type = CSS_TOKEN_EOF;
         eof_token->start = input + length;
         eof_token->length = 0;
         eof_token->value = "";  // Empty string instead of NULL
+        css_stamp_token_location(eof_token, &line_counter);
         token_count++;
     }
 

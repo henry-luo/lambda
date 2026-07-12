@@ -116,7 +116,7 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
         }
     }
     if (cap->blk) {
-        bool is_border_box = cap->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+        bool is_border_box = layout_uses_border_box(cap);
         if (is_border_box) {
             cap->height = adjust_min_max_height(cap, cap->height);
         } else {
@@ -142,11 +142,8 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
 
 float adjust_table_caption_width(ViewBlock* cap, float wrapper_content_width) {
     if (cap->blk && cap->blk->given_width > 0) {
-        cap->width = cap->blk->given_width;
-        if (cap->blk->box_sizing != CSS_VALUE_BORDER_BOX && cap->bound) {
-            BoxMetrics box = layout_box_metrics(cap);
-            cap->width += box.pad_border_h;
-        }
+        cap->width = layout_css_size_to_border_box(
+            cap->bound, layout_box_sizing(cap), cap->blk->given_width, true);
     } else {
         // caption is a block child of the table wrapper.
         float cap_margin_h = 0;
@@ -159,7 +156,7 @@ float adjust_table_caption_width(ViewBlock* cap, float wrapper_content_width) {
         cap->width = wrapper_content_width - cap_margin_h;
     }
     if (cap->blk) {
-        bool is_border_box = cap->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+        bool is_border_box = layout_uses_border_box(cap);
         if (is_border_box) {
             cap->width = adjust_min_max_width(cap, cap->width);
         } else {

@@ -163,9 +163,15 @@ awk -F'\t' -v out="$TMP" '
   $1 == "_ufn_op"    { print $2                  >> (out"/excl_operator.txt") }
 ' "$TMP/ast.tsv"
 
+# ast-grep versions can legally return no rows for a rule; keep downstream
+# join/sort stages deterministic by materializing every expected intermediate.
+for f in defs_full.tsv excl_virtual.txt excl_extern_c.txt excl_used.txt excl_operator.txt; do
+  [[ -e "$TMP/$f" ]] || : > "$TMP/$f"
+done
+
 # Dedup + sort each.
 for f in defs_full.tsv excl_virtual.txt excl_extern_c.txt excl_used.txt excl_operator.txt; do
-  [[ -e "$TMP/$f" ]] && sort -u "$TMP/$f" -o "$TMP/$f"
+  sort -u "$TMP/$f" -o "$TMP/$f"
 done
 
 # Hard-coded allowlist.

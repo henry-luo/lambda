@@ -1751,11 +1751,10 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
 Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found) {
     Item result = ItemNull;
     *is_found = false;
-    ShapeEntry *field = map_type->shape;
-    while (field) {
+    FOR_EACH_MAP_FIELD(map_type, field) {
         if (!field->name) {
             // spread/nested map — search recursively
-            Map* nested_map = *(Map**)((char*)map_data + field->byte_offset);
+            Map* nested_map = map_shape_field_to_map(map_data, field);
             if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
                 bool nested_found;
                 Item nested_result = _map_get((TypeMap*)nested_map->type, nested_map->data, key, &nested_found);
@@ -1774,7 +1773,6 @@ Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found
                 // don't return — later entries may override
             }
         }
-        field = field->next;
     }
     if (!*is_found) {
     }
@@ -2237,15 +2235,13 @@ SymbolKeyList* item_keys(Item data) {
         Map* map = data.map;
         TypeMap* map_type = (TypeMap*)map->type;
         SymbolKeyList* keys = symbol_key_list_new(8);
-        ShapeEntry* field = map_type->shape;
-        while (field) {
+        FOR_EACH_MAP_FIELD(map_type, field) {
             if (field->name) {
                 // Convert StrView to Symbol for the transpiled code
                 StrView* sv = field->name;
                 Symbol* sym = heap_create_symbol(sv->str, sv->length);
                 symbol_key_list_append(keys, sym);
             }
-            field = field->next;
         }
         return keys;
     }
@@ -2262,15 +2258,13 @@ SymbolKeyList* item_keys(Item data) {
         Element* elmt = data.element;
         TypeMap* elmt_type = (TypeMap*)elmt->type;
         SymbolKeyList* keys = symbol_key_list_new(8);
-        ShapeEntry* field = elmt_type->shape;
-        while (field) {
+        FOR_EACH_MAP_FIELD(elmt_type, field) {
             if (field->name) {
                 // Convert StrView to Symbol for the transpiled code
                 StrView* sv = field->name;
                 Symbol* sym = heap_create_symbol(sv->str, sv->length);
                 symbol_key_list_append(keys, sym);
             }
-            field = field->next;
         }
         return keys;
     }

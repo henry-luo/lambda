@@ -1090,6 +1090,7 @@ extern Item js_map_group_by(Item items, Item callback);
 
 // Function formal length (ES spec .length)
 extern void js_set_formal_length(Item fn_item, int length);
+extern void* js_function_get_ptr(Item fn_item);
 
 // v25: Reflect API wrappers (js_globals.cpp)
 extern Item js_reflect_own_keys(Item obj);
@@ -1677,6 +1678,8 @@ JitImport jit_runtime_imports[] = {
     {"js_call_function", FPTR(js_call_function)},
     {"js_apply_function", FPTR(js_apply_function)},
     {"js_apply_constructor", FPTR(js_apply_constructor)},
+    // Ruby block lowering imports the JS/Lambda function pointer bridge directly.
+    {"js_function_get_ptr", FPTR(js_function_get_ptr)},
     {"js_new_function_from_string", FPTR(js_new_function_from_string)},
     {"js_builtin_eval", FPTR(js_builtin_eval)},
     {"js_create_regex", FPTR(js_create_regex)},

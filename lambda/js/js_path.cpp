@@ -10,6 +10,7 @@
 #include "../../lib/log.h"
 #include "../../lib/file.h"
 #include "../../lib/mem.h"
+#include "../../lib/path_str.h"
 
 #include <cstring>
 #include <cstdio>
@@ -61,52 +62,7 @@ static const char* item_to_cstr(Item value, char* buf, int buf_size) {
 // Resolves '.' and '..' segments, collapses duplicate separators
 // =============================================================================
 static int normalize_path_buf(const char* path, char* result, int result_size) {
-    const char* segments[256];
-    int seg_count = 0;
-    bool is_absolute = (path[0] == '/');
-
-    int plen = (int)strlen(path);
-
-    // tokenize into a temp buffer (strtok modifies)
-    char temp[4096];
-    if (plen >= (int)sizeof(temp)) plen = (int)sizeof(temp) - 1;
-    memcpy(temp, path, plen);
-    temp[plen] = '\0';
-
-    char* tok = strtok(temp, "/");
-    while (tok && seg_count < 256) {
-        if (strcmp(tok, ".") == 0) {
-            // skip
-        } else if (strcmp(tok, "..") == 0) {
-            if (seg_count > 0 && strcmp(segments[seg_count - 1], "..") != 0) {
-                seg_count--;
-            } else if (!is_absolute) {
-                segments[seg_count++] = "..";
-            }
-        } else {
-            segments[seg_count++] = tok;
-        }
-        tok = strtok(NULL, "/");
-    }
-
-    // rebuild
-    int pos = 0;
-    if (is_absolute) {
-        result[pos++] = '/';
-    }
-    for (int i = 0; i < seg_count; i++) {
-        if (i > 0) result[pos++] = '/';
-        int slen = (int)strlen(segments[i]);
-        if (pos + slen >= result_size - 1) break;
-        memcpy(result + pos, segments[i], slen);
-        pos += slen;
-    }
-    if (pos == 0) {
-        result[0] = '.';
-        pos = 1;
-    }
-    result[pos] = '\0';
-    return pos;
+    return path_str_normalize_lexical_posix(path, result, result_size, true);
 }
 
 // =============================================================================
@@ -123,19 +79,11 @@ extern "C" Item js_path_basename(Item path_item, Item ext_item) {
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path || !*path) return make_string_item("");
 
+    int base_start = 0;
+    int base_len = 0;
+    path_str_posix_basename_span(path, &base_start, &base_len);
     int path_len = (int)strlen(path);
-
-    // strip trailing separators (POSIX: only '/')
-    int end = path_len - 1;
-    while (end >= 0 && path[end] == '/') end--;
-    if (end < 0) return make_string_item("/");
-
-    // find start of basename (after last separator)
-    int start = end;
-    while (start > 0 && path[start - 1] != '/') start--;
-
-    int base_len = end - start + 1;
-    const char* base = path + start;
+    const char* base = path + base_start;
 
     // if ext provided, strip it from the end
     if (get_type_id(ext_item) == LMD_TYPE_STRING) {
@@ -167,43 +115,11 @@ extern "C" Item js_path_dirname(Item path_item) {
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path || !*path) return make_string_item(".");
 
-    int len = (int)strlen(path);
-    bool has_root = (path[0] == '/');
-
-    // determine root length: '//' prefix is special (stays as '//')
-    int root_end = 0;
-    if (has_root) {
-        root_end = 1;
-        if (len > 1 && path[1] == '/' && (len == 2 || path[2] != '/')) {
-            root_end = 2; // '//' prefix
-        }
+    int dir_len = 0;
+    if (path_str_posix_dirname_span(path, &dir_len)) {
+        return make_string_item(path, dir_len);
     }
-
-    // strip trailing slashes
-    int end = len - 1;
-    while (end > root_end - 1 && path[end] == '/') end--;
-    if (end < root_end) {
-        // only root or empty
-        return make_string_item(path, root_end > 0 ? root_end : 1);
-    }
-
-    // find last slash before basename
-    int i = end;
-    while (i >= root_end && path[i] != '/') i--;
-
-    if (i < root_end) {
-        // no directory component
-        if (has_root) return make_string_item(path, root_end);
-        return make_string_item(".");
-    }
-
-    // strip trailing slashes from directory
-    while (i > root_end - 1 && path[i] == '/') i--;
-    if (i < root_end) {
-        return make_string_item(path, root_end);
-    }
-
-    return make_string_item(path, i + 1);
+    return make_string_item(".");
 }
 
 // path.extname(path)
@@ -214,48 +130,12 @@ extern "C" Item js_path_extname(Item path_item) {
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path || !*path) return make_string_item("");
 
-    int path_len = (int)strlen(path);
-
-    // strip trailing separators
-    int end = path_len - 1;
-    while (end >= 0 && path[end] == '/') end--;
-    if (end < 0) return make_string_item("");
-
-    // find start of basename (after last separator)
-    int start = end;
-    while (start > 0 && path[start - 1] != '/') start--;
-
-    int base_len = end - start + 1;
-    const char* base = path + start;
-
-    // Node.js extname: find last dot in basename for extension
-    // Special cases: "." -> "", ".." -> "", "..." -> ".", ".hidden" -> "",
-    // "..file" -> ".file", "file.txt" -> ".txt", "file." -> "."
-    
-    // Check if entire basename is dots
-    bool all_dots = true;
-    for (int i = 0; i < base_len; i++) {
-        if (base[i] != '.') { all_dots = false; break; }
+    int ext_start = 0;
+    int ext_len = 0;
+    if (!path_str_posix_extname_span(path, &ext_start, &ext_len)) {
+        return make_string_item("");
     }
-    if (all_dots) {
-        // "." -> "", ".." -> "", "..." -> ".", "...." -> "."
-        if (base_len <= 2) return make_string_item("");
-        return make_string_item(".", 1);
-    }
-    
-    // Find the LAST dot
-    int last_dot = -1;
-    for (int i = base_len - 1; i >= 0; i--) {
-        if (base[i] == '.') { last_dot = i; break; }
-    }
-    if (last_dot == -1) return make_string_item("");  // no dot at all
-    if (last_dot == base_len - 1 && last_dot == 0) return make_string_item("");  // just "."
-    
-    // Hidden file check: dot at position 0 with no other dots
-    // ".hidden" -> "" but ".foo.bar" -> ".bar", "..ext" -> ".ext"
-    if (last_dot == 0) return make_string_item("");  // single leading dot, no other dots
-    
-    return make_string_item(base + last_dot, base_len - last_dot);
+    return make_string_item(path + ext_start, ext_len);
 }
 
 // path.isAbsolute(path)
@@ -266,7 +146,7 @@ extern "C" Item js_path_isAbsolute(Item path_item) {
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path || path[0] == '\0') return (Item){.item = ITEM_FALSE};
 
-    return (Item){.item = (path[0] == '/') ? ITEM_TRUE : ITEM_FALSE};
+    return (Item){.item = path_str_posix_is_absolute(path) ? ITEM_TRUE : ITEM_FALSE};
 }
 
 // path.win32.isAbsolute(path)
@@ -275,20 +155,7 @@ static Item js_path_win32_isAbsolute(Item path_item) {
     if (!validate_path_string(path_item, "path")) return ItemNull;
     char path_buf[2048];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path || path[0] == '\0') return (Item){.item = ITEM_FALSE};
-
-    // UNC path: \\server or //server
-    if ((path[0] == '\\' || path[0] == '/') && (path[1] == '\\' || path[1] == '/'))
-        return (Item){.item = ITEM_TRUE};
-    // Root path: / or backslash
-    if (path[0] == '\\' || path[0] == '/') return (Item){.item = ITEM_TRUE};
-    // Drive letter + colon + separator: c:\ or c:/
-    // Note: c: alone (without trailing separator) is relative (current dir on drive)
-    if (((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z'))
-        && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) {
-        return (Item){.item = ITEM_TRUE};
-    }
-    return (Item){.item = ITEM_FALSE};
+    return (Item){.item = path_str_win32_is_absolute(path) ? ITEM_TRUE : ITEM_FALSE};
 }
 
 // path.join(...paths)
@@ -316,21 +183,11 @@ extern "C" Item js_path_join(Item args_item) {
         if (!seg || seg[0] == '\0') continue;
 
         if (result_len == 0) {
-            int seg_len = (int)strlen(seg);
-            if (seg_len >= (int)sizeof(result)) seg_len = (int)sizeof(result) - 1;
-            memcpy(result, seg, seg_len);
-            result_len = seg_len;
+            result_len = path_str_copy(result, sizeof(result), seg);
         } else {
-            if (result_len < (int)sizeof(result) - 1 && result[result_len - 1] != '/') {
-                result[result_len++] = '/';
-            }
-            int seg_len = (int)strlen(seg);
-            if (result_len + seg_len >= (int)sizeof(result)) {
-                seg_len = (int)sizeof(result) - 1 - result_len;
-            }
-            memcpy(result + result_len, seg, seg_len);
-            result_len += seg_len;
-            result[result_len] = '\0';
+            char joined[4096];
+            result_len = path_str_join_posix_into(joined, sizeof(joined), result, seg);
+            path_str_copy(result, sizeof(result), joined);
         }
     }
 
@@ -389,26 +246,16 @@ extern "C" Item js_path_resolve(Item args_item) {
 
         // if absolute, replace resolved
 #ifdef _WIN32
-        bool is_abs = (seg[0] == '/' || seg[0] == '\\' ||
-                       (seg[0] >= 'A' && seg[0] <= 'Z' && seg[1] == ':') ||
-                       (seg[0] >= 'a' && seg[0] <= 'z' && seg[1] == ':'));
+        bool is_abs = path_str_win32_is_absolute(seg);
 #else
-        bool is_abs = (seg[0] == '/');
+        bool is_abs = path_str_posix_is_absolute(seg);
 #endif
         if (is_abs) {
-            int slen = (int)strlen(seg);
-            if (slen >= (int)sizeof(resolved)) slen = (int)sizeof(resolved) - 1;
-            memcpy(resolved, seg, slen);
-            resolved[slen] = '\0';
+            path_str_copy(resolved, sizeof(resolved), seg);
         } else {
-            char* joined = file_path_join(resolved, seg);
-            if (joined) {
-                int jlen = (int)strlen(joined);
-                if (jlen >= (int)sizeof(resolved)) jlen = (int)sizeof(resolved) - 1;
-                memcpy(resolved, joined, jlen);
-                resolved[jlen] = '\0';
-                mem_free(joined);
-            }
+            char joined[4096];
+            path_str_join_posix_into(joined, sizeof(joined), resolved, seg);
+            path_str_copy(resolved, sizeof(resolved), joined);
         }
     }
 
@@ -456,63 +303,13 @@ extern "C" Item js_path_relative(Item from_item, Item to_item) {
     const char* from_abs = from_real ? from_real : from_path;
     const char* to_abs = to_real ? to_real : to_path;
 
-    // find common prefix
-    int common = 0;
-    int last_sep = 0;
-    int fl = (int)strlen(from_abs);
-    int tl = (int)strlen(to_abs);
-    int minl = fl < tl ? fl : tl;
-
-    for (int i = 0; i < minl; i++) {
-        if (from_abs[i] != to_abs[i]) break;
-        if (from_abs[i] == '/') last_sep = i;
-        common = i + 1;
-    }
-    // if one fully contains the other and next char is / or end
-    if (common == minl) {
-        if (fl == tl) {
-            // same path
-            if (from_real) mem_free(from_real);
-            if (to_real) mem_free(to_real);
-            return make_string_item("");
-        }
-        if (common < fl && from_abs[common] == '/') last_sep = common;
-        else if (common < tl && to_abs[common] == '/') last_sep = common;
-        else last_sep = common;
-    }
-
-    // count remaining segments in 'from' after common prefix
-    int up_count = 0;
-    for (int i = last_sep + 1; i < fl; i++) {
-        if (from_abs[i] == '/') up_count++;
-    }
-    if (last_sep + 1 < fl) up_count++; // trailing segment
-
-    // build result
     char result[4096];
-    int pos = 0;
-    for (int i = 0; i < up_count; i++) {
-        if (i > 0) result[pos++] = '/';
-        result[pos++] = '.';
-        result[pos++] = '.';
-    }
-
-    // append remaining portion of 'to' after common prefix
-    const char* to_rest = to_abs + last_sep;
-    if (to_rest[0] == '/') to_rest++;
-    int rest_len = (int)strlen(to_rest);
-    if (rest_len > 0) {
-        if (pos > 0) result[pos++] = '/';
-        if (pos + rest_len >= (int)sizeof(result) - 1) rest_len = (int)sizeof(result) - 1 - pos;
-        memcpy(result + pos, to_rest, rest_len);
-        pos += rest_len;
-    }
-    result[pos] = '\0';
+    int result_len = path_str_relative_posix(from_abs, to_abs, result, sizeof(result));
 
     if (from_real) mem_free(from_real);
     if (to_real) mem_free(to_real);
 
-    return make_string_item(result, pos);
+    return make_string_item(result, result_len);
 }
 
 // path.parse(path)
@@ -545,59 +342,35 @@ extern "C" Item js_path_parse(Item path_item) {
     }
     const char* stripped = stripped_buf;
 
-    // root
-    const char* root = "";
-    if (stripped[0] == '/') root = "/";
+    const char* root = path_str_posix_is_absolute(stripped) ? "/" : "";
 
-    // dir — use original path for dirname (preserves internal slashes)
-    char* dir = file_path_dirname(stripped);
-    // Node.js: when dirname returns "." it means no directory component
-    // Only keep "." if the original path had a "/" (explicit dir reference)
-    if (dir && strcmp(dir, ".") == 0 && !strchr(stripped, '/')) {
-        mem_free(dir);
-        dir = NULL;
+    int dir_len = 0;
+    bool has_dir = path_str_posix_dirname_span(stripped, &dir_len);
+
+    int base_start = 0;
+    int base_len = 0;
+    bool has_base = path_str_posix_basename_span(stripped, &base_start, &base_len);
+    if (has_base && base_len == 1 && stripped[base_start] == '/') {
+        base_len = 0;
     }
 
-    // base (basename) — use stripped path
-    const char* base = file_path_basename(stripped);
-    // Node.js: basename of root-only paths is ""
-    if (base && strcmp(base, "/") == 0) base = "";
-
-    // ext
-    const char* ext = file_path_ext(stripped);
-    // Node.js extension rules: ext is the portion from the LAST dot in basename,
-    // but only if there's a non-dot character before that last dot.
-    // So '.', '..', '.bashrc' all have ext="" while 'file.txt' has ext=".txt"
-    if (ext && base) {
-        int blen = (int)strlen(base);
-        // Find the last dot in base
-        int last_dot = -1;
-        for (int i = blen - 1; i >= 0; i--) {
-            if (base[i] == '.') { last_dot = i; break; }
-        }
-        // ext is "" if: no dot, dot at position 0, or all chars before last_dot are dots
-        bool has_non_dot_before = false;
-        for (int i = 0; i < last_dot; i++) {
-            if (base[i] != '.') { has_non_dot_before = true; break; }
-        }
-        if (last_dot <= 0 || !has_non_dot_before) {
-            ext = "";
-        }
+    int ext_start = 0;
+    int ext_len = 0;
+    if (!path_str_posix_extname_span(stripped, &ext_start, &ext_len) ||
+        ext_start < base_start ||
+        ext_start > base_start + base_len) {
+        ext_len = 0;
     }
 
-    // name (base without ext)
-    int base_len = base ? (int)strlen(base) : 0;
-    int ext_len = ext ? (int)strlen(ext) : 0;
     int name_len = base_len - ext_len;
     if (name_len < 0) name_len = 0;
+    const char* base = stripped + base_start;
 
     js_property_set(obj, make_string_item("root"), make_string_item(root));
-    js_property_set(obj, make_string_item("dir"), dir ? make_string_item(dir) : make_string_item(""));
-    js_property_set(obj, make_string_item("base"), base ? make_string_item(base) : make_string_item(""));
-    js_property_set(obj, make_string_item("ext"), ext ? make_string_item(ext) : make_string_item(""));
-    js_property_set(obj, make_string_item("name"), base ? make_string_item(base, name_len) : make_string_item(""));
-
-    if (dir) mem_free(dir);
+    js_property_set(obj, make_string_item("dir"), has_dir ? make_string_item(stripped, dir_len) : make_string_item(""));
+    js_property_set(obj, make_string_item("base"), make_string_item(base, base_len));
+    js_property_set(obj, make_string_item("ext"), ext_len > 0 ? make_string_item(stripped + ext_start, ext_len) : make_string_item(""));
+    js_property_set(obj, make_string_item("name"), make_string_item(base, name_len));
 
     return obj;
 }
@@ -683,14 +456,6 @@ extern "C" Item js_path_toNamespacedPath(Item path_item) {
 // Win32 path helpers
 // =============================================================================
 
-// Check if char is a Windows path separator
-static inline bool is_win32_sep(char c) { return c == '\\' || c == '/'; }
-
-// Check if char is a drive letter
-static inline bool is_drive_letter(char c) {
-    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
-}
-
 // win32.normalize(path)
 static Item js_path_win32_normalize(Item path_item) {
     if (!validate_path_string(path_item, "path")) return ItemNull;
@@ -698,74 +463,9 @@ static Item js_path_win32_normalize(Item path_item) {
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path || path[0] == '\0') return make_string_item(".");
 
-    int plen = (int)strlen(path);
     char result[4096];
-    const char* segments[256];
-    int seg_count = 0;
-    bool is_absolute = false;
-    int prefix_len = 0;
-    char prefix[16] = {0};
-
-    // Check for drive letter or UNC
-    if (plen >= 2 && is_drive_letter(path[0]) && path[1] == ':') {
-        prefix[0] = path[0]; prefix[1] = ':';
-        prefix_len = 2;
-        if (plen >= 3 && is_win32_sep(path[2])) {
-            prefix[2] = '\\'; prefix_len = 3;
-            is_absolute = true;
-        }
-    } else if (plen >= 2 && is_win32_sep(path[0]) && is_win32_sep(path[1])) {
-        // UNC path
-        prefix[0] = '\\'; prefix[1] = '\\'; prefix_len = 2;
-        is_absolute = true;
-    } else if (is_win32_sep(path[0])) {
-        prefix[0] = '\\'; prefix_len = 1;
-        is_absolute = true;
-    }
-
-    // Tokenize remaining path
-    char temp[4096];
-    int remaining_start = prefix_len;
-    int rlen = plen - remaining_start;
-    if (rlen >= (int)sizeof(temp)) rlen = (int)sizeof(temp) - 1;
-    memcpy(temp, path + remaining_start, rlen);
-    temp[rlen] = '\0';
-
-    // Split on both / and backslash
-    char* p = temp;
-    while (*p) {
-        while (*p && is_win32_sep(*p)) p++;
-        if (!*p) break;
-        char* seg_start = p;
-        while (*p && !is_win32_sep(*p)) p++;
-        if (*p) { *p = '\0'; p++; }
-
-        if (strcmp(seg_start, ".") == 0) continue;
-        if (strcmp(seg_start, "..") == 0) {
-            if (seg_count > 0 && strcmp(segments[seg_count - 1], "..") != 0) {
-                seg_count--;
-            } else if (!is_absolute) {
-                segments[seg_count++] = "..";
-            }
-        } else {
-            if (seg_count < 256) segments[seg_count++] = seg_start;
-        }
-    }
-
-    // Build result with backslash separators
-    int pos = 0;
-    memcpy(result, prefix, prefix_len);
-    pos = prefix_len;
-    for (int i = 0; i < seg_count; i++) {
-        if (i > 0) result[pos++] = '\\';
-        int slen = (int)strlen(segments[i]);
-        if (pos + slen >= (int)sizeof(result) - 1) break;
-        memcpy(result + pos, segments[i], slen);
-        pos += slen;
-    }
-    if (pos == 0) { result[0] = '.'; pos = 1; }
-    result[pos] = '\0';
-    return make_string_item(result, pos);
+    int result_len = path_str_normalize_lexical_win32(path, result, sizeof(result), true);
+    return make_string_item(result, result_len);
 }
 
 // win32.basename(path, ext)
@@ -778,29 +478,12 @@ static Item js_path_win32_basename(Item path_item, Item ext_item) {
     if (!path || !*path) return make_string_item("");
 
     int path_len = (int)strlen(path);
-
-    // determine root end (drive letter prefix)
-    int root_end = 0;
-    if (path_len >= 2 && is_drive_letter(path[0]) && path[1] == ':') {
-        root_end = 2;
-        if (path_len > 2 && is_win32_sep(path[2])) root_end = 3;
-    } else if (path_len >= 1 && is_win32_sep(path[0])) {
-        root_end = 1;
-        // UNC: \\server\share
-        if (path_len >= 2 && is_win32_sep(path[1])) root_end = 2;
+    int base_start = 0;
+    int base_len = 0;
+    if (!path_str_win32_basename_span(path, &base_start, &base_len)) {
+        return make_string_item("");
     }
-
-    int end = path_len - 1;
-    while (end >= root_end && is_win32_sep(path[end])) end--;
-    if (end < root_end) return make_string_item("");
-
-    int start = end;
-    while (start > root_end && !is_win32_sep(path[start - 1])) start--;
-    // ensure start is not before root_end
-    if (start < root_end) start = root_end;
-
-    int base_len = end - start + 1;
-    const char* base = path + start;
+    const char* base = path + base_start;
 
     if (get_type_id(ext_item) == LMD_TYPE_STRING) {
         char ext_buf[256];
@@ -829,39 +512,11 @@ static Item js_path_win32_dirname(Item path_item) {
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path || !*path) return make_string_item(".");
 
-    int plen = (int)strlen(path);
-    int root_end = -1;
-
-    // Check for drive letter prefix
-    if (plen >= 2 && is_drive_letter(path[0]) && path[1] == ':') {
-        root_end = (plen > 2 && is_win32_sep(path[2])) ? 3 : 2;
-    } else if (is_win32_sep(path[0])) {
-        root_end = 1;
+    int dir_len = 0;
+    if (path_str_win32_dirname_span(path, &dir_len)) {
+        return make_string_item(path, dir_len);
     }
-
-    // Find end (skip trailing separators)
-    int end = plen - 1;
-    while (end > (root_end >= 0 ? root_end - 1 : -1) && is_win32_sep(path[end])) end--;
-    if (end < 0 || (root_end >= 0 && end < root_end)) {
-        // All root or separators
-        if (root_end > 0) return make_string_item(path, root_end);
-        return make_string_item(".");
-    }
-
-    // Find last separator before end
-    int i = end;
-    while (i > (root_end >= 0 ? root_end - 1 : -1) && !is_win32_sep(path[i])) i--;
-
-    if (i < 0 || (root_end >= 0 && i < root_end)) {
-        if (root_end > 0) return make_string_item(path, root_end);
-        return make_string_item(".");
-    }
-
-    // Strip trailing separators from dirname
-    while (i > (root_end >= 0 ? root_end - 1 : 0) && is_win32_sep(path[i])) i--;
-    if (root_end >= 0 && i < root_end) return make_string_item(path, root_end);
-
-    return make_string_item(path, i + 1);
+    return make_string_item(".");
 }
 
 // win32.extname — same as POSIX but handles backslash separators
@@ -871,30 +526,12 @@ static Item js_path_win32_extname(Item path_item) {
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path || !*path) return make_string_item("");
 
-    int path_len = (int)strlen(path);
-    int end = path_len - 1;
-    while (end >= 0 && is_win32_sep(path[end])) end--;
-    if (end < 0) return make_string_item("");
-
-    int start = end;
-    while (start > 0 && !is_win32_sep(path[start - 1]) && path[start - 1] != ':') start--;
-
-    int base_len = end - start + 1;
-    const char* base = path + start;
-
-    int last_dot = -1;
-    for (int i = base_len - 1; i >= 0; i--) {
-        if (base[i] == '.') { last_dot = i; break; }
+    int ext_start = 0;
+    int ext_len = 0;
+    if (!path_str_win32_extname_span(path, &ext_start, &ext_len)) {
+        return make_string_item("");
     }
-    if (last_dot <= 0) return make_string_item("");
-
-    bool all_dots = true;
-    for (int i = 0; i < last_dot; i++) {
-        if (base[i] != '.') { all_dots = false; break; }
-    }
-    if (all_dots) return make_string_item("");
-
-    return make_string_item(base + last_dot, base_len - last_dot);
+    return make_string_item(path + ext_start, ext_len);
 }
 
 // win32.resolve(...paths) — resolve to absolute path using backslashes

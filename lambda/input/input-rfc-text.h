@@ -13,6 +13,7 @@
 
 #include "input-utils.h"
 #include "input-context.hpp"
+#include "../../lib/str.h"
 #include "../../lib/stringbuf.h"
 
 /**
@@ -111,6 +112,17 @@ static inline size_t parse_rfc_header_value(StringBuf* sb, const char** pos) {
  * @param upper_case_keys  true → normalise param names to UPPER; false → lower
  */
 namespace lambda {
+static inline char rfc_ascii_case_char(char c, bool uppercase) {
+    char out = c;
+    if (uppercase) {
+        str_to_upper(&out, &c, 1);
+    }
+    else {
+        str_to_lower(&out, &c, 1);
+    }
+    return out;
+}
+
 static inline void parse_rfc_property_params(StringBuf* sb, const char** pos,
                                               InputContext& ctx, Map* params_map,
                                               bool upper_case_keys) {
@@ -119,8 +131,7 @@ static inline void parse_rfc_property_params(StringBuf* sb, const char** pos,
         (*pos)++;   // skip ';'
         stringbuf_reset(sb);
         while (**pos && **pos != '=' && **pos != ':' && **pos != '\n' && **pos != '\r') {
-            char c = upper_case_keys ? (char)toupper((unsigned char)**pos)
-                                     : (char)tolower((unsigned char)**pos);
+            char c = rfc_ascii_case_char(**pos, upper_case_keys);
             stringbuf_append_char(sb, c);
             (*pos)++;
         }

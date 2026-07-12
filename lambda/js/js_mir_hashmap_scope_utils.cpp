@@ -86,14 +86,12 @@ JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode
 // ============================================================================
 
 MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type) {
-    char name[64];
-    snprintf(name, sizeof(name), "%s_%d", prefix, mt->reg_counter++);
-    MIR_type_t rtype = (type == MIR_T_P) ? MIR_T_I64 : type;
-    return MIR_new_func_reg(mt->ctx, mt->current_func, rtype, name);
+    return mir_new_numbered_reg(mt->ctx, mt->current_func, &mt->reg_counter,
+                                prefix, type);
 }
 
 MIR_label_t jm_new_label(JsMirTranspiler* mt) {
-    return MIR_new_label(mt->ctx);
+    return mir_new_emit_label(mt->ctx);
 }
 
 // Tune6 §3.3: per-opcode emission histogram (env-gated, zero cost when off) to
@@ -130,7 +128,7 @@ void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn) {
         unsigned c = (unsigned)insn->code;
         if (c < JM_OPCODE_HIST_SIZE) g_jm_opcode_hist[c]++;
     }
-    MIR_append_insn(mt->ctx, mt->current_func_item, insn);
+    mir_append_emit_insn(mt->ctx, mt->current_func_item, insn);
 }
 
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
@@ -138,7 +136,7 @@ void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
         log_error("js-mir: attempt to emit NULL label — skipping");
         return;
     }
-    MIR_append_insn(mt->ctx, mt->current_func_item, label);
+    mir_append_emit_label(mt->ctx, mt->current_func_item, label);
 }
 
 static int jm_find_current_scope_env_slot(JsMirTranspiler* mt, const char* name) {

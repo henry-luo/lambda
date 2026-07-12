@@ -4,7 +4,6 @@
 #include "../../../lib/color.h"
 #include <stdbool.h>
 #include <stdio.h>
-#include <ctype.h>
 #include <assert.h>
 #include "../../../lib/str.h"
 

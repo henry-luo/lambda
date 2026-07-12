@@ -270,14 +270,15 @@ static Item py_class_new_core(Item name, Item bases, Item methods) {
     if (get_type_id(methods) == LMD_TYPE_MAP) {
         Map* mm = it2map(methods);
         if (mm && mm->type) {
-            ShapeEntry* field = ((TypeMap*)mm->type)->shape;
-            while (field) {
+            TypeMap* mt = (TypeMap*)mm->type;
+            FOR_EACH_MAP_FIELD(mt, field) {
+                // method maps may carry spread slots; class attribute names must be named fields.
+                if (!field->name) continue;
                 Item val = _map_read_field(field, mm->data);
                 py_setattr(cls,
                     (Item){.item = s2it((String*)name_pool_create_len(
                         py_input->name_pool, field->name->str, field->name->length))},
                     val);
-                field = field->next;
             }
         }
     }

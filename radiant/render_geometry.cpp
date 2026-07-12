@@ -42,8 +42,8 @@ Bound render_geometry_intersect_bound_rect(Bound bound, Rect rect) {
     return out;
 }
 
-RenderPixelBounds render_geometry_clip_to_pixel_bounds(Bound clip,
-                                                       const ImageSurface* surface) {
+IRect render_geometry_clip_to_pixel_bounds(Bound clip,
+                                           const ImageSurface* surface) {
     int left = max(0, render_geometry_pixel_coord(clip.left));
     int top = max(0, render_geometry_pixel_coord(clip.top));
     int right = render_geometry_pixel_coord(clip.right);
@@ -53,14 +53,14 @@ RenderPixelBounds render_geometry_clip_to_pixel_bounds(Bound clip,
         bottom = min(surface->height, bottom);
     }
 
-    RenderPixelBounds bounds = {left, top, right - left, bottom - top};
-    if (bounds.width < 0) bounds.width = 0;
-    if (bounds.height < 0) bounds.height = 0;
+    IRect bounds = {left, top, right - left, bottom - top};
+    if (bounds.w < 0) bounds.w = 0;
+    if (bounds.h < 0) bounds.h = 0;
     return bounds;
 }
 
-bool render_geometry_pixel_bounds_empty(RenderPixelBounds bounds) {
-    return bounds.width <= 0 || bounds.height <= 0;
+bool render_geometry_pixel_bounds_empty(IRect bounds) {
+    return bounds.w <= 0 || bounds.h <= 0;
 }
 
 Rect render_geometry_block_border_rect(const BlockBlot* parent_block,

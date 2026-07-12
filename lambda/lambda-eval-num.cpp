@@ -28,9 +28,8 @@ Item push_c(int64_t cval) {
 
 // decimal_is_zero is now in lambda-decimal.cpp
 
-// helper macro for vector type detection
-#define IS_VECTOR_TYPE(t) ((t) == LMD_TYPE_ARRAY_NUM || (t) == LMD_TYPE_ARRAY || \
-                           (t) == LMD_TYPE_ARRAY || (t) == LMD_TYPE_RANGE)
+// runtime lists and arrays share LMD_TYPE_ARRAY, so one array predicate covers both.
+#define IS_VECTOR_TYPE(t) ((t) == LMD_TYPE_ARRAY_NUM || (t) == LMD_TYPE_ARRAY || (t) == LMD_TYPE_RANGE)
 
 #define IS_SCALAR_NUMERIC(t) (is_integer_type_id((TypeId)(t)) || is_float_type_id((TypeId)(t)) || \
                               (t) == LMD_TYPE_DECIMAL || \
@@ -1088,8 +1087,7 @@ Item fn_abs(Item item) {
         double val = item.get_double();
         return push_d(fabs(val));
     }
-    else if (type == LMD_TYPE_ARRAY_NUM || type == LMD_TYPE_ARRAY ||
-             type == LMD_TYPE_ARRAY || type == LMD_TYPE_RANGE) {
+    else if (IS_VECTOR_TYPE(type)) {
         int64_t len = vector_length(item);
         if (len < 0) return ItemError;
         if (len == 0) {
@@ -1137,8 +1135,7 @@ Item fn_round(Item item) {
         double val = item.get_double();
         return push_d(round(val));
     }
-    else if (type == LMD_TYPE_ARRAY_NUM || type == LMD_TYPE_ARRAY ||
-             type == LMD_TYPE_ARRAY || type == LMD_TYPE_RANGE) {
+    else if (IS_VECTOR_TYPE(type)) {
         int64_t len = vector_length(item);
         if (len < 0) return ItemError;
         if (len == 0) {
@@ -1183,8 +1180,7 @@ Item fn_floor(Item item) {
         double val = item.get_double();
         return push_d(floor(val));
     }
-    else if (type == LMD_TYPE_ARRAY_NUM || type == LMD_TYPE_ARRAY ||
-             type == LMD_TYPE_ARRAY || type == LMD_TYPE_RANGE) {
+    else if (IS_VECTOR_TYPE(type)) {
         int64_t len = vector_length(item);
         if (len < 0) return ItemError;
         if (len == 0) {
@@ -1229,8 +1225,7 @@ Item fn_ceil(Item item) {
         double val = item.get_double();
         return push_d(ceil(val));
     }
-    else if (type == LMD_TYPE_ARRAY_NUM || type == LMD_TYPE_ARRAY ||
-             type == LMD_TYPE_ARRAY || type == LMD_TYPE_RANGE) {
+    else if (IS_VECTOR_TYPE(type)) {
         int64_t len = vector_length(item);
         if (len < 0) return ItemError;
         if (len == 0) {
@@ -1873,7 +1868,7 @@ Item fn_pos(Item item) {
     else if (get_type_id(item) == LMD_TYPE_NUM_SIZED || get_type_id(item) == LMD_TYPE_UINT64) {
         return item;  // Already numeric
     }
-    else if (get_type_id(item) == LMD_TYPE_STRING || get_type_id(item) == LMD_TYPE_SYMBOL) {
+    else if (is_text_type_id(get_type_id(item))) {
         // Cast string/symbol to number
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
@@ -1984,7 +1979,7 @@ Item fn_neg(Item item) {
         }
         return { .array_num = result };
     }
-    else if (get_type_id(item) == LMD_TYPE_STRING || get_type_id(item) == LMD_TYPE_SYMBOL) {
+    else if (is_text_type_id(get_type_id(item))) {
         // Cast string/symbol to number, then negate
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
@@ -2067,7 +2062,7 @@ Item fn_int(Item item) {
         }
         return {.item = i2it((int32_t)result)};
     }
-    else if (get_type_id(item) == LMD_TYPE_STRING || get_type_id(item) == LMD_TYPE_SYMBOL) {
+    else if (is_text_type_id(get_type_id(item))) {
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
         if (!chars || len == 0) {
@@ -2126,7 +2121,7 @@ int64_t fn_int64(Item item) {
         // Convert decimal to int64 using centralized function
         return decimal_to_int64(item);
     }
-    else if (get_type_id(item) == LMD_TYPE_STRING || get_type_id(item) == LMD_TYPE_SYMBOL) {
+    else if (is_text_type_id(get_type_id(item))) {
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
         if (!chars || len == 0) {
@@ -2176,7 +2171,7 @@ Item fn_decimal(Item item) {
     else if (get_type_id(item) == LMD_TYPE_UINT64) {
         return decimal_from_int64((int64_t)item.get_uint64(), context);
     }
-    else if (get_type_id(item) == LMD_TYPE_STRING || get_type_id(item) == LMD_TYPE_SYMBOL) {
+    else if (is_text_type_id(get_type_id(item))) {
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
         if (!chars || len == 0) {
@@ -2470,7 +2465,7 @@ Item fn_float(Item item) {
         double dval = decimal_to_double(item);
         return push_d(dval);
     }
-    else if (get_type_id(item) == LMD_TYPE_STRING || get_type_id(item) == LMD_TYPE_SYMBOL) {
+    else if (is_text_type_id(get_type_id(item))) {
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
         if (!chars || len == 0) {

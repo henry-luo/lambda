@@ -35,11 +35,23 @@ float layout_content_height_from_border_box(ViewBlock* block, float border_heigh
 float layout_border_width_from_content_box(ViewBlock* block, float content_width);
 float layout_border_height_from_content_box(ViewBlock* block, float content_height);
 float layout_padding_border_axis(ViewBlock* block, bool horizontal);
+float layout_boundary_content_size_from_border_box(const BoundaryProp* bound, float border_size, bool horizontal);
+float layout_boundary_border_size_from_content_box(const BoundaryProp* bound, float content_size, bool horizontal);
 float layout_content_size_from_border_box(ViewBlock* block, float border_size, bool horizontal);
 float layout_border_size_from_content_box(ViewBlock* block, float content_size, bool horizontal);
+float layout_css_size_to_content_box(const BoundaryProp* bound, CssEnum box_sizing, float css_size, bool horizontal);
+float layout_css_size_to_border_box(const BoundaryProp* bound, CssEnum box_sizing, float css_size, bool horizontal);
 float layout_floor_border_box_width(ViewBlock* block, float border_width);
 float layout_floor_border_box_height(ViewBlock* block, float border_height);
 float layout_floor_border_box_axis(ViewBlock* block, float border_size, bool horizontal);
+
+static inline CssEnum layout_box_sizing(ViewBlock* block) {
+    return (block && block->blk) ? block->blk->box_sizing : CSS_VALUE_CONTENT_BOX;
+}
+
+static inline bool layout_uses_border_box(ViewBlock* block) {
+    return layout_box_sizing(block) == CSS_VALUE_BORDER_BOX;
+}
 
 float layout_apply_min_max_width(ViewBlock* block, float width, bool width_is_border_box);
 float layout_apply_min_max_height(ViewBlock* block, float height, bool height_is_border_box);
@@ -47,6 +59,70 @@ float layout_apply_min_max_axis(ViewBlock* block, float size, bool horizontal, b
 float layout_clamp_min_max_width(ViewBlock* block, float width);
 float layout_clamp_min_max_height(ViewBlock* block, float height);
 float layout_clamp_min_max_axis(ViewBlock* block, float size, bool horizontal);
+
+static inline float layout_clamp_positive_min_max_width(ViewBlock* block, float width) {
+    if (!block || !block->blk) return width;
+    float constrained_width = width;
+    if (block->blk->given_max_width > 0.0f && constrained_width > block->blk->given_max_width) {
+        constrained_width = block->blk->given_max_width;
+    }
+    if (block->blk->given_min_width > 0.0f && constrained_width < block->blk->given_min_width) {
+        constrained_width = block->blk->given_min_width;
+    }
+    return constrained_width;
+}
+
+static inline float layout_clamp_positive_min_max_height(ViewBlock* block, float height) {
+    if (!block || !block->blk) return height;
+    float constrained_height = height;
+    if (block->blk->given_max_height > 0.0f && constrained_height > block->blk->given_max_height) {
+        constrained_height = block->blk->given_max_height;
+    }
+    if (block->blk->given_min_height > 0.0f && constrained_height < block->blk->given_min_height) {
+        constrained_height = block->blk->given_min_height;
+    }
+    return constrained_height;
+}
+
+static inline float layout_clamp_positive_min_max_axis(ViewBlock* block, float size, bool horizontal) {
+    return horizontal
+        ? layout_clamp_positive_min_max_width(block, size)
+        : layout_clamp_positive_min_max_height(block, size);
+}
+
+static inline float layout_floor_min_width(ViewBlock* block, float width) {
+    if (!block || !block->blk || block->blk->given_min_width < 0.0f) return width;
+    return width < block->blk->given_min_width ? block->blk->given_min_width : width;
+}
+
+static inline float layout_floor_min_height(ViewBlock* block, float height) {
+    if (!block || !block->blk || block->blk->given_min_height < 0.0f) return height;
+    return height < block->blk->given_min_height ? block->blk->given_min_height : height;
+}
+
+static inline float layout_floor_min_axis(ViewBlock* block, float size, bool horizontal) {
+    return horizontal ? layout_floor_min_width(block, size) : layout_floor_min_height(block, size);
+}
+
+static inline void layout_apply_positive_min_max_contribution(ViewBlock* block, bool horizontal,
+                                                              float* min_size, float* max_size) {
+    if (!block || !block->blk) return;
+    if (horizontal) {
+        if (min_size && block->blk->given_min_width > 0.0f && *min_size < block->blk->given_min_width) {
+            *min_size = block->blk->given_min_width;
+        }
+        if (max_size && block->blk->given_max_width > 0.0f && *max_size > block->blk->given_max_width) {
+            *max_size = block->blk->given_max_width;
+        }
+    } else {
+        if (min_size && block->blk->given_min_height > 0.0f && *min_size < block->blk->given_min_height) {
+            *min_size = block->blk->given_min_height;
+        }
+        if (max_size && block->blk->given_max_height > 0.0f && *max_size > block->blk->given_max_height) {
+            *max_size = block->blk->given_max_height;
+        }
+    }
+}
 
 static inline const CssValue* css_box_shorthand_side_value(const CssValue* value, int side) {
     if (!value) return nullptr;

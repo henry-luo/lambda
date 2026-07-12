@@ -3,7 +3,6 @@
 #include "../../../lib/arraylist.h"
 #include "../../../lib/str.h"
 #include <string.h>
-#include <ctype.h>
 #include <stdlib.h>
 
 // ============================================================================
