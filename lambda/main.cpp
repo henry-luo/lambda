@@ -4033,25 +4033,11 @@ int main(int argc, char *argv[]) {
             // to corrupted path traversal (infinite loop / SIGSEGV).
             path_reset();
 
-            // Clean up accumulated scripts to prevent state corruption across runs.
-            // Keep the parser (expensive to recreate) but free all script data.
-            if (runtime.scripts) {
-                for (int i = 0; i < runtime.scripts->length; i++) {
-                    Script *script = (Script*)runtime.scripts->data[i];
-                    if (script->reference) mem_free((void*)script->reference);
-                    if (script->source) mem_free((void*)script->source);
-                    if (script->directory) mem_free((void*)script->directory);
-                    if (script->syntax_tree) ts_tree_delete(script->syntax_tree);
-                    if (script->pool) pool_destroy(script->pool);
-                    if (script->type_list) arraylist_free(script->type_list);
-                    if (script->jit_context) jit_cleanup(script->jit_context);
-                    script->decimal_ctx = NULL;
-                    mem_free(script);
-                }
-                runtime.scripts->length = 0;
-            }
+            // Clean up per-run scripts; retained modules will survive once Phase 2 enables caching.
+            runtime_teardown_batch_scripts(&runtime);
         }
 
+        runtime_log_mir_cache_summary(&runtime);
         runtime_cleanup(&runtime);
         return lambda_main_finish(0);
     }

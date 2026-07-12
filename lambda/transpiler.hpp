@@ -52,6 +52,7 @@ typedef struct Runner {
 
 struct Runtime {
     ArrayList* scripts;  // list of (loaded) scripts
+    struct hashmap* script_index;  // canonical script path -> Script*
     TSParser* parser;
     char* current_dir;
     int max_errors;      // error threshold for type checking (default: 10, 0 = unlimited)
@@ -79,6 +80,12 @@ struct Runtime {
     // allocate fat DomElement/DomText on result_arena instead of the GC heap.
     bool ui_mode;
     Arena* result_arena;
+
+    // level 1 MIR cache counters. Phase 1 records index hits/misses while module
+    // retention stays disabled until cone-based initialization lands.
+    int mir_cache_hits;
+    int mir_cache_misses;
+    int mir_cache_compiles;
 };
 
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)
@@ -165,6 +172,10 @@ Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transp
 void runtime_init(Runtime* runtime);
 void runtime_cleanup(Runtime* runtime);
 void runtime_reset_heap(Runtime* runtime);  // reset heap between independent evaluations
+void runtime_register_script(Runtime* runtime, Script* script);
+void runtime_free_script(Runtime* runtime, Script* script, bool remove_index);
+void runtime_teardown_batch_scripts(Runtime* runtime);
+void runtime_log_mir_cache_summary(Runtime* runtime);
 void path_reset(void);  // reset path scheme roots (must call after runtime_reset_heap in batch)
 
 // JavaScript transpiler integration

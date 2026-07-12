@@ -1,9 +1,11 @@
 # Level 1 MIR Cache — Implementation Plan (In-Process Persistent Module Cache)
 
-**Status:** ready to implement
+**Status:** Phase 1 foundation implemented; module retention still disabled pending Phase 2
 **Date:** 2026-07-12
 **Design:** realizes **MC1** of `vibe/Lambda_Design_MIR_Cache.md` §3. Read that first for the why; this doc is the how.
 **Scope:** Lambda modules under MIR Direct, in `test-batch` (and any long-lived Runtime). Main scripts are never cached. JS / C2MIR / cross-language modules excluded from v1 (§8).
+
+**Implementation checkpoint (2026-07-12):** Phase 1 registry mechanics are landed: `Script` cache metadata, `Runtime::script_index`, path-index lookup in `load_script`/`precompile_imports`, null-safe batch teardown with stable slots, synthetic module registration through the same registry helper, and cache hit/miss summary logging. `cache_retain` is deliberately hard-disabled until Phase 2 replaces whole-registry module init with cone init and zero-then-root BSS handling.
 
 ---
 
@@ -84,6 +86,9 @@ Registry slots are **never compacted**: retiring a script NULLs its `runtime->sc
 3. **Exit gate:** baseline green (2942/2942), numbers captured in this doc's §9.
 
 ### Phase 1 — Persistent registry mechanics
+
+**Checkpoint 2026-07-12:** fields, path index, null-safe teardown, and summary instrumentation are implemented with `cache_retain = false`; the Phase 2 execution rewrite is the next enabling step before retained modules can go live.
+
 1. **`Script` + `Runtime` fields** (§3). Init `script_index` in `runtime_init` (`runner.cpp:1511`), free in `runtime_cleanup`.
 2. **`load_script`**: replace the linear dedup scan (`runner.cpp:1147-1167`) with `script_index` lookup (keep the mutex; keep `is_loading` circular check). Capture `src_mtime`/`src_size` after `read_text_file`. Set `cache_retain` per D6 at the end of a successful import compile.
 3. **Null-safe registry loops.** Audit every `runtime->scripts` iteration for NULL slots: `load_script` (now hashmap, moot), `precompile_imports` cached-check (`runner.cpp:1026-1032` — also switch to `script_index`), `run_script_mir` (rewritten in Phase 2), `runtime_cleanup` script-free loop (`runner.cpp:1622+`), the two `main.cpp` free loops, and any others found by `grep -n "scripts->data" lambda/`.
@@ -186,6 +191,7 @@ Registry slots are **never compacted**: retiring a script NULLs its `runtime->sc
 
 ## 9. Measurements (fill during implementation)
 - Baseline batch wall-time (Phase 0): _TBD_
+- Phase 1 regression gate (retention disabled): `make test-lambda-baseline` passed 3299/3299 on 2026-07-12 (Input 2105/2105, Lambda Runtime 1194/1194).
 - Post-Phase-2 wall-time: _TBD_
 - Hit rate over `test-lambda-baseline` corpus: _TBD_
 - Retained modules / RSS delta at batch end: _TBD_
