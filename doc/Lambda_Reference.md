@@ -169,8 +169,14 @@ el[element]                      // direct child elements
 el[string]                       // attr values + text children
 html[body]?<p>                   // child then recursive
 
-// For expressions
+// For expressions — clauses: let / where / group by / order by / limit / offset
 (for (x in [1,2,3] where x > 1 order by x desc) x * 2)
+
+// group by — binds each group to an element (keys = attributes, members = children)
+(for (x in sales group by x.region into g) {region: g.region, n: len(g)})
+
+// join on — relate comma sources (equi-join; `c?` = left join, c = null on no match)
+(for (o in orders, c in customers on o.cust_id == c.id) {id: o.id, name: c.name})
 
 // If expressions
 if (x > 0) "positive" else "negative"
@@ -384,10 +390,16 @@ let total = data.sales |> ~.amount |> sum;
 // Filter high-value sales
 let high_value = data.sales where ~.amount > 1000;
 
+// Summarize by region — each group `g` is a <group> element
+// (grouping key becomes an attribute, members become children)
+let by_region = for (s in data.sales group by s.region into g)
+    {region: g.region, total: sum(g |> ~.amount), count: len(g)};
+
 // Generate report
 let report = {
     total_sales: total,
     high_value_count: len(high_value),
+    by_region: by_region,
     average: total / len(data.sales),
     timestamp: datetime()
 };
