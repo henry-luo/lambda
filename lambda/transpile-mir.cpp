@@ -918,20 +918,37 @@ static MIR_reg_t emit_call_4(MirTranspiler* mt, const char* fn_name,
     return res;
 }
 
-static MIR_reg_t emit_call_6(MirTranspiler* mt, const char* fn_name,
+static MIR_reg_t emit_call_5(MirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
     MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
-    MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5,
-    MIR_type_t a6t, MIR_op_t a6) {
-    MIR_var_t args[6] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0},
-        {a4t, "d", 0}, {a5t, "e", 0}, {a6t, "f", 0}};
-    MirImportEntry* ie = ensure_import(mt, fn_name, ret_type, 6, args, 1);
+    MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5) {
+    MIR_var_t args[5] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0},
+        {a4t, "d", 0}, {a5t, "e", 0}};
+    MirImportEntry* ie = ensure_import(mt, fn_name, ret_type, 5, args, 1);
     MIR_reg_t res = new_reg(mt, fn_name, ret_type);
-    emit_insn(mt, MIR_new_call_insn(mt->ctx, 9,
+    emit_insn(mt, MIR_new_call_insn(mt->ctx, 8,
         MIR_new_ref_op(mt->ctx, ie->proto),
         MIR_new_ref_op(mt->ctx, ie->import),
         MIR_new_reg_op(mt->ctx, res),
-        a1, a2, a3, a4, a5, a6));
+        a1, a2, a3, a4, a5));
+    return res;
+}
+
+static MIR_reg_t emit_call_8(MirTranspiler* mt, const char* fn_name,
+    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
+    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
+    MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5,
+    MIR_type_t a6t, MIR_op_t a6, MIR_type_t a7t, MIR_op_t a7,
+    MIR_type_t a8t, MIR_op_t a8) {
+    MIR_var_t args[8] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0},
+        {a5t, "e", 0}, {a6t, "f", 0}, {a7t, "g", 0}, {a8t, "h", 0}};
+    MirImportEntry* ie = ensure_import(mt, fn_name, ret_type, 8, args, 1);
+    MIR_reg_t res = new_reg(mt, fn_name, ret_type);
+    emit_insn(mt, MIR_new_call_insn(mt->ctx, 11,
+        MIR_new_ref_op(mt->ctx, ie->proto),
+        MIR_new_ref_op(mt->ctx, ie->import),
+        MIR_new_reg_op(mt->ctx, res),
+        a1, a2, a3, a4, a5, a6, a7, a8));
     return res;
 }
 
@@ -3691,15 +3708,8 @@ static bool mir_validate_join_sources(AstLoopNode* first) {
         return false;
     }
     for (AstLoopNode* cur = first; cur; cur = (AstLoopNode*)cur->next) {
-        if (cur->index_name || cur->key_only) {
-            log_error("mir: join on currently supports value bindings only");
-            return false;
-        }
-        if (cur != first && !cur->on) {
-            log_error("mir: mixed join/cross-product sources are not implemented");
-            return false;
-        }
-        if (cur != first && cur->join_key_count <= 0) {
+        // Sources without `on` stay cross-product stages; sources with `on` hash-join.
+        if (cur != first && cur->on && cur->join_key_count <= 0) {
             log_error("mir: join source has no valid equality keys");
             return false;
         }
@@ -3707,11 +3717,24 @@ static bool mir_validate_join_sources(AstLoopNode* first) {
     return true;
 }
 
+// Index/key bindings surface as int (LOOP_KEY_INT) or an opaque symbol/position item otherwise.
+static Type* mir_join_index_type(AstLoopNode* loop) {
+    return (loop->key_filter == LOOP_KEY_INT) ? &TYPE_INT : &TYPE_ANY;
+}
+
+// Emit the index/key binding name as an item register (or a null item when absent).
+static MIR_reg_t mir_join_idx_name_item(MirTranspiler* mt, AstLoopNode* loop);
+
 static MIR_reg_t mir_join_name_item(MirTranspiler* mt, String* name) {
     MIR_reg_t name_ptr = emit_load_string_literal(mt, name->chars);
     MIR_reg_t str_ptr = emit_call_1(mt, "heap_create_name", MIR_T_P,
         MIR_T_P, MIR_new_reg_op(mt->ctx, name_ptr));
     return emit_box_string(mt, str_ptr);
+}
+
+static MIR_reg_t mir_join_idx_name_item(MirTranspiler* mt, AstLoopNode* loop) {
+    if (loop->index_name) return mir_join_name_item(mt, loop->index_name);
+    return emit_null_item_reg(mt);
 }
 
 static void mir_join_bind_item_var(MirTranspiler* mt, String* name, Type* item_type, MIR_reg_t item_reg) {
@@ -3742,6 +3765,13 @@ static void mir_join_bind_tuple_vars(MirTranspiler* mt, AstLoopNode* first, AstL
             MIR_T_I64, MIR_new_reg_op(mt->ctx, tuple_item),
             MIR_T_P, MIR_new_reg_op(mt->ctx, key_ptr));
         mir_join_bind_item_var(mt, cur->name, cur->type, attr);
+        if (cur->index_name) {
+            MIR_reg_t ikey_ptr = emit_load_string_literal(mt, cur->index_name->chars);
+            MIR_reg_t iattr = emit_call_2(mt, "item_attr", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, tuple_item),
+                MIR_T_P, MIR_new_reg_op(mt->ctx, ikey_ptr));
+            mir_join_bind_item_var(mt, cur->index_name, mir_join_index_type(cur), iattr);
+        }
     }
 }
 
@@ -3767,7 +3797,7 @@ static MIR_reg_t mir_join_key_item(MirTranspiler* mt, AstLoopNode* loop, bool us
 }
 
 static void mir_join_collect_source(MirTranspiler* mt, AstLoopNode* loop, MIR_reg_t rows,
-        MIR_reg_t row_keys, bool collect_keys) {
+        MIR_reg_t row_keys, bool collect_keys, MIR_reg_t idx_vals) {
     int key_filter = (int)loop->key_filter;
     MIR_reg_t collection = transpile_expr(mt, loop->as);
     TypeId coll_tid = get_effective_type(mt, loop->as);
@@ -3791,12 +3821,25 @@ static void mir_join_collect_source(MirTranspiler* mt, AstLoopNode* loop, MIR_re
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
         MIR_new_reg_op(mt->ctx, cmp)));
 
-    MIR_reg_t row = emit_call_4(mt, "iter_val_at", MIR_T_I64,
+    // key-only sources (`k at map`) bind the key as the value; others bind the value.
+    MIR_reg_t row = emit_call_4(mt, loop->key_only ? "iter_key_at" : "iter_val_at", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
         MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
         MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
     mir_join_bind_item_var(mt, loop->name, loop->type, row);
+    if (loop->index_name) {
+        MIR_reg_t idx_item = emit_call_4(mt, "iter_key_at", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
+            MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
+        mir_join_bind_item_var(mt, loop->index_name, mir_join_index_type(loop), idx_item);
+        if (idx_vals) {
+            emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, idx_vals),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_item));
+        }
+    }
     emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, rows),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, row));
     if (collect_keys) {
@@ -3882,15 +3925,35 @@ static MIR_reg_t transpile_for_join(MirTranspiler* mt, AstForNode* for_node, Ast
     MIR_reg_t keys_arr = has_order ? emit_call_0(mt, "array_plain", MIR_T_P) : 0;
 
     MIR_reg_t seed_rows = emit_call_0(mt, "array_plain", MIR_T_P);
-    mir_join_collect_source(mt, first, seed_rows, 0, false);
-    MIR_reg_t tuples = emit_call_2(mt, "fn_join_seed_tuples", MIR_T_P,
+    MIR_reg_t seed_idx = first->index_name ? emit_call_0(mt, "array_plain", MIR_T_P) : 0;
+    mir_join_collect_source(mt, first, seed_rows, 0, false, seed_idx);
+    MIR_reg_t seed_idx_item = seed_idx ? emit_box_container(mt, seed_idx) : emit_null_item_reg(mt);
+    MIR_reg_t tuples = emit_call_4(mt, "fn_join_seed_tuples", MIR_T_P,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, seed_rows)),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, mir_join_name_item(mt, first->name)));
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, mir_join_name_item(mt, first->name)),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, mir_join_idx_name_item(mt, first)),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, seed_idx_item));
 
     for (AstLoopNode* cur = (AstLoopNode*)first->next; cur; cur = (AstLoopNode*)cur->next) {
         MIR_reg_t rows = emit_call_0(mt, "array_plain", MIR_T_P);
+        MIR_reg_t cur_idx = cur->index_name ? emit_call_0(mt, "array_plain", MIR_T_P) : 0;
+
+        if (!cur->on) {
+            // cross-product stage: expand every prior tuple by every row of this source.
+            mir_join_collect_source(mt, cur, rows, 0, false, cur_idx);
+            MIR_reg_t cur_idx_item = cur_idx ? emit_box_container(mt, cur_idx) : emit_null_item_reg(mt);
+            tuples = emit_call_5(mt, "fn_cross_join_tuples", MIR_T_P,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, tuples)),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, rows)),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, mir_join_name_item(mt, cur->name)),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, mir_join_idx_name_item(mt, cur)),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_idx_item));
+            continue;
+        }
+
+        // hash-join stage.
         MIR_reg_t row_keys = emit_call_0(mt, "array_plain", MIR_T_P);
-        mir_join_collect_source(mt, cur, rows, row_keys, true);
+        mir_join_collect_source(mt, cur, rows, row_keys, true, cur_idx);
 
         MIR_reg_t prior_keys = emit_call_0(mt, "array_plain", MIR_T_P);
         MIR_reg_t tuple_stream_item = emit_box_container(mt, tuples);
@@ -3919,13 +3982,16 @@ static MIR_reg_t transpile_for_join(MirTranspiler* mt, AstForNode* for_node, Ast
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_prior)));
         emit_label(mt, l_prior_end);
 
-        tuples = emit_call_6(mt, "fn_hash_join_tuples", MIR_T_P,
+        MIR_reg_t cur_idx_item = cur_idx ? emit_box_container(mt, cur_idx) : emit_null_item_reg(mt);
+        tuples = emit_call_8(mt, "fn_hash_join_tuples", MIR_T_P,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, tuples)),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, prior_keys)),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, rows)),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, row_keys)),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, mir_join_name_item(mt, cur->name)),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, cur->optional ? 1 : 0));
+            MIR_T_I64, MIR_new_int_op(mt->ctx, cur->optional ? 1 : 0),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, mir_join_idx_name_item(mt, cur)),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_idx_item));
     }
 
     MIR_reg_t final_stream_item = emit_box_container(mt, tuples);

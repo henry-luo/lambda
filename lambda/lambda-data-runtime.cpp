@@ -1447,6 +1447,7 @@ Array* fn_group_by_keys_items(Item rows_item, Item keys_item, Item aliases_item)
 typedef struct JoinHashEntry {
     Item key;
     Array* rows;
+    Array* idxs;  // parallel to rows: index/key items for the matched rows (ItemNull when none)
 } JoinHashEntry;
 
 static uint64_t join_hash_entry(const void* entry, uint64_t seed0, uint64_t seed1) {
@@ -1473,6 +1474,12 @@ static String* join_binding_name(Item name_item) {
     return heap_create_name("");
 }
 
+// Optional binding name: ItemNull means "no index/key binding for this source".
+static String* join_optional_name(Item name_item) {
+    if (get_type_id(name_item) == LMD_TYPE_NULL) return NULL;
+    return join_binding_name(name_item);
+}
+
 static Element* join_tuple_new() {
     if (!_lambda_rt || !_lambda_rt->pool) return NULL;
     Element* tuple = elmt_pooled(_lambda_rt->pool);
@@ -1484,43 +1491,79 @@ static Element* join_tuple_new() {
     return tuple;
 }
 
-static Element* join_tuple_copy_with(Item prior_tuple, String* name, Item value) {
+// Copy prior tuple's bindings into a fresh tuple, then add the new source's value binding and,
+// when present, its index/key binding. prior_tuple may be ItemNull to seed a fresh tuple.
+static Element* join_tuple_extend(Item prior_tuple, String* name, Item value,
+        String* idx_name, Item idx_value) {
     Element* out = join_tuple_new();
-    if (!out || !name) return out;
+    if (!out) return out;
 
-    SymbolKeyList* keys = item_keys(prior_tuple);
-    int64_t len = symbol_key_list_len(keys);
-    for (int64_t i = 0; i < len; i++) {
-        Symbol* sym = symbol_key_list_at(keys, i);
-        if (!sym) continue;
-        Item attr = item_attr(prior_tuple, sym->chars);
-        // Join tuple maps are freshly materialized so later phases can bind names by normal member lookup.
-        elmt_put(out, heap_create_name(sym->chars, sym->len), attr, _lambda_rt->pool);
+    if (get_type_id(prior_tuple) != LMD_TYPE_NULL) {
+        SymbolKeyList* keys = item_keys(prior_tuple);
+        int64_t len = symbol_key_list_len(keys);
+        for (int64_t i = 0; i < len; i++) {
+            Symbol* sym = symbol_key_list_at(keys, i);
+            if (!sym) continue;
+            Item attr = item_attr(prior_tuple, sym->chars);
+            // Join tuple maps are freshly materialized so later phases can bind names by normal member lookup.
+            elmt_put(out, heap_create_name(sym->chars, sym->len), attr, _lambda_rt->pool);
+        }
+        if (keys) symbol_key_list_free(keys);
     }
-    if (keys) symbol_key_list_free(keys);
-    elmt_put(out, name, value, _lambda_rt->pool);
+    if (name) elmt_put(out, name, value, _lambda_rt->pool);
+    // Index/key bindings (e.g. the `i` in `for (i, o in ...)`) travel in the tuple alongside values,
+    // so joined/cross-product rows keep their position/key binding available in the body.
+    if (idx_name) elmt_put(out, idx_name, idx_value, _lambda_rt->pool);
     return out;
 }
 
-Array* fn_join_seed_tuples(Item rows_item, Item name_item) {
+Array* fn_join_seed_tuples(Item rows_item, Item name_item, Item idx_name_item, Item idx_vals_item) {
     Array* out = array_plain();
     if (get_type_id(rows_item) != LMD_TYPE_ARRAY || !rows_item.array || !_lambda_rt || !_lambda_rt->pool) {
         log_error("join_seed_tuples: invalid rows/runtime");
         return out;
     }
     String* name = join_binding_name(name_item);
+    String* idx_name = join_optional_name(idx_name_item);
+    Array* idx_vals = (get_type_id(idx_vals_item) == LMD_TYPE_ARRAY) ? idx_vals_item.array : NULL;
     Array* rows = rows_item.array;
     for (int64_t i = 0; i < rows->length; i++) {
-        Element* tuple = join_tuple_new();
+        Item idx_val = (idx_name && idx_vals && i < idx_vals->length) ? idx_vals->items[i] : ItemNull;
+        Element* tuple = join_tuple_extend(ItemNull, name, rows->items[i], idx_name, idx_val);
         if (!tuple) return out;
-        elmt_put(tuple, name, rows->items[i], _lambda_rt->pool);
         array_push(out, (Item){.element = tuple});
     }
     return out;
 }
 
+// Cross-product expansion: for each prior tuple, emit one tuple per row (prior order, then row
+// order — deterministic). Used for comma sources without an `on` in a joined comprehension.
+Array* fn_cross_join_tuples(Item prior_tuples_item, Item rows_item, Item name_item,
+        Item idx_name_item, Item idx_vals_item) {
+    Array* out = array_plain();
+    if (get_type_id(prior_tuples_item) != LMD_TYPE_ARRAY || get_type_id(rows_item) != LMD_TYPE_ARRAY ||
+        !prior_tuples_item.array || !rows_item.array || !_lambda_rt || !_lambda_rt->pool) {
+        log_error("cross_join_tuples: invalid tuple/rows");
+        return out;
+    }
+    Array* prior_tuples = prior_tuples_item.array;
+    Array* rows = rows_item.array;
+    String* name = join_binding_name(name_item);
+    String* idx_name = join_optional_name(idx_name_item);
+    Array* idx_vals = (get_type_id(idx_vals_item) == LMD_TYPE_ARRAY) ? idx_vals_item.array : NULL;
+    for (int64_t i = 0; i < prior_tuples->length; i++) {
+        Item prior_tuple = prior_tuples->items[i];
+        for (int64_t r = 0; r < rows->length; r++) {
+            Item idx_val = (idx_name && idx_vals && r < idx_vals->length) ? idx_vals->items[r] : ItemNull;
+            Element* tuple = join_tuple_extend(prior_tuple, name, rows->items[r], idx_name, idx_val);
+            if (tuple) array_push(out, (Item){.element = tuple});
+        }
+    }
+    return out;
+}
+
 Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item rows_item,
-        Item row_keys_item, Item name_item, int64_t optional) {
+        Item row_keys_item, Item name_item, int64_t optional, Item idx_name_item, Item idx_vals_item) {
     Array* out = array_plain();
     if (get_type_id(prior_tuples_item) != LMD_TYPE_ARRAY || get_type_id(prior_keys_item) != LMD_TYPE_ARRAY ||
         get_type_id(rows_item) != LMD_TYPE_ARRAY || get_type_id(row_keys_item) != LMD_TYPE_ARRAY ||
@@ -1535,6 +1578,8 @@ Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item ro
     Array* rows = rows_item.array;
     Array* row_keys = row_keys_item.array;
     String* name = join_binding_name(name_item);
+    String* idx_name = join_optional_name(idx_name_item);
+    Array* idx_vals = (get_type_id(idx_vals_item) == LMD_TYPE_ARRAY) ? idx_vals_item.array : NULL;
     HashMap* table = hashmap_new(sizeof(JoinHashEntry), rows ? (size_t)rows->length : 8, 0, 0,
         join_hash_entry, join_compare_entry, NULL, NULL);
     if (!table || !name) return out;
@@ -1543,14 +1588,18 @@ Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item ro
     for (int64_t i = 0; i < row_count; i++) {
         Item key = row_keys->items[i];
         if (!join_key_is_matchable(key)) continue;
-        JoinHashEntry probe = { .key = key, .rows = NULL };
+        JoinHashEntry probe = { .key = key, .rows = NULL, .idxs = NULL };
         const JoinHashEntry* existing = (const JoinHashEntry*)hashmap_get(table, &probe);
         if (!existing) {
-            JoinHashEntry entry = { .key = key, .rows = array_plain() };
+            JoinHashEntry entry = { .key = key, .rows = array_plain(), .idxs = array_plain() };
             hashmap_set(table, &entry);
             existing = (const JoinHashEntry*)hashmap_get(table, &probe);
         }
-        if (existing && existing->rows) array_push(existing->rows, rows->items[i]);
+        if (existing && existing->rows) {
+            array_push(existing->rows, rows->items[i]);
+            Item idx_val = (idx_name && idx_vals && i < idx_vals->length) ? idx_vals->items[i] : ItemNull;
+            if (existing->idxs) array_push(existing->idxs, idx_val);
+        }
     }
 
     int64_t tuple_count = prior_tuples->length < prior_keys->length ? prior_tuples->length : prior_keys->length;
@@ -1559,18 +1608,20 @@ Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item ro
         Item key = prior_keys->items[i];
         bool matched = false;
         if (join_key_is_matchable(key)) {
-            JoinHashEntry probe = { .key = key, .rows = NULL };
+            JoinHashEntry probe = { .key = key, .rows = NULL, .idxs = NULL };
             const JoinHashEntry* entry = (const JoinHashEntry*)hashmap_get(table, &probe);
             if (entry && entry->rows) {
                 for (int64_t r = 0; r < entry->rows->length; r++) {
-                    Element* tuple = join_tuple_copy_with(prior_tuple, name, entry->rows->items[r]);
+                    Item idx_val = (entry->idxs && r < entry->idxs->length) ? entry->idxs->items[r] : ItemNull;
+                    Element* tuple = join_tuple_extend(prior_tuple, name, entry->rows->items[r], idx_name, idx_val);
                     if (tuple) array_push(out, (Item){.element = tuple});
                 }
                 matched = entry->rows->length > 0;
             }
         }
         if (!matched && optional) {
-            Element* tuple = join_tuple_copy_with(prior_tuple, name, ItemNull);
+            // Left-join null padding: the new source's value AND its index/key bind to null.
+            Element* tuple = join_tuple_extend(prior_tuple, name, ItemNull, idx_name, ItemNull);
             if (tuple) array_push(out, (Item){.element = tuple});
         }
     }

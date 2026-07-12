@@ -2420,6 +2420,11 @@ static bool for_has_join_clause(AstForNode* for_node) {
     return false;
 }
 
+// Index/key bindings surface as int (LOOP_KEY_INT) or an opaque symbol/position item otherwise.
+static Type* join_index_type(AstLoopNode* loop) {
+    return (loop->key_filter == LOOP_KEY_INT) ? &TYPE_INT : &TYPE_ANY;
+}
+
 static bool validate_join_sources(Transpiler* tp, AstLoopNode* first) {
     if (!first || !first->next) {
         log_error("Error: join on requires at least two sources");
@@ -2430,17 +2435,8 @@ static bool validate_join_sources(Transpiler* tp, AstLoopNode* first) {
         return false;
     }
     for (AstLoopNode* cur = first; cur; cur = (AstLoopNode*)cur->next) {
-        if (cur->index_name || cur->key_only) {
-            log_error("Error: join on currently supports value bindings only; remove index/key-only binding '%.*s'",
-                (int)cur->name->len, cur->name->chars);
-            return false;
-        }
-        if (cur != first && !cur->on) {
-            log_error("Error: mixed join/cross-product sources are not implemented; add 'on' to source '%.*s'",
-                (int)cur->name->len, cur->name->chars);
-            return false;
-        }
-        if (cur != first && cur->join_key_count <= 0) {
+        // Sources without `on` stay cross-product (nested-loop) stages; sources with `on` hash-join.
+        if (cur != first && cur->on && cur->join_key_count <= 0) {
             log_error("Error: join source '%.*s' has no valid equality keys", (int)cur->name->len, cur->name->chars);
             return false;
         }
@@ -2448,10 +2444,18 @@ static bool validate_join_sources(Transpiler* tp, AstLoopNode* first) {
     return true;
 }
 
+// Emit the index/key binding name as an item (or ITEM_NULL when the source has no index binding).
+static void transpile_join_idx_name_item(Transpiler* tp, AstLoopNode* loop);
+
 static void transpile_join_name_item(Transpiler* tp, String* name) {
     strbuf_append_str(tp->code_buf, "(Item){.item=s2it(heap_create_name(\"");
     strbuf_append_str_n(tp->code_buf, name->chars, name->len);
     strbuf_append_str(tp->code_buf, "\"))}");
+}
+
+static void transpile_join_idx_name_item(Transpiler* tp, AstLoopNode* loop) {
+    if (loop->index_name) transpile_join_name_item(tp, loop->index_name);
+    else strbuf_append_str(tp->code_buf, "ITEM_NULL");
 }
 
 static void transpile_join_bind_item_var(Transpiler* tp, String* name, Type* item_type, const char* item_expr) {
@@ -2481,6 +2485,15 @@ static void transpile_join_bind_tuple_vars(Transpiler* tp, AstLoopNode* first, A
         strbuf_append_str(tp->code_buf, "\"); ");
         transpile_join_bind_item_var(tp, cur->name, cur->type, "join_attr");
         strbuf_append_str(tp->code_buf, "  }\n");
+        if (cur->index_name) {
+            strbuf_append_str(tp->code_buf, "  { Item join_iattr=item_attr(");
+            strbuf_append_str(tp->code_buf, tuple_expr);
+            strbuf_append_str(tp->code_buf, ",\"");
+            strbuf_append_str_n(tp->code_buf, cur->index_name->chars, cur->index_name->len);
+            strbuf_append_str(tp->code_buf, "\"); ");
+            transpile_join_bind_item_var(tp, cur->index_name, join_index_type(cur), "join_iattr");
+            strbuf_append_str(tp->code_buf, "  }\n");
+        }
     }
 }
 
@@ -2504,21 +2517,32 @@ static void transpile_join_key_item(Transpiler* tp, AstLoopNode* loop, bool use_
 }
 
 static void transpile_join_collect_source(Transpiler* tp, AstLoopNode* loop, const char* rows_name,
-        const char* keys_name, bool collect_keys) {
+        const char* keys_name, bool collect_keys, const char* idx_vals_name) {
     char filter_str[4];
     snprintf(filter_str, sizeof(filter_str), "%d", (int)loop->key_filter);
     strbuf_append_format(tp->code_buf, " Array* %s=array_plain();\n", rows_name);
     if (collect_keys) strbuf_append_format(tp->code_buf, " Array* %s=array_plain();\n", keys_name);
+    if (idx_vals_name) strbuf_append_format(tp->code_buf, " Array* %s=array_plain();\n", idx_vals_name);
     strbuf_append_str(tp->code_buf, " { Item join_src=");
     transpile_box_item(tp, loop->as);
     strbuf_append_str(tp->code_buf, ";\n  SymbolKeyList* join_iter_keys=item_keys(join_src);\n");
     strbuf_append_str(tp->code_buf, "  int64_t join_iter_n=iter_len(join_src, join_iter_keys, ");
     strbuf_append_str(tp->code_buf, filter_str);
     strbuf_append_str(tp->code_buf, ");\n  for (int64_t join_i=0; join_i<join_iter_n; join_i++) {\n");
-    strbuf_append_str(tp->code_buf, "   Item join_row=iter_val_at(join_src, join_iter_keys, join_i, ");
+    // key-only sources (`k at map`) bind the key as the value; others bind the value.
+    strbuf_append_str(tp->code_buf, loop->key_only ?
+        "   Item join_row=iter_key_at(join_src, join_iter_keys, join_i, " :
+        "   Item join_row=iter_val_at(join_src, join_iter_keys, join_i, ");
     strbuf_append_str(tp->code_buf, filter_str);
     strbuf_append_str(tp->code_buf, ");\n   ");
     transpile_join_bind_item_var(tp, loop->name, loop->type, "join_row");
+    if (loop->index_name) {
+        strbuf_append_str(tp->code_buf, "   Item join_idx=iter_key_at(join_src, join_iter_keys, join_i, ");
+        strbuf_append_str(tp->code_buf, filter_str);
+        strbuf_append_str(tp->code_buf, ");\n   ");
+        transpile_join_bind_item_var(tp, loop->index_name, join_index_type(loop), "join_idx");
+        if (idx_vals_name) strbuf_append_format(tp->code_buf, "   array_push(%s, join_idx);\n", idx_vals_name);
+    }
     strbuf_append_format(tp->code_buf, "   array_push(%s, join_row);\n", rows_name);
     if (collect_keys) {
         strbuf_append_format(tp->code_buf, "   array_push(%s,", keys_name);
@@ -2533,44 +2557,56 @@ static void transpile_join_for_body(Transpiler* tp, AstForNode* for_node, AstLoo
     static int join_counter = 0;
     int join_id = ++join_counter;
 
-    transpile_join_collect_source(tp, first, "join_seed_rows", "join_unused_keys", false);
+    const char* seed_idx = first->index_name ? "join_seed_idx" : NULL;
+    transpile_join_collect_source(tp, first, "join_seed_rows", "join_unused_keys", false, seed_idx);
     strbuf_append_format(tp->code_buf, " Array* join_tuples_%d=fn_join_seed_tuples((Item)join_seed_rows,", join_id);
     transpile_join_name_item(tp, first->name);
+    strbuf_append_char(tp->code_buf, ',');
+    transpile_join_idx_name_item(tp, first);
+    strbuf_append_char(tp->code_buf, ',');
+    if (seed_idx) strbuf_append_format(tp->code_buf, "(Item)%s", seed_idx); else strbuf_append_str(tp->code_buf, "ITEM_NULL");
     strbuf_append_str(tp->code_buf, ");\n");
 
     int source_index = 1;
     for (AstLoopNode* cur = (AstLoopNode*)first->next; cur; cur = (AstLoopNode*)cur->next, source_index++) {
-        strbuf_append_format(tp->code_buf, " Array* join_rows_%d_%d=array_plain();\n Array* join_row_keys_%d_%d=array_plain();\n",
-            join_id, source_index, join_id, source_index);
-        strbuf_append_str(tp->code_buf, " { Item join_src=");
-        transpile_box_item(tp, cur->as);
-        strbuf_append_str(tp->code_buf, ";\n  SymbolKeyList* join_iter_keys=item_keys(join_src);\n");
-        char filter_str[4];
-        snprintf(filter_str, sizeof(filter_str), "%d", (int)cur->key_filter);
-        strbuf_append_str(tp->code_buf, "  int64_t join_iter_n=iter_len(join_src, join_iter_keys, ");
-        strbuf_append_str(tp->code_buf, filter_str);
-        strbuf_append_str(tp->code_buf, ");\n  for (int64_t join_i=0; join_i<join_iter_n; join_i++) {\n");
-        strbuf_append_str(tp->code_buf, "   Item join_row=iter_val_at(join_src, join_iter_keys, join_i, ");
-        strbuf_append_str(tp->code_buf, filter_str);
-        strbuf_append_str(tp->code_buf, ");\n   ");
-        transpile_join_bind_item_var(tp, cur->name, cur->type, "join_row");
-        strbuf_append_format(tp->code_buf, "   array_push(join_rows_%d_%d, join_row);\n   array_push(join_row_keys_%d_%d,",
-            join_id, source_index, join_id, source_index);
-        transpile_join_key_item(tp, cur, true);
-        strbuf_append_str(tp->code_buf, ");\n  }\n  symbol_key_list_free(join_iter_keys);\n }\n");
+        char rows_buf[64], keys_buf[64], idx_buf[64];
+        snprintf(rows_buf, sizeof(rows_buf), "join_rows_%d_%d", join_id, source_index);
+        snprintf(keys_buf, sizeof(keys_buf), "join_row_keys_%d_%d", join_id, source_index);
+        snprintf(idx_buf, sizeof(idx_buf), "join_idx_%d_%d", join_id, source_index);
+        const char* cur_idx = cur->index_name ? idx_buf : NULL;
 
-        strbuf_append_format(tp->code_buf, " Array* join_prior_keys_%d_%d=array_plain();\n", join_id, source_index);
-        strbuf_append_format(tp->code_buf, " for (int64_t join_pi=0; join_pi<join_tuples_%d->length; join_pi++) {\n  Item join_tuple=join_tuples_%d->items[join_pi];\n",
-            join_id, join_id);
-        transpile_join_bind_tuple_vars(tp, first, cur, "join_tuple");
-        strbuf_append_format(tp->code_buf, "  array_push(join_prior_keys_%d_%d,", join_id, source_index);
-        transpile_join_key_item(tp, cur, false);
-        strbuf_append_str(tp->code_buf, ");\n }\n");
-        strbuf_append_format(tp->code_buf,
-            " join_tuples_%d=fn_hash_join_tuples((Item)join_tuples_%d,(Item)join_prior_keys_%d_%d,(Item)join_rows_%d_%d,(Item)join_row_keys_%d_%d,",
-            join_id, join_id, join_id, source_index, join_id, source_index, join_id, source_index);
-        transpile_join_name_item(tp, cur->name);
-        strbuf_append_format(tp->code_buf, ",%d);\n", cur->optional ? 1 : 0);
+        if (cur->on) {
+            // hash-join stage: collect the new source's rows/keys, then probe against prior tuples.
+            transpile_join_collect_source(tp, cur, rows_buf, keys_buf, true, cur_idx);
+            strbuf_append_format(tp->code_buf, " Array* join_prior_keys_%d_%d=array_plain();\n", join_id, source_index);
+            strbuf_append_format(tp->code_buf, " for (int64_t join_pi=0; join_pi<join_tuples_%d->length; join_pi++) {\n  Item join_tuple=join_tuples_%d->items[join_pi];\n",
+                join_id, join_id);
+            transpile_join_bind_tuple_vars(tp, first, cur, "join_tuple");
+            strbuf_append_format(tp->code_buf, "  array_push(join_prior_keys_%d_%d,", join_id, source_index);
+            transpile_join_key_item(tp, cur, false);
+            strbuf_append_str(tp->code_buf, ");\n }\n");
+            strbuf_append_format(tp->code_buf,
+                " join_tuples_%d=fn_hash_join_tuples((Item)join_tuples_%d,(Item)join_prior_keys_%d_%d,(Item)%s,(Item)%s,",
+                join_id, join_id, join_id, source_index, rows_buf, keys_buf);
+            transpile_join_name_item(tp, cur->name);
+            strbuf_append_format(tp->code_buf, ",%d,", cur->optional ? 1 : 0);
+            transpile_join_idx_name_item(tp, cur);
+            strbuf_append_char(tp->code_buf, ',');
+            if (cur_idx) strbuf_append_format(tp->code_buf, "(Item)%s", cur_idx); else strbuf_append_str(tp->code_buf, "ITEM_NULL");
+            strbuf_append_str(tp->code_buf, ");\n");
+        } else {
+            // cross-product stage: expand every prior tuple by every row of this source.
+            transpile_join_collect_source(tp, cur, rows_buf, keys_buf, false, cur_idx);
+            strbuf_append_format(tp->code_buf,
+                " join_tuples_%d=fn_cross_join_tuples((Item)join_tuples_%d,(Item)%s,",
+                join_id, join_id, rows_buf);
+            transpile_join_name_item(tp, cur->name);
+            strbuf_append_char(tp->code_buf, ',');
+            transpile_join_idx_name_item(tp, cur);
+            strbuf_append_char(tp->code_buf, ',');
+            if (cur_idx) strbuf_append_format(tp->code_buf, "(Item)%s", cur_idx); else strbuf_append_str(tp->code_buf, "ITEM_NULL");
+            strbuf_append_str(tp->code_buf, ");\n");
+        }
     }
 
     strbuf_append_format(tp->code_buf, " for (int64_t join_out_i=0; join_out_i<join_tuples_%d->length; join_out_i++) {\n  Item join_tuple=join_tuples_%d->items[join_out_i];\n",

@@ -1,7 +1,7 @@
 # Lambda For-Expression Clauses 2 — `group by` and join `on`
 
-**Status:** S1-S3 implemented: single-source `group by ... into g`, plus value-binding inner/left join `on`
-**Date:** 2026-07-10 (revised 2026-07-11 ×4: S1 implemented — group-by surface reworked per user as `group by KEY [as ALIAS], ... into g` where **`g` is an element**: keys = attributes, members = children; S2/S3 implemented value-binding join `on` with inner/left hash joins, chained/multi-key joins, null non-match, deterministic order. The interim XQuery loop-var regrouping was withdrawn (loop var would change type item→list); FC1/FC3 finalized, FC9 tightened)
+**Status:** S1-S3b implemented: single-source `group by ... into g`, value-binding inner/left join `on`, plus index/key-preserving joins and mixed join/cross-product source lists. S4 (docs) done. S5 (`VElmt` zero-copy) still open.
+**Date:** 2026-07-10 (revised 2026-07-11 ×4: S1 implemented — group-by surface reworked per user as `group by KEY [as ALIAS], ... into g` where **`g` is an element**: keys = attributes, members = children; S2/S3 implemented value-binding join `on` with inner/left hash joins, chained/multi-key joins, null non-match, deterministic order. The interim XQuery loop-var regrouping was withdrawn (loop var would change type item→list); FC1/FC3 finalized, FC9 tightened) (revised 2026-07-12: **S3b implemented** — index/key bindings now travel in join tuples and rebind in the body; comma sources without `on` compose as nested-loop cross-product stages interleaved with hash-join stages; new runtime helper `fn_cross_join_tuples`, extended `fn_join_seed_tuples`/`fn_hash_join_tuples` with index arrays; both transpilers updated; `test/lambda/for_join_s3b_test.ls`; baseline 3300/3300. **S4 docs** updated in `doc/Lambda_Expr_Stam.md` + cheatsheet)
 **Context:** extracted from `Lambda_Design_Data_Processing.md` (§4.1, §5.1) as the *settled, implement-first* subset of the relational layer. This doc covers only the **for-expression surface**: the `group by` clause and the join `on` clause. The DataFrame type, the pipe-verb surface (`group()`/`agg()`/`join()`), and window functions (`over(...)`) remain in the data-processing proposal — they need more consideration and are **not** part of this doc's scope. Successor to `Lambda_Expr_For_Clauses.md`, which shipped `where`/`order by`/`limit`/`offset` (implemented and tested, `test/lambda/for_clauses_test.ls`) and put `group by ... as` into the grammar.
 
 ---
@@ -13,15 +13,16 @@
 | `where` / `order by` / `limit` / `offset` | ✅ `grammar.js` `for_*_clause` | ✅ | ✅ | ✅ `for_clauses_test.ls` |
 | `group by ... into g` (single source) | ✅ `group_key_spec` + `into` form generated from `grammar.js` | ✅ per-key alias/inference, duplicate-name errors, `g` registered as `TYPE_ELMT`, post-group scope isolated | ✅ C and MIR transpilers materialize real `<group>` elements via shared canonical key hashing; groups emit in first-appearance order; post-group `order by`/`limit`/`offset` operate on groups | ✅ `test/lambda/for_group_test.ls` |
 | join `on` / optional side `?` (value bindings) | ✅ `loop_expr` accepts `?` and `on` for both binding forms | ✅ `AstLoopNode::on`, `optional`, equi-key pairs; FC5 equality-conjunction validation | ✅ C and MIR transpilers materialize tuple elements and call shared runtime hash-join helpers; inner + left joins; chained/multi-key; null keys never match; deterministic probe/source order | ✅ `test/lambda/for_join_test.ls` |
+| join index/key bindings + mixed join/cross-product (S3b) | ✅ (reuses `loop_expr` index/`at`/comma forms) | ✅ index/key names threaded through collection + rebind; sources without `on` validated as cross stages | ✅ index-values arrays through `fn_*_tuples`; `fn_cross_join_tuples` nested-loop stage; both transpilers | ✅ `test/lambda/for_join_s3b_test.ls` |
 
-So S1-S3 are now live for the row engine. Cross-product-only comma sources remain unchanged. The current join lowering intentionally rejects index/key-only join bindings and mixed join/cross-product source lists instead of falling back to a silent O(n·m) path.
+So S1-S3b are now live for the row engine.
 
-**Known follow-up implementation gaps (not design exclusions):**
+**S3b closed the former follow-up gaps (2026-07-12):**
 
-- **Index/key-preserving joins:** `for (i, o in orders, c in customers on ...)` and `for (k at map, o in orders on ...)` should be valid. The shipped tuple materialization currently carries only value bindings (`o`, `c`, `r`, ...), so a follow-up needs to store and rebind index/key names in joined tuple elements as well.
-- **Mixed join/cross-product pipelines:** `for (o in orders, c in customers on ..., tag in tags)` should be valid. The shipped lowering handles either pure cross-product lists or all-joined source lists; a follow-up needs a unified tuple pipeline that composes hash-join stages with nested-loop cross-product stages.
+- **Index/key-preserving joins:** `for (i, o in orders, c in customers on ...)` and `for (k at map, o in orders on ...)` are now valid. Index/key bindings travel in the join tuple as extra attributes (collected via `iter_key_at` in a parallel index-values array, threaded through `fn_join_seed_tuples`/`fn_hash_join_tuples`/`fn_cross_join_tuples`) and are rebound in the body alongside value bindings. Key-only (`k at map`) sources bind the key as the value. A left join's null pad also nulls the index binding.
+- **Mixed join/cross-product pipelines:** `for (o in orders, c in customers on ..., tag in tags)` is now valid, in any interleaving. Each comma source is a stage: a source with `on` hash-joins against the tuple stream so far; a source without `on` cross-products it (nested-loop expansion, prior order then row order). Because prior bindings live in the tuple, a join `on` after a cross-product source still resolves its keys.
 
-These gaps are deliberately rejected today so the implemented subset is honest and deterministic.
+Test: `test/lambda/for_join_s3b_test.ls` (index on probe/new side, left-join index null, mixed pre/post cross-product, key-only join). Runs under both MIR Direct and C2MIR in the gtest harness; baseline 3300/3300.
 
 ---
 
@@ -192,8 +193,8 @@ S1-S3 implementation lives in the transpiler paths (`transpile.cpp` + `transpile
 | **S1** | `group by ... into g`: grammar rework (`group_key_spec` + `into`; `make generate-grammar`); build_ast — FC9 name inference/collision errors, register `g` as element type, loop vars/lets invalid post-group (FC3-F); transpile.cpp + transpile-mir.cpp codegen with real group-element materialization | ✅ `test/lambda/for_group_test.ls` + expected `.txt`; `make test-lambda-baseline` green (3298/3298) |
 | **S2** | Grammar: `?` marker + `on` condition on `loop_expr`; `make generate-grammar`; AST join metadata on `AstLoopNode`, FC5 equi-conjunction validation with clear error | ✅ parser regenerated; AST records prior/new equi-key pairs |
 | **S3** | Hash-join codegen (inner + left), both transpilers | ✅ `test/lambda/for_join_test.ls` + expected `.txt`; `make test-lambda-baseline` green (3299/3299) |
-| **S3b** | Complete join tuple pipeline: preserve index/key bindings in joined tuple elements; compose hash-join stages with nested-loop cross-product stages | follow-up tests for indexed joins, `at` joins, and mixed join/cross-product lists; baseline green |
-| **S4** | Docs: `doc/Lambda_Expr_Stam.md` query-expression section + cheatsheet | — |
+| **S3b** | Complete join tuple pipeline: preserve index/key bindings in joined tuple elements; compose hash-join stages with nested-loop cross-product stages | ✅ `test/lambda/for_join_s3b_test.ls` (indexed joins on probe/new side, left-join index null, `at` key-only join, mixed pre/post cross-product); baseline 3300/3300 under MIR + C2MIR |
+| **S4** | Docs: `doc/Lambda_Expr_Stam.md` query-expression section + cheatsheet | ✅ `doc/Lambda_Expr_Stam.md` `group by`/join `on` sections rewritten (was "not yet implemented"); `doc/Lambda_Cheatsheet.md` updated |
 | **S5** | Phase 2: `VElmt` — new virtual element type (own vtable: `attr_get`/`attr_keys`/`attr_count` + `child_at`/`child_count`; `LMD_TYPE_VELMT` → `"element"`); dispatch in element-consuming paths; switch group construction to zero-copy `VElmt` over the bucket | element-semantics parity tests (same `.ls` goldens pass under Phase 1 and Phase 2); baseline green |
 
 Per repo rules: every new `.ls` test gets its expected-result `.txt`; `make test-lambda-baseline` must stay 100%.

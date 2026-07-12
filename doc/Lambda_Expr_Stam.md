@@ -895,21 +895,93 @@ for (x in [1, 2, 3] limit 10) x
 
 #### `group by` — Grouping
 
-> **Status:** The `group by` clause is parsed but **not yet implemented** in the runtime. It is reserved for future use.
-
-The planned syntax groups items by a key expression and binds each group to a name via `as`:
+`group by` partitions the (post-`where`) rows by one or more key expressions and binds each
+group to a name via `into`:
 
 ```
-group by <key-expr> [, <key-expr>, ...] as <group-name>
+group by <key-expr> [as <alias>] [, <key-expr> [as <alias>] ...] into <group-name>
 ```
 
-Each group will be a map with `.key` (the grouping key) and `.items` (array of items in that group):
+**The group binding is an element** (tag `group`): the grouping keys become its *attributes*
+and the group's members become its *children*. One value carries the whole group, reusing
+Lambda's element duality — so `g.region` reads a key, `len(g)` counts members, `g[0]` indexes
+them, and `g |> ~["amount"]` projects a field across members.
 
 ```lambda
-// Planned syntax (not yet available):
-for (sale in sales group by sale.product as g)
-  {product: g.key, total: sum(g.items | ~.amount)}
+// single key — attribute name inferred from the trailing field access (g.region)
+for (x in sales group by x.region into g)
+  {region: g.region, total: sum(g |> ~["amount"])}
+
+// multiple keys — each becomes a named attribute (no positional g.key[i])
+for (o in orders group by o.year, o.month into g)
+  {year: g.year, month: g.month, n: len(g)}
+
+// computed key — an alias is required (only trailing field access is inferable)
+for (w in words group by len(w) as wlen into g)
+  {length: g.wlen, n: len(g)}
+
+// grouping by the loop item itself also requires an alias
+for (w in doc.words
+     where len(w) > 3
+     group by w as word into g
+     order by len(g) desc
+     limit 10)
+  {word: g.word, freq: len(g)}
 ```
+
+Semantics:
+
+- **Key equality** is value equality with numeric-tower coherence, so `1` and `1.0` land in
+  the same group. Multi-key grouping compares the key tuple element-wise. **Null keys form one
+  group.**
+- The **loop variable (and per-tuple `let` bindings) go out of scope** after `group by` — only
+  the `into` element (plus enclosing scope) is visible in `order by`/`limit`/`offset` and the body.
+- **Groups emit in first-appearance order** of their key; `order by` then reorders groups.
+- `where` filters rows *before* grouping; `order by`/`limit`/`offset` apply to *groups*.
+- Because a group is an element, it also formats/queries like any markup node — `group by`
+  literally turns flat data into a `<group ...>...</group>` tree.
+
+#### Join `on` — Relating Multiple Sources
+
+A comma-separated source can carry an `on` condition to **join** it against the tuple stream
+built from the prior sources (a hash join under the hood). Without `on`, comma sources remain a
+cross product (unchanged):
+
+```lambda
+// equi-join
+for (o in orders, c in customers on o.cust_id == c.id)
+  {id: o.id, name: c.name, total: o.total}
+
+// left join: mark the source with `?`; unmatched prior rows appear once with c = null
+for (o in orders, c? in customers on o.cust_id == c.id)
+  {id: o.id, name: if (c != null) c.name else "unknown"}
+
+// multi-key equi-join — a conjunction of equalities
+for (a in xs, b in ys on a.k1 == b.k1 and a.k2 == b.k2) {...}
+
+// chained joins — each `on` joins its source to the tuple stream so far
+for (o in orders, c in customers on o.cust_id == c.id,
+     r in regions on c.region_id == r.id) {...}
+
+// index / key bindings survive the join
+for (i, o in orders, c in customers on o.cust_id == c.id) {pos: i, name: c.name}
+
+// mixed join + cross-product in one comprehension
+for (o in orders, c in customers on o.cust_id == c.id, tag in tags)
+  {order: o.id, cust: c.name, tag: tag}
+```
+
+Semantics:
+
+- **`on` is a conjunction of equality tests only**; each `==` must reference the new source on
+  exactly one side. Non-equi conditions belong in a following `where` — a non-equi `on` is a
+  compile error (it would silently become an O(n·m) nested loop).
+- **`?` marks the null-padded (optional) side** — `c? in customers on ...` keeps every prior
+  tuple, padding `c` with `null` on no match (left join). v1 ships **inner + left** joins;
+  full/right outer are deferred. **Null join keys never match** (the deliberate asymmetry with
+  `group by`, where null keys form a group).
+- **Output preserves prior (probe-side) order**, stable; multiple matches from the new source
+  emit in that source's order.
 
 #### Combined Clauses
 

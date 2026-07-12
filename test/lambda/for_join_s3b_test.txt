@@ -1,0 +1,97 @@
+"=== For Join S3b ==="
+[{
+    pos: 0,
+    item: "a",
+    name: "Ann"
+  }, {
+    pos: 1,
+    item: "b",
+    name: "Bob"
+  }, {
+    pos: 2,
+    item: "c",
+    name: "Ann"
+  }]
+[{
+    item: "a",
+    cpos: 0,
+    name: "Ann"
+  }, {
+    item: "b",
+    cpos: 1,
+    name: "Bob"
+  }, {
+    item: "c",
+    cpos: 0,
+    name: "Ann"
+  }]
+[{
+    pos: 0,
+    item: "a",
+    name: "Ann"
+  }, {
+    pos: 1,
+    item: "z",
+    name: null
+  }]
+[{
+    item: "a",
+    name: "Ann",
+    tag: "x"
+  }, {
+    item: "a",
+    name: "Ann",
+    tag: "y"
+  }, {
+    item: "b",
+    name: "Bob",
+    tag: "x"
+  }, {
+    item: "b",
+    name: "Bob",
+    tag: "y"
+  }, {
+    item: "c",
+    name: "Ann",
+    tag: "x"
+  }, {
+    item: "c",
+    name: "Ann",
+    tag: "y"
+  }]
+[{
+    item: "a",
+    tag: "x",
+    name: "Ann"
+  }, {
+    item: "a",
+    tag: "y",
+    name: "Ann"
+  }, {
+    item: "b",
+    tag: "x",
+    name: "Bob"
+  }, {
+    item: "b",
+    tag: "y",
+    name: "Bob"
+  }, {
+    item: "c",
+    tag: "x",
+    name: "Ann"
+  }, {
+    item: "c",
+    tag: "y",
+    name: "Ann"
+  }]
+[{
+    item: 'a',
+    key: 'a'
+  }, {
+    item: 'b',
+    key: 'b'
+  }, {
+    item: 'a',
+    key: 'a'
+  }]
+"All for join S3b tests completed!"

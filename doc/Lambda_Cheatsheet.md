@@ -396,7 +396,7 @@ for (k at {a: 1, b: 2}) k      // 'a', 'b'
 for (k, v at {a: 1, b: 2}) k ++ v  // ['a1', 'b2']
 ```
 
-**For Expression Clauses:** `let`, `where`, `order by`, `limit`, `offset`
+**For Expression Clauses:** `let`, `where`, `group by`, `order by`, `limit`, `offset`
 ```lambda
 for (x in data where x > 0) x           // filter
 for (x in data, let sq = x*x) sq        // let binding
@@ -405,6 +405,18 @@ for (x in [3,1,2] order by x desc) x    // (3,2,1)
 for (x in data limit 5 offset 10) x     // pagination
 for (x in data, let y=x*2
     where y>5 order by y desc limit 3) y
+// group by → g is an <group> element (keys=attrs, members=children)
+for (x in sales group by x.region into g)
+    {region: g.region, n: len(g)}
+```
+
+**Joins (`on`):** relate comma sources; `?` = left join
+```lambda
+for (o in orders, c in customers on o.cust_id == c.id)
+    {id: o.id, name: c.name}            // inner equi-join
+for (o in orders, c? in customers on o.cust_id == c.id)
+    {id: o.id, name: c}                 // left join (c=null on miss)
+for (o in os, c in cs on o.a==c.a and o.b==c.b) {...}  // multi-key
 ```
 
 **For Statements:**
