@@ -704,17 +704,31 @@ static void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlP
     bool disabled = form_control_is_disabled(state, static_cast<View*>(block));
     bool checked = form_control_get_checked(state, static_cast<View*>(block));
 
-    // Background
-    Color bg = disabled ? make_color(224, 224, 224) : make_color(255, 255, 255);
-    fill_rect(rdcon, x, y, size, size, bg);
+    float border_w = fmaxf(1.0f * s, 1.0f);
+    Color accent = form_accent_color(block, disabled);
+    Color border_color = disabled ? make_color(128, 128, 128) : make_color(118, 118, 118);
 
-    // 3D inset border
-    draw_3d_border(rdcon, x, y, size, size, true, 1 * s);
-
-    // Checkmark if checked - draw using RdtVector stroked path
     if (checked) {
-        float inset = 3 * s;
-        // Checkmark points: short leg down-left, then long leg up-right
+        RdtPath* face = rdt_path_new();
+        // checked checkboxes fill the native face with accent-color;
+        // painting only the tick left the box visually unselected.
+        rdt_path_add_rect(face, x, y, size, size, 2.0f * s, 2.0f * s);
+        rc_fill_path(rdcon, face, accent, RDT_FILL_WINDING, NULL);
+        rdt_path_free(face);
+    } else {
+        Color bg = disabled ? make_color(224, 224, 224) : make_color(255, 255, 255);
+        fill_rect(rdcon, x, y, size, size, bg);
+
+        RdtPath* box = rdt_path_new();
+        float inset = border_w * 0.5f;
+        rdt_path_add_rect(box, x + inset, y + inset, size - border_w, size - border_w,
+                          1.5f * s, 1.5f * s);
+        rc_stroke_path(rdcon, box, border_color, border_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
+        rdt_path_free(box);
+    }
+
+    if (checked) {
+        float inset = size * 0.22f;
         float cx1 = x + inset;
         float cy1 = y + size * 0.5f;
         float cx2 = x + size * 0.35f;
@@ -727,9 +741,9 @@ static void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlP
         rdt_path_line_to(p, cx2, cy2);
         rdt_path_line_to(p, cx3, cy3);
 
-        // checked form controls use CSS accent-color; ignoring it made browser-blue controls render black.
-        Color check_color = form_accent_color(block, disabled);
-        rc_stroke_path(rdcon, p, check_color, 2.0f * s, RDT_CAP_ROUND, RDT_JOIN_ROUND, NULL, 0, NULL);
+        Color check_color = disabled ? make_color(245, 245, 245) : make_color(255, 255, 255);
+        rc_stroke_path(rdcon, p, check_color, fmaxf(1.6f * s, 1.0f),
+                       RDT_CAP_ROUND, RDT_JOIN_ROUND, NULL, 0, NULL);
         rdt_path_free(p);
     }
 

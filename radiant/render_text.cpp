@@ -981,21 +981,24 @@ static void render_text_decorations(RenderContext* rdcon, unsigned char* str, Te
     }
     else if (rdcon->font.style->text_deco == CSS_VALUE_OVERLINE) {
         rect.x = rdcon->block.x + text_rect->x * s;
-        rect.y = floorf(rdcon->block.y + text_rect->y * s);
+        // overline sits on the text-over edge; starting inside the fragment pushed it below browser output.
+        rect.y = floorf(rdcon->block.y + text_rect->y * s - thickness);
     }
     else if (rdcon->font.style->text_deco == CSS_VALUE_LINE_THROUGH) {
         rect.x = rdcon->block.x + text_rect->x * s;
         float strike_y;
-        if (deco_m && deco_m->x_height > 0) {
-            strike_y = deco_m->x_height * 0.5f;
-        } else if (deco_m && deco_m->strikeout_position > 0) {
+        if (deco_m && deco_m->strikeout_position > 0) {
+            // browser line-through follows the font OS/2 strikeout metric; x-height fallback was too low.
             strike_y = deco_m->strikeout_position;
+        } else if (deco_m && deco_m->x_height > 0) {
+            strike_y = deco_m->x_height * 0.5f;
         } else {
             strike_y = deco_ascend * 0.3f / s;
         }
-        rect.y = roundf(rdcon->block.y + text_rect->y * s + deco_ascend - strike_y * s);
         if (deco_m && deco_m->strikeout_size > 0)
             thickness = fmaxf(ceilf(deco_m->strikeout_size), 1.0f);
+        // browser treats the strikeout metric as the stroke position; using it as the top edge paints too low.
+        rect.y = floorf(rdcon->block.y + text_rect->y * s + deco_ascend - strike_y * s - thickness);
     }
     else {
         draw_deco = false;

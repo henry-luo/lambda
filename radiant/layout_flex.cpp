@@ -2981,6 +2981,12 @@ float apply_flex_constraint(
         if (axis_is_horizontal) {
             if (item->blk && item->blk->given_min_width >= 0) {
                 min_size = item->blk->given_min_width;
+            } else if (is_main_axis && item->blk && item->blk->given_width >= 0) {
+                // definite width is the replaced form control's used main size;
+                // intrinsic min-width:auto was clamping 10px checkboxes back to UA 13px.
+                min_size = layout_css_size_to_border_box(
+                    item->bound, layout_box_sizing(lam::view_as_block(item)),
+                    item->blk->given_width, true);
             } else if (is_main_axis && item->form && item->form->intrinsic_width > 0) {
                 // min-width: auto → intrinsic width for form controls (replaced elements)
                 // Only apply on main axis per CSS Flexbox §4.5; cross-axis
@@ -2995,6 +3001,12 @@ float apply_flex_constraint(
         } else {
             if (item->blk && item->blk->given_min_height >= 0) {
                 min_size = item->blk->given_min_height;
+            } else if (is_main_axis && item->blk && item->blk->given_height >= 0) {
+                // definite height is the replaced form control's used main size;
+                // intrinsic min-height:auto must not override author sizing.
+                min_size = layout_css_size_to_border_box(
+                    item->bound, layout_box_sizing(lam::view_as_block(item)),
+                    item->blk->given_height, false);
             } else if (is_main_axis && item->form && item->form->intrinsic_height > 0) {
                 min_size = item->form->intrinsic_height;
                 if (item->bound) {
