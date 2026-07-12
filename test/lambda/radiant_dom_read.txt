@@ -10,8 +10,13 @@
   parent_name: "BODY",
   text_name: "#text",
   text_value: "Alpha",
+  text_data: "Alpha",
+  text_content: "Alpha",
   document_root: "HTML",
+  document_query: "P",
   keys: ['node_name', 'class_name', 'owner_document', 'first_child'],
+  document_keys: ['document_element', 'ready_state', 'node_name'],
+  text_keys: ['node_name', 'data', 'node_value', 'text_content'],
   node: map,
   free: null
 }

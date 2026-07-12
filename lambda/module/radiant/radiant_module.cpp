@@ -193,21 +193,8 @@ const JubeHostObjectOps radiant_dom_node_host_ops = {
 
 
 
-static const JubeHostObjectOps radiant_dom_document_host_ops = {
-    radiant_dom_document_host_get_property,
-    radiant_dom_document_host_set_property,
-    radiant_dom_document_host_call_method,
-    radiant_dom_document_host_has_property,
-    radiant_dom_document_host_delete_property,
-    radiant_dom_document_host_own_property_descriptor,
-    radiant_dom_document_host_own_property_names,
-    radiant_dom_document_host_prototype,
-    NULL,
-    NULL,
-};
-
 static const JubeTypeDef radiant_types[] = {
-    {"dom_node", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_node_host_ops, NULL},
+    {"dom_node", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
     {"range", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_node_host_ops, NULL},
     {"selection", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_node_host_ops, NULL},
     // DOM3: style hosts are record-driven; no hand-written host ops remain
@@ -216,8 +203,8 @@ static const JubeTypeDef radiant_types[] = {
     {"stylesheet", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
     {"css_rule", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
     {"rule_style_decl", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
-    {"document", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_document_host_ops, NULL},
-    {"foreign_document", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_document_host_ops, NULL},
+    {"document", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
+    {"foreign_document", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
 };
 
 RADIANT_C_API const void* radiant_dom_node_host_type(void) {
@@ -299,7 +286,7 @@ static const JubeModuleDef radiant_module = {
     NULL,
     radiant_dom_interface_decl,
     radiant_dom_type_bindings,
-    8,  // + dom_node (Phase 4a, migrating via legacy_ops)
+    10,  // DOM3 Phase 4e: document/foreign_document are binding-hook driven
 };
 
 RADIANT_C_API const JubeModuleDef* radiant_jube_module(void) {

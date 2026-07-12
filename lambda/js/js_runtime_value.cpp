@@ -2,7 +2,7 @@
 #include "../lambda-decimal.hpp"
 
 extern "C" bool js_ordinary_has_property(Item object, const char* name, int name_len);
-extern "C" void* js_dom_unwrap_element(Item item);
+extern "C" void* jube_host_identity(Item item);
 extern "C" bool js_is_proxy(Item obj);
 
 extern "C" Item js_undefined(void) {
@@ -1521,12 +1521,13 @@ extern "C" Item js_strict_equal(Item left, Item right) {
 
     default:
         if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_VMAP) {
-            // DOM nodes moved from map shells to VMap carriers; strict equality
-            // still follows node identity when duplicate host wrappers exist.
-            void* left_dom = js_dom_unwrap_element(left);
-            void* right_dom = js_dom_unwrap_element(right);
-            if (left_dom || right_dom)
-                return (Item){.item = b2it(left_dom && left_dom == right_dom)};
+            // Jube host objects can have duplicate VMap carriers for one native
+            // value; strict equality must follow host identity rather than
+            // wrapper allocation once DOM nodes are record-driven.
+            void* left_host = jube_host_identity(left);
+            void* right_host = jube_host_identity(right);
+            if (left_host || right_host)
+                return (Item){.item = b2it(left_host && left_host == right_host)};
         }
         // Object/function equality is identity equality in JavaScript.
         return (Item){.item = b2it(left.item == right.item)};

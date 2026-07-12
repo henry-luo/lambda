@@ -176,7 +176,7 @@ static const JubeMemberBind s_hostobj_demo_members[] = {
 static const JubeTypeBinding s_hostobj_demo_bindings[] = {
     {"hostobj_demo", &s_hostobj_demo_types[0], s_hostobj_demo_members,
      (int32_t)(sizeof(s_hostobj_demo_members) / sizeof(s_hostobj_demo_members[0])),
-     NULL, NULL, NULL, NULL},
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL},
 };
 
 extern "C" Item hostobj_demo_namespace(void) {

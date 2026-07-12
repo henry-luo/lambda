@@ -91,6 +91,7 @@ void resolve_sys_paths_recursive(Item item);
 extern "C" {
     void *import_resolver(const char *name);
     void register_bss_gc_roots(void* mir_ctx);
+    void reset_and_register_bss_gc_roots(void* mir_ctx);
     extern int g_mir_interp_mode;
 }
 
@@ -13770,7 +13771,12 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
 // jit_context into the global dynamic_import_table so import_resolver can resolve them
 // when MIR_link() is called for the module that imports this one.
 static void register_module_pub_fns(AstImportNode* imp) {
-    if (!imp->script || !imp->script->jit_context) return;
+    if (!imp->script || !imp->script->jit_context) {
+        log_error("mir cache: import '%.*s' has no compiled dependency context",
+                  (int)imp->module.length, imp->module.str);
+        assert(false && "MIR Direct import dependency must be compiled before importer");
+        return;
+    }
     AstNode* mod_node = imp->script->ast_root;
     if (!mod_node || mod_node->node_type != AST_SCRIPT) return;
 
@@ -13955,13 +13961,26 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     clear_dynamic_imports();
 
     AstScript* ast_root = (AstScript*)tp->ast_root;
+    if (tp->direct_imports) {
+        arraylist_free(tp->direct_imports);
+        tp->direct_imports = NULL;
+    }
+    tp->cache_cross_lang_tainted = false;
     AstNode* child = ast_root->child;
     while (child) {
         if (child->node_type == AST_NODE_IMPORT) {
             AstImportNode* imp = (AstImportNode*)child;
             if (imp->is_cross_lang) {
+                tp->cache_cross_lang_tainted = true;
                 register_cross_lang_pub_fns(imp);
             } else {
+                if (!tp->direct_imports) tp->direct_imports = arraylist_new(4);
+                if (imp->script) {
+                    arraylist_append(tp->direct_imports, imp->script);
+                    if (imp->script->cache_cross_lang_tainted) {
+                        tp->cache_cross_lang_tainted = true;
+                    }
+                }
                 register_module_pub_fns(imp);
             }
         }
@@ -14174,6 +14193,43 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     }
 }
 
+static bool script_ptr_list_contains(ArrayList* list, Script* script) {
+    if (!list || !script) return false;
+    for (int i = 0; i < list->length; i++) {
+        if ((Script*)list->data[i] == script) return true;
+    }
+    return false;
+}
+
+static void collect_import_cone_postorder(Script* script, ArrayList* cone, ArrayList* visited) {
+    if (!script || script_ptr_list_contains(visited, script)) return;
+    arraylist_append(visited, script);
+
+    if (script->direct_imports) {
+        for (int i = 0; i < script->direct_imports->length; i++) {
+            Script* dep = (Script*)script->direct_imports->data[i];
+            collect_import_cone_postorder(dep, cone, visited);
+        }
+    }
+
+    arraylist_append(cone, script);
+}
+
+static ArrayList* collect_import_cone(Script* main_script) {
+    ArrayList* cone_with_main = arraylist_new(8);
+    ArrayList* visited = arraylist_new(8);
+    collect_import_cone_postorder(main_script, cone_with_main, visited);
+    arraylist_free(visited);
+
+    ArrayList* cone = arraylist_new(cone_with_main->length > 1 ? cone_with_main->length - 1 : 1);
+    for (int i = 0; i < cone_with_main->length; i++) {
+        Script* script = (Script*)cone_with_main->data[i];
+        if (script != main_script) arraylist_append(cone, script);
+    }
+    arraylist_free(cone_with_main);
+    return cone;
+}
+
 // ============================================================================
 // Main entry point for MIR compilation
 // ============================================================================
@@ -14215,10 +14271,6 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         return output;
     }
 
-    // All modules (main + imports) are now compiled via MIR Direct.
-    // runner.script->jit_context and runner.script->main_func are already set.
-    MIR_context_t ctx = (MIR_context_t)runner.script->jit_context;
-
     if (!runner.script->main_func) {
         log_error("MIR Direct: 'main' missing after compilation of '%s'", script_path);
         Pool* error_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
@@ -14227,44 +14279,26 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         return output;
     }
 
-    // Initialize imported modules before executing the main script.
-    // For each import: call _init_mod_consts/_init_mod_types (C2MIR helpers; graceful no-op
-    // for MIR Direct modules where these don't exist), then run its main_func to compute
-    // pub variable values.  MIR Direct modules access constants via context->consts which
-    // is set to the import's const_list->data immediately before its main_func call.
-    AstScript* ast_script = (AstScript*)runner.script->ast_root;
-    AstNode* import_child = ast_script->child;
-    bool has_imports = false;
-    while (import_child) {
-        if (import_child->node_type == AST_NODE_IMPORT) has_imports = true;
-        import_child = import_child->next;
-    }
-    if (has_imports) {
+    ArrayList* import_cone = collect_import_cone(runner.script);
+    if (import_cone && import_cone->length > 0) {
         // Set up context for module initialization
         runner_setup_context(&runner);
         runner.context.run_main = run_main;
 
-        // Register BSS GC roots for ALL modules (imports + main) in dependency order.
-        // runtime->scripts is pre-order DFS: main script is first (index 0), imports are
-        // appended as they are discovered during transpilation.
-        for (int si = 0; si < runtime->scripts->length; si++) {
-            Script* s = (Script*)runtime->scripts->data[si];
-            if (s && s->jit_context) {
-                register_bss_gc_roots((void*)s->jit_context);
+        // cached modules may hold heap Items from a previous batch run; zero BSS before rooting
+        for (int i = 0; i < import_cone->length; i++) {
+            Script* imp_script = (Script*)import_cone->data[i];
+            if (imp_script && imp_script->jit_context) {
+                reset_and_register_bss_gc_roots((void*)imp_script->jit_context);
             }
         }
+        reset_and_register_bss_gc_roots((void*)runner.script->jit_context);
 
-        // Run ALL imported modules' main_func in dependency order (deepest dep first).
-        // runtime->scripts: main script = index runner.script->index (typically 0).
-        // Imports are at higher indices; deepest transitive imports are at the highest indices.
-        // Iterate in reverse so transitive imports (e.g. mod_vars imported by mod_chain)
-        // are initialized before the modules that depend on them.
-        int main_idx = runner.script->index;
-        for (int si = runtime->scripts->length - 1; si >= 0; si--) {
-            if (si == main_idx) continue;  // skip main script; it runs after this loop
-            Script* imp_script = (Script*)runtime->scripts->data[si];
+        // run only the current main script's import cone, deps before dependents
+        for (int i = 0; i < import_cone->length; i++) {
+            Script* imp_script = (Script*)import_cone->data[i];
             if (!imp_script || !imp_script->main_func) continue;
-            log_info("mir: running imported module main index=%d", si);
+            log_info("mir cache: running imported module main index=%d", imp_script->index);
             runner.context.consts = imp_script->const_list ? imp_script->const_list->data : nullptr;
             runner.context.type_list = imp_script->type_list;
             imp_script->main_func(&runner.context);
@@ -14294,6 +14328,9 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
             result = runner.context.result = runner.script->main_func(&runner.context);
             _lambda_recovery_armed = 0;
         }
+        if (runner.context.heap) {
+            runner.context.heap->result_root = runner.context.result.item;
+        }
         preserve_context_last_error(&runner.context, result);
 
         // Create output
@@ -14306,8 +14343,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
                 url_destroy((Url*)runner.context.cwd);
                 runner.context.cwd = NULL;
             }
-            runner.script->jit_context = NULL;
-            jit_cleanup(ctx);
+            arraylist_free(import_cone);
             return nullptr;
         }
         resolve_sys_paths_recursive(result);
@@ -14320,8 +14356,10 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         // With GC-managed memory the heap is retained across the session;
         // the caller is responsible for calling runtime_cleanup() when done.
         output->root = result;
+        arraylist_free(import_cone);
         return output;
     }
+    if (import_cone) arraylist_free(import_cone);
 
     // Execute (no imports — use standard path)
     Input* output = execute_script_and_create_output(&runner, run_main);

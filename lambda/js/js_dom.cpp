@@ -6217,6 +6217,10 @@ extern "C" Item js_dom_document_active_element_bridge(void* doc_ptr) {
     return root ? js_dom_wrap_element(root) : ItemNull;
 }
 
+static bool js_dom_document_method_feature_name(const char* prop);
+static bool js_dom_form_named_getter_reserved_name(const char* prop);
+static bool js_dom_node_method_feature_name(const char* prop);
+
 extern "C" Item js_document_get_property(Item prop_name) {
     if (!_js_current_document) {
         log_debug("js_document_get_property: no document set");
@@ -6490,29 +6494,10 @@ extern "C" Item js_document_get_property(Item prop_name) {
         }
     }
 
-    // Document method names accessed as properties return ITEM_TRUE for feature detection
-    static const char* doc_methods[] = {
-        "getElementById", "getElementsByTagName", "getElementsByClassName",
-        "getElementsByName", "elementFromPoint", "querySelector", "querySelectorAll",
-        "createElement", "createElementNS", "createTextNode", "createComment",
-        "createDocumentFragment", "importNode", "adoptNode",
-        "open", "close", "write", "writeln",
-        "addEventListener", "removeEventListener",
-        "focus", "blur",
-        "createRange", "getSelection",
-        "createEvent",
-        // CE-6 (§9): legacy editing APIs we deliberately retain for feature
-        // detection only. execCommand returns false; queryCommand* return
-        // false/"" per §9 — they never mutate and never dispatch.
-        "execCommand",
-        "queryCommandSupported", "queryCommandEnabled",
-        "queryCommandIndeterm", "queryCommandState", "queryCommandValue",
-        NULL
-    };
-    for (int i = 0; doc_methods[i]; i++) {
-        if (strcmp(prop, doc_methods[i]) == 0) {
-            return (Item){.item = ITEM_TRUE};
-        }
+    // Document method names accessed as properties return ITEM_TRUE for feature
+    // detection; CE-6 legacy editing APIs stay inert when called.
+    if (js_dom_document_method_feature_name(prop)) {
+        return (Item){.item = ITEM_TRUE};
     }
 
     // designMode is the legacy whole-document edit toggle. This first cut
@@ -6600,6 +6585,116 @@ extern "C" Item js_dom_text_control_set_range_text_bridge(void* dom_elem,
                                                           Item start_arg,
                                                           Item end_arg,
                                                           Item mode_arg);
+
+static bool js_dom_document_method_feature_name(const char* prop) {
+    if (!prop) return false;
+    return strcmp(prop, "getElementById") == 0 ||
+        strcmp(prop, "getElementsByTagName") == 0 ||
+        strcmp(prop, "getElementsByClassName") == 0 ||
+        strcmp(prop, "getElementsByName") == 0 ||
+        strcmp(prop, "elementFromPoint") == 0 ||
+        strcmp(prop, "querySelector") == 0 ||
+        strcmp(prop, "querySelectorAll") == 0 ||
+        strcmp(prop, "createElement") == 0 ||
+        strcmp(prop, "createElementNS") == 0 ||
+        strcmp(prop, "createTextNode") == 0 ||
+        strcmp(prop, "createComment") == 0 ||
+        strcmp(prop, "createDocumentFragment") == 0 ||
+        strcmp(prop, "importNode") == 0 ||
+        strcmp(prop, "adoptNode") == 0 ||
+        strcmp(prop, "open") == 0 ||
+        strcmp(prop, "close") == 0 ||
+        strcmp(prop, "write") == 0 ||
+        strcmp(prop, "writeln") == 0 ||
+        strcmp(prop, "addEventListener") == 0 ||
+        strcmp(prop, "removeEventListener") == 0 ||
+        strcmp(prop, "focus") == 0 ||
+        strcmp(prop, "blur") == 0 ||
+        strcmp(prop, "createRange") == 0 ||
+        strcmp(prop, "getSelection") == 0 ||
+        strcmp(prop, "createEvent") == 0 ||
+        strcmp(prop, "execCommand") == 0 ||
+        strcmp(prop, "queryCommandSupported") == 0 ||
+        strcmp(prop, "queryCommandEnabled") == 0 ||
+        strcmp(prop, "queryCommandIndeterm") == 0 ||
+        strcmp(prop, "queryCommandState") == 0 ||
+        strcmp(prop, "queryCommandValue") == 0;
+}
+
+static bool js_dom_form_named_getter_reserved_name(const char* prop) {
+    if (!prop) return true;
+    return strcmp(prop, "elements") == 0 ||
+        strcmp(prop, "length") == 0 ||
+        strcmp(prop, "action") == 0 ||
+        strcmp(prop, "method") == 0 ||
+        strcmp(prop, "enctype") == 0 ||
+        strcmp(prop, "encoding") == 0 ||
+        strcmp(prop, "acceptCharset") == 0 ||
+        strcmp(prop, "target") == 0 ||
+        strcmp(prop, "noValidate") == 0 ||
+        strcmp(prop, "autocomplete") == 0 ||
+        strcmp(prop, "name") == 0 ||
+        strcmp(prop, "submit") == 0 ||
+        strcmp(prop, "reset") == 0 ||
+        strcmp(prop, "checkValidity") == 0 ||
+        strcmp(prop, "reportValidity") == 0 ||
+        strcmp(prop, "requestSubmit") == 0;
+}
+
+static bool js_dom_node_method_feature_name(const char* prop) {
+    if (!prop) return false;
+    return strcmp(prop, "getAttribute") == 0 ||
+        strcmp(prop, "setAttribute") == 0 ||
+        strcmp(prop, "removeAttribute") == 0 ||
+        strcmp(prop, "hasAttribute") == 0 ||
+        strcmp(prop, "toggleAttribute") == 0 ||
+        strcmp(prop, "getAttributeNames") == 0 ||
+        strcmp(prop, "querySelector") == 0 ||
+        strcmp(prop, "querySelectorAll") == 0 ||
+        strcmp(prop, "closest") == 0 ||
+        strcmp(prop, "matches") == 0 ||
+        strcmp(prop, "appendChild") == 0 ||
+        strcmp(prop, "removeChild") == 0 ||
+        strcmp(prop, "replaceChild") == 0 ||
+        strcmp(prop, "replaceWith") == 0 ||
+        strcmp(prop, "insertBefore") == 0 ||
+        strcmp(prop, "insertAdjacentElement") == 0 ||
+        strcmp(prop, "insertAdjacentHTML") == 0 ||
+        strcmp(prop, "attachShadow") == 0 ||
+        strcmp(prop, "cloneNode") == 0 ||
+        strcmp(prop, "contains") == 0 ||
+        strcmp(prop, "hasChildNodes") == 0 ||
+        strcmp(prop, "normalize") == 0 ||
+        strcmp(prop, "addEventListener") == 0 ||
+        strcmp(prop, "removeEventListener") == 0 ||
+        strcmp(prop, "dispatchEvent") == 0 ||
+        strcmp(prop, "remove") == 0 ||
+        strcmp(prop, "getBoundingClientRect") == 0 ||
+        strcmp(prop, "getElementsByTagName") == 0 ||
+        strcmp(prop, "getElementsByClassName") == 0 ||
+        strcmp(prop, "compareDocumentPosition") == 0 ||
+        strcmp(prop, "append") == 0 ||
+        strcmp(prop, "prepend") == 0 ||
+        strcmp(prop, "getClientRects") == 0 ||
+        strcmp(prop, "scrollIntoView") == 0 ||
+        strcmp(prop, "scroll") == 0 ||
+        strcmp(prop, "scrollTo") == 0 ||
+        strcmp(prop, "scrollBy") == 0 ||
+        strcmp(prop, "focus") == 0 ||
+        strcmp(prop, "blur") == 0 ||
+        strcmp(prop, "__lambdaTextControlCaretBounds") == 0 ||
+        strcmp(prop, "__lambdaTextControlBoundaryFromPoint") == 0 ||
+        strcmp(prop, "__lambdaBoundaryFromPoint") == 0 ||
+        strcmp(prop, "toString") == 0 ||
+        strcmp(prop, "setSelectionRange") == 0 ||
+        strcmp(prop, "select") == 0 ||
+        strcmp(prop, "submit") == 0 ||
+        strcmp(prop, "reset") == 0 ||
+        strcmp(prop, "checkValidity") == 0 ||
+        strcmp(prop, "reportValidity") == 0 ||
+        strcmp(prop, "requestSubmit") == 0 ||
+        strcmp(prop, "setCustomValidity") == 0;
+}
 
 static Item js_text_control_set_selection_range(Item start_arg, Item end_arg, Item dir_arg) {
     Item self = js_get_this();
@@ -7549,7 +7644,7 @@ static void _select_refresh_cached_selected_options_for_node(DomNode* node) {
     _select_refresh_cached_selected_options(_nearest_select_for_node(node));
 }
 
-extern "C" void js_dom_collection_before_property_get(Item object, Item key) {
+extern "C" void js_array_exotic_before_property_get(Item object, Item key) {
     if (get_type_id(object) != LMD_TYPE_ARRAY) return;
     if (s_dom_collection_refresh_depth > 0) return;
     int child_kind = 0;
@@ -7641,7 +7736,7 @@ extern "C" void js_dom_collection_before_property_get(Item object, Item key) {
     _select_refresh_selected_options_collection(object, owner);
 }
 
-extern "C" void js_dom_options_collection_before_property_set(Item object, Item key, Item value) {
+extern "C" void js_array_exotic_before_property_set(Item object, Item key, Item value) {
     if (get_type_id(object) != LMD_TYPE_ARRAY || get_type_id(key) != LMD_TYPE_STRING) return;
     String* sk = it2s(key);
     if (!sk || sk->len != 13 || strncmp(sk->chars, "selectedIndex", 13) != 0) return;
@@ -10172,17 +10267,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     if (_is_tag(elem, "form") && prop && *prop) {
         // Skip standard IDL props (already handled above) and known DOM methods
         // to avoid shadowing them.
-        static const char* form_idl_props[] = {
-            "elements", "length", "action", "method", "enctype", "encoding",
-            "acceptCharset", "target", "noValidate", "autocomplete", "name",
-            "submit", "reset", "checkValidity", "reportValidity", "requestSubmit",
-            nullptr
-        };
-        bool is_idl = false;
-        for (int i = 0; form_idl_props[i]; i++) {
-            if (strcmp(prop, form_idl_props[i]) == 0) { is_idl = true; break; }
-        }
-        if (!is_idl) {
+        if (!js_dom_form_named_getter_reserved_name(prop)) {
             Item matches = js_array_new(0);
             std::function<void(DomNode*)> walk = [&](DomNode* node) {
                 while (node) {
@@ -10323,31 +10408,9 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return js_new_function((void*)js_dom_contains_method, 1);
 
     // DOM method names accessed as properties (not calls) return ITEM_TRUE
-    // so that feature-detection patterns like `elem.getAttribute && elem.getAttribute("class")`
-    // work correctly (jQuery, Sizzle, etc.)
-    static const char* dom_methods[] = {
-        "getAttribute", "setAttribute", "removeAttribute", "hasAttribute", "toggleAttribute", "getAttributeNames",
-        "querySelector", "querySelectorAll", "closest", "matches",
-        "appendChild", "removeChild", "replaceChild", "replaceWith", "insertBefore",
-        "insertAdjacentElement", "insertAdjacentHTML",
-        "attachShadow",
-        "cloneNode", "contains", "hasChildNodes", "normalize",
-        "addEventListener", "removeEventListener", "dispatchEvent",
-        "remove", "getBoundingClientRect", "getElementsByTagName",
-        "getElementsByClassName", "compareDocumentPosition",
-        "append", "prepend", "getClientRects", "scrollIntoView", "scroll", "scrollTo", "scrollBy", "focus", "blur",
-        "__lambdaTextControlCaretBounds", "__lambdaTextControlBoundaryFromPoint",
-        "__lambdaBoundaryFromPoint",
-        "toString",
-        "setSelectionRange", "select",
-        "submit", "reset", "checkValidity", "reportValidity", "requestSubmit",
-        "setCustomValidity",
-        NULL
-    };
-    for (int i = 0; dom_methods[i]; i++) {
-        if (strcmp(prop, dom_methods[i]) == 0) {
-            return (Item){.item = ITEM_TRUE};
-        }
+    // only for names not already declared by the Jube record table.
+    if (js_dom_node_method_feature_name(prop)) {
+        return (Item){.item = ITEM_TRUE};
     }
 
     // check expando properties (arbitrary JS values stored on this DOM node)

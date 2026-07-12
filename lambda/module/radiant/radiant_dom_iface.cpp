@@ -125,6 +125,9 @@ const char radiant_dom_interface_decl[] =
     "    local_name: string,\n"
     "    namespace_uri: string,\n"
     "    prefix: any,\n"
+    "    data: string,\n"
+    "    node_value: string,\n"
+    "    text_content: string,\n"
     "    id: string,\n"
     "    class_name: string,\n"
     "    node_type: int,\n"
@@ -269,6 +272,80 @@ const char radiant_dom_interface_decl[] =
     "    get_property_value: fn(prop: string) string,\n"
     "    set_property: fn(prop: string, value: string, priority: string) null,\n"
     "    remove_property: fn(prop: string) string\n"
+    "}\n"
+    "type document {\n"
+    "    document_element: any,\n"
+    "    body: any,\n"
+    "    head: any,\n"
+    "    title: string,\n"
+    "    url: string,\n"
+    "    href: string,\n"
+    "    protocol: string,\n"
+    "    hostname: string,\n"
+    "    port: string,\n"
+    "    pathname: string,\n"
+    "    search: string,\n"
+    "    hash: string,\n"
+    "    host: string,\n"
+    "    origin: string,\n"
+    "    location: any,\n"
+    "    document: any,\n"
+    "    ready_state: string,\n"
+    "    fonts: any,\n"
+    "    compat_mode: string,\n"
+    "    character_set: string,\n"
+    "    charset: string,\n"
+    "    content_type: string,\n"
+    "    node_type: int,\n"
+    "    node_name: string,\n"
+    "    owner_document: any,\n"
+    "    child_nodes: any,\n"
+    "    doctype: any,\n"
+    "    style_sheets: any,\n"
+    "    default_view: any,\n"
+    "    implementation: any,\n"
+    "    design_mode: string,\n"
+    "    active_element: any,\n"
+    "    forms: any,\n"
+    "    assign: fn(a0: any) any,\n"
+    "    replace: fn(a0: any) any,\n"
+    "    reload: fn() any,\n"
+    "    focus: fn() any,\n"
+    "    blur: fn() any,\n"
+    "    open: fn() any,\n"
+    "    close: fn() any,\n"
+    "    write: fn(a0: any) any,\n"
+    "    writeln: fn(a0: any) any,\n"
+    "    element_from_point: fn(a0: any, a1: any) any,\n"
+    "    exec_command: fn(a0: any) any,\n"
+    "    query_command_supported: fn(a0: any) any,\n"
+    "    query_command_enabled: fn(a0: any) any,\n"
+    "    query_command_indeterm: fn(a0: any) any,\n"
+    "    query_command_state: fn(a0: any) any,\n"
+    "    query_command_value: fn(a0: any) any,\n"
+    "    create_range: fn() any,\n"
+    "    get_selection: fn() any,\n"
+    "    get_element_by_id: fn(a0: any) any,\n"
+    "    get_elements_by_class_name: fn(a0: any) any,\n"
+    "    get_elements_by_tag_name: fn(a0: any) any,\n"
+    "    get_elements_by_name: fn(a0: any) any,\n"
+    "    query_selector: fn(a0: any) any,\n"
+    "    query_selector_all: fn(a0: any) any,\n"
+    "    create_element: fn(a0: any) any,\n"
+    "    create_element_ns: fn(a0: any, a1: any) any,\n"
+    "    create_text_node: fn(a0: any) any,\n"
+    "    create_document_fragment: fn() any,\n"
+    "    create_comment: fn(a0: any) any,\n"
+    "    create_processing_instruction: fn(a0: any, a1: any) any,\n"
+    "    import_node: fn(a0: any, a1: any) any,\n"
+    "    normalize: fn() any,\n"
+    "    adopt_node: fn(a0: any) any,\n"
+    "    append_child: fn(a0: any) any,\n"
+    "    add_event_listener: fn(a0: any, a1: any, a2: any) any,\n"
+    "    remove_event_listener: fn(a0: any, a1: any, a2: any) any,\n"
+    "    dispatch_event: fn(a0: any) any\n"
+    "}\n"
+    "type foreign_document : document {\n"
     "}\n";
 
 // ---- adapters: JubeMemberBind handler shape -> host API behavior entries ----
@@ -721,14 +798,14 @@ static const JubeMemberBind radiant_rule_decl_members[] = {
 };
 
 
-// ---- dom_node Phase 4a: identity/navigation cluster ----
-// Transitional: legacy_ops carries everything unconverted (text/comment
-// kinds, reflected attrs, tag-gated members, methods, side-table expandos,
-// per-kind prototypes, own-keys). Members guard element-only so text/comment
-// reads fall through to the legacy chains unchanged.
+// ---- dom_node Phase 4a-4e: identity/navigation + named hooks ----
+// The residual open-name/property-object semantics are explicit binding hooks;
+// dom_node no longer depends on the transitional legacy_ops fallback.
 
-extern const JubeHostObjectOps radiant_dom_node_host_ops;
 extern "C" int radiant_dom_member_is_element(Item receiver);
+extern "C" int radiant_dom_member_data(Item receiver, Item* out);
+extern "C" int radiant_dom_member_node_value(Item receiver, Item* out);
+extern "C" int radiant_dom_member_text_content(Item receiver, Item* out);
 extern "C" int radiant_dom_member_tag_name(Item receiver, Item* out);
 extern "C" int radiant_dom_member_node_name(Item receiver, Item* out);
 extern "C" int radiant_dom_member_local_name(Item receiver, Item* out);
@@ -736,22 +813,22 @@ extern "C" int radiant_dom_member_namespace_uri(Item receiver, Item* out);
 extern "C" int radiant_dom_member_prefix(Item receiver, Item* out);
 extern "C" int radiant_dom_member_id(Item receiver, Item* out);
 extern "C" int radiant_dom_member_class_name(Item receiver, Item* out);
-extern "C" int radiant_dom_member_node_type(Item receiver, Item* out);
-extern "C" int radiant_dom_member_parent_node(Item receiver, Item* out);
-extern "C" int radiant_dom_member_is_connected(Item receiver, Item* out);
+extern "C" int radiant_dom_member_node_type_any(Item receiver, Item* out);
+extern "C" int radiant_dom_member_parent_node_any(Item receiver, Item* out);
+extern "C" int radiant_dom_member_is_connected_any(Item receiver, Item* out);
 extern "C" int radiant_dom_member_child_element_count(Item receiver, Item* out);
 extern "C" int radiant_dom_member_children(Item receiver, Item* out);
 extern "C" int radiant_dom_member_attributes(Item receiver, Item* out);
-extern "C" int radiant_dom_member_owner_document(Item receiver, Item* out);
-extern "C" int radiant_dom_member_first_child(Item receiver, Item* out);
-extern "C" int radiant_dom_member_last_child(Item receiver, Item* out);
-extern "C" int radiant_dom_member_next_sibling(Item receiver, Item* out);
-extern "C" int radiant_dom_member_previous_sibling(Item receiver, Item* out);
+extern "C" int radiant_dom_member_owner_document_any(Item receiver, Item* out);
+extern "C" int radiant_dom_member_first_child_any(Item receiver, Item* out);
+extern "C" int radiant_dom_member_last_child_any(Item receiver, Item* out);
+extern "C" int radiant_dom_member_next_sibling_any(Item receiver, Item* out);
+extern "C" int radiant_dom_member_previous_sibling_any(Item receiver, Item* out);
 extern "C" int radiant_dom_member_first_element_child(Item receiver, Item* out);
 extern "C" int radiant_dom_member_last_element_child(Item receiver, Item* out);
 extern "C" int radiant_dom_member_next_element_sibling(Item receiver, Item* out);
 extern "C" int radiant_dom_member_previous_element_sibling(Item receiver, Item* out);
-extern "C" int radiant_dom_member_child_nodes(Item receiver, Item* out);
+extern "C" int radiant_dom_member_child_nodes_any(Item receiver, Item* out);
 extern "C" int radiant_dom_guard_dis(Item receiver);
 extern "C" int radiant_dom_guard_ist(Item receiver);
 extern "C" int radiant_dom_guard_it(Item receiver);
@@ -851,6 +928,7 @@ extern "C" int radiant_dom_guard_tc(Item receiver);
 extern "C" int radiant_dom_guard_input_nontc(Item receiver);
 extern "C" int radiant_dom_guard_node(Item receiver);
 extern "C" int radiant_dom_guard_text(Item receiver);
+extern "C" int radiant_dom_guard_character_data(Item receiver);
 extern "C" Item radiant_dom_element_method(Item elem_item, Item method_name, Item* args, int argc);
 extern "C" int radiant_dom_m4d_named_item(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_add(Item r, Item* args, int argc, Item* out);
@@ -956,31 +1034,48 @@ extern "C" int radiant_dom_m4c_get_form(Item r, Item* out);
 
 static const JubeMemberBind radiant_dom_node_members[] = {
     BIND_NODE("tag_name", radiant_dom_member_tag_name),
-    // nodeName is element-only here; character nodes must miss this guard and
-    // fall through to the legacy text/comment property hook.
-    BIND_NODE("node_name", radiant_dom_member_node_name),
+    // nodeName spans Element and CharacterData wrappers; resolving it in the
+    // record table keeps text/comment nodes out of legacy VMap fallback.
+    {"node_name", NULL, NULL, radiant_dom_guard_node, radiant_dom_member_node_name, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
     BIND_NODE("local_name", radiant_dom_member_local_name),
     BIND_NODE_JS("namespace_uri", "namespaceURI", radiant_dom_member_namespace_uri),
     BIND_NODE("prefix", radiant_dom_member_prefix),
+    {"data", NULL, NULL, radiant_dom_guard_character_data, radiant_dom_member_data, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"node_value", "nodeValue", NULL, radiant_dom_guard_character_data, radiant_dom_member_node_value, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"text_content", "textContent", NULL, radiant_dom_guard_character_data, radiant_dom_member_text_content, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
     BIND_NODE("id", radiant_dom_member_id),
     BIND_NODE("class_name", radiant_dom_member_class_name),
-    BIND_NODE("node_type", radiant_dom_member_node_type),
-    BIND_NODE("parent_node", radiant_dom_member_parent_node),
-    BIND_NODE("parent_element", radiant_dom_member_parent_node),
-    BIND_NODE("is_connected", radiant_dom_member_is_connected),
+    {"node_type", "nodeType", NULL, radiant_dom_guard_node, radiant_dom_member_node_type_any, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"parent_node", "parentNode", NULL, radiant_dom_guard_node, radiant_dom_member_parent_node_any, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"parent_element", "parentElement", NULL, radiant_dom_guard_node, radiant_dom_member_parent_node_any, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"is_connected", "isConnected", NULL, radiant_dom_guard_node, radiant_dom_member_is_connected_any, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
     BIND_NODE("child_element_count", radiant_dom_member_child_element_count),
     BIND_NODE("children", radiant_dom_member_children),
     BIND_NODE("attributes", radiant_dom_member_attributes),
-    BIND_NODE("owner_document", radiant_dom_member_owner_document),
-    BIND_NODE("first_child", radiant_dom_member_first_child),
-    BIND_NODE("last_child", radiant_dom_member_last_child),
-    BIND_NODE("next_sibling", radiant_dom_member_next_sibling),
-    BIND_NODE("previous_sibling", radiant_dom_member_previous_sibling),
+    {"owner_document", "ownerDocument", NULL, radiant_dom_guard_node, radiant_dom_member_owner_document_any, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"first_child", "firstChild", NULL, radiant_dom_guard_node, radiant_dom_member_first_child_any, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"last_child", "lastChild", NULL, radiant_dom_guard_node, radiant_dom_member_last_child_any, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"next_sibling", "nextSibling", NULL, radiant_dom_guard_node, radiant_dom_member_next_sibling_any, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"previous_sibling", "previousSibling", NULL, radiant_dom_guard_node, radiant_dom_member_previous_sibling_any, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
     BIND_NODE("first_element_child", radiant_dom_member_first_element_child),
     BIND_NODE("last_element_child", radiant_dom_member_last_element_child),
     BIND_NODE("next_element_sibling", radiant_dom_member_next_element_sibling),
     BIND_NODE("previous_element_sibling", radiant_dom_member_previous_element_sibling),
-    BIND_NODE("child_nodes", radiant_dom_member_child_nodes),
+    {"child_nodes", "childNodes", NULL, radiant_dom_guard_node, radiant_dom_member_child_nodes_any, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
     {"disabled", NULL, NULL, radiant_dom_guard_dis, radiant_dom_m4b_disabled_get, radiant_dom_m4b_disabled_set, NULL, NULL,
      JUBE_MEMBER_NON_ENUMERABLE},
     {"required", NULL, NULL, radiant_dom_guard_ist, radiant_dom_m4b_required_get, radiant_dom_m4b_required_set, NULL, NULL,
@@ -1166,33 +1261,219 @@ static const JubeMemberBind radiant_dom_node_members[] = {
     {"__lambda_text_control_caret_bounds", "__lambdaTextControlCaretBounds", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d___lambda_text_control_caret_bounds, NULL, 0},
 };
 
+static Item radiant_dom_doc_key(const char* name) {
+    return (Item){.item = s2it(heap_create_name(name))};
+}
+
+#define RADIANT_DOC_GET_FN(fn, js) \
+    static int fn(Item receiver, Item* out) { \
+        return radiant_dom_document_host_get_property(receiver, radiant_dom_doc_key(js), out); \
+    }
+
+#define RADIANT_DOC_CALL_FN(fn, js) \
+    static int fn(Item receiver, Item* args, int argc, Item* out) { \
+        return radiant_dom_document_host_call_method(receiver, radiant_dom_doc_key(js), args, argc, out); \
+    }
+
+RADIANT_DOC_GET_FN(radiant_doc_get_document_element, "documentElement")
+RADIANT_DOC_GET_FN(radiant_doc_get_body, "body")
+RADIANT_DOC_GET_FN(radiant_doc_get_head, "head")
+RADIANT_DOC_GET_FN(radiant_doc_get_title, "title")
+RADIANT_DOC_GET_FN(radiant_doc_get_url, "URL")
+RADIANT_DOC_GET_FN(radiant_doc_get_href, "href")
+RADIANT_DOC_GET_FN(radiant_doc_get_protocol, "protocol")
+RADIANT_DOC_GET_FN(radiant_doc_get_hostname, "hostname")
+RADIANT_DOC_GET_FN(radiant_doc_get_port, "port")
+RADIANT_DOC_GET_FN(radiant_doc_get_pathname, "pathname")
+RADIANT_DOC_GET_FN(radiant_doc_get_search, "search")
+RADIANT_DOC_GET_FN(radiant_doc_get_hash, "hash")
+RADIANT_DOC_GET_FN(radiant_doc_get_host, "host")
+RADIANT_DOC_GET_FN(radiant_doc_get_origin, "origin")
+RADIANT_DOC_GET_FN(radiant_doc_get_location, "location")
+RADIANT_DOC_GET_FN(radiant_doc_get_document, "document")
+RADIANT_DOC_GET_FN(radiant_doc_get_ready_state, "readyState")
+RADIANT_DOC_GET_FN(radiant_doc_get_fonts, "fonts")
+RADIANT_DOC_GET_FN(radiant_doc_get_compat_mode, "compatMode")
+RADIANT_DOC_GET_FN(radiant_doc_get_character_set, "characterSet")
+RADIANT_DOC_GET_FN(radiant_doc_get_charset, "charset")
+RADIANT_DOC_GET_FN(radiant_doc_get_content_type, "contentType")
+RADIANT_DOC_GET_FN(radiant_doc_get_node_type, "nodeType")
+RADIANT_DOC_GET_FN(radiant_doc_get_node_name, "nodeName")
+RADIANT_DOC_GET_FN(radiant_doc_get_owner_document, "ownerDocument")
+RADIANT_DOC_GET_FN(radiant_doc_get_child_nodes, "childNodes")
+RADIANT_DOC_GET_FN(radiant_doc_get_doctype, "doctype")
+RADIANT_DOC_GET_FN(radiant_doc_get_style_sheets, "styleSheets")
+RADIANT_DOC_GET_FN(radiant_doc_get_default_view, "defaultView")
+RADIANT_DOC_GET_FN(radiant_doc_get_implementation, "implementation")
+RADIANT_DOC_GET_FN(radiant_doc_get_design_mode, "designMode")
+RADIANT_DOC_GET_FN(radiant_doc_get_active_element, "activeElement")
+RADIANT_DOC_GET_FN(radiant_doc_get_forms, "forms")
+
+RADIANT_DOC_CALL_FN(radiant_doc_call_assign, "assign")
+RADIANT_DOC_CALL_FN(radiant_doc_call_replace, "replace")
+RADIANT_DOC_CALL_FN(radiant_doc_call_reload, "reload")
+RADIANT_DOC_CALL_FN(radiant_doc_call_focus, "focus")
+RADIANT_DOC_CALL_FN(radiant_doc_call_blur, "blur")
+RADIANT_DOC_CALL_FN(radiant_doc_call_open, "open")
+RADIANT_DOC_CALL_FN(radiant_doc_call_close, "close")
+RADIANT_DOC_CALL_FN(radiant_doc_call_write, "write")
+RADIANT_DOC_CALL_FN(radiant_doc_call_writeln, "writeln")
+RADIANT_DOC_CALL_FN(radiant_doc_call_element_from_point, "elementFromPoint")
+RADIANT_DOC_CALL_FN(radiant_doc_call_exec_command, "execCommand")
+RADIANT_DOC_CALL_FN(radiant_doc_call_query_command_supported, "queryCommandSupported")
+RADIANT_DOC_CALL_FN(radiant_doc_call_query_command_enabled, "queryCommandEnabled")
+RADIANT_DOC_CALL_FN(radiant_doc_call_query_command_indeterm, "queryCommandIndeterm")
+RADIANT_DOC_CALL_FN(radiant_doc_call_query_command_state, "queryCommandState")
+RADIANT_DOC_CALL_FN(radiant_doc_call_query_command_value, "queryCommandValue")
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_range, "createRange")
+RADIANT_DOC_CALL_FN(radiant_doc_call_get_selection, "getSelection")
+RADIANT_DOC_CALL_FN(radiant_doc_call_get_element_by_id, "getElementById")
+RADIANT_DOC_CALL_FN(radiant_doc_call_get_elements_by_class_name, "getElementsByClassName")
+RADIANT_DOC_CALL_FN(radiant_doc_call_get_elements_by_tag_name, "getElementsByTagName")
+RADIANT_DOC_CALL_FN(radiant_doc_call_get_elements_by_name, "getElementsByName")
+RADIANT_DOC_CALL_FN(radiant_doc_call_query_selector, "querySelector")
+RADIANT_DOC_CALL_FN(radiant_doc_call_query_selector_all, "querySelectorAll")
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_element, "createElement")
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_element_ns, "createElementNS")
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_text_node, "createTextNode")
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_document_fragment, "createDocumentFragment")
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_comment, "createComment")
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_processing_instruction, "createProcessingInstruction")
+RADIANT_DOC_CALL_FN(radiant_doc_call_import_node, "importNode")
+RADIANT_DOC_CALL_FN(radiant_doc_call_normalize, "normalize")
+RADIANT_DOC_CALL_FN(radiant_doc_call_adopt_node, "adoptNode")
+RADIANT_DOC_CALL_FN(radiant_doc_call_append_child, "appendChild")
+RADIANT_DOC_CALL_FN(radiant_doc_call_add_event_listener, "addEventListener")
+RADIANT_DOC_CALL_FN(radiant_doc_call_remove_event_listener, "removeEventListener")
+RADIANT_DOC_CALL_FN(radiant_doc_call_dispatch_event, "dispatchEvent")
+
+#define DOC_FIELD(n, js, fn) \
+    {n, js, NULL, NULL, fn, NULL, NULL, NULL, JUBE_MEMBER_NON_ENUMERABLE}
+#define DOC_METHOD(n, js, fn) \
+    {n, js, NULL, NULL, NULL, NULL, fn, NULL, JUBE_MEMBER_NON_ENUMERABLE}
+
+static const JubeMemberBind radiant_document_members[] = {
+    DOC_FIELD("document_element", "documentElement", radiant_doc_get_document_element),
+    DOC_FIELD("body", NULL, radiant_doc_get_body),
+    DOC_FIELD("head", NULL, radiant_doc_get_head),
+    DOC_FIELD("title", NULL, radiant_doc_get_title),
+    DOC_FIELD("url", "URL", radiant_doc_get_url),
+    DOC_FIELD("href", NULL, radiant_doc_get_href),
+    DOC_FIELD("protocol", NULL, radiant_doc_get_protocol),
+    DOC_FIELD("hostname", NULL, radiant_doc_get_hostname),
+    DOC_FIELD("port", NULL, radiant_doc_get_port),
+    DOC_FIELD("pathname", NULL, radiant_doc_get_pathname),
+    DOC_FIELD("search", NULL, radiant_doc_get_search),
+    DOC_FIELD("hash", NULL, radiant_doc_get_hash),
+    DOC_FIELD("host", NULL, radiant_doc_get_host),
+    DOC_FIELD("origin", NULL, radiant_doc_get_origin),
+    DOC_FIELD("location", NULL, radiant_doc_get_location),
+    DOC_FIELD("document", NULL, radiant_doc_get_document),
+    DOC_FIELD("ready_state", "readyState", radiant_doc_get_ready_state),
+    DOC_FIELD("fonts", NULL, radiant_doc_get_fonts),
+    DOC_FIELD("compat_mode", "compatMode", radiant_doc_get_compat_mode),
+    DOC_FIELD("character_set", "characterSet", radiant_doc_get_character_set),
+    DOC_FIELD("charset", NULL, radiant_doc_get_charset),
+    DOC_FIELD("content_type", "contentType", radiant_doc_get_content_type),
+    DOC_FIELD("node_type", "nodeType", radiant_doc_get_node_type),
+    DOC_FIELD("node_name", "nodeName", radiant_doc_get_node_name),
+    DOC_FIELD("owner_document", "ownerDocument", radiant_doc_get_owner_document),
+    DOC_FIELD("child_nodes", "childNodes", radiant_doc_get_child_nodes),
+    DOC_FIELD("doctype", NULL, radiant_doc_get_doctype),
+    DOC_FIELD("style_sheets", "styleSheets", radiant_doc_get_style_sheets),
+    DOC_FIELD("default_view", "defaultView", radiant_doc_get_default_view),
+    DOC_FIELD("implementation", NULL, radiant_doc_get_implementation),
+    DOC_FIELD("design_mode", "designMode", radiant_doc_get_design_mode),
+    DOC_FIELD("active_element", "activeElement", radiant_doc_get_active_element),
+    DOC_FIELD("forms", NULL, radiant_doc_get_forms),
+    DOC_METHOD("assign", NULL, radiant_doc_call_assign),
+    DOC_METHOD("replace", NULL, radiant_doc_call_replace),
+    DOC_METHOD("reload", NULL, radiant_doc_call_reload),
+    DOC_METHOD("focus", NULL, radiant_doc_call_focus),
+    DOC_METHOD("blur", NULL, radiant_doc_call_blur),
+    DOC_METHOD("open", NULL, radiant_doc_call_open),
+    DOC_METHOD("close", NULL, radiant_doc_call_close),
+    DOC_METHOD("write", NULL, radiant_doc_call_write),
+    DOC_METHOD("writeln", NULL, radiant_doc_call_writeln),
+    DOC_METHOD("element_from_point", "elementFromPoint", radiant_doc_call_element_from_point),
+    DOC_METHOD("exec_command", "execCommand", radiant_doc_call_exec_command),
+    DOC_METHOD("query_command_supported", "queryCommandSupported", radiant_doc_call_query_command_supported),
+    DOC_METHOD("query_command_enabled", "queryCommandEnabled", radiant_doc_call_query_command_enabled),
+    DOC_METHOD("query_command_indeterm", "queryCommandIndeterm", radiant_doc_call_query_command_indeterm),
+    DOC_METHOD("query_command_state", "queryCommandState", radiant_doc_call_query_command_state),
+    DOC_METHOD("query_command_value", "queryCommandValue", radiant_doc_call_query_command_value),
+    DOC_METHOD("create_range", "createRange", radiant_doc_call_create_range),
+    DOC_METHOD("get_selection", "getSelection", radiant_doc_call_get_selection),
+    DOC_METHOD("get_element_by_id", "getElementById", radiant_doc_call_get_element_by_id),
+    DOC_METHOD("get_elements_by_class_name", "getElementsByClassName", radiant_doc_call_get_elements_by_class_name),
+    DOC_METHOD("get_elements_by_tag_name", "getElementsByTagName", radiant_doc_call_get_elements_by_tag_name),
+    DOC_METHOD("get_elements_by_name", "getElementsByName", radiant_doc_call_get_elements_by_name),
+    DOC_METHOD("query_selector", "querySelector", radiant_doc_call_query_selector),
+    DOC_METHOD("query_selector_all", "querySelectorAll", radiant_doc_call_query_selector_all),
+    DOC_METHOD("create_element", "createElement", radiant_doc_call_create_element),
+    DOC_METHOD("create_element_ns", "createElementNS", radiant_doc_call_create_element_ns),
+    DOC_METHOD("create_text_node", "createTextNode", radiant_doc_call_create_text_node),
+    DOC_METHOD("create_document_fragment", "createDocumentFragment", radiant_doc_call_create_document_fragment),
+    DOC_METHOD("create_comment", "createComment", radiant_doc_call_create_comment),
+    DOC_METHOD("create_processing_instruction", "createProcessingInstruction", radiant_doc_call_create_processing_instruction),
+    DOC_METHOD("import_node", "importNode", radiant_doc_call_import_node),
+    DOC_METHOD("normalize", NULL, radiant_doc_call_normalize),
+    DOC_METHOD("adopt_node", "adoptNode", radiant_doc_call_adopt_node),
+    DOC_METHOD("append_child", "appendChild", radiant_doc_call_append_child),
+    DOC_METHOD("add_event_listener", "addEventListener", radiant_doc_call_add_event_listener),
+    DOC_METHOD("remove_event_listener", "removeEventListener", radiant_doc_call_remove_event_listener),
+    DOC_METHOD("dispatch_event", "dispatchEvent", radiant_doc_call_dispatch_event),
+};
+
 extern const JubeTypeBinding radiant_dom_type_bindings[];
 const JubeTypeBinding radiant_dom_type_bindings[] = {
     {"range", NULL, radiant_range_members,
      (int32_t)(sizeof(radiant_range_members) / sizeof(radiant_range_members[0])),
-     NULL, NULL, NULL, NULL, radiant_range_prototype_seed},
+     NULL, NULL, NULL, NULL, radiant_range_prototype_seed, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL},
     {"selection", NULL, radiant_selection_members,
      (int32_t)(sizeof(radiant_selection_members) / sizeof(radiant_selection_members[0])),
-     NULL, NULL, NULL, NULL, radiant_selection_prototype_seed, NULL},
+     NULL, NULL, NULL, NULL, radiant_selection_prototype_seed, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL},
     {"inline_style", NULL, radiant_inline_style_members,
      (int32_t)(sizeof(radiant_inline_style_members) / sizeof(radiant_inline_style_members[0])),
-     st_named_get, st_named_set, NULL, NULL, radiant_style_no_prototype, st_named_has},
+     st_named_get, st_named_set, NULL, NULL, radiant_style_no_prototype, st_named_has,
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL},
     {"computed_style", NULL, radiant_computed_style_members,
      (int32_t)(sizeof(radiant_computed_style_members) / sizeof(radiant_computed_style_members[0])),
-     cs_get, cs_named_set, NULL, NULL, radiant_style_no_prototype, st_named_has},
+     cs_get, cs_named_set, NULL, NULL, radiant_style_no_prototype, st_named_has,
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL},
     {"stylesheet", NULL, radiant_stylesheet_members,
      (int32_t)(sizeof(radiant_stylesheet_members) / sizeof(radiant_stylesheet_members[0])),
-     NULL, cssom_swallow_set, sh_indexed_get, NULL, radiant_style_no_prototype, NULL},
+     NULL, cssom_swallow_set, sh_indexed_get, NULL, radiant_style_no_prototype, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL},
     {"css_rule", NULL, radiant_css_rule_members,
      (int32_t)(sizeof(radiant_css_rule_members) / sizeof(radiant_css_rule_members[0])),
-     NULL, cssom_swallow_set, NULL, NULL, radiant_style_no_prototype, NULL},
+     NULL, cssom_swallow_set, NULL, NULL, radiant_style_no_prototype, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL},
     {"rule_style_decl", NULL, radiant_rule_decl_members,
      (int32_t)(sizeof(radiant_rule_decl_members) / sizeof(radiant_rule_decl_members[0])),
-     rd_named_get, rd_named_set, NULL, NULL, radiant_style_no_prototype, rd_named_has},
+     rd_named_get, rd_named_set, NULL, NULL, radiant_style_no_prototype, rd_named_has,
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL},
     {"dom_node", NULL, radiant_dom_node_members,
      (int32_t)(sizeof(radiant_dom_node_members) / sizeof(radiant_dom_node_members[0])),
      radiant_dom_node_named_get, radiant_dom_node_named_set, NULL, NULL, NULL,
-     NULL, &radiant_dom_node_host_ops},
+     NULL, radiant_dom_host_call_method, radiant_dom_host_has_property, radiant_dom_host_delete_property,
+     radiant_dom_host_own_property_descriptor, radiant_dom_host_own_property_names,
+     radiant_dom_node_prototype, NULL},
+    {"document", NULL, radiant_document_members,
+     (int32_t)(sizeof(radiant_document_members) / sizeof(radiant_document_members[0])),
+     radiant_dom_document_host_get_property, radiant_dom_document_host_set_property,
+     NULL, NULL, NULL, NULL, radiant_dom_document_host_call_method,
+     radiant_dom_document_host_has_property, radiant_dom_document_host_delete_property,
+     radiant_dom_document_host_own_property_descriptor, radiant_dom_document_host_own_property_names,
+     radiant_dom_document_prototype, NULL},
+    {"foreign_document", NULL, NULL, 0,
+     radiant_dom_document_host_get_property, radiant_dom_document_host_set_property,
+     NULL, NULL, NULL, NULL, radiant_dom_document_host_call_method,
+     radiant_dom_document_host_has_property, radiant_dom_document_host_delete_property,
+     radiant_dom_document_host_own_property_descriptor, radiant_dom_document_host_own_property_names,
+     radiant_dom_document_prototype, NULL},
 };
 
 extern const int32_t radiant_dom_type_binding_count;

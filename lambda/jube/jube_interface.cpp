@@ -161,6 +161,12 @@ static JubeTypeRecord* jube_record_for(Item receiver) {
     return jube_record_for_type(receiver.vmap->host_type);
 }
 
+void* jube_host_identity(Item item) {
+    JubeTypeRecord* trec = jube_record_for(item);
+    if (!trec) return NULL;
+    return item.vmap->host_data;
+}
+
 // resolve a key against the type's index; guard chains evaluate in
 // declaration order (first matching guard wins)
 static JubeMemberRecord* jube_resolve_member(JubeTypeRecord* trec, Item receiver, Item key) {
@@ -253,7 +259,7 @@ static void* const s_jube_tramps[9] = {
     (void*)jube_tramp_6, (void*)jube_tramp_7, (void*)jube_tramp_8,
 };
 
-static Item jube_member_method_item(JubeMemberRecord* rec) {
+static Item jube_member_js_method_item(JubeMemberRecord* rec) {
     if (rec->method_fn_rooted) return rec->method_fn;
     const JubeHostAPI* host = jube_internal_host_api();
     int arity = rec->arity;
@@ -273,6 +279,85 @@ static Item jube_member_method_item(JubeMemberRecord* rec) {
     host->gc->register_root(&rec->method_fn.item);
     rec->method_fn_rooted = true;
     return rec->method_fn;
+}
+
+static Item jube_lambda_method_invoke(Item env_item, Item* args, int argc) {
+    Item* env = (Item*)env_item.item;
+    Item out = jube_undefined_item();
+    if (env) {
+        jube_member_call(env[0], env[1], args, argc, &out);
+    }
+    return out;
+}
+
+static Item jube_lambda_method_tramp_0(void* env) {
+    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, NULL, 0);
+}
+static Item jube_lambda_method_tramp_1(void* env, Item a0) {
+    Item args[] = {a0};
+    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, args, 1);
+}
+static Item jube_lambda_method_tramp_2(void* env, Item a0, Item a1) {
+    Item args[] = {a0, a1};
+    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, args, 2);
+}
+static Item jube_lambda_method_tramp_3(void* env, Item a0, Item a1, Item a2) {
+    Item args[] = {a0, a1, a2};
+    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, args, 3);
+}
+static Item jube_lambda_method_tramp_4(void* env, Item a0, Item a1, Item a2, Item a3) {
+    Item args[] = {a0, a1, a2, a3};
+    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, args, 4);
+}
+static Item jube_lambda_method_tramp_5(void* env, Item a0, Item a1, Item a2, Item a3,
+                                       Item a4) {
+    Item args[] = {a0, a1, a2, a3, a4};
+    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, args, 5);
+}
+static Item jube_lambda_method_tramp_6(void* env, Item a0, Item a1, Item a2, Item a3,
+                                       Item a4, Item a5) {
+    Item args[] = {a0, a1, a2, a3, a4, a5};
+    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, args, 6);
+}
+static Item jube_lambda_method_tramp_7(void* env, Item a0, Item a1, Item a2, Item a3,
+                                       Item a4, Item a5, Item a6) {
+    Item args[] = {a0, a1, a2, a3, a4, a5, a6};
+    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, args, 7);
+}
+
+static void* const s_jube_lambda_method_tramps[8] = {
+    (void*)jube_lambda_method_tramp_0, (void*)jube_lambda_method_tramp_1,
+    (void*)jube_lambda_method_tramp_2, (void*)jube_lambda_method_tramp_3,
+    (void*)jube_lambda_method_tramp_4, (void*)jube_lambda_method_tramp_5,
+    (void*)jube_lambda_method_tramp_6, (void*)jube_lambda_method_tramp_7,
+};
+
+static Item jube_member_lambda_method_item(Item receiver, JubeMemberRecord* rec) {
+    int arity = rec->arity;
+    if (arity < 0) arity = 0;
+    if (arity > 7) arity = 7;
+    Item* env = (Item*)heap_data_calloc(sizeof(Item) * 2);
+    if (!env) return jube_undefined_item();
+    env[0] = receiver;
+    env[1] = jube_name_item(rec->snake_name);
+    // Lambda projection reads run outside js_input, so Jube methods cannot use
+    // JS function allocation there; capture receiver+name as real Items and
+    // re-enter record dispatch through the normal Lambda closure ABI.
+    Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
+    if (!fn) return jube_undefined_item();
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->arity = (uint8_t)rec->arity;
+    fn->fn_type = NULL;
+    fn->ptr = (fn_ptr)s_jube_lambda_method_tramps[arity];
+    fn->closure_env = env;
+    fn->name = rec->snake_name;
+    fn->closure_field_count = 2;
+    return (Item){.function = fn};
+}
+
+static Item jube_member_method_item(Item receiver, JubeMemberRecord* rec) {
+    if (js_input && js_input->pool) return jube_member_js_method_item(rec);
+    return jube_member_lambda_method_item(receiver, rec);
 }
 
 static Item jube_member_const_item(JubeMemberRecord* rec) {
@@ -317,7 +402,7 @@ static Item jube_type_prototype_for(JubeTypeRecord* trec) {
             JubeMemberRecord* rec = &trec->members[i];
             if (rec->kind != JUBE_MEMBER_METHOD) continue;
             host->value->property_set(trec->prototype, jube_name_item(rec->camel_name),
-                                      jube_member_method_item(rec));
+                                      jube_member_js_method_item(rec));
         }
     }
     return trec->prototype;
@@ -370,7 +455,7 @@ int jube_member_get(Item receiver, Item key, Item* out) {
             *out = jube_member_const_item(rec);
             return 1;
         case JUBE_MEMBER_METHOD:
-            *out = jube_member_method_item(rec);
+            *out = jube_member_method_item(receiver, rec);
             return 1;
         default:
             if (rec->bind && rec->bind->get && rec->bind->get(receiver, out)) return 1;
@@ -444,7 +529,7 @@ int jube_member_projected_get(Item receiver, Item key, Item* out) {
         *out = jube_member_const_item(rec);
         return 1;
     case JUBE_MEMBER_METHOD:
-        *out = jube_member_method_item(rec);
+        *out = jube_member_method_item(receiver, rec);
         return 1;
     default:
         if (rec->bind && rec->bind->get && rec->bind->get(receiver, out)) return 1;
@@ -466,6 +551,14 @@ int jube_member_set(Item receiver, Item key, Item value, Item* out) {
             // migrating types: a converted getter without a converted setter
             // must keep the legacy write behavior (id/className writes)
             if (jube_legacy_ops(trec)) return 0;
+            if (trec->binding && trec->binding->named_set && receiver.vmap->host_data &&
+                    trec->binding->named_set(receiver, jube_name_item(rec->camel_name),
+                                             value, out)) {
+                // Getter-only projected DOM rows still need the record-owned
+                // named setter under the canonical JS name (className, htmlFor)
+                // after VMap snake/camel fallback is removed.
+                return 1;
+            }
             // declared read-only surface swallows writes (pinned DOM1 behavior:
             // no expando shadowing of projected members)
             *out = value;
@@ -501,6 +594,10 @@ int jube_member_call(Item receiver, Item name, Item* args, int argc, Item* out) 
         rec->bind->call(receiver, args, argc, out);
         return 1;
     }
+    if (trec->binding && trec->binding->object_call && receiver.vmap->host_data &&
+            trec->binding->object_call(receiver, name, args, argc, out)) {
+        return 1;
+    }
     // not a declared method: fall through so the engine can read the property
     // (expando-stored functions) and call it
     return 0;
@@ -510,6 +607,11 @@ int jube_member_has(Item receiver, Item key, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
     bool present = jube_resolve_member(trec, receiver, key) != NULL;
+    if (!present && trec->binding && trec->binding->object_has &&
+            receiver.vmap->host_data &&
+            trec->binding->object_has(receiver, key, out)) {
+        return 1;
+    }
     if (!present && jube_legacy_ops(trec)) return 0;
     if (!present && trec->binding && trec->binding->named_has &&
             receiver.vmap->host_data &&
@@ -532,6 +634,10 @@ int jube_member_delete(Item receiver, Item key, Item* out) {
     if (!trec || !out) return 0;
     if (jube_resolve_member(trec, receiver, key)) {
         *out = (Item){.item = b2it(false)};
+        return 1;
+    }
+    if (trec->binding && trec->binding->object_delete && receiver.vmap->host_data &&
+            trec->binding->object_delete(receiver, key, out)) {
         return 1;
     }
     if (jube_legacy_ops(trec)) return 0;
@@ -560,6 +666,10 @@ int jube_member_descriptor(Item receiver, Item key, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
     const JubeHostAPI* host = jube_internal_host_api();
+    if (trec->binding && trec->binding->object_descriptor && receiver.vmap->host_data &&
+            trec->binding->object_descriptor(receiver, key, out)) {
+        return 1;
+    }
     JubeMemberRecord* rec = jube_resolve_member(trec, receiver, key);
     if (rec && rec->kind != JUBE_MEMBER_METHOD && receiver.vmap->host_data) {
         Item value = jube_undefined_item();
@@ -601,6 +711,10 @@ int jube_member_descriptor(Item receiver, Item key, Item* out) {
 int jube_member_own_keys(Item receiver, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
+    if (trec->binding && trec->binding->object_own_keys && receiver.vmap->host_data &&
+            trec->binding->object_own_keys(receiver, out)) {
+        return 1;
+    }
     if (jube_legacy_ops(trec)) return 0;
     const JubeHostAPI* host = jube_internal_host_api();
     Item keys = host->value->array_new(0);
@@ -626,9 +740,57 @@ int jube_member_own_keys(Item receiver, Item* out) {
     return 1;
 }
 
+static bool jube_array_has_string_key(Item keys, const char* chars) {
+    if (!chars || get_type_id(keys) != LMD_TYPE_ARRAY || !keys.array) return false;
+    size_t len = strlen(chars);
+    for (int64_t i = 0; i < keys.array->length; i++) {
+        Item existing = keys.array->items[i];
+        if (get_type_id(existing) != LMD_TYPE_STRING) continue;
+        String* str = it2s(existing);
+        if (str && str->len == len && memcmp(str->chars, chars, len) == 0) return true;
+    }
+    return false;
+}
+
+int jube_member_projection_keys(Item receiver, Item* out) {
+    JubeTypeRecord* trec = jube_record_for(receiver);
+    if (!trec || !out) return 0;
+    const JubeHostAPI* host = jube_internal_host_api();
+    Item keys = host->value->array_new(0);
+    for (int i = 0; i < trec->member_count; i++) {
+        JubeMemberRecord* rec = &trec->members[i];
+        if (rec->kind != JUBE_MEMBER_FIELD) continue;
+        if (rec->bind && rec->bind->guard && !rec->bind->guard(receiver)) continue;
+        if (jube_array_has_string_key(keys, rec->snake_name)) continue;
+        // Lambda projection iteration exposes declared snake_case fields; JS
+        // own-key enumeration remains WebIDL/camelCase through object_own_keys.
+        host->value->array_push(keys, jube_name_item(rec->snake_name));
+    }
+    if (receiver.vmap->host_data) {
+        Item expando = jube_expando_object(receiver, false);
+        if (get_type_id(expando) == LMD_TYPE_MAP) {
+            Item expando_keys = host->script->reflect_own_keys(expando);
+            if (get_type_id(expando_keys) == LMD_TYPE_ARRAY && expando_keys.array) {
+                Array* arr = expando_keys.array;
+                for (int64_t i = 0; i < arr->length; i++) {
+                    host->value->array_push(keys, arr->items[i]);
+                }
+            }
+        }
+    }
+    *out = keys;
+    return 1;
+}
+
 int jube_member_prototype(Item receiver, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
+    if (trec->binding && trec->binding->object_prototype && receiver.vmap->host_data &&
+            trec->binding->object_prototype(receiver, out)) {
+        // DOM nodes need receiver-specific Element/Text/Document prototypes;
+        // a static prototype_seed cannot preserve that WebIDL identity.
+        return 1;
+    }
     // migrating types keep their legacy per-kind prototypes (Element/Node/...)
     if (jube_legacy_ops(trec)) return 0;
     *out = jube_type_prototype_for(trec);

@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <sys/stat.h>
 #ifndef _WIN32
 #include <pthread.h>
 #include <unistd.h>    // for sysconf
@@ -29,6 +30,10 @@ extern "C" Item js_property_get(Item object, Item key);
 extern "C" void js_dom_shutdown(void);
 struct DomDocument;
 extern void free_document(DomDocument* doc);
+
+#ifndef LAMBDA_MIR_CACHE_DEFAULT
+#define LAMBDA_MIR_CACHE_DEFAULT 1
+#endif
 
 // ============================================================================
 // Lambda Home Path
@@ -273,7 +278,8 @@ static void print_elapsed_time(const char* label, win_timer start, win_timer end
         nanoseconds += 1000000000;
     }
     double elapsed_ms = seconds * 1000.0 + nanoseconds / 1e6;
-        log_debug("%s took %.3f ms", label, elapsed_ms);
+    log_debug("%s took %.3f ms", label, elapsed_ms);
+    (void)elapsed_ms;
 }
 #endif
 
@@ -300,10 +306,124 @@ extern __thread Context* input_context;
 // When non-NULL, load_script() uses this instead of runtime->parser.
 static __thread TSParser* tls_parser = NULL;
 
+typedef struct ScriptIndexEntry {
+    const char* path;
+    Script* script;
+} ScriptIndexEntry;
+
+HASHMAP_DEFINE_STRKEY(script_index, ScriptIndexEntry, path)
+
 #ifndef _WIN32
 // Mutex for thread-safe access to runtime->scripts during parallel compilation
 static pthread_mutex_t scripts_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
+
+static Script* runtime_script_index_get(Runtime* runtime, const char* path) {
+    if (!runtime || !runtime->script_index || !path) return NULL;
+    ScriptIndexEntry probe = { .path = path, .script = NULL };
+    const ScriptIndexEntry* found = (const ScriptIndexEntry*)hashmap_get(runtime->script_index, &probe);
+    return found ? found->script : NULL;
+}
+
+static void runtime_script_index_put(Runtime* runtime, Script* script) {
+    if (!runtime || !script || !script->reference) return;
+    if (!runtime->script_index) {
+        runtime->script_index = script_index_new(64);
+    }
+    ScriptIndexEntry entry = { .path = script->reference, .script = script };
+    hashmap_set(runtime->script_index, &entry);
+    if (hashmap_oom(runtime->script_index)) {
+        log_error("mir cache index: failed to index script %s", script->reference);
+    }
+}
+
+static void runtime_script_index_delete(Runtime* runtime, const char* path) {
+    if (!runtime || !runtime->script_index || !path) return;
+    ScriptIndexEntry probe = { .path = path, .script = NULL };
+    hashmap_delete(runtime->script_index, &probe);
+}
+
+static void runtime_script_index_delete_script(Runtime* runtime, Script* script) {
+    if (!runtime || !runtime->script_index || !script || !script->reference) return;
+    if (runtime_script_index_get(runtime, script->reference) != script) return;
+    runtime_script_index_delete(runtime, script->reference);
+}
+
+static void capture_script_file_stat(Script* script, const char* path, bool file_backed) {
+    if (!script || !path || !file_backed) return;
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        script->src_mtime = st.st_mtime;
+        script->src_size = st.st_size;
+    }
+}
+
+static bool script_file_stat_changed(Script* script, const char* path) {
+    if (!script || !path) return false;
+    if (script->src_mtime == 0 && script->src_size == 0) return false;
+    struct stat st;
+    if (stat(path, &st) != 0) return false;
+    return st.st_mtime != script->src_mtime || st.st_size != script->src_size;
+}
+
+static bool script_ptr_list_contains(ArrayList* list, Script* script) {
+    if (!list || !script) return false;
+    for (int i = 0; i < list->length; i++) {
+        if ((Script*)list->data[i] == script) return true;
+    }
+    return false;
+}
+
+static bool script_imports_retired_dep(Script* script, ArrayList* retired) {
+    if (!script || !script->direct_imports || !retired) return false;
+    for (int i = 0; i < script->direct_imports->length; i++) {
+        Script* dep = (Script*)script->direct_imports->data[i];
+        if (script_ptr_list_contains(retired, dep)) return true;
+    }
+    return false;
+}
+
+static void retire_script_cache_entry(Runtime* runtime, Script* script, ArrayList* retired, const char* reason) {
+    if (!runtime || !script || script->cache_retired) return;
+    script->cache_retired = true;
+    runtime_script_index_delete_script(runtime, script);
+    arraylist_append(retired, script);
+    runtime->mir_cache_invalidations++;
+    log_info("mir cache index: retired path=%s index=%d reason=%s",
+             script->reference ? script->reference : "<unknown>", script->index,
+             reason ? reason : "changed dependency");
+}
+
+static void retire_script_cone(Runtime* runtime, Script* root) {
+    if (!runtime || !runtime->scripts || !root) return;
+    ArrayList* retired = arraylist_new(8);
+    retire_script_cache_entry(runtime, root, retired, "source changed");
+
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (int i = 0; i < runtime->scripts->length; i++) {
+            Script* candidate = (Script*)runtime->scripts->data[i];
+            if (!candidate || candidate->cache_retired || !candidate->cache_retain) continue;
+            if (script_imports_retired_dep(candidate, retired)) {
+                retire_script_cache_entry(runtime, candidate, retired, "dependent of changed module");
+                changed = true;
+            }
+        }
+    }
+    arraylist_free(retired);
+}
+
+static Script* runtime_script_index_get_current(Runtime* runtime, const char* path) {
+    Script* script = runtime_script_index_get(runtime, path);
+    if (!script) return NULL;
+    if (script_file_stat_changed(script, path)) {
+        log_info("mir cache index: stale path=%s index=%d", path, script->index);
+        retire_script_cone(runtime, script);
+        return NULL;
+    }
+    return script;
+}
 
 // Persistent last error (survives beyond runner lifetime)
 // This is needed because context points to runner's stack-allocated EvalContext
@@ -1022,14 +1142,7 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
             for (int i = 1; i < count; i++) {
                 if (nodes[i].depth != level || !nodes[i].source) continue;
                 // check if already in cache
-                bool cached = false;
-                for (int j = 0; j < runtime->scripts->length; j++) {
-                    Script* s = (Script*)runtime->scripts->data[j];
-                    if (strcmp(s->reference, nodes[i].path) == 0) {
-                        cached = true;
-                        break;
-                    }
-                }
+                bool cached = runtime_script_index_get_current(runtime, nodes[i].path) != NULL;
                 if (!cached) {
                     args[actual].runtime = runtime;
                     args[actual].node = &nodes[i];
@@ -1090,11 +1203,17 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
         // Precompile adds them in topological order (leaves first), so we reverse.
         int pre_end = runtime->scripts->length;
         for (int i = pre_start, j = pre_end - 1; i < j; i++, j--) {
+            Script* left = (Script*)runtime->scripts->data[i];
+            Script* right = (Script*)runtime->scripts->data[j];
+            if ((left && left->cache_retain) || (right && right->cache_retain)) {
+                log_error("mir cache index: refusing to renumber retained precompiled module");
+                break;
+            }
             void* tmp = runtime->scripts->data[i];
             runtime->scripts->data[i] = runtime->scripts->data[j];
             runtime->scripts->data[j] = tmp;
-            ((Script*)runtime->scripts->data[i])->index = i;
-            ((Script*)runtime->scripts->data[j])->index = j;
+            if (runtime->scripts->data[i]) ((Script*)runtime->scripts->data[i])->index = i;
+            if (runtime->scripts->data[j]) ((Script*)runtime->scripts->data[j])->index = j;
         }
     }
 
@@ -1140,37 +1259,38 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
     }
 
-    // find the script in the list of scripts (thread-safe)
+    // find the script in the path index (thread-safe)
 #ifndef _WIN32
     pthread_mutex_lock(&scripts_mutex);
 #endif
-    for (int i = 0; i < runtime->scripts->length; i++) {
-        Script *script = (Script*)runtime->scripts->data[i];
-        if (strcmp(script->reference, lookup_path) == 0) {
-            // circular import detection: script is in list but still being loaded
-            if (script->is_loading) {
-#ifndef _WIN32
-                pthread_mutex_unlock(&scripts_mutex);
-#endif
-                log_error("Circular import detected: %s", lookup_path);
-                fprintf(stderr, "Error: Circular import detected: %s\n", lookup_path);
-                if (canonical_path) mem_free(canonical_path);
-                return NULL;
-            }
+    Script* cached_script = runtime_script_index_get_current(runtime, lookup_path);
+    if (cached_script) {
+        // circular import detection: script is in list but still being loaded
+        if (cached_script->is_loading) {
 #ifndef _WIN32
             pthread_mutex_unlock(&scripts_mutex);
 #endif
-            log_info("Script %s is already loaded.", lookup_path);
+            log_error("Circular import detected: %s", lookup_path);
+            fprintf(stderr, "Error: Circular import detected: %s\n", lookup_path);
             if (canonical_path) mem_free(canonical_path);
-            return script;
+            return NULL;
         }
+#ifndef _WIN32
+        pthread_mutex_unlock(&scripts_mutex);
+#endif
+        runtime->mir_cache_hits++;
+        log_info("mir cache index: hit path=%s index=%d retained=%d",
+                 lookup_path, cached_script->index, cached_script->cache_retain ? 1 : 0);
+        if (canonical_path) mem_free(canonical_path);
+        return cached_script;
     }
+    runtime->mir_cache_misses++;
+    log_info("mir cache index: miss path=%s", lookup_path);
     // script not found — create stub and register immediately to prevent duplicates
     Script *new_script = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_SYSTEM);
     new_script->reference = mem_strdup(lookup_path, MEM_CAT_SYSTEM);
     new_script->is_loading = true;
-    arraylist_append(runtime->scripts, new_script);
-    new_script->index = runtime->scripts->length - 1;
+    runtime_register_script(runtime, new_script);
 #ifndef _WIN32
     pthread_mutex_unlock(&scripts_mutex);
 #endif
@@ -1180,7 +1300,12 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     const char* script_source = source ? mem_strdup(source, MEM_CAT_SYSTEM) : read_text_file(lookup_path);
     if (!script_source) {
         log_error("Error: Failed to read source code from %s", lookup_path);
-        new_script->is_loading = false;
+        // failed stubs must leave neither a live slot nor an index entry for later imports
+        int failed_index = new_script->index;
+        runtime_free_script(runtime, new_script, true);
+        if (runtime->scripts && failed_index >= 0 && failed_index < runtime->scripts->length) {
+            runtime->scripts->data[failed_index] = NULL;
+        }
         if (canonical_path) mem_free(canonical_path);
         return NULL;
     }
@@ -1205,10 +1330,12 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         new_script->directory = mem_strdup("./", MEM_CAT_SYSTEM);
     }
     log_debug("script directory: %s", new_script->directory);
-    if (canonical_path) mem_free(canonical_path);
     new_script->source = script_source;
+    capture_script_file_stat(new_script, lookup_path, source == NULL || is_import);
+    if (canonical_path) mem_free(canonical_path);
     log_debug("script source length: %d", (int)strlen(new_script->source));
     new_script->is_main = !is_import;  // main script is not an import
+    new_script->cache_retain = false;
 
     // Initialize decimal context (use shared unlimited context for transpiler)
     new_script->decimal_ctx = decimal_unlimited_context();
@@ -1240,6 +1367,13 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         log_error("Error: Failed to compile script %s", script_path);
         return NULL;
     }
+    // L1 cache can be disabled for timing runs while preserving same-run import dedup.
+    new_script->cache_retain = is_import && runtime->use_mir_direct &&
+        !runtime->mir_cache_disabled && !new_script->cache_cross_lang_tainted;
+    if (new_script->cache_retain) {
+        log_info("mir cache index: retaining import path=%s index=%d", new_script->reference, new_script->index);
+    }
+    runtime->mir_cache_compiles++;
 
     // Register in unified module registry for cross-language imports.
     // Only when the runtime context (heap, name_pool) is already initialized —
@@ -1341,7 +1475,7 @@ void runner_setup_context(Runner* runner) {
 extern "C" Item path_resolve_for_iteration(Path* path);
 
 // Forward declare BSS root registration from mir.c
-extern "C" void register_bss_gc_roots(void* mir_ctx);
+extern "C" void reset_and_register_bss_gc_roots(void* mir_ctx);
 
 void resolve_sys_paths_recursive(Item item) {
     TypeId type_id = get_type_id(item);
@@ -1383,7 +1517,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
 
     // Register BSS global variables as GC roots (module-level let bindings)
     if (runner->script->jit_context) {
-        register_bss_gc_roots((void*)runner->script->jit_context);
+        reset_and_register_bss_gc_roots((void*)runner->script->jit_context);
     }
 
     // set the run_main flag in the execution context
@@ -1512,13 +1646,73 @@ void runtime_init(Runtime* runtime) {
     memset(runtime, 0, sizeof(Runtime));
     runtime->parser = lambda_parser();
     runtime->scripts = arraylist_new(16);
+    runtime->script_index = script_index_new(64);
     runtime->max_errors = 10;  // default error threshold
     runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
     runtime->transpile_dir = NULL;  // default: no file output; set via --transpile-dir
     runtime->dry_run = false;  // default: real IO
+    const char* disable_mir_cache = shell_getenv("LAMBDA_DISABLE_MIR_CACHE");
+    runtime->mir_cache_disabled = (LAMBDA_MIR_CACHE_DEFAULT == 0) ||
+        (disable_mir_cache &&
+         (strcmp(disable_mir_cache, "1") == 0 || strcmp(disable_mir_cache, "true") == 0));
+    // debug and release builds enable retained MIR imports by default; this opt-out is for timing and emergency bisecting.
+    if (runtime->mir_cache_disabled) {
+        log_info("mir cache index: retained module cache disabled by build default or LAMBDA_DISABLE_MIR_CACHE");
+    }
     module_registry_init();
     jube_register_builtin_modules();
     dom_set_runtime_cleanup_hook(runtime_cleanup);  // wire DOM-layer cleanup hook
+}
+
+void runtime_register_script(Runtime* runtime, Script* script) {
+    if (!runtime || !runtime->scripts || !script) return;
+    arraylist_append(runtime->scripts, script);
+    script->index = runtime->scripts->length - 1;
+    runtime_script_index_put(runtime, script);
+}
+
+void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
+    if (!script) return;
+    if (remove_index && script->reference) {
+        runtime_script_index_delete_script(runtime, script);
+    }
+    if (script->reference) mem_free((void*)script->reference);
+    if (script->source) mem_free((void*)script->source);
+    if (script->directory) mem_free((void*)script->directory);
+    if (script->syntax_tree) ts_tree_delete(script->syntax_tree);
+    if (script->pool) pool_destroy(script->pool);
+    if (script->type_list) arraylist_free(script->type_list);
+    if (script->direct_imports) arraylist_free(script->direct_imports);
+    if (script->jit_context) jit_cleanup(script->jit_context);
+    // decimal context is shared global; cached/free paths only clear the borrowed pointer
+    script->decimal_ctx = NULL;
+    mem_free(script);
+}
+
+void runtime_teardown_batch_scripts(Runtime* runtime) {
+    if (!runtime || !runtime->scripts) return;
+    for (int i = 0; i < runtime->scripts->length; i++) {
+        Script* script = (Script*)runtime->scripts->data[i];
+        if (!script) continue;
+        // retained modules keep compile pools/JIT contexts alive until invalidation or cleanup
+        if (script->cache_retain && !script->cache_retired) continue;
+        runtime_free_script(runtime, script, true);
+        runtime->scripts->data[i] = NULL;
+    }
+}
+
+void runtime_log_mir_cache_summary(Runtime* runtime) {
+    if (!runtime) return;
+    int lookups = runtime->mir_cache_hits + runtime->mir_cache_misses;
+    double hit_rate = lookups > 0 ? (100.0 * (double)runtime->mir_cache_hits / (double)lookups) : 0.0;
+    size_t retained = runtime->script_index ? hashmap_count(runtime->script_index) : 0;
+    log_info("mir cache index: summary modules_cached=%zu compiles_saved=%d hit_rate=%.1f%% compiles=%d hits=%d misses=%d invalidations=%d disabled=%d",
+             retained, runtime->mir_cache_hits, hit_rate,
+             runtime->mir_cache_compiles, runtime->mir_cache_hits,
+             runtime->mir_cache_misses, runtime->mir_cache_invalidations,
+             runtime->mir_cache_disabled ? 1 : 0);
+    (void)retained;
+    (void)hit_rate;
 }
 
 // Reset the retained heap, nursery, and name_pool on a Runtime.
@@ -1622,18 +1816,15 @@ void runtime_cleanup(Runtime* runtime) {
     if (runtime->scripts) {
         for (int i = 0; i < runtime->scripts->length; i++) {
             Script *script = (Script*)runtime->scripts->data[i];
-            if (script->reference) mem_free((void*)script->reference);
-            if (script->source) mem_free((void*)script->source);
-            if (script->directory) mem_free((void*)script->directory);
-            if (script->syntax_tree) ts_tree_delete(script->syntax_tree);
-            if (script->pool) pool_destroy(script->pool);
-            if (script->type_list) arraylist_free(script->type_list);
-            if (script->jit_context) jit_cleanup(script->jit_context);
-            // decimal context is now shared global - don't free it
-            script->decimal_ctx = NULL;
-            mem_free(script);
+            if (!script) continue;
+            runtime_free_script(runtime, script, false);
+            runtime->scripts->data[i] = NULL;
         }
         arraylist_free(runtime->scripts);
         runtime->scripts = NULL;
+    }
+    if (runtime->script_index) {
+        hashmap_free(runtime->script_index);
+        runtime->script_index = NULL;
     }
 }

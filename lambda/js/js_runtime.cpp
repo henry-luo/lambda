@@ -59,8 +59,8 @@ extern "C" int64_t it2i(Item item);
 // Tune8 §2.2: js_private_property_set now takes a strict flag (0 = sloppy,
 // 1 = strict with proxy-throw); js_private_property_set_strict removed.
 extern "C" Item js_private_property_set(Item object, Item key, Item value, int64_t strict);
-extern "C" void js_dom_collection_before_property_get(Item object, Item key);
-extern "C" void js_dom_options_collection_before_property_set(Item object, Item key, Item value);
+extern "C" void js_array_exotic_before_property_get(Item object, Item key);
+extern "C" void js_array_exotic_before_property_set(Item object, Item key, Item value);
 extern "C" Item js_new_number_wrapper(Item arg);
 extern "C" Item js_new_boolean_wrapper(Item arg);
 extern "C" Item js_new_string_wrapper(Item arg);
@@ -4183,7 +4183,7 @@ extern "C" Item js_property_get(Item object, Item key) {
             key = js_to_property_key(key);
             if (js_check_exception()) return make_js_undefined();
         }
-        js_dom_collection_before_property_get(object, key);
+        js_array_exotic_before_property_get(object, key);
         // Array index access
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
@@ -5764,7 +5764,7 @@ static Item js_property_set_array(Item object, Item key, Item value) {
         key = js_to_property_key(key);
         if (js_check_exception()) return value;
     }
-    js_dom_options_collection_before_property_set(object, key, value);
+    js_array_exotic_before_property_set(object, key, value);
     // Handle arr.length = newLength (resize array)
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
@@ -6751,7 +6751,7 @@ extern "C" Item js_property_access(Item object, Item key) {
     if (type == LMD_TYPE_ARRAY && get_type_id(key) == LMD_TYPE_INT) {
         // Live DOM collections must refresh before dense array fast reads;
         // otherwise optimized member access can observe stale option slots.
-        js_dom_collection_before_property_get(object, key);
+        js_array_exotic_before_property_get(object, key);
         Item dense_value = ItemNull;
         int64_t idx = it2i(key);
         if (js_array_fast_own_dense_get(object, idx, &dense_value)) {
@@ -8123,7 +8123,7 @@ extern "C" Item js_array_get(Item array, Item index) {
     }
     // Live DOM collections share array storage but must refresh before any
     // indexed read; MIR fallback can call this helper directly.
-    js_dom_collection_before_property_get(array, index);
+    js_array_exotic_before_property_get(array, index);
 
     // ES spec: boolean keys are coerced to "true"/"false" string property names,
     // not numeric indices. Route to companion map lookup.
@@ -8209,7 +8209,7 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
     if (get_type_id(array) == LMD_TYPE_ARRAY) {
         // Live DOM collections share array storage but must refresh before any
         // indexed read; optimized MIR array access calls this fallback directly.
-        js_dom_collection_before_property_get(array, (Item){.item = i2it((int)index)});
+        js_array_exotic_before_property_get(array, (Item){.item = i2it((int)index)});
         if (index < 0 || index > 0xFFFFFFFELL) {
             char idx_buf[32];
             int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
@@ -18641,13 +18641,6 @@ extern "C" Item js_generator_throw(Item generator, Item error);
 
 // Map method dispatcher: handles collection methods, falls back to property access
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
-    // document.implementation singleton methods
-    if (js_is_dom_implementation(obj)) {
-        Item out;
-        if (js_dom_implementation_method(method_name, args, argc, &out)) return out;
-        return ItemNull;
-    }
-
     if (get_type_id(obj) == LMD_TYPE_VMAP && js_host_object_type(obj)) {
         Item result = ItemNull;
         if (js_host_object_call_method(obj, method_name, args, argc, &result)) {

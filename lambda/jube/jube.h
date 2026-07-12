@@ -116,6 +116,15 @@ typedef struct JubeTypeBinding {
     // exists (e.g. a CSS property name on a style object) without running the
     // named getter; NULL = named names are not part of `has`
     int (*named_has)(Item receiver, Item key, Item* out);
+    // object-operation hooks for large WebIDL surfaces whose descriptor,
+    // own-key, delete, and prototype semantics are receiver-specific. These
+    // are record-owned hooks, not legacy host_ops fallbacks.
+    int (*object_call)(Item receiver, Item method_name, Item* args, int argc, Item* out);
+    int (*object_has)(Item receiver, Item key, Item* out);
+    int (*object_delete)(Item receiver, Item key, Item* out);
+    int (*object_descriptor)(Item receiver, Item key, Item* out);
+    int (*object_own_keys)(Item receiver, Item* out);
+    int (*object_prototype)(Item receiver, Item* out);
     // TRANSITIONAL (Phase 4 migration): when set, record misses delegate to
     // this legacy host-ops table instead of the generic expando/prototype
     // paths, so a large type (dom_node) converts cluster-by-cluster while

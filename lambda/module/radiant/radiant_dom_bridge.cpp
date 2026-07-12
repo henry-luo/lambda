@@ -317,6 +317,10 @@ static bool radiant_dom_is_internal_attr(const char* name) {
     return name && strncmp(name, "__lambda_", 9) == 0;
 }
 
+static bool radiant_dom_is_attr_name_projection(const char* name) {
+    return name && strchr(name, '-') != nullptr;
+}
+
 static Item radiant_dom_class_name_item(DomElement* elem) {
     if (!elem || elem->class_count == 0) return radiant_dom_string_item("");
     StrBuf* sb = strbuf_new_cap(64);
@@ -1151,8 +1155,6 @@ static DomElement* radiant_dom_member_elem(Item receiver) {
     }
 
 RADIANT_MEMBER_GET(radiant_dom_member_tag_name,
-    (Item){.item = s2it(radiant_dom_uppercase_name(elem->tag_name))})
-RADIANT_MEMBER_GET(radiant_dom_member_node_name,
     (Item){.item = s2it(radiant_dom_uppercase_name(elem->tag_name))})
 RADIANT_MEMBER_GET(radiant_dom_member_local_name,
     radiant_dom_string_item(elem->tag_name))
@@ -2155,6 +2157,127 @@ RADIANT_C_API int radiant_dom_guard_text(Item receiver) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
     return node && node->is_text();
 }
+RADIANT_C_API int radiant_dom_guard_character_data(Item receiver) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    return node && (node->is_text() || node->is_comment());
+}
+
+static int radiant_dom_member_character_data_property(Item receiver,
+                                                      const char* prop,
+                                                      Item* out) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    if (!node || !prop || !out) return 0;
+    if (node->is_text()) {
+        return radiant_dom_get_text_property(node->as_text(), prop, out) ? 1 : 0;
+    }
+    if (node->is_comment()) {
+        return radiant_dom_get_comment_property(node->as_comment(), prop, out) ? 1 : 0;
+    }
+    return 0;
+}
+
+RADIANT_C_API int radiant_dom_member_data(Item receiver, Item* out) {
+    return radiant_dom_member_character_data_property(receiver, "data", out);
+}
+
+RADIANT_C_API int radiant_dom_member_node_value(Item receiver, Item* out) {
+    return radiant_dom_member_character_data_property(receiver, "nodeValue", out);
+}
+
+RADIANT_C_API int radiant_dom_member_text_content(Item receiver, Item* out) {
+    return radiant_dom_member_character_data_property(receiver, "textContent", out);
+}
+
+RADIANT_C_API int radiant_dom_member_node_name(Item receiver, Item* out) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    if (!node || !out) return 0;
+    if (node->is_element()) {
+        *out = (Item){.item = s2it(radiant_dom_uppercase_name(node->as_element()->tag_name))};
+        return 1;
+    }
+    // Text/comment wrappers no longer fall through VMap camelization; their
+    // shared Node fields must be resolved by the record table directly.
+    return radiant_dom_member_character_data_property(receiver, "nodeName", out);
+}
+
+RADIANT_C_API int radiant_dom_member_node_type_any(Item receiver, Item* out) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    if (!node || !out) return 0;
+    if (node->is_element()) {
+        *out = radiant_dom_int_item((int64_t)node->as_element()->node_type);
+        return 1;
+    }
+    return radiant_dom_member_character_data_property(receiver, "nodeType", out);
+}
+
+RADIANT_C_API int radiant_dom_member_parent_node_any(Item receiver, Item* out) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    if (!node || !out) return 0;
+    DomNode* parent = node->parent;
+    *out = (parent && parent->is_element()) ? radiant_dom_node_item(parent) : ItemNull;
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_member_is_connected_any(Item receiver, Item* out) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    if (!node || !out) return 0;
+    *out = (Item){.item = b2it(radiant_dom_node_is_connected(node) ? 1 : 0)};
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_member_owner_document_any(Item receiver, Item* out) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    if (!node || !out) return 0;
+    if (node->is_element() && node->as_element()->doc) {
+        *out = radiant_dom_document_item(node->as_element()->doc);
+        return 1;
+    }
+    DomNode* parent = node->parent;
+    DomDocument* doc = (parent && parent->is_element()) ? parent->as_element()->doc : nullptr;
+    *out = doc ? radiant_dom_document_item(doc) : js_dom_owner_document_for_node((void*)node);
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_member_first_child_any(Item receiver, Item* out) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    if (!node || !out) return 0;
+    *out = node->is_element()
+        ? radiant_dom_node_item(radiant_dom_first_script_visible_child(node->as_element()))
+        : ItemNull;
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_member_last_child_any(Item receiver, Item* out) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    if (!node || !out) return 0;
+    *out = node->is_element()
+        ? radiant_dom_node_item(radiant_dom_last_script_visible_child(node->as_element()))
+        : ItemNull;
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_member_next_sibling_any(Item receiver, Item* out) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    if (!node || !out) return 0;
+    *out = radiant_dom_node_item(radiant_dom_next_script_visible_sibling(node));
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_member_previous_sibling_any(Item receiver, Item* out) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    if (!node || !out) return 0;
+    *out = radiant_dom_node_item(radiant_dom_prev_script_visible_sibling(node));
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_member_child_nodes_any(Item receiver, Item* out) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    if (!node || !out) return 0;
+    *out = node->is_element()
+        ? js_dom_live_child_collection_bridge((void*)node->as_element(), false)
+        : radiant_dom_empty_node_list();
+    return 1;
+}
 RADIANT_C_API int radiant_dom_m4d_named_item(Item r, Item* args, int argc, Item* out) {
     *out = radiant_dom_element_method(r,
         (Item){.item = s2it(heap_create_name("namedItem"))}, args, argc);
@@ -2547,6 +2670,17 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
     if (!node->is_element()) return false;
 
     DomElement* elem = node->as_element();
+    if (radiant_dom_is_attr_name_projection(prop) && !radiant_dom_is_internal_attr(prop)) {
+        const char* text = js_dom_to_attribute_cstr(value);
+        // Dashed Lambda projection writes used to be routed by VMap's DOM-only
+        // setAttribute shortcut; after Phase 5 removes that shortcut, the DOM
+        // named setter must own attr-name writes before JS property fallback.
+        dom_element_set_attribute(elem, prop, text ? text : "");
+        js_dom_after_set_attribute((void*)elem, prop, text ? text : "");
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        *out = value;
+        return true;
+    }
     if (strcmp(prop, "id") == 0) {
         const char* id_str = fn_to_cstr(value);
         if (id_str && dom_element_set_attribute(elem, "id", id_str)) {
@@ -3260,6 +3394,12 @@ RADIANT_C_API int radiant_dom_node_named_set(Item object, Item key, Item value, 
     return radiant_dom_host_set_property(object, key, value, out);
 }
 
+RADIANT_C_API int radiant_dom_node_prototype(Item object, Item* out) {
+    if (!out || !radiant_dom_unwrap_node(object)) return 0;
+    *out = radiant_dom_host_prototype(object);
+    return 1;
+}
+
 RADIANT_C_API int radiant_dom_host_call_method(Item object,
                                             Item method_name,
                                             Item* args,
@@ -3554,6 +3694,12 @@ RADIANT_C_API Item radiant_dom_document_host_prototype(Item object) {
     // Object surface in the registered host op instead of an engine-side brand check.
     Item proto = js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
+}
+
+RADIANT_C_API int radiant_dom_document_prototype(Item object, Item* out) {
+    if (!out) return 0;
+    *out = radiant_dom_document_host_prototype(object);
+    return 1;
 }
 
 static DomElement* radiant_dom_document_child_by_tag(DomDocument* doc, const char* tag) {

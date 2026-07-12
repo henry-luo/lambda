@@ -5,6 +5,8 @@ extern "C" {
 #endif
 
 #include <tree_sitter/api.h>
+#include <sys/types.h>
+#include <time.h>
 #include "ts-enum.h"
 #include "../lib/mempool.h"
 
@@ -664,7 +666,12 @@ struct Script : Input {
     int index;                  // index of the script in the runtime scripts list
     bool is_main;               // true if this is the main entry-point script
     bool is_loading;            // true while script is being loaded (for circular import detection)
+    bool cache_retain;          // true when an imported module may survive per-script teardown
+    bool cache_retired;         // true when a retained cache slot has been invalidated
+    bool cache_cross_lang_tainted;  // true when the import subtree contains a cross-language module
     const char* source;
+    time_t src_mtime;           // file timestamp captured when loaded
+    off_t src_size;             // file size captured when loaded
     TSTree* syntax_tree;
 
     // AST-specific fields (beyond Input)
@@ -683,6 +690,8 @@ struct Script : Input {
     // Function name mapping: MIR internal name → Lambda human-readable name
     // Used by build_debug_info_table() to get user-friendly names
     struct hashmap* func_name_map;  // maps char* (MIR name) → char* (Lambda name)
+
+    ArrayList* direct_imports;  // direct Lambda import dependencies, populated by MIR cache phases
 };
 
 typedef struct Runtime Runtime;

@@ -217,9 +217,8 @@ void* create_js_import_script(const char* resolved_path, Item namespace_obj, voi
     script->const_list = arraylist_new(4);
     script->type_list = arraylist_new(4);
 
-    // Register in the runtime's scripts list
-    arraylist_append(runtime->scripts, script);
-    script->index = runtime->scripts->length - 1;
+    // register in the runtime's script list and path index
+    runtime_register_script(runtime, script);
 
     // Create synthetic AstScript root
     AstScript* ast = (AstScript*)pool_calloc(pool, sizeof(AstScript));
