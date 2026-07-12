@@ -12,7 +12,6 @@
  * Supports nested lists with proper indentation handling.
  */
 #include "block_common.hpp"
-#include <cctype>
 #include <cstdio>
 #include "../../../../lib/mem.h"
 #include "lib/arraylist.h"

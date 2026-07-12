@@ -29,8 +29,7 @@ static bool grid_item_has_in_flow_content(ViewBlock* item) {
         if (!child->is_element()) continue;
         ViewBlock* child_block = lam::view_as_block(child->as_element());
         if (!child_block) return true;
-        if (child_block->display.outer == CSS_VALUE_NONE ||
-            child_block->display.inner == CSS_VALUE_NONE ||
+        if (layout_block_is_display_none(child_block) ||
             layout_view_is_abs_or_fixed(child_block)) {
             continue;
         }

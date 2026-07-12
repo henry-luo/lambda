@@ -10,7 +10,7 @@
  */
 #include "inline_common.hpp"
 #include <cstring>
-#include <cctype>
+#include "lib/str.h"
 
 namespace lambda {
 namespace markup {
@@ -133,7 +133,7 @@ Item parse_rst_trailing_underscore_reference(MarkupParser* parser, const char** 
 
     // Find start of reference (word before underscore)
     const char* ref_start = pos - 1;
-    while (ref_start > current_line && !isspace((unsigned char)*(ref_start - 1))) {
+    while (ref_start > current_line && !str_is_space(*(ref_start - 1))) {
         ref_start--;
     }
 
@@ -327,20 +327,11 @@ Item parse_rst_reference_link(MarkupParser* parser, const char** text) {
     // Look up the reference in link_defs_ (RST refs are case-insensitive)
     const char* url = nullptr;
     for (int i = 0; i < parser->link_def_count_; i++) {
-        // Compare case-insensitively
-        bool match = true;
         size_t label_len = strlen(parser->link_defs_[i].label);
-        if (label_len == ref_len) {
-            for (size_t j = 0; j < ref_len; j++) {
-                if (tolower((unsigned char)ref_name[j]) != tolower((unsigned char)parser->link_defs_[i].label[j])) {
-                    match = false;
-                    break;
-                }
-            }
-            if (match) {
-                url = parser->link_defs_[i].url;
-                break;
-            }
+        if (label_len == ref_len &&
+            str_ieq(ref_name, ref_len, parser->link_defs_[i].label, label_len)) {
+            url = parser->link_defs_[i].url;
+            break;
         }
     }
 
@@ -424,7 +415,7 @@ Item parse_asciidoc_inline(MarkupParser* parser, const char* text) {
  * Org-mode emphasis requires markers to be bounded by whitespace or punctuation.
  */
 static inline bool is_org_word_boundary(char c) {
-    return c == '\0' || isspace((unsigned char)c) ||
+    return c == '\0' || str_is_space(c) ||
            c == '(' || c == ')' || c == '[' || c == ']' ||
            c == '{' || c == '}' || c == '<' || c == '>' ||
            c == ',' || c == '.' || c == ';' || c == ':' ||

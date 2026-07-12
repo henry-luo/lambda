@@ -26,7 +26,7 @@
 #include "lib/log.h"
 #include "lib/mem.h"
 #include "lib/base64.h"
-#include <ctype.h>
+#include "lib/str.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -390,7 +390,7 @@ static bool parse_hex_token(const char** pp, const char* end,
         if (c >= '0' && c <= '9') d = c - '0';
         else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
         else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
-        else if (isspace((unsigned char)c)) continue;
+        else if (str_is_space(c)) continue;
         else return false;
         if (hex_chars >= 8) return false;  // up to 32 bits
         v = (v << 4) | (uint32_t)d;
@@ -405,7 +405,7 @@ static bool parse_hex_token(const char** pp, const char* end,
 }
 
 static const char* skip_ws(const char* s, const char* end) {
-    while (s < end && (isspace((unsigned char)*s) || *s == '%')) {
+    while (s < end && (str_is_space(*s) || *s == '%')) {
         if (*s == '%') {  // comment to end-of-line
             while (s < end && *s != '\n' && *s != '\r') s++;
         } else {
@@ -422,7 +422,7 @@ static const char* find_keyword(const char* s, const char* end, const char* kw) 
     while (s + kl <= end) {
         if (memcmp(s, kw, kl) == 0) {
             const char* after = s + kl;
-            if (after >= end || isspace((unsigned char)*after) ||
+            if (after >= end || str_is_space(*after) ||
                 *after == '<' || *after == '[') {
                 return after;
             }
@@ -487,7 +487,7 @@ static int parse_bfchar_dst(const char** pp, const char* end,
         if (c >= '0' && c <= '9') d = c - '0';
         else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
         else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
-        else if (isspace((unsigned char)c)) continue;
+        else if (str_is_space(c)) continue;
         else return 0;
         acc = (acc << 4) | (uint32_t)d;
         hex_chars++;
@@ -968,13 +968,13 @@ static void osp_skip_ws(ObjStreamParser* p) {
             while (p->pos < p->end && *p->pos != '\n' && *p->pos != '\r') p->pos++;
             continue;
         }
-        if (!isspace(c)) break;
+        if (!str_is_space((char)c)) break;
         p->pos++;
     }
 }
 
 static bool osp_is_delim(char c) {
-    return isspace((unsigned char)c) || c == '/' || c == '(' || c == ')' ||
+    return str_is_space(c) || c == '/' || c == '(' || c == ')' ||
            c == '<' || c == '>' || c == '[' || c == ']' || c == '{' ||
            c == '}' || c == '%';
 }
@@ -1104,12 +1104,12 @@ static Item osp_parse_number_or_ref(ObjStreamParser* p) {
     long obj_num = strtol(p->pos, &end, 10);
     if (end != p->pos) {
         const char* after_obj = end;
-        while (after_obj < p->end && isspace((unsigned char)*after_obj)) after_obj++;
-        if (after_obj < p->end && (*after_obj == '+' || *after_obj == '-' || isdigit((unsigned char)*after_obj))) {
+        while (after_obj < p->end && str_is_space(*after_obj)) after_obj++;
+        if (after_obj < p->end && (*after_obj == '+' || *after_obj == '-' || str_is_digit(*after_obj))) {
             char* gen_end = nullptr;
             long gen_num = strtol(after_obj, &gen_end, 10);
             const char* after_gen = gen_end;
-            while (after_gen < p->end && isspace((unsigned char)*after_gen)) after_gen++;
+            while (after_gen < p->end && str_is_space(*after_gen)) after_gen++;
             if (gen_end != after_obj && after_gen < p->end && *after_gen == 'R') {
                 p->pos = after_gen + 1;
                 return osp_make_ref(p, (int)obj_num, (int)gen_num);
@@ -1218,7 +1218,7 @@ static Item osp_parse_object(ObjStreamParser* p, int depth) {
         Map* dict = osp_parse_dictionary(p, depth);
         return dict ? (Item){.item = (uint64_t)dict} : (Item){.item = ITEM_ERROR};
     }
-    if (*p->pos == '+' || *p->pos == '-' || *p->pos == '.' || isdigit((unsigned char)*p->pos)) {
+    if (*p->pos == '+' || *p->pos == '-' || *p->pos == '.' || str_is_digit(*p->pos)) {
         return osp_parse_number_or_ref(p);
     }
     p->pos++;

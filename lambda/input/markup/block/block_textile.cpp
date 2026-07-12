@@ -8,8 +8,8 @@
  */
 #include "block_common.hpp"
 #include "../../../../lib/mem.h"
+#include "../../../../lib/str.h"
 #include <cstring>
-#include <cctype>
 
 namespace lambda {
 namespace markup {
@@ -156,14 +156,14 @@ Item parse_textile_footnote_def(MarkupParser* parser, const char* line) {
     }
 
     const char* p = line + 2;
-    if (!isdigit((unsigned char)*p)) {
+    if (!str_is_digit(*p)) {
         parser->current_line++;
         return Item{.item = ITEM_UNDEFINED};
     }
 
     // Extract footnote number
     const char* num_start = p;
-    while (isdigit((unsigned char)*p)) p++;
+    while (str_is_digit(*p)) p++;
     size_t num_len = p - num_start;
 
     char fn_num[16];

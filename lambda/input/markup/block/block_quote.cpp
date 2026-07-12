@@ -15,7 +15,6 @@
 #include "block_common.hpp"
 #include "lib/arraylist.h"
 #include "../../../../lib/mem.h"
-#include <cctype>
 #include <cstring>
 #include "lib/str.h"
 

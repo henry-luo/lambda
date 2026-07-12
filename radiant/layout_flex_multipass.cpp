@@ -171,14 +171,16 @@ static float flex_apply_border_box_height_constraints(ViewBlock* block, float bo
     if (!block || !block->blk) return border_box_height;
 
     float constrained = border_box_height;
-    if (block->blk->given_max_height >= 0.0f) {
-        float max_border_height = flex_border_box_height_constraint(block, block->blk->given_max_height);
+    float max_height = layout_explicit_max_height_or(block, -1.0f);
+    if (max_height >= 0.0f) {
+        float max_border_height = flex_border_box_height_constraint(block, max_height);
         if (constrained > max_border_height) {
             constrained = max_border_height;
         }
     }
-    if (block->blk->given_min_height >= 0.0f) {
-        float min_border_height = flex_border_box_height_constraint(block, block->blk->given_min_height);
+    float min_height = layout_explicit_min_height_or(block, -1.0f);
+    if (min_height >= 0.0f) {
+        float min_border_height = flex_border_box_height_constraint(block, min_height);
         if (constrained < min_border_height) {
             constrained = min_border_height;
         }

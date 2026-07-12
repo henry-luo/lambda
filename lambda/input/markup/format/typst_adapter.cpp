@@ -17,7 +17,6 @@
  */
 #include "../format_adapter.hpp"
 #include <cstring>
-#include <cctype>
 
 namespace lambda {
 namespace markup {

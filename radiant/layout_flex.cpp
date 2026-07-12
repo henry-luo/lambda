@@ -352,14 +352,16 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         (parent_block->blk && parent_block->blk->given_height >= 0) ||
                         (parent_is_absolute && parent_block->position &&
                          parent_block->position->has_top && parent_block->position->has_bottom);
+                    float parent_min_height = layout_positive_min_height(parent_block);
+                    float parent_max_height = layout_positive_max_height_or(parent_block, 0.0f);
                     if (!parent_has_definite_main_height &&
-                        parent_block->blk && parent_block->blk->given_min_height > 0 &&
-                        parent_block->height <= parent_block->blk->given_min_height + 0.5f) {
+                        parent_min_height > 0.0f &&
+                        parent_block->height <= parent_min_height + 0.5f) {
                         parent_has_definite_main_height = true;
                     }
                     if (!parent_has_definite_main_height &&
-                        parent_block->blk && parent_block->blk->given_max_height > 0 &&
-                        fabs(parent_block->height - parent_block->blk->given_max_height) < 1.0f) {
+                        parent_max_height > 0.0f &&
+                        fabs(parent_block->height - parent_max_height) < 1.0f) {
                         parent_has_definite_main_height = true;
                     }
                     if (parent_has_definite_main_height) {
@@ -1218,6 +1220,8 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // Get padding values for content-box calculation
         float padding_main = 0.0f;
         float padding_cross = 0.0f;
+        float min_width = layout_positive_min_width(container);
+        float min_height = layout_positive_min_height(container);
         if (container->bound) {
             BoxMetrics container_box = layout_box_metrics(container);
             if (is_main_axis_horizontal(flex_layout)) {
@@ -1232,37 +1236,37 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         if (is_main_axis_horizontal(flex_layout)) {
             // Row flex: min-width affects main_axis_size (for justify-content)
             // CRITICAL: min-width is border-box, main_axis_size is content-box
-            float min_content_width = container->blk->given_min_width - padding_main;
-            if (container->blk->given_min_width > 0 && flex_layout->main_axis_size < min_content_width) {
+            float min_content_width = min_width - padding_main;
+            if (min_width > 0.0f && flex_layout->main_axis_size < min_content_width) {
                 log_debug("%s Phase 5b: Applying min-width to main axis: %.1f -> %.1f (min-width=%.1f, padding=%.1f)", container->source_loc(),
-                          flex_layout->main_axis_size, min_content_width, container->blk->given_min_width, padding_main);
+                          flex_layout->main_axis_size, min_content_width, min_width, padding_main);
                 flex_layout->main_axis_size = min_content_width;
-                container->width = container->blk->given_min_width;  // Keep border-box width
+                container->width = min_width;  // Keep border-box width
             }
             // Row flex: min-height affects cross_axis_size
-            float min_content_height = container->blk->given_min_height - padding_cross;
-            if (container->blk->given_min_height > 0 && container->height < container->blk->given_min_height) {
+            float min_content_height = min_height - padding_cross;
+            if (min_height > 0.0f && container->height < min_height) {
                 log_debug("%s Phase 5b: Applying min-height to cross axis: %.1f -> %.1f", container->source_loc(),
-                          container->height, container->blk->given_min_height);
-                container->height = container->blk->given_min_height;
-                flex_layout->cross_axis_size = min_content_height > 0 ? min_content_height : container->blk->given_min_height;
+                          container->height, min_height);
+                container->height = min_height;
+                flex_layout->cross_axis_size = min_content_height > 0 ? min_content_height : min_height;
             }
         } else {
             // Column flex: min-height affects main_axis_size (and justify-content)
-            float min_content_height = container->blk->given_min_height - padding_main;
-            if (container->blk->given_min_height > 0 && container->height < container->blk->given_min_height) {
+            float min_content_height = min_height - padding_main;
+            if (min_height > 0.0f && container->height < min_height) {
                 log_debug("%s Phase 5b: Applying min-height to main axis: %.1f -> %.1f", container->source_loc(),
-                          container->height, container->blk->given_min_height);
-                container->height = container->blk->given_min_height;
-                flex_layout->main_axis_size = min_content_height > 0 ? min_content_height : container->blk->given_min_height;
+                          container->height, min_height);
+                container->height = min_height;
+                flex_layout->main_axis_size = min_content_height > 0 ? min_content_height : min_height;
             }
             // Column flex: min-width affects cross_axis_size
-            float min_content_width = container->blk->given_min_width - padding_cross;
-            if (container->blk->given_min_width > 0 && flex_layout->cross_axis_size < min_content_width) {
+            float min_content_width = min_width - padding_cross;
+            if (min_width > 0.0f && flex_layout->cross_axis_size < min_content_width) {
                 log_debug("%s Phase 5b: Applying min-width to cross axis: %.1f -> %.1f", container->source_loc(),
-                          flex_layout->cross_axis_size, container->blk->given_min_width);
-                flex_layout->cross_axis_size = min_content_width > 0 ? min_content_width : container->blk->given_min_width;
-                container->width = container->blk->given_min_width;
+                          flex_layout->cross_axis_size, min_width);
+                flex_layout->cross_axis_size = min_content_width > 0 ? min_content_width : min_width;
+                container->width = min_width;
             }
         }
     }
@@ -2632,15 +2636,16 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
     }
 
     bool is_horizontal = is_main_axis_horizontal(flex_layout);
+    ViewBlock* item_block = lam::view_as_block(item);
 
     // Get specified constraints from BlockProp (CSS values)
-    float min_width = item->blk ? item->blk->given_min_width : -1;
-    float max_width = layout_positive_max_width_or(lam::view_as_block(item), FLT_MAX);
-    float min_height = item->blk ? item->blk->given_min_height : -1;
-    float max_height = layout_positive_max_height_or(lam::view_as_block(item), FLT_MAX);
+    float min_width = layout_explicit_min_width_or(item_block, -1.0f);
+    float max_width = layout_positive_max_width_or(item_block, FLT_MAX);
+    float min_height = layout_explicit_min_height_or(item_block, -1.0f);
+    float max_height = layout_positive_max_height_or(item_block, FLT_MAX);
 
     log_debug("%s resolve_flex_item_constraints: item %p, given_min_width=%.2f, min_width=%.1f, has_explicit_width=%d", item->source_loc(),
-              item, item->blk ? item->blk->given_min_width : -1.0f, min_width, item->fi->has_explicit_width);
+              item, min_width, min_width, item->fi->has_explicit_width);
 
     // CSS Flexbox §4.5: Resolve 'auto' min-width/height for flex items
     // - For MAIN AXIS: min-size: auto = content-based minimum (§4.5)
@@ -2657,8 +2662,8 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
     // CSS Flexbox §4.5: Resolve 'auto' min-width/height for flex items
     // min-width/height is 'auto' when given_min_width/height == -1.
     // Values >= 0 (including 0) are explicitly set by CSS.
-    bool min_width_is_auto = !item->blk || item->blk->given_min_width < 0;
-    bool min_height_is_auto = !item->blk || item->blk->given_min_height < 0;
+    bool min_width_is_auto = !layout_has_explicit_min_width(item_block);
+    bool min_height_is_auto = !layout_has_explicit_min_height(item_block);
 
     if (min_width_is_auto) {
         if (is_horizontal) {
@@ -2964,26 +2969,16 @@ float apply_flex_constraint(
         float min_size = 0;
         float max_size = layout_positive_max_axis_or(item_block, axis_is_horizontal, FLT_MAX);
 
-        if (axis_is_horizontal) {
-            if (item->blk && item->blk->given_min_width >= 0) {
-                min_size = item->blk->given_min_width;
-            } else if (is_main_axis && item->form && item->form->intrinsic_width > 0) {
-                // min-width: auto → intrinsic width for form controls (replaced elements)
-                // Only apply on main axis per CSS Flexbox §4.5; cross-axis
-                // min defaults to 0 unless explicitly set.
-                min_size = item->form->intrinsic_width;
-                // add border+padding for border-box consistency
+        float explicit_min = layout_explicit_min_axis_or(item_block, axis_is_horizontal, -1.0f);
+        if (explicit_min >= 0.0f) {
+            min_size = explicit_min;
+        } else if (is_main_axis && item->form) {
+            // min-size: auto -> intrinsic size for form controls on the main axis.
+            float intrinsic_min = axis_is_horizontal ? item->form->intrinsic_width : item->form->intrinsic_height;
+            if (intrinsic_min > 0.0f) {
+                min_size = intrinsic_min;
                 if (item->bound) {
-                    min_size += layout_boundary_metrics(item->bound).pad_border_h;
-                }
-            }
-        } else {
-            if (item->blk && item->blk->given_min_height >= 0) {
-                min_size = item->blk->given_min_height;
-            } else if (is_main_axis && item->form && item->form->intrinsic_height > 0) {
-                min_size = item->form->intrinsic_height;
-                if (item->bound) {
-                    min_size += layout_boundary_metrics(item->bound).pad_border_v;
+                    min_size += layout_boundary_padding_border_axis(item->bound, axis_is_horizontal);
                 }
             }
         }

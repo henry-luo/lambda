@@ -6,6 +6,7 @@
  * the appropriate block parser.
  */
 #include "block_common.hpp"
+#include "lib/str.h"
 
 namespace lambda {
 namespace markup {
@@ -340,9 +341,9 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
             }
 
             // Textile footnote definitions: fn1. text
-            if (line[0] == 'f' && line[1] == 'n' && isdigit((unsigned char)line[2])) {
+            if (line[0] == 'f' && line[1] == 'n' && str_is_digit(line[2])) {
                 const char* p = line + 3;
-                while (isdigit((unsigned char)*p)) p++;
+                while (str_is_digit(*p)) p++;
                 // Skip modifiers if present
                 while (*p && *p != '.' && *p != '\n') p++;
                 if (*p == '.') {

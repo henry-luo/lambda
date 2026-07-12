@@ -11,7 +11,6 @@
  * reference-style links during inline parsing.
  */
 #include "block_common.hpp"
-#include <cctype>
 #include "../../../../lib/mem.h"
 
 namespace lambda {

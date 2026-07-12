@@ -9,9 +9,9 @@
  */
 #include "block_common.hpp"
 #include "../../../../lib/mem.h"
-#include <cctype>
 #include <cstring>
 #include "lib/arraylist.h"
+#include "lib/str.h"
 
 namespace lambda {
 namespace markup {
@@ -255,7 +255,7 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
 
         // Skip unknown man directives (lines starting with .)
         // but don't skip regular text lines
-        if (first_line[0] == '.' && !isspace((unsigned char)first_line[1])) {
+        if (first_line[0] == '.' && !str_is_space(first_line[1])) {
             // Known directives that we don't handle yet - just skip
             parser->current_line++;
             return Item{.item = ITEM_UNDEFINED};
