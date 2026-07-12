@@ -31,6 +31,10 @@ extern "C" void js_dom_shutdown(void);
 struct DomDocument;
 extern void free_document(DomDocument* doc);
 
+#ifndef LAMBDA_MIR_CACHE_DEFAULT
+#define LAMBDA_MIR_CACHE_DEFAULT 1
+#endif
+
 // ============================================================================
 // Lambda Home Path
 // ============================================================================
@@ -274,7 +278,8 @@ static void print_elapsed_time(const char* label, win_timer start, win_timer end
         nanoseconds += 1000000000;
     }
     double elapsed_ms = seconds * 1000.0 + nanoseconds / 1e6;
-        log_debug("%s took %.3f ms", label, elapsed_ms);
+    log_debug("%s took %.3f ms", label, elapsed_ms);
+    (void)elapsed_ms;
 }
 #endif
 
@@ -1647,10 +1652,12 @@ void runtime_init(Runtime* runtime) {
     runtime->transpile_dir = NULL;  // default: no file output; set via --transpile-dir
     runtime->dry_run = false;  // default: real IO
     const char* disable_mir_cache = shell_getenv("LAMBDA_DISABLE_MIR_CACHE");
-    runtime->mir_cache_disabled = disable_mir_cache &&
-        (strcmp(disable_mir_cache, "1") == 0 || strcmp(disable_mir_cache, "true") == 0);
+    runtime->mir_cache_disabled = (LAMBDA_MIR_CACHE_DEFAULT == 0) ||
+        (disable_mir_cache &&
+         (strcmp(disable_mir_cache, "1") == 0 || strcmp(disable_mir_cache, "true") == 0));
+    // debug and release builds enable retained MIR imports by default; this opt-out is for timing and emergency bisecting.
     if (runtime->mir_cache_disabled) {
-        log_info("mir cache index: retained module cache disabled by LAMBDA_DISABLE_MIR_CACHE");
+        log_info("mir cache index: retained module cache disabled by build default or LAMBDA_DISABLE_MIR_CACHE");
     }
     module_registry_init();
     jube_register_builtin_modules();

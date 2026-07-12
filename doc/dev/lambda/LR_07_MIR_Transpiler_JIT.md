@@ -94,7 +94,7 @@ MIR Direct has a process-local Level 1 module cache for long-lived `Runtime` ins
 
 The cache is intentionally narrow: it applies only to MIR Direct Lambda imports. JS, C2MIR, and cross-language-tainted module subtrees are not retained. Runtime heap state is not retained; before each module init, module-level BSS globals are zeroed and registered as GC roots so cached code recomputes heap-backed values for the current script run. Execution uses the current main script's direct-import cone, not the whole registry, so unrelated cached modules are neither rooted nor initialized.
 
-Invalidation is mtime/size based. A file-backed cache hit stats the canonical path; if the source changed, the stale script and retained dependents are retired from the index and the current load falls through to a fresh compile. `LAMBDA_DISABLE_MIR_CACHE=1` disables retained import caching for timing comparisons while keeping normal import deduplication and circular-import detection within a single compilation.
+Invalidation is mtime/size based. A file-backed cache hit stats the canonical path; if the source changed, the stale script and retained dependents are retired from the index and the current load falls through to a fresh compile. The cache is enabled by default in both debug and release builds (`LAMBDA_MIR_CACHE_DEFAULT=1` unless a build opts out). `LAMBDA_DISABLE_MIR_CACHE=1` disables retained import caching for timing comparisons while keeping normal import deduplication and circular-import detection within a single compilation.
 
 Design and rollout details live in [Level 1 MIR Cache — Implementation Plan](../../../vibe/Lambda_Impl_MIR_Cache_L1.md).
 
