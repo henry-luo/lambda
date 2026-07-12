@@ -2972,6 +2972,15 @@ float apply_flex_constraint(
         float explicit_min = layout_explicit_min_axis_or(item_block, axis_is_horizontal, -1.0f);
         if (explicit_min >= 0.0f) {
             min_size = explicit_min;
+        } else if (is_main_axis && item->blk &&
+                   ((axis_is_horizontal && item->blk->given_width >= 0) ||
+                    (!axis_is_horizontal && item->blk->given_height >= 0))) {
+            // definite form-control size is the used main size;
+            // intrinsic min-size:auto was clamping 10px checkboxes back to UA 13px.
+            min_size = layout_css_size_to_border_box(
+                item->bound, layout_box_sizing(item_block),
+                axis_is_horizontal ? item->blk->given_width : item->blk->given_height,
+                axis_is_horizontal);
         } else if (is_main_axis && item->form) {
             // min-size: auto -> intrinsic size for form controls on the main axis.
             float intrinsic_min = axis_is_horizontal ? item->form->intrinsic_width : item->form->intrinsic_height;
