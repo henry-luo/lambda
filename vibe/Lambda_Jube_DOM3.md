@@ -2,10 +2,10 @@
 
 > **Status**: Phases 0–3 and 4a–4d implemented and green (2026-07-12). Eight of ten radiant
 > types are fully record-driven with `host_ops = NULL`; `dom_node` is migrating via the
-> `legacy_ops` fall-through with **141 declared members** (identity/nav, reflected
-> attributes, live form controls, and all node methods with D0d function-object reads —
-> `get_attribute` deferred with bisect evidence). Remaining: Phase 4e (catch-alls → named
-> hooks, engine js_dom.cpp sweep incl. get_attribute alignment, `legacy_ops` → NULL flip,
+> `legacy_ops` fall-through with **142 declared members** (identity/nav, reflected
+> attributes, live form controls, and all node methods with D0d function-object reads,
+> including restored `get_attribute`). Remaining: Phase 4e (catch-alls → named
+> hooks, engine js_dom.cpp sweep, `legacy_ops` → NULL flip,
 > document/foreign_document types, classList/Location/DOMImplementation), then Phase 5
 > convergence. Suite gates green at every sub-step: JS gtest 309/309, UI-automation clean,
 > Lambda baseline exit 0.
@@ -778,36 +778,35 @@ pending).
   the rest element-guarded; `insertAdjacentHTML`/`__lambda*` internals via `js_name`). Call
   handlers delegate into `radiant_dom_element_method` (dispatch converted, arms keep exact
   behavior; extraction = 4e). This lands **D0d incrementally**: method-name property reads now
-  return real cached function objects. One name deliberately deferred with the bisect evidence
-  in-code: **`get_attribute`** — flipping its read from `ITEM_TRUE` to a function enables
-  jQuery/Sizzle's `support.attributes` path (its probe *relies* on `true(...)` throwing), and
-  our `getAttribute` doesn't yet satisfy that path (`dom_jquery_lib` line 39 flips). It
-  converts in the 4e engine sweep with deliberate golden updates. `dom_node` registers
-  **141 members**. Document/classList/Location/DOMImplementation methods remain legacy
-  (document types not yet declared). All nine focused goldens diff-exact; suites recorded
-  below.
+  return real function objects. The earlier **`get_attribute`** deferral was resolved in the
+  4e opening engine fix below; the row now converts with the rest of the node methods, and
+  jQuery/Sizzle's `support.attributes` path remains golden-stable once record-native `.call`
+  dispatch is correct. `dom_node` registers **142 members**. Document/classList/Location/
+  DOMImplementation methods remain legacy (document types not yet declared). All nine focused
+  goldens diff-exact; suites recorded below.
 - **4e** Catch-alls: form named getter, attribute fallback, `on*` handlers, dataset →
   `named_get/named_set`; live collections → `indexed_/named_` hooks with refresh inside;
   delete the residual direct `js_dom_*` calls from `js_runtime.cpp`/`js_globals.cpp`/
   `js_runtime_value.cpp`.
 
-  Progress (2026-07-12, 4e opening investigation): the `get_attribute` alignment was
-  attempted first and **root-caused to an engine bug, not a getAttribute defect**. Findings,
-  fully bisected (repro: `temp/jq_find_repro.js`): our `getAttribute` semantics are correct
-  (Sizzle's probe expectations verified value-by-value). Enabling the row flips Sizzle's
-  `support.attributes` (its probe relies on `true("className")` *throwing*), which reroutes
-  jQuery into paths where the real breakage lives: **after Sizzle's context-scoped `find()`
-  executes, `Function.prototype.call`/`apply` on record env-closure natives returns
-  null/undefined without ever reaching `js_call_function`** — bisected to the `matches` row
-  being *present* (any use of record fns inside find's machinery), flip point
-  `$app.find(".item")`, while direct member calls (`el.matches(...)`), plain-JS-closure
-  `.call`, and fresh top-level `.call` all keep working. `jube_interface_runtime_reset` ruled
-  out (never fires); trampoline never entered (instrumented); `js_invoke_fn_raw` env-branch
-  never entered; `js_call_function` never entered — the failure is in the member-call/builtin
-  dispatch layer above (suspects: method inline-cache trained during find, or builtin
-  FUNC_CALL receiver resolution for env-carrying natives). This is a pre-existing engine
-  dispatch defect exposed by record fns; it also caps D0d for `get_attribute` until fixed.
-  Both deferred with in-code comments; the tree is green with `get_attribute` legacy.
+  Progress (2026-07-12, 4e opening fix): the `get_attribute` alignment was attempted first
+  and **root-caused to an engine bug, not a getAttribute defect**. Findings, fully bisected
+  (repro: `temp/jq_find_repro.js`): our `getAttribute` semantics are correct (Sizzle's probe
+  expectations verified value-by-value). Enabling the row flips Sizzle's `support.attributes`
+  (its probe relies on `true("className")` *throwing*), which reroutes jQuery into paths
+  where the real breakage lived: after Sizzle's context-scoped `find()` executed,
+  `Function.prototype.call`/`apply` on record env-closure natives returned null/undefined.
+  The first instrumentation showed this happened before the trampoline/env branch; the final
+  pointer trace showed why: Jube methods shared per-arity trampolines, and `js_new_function`
+  cached wrappers by `func_ptr`, so later records mutated the same `JsFunction` wrapper's
+  closure env/name (`matches` became `getElementsByClassName` after Sizzle). The fix routes
+  Jube member methods through uncached `js_new_method_function`, preserving one wrapper/env
+  per record. Repro now stays true across direct, saved, and member `.call` paths after
+  `$app.find(".item")`; `get_attribute` is restored in the radiant interface and binding row.
+  Verification for this slice: `make release` green; `dom_jquery_lib` direct diff-exact;
+  focused `dom_jquery_lib` GTest green; full `test_js_gtest` green 309/309. The UI-automation
+  gate currently fails three unrelated form hit-testing/drag state cases
+  (`test_form_state_drag`, `test_form_state_li_drag`, `test_form_textarea_scrolled_hit_test`).
 
 Gates per sub-step: anchors + full JS gtest + `dom_jquery_lib`/`dom_v12b`/`dom_identity` direct
 diffs; 4c/4e additionally UI-automation + `make test-radiant-baseline` vs the DOM2 Phase-0

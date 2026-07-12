@@ -24,6 +24,7 @@
 extern "C" TSParser* lambda_parser(void);
 extern "C" TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 extern "C" Item js_get_this();
+extern "C" Item js_new_method_function(void* func_ptr, int param_count);
 // raw VMap backing-store access (vmap.cpp); bypasses host-object routing so
 // the generic expando store cannot recurse back into member dispatch
 extern "C" Item vmap_backing_get(VMap* vm, Item key);
@@ -258,7 +259,9 @@ static Item jube_member_method_item(JubeMemberRecord* rec) {
     int arity = rec->arity;
     if (arity < 0) arity = 0;
     if (arity > 8) arity = 8;
-    Item fn_item = host->script->new_function(s_jube_tramps[arity], arity);
+    // Jube methods share per-arity trampolines; bypass the func_ptr cache so each
+    // member record keeps its own closure env/name instead of mutating one wrapper.
+    Item fn_item = js_new_method_function(s_jube_tramps[arity], arity);
     JsFunction* fn = (JsFunction*)fn_item.function;
     if (fn) {
         rec->env_slot[0] = (Item){.item = (uint64_t)(uintptr_t)rec};
