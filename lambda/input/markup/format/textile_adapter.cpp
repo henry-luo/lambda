@@ -17,7 +17,7 @@
  */
 #include "../format_adapter.hpp"
 #include <cstring>
-#include <cctype>
+#include "../../../../lib/str.h"
 
 namespace lambda {
 namespace markup {
@@ -161,7 +161,7 @@ public:
 
         // Textile headers: h1. Header text
         // With optional modifiers: h1(class#id){style}[lang]<. Header text
-        if (*line == 'h' && isdigit((unsigned char)line[1])) {
+        if (*line == 'h' && str_is_digit(line[1])) {
             int level = line[1] - '0';
             if (level >= 1 && level <= 6) {
                 TextileModifiers mods;
@@ -293,7 +293,7 @@ public:
         // Regular blocks end with blank line or new block
         return is_blank_line(line) ||
                (line[0] == 'p' && line[1] == '.') ||
-               (line[0] == 'h' && isdigit((unsigned char)line[1]));
+               (line[0] == 'h' && str_is_digit(line[1]));
     }
 
     BlockquoteInfo detectBlockquote(const char* line) override {
@@ -389,7 +389,7 @@ public:
 
             info.url_start = p;
             // URL ends at whitespace or end of line
-            while (*p && !isspace((unsigned char)*p)) p++;
+            while (*p && !str_is_space(*p)) p++;
             info.url_end = p;
 
             if (title_start) {
@@ -406,7 +406,7 @@ public:
             const char* p = pos + 1;
             // Check for digits or alphanumeric
             const char* ref_start = p;
-            while (*p && (isalnum((unsigned char)*p) || *p == '_') && *p != ']') p++;
+            while (*p && (str_is_alnum(*p) || *p == '_') && *p != ']') p++;
             if (*p == ']' && p > ref_start) {
                 // This is a footnote reference - mark as special link
                 info.url_start = ref_start;
@@ -461,7 +461,7 @@ public:
                 p++;
                 // The URL following is a link target
                 // For now, just advance past it
-                while (*p && !isspace((unsigned char)*p)) p++;
+                while (*p && !str_is_space(*p)) p++;
             }
 
             info.end_pos = p;

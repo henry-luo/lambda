@@ -12,7 +12,7 @@
  */
 #include "../format_adapter.hpp"
 #include <cstring>
-#include <cctype>
+#include "../../../../lib/str.h"
 
 namespace lambda {
 namespace markup {
@@ -181,7 +181,7 @@ public:
         if (strncmp(pos, "http://", 7) == 0 || strncmp(pos, "https://", 8) == 0) {
             info.url_start = pos;
             info.url_end = pos;
-            while (*info.url_end && !isspace((unsigned char)*info.url_end) &&
+            while (*info.url_end && !str_is_space(*info.url_end) &&
                    *info.url_end != '>' && *info.url_end != ')') {
                 info.url_end++;
             }
@@ -219,7 +219,7 @@ public:
         if (line[0] != '.') return nullptr;
         const char* start = line + 1;
         const char* end = start;
-        while (*end && !isspace((unsigned char)*end)) end++;
+        while (*end && !str_is_space(*end)) end++;
         if (len) *len = end - start;
         return start;
     }

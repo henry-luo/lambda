@@ -18,7 +18,6 @@ extern "C" {
 #include "../../../../lib/log.h"
 }
 #include <cstring>
-#include <cctype>
 
 namespace lambda {
 namespace markup {

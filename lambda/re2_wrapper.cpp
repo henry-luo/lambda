@@ -7,6 +7,7 @@
 
 #include "re2_wrapper.hpp"
 #include "ast.hpp"
+#include "../lib/re2_glue.hpp"
 #include "../lib/log.h"
 #include "../lib/mempool.h"
 
@@ -359,21 +360,13 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
 
     log_debug("Compiled pattern regex: %s", regex->str);
 
-    // Compile RE2
-    re2::RE2::Options options;
-    options.set_log_errors(false);
-    // UTF8 is the default encoding
-
-    re2::RE2* re2 = new re2::RE2(regex->str, options); // NEW_DELETE_OK: audited RE2 boundary; freed by pattern_destroy().
-
-    if (!re2->ok()) {
-        if (error_msg) {
-            // Note: error() returns std::string, we need to copy it
-            static char error_buffer[256];
-            snprintf(error_buffer, sizeof(error_buffer), "%s", re2->error().c_str());
-            *error_msg = error_buffer;
-        }
-        delete re2; // NEW_DELETE_OK: paired with new above on compile failure.
+    re2::RE2::Options options = lam::re2_glue_default_options();
+    static char error_buffer[256];
+    re2::RE2* re2 = lam::re2_glue_compile(
+        regex->str, regex->length, options, "compile_pattern_ast",
+        error_msg ? error_buffer : nullptr, sizeof(error_buffer));
+    if (!re2) {
+        if (error_msg) *error_msg = error_buffer;
         strbuf_free(regex);
         return nullptr;
     }
@@ -428,11 +421,11 @@ bool pattern_partial_match(TypePattern* pattern, String* str) {
 // Destroy a compiled pattern
 void pattern_destroy(TypePattern* pattern) {
     if (pattern && pattern->re2) {
-        delete pattern->re2; // NEW_DELETE_OK: paired with new at re2_wrapper.cpp::compile_pattern_ast.
+        lam::re2_glue_release(pattern->re2);
         pattern->re2 = nullptr;
     }
     if (pattern && pattern->re2_unanchored) {
-        delete pattern->re2_unanchored; // NEW_DELETE_OK: paired with new at re2_wrapper.cpp::pattern_get_unanchored.
+        lam::re2_glue_release(pattern->re2_unanchored);
         pattern->re2_unanchored = nullptr;
     }
 }
@@ -441,42 +434,15 @@ void pattern_destroy(TypePattern* pattern) {
 // boundary: rb_runtime/py_stdlib/etc. call these instead of `new re2::RE2`
 // so the new/delete stays inside the wrapper.
 re2::RE2* re2_compile(const char* pattern, size_t pattern_len) {
-    if (!pattern) return nullptr;
-    std::string pat(pattern, pattern_len); // STD_CONTAINER_OK: re2::RE2 ctor takes std::string.
-    re2::RE2::Options opts;
-    opts.set_log_errors(false);
-    re2::RE2* re = new re2::RE2(pat, opts); // NEW_DELETE_OK: audited RE2 C-ABI boundary; see re2_release().
-    if (!re->ok()) {
-        delete re; // NEW_DELETE_OK: paired with new above on failure.
-        return nullptr;
-    }
-    return re;
+    re2::RE2::Options opts = lam::re2_glue_default_options();
+    return lam::re2_glue_compile(pattern, pattern_len, opts, nullptr);
 }
 
 void re2_release(re2::RE2* re) {
-    if (!re) return;
-    delete re; // NEW_DELETE_OK: paired with new in re2_compile().
+    lam::re2_glue_release(re);
 }
 
 #ifndef SIMPLE_SCHEMA_PARSER
-static void select_match_window(int64_t total, int64_t limit, int64_t* first, int64_t* count) {
-    *first = 0;
-    *count = total;
-    if (total <= 0) {
-        *count = 0;
-        return;
-    }
-    if (limit > 0 && limit < total) {
-        *count = limit;
-    } else if (limit < 0) {
-        int64_t requested = (limit == INT64_MIN) ? INT64_MAX : -limit;
-        if (requested < total) {
-            *first = total - requested;
-            *count = requested;
-        }
-    }
-}
-
 static re2::RE2* pattern_get_unanchored_options(TypePattern* pattern, bool ignore_case, bool* must_release) {
     *must_release = false;
     if (!ignore_case) return pattern_get_unanchored(pattern);
@@ -488,17 +454,11 @@ static re2::RE2* pattern_get_unanchored_options(TypePattern* pattern, bool ignor
         log_error("pattern_get_unanchored_options: unexpected source format: %s", src);
         return nullptr;
     }
-    std::string unanchored(src + 1, len - 2); // STD_CONTAINER_OK: re2::RE2 ctor takes std::string.
-
-    re2::RE2::Options opts;
-    opts.set_log_errors(false);
+    re2::RE2::Options opts = lam::re2_glue_default_options();
     opts.set_case_sensitive(false);
-    re2::RE2* re = new re2::RE2(unanchored, opts); // NEW_DELETE_OK: one-shot case-folded regex for option-specific find/replace.
-    if (!re->ok()) {
-        log_error("pattern_get_unanchored_options: failed to compile unanchored regex: %s", re->error().c_str());
-        delete re; // NEW_DELETE_OK: paired with new above on compile failure.
-        return nullptr;
-    }
+    re2::RE2* re = lam::re2_glue_compile(
+        src + 1, len - 2, opts, "pattern_get_unanchored_options");
+    if (!re) return nullptr;
     *must_release = true;
     return re;
 }
@@ -533,21 +493,14 @@ re2::RE2* pattern_get_unanchored(TypePattern* pattern) {
         log_error("pattern_get_unanchored: unexpected source format: %s", src);
         return nullptr;
     }
-    std::string unanchored(src + 1, len - 2); // STD_CONTAINER_OK: re2::RE2 ctor takes std::string.
-
-    re2::RE2::Options opts;
-    opts.set_log_errors(false);
-    pattern->re2_unanchored = new re2::RE2(unanchored, opts); // NEW_DELETE_OK: audited RE2 boundary; freed by pattern_destroy().
-
-    if (!pattern->re2_unanchored->ok()) {
-        log_error("pattern_get_unanchored: failed to compile unanchored regex: %s",
-                  pattern->re2_unanchored->error().c_str());
-        delete pattern->re2_unanchored; // NEW_DELETE_OK: paired with new above on compile failure.
-        pattern->re2_unanchored = nullptr;
+    re2::RE2::Options opts = lam::re2_glue_default_options();
+    pattern->re2_unanchored = lam::re2_glue_compile(
+        src + 1, len - 2, opts, "pattern_get_unanchored");
+    if (!pattern->re2_unanchored) {
         return nullptr;
     }
 
-    log_debug("pattern_get_unanchored: compiled '%s'", unanchored.c_str());
+    log_debug("pattern_get_unanchored: compiled '%.*s'", (int)(len - 2), src + 1);
     return pattern->re2_unanchored;
 }
 
@@ -639,9 +592,9 @@ List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len
 
     int64_t total = pattern_count_matches_with_re(re, str, len);
     int64_t first = 0, selected_count = 0;
-    select_match_window(total, limit, &first, &selected_count);
+    lam::re2_glue_select_match_window(total, limit, &first, &selected_count);
     if (selected_count == 0) {
-        if (must_release) delete re; // NEW_DELETE_OK: paired with option-specific new in pattern_get_unanchored_options().
+        if (must_release) lam::re2_glue_release(re);
         return result;
     }
 
@@ -672,7 +625,7 @@ List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len
         if (pushed >= selected_count) break;
     }
 
-    if (must_release) delete re; // NEW_DELETE_OK: paired with option-specific new in pattern_get_unanchored_options().
+    if (must_release) lam::re2_glue_release(re);
     return result;
 }
 
@@ -692,9 +645,9 @@ String* pattern_replace_all_options(TypePattern* pattern, const char* str, size_
 
     int64_t total = pattern_count_matches_with_re(re, str, str_len);
     int64_t first = 0, selected_count = 0;
-    select_match_window(total, limit, &first, &selected_count);
+    lam::re2_glue_select_match_window(total, limit, &first, &selected_count);
     if (selected_count == 0) {
-        if (must_release) delete re; // NEW_DELETE_OK: paired with option-specific new in pattern_get_unanchored_options().
+        if (must_release) lam::re2_glue_release(re);
         return make_heap_string(str, str_len);
     }
 
@@ -728,7 +681,7 @@ String* pattern_replace_all_options(TypePattern* pattern, const char* str, size_
 
     String* result = make_heap_string(out->str, out->length);
     strbuf_free(out);
-    if (must_release) delete re; // NEW_DELETE_OK: paired with option-specific new in pattern_get_unanchored_options().
+    if (must_release) lam::re2_glue_release(re);
     return result;
 }
 

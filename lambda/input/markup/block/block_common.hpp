@@ -23,7 +23,6 @@
 #include "lib/strbuf.h"
 #include "lib/log.h"
 #include <cstring>
-#include <cctype>
 
 namespace lambda {
 namespace markup {

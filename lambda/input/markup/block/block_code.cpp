@@ -441,7 +441,7 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
                 // Find end of first word (stop at whitespace)
                 const char* word_end = fence_info.info_string;
                 while (word_end < fence_info.info_string + fence_info.info_length &&
-                       *word_end && !isspace((unsigned char)*word_end)) {
+                       *word_end && !str_is_space(*word_end)) {
                     word_end++;
                 }
                 size_t word_len = word_end - fence_info.info_string;

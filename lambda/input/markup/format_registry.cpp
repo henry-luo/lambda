@@ -5,7 +5,6 @@
  */
 #include "format_adapter.hpp"
 #include <cstring>
-#include <cctype>
 
 extern "C" {
 #include "../../../lib/file.h"
@@ -219,7 +218,7 @@ Format FormatRegistry::detectFromContent(const char* content) {
     }
 
     // Check for Textile: h1. or h2.
-    if (content[0] == 'h' && isdigit((unsigned char)content[1]) && content[2] == '.') {
+    if (content[0] == 'h' && str_is_digit(content[1]) && content[2] == '.') {
         return Format::TEXTILE;
     }
 

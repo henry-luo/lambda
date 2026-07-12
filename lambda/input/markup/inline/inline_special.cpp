@@ -14,7 +14,6 @@
  */
 #include "inline_common.hpp"
 #include <cstring>
-#include <cctype>
 #include "lib/str.h"
 
 namespace lambda {

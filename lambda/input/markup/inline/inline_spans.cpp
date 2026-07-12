@@ -11,6 +11,7 @@
 #include "inline_common.hpp"
 #include "../../../../lib/strbuf.h"
 #include "../../../../lib/log.h"
+#include "../../../../lib/str.h"
 
 namespace lambda {
 namespace markup {
@@ -209,19 +210,10 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                         const char* url = nullptr;
                         for (int i = 0; i < parser->link_def_count_; i++) {
                             size_t label_len = strlen(parser->link_defs_[i].label);
-                            if (label_len == ref_len) {
-                                bool match = true;
-                                for (size_t j = 0; j < ref_len; j++) {
-                                    if (tolower((unsigned char)ref_name[j]) !=
-                                        tolower((unsigned char)parser->link_defs_[i].label[j])) {
-                                        match = false;
-                                        break;
-                                    }
-                                }
-                                if (match) {
-                                    url = parser->link_defs_[i].url;
-                                    break;
-                                }
+                            if (label_len == ref_len &&
+                                str_ieq(ref_name, ref_len, parser->link_defs_[i].label, label_len)) {
+                                url = parser->link_defs_[i].url;
+                                break;
                             }
                         }
 

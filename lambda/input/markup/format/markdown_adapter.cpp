@@ -12,7 +12,6 @@
  */
 #include "../format_adapter.hpp"
 #include <cstring>
-#include <cctype>
 #include "../../../../lib/str.h"
 
 namespace lambda {
@@ -118,9 +117,9 @@ public:
                     return info; // List marker, not setext heading content
                 }
             }
-            if (isdigit((unsigned char)*p)) {
+            if (str_is_digit(*p)) {
                 const char* d = p;
-                while (isdigit((unsigned char)*d)) d++;
+                while (str_is_digit(*d)) d++;
                 if (*d == '.' || *d == ')') {
                     const char* after = d + 1;
                     if (*after == ' ' || *after == '\t' || *after == '\0' || *after == '\r' || *after == '\n') {
@@ -211,10 +210,10 @@ public:
         }
 
         // Ordered list markers: 1. or 1) (number must be at most 9 digits per CommonMark)
-        if (!info.valid && isdigit((unsigned char)*p)) {
+        if (!info.valid && str_is_digit(*p)) {
             const char* num_start = p;
             int digits = 0;
-            while (isdigit((unsigned char)*p)) { digits++; p++; }
+            while (str_is_digit(*p)) { digits++; p++; }
 
             // CommonMark: ordered list numbers must be at most 9 digits
             if (digits > 9) return info;  // Too many digits, not a valid list item

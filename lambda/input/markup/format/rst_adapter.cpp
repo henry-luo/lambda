@@ -9,7 +9,6 @@
  */
 #include "../format_adapter.hpp"
 #include <cstring>
-#include <cctype>
 #include "../../../../lib/str.h"
 
 namespace lambda {
@@ -109,9 +108,9 @@ public:
                 info.marker_end = p + 2;
                 info.text_start = p + 3;
                 info.valid = true;
-            } else if (isdigit((unsigned char)*p)) {
+            } else if (str_is_digit(*p)) {
                 const char* num_start = p;
-                while (isdigit((unsigned char)*p)) p++;
+                while (str_is_digit(*p)) p++;
                 if (*p == '.' || *p == ')') {
                     info.marker = *p;
                     info.number = (int)str_to_int64_default(num_start, strlen(num_start), 0);
