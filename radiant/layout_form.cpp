@@ -270,7 +270,19 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
     // CSS UA stylesheets size buttons to match text input height for visual consistency.
     {
         float def_bp_v = 2 * (FormDefaults::BUTTON_PADDING_V + FormDefaults::BUTTON_BORDER);
-        form->intrinsic_height = (FormDefaults::TEXT_HEIGHT - def_bp_v) * pr;
+        float content_height = (FormDefaults::TEXT_HEIGHT - def_bp_v) * pr;
+        if (block && block->display.inner == CSS_VALUE_FLEX &&
+            font && font->font_size > 0 && lycon->ui_context) {
+            FontBox temp_font;
+            setup_font(lycon->ui_context, &temp_font, font);
+            if (temp_font.font_handle) {
+                // author flex buttons lay out real text children; the native
+                // 15px control height would override their CSS normal line-height.
+                float line_h = calc_normal_line_height(temp_font.font_handle);
+                if (line_h > 0) content_height = line_h;
+            }
+        }
+        form->intrinsic_height = content_height;
     }
 }
 

@@ -297,7 +297,8 @@ TEST(RadiantViewTest, PromotesCachedPngDecodeFromThumbnailToFullSize) {
     const char* view_log = "./temp/test_radiant_view_cache_promotion_log.txt";
     char command[512];
     snprintf(command, sizeof(command),
-             "LAMBDA_LOG_FILE=%s ./lambda.exe view test/html/image_cache_promotion.html "
+             "LAMBDA_IMAGE_DECODE_TRACE=1 LAMBDA_LOG_FILE=%s "
+             "./lambda.exe view test/html/image_cache_promotion.html "
              "--headless > ./temp/test_radiant_view_cache_promotion.log 2>&1",
              view_log);
     int status = system(command);

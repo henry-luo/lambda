@@ -446,6 +446,8 @@ typedef struct {
     jmp_buf jmpbuf;
     bool had_error;
     bool is_checksum_error;
+    unsigned char* image_data;
+    png_bytep* row_pointers;
 } PngErrorContext;
 
 static void png_lenient_error_handler(png_structp png_ptr, png_const_charp message) {
@@ -467,7 +469,12 @@ static void png_lenient_warning_handler(png_structp png_ptr, png_const_charp mes
 
 static unsigned char* load_png_from_memory(const unsigned char* data, size_t length, int* width, int* height, int* channels) {
     // Create PNG read struct with lenient error handling
-    PngErrorContext err_ctx = { .had_error = false, .is_checksum_error = false };
+    PngErrorContext err_ctx = {
+        .had_error = false,
+        .is_checksum_error = false,
+        .image_data = NULL,
+        .row_pointers = NULL
+    };
     png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING,
         &err_ctx, png_lenient_error_handler, png_lenient_warning_handler);
     if (!png_ptr) {
@@ -482,21 +489,20 @@ static unsigned char* load_png_from_memory(const unsigned char* data, size_t len
         return NULL;
     }
 
-    unsigned char* image_data = NULL;
-    png_bytep* row_pointers = NULL;
-
     if (setjmp(err_ctx.jmpbuf)) {
+        // libpng longjmp makes locals changed after setjmp unreliable, so
+        // owned buffers live in err_ctx for checksum-tolerant return/cleanup.
         // Error handler jumped here. If it's a checksum error and we have image data,
         // the pixel data was decompressed successfully — return it (browser behavior).
-        if (err_ctx.is_checksum_error && image_data) {
+        if (err_ctx.is_checksum_error && err_ctx.image_data) {
             log_debug("[PNG] Returning image despite checksum error (%dx%d)", *width, *height);
-            if (row_pointers) mem_free(row_pointers);
+            if (err_ctx.row_pointers) mem_free(err_ctx.row_pointers);
             png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
-            return image_data;
+            return err_ctx.image_data;
         }
         // Fatal error — clean up and return NULL
-        if (image_data) mem_free(image_data);
-        if (row_pointers) mem_free(row_pointers);
+        if (err_ctx.image_data) mem_free(err_ctx.image_data);
+        if (err_ctx.row_pointers) mem_free(err_ctx.row_pointers);
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
         log_error("PNG decompression error");
         return NULL;
@@ -532,26 +538,33 @@ static unsigned char* load_png_from_memory(const unsigned char* data, size_t len
     *channels = 4;
 
     // Allocate memory for image
-    image_data = (unsigned char*)mem_calloc(1, *width * *height * 4, MEM_CAT_IMAGE);
-    if (!image_data) {
+    err_ctx.image_data = (unsigned char*)mem_calloc(1, *width * *height * 4, MEM_CAT_IMAGE);
+    if (!err_ctx.image_data) {
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
         log_error("Failed to allocate memory for PNG image");
         return NULL;
     }
 
     // Create row pointers
-    row_pointers = (png_bytep*)mem_alloc(sizeof(png_bytep) * *height, MEM_CAT_IMAGE);
+    err_ctx.row_pointers = (png_bytep*)mem_alloc(sizeof(png_bytep) * *height, MEM_CAT_IMAGE);
+    if (!err_ctx.row_pointers) {
+        mem_free(err_ctx.image_data);
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        log_error("Failed to allocate memory for PNG row pointers");
+        return NULL;
+    }
     for (int y = 0; y < *height; y++) {
-        row_pointers[y] = image_data + y * (*width) * 4;
+        err_ctx.row_pointers[y] = err_ctx.image_data + y * (*width) * 4;
     }
 
     // Read image data
-    png_read_image(png_ptr, row_pointers);
+    png_read_image(png_ptr, err_ctx.row_pointers);
 
-    mem_free(row_pointers);
+    mem_free(err_ctx.row_pointers);
+    err_ctx.row_pointers = NULL;
     png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
 
-    return image_data;
+    return err_ctx.image_data;
 }
 
 // Load JPEG from memory using TurboJPEG

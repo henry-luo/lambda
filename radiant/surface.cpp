@@ -17,6 +17,7 @@
 #include "../lambda/input/input.hpp"  // for download_http_content
 #include "../lambda/network/network_resource_manager.h"
 
+#include <stdlib.h>
 #include <unistd.h>
 #include <strings.h>
 
@@ -1047,6 +1048,11 @@ static bool image_surface_can_promote_decode(ImageSurface* img, int target_w, in
     return target_w > decoded_w || target_h > decoded_h;
 }
 
+static bool image_decode_trace_enabled(void) {
+    const char* trace = getenv("LAMBDA_IMAGE_DECODE_TRACE");
+    return trace && trace[0] != '\0';
+}
+
 void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h) {
     if (!img) return;
 
@@ -1069,8 +1075,15 @@ void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h)
             img->decoded_height = height;
             img->pitch = width * 4;
             image_surface_bump_generation(img);
-            log_debug("[image] Decoded local image on demand: %dx%d (intrinsic %dx%d, target %dx%d) from %s",
-                      width, height, img->width, img->height, target_w, target_h, img->source_path);
+            // Release builds strip debug logs; keep this opt-in trace for
+            // cache-promotion tests without raising normal image decodes to note.
+            if (image_decode_trace_enabled()) {
+                log_notice("[image] Decoded local image on demand: %dx%d (intrinsic %dx%d, target %dx%d) from %s",
+                           width, height, img->width, img->height, target_w, target_h, img->source_path);
+            } else {
+                log_debug("[image] Decoded local image on demand: %dx%d (intrinsic %dx%d, target %dx%d) from %s",
+                          width, height, img->width, img->height, target_w, target_h, img->source_path);
+            }
         } else {
             // Lazy decode happens after layout chose an intrinsic placeholder;
             // unsupported/corrupt payloads must not escalate to page failure.
@@ -1091,8 +1104,15 @@ void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h)
             img->decoded_height = height;
             img->pitch = width * 4;
             image_surface_bump_generation(img);
-            log_debug("[image] Decoded HTTP image on demand: %dx%d (intrinsic %dx%d, target %dx%d)",
-                      width, height, img->width, img->height, target_w, target_h);
+            // Release builds strip debug logs; keep this opt-in trace for
+            // cache-promotion tests without raising normal image decodes to note.
+            if (image_decode_trace_enabled()) {
+                log_notice("[image] Decoded HTTP image on demand: %dx%d (intrinsic %dx%d, target %dx%d)",
+                           width, height, img->width, img->height, target_w, target_h);
+            } else {
+                log_debug("[image] Decoded HTTP image on demand: %dx%d (intrinsic %dx%d, target %dx%d)",
+                          width, height, img->width, img->height, target_w, target_h);
+            }
         } else {
             // Lazy decode happens after network metadata was accepted; keep
             // rendering stable when the payload is unsupported or corrupt.
