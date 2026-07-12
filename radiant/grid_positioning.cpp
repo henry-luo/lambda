@@ -359,6 +359,21 @@ static float resolve_margin_side(ViewBlock* item, int side, float track_width) {
     return 0.0f;
 }
 
+static float compute_grid_item_alignment_baseline(::LayoutContext* lycon, ViewBlock* item) {
+    float baseline = radiant::compute_element_first_baseline(lycon, item, true);
+    if (!item || baseline < 0.0f) return baseline;
+
+    // Child-derived baselines can carry absolute y after an earlier alignment
+    // pass; grid row math needs the baseline relative to the item's border box.
+    if (baseline > item->height && item->y > 0.0f) {
+        float relative_baseline = baseline - item->y;
+        if (relative_baseline >= 0.0f) {
+            baseline = relative_baseline;
+        }
+    }
+    return baseline;
+}
+
 // Align all grid items
 void align_grid_items(GridContainerLayout* grid_layout) {
     if (!grid_layout) return;
@@ -387,6 +402,9 @@ void align_grid_items(GridContainerLayout* grid_layout) {
         ScratchArena* sa = &grid_layout->lycon->scratch;
         float* row_max_baseline = (float*)scratch_calloc(sa, row_count * sizeof(float));
         float* row_max_below = (float*)scratch_calloc(sa, row_count * sizeof(float));
+        bool* row_has_baseline = (bool*)scratch_calloc(sa, row_count * sizeof(bool));
+        float* item_baseline_shift = (float*)scratch_calloc(
+            sa, grid_layout->item_count * sizeof(float));
 
         // First pass: compute baselines and find per-row max above/below baseline
         for (int i = 0; i < grid_layout->item_count; i++) {
@@ -400,9 +418,9 @@ void align_grid_items(GridContainerLayout* grid_layout) {
 
             int row_idx = gi->computed_grid_row_start - 1;
             if (row_idx < 0 || row_idx >= row_count) continue;
+            row_has_baseline[row_idx] = true;
 
-            float baseline = radiant::compute_element_first_baseline(
-                grid_layout->lycon, item, true);
+            float baseline = compute_grid_item_alignment_baseline(grid_layout->lycon, item);
             if (baseline < 0) baseline = item->height;
 
             float below = item->height - baseline;
@@ -412,17 +430,25 @@ void align_grid_items(GridContainerLayout* grid_layout) {
                 row_max_below[row_idx] = below;
         }
 
-        // Check if any row needs to grow for baseline alignment
+        // Check if any row needs to resize for baseline alignment
         bool rows_changed = false;
         for (int r = 0; r < row_count; r++) {
+            if (!row_has_baseline[r]) continue;
             float needed = row_max_baseline[r] + row_max_below[r];
-            if (needed > grid_layout->computed_rows[r].computed_size + 0.5f) {
-                grid_layout->computed_rows[r].computed_size = needed;
+            GridTrack* row_track = &grid_layout->computed_rows[r];
+            bool is_definite_track = row_track->size &&
+                (row_track->size->type == GRID_TRACK_SIZE_LENGTH ||
+                 row_track->size->type == GRID_TRACK_SIZE_PERCENTAGE);
+            if (!is_definite_track && fabsf(needed - row_track->computed_size) > 0.5f) {
+                // Auto/intrinsic rows can be visited by both early and final grid
+                // passes; recompute their baseline fit instead of preserving an
+                // over-large estimate from an earlier pass.
+                row_track->computed_size = needed;
                 rows_changed = true;
             }
         }
 
-        // If rows grew, re-position all items to account for new row positions
+        // If rows changed, re-position all items to account for new row positions
         if (rows_changed) {
             float row_gap = grid_layout->row_gap;
             // Get container padding/border offset
@@ -471,7 +497,8 @@ void align_grid_items(GridContainerLayout* grid_layout) {
             }
         }
 
-        // Apply baseline shifts to track_base_y
+        // Baseline alignment can run more than once as grid content is laid out;
+        // keep the shim transient so track_base_y remains the unaligned track origin.
         for (int i = 0; i < grid_layout->item_count; i++) {
             ViewBlock* item = grid_layout->grid_items[i];
             GridItemProp* gi = grid_item_prop(item);
@@ -484,18 +511,31 @@ void align_grid_items(GridContainerLayout* grid_layout) {
             int row_idx = gi->computed_grid_row_start - 1;
             if (row_idx < 0 || row_idx >= row_count) continue;
 
-            float baseline = radiant::compute_element_first_baseline(
-                grid_layout->lycon, item, true);
+            float baseline = compute_grid_item_alignment_baseline(grid_layout->lycon, item);
             if (baseline < 0) baseline = item->height;
 
             float shift = row_max_baseline[row_idx] - baseline;
             if (shift > 0.01f) {
-                gi->track_base_y += shift;
+                item_baseline_shift[i] = shift;
             }
         }
 
+        for (int i = 0; i < grid_layout->item_count; i++) {
+            ViewBlock* item = grid_layout->grid_items[i];
+            GridItemProp* gi = grid_item_prop(item);
+            if (!item || !gi) continue;
+            float base_y = gi->track_base_y;
+            gi->track_base_y = base_y + item_baseline_shift[i];
+            align_grid_item(item, grid_layout);
+            gi->track_base_y = base_y;
+        }
+
+        scratch_free(sa, item_baseline_shift);
+        scratch_free(sa, row_has_baseline);
         scratch_free(sa, row_max_below);
         scratch_free(sa, row_max_baseline);
+        log_debug("Grid items aligned\n");
+        return;
     }
 
     for (int i = 0; i < grid_layout->item_count; i++) {

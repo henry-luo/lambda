@@ -261,13 +261,6 @@ float compute_element_first_baseline(
     (void)lycon;
     (void)is_row_direction;
 
-    if (element->font) {
-        BoxMetrics box = layout_box_metrics(element);
-        float fallback = element->font->font_size * 0.8f;
-        return box.padding.top + box.border.top +
-            compute_font_baseline_ascender(lycon, element->font, false, fallback);
-    }
-
     // CSS 2.1 §10.8.1: use the first in-flow child baseline when one exists.
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
@@ -276,6 +269,20 @@ float compute_element_first_baseline(
         if (child_baseline >= 0) {
             return child_block->y + child_baseline;
         }
+    }
+
+    bool has_text_content = false;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (layout_text_node_has_content(child)) {
+            has_text_content = true;
+            break;
+        }
+    }
+    if (has_text_content && element->font) {
+        BoxMetrics box = layout_box_metrics(element);
+        float fallback = element->font->font_size * 0.8f;
+        return box.padding.top + box.border.top +
+            compute_font_baseline_ascender(lycon, element->font, false, fallback);
     }
 
     // No child with baseline: synthesize from the bottom border edge.

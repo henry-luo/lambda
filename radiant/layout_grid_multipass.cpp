@@ -12,7 +12,6 @@
 #include "layout_measure.hpp"
 #include "layout_box.hpp"
 #include "layout_percentages.hpp"
-#include "grid_baseline.hpp"
 #include "../lib/tagged.hpp"
 
 extern "C" {
@@ -391,9 +390,6 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             }
         }
     }
-
-    // Apply baseline alignment: shift items within each row to a shared baseline
-    radiant::grid::resolve_and_apply_grid_baselines(lycon->grid_container);
 
     log_info("=== GRID PASS 3 COMPLETE ===");
 
