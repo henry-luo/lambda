@@ -27,14 +27,37 @@ The codebase (~590k LOC surveyed) is not uniformly duplicative — several subsy
 
 **Estimated removable duplication:** roughly 4,000–6,000 LOC of direct clones, plus large maintainability wins from table-driving the op/builtin dispatch families.
 
-### Progress update (2026-07-11)
+### Progress update (2026-07-12, verified against code)
 
-- ✅ Formatter dispatch + element attribute iteration (§3.1, §3.2) are complete: serializer dispatch now goes through shared formatter handlers, and formatter/validator attribute walks use reader iterators.
-- ✅ JS/core sharing (§6.1, §6.2, §6.3, §6.5, §6.6 partial) has landed for dtoa, base64 decode, common JS value helpers, civil-date math, JSON string escaping, and core UTF-16 pair math.
-- ✅ Input/parser cleanup has landed for the INI/Properties unified parser (§2.1), hexadecimal escape decoding (§2.3), shared decimal number scanning for JSON/TOML/Mark/YAML, Mark `n`/`m` suffix policy, and shared TOML/YAML radix integer parsing (§2.6 partial), plus several small parser helper migrations.
-- ✅ Lambda core cleanup has landed for transpiler analysis helpers (§1.1), numeric conversion/ArrayNum readers (§1.2, §1.3), scalar TypeId predicates (§1.5 partial), map field reconstruction (§1.4 partial), UTF normalization (§1.6), and the §1.7 small items.
-- ✅ Radiant paint/display-list utility sharing has landed for XML/SVG escaping, color parsing, grow-array helpers, matrix/rect bounds helpers, dirty-region bounds, surface-region save/restore, glyph sampling, and related §5.6 utility cleanup.
-- Still open: Radiant layout min/max and box-sizing migration (§4.2, §4.8), flex/grid alignment and percentage sharing (§4.4-§4.6), display-list replay/tile replay consolidation (§5.1), remaining parser source-tracker/comment cleanup (§2.4, §2.6), and shared MIR emitter infrastructure (§6.4).
+**Complete** (every ✅ claim below spot-checked in the live tree):
+- ✅ Lambda core: §1.1 transpiler analysis helpers, §1.2/§1.3 numeric conversion + ArrayNum readers, §1.6 UTF normalization, all §1.7 small items.
+- ✅ Input/parsers: §2.1 unified INI/Properties, §2.2 quoted-string unification, §2.3 hex/surrogate escapes, §2.5 lib/str adoption (except PDF/markup remainder noted below), most of §2.6.
+- ✅ Formatters + validator: all of §3 (dispatch visitor, `ElementReader::attrs()`, XML escaping, TypeId names, number/datetime helpers, escaper consolidation, math dispatch tables, §3.8 small items).
+- ✅ Radiant layout: §4.1 box-metric migration, §4.3 out-of-flow canonicalization, §4.7 box-shorthand helper, §4.8 box-sizing (only 2 CSS-declaration-keyword reads in `intrinsic_sizing.cpp` + style-resolution assignments remain; ~99 sites on `layout_uses_border_box()`/`layout_box_sizing()`), §4.4 flex alignment distribution (zero switch ladders left in `layout_flex.cpp`; stretch/baseline stay flex-local by design).
+- ✅ Radiant paint: §5.2 glyph rasterization, §5.4 lib-reuse batch, §5.5 helper extractions incl. `IRect`/`render_rect.hpp` (`RenderPixelBounds` and `int region[4]` fully gone), §5.6 math templates.
+- ✅ JS↔core: §6.1 dtoa, §6.2 base64 decode, §6.3 static-helper dedup, §6.5 civil-date math, §6.6 JSON escaping / percent-encoding / UTF-16 pair math / inspect-vs-print audit.
+
+**Partial** (helpers landed; quantified remainder):
+- §4.2 min/max clamps — ~111 raw `given_min/max_*` clamp sites remain vs ~18 helper calls; 76 of the raw sites are in `layout_flex.cpp` (deferred for FLT_MAX/auto-min subtleties); grid is clean.
+- §4.5 baselines — shared `compute_font_baseline_ascender()` used by flex/table/grid, but the three recursive first-baseline walkers remain separate.
+- §4.6 percentages — `layout_percentages.{hpp,cpp}` exists; `layout_reresolve_percentage_box()` is grid-only (flex uses the lower-level shared primitives); the two containing-content-width wrappers remain separate over shared primitives.
+- §4.8 layout_axis — ~62 `is_horizontal` conditional branches + 31 adapter calls + 10 direction branches left in flex vs 45 axis-helper uses.
+- §4.8 child iteration — skip helpers adopted; one raw predicate left (`grid_utils.cpp:32`); shared `collect_in_flow_children()` never built.
+- §5.1 replay clone — `dl_replay_tile` 566→207 LOC, `dl_replay` 226→171; all helper families shared; the two outer dispatch switches (30 vs 43 `case DL_`) remain parallel, no single parameterized replay core.
+- §5.3 paint-op table — `PAINT_OP_LIST` drives the enum + `paint_op_name()`; validate/lower-raster/lower-svg remain 3 explicit switches (79 `case PAINT_`, down from 108).
+- §5.5 rect zoo — `IRect` slice done; broader `Rect`/`Bound`/`DirtyRect`/`Point2D` consolidation not started.
+- §2.4 line/col tracking — `LineCounter` shared by CSS/HTML5/markup byte-cursors; YAML keeps its parser-local cursor (`YamlCursor` helpers), CSS parser/engine structs keep their own line/col fields.
+- §2.5/§2.6 ctype remainder — `input-pdf.cpp` (11 calls) + `input-pdf-postprocess.cpp` (10), and 28 calls across 13 `markup/` files incl. the link-reference `tolower` comparisons (`inline_format_specific.cpp:335`, `inline_spans.cpp:216`).
+- §1.4 map-field walks — `FOR_EACH_MAP_FIELD` adopted ~18 sites; the 3 read-only `build_ast.cpp` walks are now migrated; residual `->shape` loops are mostly mutation/codegen/copy paths.
+- §1.5 type predicates — broadly adopted; the `build_ast.cpp` quick sweep is done, with local names for AST-specific memberships; remaining replaceable single-variable chains are concentrated in `transpile-mir.cpp`/`transpile.cpp` and still need a refreshed count before the next pass.
+- §6.4 MirEmitter — mechanical bodies shared via `mir_emitter_shared.hpp`; the embedded base struct was not built — each transpiler keeps its own reg counter, import cache, and thin wrapper shims.
+- §6.6 builtin registration — registry strncmp ladders → spec-map tables done; the giant `switch(builtin_id)` (`js_runtime.cpp` ~9470) and 357 `strncmp`s in `js_mir_expression_lowering.cpp` remain; adding a builtin still touches 3 places.
+- §6.6 path_str — `lib/path_str.h` with `js_path.cpp` fully routed; `require()` lightly routed (2 calls), remaining local code is intentional policy.
+
+**Not started:**
+- §6.6 RE2 glue — no `lib/re2_glue`; `re2_wrapper.cpp` (802 LOC) and `js_regex_wrapper.cpp` (2862 LOC) still duplicate the compile/cache/options/capture lifecycle.
+- §5.7 both deep-audit flags — dual SVG serialization paths (`render_svg.cpp` 80 KB + `render_svg_inline.cpp` 233 KB + PaintIR SVG lowering) and `event.cpp` (444 KB) vs `event_sim.cpp` (260 KB).
+- §4.8 last item — `resolve_htm_style.cpp` (2172 LOC) vs `resolve_css_style.cpp` overlap.
 
 ### Top 10 highest-leverage actions
 
@@ -42,10 +65,10 @@ The codebase (~590k LOC surveyed) is not uniformly duplicative — several subsy
 |---|--------|------|------|--------|------|
 | 1 | ✅ Extract `lib/dtoa` from `lambda_double_to_shortest` ≡ `js_double_to_string` | JS↔core | 135 | Low | Low |
 | 2 | ✅ Resolve INI/Properties triple implementation (wire `input-kv.cpp`, delete `input-ini`/`input-prop`) | input | 480 | Med | Med |
-| 3 | Migrate radiant layout to existing `layout_box_metrics`/`layout_apply_min_max_*` helpers | radiant | 450–750 | Med | Low |
-| 4 | De-clone `dl_replay_tile` vs `dl_replay` + shared glyph raster | radiant | 530 | High | Med |
+| 3 | 🔶 Migrate radiant layout to existing `layout_box_metrics`/`layout_apply_min_max_*` helpers — box metrics (§4.1) done; min/max (§4.2) partial, ~111 raw clamp sites left (76 in flex) | radiant | 450–750 | Med | Low |
+| 4 | 🔶 De-clone `dl_replay_tile` vs `dl_replay` + shared glyph raster — glyph (§5.2) done; replay helper families shared, two parallel dispatch switches remain (§5.1) | radiant | 530 | High | Med |
 | 5 | ✅ Kill the 22×/21×/8× static helper copies in lambda/js | JS | 270 | Trivial | Low |
-| 6 | `MirEmitter` base shared by `transpile-mir.cpp` and `js_mir_*` | JS↔core | 300–500 | Med-High | Med |
+| 6 | 🔶 `MirEmitter` base shared by `transpile-mir.cpp` and `js_mir_*` — mechanical bodies shared via `mir_emitter_shared.hpp`; embedded base struct not built (§6.4) | JS↔core | 300–500 | Med-High | Med |
 | 7 | ✅ Shared formatter dispatch visitor + `ElementReader` attribute iterator | format | 290 | Med | Med |
 | 8 | ✅ Done: unify parser quoted-string/reference loops by policy-local helpers | input | 450 | Med | Med |
 | 9 | ✅ Move 5 duplicated analysis helpers into `transpile_shared.cpp` | core | 120 | Low | Low |
@@ -91,12 +114,16 @@ Canonical `array_num_read_scalar_at` (`lambda-data-runtime.cpp:240–264`) vs `r
 
 ✅ Partial (2026-07-12): routed Python and Ruby runtime map/hash helper walks through `FOR_EACH_MAP_FIELD()` as well, covering Python dict `keys()`/`values()`/`items()`/`update()`/`copy()`, class-method map copying, mapping-rest pattern copies, Ruby hash `keys()`/`values()`/`to_a()`/`length()`/`value?()`/`merge()`, inline SVG subscene attribute serialization, and validator typo-suggestion field scans. The pass also fixed two iterator-adjacent Python dict bugs found during verification: mapping-rest patterns now read packed map slots through `_map_read_field()` instead of reconstructing raw `Item` words, and `py_dict_get()` now performs a direct empty-map-safe dict lookup instead of routing missing keys through attribute/JS-object lookup. Verified with `make build`, `make build-jube`, `git diff --check`, Python dict/mapping/class temp smokes, `test_py_classes.py`, `test_py_match.py`, `test_py_kwargs.py`, `test_py_stdlib_collections.py`, Ruby numerics, and `test_rb_gtest` (22/22); Jube Python commands still emit the known small eval/py-runtime memtrack diagnostics while exiting cleanly.
 
+✅ Partial (2026-07-12): routed the three remaining read-only `build_ast.cpp` shape walks through `FOR_EACH_MAP_FIELD()`: struct field type resolution, user-member method shadow checks, and inherited-field scope injection. Parent-shape copying and AST/type-construction loops remain explicit because they allocate or relink shape entries. Verified with `make build`, `git diff --check`, and focused Lambda smokes for `unboxed_field_access.ls`, `func_param.ls`, `sized_numeric_type_annot.ls`, `mixed_numeric_ops.ls`, `typed_array_vector_ops.ls`, `eq_total.ls`, and `value.ls`.
+
 ### 1.5 Ad-hoc scalar-type predicate chains ~85× — C3/C4, MED-HIGH
 `tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT || ...` appears 42× in `transpile.cpp`, 35× in `transpile-mir.cpp`, 8× in `build_ast.cpp`, plus named variants with *subtly different membership*: `has_typed_params` (`transpile_shared.cpp:14–37`), `mir_is_native_param_type` (`transpile-mir.cpp:673–684`), `is_numeric_type` (`transpile.cpp:352`), `is_scalar_numeric` (`lambda-vector.cpp:67`). **Fix:** canonical predicates (`is_native_scalar_type`, `is_unboxable_param_type`, `is_numeric_type`) defined once near `TypeId`; replace deliberately, not blindly — memberships differ per site. Effort: medium.
 
 ✅ Partial: added shared TypeId predicates near the canonical `is_numeric_type_id()` helper and routed the exact-match predicate chains in `transpile_shared.cpp`, `transpile.cpp`, `transpile-mir.cpp`, `transpile-call.cpp`, `build_ast.cpp`, `lambda-vector.cpp`, `lambda-eval*.cpp`, `lambda-data*.cpp`, `lambda-proc.cpp`, `target.cpp`, and `vmap.cpp` through them. The second pass added `is_native_numeric_or_bool_type_id()` and `is_text_type_id()` for exact native/bool and string-or-symbol memberships. This pass added `is_integer_type_id()` and `is_float_type_id()` and routed the remaining exact integer/float-family chains in the core Lambda runtime, validator, format, and MIR paths through them. Follow-up added `is_fn_call_wrapper_return_type_id()` and routed the shared plus legacy C-transpiler wrapper-return checks through it, while also replacing the legacy typed-param chain with `is_typed_wrapper_param_type_id()`. The latest pass routed the core member/split/splice text and integer checks through `is_text_type_id()` / `is_integer_type_id()` and collapsed repeated runtime vector predicates behind one local helper. Language-specific JS/Ruby/Python/TS memberships remain explicit. Verified with `make build`, `make check-int-cast`, `git diff --check`, direct MIR smokes for `mixed_numeric_ops.ls`, `typed_array_vector_ops.ls`, `eq_total.ls`, `value.ls`, `unboxed_field_access.ls`, `sized_numeric_type_annot.ls`, `func_param.ls`, `numeric_sys_func.ls`, procedural `proc_splice.ls`, and `temp/cleanup_predicate_smoke.ls`; an attempted `test_lambda_gtest` numeric filter matched 0 tests and is not counted.
 
 ✅ Partial (2026-07-12): collapsed Ruby runtime's repeated `int|float|int64` arithmetic/comparison membership into local `rb_is_numeric_type()` / `rb_are_numeric_types()` helpers, preserving Ruby's intentionally narrower numeric set rather than using Lambda's broader numeric predicates. The same verification pass fixed the Jube-only Bash builtin compile blocker by including the shared `lib/str.h` declaration for `str_char_in_set()`, restored the Jube source overlay for `lambda/jube`, `lambda/module/radiant`, `lambda/module/hostobj_demo`, and `transpile_shared.cpp`, registered the Ruby-emitted `js_function_get_ptr` MIR import, moved Ruby array item growth to GC data-zone storage via `rb_array_ensure_capacity()`, and retained standalone Ruby heaps through `Runtime` so `runtime_cleanup()` owns teardown without leaking into memtrack output. Verified with `make build`, `make build-jube`, `make check-int-cast`, `git diff --check`, direct `lambda-jube.exe rb --no-log test/rb/test_rb_numerics.rb`, and `test_rb_gtest` (22/22).
+
+✅ Partial (2026-07-12): added shared `is_array_family_type_id()`, `is_map_family_type_id()`, and `is_container_type_id()` near the canonical TypeId predicates, then routed the exact `build_ast.cpp` array-family, map-family, and container checks through them. Also named the AST-local predicate memberships for parameter full-type preservation, static scalar spread diagnostics, and mutable-assignment numeric narrowing, and reused existing numeric/float/integer predicates for the compatible coercion paths. `lambda/lambda-embed.h` was regenerated from `lambda/lambda.h`. Verified with `make build`, `git diff --check`, and focused Lambda smokes for `mixed_numeric_ops.ls`, `typed_array_vector_ops.ls`, `unboxed_field_access.ls`, `sized_numeric_type_annot.ls`, `func_param.ls`, `eq_total.ls`, and `value.ls`.
 
 ### ✅ 1.6 `utf_string.cpp` copy-paste wrappers — C3, some C2, MED
 Five `normalize_utf8proc_nfc/nfd/casefold/nfkc/nfkd` (`utf_string.cpp:17–84, 221–267`) identical except the option flags; five comparators `equal/less/greater/less_equal/greater_equal_comp_unicode` (133–218) identical except a one-line result map. ~150 LOC → ~50. **Fix:** one parameterized `normalize_utf8proc(str,len,out_len,opts)` + one comparator core. The normalize group is generic and a candidate for `lib/utf` (which has no normalization today). Effort: low.
