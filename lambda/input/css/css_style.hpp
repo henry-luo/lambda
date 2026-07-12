@@ -469,6 +469,7 @@ typedef enum CssPropertyId {
 
     // User Interface Properties
     CSS_PROPERTY_RESIZE,
+    CSS_PROPERTY_ACCENT_COLOR,
     CSS_PROPERTY_CARET_COLOR,
     CSS_PROPERTY_CARET_SHAPE,
     CSS_PROPERTY_NAV_INDEX,

@@ -554,7 +554,9 @@ struct InlineProp {
     CssEnum cursor;
     CssEnum caret_shape;
     Color color;
+    Color accent_color;
     bool has_color;
+    bool has_accent_color;
     Color svg_fill_color;
     Color svg_stroke_color;
     CssEnum vertical_align;

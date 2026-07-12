@@ -4008,6 +4008,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         CSS_PROPERTY_FILL,
         CSS_PROPERTY_STROKE,
         CSS_PROPERTY_STROKE_WIDTH,
+        CSS_PROPERTY_ACCENT_COLOR,
         CSS_PROPERTY_VISIBILITY,
         CSS_PROPERTY_EMPTY_CELLS,
         CSS_PROPERTY_DIRECTION,
@@ -4657,6 +4658,21 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             span->in_line->color = resolve_color_value(lycon, value);
             span->in_line->has_color = true;
+            break;
+        }
+
+        case CSS_PROPERTY_ACCENT_COLOR: {
+            log_debug("[CSS] Processing accent-color property");
+            if (!span->in_line) {
+                span->in_line = alloc_inline_prop(lycon);
+            }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+                span->in_line->has_accent_color = false;
+            } else {
+                // accent-color is inherited; store the computed color so form painters do not use UA black.
+                span->in_line->accent_color = resolve_color_value(lycon, value);
+                span->in_line->has_accent_color = true;
+            }
             break;
         }
 
