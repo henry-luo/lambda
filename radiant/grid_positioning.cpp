@@ -402,7 +402,7 @@ void align_grid_items(GridContainerLayout* grid_layout) {
         ScratchArena* sa = &grid_layout->lycon->scratch;
         float* row_max_baseline = (float*)scratch_calloc(sa, row_count * sizeof(float));
         float* row_max_below = (float*)scratch_calloc(sa, row_count * sizeof(float));
-        bool* row_has_baseline = (bool*)scratch_calloc(sa, row_count * sizeof(bool));
+        int* row_baseline_count = (int*)scratch_calloc(sa, row_count * sizeof(int));
         float* item_baseline_shift = (float*)scratch_calloc(
             sa, grid_layout->item_count * sizeof(float));
 
@@ -418,7 +418,7 @@ void align_grid_items(GridContainerLayout* grid_layout) {
 
             int row_idx = gi->computed_grid_row_start - 1;
             if (row_idx < 0 || row_idx >= row_count) continue;
-            row_has_baseline[row_idx] = true;
+            row_baseline_count[row_idx]++;
 
             float baseline = compute_grid_item_alignment_baseline(grid_layout->lycon, item);
             if (baseline < 0) baseline = item->height;
@@ -433,16 +433,19 @@ void align_grid_items(GridContainerLayout* grid_layout) {
         // Check if any row needs to resize for baseline alignment
         bool rows_changed = false;
         for (int r = 0; r < row_count; r++) {
-            if (!row_has_baseline[r]) continue;
+            if (row_baseline_count[r] <= 0) continue;
             float needed = row_max_baseline[r] + row_max_below[r];
             GridTrack* row_track = &grid_layout->computed_rows[r];
             bool is_definite_track = row_track->size &&
                 (row_track->size->type == GRID_TRACK_SIZE_LENGTH ||
                  row_track->size->type == GRID_TRACK_SIZE_PERCENTAGE);
-            if (!is_definite_track && fabsf(needed - row_track->computed_size) > 0.5f) {
-                // Auto/intrinsic rows can be visited by both early and final grid
-                // passes; recompute their baseline fit instead of preserving an
-                // over-large estimate from an earlier pass.
+            bool has_baseline_group = row_baseline_count[r] > 1;
+            bool should_resize = has_baseline_group
+                ? fabsf(needed - row_track->computed_size) > 0.5f
+                : needed > row_track->computed_size + 0.5f;
+            if (!is_definite_track && should_resize) {
+                // True baseline-sharing groups need their fitted row size recomputed
+                // across passes; single-item rows keep align-content stretch space.
                 row_track->computed_size = needed;
                 rows_changed = true;
             }
@@ -531,7 +534,7 @@ void align_grid_items(GridContainerLayout* grid_layout) {
         }
 
         scratch_free(sa, item_baseline_shift);
-        scratch_free(sa, row_has_baseline);
+        scratch_free(sa, row_baseline_count);
         scratch_free(sa, row_max_below);
         scratch_free(sa, row_max_baseline);
         log_debug("Grid items aligned\n");

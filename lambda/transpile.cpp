@@ -802,8 +802,7 @@ static bool is_idiv_expr(AstNode* node) {
     // boxed fn_idiv() path is used (returns Item).
     TypeId lt = bin->left->type ? bin->left->type->type_id : LMD_TYPE_ANY;
     TypeId rt = bin->right->type ? bin->right->type->type_id : LMD_TYPE_ANY;
-    bool both_int = (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64) &&
-                    (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64);
+    bool both_int = is_integer_type_id(lt) && is_integer_type_id(rt);
     return !both_int;  // true only when boxed fn_idiv() is used
 }
 
@@ -819,15 +818,14 @@ static bool binary_already_returns_item(AstNode* node) {
     AstBinaryNode* bin_node = (AstBinaryNode*)node;
     TypeId lt = bin_node->left->type ? bin_node->left->type->type_id : LMD_TYPE_ANY;
     TypeId rt = bin_node->right->type ? bin_node->right->type->type_id : LMD_TYPE_ANY;
-    bool both_numeric = (LMD_TYPE_INT <= lt && lt <= LMD_TYPE_FLOAT &&
-                         LMD_TYPE_INT <= rt && rt <= LMD_TYPE_FLOAT);
+    bool both_numeric = is_native_numeric_type_id(lt) &&
+                         is_native_numeric_type_id(rt);
 
     switch (bin_node->op) {
     case OPERATOR_IDIV: {
         // Native fn_idiv_i for INT/INT64 operands returns int64_t (needs boxing)
         // Boxed fn_idiv for other types returns Item (no boxing needed)
-        bool both_int = (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64) &&
-                        (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64);
+        bool both_int = is_integer_type_id(lt) && is_integer_type_id(rt);
         return !both_int;
     }
     case OPERATOR_MOD:
@@ -1491,8 +1489,7 @@ void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
         TypeId operand_type = unary_node->operand->type->type_id;
 
         // Fast path for numeric types that can be handled directly by C
-        if (operand_type == LMD_TYPE_INT || operand_type == LMD_TYPE_INT64 ||
-            operand_type == LMD_TYPE_FLOAT) {
+        if (is_native_numeric_type_id(operand_type)) {
             // Direct C operator application for primitive numeric types
             if (unary_node->op == OPERATOR_POS) {
                 // Unary + can be optimized away for numeric types
@@ -1596,8 +1593,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             }
             // else let fn_add() handle it
         }
-        else if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
-            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_FLOAT) {
+        else if (is_native_numeric_type_id(left_type) &&
+            is_native_numeric_type_id(right_type)) {
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, '+');
@@ -1613,8 +1610,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_SUB) {
-        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
-            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_FLOAT) {
+        if (is_native_numeric_type_id(left_type) &&
+            is_native_numeric_type_id(right_type)) {
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, '-');
@@ -1630,8 +1627,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_MUL) {
-        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
-            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_FLOAT) {
+        if (is_native_numeric_type_id(left_type) &&
+            is_native_numeric_type_id(right_type)) {
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, '*');
@@ -1648,8 +1645,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     }
     else if (bi_node->op == OPERATOR_MOD) {
         // Native fast path for typed integer mod (fn_mod_i handles div-by-zero)
-        if ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64) &&
-            (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64)) {
+        if (is_integer_type_id(left_type) &&
+            is_integer_type_id(right_type)) {
             strbuf_append_str(tp->code_buf, "fn_mod_i((int64_t)(");
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, "),(int64_t)(");
@@ -1658,8 +1655,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             return;
         }
         // Native fast path for typed float mod
-        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
-            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_FLOAT) {
+        if (is_native_numeric_type_id(left_type) &&
+            is_native_numeric_type_id(right_type)) {
             strbuf_append_str(tp->code_buf, "fmod((double)(");
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, "),(double)(");
@@ -1675,8 +1672,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_DIV) {
-        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
-            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_FLOAT) {
+        if (is_native_numeric_type_id(left_type) &&
+            is_native_numeric_type_id(right_type)) {
             strbuf_append_str(tp->code_buf, "((double)(");
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, ")/(double)(");
@@ -1693,8 +1690,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     }
     else if (bi_node->op == OPERATOR_IDIV) {
         // Native fast path for typed integer division (fn_idiv_i handles div-by-zero)
-        if ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64) &&
-            (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64)) {
+        if (is_integer_type_id(left_type) &&
+            is_integer_type_id(right_type)) {
             strbuf_append_str(tp->code_buf, "fn_idiv_i((int64_t)(");
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, "),(int64_t)(");
@@ -1976,7 +1973,7 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
         // at the C level (e.g., fn_string() returns String* but fn_join2() returns Item),
         // causing "incompatible types in cond-expression" errors in C2MIR.
         TypeId tid = then_type->type_id;
-        if (is_native_numeric_type_id(tid) || tid == LMD_TYPE_BOOL) {
+        if (is_native_numeric_or_bool_type_id(tid)) {
             need_boxing = false;
         }
     }
@@ -2165,8 +2162,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
         // Case 3: Variable is ANY (Item) but RHS has concrete scalar type
         // (from type re-inference after param type change). Must box native → Item.
         if (!unbox_fn && var_tid == LMD_TYPE_ANY &&
-            (rhs_tid == LMD_TYPE_INT || rhs_tid == LMD_TYPE_INT64 ||
-             rhs_tid == LMD_TYPE_FLOAT || rhs_tid == LMD_TYPE_BOOL)) {
+            is_native_numeric_or_bool_type_id(rhs_tid)) {
             transpile_box_item(tp, asn_node->as);
             tp->current_assign_name = prev_assign_name;
             strbuf_append_char(tp->code_buf, ';');
@@ -3438,10 +3434,10 @@ static Type* infer_binary_result_type(Operator op, TypeId left_tid, TypeId right
     if (left_tid == LMD_TYPE_ANY || right_tid == LMD_TYPE_ANY) return &TYPE_ANY;
     if (left_tid == LMD_TYPE_ERROR || right_tid == LMD_TYPE_ERROR) return &TYPE_ANY;
 
-    bool left_int  = (left_tid == LMD_TYPE_INT || left_tid == LMD_TYPE_INT64);
-    bool right_int = (right_tid == LMD_TYPE_INT || right_tid == LMD_TYPE_INT64);
-    bool left_num  = left_int || (left_tid == LMD_TYPE_FLOAT);
-    bool right_num = right_int || (right_tid == LMD_TYPE_FLOAT);
+    bool left_int = is_integer_type_id(left_tid);
+    bool right_int = is_integer_type_id(right_tid);
+    bool left_num = is_native_numeric_type_id(left_tid);
+    bool right_num = is_native_numeric_type_id(right_tid);
 
     switch (op) {
     case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
@@ -3501,7 +3497,7 @@ static void reinfer_body_types(AstNode* node) {
         if (un->operand && un->operand->type) {
             TypeId tid = un->operand->type->type_id;
             if (un->op == OPERATOR_NEG) {
-                if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64) node->type = &TYPE_INT;
+                if (is_integer_type_id(tid)) node->type = &TYPE_INT;
                 else if (tid == LMD_TYPE_FLOAT) node->type = &TYPE_FLOAT;
             } else if (un->op == OPERATOR_NOT) {
                 node->type = &TYPE_BOOL;
@@ -3813,8 +3809,7 @@ static void walk_ast_for_proc_refs(AstNode* node, AstFuncNode* target,
 
 // Check if a type is a concrete scalar suitable for inference
 static bool is_inferable_type(TypeId tid) {
-    return tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 ||
-           tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL;
+    return is_native_numeric_or_bool_type_id(tid);
 }
 
 // Main entry point: infer parameter types for procs with untyped params
@@ -3919,8 +3914,8 @@ void infer_proc_param_types_from_callsites(Transpiler* tp, AstScript* script) {
                 } else if (inferred_types[pi] != arg_tid) {
                     // Type mismatch across call sites — can't infer
                     // Exception: INT and INT64 are compatible → use INT
-                    bool both_int = (inferred_types[pi] == LMD_TYPE_INT || inferred_types[pi] == LMD_TYPE_INT64) &&
-                                    (arg_tid == LMD_TYPE_INT || arg_tid == LMD_TYPE_INT64);
+                    bool both_int = is_integer_type_id(inferred_types[pi]) &&
+                                    is_integer_type_id(arg_tid);
                     if (both_int) {
                         inferred_types[pi] = LMD_TYPE_INT;
                     } else {
@@ -4406,8 +4401,7 @@ void transpile_return(Transpiler* tp, AstReturnNode *return_node) {
             Type *ret = fn_type ? fn_type->returned : nullptr;
             if (ret && !tp->current_func_node->captures && !fn_type->can_raise) {
                 TypeId rt = ret->type_id;
-                func_returns_native = (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64 ||
-                                      rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_BOOL);
+                func_returns_native = is_native_numeric_or_bool_type_id(rt);
             }
         }
         if (func_returns_native) {
@@ -4539,7 +4533,7 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
         }
         if (is_unsafe) {
             TypeId tid = assign_node->target_node->type->type_id;
-            if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_BOOL) {
+            if (is_integer_type_id(tid) || tid == LMD_TYPE_BOOL) {
                 use_store_func = true;
                 store_fn = "_store_i64";
             } else if (tid == LMD_TYPE_FLOAT) {
@@ -4626,7 +4620,7 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
                         strbuf_append_str(tp->code_buf, "_");
                     }
                     strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
-                    if (is_native_numeric_type_id(ftype) || ftype == LMD_TYPE_BOOL) {
+                    if (is_native_numeric_or_bool_type_id(ftype)) {
                         strbuf_append_char(tp->code_buf, ')');
                     }
                     strbuf_append_str(tp->code_buf, ");");
@@ -5158,8 +5152,7 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
         Type *ret = fn_type ? fn_type->returned : nullptr;
         if (ret && !tp->current_func_node->captures && !fn_type->can_raise) {
             TypeId rt = ret->type_id;
-            returns_native = (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64 ||
-                              rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_BOOL);
+            returns_native = is_native_numeric_or_bool_type_id(rt);
         }
     }
 
@@ -5798,8 +5791,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
             operand = ((TypeType*)operand)->type;
         }
         if (operand) {
-            if (operand->type_id == LMD_TYPE_INT || operand->type_id == LMD_TYPE_INT64
-                || operand->type_id == LMD_TYPE_FLOAT) object_type = LMD_TYPE_ARRAY_NUM;
+            if (is_native_numeric_type_id(operand->type_id)) object_type = LMD_TYPE_ARRAY_NUM;
             else object_type = LMD_TYPE_ARRAY;
         }
     }
@@ -5865,11 +5857,11 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     // Determine if the expression result type allows using raw (unboxed) access.
     // When the result is used in a scalar context, we can skip boxing overhead.
     TypeId result_type = field_node->type ? field_node->type->type_id : LMD_TYPE_ANY;
-    bool use_raw_int = (result_type == LMD_TYPE_INT || result_type == LMD_TYPE_INT64);
+    bool use_raw_int = is_integer_type_id(result_type);
     bool use_raw_float = (result_type == LMD_TYPE_FLOAT);
 
     // Helper: is field type a known integer (can be used as raw index)
-    bool field_is_int = (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64);
+    bool field_is_int = is_integer_type_id(field_type);
     // Also allow ANY-typed fields — unbox at call site with it2i()
     bool field_is_any = (field_type == LMD_TYPE_ANY);
 
@@ -6188,8 +6180,8 @@ bool value_emits_native_type(Transpiler* tp, AstNode* value, TypeId target_type)
     TypeId val_type = value->type->type_id;
 
     // type must match (INT and INT64 both stored as int64_t in direct fields)
-    if (target_type == LMD_TYPE_INT || target_type == LMD_TYPE_INT64) {
-        if (val_type != LMD_TYPE_INT && val_type != LMD_TYPE_INT64) return false;
+    if (is_integer_type_id(target_type)) {
+        if (!is_integer_type_id(val_type)) return false;
     } else {
         if (val_type != target_type) return false;
     }
@@ -6346,7 +6338,7 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
         // fall back to runtime map_get — add unboxing when field type is resolved
         {
             TypeId mem_tid = ((AstNode*)field_node)->type ? ((AstNode*)field_node)->type->type_id : LMD_TYPE_ANY;
-            if (mem_tid == LMD_TYPE_INT || mem_tid == LMD_TYPE_INT64) {
+            if (is_integer_type_id(mem_tid)) {
                 strbuf_append_str(tp->code_buf, "it2i("); needs_unbox = true;
             } else if (mem_tid == LMD_TYPE_FLOAT) {
                 strbuf_append_str(tp->code_buf, "it2d("); needs_unbox = true;
@@ -6376,7 +6368,7 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
         // add unboxing when field type is resolved
         {
             TypeId mem_tid = ((AstNode*)field_node)->type ? ((AstNode*)field_node)->type->type_id : LMD_TYPE_ANY;
-            if (mem_tid == LMD_TYPE_INT || mem_tid == LMD_TYPE_INT64) {
+            if (is_integer_type_id(mem_tid)) {
                 strbuf_append_str(tp->code_buf, "it2i("); needs_unbox = true;
             } else if (mem_tid == LMD_TYPE_FLOAT) {
                 strbuf_append_str(tp->code_buf, "it2d("); needs_unbox = true;
@@ -6730,7 +6722,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
                     strbuf_append_str(tp->code_buf, " = ");
                     // unbox based on type
                     TypeId ftid = field_type ? field_type->type_id : LMD_TYPE_ANY;
-                    if (ftid == LMD_TYPE_INT || ftid == LMD_TYPE_INT64) {
+                    if (is_integer_type_id(ftid)) {
                         strbuf_append_str(tp->code_buf, "it2i(");
                     } else if (ftid == LMD_TYPE_FLOAT) {
                         strbuf_append_str(tp->code_buf, "it2d(");
@@ -6744,8 +6736,8 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
                     strbuf_append_str(tp->code_buf, "fn_member(self_item, s2it(heap_create_name(\"");
                     strbuf_append_str_n(tp->code_buf, fname, flen);
                     strbuf_append_str(tp->code_buf, "\")))");
-                    if (is_native_numeric_type_id(ftid) ||
-                        ftid == LMD_TYPE_BOOL || ftid == LMD_TYPE_STRING) {
+                    if (is_native_numeric_or_bool_type_id(ftid) ||
+                        ftid == LMD_TYPE_STRING) {
                         strbuf_append_char(tp->code_buf, ')');  // close unbox call
                     }
                     strbuf_append_str(tp->code_buf, ";\n");
@@ -6778,7 +6770,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         bool tco_retitem = fn_type && fn_type->can_raise && !is_closure && !is_method;
         if (tco_retitem) {
             strbuf_append_str(tp->code_buf, "return item_to_ri(ITEM_ERROR); }\n");
-        } else if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_INT64) {
+        } else if (is_integer_type_id(ret_tid)) {
             strbuf_append_str(tp->code_buf, "return 0; }\n");
         } else if (ret_tid == LMD_TYPE_FLOAT) {
             strbuf_append_str(tp->code_buf, "return 0.0; }\n");
@@ -6895,8 +6887,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         if (!needs_boxing && ret_type->type_id == LMD_TYPE_ANY && fn_node->body->type) {
             TypeId body_type_id = fn_node->body->type->type_id;
             // Box scalar types when returning as Item
-            needs_boxing = (body_type_id == LMD_TYPE_INT || body_type_id == LMD_TYPE_INT64 ||
-                           body_type_id == LMD_TYPE_FLOAT || body_type_id == LMD_TYPE_BOOL ||
+            needs_boxing = (is_native_numeric_or_bool_type_id(body_type_id) ||
                            is_text_type_id(body_type_id) ||
                            body_type_id == LMD_TYPE_BINARY || body_type_id == LMD_TYPE_DECIMAL ||
                            body_type_id == LMD_TYPE_DTIME);
