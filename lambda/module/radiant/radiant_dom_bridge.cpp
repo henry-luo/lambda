@@ -3186,7 +3186,7 @@ static bool radiant_dom_projected_own_value(Item object, Item key, Item* out) {
     // DOM3 Phase 4: converted members resolve through the record system, so
     // own-keys projection and descriptors keep covering them after their
     // legacy chain arms are deleted
-    if (jube_member_get(object, key, out)) return true;
+    if (jube_member_projected_get(object, key, out)) return true;
     return radiant_dom_get_basic_property(object, key, out);
 }
 
@@ -3243,6 +3243,19 @@ RADIANT_C_API int radiant_dom_host_set_property(Item object, Item key, Item valu
     if (!out) return 0;
     *out = radiant_dom_set_property(object, key, value);
     return 1;
+}
+
+RADIANT_C_API int radiant_dom_node_named_get(Item object, Item key, Item* out) {
+    if (!out || !radiant_dom_unwrap_node(object)) return 0;
+    // Phase 4e migration: DOM open-name lookup must be handled through Jube
+    // hooks before the legacy host-ops fallback so record methods keep their
+    // method-function identity after selector engines train property IC sites.
+    return radiant_dom_host_get_property(object, key, out);
+}
+
+RADIANT_C_API int radiant_dom_node_named_set(Item object, Item key, Item value, Item* out) {
+    if (!out || !radiant_dom_unwrap_node(object)) return 0;
+    return radiant_dom_host_set_property(object, key, value, out);
 }
 
 RADIANT_C_API int radiant_dom_host_call_method(Item object,
