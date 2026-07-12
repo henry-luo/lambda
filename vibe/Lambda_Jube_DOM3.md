@@ -791,10 +791,27 @@ pending).
   delete the residual direct `js_dom_*` calls from `js_runtime.cpp`/`js_globals.cpp`/
   `js_runtime_value.cpp`.
 
+  Progress (2026-07-12, 4e opening investigation): the `get_attribute` alignment was
+  attempted first and **root-caused to an engine bug, not a getAttribute defect**. Findings,
+  fully bisected (repro: `temp/jq_find_repro.js`): our `getAttribute` semantics are correct
+  (Sizzle's probe expectations verified value-by-value). Enabling the row flips Sizzle's
+  `support.attributes` (its probe relies on `true("className")` *throwing*), which reroutes
+  jQuery into paths where the real breakage lives: **after Sizzle's context-scoped `find()`
+  executes, `Function.prototype.call`/`apply` on record env-closure natives returns
+  null/undefined without ever reaching `js_call_function`** — bisected to the `matches` row
+  being *present* (any use of record fns inside find's machinery), flip point
+  `$app.find(".item")`, while direct member calls (`el.matches(...)`), plain-JS-closure
+  `.call`, and fresh top-level `.call` all keep working. `jube_interface_runtime_reset` ruled
+  out (never fires); trampoline never entered (instrumented); `js_invoke_fn_raw` env-branch
+  never entered; `js_call_function` never entered — the failure is in the member-call/builtin
+  dispatch layer above (suspects: method inline-cache trained during find, or builtin
+  FUNC_CALL receiver resolution for env-carrying natives). This is a pre-existing engine
+  dispatch defect exposed by record fns; it also caps D0d for `get_attribute` until fixed.
+  Both deferred with in-code comments; the tree is green with `get_attribute` legacy.
+
 Gates per sub-step: anchors + full JS gtest + `dom_jquery_lib`/`dom_v12b`/`dom_identity` direct
 diffs; 4c/4e additionally UI-automation + `make test-radiant-baseline` vs the DOM2 Phase-0
-triage table; phase-end grep gates: `dom_methods\[\]|doc_methods\[\]|form_idl_props\[\]` → 0
-hits; strcmp budget for js_dom.cpp ≤ ~200 (data compares), bridge dispatch chains deleted.
+triage table; phase-end grep gates: `dom_methods\[\]|doc_methods\[\]|form_idl_props\[\]` → 0 hits; strcmp budget for js_dom.cpp ≤ ~200 (data compares), bridge dispatch chains deleted.
 
 ### Phase 5 — Lambda projection convergence
 

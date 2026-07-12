@@ -12944,6 +12944,12 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     if (fn && fn->name) { _trace_last_fn = fn->name->chars; _trace_last_fn_len = (int)fn->name->len; }
     else if (fn) { _trace_last_fn = "(anon)"; _trace_last_fn_len = 6; }
     _trace_total_calls++;
+    if (fn && fn->name && fn->name->len == 7 && strncmp(fn->name->chars, "matches", 7) == 0) {
+        log_error("CALLFN-DBG matches: fn=%p builtin_id=%d flags=0x%x env=%p env_size=%d bound_args=%p bound_argc=%d bound_this=0x%llx func_ptr=%p argc=%d",
+            (void*)fn, fn->builtin_id, fn->flags, (void*)fn->env, fn->env_size,
+            (void*)fn->bound_args, fn->bound_argc, (unsigned long long)fn->bound_this.item,
+            fn->func_ptr, arg_count);
+    }
 
     if (fn && fn->name && fn->name->len == 4 && strncmp(fn->name->chars, "Date", 4) == 0) {
         extern Item js_date_now_string(void);

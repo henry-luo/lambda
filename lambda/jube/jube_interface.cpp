@@ -922,7 +922,10 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
             ? jube_strndup(src->const_str, strlen(src->const_str)) : NULL;
     }
 
+    // release strips log_info(), so keep diagnostic counters out of NDEBUG builds.
+#ifndef NDEBUG
     int method_count = 0, const_count = 0;
+#endif
     for (int i = 0; i < parsed_count; i++) {
         JubeMemberRecord* rec = &records[out_count++];
         const JubeMemberBind* bind = jube_find_bind(binding, parsed[i].name);
@@ -937,7 +940,9 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
             rec->arity = parsed[i].arity;
             rec->can_raise = parsed[i].can_raise;
             rec->readonly = true;
+#ifndef NDEBUG
             method_count++;
+#endif
         } else if (!bind) {
             rec->kind = JUBE_MEMBER_CONST;
             rec->readonly = true;
@@ -945,7 +950,9 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
             rec->const_is_str = parsed[i].default_is_str;
             rec->const_str = parsed[i].default_str;
             parsed[i].default_str = NULL;
+#ifndef NDEBUG
             const_count++;
+#endif
         } else {
             rec->kind = JUBE_MEMBER_FIELD;
             rec->readonly = !bind->set && !bind->reflect_attr;
@@ -977,8 +984,10 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
     trec->prototype = ItemNull;
     s_type_records[s_type_record_count++] = trec;
 
+#ifndef NDEBUG
     log_info("JUBE_REG: type %s.%s members=%d (methods=%d, consts=%d, inherited=%d)",
              module->name, type_name, out_count, method_count, const_count, base_count);
+#endif
     jube_free_parsed_members(parsed, parsed_count);
     mem_free(type_name);
     return 0;

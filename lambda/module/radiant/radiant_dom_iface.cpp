@@ -1108,10 +1108,12 @@ static const JubeMemberBind radiant_dom_node_members[] = {
     {"append_data", "appendData", NULL, radiant_dom_guard_text, NULL, NULL, radiant_dom_m4d_append_data, NULL, 0},
     {"delete_data", "deleteData", NULL, radiant_dom_guard_text, NULL, NULL, radiant_dom_m4d_delete_data, NULL, 0},
     {"substring_data", "substringData", NULL, radiant_dom_guard_text, NULL, NULL, radiant_dom_m4d_substring_data, NULL, 0},
-    // get_attribute deliberately NOT converted yet: flipping its
-    // property read from ITEM_TRUE to a function enables jQuery/Sizzle's
-    // support.attributes path (the probe relies on `true(...)` throwing);
-    // align in the 4e engine sweep with deliberate golden updates.
+    // get_attribute deliberately NOT converted yet: its ITEM_TRUE->function flip
+    // reroutes jQuery/Sizzle feature detection into paths that expose a deeper
+    // engine issue — after Sizzle's context find() runs, Function.prototype.call
+    // on record env-closure natives fails BEFORE reaching js_call_function
+    // (direct member calls and plain-closure .call are unaffected). Root-cause
+    // the engine dispatch first; repro: temp/jq_find_repro.js. See DOM3 doc 4e.
     {"set_attribute", "setAttribute", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_set_attribute, NULL, 0},
     {"remove_attribute", "removeAttribute", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_remove_attribute, NULL, 0},
     {"toggle_attribute", "toggleAttribute", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_toggle_attribute, NULL, 0},
