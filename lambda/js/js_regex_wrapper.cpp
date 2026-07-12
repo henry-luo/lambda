@@ -13,6 +13,7 @@
  * - Lookbehind (?<=Y)/(?<!Y)              → stripped (handled in Phase A)
  */
 #include "js_regex_wrapper.h"
+#include "../../lib/re2_glue.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/memtrack.h"
@@ -459,20 +460,13 @@ static re2::RE2* compile_lookbehind_re(const std::string& inner, bool ignore_cas
     pat.append("(?:");
     pat.append(inner);
     pat.append(")\\z");
-    re2::RE2::Options o;
-    o.set_log_errors(false);
+    re2::RE2::Options o = lam::re2_glue_default_options();
     o.set_encoding(re2::RE2::Options::EncodingUTF8);
     o.set_case_sensitive(!ignore_case);
     o.set_one_line(!multiline);
     o.set_dot_nl(dot_all);
-    re2::RE2* re = new re2::RE2(pat, o);
-    if (!re->ok()) {
-        log_debug("js regex wrapper: lookbehind subpattern compile failed '%s': %s",
-                  pat.c_str(), re->error().c_str());
-        delete re;
-        return nullptr;
-    }
-    return re;
+    return lam::re2_glue_compile(
+        pat.data(), pat.size(), o, "js regex wrapper: lookbehind subpattern");
 }
 
 static re2::RE2* compile_positive_assert_re(const std::string& inner, bool ignore_case,
@@ -481,20 +475,13 @@ static re2::RE2* compile_positive_assert_re(const std::string& inner, bool ignor
     pat.append("(?:");
     pat.append(inner);
     pat.append(")");
-    re2::RE2::Options o;
-    o.set_log_errors(false);
+    re2::RE2::Options o = lam::re2_glue_default_options();
     o.set_encoding(re2::RE2::Options::EncodingUTF8);
     o.set_case_sensitive(!ignore_case);
     o.set_one_line(!multiline);
     o.set_dot_nl(dot_all);
-    re2::RE2* re = new re2::RE2(pat, o);
-    if (!re->ok()) {
-        log_debug("js regex wrapper: positive assertion subpattern compile failed '%s': %s",
-                  pat.c_str(), re->error().c_str());
-        delete re;
-        return nullptr;
-    }
-    return re;
+    return lam::re2_glue_compile(
+        pat.data(), pat.size(), o, "js regex wrapper: positive assertion subpattern");
 }
 
 // ============================================================================
@@ -1515,11 +1502,11 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                     f.reject_pattern = nullptr;
                     f.reject_wrapper = nullptr;
                 } else {
-                    re2::RE2::Options assert_opts;
-                    assert_opts.set_log_errors(false);
+                    re2::RE2::Options assert_opts = lam::re2_glue_default_options();
                     assert_opts.set_encoding(re2::RE2::Options::EncodingUTF8);
-                    re2::RE2* assert_re = new re2::RE2(info.inner, assert_opts);
-                    if (assert_re->ok()) {
+                    re2::RE2* assert_re = lam::re2_glue_compile(
+                        info.inner.data(), info.inner.size(), assert_opts, nullptr);
+                    if (assert_re) {
                         fi = out->filter_count;
                         JsRegexFilter& f = out->filters[out->filter_count++];
                         f.type = JS_PF_ASSERT_MATCH;
@@ -1528,7 +1515,6 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                         f.reject_wrapper = nullptr;
                     } else {
                         log_debug("js regex wrapper: failed to compile assertion pattern '%s'", info.inner.c_str());
-                        delete assert_re;
                     }
                 }
 
@@ -1601,16 +1587,14 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 }
 
                 // Create the rejection pattern
-                re2::RE2::Options reject_opts;
-                reject_opts.set_log_errors(false);
+                re2::RE2::Options reject_opts = lam::re2_glue_default_options();
                 reject_opts.set_encoding(re2::RE2::Options::EncodingUTF8);
                 int group_offset = count_capture_groups_until(original, info.start_pos);
                 std::string reject_inner = normalize_assertion_backrefs(info.inner, group_offset);
-                re2::RE2* reject_re = new re2::RE2(reject_inner, reject_opts);
+                re2::RE2* reject_re = lam::re2_glue_compile(
+                    reject_inner.data(), reject_inner.size(), reject_opts, nullptr);
                 JsRegexCompiled* reject_wrapper = nullptr;
-                if (!reject_re->ok()) {
-                    delete reject_re;
-                    reject_re = nullptr;
+                if (!reject_re) {
                     reject_wrapper = js_regex_wrapper_compile(
                         reject_inner.c_str(), (int)reject_inner.size(), "", 0, &reject_opts);
                 }
@@ -2296,18 +2280,16 @@ JsRegexCompiled* js_regex_wrapper_compile(const char* pattern, int pattern_len,
     if (opts) {
         final_opts = *opts;
     } else {
-        final_opts.set_log_errors(false);
+        final_opts = lam::re2_glue_default_options();
         final_opts.set_encoding(re2::RE2::Options::EncodingUTF8);
     }
 
-    re2::RE2* compiled = new re2::RE2(rw.pattern, final_opts);
-    if (!compiled->ok()) {
-        log_debug("js regex wrapper: RE2 compile failed for pattern '%s': %s",
-                  rw.pattern.c_str(), compiled->error().c_str());
-        delete compiled;
+    re2::RE2* compiled = lam::re2_glue_compile(
+        rw.pattern.data(), rw.pattern.size(), final_opts, "js regex wrapper");
+    if (!compiled) {
         // free any reject patterns allocated
         for (int i = 0; i < rw.filter_count; i++) {
-            if (rw.filters[i].reject_pattern) delete rw.filters[i].reject_pattern;
+            if (rw.filters[i].reject_pattern) lam::re2_glue_release(rw.filters[i].reject_pattern);
             if (rw.filters[i].reject_wrapper) js_regex_compiled_free(rw.filters[i].reject_wrapper);
         }
         if (rw.group_remap) mem_free(rw.group_remap);
@@ -2373,8 +2355,7 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
         }
 
         std::string source_pattern = compiled->re2->pattern();
-        re2::RE2::Options refined_opts;
-        refined_opts.set_log_errors(false);
+        re2::RE2::Options refined_opts = lam::re2_glue_default_options();
         refined_opts.set_encoding(re2::RE2::Options::EncodingUTF8);
         refined_opts.set_case_sensitive(compiled->re2->options().case_sensitive());
         refined_opts.set_dot_nl(compiled->re2->options().dot_nl());
@@ -2756,8 +2737,7 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                                     groups[f.reject_at_start].data()) {
                                     marker_offset = (int)(groups[f.reject_at_start].data() - input);
                                 }
-                                re2::RE2::Options retry_opts;
-                                retry_opts.set_log_errors(false);
+                                re2::RE2::Options retry_opts = lam::re2_glue_default_options();
                                 retry_opts.set_encoding(re2::RE2::Options::EncodingUTF8);
                                 retry_opts.set_case_sensitive(compiled->re2->options().case_sensitive());
                                 retry_opts.set_dot_nl(compiled->re2->options().dot_nl());
@@ -2848,11 +2828,9 @@ bool js_regex_wrapper_test(JsRegexCompiled* compiled, const char* input, int inp
 
 void js_regex_compiled_free(JsRegexCompiled* compiled) {
     if (!compiled) return;
-    if (compiled->re2) delete compiled->re2;
+    if (compiled->re2) lam::re2_glue_release(compiled->re2);
     for (int i = 0; i < compiled->filter_count; i++) {
-        if (compiled->filters[i].reject_pattern) {
-            delete compiled->filters[i].reject_pattern;
-        }
+        if (compiled->filters[i].reject_pattern) lam::re2_glue_release(compiled->filters[i].reject_pattern);
         if (compiled->filters[i].reject_wrapper) {
             js_regex_compiled_free(compiled->filters[i].reject_wrapper);
         }
