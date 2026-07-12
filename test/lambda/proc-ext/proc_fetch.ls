@@ -1,4 +1,4 @@
 pn main() {
-    let resp = fetch("http://example.com", {'method': "GET"})^;
-    print("<h1>Example Domain</h1>" in resp);
+    let resp = fetch("test/input/test_data.html", {'method': "GET"})^;
+    print("<h1>Welcome</h1>" in resp);
 }

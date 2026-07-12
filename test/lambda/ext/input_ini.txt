@@ -69,7 +69,7 @@
     small_decimal: 0.001,
     avogadro: 6.022e+23,
     planck: 6.626e-34,
-    big_positive: 1.5e+10,
+    big_positive: 15000000000,
     big_negative: -2.3e-15,
     signed_positive: 100,
     signed_float: 3.14,

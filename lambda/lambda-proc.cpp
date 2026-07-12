@@ -564,13 +564,50 @@ Item fetch_response_to_item(FetchResponse* response) {
 RetItem pn_fetch(Item url, Item options) {
     if (g_dry_run) return ri_ok(dry_run_fabricated_fetch());
     log_debug("pn_fetch called");
-    // Validate URL parameter
-    String* url_str;
-    if (url._type_id != LMD_TYPE_STRING && url._type_id != LMD_TYPE_SYMBOL) {
-        log_debug("fetch url must be a string or symbol, got type %s", get_type_name(url._type_id));
+    // Validate target parameter
+    TypeId url_type = get_type_id(url);
+    if (!is_text_type_id(url_type) && url_type != LMD_TYPE_PATH) {
+        log_debug("fetch target must be a string, symbol, or path, got type %s", get_type_name(url_type));
         return item_to_ri(ItemError);
     }
-    url_str = fn_string(url);
+
+    Url* cwd = context ? (Url*)context->cwd : NULL;
+    Target* target = item_to_target(url.item, cwd);
+    if (!target) {
+        log_error("fetch: failed to resolve target");
+        return item_to_ri(ItemError);
+    }
+
+    if (target_is_local(target)) {
+        // fetch() accepts local targets; routing them through HTTP makes offline tests depend on DNS.
+        StrBuf* path_buf = (StrBuf*)target_to_local_path(target, cwd);
+        target_free(target);
+        if (!path_buf || !path_buf->str || path_buf->length == 0) {
+            log_error("fetch: failed to resolve local target path");
+            if (path_buf) strbuf_free(path_buf);
+            return item_to_ri(ItemError);
+        }
+
+        size_t file_size = 0;
+        char* file_data = read_binary_file(path_buf->str, &file_size);
+        if (!file_data) {
+            log_error("fetch: failed to read local file %s", path_buf->str);
+            strbuf_free(path_buf);
+            return item_to_ri(ItemError);
+        }
+
+        // fetch() returns a string body; local files use the same owned string path as HTTP bodies.
+        String* body = heap_strcpy(file_data, file_size);
+        mem_free(file_data);
+        strbuf_free(path_buf);
+        return ri_ok((Item){.item = s2it(body)});
+    }
+
+    if (!target_is_remote(target)) {
+        log_error("fetch: unsupported target scheme %d", target->scheme);
+        target_free(target);
+        return item_to_ri(ItemError);
+    }
 
     // Parse options parameter (similar to JS fetch options)
     FetchConfig config = {
@@ -642,8 +679,18 @@ RetItem pn_fetch(Item url, Item options) {
         // Continue with default config
     }
 
+    StrBuf* url_buf = strbuf_new();
+    const char* url_str = target_to_url_string(target, url_buf);
+    target_free(target);
+    if (!url_str || url_buf->length == 0) {
+        log_error("fetch: failed to render remote target URL");
+        strbuf_free(url_buf);
+        return item_to_ri(ItemError);
+    }
+
     // Perform the HTTP request
-    FetchResponse* response = http_fetch(url_str->chars, &config);
+    FetchResponse* response = http_fetch(url_str, &config);
+    strbuf_free(url_buf);
     if (!response) {
         log_debug("fetch: HTTP request failed");
         return item_to_ri(ItemError);

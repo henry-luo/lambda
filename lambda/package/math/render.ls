@@ -2318,7 +2318,7 @@ fn box_with_error(bx, err) => {
 // ============================================================
 
 fn render_middle_delim(node, context) {
-    if (node.delim == null) {
+    if (is_empty_middle_delim(node)) {
         {
             element: <span class: css.NULLDELIMITER, style: "width:0.12em">,
             height: 0.0,
@@ -2926,8 +2926,13 @@ fn is_null_middle_sequence(node, i) {
     if (i + 1 >= len(node)) false
     else
         (let child = node[i],
-         child is element and name(child) == 'middle_delim' and child.delim == null)
+         // malformed \middle tokens parse with an empty delimiter; MathLive emits
+         // a null delimiter and drops the offending next token.
+         child is element and name(child) == 'middle_delim' and is_empty_middle_delim(child))
 }
+
+fn is_empty_middle_delim(child) =>
+    child.delim == null or string(child.delim) == ""
 
 fn is_empty_not_target_sequence(node, i) {
     if (i + 1 >= len(node)) false
