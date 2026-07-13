@@ -25,7 +25,7 @@ Five global headers (per user decision — style folds into view; edit+state fol
 
 **Naming decision (`shell.hpp` rejected):** `radiant.hpp` — recommended. It reads as "the engine's own header", matches the top-level `lambda.h` precedent, and naturally doubles as the one header external consumers (`lambda/main.cpp`, module bridges) include: it declares the shell surface and `#include`s the other four. No filename conflict: `radiant/radiant.cpp` (27-line dead main) is deleted by Impl_Clean_Up Phase 0.
 
-End-state header count: **5 global + ~19 justified exceptions ≈ 24** (from 140). The exceptions (§3.3): `webdriver/webdriver.hpp` (own module), 2 platform handles, ~9 header-only implementation files, `event_sim.hpp` (test feature, kept separate), and the 6 graph headers (left out of this migration entirely — graph layout is expected to migrate to Lambda script rather than stay in C+, so consolidating its C+ headers now would be wasted work).
+End-state header count: **5 global + ~20 justified exceptions ≈ 25** (from 140). The exceptions (§3.3): `webdriver/webdriver.hpp` (own module), 2 platform handles, `rdt_video.h` (platform media ABI; see H1 note), ~9 header-only implementation files, `event_sim.hpp` (test feature, kept separate), and the 6 graph headers (left out of this migration entirely — graph layout is expected to migrate to Lambda script rather than stay in C+, so consolidating its C+ headers now would be wasted work).
 
 What this buys (per DD4): one greppable surface per domain for agents and humans; the header as reviewable API doc; declaration changes become visible single-point edits. Direct LOC saving is secondary but real: ~120 deleted header files × ~8–15 lines of guard/include/banner ceremony, plus include-list dedup in 136 `.cpp` files ≈ **~2,000–2,500 LOC**.
 
@@ -74,7 +74,7 @@ radiant.hpp   (shell; may include everything below)
 
 **→ `layout.hpp` (H2)** — absorb 28: `layout_abs_children` `layout_alignment` `layout_axis` `layout_box` `layout_cache` `layout_containing_block` `layout_counters` `layout_debug` `layout_flex` `layout_flex_measurement` `layout_flex_multipass` `layout_grid_multipass` `layout_guards` `layout_list` `layout_measure` `layout_mode` `layout_multicol` `layout_pass` `layout_percentages` `layout_positioned` `layout_table` `layout_table_caption` `layout_table_metadata` `layout_text` (all `.hpp`/`.h`), `intrinsic_sizing.hpp`, `available_space.hpp`, `grid.hpp`, `grid_types.hpp`.
 
-**→ `render.hpp` (H1)** — absorb 51: all 33 thin `render_*.hpp` (`backend` `backend_caps` `background` `border` `clip` `columns` `composite` `effects` `export_support` `filter` `form` `geometry` `glyph` `img` `list` `media` `output` `overlay` `paint_block` `paint_boundary` `paint_gateway` `painter` `path` `pdf` `profiler` `raster` `rect` `selection` `state` `svg` `svg_inline` `text` `vector_path` `video`), `paint_ir.h`, `display_list.h`, `display_list_bounds.hpp`, `display_list_storage.hpp`, `display_list_surface_region.hpp`, the 8 tiny `display_list_replay*.hpp`, `retained_display_list.hpp`, `retained_fields.hpp`, `tile_pool.h`, `rdt_vector.hpp`, `rdt_video.h`, `gif_player.h`, `lottie_player.h`, `video_frame_wake.h`, `stacking_order.hpp`.
+**→ `render.hpp` (H1)** — absorb 50: all 33 thin `render_*.hpp` (`backend` `backend_caps` `background` `border` `clip` `columns` `composite` `effects` `export_support` `filter` `form` `geometry` `glyph` `img` `list` `media` `output` `overlay` `paint_block` `paint_boundary` `paint_gateway` `painter` `path` `pdf` `profiler` `raster` `rect` `selection` `state` `svg` `svg_inline` `text` `vector_path` `video`), `paint_ir.h`, `display_list.h`, `display_list_bounds.hpp`, `display_list_storage.hpp`, `display_list_surface_region.hpp`, the 8 tiny `display_list_replay*.hpp`, `retained_display_list.hpp`, `retained_fields.hpp`, `tile_pool.h`, `rdt_vector.hpp`, `gif_player.h`, `lottie_player.h`, `video_frame_wake.h`, `stacking_order.hpp`. `rdt_video.h` declarations are mirrored into `render.hpp`, but the narrow header stays as an exception for platform media backends.
 
 **→ `event.hpp` (H3)** — absorb 21: `event_state_log.hpp`, `handler.hpp`, `editing.hpp`, `editing_controller.hpp`, `editing_dispatch.hpp`, `editing_geometry.hpp`, `editing_host.hpp`, `editing_intent.hpp`, `editing_target_range.hpp`, `dom_range.hpp`, `dom_range_resolver.hpp`, `text_edit.hpp`, `text_control.hpp`, `clipboard.hpp`, `context_menu.hpp`, `scroller.hpp`, `state_store.hpp`, `state_machine.hpp`, `state_schema.hpp`, `source_pos_bridge.hpp`, plus seed `event.hpp`. (`state_store_internal.hpp` stays internal; `event_sim.hpp` stays separate — see exceptions. Note: most of the state_store C+ code is expected to eventually migrate to Lambda script, so the merge treats its declarations as a clearly-banded, removable section rather than interleaving them.)
 
@@ -82,14 +82,14 @@ radiant.hpp   (shell; may include everything below)
 
 **Stay (justified exceptions, ~19):**
 - `webdriver/webdriver.hpp` — separate module, already coherent.
-- Platform: `webview_handle_mac.h`, `webview_handle_linux.h` (included only by their platform files).
+- Platform: `webview_handle_mac.h`, `webview_handle_linux.h` (included only by their platform files); `rdt_video.h` (platform media ABI). H1 discovered the root cause: macOS AVFoundation/CoreGraphics headers define a global `Rect`, so AVFoundation `.mm` sources cannot include `render.hpp`/`view.hpp`, where Radiant's own global `Rect` is declared. The declarations are still present in `render.hpp` for render consumers, guarded by `RADIANT_RDT_VIDEO_API`.
 - Header-only impl: `grid_sizing_algorithm.hpp`, `grid_enhanced_adapter.hpp`, `grid_placement.hpp`, `grid_track.hpp`, `grid_occupancy.hpp`, `glyph_sampling.hpp`, `render_effect_raster_fallback.hpp`, `render_glyph_run_raster_lower.hpp`, `state_store_internal.hpp` — banner-marked internal. (Longer-term these are DD5 candidates to become `.cpp` + methods; out of scope here.)
 - `event_sim.hpp` (428 LOC) — a *testing* feature, not runtime; stays separate from `event.hpp`. If it is later kept in release builds (WebDriver support), it can be merged then.
 - Graph family — **left out of this migration**: `graph_dagre.hpp`, `graph_edge_utils.hpp`, `graph_layout_types.hpp`, `graph_theme.hpp`, `graph_to_svg.hpp`, `layout_graph.hpp` stay as-is. Graph layout is expected to migrate from C+ to Lambda script; consolidating its headers now would be churn on code with a limited C+ lifespan.
 
 **Delete (dead):** `grid_baseline.hpp` (262 LOC, zero includers) — H0, after grepping its symbol names to confirm no copies live elsewhere.
 
-Tally: 8 + 28 + 51 + 21 + 5 = 113 absorbed/deleted after migration, + 1 dead, + 5 seeds grown in place, + ~19 kept (incl. 6 graph + event_sim) = 140 accounted.
+Tally: 8 + 28 + 50 + 21 + 5 = 112 absorbed/deleted after migration, + 1 dead, + 5 seeds grown in place, + ~20 kept (incl. 6 graph + event_sim + `rdt_video.h`) = 140 accounted.
 
 ---
 

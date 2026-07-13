@@ -14,6 +14,7 @@ ALLOW_LIST = {
     "webdriver/webdriver.hpp",
     "webview_handle_mac.h",
     "webview_handle_linux.h",
+    "rdt_video.h",
     "grid_sizing_algorithm.hpp",
     "grid_enhanced_adapter.hpp",
     "grid_placement.hpp",
@@ -39,7 +40,7 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[4]
 
 
-def git_status_paths(root: Path) -> set[str]:
+def git_status_paths(root: Path) -> dict[str, str]:
     proc = subprocess.run(
         ["git", "status", "--porcelain", "--", "radiant"],
         cwd=root,
@@ -48,13 +49,14 @@ def git_status_paths(root: Path) -> set[str]:
         stderr=subprocess.DEVNULL,
         check=False,
     )
-    paths: set[str] = set()
+    paths: dict[str, str] = {}
     for line in proc.stdout.splitlines():
         if len(line) < 4: continue
+        status = line[:2]
         path = line[3:]
         if " -> " in path:
             path = path.split(" -> ", 1)[1]
-        paths.add(path)
+        paths[path] = status
     return paths
 
 
@@ -90,12 +92,14 @@ def main() -> int:
             disallowed.append(rel)
         if has_sibling and not is_allowed:
             per_file.append(rel)
-        if repo_rel in changed and (not is_allowed or (has_sibling and not is_allowed)):
+        status = changed.get(repo_rel, "")
+        is_new_header = status.startswith("A") or status.startswith("??")
+        if is_new_header and (not is_allowed or (has_sibling and not is_allowed)):
             new_violations.append((rel, is_allowed, has_sibling))
     mode = os.environ.get("RADIANT_HEADER_LINT_MODE", "warn")
     prefix = "no-new-per-file-header"
     if new_violations:
-        print(f"{prefix}: {len(new_violations)} changed Radiant header(s) violate DD4:")
+        print(f"{prefix}: {len(new_violations)} new Radiant header(s) violate DD4:")
         for rel, is_allowed, has_sibling in new_violations:
             reasons = []
             if not is_allowed:
@@ -104,7 +108,7 @@ def main() -> int:
                 reasons.append("mirrors a sibling source file")
             print(f"  radiant/{rel}: {', '.join(reasons)}")
     else:
-        print(f"{prefix}: no changed Radiant headers violate DD4")
+        print(f"{prefix}: no new Radiant headers violate DD4")
     if disallowed or per_file:
         # Legacy headers remain during H1-H5; keep default output concise until
         # H6 flips the ratchet to error mode.

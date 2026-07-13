@@ -3,7 +3,7 @@
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
 #include "../../../radiant/layout_custom.hpp"
-#include "../../../radiant/render_export_support.hpp"
+#include "../../../radiant/render.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/mem_context.h"

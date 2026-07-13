@@ -18,7 +18,7 @@
 #include "editing.hpp"
 #include "state_machine.hpp"
 #include "state_schema.hpp"
-#include "retained_display_list.hpp"
+#include "render.hpp"
 #include "../lambda/ast.hpp"
 #include "../lambda/mark_builder.hpp"
 // str.h included via view.hpp

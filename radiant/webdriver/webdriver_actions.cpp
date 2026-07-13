@@ -9,7 +9,7 @@
 #include "../event.hpp"
 #include "../state_store.hpp"
 #include "../layout.hpp"
-#include "../render_img.hpp"
+#include "../render.hpp"
 #include "../../lib/tagged.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"

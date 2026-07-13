@@ -5,7 +5,7 @@
 
 #include "webdriver.hpp"
 #include "../layout.hpp"
-#include "../render_export_support.hpp"
+#include "../render.hpp"
 #include "../state_store.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem_factory.h"

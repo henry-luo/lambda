@@ -1,4 +1,4 @@
-#include "render_selection.hpp"
+#include "render.hpp"
 #include "state_store.hpp"
 
 static int compare_view_order(View* view_a, View* view_b) {

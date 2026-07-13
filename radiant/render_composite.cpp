@@ -1,4 +1,4 @@
-#include "render_composite.hpp"
+#include "render.hpp"
 
 #include "../lib/math_utils.h"
 #include <math.h>

@@ -1,8 +1,6 @@
-#include "display_list_replay_effects.hpp"
+#include "render.hpp"
 
-#include "display_list_surface_region.hpp"
-#include "render_background.hpp"
-#include "render_filter.hpp"
+#include "render.hpp"
 #include <string.h>
 
 static Bound dl_replay_clip_at_offset(const Bound* clip, const ImageSurface* surface,

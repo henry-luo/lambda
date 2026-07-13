@@ -1,7 +1,6 @@
-#include "display_list_replay_backdrop.hpp"
+#include "render.hpp"
 
-#include "display_list_surface_region.hpp"
-#include "render_composite.hpp"
+#include "render.hpp"
 #include <string.h>
 
 void dl_replay_backdrop_init(DisplayReplayBackdropStack* stack) {

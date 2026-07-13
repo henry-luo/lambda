@@ -1,8 +1,6 @@
-#include "render_effects.hpp"
+#include "render.hpp"
 
-#include "render_geometry.hpp"
-#include "render_painter.hpp"
-#include "render_profiler.hpp"
+#include "render.hpp"
 
 #include "../lib/log.h"
 

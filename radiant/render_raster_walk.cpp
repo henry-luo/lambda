@@ -1,10 +1,4 @@
 #include "render.hpp"
-#include "render_profiler.hpp"
-#include "render_text.hpp"
-#include "render_backend.h"
-#include "render_list.hpp"
-#include "render_media.hpp"
-#include "render_svg_inline.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"

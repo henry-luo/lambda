@@ -1,7 +1,6 @@
-#include "display_list.h"
+#include "render.hpp"
 
-#include "display_list_storage.hpp"
-#include "display_list_bounds.hpp"
+#include "render.hpp"
 #include "../lib/math_utils.h"
 #include <math.h>
 

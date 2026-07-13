@@ -1,6 +1,4 @@
 #include "render.hpp"
-#include "render_paint_gateway.hpp"
-#include "render_state.hpp"
 
 // ---------------------------------------------------------------------------
 // Painter gateway (rc_*).

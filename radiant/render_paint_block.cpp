@@ -1,4 +1,4 @@
-#include "render_paint_block.hpp"
+#include "render.hpp"
 
 RenderPaintBlockResult render_paint_block_run(RenderPaintBlockOps* ops,
                                               ViewBlock* block) {

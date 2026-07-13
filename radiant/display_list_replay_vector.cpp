@@ -1,4 +1,4 @@
-#include "display_list_replay_vector.hpp"
+#include "render.hpp"
 
 DisplayReplayVectorResult dl_replay_vector_item(RdtVector* vec,
                                                 DisplayItem* item,

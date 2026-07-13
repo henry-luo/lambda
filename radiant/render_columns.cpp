@@ -1,4 +1,3 @@
-#include "render_columns.hpp"
 #include "render.hpp"
 #include "layout_box.hpp"
 

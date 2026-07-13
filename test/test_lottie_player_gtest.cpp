@@ -9,7 +9,7 @@
 #include <gtest/gtest.h>
 #include <cstring>
 
-#include "../radiant/lottie_player.h"
+#include "../radiant/render.hpp"
 #include "../radiant/view.hpp"
 
 extern "C" {

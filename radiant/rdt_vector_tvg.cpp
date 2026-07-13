@@ -2,8 +2,7 @@
 // All ThorVG C API calls are isolated in this file.
 // Radiant rendering code calls only rdt_* functions.
 
-#include "rdt_vector.hpp"
-#include "render_svg_inline.hpp"
+#include "render.hpp"
 #include "../lib/log.h"
 #include "../lib/lambda_alloca.h"
 #include "../lib/mem_factory.h"

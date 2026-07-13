@@ -1,7 +1,4 @@
 #include "render.hpp"
-#include "render_export_support.hpp"
-#include "render_output.hpp"
-#include "render_svg.hpp"
 #include "view.hpp"
 #include "layout.hpp"
 #include "font_face.h"

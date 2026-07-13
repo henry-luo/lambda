@@ -1,14 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "../radiant/display_list.h"
-#include "../radiant/display_list_bounds.hpp"
-#include "../radiant/display_list_replay_glyph.hpp"
-#include "../radiant/display_list_replay_state.hpp"
-#include "../radiant/display_list_storage.hpp"
-#include "../radiant/paint_ir.h"
-#include "../radiant/render_paint_boundary.hpp"
-#include "../radiant/render_paint_block.hpp"
-#include "../radiant/render_paint_gateway.hpp"
+#include "../radiant/render.hpp"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include <string.h>

@@ -1,4 +1,4 @@
-#include "../radiant/rdt_vector.hpp"
+#include "../radiant/render.hpp"
 
 RdtPath* rdt_path_clone(const RdtPath* src) {
     (void)src;

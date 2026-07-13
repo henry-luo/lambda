@@ -1,6 +1,6 @@
-#include "lottie_player.h"
+#include "render.hpp"
 #include "view.hpp"
-#include "rdt_vector.hpp"
+#include "render.hpp"
 #include "state_store.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"

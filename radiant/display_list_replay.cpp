@@ -1,14 +1,6 @@
-#include "display_list_replay.hpp"
+#include "render.hpp"
 
-#include "display_list_bounds.hpp"
-#include "display_list_replay_backdrop.hpp"
-#include "display_list_replay_effects.hpp"
-#include "display_list_replay_glyph.hpp"
-#include "display_list_replay_raster.hpp"
-#include "display_list_replay_shadow.hpp"
-#include "display_list_replay_state.hpp"
-#include "display_list_replay_vector.hpp"
-#include "render_backend_caps.hpp"
+#include "render.hpp"
 #include "../lib/log.h"
 
 static bool dl_replay_item_intersects_dirty(const DisplayReplayDirtyClip* dirty_clip,

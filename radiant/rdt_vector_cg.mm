@@ -1,6 +1,5 @@
 // rdt_vector_cg.mm — Core Graphics backend for RdtVector (macOS)
-#include "rdt_vector.hpp"
-#include "render_svg_inline.hpp"
+#include "render.hpp"
 #include "../lib/log.h"
 #include "../lib/mem_factory.h"
 #include "../lib/mem.h"

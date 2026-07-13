@@ -49,7 +49,7 @@
 #include "../radiant/state_store.hpp"
 #include "../radiant/clipboard.hpp"
 #include "../radiant/font_face.h"
-#include "../radiant/render_export_support.hpp"
+#include "../radiant/render.hpp"
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
 #include "input/css/css_style.hpp"   // css_property_system_init
 #include "input/css/css_engine.hpp"  // CssEngine for CSS extraction
@@ -426,25 +426,8 @@ int cmd_webdriver(int argc, char** argv);
 // Legacy layout function from radiant (for backward compatibility)
 int run_layout(const char* html_file);
 
-// SVG rendering function from radiant (available since radiant sources are included in lambda.exe)
-int render_html_to_svg(const char* html_file, const char* svg_file, int viewport_width = 1200, int viewport_height = 800, float scale = 1.0f);
-
-// PDF rendering function from radiant (available since radiant sources are included in lambda.exe)
-int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width = 800, int viewport_height = 1200, float scale = 1.0f);
-
-// PNG rendering function from radiant (available since radiant sources are included in lambda.exe)
-int render_html_to_png(const char* html_file, const char* png_file, int viewport_width = 1200, int viewport_height = 800, float scale = 1.0f, float pixel_ratio = 1.0f);
-
-// JPEG rendering function from radiant (available since radiant sources are included in lambda.exe)
-int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width = 1200, int viewport_height = 800, float scale = 1.0f, float pixel_ratio = 1.0f);
-
-// Unified Radiant output-target rendering function
-int render_html_to_output_target(const char* html_file, const char* output_file,
-                                 int viewport_width, int viewport_height,
-                                 float scale, float pixel_ratio, int jpeg_quality);
-
-// Batch render command: reads jobs from stdin, shares one UiContext for efficiency
-int cmd_render_batch(int argc, char** argv);
+// Render/export declarations come from render.hpp; repeating default arguments
+// here breaks once render_export_support.hpp is a DD4 shim to the global header.
 
 // Document viewer function from radiant - unified viewer for all document types (HTML, PDF, Markdown, etc.)
 extern int view_doc_in_window(const char* doc_file);

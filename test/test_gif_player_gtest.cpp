@@ -8,7 +8,7 @@
 #include <gtest/gtest.h>
 #include <cstring>
 
-#include "../radiant/gif_player.h"
+#include "../radiant/render.hpp"
 #include "../radiant/view.hpp"
 
 extern "C" {

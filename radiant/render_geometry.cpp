@@ -1,4 +1,4 @@
-#include "render_geometry.hpp"
+#include "render.hpp"
 
 static int render_geometry_pixel_coord(float value) {
     return (int)value; // INT_CAST_OK: raster surfaces are indexed with integer pixel coordinates.

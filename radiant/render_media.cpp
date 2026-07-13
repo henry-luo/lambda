@@ -1,10 +1,6 @@
-#include "render_media.hpp"
+#include "render.hpp"
 
 #include "render.hpp"
-#include "render_geometry.hpp"
-#include "render_painter.hpp"
-#include "render_selection.hpp"
-#include "render_state.hpp"
 #include "webview.h"
 
 #include "../lib/tagged.hpp"

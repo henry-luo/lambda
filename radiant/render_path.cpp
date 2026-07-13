@@ -1,6 +1,4 @@
-#include "render_path.hpp"
 #include "render.hpp"
-#include "render_border.hpp"
 
 #define RENDER_PATH_KAPPA 0.5522847498f
 
