@@ -14,7 +14,9 @@
 #import <objc/runtime.h>
 #include <unistd.h>
 
-#include "webview.h"
+#define Rect RadiantRect
+#include "radiant.hpp"
+#undef Rect
 #include "webview_handle_mac.h"
 
 extern "C" {

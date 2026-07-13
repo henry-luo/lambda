@@ -1,5 +1,4 @@
 #pragma once
-#include "animation.h"
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
@@ -20,6 +19,128 @@
 #include <stdint.h>
 #include <math.h>
 #include <string.h>
+
+// ===== animation =====
+
+struct DirtyTracker;
+
+typedef enum AnimationType {
+    ANIM_CSS_ANIMATION = 0,
+    ANIM_CSS_TRANSITION,
+    ANIM_GIF,
+    ANIM_LOTTIE,
+} AnimationType;
+
+typedef enum AnimationDirection {
+    ANIM_DIR_NORMAL = 0,
+    ANIM_DIR_REVERSE,
+    ANIM_DIR_ALTERNATE,
+    ANIM_DIR_ALTERNATE_REVERSE,
+} AnimationDirection;
+
+typedef enum AnimationFillMode {
+    ANIM_FILL_NONE = 0,
+    ANIM_FILL_FORWARDS,
+    ANIM_FILL_BACKWARDS,
+    ANIM_FILL_BOTH,
+} AnimationFillMode;
+
+typedef enum AnimationPlayState {
+    ANIM_PLAY_RUNNING = 0,
+    ANIM_PLAY_PAUSED,
+    ANIM_PLAY_FINISHED,
+} AnimationPlayState;
+
+typedef enum TimingFunctionType {
+    TIMING_LINEAR = 0,
+    TIMING_CUBIC_BEZIER,
+    TIMING_STEPS,
+} TimingFunctionType;
+
+typedef enum StepPosition {
+    STEP_JUMP_END = 0,
+    STEP_JUMP_START,
+    STEP_JUMP_BOTH,
+    STEP_JUMP_NONE,
+} StepPosition;
+
+typedef struct TimingFunction {
+    TimingFunctionType type;
+    union {
+        struct {
+            float x1, y1, x2, y2;
+            float samples[11];
+        } bezier;
+        struct {
+            int count;
+            StepPosition position;
+        } steps;
+    };
+} TimingFunction;
+
+void timing_cubic_bezier_init(TimingFunction* tf, float x1, float y1, float x2, float y2);
+float timing_function_eval(const TimingFunction* tf, float t);
+
+extern TimingFunction TIMING_EASE;
+extern TimingFunction TIMING_EASE_IN;
+extern TimingFunction TIMING_EASE_OUT;
+extern TimingFunction TIMING_EASE_IN_OUT;
+
+void timing_init_presets();
+
+typedef struct AnimationInstance AnimationInstance;
+typedef void (*AnimTickFn)(AnimationInstance* anim, float t);
+typedef void (*AnimFinishFn)(AnimationInstance* anim);
+
+struct AnimationInstance {
+    AnimationInstance* next;
+    AnimationInstance* prev;
+
+    AnimationType type;
+    void* target;
+    void* state;
+
+    double start_time;
+    double duration;
+    double delay;
+    int iteration_count;
+    int current_iteration;
+
+    AnimationDirection direction;
+    AnimationFillMode fill_mode;
+    AnimationPlayState play_state;
+
+    TimingFunction timing;
+
+    AnimTickFn tick;
+    AnimFinishFn on_finish;
+
+    float bounds[4];
+    double pause_time;
+};
+
+typedef struct AnimationScheduler {
+    AnimationInstance* first;
+    AnimationInstance* last;
+    int count;
+
+    double current_time;
+    bool has_active_animations;
+
+    Pool* pool;
+} AnimationScheduler;
+
+AnimationScheduler* animation_scheduler_create(Pool* pool);
+void animation_scheduler_destroy(AnimationScheduler* scheduler);
+bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
+                              DirtyTracker* dirty_tracker);
+void animation_scheduler_add(AnimationScheduler* scheduler, AnimationInstance* anim);
+void animation_scheduler_remove(AnimationScheduler* scheduler, AnimationInstance* anim);
+void animation_scheduler_remove_by_target(AnimationScheduler* scheduler, void* target);
+void animation_scheduler_remove_views(AnimationScheduler* scheduler);
+AnimationInstance* animation_instance_create(AnimationScheduler* scheduler);
+void animation_instance_pause(AnimationInstance* anim, double now);
+void animation_instance_resume(AnimationInstance* anim, double now);
 
 // 3x3 affine transform matrix shared by view transforms and render backends.
 // The layout matches ThorVG's Tvg_Matrix, but the type itself is Radiant-owned.

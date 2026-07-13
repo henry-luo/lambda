@@ -6,7 +6,7 @@
 #include "event.hpp"
 #include "view.hpp"
 #include "render.hpp"
-#include "webview.h"
+#include "radiant.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
@@ -21,7 +21,6 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_value.hpp"
 #include "../lib/image.h"
-#include "animation.h"
 #include <GLFW/glfw3.h>
 #include <cstdlib>
 #include <cstring>

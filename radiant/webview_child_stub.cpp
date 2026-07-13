@@ -5,7 +5,7 @@
 
 #if !defined(__APPLE__) && !defined(__linux__)
 
-#include "webview.h"
+#include "radiant.hpp"
 
 extern "C" {
 #include "../lib/log.h"

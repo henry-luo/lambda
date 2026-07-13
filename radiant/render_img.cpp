@@ -10,7 +10,7 @@ extern "C" {
 }
 #include "../lambda/input/input.hpp"
 #include "../lambda/js/js_runtime.h"
-#include "../radiant/script_runner.h"
+#include "../radiant/radiant.hpp"
 #include <stdio.h>
 #include <string.h>
 #include <png.h>

@@ -1,4 +1,6 @@
-#include "frame_clock.h"
+#define Rect RadiantRect
+#include "radiant.hpp"
+#undef Rect
 
 #include "../lib/log.h"
 #include "../lib/memtrack.h"

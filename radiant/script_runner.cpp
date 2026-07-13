@@ -14,7 +14,7 @@
  */
 #include "../lib/memtrack.h"
 
-#include "script_runner.h"
+#include "radiant.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_dom.h"

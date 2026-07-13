@@ -1,6 +1,6 @@
 #include "event.hpp"
 #include "state_store_internal.hpp"
-#include "animation.h"
+#include "view.hpp"
 #include "../lib/log.h"
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"

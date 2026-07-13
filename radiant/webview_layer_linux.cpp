@@ -18,12 +18,11 @@
 #include <stdio.h>
 #include <time.h>
 
-#include "webview.h"
 #include "webview_handle_linux.h"
 
 // ImageSurface and mem_ helpers
 #define Rect RadiantRect
-#include "view.hpp"
+#include "radiant.hpp"
 #undef Rect
 
 extern "C" {

@@ -10,13 +10,12 @@
 #import <objc/runtime.h>
 #include <unistd.h>
 
-#include "webview.h"
 #include "webview_handle_mac.h"
 
 // view.hpp defines 'Rect' which conflicts with macOS MacTypes.h Rect.
 // Temporarily rename to avoid redefinition error in ObjC++ compilation.
 #define Rect RadiantRect
-#include "view.hpp"
+#include "radiant.hpp"
 #undef Rect
 
 extern "C" {

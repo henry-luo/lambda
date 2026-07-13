@@ -19,7 +19,9 @@
 #include <string.h>
 #include <stdio.h>
 
-#include "webview.h"
+#define Rect RadiantRect
+#include "radiant.hpp"
+#undef Rect
 #include "webview_handle_linux.h"
 
 extern "C" {

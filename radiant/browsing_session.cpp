@@ -2,8 +2,7 @@
 // Browsing session with history management for Radiant web browser.
 
 #include "view.hpp"
-#include "browsing_session.h"
-#include "webview.h"
+#include "radiant.hpp"
 #include "../lib/log.h"
 #include "../lib/mem.h"
 #include "../lib/mem_grow.hpp"

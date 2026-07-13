@@ -82,7 +82,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "view.hpp"
 #include "render.hpp"
 #include "event.hpp"
-#include "../radiant/script_runner.h"
+#include "../radiant/radiant.hpp"
 #include "../lib/tagged.hpp"
 #include "../lambda/render_map.h"
 #include "../lambda/template_state.h"

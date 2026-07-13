@@ -8,7 +8,6 @@
 #include <thorvg_capi.h>
 #include "view.hpp"
 #include "event.hpp"
-#include "animation.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/arena.h"

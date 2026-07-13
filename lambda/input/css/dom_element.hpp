@@ -417,7 +417,7 @@ struct DomElement : DomNode {
     // values of transitionable properties, plus back-pointers to running
     // transition instances. Allocated lazily from doc->pool (survives view-pool
     // relayout, unlike in_line/bound/transform which are view-pool allocated).
-    // Opaque here (radiant/css_animation.h owns the type) to avoid a header dep.
+    // Opaque here (radiant/view.hpp owns the type) to avoid a header dep.
     void* transition_state;
     // CSS filter properties
     FilterProp* filter;

@@ -2,7 +2,7 @@
 #include "view.hpp"
 #include "render.hpp"
 #include "event.hpp"
-#include "webview.h"
+#include "radiant.hpp"
 
 #include "../lib/log.h"
 #include "../lib/mem_factory.h"
