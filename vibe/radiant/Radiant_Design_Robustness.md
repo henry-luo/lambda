@@ -24,7 +24,7 @@ The real risk has therefore **shifted to five subtler structural gaps**, each a 
 | G1 | `*_require` casts + invariant `assert`s vanish under `-DNDEBUG` | ~1,050 silent type-confusions + ~7 release null-derefs/infinite-loops | **HIGH** |
 | G2 | NaN/Inf → `(int)` cast UB at layout→render boundary; render tier outside the int-cast lint | ~150 unguarded casts; UB on hostile CSS | **HIGH** |
 | G3 | Recursion bypasses: intrinsic-measure walk, inline-SVG `<use>` cycles, DOM maintenance walks | stack overflow / infinite recursion on hostile input | **HIGH** |
-| G4 | WebDriver element-staleness guard exists but is never called | dangling `View*` via external channel | **MED** (gated: external caller) |
+| G4 | Stale-`View*` handle class: WebDriver staleness guard never called + internal DocState twin (T7) | dangling `View*` via external channel; internal caches guarded only by a manually-invoked prune | **MED** (WebDriver gated: external caller; DocState reachable today) |
 | G5 | SVG-DOM picture raced across tiles; signal guard's cross-thread assumption; init/IO return checks | data race + fragile invariants + silent-wrong-output | **MED** |
 
 Everything below is organized so the fixes converge on a **small set of shared mechanisms** (an always-on check macro, a finite-scrub choke point, one recursion-guard RAII, a resolver funnel, an IO-writer RAII) rather than hundreds of edits — matching the C+ direction of the other radiant plans.
@@ -41,6 +41,7 @@ Everything below is organized so the fixes converge on a **small set of shared m
 - **T4 [LOW] — `reinterpret_cast` for plain upcasts** (view_pool.cpp:1331/1394, layout_positioned.cpp:564): should be implicit/`static_cast`; bypasses inheritance checking.
 - **T5 [LOW] — `const_cast` on CssValue** (css_temp_decl.hpp:44/93/96, resolve_css_style.cpp:12807): stashes into a mutable temp decl; audit the write path for mutation of shared/cached CssValue.
 - **T6 [LOW] — cast-lint file allowlist is hardcoded** (no-radiant-view-cast-*.yml): new files unprotected by default; `reinterpret_cast` not matched.
+- **T7 [MED] — DocState transient caches hold raw `View*`/`DomElement*` guarded only by a manually-invoked prune.** (Added 2026-07-13 from the RAD_17 known-issues audit — previously owned by neither this doc nor the memory doc.) The memory doc's V3 verifies the *machinery* (`doc_state_detach_transient_owner`, `clear_dom_view_pool_pointers`, `state_store_prune_after_reflow` state_store.cpp:3144) is correct — but nothing enforces the *call*: the prune has a single call site (event.cpp:4634), and any new/refactored reflow path that skips it leaves stale views to be dereferenced on the next state read. Internal twin of T2 — same stale-handle class, internal channel, and unlike T2 it is reachable today.
 
 ### 2.2 Buffer / string / numeric (agent 2)
 
@@ -69,6 +70,7 @@ Everything below is organized so the fixes converge on a **small set of shared m
 - **E5 [LOW] — `pthread_create` unchecked** (tile_pool.cpp:239): failure → garbage thread handle → crash at `pthread_join` teardown. frame_clock.cpp:357 is the correct pattern to copy.
 - **E6 [MED] — clipboard paste sanitizer is a minimal stub** (clipboard.cpp:385): strips only `<script>`/`<style>` by substring; `onerror=`/`onclick=`, `<svg><script>`, `javascript:` URLs survive. Gap if pasted HTML can execute handlers.
 - **E7 [LOW] — `g_picture_font_ctx` unsynchronized** (rdt_vector_tvg.cpp:84) written once/read by workers, no barrier; `fwrite`/`fclose` returns unchecked in dumps (I3); no `../` path normalization (U3).
+- **E8 [MED] — LayoutCache invalidation is coarse and style-keyed only.** (Added 2026-07-13 from the RAD_04 known-issues audit.) Per-element measurement caches (`LayoutCache`, layout_cache.hpp:92) are cleared only when *that element's* styles are re-resolved (layout.cpp:872); nothing ties an entry's validity to descendant mutations, so a DOM/content change that dirties a subtree without re-resolving an ancestor's style can serve that ancestor a stale cached measurement — silent-wrong-layout, the same output class as E4. The invalidation contract ("valid only until any descendant changes") is nowhere stated in layout_cache.hpp.
 - **Verified good:** picture caches mutex-correct on every path incl. eviction; PNG/JPEG writers check fopen + setjmp + fclose on all returns; GIF/Lottie buffer aliasing generation-guarded.
 
 ### 2.5 Fuzz-coverage gap (agent 4 §6)
@@ -99,8 +101,9 @@ A macro that in **all** build modes evaluates its condition and, on failure, `lo
 - Eliminates the decrement-on-every-return-path bug hand-rolled counters invite (layout.cpp already has six `depth--` sites).
 - Document the depth-300 view-tree-truncation transitive property in `layout_guards.h` so it can't be silently reopened.
 
-### F4 — WebDriver element resolver funnel (fixes T2)
+### F4 — Stale-handle funnels: WebDriver + DocState (fixes T2, T7)
 - Add `wd_resolve_element(session, id, &out)` that runs `is_stale` → returns `WD_ERROR_STALE_ELEMENT_REFERENCE` before yielding the `View*`; route all ~10 handlers through it. Lint-enforceable: ban direct `element_registry_get` outside the resolver (ast-grep). Also bump the registry version on in-place relayout, not just navigation.
+- **Internal twin (T7):** apply the same funnel discipline to DocState's transient view caches — stamp DocState with a relayout generation (bumped in the same place the element-registry version bumps) and have the transient-view accessors `RADIANT_CHECK` (or degrade to a fresh lookup) on generation mismatch, so a reflow path that skips `state_store_prune_after_reflow` fails deterministically instead of dereferencing recycled view-pool memory. Longer-term, key the caches by node `id` like the WebDriver registry (the RAD_17/RAD_23 docs propose the same shape) — that removes the raw pointers entirely; the generation stamp is the cheap interim that makes the missed-prune bug loud.
 
 ### F5 — `IoWriter` RAII + status convention for init/IO (fixes E4, E5, I3; hardens init chains)
 - Generalize the exemplary `render_output_render_tiled_png` pattern (checked fopen + setjmp + fclose-on-every-return) into an `IoWriter` RAII wrapper (checked open/write/close, error as status, auto-close on scope exit); adopt for state dumps, event logs, font-file reads.
@@ -119,6 +122,7 @@ A macro that in **all** build modes evaluates its condition and, on failure, `lo
 - **N4/N5:** adopt the lib `Str`/`StrBuf` tier in the selector builders (drop the `[256]`/`[512]` pair, detect truncation); add an ast-grep rule flagging `strncpy` not followed by explicit NUL-termination.
 - **T5:** audit the `CssTempDecl` write path for mutation through the cast-away-const pointer.
 - **E6:** replace the substring paste stripper with an allow-list DOM sanitizer (strip event-handler attrs, `javascript:`/`data:` URLs, embedded `<script>`) before pasted HTML reaches script dispatch.
+- **E8:** state the LayoutCache invalidation contract in layout_cache.hpp, and clear ancestor caches when a subtree is dirtied (the RAD_04 dirty-propagation proposal). Add a debug/fuzz-mode cross-check: on cache hit, re-measure and `assert` equality with the cached result — turns a silently-served stale measurement into a diagnosable failure.
 
 ### F8 — Fuzz corpus + target extensions (fixes §2.5)
 - **New corpus seeds** (drive R1/R2/N1/N3): `crash_float_deep_nesting.html` (10k nested `float:left`), `crash_inline_block_deep_nesting.html`, `crash_table_cell_deep_nesting.html`, `crash_svg_use_cycle.html`, `crash_svg_deep_g.html`, CSS `calc(1e30px)`/`calc(0/0)` on transformed elements, images with pathological declared dimensions, `viewBox`/`rgb()` with NaN/Inf, huge class names for selector builders.
@@ -147,7 +151,7 @@ Ranked by exploitability under untrusted HTML/CSS/image/font input:
 2. **F2** (finite-scrub + lint scope) — closes the top *numeric* UB class (N1) at one choke point.
 3. **F3** (RecursionGuard) — closes the three stack-overflow bypasses (R1/R2/R3), the top *crash-on-hostile-input* class.
 4. **F8** (fuzz) — lands alongside F2/F3 so the fixes are regression-tested where coverage is currently 0%.
-5. **F4** (WebDriver resolver), **F6** (threading contract + SVG-DOM race) — gated on external caller / parallel rendering; do before those surfaces ship broadly.
+5. **F4** (stale-handle funnels), **F6** (threading contract + SVG-DOM race) — the WebDriver half of F4 and F6 are gated on external caller / parallel rendering (do before those surfaces ship broadly); F4's DocState generation stamp (T7) is reachable today and can land with F1.
 6. **F5, F7** — breadth hardening; fold into the relevant C+ class waves (`Radiant_Impl_Mem_Mgt.md` P4/P5) and the header/lint work.
 
 ### Lint-enforceable mechanically (extend `utils/lint`)

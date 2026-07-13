@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-13
 **Baseline commit:** `028a75323`
-**Parent design:** `vibe/radiant/Radiant_Design_Memory.md` — the policy (R1–R7), the safety findings (S1–S10, V1–V5, font gaps), the lifetime-role matrix (§2), and the C+ class catalog (§5). This doc turns that into execution-grade tasks.
+**Parent design:** `vibe/radiant/Radiant_Design_Memory.md` — the policy (R1–R7), the safety findings (S1–S12, V1–V5, font gaps), the lifetime-role matrix (§2), and the C+ class catalog (§5). This doc turns that into execution-grade tasks.
 **Related:** `vibe/Memory_Context.md` (factory/registry), `vibe/radiant/Radiant_Imp_Code_Dedup.md` (header consolidation H1–H6 — class declarations land in the 5 global headers), `vibe/radiant/Radiant_Impl_Clean_Up.md` (LOC phases), `doc/dev/C_Plus_Convention.md`.
 
 ---
@@ -48,6 +48,10 @@
 
 ### P0.7 — S10c: InputIntent dispose audit  **[LOW]**
 - Only the paste path allocates (`editing_intent.cpp:145–151`); event.cpp has ~10 intent build sites and 2 dispose calls. Audit every `insertFromPaste`/paste-adjacent branch; add missing `input_intent_dispose` calls. P4.3 (dtor) later makes the pairing automatic.
+
+### P0.8 — S11: `WebViewProp.src`/`srcdoc` not registered as retained fields  **[MED, latent dangling ptr]**
+- webview.h:42–43: both are borrowed DOM-attribute pointers ("borrowed from DOM attribute") with no `PersistentFieldRef` registration, so `view_pool_reset_retained` while a webview is live leaves them dangling. Add both fields to `radiant/retained_fields.hpp` following the existing font-family/background-image/surface-path registrations.
+- **Test:** gtest/event_sim scenario: create a webview view, force `view_pool_reset_retained`, assert `src`/`srcdoc` still readable (ASan-clean) and equal to the attribute value.
 
 ---
 
@@ -120,7 +124,7 @@ Sequenced **with** the header-consolidation phases (each domain's classes land a
 |---|---|---|---|
 | P5.1 render | `PaintList`, `DisplayList`, `TileGrid`/`RenderPool`/`WorkerState`, `RetainedDisplayListCache` | H1 | PaintList dtor = P0.3's free loop (now structural); DisplayList re-init/tracking (S10a groundwork); pthread lifecycle encapsulated |
 | P5.2 view/DOM | `ViewTree`, `DomDocument` | H4 | R6 symmetry structural; `alloc_prop` becomes `ViewTree::alloc_prop` with the P0.5 contract in one place; teardown walk = `destroy()` |
-| P5.3 event/state | `DocState`, `StateStore`, `BrowsingSession`, `ClipboardStore`, `EventStateLog`/`StateDumpLog` (RAII over FILE*), `EditHistory` | H3 | `BrowsingSession::navigate()/go_back()/go_forward()` own old-doc disposal — P0.1's fix moves inside the API so callers *can't* leak; `DocState::reset()` reintroduced correctly if needed (P0.4) |
+| P5.3 event/state | `DocState`, `StateStore`, `BrowsingSession`, `ClipboardStore`, `EventStateLog`/`StateDumpLog` (RAII over FILE*), `EditHistory` | H3 | `BrowsingSession::navigate()/go_back()/go_forward()` own old-doc disposal — P0.1's fix moves inside the API so callers *can't* leak; `init()` takes the borrowed network context (`thread_pool`/`file_cache`) as explicit params, encoding the owns-vs-borrows contract (S12; today comment-only at browsing_session.cpp:96); `DocState::reset()` reintroduced correctly if needed (P0.4) |
 | P5.4 media/vector | `GifAnimation`, `LottiePlayer`, `RdtPicture` (handle struct, methods only — refcount lands in P6.2) | H1 | dtors centralize the "null surface->pixels + bump generation" invariant (F5/V5) |
 | P5.5 counters/context | `CounterContext`, `UiContext` (document ownership as sub-object) | H4 | unify CounterContext's mixed heap/arena backing |
 
@@ -160,6 +164,7 @@ Coordination notes: P0.3 lands **before** `Radiant_Impl_Clean_Up.md` P5 (paint d
 | `session_navigate_no_leak` (event_sim or gtest) | P0.1 | 50× navigate/back/forward → live document count stable, memtrack balance |
 | `layout_early_return_no_leak` | P0.2 | invalid-root layout → no leaked scratch node / counter allocations |
 | `paint_list_ownership` gtest | P0.3 | owns_* payloads freed by clear/destroy; memtrack balance |
+| `webview_retained_fields` | P0.8 | `src`/`srcdoc` valid across `view_pool_reset_retained` (ASan-clean) |
 | alloca remediation fixtures | P1.3 | gradient with 10⁵ stops renders (or cleanly rejects) without stack overflow |
 | layout suite full pass | P3.* | byte-identical view trees (494/344/703 fixtures) |
 | `range_churn_stress` | P6.1 | 1M range cycles → arena plateau |

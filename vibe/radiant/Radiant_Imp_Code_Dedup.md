@@ -216,3 +216,21 @@ One-liner ritual: concatenate the phase's headers, then check for duplicate `#de
 - **RQ3 — `event_sim.hpp`: stays separate** from `event.hpp`. It is a testing feature, not a runtime feature. If it is later kept in release builds (for WebDriver support), it can be merged at that point.
 - **RQ4 — `form_control.hpp`: → `view.hpp`.** Follows the governing principle: view.hpp holds what describes the view/style tree; layout/render hold their processes; event holds event/editing/state handling.
 - **state_store merge: approved** into `event.hpp`, with two riders: (a) the merged `event.hpp` may need a structuring rewrite once all pieces are in, to keep it readable (scheduled as the H3 exit deliverable); (b) most of the state_store C+ code is expected to eventually migrate to Lambda script, so its band is kept cleanly separable.
+
+---
+
+## 10. Legacy dual-path retirement backlog (added 2026-07-13; tracked here, NOT in H-phase scope)
+
+The H-phases move declarations only (§6 scope fences). But the 2026-07-13 audit of the `doc/dev/radiant/RAD_*.md` known-issues sections showed that the most-repeated structural-debt class in radiant — **two live representations/code paths where one is canonical and the other awaits deletion** — had no home in any design doc. It is dedup work (each item is a duplicated implementation), so it is tracked here as a post-H6 backlog. Each item is its own small campaign gated the usual way (radiant baseline + the domain suite from §5); every retirement should tick the DD1 Lizard dup-ratchet down.
+
+| # | Dual path | Canonical / legacy | Source | Action |
+|---|---|---|---|---|
+| DP1 | `DomElement::native_element` — the embedded `Element elmt` is a *copy* of the original parsed Element (dom_element_init), plus a redundant `native_element` pointer into it; two notions of "the element" to keep in sync | embedded element canonical; field carries `TODO(Phase 4): Remove` (dom_element.hpp:297–308) that never landed | RAD_01 §8, RAD_15 §10 | complete the Phase-4 removal: `dom_element_to_element()` accessor, delete the field |
+| DP2 | Grid dual representation: legacy `GridTrack` structs ↔ enhanced (Taffy-style) track layer, bridged by a per-pass adapter round-trip (`grid_enhanced_adapter.hpp`), incl. the shrink-guard workaround the round-trip forces. (The dead "pure" `run_track_sizing_algorithm` flagged alongside it in RAD_09 was already removed — see grid_enhanced_adapter.hpp:826.) | enhanced layer is the live algorithm; legacy structs persist as its I/O | RAD_09 §8 | migrate remaining consumers to the enhanced layer; delete the adapter round-trip |
+| DP3 | Selection/caret: canonical model + legacy `state_store` projection kept in sync by manual invariants | canonical model | RAD_17 §8, RAD_18 §10, RAD_19 §8 | migrate consumers off the projection, delete it — coordinate with the H3 rider (state-store band is Lambda-script-bound); the most-repeated dual-path issue in the RAD set |
+| DP4 | Legacy `render_list_bullet` (render_list.cpp:218, called from render_block.cpp:433) alongside the `::marker` path | `::marker` | RAD_11 §7 | delete the legacy path |
+| DP5 | Legacy contenteditable key-handling path with unfinished stubs, superseded by the transaction path | transaction path | RAD_15 §10 | delete the legacy path |
+| DP6 | text_edit dual dispatch surfaces: `te_replace_byte_range` vs `_no_events` (text_edit.hpp:90/96); `te_ime_commit` vs `_prepare`/`_finish` (:198/205/209) | one parameterized entry each | RAD_19 §8 | collapse each pair |
+| DP7 | Raster render path only partway migrated onto the shared backend walker — two walkers live | shared backend walker | RAD_13 §10 | finish the migration; delete the raster-only walk |
+
+Sequencing: DP4 is a deletion with tests already green — earliest candidate, and DP-work touches `.cpp` bodies not headers, so it can run parallel to the H-phases. DP1/DP2/DP3 are the real campaigns: DP3 after H3 (its declarations will live in `event.hpp`'s state band), DP2 after H2. DP1 crosses into `lambda/input/css/` — coordinate with the DOM-side owners before scheduling.
