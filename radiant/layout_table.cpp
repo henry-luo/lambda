@@ -3769,33 +3769,46 @@ static bool table_cell_apply_vertical_align_keyword(ViewTableCell* cell,
                                                     bool from_inline_style) {
     if (!cell || !cell->td) return false;
 
+#ifndef NDEBUG
+    // release strips log_debug(), so the readable keyword name must be debug-only too.
     const char* align_name = nullptr;
+#endif
     switch (keyword) {
     case CSS_VALUE_TOP:
         cell->td->vertical_align = TableCellProp::CELL_VALIGN_TOP;
+#ifndef NDEBUG
         align_name = "top";
+#endif
         break;
     case CSS_VALUE_MIDDLE:
         cell->td->vertical_align = TableCellProp::CELL_VALIGN_MIDDLE;
+#ifndef NDEBUG
         align_name = "middle";
+#endif
         break;
     case CSS_VALUE_BOTTOM:
         cell->td->vertical_align = TableCellProp::CELL_VALIGN_BOTTOM;
+#ifndef NDEBUG
         align_name = "bottom";
+#endif
         break;
     case CSS_VALUE_BASELINE:
         cell->td->vertical_align = TableCellProp::CELL_VALIGN_BASELINE;
+#ifndef NDEBUG
         align_name = "baseline";
+#endif
         break;
     default:
         return false;
     }
 
+#ifndef NDEBUG
     if (from_inline_style) {
         log_debug("Cell vertical-align from in_line: %s", align_name);
     } else {
         log_debug("Cell vertical-align: %s", align_name);
     }
+#endif
     return true;
 }
 
