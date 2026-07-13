@@ -139,7 +139,8 @@ inline bool is_slow_benchmark(const std::string& test_name) {
 inline char* execute_lambda_script(const char* script_path, bool is_procedural = false, bool use_mir = false) {
     char command[512];
     const char* c2mir_flag = use_mir ? "" : " --c2mir";
-    const char* exe = use_mir ? "lambda.exe" : "lambda-jube.exe";
+    // c2mir is a lambda.exe mode; lambda-jube.exe can abort before BATCH_END and hide every script result.
+    const char* exe = "lambda.exe";
     const char* no_log_flag = " --no-log";  // always disable logging in tests for performance
 #ifdef _WIN32
     if (is_procedural) {
@@ -498,7 +499,8 @@ inline void run_sub_batch(
 
     char command[512];
     const char* c2mir_flag = use_mir ? "" : " --c2mir";
-    const char* exe = use_mir ? "lambda.exe" : "lambda-jube.exe";
+    // c2mir is a lambda.exe mode; lambda-jube.exe can abort before BATCH_END and hide every script result.
+    const char* exe = "lambda.exe";
 #ifdef _WIN32
     snprintf(command, sizeof(command), "%s test-batch --no-log --timeout=60%s < \"%s\"",
              exe, c2mir_flag, manifest_path);

@@ -12,12 +12,12 @@ extern "C" {
 #endif
 
 // ============================================================================
-// TypeScript AST Node Types (start at 1000 to avoid collisions with JS nodes)
+// TypeScript AST Node Types (start at 1500 to avoid collisions with JS nodes)
 // ============================================================================
 
 typedef enum TsAstNodeType {
     // --- type expression nodes (resolved to Lambda Type* during transpilation) ---
-    TS_AST_NODE_TYPE_ANNOTATION = 1000,  // : SomeType
+    TS_AST_NODE_TYPE_ANNOTATION = 1500,  // : SomeType
     TS_AST_NODE_TYPE_ALIAS,              // type Foo = ...
     TS_AST_NODE_INTERFACE,               // interface Foo { ... }
     TS_AST_NODE_TYPE_PARAMETERS,         // <T extends U = V>

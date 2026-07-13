@@ -4599,6 +4599,21 @@ int main(int argc, char *argv[]) {
         return lambda_main_finish(result);
     }
 
+    // Handle canonical AST dump commands (Phase 1: unified AST renumber harness)
+    if (argc >= 3 && strcmp(argv[1], "--emit-ast-dump") == 0) {
+        const char* dump_path = argv[2];
+        log_debug("Emitting canonical Lambda AST dump for '%s'", dump_path);
+        int result = emit_ast_dump_file(dump_path);
+        return lambda_main_finish(result);
+    }
+
+    if (argc >= 3 && strcmp(argv[1], "--emit-js-ast-dump") == 0) {
+        const char* dump_path = argv[2];
+        log_debug("Emitting canonical JS AST dump for '%s'", dump_path);
+        int result = emit_js_ast_dump_file(dump_path);
+        return lambda_main_finish(result);
+    }
+
     // Handle run command
     log_debug("Checking for run command");
     if (argc >= 2 && strcmp(argv[1], "run") == 0) {

@@ -66,96 +66,72 @@ struct TsTypeAnnotationNode;
 }
 #endif
 
-// JavaScript AST Node Types
-typedef enum JsAstNodeType {
-    JS_AST_NODE_NULL,
-    
-    JS_AST_NODE_PROGRAM,
-    JS_AST_NODE_FUNCTION_DECLARATION,
-    JS_AST_NODE_VARIABLE_DECLARATION,
-    JS_AST_NODE_EXPRESSION_STATEMENT,
-    JS_AST_NODE_BLOCK_STATEMENT,
-    JS_AST_NODE_IF_STATEMENT,
-    JS_AST_NODE_WHILE_STATEMENT,
-    JS_AST_NODE_FOR_STATEMENT,
-    JS_AST_NODE_RETURN_STATEMENT,
-    JS_AST_NODE_BREAK_STATEMENT,
-    JS_AST_NODE_CONTINUE_STATEMENT,
-    
-    // Expressions
-    JS_AST_NODE_IDENTIFIER,
-    JS_AST_NODE_LITERAL,
-    JS_AST_NODE_BINARY_EXPRESSION,
-    JS_AST_NODE_UNARY_EXPRESSION,
-    JS_AST_NODE_ASSIGNMENT_EXPRESSION,
-    JS_AST_NODE_CALL_EXPRESSION,
-    JS_AST_NODE_MEMBER_EXPRESSION,
-    JS_AST_NODE_ARRAY_EXPRESSION,
-    JS_AST_NODE_OBJECT_EXPRESSION,
-    JS_AST_NODE_FUNCTION_EXPRESSION,
-    JS_AST_NODE_ARROW_FUNCTION,
-    JS_AST_NODE_CONDITIONAL_EXPRESSION,
-    
-    // ES6+ Features
-    JS_AST_NODE_TEMPLATE_LITERAL,
-    JS_AST_NODE_TEMPLATE_ELEMENT,
-    JS_AST_NODE_SPREAD_ELEMENT,
-    JS_AST_NODE_CLASS_DECLARATION,
-    JS_AST_NODE_CLASS_EXPRESSION,
-    JS_AST_NODE_METHOD_DEFINITION,
-    JS_AST_NODE_FIELD_DEFINITION,
-    JS_AST_NODE_STATIC_BLOCK,
-    JS_AST_NODE_TRY_STATEMENT,
-    JS_AST_NODE_CATCH_CLAUSE,
-    JS_AST_NODE_FINALLY_CLAUSE,
-    JS_AST_NODE_THROW_STATEMENT,
-    JS_AST_NODE_ASSIGNMENT_PATTERN,
-    JS_AST_NODE_ARRAY_PATTERN,
-    JS_AST_NODE_OBJECT_PATTERN,
-    
-    // Patterns and declarations
-    JS_AST_NODE_VARIABLE_DECLARATOR,
-    JS_AST_NODE_PROPERTY,
-    JS_AST_NODE_PARAMETER,
-    JS_AST_NODE_REST_ELEMENT,
-    JS_AST_NODE_REST_PROPERTY,
-    
-    // v5: New expression and control flow
-    JS_AST_NODE_NEW_EXPRESSION,
-    JS_AST_NODE_SWITCH_STATEMENT,
-    JS_AST_NODE_SWITCH_CASE,
-    JS_AST_NODE_DO_WHILE_STATEMENT,
-    JS_AST_NODE_FOR_OF_STATEMENT,
-    JS_AST_NODE_FOR_IN_STATEMENT,
+// JavaScript AST node types share AstNodeType's underlying space. Core-shaped
+// nodes use core values now; JS-only or not-yet-merged variants stay in 1000–1499.
+typedef AstNodeType JsAstNodeType;
+static const JsAstNodeType JS_AST_NODE_NULL = AST_NODE_NULL;
+static const JsAstNodeType JS_AST_NODE_PROGRAM = AST_SCRIPT;
+static const JsAstNodeType JS_AST_NODE_FUNCTION_DECLARATION = AST_NODE_FUNC;
+static const JsAstNodeType JS_AST_NODE_VARIABLE_DECLARATION = AST_NODE_VAR_STAM;
+static const JsAstNodeType JS_AST_NODE_EXPRESSION_STATEMENT = AST_NODE_EXPR_STMT;
+static const JsAstNodeType JS_AST_NODE_BLOCK_STATEMENT = AST_NODE_BLOCK;
+static const JsAstNodeType JS_AST_NODE_IF_STATEMENT = AST_NODE_IF_EXPR;
+static const JsAstNodeType JS_AST_NODE_WHILE_STATEMENT = AST_NODE_WHILE_STAM;
+static const JsAstNodeType JS_AST_NODE_FOR_STATEMENT = AST_NODE_FOR_STAM;
+static const JsAstNodeType JS_AST_NODE_RETURN_STATEMENT = AST_NODE_RETURN_STAM;
+static const JsAstNodeType JS_AST_NODE_BREAK_STATEMENT = AST_NODE_BREAK_STAM;
+static const JsAstNodeType JS_AST_NODE_CONTINUE_STATEMENT = AST_NODE_CONTINUE_STAM;
+static const JsAstNodeType JS_AST_NODE_IDENTIFIER = AST_NODE_IDENT;
+static const JsAstNodeType JS_AST_NODE_LITERAL = AST_NODE_LITERAL;
+static const JsAstNodeType JS_AST_NODE_BINARY_EXPRESSION = AST_NODE_BINARY;
+static const JsAstNodeType JS_AST_NODE_UNARY_EXPRESSION = AST_NODE_UNARY;
+static const JsAstNodeType JS_AST_NODE_ASSIGNMENT_EXPRESSION = AST_NODE_ASSIGN;
+static const JsAstNodeType JS_AST_NODE_CALL_EXPRESSION = AST_NODE_CALL_EXPR;
+static const JsAstNodeType JS_AST_NODE_MEMBER_EXPRESSION = AST_NODE_MEMBER_EXPR;
+static const JsAstNodeType JS_AST_NODE_ARRAY_EXPRESSION = AST_NODE_ARRAY;
+static const JsAstNodeType JS_AST_NODE_OBJECT_EXPRESSION = AST_NODE_MAP;
+static const JsAstNodeType JS_AST_NODE_FUNCTION_EXPRESSION = AST_NODE_FUNC_EXPR;
+static const JsAstNodeType JS_AST_NODE_SPREAD_ELEMENT = AST_NODE_SPREAD;
+static const JsAstNodeType JS_AST_NODE_CLASS_DECLARATION = AST_NODE_CLASS;
+static const JsAstNodeType JS_AST_NODE_FIELD_DEFINITION = AST_NODE_FIELD;
+static const JsAstNodeType JS_AST_NODE_THROW_STATEMENT = AST_NODE_RAISE_STAM;
+static const JsAstNodeType JS_AST_NODE_PARAMETER = AST_NODE_PARAM;
+static const JsAstNodeType JS_AST_NODE_NEW_EXPRESSION = AST_NODE_NEW_EXPR;
+static const JsAstNodeType JS_AST_NODE_SEQUENCE_EXPRESSION = AST_NODE_SEQ;
+static const JsAstNodeType JS_AST_NODE_YIELD_EXPRESSION = AST_NODE_YIELD;
+static const JsAstNodeType JS_AST_NODE_AWAIT_EXPRESSION = AST_NODE_AWAIT;
+static const JsAstNodeType JS_AST_NODE_IMPORT_DECLARATION = AST_NODE_IMPORT;
+static const JsAstNodeType JS_AST_NODE_EXPORT_DECLARATION = AST_NODE_EXPORT;
 
-    // v11: Sequence expression
-    JS_AST_NODE_SEQUENCE_EXPRESSION,
-
-    // v11: Labeled statement
-    JS_AST_NODE_LABELED_STATEMENT,
-
-    // v11: Regex literal
-    JS_AST_NODE_REGEX,
-
-    // v14: Generators, async/await, ES modules
-    JS_AST_NODE_YIELD_EXPRESSION,
-    JS_AST_NODE_AWAIT_EXPRESSION,
-    JS_AST_NODE_IMPORT_DECLARATION,
-    JS_AST_NODE_EXPORT_DECLARATION,
-    JS_AST_NODE_IMPORT_SPECIFIER,
-    JS_AST_NODE_EXPORT_SPECIFIER,
-
-    // v17: with statement (for strict mode rejection)
-    JS_AST_NODE_WITH_STATEMENT,
-
-    // v20: Tagged template literals
-    JS_AST_NODE_TAGGED_TEMPLATE,
-
-    // the TypeScript parser stores TS_AST_NODE_* values in JsAstNode::node_type.
-    // Keep the enum range wide enough so newer clang does not treat those
-    // extension-node comparisons as impossible after the JS rollback.
-    JS_AST_NODE_TS_EXTENSION_SENTINEL = 1100,
-} JsAstNodeType;
+static const JsAstNodeType JS_AST_NODE_ARROW_FUNCTION = (JsAstNodeType)1000;
+static const JsAstNodeType JS_AST_NODE_CONDITIONAL_EXPRESSION = (JsAstNodeType)1001;
+static const JsAstNodeType JS_AST_NODE_TEMPLATE_LITERAL = (JsAstNodeType)1002;
+static const JsAstNodeType JS_AST_NODE_TEMPLATE_ELEMENT = (JsAstNodeType)1003;
+static const JsAstNodeType JS_AST_NODE_CLASS_EXPRESSION = (JsAstNodeType)1004;
+static const JsAstNodeType JS_AST_NODE_METHOD_DEFINITION = (JsAstNodeType)1005;
+static const JsAstNodeType JS_AST_NODE_STATIC_BLOCK = (JsAstNodeType)1006;
+static const JsAstNodeType JS_AST_NODE_TRY_STATEMENT = (JsAstNodeType)1007;
+static const JsAstNodeType JS_AST_NODE_CATCH_CLAUSE = (JsAstNodeType)1008;
+static const JsAstNodeType JS_AST_NODE_FINALLY_CLAUSE = (JsAstNodeType)1009;
+static const JsAstNodeType JS_AST_NODE_ASSIGNMENT_PATTERN = (JsAstNodeType)1010;
+static const JsAstNodeType JS_AST_NODE_ARRAY_PATTERN = (JsAstNodeType)1011;
+static const JsAstNodeType JS_AST_NODE_OBJECT_PATTERN = (JsAstNodeType)1012;
+static const JsAstNodeType JS_AST_NODE_VARIABLE_DECLARATOR = (JsAstNodeType)1013;
+static const JsAstNodeType JS_AST_NODE_PROPERTY = (JsAstNodeType)1014;
+static const JsAstNodeType JS_AST_NODE_REST_ELEMENT = (JsAstNodeType)1015;
+static const JsAstNodeType JS_AST_NODE_REST_PROPERTY = (JsAstNodeType)1016;
+static const JsAstNodeType JS_AST_NODE_SWITCH_STATEMENT = (JsAstNodeType)1017;
+static const JsAstNodeType JS_AST_NODE_SWITCH_CASE = (JsAstNodeType)1018;
+static const JsAstNodeType JS_AST_NODE_DO_WHILE_STATEMENT = (JsAstNodeType)1019;
+static const JsAstNodeType JS_AST_NODE_FOR_OF_STATEMENT = (JsAstNodeType)1020;
+static const JsAstNodeType JS_AST_NODE_FOR_IN_STATEMENT = (JsAstNodeType)1021;
+static const JsAstNodeType JS_AST_NODE_LABELED_STATEMENT = (JsAstNodeType)1022;
+static const JsAstNodeType JS_AST_NODE_REGEX = (JsAstNodeType)1023;
+static const JsAstNodeType JS_AST_NODE_IMPORT_SPECIFIER = (JsAstNodeType)1024;
+static const JsAstNodeType JS_AST_NODE_EXPORT_SPECIFIER = (JsAstNodeType)1025;
+static const JsAstNodeType JS_AST_NODE_WITH_STATEMENT = (JsAstNodeType)1026;
+static const JsAstNodeType JS_AST_NODE_TAGGED_TEMPLATE = (JsAstNodeType)1027;
+static const JsAstNodeType JS_AST_NODE_TS_EXTENSION_SENTINEL = (JsAstNodeType)2000;
 
 // JavaScript operators
 typedef enum JsOperator {
@@ -239,7 +215,7 @@ typedef enum JsLiteralType {
 // NOTE: Field order must match AstNode layout (node_type, type, next, node)
 // because NameEntry stores AstNode* but points to JsAstNode memory
 typedef struct JsAstNode {
-    JsAstNodeType node_type;
+    AstNodeType node_type;
     Type* type;                     // Inferred Lambda type
     struct JsAstNode* next;         // Linked list for siblings
     TSNode node;                    // Tree-sitter node

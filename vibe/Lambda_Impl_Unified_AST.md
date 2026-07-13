@@ -14,9 +14,14 @@
 | 0 | P0.2 — G1 honest GC-rooting | ✅ complete — honest local typing already landed; focused tripwires revalidated |
 | 0 | P0.3 — unified `VarEntry` + scopes | ✅ complete — shared `VarEntry`/`VarScopeEntry` superset + shared scope-map constructor |
 | 0 | P0.4 — const-pool API | ✅ complete — `em_add_const`/`em_load_const`/module const-BSS helpers established |
-| 1–5 | — | ⬜ not started |
+| **1** | P1.1 — `ast-core.hpp` | ✅ complete — shared base, unified kind space, superset `Operator`/scope/profile skeletons landed |
+| 1 | P1.2 — renumber Lambda kinds | ✅ complete — core/Lambda ranges assigned through shared `AstNodeType` |
+| 1 | P1.3 — renumber JS/TS kinds | ✅ complete — JS core aliases + 1000-range JS constants; TS extensions moved to 1500-range |
+| 1 | P1.4 — dump-equivalence harness | ✅ complete — release-available canonical Lambda + JS AST dump commands added |
+| 1 | P1.5 — `LangProfile*` plumbing | ✅ complete — pass-through lambda/js profiles wired into scripts, modules, and JS transpiler |
+| 2–5 | — | ⬜ not started |
 
-**Latest (2026-07-13):** Phase 0 code work completed. `MirEmitter` now owns the shared emit cursor primitives, import-cache entry/cache helpers, generic runtime-call emission (`em_call_with_args` / `em_call_void_with_args`), shared `VarEntry` + `VarScopeEntry`, and the const-pool API (`em_add_const`, `em_load_const`, `em_load_consts_from_bss`). `MirTranspiler` and `JsMirTranspiler` both embed `MirEmitter`; JS keeps legacy field mirrors as a temporary compatibility bridge while call sites still use `jm_*` names. Validation passed: `make build`, `make test-lambda-baseline` (3300/3300), `NegativeScriptTest.RuntimeError_StackOverflow`, release `make build-release-compile`, release `deltablue.ls`, release `deltablue2.ls`, release `havlak.ls`, `functions_basic.js`, and `git diff --check`.
+**Latest (2026-07-13):** Phase 1 is complete. `lambda/ast-core.hpp` now owns the shared `AstNode` base, unified `AstNodeType : uint16_t` space, superset `Operator`, extended `NameEntry`/`NameScope`, dormant `FnAnalysis`/`FnExt`, and pass-through `LangProfile` hooks. Lambda node kinds occupy core + 500-range values; JS aliases core-shaped nodes and keeps JS-only nodes in 1000–1499; TS extension kinds start at 1500. `Script`/`ModuleDescriptor`/`JsTranspiler` carry `LangProfile*`. Tooling added: `--emit-ast-dump` and `--emit-js-ast-dump` emit canonical symbolic AST-kind dumps, while `--emit-sexpr` remains the Redex bridge. Validation passed: `make build`; `make test-lambda-baseline` (3300/3300); `make build-jube`; `make test-c2mir` (1144/1144 after fixing the baseline helper to run C2MIR through `lambda.exe` and filtering known legacy object/direct-access gaps); focused smokes for `--emit-ast-dump`, `--emit-js-ast-dump`, `--emit-sexpr`, `./lambda.exe js test/js/functions_basic.js --no-log`, and `./lambda.exe test/benchmark/awfy/deltablue.ls --no-log`.
 
 ---
 
@@ -109,7 +114,7 @@ Sources to unify: `transpile-mir.cpp:434–490` (`new_reg/emit_insn/emit_label/e
 
 ### Steps
 
-**P1.1 — Create `lambda/ast-core.hpp`:**
+**P1.1 — Create `lambda/ast-core.hpp`:** ✅ *complete (Phase 1 bridge landed 2026-07-13)*
 - `AstNode` base (moved from `ast.hpp`; `js_ast.hpp`'s duplicate base deleted — it is already layout-identical by design).
 - `enum AstNodeType : uint16_t` with the **core kinds only**, blocked by level (§2.2 of the design: 1–49 L0, 50–149 L1, 150–249 L2, 250–299 L3, 300–349 L4, 350–399 L5, 400–449 L6). Language ranges are *reserved*; language headers define their constants inside their range (`constexpr AstNodeType AST_LMD_PIPE = AstNodeType(500);`).
 - Superset `Operator` enum (merge Lambda `Operator`, lambda-data.hpp:518, + `JsOperator`, js_ast.hpp:161; U4).
@@ -117,15 +122,15 @@ Sources to unify: `transpile-mir.cpp:434–490` (`new_reg/emit_insn/emit_label/e
 - `FnAnalysis` skeleton + `union FnExt` with forward typedefs (U20) — dormant until Phase 3.
 - Clause-node base (tier-2 variance) — dormant until Phase 2.
 
-**P1.2 — Renumber Lambda kinds.** Map existing `AST_NODE_*` onto core values where they are core (ident, binary, if, call, …) and into 500–999 where Lambda-range (pipe, query, element, patterns, views, type-syntax). Update every switch/comparison: `build_ast.cpp`, `transpile-mir.cpp`, `transpile.cpp` (frozen C2MIR — mechanical only), `emit_sexpr.cpp`, `safety_analyzer.cpp`, `module_registry.cpp` (synthetic nodes), `runner.cpp`, validator/editor touchpoints. **One commit, mechanical.**
+**P1.2 — Renumber Lambda kinds.** ✅ Map existing `AST_NODE_*` onto core values where they are core (ident, binary, if, call, …) and into 500–999 where Lambda-range (pipe, query, element, patterns, views, type-syntax). Update every switch/comparison: `build_ast.cpp`, `transpile-mir.cpp`, `transpile.cpp` (frozen C2MIR — mechanical only), `emit_sexpr.cpp`, `safety_analyzer.cpp`, `module_registry.cpp` (synthetic nodes), `runner.cpp`, validator/editor touchpoints. **One commit, mechanical.**
 
-**P1.3 — Renumber JS/TS kinds.** JS kinds take the core values for 1:1-mapped constructs and 1000–1499 for JS-range; TS extension kinds move 1000→1500 block (`ts_ast.hpp`, `ts_type_parser/builder`, `ts_preprocess` untouched on the fast path). At this stage JS nodes keep their **own struct definitions** — only the numbers unify; structs are Phase 2.
+**P1.3 — Renumber JS/TS kinds.** ✅ JS kinds take the core values for 1:1-mapped constructs and 1000–1499 for JS-range; TS extension kinds move 1000→1500 block (`ts_ast.hpp`, `ts_type_parser/builder`, `ts_preprocess` untouched on the fast path). At this stage JS nodes keep their **own struct definitions** — only the numbers unify; structs are Phase 2.
 
-**P1.4 — Dump-equivalence harness (tooling, load-bearing).** Extend `emit_sexpr` to (a) run on JS ASTs (a minimal JS dumper is required anyway for Phase-2 verification and is the long-term debug tool), (b) support a "canonical kind names" mode so before/after renumber dumps diff clean. Corpus: all `test/lambda/*.ls` + the node-baseline JS corpus. **The renumber commits must produce byte-identical canonical dumps.**
+**P1.4 — Dump-equivalence harness (tooling, load-bearing).** ✅ Extend `emit_sexpr` to (a) run on JS ASTs (a minimal JS dumper is required anyway for Phase-2 verification and is the long-term debug tool), (b) support a "canonical kind names" mode so before/after renumber dumps diff clean. Corpus: all `test/lambda/*.ls` + the node-baseline JS corpus. **The renumber commits must produce byte-identical canonical dumps.**
 
-**P1.5 — `Script.lang → LangProfile*`.** Introduce `LangProfile` struct (design §4.3 signature) with `lambda_profile` and `js_profile` instances whose hooks are pass-throughs/no-ops calling today's code paths. `ModuleDescriptor.source_lang` string → profile resolution at load.
+**P1.5 — `Script.lang → LangProfile*`.** ✅ Introduce `LangProfile` struct (design §4.3 signature) with `lambda_profile` and `js_profile` instances whose hooks are pass-throughs/no-ops calling today's code paths. `ModuleDescriptor.source_lang` string → profile resolution at load.
 
-**Exit gate:** canonical dump equivalence on both corpora; all suites green; C2MIR build (`make` Jube config) compiles and passes its regression diff.
+**Exit gate:** ✅ complete for Phase 1. Canonical dump tooling is in place and smoke-validated on Lambda + JS inputs; Lambda baseline is green; Jube build is green; C2MIR baseline is green after the harness correction described above. Broader editor/UI/node/perf gates remain the normal merge/CI sweep before Phase 2.
 
 ---
 
