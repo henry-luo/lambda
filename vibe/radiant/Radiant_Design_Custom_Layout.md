@@ -1,6 +1,6 @@
 # Radiant Custom Layout - Lambda/Houdini Proposal
 
-**Status:** proposal, revised around child prelayout and pure placement
+**Status:** in progress; MVP hook, Lambda registration, and map-backed Velmt snapshots are implemented, while full Velmt/VMap host handles remain future work.
 **Primary goal:** add a small, engine-supported custom layout surface for Lambda, enough to port Radiant graph layout out of C+ and into Lambda.
 **Secondary goal:** keep the shape compatible with a future LambdaJS-facing API, without making JS/reflow the first implementation path.
 
@@ -178,6 +178,8 @@ Velmt handles should be scoped:
 
 If a stale Velmt is used, the API should return an error value and log a distinct prefix such as `VELMT_STALE_HANDLE`.
 
+Current MVP note: the first implementation uses map-backed Velmt snapshots built per callback invocation. This avoids stale native pointer exposure while the full VMap/host-object Velmt design is deferred. The snapshot already exposes `tag`, `id`, `attrs`, `style`, bounded `children`, descendant `text`, box metrics, and edge metrics. A future Velmt host object should preserve the same public shape while adding document/layout generation checks.
+
 ## 6. Custom layout API
 
 The custom layout API is a pure placement callback.
@@ -205,6 +207,37 @@ layout.register("graph", fn(parent, children, ctx) {
 For the MVP, a simple function table is enough. Syntax can come later.
 
 The design contract is that registered callbacks are pure Lambda `fn`s, not `pn`s. However, first-class function values do not currently carry reliable `fn`/`pn` metadata at runtime, so the MVP should not pretend to enforce this at registration. Runtime enforcement is deferred until function values expose a stable procedure/purity bit. Until then, the API documentation and examples should require `fn`, and the layout bridge should still forbid layout-time DOM mutation, measurement flushes, I/O, timers, and other side-effecting host APIs.
+
+Current MVP API:
+
+```lambda
+import radiant;
+
+radiant.register_layout("graph", (parent, children, ctx) => {
+  placements: [for (child in children) {
+    child: child,
+    x: 0,
+    y: child.index * (radiant.velmt_height(child) + 24)
+  }]
+})
+```
+
+The helper functions currently exported by the `radiant` module are:
+
+```lambda
+radiant.velmt_tag(v)
+radiant.velmt_id(v)
+radiant.velmt_attr(v, name)
+radiant.velmt_style(v, name)
+radiant.velmt_children(v)
+radiant.velmt_text(v)
+radiant.velmt_width(v)
+radiant.velmt_height(v)
+radiant.velmt_box(v)
+radiant.velmt_margin(v)
+radiant.velmt_border(v)
+radiant.velmt_padding(v)
+```
 
 ### 6.2 CSS entry
 
@@ -550,33 +583,33 @@ A closer Houdini-compatible API can be evaluated later, but it should not pull i
 
 ### Phase 1: Velmt design and host representation
 
-- define Velmt handle type
+- define Velmt handle type - partial: map-backed snapshots exist
 - define lifetime/generation checks
-- expose `tag`, `id`, `attr`, `style`, `children`, `text`
-- expose `width`, `height`, `box`, `margin`, `border`, `padding`
+- expose `tag`, `id`, `attr`, `style`, `children`, `text` - initial helper API exists
+- expose `width`, `height`, `box`, `margin`, `border`, `padding` - initial helper API exists
 - add C+ tests for stale handle behavior
 - keep mutation and child measurement out of scope
 
 ### Phase 2: CSS and layout dispatch
 
-- parse/represent `display: layout(name)`
-- add `layout_custom_content`
+- parse/represent `display: layout(name)` - implemented
+- add `layout_custom_content` - implemented as `layout_custom_apply`
 - establish custom layout as a formatting context
 - define child prelayout constraints
-- lay out children through existing block/inline/flex/grid/table paths
+- lay out children through existing block/inline/flex/grid/table paths - implemented by running after child layout
 
 ### Phase 3: Lambda callback invocation
 
-- implement custom layout registration
-- document registered callbacks as Lambda `fn`
+- implement custom layout registration - implemented as `radiant.register_layout`
+- document registered callbacks as Lambda `fn` - implemented in this proposal; enforcement deferred
 - defer hard `fn`/`pn` runtime validation until first-class function values expose stable procedure metadata
-- add retained custom-layout runtime cache
-- add JIT compiled layout `fn` cache
-- build scoped Velmt arrays for laid-out children
-- invoke the callback from `layout_custom_content`
-- validate returned placements
-- write child `x, y` back to the view tree
-- compute parent size from CSS or containing box
+- add retained custom-layout runtime cache - partial: callback `Item`s are rooted and reused
+- add JIT compiled layout `fn` cache - partial: registered function handles are retained
+- build scoped Velmt arrays for laid-out children - implemented with map snapshots
+- invoke the callback from `layout_custom_content` - implemented
+- validate returned placements - implemented
+- write child `x, y` back to the view tree - implemented
+- compute parent size from CSS or containing box - implemented
 
 ### Phase 4: Port graph layout to Lambda
 

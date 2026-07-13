@@ -52,6 +52,21 @@ static bool line_has_prior_flow_content(const Linebox* line) {
          line->has_non_c1_text);
 }
 
+static const char* stabilize_custom_layout_name(const char* name, char* storage, size_t storage_size) {
+    if (!name || !storage || storage_size == 0) return nullptr;
+    size_t i = 0;
+    while (i + 1 < storage_size && name[i] != '\0') {
+        storage[i] = name[i];
+        i++;
+    }
+    storage[i] = '\0';
+    if (name[i] != '\0') {
+        log_error("CUSTOM_LAYOUT_NAME_TOO_LONG name starts with '%s'", storage);
+        return nullptr;
+    }
+    return storage;
+}
+
 // Check if a view element is a descendant of another view element
 static bool view_is_descendant_of(ViewElement* child, ViewElement* ancestor) {
     ViewElement* walker = child->parent_view();
@@ -7594,6 +7609,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // =========================================================================
     DomElement* dom_elem = elmt->is_element() ? elmt->as_element() : nullptr;
     const char* custom_layout_name = custom_layout_name_for_element(dom_elem);
+    char custom_layout_name_storage[128];
+    if (custom_layout_name && custom_layout_name[0] != '\0') {
+        // CSS value nodes may be revisited while laying out children; keep this
+        // block's selected custom layout key stable until the callback runs.
+        custom_layout_name = stabilize_custom_layout_name(
+            custom_layout_name, custom_layout_name_storage, sizeof(custom_layout_name_storage));
+    }
     bool has_custom_layout = custom_layout_name && custom_layout_name[0] != '\0';
     radiant::KnownDimensions known_dims = radiant::layout_known_dimensions_from_block(block);
 
@@ -7687,7 +7709,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // layout block content to determine content width and height
         layout_block_content(lycon, block, &pa_block, &pa_line);
         if (has_custom_layout) {
-            // Custom layout consumes already-laid-out child border boxes, so the
+            // custom layout consumes already-laid-out child border boxes, so the
             // callback must run before this block contributes size to its parent.
             layout_custom_apply(lycon, block, custom_layout_name);
         }

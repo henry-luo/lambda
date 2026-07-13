@@ -7,14 +7,23 @@
 #include <string.h>
 
 #define CUSTOM_LAYOUT_MAX_REGISTRY 64
+#define CUSTOM_LAYOUT_NAME_CAP 64
+#define CUSTOM_LAYOUT_MAX_UNKNOWN_LOGS 128
 
 typedef struct CustomLayoutRegistryEntry {
-    const char* name;
+    char name[CUSTOM_LAYOUT_NAME_CAP];
     CustomLayoutFn fn;
 } CustomLayoutRegistryEntry;
 
+typedef struct CustomLayoutUnknownLogEntry {
+    DomDocument* doc;
+    char name[CUSTOM_LAYOUT_NAME_CAP];
+} CustomLayoutUnknownLogEntry;
+
 static CustomLayoutRegistryEntry g_custom_layout_registry[CUSTOM_LAYOUT_MAX_REGISTRY];
 static int g_custom_layout_registry_count = 0;
+static CustomLayoutUnknownLogEntry g_custom_layout_unknown_logs[CUSTOM_LAYOUT_MAX_UNKNOWN_LOGS];
+static int g_custom_layout_unknown_log_count = 0;
 
 static void velmt_edges_from_box_edges(VelmtEdges* dst, const BoxEdges* src) {
     if (!dst || !src) return;
@@ -50,15 +59,17 @@ static int custom_layout_count_children(ViewBlock* block) {
     return count;
 }
 
-static void custom_layout_fill_velmt(Velmt* velmt, View* child, int index) {
-    if (!velmt || !child) return;
+void custom_layout_fill_velmt_from_view(Velmt* velmt, View* child, int index, bool normalize_origin) {
+    if (!velmt) return;
+    memset(velmt, 0, sizeof(*velmt));
+    if (!child) return;
     velmt->view = child;
     velmt->element = child->is_element() ? child->as_element() : nullptr;
     velmt->index = index;
-    // Custom layout receives each child as a measured local border box; the
-    // callback owns final placement and should not depend on normal-flow x/y.
-    velmt->border_box.x = 0.0f;
-    velmt->border_box.y = 0.0f;
+    // top-level custom layout children are normalized; nested Velmt snapshots
+    // preserve local child offsets so callbacks can inspect rich content.
+    velmt->border_box.x = normalize_origin ? 0.0f : child->x;
+    velmt->border_box.y = normalize_origin ? 0.0f : child->y;
     velmt->border_box.width = child->width;
     velmt->border_box.height = child->height;
 
@@ -76,7 +87,7 @@ static int custom_layout_collect_children(ViewBlock* block, Velmt* children, int
     int count = 0;
     for (View* child = (View*)block->first_child; child; child = child->next()) {
         if (!custom_layout_child_is_in_flow(child)) continue;
-        custom_layout_fill_velmt(&children[count], child, count);
+        custom_layout_fill_velmt_from_view(&children[count], child, count, true);
         count++;
         if (count >= capacity) break;
     }
@@ -90,6 +101,69 @@ static bool custom_layout_placement_valid(const CustomLayoutContext* context,
         placement->child_index < context->child_count;
 }
 
+static bool custom_layout_copy_name(char* dst, const char* name, const char* log_prefix) {
+    if (!dst || !name || name[0] == '\0') return false;
+    size_t name_len = strlen(name);
+    if (name_len >= CUSTOM_LAYOUT_NAME_CAP) {
+        log_error("%s layout name too long '%s'", log_prefix ? log_prefix : "CUSTOM_LAYOUT", name);
+        return false;
+    }
+    memcpy(dst, name, name_len + 1);
+    return true;
+}
+
+static DomDocument* custom_layout_document_for_block(ViewBlock* block) {
+    if (!block || !block->is_element()) return nullptr;
+    DomElement* element = block->as_element();
+    return element ? element->doc : nullptr;
+}
+
+static void custom_layout_log_unregistered_once(ViewBlock* block, const char* layout_name) {
+    if (!layout_name || layout_name[0] == '\0') return;
+    DomDocument* doc = custom_layout_document_for_block(block);
+    for (int i = 0; i < g_custom_layout_unknown_log_count; i++) {
+        CustomLayoutUnknownLogEntry* entry = &g_custom_layout_unknown_logs[i];
+        if (entry->doc == doc && strcmp(entry->name, layout_name) == 0) {
+            return;
+        }
+    }
+    if (g_custom_layout_unknown_log_count < CUSTOM_LAYOUT_MAX_UNKNOWN_LOGS) {
+        CustomLayoutUnknownLogEntry* entry =
+            &g_custom_layout_unknown_logs[g_custom_layout_unknown_log_count];
+        entry->doc = doc;
+        if (custom_layout_copy_name(entry->name, layout_name, "CUSTOM_LAYOUT_UNKNOWN_LOG")) {
+            g_custom_layout_unknown_log_count++;
+        }
+    }
+    log_debug("CUSTOM_LAYOUT_UNREGISTERED %s layout='%s'",
+              block ? block->source_loc() : "(null)", layout_name);
+}
+
+static void custom_layout_apply_parent_axis(ViewBlock* block, float content_size, bool horizontal) {
+    if (!block) return;
+
+    content_size = max(content_size, 0.0f);
+    float border_size = 0.0f;
+    if (layout_uses_border_box(block)) {
+        border_size = layout_border_size_from_content_box(block, content_size, horizontal);
+        border_size = layout_apply_min_max_axis(block, border_size, horizontal, true);
+        border_size = layout_floor_border_box_axis(block, border_size, horizontal);
+        content_size = layout_content_size_from_border_box(block, border_size, horizontal);
+    } else {
+        content_size = layout_apply_min_max_axis(block, content_size, horizontal, false);
+        border_size = layout_border_size_from_content_box(block, content_size, horizontal);
+        border_size = layout_floor_border_box_axis(block, border_size, horizontal);
+    }
+
+    if (horizontal) {
+        block->content_width = content_size;
+        block->width = border_size;
+    } else {
+        block->content_height = content_size;
+        block->height = border_size;
+    }
+}
+
 static void custom_layout_apply_parent_size(ViewBlock* block,
                                             const CustomLayoutResult* result,
                                             float min_x,
@@ -98,21 +172,19 @@ static void custom_layout_apply_parent_size(ViewBlock* block,
                                             float max_y) {
     if (!block || !result) return;
 
-    BoxMetrics metrics = layout_box_metrics(block);
+    if (result->has_baseline && block->blk) {
+        block->blk->first_line_baseline = result->baseline;
+    }
     float content_width = (max_x > min_x) ? max_x - min_x : 0.0f;
     float content_height = (max_y > min_y) ? max_y - min_y : 0.0f;
     if (result->has_width) content_width = result->width;
     if (result->has_height) content_height = result->height;
 
     if (!block->blk || block->blk->given_width < 0.0f) {
-        block->content_width = max(content_width, 0.0f);
-        block->width = layout_floor_border_box_width(
-            block, block->content_width + metrics.pad_border_h);
+        custom_layout_apply_parent_axis(block, content_width, true);
     }
     if (!block->blk || block->blk->given_height < 0.0f) {
-        block->content_height = max(content_height, 0.0f);
-        block->height = layout_floor_border_box_height(
-            block, block->content_height + metrics.pad_border_v);
+        custom_layout_apply_parent_axis(block, content_height, false);
     }
 }
 
@@ -128,7 +200,12 @@ bool custom_layout_register(const char* name, CustomLayoutFn fn) {
         log_error("CUSTOM_LAYOUT_REGISTRY_FULL cannot register layout '%s'", name);
         return false;
     }
-    g_custom_layout_registry[g_custom_layout_registry_count].name = name;
+    // layout names can originate in Lambda/CSS-managed memory; copy the key
+    // into registry-owned storage before later layout passes call strcmp().
+    if (!custom_layout_copy_name(g_custom_layout_registry[g_custom_layout_registry_count].name,
+        name, "CUSTOM_LAYOUT_REGISTRY")) {
+        return false;
+    }
     g_custom_layout_registry[g_custom_layout_registry_count].fn = fn;
     g_custom_layout_registry_count++;
     return true;
@@ -142,6 +219,19 @@ CustomLayoutFn custom_layout_lookup(const char* name) {
         }
     }
     return nullptr;
+}
+
+void custom_layout_registry_clear(void) {
+    for (int i = 0; i < g_custom_layout_registry_count; i++) {
+        g_custom_layout_registry[i].name[0] = '\0';
+        g_custom_layout_registry[i].fn = nullptr;
+    }
+    g_custom_layout_registry_count = 0;
+    for (int i = 0; i < g_custom_layout_unknown_log_count; i++) {
+        g_custom_layout_unknown_logs[i].doc = nullptr;
+        g_custom_layout_unknown_logs[i].name[0] = '\0';
+    }
+    g_custom_layout_unknown_log_count = 0;
 }
 
 bool custom_layout_result_place(CustomLayoutResult* result, int child_index, float x, float y) {
@@ -200,7 +290,7 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
     if (!lycon || !block || !layout_name || layout_name[0] == '\0') return false;
     CustomLayoutFn fn = custom_layout_lookup(layout_name);
     if (!fn) {
-        log_debug("CUSTOM_LAYOUT_UNREGISTERED %s layout='%s'", block->source_loc(), layout_name);
+        custom_layout_log_unregistered_once(block, layout_name);
         return false;
     }
 
@@ -290,7 +380,7 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
     for (int i = 0; i < child_count; i++) {
         if (placed_children[i]) continue;
         Velmt* child = &context.children[i];
-        // A successful custom layout pass owns every in-flow child position;
+        // a successful custom layout pass owns every in-flow child position;
         // omitted placements must not leak normal-flow coordinates.
         child->view->x = 0.0f;
         child->view->y = 0.0f;

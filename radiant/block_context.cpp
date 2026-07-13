@@ -12,6 +12,7 @@
 
 #include "layout.hpp"
 #include "layout_box.hpp"
+#include "layout_custom.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
@@ -188,6 +189,12 @@ bool block_context_establishes_bfc(ViewBlock* block) {
     // 8. Flex and Grid containers establish BFC for their children
     if (block->display.inner == CSS_VALUE_FLEX ||
         block->display.inner == CSS_VALUE_GRID) {
+        return true;
+    }
+
+    // Custom layout containers reposition children after prelayout; child
+    // margins must not collapse through the container before placement.
+    if (custom_layout_name_for_element(block)) {
         return true;
     }
 

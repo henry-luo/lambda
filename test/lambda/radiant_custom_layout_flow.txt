@@ -1,0 +1,9 @@
+{
+  registered: true,
+  layout: true,
+  graph: [140, 80],
+  a: [-10, 0, 40, 20],
+  b: [40, 30, 40, 20],
+  c: [90, 60, 40, 20],
+  free: null
+}

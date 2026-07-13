@@ -44,6 +44,8 @@ typedef struct CustomLayoutPlacement {
     int child_index;
     float x;
     float y;
+    int z;
+    bool has_z;
 } CustomLayoutPlacement;
 
 typedef struct CustomLayoutResult {
@@ -52,15 +54,19 @@ typedef struct CustomLayoutResult {
     int placement_capacity;
     float width;
     float height;
+    float baseline;
     bool has_width;
     bool has_height;
+    bool has_baseline;
 } CustomLayoutResult;
 
 typedef bool (*CustomLayoutFn)(const CustomLayoutContext* context, CustomLayoutResult* result);
 
 bool custom_layout_register(const char* name, CustomLayoutFn fn);
 CustomLayoutFn custom_layout_lookup(const char* name);
+void custom_layout_registry_clear(void);
 bool custom_layout_result_place(CustomLayoutResult* result, int child_index, float x, float y);
+void custom_layout_fill_velmt_from_view(Velmt* velmt, View* child, int index, bool normalize_origin);
 
 const char* custom_layout_name_from_css_value(const CssValue* value);
 const char* custom_layout_name_for_element(DomElement* element);
