@@ -272,147 +272,6 @@ static float intrinsic_resolve_font_size_value(LayoutContext* lycon, const CssVa
     return -1.0f;
 }
 
-// ============================================================================
-// Helper: Read border width from CSS specified style
-// ============================================================================
-static const char* css_font_family_name_from_value(const CssValue* value) {
-    if (!value) return NULL;
-    if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
-    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
-        return value->data.custom_property.name;
-    }
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        const CssEnumInfo* info = css_enum_info(value->data.keyword);
-        return info ? info->name : NULL;
-    }
-    return NULL;
-}
-
-static bool css_font_family_available_for_intrinsic(LayoutContext* lycon, const char* family) {
-    if (!family) return false;
-    size_t flen = strlen(family);
-    if (str_ieq(family, flen, "serif", 5) ||
-        str_ieq(family, flen, "sans-serif", 10) ||
-        str_ieq(family, flen, "monospace", 9) ||
-        str_ieq(family, flen, "cursive", 7) ||
-        str_ieq(family, flen, "fantasy", 7) ||
-        str_ieq(family, flen, "system-ui", 9) ||
-        str_ieq(family, flen, "ui-serif", 8) ||
-        str_ieq(family, flen, "ui-sans-serif", 13) ||
-        str_ieq(family, flen, "ui-monospace", 12) ||
-        str_ieq(family, flen, "ui-rounded", 10) ||
-        str_ieq(family, flen, "BlinkMacSystemFont", 18)) {
-        return true;
-    }
-    if (lycon->ui_context && lycon->ui_context->font_faces && lycon->ui_context->font_face_count > 0) {
-        for (int i = 0; i < lycon->ui_context->font_face_count; i++) {
-            FontFaceDescriptor* desc = lycon->ui_context->font_faces[i];
-            if (desc && desc->family_name &&
-                str_ieq(desc->family_name, strlen(desc->family_name), family, strlen(family))) {
-                return true;
-            }
-        }
-    }
-    if (lycon->ui_context && lycon->ui_context->font_ctx) {
-        return font_family_exists(lycon->ui_context->font_ctx, family);
-    }
-    return false;
-}
-
-static const char* select_intrinsic_font_family(LayoutContext* lycon, const CssValue* value) {
-    if (!value) return NULL;
-    if (value->type != CSS_VALUE_TYPE_LIST) return css_font_family_name_from_value(value);
-
-    const char* fallback = NULL;
-    for (int i = 0; i < value->data.list.count; i++) {
-        CssValue* item = value->data.list.values[i];
-        const char* family = css_font_family_name_from_value(item);
-        if (!family) continue;
-        fallback = family;
-        if (css_font_family_available_for_intrinsic(lycon, family)) return family;
-    }
-    return fallback;
-}
-
-static const char* intrinsic_join_font_family_values(LayoutContext* lycon, const CssValue* list,
-                                                     size_t start, size_t end) {
-    if (!lycon || !lycon->doc || !lycon->doc->view_tree ||
-        !list || list->type != CSS_VALUE_TYPE_LIST || start >= end) {
-        return NULL;
-    }
-    size_t list_count = (size_t)list->data.list.count;
-    if (end > list_count) end = list_count;
-    if (start >= end) return NULL;
-
-    if (end == start + 1) {
-        return css_font_family_name_from_value(list->data.list.values[start]);
-    }
-
-    size_t total_len = 0;
-    size_t part_count = 0;
-    for (size_t i = start; i < end; i++) {
-        const char* part = css_font_family_name_from_value(list->data.list.values[i]);
-        if (!part || !*part) continue;
-        total_len += strlen(part);
-        part_count++;
-    }
-    if (part_count == 0) return NULL;
-    total_len += part_count - 1;
-
-    char* combined = (char*)pool_alloc(lycon->doc->view_tree->pool, total_len + 1);
-    if (!combined) return NULL;
-    combined[0] = '\0';
-
-    size_t pos = 0;
-    bool first = true;
-    for (size_t i = start; i < end; i++) {
-        const char* part = css_font_family_name_from_value(list->data.list.values[i]);
-        if (!part || !*part) continue;
-        if (!first) {
-            pos = str_cat(combined, pos, total_len + 1, " ", 1);
-        }
-        pos = str_cat(combined, pos, total_len + 1, part, strlen(part));
-        first = false;
-    }
-    return combined;
-}
-
-static const char* select_intrinsic_font_shorthand_family(LayoutContext* lycon,
-                                                          const CssValue* shorthand_value,
-                                                          const CssValue* main_group,
-                                                          size_t family_start_index) {
-    const char* selected = NULL;
-    const char* fallback = NULL;
-
-    if (main_group && main_group->type == CSS_VALUE_TYPE_LIST) {
-        selected = intrinsic_join_font_family_values(
-            lycon, main_group, family_start_index, main_group->data.list.count);
-        fallback = selected;
-        if (selected) return selected;
-    }
-
-    if (shorthand_value && shorthand_value->type == CSS_VALUE_TYPE_LIST &&
-        shorthand_value->data.list.count >= 2 &&
-        shorthand_value->data.list.values[0] &&
-        shorthand_value->data.list.values[0]->type == CSS_VALUE_TYPE_LIST) {
-        size_t shorthand_count = (size_t)shorthand_value->data.list.count;
-        for (size_t i = 1; i < shorthand_count; i++) {
-            const CssValue* item = shorthand_value->data.list.values[i];
-            const char* family = NULL;
-            if (item && item->type == CSS_VALUE_TYPE_LIST) {
-                family = intrinsic_join_font_family_values(lycon, item, 0, item->data.list.count);
-            } else {
-                family = css_font_family_name_from_value(item);
-            }
-            if (!family) continue;
-            fallback = family;
-            if (css_font_family_available_for_intrinsic(lycon, family)) return family;
-        }
-    }
-
-    return fallback;
-}
-
 static void intrinsic_apply_monospace_font_size_quirk(FontProp* font,
                                                       FontProp* parent_font) {
     if (!font || !font->family || font->font_size <= 0.0f ||
@@ -2318,8 +2177,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             }
                         }
                         if (fam_idx < count) {
-                            css_family = select_intrinsic_font_shorthand_family(
-                                lycon, fv, font_group, fam_idx);
+                            css_family = css_select_font_shorthand_family(
+                                lycon, fv, font_group, fam_idx, false);
                         }
                         need_font_setup = true;
                         break;
@@ -2343,8 +2202,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                                 // everything after is font-family
                                 size_t fam_idx = fi + 1;
                                 if (fam_idx < count) {
-                                    css_family = select_intrinsic_font_shorthand_family(
-                                        lycon, fv, font_group, fam_idx);
+                                    css_family = css_select_font_shorthand_family(
+                                        lycon, fv, font_group, fam_idx, false);
                                 }
                                 need_font_setup = true;
                                 break;
@@ -2378,7 +2237,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
         if (font_family_decl && font_family_decl->value &&
             (!font_shorthand_decl || font_family_decl->source_order > font_shorthand_decl->source_order)) {
-            const char* longhand_family = select_intrinsic_font_family(lycon, font_family_decl->value);
+            const char* longhand_family = css_select_font_family(
+                lycon, font_family_decl->value, false);
 
             if (longhand_family) {
                 css_family = longhand_family;

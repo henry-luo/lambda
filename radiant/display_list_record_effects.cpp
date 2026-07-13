@@ -1,6 +1,4 @@
 #include "render.hpp"
-
-#include "render.hpp"
 #include <string.h>
 
 static void dl_copy_effect_params(float* dst, int type, const float* params) {
@@ -11,16 +9,23 @@ static void dl_copy_effect_params(float* dst, int type, const float* params) {
     }
 }
 
+static DisplayItem* dl_alloc_int_rect_effect_item(DisplayList* dl, DisplayOp op,
+                                                  int x, int y, int w, int h) {
+    DisplayItem* item = dl_alloc_item(dl);
+    item->op = op;
+    item->bounds[0] = (float)x; item->bounds[1] = (float)y;
+    item->bounds[2] = (float)w; item->bounds[3] = (float)h;
+    return item;
+}
+
 // ---------------------------------------------------------------------------
 // Recording: post-processing operations
 // ---------------------------------------------------------------------------
 
 void dl_composite_opacity(DisplayList* dl, int x0, int y0, int w, int h,
                           float opacity, bool premultiplied_source) {
-    DisplayItem* item = dl_alloc_item(dl);
-    item->op = DL_COMPOSITE_OPACITY;
-    item->bounds[0] = (float)x0; item->bounds[1] = (float)y0;
-    item->bounds[2] = (float)w; item->bounds[3] = (float)h;
+    DisplayItem* item = dl_alloc_int_rect_effect_item(dl, DL_COMPOSITE_OPACITY,
+                                                      x0, y0, w, h);
     item->composite_opacity.x0 = x0;
     item->composite_opacity.y0 = y0;
     item->composite_opacity.w = w;
@@ -30,10 +35,8 @@ void dl_composite_opacity(DisplayList* dl, int x0, int y0, int w, int h,
 }
 
 void dl_save_backdrop(DisplayList* dl, int x0, int y0, int w, int h) {
-    DisplayItem* item = dl_alloc_item(dl);
-    item->op = DL_SAVE_BACKDROP;
-    item->bounds[0] = (float)x0; item->bounds[1] = (float)y0;
-    item->bounds[2] = (float)w; item->bounds[3] = (float)h;
+    DisplayItem* item = dl_alloc_int_rect_effect_item(dl, DL_SAVE_BACKDROP,
+                                                      x0, y0, w, h);
     item->save_backdrop.x0 = x0;
     item->save_backdrop.y0 = y0;
     item->save_backdrop.w = w;
@@ -42,10 +45,8 @@ void dl_save_backdrop(DisplayList* dl, int x0, int y0, int w, int h) {
 
 void dl_apply_blend_mode(DisplayList* dl, int x0, int y0, int w, int h,
                          int blend_mode) {
-    DisplayItem* item = dl_alloc_item(dl);
-    item->op = DL_APPLY_BLEND_MODE;
-    item->bounds[0] = (float)x0; item->bounds[1] = (float)y0;
-    item->bounds[2] = (float)w; item->bounds[3] = (float)h;
+    DisplayItem* item = dl_alloc_int_rect_effect_item(dl, DL_APPLY_BLEND_MODE,
+                                                      x0, y0, w, h);
     item->apply_blend_mode.x0 = x0;
     item->apply_blend_mode.y0 = y0;
     item->apply_blend_mode.w = w;

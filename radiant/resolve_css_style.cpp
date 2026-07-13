@@ -487,7 +487,7 @@ static bool css_custom_property_name_matches(const char* stored_name, const char
     return strcmp(stored_body, lookup_body) == 0;
 }
 
-static const char* css_font_family_name_from_value(const CssValue* value) {
+const char* css_font_family_name_from_value(const CssValue* value) {
     if (!value) return NULL;
     if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
     if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
@@ -544,7 +544,8 @@ static bool css_font_face_descriptor_is_available(FontFaceDescriptor* desc) {
     return css_font_face_source_is_available(desc->src_local_path);
 }
 
-static bool css_font_family_is_available(LayoutContext* lycon, const char* family) {
+bool css_font_family_is_available(LayoutContext* lycon, const char* family,
+                                  bool require_loadable_face_source) {
     if (!family) return false;
     size_t flen = strlen(family);
     if (str_ieq(family, flen, "serif", 5) ||
@@ -567,7 +568,7 @@ static bool css_font_family_is_available(LayoutContext* lycon, const char* famil
             FontFaceDescriptor* desc = lycon->ui_context->font_faces[i];
             if (desc && desc->family_name &&
                 str_ieq(desc->family_name, strlen(desc->family_name), family, flen) &&
-                css_font_face_descriptor_is_available(desc)) {
+                (!require_loadable_face_source || css_font_face_descriptor_is_available(desc))) {
                 return true;
             }
         }
@@ -619,8 +620,8 @@ static CssEnum css_resolve_content_alignment_keyword(const CssValue* value) {
     return CSS_VALUE__UNDEF;
 }
 
-static const char* css_join_font_family_values(LayoutContext* lycon, const CssValue* list,
-                                               size_t start, size_t end) {
+const char* css_join_font_family_values(LayoutContext* lycon, const CssValue* list,
+                                        size_t start, size_t end) {
     if (!lycon || !lycon->doc || !lycon->doc->view_tree ||
         !list || list->type != CSS_VALUE_TYPE_LIST || start >= end) {
         return NULL;
@@ -662,10 +663,29 @@ static const char* css_join_font_family_values(LayoutContext* lycon, const CssVa
     return combined;
 }
 
-static const char* css_select_font_shorthand_family(LayoutContext* lycon,
-                                                    const CssValue* shorthand_value,
-                                                    const CssValue* main_group,
-                                                    size_t family_start_index) {
+const char* css_select_font_family(LayoutContext* lycon, const CssValue* value,
+                                   bool require_loadable_face_source) {
+    if (!value) return NULL;
+    if (value->type != CSS_VALUE_TYPE_LIST) return css_font_family_name_from_value(value);
+
+    const char* fallback = NULL;
+    for (int i = 0; i < value->data.list.count; i++) {
+        CssValue* item = value->data.list.values[i];
+        const char* family = css_font_family_name_from_value(item);
+        if (!family) continue;
+        fallback = family;
+        if (css_font_family_is_available(lycon, family, require_loadable_face_source)) {
+            return family;
+        }
+    }
+    return fallback;
+}
+
+const char* css_select_font_shorthand_family(LayoutContext* lycon,
+                                             const CssValue* shorthand_value,
+                                             const CssValue* main_group,
+                                             size_t family_start_index,
+                                             bool require_loadable_face_source) {
     const char* selected = NULL;
     const char* fallback = NULL;
 
@@ -691,7 +711,9 @@ static const char* css_select_font_shorthand_family(LayoutContext* lycon,
             }
             if (!family) continue;
             fallback = family;
-            if (css_font_family_is_available(lycon, family)) return family;
+            if (css_font_family_is_available(lycon, family, require_loadable_face_source)) {
+                return family;
+            }
         }
     }
 
@@ -5360,7 +5382,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
 
                 const char* font_family_name = css_select_font_shorthand_family(
-                    lycon, value, effective_value, family_start_index);
+                    lycon, value, effective_value, family_start_index, true);
 
                 // Apply font-size
                 if (size_value) {
@@ -5634,7 +5656,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     if (family) {
                         // Check if this font is available
-                        if (css_font_family_is_available(lycon, family)) {
+                        if (css_font_family_is_available(lycon, family, true)) {
                             radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)family));
                             log_debug("[CSS] Font family from list[%zu]: %s (available)", i, family);
                             break;

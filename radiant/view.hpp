@@ -2480,6 +2480,18 @@ Color color_name_to_rgb(CssEnum color_name);
 int64_t get_cascade_priority(const CssDeclaration* decl);
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
+const char* css_font_family_name_from_value(const CssValue* value);
+bool css_font_family_is_available(LayoutContext* lycon, const char* family,
+                                  bool require_loadable_face_source);
+const char* css_join_font_family_values(LayoutContext* lycon, const CssValue* list,
+                                        size_t start, size_t end);
+const char* css_select_font_family(LayoutContext* lycon, const CssValue* value,
+                                   bool require_loadable_face_source);
+const char* css_select_font_shorthand_family(LayoutContext* lycon,
+                                             const CssValue* shorthand_value,
+                                             const CssValue* main_group,
+                                             size_t family_start_index,
+                                             bool require_loadable_face_source);
 void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon);
 void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon);
 DisplayValue resolve_display_value(void* child);

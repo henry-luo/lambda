@@ -290,6 +290,67 @@ static void paint_default_text_control_box(RenderContext* rdcon, ViewBlock* bloc
  * @param font Font properties to use
  * @param color Text color
  */
+struct FormGlyphRun {
+    const unsigned char* cursor;
+    const unsigned char* end;
+    FontHandle* font_handle;
+    FontStyleDesc style;
+    bool render_bitmap;
+};
+
+struct FormGlyphStep {
+    const unsigned char* start;
+    LoadedGlyph* glyph;
+};
+
+static float form_render_pixel_ratio(RenderContext* rdcon) {
+    return (rdcon && rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
+        ? rdcon->ui_context->pixel_ratio : 1.0f;
+}
+
+static void form_glyph_run_init(FormGlyphRun* run, FontHandle* font_handle,
+                                FontProp* font, const char* text,
+                                size_t byte_len, bool render_bitmap) {
+    if (!run) return;
+    run->cursor = (const unsigned char*)text;
+    run->end = run->cursor ? run->cursor + byte_len : NULL;
+    run->font_handle = font_handle;
+    run->style = font_style_desc_from_prop(font);
+    run->render_bitmap = render_bitmap;
+}
+
+static bool form_glyph_run_next(FormGlyphRun* run, FormGlyphStep* step) {
+    if (!run || !step || !run->cursor || !run->end || !run->font_handle) return false;
+    while (run->cursor < run->end) {
+        const unsigned char* glyph_start = run->cursor;
+        uint32_t codepoint;
+        int bytes = str_utf8_decode((const char*)run->cursor,
+                                    (size_t)(run->end - run->cursor),
+                                    &codepoint);
+        if (bytes <= 0) { run->cursor++; continue; }
+        run->cursor += bytes;
+        step->start = glyph_start;
+        step->glyph = font_load_glyph(run->font_handle, &run->style,
+                                      codepoint, run->render_bitmap);
+        return true;
+    }
+    return false;
+}
+
+static float form_measure_glyph_width(FontHandle* font_handle, FontProp* font,
+                                      float pixel_ratio, const char* text,
+                                      size_t byte_len) {
+    if (!text || byte_len == 0 || !font_handle || !font) return 0.0f;
+    FormGlyphRun run;
+    form_glyph_run_init(&run, font_handle, font, text, byte_len, false);
+    FormGlyphStep step;
+    float text_width = 0.0f;
+    while (form_glyph_run_next(&run, &step)) {
+        if (step.glyph) text_width += step.glyph->advance_x / pixel_ratio;
+    }
+    return text_width;
+}
+
 void render_simple_string(RenderContext* rdcon, const char* text, float x, float y,
                           FontProp* font, Color color) {
     if (!text || !*text || !font || !rdcon->ui_context) return;
@@ -310,32 +371,23 @@ void render_simple_string(RenderContext* rdcon, const char* text, float x, float
     const FontMetrics* _fm = font_get_metrics(fbox.font_handle);
     float ascender = _fm ? (_fm->hhea_ascender * rdcon->ui_context->pixel_ratio) : 12.0f;
 
-    // Render each character
-    const unsigned char* p = (const unsigned char*)text;
-    const unsigned char* p_end = p + strlen(text);
+    FormGlyphRun run;
+    form_glyph_run_init(&run, fbox.font_handle, font, text, strlen(text), true);
+    FormGlyphStep step;
     float pen_x = x;
-
-    while (p < p_end) {
-        uint32_t codepoint;
-        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-        if (bytes <= 0) { p++; continue; }
-        p += bytes;
-
-        // Load glyph
-        FontStyleDesc _sd = font_style_desc_from_prop(font);
-        LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &_sd, codepoint, true);
-        if (!glyph) {
+    while (form_glyph_run_next(&run, &step)) {
+        if (!step.glyph) {
             pen_x += font->font_size * 0.5f;  // fallback advance
             continue;
         }
 
         // Draw the glyph
-        draw_glyph(rdcon, &glyph->bitmap,
-                   lroundf(pen_x + glyph->bitmap.bearing_x),
-                   lroundf(y + ascender - glyph->bitmap.bearing_y));
+        draw_glyph(rdcon, &step.glyph->bitmap,
+                   lroundf(pen_x + step.glyph->bitmap.bearing_x),
+                   lroundf(y + ascender - step.glyph->bitmap.bearing_y));
 
         // Advance pen position
-        pen_x += glyph->advance_x;
+        pen_x += step.glyph->advance_x;
     }
 
     // Restore color
@@ -354,21 +406,9 @@ static float measure_input_text_width(RenderContext* rdcon, FontProp* font,
     FontBox fbox = {0};
     setup_font(rdcon->ui_context, &fbox, font);
     if (!fbox.font_handle) return 0.0f;
-    float pixel_ratio = (rdcon->ui_context->pixel_ratio > 0)
-        ? rdcon->ui_context->pixel_ratio : 1.0f;
-    FontStyleDesc sd = font_style_desc_from_prop(font);
-    const unsigned char* p = (const unsigned char*)text;
-    const unsigned char* p_end = p + byte_count;
-    float tw = 0.0f;
-    while (p < p_end) {
-        uint32_t codepoint;
-        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-        if (bytes <= 0) { p++; continue; }
-        p += bytes;
-        LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
-        if (glyph) tw += glyph->advance_x / pixel_ratio;
-    }
-    return tw;
+    return form_measure_glyph_width(fbox.font_handle, font,
+                                    form_render_pixel_ratio(rdcon),
+                                    text, (size_t)byte_count);
 }
 
 /**
@@ -943,25 +983,9 @@ static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlPro
         }
 
         // Measure text width for horizontal centering
-        FontBox fbox = {0};
-        setup_font(rdcon->ui_context, &fbox, block->font);
-        float text_width = 0;
-        if (fbox.font_handle) {
-            float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
-                ? rdcon->ui_context->pixel_ratio : 1.0f;
-            const unsigned char* p = (const unsigned char*)label_text;
-            const unsigned char* p_end = p + strlen(label_text);
-            while (p < p_end) {
-                uint32_t codepoint;
-                int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-                if (bytes <= 0) { p++; continue; }
-                p += bytes;
-                FontStyleDesc sd = font_style_desc_from_prop(block->font);
-                LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
-                if (glyph) text_width += glyph->advance_x / pixel_ratio;
-            }
-            text_width *= s;
-        }
+        float text_width = measure_input_text_width(
+            rdcon, block->font, label_text,
+            (int)strlen(label_text)) * s; // INT_CAST_OK: form text measurement API uses byte-count ints.
 
         float font_size_scaled = block->font->font_size * s;
         float text_x = x + (w - text_width) / 2;
@@ -1279,19 +1303,8 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
 static float measure_text_width(FontHandle* font_handle, FontProp* font, float pixel_ratio,
                                 const char* text, int byte_len) {
     if (!text || byte_len <= 0 || !font_handle) return 0;
-    const unsigned char* p = (const unsigned char*)text;
-    const unsigned char* p_end = p + byte_len;
-    float tw = 0;
-    while (p < p_end) {
-        uint32_t codepoint;
-        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-        if (bytes <= 0) { p++; continue; }
-        p += bytes;
-        FontStyleDesc sd = font_style_desc_from_prop(font);
-        LoadedGlyph* glyph = font_load_glyph(font_handle, &sd, codepoint, false);
-        if (glyph) tw += glyph->advance_x / pixel_ratio;
-    }
-    return tw;
+    return form_measure_glyph_width(font_handle, font, pixel_ratio,
+                                    text, (size_t)byte_len);
 }
 
 /**
@@ -1436,21 +1449,16 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
                 // find end of this logical line
                 const char* line_end = line_start;
                 while (*line_end && *line_end != '\n') line_end++;
-                int line_byte_len = (int)(line_end - line_start);
+                size_t line_byte_len = (size_t)(line_end - line_start);
 
                 // render this line's characters
                 float pen_x = content_x - scroll_x_px;
-                const unsigned char* p = (const unsigned char*)line_start;
-                const unsigned char* p_end = p + line_byte_len;
-                while (p < p_end) {
-                    const unsigned char* glyph_start = p;
-                    uint32_t codepoint;
-                    int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-                    if (bytes <= 0) { p++; continue; }
-                    p += bytes;
-
-                    FontStyleDesc sd = font_style_desc_from_prop(render_font);
-                    LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, true);
+                FormGlyphRun glyph_run;
+                form_glyph_run_init(&glyph_run, fbox.font_handle, render_font,
+                                    line_start, line_byte_len, true);
+                FormGlyphStep glyph_step;
+                while (form_glyph_run_next(&glyph_run, &glyph_step)) {
+                    LoadedGlyph* glyph = glyph_step.glyph;
                     if (!glyph) {
                         pen_x += font_size_scaled * 0.5f;
                         continue;
@@ -1465,7 +1473,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
 
                     if (pen_y + line_height >= y && pen_x + glyph->advance_x >= content_x &&
                         pen_x <= content_x + content_w) {
-                        ptrdiff_t glyph_byte_off = glyph_start - (const unsigned char*)text;
+                        ptrdiff_t glyph_byte_off = glyph_step.start - (const unsigned char*)text;
                         bool selected_glyph = has_active_selection &&
                             glyph_byte_off >= active_sel_start &&
                             glyph_byte_off < active_sel_end;

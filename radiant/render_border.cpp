@@ -79,6 +79,16 @@ static Corner corner_inset(const Corner* radius, float inset_x, float inset_y) {
     return out;
 }
 
+static RdtPath* render_border_create_centered_stroke_path(BorderProp* border,
+                                                          Rect rect,
+                                                          float width) {
+    float half_w = width / 2.0f;
+    Rect stroke_rect = {rect.x + half_w, rect.y + half_w,
+                        rect.width - width, rect.height - width};
+    Corner stroke_radius = corner_inset(&border->radius, half_w, half_w);
+    return render_path_create_rounded_rect(stroke_rect, &stroke_radius);
+}
+
 static Corner corner_expand(const Corner* radius, float expand_x, float expand_y) {
     Corner out = *radius;
     out.top_left = max(0.0f, out.top_left + expand_x);
@@ -786,26 +796,15 @@ static void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect re
                 render_inset_outset_trapezoid(rdcon, rect, w, w, w, w, tl_color, br_color);
                 return;
             } else {
-                // Inset path by w/2 for centered stroke
-                float half_w = w / 2.0f;
-                Rect stroke_rect = {rect.x + half_w, rect.y + half_w,
-                                    rect.width - w, rect.height - w};
-                Corner orig_r = border->radius;
-                Corner stroke_radius = corner_inset(&orig_r, half_w, half_w);
-                RdtPath* shape = render_path_create_rounded_rect(stroke_rect, &stroke_radius);
+                RdtPath* shape = render_border_create_centered_stroke_path(border, rect, w);
                 rc_stroke_path(rdcon, shape, tl_color, w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
                 rdt_path_free(shape);
             }
 
         } else {
             // Default: solid, dotted, dashed
-            // Inset path by w/2 for centered stroke
+            RdtPath* shape = render_border_create_centered_stroke_path(border, rect, w);
             float half_w = w / 2.0f;
-            Rect stroke_rect = {rect.x + half_w, rect.y + half_w,
-                                rect.width - w, rect.height - w};
-            Corner orig_r = border->radius;
-            Corner stroke_radius = corner_inset(&orig_r, half_w, half_w);
-            RdtPath* shape = render_path_create_rounded_rect(stroke_rect, &stroke_radius);
             float dash[2];
             RdtStrokeCap cap;
             int dash_count = get_dash_pattern(style, w, dash, &cap);
