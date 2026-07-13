@@ -265,8 +265,6 @@ RADIANT_FILE_MODULES = {
     "state_store":           "GUI/window/events",
     "ui_context":            "GUI/window/events",
     # graph utilities
-    "graph_dagre":           "Graph utilities",
-    "graph_edge_utils":      "Graph utilities",
     "graph_theme":           "Graph utilities",
     "graph_to_svg":          "Graph utilities",
     # CLI/commands
