@@ -113,60 +113,7 @@ static PaintList* pdf_active_paint_list(PdfRenderContext* ctx) {
 
 static void pdf_effect_raster_fallback_clear(PdfEffectRasterFallback* fallback) {
     if (!fallback) return;
-    PaintList* list = &fallback->paint_list;
-    for (int i = 0; i < list->count; i++) {
-        PaintCmd* cmd = &list->cmds[i];
-        switch (cmd->op) {
-        case PAINT_FILL_PATH:
-            if (cmd->fill_path.owns_path && cmd->fill_path.path) {
-                rdt_path_free(cmd->fill_path.path);
-                cmd->fill_path.path = nullptr;
-                cmd->fill_path.owns_path = false;
-            }
-            break;
-        case PAINT_STROKE_PATH:
-            if (cmd->stroke_path.owns_path && cmd->stroke_path.path) {
-                rdt_path_free(cmd->stroke_path.path);
-                cmd->stroke_path.path = nullptr;
-                cmd->stroke_path.owns_path = false;
-            }
-            break;
-        case PAINT_FILL_LINEAR_GRADIENT:
-            if (cmd->fill_linear_gradient.owns_path && cmd->fill_linear_gradient.path) {
-                rdt_path_free(cmd->fill_linear_gradient.path);
-                cmd->fill_linear_gradient.path = nullptr;
-                cmd->fill_linear_gradient.owns_path = false;
-            }
-            if (cmd->fill_linear_gradient.owns_stops && cmd->fill_linear_gradient.stops) {
-                mem_free((void*)cmd->fill_linear_gradient.stops);
-                cmd->fill_linear_gradient.stops = nullptr;
-                cmd->fill_linear_gradient.owns_stops = false;
-            }
-            break;
-        case PAINT_FILL_RADIAL_GRADIENT:
-            if (cmd->fill_radial_gradient.owns_path && cmd->fill_radial_gradient.path) {
-                rdt_path_free(cmd->fill_radial_gradient.path);
-                cmd->fill_radial_gradient.path = nullptr;
-                cmd->fill_radial_gradient.owns_path = false;
-            }
-            if (cmd->fill_radial_gradient.owns_stops && cmd->fill_radial_gradient.stops) {
-                mem_free((void*)cmd->fill_radial_gradient.stops);
-                cmd->fill_radial_gradient.stops = nullptr;
-                cmd->fill_radial_gradient.owns_stops = false;
-            }
-            break;
-        case PAINT_GLYPH_RUN:
-            if (cmd->glyph_run.owns_text && cmd->glyph_run.text) {
-                mem_free((void*)cmd->glyph_run.text);
-                cmd->glyph_run.text = nullptr;
-                cmd->glyph_run.owns_text = false;
-            }
-            break;
-        default:
-            break;
-        }
-    }
-    paint_list_clear(list);
+    paint_list_clear(&fallback->paint_list);
 }
 
 static bool pdf_effect_group_needs_raster_fallback(const PaintEffectGroup* group) {

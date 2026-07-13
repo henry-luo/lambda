@@ -230,14 +230,7 @@ static void event_log_editing_surface(JsonWriter* w,
                                       const EditingSurface* surface) {
     jw_key(w, "surface");
     jw_obj_begin(w);
-        jw_kv_str(w, "kind", editing_surface_kind_name(
-            surface ? surface->kind : EDIT_SURFACE_NONE));
-        jw_kv_str(w, "mode", editing_mode_name(
-            surface ? surface->mode : EDIT_MODE_RICH));
-        event_state_log_write_node_ref(w, "owner",
-            surface ? (const DomNode*)surface->owner : nullptr);
-        event_state_log_write_node_ref(w, "target",
-            surface ? (const DomNode*)surface->view : nullptr);
+        editing_log_write_surface_core_fields(w, surface, false);
     jw_obj_end(w);
 }
 
@@ -717,6 +710,19 @@ static DomDocument* event_context_find_focused_document(DomDocument* doc,
     if (state && focus_get(state)) return doc;
     if (!doc->view_tree || !doc->view_tree->root) return NULL;
     return event_context_find_focused_document_in_view(doc->view_tree->root, depth);
+}
+
+static Item call_template_event_handler(fn_ptr handler_func, Item model_item,
+                                        Item event_item) {
+    typedef Item (*TemplateEventHandlerFn)(Item, Item);
+    union {
+        fn_ptr raw;
+        TemplateEventHandlerFn typed;
+    } handler;
+    // template_registry stores generated handlers as erased fn_ptr; event
+    // handlers are emitted with the stable (Item model, Item event) ABI.
+    handler.raw = handler_func;
+    return handler.typed(model_item, event_item);
 }
 
 static bool pdf_text_run_metrics(ViewText* text, float* out_width, bool* out_copy_space) {
@@ -1912,9 +1918,8 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
                                              event_name, tmpl->name ? tmpl->name : tmpl->template_ref);
 
                                     // invoke parent handler with (parent_source_item, event_data)
-                                    typedef Item (*handler_fn)(Item, Item);
-                                    handler_fn fn = (handler_fn)h->handler_func;
-                                    fn(lookup.source_item, event_data);
+                                    call_template_event_handler(h->handler_func,
+                                        lookup.source_item, event_data);
 
                                     // For edit handlers, mark dirty after in-place mutation
                                     if (tmpl->is_edit) {
@@ -2064,9 +2069,8 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 g_emit_handler_ctx = &emit_ctx;
 
                                 // invoke handler: Item handler(Item model, Item event)
-                                typedef Item (*handler_fn)(Item, Item);
-                                handler_fn fn = (handler_fn)h->handler_func;
-                                fn(lookup.source_item, event_item);
+                                call_template_event_handler(h->handler_func,
+                                    lookup.source_item, event_item);
 
                                 auto t_handler = high_resolution_clock::now();
 
@@ -4749,11 +4753,70 @@ static void radiant_js_ctx_exit(JsCtxScope* s, EventContext* evcon,
     s->active = false;
 }
 
+struct JsDispatchScope {
+    EventContext* evcon;
+    JsCtxScope scope;
+    std::chrono::high_resolution_clock::time_point t_start;
+    bool active;
+
+    JsDispatchScope(EventContext* event_context) {
+        evcon = event_context;
+        active = false;
+        if (radiant_js_ctx_enter(&scope, evcon)) {
+            t_start = std::chrono::high_resolution_clock::now();
+            active = true;
+        }
+    }
+
+    ~JsDispatchScope() {
+        if (active) radiant_js_ctx_exit(&scope, evcon, t_start);
+    }
+};
+
+typedef Item (*RadiantJsEventBuilder)(void* userdata);
+
+static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
+                                         RadiantJsEventBuilder build_event,
+                                         void* userdata,
+                                         bool read_prevented,
+                                         bool* dispatched = nullptr) {
+    if (dispatched) *dispatched = false;
+    DomElement* dom_target = radiant_view_to_dom_element(target);
+    if (!dom_target || !build_event) return false;
+    JsDispatchScope dispatch_scope(evcon);
+    if (!dispatch_scope.active) return false;
+    if (dispatched) *dispatched = true;
+    Item ev = build_event(userdata);
+    Item target_item = js_dom_wrap_element(dom_target);
+    js_dom_dispatch_event(target_item, ev);
+    return read_prevented ? js_event_is_default_prevented(ev) : false;
+}
+
 /**
  * §7 unification (U-1): dispatch a "mouseover" / "mouseout" / generic mouse
  * event through the JS EventTarget pipeline at the given target view. Returns
  * true if default action should be prevented.
  */
+typedef struct {
+    const char* type;
+    int client_x;
+    int client_y;
+    int button;
+    int buttons;
+    bool ctrl;
+    bool shift;
+    bool alt;
+    bool meta;
+    int detail;
+} MouseEventBuildArgs;
+
+static Item build_mouse_event_item(void* userdata) {
+    MouseEventBuildArgs* args = (MouseEventBuildArgs*)userdata;
+    return js_create_native_mouse_event(args->type, args->client_x, args->client_y,
+        args->button, args->buttons, args->ctrl, args->shift, args->alt,
+        args->meta, args->detail, ItemNull);
+}
+
 static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
                                          const char* type, int client_x, int client_y,
                                          int button, int buttons,
@@ -4761,20 +4824,12 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
                                          int detail,
                                          bool* dispatched = nullptr)
 {
-    if (dispatched) *dispatched = false;
-    DomElement* dom_target = radiant_view_to_dom_element(target);
-    if (!dom_target) return false;
-    JsCtxScope scope;
-    if (!radiant_js_ctx_enter(&scope, evcon)) return false;
-    if (dispatched) *dispatched = true;
-    auto t_start = std::chrono::high_resolution_clock::now();
-    Item ev = js_create_native_mouse_event(type, client_x, client_y,
-        button, buttons, ctrl, shift, alt, meta, detail, ItemNull);
-    Item target_item = js_dom_wrap_element(dom_target);
-    js_dom_dispatch_event(target_item, ev);
-    bool prevented = js_event_is_default_prevented(ev);
-    radiant_js_ctx_exit(&scope, evcon, t_start);
-    return prevented;
+    MouseEventBuildArgs args = {
+        type, client_x, client_y, button, buttons,
+        ctrl, shift, alt, meta, detail
+    };
+    return radiant_dispatch_built_event(evcon, target, build_mouse_event_item,
+        &args, true, dispatched);
 }
 
 /**
@@ -4782,27 +4837,38 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
  * EventTarget pipeline at the given target view. Returns true if default
  * action should be prevented.
  */
+typedef struct {
+    const char* type;
+    const char* key_name;
+    bool ctrl;
+    bool shift;
+    bool alt;
+    bool meta;
+    bool repeat;
+} KeyboardEventBuildArgs;
+
+static Item build_keyboard_event_item(void* userdata) {
+    KeyboardEventBuildArgs* args = (KeyboardEventBuildArgs*)userdata;
+    return js_create_native_keyboard_event(args->type, args->key_name, args->key_name,
+        args->ctrl, args->shift, args->alt, args->meta, args->repeat);
+}
+
 static bool radiant_dispatch_keyboard_event(EventContext* evcon, View* target,
                                             const char* type, int key_code,
                                             int mods, bool repeat)
 {
-    DomElement* dom_target = radiant_view_to_dom_element(target);
-    if (!dom_target) return false;
-    JsCtxScope scope;
-    if (!radiant_js_ctx_enter(&scope, evcon)) return false;
-    auto t_start = std::chrono::high_resolution_clock::now();
     const char* key_name = key_code_to_name(key_code);
-    Item ev = js_create_native_keyboard_event(type, key_name, key_name,
+    KeyboardEventBuildArgs args = {
+        type,
+        key_name,
         (mods & RDT_MOD_CTRL) != 0,
         (mods & RDT_MOD_SHIFT) != 0,
         (mods & RDT_MOD_ALT) != 0,
         (mods & RDT_MOD_SUPER) != 0,
-        repeat);
-    Item target_item = js_dom_wrap_element(dom_target);
-    js_dom_dispatch_event(target_item, ev);
-    bool prevented = js_event_is_default_prevented(ev);
-    radiant_js_ctx_exit(&scope, evcon, t_start);
-    return prevented;
+        repeat
+    };
+    return radiant_dispatch_built_event(evcon, target, build_keyboard_event_item,
+        &args, true);
 }
 
 // Build a JS StaticRange-shaped Map for one EditingTargetRange. Matches the
@@ -4861,39 +4927,39 @@ static const char* input_event_data_for_surface(const EditingSurface* surface,
  * which the caller treats as "no JS opinion" — Lambda-template paths still
  * fire through dispatch_lambda_handler in that case.
  */
-static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
-                                         const char* type,
-                                         const InputIntent* intent)
-{
-    if (!evcon || !target || !type || !intent) return false;
-    DomElement* dom_target = radiant_view_to_dom_element(target);
-    if (!dom_target) return false;
+typedef struct {
+    EventContext* evcon;
+    View* target;
+    const char* type;
+    const InputIntent* intent;
     EditingSurface surface;
-    bool has_surface = editing_surface_from_target(target, &surface);
-    JsCtxScope scope;
-    if (!radiant_js_ctx_enter(&scope, evcon)) return false;
-    auto t_start = std::chrono::high_resolution_clock::now();
-    const char* input_type = input_intent_type_name(intent->type);
-    const char* data = input_event_data_for_surface(&surface, has_surface,
-                                                    intent);
+    bool has_surface;
+} InputEventBuildArgs;
+
+static Item build_input_event_item(void* userdata) {
+    InputEventBuildArgs* args = (InputEventBuildArgs*)userdata;
+    const char* input_type = input_intent_type_name(args->intent->type);
+    const char* data = input_event_data_for_surface(&args->surface,
+                                                    args->has_surface,
+                                                    args->intent);
 
     EditingTargetRange ranges[1];
     const EditingTargetRange* range_snapshot = nullptr;
     uint32_t n_ranges = 0;
     bool wants_target_ranges =
-        strcmp(type, "beforeinput") == 0 || strcmp(type, "input") == 0;
+        strcmp(args->type, "beforeinput") == 0 || strcmp(args->type, "input") == 0;
     if (!wants_target_ranges) {
         range_snapshot = nullptr;
         n_ranges = 0;
-    } else if (evcon->editing_target_ranges_active) {
-        range_snapshot = evcon->editing_target_ranges;
-        n_ranges = evcon->editing_target_range_count;
+    } else if (args->evcon->editing_target_ranges_active) {
+        range_snapshot = args->evcon->editing_target_ranges;
+        n_ranges = args->evcon->editing_target_range_count;
     } else {
         // Non-transaction fallback: compute the StaticRange[] snapshot before
         // dispatch so handlers see the current pre-dispatch ranges.
-        DocState* state = event_context_target_state(evcon);
-        n_ranges = has_surface
-            ? editing_compute_target_ranges(state, &surface, intent, ranges, 1)
+        DocState* state = event_context_target_state(args->evcon);
+        n_ranges = args->has_surface
+            ? editing_compute_target_ranges(state, &args->surface, args->intent, ranges, 1)
             : 0;
         range_snapshot = ranges;
     }
@@ -4910,20 +4976,38 @@ static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
     // Text controls expose the plain text through `data` and keep dataTransfer
     // null, matching the Input Events cut/paste WPT surface.
     Item data_transfer = ItemNull;
-    if (has_surface && editing_surface_is_rich(&surface) &&
-        input_intent_uses_transfer_payload(intent->type)) {
-        data_transfer = js_data_transfer_new_with_strings(intent->data,
-                                                          intent->html_data);
+    if (args->has_surface && editing_surface_is_rich(&args->surface) &&
+        input_intent_uses_transfer_payload(args->intent->type)) {
+        data_transfer = js_data_transfer_new_with_strings(args->intent->data,
+                                                          args->intent->html_data);
     }
 
-    Item ev = js_create_native_input_event(type, input_type, data,
-                                           intent->is_composing, data_transfer,
-                                           ranges_arr);
-    Item target_item = js_dom_wrap_element(dom_target);
-    js_dom_dispatch_event(target_item, ev);
-    bool prevented = js_event_is_default_prevented(ev);
-    radiant_js_ctx_exit(&scope, evcon, t_start);
-    return prevented;
+    return js_create_native_input_event(args->type, input_type, data,
+                                        args->intent->is_composing, data_transfer,
+                                        ranges_arr);
+}
+
+static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
+                                         const char* type,
+                                         const InputIntent* intent)
+{
+    if (!evcon || !target || !type || !intent) return false;
+    EditingSurface surface;
+    bool has_surface = editing_surface_from_target(target, &surface);
+    InputEventBuildArgs args = {evcon, target, type, intent, surface, has_surface};
+    return radiant_dispatch_built_event(evcon, target, build_input_event_item,
+        &args, true);
+}
+
+typedef struct {
+    const char* type;
+    const char* data;
+} CompositionEventBuildArgs;
+
+static Item build_composition_event_item(void* userdata) {
+    CompositionEventBuildArgs* args = (CompositionEventBuildArgs*)userdata;
+    return js_create_native_composition_event(args->type,
+                                              args->data ? args->data : "");
 }
 
 static void radiant_dispatch_composition_event(EventContext* evcon,
@@ -4932,15 +5016,9 @@ static void radiant_dispatch_composition_event(EventContext* evcon,
                                                const char* data)
 {
     if (!evcon || !target || !type) return;
-    DomElement* dom_target = radiant_view_to_dom_element(target);
-    if (!dom_target) return;
-    JsCtxScope scope;
-    if (!radiant_js_ctx_enter(&scope, evcon)) return;
-    auto t_start = std::chrono::high_resolution_clock::now();
-    Item ev = js_create_native_composition_event(type, data ? data : "");
-    Item target_item = js_dom_wrap_element(dom_target);
-    js_dom_dispatch_event(target_item, ev);
-    radiant_js_ctx_exit(&scope, evcon, t_start);
+    CompositionEventBuildArgs args = {type, data};
+    radiant_dispatch_built_event(evcon, target, build_composition_event_item,
+        &args, false);
 }
 
 /**
@@ -4948,43 +5026,50 @@ static void radiant_dispatch_composition_event(EventContext* evcon,
  * EventTarget pipeline. Per spec, focus and blur do not bubble; focusin
  * and focusout do — `js_create_native_focus_event` sets bubbles accordingly.
  */
+typedef struct {
+    const char* type;
+    View* related;
+} FocusEventBuildArgs;
+
+static Item build_focus_event_item(void* userdata) {
+    FocusEventBuildArgs* args = (FocusEventBuildArgs*)userdata;
+    Item rel = ItemNull;
+    if (args->related) {
+        DomElement* rel_el = radiant_view_to_dom_element(args->related);
+        if (rel_el) rel = js_dom_wrap_element(rel_el);
+    }
+    return js_create_native_focus_event(args->type, rel);
+}
+
 static void radiant_dispatch_focus_event(EventContext* evcon, View* target,
                                          const char* type, View* related)
 {
-    DomElement* dom_target = radiant_view_to_dom_element(target);
-    if (!dom_target) return;
-    JsCtxScope scope;
-    if (!radiant_js_ctx_enter(&scope, evcon)) return;
-    auto t_start = std::chrono::high_resolution_clock::now();
-    Item rel = ItemNull;
-    if (related) {
-        DomElement* rel_el = radiant_view_to_dom_element(related);
-        if (rel_el) rel = js_dom_wrap_element(rel_el);
-    }
-    Item ev = js_create_native_focus_event(type, rel);
-    Item target_item = js_dom_wrap_element(dom_target);
-    js_dom_dispatch_event(target_item, ev);
-    radiant_js_ctx_exit(&scope, evcon, t_start);
+    FocusEventBuildArgs args = {type, related};
+    radiant_dispatch_built_event(evcon, target, build_focus_event_item,
+        &args, false);
 }
 
 /**
  * Dispatch a plain Event through the JS EventTarget pipeline.
  */
+typedef struct {
+    const char* type;
+    bool bubbles;
+    bool cancelable;
+} SimpleEventBuildArgs;
+
+static Item build_simple_event_item(void* userdata) {
+    SimpleEventBuildArgs* args = (SimpleEventBuildArgs*)userdata;
+    return js_create_event(args->type, args->bubbles, args->cancelable);
+}
+
 static bool radiant_dispatch_simple_event(EventContext* evcon, View* target,
                                           const char* type,
                                           bool bubbles, bool cancelable)
 {
-    DomElement* dom_target = radiant_view_to_dom_element(target);
-    if (!dom_target) return false;
-    JsCtxScope scope;
-    if (!radiant_js_ctx_enter(&scope, evcon)) return false;
-    auto t_start = std::chrono::high_resolution_clock::now();
-    Item ev = js_create_event(type, bubbles, cancelable);
-    Item target_item = js_dom_wrap_element(dom_target);
-    js_dom_dispatch_event(target_item, ev);
-    bool prevented = js_event_is_default_prevented(ev);
-    radiant_js_ctx_exit(&scope, evcon, t_start);
-    return prevented;
+    SimpleEventBuildArgs args = {type, bubbles, cancelable};
+    return radiant_dispatch_built_event(evcon, target, build_simple_event_item,
+        &args, true);
 }
 
 void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event);
@@ -5030,23 +5115,24 @@ extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
         event_context_cleanup(&evcon);
         return false;
     }
-    JsCtxScope scope;
-    if (!radiant_js_ctx_enter(&scope, &evcon)) {
-        event_context_cleanup(&evcon);
-        return false;
+    bool prevented = false;
+    {
+        JsDispatchScope dispatch_scope(&evcon);
+        if (!dispatch_scope.active) {
+            event_context_cleanup(&evcon);
+            return false;
+        }
+        // event_sim selected the native form control; mirror that into JS DOM
+        // selectedness before firing change so handlers reading target.value see it.
+        js_dom_select_set_selected_index_bridge((void*)dom_target,
+                                                (Item){.item = i2it(selected_index)});
+        Item target_item = js_dom_wrap_element(dom_target);
+        Item input_ev = js_create_event("input", true, false);
+        js_dom_dispatch_event(target_item, input_ev);
+        Item change_ev = js_create_event("change", true, false);
+        js_dom_dispatch_event(target_item, change_ev);
+        prevented = js_event_is_default_prevented(change_ev);
     }
-    auto t_start = std::chrono::high_resolution_clock::now();
-    // event_sim selected the native form control; mirror that into JS DOM
-    // selectedness before firing change so handlers reading target.value see it.
-    js_dom_select_set_selected_index_bridge((void*)dom_target,
-                                            (Item){.item = i2it(selected_index)});
-    Item target_item = js_dom_wrap_element(dom_target);
-    Item input_ev = js_create_event("input", true, false);
-    js_dom_dispatch_event(target_item, input_ev);
-    Item change_ev = js_create_event("change", true, false);
-    js_dom_dispatch_event(target_item, change_ev);
-    bool prevented = js_event_is_default_prevented(change_ev);
-    radiant_js_ctx_exit(&scope, &evcon, t_start);
     event_context_cleanup(&evcon);
     return prevented;
 }
@@ -5062,12 +5148,10 @@ static bool radiant_dispatch_clipboard_event(EventContext* evcon, View* target,
 {
     DomElement* dom_target = radiant_view_to_dom_element(target);
     if (!dom_target) return false;
-    JsCtxScope scope;
-    if (!radiant_js_ctx_enter(&scope, evcon)) return false;
-    auto t_start = std::chrono::high_resolution_clock::now();
+    JsDispatchScope dispatch_scope(evcon);
+    if (!dispatch_scope.active) return false;
     Item target_item = js_dom_wrap_element(dom_target);
     bool prevented = js_dispatch_clipboard_event_to_element(target_item, type);
-    radiant_js_ctx_exit(&scope, evcon, t_start);
     return prevented;
 }
 
@@ -5087,12 +5171,10 @@ static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
 {
     DomElement* dom_target = radiant_view_to_dom_element(target);
     if (!dom_target) return false;
-    JsCtxScope scope;
-    if (!radiant_js_ctx_enter(&scope, evcon)) return false;
-    auto t_start = std::chrono::high_resolution_clock::now();
+    JsDispatchScope dispatch_scope(evcon);
+    if (!dispatch_scope.active) return false;
     Item target_item = js_dom_wrap_element(dom_target);
     bool prevented = js_dispatch_drag_event_to_element(target_item, type, cx, cy);
-    radiant_js_ctx_exit(&scope, evcon, t_start);
     log_debug("JSDND: dispatched '%s' at (%d,%d) prevented=%d", type, cx, cy, prevented);
     return prevented;
 }
@@ -5102,27 +5184,32 @@ static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
  * pipeline. Returns true if default action (native scroll) should be
  * suppressed (event.preventDefault()).
  */
+typedef struct {
+    int client_x;
+    int client_y;
+    double delta_x;
+    double delta_y;
+    int mods;
+} WheelEventBuildArgs;
+
+static Item build_wheel_event_item(void* userdata) {
+    WheelEventBuildArgs* args = (WheelEventBuildArgs*)userdata;
+    return js_create_native_wheel_event("wheel", args->client_x, args->client_y,
+        args->delta_x, args->delta_y, 0,
+        (args->mods & RDT_MOD_CTRL) != 0,
+        (args->mods & RDT_MOD_SHIFT) != 0,
+        (args->mods & RDT_MOD_ALT) != 0,
+        (args->mods & RDT_MOD_SUPER) != 0);
+}
+
 static bool radiant_dispatch_wheel_event(EventContext* evcon, View* target,
                                          int client_x, int client_y,
                                          double delta_x, double delta_y,
                                          int mods)
 {
-    DomElement* dom_target = radiant_view_to_dom_element(target);
-    if (!dom_target) return false;
-    JsCtxScope scope;
-    if (!radiant_js_ctx_enter(&scope, evcon)) return false;
-    auto t_start = std::chrono::high_resolution_clock::now();
-    Item ev = js_create_native_wheel_event("wheel", client_x, client_y,
-        delta_x, delta_y, 0,
-        (mods & RDT_MOD_CTRL) != 0,
-        (mods & RDT_MOD_SHIFT) != 0,
-        (mods & RDT_MOD_ALT) != 0,
-        (mods & RDT_MOD_SUPER) != 0);
-    Item target_item = js_dom_wrap_element(dom_target);
-    js_dom_dispatch_event(target_item, ev);
-    bool prevented = js_event_is_default_prevented(ev);
-    radiant_js_ctx_exit(&scope, evcon, t_start);
-    return prevented;
+    WheelEventBuildArgs args = {client_x, client_y, delta_x, delta_y, mods};
+    return radiant_dispatch_built_event(evcon, target, build_wheel_event_item,
+        &args, true);
 }
 
 void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) {
@@ -5434,34 +5521,25 @@ static bool is_radio(View* view) {
     return type && strcmp(type, "radio") == 0;
 }
 
-/**
- * Find all radio buttons in the same name group and uncheck them
- * @param root The document root to search from
- * @param name The radio button name attribute to match
- * @param exclude The radio button to exclude from unchecking (the one being checked)
- */
-static void uncheck_radio_group(View* root, const char* name, View* exclude, DocState* state) {
-    if (!root || !name) return;
+void radiant_uncheck_radio_group(View* root, const char* name, View* exclude,
+                                 DocState* state, bool sync_pseudo) {
+    if (!root || !name || !state) return;
 
-    // Traverse view tree to find all radio buttons with matching name
     View* current = root;
     while (current) {
         if (current != exclude && is_radio(current)) {
             ViewElement* elem = lam::view_require_element(current);
             const char* elem_name = elem->get_attribute("name");
-            if (elem_name && strcmp(elem_name, name) == 0) {
-                // Uncheck this radio button
-                if (state_get_pseudo_state(state, current, PSEUDO_STATE_CHECKED)) {
-                    form_control_uncheck_radio_group_peer(state, current);
+            if (elem_name && strcmp(elem_name, name) == 0 &&
+                form_control_get_checked(state, current)) {
+                form_control_uncheck_radio_group_peer(state, current);
+                if (sync_pseudo) {
                     sync_pseudo_state(current, PSEUDO_STATE_CHECKED, false);
-                    log_debug("uncheck_radio_group: unchecked radio name=%s", elem_name);
                 }
+                log_debug("uncheck_radio_group: unchecked radio name=%s", elem_name);
             }
         }
 
-        // Traverse DOM-element tree (descend into ALL element children,
-        // not just block children — radio inputs are commonly nested in
-        // inline <label> wrappers which would otherwise be skipped).
         if (current->is_element()) {
             ViewElement* ce = lam::view_require_element(current);
             if (ce->first_child) {
@@ -5469,19 +5547,15 @@ static void uncheck_radio_group(View* root, const char* name, View* exclude, Doc
                 continue;
             }
         }
-        // No children, try next sibling
         if (current->next()) {
             current = current->next();
             continue;
         }
-        // Go up to find next sibling of ancestor
         current = current->parent;
         while (current && !current->next()) {
             current = current->parent;
         }
-        if (current) {
-            current = current->next();
-        }
+        if (current) current = current->next();
     }
 }
 
@@ -5646,7 +5720,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
                 while (root->parent) {
                     root = root->parent;
                 }
-                uncheck_radio_group(root, name, input, state);
+                radiant_uncheck_radio_group(root, name, input, state, true);
             }
 
             // Check this radio button through centralized writer API.

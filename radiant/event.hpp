@@ -4,6 +4,8 @@
 
 // Forward declaration for GLFW cursor
 struct GLFWcursor;
+struct DocState;
+struct DomNode;
 
 typedef enum  {
     RDT_EVENT_NIL = 0,
@@ -130,3 +132,6 @@ typedef struct {
     int cursor;  // current cursor style (CssEnum value)
     GLFWcursor* sys_cursor;
 } MouseState;
+
+void radiant_uncheck_radio_group(DomNode* root, const char* name, DomNode* exclude,
+                                 DocState* state, bool sync_pseudo);

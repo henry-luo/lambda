@@ -3122,6 +3122,43 @@ float apply_stretch_constraint(
     return constrained;
 }
 
+static float flex_item_margin_top(ViewElement* item) {
+    return item && item->bound ? item->bound->margin.top : 0.0f;
+}
+
+static float flex_item_content_top_offset(ViewElement* item) {
+    if (!item || !item->bound) return 0.0f;
+    float offset = item->bound->padding.top;
+    if (item->bound->border) {
+        offset += item->bound->border->width.top;
+    }
+    return offset;
+}
+
+static bool flex_item_has_direct_text_content(ViewElement* item) {
+    if (!item) return false;
+    for (DomNode* child = item->first_child; child; child = child->next_sibling) {
+        if (layout_text_node_has_content(child)) return true;
+    }
+    return false;
+}
+
+static float flex_item_direct_text_baseline(ViewElement* item, float fallback_ascender) {
+    return flex_item_margin_top(item) + flex_item_content_top_offset(item) +
+        radiant::compute_font_baseline_ascender(nullptr, item ? item->font : nullptr,
+                                                false, fallback_ascender);
+}
+
+static bool flex_alignment_is_baseline(int alignment) {
+    return alignment == ALIGN_BASELINE || alignment == CSS_VALUE_BASELINE;
+}
+
+static bool flex_item_uses_baseline_alignment(ViewElement* item, int container_align_items) {
+    int align_self = has_flex_item_prop(item) ? (int)item->fi->align_self : ALIGN_AUTO;
+    return flex_alignment_is_baseline(align_self) ||
+           (align_self == ALIGN_AUTO && flex_alignment_is_baseline(container_align_items));
+}
+
 // Calculate baseline offset for a flex item from its outer margin edge
 // Returns the distance from the item's top margin edge to its baseline
 //
@@ -3132,7 +3169,7 @@ float calculate_item_baseline(ViewElement* item) {
     if (!item) return 0;
 
     // Get top margin
-    float margin_top = item->bound ? item->bound->margin.top : 0;
+    float margin_top = flex_item_margin_top(item);
 
     // Check if item has text content with explicit baseline
     if (has_flex_item_prop(item) && item->fi->baseline_offset > 0) {
@@ -3146,13 +3183,7 @@ float calculate_item_baseline(ViewElement* item) {
     if (item_block && item_block->embed && item_block->embed->flex &&
         item_block->embed->flex->has_baseline_child) {
         // Use the stored first baseline from this flex container's first line
-        float parent_offset_y = 0;
-        if (item->bound) {
-            parent_offset_y = item->bound->padding.top;
-            if (item->bound->border) {
-                parent_offset_y += item->bound->border->width.top;
-            }
-        }
+        float parent_offset_y = flex_item_content_top_offset(item);
         float result = margin_top + parent_offset_y + item_block->embed->flex->first_baseline;
         log_debug("calculate_item_baseline: flex container item=%p, first_baseline=%d, result=%.1f",
                   item, item_block->embed->flex->first_baseline, result);
@@ -3189,13 +3220,7 @@ float calculate_item_baseline(ViewElement* item) {
                 if (child_baseline > 0) {
                     // child->y is already relative to item's content box
                     // We need to account for item's padding/border to get position from margin edge
-                    float parent_offset_y = 0;
-                    if (item->bound) {
-                        parent_offset_y = item->bound->padding.top;
-                        if (item->bound->border) {
-                            parent_offset_y += item->bound->border->width.top;
-                        }
-                    }
+                    float parent_offset_y = flex_item_content_top_offset(item);
 
                     // child->y is relative to parent's content box (after border+padding)
                     // So the child's position from parent's margin edge is:
@@ -3215,29 +3240,9 @@ float calculate_item_baseline(ViewElement* item) {
     // the most accurate baseline in the laid-out text child. Some block-flow
     // fallback baselines include line-box advance and are too deep for flex
     // baseline alignment.
-    DomNode* text_child = item->first_child;
-    while (text_child) {
-        if (text_child->is_text()) {
-            const char* text = (const char*)text_child->text_data();
-            while (text && (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r')) {
-                text++;
-            }
-            if (text && *text) {
-                float border_top = 0;
-                float padding_top = 0;
-                if (item->bound) {
-                    padding_top = item->bound->padding.top;
-                    if (item->bound->border) {
-                        border_top = item->bound->border->width.top;
-                    }
-                }
-                float fallback_ascender = item->font ? item->font->font_size * 0.8f : item->height * 0.8f;
-                float text_ascender = radiant::compute_font_baseline_ascender(
-                    nullptr, item->font, false, fallback_ascender);
-                return margin_top + border_top + padding_top + text_ascender;
-            }
-        }
-        text_child = text_child->next_sibling;
+    if (flex_item_has_direct_text_content(item)) {
+        float fallback_ascender = item->font ? item->font->font_size * 0.8f : item->height * 0.8f;
+        return flex_item_direct_text_baseline(item, fallback_ascender);
     }
 
     // CSS Flexbox §9.4 / CSS 2.1 §10.8.1: For block containers with in-flow
@@ -3252,31 +3257,9 @@ float calculate_item_baseline(ViewElement* item) {
     // hasn't been laid out yet (e.g., during flex Phase 5 before layout_flex_item_content).
     // Only apply when the item actually has non-whitespace text children.
     if (item->font && item->font->ascender > 0) {
-        bool has_text_child = false;
-        DomNode* dn = item->first_child;
-        while (dn) {
-            if (dn->is_text()) {
-                const char* text = (const char*)dn->text_data();
-                if (text) {
-                    // check for non-whitespace content
-                    while (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r') text++;
-                    if (*text) { has_text_child = true; break; }
-                }
-            }
-            dn = dn->next_sibling;
-        }
-        if (has_text_child) {
-            float border_top = 0, padding_top = 0;
-            if (item->bound) {
-                padding_top = item->bound->padding.top;
-                if (item->bound->border) {
-                    border_top = item->bound->border->width.top;
-                }
-            }
+        if (flex_item_has_direct_text_content(item)) {
             float fallback_ascender = item->font->font_size * 0.8f;
-            float text_ascender = radiant::compute_font_baseline_ascender(
-                nullptr, item->font, false, fallback_ascender);
-            return margin_top + border_top + padding_top + text_ascender;
+            return flex_item_direct_text_baseline(item, fallback_ascender);
         }
     }
 
@@ -3295,13 +3278,7 @@ float find_max_baseline(FlexLineInfo* line, int container_align_items) {
         ViewElement* item = lam::view_as_element(line->items[i]);
         if (!item) continue;
 
-        // Check if this item participates in baseline alignment
-        // Either via align-self: baseline OR container's align-items: baseline (and no override)
-        int align_self = has_flex_item_prop(item) ? (int)item->fi->align_self : ALIGN_AUTO;
-        bool uses_baseline = (align_self == ALIGN_BASELINE) ||
-                            (align_self == ALIGN_AUTO && container_align_items == ALIGN_BASELINE);
-
-        if (uses_baseline) {
+        if (flex_item_uses_baseline_alignment(item, container_align_items)) {
             float baseline = calculate_item_baseline(item);
             log_debug("find_max_baseline: item %d - baseline=%.1f, height=%.1f, margin_top=%.1f",
                       i, baseline, item->height, item->bound ? item->bound->margin.top : 0);
@@ -3389,14 +3366,7 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) 
             ViewElement* item = lam::view_as_element(line->items[i]);
             if (!item) continue;
 
-            // Check if this item uses baseline alignment
-            // NOTE: fi may be NULL for items that inherit alignment from container
-            int align_self = (has_flex_item_prop(item) && (int)item->fi->align_self != ALIGN_AUTO) ?
-                item->fi->align_self : ALIGN_AUTO;
-            bool uses_baseline = (align_self == ALIGN_BASELINE) ||
-                                (align_self == ALIGN_AUTO && flex_layout->align_items == ALIGN_BASELINE);
-
-            if (!uses_baseline) continue;
+            if (!flex_item_uses_baseline_alignment(item, flex_layout->align_items)) continue;
 
             // Calculate this item's baseline
             float item_baseline = calculate_item_baseline(item);
@@ -3473,10 +3443,7 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) 
         for (int i = 0; i < line->item_count; i++) {
             ViewElement* item = lam::view_as_element(line->items[i]);
             if (!item) continue;
-            int align_self = (has_flex_item_prop(item) && (int)item->fi->align_self != ALIGN_AUTO) ?
-                item->fi->align_self : flex_layout->align_items;
-            bool is_baseline_item = (align_self == ALIGN_BASELINE || align_self == CSS_VALUE_BASELINE);
-            if (is_baseline_item) {
+            if (flex_item_uses_baseline_alignment(item, flex_layout->align_items)) {
                 has_baseline = true;
                 float baseline = calculate_item_baseline(item);
                 float margin_top = item->bound ? item->bound->margin.top : 0;
@@ -4119,6 +4086,55 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
     log_info("ITERATIVE_FLEX COMPLETE - converged after %d iterations", iteration);
 }
 
+static float flex_line_outer_main_size(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
+    float total_item_size = 0.0f;
+    for (int i = 0; i < line->item_count; i++) {
+        ViewElement* item = lam::view_as_element(line->items[i]);
+        if (!item) continue;
+        float item_size = get_main_axis_outer_size(item, flex_layout);
+        log_debug("MAIN_AXIS_ALIGN - item %d outer size: %.1f", i, item_size);
+        total_item_size += item_size;
+    }
+    return total_item_size;
+}
+
+static int flex_line_auto_margin_count(FlexContainerLayout* flex_layout,
+                                       FlexLineInfo* line,
+                                       LayoutAxis main_axis) {
+    (void)flex_layout;
+    int auto_margin_count = 0;
+    for (int i = 0; i < line->item_count; i++) {
+        ViewElement* item = lam::view_as_element(line->items[i]);
+        if (!item) continue;
+        auto_margin_count += layout_count_auto_margins(
+            item->bound && layout_axis_margin_start_type(&item->bound->margin, main_axis) == CSS_VALUE_AUTO,
+            item->bound && layout_axis_margin_end_type(&item->bound->margin, main_axis) == CSS_VALUE_AUTO);
+    }
+    return auto_margin_count;
+}
+
+static int flex_physical_justify_value(FlexContainerLayout* flex_layout,
+                                       int justify,
+                                       float free_space) {
+    int result = radiant::alignment_fallback_for_overflow(justify, free_space);
+    if (result != justify) {
+        log_debug("JUSTIFY_CONTENT overflow fallback: %d -> %d (free_space=%.1f)",
+                  justify, result, free_space);
+    }
+
+    // CSS Alignment start/end are physical in this LTR horizontal-tb mapping;
+    // flex-start/end still honor reversed flex directions.
+    bool is_reverse = (flex_layout->direction == CSS_VALUE_ROW_REVERSE ||
+                       flex_layout->direction == CSS_VALUE_COLUMN_REVERSE);
+    if (result == CSS_VALUE_START) {
+        return is_reverse ? CSS_VALUE_FLEX_END : CSS_VALUE_FLEX_START;
+    }
+    if (result == CSS_VALUE_END) {
+        return is_reverse ? CSS_VALUE_FLEX_START : CSS_VALUE_FLEX_END;
+    }
+    return result;
+}
+
 // Align items on main axis (justify-content)
 void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
     if (!flex_layout || !line || line->item_count == 0) return;
@@ -4130,25 +4146,11 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
 
     // *** FIX 1: Calculate total item size INCLUDING margins for positioning ***
     // CSS Flexbox: margins are part of the item's outer size for justify-content
-    float total_item_size = 0.0f;
-    for (int i = 0; i < line->item_count; i++) {
-        ViewElement* item = lam::view_as_element(line->items[i]);
-        if (!item) continue;
-        float item_size = get_main_axis_outer_size(item, flex_layout);
-        log_debug("MAIN_AXIS_ALIGN - item %d outer size: %.1f", i, item_size);
-        total_item_size += item_size;
-    }
+    float total_item_size = flex_line_outer_main_size(flex_layout, line);
     log_info("MAIN_AXIS_ALIGN - total_item_size=%.1f (with margins, without gaps)", total_item_size);
 
     // Check for auto margins on main axis
-    int auto_margin_count = 0;
-    for (int i = 0; i < line->item_count; i++) {
-        ViewElement* item = lam::view_as_element(line->items[i]);
-        if (!item) continue;
-        auto_margin_count += layout_count_auto_margins(
-            item->bound && layout_axis_margin_start_type(&item->bound->margin, main_axis) == CSS_VALUE_AUTO,
-            item->bound && layout_axis_margin_end_type(&item->bound->margin, main_axis) == CSS_VALUE_AUTO);
-    }
+    int auto_margin_count = flex_line_auto_margin_count(flex_layout, line, main_axis);
 
     float current_pos = 0.0f;
     float spacing = 0.0f;
@@ -4165,33 +4167,10 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         // CRITICAL FIX: Use justify value directly - it's now stored as Lexbor constant
         int justify = flex_layout->justify;
 
-        // Apply overflow fallback - when free_space < 0, space-* values fall back to flex-start
-        if (free_space < 0) {
-            int old_justify = justify;
-            justify = radiant::alignment_fallback_for_overflow(justify, free_space);
-            if (old_justify != justify) {
-                log_debug("JUSTIFY_CONTENT overflow fallback: %d -> %d (free_space=%.1f)",
-                         old_justify, justify, free_space);
-            }
-        }
-
         log_debug("JUSTIFY_CONTENT - justify=%d, container_size=%.1f, total_size_with_gaps=%.1f, free_space=%.1f, direction=%d",
                justify, container_size, total_size_with_gaps, free_space, flex_layout->direction);
 
-        // CSS Alignment: 'start'/'end' are writing-mode aware, not flex-direction aware
-        // For LTR horizontal-tb writing mode:
-        // - 'start' always means physical start (top for column, left for row)
-        // - 'end' always means physical end (bottom for column, right for row)
-        // This differs from flex-start/flex-end which respect reversed directions
-        bool is_reverse = (flex_layout->direction == CSS_VALUE_ROW_REVERSE ||
-                          flex_layout->direction == CSS_VALUE_COLUMN_REVERSE);
-
-        int distribution_justify = justify;
-        if (justify == CSS_VALUE_START) {
-            distribution_justify = is_reverse ? CSS_VALUE_FLEX_END : CSS_VALUE_FLEX_START;
-        } else if (justify == CSS_VALUE_END) {
-            distribution_justify = is_reverse ? CSS_VALUE_FLEX_START : CSS_VALUE_FLEX_END;
-        }
+        int distribution_justify = flex_physical_justify_value(flex_layout, justify, free_space);
 
         radiant::SpaceDistribution distribution = radiant::compute_space_distribution(
             distribution_justify, free_space, line->item_count, 0.0f);
@@ -4921,15 +4900,7 @@ static void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
                 item_cross_size = get_cross_axis_size(item, flex_layout);
             }
 
-            // Check if this item participates in baseline alignment
-            bool is_baseline = false;
-            if (has_flex_item_prop(item)) {
-                int align = (int)item->fi->align_self != ALIGN_AUTO ?
-                    item->fi->align_self : flex_layout->align_items;
-                is_baseline = (align == ALIGN_BASELINE || align == CSS_VALUE_BASELINE);
-            }
-
-            if (is_baseline && is_horizontal) {
+            if (flex_item_uses_baseline_alignment(item, flex_layout->align_items) && is_horizontal) {
                 // §9.4 Step 8: For baseline items, compute pre/post distances
                 has_baseline_items = true;
                 float baseline = calculate_item_baseline(item);

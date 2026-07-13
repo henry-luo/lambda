@@ -280,13 +280,7 @@ static void svg_finish_effect_raster_fallback(SvgRenderContext* ctx) {
 }
 
 static void svg_color_to_string(Color color, char* result) {
-    if (color.a == 0) {
-        str_copy(result, 32, "transparent", 11);
-    } else if (color.a == 255) {
-        str_fmt(result, 32, "rgb(%d,%d,%d)", color.r, color.g, color.b);
-    } else {
-        str_fmt(result, 32, "rgba(%d,%d,%d,%.3f)", color.r, color.g, color.b, color.a / 255.0f);
-    }
+    paint_svg_color_to_string(color, result, 32);
 }
 
 static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {

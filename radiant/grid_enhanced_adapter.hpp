@@ -506,55 +506,6 @@ inline void resolve_negative_lines_in_items(
     }
 }
 
-struct GridExtent { int cols; int rows; };
-
-/**
- * Calculate initial grid extent from items with definite positive positions.
- * This determines how many tracks are needed before resolving negative lines.
- *
- * @param items Array of item infos
- * @param explicit_col_count Number of explicit columns
- * @param explicit_row_count Number of explicit rows
- * @return GridExtent with max cols and rows needed
- */
-inline GridExtent calculate_initial_grid_extent(
-    const ItemInfoArray& items,
-    int explicit_col_count,
-    int explicit_row_count)
-{
-    int max_col = explicit_col_count > 0 ? explicit_col_count : 1;
-    int max_row = explicit_row_count > 0 ? explicit_row_count : 1;
-
-    for (const auto& item : items) {
-        // Items with positive definite start contribute their start position
-        // Items with has_negative_start will be resolved after we know the grid size
-        if (item.column.start > 0 && !item.column.has_negative_start) {
-            // This item needs at least this column to exist
-            if (item.column.start > max_col) {
-                max_col = item.column.start;
-            }
-            // If we also know the span (no negative end), add full extent
-            if (!item.column.has_negative_end) {
-                int col_end = item.column.start + item.column.span;
-                if (col_end > max_col + 1) max_col = col_end - 1;
-            }
-        }
-        if (item.row.start > 0 && !item.row.has_negative_start) {
-            // This item needs at least this row to exist
-            if (item.row.start > max_row) {
-                max_row = item.row.start;
-            }
-            // If we also know the span (no negative end), add full extent
-            if (!item.row.has_negative_end) {
-                int row_end = item.row.start + item.row.span;
-                if (row_end > max_row + 1) max_row = row_end - 1;
-            }
-        }
-    }
-
-    return {max_col, max_row};
-}
-
 /**
  * Enhanced grid item placement using CellOccupancyMatrix
  *
@@ -630,11 +581,7 @@ inline void place_items_with_occupancy(
                  info.row.has_negative_start, info.row.has_negative_end);
     }
 
-    // Step 1: Calculate initial grid extent from definite positive positions
-    // (result used indirectly: resolve_negative_lines_in_items uses the resolved grid size)
-    (void)calculate_initial_grid_extent(item_infos, explicit_col_count, explicit_row_count);
-
-    // Step 2: Resolve negative line numbers against the EXPLICIT grid only
+    // Step 1: Resolve negative line numbers against the EXPLICIT grid only
     // CSS Grid spec §8.3: "Numeric indices count from the edges of the EXPLICIT grid."
     // If there's no explicit grid (0 tracks), -1 = line 1, -2 and beyond clamp to line 1.
     // This is the CORRECT spec behavior - negative lines NEVER reference implicit grid.

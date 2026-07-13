@@ -14,6 +14,7 @@
 #include <time.h>
 #include <cmath>  // for INFINITY
 #include <string.h>
+#include <stdarg.h>
 
 void print_view_group(ViewElement* view_group, StrBuf* buf, int indent);
 
@@ -139,14 +140,18 @@ typedef enum ViewTeardownFlag {
 } ViewTeardownFlag;
 
 typedef void (*ViewPropReleaseFn)(DomElement* elem, ViewTree* tree);
-typedef void (*ViewPropClearFn)(DomElement* elem);
-typedef void (*ViewPropFreeFn)(DomElement* elem, ViewTree* tree);
+typedef void (*ViewPropPayloadFreeFn)(DomElement* elem, ViewTree* tree);
+typedef void (*ViewPropCustomFn)(DomElement* elem, ViewTree* tree);
+typedef void* (*ViewPropGetFn)(DomElement* elem);
 
 typedef struct ViewPropTeardownEntry {
     const char* name;
     ViewPropReleaseFn release_external;
-    ViewPropClearFn clear_pointer;
-    ViewPropFreeFn free_pool;
+    ViewPropPayloadFreeFn free_payload;
+    ViewPropGetFn get_member;
+    ViewPropCustomFn clear_member;
+    ViewPropCustomFn custom_clear;
+    ViewPropCustomFn custom_free;
 } ViewPropTeardownEntry;
 
 static void view_teardown_visit_node(ViewTree* tree, DomNode* node, int flags, bool include_siblings);
@@ -156,6 +161,31 @@ static void view_pool_free_ptr(ViewTree* tree, void* ptr) {
         pool_free(tree->pool, ptr);
     }
 }
+
+#define DEFINE_VIEW_PROP_ACCESSORS(field) \
+static void* view_prop_get_##field(DomElement* elem) { \
+    return elem ? (void*)elem->field : nullptr; \
+} \
+static void view_prop_clear_##field(DomElement* elem, ViewTree*) { \
+    if (elem) elem->field = nullptr; \
+}
+
+DEFINE_VIEW_PROP_ACCESSORS(font)
+DEFINE_VIEW_PROP_ACCESSORS(in_line)
+DEFINE_VIEW_PROP_ACCESSORS(bound)
+DEFINE_VIEW_PROP_ACCESSORS(blk)
+DEFINE_VIEW_PROP_ACCESSORS(scroller)
+DEFINE_VIEW_PROP_ACCESSORS(embed)
+DEFINE_VIEW_PROP_ACCESSORS(position)
+DEFINE_VIEW_PROP_ACCESSORS(transform)
+DEFINE_VIEW_PROP_ACCESSORS(filter)
+DEFINE_VIEW_PROP_ACCESSORS(backdrop_filter)
+DEFINE_VIEW_PROP_ACCESSORS(multicol)
+DEFINE_VIEW_PROP_ACCESSORS(pseudo)
+DEFINE_VIEW_PROP_ACCESSORS(vpath)
+DEFINE_VIEW_PROP_ACCESSORS(layout_cache)
+
+#undef DEFINE_VIEW_PROP_ACCESSORS
 
 static void release_font_prop(FontProp* font) {
     if (font) {
@@ -167,11 +197,7 @@ static void release_element_font_prop(DomElement* elem, ViewTree*) {
     release_font_prop(elem ? elem->font : nullptr);
 }
 
-static void clear_element_font_prop(DomElement* elem) {
-    if (elem) elem->font = nullptr;
-}
-
-static void free_element_font_prop(DomElement* elem, ViewTree* tree) {
+static void free_element_font_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->font) return;
     // FontProp family is sometimes retained separately from the prop; the
     // teardown table owns both members so new font-owned pool pointers only
@@ -179,64 +205,15 @@ static void free_element_font_prop(DomElement* elem, ViewTree* tree) {
     if (elem->font->family) {
         view_pool_free_ptr(tree, elem->font->family);
     }
-    view_pool_free_ptr(tree, elem->font);
-    elem->font = nullptr;
 }
 
-static void clear_inline_prop(DomElement* elem) {
-    if (elem) elem->in_line = nullptr;
-}
-
-static void free_inline_prop(DomElement* elem, ViewTree* tree) {
-    if (!elem || !elem->in_line) return;
-    view_pool_free_ptr(tree, elem->in_line);
-    elem->in_line = nullptr;
-}
-
-static void clear_boundary_prop(DomElement* elem) {
-    if (elem) elem->bound = nullptr;
-}
-
-static void free_boundary_prop(DomElement* elem, ViewTree* tree) {
+static void free_boundary_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->bound) return;
     view_pool_free_ptr(tree, elem->bound->background);
     view_pool_free_ptr(tree, elem->bound->border);
     view_pool_free_ptr(tree, elem->bound->mask);
     view_pool_free_ptr(tree, elem->bound->box_shadow);
     view_pool_free_ptr(tree, elem->bound->outline);
-    view_pool_free_ptr(tree, elem->bound);
-    elem->bound = nullptr;
-}
-
-static void clear_block_prop(DomElement* elem) {
-    if (elem) elem->blk = nullptr;
-}
-
-static void free_block_prop(DomElement* elem, ViewTree* tree) {
-    if (!elem || !elem->blk) return;
-    view_pool_free_ptr(tree, elem->blk);
-    elem->blk = nullptr;
-}
-
-static void clear_scroll_prop(DomElement* elem) {
-    if (elem) elem->scroller = nullptr;
-}
-
-static void free_scroll_prop(DomElement* elem, ViewTree* tree) {
-    if (!elem || !elem->scroller) return;
-    view_pool_free_ptr(tree, elem->scroller->pane);
-    view_pool_free_ptr(tree, elem->scroller);
-    elem->scroller = nullptr;
-}
-
-static void clear_position_prop(DomElement* elem) {
-    if (elem) elem->position = nullptr;
-}
-
-static void free_position_prop(DomElement* elem, ViewTree* tree) {
-    if (!elem || !elem->position) return;
-    view_pool_free_ptr(tree, elem->position);
-    elem->position = nullptr;
 }
 
 static void release_embedded_document(DomElement* elem) {
@@ -319,56 +296,15 @@ static void release_embed_prop_entry(DomElement* elem, ViewTree*) {
     release_embed_prop(elem);
 }
 
-static void clear_embed_prop(DomElement* elem) {
-    if (elem) elem->embed = nullptr;
-}
-
-static void free_embed_prop(DomElement* elem, ViewTree* tree) {
+static void free_embed_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->embed) return;
     view_pool_free_ptr(tree, elem->embed->flex);
     view_pool_free_ptr(tree, elem->embed->grid);
-    view_pool_free_ptr(tree, elem->embed);
-    elem->embed = nullptr;
 }
 
-static void clear_transform_prop(DomElement* elem) {
-    if (elem) elem->transform = nullptr;
-}
-
-static void free_transform_prop(DomElement* elem, ViewTree* tree) {
-    if (!elem || !elem->transform) return;
-    view_pool_free_ptr(tree, elem->transform);
-    elem->transform = nullptr;
-}
-
-static void clear_filter_prop(DomElement* elem) {
-    if (elem) elem->filter = nullptr;
-}
-
-static void free_filter_prop(DomElement* elem, ViewTree* tree) {
-    if (!elem || !elem->filter) return;
-    view_pool_free_ptr(tree, elem->filter);
-    elem->filter = nullptr;
-}
-
-static void clear_backdrop_filter_prop(DomElement* elem) {
-    if (elem) elem->backdrop_filter = nullptr;
-}
-
-static void free_backdrop_filter_prop(DomElement* elem, ViewTree* tree) {
-    if (!elem || !elem->backdrop_filter) return;
-    view_pool_free_ptr(tree, elem->backdrop_filter);
-    elem->backdrop_filter = nullptr;
-}
-
-static void clear_multicol_prop(DomElement* elem) {
-    if (elem) elem->multicol = nullptr;
-}
-
-static void free_multicol_prop(DomElement* elem, ViewTree* tree) {
-    if (!elem || !elem->multicol) return;
-    view_pool_free_ptr(tree, elem->multicol);
-    elem->multicol = nullptr;
+static void free_scroll_payload(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->scroller) return;
+    view_pool_free_ptr(tree, elem->scroller->pane);
 }
 
 static void release_form_prop(DomElement* elem, ViewTree*) {
@@ -388,7 +324,7 @@ static void release_form_prop(DomElement* elem, ViewTree*) {
     }
 }
 
-static void clear_item_prop(DomElement* elem) {
+static void clear_item_prop(DomElement* elem, ViewTree*) {
     if (!elem) return;
     elem->fi = nullptr;
     elem->item_prop_type = DomElement::ITEM_PROP_NONE;
@@ -421,53 +357,33 @@ static void free_item_prop(DomElement* elem, ViewTree* tree) {
     elem->item_prop_type = DomElement::ITEM_PROP_NONE;
 }
 
-static void clear_pseudo_content_prop(DomElement* elem) {
-    if (elem) elem->pseudo = nullptr;
-}
-
-static void free_pseudo_content_prop(DomElement* elem, ViewTree* tree) {
-    if (!elem || !elem->pseudo) return;
-    view_pool_free_ptr(tree, elem->pseudo);
-    elem->pseudo = nullptr;
-}
-
-static void clear_vector_path_prop(DomElement* elem) {
-    if (elem) elem->vpath = nullptr;
-}
-
-static void free_vector_path_prop(DomElement* elem, ViewTree* tree) {
-    if (!elem || !elem->vpath) return;
-    view_pool_free_ptr(tree, elem->vpath);
-    elem->vpath = nullptr;
-}
-
-static void clear_layout_cache_prop(DomElement* elem) {
-    if (elem) elem->layout_cache = nullptr;
-}
-
-static void free_layout_cache_prop(DomElement* elem, ViewTree* tree) {
-    if (!elem || !elem->layout_cache) return;
-    view_pool_free_ptr(tree, elem->layout_cache);
-    elem->layout_cache = nullptr;
+static void view_prop_free_member(DomElement* elem, ViewTree* tree,
+                                  ViewPropGetFn get_member,
+                                  ViewPropCustomFn clear_member) {
+    if (!get_member || !clear_member) return;
+    void* ptr = get_member(elem);
+    if (!ptr) return;
+    view_pool_free_ptr(tree, ptr);
+    clear_member(elem, tree);
 }
 
 static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
-    { "font",            release_element_font_prop, clear_element_font_prop, free_element_font_prop },
-    { "inline",          nullptr,                   clear_inline_prop,       free_inline_prop },
-    { "boundary",        nullptr,                   clear_boundary_prop,     free_boundary_prop },
-    { "block",           nullptr,                   clear_block_prop,        free_block_prop },
-    { "scroll",          nullptr,                   clear_scroll_prop,       free_scroll_prop },
-    { "embed",           release_embed_prop_entry,  clear_embed_prop,        free_embed_prop },
-    { "position",        nullptr,                   clear_position_prop,     free_position_prop },
-    { "transform",       nullptr,                   clear_transform_prop,    free_transform_prop },
-    { "filter",          nullptr,                   clear_filter_prop,       free_filter_prop },
-    { "backdrop-filter", nullptr,                   clear_backdrop_filter_prop, free_backdrop_filter_prop },
-    { "multicol",        nullptr,                   clear_multicol_prop,     free_multicol_prop },
-    { "form",            release_form_prop,         nullptr,                 nullptr },
-    { "item",            nullptr,                   clear_item_prop,         free_item_prop },
-    { "pseudo",          release_pseudo_content_prop_entry, clear_pseudo_content_prop, free_pseudo_content_prop },
-    { "vector-path",     nullptr,                   clear_vector_path_prop,  free_vector_path_prop },
-    { "layout-cache",    nullptr,                   clear_layout_cache_prop, free_layout_cache_prop },
+    { "font",            release_element_font_prop, free_element_font_payload, view_prop_get_font,            view_prop_clear_font,            nullptr,         nullptr },
+    { "inline",          nullptr,                   nullptr,                   view_prop_get_in_line,         view_prop_clear_in_line,         nullptr,         nullptr },
+    { "boundary",        nullptr,                   free_boundary_payload,     view_prop_get_bound,           view_prop_clear_bound,           nullptr,         nullptr },
+    { "block",           nullptr,                   nullptr,                   view_prop_get_blk,             view_prop_clear_blk,             nullptr,         nullptr },
+    { "scroll",          nullptr,                   free_scroll_payload,       view_prop_get_scroller,        view_prop_clear_scroller,        nullptr,         nullptr },
+    { "embed",           release_embed_prop_entry,  free_embed_payload,        view_prop_get_embed,           view_prop_clear_embed,           nullptr,         nullptr },
+    { "position",        nullptr,                   nullptr,                   view_prop_get_position,        view_prop_clear_position,        nullptr,         nullptr },
+    { "transform",       nullptr,                   nullptr,                   view_prop_get_transform,       view_prop_clear_transform,       nullptr,         nullptr },
+    { "filter",          nullptr,                   nullptr,                   view_prop_get_filter,          view_prop_clear_filter,          nullptr,         nullptr },
+    { "backdrop-filter", nullptr,                   nullptr,                   view_prop_get_backdrop_filter, view_prop_clear_backdrop_filter, nullptr,         nullptr },
+    { "multicol",        nullptr,                   nullptr,                   view_prop_get_multicol,        view_prop_clear_multicol,        nullptr,         nullptr },
+    { "form",            release_form_prop,         nullptr,                   nullptr,                       nullptr,                       nullptr,         nullptr },
+    { "item",            nullptr,                   nullptr,                   nullptr,                       nullptr,                       clear_item_prop, free_item_prop },
+    { "pseudo",          release_pseudo_content_prop_entry, nullptr,           view_prop_get_pseudo,          view_prop_clear_pseudo,          nullptr,         nullptr },
+    { "vector-path",     nullptr,                   nullptr,                   view_prop_get_vpath,           view_prop_clear_vpath,           nullptr,         nullptr },
+    { "layout-cache",    nullptr,                   nullptr,                   view_prop_get_layout_cache,    view_prop_clear_layout_cache,    nullptr,         nullptr },
 };
 
 static void view_teardown_visit_pseudo(ViewTree* tree,
@@ -493,11 +409,22 @@ static void view_teardown_apply_table(ViewTree* tree,
         if ((flags & VIEW_TEARDOWN_RELEASE_EXTERNAL) && entry->release_external) {
             entry->release_external(elem, tree);
         }
-        if ((flags & VIEW_TEARDOWN_FREE_POOL) && entry->free_pool) {
-            entry->free_pool(elem, tree);
+        if ((flags & VIEW_TEARDOWN_FREE_POOL)) {
+            if (entry->custom_free) {
+                entry->custom_free(elem, tree);
+            } else {
+                if (entry->free_payload) {
+                    entry->free_payload(elem, tree);
+                }
+                view_prop_free_member(elem, tree, entry->get_member, entry->clear_member);
+            }
         }
-        if ((flags & VIEW_TEARDOWN_CLEAR_POINTERS) && entry->clear_pointer) {
-            entry->clear_pointer(elem);
+        if ((flags & VIEW_TEARDOWN_CLEAR_POINTERS)) {
+            if (entry->custom_clear) {
+                entry->custom_clear(elem, tree);
+            } else if (entry->clear_member) {
+                entry->clear_member(elem, tree);
+            }
         }
     }
 }
@@ -1274,6 +1201,34 @@ void append_json_string(StrBuf* buf, const char* str) {
     strbuf_append_char(buf, '"');
 }
 
+static void append_json_key(StrBuf* buf, int indent, const char* key) {
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_char(buf, '"');
+    strbuf_append_str(buf, key);
+    strbuf_append_str(buf, "\": ");
+}
+
+static void append_json_comma_newline(StrBuf* buf, bool comma) {
+    strbuf_append_str(buf, comma ? ",\n" : "\n");
+}
+
+static void append_json_string_field(StrBuf* buf, int indent, const char* key,
+                                     const char* value, bool comma) {
+    append_json_key(buf, indent, key);
+    append_json_string(buf, value);
+    append_json_comma_newline(buf, comma);
+}
+
+static void append_json_format_field(StrBuf* buf, int indent, const char* key,
+                                     bool comma, const char* format, ...) {
+    append_json_key(buf, indent, key);
+    va_list args;
+    va_start(args, format);
+    strbuf_vappend_format(buf, format, args);
+    va_end(args);
+    append_json_comma_newline(buf, comma);
+}
+
 /**
  * Calculate the CSS transform translation offset for a view element.
  * This extracts the translate() portion from CSS transforms to apply to layout coordinates.
@@ -1965,6 +1920,8 @@ static const char* non_rendered_table_marker_display(DomElement* elem) {
     return "table-column-group";
 }
 
+static void append_element_selector_json(DomElement* elem, StrBuf* buf, const char* tag_name);
+
 static void print_non_rendered_table_marker_json(View* view, StrBuf* buf, int indent) {
     DomElement* elem = lam::dom_require_element(view);
     const char* tag_name = elem->node_name() ? elem->node_name() : "unknown";
@@ -1983,43 +1940,7 @@ static void print_non_rendered_table_marker_json(View* view, StrBuf* buf, int in
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"selector\": ");
     const char* class_attr = elem->get_attribute("class");
-    char base_selector[256];
-    if (class_attr) {
-        size_t class_len = strlen(class_attr);
-        snprintf(base_selector, sizeof(base_selector), "%s.%.*s",
-                 tag_name, (int)class_len, class_attr); // INT_CAST_OK: snprintf precision requires int.
-    } else {
-        snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
-    }
-
-    char final_selector[512];
-    DomNode* parent = elem->parent;
-    if (parent && parent->is_element()) {
-        int sibling_count = 0;
-        int current_index = 0;
-        DomNode* sibling = lam::dom_require_element(parent)->first_child;
-        while (sibling) {
-            if (sibling->node_type == DOM_NODE_ELEMENT) {
-                const char* sibling_tag = sibling->node_name();
-                if (sibling_tag && strcmp(sibling_tag, tag_name) == 0) {
-                    sibling_count++;
-                    if (sibling == elem) {
-                        current_index = sibling_count;
-                    }
-                }
-            }
-            sibling = sibling->next_sibling;
-        }
-        if (sibling_count > 1 && current_index > 0) {
-            snprintf(final_selector, sizeof(final_selector), "%s:nth-of-type(%d)",
-                     base_selector, current_index);
-        } else {
-            snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
-        }
-    } else {
-        snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
-    }
-    append_json_string(buf, final_selector);
+    append_element_selector_json(elem, buf, tag_name);
     strbuf_append_str(buf, ",\n");
 
     strbuf_append_char_n(buf, ' ', indent + 2);
@@ -2149,12 +2070,13 @@ static bool should_skip_non_rendered_dom_tag(const char* tag) {
         strcmp(tag, "style") == 0 || strcmp(tag, "script") == 0);
 }
 
-static void append_element_selector_json(ViewElement* elem, StrBuf* buf, const char* tag_name) {
+static void append_element_selector_json(DomElement* elem, StrBuf* buf, const char* tag_name) {
     const char* class_attr = elem->get_attribute("class");
     char base_selector[256];
     if (class_attr) {
         size_t class_len = strlen(class_attr);
-        snprintf(base_selector, sizeof(base_selector), "%s.%.*s", tag_name, (int)class_len, class_attr);
+        snprintf(base_selector, sizeof(base_selector), "%s.%.*s",
+                 tag_name, (int)class_len, class_attr); // INT_CAST_OK: snprintf precision requires int.
     } else {
         snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
     }
@@ -2190,14 +2112,11 @@ static void print_display_none_json(ViewElement* elem, StrBuf* buf, int indent) 
     const char* tag_name = elem->node_name() ? elem->node_name() : "div";
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "{\n");
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"type\": \"none\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"tag\": ");
+    append_json_string_field(buf, indent + 2, "type", "none", true);
+    append_json_key(buf, indent + 2, "tag");
     append_json_string(buf, tag_name);
     strbuf_append_str(buf, ",\n");
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"selector\": ");
+    append_json_key(buf, indent + 2, "selector");
     append_element_selector_json(elem, buf, tag_name);
     strbuf_append_str(buf, ",\n");
     strbuf_append_char_n(buf, ' ', indent + 2);
@@ -2209,20 +2128,15 @@ static void print_display_none_json(ViewElement* elem, StrBuf* buf, int indent) 
     strbuf_append_str(buf, "],\n");
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"x\": 0.0,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"y\": 0.0,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"width\": 0.0,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"height\": 0.0\n");
+    append_json_format_field(buf, indent + 4, "x", true, "0.0");
+    append_json_format_field(buf, indent + 4, "y", true, "0.0");
+    append_json_format_field(buf, indent + 4, "width", true, "0.0");
+    append_json_format_field(buf, indent + 4, "height", false, "0.0");
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"computed\": {\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"display\": \"none\"\n");
+    append_json_string_field(buf, indent + 4, "display", "none", false);
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "}");
 
@@ -2384,13 +2298,8 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     strbuf_append_str(buf, "{\n");
 
     // Basic view properties
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"type\": ");
-    append_json_string(buf, block->view_name());
-    strbuf_append_str(buf, ",\n");
-
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"tag\": ");
+    append_json_string_field(buf, indent + 2, "type", block->view_name(), true);
+    append_json_key(buf, indent + 2, "tag");
 
     // CRITICAL FIX: Provide better element names for debugging
     const char* tag_name = "unknown";
@@ -2426,56 +2335,9 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     strbuf_append_str(buf, ",\n");
 
     // ENHANCEMENT: Add CSS class information if available
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"selector\": ");
-
-    // Generate enhanced CSS selector with nth-of-type support (matches browser behavior)
+    append_json_key(buf, indent + 2, "selector");
     const char* class_attr = block->get_attribute("class");
-
-    // Start with tag name and class
-    char base_selector[256];
-    if (class_attr) {
-        size_t class_len = strlen(class_attr);
-        snprintf(base_selector, sizeof(base_selector), "%s.%.*s", tag_name, (int)class_len, class_attr);
-    } else {
-        snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
-    }
-
-    // Add nth-of-type if there are multiple siblings with same tag
-    char final_selector[512];
-    DomNode* parent = block->parent;
-    if (parent) {
-        // Count siblings with same tag name
-        int sibling_count = 0;
-        int current_index = 0;
-        DomNode* sibling = nullptr;
-        if (parent->is_element()) {
-            sibling = lam::dom_require_element(parent)->first_child;
-        }
-
-        while (sibling) {
-            if (sibling->node_type == DOM_NODE_ELEMENT) {
-                const char* sibling_tag = sibling->node_name();
-                if (sibling_tag && strcmp(sibling_tag, tag_name) == 0) {
-                    sibling_count++;
-                    if (sibling == block) {
-                        current_index = sibling_count; // 1-based index
-                    }
-                }
-            }
-            sibling = sibling->next_sibling;
-        }
-
-        // Add nth-of-type if multiple siblings exist
-        if (sibling_count > 1 && current_index > 0) {
-            snprintf(final_selector, sizeof(final_selector), "%s:nth-of-type(%d)", base_selector, current_index);
-        } else {
-            snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
-        }
-    } else {
-        snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
-    }
-    append_json_string(buf, final_selector);
+    append_element_selector_json(block, buf, tag_name);
     strbuf_append_str(buf, ",\n");
 
     // Add classes array (for test compatibility)
@@ -2990,18 +2852,10 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "{\n");
 
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"type\": \"text\",\n");
-
-    // CRITICAL FIX: Add tag field for consistency with block elements
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"tag\": \"text\",\n");
-
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"selector\": \"text\",\n");
-
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"content\": ");
+    append_json_string_field(buf, indent + 2, "type", "text", true);
+    append_json_string_field(buf, indent + 2, "tag", "text", true);
+    append_json_string_field(buf, indent + 2, "selector", "text", true);
+    append_json_key(buf, indent + 2, "content");
 
     unsigned char* text_data = text->text_data();
     if (text_data && rect->length > 0) {
@@ -3018,10 +2872,8 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     // Add text fragment information (matching text output)
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"text_info\": {\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"start_index\": %d,\n", rect->start_index);
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"length\": %d\n", rect->length);
+    append_json_format_field(buf, indent + 4, "start_index", true, "%d", rect->start_index);
+    append_json_format_field(buf, indent + 4, "length", false, "%d", rect->length);
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
 
@@ -3044,15 +2896,9 @@ void print_br_json(View* br, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "{\n");
 
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"type\": \"br\",\n");
-
-    // CRITICAL FIX: Add tag field for consistency with block elements
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"tag\": \"br\",\n");
-
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"selector\": \"br\",\n");
+    append_json_string_field(buf, indent + 2, "type", "br", true);
+    append_json_string_field(buf, indent + 2, "tag", "br", true);
+    append_json_string_field(buf, indent + 2, "selector", "br", true);
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
@@ -3095,13 +2941,8 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
     strbuf_append_str(buf, "{\n");
 
     // Basic view properties
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"type\": ");
-    append_json_string(buf, span->view_name());
-    strbuf_append_str(buf, ",\n");
-
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"tag\": ");
+    append_json_string_field(buf, indent + 2, "type", span->view_name(), true);
+    append_json_key(buf, indent + 2, "tag");
 
     // Get tag name
     const char* tag_name = "span";
@@ -3113,55 +2954,8 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
     strbuf_append_str(buf, ",\n");
 
     // Generate selector (same logic as blocks)
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"selector\": ");
-
-    const char* class_attr = span->get_attribute("class");
-    // Start with tag name and class
-    char base_selector[256];
-    if (class_attr) {
-        size_t class_len = strlen(class_attr);
-        snprintf(base_selector, sizeof(base_selector), "%s.%.*s", tag_name, (int)class_len, class_attr);
-    } else {
-        snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
-    }
-
-    // Add nth-of-type if there are multiple siblings with same tag
-    char final_selector[512];
-    DomNode* parent = span->parent;
-    if (parent) {
-        // Count siblings with same tag name
-        int sibling_count = 0;
-        int current_index = 0;
-        DomNode* sibling = nullptr;
-        if (parent->is_element()) {
-            sibling = lam::dom_require_element(parent)->first_child;
-        }
-
-        while (sibling) {
-            if (sibling->node_type == DOM_NODE_ELEMENT) {
-                const char* sibling_tag = sibling->node_name();
-                if (sibling_tag && strcmp(sibling_tag, tag_name) == 0) {
-                    sibling_count++;
-                    if (sibling == span) {
-                        current_index = sibling_count; // 1-based index
-                    }
-                }
-            }
-            sibling = sibling->next_sibling;
-        }
-
-        // Add nth-of-type if multiple siblings exist
-        if (sibling_count > 1 && current_index > 0) {
-            snprintf(final_selector, sizeof(final_selector), "%s:nth-of-type(%d)", base_selector, current_index);
-        } else {
-            snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
-        }
-    } else {
-        snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
-    }
-
-    append_json_string(buf, final_selector);
+    append_json_key(buf, indent + 2, "selector");
+    append_element_selector_json(span, buf, tag_name);
     strbuf_append_str(buf, ",\n");
 
     strbuf_append_char_n(buf, ' ', indent + 2);

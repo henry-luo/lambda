@@ -3857,6 +3857,72 @@ DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_heigh
     return load_dom_backed_image_document(img_url, viewport_width, viewport_height, pool, "load_image_doc");
 }
 
+struct LayoutTempPathGuard {
+    char* path;
+    ~LayoutTempPathGuard() {
+        if (path) mem_free(path);
+    }
+};
+
+static Input* parse_layout_source_as(char* content, Url* source_url,
+                                     const char* type_name, const char* log_prefix) {
+    size_t type_len = strlen(type_name);
+    String* type_str = (String*)mem_alloc(sizeof(String) + type_len + 1, MEM_CAT_LAYOUT);
+    if (!type_str) {
+        log_error("%s: failed to allocate type string", log_prefix);
+        return nullptr;
+    }
+    type_str->len = type_len;
+    str_copy(type_str->chars, type_str->len + 1, type_name, type_len);
+    Input* input = input_from_source(content, source_url, type_str, nullptr);
+    mem_free(type_str);
+    return input;
+}
+
+static CssStylesheet* load_pool_backed_stylesheet(CssEngine* css_engine, Pool* pool,
+                                                  const char* css_filename,
+                                                  const char* log_prefix,
+                                                  const char* label,
+                                                  bool warn_missing) {
+    char* css_content = read_text_file(css_filename);
+    if (!css_content) {
+        if (warn_missing) {
+            log_warn("[%s] Failed to load %s file: %s", log_prefix, label, css_filename);
+        }
+        return nullptr;
+    }
+
+    size_t css_len = strlen(css_content);
+    char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
+    if (!css_pool_copy) {
+        mem_free(css_content);
+        return nullptr;
+    }
+
+    str_copy(css_pool_copy, css_len + 1, css_content, css_len);
+    mem_free(css_content);
+    CssStylesheet* stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
+    if (stylesheet) {
+        log_debug("[%s] Loaded %s with %zu rules", log_prefix, label, stylesheet->rule_count);
+    } else if (warn_missing) {
+        log_warn("[%s] Failed to parse %s", log_prefix, label);
+    }
+    return stylesheet;
+}
+
+static CssStylesheet* load_home_stylesheet(CssEngine* css_engine, Pool* pool,
+                                           const char* relative_path,
+                                           const char* log_prefix,
+                                           const char* label,
+                                           bool warn_missing) {
+    char* css_filename = lambda_home_path(relative_path);
+    log_debug("[%s] Loading stylesheet: %s", log_prefix, css_filename);
+    CssStylesheet* stylesheet = load_pool_backed_stylesheet(css_engine, pool, css_filename,
+                                                            log_prefix, label, warn_missing);
+    mem_free(css_filename);
+    return stylesheet;
+}
+
 /**
  * Load text document as source view
  * Reads text file content, wraps in HTML <pre> element, renders with monospace font
@@ -3875,13 +3941,7 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
         return nullptr;
     }
 
-    struct TextTempPathGuard {
-        char* path;
-        ~TextTempPathGuard() {
-            if (path) mem_free(path);
-        }
-    };
-    TextTempPathGuard text_path_guard = { url_to_local_path(text_url) };
+    LayoutTempPathGuard text_path_guard = { url_to_local_path(text_url) };
     char* text_filepath = text_path_guard.path;
     if (!text_filepath) {
         log_error("load_text_doc: failed to resolve text file URL");
@@ -3977,17 +4037,7 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
     // Step 4: Parse HTML using Lambda parser
     auto step4_start = std::chrono::high_resolution_clock::now();
 
-    String* type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
-    if (!type_str) {
-        log_error("Failed to allocate HTML type string for text file wrapper");
-        mem_free(html_content);
-        return nullptr;
-    }
-    type_str->len = 4;
-    str_copy(type_str->chars, type_str->len + 1, "html", 4);
-
-    Input* input = input_from_source(html_content, text_url, type_str, nullptr);
-    mem_free(type_str);
+    Input* input = parse_layout_source_as(html_content, text_url, "html", "load_text_doc");
     mem_free(html_content);
 
     if (!input || !input->root.item || input->root.item == ITEM_ERROR) {
@@ -4081,7 +4131,8 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
         return nullptr;
     }
 
-    char* markdown_filepath = url_to_local_path(markdown_url);
+    LayoutTempPathGuard markdown_path_guard = { url_to_local_path(markdown_url) };
+    char* markdown_filepath = markdown_path_guard.path;
     if (!markdown_filepath) {
         // url_to_local_path failed - try using the URL's pathname directly as fallback
         const char* pathname = url_get_pathname(markdown_url);
@@ -4097,28 +4148,16 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     char* markdown_content = read_text_file(markdown_filepath);
     if (!markdown_content) {
         log_error("Failed to read markdown file: %s", markdown_filepath);
-        if (markdown_filepath) mem_free(markdown_filepath);
         return nullptr;
     }
 
-    // Create type string for markdown
-    String* type_str = (String*)mem_alloc(sizeof(String) + 9, MEM_CAT_LAYOUT);
-    type_str->len = 8;
-    str_copy(type_str->chars, type_str->len + 1, "markdown", 8);
-
     // Parse markdown to Lambda Element tree
-    Input* input = input_from_source(markdown_content, markdown_url, type_str, nullptr);
-    mem_free(type_str);
+    Input* input = parse_layout_source_as(markdown_content, markdown_url, "markdown", "load_markdown_doc");
     mem_free(markdown_content);  // from read_text_file, uses stdlib
 
     if (!input) {
         log_error("Failed to parse markdown file: %s", markdown_filepath);
-        if (markdown_filepath) mem_free(markdown_filepath);
         return nullptr;
-    }
-    if (markdown_filepath) {
-        mem_free(markdown_filepath);
-        markdown_filepath = nullptr;
     }
 
     // Get root element from parsed markdown
@@ -4364,34 +4403,11 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     }
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
-    // Step 4: Load markdown.css stylesheet
-    // Determine the path to markdown.css (relative to lambda home)
-    char* css_filename = lambda_home_path("input/markdown.css");
-    log_debug("[Lambda Markdown] Loading default markdown stylesheet: %s", css_filename);
-
-    CssStylesheet* markdown_stylesheet = nullptr;
-    char* css_content = read_text_file(css_filename);
-    if (css_content) {
-        size_t css_len = strlen(css_content);
-        char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
-        if (css_pool_copy) {
-            str_copy(css_pool_copy, css_len + 1, css_content, css_len);
-            mem_free(css_content);
-            markdown_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
-            if (markdown_stylesheet) {
-                log_debug("[Lambda Markdown] Loaded markdown stylesheet with %zu rules",
-                        markdown_stylesheet->rule_count);
-            } else {
-                log_warn("Failed to parse markdown.css");
-            }
-        } else {
-            mem_free(css_content);
-        }
-    } else {
-        log_warn("Failed to load markdown.css file: %s", css_filename);
+    CssStylesheet* markdown_stylesheet = load_home_stylesheet(
+        css_engine, pool, "input/markdown.css", "Lambda Markdown", "markdown stylesheet", true);
+    if (!markdown_stylesheet) {
         log_warn("Continuing without stylesheet - markdown will use browser defaults");
     }
-    mem_free(css_filename);
 
     auto step3_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 3 - CSS parse: %.1fms",
@@ -4401,43 +4417,10 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     CssStylesheet* math_stylesheet = nullptr;
     CssStylesheet* katex_stylesheet = nullptr;
     {
-        char* math_css_filename = lambda_home_path("input/math.css");
-        char* math_css_content = read_text_file(math_css_filename);
-        if (math_css_content) {
-            size_t math_css_len = strlen(math_css_content);
-            char* math_css_pool = (char*)pool_alloc(pool, math_css_len + 1);
-            if (math_css_pool) {
-                str_copy(math_css_pool, math_css_len + 1, math_css_content, math_css_len);
-                mem_free(math_css_content);
-                math_stylesheet = css_parse_stylesheet(css_engine, math_css_pool, math_css_filename);
-                if (math_stylesheet) {
-                    log_debug("[Lambda Markdown] Loaded math stylesheet with %zu rules",
-                              math_stylesheet->rule_count);
-                }
-            } else {
-                mem_free(math_css_content);
-            }
-        }
-        mem_free(math_css_filename);
-
-        char* katex_css_filename = lambda_home_path("input/latex/css/katex.css");
-        char* katex_css_content = read_text_file(katex_css_filename);
-        if (katex_css_content) {
-            size_t katex_css_len = strlen(katex_css_content);
-            char* katex_css_pool = (char*)pool_alloc(pool, katex_css_len + 1);
-            if (katex_css_pool) {
-                str_copy(katex_css_pool, katex_css_len + 1, katex_css_content, katex_css_len);
-                mem_free(katex_css_content);
-                katex_stylesheet = css_parse_stylesheet(css_engine, katex_css_pool, katex_css_filename);
-                if (katex_stylesheet) {
-                    log_debug("[Lambda Markdown] Loaded KaTeX font stylesheet with %zu rules",
-                              katex_stylesheet->rule_count);
-                }
-            } else {
-                mem_free(katex_css_content);
-            }
-        }
-        mem_free(katex_css_filename);
+        math_stylesheet = load_home_stylesheet(
+            css_engine, pool, "input/math.css", "Lambda Markdown", "math stylesheet", false);
+        katex_stylesheet = load_home_stylesheet(
+            css_engine, pool, "input/latex/css/katex.css", "Lambda Markdown", "KaTeX font stylesheet", false);
     }
 
     // Step 5: Apply CSS cascade to DOM tree
@@ -4509,13 +4492,7 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
         return nullptr;
     }
 
-    struct WikiTempPathGuard {
-        char* path;
-        ~WikiTempPathGuard() {
-            if (path) mem_free(path);
-        }
-    };
-    WikiTempPathGuard wiki_path_guard = { url_to_local_path(wiki_url) };
+    LayoutTempPathGuard wiki_path_guard = { url_to_local_path(wiki_url) };
     char* wiki_filepath = wiki_path_guard.path;
     if (!wiki_filepath) {
         log_error("load_wiki_doc: failed to resolve wiki file URL");
@@ -4531,14 +4508,8 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
         return nullptr;
     }
 
-    // Create type string for wiki
-    String* type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
-    type_str->len = 4;
-    str_copy(type_str->chars, type_str->len + 1, "wiki", 4);
-
     // Parse wiki to Lambda Element tree
-    Input* input = input_from_source(wiki_content, wiki_url, type_str, nullptr);
-    mem_free(type_str);
+    Input* input = parse_layout_source_as(wiki_content, wiki_url, "wiki", "load_wiki_doc");
     mem_free(wiki_content);  // from read_text_file, uses stdlib
 
     if (!input) {
@@ -4600,34 +4571,11 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
     }
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
-    // Step 4: Load wiki.css stylesheet
-    // Determine the path to wiki.css (relative to lambda home)
-    char* css_filename = lambda_home_path("input/wiki.css");
-    log_debug("[Lambda Wiki] Loading default wiki stylesheet: %s", css_filename);
-
-    CssStylesheet* wiki_stylesheet = nullptr;
-    char* css_content = read_text_file(css_filename);
-    if (css_content) {
-        size_t css_len = strlen(css_content);
-        char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
-        if (css_pool_copy) {
-            str_copy(css_pool_copy, css_len + 1, css_content, css_len);
-            mem_free(css_content);
-            wiki_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
-            if (wiki_stylesheet) {
-                log_debug("[Lambda Wiki] Loaded wiki stylesheet with %zu rules",
-                        wiki_stylesheet->rule_count);
-            } else {
-                log_warn("Failed to parse wiki.css");
-            }
-        } else {
-            mem_free(css_content);
-        }
-    } else {
-        log_warn("Failed to load wiki.css file: %s", css_filename);
+    CssStylesheet* wiki_stylesheet = load_home_stylesheet(
+        css_engine, pool, "input/wiki.css", "Lambda Wiki", "wiki stylesheet", true);
+    if (!wiki_stylesheet) {
         log_warn("Continuing without stylesheet - wiki will use browser defaults");
     }
-    mem_free(css_filename);
 
     auto step3_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 3 - CSS parse: %.1fms",
@@ -4675,13 +4623,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         return nullptr;
     }
 
-    struct LatexTempPathGuard {
-        char* path;
-        ~LatexTempPathGuard() {
-            if (path) mem_free(path);
-        }
-    };
-    LatexTempPathGuard latex_path_guard = { url_to_local_path(latex_url) };
+    LayoutTempPathGuard latex_path_guard = { url_to_local_path(latex_url) };
     char* latex_filepath = latex_path_guard.path;
     if (!latex_filepath) {
         log_error("load_latex_doc: failed to resolve LaTeX file URL");
@@ -4814,54 +4756,13 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     }
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
-    // Step 5: Load LaTeX.css stylesheet (if it exists)
-    // LaTeX to HTML conversion may embed styles, but we can provide default styling
-    char* css_filename = lambda_home_path("input/latex/css/article.css");
-    log_debug("[Lambda LaTeX] Loading default LaTeX stylesheet: %s", css_filename);
-
-    CssStylesheet* latex_stylesheet = nullptr;
-    char* css_content = read_text_file(css_filename);
-    if (css_content) {
-        size_t css_len = strlen(css_content);
-        char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
-        if (css_pool_copy) {
-            str_copy(css_pool_copy, css_len + 1, css_content, css_len);
-            mem_free(css_content);
-            latex_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
-            if (latex_stylesheet) {
-                log_debug("[Lambda LaTeX] Loaded LaTeX stylesheet with %zu rules",
-                        latex_stylesheet->rule_count);
-            } else {
-                log_warn("Failed to parse latex.css");
-            }
-        } else {
-            mem_free(css_content);
-        }
-    } else {
+    CssStylesheet* latex_stylesheet = load_home_stylesheet(
+        css_engine, pool, "input/latex/css/article.css", "Lambda LaTeX", "LaTeX stylesheet", false);
+    if (!latex_stylesheet) {
         log_debug("No latex.css file found, LaTeX HTML will use embedded and inline styles");
     }
-    mem_free(css_filename);
-
-    // Load KaTeX font stylesheet for math rendering (@font-face declarations for KaTeX_Size1-4 etc.)
-    char* katex_css_filename = lambda_home_path("input/latex/css/katex.css");
-    CssStylesheet* katex_stylesheet = nullptr;
-    char* katex_css_content = read_text_file(katex_css_filename);
-    if (katex_css_content) {
-        size_t katex_css_len = strlen(katex_css_content);
-        char* katex_css_pool_copy = (char*)pool_alloc(pool, katex_css_len + 1);
-        if (katex_css_pool_copy) {
-            str_copy(katex_css_pool_copy, katex_css_len + 1, katex_css_content, katex_css_len);
-            mem_free(katex_css_content);
-            katex_stylesheet = css_parse_stylesheet(css_engine, katex_css_pool_copy, katex_css_filename);
-            if (katex_stylesheet) {
-                log_debug("[Lambda LaTeX] Loaded KaTeX font stylesheet with %zu rules",
-                        katex_stylesheet->rule_count);
-            }
-        } else {
-            mem_free(katex_css_content);
-        }
-    }
-    mem_free(katex_css_filename);
+    CssStylesheet* katex_stylesheet = load_home_stylesheet(
+        css_engine, pool, "input/latex/css/katex.css", "Lambda LaTeX", "KaTeX font stylesheet", false);
 
     // Step 6: Extract and parse any inline <style> elements from HTML
     log_debug("[Lambda LaTeX] Extracting inline <style> elements from LaTeX-generated HTML...");
@@ -4947,13 +4848,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         return nullptr;
     }
 
-    struct XmlTempPathGuard {
-        char* path;
-        ~XmlTempPathGuard() {
-            if (path) mem_free(path);
-        }
-    };
-    XmlTempPathGuard xml_path_guard = { url_to_local_path(xml_url) };
+    LayoutTempPathGuard xml_path_guard = { url_to_local_path(xml_url) };
     char* xml_filepath = xml_path_guard.path;
     if (!xml_filepath) {
         log_error("[Lambda XML] Failed to resolve XML file URL");

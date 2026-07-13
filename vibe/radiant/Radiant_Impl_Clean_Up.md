@@ -164,6 +164,10 @@ make build && make test-radiant-baseline                                    # mu
 - Files: `radiant/radiant.cpp`, `radiant/grid_enhanced_adapter.hpp`, `radiant/resolve_css_style.cpp`.
 - Tests: radiant baseline + `make layout suite=baseline` (grid + table fixtures cover L1/C5).
 
+**2026-07-13 status:** code slice implemented. `utils/verify_loc_reduction.sh` already existed at the start of the slice; the Phase 0 deletion set removed 200 LOC (`radiant.cpp` -27, `grid_enhanced_adapter.hpp` -53, `resolve_css_style.cpp` -120) and `./utils/count_loc.sh` now reports `./radiant` at 197,766 LOC.
+
+Focused verification passed: `make build` and `make layout suite=baseline` (`4325/4325`, 7 skipped). The stricter whole phase gate is still **not fully green**: `make test-radiant-baseline` exits nonzero on broader existing failures (puppertino 2, UI automation 3, render visual 4), and `make lint` exits nonzero on existing tree-wide lint findings outside the Phase 0 files. Do not start Phase 1 until those global gates are either fixed or explicitly re-baselined.
+
 ### Phase 1 — CSS mechanical helpers (~510 LOC, low risk)
 - C1 `ensure_bound`/`ensure_border`/`ensure_blk` (~250) — mirror resolve_htm_style's accepted pattern.
 - C2 4-side border width/style/color resolvers (~235).
@@ -171,11 +175,15 @@ make build && make test-radiant-baseline                                    # mu
 - Files: `resolve_css_style.cpp`, new `resolve_style_helpers.hpp` (or file-top statics), `css_animation.cpp`.
 - Tests: radiant baseline + layout baseline (border fixtures). Behavior must be bit-identical; these are pure hoists.
 
+**2026-07-13 status:** implemented as file-top statics in `resolve_css_style.cpp` plus `css_animation.cpp` delegation to `css_property_id_from_name()`. C6's narrow enum-name logging cleanup is also implemented: 30 repeated `info ? info->name : "unknown"` fallbacks now call one helper while preserving log text. Verified after the slice with `make build` and `make layout suite=baseline` (`4325/4325`, 7 skipped); the CSS file LOC gate still passes at `-516` versus `HEAD` after the C6 helper.
+
 ### Phase 2 — CSS box-side unification (~200 LOC, low-med risk)
 - C3 margin/padding/inset side + logical fan-out over one `resolve_box_side()`; extract `css_value_axis_type()`.
 - ⚠ This one is *not* byte-neutral by construction: it deliberately fixes the TOP-vs-LEFT calc/isnan drift. Run layout baseline before/after and review any diffs as bug-fixes, not regressions. Preserve the hard-wired LTR/horizontal-tb mapping.
 - Files: `resolve_css_style.cpp`.
 - Tests: radiant baseline + full `make layout suite=baseline`; inspect positioned/margin fixture diffs individually.
+
+**2026-07-13 status:** implemented for margin, padding, inset, and physical `top/right/bottom/left`; logical inset mapping remains hard-wired to LTR/horizontal-tb. The NaN inset invariant is centralized so raw percentages remain re-resolvable and non-percentage NaN behaves as `auto`. Verified with `make build`, `make layout suite=baseline` (`4325/4325`, 7 skipped), and LOC gate over Phase 0-2 files: `-626` total versus `HEAD`.
 
 ### Phase 3 — Dumpers and loaders (~480–600 LOC, low-med risk)
 - M2 view_pool JSON field helpers (~150–250), M1 selector builder ×4→1 (~115), M4 cmd_layout `load_*_doc` prologue + CSS-bundle helpers (~115).
@@ -183,22 +191,36 @@ make build && make test-radiant-baseline                                    # mu
 - Files: `view_pool.cpp`, `cmd_layout.cpp`.
 - Tests: radiant baseline + layout baseline + markdown/latex/xml layout suites.
 
+**2026-07-13 status:** implemented the shared nth-of-type selector builder call sites, introduced JSON key/field emitters for repeated `view_pool.cpp` object headers, and consolidated `cmd_layout.cpp` temp-path, typed `input_from_source`, and pool-backed stylesheet loading. Verified with `make build`, `make layout suite=baseline` (`4325/4325`, 7 skipped), and LOC gate over Phase 0-3 files: `-863` total versus `HEAD`.
+
 ### Phase 4 — Event/state/paint scaffolds (~270–330 LOC, low-med risk)
 - E1 state-transition loggers 9→2 helpers (~90), E2 dispatch scaffold RAII (~65), E3 SM transition epilogue + hover≡active merge (~40), E4 shared editing-surface writer (~18).
 - P1 form-control prologue (~60), P2+P3 background clip/tile + color-string (~80 combined).
 - Files: `state_store.cpp`, `event.cpp`, `state_machine.cpp`, `editing_dispatch.cpp`, `event_state_log.*`, `render_form.cpp`, `render_background.cpp`, `render_svg.cpp`, `paint_ir.cpp`.
 - Tests: radiant baseline + `make editor-4c-js` + `make editor-4c-view` (golden event/state logs) + form/background/border-radius layout fixtures.
 
+**2026-07-13 status:** implemented. P1 introduced a shared `FormControlBox` prologue for form-control painters; P2/P3 centralized background rounded-rect paths, background tile iteration, image tile planning, and SVG color formatting; E1 collapsed scalar/view-ref transition loggers; E2 added the JS dispatch scope and event-builder scaffold; E3 added a transition-depth scope plus common transition completion path and merged hover/active single-target transitions; E4 moved shared editing-surface JSON fields into `event_state_log`.
+
+Focused verification passed after each slice with `make build` and `make layout suite=baseline` (`4325/4325`, 7 skipped). The Phase 0-4 LOC gate passed at `-804` total versus `HEAD` over the touched file set. The proposal's editor gates are still not fully green in this checkout: `make editor-4c-js` passes the core suite (`pass=218 fail=0 skip=0`) but then fails because esbuild cannot resolve `react`; `make editor-4c-view` is broadly red (`3/54 passed`) with multiple headless `Abort trap: 6` runs. Treat those as unresolved broader editor/harness blockers, not as accepted Phase 4 regressions.
+
 ### Phase 5 — Layout targeted unification (~440 LOC, med risk)
 - L2 table border getters 5→1 (~80), L3 baseline walkers 3→1 (~300), L4 flex justify onto `compute_space_distribution` (~60).
 - Files: `layout_table.cpp`, `layout_flex.cpp`, `layout_alignment.*`, `grid_baseline.hpp`.
 - Tests: radiant baseline + full layout baseline (flex 494 / grid 344 / table 703 fixtures); L3 diffs reviewed case-by-case — baseline math is subtle.
+
+**2026-07-13 status:** partially implemented and regression-gated. L2 now routes table/cell/row/rowgroup/column border lookups through one `BoundaryProp` side getter. L4 extracted flex main-axis outer-size, auto-margin counting, and physical justify-value helpers while preserving `compute_space_distribution` as the spacing authority. L3 is implemented for the table side: `layout_table.cpp` delegates its recursive first-text-baseline traversal to `radiant::compute_view_first_text_baseline()` with a table-row callback. The flex first-baseline walker remains intentionally open because it carries extra policy not present in the shared walker yet: stored flex-container baselines, inline-child skip to avoid first-line double-counting, positioned-child skip, direct text fallback, and `blk->first_line_baseline` fallback. Safe L3-adjacent flex cleanup did land: `layout_flex.cpp` now centralizes flex baseline margin/top-offset/direct-text helpers, the direct-text baseline helper, and the repeated baseline-participation predicate while preserving the flex-specific traversal order. A guarded attempt to route flex child/text traversal through the shared walker was reverted after `make layout suite=baseline` produced 23 baseline-alignment failures; any future L3 flex slice needs a policy-preserving flex baseline adapter, not the generic text walker.
+
+Verification passed after each Phase 5 slice with `make build` and `make layout suite=baseline` (`4325/4325`, 7 skipped). LOC gate over the Phase 5 layout files passed at `-73` versus `HEAD`; the latest flex baseline helper cleanup separately passes at `-29` over `layout_flex.cpp`.
 
 ### Phase 6 — Descriptor tables (~200–320 LOC, med risk)
 - P4 `DL_OP_LIST` descriptor driving storage serialize/deserialize/free + retained dup/free + bounds (**not** the replay-core merge) (~80–140).
 - P5 paint-op descriptor table folding validate/bounds scaffolding and bringing `render_pdf.cpp`'s two switches into the table (~120–180).
 - Files: `display_list.h`, `display_list_storage.cpp`, `retained_display_list.cpp`, `display_list_bounds.cpp`, `paint_ir.h/cpp`, `render_pdf.cpp`.
 - Tests: radiant baseline + retained/tiled parity + SVG-export + PDF fixtures — **all three lowering backends diffed**.
+
+**2026-07-13 status:** partially implemented and regression-gated. P4 safe slice introduced `DL_OP_LIST`, `DisplayOpDescriptor`, shared replay-state flags, and a shared owned-payload free helper used by both display-list storage and retained-list rollback; replay-core merge is still deferred. P5 safe slices moved owned PaintIR payload cleanup into the `PaintList` lifecycle, removed PDF's duplicate fallback cleanup switch, collapsed repeated PaintIR validation failure boilerplate through one per-command helper, and moved validation stack-depth reporting onto one local state struct. The full P5 lowering descriptor table remains open: `paint_ir_validate`, raster/SVG lowering, and PDF lowering still use backend-specific command switches.
+
+Verification passed after each descriptor slice with `make build` and `make layout suite=baseline` (`4325/4325`, 7 skipped). LOC gate for the P4 display-list files passed at `-10`; the P5 paint/PDF file-set gate passes at `-60` over `paint_ir.cpp` and `render_pdf.cpp`; the late paint/PDF/view cleanup gate passed at `-193` over `view_pool.cpp`, `paint_ir.cpp`, and `render_pdf.cpp`.
 
 ### Phase 7 — Structural (open-ended; start only after 0–6 hold)
 Ordered slices, each independently gated:
@@ -208,6 +230,10 @@ Ordered slices, each independently gated:
 4. L6b/c flex-line packing and table column contributions shared between intrinsic pass and real layout (largest remaining mass, ~800–1500 total for L6; HIGH risk — every slice runs the full layout suite).
 5. P4b replay-core merge (the deferred §5.1 half), P6 SVG border/text parity — only after descriptor tables are proven.
 6. E6 snapshot accessor delegation, L7 table iterator extraction — opportunistic.
+
+**2026-07-13 status:** started. L6a now has one intrinsic CSS `repeat()` track counter shared by intrinsic width and height fallback paths, fixing the previous width/height fallback split without changing the layout baseline. E5 has one safe sub-slice implemented: live and simulated radio-group unchecking now share the same DFS helper while preserving live pseudo-state sync and simulator writer-only semantics; the hit-test and text-extraction sharing pieces remain open because their policies still differ. E6 is implemented for caret and selection projection snapshots: visual/render/debug caret accessors and anchor/focus/visual/debug selection accessors now read through shared local snapshot structs while preserving their public failure defaults. M3 was also implemented opportunistically: `view_pool.cpp` now drives repetitive property clear/free teardown through generated member accessors and a table, keeping only real nested ownership hooks custom. L5 has a safe preparatory cleanup: `layout_flex_measurement.cpp` now has one existing-height probe for explicit block height, laid-out height, and cached flex intrinsic height, and all remaining matching length-only CSS height declaration checks now reuse `get_explicit_css_height()` in recursive, SVG/replaced, nested-child, and default-element measurement paths; the larger routing of the manual height model onto the intrinsic API remains open. L7 is partially implemented: `layout_table.cpp` now has a table-wide cell iterator for straight row/cell walks, one shared row-height/cell-alignment updater that preserves the existing rowspan-one-only and grow-only policies at each call site, one row-metadata-index helper for the repeated first-cell lookup pattern, one TBODY row-group iterator for explicit-height distribution, shared row-y-position recalculation helpers, column-span iteration/summing helpers for colspan width contribution and cell width calculation, a shared fixed-layout span assignment helper for `<col>`/first-row width propagation, shared fixed-layout helpers for positive `span` parsing plus grouped/standalone `<col>` CSS width resolution, shared column constraint raise/clamp helpers for `<col>` width/min-width/max-width application, shared column-total summing for percent-width totals and max-width minimum floors, whole-column assign/copy/scale helpers for fixed/auto distribution data moves, shared column summing for final table/tbody width totals, a shared preferred-width similarity predicate, a shared percent-column grow helper for the no-auto-column branch, a shared percent-distribution helper that preserves the old target/shrink/grow policy, and a shared non-percent auto column distribution helper for the CSS 2.1 Case 1/2/3 block. These remove the largest remaining inline column-distribution blocks from `table_auto_layout`; smaller policy loops remain.
+
+Verification for these Phase 7/M3 slices passed with `make build` and `make layout suite=baseline` (`4325/4325`, 7 skipped). Combined late-slice LOC gate passed at `-187` over `state_store.cpp`, `intrinsic_sizing.cpp`, `view_pool.cpp`, `paint_ir.cpp`, and `render_pdf.cpp`; the L7 table slice separately passes at `-185` over `layout_table.cpp`, the L5 flex-measurement helper slice passes at `-20` over `layout_flex_measurement.cpp`, and the E5 event-sim radio slice removes 24 lines from `event_sim.cpp`. The latest L5/L7/E5 helper slices also passed `git diff --check` and `make check-int-cast`.
 
 ### Running totals
 

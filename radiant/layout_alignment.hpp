@@ -12,6 +12,7 @@
  */
 
 #include <cstdint>
+#include "../lambda/input/css/dom_node.hpp"
 
 // CSS value constants (from css_value.hpp)
 // We use int32_t to allow both enum and numeric values
@@ -160,6 +161,17 @@ float compute_element_first_baseline(
     ::LayoutContext* lycon,
     ViewBlock* element,
     bool is_row_direction
+);
+
+typedef float (*FirstBaselineRowCallback)(::LayoutContext* lycon, View* row);
+
+float compute_view_first_text_baseline(
+    ::LayoutContext* lycon,
+    View* parent,
+    float cumulative_y,
+    bool use_normal_line_height,
+    bool skip_block_children_of_table,
+    FirstBaselineRowCallback row_baseline
 );
 
 /**

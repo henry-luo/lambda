@@ -13,6 +13,22 @@
 #define DL_INITIAL_CAPACITY 2048
 #define DL_VALIDATE_ELEMENT_STACK_LIMIT 1024
 
+static const DisplayOpDescriptor DISPLAY_OP_DESCRIPTORS[] = {
+#define DL_OP_DESCRIPTOR(name, flags) { name, flags },
+    DISPLAY_OP_LIST(DL_OP_DESCRIPTOR)
+#undef DL_OP_DESCRIPTOR
+};
+
+const DisplayOpDescriptor* dl_op_descriptor(DisplayOp op) {
+    if (op < DL_FILL_RECT || op > DL_END_ELEMENT) return nullptr;
+    return &DISPLAY_OP_DESCRIPTORS[(int)op];
+}
+
+bool dl_op_preserves_replay_state(DisplayOp op) {
+    const DisplayOpDescriptor* desc = dl_op_descriptor(op);
+    return desc && (desc->flags & DL_OP_FLAG_PRESERVES_REPLAY_STATE);
+}
+
 DisplayItem* dl_alloc_item(DisplayList* dl) {
     if (!dl) return nullptr;
     if (dl->count >= dl->capacity) {
@@ -106,33 +122,43 @@ void dl_init(DisplayList* dl, Arena* backing_arena) {
     mem_scratch_init(NULL, &dl->arena, backing_arena, MEM_ROLE_RENDER, "display_list.scratch");
 }
 
+void dl_item_free_owned_payload(DisplayItem* item) {
+    if (!item) return;
+    switch (item->op) {
+        case DL_FILL_PATH:
+            rdt_path_free(item->fill_path.path);
+            item->fill_path.path = nullptr;
+            break;
+        case DL_STROKE_PATH:
+            rdt_path_free(item->stroke_path.path);
+            item->stroke_path.path = nullptr;
+            break;
+        case DL_FILL_LINEAR_GRADIENT:
+            rdt_path_free(item->fill_linear_gradient.path);
+            item->fill_linear_gradient.path = nullptr;
+            break;
+        case DL_FILL_RADIAL_GRADIENT:
+            rdt_path_free(item->fill_radial_gradient.path);
+            item->fill_radial_gradient.path = nullptr;
+            break;
+        case DL_DRAW_PICTURE:
+            rdt_picture_free(item->draw_picture.picture);
+            item->draw_picture.picture = nullptr;
+            break;
+        case DL_PUSH_CLIP:
+            rdt_path_free(item->push_clip.path);
+            item->push_clip.path = nullptr;
+            break;
+        default:
+            break;
+    }
+}
+
 void dl_clear(DisplayList* dl) {
     if (!dl) return;
 
     for (int i = 0; i < dl->count; i++) {
-        DisplayItem* item = &dl->items[i];
-        switch (item->op) {
-            case DL_FILL_PATH:
-                rdt_path_free(item->fill_path.path);
-                break;
-            case DL_STROKE_PATH:
-                rdt_path_free(item->stroke_path.path);
-                break;
-            case DL_FILL_LINEAR_GRADIENT:
-                rdt_path_free(item->fill_linear_gradient.path);
-                break;
-            case DL_FILL_RADIAL_GRADIENT:
-                rdt_path_free(item->fill_radial_gradient.path);
-                break;
-            case DL_PUSH_CLIP:
-                rdt_path_free(item->push_clip.path);
-                break;
-            case DL_DRAW_PICTURE:
-                rdt_picture_free(item->draw_picture.picture);
-                break;
-            default:
-                break;
-        }
+        dl_item_free_owned_payload(&dl->items[i]);
     }
     dl->count = 0;
     scratch_release(&dl->arena);

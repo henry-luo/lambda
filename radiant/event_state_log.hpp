@@ -82,6 +82,7 @@ const char* jw_finish(JsonWriter* w);
 
 typedef struct EventStateLog EventStateLog;
 struct DomNode;
+struct EditingSurface;
 
 /* Open a per-document log file. doc_name is sanitized into the path:
  *   ./temp/events_${pid}_${sanitized_doc_name}.jsonl
@@ -148,6 +149,10 @@ void event_state_log_emit_raw(EventStateLog* log, const char* json_line);
  */
 void event_state_log_write_node_ref(JsonWriter* w, const char* key,
                                     const struct DomNode* node);
+
+void editing_log_write_surface_core_fields(JsonWriter* w,
+                                           const struct EditingSurface* surface,
+                                           bool include_state_flags);
 
 /* ------------------------------------------------------------------ */
 /* Convenience record helpers.                                         */

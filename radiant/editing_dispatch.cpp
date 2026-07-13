@@ -525,18 +525,7 @@ static void editing_log_write_surface(JsonWriter* w,
                                       const EditingSurface* surface) {
     jw_key(w, "surface");
     jw_obj_begin(w);
-        jw_kv_str(w, "kind", editing_surface_kind_name(
-            surface ? surface->kind : EDIT_SURFACE_NONE));
-        jw_kv_str(w, "mode", editing_mode_name(
-            surface ? surface->mode : EDIT_MODE_RICH));
-        jw_kv_bool(w, "readonly", surface ? surface->readonly : false);
-        jw_kv_bool(w, "disabled", surface ? surface->disabled : false);
-        jw_kv_bool(w, "target_in_false_island",
-                   surface ? surface->target_in_false_island : false);
-        event_state_log_write_node_ref(w, "owner",
-            surface ? (const DomNode*)surface->owner : nullptr);
-        event_state_log_write_node_ref(w, "target",
-            surface ? (const DomNode*)surface->view : nullptr);
+        editing_log_write_surface_core_fields(w, surface, true);
     jw_obj_end(w);
 }
 
