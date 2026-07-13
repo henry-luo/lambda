@@ -26,7 +26,7 @@
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
 #include "../../radiant/form_control.hpp"
-#include "../../radiant/text_control.hpp"
+#include "../../radiant/event.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include <cstring>

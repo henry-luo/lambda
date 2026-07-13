@@ -1484,9 +1484,13 @@ typedef struct {
     int item_index;
 } ListBlot;
 
-// Now include headers that depend on these constants
 #ifndef LAMBDA_HEADLESS
-#include "event.hpp"
+typedef struct {
+    bool is_mouse_down;
+    float down_x, down_y;  // mouse position when mouse down
+    int cursor;  // current cursor style (CssEnum value)
+    GLFWcursor* sys_cursor;
+} MouseState;
 
 typedef struct UiContext {
     GLFWwindow *window;    // current window

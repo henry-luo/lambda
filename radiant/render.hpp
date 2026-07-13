@@ -7,7 +7,7 @@
 #include <string.h>
 #include <thorvg_capi.h>
 #include "view.hpp"
-#include "state_store.hpp"
+#include "event.hpp"
 #include "clip_shape.h"
 #include "animation.h"
 #include "../lambda/input/css/dom_node.hpp"

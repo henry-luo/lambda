@@ -1,27 +1,10 @@
-#include "handler.hpp"
+#include "event.hpp"
 #include "render.hpp"
-#include "state_store.hpp"
 #include "animation.h"
-#include "state_machine.hpp"
-#include "state_schema.hpp"
-#include "scroller.hpp"
 #include "form_control.hpp"
-#include "text_control.hpp"
-#include "text_edit.hpp"
-#include "context_menu.hpp"
-#include "clipboard.hpp"
 #include "browsing_session.h"
 #include "rdt_video.h"
 #include "webview.h"
-#include "dom_range_resolver.hpp"
-#include "editing_host.hpp"
-#include "editing.hpp"
-#include "editing_controller.hpp"
-#include "editing_dispatch.hpp"
-#include "editing_geometry.hpp"
-#include "editing_intent.hpp"
-#include "editing_target_range.hpp"
-#include "render.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/font/font.h"
@@ -37,8 +20,6 @@
 #include "../lambda/render_map.h"
 #include "../lambda/lambda.h"         // Context (input_context)
 #include "../lambda/lambda-data.hpp"  // EvalContext
-#include "source_pos_bridge.hpp"      // SourcePos / selection bridge for editor handlers
-#include "dom_range.hpp"              // DomSelection / DomBoundary
 #include "../lambda/transpiler.hpp"   // Runtime (heap, nursery, name_pool)
 #include "../lambda/mark_builder.hpp" // MarkBuilder for event object construction
 #include "../lambda/js/js_dom.h"      // js_dom_set_document for HTML event handlers

@@ -8,7 +8,7 @@
 #include "cookie_jar.h"
 #include "../input/css/dom_element.hpp"
 #include "../../radiant/view.hpp"
-#include "../../radiant/state_store.hpp"
+#include "../../radiant/event.hpp"
 #include "../../lib/url.h"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"

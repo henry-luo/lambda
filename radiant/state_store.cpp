@@ -1,9 +1,6 @@
-#include "state_store.hpp"
+#include "event.hpp"
 #include "state_store_internal.hpp"
 #include "animation.h"
-#include "dom_range.hpp"
-#include "dom_range_resolver.hpp"
-#include "source_pos_bridge.hpp"   // R7 step 3c — register path recorder
 #include "../lib/log.h"
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
@@ -11,13 +8,7 @@
 #include "../lib/escape.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
-#include "event_state_log.hpp"
 #include "form_control.hpp"
-#include "text_control.hpp"
-#include "text_edit.hpp"
-#include "editing.hpp"
-#include "state_machine.hpp"
-#include "state_schema.hpp"
 #include "render.hpp"
 #include "../lambda/ast.hpp"
 #include "../lambda/mark_builder.hpp"
@@ -8521,7 +8512,6 @@ char* extract_selected_html(DocState* state, Arena* arena) {
 // pasteboard via its installed backend; for headless / test builds the
 // default in-memory backend is used and writes never touch GLFW.
 
-#include "clipboard.hpp"
 
 void clipboard_copy_text(const char* text) {
     if (!text) return;

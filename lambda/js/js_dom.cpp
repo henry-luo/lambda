@@ -38,16 +38,7 @@
 #include "../input/css/selector_matcher.hpp"
 #include "../../radiant/view.hpp"
 #include "../../radiant/form_control.hpp"
-#include "../../radiant/state_store.hpp"
-#include "../../radiant/dom_range.hpp"
-#include "../../radiant/dom_range_resolver.hpp"
-#include "../../radiant/editing.hpp"
-#include "../../radiant/editing_dispatch.hpp"
-#include "../../radiant/editing_geometry.hpp"
-#include "../../radiant/editing_intent.hpp"
-#include "../../radiant/editing_target_range.hpp"
-#include "../../radiant/clipboard.hpp"
-#include "../../radiant/handler.hpp"
+#include "../../radiant/event.hpp"
 #include "../../radiant/render.hpp"
 #include "../input/html5/html5_parser.h"
 
@@ -1107,7 +1098,7 @@ static void reset_dom_wrapper_cache(); // forward declaration
 static void reset_foreign_document_cache(); // forward declaration
 static void reset_live_dom_collections(); // forward declaration
 // Phase 6E: text-control helpers are shared with Radiant event/render paths.
-#include "../../radiant/text_control.hpp"
+#include "../../radiant/event.hpp"
 #define tc_is_text_control_elem(e)      tc_is_text_control(e)
 
 extern "C" void* js_dom_current_active_text_control(void) {

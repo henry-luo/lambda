@@ -12,7 +12,7 @@
  *   - HTML sanitiser stub that strips <script> / <style> blocks.
  */
 
-#include "clipboard.hpp"
+#include "event.hpp"
 
 #include <string.h>
 #include <stdlib.h>

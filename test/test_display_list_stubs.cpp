@@ -1,5 +1,5 @@
 #include "../radiant/render.hpp"
-#include "../radiant/state_store.hpp"
+#include "../radiant/event.hpp"
 #include <string.h>
 
 static const RdtPath* g_test_path = nullptr;

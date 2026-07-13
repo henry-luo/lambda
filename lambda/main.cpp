@@ -46,8 +46,7 @@
 #include "../radiant/layout_graph.hpp"
 #include "../radiant/graph_to_svg.hpp"
 #include "../radiant/graph_theme.hpp"
-#include "../radiant/state_store.hpp"
-#include "../radiant/clipboard.hpp"
+#include "../radiant/event.hpp"
 #include "../radiant/font_face.h"
 #include "../radiant/render.hpp"
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API

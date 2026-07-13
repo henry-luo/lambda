@@ -3,11 +3,9 @@
 // Build target: linked into all Radiant builds via the radiant/ glob in
 // build_lambda_config.json.
 
-#include "text_edit.hpp"
+#include "event.hpp"
 
 #include "form_control.hpp"
-#include "text_control.hpp"
-#include "state_store.hpp"
 #include "view.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/log.h"

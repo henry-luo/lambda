@@ -19,7 +19,7 @@ extern "C" {
 #include "../lib/test_utils.h"
 
 #include "../lambda/input/css/dom_element.hpp"
-#include "../radiant/dom_range.hpp"
+#include "../radiant/event.hpp"
 
 #include <cstring>
 #include <new>
@@ -955,7 +955,6 @@ TEST_F(DomRangeTest, SelectionModifyRejectsUnknown) {
 // directly on our synthetic nodes.)
 // ============================================================================
 #include "../radiant/view.hpp"
-#include "../radiant/dom_range_resolver.hpp"
 
 class DomResolverTest : public DomRangeTest {
 protected:

@@ -1,12 +1,17 @@
 #pragma once
 
-#include "render.hpp"
+#ifndef RADIANT_EVENT_CORE_ONLY
+#include "view.hpp"
+#endif
 
+#include "../lambda/lambda.h"
+
+#ifndef RADIANT_EVENT_CORE_ONLY
 #include "../lib/arraylist.h"
 #include "../lib/strbuf.h"
-#include "../lambda/lambda.h"
 #include "../lambda/template_state.h"
 #include "../lambda/render_map.h"
+#endif
 
 #include <cstdint>
 #include <stdbool.h>
@@ -14,10 +19,13 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#ifndef RADIANT_EVENT_CORE_ONLY
+struct RenderContext;
+typedef struct RenderContext RenderContext;
+#endif
+
 // ===== event core =====
 
-// Forward declaration for GLFW cursor
-struct GLFWcursor;
 struct DocState;
 struct DomNode;
 
@@ -140,16 +148,10 @@ typedef union RdtEvent {
     FocusEvent focus;
 } RdtEvent;
 
-typedef struct {
-    bool is_mouse_down;
-    float down_x, down_y;  // mouse position when mouse down
-    int cursor;  // current cursor style (CssEnum value)
-    GLFWcursor* sys_cursor;
-} MouseState;
-
 void radiant_uncheck_radio_group(DomNode* root, const char* name, DomNode* exclude,
                                  DocState* state, bool sync_pseudo);
 
+#ifndef RADIANT_EVENT_CORE_ONLY
 
 // ===== event/state log =====
 
@@ -4099,4 +4101,4 @@ float text_glyph_x_for_byte_offset(UiContext* uicon, ViewText* text,
  */
 void update_caret_visual_position(UiContext* uicon, DocState* state);
 
-
+#endif // RADIANT_EVENT_CORE_ONLY

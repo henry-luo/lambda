@@ -10,7 +10,7 @@
 #include "../../input/css/selector_matcher.hpp"
 #include "../../js/js_class.h"
 #include "../../../radiant/form_control.hpp"
-#include "../../../radiant/text_control.hpp"
+#include "../../../radiant/event.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/mem.h"

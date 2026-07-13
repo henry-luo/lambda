@@ -31,7 +31,7 @@
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
-#include "../../radiant/clipboard.hpp"
+#include "../../radiant/event.hpp"
 #include <string.h>
 #include <stdlib.h>
 

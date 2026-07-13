@@ -4,15 +4,8 @@
 
 #include "event_sim.hpp"
 #include "event.hpp"
-#include "event_state_log.hpp"
-#include "state_store.hpp"
-#include "state_machine.hpp"
-#include "dom_range.hpp"
-#include "editing.hpp"
 #include "form_control.hpp"
 #include "render.hpp"
-#include "text_control.hpp"
-#include "text_edit.hpp"
 #include "view.hpp"
 #include "webview.h"
 #include "../lib/tagged.hpp"
@@ -30,7 +23,6 @@
 #include "../lambda/input/css/css_value.hpp"
 #include "../lib/image.h"
 #include "animation.h"
-#include "clipboard.hpp"
 #include <GLFW/glfw3.h>
 #include <cstdlib>
 #include <cstring>

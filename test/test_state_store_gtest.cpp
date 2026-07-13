@@ -7,7 +7,7 @@ extern "C" {
 #include "../lib/test_utils.h"
 
 #include "../lambda/input/css/dom_element.hpp"
-#include "../radiant/state_store.hpp"
+#include "../radiant/event.hpp"
 #include "../radiant/view.hpp"
 
 #include <new>

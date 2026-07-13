@@ -1,11 +1,8 @@
 // Phase 6E shared text-control helpers.
 // See radiant/text_control.hpp for the public surface and design rationale.
 
-#include "text_control.hpp"
-#include "text_edit.hpp"
+#include "event.hpp"
 #include "form_control.hpp"
-#include "dom_range.hpp"
-#include "state_store.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/strbuf.h"
 #include "../lib/log.h"

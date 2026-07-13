@@ -4,14 +4,8 @@
 
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/template_registry.h"
-#include "../radiant/clipboard.hpp"
-#include "../radiant/editing.hpp"
+#include "../radiant/event.hpp"
 #include "../radiant/render.hpp"
-#include "../radiant/source_pos_bridge.hpp"
-#include "../radiant/state_machine.hpp"
-#include "../radiant/state_schema.hpp"
-#include "../radiant/text_control.hpp"
-#include "../radiant/text_edit.hpp"
 #include "../radiant/view.hpp"
 
 TemplateRegistry* g_template_registry = NULL;

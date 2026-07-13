@@ -12,8 +12,7 @@
  * helpers `dom_selection_sync_from_*_projection()` live in state_store.cpp.
  */
 
-#include "dom_range_resolver.hpp"
-#include "dom_range.hpp"
+#include "event.hpp"
 #include "view.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"

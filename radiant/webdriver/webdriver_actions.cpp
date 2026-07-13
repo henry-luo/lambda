@@ -7,7 +7,6 @@
 
 #include "webdriver.hpp"
 #include "../event.hpp"
-#include "../state_store.hpp"
 #include "../layout.hpp"
 #include "../render.hpp"
 #include "../../lib/tagged.hpp"
