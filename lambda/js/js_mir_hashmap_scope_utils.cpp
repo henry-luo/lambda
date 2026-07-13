@@ -1,25 +1,15 @@
 #include "js_mir_internal.hpp"
+#include "js_exec_profile.h"
 
 // ============================================================================
 // Hashmap helpers
 // ============================================================================
 
-int js_import_cache_cmp(const void *a, const void *b, void *udata) {
-    (void)udata;
-    return strcmp(((JsImportCacheEntry*)a)->name, ((JsImportCacheEntry*)b)->name);
-}
-uint64_t js_import_cache_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((JsImportCacheEntry*)item)->name,
-        strlen(((JsImportCacheEntry*)item)->name), seed0, seed1);
-}
-
 int js_var_scope_cmp(const void *a, const void *b, void *udata) {
-    (void)udata;
-    return strcmp(((JsVarScopeEntry*)a)->name, ((JsVarScopeEntry*)b)->name);
+    return em_var_scope_cmp(a, b, udata);
 }
 uint64_t js_var_scope_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((JsVarScopeEntry*)item)->name,
-        strlen(((JsVarScopeEntry*)item)->name), seed0, seed1);
+    return em_var_scope_hash(item, seed0, seed1);
 }
 
 int js_local_func_cmp(const void *a, const void *b, void *udata) {
@@ -53,14 +43,15 @@ JsMirTranspiler* jm_create_mir_transpiler(
     memset(mt, 0, sizeof(JsMirTranspiler));
     mt->tp = tp;
     mt->ctx = ctx;
+    mt->em.ctx = ctx;
+    mt->em.note_mir_call = js_exec_profile_note_mir_call;
     mt->is_module = is_module;
     mt->filename = filename;
-    mt->import_cache = hashmap_new(sizeof(JsImportCacheEntry), import_capacity, 0, 0,
-        js_import_cache_hash, js_import_cache_cmp, NULL, NULL);
+    mt->em.import_cache = em_import_cache_new(import_capacity);
+    mt->import_cache = mt->em.import_cache;
     mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), local_func_capacity, 0, 0,
         js_local_func_hash, js_local_func_cmp, NULL, NULL);
-    mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), var_scope_capacity, 0, 0,
-        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
+    mt->var_scopes[0] = em_var_scope_new(var_scope_capacity);
     mt->scope_depth = 0;
     mt->var_hoist_depth = -1;
     mt->loop_scope_depth = -1;
@@ -86,12 +77,17 @@ JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode
 // ============================================================================
 
 MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type) {
-    return mir_new_numbered_reg(mt->ctx, mt->current_func, &mt->reg_counter,
-                                prefix, type);
+    jm_sync_emitter_from_compat(mt);
+    MIR_reg_t reg = em_new_reg(&mt->em, prefix, type);
+    jm_sync_compat_from_emitter(mt);
+    return reg;
 }
 
 MIR_label_t jm_new_label(JsMirTranspiler* mt) {
-    return mir_new_emit_label(mt->ctx);
+    jm_sync_emitter_from_compat(mt);
+    MIR_label_t label = em_new_label(&mt->em);
+    jm_sync_compat_from_emitter(mt);
+    return label;
 }
 
 // Tune6 §3.3: per-opcode emission histogram (env-gated, zero cost when off) to
@@ -128,7 +124,9 @@ void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn) {
         unsigned c = (unsigned)insn->code;
         if (c < JM_OPCODE_HIST_SIZE) g_jm_opcode_hist[c]++;
     }
-    mir_append_emit_insn(mt->ctx, mt->current_func_item, insn);
+    jm_sync_emitter_from_compat(mt);
+    em_emit_insn(&mt->em, insn);
+    jm_sync_compat_from_emitter(mt);
 }
 
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
@@ -136,7 +134,9 @@ void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
         log_error("js-mir: attempt to emit NULL label — skipping");
         return;
     }
-    mir_append_emit_label(mt->ctx, mt->current_func_item, label);
+    jm_sync_emitter_from_compat(mt);
+    em_emit_label(&mt->em, label);
+    jm_sync_compat_from_emitter(mt);
 }
 
 static int jm_find_current_scope_env_slot(JsMirTranspiler* mt, const char* name) {
@@ -262,8 +262,7 @@ MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r) {
 void jm_push_scope(JsMirTranspiler* mt) {
     if (mt->scope_depth >= 63) { log_error("js-mir: scope overflow"); return; }
     mt->scope_depth++;
-    mt->var_scopes[mt->scope_depth] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
-        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
+    mt->var_scopes[mt->scope_depth] = em_var_scope_new(16);
 }
 
 // v20: Find the formal parameter index for a variable name in arguments aliasing.

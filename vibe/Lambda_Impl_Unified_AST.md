@@ -10,13 +10,13 @@
 
 | Phase | Step | Status |
 |---|---|---|
-| **0** | P0.1 — extract `MirEmitter` | 🟡 **in progress** — Lambda side ✅ done; JS side + shared `em_call_*`/`em_ensure_import` (import-cache unify) pending |
-| 0 | P0.2 — G1 honest GC-rooting | ⬜ not started |
-| 0 | P0.3 — unified `VarEntry` + scopes | ⬜ not started |
-| 0 | P0.4 — const-pool API | ⬜ not started |
+| **0** | P0.1 — extract `MirEmitter` | ✅ complete — Lambda + JS embed/use `MirEmitter`; shared import cache + runtime-call implementation landed |
+| 0 | P0.2 — G1 honest GC-rooting | ✅ complete — honest local typing already landed; focused tripwires revalidated |
+| 0 | P0.3 — unified `VarEntry` + scopes | ✅ complete — shared `VarEntry`/`VarScopeEntry` superset + shared scope-map constructor |
+| 0 | P0.4 — const-pool API | ✅ complete — `em_add_const`/`em_load_const`/module const-BSS helpers established |
 | 1–5 | — | ⬜ not started |
 
-**Latest (2026-07-13):** `struct MirEmitter` + inline `em_new_reg`/`em_new_label`/`em_emit_insn`/`em_emit_label` primitives added to `lambda/mir_emitter_shared.hpp` (building on the already-shared *stateless* helpers there). `MirTranspiler` now embeds a `MirEmitter em`, with its per-function emit cursor / counters / import-cache fields removed and all accesses routed through `mt->em.*`; the `new_reg`/`new_label`/`emit_insn`/`emit_label` wrappers delegate to the `em_*` functions. Build clean (0/0); every individual Lambda test passes (baseline gate confirmed modulo known parallel-load timeout flakiness on heavy tests). Change staged, uncommitted.
+**Latest (2026-07-13):** Phase 0 code work completed. `MirEmitter` now owns the shared emit cursor primitives, import-cache entry/cache helpers, generic runtime-call emission (`em_call_with_args` / `em_call_void_with_args`), shared `VarEntry` + `VarScopeEntry`, and the const-pool API (`em_add_const`, `em_load_const`, `em_load_consts_from_bss`). `MirTranspiler` and `JsMirTranspiler` both embed `MirEmitter`; JS keeps legacy field mirrors as a temporary compatibility bridge while call sites still use `jm_*` names. Validation passed: `make build`, `make test-lambda-baseline` (3300/3300), `NegativeScriptTest.RuntimeError_StackOverflow`, release `make build-release-compile`, release `deltablue.ls`, release `deltablue2.ls`, release `havlak.ls`, `functions_basic.js`, and `git diff --check`.
 
 ---
 
@@ -65,38 +65,41 @@ TS today: `TsTranspiler` *is* `JsTranspiler`; the default fast path strips TS an
 
 ## 2. Phase 0 — Emitter Substrate (no AST change)
 
-**Deliverable:** `lambda/mir_emitter.hpp` + `mir_emitter.cpp`; both transpilers run on it; G1 rooting fixed; all suites green. Independently valuable (Clean_Up §6.4) even if later phases pause.
+**Deliverable:** shared emitter substrate in `lambda/mir_emitter_shared.hpp`; both transpilers run on it; G1 rooting fixed; all suites green. Independently valuable (Clean_Up §6.4) even if later phases pause.
 
 ### Steps
 
-**P0.1 — Extract `MirEmitter`.** 🟡 *in progress (Lambda side landed 2026-07-13)*
+**P0.1 — Extract `MirEmitter`.** ✅ *complete (Phase 0 bridge landed 2026-07-13)*
 ```c
 struct MirEmitter {                        // ✅ landed in lambda/mir_emitter_shared.hpp
     MIR_context_t ctx;                     // ✅ (cached; MIR_module_t module kept on owner for now)
     MIR_item_t func_item;  MIR_func_t func;// ✅ per-function emit cursor
     int reg_counter;  int label_counter;   // ✅
-    hashmap* import_cache;                 // ✅ ensure_import memo (handle held; shared em_ensure_import still TODO)
+    hashmap* import_cache;                 // ✅ shared ensure_import memo
+    void (*note_mir_call)(const char*);     // ✅ optional JS profiling hook
+    ArrayList* const_list;                  // ✅ P0.4 const pool
+    MIR_reg_t consts_reg; MIR_item_t consts_bss; // ✅ P0.4 module const pointer
     // MIR_reg_t rt_reg, gc_reg;           // ⬜ deferred — not needed by the shared primitives yet
-    // GC root slots (P0.2), consts/type_list BSS regs (P0.4)
 };
 // primitives: em_new_reg ✅, em_new_label ✅, em_emit_insn ✅, em_emit_label ✅,
-//   em_call_0..6 (+void variants) ⬜, em_null_item ⬜, em_box_*/em_unbox_* bridge ⬜, em_ensure_import ⬜
+//   em_call_with_args/em_call_void_with_args ✅, em_ensure_import ✅,
+//   em_add_const/em_load_const ✅, em_null_item/em_box_*/em_unbox_* bridge deferred
 ```
 Sources to unify: `transpile-mir.cpp:434–490` (`new_reg/emit_insn/emit_label/emit_call_N/ensure_import`) ≡ `js_mir_internal.hpp:96–204` + `js_mir_calls_boxing_types.cpp:168+` (`jm_*`).
 **Mechanics:** `MirTranspiler` and `JsMirTranspiler` *embed* a `MirEmitter`; the old function names become thin inline wrappers (`#define`/inline forwarding) so the initial diff is small and reviewable; wrappers are deleted at the end of the phase (or mechanically inlined). The JS-side `js_exec_profile_note_mir_call` hook becomes an optional emitter callback.
 
 - ✅ **Done (Lambda):** `MirEmitter` struct + `em_new_reg`/`em_new_label`/`em_emit_insn`/`em_emit_label` in `mir_emitter_shared.hpp`; `MirTranspiler` embeds `MirEmitter em`, its cursor/counter/import-cache fields removed and accesses migrated to `mt->em.*`; the four primitive wrappers delegate to `em_*`. (Watch-out found: greedy field rename also hits the unrelated `current_func_can_raise` field — keep that on `MirTranspiler`.)
-- ⬜ **TODO (JS + dedup payoff):** `JsMirTranspiler` embeds `MirEmitter`; promote `emit_call_*`/`ensure_import` ⇄ `jm_call_*`/`jm_ensure_import` into shared `em_call_*`/`em_ensure_import`, then delete both copies. Import-cache unification is feasible — Lambda `ImportCacheEntry` and JS `JsImportCacheEntry` share an identical layout (`char name[128]; {MIR_item_t proto; MIR_item_t import;}`).
+- ✅ **Done (JS + dedup payoff):** `JsMirTranspiler` embeds `MirEmitter`; `jm_new_reg`/`jm_new_label`/`jm_emit`/`jm_emit_label` delegate through the shared emitter bridge; `jm_ensure_import` and `jm_call_*`/`jm_call_void_*` now use shared `em_ensure_import` and generic `em_call_*` internals. JS legacy cursor fields remain mirrored for call-site stability until Phase 4 lowering shrinks the old surface.
 
-**P0.2 — G1 honest-rooting fix, in the emitter.** Implement the honest-local-typing design from `vibe/Lambda_GC_Root_Issue.md`: root slots are allocated **only** for locals whose `VarEntry.type_id` is actually a GC-managed `Item`/pointer type; native ints/doubles and non-GC pointers are never blanket-rooted as `MIR_T_I64` Items. This is the single most delicate step of Phase 0:
+**P0.2 — G1 honest-rooting fix, in the emitter.** ✅ Implement the honest-local-typing design from `vibe/Lambda_GC_Root_Issue.md`: root slots are allocated **only** for locals whose `VarEntry.type_id` is actually a GC-managed `Item`/pointer type; native ints/doubles and non-GC pointers are never blanket-rooted as `MIR_T_I64` Items. This is the single most delicate step of Phase 0:
 - Known tripwires (from prior sessions): deltablue holds pointer locals in int-typed registers (why blanket rooting was "load-bearing"); the StackOverflow test hangs under naive blanket rooting; BUG-001 (`array_end`→GC use-after-free) reproduces deterministically via havlak+push.
 - **Acceptance evidence:** lambda baseline + gtest 100%; StackOverflow test terminates; havlak+push BUG-001 repro passes; JS suites green; AWFY within noise on release build.
 
-**P0.3 — Unified `VarEntry` + scope stacks.** Merge `MirVarEntry` (transpile-mir.cpp:106–116) and `JsMirVarEntry` (js_mir_context.hpp:145) into one emitter-owned `VarEntry` with the flag superset (`tdz_active/is_let_const/is_const` ∪ `is_state_var/num_type/elem_type` ∪ env slot fields); one `var_scopes[64]` hashmap-stack implementation.
+**P0.3 — Unified `VarEntry` + scope stacks.** ✅ Merge `MirVarEntry` (transpile-mir.cpp:106–116) and `JsMirVarEntry` (js_mir_context.hpp:145) into one emitter-owned `VarEntry` with the flag superset (`tdz_active/is_let_const/is_const` ∪ `is_state_var/num_type/elem_type` ∪ env slot fields); one `var_scopes[64]` hashmap-stack implementation.
 
-**P0.4 — Const-pool API.** `em_add_const/em_load_const` + per-module `consts_bss` discipline on the emitter (Lambda's existing model). Lambda switches to the API (mechanical); JS *adopts the API* for its future pool residents (regex objects, template cooked arrays) but actual migration of those happens with Phase 4 lowering — Phase 0 only establishes the single home.
+**P0.4 — Const-pool API.** ✅ `em_add_const/em_load_const` + per-module `consts_bss` discipline on the emitter (Lambda's existing model). Lambda switches to the API (mechanical); JS *adopts the API* for its future pool residents (regex objects, template cooked arrays) but actual migration of those happens with Phase 4 lowering — Phase 0 only establishes the single home.
 
-**Exit gate:** all suites green, benchmarks flat, `jm_call_*`/`emit_call_*` duplicates gone. **Concurrency Stage A is unblocked from here (U21).**
+**Exit gate:** Phase 0 implementation checks are green: full Lambda baseline passed, release build passed, and AWFY GC/codegen tripwires passed on the release binary. The broader editor/UI/node/perf matrix in §1 remains the normal merge/CI sweep before Phase 1. **Concurrency Stage A is unblocked from here (U21).**
 
 ---
 

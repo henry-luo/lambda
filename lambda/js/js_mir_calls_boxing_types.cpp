@@ -102,28 +102,10 @@ JsMirImportEntry* jm_ensure_import(JsMirTranspiler* mt, const char* name,
 #ifdef JS_MIR_EMIT_TELEMETRY
     jm_telemetry_record(name);
 #endif
-    JsImportCacheEntry key;
-    memset(&key, 0, sizeof(key));
-    mir_format_import_key(key.name, sizeof(key.name), name,
-        ret_type, nargs, args, nres, true);
-
-    JsImportCacheEntry* found = (JsImportCacheEntry*)hashmap_get(mt->import_cache, &key);
-    if (found) return &found->entry;
-
-    MIR_item_t proto = NULL;
-    MIR_item_t imp = NULL;
-    mir_create_import_proto_pair(mt->ctx, name, ret_type, nargs, args, nres,
-        true, &proto, &imp);
-
-    JsImportCacheEntry new_entry;
-    memset(&new_entry, 0, sizeof(new_entry));
-    snprintf(new_entry.name, sizeof(new_entry.name), "%s", key.name);
-    new_entry.entry.proto = proto;
-    new_entry.entry.import = imp;
-    hashmap_set(mt->import_cache, &new_entry);
-
-    found = (JsImportCacheEntry*)hashmap_get(mt->import_cache, &key);
-    return &found->entry;
+    jm_sync_emitter_from_compat(mt);
+    JsMirImportEntry* entry = em_ensure_import(&mt->em, name, ret_type, nargs, args, nres, true);
+    jm_sync_compat_from_emitter(mt);
+    return entry;
 }
 
 // Item(Item, Item)
@@ -157,16 +139,10 @@ static MIR_reg_t jm_call_with_args(JsMirTranspiler* mt,
         log_error("[JS_MIR_CALL] unsupported return-call arity %d for %s", nargs, fn_name);
         return 0;
     }
-    js_exec_profile_note_mir_call(fn_name);
-    MIR_var_t args[MIR_SHARED_MAX_CALL_ARGS];
-    if (nargs > 0) {
-        mir_prepare_call_args(args, arg_types, nargs);
-    }
-    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, nargs,
-                                            nargs ? args : NULL, 1);
-    MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
-    jm_emit(mt, mir_new_call_with_args(mt->ctx, ie->proto, ie->import,
-        res, nargs, arg_ops));
+    jm_sync_emitter_from_compat(mt);
+    MIR_reg_t res = em_call_with_args(&mt->em, fn_name, ret_type, nargs,
+        arg_types, arg_ops, true);
+    jm_sync_compat_from_emitter(mt);
     return res;
 }
 
@@ -179,15 +155,9 @@ static void jm_call_void_with_args(JsMirTranspiler* mt,
         log_error("[JS_MIR_CALL] unsupported void-call arity %d for %s", nargs, fn_name);
         return;
     }
-    js_exec_profile_note_mir_call(fn_name);
-    MIR_var_t args[MIR_SHARED_MAX_CALL_ARGS];
-    if (nargs > 0) {
-        mir_prepare_call_args(args, arg_types, nargs);
-    }
-    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, nargs,
-                                            nargs ? args : NULL, 0);
-    jm_emit(mt, mir_new_call_with_args(mt->ctx, ie->proto, ie->import,
-        0, nargs, arg_ops));
+    jm_sync_emitter_from_compat(mt);
+    em_call_void_with_args(&mt->em, fn_name, nargs, arg_types, arg_ops, true);
+    jm_sync_compat_from_emitter(mt);
 }
 
 MIR_reg_t jm_call_0(JsMirTranspiler* mt, const char* fn_name, MIR_type_t ret_type) {
@@ -291,20 +261,20 @@ void jm_call_void_5(JsMirTranspiler* mt, const char* fn_name,
 
 MIR_reg_t jm_emit_null(JsMirTranspiler* mt) {
     MIR_reg_t r = jm_new_reg(mt, "null", MIR_T_I64);
-    mir_emit_i64_const_to_reg(mt->ctx, mt->current_func_item, r, (int64_t)ITEM_NULL_VAL);
+    mir_emit_i64_const_to_reg(mt->ctx, mt->em.func_item, r, (int64_t)ITEM_NULL_VAL);
     return r;
 }
 
 // v17: emit JS undefined value (for strict mode this coercion)
 MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt) {
     MIR_reg_t r = jm_new_reg(mt, "undef", MIR_T_I64);
-    mir_emit_i64_const_to_reg(mt->ctx, mt->current_func_item, r, (int64_t)ITEM_JS_UNDEFINED);
+    mir_emit_i64_const_to_reg(mt->ctx, mt->em.func_item, r, (int64_t)ITEM_JS_UNDEFINED);
     return r;
 }
 
 MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt) {
     MIR_reg_t r = jm_new_reg(mt, "item_error", MIR_T_I64);
-    mir_emit_i64_const_to_reg(mt->ctx, mt->current_func_item, r,
+    mir_emit_i64_const_to_reg(mt->ctx, mt->em.func_item, r,
         (int64_t)(((uint64_t)LMD_TYPE_ERROR) << 56));
     return r;
 }

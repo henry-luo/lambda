@@ -12216,8 +12216,7 @@ static struct hashmap* jm_clone_var_scope_map(struct hashmap* src) {
     size_t count = hashmap_count(src);
     size_t cap = count + 8;
     if (cap < 16) cap = 16;
-    struct hashmap* dst = hashmap_new(sizeof(JsVarScopeEntry), cap, 0, 0,
-        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
+    struct hashmap* dst = em_var_scope_new((int)cap); // INT_CAST_OK: hashmap capacity is count-sized API.
     if (!dst) return NULL;
 
     size_t iter = 0;
