@@ -303,6 +303,10 @@ function discoverTests(config) {
                     displayName: t.name || baseName,
                     icon: t.icon || '🧪',
                     isGtest: baseName.endsWith('_gtest') || libs.includes('gtest') || libs.includes('gtest_main'),
+                    // Some GTest binaries launch their own worker processes; respect
+                    // config-level serialization so nested async subprocesses are not
+                    // starved by the outer suite scheduler.
+                    exclusive: t.parallel === false || suite.parallel === false || t.exclusive === true,
                 });
             }
         }
