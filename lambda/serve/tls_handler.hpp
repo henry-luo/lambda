@@ -51,6 +51,10 @@ struct TlsContext {
     mbedtls_x509_crt        *ca_chain;
     mbedtls_entropy_context  *entropy;
     mbedtls_ctr_drbg_context *ctr_drbg;
+    mbedtls_x509_crt        *extra_certs[8];
+    mbedtls_pk_context      *extra_keys[8];
+    int                      ciphersuites[32];
+    int                      extra_cert_count;
     int                      initialized;
 };
 
@@ -60,6 +64,7 @@ void        tls_context_destroy(TlsContext *ctx);
 
 // load certificates into an existing context
 int tls_load_certificates(TlsContext *ctx, const char *cert_file, const char *key_file);
+int tls_add_certificates(TlsContext *ctx, const char *cert_file, const char *key_file);
 int tls_set_ca_certificates(TlsContext *ctx, const char *ca_file);
 
 // ============================================================================

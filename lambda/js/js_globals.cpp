@@ -10122,6 +10122,35 @@ extern "C" Item js_object_keys(Item object) {
     return final_result;
 }
 
+extern "C" Item js_typed_array_enumerable_custom_keys(Item object) {
+    Item result = js_array_new(0);
+    if (get_type_id(object) != LMD_TYPE_MAP || !object.map ||
+        object.map->map_kind != MAP_KIND_TYPED_ARRAY) {
+        return result;
+    }
+
+    int ta_len = js_typed_array_length(object);
+    Map* m = object.map;
+    TypeMap* tm = (TypeMap*)m->type;
+    ShapeEntry* e = tm ? tm->shape : NULL;
+    while (e) {
+        const char* s = e->name->str;
+        int slen = (int)e->name->length;
+        if (!js_is_engine_internal_enumeration_key(s, slen)) {
+            JsShapeSlotStatus status = js_own_shape_slot_status(object, s, slen, NULL, NULL);
+            if ((status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) &&
+                js_props_query_enumerable(m, e, s, slen)) {
+                int64_t num_idx = js_parse_array_index(s, slen);
+                if (num_idx < 0 || num_idx >= ta_len) {
+                    js_array_push(result, (Item){.item = s2it(heap_create_name(s, slen))});
+                }
+            }
+        }
+        e = e->next;
+    }
+    return result;
+}
+
 // =============================================================================
 // js_to_string_val — convert any value to string (returns Item)
 // =============================================================================
@@ -18070,6 +18099,11 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
         Item cst_fn = js_new_function((void*)js_error_captureStackTrace, 2);
         Item cst_key = (Item){.item = s2it(heap_create_name("captureStackTrace", 17))};
         js_func_init_property(fn_item, cst_key, cst_fn);
+        // stack capture is eager in LambdaJS, so the V8 default limit must be
+        // materialized on Error before diagnostic-heavy tests recurse deeply.
+        js_func_init_property(fn_item,
+            (Item){.item = s2it(heap_create_name("stackTraceLimit", 15))},
+            (Item){.item = i2it(10)});
     }
     return fn_item;
 }

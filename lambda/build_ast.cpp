@@ -1039,7 +1039,7 @@ bool should_continue_transpiling(Transpiler* tp) {
 
 // Forward declaration for closure capture analysis
 void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_scope,
-                                 NameScope* global_scope, CaptureInfo** captures);
+                                 NameScope* global_scope, FnCapture** captures);
 
 // Check if a scope is an ancestor of another scope
 bool is_ancestor_scope(NameScope* ancestor, NameScope* descendant) {
@@ -1150,22 +1150,30 @@ static void validate_compound_mutable_root(Transpiler* tp, TSNode assign_node, A
 }
 
 // Add a capture to the list if not already present
-void add_capture(Transpiler* tp, CaptureInfo** captures, String* name, NameEntry* entry) {
+void add_capture(Transpiler* tp, FnCapture** captures, String* name, NameEntry* entry) {
     // Check if already captured
-    CaptureInfo* c = *captures;
+    FnCapture* c = *captures;
     while (c) {
-        if (c->name == name || (c->name && name &&
-            c->name->len == name->len &&
-            memcmp(c->name->chars, name->chars, name->len) == 0)) {
+        if (c->lambda_name == name || (c->lambda_name && name &&
+            c->lambda_name->len == name->len &&
+            memcmp(c->lambda_name->chars, name->chars, name->len) == 0)) {
             return; // already captured
         }
         c = c->next;
     }
 
     // Add new capture
-    CaptureInfo* capture = (CaptureInfo*)pool_calloc(tp->pool, sizeof(CaptureInfo));
-    capture->name = name;
+    FnCapture* capture = (FnCapture*)pool_calloc(tp->pool, sizeof(FnCapture));
+    capture->lambda_name = name;
+    if (name) {
+        int name_len = name->len < sizeof(capture->name) - 1 ? (int)name->len : (int)sizeof(capture->name) - 1;
+        memcpy(capture->name, name->chars, name_len);
+        capture->name[name_len] = '\0';
+        memcpy(capture->scope_env_key, capture->name, (size_t)name_len + 1);
+    }
     capture->entry = entry;
+    capture->scope_env_slot = -1;
+    capture->grandparent_slot = -1;
     capture->is_mutable = false;
     capture->next = *captures;
     *captures = capture;
@@ -1173,12 +1181,12 @@ void add_capture(Transpiler* tp, CaptureInfo** captures, String* name, NameEntry
 }
 
 // Mark an existing capture as mutable (called when assignment to captured var is detected)
-void mark_capture_mutable(CaptureInfo** captures, String* name) {
-    CaptureInfo* c = *captures;
+void mark_capture_mutable(FnCapture** captures, String* name) {
+    FnCapture* c = *captures;
     while (c) {
-        if (c->name == name || (c->name && name &&
-            c->name->len == name->len &&
-            memcmp(c->name->chars, name->chars, name->len) == 0)) {
+        if (c->lambda_name == name || (c->lambda_name && name &&
+            c->lambda_name->len == name->len &&
+            memcmp(c->lambda_name->chars, name->chars, name->len) == 0)) {
             c->is_mutable = true;
             log_debug("capture marked mutable: %.*s", (int)name->len, name->chars);
             return;
@@ -1189,7 +1197,7 @@ void mark_capture_mutable(CaptureInfo** captures, String* name) {
 
 // Recursively collect captures from an AST node
 void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_scope,
-                                 NameScope* global_scope, CaptureInfo** captures) {
+                                 NameScope* global_scope, FnCapture** captures) {
     if (!node) return;
 
     switch (node->node_type) {
@@ -1371,14 +1379,14 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         // nested functions for closure environment construction.
         AstFuncNode* nested_fn = (AstFuncNode*)node;
         if (nested_fn->captures) {
-            CaptureInfo* cap = nested_fn->captures;
+            FnCapture* cap = nested_fn->captures;
             while (cap) {
                 // Check if this captured variable is NOT local to the current function's scope
                 // and NOT global. If so, the current function also needs to capture it.
                 if (cap->entry && !cap->entry->import &&
                     !is_local_to_scope(cap->entry, fn_scope) &&
                     !is_global_entry(cap->entry, global_scope)) {
-                    add_capture(tp, captures, cap->name, cap->entry);
+                    add_capture(tp, captures, cap->lambda_name, cap->entry);
                 }
                 cap = cap->next;
             }
@@ -1395,18 +1403,25 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
 void analyze_captures(Transpiler* tp, AstFuncNode* fn_node, NameScope* global_scope) {
     fn_node->captures = nullptr;
     collect_captures_from_node(tp, fn_node->body, fn_node->vars, global_scope, &fn_node->captures);
+    if (!fn_node->analysis) {
+        fn_node->analysis = (FnAnalysis*)pool_calloc(tp->pool, sizeof(FnAnalysis));
+    }
+    fn_node->analysis->captures = fn_node->captures;
+    fn_node->analysis->capture_count = 0;
 
     if (fn_node->captures) {
         log_debug("function %.*s has captures:",
             fn_node->name ? (int)fn_node->name->len : 5,
             fn_node->name ? fn_node->name->chars : "anon");
-        CaptureInfo* c = fn_node->captures;
+        FnCapture* c = fn_node->captures;
         while (c) {
-            log_debug("  - %.*s", (int)c->name->len, c->name->chars);
+            fn_node->analysis->capture_count++;
+            String* capture_name = c->lambda_name;
+            log_debug("  - %.*s", (int)capture_name->len, capture_name->chars);
             if (c->is_mutable) {
                 record_semantic_error(tp, fn_node->node, ERR_IMMUTABLE_ASSIGNMENT,
                     "cannot mutate captured binding '%.*s'. pass it as `var` to a pn or return a new value.",
-                    (int)c->name->len, c->name->chars);
+                    (int)capture_name->len, capture_name->chars);
             }
             c = c->next;
         }

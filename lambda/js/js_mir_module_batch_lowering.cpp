@@ -412,7 +412,7 @@ static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode*
     const char* name, char* out_key);
 
 static const char* jm_capture_scope_env_slot_key(JsFuncCollected* parent, JsFuncCollected* child,
-        JsCaptureEntry* cap) {
+        FnCapture* cap) {
     if (!cap) return "";
     if (jm_parent_has_duplicate_lexical_slot_name(parent, cap->name)) {
         if (!cap->scope_env_key[0] || strcmp(cap->scope_env_key, cap->name) == 0) {
@@ -2670,10 +2670,10 @@ static int jm_p6_param_index_for_identifier(JsAstNode* arg, JsFuncCollected* fc)
     return -1;
 }
 
-static TypeId jm_p6_evidence_type(P6NarrowEvidence* e) {
-    if (!e || e->other_count > 0) return LMD_TYPE_ANY;
-    if (e->float_count > 0) return LMD_TYPE_FLOAT;
-    if (e->int_count > 0) return LMD_TYPE_FLOAT;
+static TypeId jm_p6_evidence_type(FnParamEvidence* e) {
+    if (!e || e->other_evidence > 0) return LMD_TYPE_ANY;
+    if (e->float_evidence > 0) return LMD_TYPE_FLOAT;
+    if (e->int_evidence > 0) return LMD_TYPE_FLOAT;
     return LMD_TYPE_ANY;
 }
 
@@ -2704,7 +2704,7 @@ static bool jm_p6_function_allows_native_specialization(JsFuncCollected* fc) {
 
 static TypeId jm_p6_arg_type_with_evidence(JsMirTranspiler* mt, JsAstNode* arg,
                                            JsFuncCollected* fc,
-                                           P6NarrowEvidence* evidence_for_func) {
+                                           FnParamEvidence* evidence_for_func) {
     int param_index = jm_p6_param_index_for_identifier(arg, fc);
     if (param_index >= 0) {
         TypeId evidence_type = jm_p6_evidence_type(&evidence_for_func[param_index]);
@@ -2960,7 +2960,7 @@ void jm_p4b_ctor_walk(JsMirTranspiler* mt, JsAstNode* node,
 // Per-function, per-param call-site evidence
 // Walk AST collecting call-site argument types for narrowing
 void jm_p6_narrow_walk(JsMirTranspiler* mt, JsAstNode* node,
-                               P6NarrowEvidence evidence[][16]) {
+                               FnParamEvidence evidence[][16]) {
     if (!node) return;
     switch (node->node_type) {
     case JS_AST_NODE_CALL_EXPRESSION: {
@@ -2974,9 +2974,9 @@ void jm_p6_narrow_walk(JsMirTranspiler* mt, JsAstNode* node,
                 // boolean arguments must stay boxed; treating them as INT makes
                 // native conditions read boxed boolean tags as nonzero numbers.
                 if (at == LMD_TYPE_INT || at == LMD_TYPE_FLOAT)
-                    evidence[fi][pi].float_count++;
+                    evidence[fi][pi].float_evidence++;
                 else
-                    evidence[fi][pi].other_count++;
+                    evidence[fi][pi].other_evidence++;
                 if (arg) arg = arg->next;
             }
         }
@@ -5132,7 +5132,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // module-level slot. Loop bindings use those slots only inside copied
         // closure envs so they keep per-iteration semantics.
         auto capture_is_module_shadow_lexical = [&](JsFuncCollected* child,
-                JsCaptureEntry* cap) -> bool {
+                FnCapture* cap) -> bool {
             if (!child || !cap) return false;
             if (!jm_name_set_has(duplicate_module_block_const_lexicals, cap->name)) return false;
             char derived_key[128];
@@ -5147,7 +5147,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             return true;
         };
 
-        auto capture_qualifies = [&](JsFuncCollected* child, JsCaptureEntry* cap) -> bool {
+        auto capture_qualifies = [&](JsFuncCollected* child, FnCapture* cap) -> bool {
             if (!cap) return false;
             const char* name = cap->name;
             if (!cap->is_let_const) return false;
@@ -5166,7 +5166,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             return true;
         };
 
-        auto capture_slot_key = [&](JsFuncCollected* child, JsCaptureEntry* cap) -> const char* {
+        auto capture_slot_key = [&](JsFuncCollected* child, FnCapture* cap) -> const char* {
             if (!cap) return "";
             if (cap->scope_env_key[0] && strcmp(cap->scope_env_key, cap->name) != 0) {
                 JsModuleConstEntry mclookup;
@@ -5205,7 +5205,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             return true;
         };
 
-        auto capture_is_shared_module_binding = [&](JsFuncCollected* child, JsCaptureEntry* cap) -> bool {
+        auto capture_is_shared_module_binding = [&](JsFuncCollected* child, FnCapture* cap) -> bool {
             if (!cap) return false;
             if (!capture_qualifies(child, cap)) {
                 return false;
@@ -5220,7 +5220,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             bool has_private = false;
             bool has_shared = false;
             for (int k = 0; k < child->capture_count; k++) {
-                JsCaptureEntry* cap = &child->captures[k];
+                FnCapture* cap = &child->captures[k];
                 if (!capture_qualifies(child, cap)) continue;
                 if (cap->force_env_capture || jm_name_set_has(for_init_lets, cap->name)) {
                     has_private = true;
@@ -5232,7 +5232,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         };
 
         auto include_capture = [&](JsFuncCollected* child, int k) -> bool {
-            JsCaptureEntry* cap = &child->captures[k];
+            FnCapture* cap = &child->captures[k];
             return capture_qualifies(child, cap);
         };
 
@@ -5297,7 +5297,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     child->closure_env_has_parent_link = true;
                     child->closure_env_parent_link_slot = total;
                     for (int k = 0; k < child->capture_count; k++) {
-                        JsCaptureEntry* cap = &child->captures[k];
+                        FnCapture* cap = &child->captures[k];
                         if (capture_is_shared_module_binding(child, cap) && cap->scope_env_slot >= 0) {
                             // copied envs keep loop lets private; outer module
                             // lets must still mutate the shared parent slot.
@@ -5682,8 +5682,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // narrow to INT/FLOAT when ALL call sites pass compatible types.
     if (mt->func_count > 0) {
         // allocate evidence per function per param (max 16 params)
-        P6NarrowEvidence (*evi)[16] = (P6NarrowEvidence (*)[16])mem_calloc(
-            mt->func_count * 16, sizeof(P6NarrowEvidence), MEM_CAT_JS_RUNTIME);
+        FnParamEvidence (*evi)[16] = (FnParamEvidence (*)[16])mem_calloc(
+            mt->func_count * 16, sizeof(FnParamEvidence), MEM_CAT_JS_RUNTIME);
         // Program bodies are linked statement lists; walking only the head
         // misses later top-level calls that seed recursive parameter types.
         for (JsAstNode* top = (JsAstNode*)program->body; top; top = top->next) {
@@ -5703,21 +5703,21 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             bool narrowed = false;
             for (int p = 0; p < fc->param_count && p < 16; p++) {
                 if (fc->param_types[p] != LMD_TYPE_ANY) continue;
-                P6NarrowEvidence* e = &evi[i][p];
-                int total = e->int_count + e->float_count + e->other_count;
+                FnParamEvidence* e = &evi[i][p];
+                int total = e->int_evidence + e->float_evidence + e->other_evidence;
                 if (total == 0) continue; // never called
-                if (e->other_count > 0) continue; // something non-numeric passed
-                if (e->float_count > 0 && e->int_count == 0) {
+                if (e->other_evidence > 0) continue; // something non-numeric passed
+                if (e->float_evidence > 0 && e->int_evidence == 0) {
                     fc->param_types[p] = LMD_TYPE_FLOAT;
                     narrowed = true;
                     log_info("P6 narrow %s param[%d] → FLOAT (calls: %d int, %d float, %d other)",
-                             fc->name, p, e->int_count, e->float_count, e->other_count);
+                             fc->name, p, e->int_evidence, e->float_evidence, e->other_evidence);
                 } else {
                     // mixed int+float → narrow to FLOAT (int is promotable)
                     fc->param_types[p] = LMD_TYPE_FLOAT;
                     narrowed = true;
                     log_info("P6 narrow %s param[%d] → FLOAT (mixed: %d int, %d float)",
-                             fc->name, p, e->int_count, e->float_count);
+                             fc->name, p, e->int_evidence, e->float_evidence);
                 }
             }
             if (narrowed) {
