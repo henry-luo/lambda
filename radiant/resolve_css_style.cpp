@@ -8193,7 +8193,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 block->blk->break_before = value->data.keyword;
                 log_debug("[CSS] break-before: %s",
-                          css_enum_info(value->data.keyword) ? css_enum_info(value->data.keyword)->name : "unknown");
+                          css_enum_name_or_unknown(css_enum_info(value->data.keyword)));
             }
             break;
         }
@@ -8207,7 +8207,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 block->blk->break_after = value->data.keyword;
                 log_debug("[CSS] break-after: %s",
-                          css_enum_info(value->data.keyword) ? css_enum_info(value->data.keyword)->name : "unknown");
+                          css_enum_name_or_unknown(css_enum_info(value->data.keyword)));
             }
             break;
         }

@@ -1460,6 +1460,52 @@ static void table_scale_columns(float* col_widths, int columns, float scale) {
     });
 }
 
+static void table_position_row_group_box(ViewTable* table, TableMetadata* meta,
+                                         ViewBlock* child, float* col_widths,
+                                         float* col_x_positions, int columns,
+                                         bool has_direct_float, float* current_y) {
+    float tbody_content_width = 0.0f;
+    if (table->tb->border_collapse) {
+        tbody_content_width = col_x_positions[columns] - col_x_positions[0];
+        log_debug("%s Border-collapse tbody width: col_positions[%d]=%.1f - col_positions[0]=%.1f = %.1f",
+                  table->source_loc(), columns, col_x_positions[columns],
+                  col_x_positions[0], tbody_content_width);
+    } else {
+        tbody_content_width = table_sum_span_columns(col_widths, 0, columns, columns);
+        if (table->tb->border_spacing_h > 0.0f && columns > 1) {
+            tbody_content_width += (columns - 1) * table->tb->border_spacing_h;
+        }
+    }
+
+    // table-internal floats can leave a row group with no formal columns.
+    if (tbody_content_width <= 0.0f && table->width > 0.0f && columns == 0) {
+        tbody_content_width = table->width;
+        log_debug("%s No columns: using table->width %.1f for tbody_content_width",
+                  table->source_loc(), table->width);
+    }
+
+    *current_y = table_clear_direct_float_intrusion(
+        table, *current_y, tbody_content_width, has_direct_float);
+
+    float float_shift_x = 0.0f;
+    if (has_direct_float && table->width > 0.0f && tbody_content_width > 0.0f) {
+        float left_intrusion = table_direct_left_float_intrusion(table, *current_y, table->width);
+        float max_shift = table->width - tbody_content_width;
+        if (max_shift < 0.0f) max_shift = 0.0f;
+        if (left_intrusion > max_shift) left_intrusion = max_shift;
+        float_shift_x = left_intrusion;
+    }
+
+    child->x = table->tb->border_collapse
+        ? meta->collapsed_border_left / 2.0f + float_shift_x
+        : col_x_positions[0] + float_shift_x;
+    child->y = *current_y;
+    child->width = tbody_content_width;
+    log_debug("%s Row group positioned at x=%.1f, y=%.1f, width=%.1f (tbody_content_width=%.1f, columns=%d)",
+              table->source_loc(), child->x, child->y, child->width,
+              tbody_content_width, columns);
+}
+
 static bool table_columns_within_tolerance(float* col_widths, int columns, float tolerance) {
     if (!col_widths || columns <= 0) return false;
     float first_width = col_widths[0];
@@ -1642,6 +1688,232 @@ static void table_apply_auto_column_width_distribution(TableMetadata* meta, floa
     }
 }
 
+static float table_apply_auto_available_width_constraint(
+    LayoutContext* lycon, ViewTable* table, TableMetadata* meta,
+    float* pref_table_width, float min_table_width) {
+    if (!pref_table_width) return 0.0f;
+
+    float container_width = 0.0f;
+    bool margins_already_subtracted = false;
+    bool table_box_already_subtracted = false;
+
+    // float-avoidance BFCs already hand over a reduced content box.
+    if (lycon->block.content_width > 0.0f) {
+        container_width = lycon->block.content_width;
+        margins_already_subtracted = true;
+        table_box_already_subtracted = true;
+        log_debug("Container width from lycon content_width (BFC float avoidance): %.1fpx",
+                  container_width);
+    }
+
+    if (container_width <= 0.0f) {
+        ViewBlock* parent = lam::view_as_block(static_cast<View*>(table->parent));
+        if (parent && parent->width > 0.0f) {
+            container_width = parent->width;
+            if (parent->bound) {
+                container_width -= layout_box_metrics(parent).pad_border_h;
+            }
+            log_debug("Container width from parent element: %.1fpx (parent->width=%.1f)",
+                      container_width, parent->width);
+        }
+    }
+
+    if (container_width <= 0.0f) {
+        container_width = lycon->line.right - lycon->line.left;
+    }
+
+    if (container_width <= 0.0f && lycon->available_space.width.is_definite()) {
+        container_width = lycon->available_space.width.to_px_or_zero();
+    }
+
+    if (!margins_already_subtracted) {
+        float margin_left = 0.0f, margin_right = 0.0f;
+        if (table->bound) {
+            margin_left = table->bound->margin.left;
+            margin_right = table->bound->margin.right;
+        }
+        container_width -= margin_left + margin_right;
+        log_debug("Auto table width constraint: container=%.1fpx (after subtracting margins %.1f+%.1f)",
+                  container_width, margin_left, margin_right);
+    }
+
+    float table_horizontal_overhead = 0.0f;
+    if (!table_box_already_subtracted) {
+        if (!table->tb->border_collapse && table->bound) {
+            BoxMetrics table_box = layout_box_metrics(table);
+            if (table->bound->padding.left > 0.0f) {
+                table_horizontal_overhead += table->bound->padding.left;
+            }
+            if (table->bound->padding.right > 0.0f) {
+                table_horizontal_overhead += table->bound->padding.right;
+            }
+            table_horizontal_overhead += table_box.border_h;
+        } else if (table->tb->border_collapse) {
+            table_horizontal_overhead += meta->collapsed_border_left / 2.0f +
+                meta->collapsed_border_right / 2.0f;
+        }
+    }
+
+    float max_available_width = container_width - table_horizontal_overhead;
+    if (max_available_width < 0.0f) max_available_width = 0.0f;
+
+    log_debug("Auto table max available grid width: %.1fpx (container=%.1f, table overhead=%.1f)",
+              max_available_width, container_width, table_horizontal_overhead);
+
+    if (max_available_width > 0.0f && *pref_table_width > max_available_width) {
+        log_debug("Constraining preferred width from %.1fpx to %.1fpx (available space minus margins)",
+                  *pref_table_width, max_available_width);
+        *pref_table_width = max_available_width;
+    } else if (max_available_width == 0.0f && *pref_table_width > min_table_width) {
+        log_debug("Margins consume all space, using minimum content width: %.1fpx",
+                  min_table_width);
+        *pref_table_width = min_table_width;
+    }
+
+    return max_available_width;
+}
+
+static float table_explicit_content_area_for_auto_layout(ViewTable* table,
+                                                         TableMetadata* meta,
+                                                         float explicit_table_width) {
+    float explicit_content_area = explicit_table_width;
+    if (table->tb->border_collapse) {
+        float half_left = meta->collapsed_border_left / 2.0f;
+        float half_right = meta->collapsed_border_right / 2.0f;
+        explicit_content_area -= (half_left + half_right);
+        log_debug("Explicit content area (border-collapse, half borders %.1f+%.1f): %.1fpx",
+                  half_left, half_right, explicit_content_area);
+        return explicit_content_area;
+    }
+
+    // Separate-border content-box widths already exclude padding and border.
+    bool is_border_box = layout_uses_border_box(table);
+    if (is_border_box && table->bound && table->bound->border) {
+        explicit_content_area -= layout_box_metrics(table).border_h;
+    }
+    if (is_border_box && table->bound &&
+        table->bound->padding.left >= 0.0f && table->bound->padding.right >= 0.0f) {
+        explicit_content_area -= layout_box_metrics(table).padding_h;
+    }
+    log_debug("Explicit content area (separate borders, border_box=%d): %.1fpx",
+              is_border_box, explicit_content_area);
+    return explicit_content_area;
+}
+
+static float table_fixed_css_padding_box_width(ViewTable* table, float fixed_table_width) {
+    float css_padding_box = fixed_table_width;
+    bool fixed_is_border_box = table->tb->border_collapse || layout_uses_border_box(table);
+    if (fixed_is_border_box && table->bound && table->bound->border) {
+        css_padding_box -= layout_box_metrics(table).border_h;
+    } else if (!fixed_is_border_box && table->bound) {
+        if (table->bound->padding.left >= 0.0f) css_padding_box += table->bound->padding.left;
+        if (table->bound->padding.right >= 0.0f) css_padding_box += table->bound->padding.right;
+    }
+    return css_padding_box;
+}
+
+static void table_apply_minmax_width_constraints(ViewTable* table, TableMetadata* meta,
+                                                 float* col_widths, int columns,
+                                                 float* table_width,
+                                                 float table_padding_horizontal) {
+    if (!table->blk || !table_width) return;
+
+    float early_border_width = table->tb->border_collapse
+        ? meta->collapsed_border_left / 2.0f + meta->collapsed_border_right / 2.0f
+        : ((table->bound && table->bound->border) ? layout_box_metrics(table).border_h : 0.0f);
+    float old_table_width = *table_width;
+    float border_box_width = *table_width + early_border_width;
+    bool minmax_is_border_box = table->tb->border_collapse || layout_uses_border_box(table);
+    float minmax_extra = minmax_is_border_box ? 0.0f :
+        early_border_width + table_padding_horizontal;
+
+    // max-width cannot compress a table below its minimum content border-box.
+    if (table->blk->given_max_width >= 0.0f) {
+        float max_w_bb = table->blk->given_max_width + minmax_extra;
+        float min_col_total = table_sum_span_columns(meta->col_min_widths, 0, columns, columns);
+        float min_spacing = 0.0f;
+        if (!table->tb->border_collapse && table->tb->border_spacing_h > 0.0f) {
+            min_spacing = (columns + 1) * table->tb->border_spacing_h;
+        }
+        float min_bb = min_col_total + min_spacing + table_padding_horizontal + early_border_width;
+        if (max_w_bb < min_bb) max_w_bb = min_bb;
+        if (border_box_width > max_w_bb) {
+            *table_width = max_w_bb - early_border_width;
+            if (*table_width < 0.0f) *table_width = 0.0f;
+            log_debug("Table width clamped to max-width: %.0fpx (border-box: %.0f)",
+                      *table_width, max_w_bb);
+        }
+    }
+    if (table->blk->given_min_width >= 0.0f) {
+        float min_w_bb = table->blk->given_min_width + minmax_extra;
+        if (border_box_width < min_w_bb) {
+            *table_width = min_w_bb - early_border_width;
+            log_debug("Table width clamped to min-width: %.0fpx (border-box: %.0f)",
+                      *table_width, min_w_bb);
+        }
+    }
+    if (*table_width == old_table_width || columns <= 0) return;
+
+    float overhead = table_padding_horizontal;
+    if (!table->tb->border_collapse && table->tb->border_spacing_h > 0.0f) {
+        overhead += 2.0f * table->tb->border_spacing_h;
+        if (columns > 1) overhead += (columns - 1) * table->tb->border_spacing_h;
+    }
+    float new_col_total = *table_width - overhead;
+    if (new_col_total < 0.0f) new_col_total = 0.0f;
+    float old_col_total = old_table_width - overhead;
+    if (old_col_total > 0.0f) {
+        table_scale_columns(col_widths, columns, new_col_total / old_col_total);
+    } else if (new_col_total > 0.0f) {
+        table_assign_columns(col_widths, columns, new_col_total / columns);
+    }
+    log_debug("Redistributed column widths after min/max: new_col_total=%.0f", new_col_total);
+}
+
+static float table_prepare_final_padding_box_width(ViewTable* table, TableMetadata* meta,
+                                                   float* col_widths, int columns,
+                                                   float* table_padding_horizontal) {
+    if (table_padding_horizontal) *table_padding_horizontal = 0.0f;
+
+    for (int i = 0; i < columns; i++) {
+        if (!meta->col_collapsed[i]) continue;
+        meta->col_original_widths[i] = col_widths[i];
+        log_debug("Zeroing collapsed column %d width (was %.1f, saved to original)", i, col_widths[i]);
+        col_widths[i] = 0.0f;
+        meta->col_min_widths[i] = 0.0f;
+        meta->col_max_widths[i] = 0.0f;
+    }
+
+    float table_width = table_sum_span_columns(col_widths, 0, columns, columns);
+    for (int i = 0; i < columns; i++) {
+        log_debug("Final column %d width: %.1fpx", i, col_widths[i]);
+    }
+    log_debug("Final table width: %.1fpx", table_width);
+    log_debug("table_width before border adjustments: %.1f, border_collapse=%d",
+              table_width, table->tb->border_collapse);
+
+    if (table->tb->border_collapse) {
+        log_debug("Border-collapse: col_widths already include border halves, table_width=%.1fpx",
+                  table_width);
+    } else if (table->tb->border_spacing_h > 0.0f) {
+        log_debug("Applying border-spacing %fpx to table width", table->tb->border_spacing_h);
+        if (columns > 1) table_width += (columns - 1) * table->tb->border_spacing_h;
+        table_width += 2.0f * table->tb->border_spacing_h;
+        log_debug("Border-spacing applied (%.1fpx) - table width: %.1f (includes edge spacing)",
+                  table->tb->border_spacing_h, table_width);
+    }
+
+    if (!table->tb->border_collapse && table->bound &&
+        table->bound->padding.left >= 0.0f && table->bound->padding.right >= 0.0f) {
+        float padding_h = layout_box_metrics(table).padding_h;
+        if (table_padding_horizontal) *table_padding_horizontal = padding_h;
+        table_width += padding_h;
+        log_debug("Added table padding horizontal: %.1fpx (left=%.1f, right=%.1f)",
+                  padding_h, table->bound->padding.left, table->bound->padding.right);
+    }
+    return table_width;
+}
+
 static int table_positive_span_attr(ViewElement* element) {
     const char* span_str = element ? element->get_attribute("span") : NULL;
     int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: span count from attribute
@@ -1684,6 +1956,32 @@ static float table_resolve_fixed_explicit_width(LayoutContext* lycon, ViewTable*
         log_debug("FIXED LAYOUT - using given_width: %.1fpx", fixed_explicit_width);
     }
     return fixed_explicit_width;
+}
+
+static float table_fixed_content_width_for_columns(ViewTable* table,
+                                                   float fixed_explicit_width,
+                                                   int columns) {
+    float content_width = fixed_explicit_width;
+    bool fixed_width_is_border_box = table->tb->border_collapse ||
+        layout_uses_border_box(table);
+    if (fixed_width_is_border_box) {
+        float table_border_h = 0.0f;
+        if (table->bound && table->bound->border) {
+            table_border_h = layout_box_metrics(table).border_h;
+        }
+        content_width -= table_border_h;
+    }
+
+    // fixed-layout column percentages resolve against content tracks, not table border or spacing overhead.
+    if (!table->tb->border_collapse && table->tb->border_spacing_h > 0.0f) {
+        float spacing_h = (columns + 1) * table->tb->border_spacing_h;
+        content_width -= spacing_h;
+        log_debug("Subtracting border-spacing: (%d+1)*%.1f = %.1f",
+                  columns, table->tb->border_spacing_h, spacing_h);
+    }
+
+    log_debug("Content width for columns: %.1fpx", content_width);
+    return content_width;
 }
 
 static float table_resolve_percent_or_length_width(LayoutContext* lycon,
@@ -1824,6 +2122,56 @@ static void table_distribute_fixed_column_widths(float* explicit_col_widths, int
     }
 }
 
+static float table_resolve_fixed_explicit_height(LayoutContext* lycon, ViewTable* table) {
+    float explicit_height = 0.0f;
+    if (table->node_type == DOM_NODE_ELEMENT) {
+        DomElement* dom_elem = table->as_element();
+        if (dom_elem && dom_elem->specified_style) {
+            CssDeclaration* height_decl = style_tree_get_declaration(
+                dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
+            if (height_decl && height_decl->value) {
+                explicit_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+                if (explicit_height > 0.0f) {
+                    log_debug("FIXED LAYOUT - read table CSS height: %.1fpx (resolved)", explicit_height);
+                }
+            }
+        }
+        if (explicit_height <= 0.0f && table->blk && table->blk->given_height > 0.0f) {
+            explicit_height = table->blk->given_height;
+            log_debug("FIXED LAYOUT - read table HTML height attribute: %.1fpx", explicit_height);
+        }
+    }
+    return explicit_height;
+}
+
+static void table_apply_fixed_height_distribution(LayoutContext* lycon, ViewTable* table, int rows) {
+    float explicit_table_height = table_resolve_fixed_explicit_height(lycon, table);
+    if (explicit_table_height <= 0.0f) return;
+
+    log_debug("=== FIXED LAYOUT HEIGHT DISTRIBUTION ===");
+    log_debug("Total rows to distribute height: %d", rows);
+
+    float content_height = explicit_table_height;
+    bool height_is_border_box = table->tb->border_collapse || layout_uses_border_box(table);
+    if (height_is_border_box && table->bound && table->bound->border) {
+        content_height -= layout_box_metrics(table).border_v;
+    }
+    if (!table->tb->border_collapse && table->bound) {
+        if (table->bound->padding.top >= 0.0f) content_height -= table->bound->padding.top;
+        if (table->bound->padding.bottom >= 0.0f) content_height -= table->bound->padding.bottom;
+    }
+    if (!table->tb->border_collapse && table->tb->border_spacing_v > 0.0f && rows > 0) {
+        content_height -= (rows + 1) * table->tb->border_spacing_v;
+        log_debug("Subtracting vertical border-spacing: (%d+1)*%.1f = %.1f",
+                  rows, table->tb->border_spacing_v, (rows + 1) * table->tb->border_spacing_v);
+    }
+
+    table->tb->fixed_row_height = rows > 0 ? content_height / rows : 0.0f;
+    log_debug("Height per row: %.1fpx (content_height=%.1f / rows=%d)",
+              table->tb->fixed_row_height, content_height, rows);
+    log_debug("=== FIXED LAYOUT HEIGHT DISTRIBUTION COMPLETE ===");
+}
+
 static void table_raise_column_width_constraints(TableMetadata* meta, float* col_widths,
                                                  int col, float width) {
     if (!meta || !col_widths || col < 0 || col >= meta->column_count || width <= 0.0f) return;
@@ -1849,6 +2197,40 @@ static float table_resolve_column_length_constraint(LayoutContext* lycon, ViewBl
         return resolve_length_value(lycon, property, decl->value);
     }
     return unset_value;
+}
+
+static void table_apply_column_constraints(LayoutContext* lycon, TableMetadata* meta,
+                                           float* col_widths, int col,
+                                           ViewBlock* col_elem, float width_divisor) {
+    float col_css_width = table_resolve_column_length_constraint(
+        lycon, col_elem, CSS_PROPERTY_WIDTH,
+        col_elem->blk ? col_elem->blk->given_width : 0.0f,
+        col_elem->blk && col_elem->blk->given_width > 0.0f, 0.0f);
+    if (col_css_width > 0.0f) {
+        table_raise_column_width_constraints(
+            meta, col_widths, col,
+            width_divisor > 1.0f ? col_css_width / width_divisor : col_css_width);
+    }
+
+    float col_min_w = table_resolve_column_length_constraint(
+        lycon, col_elem, CSS_PROPERTY_MIN_WIDTH,
+        col_elem->blk ? col_elem->blk->given_min_width : -1.0f,
+        col_elem->blk && col_elem->blk->given_min_width >= 0.0f, -1.0f);
+    if (col_min_w > 0.0f) {
+        table_raise_column_width_constraints(
+            meta, col_widths, col,
+            width_divisor > 1.0f ? col_min_w / width_divisor : col_min_w);
+    }
+
+    float col_max_w = table_resolve_column_length_constraint(
+        lycon, col_elem, CSS_PROPERTY_MAX_WIDTH,
+        col_elem->blk ? col_elem->blk->given_max_width : -1.0f,
+        col_elem->blk && col_elem->blk->given_max_width >= 0.0f, -1.0f);
+    if (col_max_w >= 0.0f) {
+        table_clamp_column_max_width(
+            meta, col_widths, col,
+            width_divisor > 1.0f ? col_max_w / width_divisor : col_max_w);
+    }
 }
 
 static float table_sum_cell_span_columns(ViewTableCell* tcell, float* col_widths, int columns) {
@@ -3087,6 +3469,12 @@ static bool table_resolve_border_collapse_value(CssValue* value, bool* border_co
     return false;
 }
 
+static bool table_resolve_caption_side_value(CssValue* value, bool* is_bottom) {
+    if (!value || value->type != CSS_VALUE_TYPE_KEYWORD || !is_bottom) return false;
+    *is_bottom = value->data.keyword == CSS_VALUE_BOTTOM;
+    return true;
+}
+
 static bool table_resolve_border_spacing_value(LayoutContext* lycon, CssValue* value,
         float* spacing_h, float* spacing_v, bool* keep_inheriting) {
     if (keep_inheriting) *keep_inheriting = false;
@@ -3306,15 +3694,12 @@ static void resolve_table_properties(LayoutContext* lycon, DomNode* element, Vie
                 CSS_PROPERTY_CAPTION_SIDE);
 
             if (caption_decl && caption_decl->value) {
-                CssValue* val = (CssValue*)caption_decl->value;
-                if (val->type == CSS_VALUE_TYPE_KEYWORD) {
-                    if (val->data.keyword == CSS_VALUE_BOTTOM) {
-                        table->tb->caption_side = TableProp::CAPTION_SIDE_BOTTOM;
-                        log_debug("Table caption-side: bottom");
-                    } else {
-                        table->tb->caption_side = TableProp::CAPTION_SIDE_TOP;
-                        log_debug("Table caption-side: top");
-                    }
+                bool caption_bottom = false;
+                if (table_resolve_caption_side_value(caption_decl->value, &caption_bottom)) {
+                    table->tb->caption_side = caption_bottom
+                        ? TableProp::CAPTION_SIDE_BOTTOM : TableProp::CAPTION_SIDE_TOP;
+                    log_debug("Table caption-side: %s",
+                              caption_bottom ? "bottom" : "top");
                 }
             }
 
@@ -3388,6 +3773,41 @@ static void resolve_table_properties(LayoutContext* lycon, DomNode* element, Vie
 }
 
 // Parse cell attributes (colspan, rowspan)
+static bool table_cell_apply_vertical_align_keyword(ViewTableCell* cell,
+                                                    CssEnum keyword,
+                                                    bool from_inline_style) {
+    if (!cell || !cell->td) return false;
+
+    const char* align_name = nullptr;
+    switch (keyword) {
+    case CSS_VALUE_TOP:
+        cell->td->vertical_align = TableCellProp::CELL_VALIGN_TOP;
+        align_name = "top";
+        break;
+    case CSS_VALUE_MIDDLE:
+        cell->td->vertical_align = TableCellProp::CELL_VALIGN_MIDDLE;
+        align_name = "middle";
+        break;
+    case CSS_VALUE_BOTTOM:
+        cell->td->vertical_align = TableCellProp::CELL_VALIGN_BOTTOM;
+        align_name = "bottom";
+        break;
+    case CSS_VALUE_BASELINE:
+        cell->td->vertical_align = TableCellProp::CELL_VALIGN_BASELINE;
+        align_name = "baseline";
+        break;
+    default:
+        return false;
+    }
+
+    if (from_inline_style) {
+        log_debug("Cell vertical-align from in_line: %s", align_name);
+    } else {
+        log_debug("Cell vertical-align: %s", align_name);
+    }
+    return true;
+}
+
 static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewTableCell* cell) {
     assert(cell->td);
     // Initialize defaults
@@ -3433,20 +3853,7 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
         // First, check the resolved in_line->vertical_align (set by HTML default styles in resolve_htm_style.cpp)
         // This handles the CSS 2.1 default: vertical-align: middle for td/th
         if (cell->in_line && cell->in_line->vertical_align) {
-            CssEnum valign_value = cell->in_line->vertical_align;
-            if (valign_value == CSS_VALUE_TOP) {
-                cell->td->vertical_align = TableCellProp::CELL_VALIGN_TOP;
-                log_debug("Cell vertical-align from in_line: top");
-            } else if (valign_value == CSS_VALUE_MIDDLE) {
-                cell->td->vertical_align = TableCellProp::CELL_VALIGN_MIDDLE;
-                log_debug("Cell vertical-align from in_line: middle");
-            } else if (valign_value == CSS_VALUE_BOTTOM) {
-                cell->td->vertical_align = TableCellProp::CELL_VALIGN_BOTTOM;
-                log_debug("Cell vertical-align from in_line: bottom");
-            } else if (valign_value == CSS_VALUE_BASELINE) {
-                cell->td->vertical_align = TableCellProp::CELL_VALIGN_BASELINE;
-                log_debug("Cell vertical-align from in_line: baseline");
-            }
+            table_cell_apply_vertical_align_keyword(cell, cell->in_line->vertical_align, true);
         }
 
         // Then check CSS declarations (may override the default)
@@ -3465,22 +3872,8 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
             }
 
             if (valign_decl && valign_decl->value && valign_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum valign_keyword = valign_decl->value->data.keyword;
-
-                // Map CSS vertical-align keywords to cell enum
-                if (valign_keyword == CSS_VALUE_TOP) {
-                    cell->td->vertical_align = TableCellProp::CELL_VALIGN_TOP;
-                    log_debug("Cell vertical-align: top");
-                } else if (valign_keyword == CSS_VALUE_MIDDLE) {
-                    cell->td->vertical_align = TableCellProp::CELL_VALIGN_MIDDLE;
-                    log_debug("Cell vertical-align: middle");
-                } else if (valign_keyword == CSS_VALUE_BOTTOM) {
-                    cell->td->vertical_align = TableCellProp::CELL_VALIGN_BOTTOM;
-                    log_debug("Cell vertical-align: bottom");
-                } else if (valign_keyword == CSS_VALUE_BASELINE) {
-                    cell->td->vertical_align = TableCellProp::CELL_VALIGN_BASELINE;
-                    log_debug("Cell vertical-align: baseline");
-                }
+                table_cell_apply_vertical_align_keyword(
+                    cell, valign_decl->value->data.keyword, false);
             }
         }
     }
@@ -4511,12 +4904,12 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
                 if (table->tb) {
                     CssDeclaration* caption_decl = style_tree_get_declaration(
                         dom_elem->specified_style, CSS_PROPERTY_CAPTION_SIDE);
-                    if (caption_decl && caption_decl->value) {
-                        CssValue* val = caption_decl->value;
-                        if (val->type == CSS_VALUE_TYPE_KEYWORD && val->data.keyword == CSS_VALUE_BOTTOM) {
-                            table->tb->caption_side = TableProp::CAPTION_SIDE_BOTTOM;
-                            log_debug("%s Caption side: bottom (from caption element)", node->source_loc());
-                        }
+                    bool caption_bottom = false;
+                    if (table_resolve_caption_side_value(
+                            caption_decl ? caption_decl->value : nullptr, &caption_bottom) &&
+                        caption_bottom) {
+                        table->tb->caption_side = TableProp::CAPTION_SIDE_BOTTOM;
+                        log_debug("%s Caption side: bottom (from caption element)", node->source_loc());
                     }
                 }
             }
@@ -5051,6 +5444,42 @@ static void for_each_direct_table_row_group(ViewTable* table, Fn fn) {
     });
 }
 
+struct TableOrderedRowElements {
+    ViewBlock* header_group;
+    ViewBlock* footer_group;
+    ArrayList* body_groups;
+    ArrayList* ordered_elements;
+};
+
+static TableOrderedRowElements table_collect_ordered_row_elements(ViewTable* table) {
+    TableOrderedRowElements result = {nullptr, nullptr, arraylist_new(8), nullptr};
+
+    for_each_direct_table_block(table, [&](ViewBlock* child) {
+        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+            ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
+            int section = group->get_section_type();
+            if (section == TABLE_SECTION_THEAD && !result.header_group) {
+                result.header_group = child;
+            } else if (section == TABLE_SECTION_TFOOT && !result.footer_group) {
+                result.footer_group = child;
+            } else {
+                arraylist_append(result.body_groups, child);
+            }
+        } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
+            arraylist_append(result.body_groups, child);
+        }
+    });
+
+    result.ordered_elements = arraylist_new(result.body_groups->length + 2);
+    if (result.header_group) arraylist_append(result.ordered_elements, result.header_group);
+    for (int i = 0; i < result.body_groups->length; i++) {
+        arraylist_append(result.ordered_elements, result.body_groups->data[i]);
+    }
+    if (result.footer_group) arraylist_append(result.ordered_elements, result.footer_group);
+
+    return result;
+}
+
 static void update_rowspan_cell_heights(ViewTable* table, TableMetadata* meta) {
     if (!table || !meta) return;
 
@@ -5218,6 +5647,11 @@ static float table_caption_positive_margin_top(ViewBlock* caption) {
         ? caption->bound->margin.top : 0.0f;
 }
 
+static float table_caption_positive_margin_bottom(ViewBlock* caption) {
+    return (caption && caption->bound && caption->bound->margin.bottom > 0.0f)
+        ? caption->bound->margin.bottom : 0.0f;
+}
+
 static float table_caption_positive_margin_left(ViewBlock* caption) {
     return (caption && caption->bound &&
             caption->bound->margin.left_type != CSS_VALUE_AUTO &&
@@ -5238,13 +5672,8 @@ static float table_caption_positive_horizontal_margin(ViewBlock* caption) {
 }
 
 static float table_caption_positive_vertical_margin(ViewBlock* caption) {
-    float margin_v = 0.0f;
-    if (caption && caption->bound) {
-        float mt = caption->bound->margin.top > 0.0f ? caption->bound->margin.top : 0.0f;
-        float mb = caption->bound->margin.bottom > 0.0f ? caption->bound->margin.bottom : 0.0f;
-        margin_v = mt + mb;
-    }
-    return margin_v;
+    return table_caption_positive_margin_top(caption) +
+        table_caption_positive_margin_bottom(caption);
 }
 
 static float table_caption_height_with_margins(ViewBlock* caption) {
@@ -5272,6 +5701,11 @@ enum TableCaptionWidthChangeReference {
     TABLE_CAPTION_WIDTH_REFERENCE_WRAPPER
 };
 
+enum TableCaptionStackSide {
+    TABLE_CAPTION_STACK_TOP,
+    TABLE_CAPTION_STACK_BOTTOM
+};
+
 static float table_adjust_caption_width_and_height(LayoutContext* lycon,
                                                    ViewTable* table,
                                                    ViewBlock* caption,
@@ -5296,6 +5730,79 @@ static float table_adjust_caption_width_and_height(LayoutContext* lycon,
                   table->source_loc(), caption_index, old_width, table_width);
     }
     return relayout_table_caption(lycon, caption, table_width);
+}
+
+static float table_position_caption_stack(LayoutContext* lycon,
+                                          ViewTable* table,
+                                          ArrayList* captions,
+                                          float base_y,
+                                          float table_width,
+                                          float wrapper_content_width,
+                                          TableCaptionWidthChangeReference reference,
+                                          TableCaptionStackSide side) {
+    float cap_y = base_y;
+    float total_height = 0.0f;
+    for_each_table_caption(captions, [&](ViewBlock* cap, int ci) {
+        table_position_caption_with_margins(cap, cap_y);
+
+        float this_cap_height = table_adjust_caption_width_and_height(
+            lycon, table, cap, table_width, wrapper_content_width, ci, reference);
+
+        total_height += this_cap_height;
+        cap_y += this_cap_height;
+        if (side == TABLE_CAPTION_STACK_TOP) {
+            log_debug("Positioned caption %d at top: y=%.1f, height=%.1f, total=%.1f",
+                      ci, cap->y, cap->height, total_height);
+        } else {
+            log_debug("%s Positioned caption %d at bottom: y=%.1f, height=%.1f",
+                      table->source_loc(), ci, cap->y, cap->height);
+        }
+    });
+    return total_height;
+}
+
+static float table_measure_caption_width_contribution(LayoutContext* lycon,
+                                                      ViewTable* table,
+                                                      ViewBlock* caption) {
+    if (!caption) return 0.0f;
+
+    float contribution = 0.0f;
+    if (caption->blk && caption->blk->given_width > 0.0f) {
+        contribution = adjust_min_max_width(caption, caption->blk->given_width);
+        log_debug("Caption has explicit CSS width: %.1fpx (after min/max clamp)", contribution);
+    } else if (DomElement* caption_elem = caption->as_element()) {
+        IntrinsicSizes caption_sizes = layout_measure_intrinsic_widths(
+            lycon, caption_elem, "table caption");
+        contribution = adjust_min_max_width(caption, ceilf(caption_sizes.min_content));
+        log_debug("Caption auto width - intrinsic min-content: %.1fpx (max-content: %.1f, after min/max clamp)",
+                  contribution, caption_sizes.max_content);
+    }
+
+    // Caption width is compared against the table grid content width, so convert
+    // the caption margin box into that coordinate space before applying it.
+    if (caption->blk && caption->blk->given_width > 0.0f &&
+        !layout_uses_border_box(caption) && caption->bound) {
+        BoxMetrics caption_box = layout_box_metrics(caption);
+        contribution += caption_box.border_h;
+        if (caption->bound->padding.left > 0.0f) contribution += caption->bound->padding.left;
+        if (caption->bound->padding.right > 0.0f) contribution += caption->bound->padding.right;
+    }
+    if (table->bound) {
+        contribution -= layout_box_metrics(table).border_h;
+        if (table->bound->padding.left > 0.0f) contribution -= table->bound->padding.left;
+        if (table->bound->padding.right > 0.0f) contribution -= table->bound->padding.right;
+    }
+
+    if (caption->bound) {
+        float ml = table_caption_positive_margin_left(caption);
+        float mr = table_caption_positive_margin_right(caption);
+        if (ml + mr > 0.0f) {
+            contribution += ml + mr;
+            log_debug("Caption margin-box: added margins (left=%.0f, right=%.0f) -> contribution=%.1fpx",
+                      ml, mr, contribution);
+        }
+    }
+    return contribution;
 }
 
 static void table_recalculate_row_y_positions(ViewTable* table, TableMetadata* meta,
@@ -5367,6 +5874,96 @@ static float table_resolve_row_explicit_height(LayoutContext* lycon, ViewTable* 
         return resolved_height;
     }
     return 0.0f;
+}
+
+static float table_resolve_row_group_explicit_height(LayoutContext* lycon, ViewTable* table,
+                                                     ViewBlock* group_block,
+                                                     bool* has_percent_height) {
+    if (has_percent_height) *has_percent_height = false;
+    if (!group_block || !group_block->is_element()) return 0.0f;
+    DomElement* group_elem = group_block->as_element();
+    if (!group_elem->specified_style) return 0.0f;
+
+    CssDeclaration* height_decl = style_tree_get_declaration(
+        group_elem->specified_style, CSS_PROPERTY_HEIGHT);
+    if (!height_decl || !height_decl->value) return 0.0f;
+
+    // CSS 2.1 row-group percentage heights compute to auto, but the rows
+    // must be marked so later table-height distribution preserves that policy.
+    if (height_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        if (has_percent_height) *has_percent_height = true;
+        log_debug("%s Row group has percentage height - all rows compute to auto",
+                  table->source_loc());
+        return 0.0f;
+    }
+
+    float resolved = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+    if (resolved > 0.0f) {
+        log_debug("%s Row group has explicit CSS height: %.1fpx",
+                  table->source_loc(), resolved);
+        return resolved;
+    }
+    return 0.0f;
+}
+
+static void table_apply_row_group_min_height(LayoutContext* lycon, ViewTable* table,
+                                             TableMetadata* meta, ViewTableRowGroup* group,
+                                             ViewBlock* group_block,
+                                             float explicit_group_height,
+                                             float* current_y) {
+    float content_group_height = group_block->height;
+    if (explicit_group_height > group_block->height) {
+        group_block->height = explicit_group_height;
+        log_debug("%s Row group expanded to explicit height: %.1fpx (content was %.1fpx)",
+                  table->source_loc(), group_block->height, content_group_height);
+    }
+
+    if (group_block->height <= content_group_height) return;
+
+    float extra = group_block->height - content_group_height;
+    *current_y += extra;
+    log_debug("%s Advanced current_y by %.1f for expanded row group",
+              table->source_loc(), extra);
+
+    int eligible_rows = 0;
+    for_each_table_row_in_group(group, [&](ViewTableRow* trow, ViewBlock* row) {
+        (void)trow;
+        if (row->height > 0.0f) eligible_rows++;
+    });
+    if (eligible_rows <= 0) return;
+
+    float extra_per_row = extra / eligible_rows;
+    float y_accum = 0.0f;
+    for_each_table_row_in_group(group, [&](ViewTableRow* trow, ViewBlock* row) {
+        if (row->height <= 0.0f) return;
+
+        row->y = y_accum;
+        row->height += extra_per_row;
+        log_debug("%s Row expanded to %.1fpx (added %.1fpx)",
+                  table->source_loc(), row->height, extra_per_row);
+
+        int row_idx = table_row_metadata_index_from_row(trow, -1);
+        if (row_idx >= 0 && row_idx < meta->row_count) {
+            meta->row_heights[row_idx] = row->height;
+        }
+
+        update_row_cells_after_height_change(lycon, trow, row->height, false, true);
+
+        y_accum += row->height;
+        if (!table->tb->border_collapse && table->tb->border_spacing_v > 0.0f) {
+            y_accum += table->tb->border_spacing_v;
+        }
+    });
+}
+
+static void table_track_row_metrics(ViewTable* table, TableMetadata* meta,
+                                    int row_idx, float row_y,
+                                    float row_height, const char* row_label) {
+    if (row_idx < 0 || row_idx >= meta->row_count) return;
+    meta->row_y_positions[row_idx] = row_y;
+    meta->row_heights[row_idx] = row_height;
+    log_debug("%s Tracking %s %d: y=%.1f, height=%.1f",
+              table->source_loc(), row_label, row_idx, row_y, row_height);
 }
 
 static void table_place_collapsed_row(ViewTable* table, TableMetadata* meta,
@@ -7397,39 +7994,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             int span = table_positive_span_attr(col_elem);
             width_divisor = (float)span;
         }
-
-        float col_css_width = table_resolve_column_length_constraint(
-            lycon, col_elem, CSS_PROPERTY_WIDTH,
-            col_elem->blk ? col_elem->blk->given_width : 0.0f,
-            col_elem->blk && col_elem->blk->given_width > 0.0f, 0.0f);
-        if (col_css_width > 0 && width_divisor > 1.0f) {
-            col_css_width /= width_divisor;
-        }
-        if (col_css_width > 0) {
-            table_raise_column_width_constraints(meta, col_widths, c, col_css_width);
-        }
-
-        float col_min_w = table_resolve_column_length_constraint(
-            lycon, col_elem, CSS_PROPERTY_MIN_WIDTH,
-            col_elem->blk ? col_elem->blk->given_min_width : -1.0f,
-            col_elem->blk && col_elem->blk->given_min_width >= 0.0f, -1.0f);
-        if (col_min_w > 0 && width_divisor > 1.0f) {
-            col_min_w /= width_divisor;
-        }
-        if (col_min_w > 0) {
-            table_raise_column_width_constraints(meta, col_widths, c, col_min_w);
-        }
-
-        float col_max_w = table_resolve_column_length_constraint(
-            lycon, col_elem, CSS_PROPERTY_MAX_WIDTH,
-            col_elem->blk ? col_elem->blk->given_max_width : -1.0f,
-            col_elem->blk && col_elem->blk->given_max_width >= 0.0f, -1.0f);
-        if (col_max_w >= 0 && width_divisor > 1.0f) {
-            col_max_w /= width_divisor;
-        }
-        if (col_max_w >= 0) {
-            table_clamp_column_max_width(meta, col_widths, c, col_max_w);
-        }
+        table_apply_column_constraints(lycon, meta, col_widths, c, col_elem, width_divisor);
     }
 
     // Apply CSS 2.1 table-layout algorithm with improved precision
@@ -7454,31 +8019,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         }
 
       if (fixed_explicit_width > 0) {
-        // STEP 2: Calculate available content width (subtract spacing, and border only for border-collapse)
-        float content_width = fixed_explicit_width;
-
-        // CSS 2.1 §17.6.2: In border-collapse mode, CSS width is border-box — subtract border.
-        // CSS 2.1 §10.2: In separate borders mode, CSS width is content-box — border is additional.
-        // Exception: box-sizing:border-box makes width border-box.
-        bool fixed_width_is_border_box = table->tb->border_collapse ||
-            layout_uses_border_box(table);
-        if (fixed_width_is_border_box) {
-            float table_border_h = 0;
-            if (table->bound && table->bound->border) {
-                table_border_h = layout_box_metrics(table).border_h;
-            }
-            content_width -= table_border_h;
-        }
-
-        // For border-collapse, no additional adjustments needed
-        // For separate borders, subtract border-spacing
-        if (!table->tb->border_collapse && table->tb->border_spacing_h > 0) {
-            content_width -= (columns + 1) * table->tb->border_spacing_h; // Spacing around and between columns
-            log_debug("Subtracting border-spacing: (%d+1)*%.1f = %.1f",
-                   columns, table->tb->border_spacing_h, (columns + 1) * table->tb->border_spacing_h);
-        }
-
-        log_debug("Content width for columns: %.1fpx", content_width);
+        // STEP 2: Calculate available content width for CSS fixed-layout columns.
+        float content_width = table_fixed_content_width_for_columns(
+            table, fixed_explicit_width, columns);
         // STEP 3: Determine column widths per CSS 2.1 §17.5.2.1
         // Priority: 1) col element width, 2) first-row cell width, 3) equal distribution
         float* explicit_col_widths = (float*)scratch_calloc(&lycon->scratch, columns * sizeof(float));
@@ -7533,73 +8076,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             log_debug("  Final column %d width: %.1fpx", i, col_widths[i]);
         }
 
-        // STEP 6: Handle explicit table HEIGHT for fixed layout
-        // If table has height: 300px or height="200" attribute, distribute that height across rows
-        float explicit_table_height = 0;
-        if (table->node_type == DOM_NODE_ELEMENT) {
-            DomElement* dom_elem = table->as_element();
-            if (dom_elem->specified_style) {
-                CssDeclaration* height_decl = style_tree_get_declaration(
-                    dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
-                if (height_decl && height_decl->value) {
-                    // Use resolve_length_value to properly handle em/rem/px units
-                    float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-                    if (resolved_height > 0) {
-                        explicit_table_height = resolved_height;
-                        log_debug("FIXED LAYOUT - read table CSS height: %.1fpx (resolved)", explicit_table_height);
-                    }
-                }
-            }
-            // Fallback to HTML height attribute (stored in blk->given_height)
-            if (explicit_table_height <= 0 && table->blk && table->blk->given_height > 0) {
-                explicit_table_height = table->blk->given_height;
-                log_debug("FIXED LAYOUT - read table HTML height attribute: %.1fpx", explicit_table_height);
-            }
-        }
-
-        if (explicit_table_height > 0) {
-            log_debug("=== FIXED LAYOUT HEIGHT DISTRIBUTION ===");
-
-            // Count total rows
-            int total_rows = rows;  // 'rows' variable from earlier count
-            log_debug("Total rows to distribute height: %d", total_rows);
-
-            // Calculate available content height (subtract padding, spacing, and border only for border-collapse)
-            float content_height = explicit_table_height;
-
-            // CSS 2.1 §17.6.2: In border-collapse, CSS height is border-box — subtract border.
-            // CSS 2.1 §10.2: In separate borders, CSS height is content-box — border is additional.
-            // Exception: box-sizing:border-box makes height border-box.
-            bool height_is_border_box = table->tb->border_collapse ||
-                layout_uses_border_box(table);
-            if (height_is_border_box && table->bound && table->bound->border) {
-                content_height -= layout_box_metrics(table).border_v;
-            }
-
-            // Subtract table padding
-            // CSS 2.1 §17.6.2: Padding on table elements is ignored in border-collapse mode
-            if (!table->tb->border_collapse && table->bound) {
-                if (table->bound->padding.top >= 0) content_height -= table->bound->padding.top;
-                if (table->bound->padding.bottom >= 0) content_height -= table->bound->padding.bottom;
-            }
-
-            // Subtract border-spacing (if separate borders)
-            if (!table->tb->border_collapse && table->tb->border_spacing_v > 0 && total_rows > 0) {
-                content_height -= (total_rows + 1) * table->tb->border_spacing_v;
-                log_debug("Subtracting vertical border-spacing: (%d+1)*%.1f = %.1f",
-                       total_rows, table->tb->border_spacing_v, (total_rows + 1) * table->tb->border_spacing_v);
-            }
-
-            // Distribute height equally across rows
-            float height_per_row = total_rows > 0 ? content_height / total_rows : 0;
-            log_debug("Height per row: %.1fpx (content_height=%.1f / rows=%d)",
-                   height_per_row, content_height, total_rows);
-
-            // Store the fixed row height for later application during positioning
-            // We'll apply this when positioning rows in the main layout loop
-            table->tb->fixed_row_height = height_per_row;
-            log_debug("=== FIXED LAYOUT HEIGHT DISTRIBUTION COMPLETE ===");
-        }
+        table_apply_fixed_height_distribution(lycon, table, rows);
       } // end if (fixed_explicit_width > 0)
     }
 
@@ -7629,69 +8106,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     float min_table_width = min_table_content_width + border_spacing_total;
     float pref_table_width = pref_table_content_width + border_spacing_total;
-    // CSS 2.1 §17.5.2.1: Table width must be at least as wide as the caption.
-    // Consider both explicit CSS width and intrinsic content width of the caption.
-    float caption_width_contribution = 0;
     if (caption) {
-        if (caption->blk && caption->blk->given_width > 0) {
-            // Caption has explicit CSS width - apply min/max-width constraints
-            caption_width_contribution = adjust_min_max_width(caption, caption->blk->given_width);
-            log_debug("Caption has explicit CSS width: %.1fpx (after min/max clamp)", caption_width_contribution);
-        } else {
-            // Caption has auto width - measure its intrinsic content width
-            // The caption's min-content width determines the minimum table width
-            DomElement* caption_elem = caption->as_element();
-            if (caption_elem) {
-                IntrinsicSizes caption_sizes = layout_measure_intrinsic_widths(
-                    lycon, caption_elem, "table caption");
-                caption_width_contribution = ceilf(caption_sizes.min_content);
-                // Apply min/max-width constraints to auto-width caption
-                caption_width_contribution = adjust_min_max_width(caption, caption_width_contribution);
-                log_debug("Caption auto width - intrinsic min-content: %.1fpx (max-content: %.1f, after min/max clamp)",
-                         caption_width_contribution, caption_sizes.max_content);
-            }
-        }
-        // CSS 2.1 §17.5.2: The table wrapper must be at least as wide as the caption.
-        // table_wrapper_width = table_grid_content + border_spacing + table_padding + table_border
-        // caption_margin_box = caption_content + caption_padding + caption_border + caption_margin
-        // Constraint: table_wrapper_width >= caption_margin_box
-        // Since pref_table_width = table_grid_content + border_spacing:
-        //   caption_contribution = caption_border_box + caption_margin - table_padding - table_border
-        //
-        // For explicit width (content-box): given_width is content, add caption border+padding.
-        // For explicit width (border-box): given_width is already border-box.
-        // For intrinsic sizing: min_content already includes caption border+padding.
-        if (caption->blk && caption->blk->given_width > 0) {
-            bool is_border_box = layout_uses_border_box(caption);
-            if (!is_border_box && caption->bound) {
-                BoxMetrics caption_box = layout_box_metrics(caption);
-                caption_width_contribution += caption_box.border_h;
-                if (caption->bound->padding.left > 0) caption_width_contribution += caption->bound->padding.left;
-                if (caption->bound->padding.right > 0) caption_width_contribution += caption->bound->padding.right;
-            }
-        }
-        // Subtract the table's own border+padding since pref_table_width represents
-        // the grid content area, and the table wrapper adds border+padding on top.
-        if (table->bound) {
-            caption_width_contribution -= layout_box_metrics(table).border_h;
-            if (table->bound->padding.left > 0) caption_width_contribution -= table->bound->padding.left;
-            if (table->bound->padding.right > 0) caption_width_contribution -= table->bound->padding.right;
-        }
-
-        // CSS 2.1 §17.4: The table wrapper must accommodate the caption's margin-box width.
-        // Include fixed horizontal margins (non-auto) in the caption width contribution so
-        // the table expands if the caption's margin-box exceeds the table content width.
-        if (caption->bound) {
-            float ml = table_caption_positive_margin_left(caption);
-            float mr = table_caption_positive_margin_right(caption);
-            if (ml + mr > 0) {
-                caption_width_contribution += ml + mr;
-                log_debug("Caption margin-box: added margins (left=%.0f, right=%.0f) -> contribution=%.1fpx",
-                         ml, mr, caption_width_contribution);
-            }
-        }
-
-        // Table minimum width must accommodate caption
+        float caption_width_contribution =
+            table_measure_caption_width_contribution(lycon, table, caption);
         if (caption_width_contribution > pref_table_width) {
             log_debug("Caption wider than table content: caption=%dpx > table=%dpx",
                      caption_width_contribution, pref_table_width);
@@ -7705,138 +8122,18 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     log_debug("Table content: min=%.1fpx, preferred=%.1fpx", min_table_content_width, pref_table_content_width);
     log_debug("Table total (with spacing): min=%.1fpx, preferred=%.1fpx", min_table_width, pref_table_width);
 
-    // CSS 2.1: For auto-width tables, constrain by available space minus margins
-    // The available space comes from:
-    // 1. The parent element's width (most reliable)
-    // 2. lycon->line bounds (if set)
-    // 3. lycon->available_space (fallback)
-    float max_available_width = 0;
+    // CSS 2.1: For auto-width tables, constrain by available space minus margins.
+    float max_available_width = 0.0f;
     if (!has_explicit_table_width) {
-        // Try to get container width from parent element first
-        float container_width = 0;
-        bool margins_already_subtracted = false;
-        bool table_box_already_subtracted = false;
-
-        // CSS 2.1 §9.5 + §17.5.2.2: For auto-width tables inside a BFC that avoids
-        // floats, use lycon->block.content_width which already accounts for float
-        // avoidance width reduction computed by layout_block().
-        // Note: lycon->block.content_width is the table content-box width computed
-        // by layout_block.cpp from parent_content - margins - border - padding.
-        if (lycon->block.content_width > 0) {
-            container_width = lycon->block.content_width;
-            margins_already_subtracted = true;
-            table_box_already_subtracted = true;
-            log_debug("Container width from lycon content_width (BFC float avoidance): %.1fpx", container_width);
-        }
-
-        // Fallback to parent element width
-        if (container_width <= 0) {
-            ViewBlock* parent = lam::view_as_block(static_cast<View*>(table->parent));
-            if (parent && parent->width > 0) {
-                container_width = parent->width;
-                if (parent->bound) {
-                    container_width -= layout_box_metrics(parent).pad_border_h;
-                }
-                log_debug("Container width from parent element: %.1fpx (parent->width=%.1f)", container_width, parent->width);
-            }
-        }
-
-        // Fallback to line bounds
-        if (container_width <= 0) {
-            container_width = lycon->line.right - lycon->line.left;
-        }
-
-        // Fallback to available_space
-        if (container_width <= 0 && lycon->available_space.width.is_definite()) {
-            container_width = lycon->available_space.width.to_px_or_zero();
-        }
-
-        // Subtract table margins only if not already accounted for
-        if (!margins_already_subtracted) {
-            float margin_left = 0, margin_right = 0;
-            if (table->bound) {
-                margin_left = table->bound->margin.left;
-                margin_right = table->bound->margin.right;
-            }
-            container_width -= margin_left + margin_right;
-            log_debug("Auto table width constraint: container=%.1fpx (after subtracting margins %.1f+%.1f)",
-                     container_width, margin_left, margin_right);
-        }
-
-        float table_horizontal_overhead = 0.0f;
-        if (!table_box_already_subtracted) {
-            if (!table->tb->border_collapse && table->bound) {
-                BoxMetrics table_box = layout_box_metrics(table);
-                if (table->bound->padding.left > 0.0f) {
-                    table_horizontal_overhead += table->bound->padding.left;
-                }
-                if (table->bound->padding.right > 0.0f) {
-                    table_horizontal_overhead += table->bound->padding.right;
-                }
-                table_horizontal_overhead += table_box.border_h;
-            } else if (table->tb->border_collapse) {
-                table_horizontal_overhead += meta->collapsed_border_left / 2.0f +
-                    meta->collapsed_border_right / 2.0f;
-            }
-        }
-
-        max_available_width = container_width - table_horizontal_overhead;
-        if (max_available_width < 0) max_available_width = 0;
-
-        log_debug("Auto table max available grid width: %.1fpx (container=%.1f, table overhead=%.1f)",
-                  max_available_width, container_width, table_horizontal_overhead);
-
-        // Constrain preferred width to available space
-        // But never go below minimum content width (table will overflow)
-        if (max_available_width > 0 && pref_table_width > max_available_width) {
-            log_debug("Constraining preferred width from %.1fpx to %.1fpx (available space minus margins)",
-                     pref_table_width, max_available_width);
-            pref_table_width = max_available_width;
-        } else if (max_available_width == 0 && pref_table_width > min_table_width) {
-            // Margins consume all available space — shrink to minimum content width.
-            // CSS 2.1 §17.5.2: when the available width (container minus margins) is
-            // zero or negative, the table uses its minimum content width and overflows.
-            log_debug("Margins consume all space, using minimum content width: %.1fpx", min_table_width);
-            pref_table_width = min_table_width;
-        }
-    }
-
-    // Determine used table width according to CSS 2.1 specification
-    // For explicit width, we need to account for border and padding
-    // (table_content_width already has border/padding/spacing subtracted,
-    // but we need the width after border/padding only, before spacing)
-    float explicit_content_area = (float)explicit_table_width;
-    if (has_explicit_table_width) {
-        if (table->tb->border_collapse) {
-            // Border-collapse: CSS width is border-box including half of outer collapsed borders.
-            // Subtract half of collapsed outer borders to get content area.
-            // Note: padding is ignored in border-collapse per CSS 2.1 §17.6.2
-            float half_left = meta->collapsed_border_left / 2.0f;
-            float half_right = meta->collapsed_border_right / 2.0f;
-            explicit_content_area -= (half_left + half_right);
-            log_debug("Explicit content area (border-collapse, half borders %.1f+%.1f): %.1fpx",
-                      half_left, half_right, explicit_content_area);
-        } else {
-            // CSS 2.1 §10.2: In separate borders mode, CSS width is content-box.
-            // Do NOT subtract border — it is additional to the content width.
-            // Exception: box-sizing:border-box makes CSS width border-box.
-            bool is_border_box = layout_uses_border_box(table);
-            if (is_border_box && table->bound && table->bound->border) {
-                explicit_content_area -= layout_box_metrics(table).border_h;
-            }
-            // Subtract table padding only for border-box.
-            // CSS 2.1 §10.2: In content-box (default), 'width' is the content area
-            // which already excludes padding. Only border-box includes padding in width.
-            if (is_border_box && table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
-                explicit_content_area -= layout_box_metrics(table).padding_h;
-            }
-            log_debug("Explicit content area (separate borders, border_box=%d): %.1fpx", is_border_box, explicit_content_area);
-        }
+        max_available_width = table_apply_auto_available_width_constraint(
+            lycon, table, meta, &pref_table_width, min_table_width);
     }
 
     float used_table_width;
     bool direct_float_expanded_auto_width = false;
     if (has_explicit_table_width) {
+        float explicit_content_area = table_explicit_content_area_for_auto_layout(
+            table, meta, explicit_table_width);
         // CSS 2.1: Table has explicit width - use content area (but not less than minimum)
         used_table_width = explicit_content_area > min_table_width ? explicit_content_area : min_table_width;
         log_debug("CSS 2.1: Using explicit table content width: %.1fpx (requested: %.1fpx)", used_table_width, explicit_content_area);
@@ -7901,62 +8198,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
     } // End of auto layout algorithm guard
 
-    // CSS 2.1 §17.5.5: visibility:collapse on columns.
-    // Zero the widths for collapsed columns. This automatically handles:
-    // - Column element positioning (via col_x_positions)
-    // - Table width calculation (collapsed columns contribute 0)
-    // - Cell positioning (cells shift left as col_x_positions contract)
-    // We save original widths so that cells in collapsed columns can be
-    // laid out at their original width for correct row height computation
-    // (CSS 2.1 §17.5.5: "row heights are not recalculated").
-    for (int i = 0; i < columns; i++) {
-        if (meta->col_collapsed[i]) {
-            meta->col_original_widths[i] = col_widths[i];
-            log_debug("Zeroing collapsed column %d width (was %.1f, saved to original)", i, col_widths[i]);
-            col_widths[i] = 0.0f;
-            meta->col_min_widths[i] = 0.0f;
-            meta->col_max_widths[i] = 0.0f;
-        }
-    }
-
-    // Calculate final table width
-    float table_width = table_sum_span_columns(col_widths, 0, columns, columns);
-    for (int i = 0; i < columns; i++) {
-        log_debug("Final column %d width: %.1fpx", i, col_widths[i]);
-    }
-
-    log_debug("Final table width: %.1fpx", table_width);
-
-    log_debug("table_width before border adjustments: %.1f, border_collapse=%d",
-           table_width, table->tb->border_collapse);
-
-    // Apply border spacing or border collapse adjustments
-    if (table->tb->border_collapse) {
-        // Border-collapse: CSS 2.1 §17.6.2
-        // col_widths already include per-cell border halves (added during measurement).
-        // No additional border contribution needed for table width.
-        log_debug("Border-collapse: col_widths already include border halves, table_width=%.1fpx",
-               table_width);
-    } else if (table->tb->border_spacing_h > 0) {
-        // Separate borders: add spacing between columns AND around table edges
-        log_debug("Applying border-spacing %fpx to table width", table->tb->border_spacing_h);
-        if (columns > 1) {
-            table_width += (columns - 1) * table->tb->border_spacing_h; // Between columns
-        }
-        table_width += 2 * table->tb->border_spacing_h; // Left and right edges
-        log_debug("Border-spacing applied (%.1fpx) - table width: %.1f (includes edge spacing)",
-               table->tb->border_spacing_h, table_width);
-    }
-
-    // Add table padding to width
-    // CSS 2.1 §17.6.2: Padding on table elements is ignored in border-collapse mode
-    float table_padding_horizontal = 0;
-    if (!table->tb->border_collapse && table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
-        table_padding_horizontal = layout_box_metrics(table).padding_h;
-        table_width += table_padding_horizontal;
-        log_debug("Added table padding horizontal: %.1fpx (left=%.1f, right=%.1f)",
-               table_padding_horizontal, table->bound->padding.left, table->bound->padding.right);
-    }
+    float table_padding_horizontal = 0.0f;
+    float table_width = table_prepare_final_padding_box_width(
+        table, meta, col_widths, columns, &table_padding_horizontal);
 
     // CSS 2.1 §17.5.2.1: For fixed layout, "the width of the table is then the
     // greater of the value of the 'width' property for the table element and the
@@ -7966,20 +8210,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     //   border-collapse (§17.6.2): CSS width is border-box → subtract border
     //   separate borders (§10.2): CSS width is content-box → add padding
     if (table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED && fixed_table_width > 0) {
-        float css_padding_box = (float)fixed_table_width;
-        bool fixed_is_border_box = table->tb->border_collapse ||
-            layout_uses_border_box(table);
-        if (fixed_is_border_box) {
-            if (table->bound && table->bound->border) {
-                css_padding_box -= layout_box_metrics(table).border_h;
-            }
-        } else {
-            // Content-box + padding = padding-box
-            if (table->bound) {
-                if (table->bound->padding.left >= 0) css_padding_box += table->bound->padding.left;
-                if (table->bound->padding.right >= 0) css_padding_box += table->bound->padding.right;
-            }
-        }
+        float css_padding_box = table_fixed_css_padding_box_width(table, fixed_table_width);
         log_debug("Fixed layout: css_padding_box=%.0f, min_padding_box=%.0f",
                css_padding_box, table_width);
         if (css_padding_box > table_width) {
@@ -8011,70 +8242,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // table_width is padding-box (excludes border).
     // given_min/max_width is border-box when box-sizing:border-box, content-box otherwise.
     // Convert min/max to border-box for comparison with border_box_width.
-    float early_border_width = 0;
-    if (table->tb->border_collapse) {
-        early_border_width = meta->collapsed_border_left / 2.0f + meta->collapsed_border_right / 2.0f;
-    } else if (table->bound && table->bound->border) {
-        early_border_width = layout_box_metrics(table).border_h;
-    }
-    if (table->blk) {
-        float old_table_width = table_width;
-        float border_box_width = table_width + early_border_width;
-        // For content-box, min/max values are content-box — add padding+border to get border-box
-        bool minmax_is_border_box = table->tb->border_collapse ||
-            layout_uses_border_box(table);
-        float minmax_extra = 0;
-        if (!minmax_is_border_box) {
-            minmax_extra = early_border_width + table_padding_horizontal;
-        }
-        if (table->blk->given_max_width >= 0) {
-            float max_w_bb = table->blk->given_max_width + minmax_extra;
-            // CSS Tables 3: max-width cannot compress table below minimum content width.
-            // Compute minimum padding-box from col min-widths + spacing + padding.
-            float min_col_total =
-                table_sum_span_columns(meta->col_min_widths, 0, columns, columns);
-            float min_spacing = 0;
-            if (!table->tb->border_collapse && table->tb->border_spacing_h > 0)
-                min_spacing = (columns + 1) * table->tb->border_spacing_h;
-            float min_pb = min_col_total + min_spacing + table_padding_horizontal;
-            float min_bb = min_pb + early_border_width;
-            if (max_w_bb < min_bb) max_w_bb = min_bb;
-            if (border_box_width > max_w_bb) {
-                table_width = max_w_bb - early_border_width;
-                if (table_width < 0) table_width = 0;
-                log_debug("Table width clamped to max-width: %.0fpx (border-box: %.0f)", table_width, max_w_bb);
-            }
-        }
-        if (table->blk->given_min_width >= 0) {
-            float min_w_bb = table->blk->given_min_width + minmax_extra;
-            if (border_box_width < min_w_bb) {
-                table_width = min_w_bb - early_border_width;
-                log_debug("Table width clamped to min-width: %.0fpx (border-box: %.0f)", table_width, min_w_bb);
-            }
-        }
-        // If table_width changed due to min/max, redistribute column widths
-        if (table_width != old_table_width && columns > 0) {
-            // Calculate the column-content area (table_width minus padding, spacing)
-            float overhead = table_padding_horizontal;
-            if (!table->tb->border_collapse && table->tb->border_spacing_h > 0) {
-                overhead += 2 * table->tb->border_spacing_h; // Edge spacing
-                if (columns > 1) overhead += (columns - 1) * table->tb->border_spacing_h;
-            }
-            float new_col_total = table_width - overhead;
-            if (new_col_total < 0) new_col_total = 0;
-            float old_col_total = old_table_width - overhead;
-            if (old_col_total > 0) {
-                // Scale columns proportionally
-                float scale = new_col_total / old_col_total;
-                table_scale_columns(col_widths, columns, scale);
-            } else if (new_col_total > 0) {
-                // Old total was 0 (empty table), distribute equally
-                float per_col = new_col_total / columns;
-                table_assign_columns(col_widths, columns, per_col);
-            }
-            log_debug("Redistributed column widths after min/max: new_col_total=%.0f", new_col_total);
-        }
-    }
+    table_apply_minmax_width_constraints(
+        table, meta, col_widths, columns, &table_width, table_padding_horizontal);
 
     log_debug("===== CSS 2.1 TABLE LAYOUT COMPLETE =====");
 
@@ -8109,89 +8278,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (!table->tb->border_collapse && table->tb->border_spacing_h > 0) {
         col_x_positions[0] += table->tb->border_spacing_h;
         log_debug("Added left border-spacing: +%.1fpx", table->tb->border_spacing_h);
-    }
-
-    // Enhanced border width calculation for pixel-perfect precision
-    float cell_border_width = 1.0f; // Default to 1px
-
-    if (table->tb->border_collapse && table->first_child != nullptr) {
-        // Simple safety check before traversing table structure
-        ViewBlock* first_child = lam::view_as_block(static_cast<View*>(table->first_child));
-        if ((uintptr_t)first_child >= 0x1000 && (uintptr_t)first_child <= 0x7FFFFFFFFFFF) {
-            log_debug("Enhanced border precision: Attempting to calculate optimal border width");
-
-            // CSS 2.1 border-collapse: Use the maximum border width among adjacent borders
-            float max_border_width = 0.0f;
-
-            // Check table border (all sides to get the most representative value)
-            if (table->bound && table->bound->border) {
-                float table_border_avg = (table->bound->border->width.left +
-                                        table->bound->border->width.right +
-                                        table->bound->border->width.top +
-                                        table->bound->border->width.bottom) / 4.0f;
-                if (table_border_avg > max_border_width) {
-                    max_border_width = table_border_avg;
-                }
-                log_debug("Enhanced border precision: table average border=%.2fpx", table_border_avg);
-            }
-
-            // Sample cell borders to get more accurate representation
-            int sampled_cells = 0;
-            float total_cell_border = 0.0f;
-            ViewBlock* sample_row = first_child;
-
-            // Find the first actual table row
-            while (sample_row && sample_row->view_type != RDT_VIEW_TABLE_ROW) {
-                if (sample_row->view_type == RDT_VIEW_TABLE_ROW_GROUP && sample_row->first_child) {
-                    sample_row = lam::view_as_block(static_cast<View*>(sample_row->first_child));
-                } else {
-                    sample_row = lam::view_as_block(static_cast<View*>(sample_row->next_sibling));
-                }
-            }
-
-            // Sample a few cells from the first row to get representative border width
-            if (sample_row && sample_row->view_type == RDT_VIEW_TABLE_ROW) {
-                for (ViewBlock* cell = lam::view_as_block(static_cast<View*>(sample_row->first_child));
-                     cell && sampled_cells < 3;
-                     cell = lam::view_as_block(static_cast<View*>(cell->next_sibling))) {
-                    if (cell->view_type == RDT_VIEW_TABLE_CELL && cell->bound && cell->bound->border) {
-                        // Average horizontal borders for width calculation
-                        float cell_h_border = (cell->bound->border->width.left +
-                                             cell->bound->border->width.right) / 2.0f;
-                        if (cell_h_border > 0) {
-                            total_cell_border += cell_h_border;
-                            sampled_cells++;
-                            log_debug("Enhanced border precision: cell %d border=%.2fpx",
-                                     sampled_cells, cell_h_border);
-                        }
-                    }
-                }
-            }
-
-            // Calculate final border width using maximum principle
-            if (sampled_cells > 0) {
-                float avg_cell_border = total_cell_border / sampled_cells;
-                if (avg_cell_border > max_border_width) {
-                    max_border_width = avg_cell_border;
-                }
-                log_debug("Enhanced border precision: average cell border=%.2fpx (sampled %d cells)",
-                         avg_cell_border, sampled_cells);
-            }
-
-            // Apply the calculated border width with reasonable bounds
-            if (max_border_width > 0.5f) {
-                cell_border_width = max_border_width;
-                // Cap at reasonable maximum to prevent layout explosion
-                if (cell_border_width > 8.0f) {
-                    cell_border_width = 8.0f;
-                }
-            }
-
-            log_debug("Enhanced border precision: final border width=%.2fpx for collapse calculation",
-                     cell_border_width);
-        } else {
-            log_debug("Enhanced border precision: Skipping border detection due to invalid table structure");
-        }
     }
 
     // CSS 2.1 Column Position Calculation (Section 17.5)
@@ -8286,19 +8372,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Position caption at top if caption-side is top (default)
     if (captions->length > 0 && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
-        float cap_y = 0;
-        caption_height = 0;  // recalculate from scratch during positioning
-        for_each_table_caption(captions, [&](ViewBlock* cap, int ci) {
-            table_position_caption_with_margins(cap, cap_y);
-
-            float this_cap_height = table_adjust_caption_width_and_height(
-                lycon, table, cap, table_width, wrapper_content_width, ci,
-                TABLE_CAPTION_WIDTH_REFERENCE_ADJUSTED_CAP);
-
-            caption_height += this_cap_height;
-            cap_y += this_cap_height;
-            log_debug("Positioned caption %d at top: y=%.1f, height=%.1f, total=%.1f", ci, cap->y, cap->height, caption_height);
-        });
+        caption_height = table_position_caption_stack(
+            lycon, table, captions, 0.0f, table_width, wrapper_content_width,
+            TABLE_CAPTION_WIDTH_REFERENCE_ADJUSTED_CAP, TABLE_CAPTION_STACK_TOP);
 
         // Update current_y with total caption height
         current_y = caption_height + table_border_top + table_padding_top;
@@ -8320,41 +8396,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // maintain their source order relative to other body groups.
     // =========================================================================
 
-    // First pass: collect the first thead/tfoot separately; everything else
-    // goes into body_groups in source order.
-    ViewBlock* header_group = nullptr;
-    ViewBlock* footer_group = nullptr;
-    ArrayList* body_groups = arraylist_new(8);  // tbody + extra thead/tfoot + direct rows
-
-    for (View* child_view = static_cast<View*>(table->first_child); child_view; child_view = static_cast<View*>(child_view->next_sibling)) {
-        ViewBlock* child = lam::view_as_block(child_view);
-        if (!child) continue;
-        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-            ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
-            int section = group->get_section_type();
-            if (section == TABLE_SECTION_THEAD && !header_group) {
-                header_group = child;
-            } else if (section == TABLE_SECTION_TFOOT && !footer_group) {
-                footer_group = child;
-            } else {
-                // Additional theads/tfoots become regular row groups (source order)
-                arraylist_append(body_groups, child);
-            }
-        } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
-            // Direct rows are treated as part of tbody
-            arraylist_append(body_groups, child);
-        }
-    }
-
-    // Build ordered list: first THEAD → body groups (source order) → first TFOOT
-    ArrayList* ordered_elements = arraylist_new(body_groups->length + 2);
-    if (header_group) arraylist_append(ordered_elements, header_group);
-    for (int i = 0; i < body_groups->length; i++) arraylist_append(ordered_elements, body_groups->data[i]);
-    if (footer_group) arraylist_append(ordered_elements, footer_group);
+    TableOrderedRowElements ordered_rows = table_collect_ordered_row_elements(table);
+    ArrayList* body_groups = ordered_rows.body_groups;
+    ArrayList* ordered_elements = ordered_rows.ordered_elements;
 
     log_info("%s Row group ordering: header=%s, %d body groups, footer=%s (total %d)", table->source_loc(),
-              header_group ? "yes" : "no", body_groups->length, footer_group ? "yes" : "no",
-              ordered_elements->length);
+              ordered_rows.header_group ? "yes" : "no", body_groups->length,
+              ordered_rows.footer_group ? "yes" : "no", ordered_elements->length);
 
     // Process elements in visual order (THEAD groups → TBODY groups → direct rows → TFOOT groups)
     for (int _i = 0; _i < ordered_elements->length; _i++) {
@@ -8362,92 +8410,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         log_info("%s Processing ordered element %d: view_type=%d", table->source_loc(), _i, child->view_type);
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
             ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
+            table_position_row_group_box(
+                table, meta, child, col_widths, col_x_positions, columns,
+                has_direct_float, &current_y);
             float group_start_y = current_y;
-
-            // Position row group at table content area (after padding and border-spacing)
-
-            // Calculate tbody content width
-            float tbody_content_width;
-            if (table->tb->border_collapse) {
-                // For border-collapse, tbody width = sum of cell widths (including half-borders)
-                // This equals: col_x_positions[columns] - col_x_positions[0]
-                // The cells' widths already include their half-borders from resolved collapsed borders.
-                tbody_content_width = col_x_positions[columns] - col_x_positions[0];
-                log_debug("%s Border-collapse tbody width: col_positions[%d]=%.1f - col_positions[0]=%.1f = %.1f", table->source_loc(),
-                        columns, col_x_positions[columns], col_x_positions[0], tbody_content_width);
-            } else {
-                // For border-spacing, calculate as sum of column widths + spacing
-                tbody_content_width = table_sum_span_columns(col_widths, 0, columns, columns);
-                // Add border-spacing between columns
-                if (table->tb->border_spacing_h > 0 && columns > 1) {
-                    tbody_content_width += (columns - 1) * table->tb->border_spacing_h;
-                }
-            }
-
-            // CSS 2.1 §9.4.1: When a table has no columns (all children were
-            // floated/blockified), the row groups should still use the table's
-            // content width so they span the full table area.
-            if (tbody_content_width <= 0 && table->width > 0 && columns == 0) {
-                tbody_content_width = table->width;
-                log_debug("%s No columns: using table->width %.1f for tbody_content_width", table->source_loc(), table->width);
-            }
-
-            current_y = table_clear_direct_float_intrusion(
-                table, current_y, tbody_content_width, has_direct_float);
-            group_start_y = current_y;
             float group_content_end_y = group_start_y;
-
-            float float_shift_x = 0.0f;
-            if (has_direct_float && table->width > 0.0f && tbody_content_width > 0.0f) {
-                float left_intrusion = table_direct_left_float_intrusion(table, current_y, table->width);
-                float max_shift = table->width - tbody_content_width;
-                if (max_shift < 0.0f) max_shift = 0.0f;
-                if (left_intrusion > max_shift) left_intrusion = max_shift;
-                float_shift_x = left_intrusion;
-            }
-
-            // Position tbody based on border-collapse mode
-            if (table->tb->border_collapse) {
-                // Border-collapse: tbody starts at half the outer collapsed border
-                child->x = meta->collapsed_border_left / 2.0f + float_shift_x;
-                child->y = current_y; // Use current_y to stack row groups
-                child->width = tbody_content_width;
-            } else {
-                // Border-separate: tbody starts after table padding and left border-spacing
-                // col_x_positions[0] already includes table padding + border-spacing
-                child->x = (float)col_x_positions[0] + float_shift_x;
-                child->y = current_y;
-                child->width = tbody_content_width;
-            }
-
-            log_debug("%s Row group positioned at x=%.1f, y=%.1f, width=%.1f (tbody_content_width=%.1f, columns=%d)", table->source_loc(),
-                   child->x, child->y, child->width, tbody_content_width, columns);
 
             // CSS 2.1 §17.5.3: Check row group height properties
             // Percentage heights compute to auto; non-percentage heights act as minimum height
             // Note: CSS 2.1 says min-height/max-height on row groups is undefined.
             // Browsers apply 'height' as minimum but ignore min-height/max-height.
             bool group_has_percent_height = false;
-            float explicit_group_height = 0.0f;
-            if (child->is_element()) {
-                DomElement* group_elem = child->as_element();
-                if (group_elem->specified_style) {
-                    CssDeclaration* height_decl = style_tree_get_declaration(
-                        group_elem->specified_style, CSS_PROPERTY_HEIGHT);
-                    if (height_decl && height_decl->value) {
-                        if (height_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                            group_has_percent_height = true;
-                            log_debug("%s Row group has percentage height - all rows compute to auto", table->source_loc());
-                        } else {
-                            float resolved = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-                            if (resolved > 0) {
-                                explicit_group_height = resolved;
-                                log_debug("%s Row group has explicit CSS height: %.1fpx", table->source_loc(), explicit_group_height);
-                            }
-                        }
-                    }
-                }
-            }
+            float explicit_group_height = table_resolve_row_group_explicit_height(
+                lycon, table, child, &group_has_percent_height);
 
             for_each_table_row_in_group(group, [&](ViewTableRow* trow, ViewBlock* row) {
                 // CSS 2.1 §17.5.3: If row group has percentage height, mark all its rows
@@ -8531,11 +8506,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 }
 
                 // Track row height and Y position for rowspan calculation
-                if (global_row_index < meta->row_count) {
-                    meta->row_y_positions[global_row_index] = current_y;
-                    meta->row_heights[global_row_index] = row->height;
-                    log_debug("%s Tracking row %d: y=%.1f, height=%.1f", table->source_loc(), global_row_index, current_y, row->height);
-                }
+                table_track_row_metrics(table, meta, global_row_index,
+                                        current_y, row->height, "row");
                 global_row_index++;
 
                 current_y += row->height;
@@ -8560,50 +8532,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             child->height = group_content_end_y - group_start_y;
 
             // CSS 2.1 §17.5.3: height on row groups specifies minimum height
-            float content_group_height = child->height;
-            if (explicit_group_height > child->height) {
-                child->height = explicit_group_height;
-                log_debug("%s Row group expanded to explicit height: %.1fpx (content was %.1fpx)", table->source_loc(), child->height, content_group_height);
-            }
-
-            // Distribute extra height to rows within the group
-            if (child->height > content_group_height) {
-                float extra = child->height - content_group_height;
-                current_y += extra;
-                log_debug("%s Advanced current_y by %.1f for expanded row group", table->source_loc(), extra);
-
-                // Count eligible rows for distribution
-                int eligible_rows = 0;
-                for_each_table_row_in_group(group, [&](ViewTableRow* trow, ViewBlock* r) {
-                    (void)trow;
-                    if (r->height > 0) eligible_rows++;
-                });
-                if (eligible_rows > 0) {
-                    float extra_per_row = extra / eligible_rows;
-                    float y_accum = 0;
-                    for_each_table_row_in_group(group, [&](ViewTableRow* trow, ViewBlock* r) {
-                        if (r->height > 0) {
-                            r->y = y_accum;
-                            r->height += extra_per_row;
-                            log_debug("%s Row expanded to %.1fpx (added %.1fpx)", table->source_loc(), r->height, extra_per_row);
-
-                            // Update row height in meta
-                            int row_idx = table_row_metadata_index_from_row(trow, -1);
-                            if (row_idx >= 0 && row_idx < meta->row_count) {
-                                meta->row_heights[row_idx] = r->height;
-                            }
-
-                            update_row_cells_after_height_change(lycon, trow, r->height, false, true);
-
-                            y_accum += r->height;
-                            // Add border-spacing between rows
-                            if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
-                                y_accum += table->tb->border_spacing_v;
-                            }
-                        }
-                    });
-                }
-            }
+            table_apply_row_group_min_height(
+                lycon, table, meta, group, child, explicit_group_height, &current_y);
         }
         else if (child->view_type == RDT_VIEW_TABLE_ROW) {
             // Handle direct table rows (part of implicit tbody, positioned with other tbody content)
@@ -8663,11 +8593,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             update_row_cells_after_height_change(lycon, trow, trow->height, false, true);
 
             // Track row height and Y position for rowspan calculation
-            if (global_row_index < meta->row_count) {
-                meta->row_y_positions[global_row_index] = current_y;
-                meta->row_heights[global_row_index] = trow->height;
-                log_debug("%s Tracking direct row %d: y=%.1f, height=%.1f", table->source_loc(), global_row_index, current_y, trow->height);
-            }
+            table_track_row_metrics(table, meta, global_row_index,
+                                    current_y, trow->height, "direct row");
             global_row_index++;
 
             current_y += trow->height;
@@ -8947,19 +8874,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Position captions at bottom if caption-side is bottom (CSS 2.1 Section 17.4.1)
     if (captions->length > 0 && table->tb->caption_side == TableProp::CAPTION_SIDE_BOTTOM) {
-        float cap_y = final_table_height;
-        float total_bottom_caption_height = 0;
-        for_each_table_caption(captions, [&](ViewBlock* cap, int ci) {
-            table_position_caption_with_margins(cap, cap_y);
-
-            float this_cap_height = table_adjust_caption_width_and_height(
-                lycon, table, cap, table_width, wrapper_content_width, ci,
-                TABLE_CAPTION_WIDTH_REFERENCE_WRAPPER);
-
-            cap_y += this_cap_height;
-            total_bottom_caption_height += this_cap_height;
-            log_debug("%s Positioned caption %d at bottom: y=%.1f, height=%.1f", table->source_loc(), ci, cap->y, cap->height);
-        });
+        float total_bottom_caption_height = table_position_caption_stack(
+            lycon, table, captions, final_table_height, table_width, wrapper_content_width,
+            TABLE_CAPTION_WIDTH_REFERENCE_WRAPPER, TABLE_CAPTION_STACK_BOTTOM);
         final_table_height += total_bottom_caption_height;
         caption_height = total_bottom_caption_height;
         log_debug("%s Total bottom caption height: %.1f", table->source_loc(), total_bottom_caption_height);

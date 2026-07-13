@@ -329,3 +329,10 @@ rules:
     category: correctness
     tags: [radiant, state-machine, coverage]
     note: "Parses C++ enum header + table source, asserts every enum value has a matching row. Neither ast-grep nor alint can express this; intentionally stays as Python."
+
+  no-new-per-file-header:
+    backend: python
+    file: utils/lint/rules/structural/no_new_per_file_header.py
+    category: architecture
+    tags: [radiant, headers, structure]
+    note: "Warn-mode DD4 ratchet for Radiant header consolidation. Flags changed headers that mirror sibling source files or are outside the global-header allow-list; H6 flips this to error mode."
