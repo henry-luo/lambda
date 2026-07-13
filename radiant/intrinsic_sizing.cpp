@@ -76,6 +76,121 @@ static int intrinsic_count_grid_template_tracks(const CssValue* value,
     return total_tracks > 0 ? total_tracks : list_count;
 }
 
+static bool intrinsic_style_keyword_declaration(StyleTree* style, CssPropertyId property,
+                                                CssEnum* keyword) {
+    if (!style) return false;
+    CssDeclaration* decl = style_tree_get_declaration(style, property);
+    if (!decl || !decl->value || decl->value->type != CSS_VALUE_TYPE_KEYWORD) {
+        return false;
+    }
+    if (keyword) *keyword = decl->value->data.keyword;
+    return true;
+}
+
+static bool intrinsic_style_display_keyword(StyleTree* style, CssEnum* keyword) {
+    return intrinsic_style_keyword_declaration(style, CSS_PROPERTY_DISPLAY, keyword);
+}
+
+static bool intrinsic_specified_display_keyword(DomElement* element, CssEnum* keyword) {
+    return element && intrinsic_style_display_keyword(element->specified_style, keyword);
+}
+
+static bool intrinsic_element_display_matches(DomElement* element, ViewBlock* view,
+                                              CssEnum display_inner,
+                                              CssEnum inline_display) {
+    if (view && view->display.inner == display_inner) return true;
+    CssEnum value = (CssEnum)0;
+    if (!intrinsic_specified_display_keyword(element, &value)) return false;
+    return value == display_inner || value == inline_display;
+}
+
+static bool intrinsic_pseudo_style_is_inline(StyleTree* pseudo_style) {
+    if (!pseudo_style || !pseudo_style->tree) return true;
+    CssEnum display = (CssEnum)0;
+    if (!intrinsic_style_display_keyword(pseudo_style, &display)) return true;
+    return display != CSS_VALUE_BLOCK && display != CSS_VALUE_TABLE &&
+           display != CSS_VALUE_LIST_ITEM && display != CSS_VALUE_FLEX &&
+           display != CSS_VALUE_GRID && display != CSS_VALUE_NONE;
+}
+
+static int intrinsic_grid_template_column_count(DomElement* element, ViewBlock* view,
+                                                int fallback_count,
+                                                const char* log_context,
+                                                bool log_embed_count,
+                                                bool log_specified_type) {
+    int column_count = fallback_count;
+    GridProp* grid_prop = (view && view->embed) ? view->embed->grid : nullptr;
+    if (grid_prop && grid_prop->grid_template_columns) {
+        column_count = grid_prop->grid_template_columns->track_count;
+        if (log_embed_count) {
+            log_debug("%s: grid %s from embed, cols=%d",
+                      log_context ? log_context : "intrinsic_grid_template_column_count",
+                      element ? element->node_name() : "<null>", column_count);
+        }
+    }
+
+    int unresolved_threshold = fallback_count > 0 ? fallback_count : 0;
+    if (column_count <= unresolved_threshold && element && element->specified_style) {
+        CssDeclaration* cols_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_GRID_TEMPLATE_COLUMNS);
+        if (cols_decl && cols_decl->value) {
+            if (log_specified_type) {
+                log_debug("%s: %s grid-template-columns value type=%d",
+                          log_context ? log_context : "intrinsic_grid_template_column_count",
+                          element->node_name(), cols_decl->value->type);
+            }
+            column_count = intrinsic_count_grid_template_tracks(cols_decl->value, log_context);
+        }
+    }
+    return column_count;
+}
+
+static bool intrinsic_style_length_declaration(LayoutContext* lycon, StyleTree* style,
+                                               CssPropertyId property,
+                                               CssPropertyId resolve_property,
+                                               float* out_value) {
+    if (!style || !out_value) return false;
+
+    CssDeclaration* decl = style_tree_get_declaration(style, property);
+    if (!decl || !decl->value || decl->value->type != CSS_VALUE_TYPE_LENGTH) return false;
+
+    *out_value = resolve_length_value(lycon, resolve_property, decl->value);
+    return true;
+}
+
+static bool intrinsic_style_length_declaration_or_fallback(LayoutContext* lycon, StyleTree* style,
+                                                           CssPropertyId property,
+                                                           CssPropertyId fallback_property,
+                                                           CssPropertyId resolve_property,
+                                                           float* out_value) {
+    if (!style || !out_value) return false;
+
+    CssDeclaration* decl = style_tree_get_declaration(style, property);
+    if (!decl) decl = style_tree_get_declaration(style, fallback_property);
+    if (!decl || !decl->value || decl->value->type != CSS_VALUE_TYPE_LENGTH) return false;
+
+    *out_value = resolve_length_value(lycon, resolve_property, decl->value);
+    return true;
+}
+
+static bool intrinsic_style_flex_direction_is_row(StyleTree* style, bool* is_row) {
+    CssEnum direction = (CssEnum)0;
+    if (!intrinsic_style_keyword_declaration(style, CSS_PROPERTY_FLEX_DIRECTION, &direction)) {
+        return false;
+    }
+    if (is_row) *is_row = (direction == CSS_VALUE_ROW || direction == CSS_VALUE_ROW_REVERSE);
+    return true;
+}
+
+static bool intrinsic_style_flex_wrap_enabled(StyleTree* style, bool* is_wrapping) {
+    CssEnum wrap = (CssEnum)0;
+    if (!intrinsic_style_keyword_declaration(style, CSS_PROPERTY_FLEX_WRAP, &wrap)) {
+        return false;
+    }
+    if (is_wrapping) *is_wrapping = (wrap == CSS_VALUE_WRAP || wrap == CSS_VALUE_WRAP_REVERSE);
+    return true;
+}
+
 static float intrinsic_resolve_line_height_for_owner(LayoutContext* lycon, const CssValue* value,
                                                      DomElement* owner, float target_font_size) {
     if (!lycon || !value) return 0;
@@ -798,41 +913,20 @@ static bool intrinsic_resolve_vertical_margins(LayoutContext* lycon, DomElement*
     return resolved;
 }
 
-static bool node_is_table_cell_like(DomNode* node) {
-    if (!node || !node->is_element()) return false;
-    DomElement* elem = node->as_element();
-    if (elem->view_type == RDT_VIEW_TABLE_CELL ||
-        elem->display.inner == CSS_VALUE_TABLE_CELL ||
-        elem->display.outer == CSS_VALUE_TABLE_CELL) {
-        return true;
-    }
-    if (elem->specified_style) {
-        CssDeclaration* display_decl = style_tree_get_declaration(
-            elem->specified_style, CSS_PROPERTY_DISPLAY);
-        if (display_decl && display_decl->value &&
-            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-            display_decl->value->data.keyword == CSS_VALUE_TABLE_CELL) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static bool intrinsic_element_matches_display(DomElement* elem, CssEnum display_value) {
     if (!elem) return false;
     if (elem->display.inner == display_value || elem->display.outer == display_value) {
         return true;
     }
-    if (elem->specified_style) {
-        CssDeclaration* display_decl = style_tree_get_declaration(
-            elem->specified_style, CSS_PROPERTY_DISPLAY);
-        if (display_decl && display_decl->value &&
-            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-            display_decl->value->data.keyword == display_value) {
-            return true;
-        }
-    }
-    return false;
+    CssEnum value = (CssEnum)0;
+    return intrinsic_specified_display_keyword(elem, &value) && value == display_value;
+}
+
+static bool node_is_table_cell_like(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    DomElement* elem = node->as_element();
+    return elem->view_type == RDT_VIEW_TABLE_CELL ||
+           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_CELL);
 }
 
 static bool intrinsic_is_table_box(DomElement* elem) {
@@ -1418,6 +1512,110 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     return result;
 }
 
+static TextIntrinsicWidths intrinsic_measure_pseudo_text_widths(LayoutContext* lycon,
+                                                                StyleTree* pseudo_style,
+                                                                const char* content) {
+    TextIntrinsicWidths widths = {0, 0};
+    if (content && *content) {
+        widths = measure_text_intrinsic_widths(lycon, content, strlen(content));
+    }
+    CssDeclaration* width_decl = pseudo_style
+        ? style_tree_get_declaration(pseudo_style, CSS_PROPERTY_WIDTH) : nullptr;
+    if (width_decl && width_decl->value && width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+        float explicit_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
+        if (!isnan(explicit_width) && explicit_width >= 0) {
+            widths.max_content = fmax(widths.max_content, explicit_width);
+        }
+    }
+    return widths;
+}
+
+static bool intrinsic_pseudo_border_width_pair(LayoutContext* lycon, StyleTree* pseudo_style,
+                                               float* border_l, float* border_r) {
+    if (!pseudo_style || !border_l || !border_r) return false;
+
+    CssDeclaration* border_width_decl = style_tree_get_declaration(
+        pseudo_style, CSS_PROPERTY_BORDER_WIDTH);
+    if (!border_width_decl || !border_width_decl->value) return false;
+
+    const CssValue* right_value = css_box_shorthand_side_value(border_width_decl->value, 1);
+    const CssValue* left_value = css_box_shorthand_side_value(border_width_decl->value, 3);
+    if (!right_value || !left_value) return false;
+
+    *border_r = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, right_value);
+    *border_l = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, left_value);
+    return true;
+}
+
+static bool intrinsic_pseudo_positive_length_decl(LayoutContext* lycon, StyleTree* pseudo_style,
+                                                  CssPropertyId property, float* out_value,
+                                                  bool require_length_value) {
+    if (!pseudo_style || !out_value) return false;
+
+    CssDeclaration* decl = style_tree_get_declaration(pseudo_style, property);
+    if (!decl || !decl->value) return false;
+    if (require_length_value && decl->value->type != CSS_VALUE_TYPE_LENGTH) return false;
+
+    float resolved = resolve_length_value(lycon, property, decl->value);
+    if (isnan(resolved) || resolved <= 0.0f) return false;
+
+    *out_value = resolved;
+    return true;
+}
+
+static float intrinsic_pseudo_border_side_shorthand(LayoutContext* lycon,
+                                                    StyleTree* pseudo_style,
+                                                    CssPropertyId side_property,
+                                                    CssPropertyId side_width_property) {
+    if (!pseudo_style) return 0.0f;
+
+    CssDeclaration* side_decl = style_tree_get_declaration(pseudo_style, side_property);
+    if (!side_decl || !side_decl->value) return 0.0f;
+
+    const CssValue* value = side_decl->value;
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        float resolved = resolve_length_value(lycon, side_width_property, value);
+        return !isnan(resolved) && resolved > 0.0f ? resolved : 0.0f;
+    }
+    if (value->type != CSS_VALUE_TYPE_LIST) return 0.0f;
+
+    for (int i = 0; i < value->data.list.count; i++) {
+        CssValue* item = value->data.list.values[i];
+        if (!item || item->type != CSS_VALUE_TYPE_LENGTH) continue;
+        float resolved = resolve_length_value(lycon, side_width_property, item);
+        if (!isnan(resolved) && resolved > 0.0f) return resolved;
+    }
+    return 0.0f;
+}
+
+static void intrinsic_pseudo_horizontal_border_widths(LayoutContext* lycon, StyleTree* pseudo_style,
+                                                      float* border_l, float* border_r) {
+    if (!border_l || !border_r) return;
+
+    *border_l = 0.0f;
+    *border_r = 0.0f;
+
+    // Pseudo intrinsic widths intentionally preserve this legacy cascade probe:
+    // `border-width` suppresses width longhands only when both horizontal sides exist.
+    bool border_width_found = intrinsic_pseudo_border_width_pair(
+        lycon, pseudo_style, border_l, border_r);
+    if (!border_width_found) {
+        intrinsic_pseudo_positive_length_decl(
+            lycon, pseudo_style, CSS_PROPERTY_BORDER_LEFT_WIDTH, border_l, true);
+        intrinsic_pseudo_positive_length_decl(
+            lycon, pseudo_style, CSS_PROPERTY_BORDER_RIGHT_WIDTH, border_r, true);
+    }
+
+    if (*border_l == 0.0f) {
+        *border_l = intrinsic_pseudo_border_side_shorthand(
+            lycon, pseudo_style, CSS_PROPERTY_BORDER_LEFT, CSS_PROPERTY_BORDER_LEFT_WIDTH);
+    }
+    if (*border_r == 0.0f) {
+        *border_r = intrinsic_pseudo_border_side_shorthand(
+            lycon, pseudo_style, CSS_PROPERTY_BORDER_RIGHT, CSS_PROPERTY_BORDER_RIGHT_WIDTH);
+    }
+}
+
 // ============================================================================
 // Text Height at Constrained Width (CSS Flexbox §9.4)
 // ============================================================================
@@ -1614,27 +1812,22 @@ static bool is_inline_level_element(DomElement* element) {
     }
 
     // Fall back to checking specified CSS style
-    if (element->specified_style) {
-        CssDeclaration* display_decl = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_DISPLAY);
-        if (display_decl && display_decl->value &&
-            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-            // Check for inline display values
-            CssEnum display_value = display_decl->value->data.keyword;
-            if (display_value == CSS_VALUE_INLINE ||
-                display_value == CSS_VALUE_INLINE_BLOCK ||
-                display_value == CSS_VALUE_INLINE_FLEX ||
-                display_value == CSS_VALUE_INLINE_GRID ||
-                display_value == CSS_VALUE_INLINE_TABLE) {
-                return true;
-            }
-            // Explicit block display
-            if (display_value == CSS_VALUE_BLOCK ||
-                display_value == CSS_VALUE_FLEX ||
-                display_value == CSS_VALUE_GRID ||
-                display_value == CSS_VALUE_TABLE) {
-                return false;
-            }
+    CssEnum display_value = (CssEnum)0;
+    if (intrinsic_specified_display_keyword(element, &display_value)) {
+        // Check for inline display values
+        if (display_value == CSS_VALUE_INLINE ||
+            display_value == CSS_VALUE_INLINE_BLOCK ||
+            display_value == CSS_VALUE_INLINE_FLEX ||
+            display_value == CSS_VALUE_INLINE_GRID ||
+            display_value == CSS_VALUE_INLINE_TABLE) {
+            return true;
+        }
+        // Explicit block display
+        if (display_value == CSS_VALUE_BLOCK ||
+            display_value == CSS_VALUE_FLEX ||
+            display_value == CSS_VALUE_GRID ||
+            display_value == CSS_VALUE_TABLE) {
+            return false;
         }
     }
 
@@ -1885,13 +2078,9 @@ static bool intrinsic_pseudo_needs_table_repair(DomElement* element, bool is_bef
     StyleTree* pseudo_styles = is_before ? element->before_styles : element->after_styles;
     if (!pseudo_styles || !pseudo_styles->tree) return false;
 
-    CssDeclaration* display_decl = style_tree_get_declaration(
-        pseudo_styles, CSS_PROPERTY_DISPLAY);
-    if (!display_decl || !display_decl->value ||
-        display_decl->value->type != CSS_VALUE_TYPE_KEYWORD) {
-        return false;
-    }
-    return is_table_internal_display(display_decl->value->data.keyword);
+    CssEnum display = (CssEnum)0;
+    return intrinsic_style_display_keyword(pseudo_styles, &display) &&
+           is_table_internal_display(display);
 }
 
 static void intrinsic_materialize_pseudo_content(LayoutContext* lycon, DomElement* element) {
@@ -2397,15 +2586,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool is_table_display = false;
     {
         ViewBlock* tview = lam::unsafe_view_block_element_storage(element);
-        if (tview->display.inner == CSS_VALUE_TABLE) is_table_display = true;
-        if (!is_table_display && element->tag() == HTM_TAG_TABLE) is_table_display = true;
-        if (!is_table_display && element->specified_style) {
-            CssDeclaration* dd = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_DISPLAY);
-            if (dd && dd->value && dd->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum dv = dd->value->data.keyword;
-                if (dv == CSS_VALUE_TABLE || dv == CSS_VALUE_INLINE_TABLE) is_table_display = true;
-            }
+        if (intrinsic_element_display_matches(
+                element, tview, CSS_VALUE_TABLE, CSS_VALUE_INLINE_TABLE)) {
+            is_table_display = true;
         }
+        if (!is_table_display && element->tag() == HTM_TAG_TABLE) is_table_display = true;
     }
 
     // Check for explicit CSS width first
@@ -2931,18 +3116,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // ========================================================================
     {
         ViewBlock* tbl_view = lam::unsafe_view_block_element_storage(element);
-        bool is_table_element = (tbl_view->display.inner == CSS_VALUE_TABLE);
-        if (!is_table_element) {
-            uintptr_t etag = element->tag();
-            if (etag == HTM_TAG_TABLE) is_table_element = true;
-        }
-        if (!is_table_element && element->specified_style) {
-            CssDeclaration* dd = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_DISPLAY);
-            if (dd && dd->value && dd->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum dv = dd->value->data.keyword;
-                if (dv == CSS_VALUE_TABLE || dv == CSS_VALUE_INLINE_TABLE) is_table_element = true;
-            }
-        }
+        bool is_table_element = intrinsic_element_display_matches(
+            element, tbl_view, CSS_VALUE_TABLE, CSS_VALUE_INLINE_TABLE);
+        if (!is_table_element && element->tag() == HTM_TAG_TABLE) is_table_element = true;
 
         if (is_table_element) {
             float border_spacing = 0;
@@ -3590,31 +3766,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool has_generated_inline_before = false;
     if (!intrinsic_pseudo_child_is_materialized(element, true) &&
         dom_element_has_before_content(element) && element->before_styles && element->before_styles->tree) {
-        bool before_is_inline = true;
-        CssDeclaration* pd_decl = style_tree_get_declaration(element->before_styles, CSS_PROPERTY_DISPLAY);
-        if (pd_decl && pd_decl->value && pd_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-            CssEnum dv = pd_decl->value->data.keyword;
-            if (dv == CSS_VALUE_BLOCK || dv == CSS_VALUE_TABLE ||
-                dv == CSS_VALUE_LIST_ITEM || dv == CSS_VALUE_FLEX ||
-                dv == CSS_VALUE_GRID || dv == CSS_VALUE_NONE) {
-                before_is_inline = false;
-            }
-        }
-
         const char* before_content = dom_element_get_pseudo_element_content(
             element, 1 /*PSEUDO_ELEMENT_BEFORE*/);
-        if (before_is_inline && before_content && *before_content) {
-            TextIntrinsicWidths tw = measure_text_intrinsic_widths(
-                lycon, before_content, strlen(before_content));
+        if (intrinsic_pseudo_style_is_inline(element->before_styles) &&
+            before_content && *before_content) {
+            TextIntrinsicWidths tw = intrinsic_measure_pseudo_text_widths(
+                lycon, element->before_styles, before_content);
             float before_width = tw.max_content;
-            CssDeclaration* width_decl = style_tree_get_declaration(
-                element->before_styles, CSS_PROPERTY_WIDTH);
-            if (width_decl && width_decl->value && width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                float explicit_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
-                if (!isnan(explicit_width) && explicit_width >= 0) {
-                    before_width = fmax(before_width, explicit_width);
-                }
-            }
             has_inline_content = true;
             has_generated_inline_before = true;
             inline_run_ends_with_collapsible_space = false;
@@ -3650,21 +3808,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     ViewBlock* view_block = lam::unsafe_view_block_element_storage(element);
 
     // Check if this is a grid container.
-    bool is_grid_container = false;
-    if (view_block->display.inner == CSS_VALUE_GRID) {
-        is_grid_container = true;
-    }
-    if (!is_grid_container && element->specified_style) {
-        CssDeclaration* display_decl = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_DISPLAY);
-        if (display_decl && display_decl->value &&
-            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-            CssEnum dv = display_decl->value->data.keyword;
-            if (dv == CSS_VALUE_GRID || dv == CSS_VALUE_INLINE_GRID) {
-                is_grid_container = true;
-            }
-        }
-    }
+    bool is_grid_container = intrinsic_element_display_matches(
+        element, view_block, CSS_VALUE_GRID, CSS_VALUE_INLINE_GRID);
     if (is_grid_container) {
         log_debug("measure_element_intrinsic_widths: grid container");
 
@@ -3673,19 +3818,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // (each column's max-content = max of all items spanning only that column).
         // This is different from a block container which takes max of block children.
         GridProp* grid_prop = view_block->embed ? view_block->embed->grid : nullptr;
-        int col_count = 0;
-        if (grid_prop && grid_prop->grid_template_columns) {
-            col_count = grid_prop->grid_template_columns->track_count;
-        }
-        // Also check specified_style for unresolved grid-template-columns
-        if (col_count == 0 && element->specified_style) {
-            CssDeclaration* cols_decl = style_tree_get_declaration(
-                element->specified_style, CSS_PROPERTY_GRID_TEMPLATE_COLUMNS);
-            if (cols_decl && cols_decl->value) {
-                col_count = intrinsic_count_grid_template_tracks(
-                    cols_decl->value, "measure_element_intrinsic_widths");
-            }
-        }
+        int col_count = intrinsic_grid_template_column_count(
+            element, view_block, 0, "measure_element_intrinsic_widths", false, false);
 
         if (col_count > 1) {
             // Compute per-column max-content: assign each child to a column (auto-placement)
@@ -3787,22 +3921,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
 
-    // First check resolved display.inner
-    if (view_block->display.inner == CSS_VALUE_FLEX) {
-        is_flex_container = true;
-    }
-    // Also check specified_style for unresolved display
-    if (!is_flex_container && element->specified_style) {
-        CssDeclaration* display_decl = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_DISPLAY);
-        if (display_decl && display_decl->value &&
-            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-            CssEnum dv = display_decl->value->data.keyword;
-            if (dv == CSS_VALUE_FLEX || dv == CSS_VALUE_INLINE_FLEX) {
-                is_flex_container = true;
-                log_debug("measure_element_intrinsic_widths: detected flex via specified_style");
-            }
-        }
+    is_flex_container = intrinsic_element_display_matches(
+        element, view_block, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX);
+    if (is_flex_container && view_block->display.inner != CSS_VALUE_FLEX) {
+        log_debug("measure_element_intrinsic_widths: detected flex via specified_style");
     }
 
     // Check flex direction for row vs column
@@ -3818,29 +3940,15 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             is_vertical_wm = (view_block->embed->flex->writing_mode == WM_VERTICAL_LR ||
                               view_block->embed->flex->writing_mode == WM_VERTICAL_RL);
         } else if (element->specified_style) {
-            // Check specified_style for flex-direction
-            CssDeclaration* dir_decl = style_tree_get_declaration(
-                element->specified_style, CSS_PROPERTY_FLEX_DIRECTION);
-            if (dir_decl && dir_decl->value && dir_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum dir = dir_decl->value->data.keyword;
-                is_row_flex = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
-            }
-            // Check for writing-mode
-            CssDeclaration* wm_decl = style_tree_get_declaration(
-                element->specified_style, CSS_PROPERTY_WRITING_MODE);
-            if (wm_decl && wm_decl->value && wm_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum wm = wm_decl->value->data.keyword;
+            intrinsic_style_flex_direction_is_row(element->specified_style, &is_row_flex);
+            CssEnum wm = (CssEnum)0;
+            if (intrinsic_style_keyword_declaration(
+                    element->specified_style, CSS_PROPERTY_WRITING_MODE, &wm)) {
                 is_vertical_wm = (wm == CSS_VALUE_VERTICAL_LR || wm == CSS_VALUE_VERTICAL_RL);
             }
-            // Check for gap (try column-gap first, then gap shorthand)
-            CssDeclaration* gap_decl = style_tree_get_declaration(
-                element->specified_style, CSS_PROPERTY_COLUMN_GAP);
-            if (!gap_decl) {
-                gap_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_GAP);
-            }
-            if (gap_decl && gap_decl->value && gap_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                flex_gap = resolve_length_value(lycon, CSS_PROPERTY_GAP, gap_decl->value);
-            }
+            intrinsic_style_length_declaration_or_fallback(
+                lycon, element->specified_style, CSS_PROPERTY_COLUMN_GAP,
+                CSS_PROPERTY_GAP, CSS_PROPERTY_GAP, &flex_gap);
         }
         // In vertical writing modes, the physical axis mapping swaps:
         // column becomes horizontal, row becomes vertical
@@ -3856,12 +3964,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 int wrap = view_block->embed->flex->wrap;
                 is_flex_wrap = (wrap == CSS_VALUE_WRAP || wrap == CSS_VALUE_WRAP_REVERSE);
             } else if (element->specified_style) {
-                CssDeclaration* wrap_decl = style_tree_get_declaration(
-                    element->specified_style, CSS_PROPERTY_FLEX_WRAP);
-                if (wrap_decl && wrap_decl->value && wrap_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                    CssEnum wrap = wrap_decl->value->data.keyword;
-                    is_flex_wrap = (wrap == CSS_VALUE_WRAP || wrap == CSS_VALUE_WRAP_REVERSE);
-                }
+                intrinsic_style_flex_wrap_enabled(element->specified_style, &is_flex_wrap);
             }
         }
         log_debug("measure_element_intrinsic_widths: %s is_flex=%d, is_row_flex=%d, gap=%.1f, vertical_wm=%d, wrap=%d",
@@ -4737,115 +4840,33 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // CSS Generated Content §2: Pseudo-elements default to display:inline.
             // If display:block/table/list-item, the pseudo generates a block-level box
             // that doesn't contribute to inline content sum — skip it here.
-            CssDeclaration* pd_decl = style_tree_get_declaration(ps, CSS_PROPERTY_DISPLAY);
-            if (pd_decl && pd_decl->value && pd_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum dv = pd_decl->value->data.keyword;
-                if (dv == CSS_VALUE_BLOCK || dv == CSS_VALUE_TABLE ||
-                    dv == CSS_VALUE_LIST_ITEM || dv == CSS_VALUE_FLEX ||
-                    dv == CSS_VALUE_GRID || dv == CSS_VALUE_NONE) continue;
-            }
+            if (!intrinsic_pseudo_style_is_inline(ps)) continue;
 
             // Measure content text width
-            float content_w = 0;
             const char* pc = dom_element_get_pseudo_element_content(element,
                 is_before ? 1 /*PSEUDO_ELEMENT_BEFORE*/ : 2 /*PSEUDO_ELEMENT_AFTER*/);
-            if (pc && *pc) {
-                TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, pc, strlen(pc));
-                content_w = tw.max_content;
-            }
+            TextIntrinsicWidths content_widths = intrinsic_measure_pseudo_text_widths(lycon, ps, pc);
+            float content_w = content_widths.max_content;
 
-            // Get explicit width if set
-            CssDeclaration* pw_decl = style_tree_get_declaration(ps, CSS_PROPERTY_WIDTH);
-            if (pw_decl && pw_decl->value && pw_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                float ew = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, pw_decl->value);
-                if (!isnan(ew) && ew >= 0) content_w = fmax(content_w, ew);
-            }
-
-            // Resolve horizontal border widths (3-tier: shorthand → longhand → side)
-            float border_l = 0, border_r = 0;
-            bool bw_found = false;
-            CssDeclaration* bw_decl = style_tree_get_declaration(ps, CSS_PROPERTY_BORDER_WIDTH);
-            if (bw_decl && bw_decl->value) {
-                const CssValue* right_value = css_box_shorthand_side_value(bw_decl->value, 1);
-                const CssValue* left_value = css_box_shorthand_side_value(bw_decl->value, 3);
-                if (right_value && left_value) {
-                    border_r = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, right_value);
-                    border_l = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, left_value);
-                    bw_found = true;
-                }
-            }
-            if (!bw_found) {
-                CssDeclaration* bl_w = style_tree_get_declaration(ps, CSS_PROPERTY_BORDER_LEFT_WIDTH);
-                if (bl_w && bl_w->value && bl_w->value->type == CSS_VALUE_TYPE_LENGTH) {
-                    float v = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, bl_w->value);
-                    if (!isnan(v) && v > 0) { border_l = v; bw_found = true; }
-                }
-                CssDeclaration* br_w = style_tree_get_declaration(ps, CSS_PROPERTY_BORDER_RIGHT_WIDTH);
-                if (br_w && br_w->value && br_w->value->type == CSS_VALUE_TYPE_LENGTH) {
-                    float v = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, br_w->value);
-                    if (!isnan(v) && v > 0) { border_r = v; bw_found = true; }
-                }
-            }
-            if (border_l == 0) {
-                CssDeclaration* bl_d = style_tree_get_declaration(ps, CSS_PROPERTY_BORDER_LEFT);
-                if (bl_d && bl_d->value) {
-                    const CssValue* v = bl_d->value;
-                    if (v->type == CSS_VALUE_TYPE_LENGTH) {
-                        float lv = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, v);
-                        if (!isnan(lv) && lv > 0) border_l = lv;
-                    } else if (v->type == CSS_VALUE_TYPE_LIST) {
-                        for (int i = 0; i < v->data.list.count; i++) {
-                            if (v->data.list.values[i] && v->data.list.values[i]->type == CSS_VALUE_TYPE_LENGTH) {
-                                float lv = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, v->data.list.values[i]);
-                                if (!isnan(lv) && lv > 0) { border_l = lv; break; }
-                            }
-                        }
-                    }
-                }
-            }
-            if (border_r == 0) {
-                CssDeclaration* br_d = style_tree_get_declaration(ps, CSS_PROPERTY_BORDER_RIGHT);
-                if (br_d && br_d->value) {
-                    const CssValue* v = br_d->value;
-                    if (v->type == CSS_VALUE_TYPE_LENGTH) {
-                        float lv = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, v);
-                        if (!isnan(lv) && lv > 0) border_r = lv;
-                    } else if (v->type == CSS_VALUE_TYPE_LIST) {
-                        for (int i = 0; i < v->data.list.count; i++) {
-                            if (v->data.list.values[i] && v->data.list.values[i]->type == CSS_VALUE_TYPE_LENGTH) {
-                                float lv = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, v->data.list.values[i]);
-                                if (!isnan(lv) && lv > 0) { border_r = lv; break; }
-                            }
-                        }
-                    }
-                }
-            }
+            float border_l = 0.0f;
+            float border_r = 0.0f;
+            intrinsic_pseudo_horizontal_border_widths(lycon, ps, &border_l, &border_r);
 
             // Resolve horizontal padding
-            float pad_l = 0, pad_r = 0;
-            CssDeclaration* pl_d = style_tree_get_declaration(ps, CSS_PROPERTY_PADDING_LEFT);
-            if (pl_d && pl_d->value) {
-                float v = resolve_length_value(lycon, CSS_PROPERTY_PADDING_LEFT, pl_d->value);
-                if (!isnan(v) && v > 0) pad_l = v;
-            }
-            CssDeclaration* pr_d = style_tree_get_declaration(ps, CSS_PROPERTY_PADDING_RIGHT);
-            if (pr_d && pr_d->value) {
-                float v = resolve_length_value(lycon, CSS_PROPERTY_PADDING_RIGHT, pr_d->value);
-                if (!isnan(v) && v > 0) pad_r = v;
-            }
+            float pad_l = 0.0f;
+            float pad_r = 0.0f;
+            intrinsic_pseudo_positive_length_decl(
+                lycon, ps, CSS_PROPERTY_PADDING_LEFT, &pad_l, false);
+            intrinsic_pseudo_positive_length_decl(
+                lycon, ps, CSS_PROPERTY_PADDING_RIGHT, &pad_r, false);
 
             // Resolve horizontal margin
-            float mar_l = 0, mar_r = 0;
-            CssDeclaration* ml_d = style_tree_get_declaration(ps, CSS_PROPERTY_MARGIN_LEFT);
-            if (ml_d && ml_d->value) {
-                float v = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, ml_d->value);
-                if (!isnan(v) && v > 0) mar_l = v;
-            }
-            CssDeclaration* mr_d = style_tree_get_declaration(ps, CSS_PROPERTY_MARGIN_RIGHT);
-            if (mr_d && mr_d->value) {
-                float v = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, mr_d->value);
-                if (!isnan(v) && v > 0) mar_r = v;
-            }
+            float mar_l = 0.0f;
+            float mar_r = 0.0f;
+            intrinsic_pseudo_positive_length_decl(
+                lycon, ps, CSS_PROPERTY_MARGIN_LEFT, &mar_l, false);
+            intrinsic_pseudo_positive_length_decl(
+                lycon, ps, CSS_PROPERTY_MARGIN_RIGHT, &mar_r, false);
 
             float outer_w = content_w + border_l + border_r + pad_l + pad_r + mar_l + mar_r;
             if (outer_w > 0) {
@@ -5560,57 +5581,22 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     }
 
     // Check if this is a grid container - need to detect column count
-    bool is_grid_container = false;
+    bool is_grid_container = intrinsic_element_display_matches(
+        element, view, CSS_VALUE_GRID, CSS_VALUE_INLINE_GRID);
     int grid_column_count = 1;  // Default: single column = vertical stacking
     float grid_row_gap = 0;
 
-    if (view->display.inner == CSS_VALUE_GRID) {
-        is_grid_container = true;
-    }
-    // Also check specified_style for unresolved display
-    if (!is_grid_container && element->specified_style) {
-        CssDeclaration* display_decl = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_DISPLAY);
-        if (display_decl && display_decl->value &&
-            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-            CssEnum dv = display_decl->value->data.keyword;
-            if (dv == CSS_VALUE_GRID || dv == CSS_VALUE_INLINE_GRID) {
-                is_grid_container = true;
-            }
-        }
-    }
-
     if (is_grid_container) {
-        // Get column count from grid-template-columns
-        if (view->embed && view->embed->grid && view->embed->grid->grid_template_columns) {
-            grid_column_count = view->embed->grid->grid_template_columns->track_count;
-            log_debug("calculate_max_content_height: grid %s from embed, cols=%d",
-                      element->node_name(), grid_column_count);
-        }
-        // Try specified_style for unresolved grid
-        if (grid_column_count <= 1 && element->specified_style) {
-            CssDeclaration* cols_decl = style_tree_get_declaration(
-                element->specified_style, CSS_PROPERTY_GRID_TEMPLATE_COLUMNS);
-            if (cols_decl && cols_decl->value) {
-                log_debug("calculate_max_content_height: %s grid-template-columns value type=%d",
-                          element->node_name(), cols_decl->value->type);
-                grid_column_count = intrinsic_count_grid_template_tracks(
-                    cols_decl->value, "calculate_max_content_height");
-            }
-        }
+        grid_column_count = intrinsic_grid_template_column_count(
+            element, view, grid_column_count, "calculate_max_content_height", true, true);
         // Get row gap
         if (view->embed && view->embed->grid) {
             grid_row_gap = view->embed->grid->row_gap;
         }
-        if (grid_row_gap <= 0 && element->specified_style) {
-            CssDeclaration* gap_decl = style_tree_get_declaration(
-                element->specified_style, CSS_PROPERTY_ROW_GAP);
-            if (!gap_decl) {
-                gap_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_GAP);
-            }
-            if (gap_decl && gap_decl->value && gap_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                grid_row_gap = resolve_length_value(lycon, CSS_PROPERTY_GAP, gap_decl->value);
-            }
+        if (grid_row_gap <= 0) {
+            intrinsic_style_length_declaration_or_fallback(
+                lycon, element->specified_style, CSS_PROPERTY_ROW_GAP,
+                CSS_PROPERTY_GAP, CSS_PROPERTY_GAP, &grid_row_gap);
         }
         log_debug("calculate_max_content_height: grid %s with %d columns, gap=%.1f",
                   element->node_name(), grid_column_count, grid_row_gap);
@@ -5633,20 +5619,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     bool is_flex_wrap = false;
     float flex_row_gap = 0;
     float flex_column_gap = 0;
-    bool is_flex_container = (view->display.inner == CSS_VALUE_FLEX);
-
-    // Also check specified_style for unresolved display
-    if (!is_flex_container && element->specified_style) {
-        CssDeclaration* display_decl = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_DISPLAY);
-        if (display_decl && display_decl->value &&
-            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-            CssEnum dv = display_decl->value->data.keyword;
-            if (dv == CSS_VALUE_FLEX || dv == CSS_VALUE_INLINE_FLEX) {
-                is_flex_container = true;
-            }
-        }
-    }
+    bool is_flex_container = intrinsic_element_display_matches(
+        element, view, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX);
 
     if (is_flex_container) {
         // Default flex direction is row, wrap is nowrap
@@ -5668,42 +5642,20 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             flex_row_gap = view->embed->flex->row_gap;
             flex_column_gap = view->embed->flex->column_gap;
         } else if (element->specified_style) {
-            // Check specified_style for flex-direction
-            CssDeclaration* dir_decl = style_tree_get_declaration(
-                element->specified_style, CSS_PROPERTY_FLEX_DIRECTION);
-            if (dir_decl && dir_decl->value && dir_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum dir = dir_decl->value->data.keyword;
-                is_flex_row = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
-            }
-            // Check for flex-wrap
-            CssDeclaration* wrap_decl = style_tree_get_declaration(
-                element->specified_style, CSS_PROPERTY_FLEX_WRAP);
-            if (wrap_decl && wrap_decl->value && wrap_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum wrap = wrap_decl->value->data.keyword;
-                if (wrap == CSS_VALUE_WRAP || wrap == CSS_VALUE_WRAP_REVERSE) {
-                    is_flex_wrap = true;
-                }
-            }
-            // Check for gap
-            CssDeclaration* gap_decl = style_tree_get_declaration(
-                element->specified_style, CSS_PROPERTY_GAP);
-            if (gap_decl && gap_decl->value && gap_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                float gap = resolve_length_value(lycon, CSS_PROPERTY_GAP, gap_decl->value);
+            intrinsic_style_flex_direction_is_row(element->specified_style, &is_flex_row);
+            intrinsic_style_flex_wrap_enabled(element->specified_style, &is_flex_wrap);
+            float gap = 0.0f;
+            if (intrinsic_style_length_declaration(
+                    lycon, element->specified_style, CSS_PROPERTY_GAP, CSS_PROPERTY_GAP, &gap)) {
                 flex_row_gap = gap;
                 flex_column_gap = gap;
             }
-            // Check for row-gap
-            CssDeclaration* row_gap_decl = style_tree_get_declaration(
-                element->specified_style, CSS_PROPERTY_ROW_GAP);
-            if (row_gap_decl && row_gap_decl->value && row_gap_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                flex_row_gap = resolve_length_value(lycon, CSS_PROPERTY_ROW_GAP, row_gap_decl->value);
-            }
-            // Check for column-gap
-            CssDeclaration* col_gap_decl = style_tree_get_declaration(
-                element->specified_style, CSS_PROPERTY_COLUMN_GAP);
-            if (col_gap_decl && col_gap_decl->value && col_gap_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                flex_column_gap = resolve_length_value(lycon, CSS_PROPERTY_COLUMN_GAP, col_gap_decl->value);
-            }
+            intrinsic_style_length_declaration(
+                lycon, element->specified_style, CSS_PROPERTY_ROW_GAP,
+                CSS_PROPERTY_ROW_GAP, &flex_row_gap);
+            intrinsic_style_length_declaration(
+                lycon, element->specified_style, CSS_PROPERTY_COLUMN_GAP,
+                CSS_PROPERTY_COLUMN_GAP, &flex_column_gap);
         }
     }
     bool is_empty_auto_container = !is_form_control_replaced &&
@@ -5719,11 +5671,9 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     CssEnum display_inner = view->display.inner;
     if (display_inner == 0 && element->specified_style) {
         // Display not resolved yet, try to get from CSS
-        CssDeclaration* display_decl = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_DISPLAY);
-        if (display_decl && display_decl->value &&
-            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-            display_inner = display_decl->value->data.keyword;
+        CssEnum display_value = (CssEnum)0;
+        if (intrinsic_specified_display_keyword(element, &display_value)) {
+            display_inner = display_value;
             // block => flow layout
             if (display_inner == CSS_VALUE_BLOCK) {
                 display_inner = CSS_VALUE_FLOW;

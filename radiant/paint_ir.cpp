@@ -930,7 +930,6 @@ void paint_glyph_run(PaintList* pl, const PaintGlyphRun* glyph_run) {
 }
 
 // ---------------------------------------------------------------------------
-// Raster lowering: PaintIR -> DisplayList
 // ---------------------------------------------------------------------------
 
 typedef struct PaintIrRasterEffectFrame {
@@ -1022,6 +1021,27 @@ static void paint_ir_lower_raster_effect_finish(const PaintEffectGroup* group,
     }
 }
 
+static bool paint_ir_lower_raster_effect_stack_command(const PaintCmd* cmd, DisplayList* dl, PaintIrRasterEffectFrame* effect_stack, int* effect_depth, int command_index) {
+    if (!paint_op_has_flags(cmd->op, PAINT_OP_FLAG_EFFECT_STACK)) return false;
+    if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_STACK_PUSH)) {
+        const PaintEffectGroup* p = &cmd->effect_group;
+        if (*effect_depth >= PAINT_IR_RASTER_EFFECT_STACK_MAX) {
+            log_error("[PAINT_IR_EFFECT] raster effect stack overflow at command %d", command_index);
+            return true;
+        }
+        effect_stack[(*effect_depth)++].group = *p;
+        paint_ir_lower_raster_effect_begin(p, dl);
+        return true;
+    }
+    if (*effect_depth <= 0) {
+        log_error("[PAINT_IR_EFFECT] raster effect stack underflow at command %d", command_index);
+        return true;
+    }
+    PaintIrRasterEffectFrame* frame = &effect_stack[--(*effect_depth)];
+    paint_ir_lower_raster_effect_finish(&frame->group, dl);
+    return true;
+}
+
 static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl) {
     if (!pl || !dl) return;
 
@@ -1031,9 +1051,9 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
     for (int i = 0; i < pl->count; i++) {
         const PaintCmd* cmd = &pl->cmds[i];
         if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_RASTER_NOOP)) {
-            // raster vector ops carry local transforms; stack markers are kept for validation and vector backends only.
             continue;
         }
+        if (paint_ir_lower_raster_effect_stack_command(cmd, dl, effect_stack, &effect_depth, i)) continue;
         switch (cmd->op) {
         case PAINT_FILL_RECT: {
             const PaintFillRect* p = &cmd->fill_rect;
@@ -1216,25 +1236,6 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
             break;
         }
 
-        case PAINT_BEGIN_EFFECT_GROUP: {
-            const PaintEffectGroup* p = &cmd->effect_group;
-            if (effect_depth < PAINT_IR_RASTER_EFFECT_STACK_MAX) {
-                effect_stack[effect_depth++].group = *p;
-                paint_ir_lower_raster_effect_begin(p, dl);
-            } else {
-                log_error("[PAINT_IR_EFFECT] raster effect stack overflow at command %d", i);
-            }
-            break;
-        }
-        case PAINT_END_EFFECT_GROUP: {
-            if (effect_depth > 0) {
-                PaintIrRasterEffectFrame* frame = &effect_stack[--effect_depth];
-                paint_ir_lower_raster_effect_finish(&frame->group, dl);
-            } else {
-                log_error("[PAINT_IR_EFFECT] raster effect stack underflow at command %d", i);
-            }
-            break;
-        }
         case PAINT_SVG_SUBSCENE: {
             const PaintSvgSubscene* p = &cmd->svg_subscene;
             if (g_svg_subscene_raster_lowerer) {
@@ -1245,8 +1246,6 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
             break;
         }
 
-        // Other higher-level semantic ops are target-neutral; the raster lowering
-        // only consumes their pixel-domain expansions during this migration.
         case PAINT_GLYPH_RUN:
             if (g_glyph_run_raster_lowerer) {
                 g_glyph_run_raster_lowerer(&cmd->glyph_run, dl);

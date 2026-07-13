@@ -395,6 +395,16 @@ static Item radiant_layout_context_item(const CustomLayoutContext* context) {
     radiant_obj_set(obj, "available_height", radiant_float_item(context->available_height));
     radiant_obj_set_optional_float(obj, "css_width", context->css_width);
     radiant_obj_set_optional_float(obj, "css_height", context->css_height);
+    radiant_obj_set(obj, "child_available_width", radiant_float_item(context->child_available_width));
+    radiant_obj_set(obj, "child_available_height", radiant_float_item(context->child_available_height));
+    radiant_obj_set(obj, "child_available_width_definite",
+        radiant_bool_item(context->child_available_width_definite));
+    radiant_obj_set(obj, "child_available_height_definite",
+        radiant_bool_item(context->child_available_height_definite));
+    radiant_obj_set(obj, "child_available_width_source",
+        radiant_string_item(context->child_available_width_source));
+    radiant_obj_set(obj, "child_available_height_source",
+        radiant_string_item(context->child_available_height_source));
     radiant_obj_set(obj, "direction", radiant_string_item(
         context->direction == CSS_VALUE_RTL ? "rtl" : "ltr"));
     radiant_obj_set(obj, "writing_mode", radiant_string_item(

@@ -522,6 +522,16 @@ MVP rule:
 - otherwise use the outer parent layout context's available width
 - if neither is definite, treat percentage widths as auto and log a custom-layout diagnostic
 
+Current implementation note: custom layout now logs
+`CUSTOM_LAYOUT_PERCENT_CHILD_AUTO_WIDTH` and
+`CUSTOM_LAYOUT_PERCENT_CHILD_AUTO_HEIGHT` when an auto-size custom layout
+container receives child percentage sizes on that axis. This makes the
+prelayout fallback visible while preserving the MVP invariant that callbacks
+only receive already-sized children. The callback context exposes
+`child_available_width`, `child_available_height`, matching `*_definite`
+booleans, and `*_source` strings (`css`, `available`, `intrinsic`,
+`fallback`) so Lambda code can tell how child prelayout was constrained.
+
 ### 9.2 Child size is fixed for the callback
 
 Since the callback cannot measure or relayout children, it cannot say "wrap this node at 160px, that node at 240px" unless those constraints were already encoded in CSS before child prelayout.
@@ -606,7 +616,7 @@ A closer Houdini-compatible API can be evaluated later, but it should not pull i
 - parse/represent `display: layout(name)` - implemented
 - add `layout_custom_content` - implemented as `layout_custom_apply`
 - establish custom layout as a formatting context
-- define child prelayout constraints
+- define child prelayout constraints - implemented as a read-only per-axis child constraint snapshot with percent-size diagnostics
 - lay out children through existing block/inline/flex/grid/table paths - implemented by running after child layout
 
 ### Phase 3: Lambda callback invocation
