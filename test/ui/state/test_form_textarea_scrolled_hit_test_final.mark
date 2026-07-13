@@ -25,4 +25,7 @@
             }>>>
       <div index: 27
         <div index: 5
-          <input index: 5, flags: ['placeholder-shown', 'valid', 'optional']>>>>>>
+          <input index: 5, flags: ['placeholder-shown', 'valid', 'optional']>>>
+      <div index: 39
+        <div index: 5
+          <input index: 3, flags: ['readonly', 'valid', 'optional']>>>>>>
