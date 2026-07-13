@@ -212,24 +212,6 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     }
 }
 
-void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
-    float ratio = rdcon->ui_context->pixel_ratio;
-    if (rdcon->list.list_style_type == CSS_VALUE_DISC) {
-        Rect rect;
-        rect.x = rdcon->block.x + list_item->x - 15 * ratio;
-        rect.y = rdcon->block.y + list_item->y + 7 * ratio;
-        rect.width = rect.height = 5 * ratio;
-        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, rdcon->color.c,
-            &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
-    }
-    else if (rdcon->list.list_style_type == CSS_VALUE_DECIMAL) {
-        log_debug("render list decimal");
-    }
-    else {
-        log_debug("unknown list style type");
-    }
-}
-
 void render_litem_view(RenderContext* rdcon, ViewBlock* list_item) {
     log_debug("view list item:%s", list_item->node_name());
     rdcon->list.item_index++;
