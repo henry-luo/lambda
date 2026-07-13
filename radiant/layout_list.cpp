@@ -9,7 +9,6 @@
  * - Counter spec extraction from pseudo-element styles
  */
 
-#include "layout_list.hpp"
 #include "layout.hpp"
 #include "render.hpp"
 #include "../lib/log.h"

@@ -2,7 +2,6 @@
  * layout_alignment.cpp - Implementation of unified alignment functions
  */
 
-#include "layout_alignment.hpp"
 #include "layout.hpp"
 #include "view.hpp"
 #include "../lib/font/font.h"

@@ -2,7 +2,6 @@
 #include "layout.hpp"
 #include "view.hpp"
 #include "grid_enhanced_adapter.hpp"  // Enhanced grid integration
-#include "intrinsic_sizing.hpp"       // measure_text_intrinsic_widths
 #include "../lib/tagged.hpp"
 #include "../lib/mem_grow.hpp"
 

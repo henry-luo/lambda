@@ -2,8 +2,6 @@
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
 #include "layout_table.hpp"
-#include "intrinsic_sizing.hpp"
-#include "layout_measure.hpp"
 #include "render.hpp"
 #include "state_store.hpp"
 

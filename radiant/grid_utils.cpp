@@ -1,5 +1,4 @@
 #include "grid.hpp"
-#include "intrinsic_sizing.hpp"
 #include "layout.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lib/mem_grow.hpp"

@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "../radiant/layout_custom.hpp"
+#include "../radiant/layout.hpp"
 #include "../radiant/render.hpp"
 #include "../lib/arraylist.h"
 #include "../lib/arena.h"
