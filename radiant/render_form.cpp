@@ -140,6 +140,23 @@ static void stroke_circle(RenderContext* rdcon, float cx, float cy, float radius
     rdt_path_free(p);
 }
 
+static void draw_rect_focus_ring(RenderContext* rdcon, float x, float y,
+                                 float w, float h, float scale) {
+    float ring = 2.0f * scale;
+    Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
+    float rx = x - ring, ry = y - ring;
+    float rw = w + 2 * ring, rh = h + 2 * ring;
+    RdtPath* p = rdt_path_new();
+    rdt_path_move_to(p, rx, ry);
+    rdt_path_line_to(p, rx + rw, ry);
+    rdt_path_line_to(p, rx + rw, ry + rh);
+    rdt_path_line_to(p, rx, ry + rh);
+    rdt_path_close(p);
+    rc_stroke_path(rdcon, p, ring_color, ring,
+                   RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
+    rdt_path_free(p);
+}
+
 // Helper to draw a 3D border effect (inset or outset)
 static void draw_3d_border(RenderContext* rdcon, float x, float y, float w, float h,
                            bool inset, float border_width) {
@@ -238,6 +255,10 @@ static FormControlBox form_control_box(RenderContext* rdcon, ViewBlock* block) {
     box.use_default_border = !form_border_has_author_override(box.css_border);
     box.disabled = form_control_is_disabled(box.state, static_cast<View*>(block));
     return box;
+}
+
+static bool form_control_has_focus(const FormControlBox* box, ViewBlock* block) {
+    return box && box->state && focus_get(box->state) == static_cast<View*>(block);
 }
 
 /**
@@ -525,7 +546,7 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
     const char* value_text = form->value ? form->value : "";
     uint32_t value_len = (uint32_t)strlen(value_text);
     DocState* state = fc.state;
-    bool focused_here = state && focus_get(state) == static_cast<View*>(block);
+    bool focused_here = form_control_has_focus(&fc, block);
     uint32_t selection_start = 0, selection_end = 0;
     form_control_get_selection(state, static_cast<View*>(block), &selection_start, &selection_end, NULL);
     uint32_t preedit_start = 0;
@@ -779,20 +800,8 @@ static void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlP
 
     // Focus ring — a 2px outset blue rectangle (matches our text-input
     // focus indicator and gives Tab navigation a visible target).
-    if (state && focus_get(state) == static_cast<View*>(block)) {
-        float ring = 2.0f * s;
-        Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
-        float rx = x - ring, ry = y - ring;
-        float rw = size + 2 * ring, rh = size + 2 * ring;
-        RdtPath* p = rdt_path_new();
-        rdt_path_move_to(p, rx, ry);
-        rdt_path_line_to(p, rx + rw, ry);
-        rdt_path_line_to(p, rx + rw, ry + rh);
-        rdt_path_line_to(p, rx, ry + rh);
-        rdt_path_close(p);
-        rc_stroke_path(rdcon, p, ring_color, ring,
-                       RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
-        rdt_path_free(p);
+    if (form_control_has_focus(&fc, block)) {
+        draw_rect_focus_ring(rdcon, x, y, size, size, s);
     }
 
     log_debug("[FORM] render_checkbox at (%.1f, %.1f) checked=%d", x, y, checked ? 1 : 0);
@@ -837,7 +846,7 @@ static void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp
     }
 
     // Focus ring (see render_checkbox).
-    if (state && focus_get(state) == static_cast<View*>(block)) {
+    if (form_control_has_focus(&fc, block)) {
         float ring = 2.0f * s;
         Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
         stroke_circle(rdcon, cx, cy, radius + ring, ring_color, ring);
@@ -876,7 +885,6 @@ static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlPro
     // existence alone means the author specified a background (including transparent).
     bool has_css_background = fc.has_css_background;
     bool use_default_border = fc.use_default_border;
-    DocState* state = fc.state;
     bool disabled = fc.disabled;
 
     if (!has_css_background) {
@@ -932,20 +940,8 @@ static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlPro
     }
 
     // Focus ring (Tab navigation indicator).
-    if (state && focus_get(state) == static_cast<View*>(block)) {
-        float ring = 2.0f * s;
-        Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
-        float rx = x - ring, ry = y - ring;
-        float rw = w + 2 * ring, rh = h + 2 * ring;
-        RdtPath* p = rdt_path_new();
-        rdt_path_move_to(p, rx, ry);
-        rdt_path_line_to(p, rx + rw, ry);
-        rdt_path_line_to(p, rx + rw, ry + rh);
-        rdt_path_line_to(p, rx, ry + rh);
-        rdt_path_close(p);
-        rc_stroke_path(rdcon, p, ring_color, ring,
-                       RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
-        rdt_path_free(p);
+    if (form_control_has_focus(&fc, block)) {
+        draw_rect_focus_ring(rdcon, x, y, w, h, s);
     }
 
     log_debug("[FORM] render_button at (%.1f, %.1f) size %.1fx%.1f, has_css_bg=%d",

@@ -2700,31 +2700,69 @@ static void clear_load_stylesheet_cascade_recursive(DomNode* node) {
     }
 }
 
-static void store_document_stylesheets(DomDocument* dom_doc,
-                                       CssStylesheet* external_stylesheet,
-                                       CssStylesheet** inline_stylesheets,
-                                       int inline_stylesheet_count,
-                                       Pool* pool,
-                                       const char* reason) {
+static void store_document_stylesheet_bundle(DomDocument* dom_doc,
+                                             CssStylesheet* first_stylesheet,
+                                             CssStylesheet* second_stylesheet,
+                                             CssStylesheet* third_stylesheet,
+                                             CssStylesheet** inline_stylesheets,
+                                             int inline_stylesheet_count,
+                                             Pool* pool,
+                                             const char* log_prefix,
+                                             const char* reason) {
     if (!dom_doc || !pool) return;
 
-    int total_stylesheets = inline_stylesheet_count + (external_stylesheet ? 1 : 0);
+    int total_stylesheets = inline_stylesheet_count;
+    if (first_stylesheet) total_stylesheets++;
+    if (second_stylesheet) total_stylesheets++;
+    if (third_stylesheet) total_stylesheets++;
     dom_doc->stylesheet_capacity = total_stylesheets;
     dom_doc->stylesheet_count = 0;
     dom_doc->stylesheets = total_stylesheets > 0
         ? (CssStylesheet**)pool_alloc(pool, total_stylesheets * sizeof(CssStylesheet*))
         : nullptr;
 
-    if (external_stylesheet && dom_doc->stylesheets) {
-        dom_doc->stylesheets[dom_doc->stylesheet_count++] = external_stylesheet;
+    if (first_stylesheet && dom_doc->stylesheets) {
+        dom_doc->stylesheets[dom_doc->stylesheet_count++] = first_stylesheet;
+    }
+    if (second_stylesheet && dom_doc->stylesheets) {
+        dom_doc->stylesheets[dom_doc->stylesheet_count++] = second_stylesheet;
+    }
+    if (third_stylesheet && dom_doc->stylesheets) {
+        dom_doc->stylesheets[dom_doc->stylesheet_count++] = third_stylesheet;
     }
     for (int i = 0; i < inline_stylesheet_count; i++) {
         if (inline_stylesheets && inline_stylesheets[i] && dom_doc->stylesheets) {
             dom_doc->stylesheets[dom_doc->stylesheet_count++] = inline_stylesheets[i];
         }
     }
-    log_debug("[Lambda CSS] Stored %d stylesheets in DomDocument for %s",
+    log_debug("[%s] Stored %d stylesheets in DomDocument for %s",
+              log_prefix ? log_prefix : "Lambda CSS",
               dom_doc->stylesheet_count, reason ? reason : "load");
+}
+
+static void store_document_stylesheets(DomDocument* dom_doc,
+                                       CssStylesheet* external_stylesheet,
+                                       CssStylesheet** inline_stylesheets,
+                                       int inline_stylesheet_count,
+                                       Pool* pool,
+                                       const char* reason) {
+    store_document_stylesheet_bundle(dom_doc, external_stylesheet, nullptr, nullptr,
+                                     inline_stylesheets, inline_stylesheet_count,
+                                     pool, "Lambda CSS", reason);
+}
+
+static void apply_stylesheet_to_dom_tree_if_nonempty(DomElement* dom_root,
+                                                     CssStylesheet* stylesheet,
+                                                     SelectorMatcher* matcher,
+                                                     Pool* pool,
+                                                     CssEngine* css_engine) {
+    if (!dom_root || !stylesheet || stylesheet->rule_count == 0 ||
+        !matcher || !pool || !css_engine) {
+        return;
+    }
+    // Loader cascades share the same matcher across sheets; centralize the
+    // non-empty guard without changing each loader's stylesheet ownership.
+    apply_stylesheet_to_dom_tree_fast(dom_root, stylesheet, matcher, pool, css_engine);
 }
 
 static void apply_load_css_cascade(DomDocument* dom_doc,
@@ -2747,7 +2785,7 @@ static void apply_load_css_cascade(DomDocument* dom_doc,
 
     if (external_stylesheet && external_stylesheet->rule_count > 0) {
         log_debug("[Lambda CSS] Applying external stylesheet with %d rules", external_stylesheet->rule_count);
-        apply_stylesheet_to_dom_tree_fast(dom_root, external_stylesheet, matcher, pool, css_engine);
+        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, external_stylesheet, matcher, pool, css_engine);
     }
 
     auto t_external = high_resolution_clock::now();
@@ -2766,7 +2804,7 @@ static void apply_load_css_cascade(DomDocument* dom_doc,
                 log_debug("[Lambda CSS] Applying inline stylesheet %d with %zu rules",
                     i, inline_stylesheets[i]->rule_count);
                 auto t_inline_start = high_resolution_clock::now();
-                apply_stylesheet_to_dom_tree_fast(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
+                apply_stylesheet_to_dom_tree_if_nonempty(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
                 auto t_inline_end = high_resolution_clock::now();
                 log_info("[TIMING] cascade(%s): inline stylesheet %d (%zu rules): %.1fms",
                     phase ? phase : "load", i, inline_stylesheets[i]->rule_count,
@@ -3879,6 +3917,44 @@ static Input* parse_layout_source_as(char* content, Url* source_url,
     return input;
 }
 
+static Element* input_first_element_root(Input* input) {
+    if (!input) return nullptr;
+
+    TypeId root_type = get_type_id(input->root);
+    if (root_type == LMD_TYPE_ELEMENT) {
+        return input->root.element;
+    }
+    if (root_type != LMD_TYPE_ARRAY) {
+        return nullptr;
+    }
+
+    List* root_list = input->root.array;
+    for (int64_t i = 0; i < root_list->length; i++) {
+        Item item = root_list->items[i];
+        if (get_type_id(item) == LMD_TYPE_ELEMENT) {
+            return item.element;
+        }
+    }
+    return nullptr;
+}
+
+static Input* read_layout_input_file(Url* url, const char* filepath,
+                                     const char* type_name, const char* log_prefix,
+                                     const char* file_label) {
+    char* content = read_text_file(filepath);
+    if (!content) {
+        log_error("Failed to read %s file: %s", file_label, filepath);
+        return nullptr;
+    }
+
+    Input* input = parse_layout_source_as(content, url, type_name, log_prefix);
+    mem_free(content);
+    if (!input) {
+        log_error("Failed to parse %s file: %s", file_label, filepath);
+    }
+    return input;
+}
+
 static CssStylesheet* load_pool_backed_stylesheet(CssEngine* css_engine, Pool* pool,
                                                   const char* css_filename,
                                                   const char* log_prefix,
@@ -4091,9 +4167,7 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
 
     // Apply stylesheets to DOM tree
     for (int i = 0; i < stylesheet_count; i++) {
-        if (stylesheets[i]) {
-            apply_stylesheet_to_dom_tree_fast(dom_root, stylesheets[i], matcher, pool, css_engine);
-        }
+        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, stylesheets[i], matcher, pool, css_engine);
     }
 
     auto step5_end = std::chrono::high_resolution_clock::now();
@@ -4145,37 +4219,14 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 
     // Step 1: Parse markdown with Lambda parser
     auto step1_start = std::chrono::high_resolution_clock::now();
-    char* markdown_content = read_text_file(markdown_filepath);
-    if (!markdown_content) {
-        log_error("Failed to read markdown file: %s", markdown_filepath);
-        return nullptr;
-    }
-
-    // Parse markdown to Lambda Element tree
-    Input* input = parse_layout_source_as(markdown_content, markdown_url, "markdown", "load_markdown_doc");
-    mem_free(markdown_content);  // from read_text_file, uses stdlib
-
+    Input* input = read_layout_input_file(markdown_url, markdown_filepath,
+                                          "markdown", "load_markdown_doc", "markdown");
     if (!input) {
-        log_error("Failed to parse markdown file: %s", markdown_filepath);
         return nullptr;
     }
 
     // Get root element from parsed markdown
-    Element* markdown_root = nullptr;
-    TypeId root_type = get_type_id(input->root);
-    if (root_type == LMD_TYPE_ELEMENT) {
-        markdown_root = input->root.element;
-    } else if (root_type == LMD_TYPE_ARRAY) {
-        // Markdown parser may return list, find first element
-        List* root_list = input->root.array;
-        for (int64_t i = 0; i < root_list->length; i++) {
-            Item item = root_list->items[i];
-            if (get_type_id(item) == LMD_TYPE_ELEMENT) {
-                markdown_root = item.element;
-                break;
-            }
-        }
-    }
+    Element* markdown_root = input_first_element_root(input);
 
     if (!markdown_root) {
         log_error("Failed to get markdown root element");
@@ -4428,15 +4479,9 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     {
         SelectorMatcher* matcher = selector_matcher_create(pool);
         state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
-        if (markdown_stylesheet && markdown_stylesheet->rule_count > 0) {
-            apply_stylesheet_to_dom_tree_fast(dom_root, markdown_stylesheet, matcher, pool, css_engine);
-        }
-        if (math_stylesheet && math_stylesheet->rule_count > 0) {
-            apply_stylesheet_to_dom_tree_fast(dom_root, math_stylesheet, matcher, pool, css_engine);
-        }
-        if (katex_stylesheet && katex_stylesheet->rule_count > 0) {
-            apply_stylesheet_to_dom_tree_fast(dom_root, katex_stylesheet, matcher, pool, css_engine);
-        }
+        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, markdown_stylesheet, matcher, pool, css_engine);
+        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, math_stylesheet, matcher, pool, css_engine);
+        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, katex_stylesheet, matcher, pool, css_engine);
     }
     auto step4_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 4 - CSS cascade: %.1fms",
@@ -4454,18 +4499,8 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     dom_doc->state = nullptr;
     dom_doc->lambda_runtime = markdown_math_runtime;
 
-    // Store stylesheets in DomDocument for @font-face processing
-    int total_stylesheets = (markdown_stylesheet ? 1 : 0) + (math_stylesheet ? 1 : 0) + (katex_stylesheet ? 1 : 0);
-    if (total_stylesheets > 0) {
-        dom_doc->stylesheet_capacity = total_stylesheets;
-        dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, total_stylesheets * sizeof(CssStylesheet*));
-        dom_doc->stylesheet_count = 0;
-        if (markdown_stylesheet) dom_doc->stylesheets[dom_doc->stylesheet_count++] = markdown_stylesheet;
-        if (math_stylesheet) dom_doc->stylesheets[dom_doc->stylesheet_count++] = math_stylesheet;
-        if (katex_stylesheet) dom_doc->stylesheets[dom_doc->stylesheet_count++] = katex_stylesheet;
-        log_debug("[Lambda Markdown] Stored %d stylesheets in DomDocument for @font-face processing",
-                  dom_doc->stylesheet_count);
-    }
+    store_document_stylesheet_bundle(dom_doc, markdown_stylesheet, math_stylesheet, katex_stylesheet,
+                                     nullptr, 0, pool, "Lambda Markdown", "@font-face processing");
 
     auto total_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] load_markdown_doc total: %.1fms",
@@ -4502,37 +4537,14 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
 
     // Step 1: Parse wiki with Lambda parser
     auto step1_start = std::chrono::high_resolution_clock::now();
-    char* wiki_content = read_text_file(wiki_filepath);
-    if (!wiki_content) {
-        log_error("Failed to read wiki file: %s", wiki_filepath);
-        return nullptr;
-    }
-
-    // Parse wiki to Lambda Element tree
-    Input* input = parse_layout_source_as(wiki_content, wiki_url, "wiki", "load_wiki_doc");
-    mem_free(wiki_content);  // from read_text_file, uses stdlib
-
+    Input* input = read_layout_input_file(wiki_url, wiki_filepath,
+                                          "wiki", "load_wiki_doc", "wiki");
     if (!input) {
-        log_error("Failed to parse wiki file: %s", wiki_filepath);
         return nullptr;
     }
 
     // Get root element from parsed wiki
-    Element* wiki_root = nullptr;
-    TypeId root_type = get_type_id(input->root);
-    if (root_type == LMD_TYPE_ELEMENT) {
-        wiki_root = input->root.element;
-    } else if (root_type == LMD_TYPE_ARRAY) {
-        // Wiki parser may return list, find first element
-        List* root_list = input->root.array;
-        for (int64_t i = 0; i < root_list->length; i++) {
-            Item item = root_list->items[i];
-            if (get_type_id(item) == LMD_TYPE_ELEMENT) {
-                wiki_root = item.element;
-                break;
-            }
-        }
-    }
+    Element* wiki_root = input_first_element_root(input);
 
     if (!wiki_root) {
         log_error("Failed to get wiki root element");
@@ -4586,7 +4598,7 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
     if (wiki_stylesheet && wiki_stylesheet->rule_count > 0) {
         SelectorMatcher* matcher = selector_matcher_create(pool);
         state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
-        apply_stylesheet_to_dom_tree_fast(dom_root, wiki_stylesheet, matcher, pool, css_engine);
+        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, wiki_stylesheet, matcher, pool, css_engine);
     }
     auto step4_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 4 - CSS cascade: %.1fms",
@@ -4777,7 +4789,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     // Apply LaTeX stylesheet first if available
     if (latex_stylesheet && latex_stylesheet->rule_count > 0) {
         log_debug("[Lambda LaTeX] Applying LaTeX stylesheet...");
-        apply_stylesheet_to_dom_tree_fast(dom_root, latex_stylesheet, matcher, pool, css_engine);
+        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, latex_stylesheet, matcher, pool, css_engine);
     }
 
     // Apply inline stylesheets from LaTeX-generated HTML
@@ -4785,7 +4797,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         if (inline_stylesheets[i] && inline_stylesheets[i]->rule_count > 0) {
             log_debug("[Lambda LaTeX] Applying inline stylesheet %d with %zu rules",
                      i, inline_stylesheets[i]->rule_count);
-            apply_stylesheet_to_dom_tree_fast(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
+            apply_stylesheet_to_dom_tree_if_nonempty(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
         }
     }
 
@@ -4794,27 +4806,9 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     log_debug("[Lambda LaTeX] CSS cascade complete");
 
-    // Store stylesheets in DomDocument for @font-face processing later
-    int total_stylesheets = inline_stylesheet_count + (latex_stylesheet ? 1 : 0) + (katex_stylesheet ? 1 : 0);
-    if (total_stylesheets > 0) {
-        dom_doc->stylesheet_capacity = total_stylesheets;
-        dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, total_stylesheets * sizeof(CssStylesheet*));
-        dom_doc->stylesheet_count = 0;
-
-        if (latex_stylesheet) {
-            dom_doc->stylesheets[dom_doc->stylesheet_count++] = latex_stylesheet;
-        }
-        if (katex_stylesheet) {
-            dom_doc->stylesheets[dom_doc->stylesheet_count++] = katex_stylesheet;
-        }
-        for (int i = 0; i < inline_stylesheet_count; i++) {
-            if (inline_stylesheets[i]) {
-                dom_doc->stylesheets[dom_doc->stylesheet_count++] = inline_stylesheets[i];
-            }
-        }
-        log_debug("[Lambda LaTeX] Stored %d stylesheets in DomDocument for @font-face processing",
-                  dom_doc->stylesheet_count);
-    }
+    store_document_stylesheet_bundle(dom_doc, latex_stylesheet, katex_stylesheet, nullptr,
+                                     inline_stylesheets, inline_stylesheet_count,
+                                     pool, "Lambda LaTeX", "@font-face processing");
 
     // Step 8: Populate DomDocument structure
     dom_doc->root = dom_root;
@@ -5045,7 +5039,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     // Apply external stylesheet to the entire tree (starting from html)
     if (external_stylesheet && external_stylesheet->rule_count > 0) {
         log_debug("[Lambda XML] Applying external stylesheet with %zu rules", external_stylesheet->rule_count);
-        apply_stylesheet_to_dom_tree_fast(html_elem, external_stylesheet, matcher, pool, css_engine);
+        apply_stylesheet_to_dom_tree_if_nonempty(html_elem, external_stylesheet, matcher, pool, css_engine);
     }
 
     log_cascade_timing_summary();  // Output cascade stats
@@ -5416,7 +5410,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
 
     // Apply script.css if loaded
     if (script_stylesheet && script_stylesheet->rule_count > 0) {
-        apply_stylesheet_to_dom_tree_fast(dom_root, script_stylesheet, matcher, pool, css_engine);
+        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, script_stylesheet, matcher, pool, css_engine);
     }
 
     // Apply inline stylesheets for HTML documents
@@ -5425,7 +5419,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
             if (inline_stylesheets[i] && inline_stylesheets[i]->rule_count > 0) {
                 log_debug("[Lambda Script] Applying inline stylesheet %d with %zu rules",
                           i, inline_stylesheets[i]->rule_count);
-                apply_stylesheet_to_dom_tree_fast(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
+                apply_stylesheet_to_dom_tree_if_nonempty(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
             }
         }
     }
@@ -5745,10 +5739,8 @@ void rebuild_lambda_doc(UiContext* uicon) {
         SelectorMatcher* matcher = selector_matcher_create(doc->pool);
         state_configure_selector_matcher((DocState*)doc->state, matcher);
         for (int i = 0; i < inline_count; i++) {
-            if (inline_sheets[i] && inline_sheets[i]->rule_count > 0) {
-                apply_stylesheet_to_dom_tree_fast(new_root, inline_sheets[i],
-                                                  matcher, doc->pool, css_engine);
-            }
+            apply_stylesheet_to_dom_tree_if_nonempty(new_root, inline_sheets[i],
+                                                     matcher, doc->pool, css_engine);
         }
     }
 
@@ -6015,10 +6007,8 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             SelectorMatcher* matcher = selector_matcher_create(doc->pool);
             state_configure_selector_matcher((DocState*)doc->state, matcher);
             for (int s = 0; s < inline_count; s++) {
-                if (inline_sheets[s] && inline_sheets[s]->rule_count > 0) {
-                    apply_stylesheet_to_dom_tree_fast(new_dom, inline_sheets[s],
-                                                      matcher, doc->pool, css_engine);
-                }
+                apply_stylesheet_to_dom_tree_if_nonempty(new_dom, inline_sheets[s],
+                                                         matcher, doc->pool, css_engine);
             }
         }
 

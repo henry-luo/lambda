@@ -70,7 +70,7 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         if (extra_column_space > 0 && radiant::alignment_is_space_distribution(justify)) {
             // Use space distribution for space-between/around/evenly (only with positive space)
             radiant::SpaceDistribution dist = radiant::compute_space_distribution(
-                justify, extra_column_space, col_count, 0.0f);
+                justify, extra_column_space, col_count);
             justify_offset = dist.gap_before_first;
             justify_spacing = dist.gap_between;
         } else {
@@ -98,7 +98,7 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         if (extra_row_space > 0 && radiant::alignment_is_space_distribution(align)) {
             // Use space distribution for space-between/around/evenly (only with positive space)
             radiant::SpaceDistribution dist = radiant::compute_space_distribution(
-                align, extra_row_space, row_count, 0.0f);
+                align, extra_row_space, row_count);
             align_offset = dist.gap_before_first;
             align_spacing = dist.gap_between;
         } else {

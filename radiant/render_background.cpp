@@ -1459,11 +1459,8 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
         if (inner_w <= 0 || inner_h <= 0) {
             // Shadow band consumes entire element — fill with adjusted shadow color
-            RdtPath* fill_path = rdt_path_new();
-            rdt_path_add_rect(fill_path, rect.x, rect.y, rect.width, rect.height, 0, 0);
-
-            RdtPath* clip_path = rdt_path_new();
-            rdt_path_add_rect(clip_path, rect.x, rect.y, rect.width, rect.height, 0, 0);
+            RdtPath* fill_path = background_rect_path(rect);
+            RdtPath* clip_path = background_rect_path(rect);
 
             rc_push_clip(rdcon, clip_path, xform);
             rc_fill_path(rdcon, fill_path, fill_color, RDT_FILL_WINDING, xform);
@@ -1577,8 +1574,7 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         }
 
         // Clip to element boundary and fill
-        RdtPath* clip_path = rdt_path_new();
-        rdt_path_add_rect(clip_path, rect.x, rect.y, rect.width, rect.height, 0, 0);
+        RdtPath* clip_path = background_rect_path(rect);
         rc_push_clip(rdcon, clip_path, xform);
         rc_fill_path(rdcon, shadow_path, fill_color, RDT_FILL_EVEN_ODD, xform);
         rc_pop_clip(rdcon);

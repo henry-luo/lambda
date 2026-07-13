@@ -45,7 +45,6 @@ ignores:
   - "radiant/cmd_layout.cpp"              # `lambda layout` subcommand
   - "radiant/event_sim.cpp"               # event-simulation test driver
   - "radiant/render_img.cpp"              # image-rendering dump path
-  - "radiant/radiant.cpp"                 # radiant CLI driver
   # Polyglot-runtime source-language print/puts/echo builtins and
   # error-message formatters (these *are* the stdout/stderr-writing side of
   # the runtime, not debug prints).

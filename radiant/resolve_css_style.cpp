@@ -31,7 +31,7 @@ static DomElement* dom_parent_element(DomElement* element) {
 }
 
 // release builds compile log_debug arguments away, so trace-only helpers must be allowed to vanish.
-static const char* __attribute__((unused)) css_enum_name_or_unknown(const CssEnumInfo* info) {
+[[maybe_unused]] static const char* css_enum_name_or_unknown(const CssEnumInfo* info) {
     return info ? info->name : "unknown";
 }
 

@@ -65,10 +65,8 @@ float compute_alignment_offset(
 SpaceDistribution compute_space_distribution(
     int32_t alignment,
     float free_space,
-    int32_t item_count,
-    float existing_gap
+    int32_t item_count
 ) {
-    (void)existing_gap;
     SpaceDistribution dist = {0.0f, 0.0f, 0.0f};
 
     // No items or single item - no distribution needed

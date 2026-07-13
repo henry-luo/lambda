@@ -128,14 +128,27 @@ static bool pdf_effect_group_needs_page_backdrop(const PaintEffectGroup* group) 
            (group->blend_mode != 0 || group->backdrop || group->backdrop_filter);
 }
 
+static bool pdf_effect_group_is_opacity_only(const RenderExportTargetCaps* caps,
+                                             const PaintEffectGroup* group) {
+    return group && caps && caps->opacity_groups &&
+           !group->has_clip &&
+           !group->has_transform &&
+           group->blend_mode == 0 &&
+           group->filter == nullptr &&
+           !group->backdrop &&
+           group->backdrop_filter == nullptr &&
+           !group->shadow &&
+           !group->isolation;
+}
+
 static bool pdf_paint_list_balanced_effect_groups(const PaintList* paint_list) {
     if (!paint_list) return false;
     int effect_depth = 0;
     for (int i = 0; i < paint_list->count; i++) {
         PaintOp op = paint_list->cmds[i].op;
-        if (op == PAINT_BEGIN_EFFECT_GROUP) {
+        if (paint_op_has_flags(op, PAINT_OP_FLAG_EFFECT_STACK | PAINT_OP_FLAG_STACK_PUSH)) {
             effect_depth++;
-        } else if (op == PAINT_END_EFFECT_GROUP) {
+        } else if (paint_op_has_flags(op, PAINT_OP_FLAG_EFFECT_STACK | PAINT_OP_FLAG_STACK_POP)) {
             effect_depth--;
             if (effect_depth < 0) return false;
         }
@@ -426,6 +439,22 @@ static bool pdf_render_path(PdfRenderContext* ctx, RdtPath* path,
     return path_ctx.has_command;
 }
 
+static bool pdf_fill_rounded_rect_path(PdfRenderContext* ctx,
+                                       const RdtMatrix* transform,
+                                       float x, float y,
+                                       float width, float height,
+                                       float radius_x, float radius_y) {
+    PdfPathContext path_ctx = {};
+    path_ctx.pdf = ctx;
+    path_ctx.transform = transform;
+    if (!pdf_path_emit_rounded_rect(&path_ctx, x, y, width, height,
+                                    radius_x, radius_y)) {
+        return false;
+    }
+    HPDF_Page_Fill(ctx->current_page);
+    return true;
+}
+
 static int pdf_image_stride_pixels(int src_w, int src_stride) {
     if (src_stride >= src_w * 4 && (src_stride % 4) == 0) {
         return src_stride / 4;
@@ -456,6 +485,11 @@ static void pdf_transform_point(const RdtMatrix* transform, float x, float y,
     }
 }
 
+static const RdtMatrix* pdf_optional_transform(bool has_transform,
+                                               const RdtMatrix* transform) {
+    return has_transform ? transform : NULL;
+}
+
 static const RdtMatrix* pdf_compose_transform(const RdtMatrix* stack_transform,
                                               const RdtMatrix* local_transform,
                                               RdtMatrix* out) {
@@ -465,6 +499,15 @@ static const RdtMatrix* pdf_compose_transform(const RdtMatrix* stack_transform,
     }
     if (stack_transform) return stack_transform;
     return local_transform;
+}
+
+static bool pdf_paint_effective_transform(const RenderExportTargetCaps* caps, const RdtMatrix* stack_transform,
+                                          bool has_local_transform, const RdtMatrix* local_transform,
+                                          RdtMatrix* composed_transform, const RdtMatrix** effective_transform) {
+    if (has_local_transform && (!caps || !caps->transforms)) return false;
+    *effective_transform = pdf_compose_transform(stack_transform,
+        pdf_optional_transform(has_local_transform, local_transform), composed_transform);
+    return true;
 }
 
 static bool pdf_draw_abgr_image(PdfRenderContext* ctx, const uint32_t* pixels,
@@ -534,6 +577,19 @@ static bool pdf_draw_abgr_image_preserve_alpha(PdfRenderContext* ctx, const uint
                                             stride_pixels, a, b, c, d, e, f) == HPDF_OK;
 }
 
+static void pdf_paint_record_fallback(PdfPaintLoweringState* state,
+                                      bool ok,
+                                      const char* failure_message) {
+    if (!state) return;
+    if (!ok) {
+        if (failure_message) log_error("%s", failure_message);
+        state->unsupported_count++;
+        return;
+    }
+    state->fallback_count++;
+    state->emitted_count++;
+}
+
 static void pdf_begin_effect_raster_fallback(PdfRenderContext* ctx,
                                              const PaintEffectGroup* group) {
     if (!ctx || !group) return;
@@ -567,20 +623,13 @@ static void pdf_finish_effect_raster_fallback(PdfRenderContext* ctx) {
         &image,
         "[PDF_PAINT_IR]");
     ctx->paint_state.command_count += paint_list_count(&ctx->effect_fallback.paint_list);
-    if (ok && image.surface) {
-        if (pdf_draw_abgr_image_preserve_alpha(ctx, (const uint32_t*)image.surface->pixels,
-                                               image.surface->width, image.surface->height,
-                                               image.surface->width,
-                                               image.x, image.y, image.width, image.height,
-                                               255, &ctx->paint_state.current_transform)) {
-            ctx->paint_state.emitted_count++;
-            ctx->paint_state.fallback_count++;
-        } else {
-            ctx->paint_state.unsupported_count++;
-        }
-    } else {
-        ctx->paint_state.unsupported_count++;
-    }
+    bool drew_fallback = ok && image.surface &&
+        pdf_draw_abgr_image_preserve_alpha(ctx, (const uint32_t*)image.surface->pixels,
+                                           image.surface->width, image.surface->height,
+                                           image.surface->width,
+                                           image.x, image.y, image.width, image.height,
+                                           255, &ctx->paint_state.current_transform);
+    pdf_paint_record_fallback(&ctx->paint_state, drew_fallback, nullptr);
     pdf_record_page_backdrop_paint_list(ctx, &ctx->effect_fallback.paint_list);
     if (image.surface) image_surface_destroy(image.surface);
     pdf_effect_raster_fallback_clear(&ctx->effect_fallback);
@@ -648,7 +697,7 @@ static void pdf_render_glyph_run(PdfRenderContext* ctx, const PaintGlyphRun* run
     RdtMatrix composed_transform;
     const RdtMatrix* effective_transform =
         pdf_compose_transform(stack_transform,
-                              run->has_transform ? &run->transform : NULL,
+                              pdf_optional_transform(run->has_transform, &run->transform),
                               &composed_transform);
 
     FontBox* font = (FontBox*)run->font;
@@ -929,24 +978,13 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
     if (!ctx || ctx->effect_fallback.active) return;
     render_svg_inline_register_paint_ir_lowerers();
 
-    bool has_transform_command = false;
-    bool has_effect_command = false;
-    for (int i = 0; i < ctx->paint_list.count; i++) {
-        PaintOp op = ctx->paint_list.cmds[i].op;
-        if (op == PAINT_PUSH_TRANSFORM || op == PAINT_POP_TRANSFORM) {
-            has_transform_command = true;
-        } else if (op == PAINT_BEGIN_EFFECT_GROUP || op == PAINT_END_EFFECT_GROUP) {
-            has_effect_command = true;
-        }
-    }
-
     PdfPaintLoweringState* state = &ctx->paint_state;
     bool streaming_transform =
-        has_transform_command ||
+        paint_list_has_op_flags(&ctx->paint_list, PAINT_OP_FLAG_TRANSFORM_STACK) ||
         state->active_transform_depth > 0 ||
         state->skipped_transform_depth > 0;
     bool streaming_effect =
-        has_effect_command ||
+        paint_list_has_op_flags(&ctx->paint_list, PAINT_OP_FLAG_EFFECT_STACK) ||
         state->active_effect_depth > 0 ||
         state->passthrough_effect_depth > 0;
     if (!streaming_transform && !streaming_effect &&
@@ -959,86 +997,21 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
         render_export_target_get_caps(RENDER_EXPORT_TARGET_PDF);
     int active_clip_depth = 0;
     int skipped_clip_depth = 0;
-
-    for (int i = 0; i < ctx->paint_list.count; i++) {
-        PaintCmd* cmd = &ctx->paint_list.cmds[i];
-        state->command_count++;
-        switch (cmd->op) {
-        case PAINT_BEGIN_EFFECT_GROUP: {
-            PaintEffectGroup* p = &cmd->effect_group;
-            bool opacity_only = caps && caps->opacity_groups &&
-                !p->has_clip &&
-                !p->has_transform &&
-                p->blend_mode == 0 &&
-                p->filter == nullptr &&
-                !p->backdrop &&
-                p->backdrop_filter == nullptr &&
-                !p->shadow &&
-                !p->isolation;
-            if (!opacity_only) {
-                state->passthrough_effect_depth++;
-                if (!state->logged_unsupported_effect) {
-                    log_error("[PDF_PAINT_IR] fallback effect group rendered as passthrough content");
-                    state->logged_unsupported_effect = true;
-                }
-                state->fallback_count++;
-                state->emitted_count++;
-                break;
-            }
-            if (state->active_effect_depth >= PDF_PAINT_EFFECT_STACK_MAX) {
-                state->passthrough_effect_depth++;
-                log_error("[PDF_PAINT_IR] opacity effect stack overflow; rendering group without opacity");
-                break;
-            }
-            state->opacity_stack[state->active_effect_depth++] = state->current_opacity;
-            state->current_opacity *= p->opacity;
-            if (state->current_opacity < 0.0f) state->current_opacity = 0.0f;
-            if (state->current_opacity > 1.0f) state->current_opacity = 1.0f;
-            if (HPDF_Page_GSave(ctx->current_page) != HPDF_OK) {
-                log_error("[PDF_PAINT_IR] failed to save PDF graphics state for opacity group");
-                break;
-            }
-            HPDF_ExtGState ext_gstate = HPDF_CreateExtGState(ctx->pdf_doc);
-            if (!ext_gstate) {
-                log_error("[PDF_PAINT_IR] failed to create PDF opacity ExtGState");
-                break;
-            }
-            HPDF_ExtGState_SetAlphaFill(ext_gstate, state->current_opacity);
-            HPDF_ExtGState_SetAlphaStroke(ext_gstate, state->current_opacity);
-            if (HPDF_Page_SetExtGState(ctx->current_page, ext_gstate) != HPDF_OK) {
-                log_error("[PDF_PAINT_IR] failed to apply PDF opacity ExtGState");
-                break;
-            }
-            state->emitted_count++;
-            break;
-        }
-        case PAINT_END_EFFECT_GROUP:
-            if (state->passthrough_effect_depth > 0) {
-                state->passthrough_effect_depth--;
-                state->emitted_count++;
-                break;
-            }
-            if (state->active_effect_depth <= 0) {
-                log_error("[PDF_PAINT_IR] opacity effect stack underflow");
-                break;
-            }
-            state->current_opacity = state->opacity_stack[--state->active_effect_depth];
-            HPDF_Page_GRestore(ctx->current_page);
-            state->emitted_count++;
-            break;
-        case PAINT_PUSH_TRANSFORM: {
+    auto handle_transform_stack = [&](PaintCmd* cmd) -> bool {
+        if (!paint_op_has_flags(cmd->op, PAINT_OP_FLAG_TRANSFORM_STACK)) return false;
+        if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_STACK_PUSH)) {
             if (state->skipped_transform_depth > 0) {
                 state->skipped_transform_depth++;
-                continue;
+                return true;
             }
             if (!caps || !caps->transforms) {
                 state->skipped_transform_depth++;
-                continue;
+                return true;
             }
             if (state->active_transform_depth >= PDF_PAINT_TRANSFORM_STACK_MAX) {
                 log_error("[PDF_PAINT_IR] transform stack overflow in lowerer");
                 state->skipped_transform_depth++;
-                continue;
+                return true;
             }
             PaintPushTransform* p = &cmd->push_transform;
             state->transform_stack[state->active_transform_depth] =
@@ -1047,9 +1020,9 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
                 ? rdt_matrix_multiply(&state->current_transform, &p->transform)
                 : p->transform;
             state->active_transform_depth++;
-            continue;
+            return true;
         }
-        case PAINT_POP_TRANSFORM:
+        if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_STACK_POP)) {
             if (state->skipped_transform_depth > 0) {
                 state->skipped_transform_depth--;
             } else if (state->active_transform_depth > 0) {
@@ -1059,10 +1032,74 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             } else {
                 log_error("[PDF_PAINT_IR] transform stack underflow in lowerer");
             }
-            continue;
-        default:
-            break;
+            return true;
         }
+        return false;
+    };
+    auto handle_effect_stack = [&](PaintCmd* cmd) -> bool {
+        if (!paint_op_has_flags(cmd->op, PAINT_OP_FLAG_EFFECT_STACK)) return false;
+        if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_STACK_PUSH)) {
+            PaintEffectGroup* p = &cmd->effect_group;
+            if (!pdf_effect_group_is_opacity_only(caps, p)) {
+                state->passthrough_effect_depth++;
+                if (!state->logged_unsupported_effect) {
+                    log_error("[PDF_PAINT_IR] fallback effect group rendered as passthrough content");
+                    state->logged_unsupported_effect = true;
+                }
+                state->fallback_count++;
+                state->emitted_count++;
+                return true;
+            }
+            if (state->active_effect_depth >= PDF_PAINT_EFFECT_STACK_MAX) {
+                state->passthrough_effect_depth++;
+                log_error("[PDF_PAINT_IR] opacity effect stack overflow; rendering group without opacity");
+                return true;
+            }
+            state->opacity_stack[state->active_effect_depth++] = state->current_opacity;
+            state->current_opacity *= p->opacity;
+            if (state->current_opacity < 0.0f) state->current_opacity = 0.0f;
+            if (state->current_opacity > 1.0f) state->current_opacity = 1.0f;
+            if (HPDF_Page_GSave(ctx->current_page) != HPDF_OK) {
+                log_error("[PDF_PAINT_IR] failed to save PDF graphics state for opacity group");
+                return true;
+            }
+            HPDF_ExtGState ext_gstate = HPDF_CreateExtGState(ctx->pdf_doc);
+            if (!ext_gstate) {
+                log_error("[PDF_PAINT_IR] failed to create PDF opacity ExtGState");
+                return true;
+            }
+            HPDF_ExtGState_SetAlphaFill(ext_gstate, state->current_opacity);
+            HPDF_ExtGState_SetAlphaStroke(ext_gstate, state->current_opacity);
+            if (HPDF_Page_SetExtGState(ctx->current_page, ext_gstate) != HPDF_OK) {
+                log_error("[PDF_PAINT_IR] failed to apply PDF opacity ExtGState");
+                return true;
+            }
+            state->emitted_count++;
+            return true;
+        }
+        if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_STACK_POP)) {
+            if (state->passthrough_effect_depth > 0) {
+                state->passthrough_effect_depth--;
+                state->emitted_count++;
+                return true;
+            }
+            if (state->active_effect_depth <= 0) {
+                log_error("[PDF_PAINT_IR] opacity effect stack underflow");
+                return true;
+            }
+            state->current_opacity = state->opacity_stack[--state->active_effect_depth];
+            HPDF_Page_GRestore(ctx->current_page);
+            state->emitted_count++;
+            return true;
+        }
+        return false;
+    };
+
+    for (int i = 0; i < ctx->paint_list.count; i++) {
+        PaintCmd* cmd = &ctx->paint_list.cmds[i];
+        state->command_count++;
+        if (handle_transform_stack(cmd)) continue;
+        if (handle_effect_stack(cmd)) continue;
 
         if (state->skipped_transform_depth > 0) {
             continue;
@@ -1070,6 +1107,51 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
 
         const RdtMatrix* stack_transform =
             state->active_transform_depth > 0 ? &state->current_transform : NULL;
+        RdtMatrix composed_transform;
+        const RdtMatrix* effective_transform = NULL;
+        auto resolve_command_transform = [&](bool has_transform,
+                                             const RdtMatrix* transform) -> bool {
+            return pdf_paint_effective_transform(caps, stack_transform,
+                                                 has_transform, transform,
+                                                 &composed_transform,
+                                                 &effective_transform);
+        };
+        auto handle_clip_stack = [&](PaintCmd* cmd) -> bool {
+            if (!paint_op_has_flags(cmd->op, PAINT_OP_FLAG_CLIP_STACK)) return false;
+            if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_STACK_PUSH)) {
+                if (skipped_clip_depth > 0) {
+                    skipped_clip_depth++;
+                    return true;
+                }
+                if (!caps || !caps->clips) {
+                    skipped_clip_depth++;
+                    return true;
+                }
+                PaintPushClip* p = &cmd->push_clip;
+                if (!resolve_command_transform(p->has_transform, &p->transform)) {
+                    skipped_clip_depth++;
+                    return true;
+                }
+                if (pdf_push_clip_path(ctx, p->clip_path,
+                                       effective_transform)) {
+                    active_clip_depth++;
+                } else {
+                    skipped_clip_depth++;
+                }
+                return true;
+            }
+            if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_STACK_POP)) {
+                if (skipped_clip_depth > 0) {
+                    skipped_clip_depth--;
+                } else if (active_clip_depth > 0) {
+                    HPDF_Page_GRestore(ctx->current_page);
+                    active_clip_depth--;
+                }
+                return true;
+            }
+            return false;
+        };
+        if (handle_clip_stack(cmd)) continue;
         switch (cmd->op) {
         case PAINT_FILL_RECT: {
             if (!caps || !caps->rects) break;
@@ -1081,12 +1163,9 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             }
             if (p->color.a == 0) break;
             pdf_set_color(ctx, p->color);
-            PdfPathContext path_ctx = {};
-            path_ctx.pdf = ctx;
-            path_ctx.transform = stack_transform;
-            if (pdf_path_emit_rounded_rect(&path_ctx, p->x, p->y, p->w, p->h,
+            if (pdf_fill_rounded_rect_path(ctx, stack_transform,
+                                           p->x, p->y, p->w, p->h,
                                            0.0f, 0.0f)) {
-                HPDF_Page_Fill(ctx->current_page);
                 state->emitted_count++;
             }
             break;
@@ -1096,12 +1175,9 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             PaintFillRoundedRect* p = &cmd->fill_rounded_rect;
             if (p->color.a == 0) break;
             pdf_set_color(ctx, p->color);
-            PdfPathContext path_ctx = {};
-            path_ctx.pdf = ctx;
-            path_ctx.transform = stack_transform;
-            if (pdf_path_emit_rounded_rect(&path_ctx, p->x, p->y, p->w, p->h,
+            if (pdf_fill_rounded_rect_path(ctx, stack_transform,
+                                           p->x, p->y, p->w, p->h,
                                            p->rx, p->ry)) {
-                HPDF_Page_Fill(ctx->current_page);
                 state->emitted_count++;
             }
             break;
@@ -1110,12 +1186,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             if (!caps || !caps->paths) break;
             PaintFillPath* p = &cmd->fill_path;
             if (p->color.a == 0 || p->rule != RDT_FILL_WINDING) break;
-            if (p->has_transform && !caps->transforms) break;
-            RdtMatrix composed_transform;
-            const RdtMatrix* effective_transform =
-                pdf_compose_transform(stack_transform,
-                                      p->has_transform ? &p->transform : NULL,
-                                      &composed_transform);
+            if (!resolve_command_transform(p->has_transform, &p->transform)) break;
             pdf_set_color(ctx, p->color);
             if (pdf_render_path(ctx, p->path, effective_transform)) {
                 HPDF_Page_Fill(ctx->current_page);
@@ -1127,12 +1198,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             if (!caps || !caps->strokes) break;
             PaintStrokePath* p = &cmd->stroke_path;
             if (p->color.a == 0 || p->dash_count > 0) break;
-            if (p->has_transform && !caps->transforms) break;
-            RdtMatrix composed_transform;
-            const RdtMatrix* effective_transform =
-                pdf_compose_transform(stack_transform,
-                                      p->has_transform ? &p->transform : NULL,
-                                      &composed_transform);
+            if (!resolve_command_transform(p->has_transform, &p->transform)) break;
             pdf_set_color(ctx, p->color);
             HPDF_Page_SetLineWidth(ctx->current_page, p->width);
             if (pdf_render_path(ctx, p->path, effective_transform)) {
@@ -1144,48 +1210,25 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
         case PAINT_FILL_LINEAR_GRADIENT: {
             if (!caps || !caps->gradients) break;
             PaintFillLinearGradient* p = &cmd->fill_linear_gradient;
-            if (p->has_transform && !caps->transforms) break;
-            RdtMatrix composed_transform;
-            const RdtMatrix* effective_transform =
-                pdf_compose_transform(stack_transform,
-                                      p->has_transform ? &p->transform : NULL,
-                                      &composed_transform);
-            if (!pdf_raster_fallback_linear_gradient(ctx, p, effective_transform)) {
-                log_error("[PDF_PAINT_IR] failed linear gradient raster fallback");
-                state->unsupported_count++;
-            } else {
-                state->fallback_count++;
-                state->emitted_count++;
-            }
+            if (!resolve_command_transform(p->has_transform, &p->transform)) break;
+            pdf_paint_record_fallback(state,
+                                      pdf_raster_fallback_linear_gradient(ctx, p, effective_transform),
+                                      "[PDF_PAINT_IR] failed linear gradient raster fallback");
             break;
         }
         case PAINT_FILL_RADIAL_GRADIENT: {
             if (!caps || !caps->gradients) break;
             PaintFillRadialGradient* p = &cmd->fill_radial_gradient;
-            if (p->has_transform && !caps->transforms) break;
-            RdtMatrix composed_transform;
-            const RdtMatrix* effective_transform =
-                pdf_compose_transform(stack_transform,
-                                      p->has_transform ? &p->transform : NULL,
-                                      &composed_transform);
-            if (!pdf_raster_fallback_radial_gradient(ctx, p, effective_transform)) {
-                log_error("[PDF_PAINT_IR] failed radial gradient raster fallback");
-                state->unsupported_count++;
-            } else {
-                state->fallback_count++;
-                state->emitted_count++;
-            }
+            if (!resolve_command_transform(p->has_transform, &p->transform)) break;
+            pdf_paint_record_fallback(state,
+                                      pdf_raster_fallback_radial_gradient(ctx, p, effective_transform),
+                                      "[PDF_PAINT_IR] failed radial gradient raster fallback");
             break;
         }
         case PAINT_DRAW_IMAGE: {
             if (!caps || !caps->images) break;
             PaintDrawImage* p = &cmd->draw_image;
-            if (p->has_transform && !caps->transforms) break;
-            RdtMatrix composed_transform;
-            const RdtMatrix* effective_transform =
-                pdf_compose_transform(stack_transform,
-                                      p->has_transform ? &p->transform : NULL,
-                                      &composed_transform);
+            if (!resolve_command_transform(p->has_transform, &p->transform)) break;
             pdf_draw_abgr_image(ctx, p->pixels, p->src_w, p->src_h, p->src_stride,
                                 p->dst_x, p->dst_y, p->dst_w, p->dst_h,
                                 p->opacity, effective_transform);
@@ -1195,12 +1238,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
         case PAINT_DRAW_IMAGE_RESOURCE: {
             if (!caps || !caps->images) break;
             PaintDrawImageResource* p = &cmd->draw_image_resource;
-            if (p->has_transform && !caps->transforms) break;
-            RdtMatrix composed_transform;
-            const RdtMatrix* effective_transform =
-                pdf_compose_transform(stack_transform,
-                                      p->has_transform ? &p->transform : NULL,
-                                      &composed_transform);
+            if (!resolve_command_transform(p->has_transform, &p->transform)) break;
             ImageSurface* img = p->image;
             if (!img || p->dst_w <= 0.0f || p->dst_h <= 0.0f) break;
             int target_w = (int)ceilf(p->dst_w); // INT_CAST_OK: image decode target width is integer pixels.
@@ -1228,49 +1266,9 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
         }
         case PAINT_SVG_SUBSCENE: {
             PaintSvgSubscene* p = &cmd->svg_subscene;
-            if (!pdf_raster_fallback_svg_subscene(ctx, p, stack_transform)) {
-                log_error("[PDF_PAINT_IR] failed SVG subscene raster fallback");
-                state->unsupported_count++;
-            } else {
-                state->fallback_count++;
-                state->emitted_count++;
-            }
-            break;
-        }
-        case PAINT_PUSH_CLIP: {
-            if (skipped_clip_depth > 0) {
-                skipped_clip_depth++;
-                break;
-            }
-            if (!caps || !caps->clips) {
-                skipped_clip_depth++;
-                break;
-            }
-            PaintPushClip* p = &cmd->push_clip;
-            if (p->has_transform && !caps->transforms) {
-                skipped_clip_depth++;
-                break;
-            }
-            RdtMatrix composed_transform;
-            const RdtMatrix* effective_transform =
-                pdf_compose_transform(stack_transform,
-                                      p->has_transform ? &p->transform : NULL,
-                                      &composed_transform);
-            if (pdf_push_clip_path(ctx, p->clip_path,
-                                   effective_transform)) {
-                active_clip_depth++;
-            } else {
-                skipped_clip_depth++;
-            }
-            break;
-        }
-        case PAINT_POP_CLIP: {
-            if (skipped_clip_depth > 0) {
-                skipped_clip_depth--;
-            } else if (active_clip_depth > 0) {
-                HPDF_Page_GRestore(ctx->current_page);
-                active_clip_depth--;
-            }
+            pdf_paint_record_fallback(state,
+                                      pdf_raster_fallback_svg_subscene(ctx, p, stack_transform),
+                                      "[PDF_PAINT_IR] failed SVG subscene raster fallback");
             break;
         }
         default:
@@ -1287,15 +1285,24 @@ static void pdf_paint_fill_rect(PdfRenderContext* ctx,
     pdf_lower_paint_list(ctx);
 }
 
+static PaintCmd* pdf_effect_fallback_latest_cmd(PdfRenderContext* ctx,
+                                                PaintList* list,
+                                                int index,
+                                                PaintOp expected_op) {
+    if (!ctx || !ctx->effect_fallback.active || !list || index < 0) return nullptr;
+    if (list->count != index + 1) return nullptr;
+    PaintCmd* cmd = &list->cmds[index];
+    return cmd->op == expected_op ? cmd : nullptr;
+}
+
 static bool pdf_paint_fill_path(PdfRenderContext* ctx, RdtPath* path, Color color) {
     PaintList* list = pdf_active_paint_list(ctx);
     int index = list ? list->count : -1;
     paint_fill_path(list, path, color, RDT_FILL_WINDING, nullptr);
     bool owns_path = false;
-    if (ctx && ctx->effect_fallback.active && list &&
-        list->count == index + 1 && index >= 0 &&
-        list->cmds[index].op == PAINT_FILL_PATH) {
-        list->cmds[index].fill_path.owns_path = true;
+    PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index, PAINT_FILL_PATH);
+    if (cmd) {
+        cmd->fill_path.owns_path = true;
         owns_path = true;
     }
     pdf_lower_paint_list(ctx);
@@ -1319,10 +1326,9 @@ static bool pdf_paint_stroke_path(PdfRenderContext* ctx, RdtPath* path,
     paint_stroke_path(list, path, color, width,
                       RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0.0f, nullptr);
     bool owns_path = false;
-    if (ctx && ctx->effect_fallback.active && list &&
-        list->count == index + 1 && index >= 0 &&
-        list->cmds[index].op == PAINT_STROKE_PATH) {
-        list->cmds[index].stroke_path.owns_path = true;
+    PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index, PAINT_STROKE_PATH);
+    if (cmd) {
+        cmd->stroke_path.owns_path = true;
         owns_path = true;
     }
     pdf_lower_paint_list(ctx);
@@ -1341,11 +1347,11 @@ static bool pdf_paint_fill_linear_gradient(PdfRenderContext* ctx,
                                gradient->stops, gradient->stop_count,
                                RDT_FILL_WINDING, nullptr, nullptr);
     bool owns_payload = false;
-    if (ctx && ctx->effect_fallback.active && list &&
-        list->count == index + 1 && index >= 0 &&
-        list->cmds[index].op == PAINT_FILL_LINEAR_GRADIENT) {
-        list->cmds[index].fill_linear_gradient.owns_path = gradient->path != nullptr;
-        list->cmds[index].fill_linear_gradient.owns_stops = stops != nullptr;
+    PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index,
+                                                   PAINT_FILL_LINEAR_GRADIENT);
+    if (cmd) {
+        cmd->fill_linear_gradient.owns_path = gradient->path != nullptr;
+        cmd->fill_linear_gradient.owns_stops = stops != nullptr;
         owns_payload = true;
     }
     pdf_lower_paint_list(ctx);
@@ -1363,11 +1369,11 @@ static bool pdf_paint_fill_radial_gradient(PdfRenderContext* ctx,
                                gradient->stops, gradient->stop_count,
                                RDT_FILL_WINDING, nullptr, nullptr);
     bool owns_payload = false;
-    if (ctx && ctx->effect_fallback.active && list &&
-        list->count == index + 1 && index >= 0 &&
-        list->cmds[index].op == PAINT_FILL_RADIAL_GRADIENT) {
-        list->cmds[index].fill_radial_gradient.owns_path = gradient->path != nullptr;
-        list->cmds[index].fill_radial_gradient.owns_stops = stops != nullptr;
+    PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index,
+                                                   PAINT_FILL_RADIAL_GRADIENT);
+    if (cmd) {
+        cmd->fill_radial_gradient.owns_path = gradient->path != nullptr;
+        cmd->fill_radial_gradient.owns_stops = stops != nullptr;
         owns_payload = true;
     }
     pdf_lower_paint_list(ctx);
