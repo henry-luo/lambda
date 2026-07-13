@@ -209,6 +209,37 @@ static float form_control_border_left_width(ViewBlock* block, bool has_css_borde
     return use_default_border ? 1.0f : 0.0f;
 }
 
+struct FormControlBox {
+    float s;
+    float x;
+    float y;
+    float w;
+    float h;
+    DocState* state;
+    BorderProp* css_border;
+    bool has_css_background;
+    bool has_css_border;
+    bool use_default_border;
+    bool disabled;
+};
+
+static FormControlBox form_control_box(RenderContext* rdcon, ViewBlock* block) {
+    FormControlBox box;
+    box.s = rdcon->scale;
+    box.x = rdcon->block.x + block->x * box.s;
+    box.y = rdcon->block.y + block->y * box.s;
+    box.w = block->width * box.s;
+    box.h = block->height * box.s;
+    box.state = rdcon->ui_context && rdcon->ui_context->document
+        ? (DocState*)rdcon->ui_context->document->state : nullptr;
+    box.has_css_background = block->bound && block->bound->background;
+    box.css_border = block->bound ? block->bound->border : nullptr;
+    box.has_css_border = form_border_has_visible_side(box.css_border);
+    box.use_default_border = !form_border_has_author_override(box.css_border);
+    box.disabled = form_control_is_disabled(box.state, static_cast<View*>(block));
+    return box;
+}
+
 /**
  * Render a simple string at the given position using the specified font.
  * @param rdcon Render context
@@ -450,21 +481,21 @@ static char* build_preedit_display_text(FormControlProp* form,
  * Render a text input control (text, password, email, etc.)
  */
 static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
-    float s = rdcon->scale;  // scale factor for CSS -> physical pixels
-    float x = rdcon->block.x + block->x * s;
-    float y = rdcon->block.y + block->y * s;
-    float w = block->width * s;
-    float h = block->height * s;
+    FormControlBox fc = form_control_box(rdcon, block);
+    float s = fc.s;  // scale factor for CSS -> physical pixels
+    float x = fc.x;
+    float y = fc.y;
+    float w = fc.w;
+    float h = fc.h;
 
     // Background (white) - only when CSS doesn't specify a background.
     // When the author sets background-color (or background image), render_block_view
     // has already painted it, so do not overdraw with white here.
     // Also: clip the white fill to the inside of any CSS border, otherwise the
     // fill stomps the border (which render_bound painted just before us).
-    bool has_css_background = block->bound && block->bound->background;
-    BorderProp* css_border = block->bound ? block->bound->border : nullptr;
-    bool has_css_border = form_border_has_visible_side(css_border);
-    bool use_default_border = !form_border_has_author_override(css_border);
+    bool has_css_background = fc.has_css_background;
+    bool has_css_border = fc.has_css_border;
+    bool use_default_border = fc.use_default_border;
     if (!has_css_background) {
         Color bg = make_color(255, 255, 255);
         float bx = x, by = y, bw_w = w, bh_h = h;
@@ -493,8 +524,7 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
     // for caret-byte→codepoint mapping.
     const char* value_text = form->value ? form->value : "";
     uint32_t value_len = (uint32_t)strlen(value_text);
-    DocState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (DocState*)rdcon->ui_context->document->state : nullptr;
+    DocState* state = fc.state;
     bool focused_here = state && focus_get(state) == static_cast<View*>(block);
     uint32_t selection_start = 0, selection_end = 0;
     form_control_get_selection(state, static_cast<View*>(block), &selection_start, &selection_end, NULL);
@@ -694,14 +724,14 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
  */
 static void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     (void)form;
-    float s = rdcon->scale;
-    float x = rdcon->block.x + block->x * s;
-    float y = rdcon->block.y + block->y * s;
-    float size = block->width * s;
+    FormControlBox fc = form_control_box(rdcon, block);
+    float s = fc.s;
+    float x = fc.x;
+    float y = fc.y;
+    float size = fc.w;
 
-    DocState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (DocState*)rdcon->ui_context->document->state : nullptr;
-    bool disabled = form_control_is_disabled(state, static_cast<View*>(block));
+    DocState* state = fc.state;
+    bool disabled = fc.disabled;
     bool checked = form_control_get_checked(state, static_cast<View*>(block));
 
     float border_w = fmaxf(1.0f * s, 1.0f);
@@ -773,19 +803,19 @@ static void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlP
  */
 static void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     (void)form;
-    float s = rdcon->scale;
-    float x = rdcon->block.x + block->x * s;
-    float y = rdcon->block.y + block->y * s;
-    float size = block->width * s;
+    FormControlBox fc = form_control_box(rdcon, block);
+    float s = fc.s;
+    float x = fc.x;
+    float y = fc.y;
+    float size = fc.w;
 
     // Calculate center and radius
     float cx = x + size / 2;
     float cy = y + size / 2;
     float radius = size / 2;
 
-    DocState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (DocState*)rdcon->ui_context->document->state : nullptr;
-    bool disabled = form_control_is_disabled(state, static_cast<View*>(block));
+    DocState* state = fc.state;
+    bool disabled = fc.disabled;
     bool checked = form_control_get_checked(state, static_cast<View*>(block));
 
     // Background circle
@@ -834,21 +864,20 @@ static const char* form_button_label_text(ViewBlock* block, FormControlProp* for
  * we skip the default gray background. Otherwise, render default button appearance.
  */
 static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
-    float s = rdcon->scale;
-    float x = rdcon->block.x + block->x * s;
-    float y = rdcon->block.y + block->y * s;
-    float w = block->width * s;
-    float h = block->height * s;
+    FormControlBox fc = form_control_box(rdcon, block);
+    float s = fc.s;
+    float x = fc.x;
+    float y = fc.y;
+    float w = fc.w;
+    float h = fc.h;
 
     // Check if button has CSS-specified background or border (from author stylesheet).
     // The background prop is only allocated when author CSS sets it, so its
     // existence alone means the author specified a background (including transparent).
-    bool has_css_background = block->bound && block->bound->background;
-    BorderProp* css_border = block->bound ? block->bound->border : nullptr;
-    bool use_default_border = !form_border_has_author_override(css_border);
-    DocState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (DocState*)rdcon->ui_context->document->state : nullptr;
-    bool disabled = form_control_is_disabled(state, static_cast<View*>(block));
+    bool has_css_background = fc.has_css_background;
+    bool use_default_border = fc.use_default_border;
+    DocState* state = fc.state;
+    bool disabled = fc.disabled;
 
     if (!has_css_background) {
         // No CSS background - render default button appearance
@@ -982,23 +1011,22 @@ static const char* get_option_text_at_index(ViewBlock* select, int index) {
  * Render a select dropdown (closed state).
  */
 static void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
-    float s = rdcon->scale;
-    float x = rdcon->block.x + block->x * s;
-    float y = rdcon->block.y + block->y * s;
-    float w = block->width * s;
-    float h = block->height * s;
+    FormControlBox fc = form_control_box(rdcon, block);
+    float s = fc.s;
+    float x = fc.x;
+    float y = fc.y;
+    float w = fc.w;
+    float h = fc.h;
 
     // Background and border are painted by render_block_view using the UA
     // defaults set in resolve_htm_style.cpp (1px solid #767676, 2px radius,
     // white/disabled-grey bg). Only fall back to manual drawing if those
     // weren't set for some reason (e.g., author CSS removed them).
-    bool has_css_background = block->bound && block->bound->background;
-    BorderProp* css_border = block->bound ? block->bound->border : nullptr;
-    bool has_css_border = form_border_has_visible_side(css_border);
-    bool use_default_border = !form_border_has_author_override(css_border);
-    DocState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (DocState*)rdcon->ui_context->document->state : nullptr;
-    bool disabled = form_control_is_disabled(state, static_cast<View*>(block));
+    bool has_css_background = fc.has_css_background;
+    bool has_css_border = fc.has_css_border;
+    bool use_default_border = fc.use_default_border;
+    DocState* state = fc.state;
+    bool disabled = fc.disabled;
     int selected_index = form_control_get_selected_index(state, static_cast<View*>(block));
 
     float bw = 1 * s;
@@ -1283,19 +1311,19 @@ static void textarea_offset_to_line_col(const char* text, int byte_offset, int* 
  * Render a textarea control with multi-line text, caret, and placeholder.
  */
 static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
-    float s = rdcon->scale;
-    float x = rdcon->block.x + block->x * s;
-    float y = rdcon->block.y + block->y * s;
-    float w = block->width * s;
-    float h = block->height * s;
+    FormControlBox fc = form_control_box(rdcon, block);
+    float s = fc.s;
+    float x = fc.x;
+    float y = fc.y;
+    float w = fc.w;
+    float h = fc.h;
 
     // Background and border are painted by render_bound when the author set them
     // (respecting border-radius / border-color). Only fall back to the default
     // white background + 3D inset border when the author didn't.
-    bool has_css_background = block->bound && block->bound->background;
-    BorderProp* css_border = block->bound ? block->bound->border : nullptr;
-    bool has_css_border = form_border_has_visible_side(css_border);
-    bool use_default_border = !form_border_has_author_override(css_border);
+    bool has_css_background = fc.has_css_background;
+    bool has_css_border = fc.has_css_border;
+    bool use_default_border = fc.use_default_border;
     if (!has_css_background) {
         Color bg = make_color(255, 255, 255);
         float bx = x, by = y, bw_w = w, bh_h = h;
@@ -1319,8 +1347,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
     // path (guarded by !is_placeholder) would skip drawing the caret.
     const char* value_text = form->value ? form->value : "";
     uint32_t value_len = (uint32_t)strlen(value_text);
-    DocState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (DocState*)rdcon->ui_context->document->state : nullptr;
+    DocState* state = fc.state;
     uint32_t selection_start = 0, selection_end = 0;
     form_control_get_selection(state, static_cast<View*>(block), &selection_start, &selection_end, NULL);
     uint32_t preedit_start = 0;
@@ -1573,13 +1600,13 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
  */
 static void render_range(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     (void)form;
-    float s = rdcon->scale;
-    float x = rdcon->block.x + block->x * s;
-    float y = rdcon->block.y + block->y * s;
-    float w = block->width * s;
-    float h = block->height * s;
-    DocState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (DocState*)rdcon->ui_context->document->state : nullptr;
+    FormControlBox fc = form_control_box(rdcon, block);
+    float s = fc.s;
+    float x = fc.x;
+    float y = fc.y;
+    float w = fc.w;
+    float h = fc.h;
+    DocState* state = fc.state;
     float range_value = form_control_get_range_value(state, static_cast<View*>(block));
 
     // Track

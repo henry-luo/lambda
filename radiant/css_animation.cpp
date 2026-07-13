@@ -121,33 +121,7 @@ static bool parse_color_value(const char* val, Color* out) {
 
 // Map a CSS property name string to CssPropertyId
 static CssPropertyId property_name_to_id(const char* name) {
-    if (strcmp(name, "opacity") == 0) return CSS_PROPERTY_OPACITY;
-    if (strcmp(name, "transform") == 0) return CSS_PROPERTY_TRANSFORM;
-    if (strcmp(name, "background-color") == 0) return CSS_PROPERTY_BACKGROUND_COLOR;
-    if (strcmp(name, "color") == 0) return CSS_PROPERTY_COLOR;
-    if (strcmp(name, "width") == 0) return CSS_PROPERTY_WIDTH;
-    if (strcmp(name, "height") == 0) return CSS_PROPERTY_HEIGHT;
-    if (strcmp(name, "top") == 0) return CSS_PROPERTY_TOP;
-    if (strcmp(name, "right") == 0) return CSS_PROPERTY_RIGHT;
-    if (strcmp(name, "bottom") == 0) return CSS_PROPERTY_BOTTOM;
-    if (strcmp(name, "left") == 0) return CSS_PROPERTY_LEFT;
-    if (strcmp(name, "margin-top") == 0) return CSS_PROPERTY_MARGIN_TOP;
-    if (strcmp(name, "margin-right") == 0) return CSS_PROPERTY_MARGIN_RIGHT;
-    if (strcmp(name, "margin-bottom") == 0) return CSS_PROPERTY_MARGIN_BOTTOM;
-    if (strcmp(name, "margin-left") == 0) return CSS_PROPERTY_MARGIN_LEFT;
-    if (strcmp(name, "padding-top") == 0) return CSS_PROPERTY_PADDING_TOP;
-    if (strcmp(name, "padding-right") == 0) return CSS_PROPERTY_PADDING_RIGHT;
-    if (strcmp(name, "padding-bottom") == 0) return CSS_PROPERTY_PADDING_BOTTOM;
-    if (strcmp(name, "padding-left") == 0) return CSS_PROPERTY_PADDING_LEFT;
-    if (strcmp(name, "border-top-width") == 0) return CSS_PROPERTY_BORDER_TOP_WIDTH;
-    if (strcmp(name, "border-right-width") == 0) return CSS_PROPERTY_BORDER_RIGHT_WIDTH;
-    if (strcmp(name, "border-bottom-width") == 0) return CSS_PROPERTY_BORDER_BOTTOM_WIDTH;
-    if (strcmp(name, "border-left-width") == 0) return CSS_PROPERTY_BORDER_LEFT_WIDTH;
-    if (strcmp(name, "border-top-color") == 0) return CSS_PROPERTY_BORDER_TOP_COLOR;
-    if (strcmp(name, "border-right-color") == 0) return CSS_PROPERTY_BORDER_RIGHT_COLOR;
-    if (strcmp(name, "border-bottom-color") == 0) return CSS_PROPERTY_BORDER_BOTTOM_COLOR;
-    if (strcmp(name, "border-left-color") == 0) return CSS_PROPERTY_BORDER_LEFT_COLOR;
-    return (CssPropertyId)0;
+    return (CssPropertyId)css_property_id_from_name(name);
 }
 
 // Determine the animation value type for a property

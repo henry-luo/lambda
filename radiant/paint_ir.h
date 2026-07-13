@@ -579,6 +579,8 @@ typedef struct {
 } PaintSvgLoweringState;
 
 void paint_svg_lowering_state_init(PaintSvgLoweringState* state, int indent_level);
+void paint_svg_color_to_string(Color color, char* result, int result_cap);
+void paint_svg_append_color(StrBuf* out, Color color);
 
 void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,
                         const PaintSvgLoweringOptions* options,

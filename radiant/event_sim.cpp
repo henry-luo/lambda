@@ -909,31 +909,7 @@ static void sim_toggle_checkbox_radio(View* input, DocState* state) {
             if (name) {
                 View* root = input;
                 while (root->parent) root = root->parent;
-                // Traverse all views to find matching radios
-                View* search = root;
-                while (search) {
-                    if (search != input && search->is_element()) {
-                        ViewElement* se = lam::view_require_element(search);
-                        if (se->tag() == HTM_TAG_INPUT) {
-                            const char* st = se->get_attribute("type");
-                            const char* sn = se->get_attribute("name");
-                            if (st && strcmp(st, "radio") == 0 && sn && strcmp(sn, name) == 0) {
-                                if (form_control_get_checked(state, search)) {
-                                    form_control_uncheck_radio_group_peer(state, search);
-                                }
-                            }
-                        }
-                    }
-                    // Depth-first traversal
-                    if (search->is_element()) {
-                        DomElement* de = search->as_element();
-                        if (de->first_child) { search = static_cast<View*>(de->first_child); continue; }
-                    }
-                    if (search->next()) { search = search->next(); continue; }
-                    search = search->parent;
-                    while (search && !search->next()) search = search->parent;
-                    if (search) search = search->next();
-                }
+                radiant_uncheck_radio_group(root, name, input, state, false);
             }
             // Check this radio
             form_control_set_checked(state, input, true);

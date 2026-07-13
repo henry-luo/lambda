@@ -399,6 +399,17 @@ static bool has_flex_item_prop(ViewElement* item) {
     return item && item->item_prop_type == DomElement::ITEM_PROP_FLEX && item->fi;
 }
 
+static float flex_measure_existing_view_height(ViewElement* elem) {
+    if (!elem) return -1.0f;
+    if (elem->blk && elem->blk->given_height >= 0.0f) return elem->blk->given_height;
+    if (elem->height > 0.0f) return elem->height;
+    if (has_flex_item_prop(elem) && elem->fi->has_intrinsic_height &&
+        elem->fi->intrinsic_height.max_content > 0.0f) {
+        return elem->fi->intrinsic_height.max_content;
+    }
+    return -1.0f;
+}
+
 static float measure_content_height_recursive(DomNode* node, LayoutContext* lycon, int depth) {
     if (!node || !node->is_element()) return 0;
     if (depth > MAX_MEASURE_DEPTH) return 0;
@@ -409,35 +420,20 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
         log_debug("measure_content_height_recursive: checking elem %s, blk=%p height=%.1f",
                   elem->tag_name ? elem->tag_name : "(null)",
                   (void*)elem->blk, elem->height);
-        if (elem->blk && elem->blk->given_height >= 0) {
-            log_debug("measure_content_height_recursive: elem %s has given_height=%.1f",
-                      elem->tag_name ? elem->tag_name : "(null)", elem->blk->given_height);
-            return elem->blk->given_height;
-        }
-        if (elem->height > 0) {
-            log_debug("measure_content_height_recursive: elem %s has height=%.1f",
-                      elem->tag_name ? elem->tag_name : "(null)", elem->height);
-            return (float)elem->height;
-        }
-        if (has_flex_item_prop(elem) && elem->fi->has_intrinsic_height && elem->fi->intrinsic_height.max_content > 0) {
-            log_debug("measure_content_height_recursive: elem %s has intrinsic_height=%.1f",
-                      elem->tag_name ? elem->tag_name : "(null)", elem->fi->intrinsic_height.max_content);
-            return (float)elem->fi->intrinsic_height.max_content;
+        float existing_height = flex_measure_existing_view_height(elem);
+        if (existing_height >= 0.0f) {
+            log_debug("measure_content_height_recursive: elem %s has existing height=%.1f",
+                      elem->tag_name ? elem->tag_name : "(null)", existing_height);
+            return existing_height;
         }
 
         // Also check specified_style for explicit height
         if (elem->specified_style) {
-            CssDeclaration* height_decl = style_tree_get_declaration(
-                elem->specified_style, CSS_PROPERTY_HEIGHT);
-            if (height_decl && height_decl->value &&
-                height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                float explicit_height = (float)resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
-                                                                    height_decl->value);
-                if (explicit_height > 0) {
-                    log_debug("measure_content_height_recursive: elem %s has specified height=%.1fpx",
-                              elem->tag_name ? elem->tag_name : "(null)", explicit_height);
-                    return explicit_height;
-                }
+            float explicit_height = get_explicit_css_height(lycon, elem);
+            if (explicit_height > 0.0f) {
+                log_debug("measure_content_height_recursive: elem %s has specified height=%.1fpx",
+                          elem->tag_name ? elem->tag_name : "(null)", explicit_height);
+                return explicit_height;
             }
         }
     }
@@ -473,13 +469,10 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
                 ViewElement* child_view = lam::view_require_element(child);
                 if (child_view) {
                     // Check for explicit height first
-                    if (child_view->blk && child_view->blk->given_height >= 0) {
-                        child_height = child_view->blk->given_height;
-                        log_debug("measure_content_height_recursive: child %s explicit height=%.1f",
-                                  child->node_name(), child_height);
-                    } else if (child_view->height > 0) {
-                        child_height = (float)child_view->height;
-                        log_debug("measure_content_height_recursive: child %s view height=%.1f",
+                    float existing_height = flex_measure_existing_view_height(child_view);
+                    if (existing_height >= 0.0f) {
+                        child_height = existing_height;
+                        log_debug("measure_content_height_recursive: child %s existing height=%.1f",
                                   child->node_name(), child_height);
                     } else {
                         // Use calculate_max_content_height as fallback
@@ -742,12 +735,10 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             }
                         }
                         if (!has_explicit_height_css && elem && elem->specified_style) {
-                            CssDeclaration* height_decl = style_tree_get_declaration(
-                                elem->specified_style, CSS_PROPERTY_HEIGHT);
-                            if (height_decl && height_decl->value &&
-                                height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                elem_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
-                                                                         height_decl->value);
+                            float css_height = get_explicit_css_height(
+                                lycon, lam::view_require_element(elem));
+                            if (css_height > 0.0f) {
+                                elem_height = css_height;
                                 has_explicit_height_css = true;
                                 log_debug("SVG height from CSS: %.1f", elem_height);
                             }
@@ -760,12 +751,10 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                              tag == HTM_TAG_VIDEO || tag == HTM_TAG_CANVAS) {
                         // Replaced elements - use explicit CSS dimensions if available
                         if (elem && elem->specified_style) {
-                            CssDeclaration* height_decl = style_tree_get_declaration(
-                                elem->specified_style, CSS_PROPERTY_HEIGHT);
-                            if (height_decl && height_decl->value &&
-                                height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                elem_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
-                                                                         height_decl->value);
+                            float css_height = get_explicit_css_height(
+                                lycon, lam::view_require_element(elem));
+                            if (css_height > 0.0f) {
+                                elem_height = css_height;
                                 has_explicit_height_css = true;
                                 log_debug("Replaced element %s has explicit CSS height=%d",
                                           sub_child->node_name(), elem_height);
@@ -878,14 +867,10 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                         // Check if this nested element has explicit height
                                         DomElement* nested = content->as_element();
                                         if (nested && nested->specified_style) {
-                                            CssDeclaration* h_decl = style_tree_get_declaration(
-                                                nested->specified_style, CSS_PROPERTY_HEIGHT);
-                                            if (h_decl && h_decl->value &&
-                                                h_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                                float h = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, h_decl->value);
-                                                if (h > 0) {
-                                                    has_children_with_explicit_height = true;
-                                                }
+                                            float h = get_explicit_css_height(
+                                                lycon, lam::view_require_element(nested));
+                                            if (h > 0.0f) {
+                                                has_children_with_explicit_height = true;
                                             }
                                         }
                                     }
@@ -1097,17 +1082,12 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                           sub_child->node_name(), elem, elem ? elem->specified_style : nullptr);
                             }
                             if (!has_explicit_height_css && elem && elem->specified_style) {
-                                CssDeclaration* height_decl = style_tree_get_declaration(
-                                    elem->specified_style, CSS_PROPERTY_HEIGHT);
-                                log_debug("  height_decl=%p, value=%p, type=%d",
-                                          height_decl, height_decl ? height_decl->value : nullptr,
-                                          height_decl && height_decl->value ? height_decl->value->type : -1);
-                                if (height_decl && height_decl->value &&
-                                    height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                    elem_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
-                                                                             height_decl->value);
+                                float css_height = get_explicit_css_height(
+                                    lycon, lam::view_require_element(elem));
+                                if (css_height > 0.0f) {
+                                    elem_height = css_height;
                                     has_explicit_height_css = true;
-                                    log_debug("Element %s has explicit CSS height=%d",
+                                    log_debug("Element %s has explicit CSS height=%.1f",
                                               sub_child->node_name(), elem_height);
                                 }
                             }

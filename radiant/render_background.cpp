@@ -50,6 +50,37 @@ static Corner background_corner_scaled(const Corner* radius, float scale) {
     return out;
 }
 
+static bool background_rounded_radius(ViewBlock* view, Rect rect, Corner* out_radius) {
+    BorderProp* border = (view && view->bound) ? view->bound->border : nullptr;
+    if (!border || !corner_has_radius(&border->radius)) return false;
+    *out_radius = border->radius;
+    constrain_corner_radii(out_radius, rect.width, rect.height);
+    return true;
+}
+
+static RdtPath* background_rect_path(Rect rect) {
+    RdtPath* path = rdt_path_new();
+    rdt_path_add_rect(path, rect.x, rect.y, rect.width, rect.height, 0, 0);
+    return path;
+}
+
+static RdtPath* background_rounded_rect_path(ViewBlock* view, Rect rect) {
+    Corner radius;
+    if (background_rounded_radius(view, rect, &radius)) {
+        return render_path_create_rounded_rect(rect, &radius);
+    }
+    return background_rect_path(rect);
+}
+
+static RdtPath* background_border_rect_path(ViewBlock* view, Rect rect) {
+    BorderProp* border = (view && view->bound) ? view->bound->border : nullptr;
+    if (border && corner_has_radius(&border->radius)) {
+        constrain_border_radii(border, rect.width, rect.height);
+        return render_path_create_rounded_rect(rect, &border->radius);
+    }
+    return background_rect_path(rect);
+}
+
 static Corner background_corner_inset_box(const Corner* radius, CssEnum box,
                                           const BorderProp* border,
                                           const Spacing* padding,
@@ -287,17 +318,7 @@ static void calc_linear_gradient_points(float angle, Rect rect,
  * Render linear gradient
  */
 static RdtPath* background_gradient_clip_path(ViewBlock* view, Rect clip_rect) {
-    RdtPath* clip = nullptr;
-    BorderProp* border = (view && view->bound) ? view->bound->border : nullptr;
-    if (border && corner_has_radius(&border->radius)) {
-        Corner radius = border->radius;
-        constrain_corner_radii(&radius, clip_rect.width, clip_rect.height);
-        clip = render_path_create_rounded_rect(clip_rect, &radius);
-    } else {
-        clip = rdt_path_new();
-        rdt_path_add_rect(clip, clip_rect.x, clip_rect.y, clip_rect.width, clip_rect.height, 0, 0);
-    }
-    return clip;
+    return background_rounded_rect_path(view, clip_rect);
 }
 
 static void render_linear_gradient_tile(RenderContext* rdcon, ViewBlock* view,
@@ -313,20 +334,12 @@ static void render_linear_gradient_tile(RenderContext* rdcon, ViewBlock* view,
 
     const RdtMatrix* xform = render_state_current_transform(rdcon);
 
-    RdtPath* p = rdt_path_new();
     bool same_rect = fabsf(tile_rect.x - clip_rect.x) < 0.001f &&
                      fabsf(tile_rect.y - clip_rect.y) < 0.001f &&
                      fabsf(tile_rect.width - clip_rect.width) < 0.001f &&
                      fabsf(tile_rect.height - clip_rect.height) < 0.001f;
-    BorderProp* border = (view && view->bound) ? view->bound->border : nullptr;
-    if (same_rect && border && corner_has_radius(&border->radius)) {
-        rdt_path_free(p);
-        Corner radius = border->radius;
-        constrain_corner_radii(&radius, tile_rect.width, tile_rect.height);
-        p = render_path_create_rounded_rect(tile_rect, &radius);
-    } else {
-        rdt_path_add_rect(p, tile_rect.x, tile_rect.y, tile_rect.width, tile_rect.height, 0, 0);
-    }
+    RdtPath* p = same_rect ? background_rounded_rect_path(view, tile_rect)
+                           : background_rect_path(tile_rect);
 
     // Calculate gradient line
     float x1, y1, x2, y2;
@@ -455,21 +468,7 @@ static void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, Radial
 
     const RdtMatrix* xform = render_state_current_transform(rdcon);
 
-    RdtPath* p = rdt_path_new();
-    bool has_radius = false;
-    BorderProp* border = nullptr;
-    if (view->bound && view->bound->border) {
-        border = view->bound->border;
-        has_radius = corner_has_radius(&border->radius);
-    }
-
-    if (has_radius) {
-        constrain_border_radii(border, rect.width, rect.height);
-        rdt_path_free(p);
-        p = render_path_create_rounded_rect(rect, &border->radius);
-    } else {
-        rdt_path_add_rect(p, rect.x, rect.y, rect.width, rect.height, 0, 0);
-    }
+    RdtPath* p = background_border_rect_path(view, rect);
 
     float cx = rect.x + rect.width * gradient->cx;
     float cy = rect.y + rect.height * gradient->cy;
@@ -583,9 +582,8 @@ static void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGr
     // Clip to border-radius if present (using the ThorVG clip path, works in DL mode)
     bool pushed_clip = false;
     RdtPath* clip_path = nullptr;
-    if (view->bound && view->bound->border && corner_has_radius(&view->bound->border->radius)) {
-        Corner radius = view->bound->border->radius;
-        constrain_corner_radii(&radius, rect.width, rect.height);
+    Corner radius;
+    if (background_rounded_radius(view, rect, &radius)) {
         clip_path = render_path_create_rounded_rect(rect, &radius);
         rc_push_clip(rdcon, clip_path, NULL);
         pushed_clip = true;
@@ -1747,14 +1745,9 @@ static bool compute_background_tile_plan(BackgroundProp* bg, Rect position_rect,
         return false;
     }
 
-    if (background_size_unspecified(bg)) {
-        plan->tile_w = position_rect.width;
-        plan->tile_h = position_rect.height;
-    } else {
-        compute_bg_image_size(bg, intrinsic_w, intrinsic_h,
-                              position_rect.width, position_rect.height,
-                              &plan->tile_w, &plan->tile_h);
-    }
+    compute_bg_image_size(bg, intrinsic_w, intrinsic_h,
+                          position_rect.width, position_rect.height,
+                          &plan->tile_w, &plan->tile_h);
     if (plan->tile_w <= 0.0f || plan->tile_h <= 0.0f) return false;
 
     float pos_x = 0.0f;
@@ -1834,6 +1827,48 @@ static bool background_tile_outside_rect(const Rect* tile_rect, const Rect* rect
            tile_rect->y >= rect->y + rect->height;
 }
 
+typedef void (*BackgroundTileCallback)(const Rect* tile_rect, void* userdata);
+
+static void background_for_each_tile(const BackgroundTilePlan* plan,
+                                     Rect tile_basis_rect,
+                                     Rect paint_rect,
+                                     BackgroundTileCallback callback,
+                                     void* userdata) {
+    if (!plan || !callback) return;
+    for (int row = plan->start_row; row <= plan->end_row; row++) {
+        for (int col = plan->start_col; col <= plan->end_col; col++) {
+            Rect tile_rect;
+            background_tile_rect(plan, tile_basis_rect, row, col, &tile_rect);
+            if (background_tile_outside_rect(&tile_rect, &paint_rect)) continue;
+            callback(&tile_rect, userdata);
+        }
+    }
+}
+
+typedef struct {
+    RenderContext* rdcon;
+    ViewBlock* view;
+    LinearGradient* gradient;
+    Rect paint_rect;
+} LinearGradientTileContext;
+
+static void render_linear_gradient_tile_cb(const Rect* tile_rect, void* userdata) {
+    LinearGradientTileContext* ctx = (LinearGradientTileContext*)userdata;
+    render_linear_gradient_tile(ctx->rdcon, ctx->view, ctx->gradient,
+                                *tile_rect, ctx->paint_rect);
+}
+
+typedef struct {
+    RenderContext* rdcon;
+    ViewBlock* view;
+    RadialGradient* gradient;
+} RadialGradientTileContext;
+
+static void render_radial_gradient_tile_cb(const Rect* tile_rect, void* userdata) {
+    RadialGradientTileContext* ctx = (RadialGradientTileContext*)userdata;
+    render_radial_gradient(ctx->rdcon, ctx->view, ctx->gradient, *tile_rect);
+}
+
 static void render_linear_gradient_layer(RenderContext* rdcon, ViewBlock* view,
                                          BackgroundProp* bg, LinearGradient* gradient,
                                          Rect position_rect, Rect paint_rect) {
@@ -1845,14 +1880,9 @@ static void render_linear_gradient_layer(RenderContext* rdcon, ViewBlock* view,
         return;
     }
 
-    for (int row = plan.start_row; row <= plan.end_row; row++) {
-        for (int col = plan.start_col; col <= plan.end_col; col++) {
-            Rect tile_rect;
-            background_tile_rect(&plan, tile_basis_rect, row, col, &tile_rect);
-            if (background_tile_outside_rect(&tile_rect, &paint_rect)) continue;
-            render_linear_gradient_tile(rdcon, view, gradient, tile_rect, paint_rect);
-        }
-    }
+    LinearGradientTileContext tile_ctx = {rdcon, view, gradient, paint_rect};
+    background_for_each_tile(&plan, tile_basis_rect, paint_rect,
+                             render_linear_gradient_tile_cb, &tile_ctx);
 }
 
 static void render_radial_gradient_layer(RenderContext* rdcon, ViewBlock* view,
@@ -1866,14 +1896,9 @@ static void render_radial_gradient_layer(RenderContext* rdcon, ViewBlock* view,
         return;
     }
 
-    for (int row = plan.start_row; row <= plan.end_row; row++) {
-        for (int col = plan.start_col; col <= plan.end_col; col++) {
-            Rect tile_rect;
-            background_tile_rect(&plan, paint_rect, row, col, &tile_rect);
-            if (background_tile_outside_rect(&tile_rect, &paint_rect)) continue;
-            render_radial_gradient(rdcon, view, gradient, tile_rect);
-        }
-    }
+    RadialGradientTileContext tile_ctx = {rdcon, view, gradient};
+    background_for_each_tile(&plan, paint_rect, paint_rect,
+                             render_radial_gradient_tile_cb, &tile_ctx);
 }
 
 /**
@@ -1895,9 +1920,7 @@ static int background_image_clip_shapes(RenderContext* rdcon, ViewBlock* view,
         out_shapes[depth++] = rdcon->clip_shapes[i];
     }
 
-    if (!view || !view->bound || !view->bound->border ||
-        !corner_has_radius(&view->bound->border->radius) ||
-        depth >= RDT_MAX_CLIP_SHAPES) {
+    if (depth >= RDT_MAX_CLIP_SHAPES) {
         return depth;
     }
 
@@ -1906,8 +1929,9 @@ static int background_image_clip_shapes(RenderContext* rdcon, ViewBlock* view,
     float clip_h = clip->bottom - clip->top;
     if (clip_w <= 0 || clip_h <= 0) return depth;
 
-    Corner radius = view->bound->border->radius;
-    constrain_corner_radii(&radius, clip_w, clip_h);
+    Rect clip_rect = {clip->left, clip->top, clip_w, clip_h};
+    Corner radius;
+    if (!background_rounded_radius(view, clip_rect, &radius)) return depth;
     rounded_shape->type = CLIP_SHAPE_ROUNDED_RECT;
     rounded_shape->rounded_rect = {
         clip->left, clip->top, clip_w, clip_h,
@@ -1919,11 +1943,6 @@ static int background_image_clip_shapes(RenderContext* rdcon, ViewBlock* view,
 
 static RdtPath* background_image_clip_path(RenderContext* rdcon, ViewBlock* view) {
     if (!rdcon) return nullptr;
-    if (!view || !view->bound || !view->bound->border ||
-        !corner_has_radius(&view->bound->border->radius)) {
-        return render_path_create_clip_path(rdcon);
-    }
-
     Bound* clip = &rdcon->block.clip;
     float clip_w = clip->right - clip->left;
     float clip_h = clip->bottom - clip->top;
@@ -1931,9 +1950,11 @@ static RdtPath* background_image_clip_path(RenderContext* rdcon, ViewBlock* view
         return render_path_create_clip_path(rdcon);
     }
 
-    Corner radius = view->bound->border->radius;
-    constrain_corner_radii(&radius, clip_w, clip_h);
     Rect clip_rect = {clip->left, clip->top, clip_w, clip_h};
+    Corner radius;
+    if (!background_rounded_radius(view, clip_rect, &radius)) {
+        return render_path_create_clip_path(rdcon);
+    }
     return render_path_create_rounded_rect(clip_rect, &radius);
 }
 
@@ -1953,6 +1974,29 @@ static void render_bg_tile_tvg(RenderContext* rdcon, ViewBlock* view, ImageSurfa
     rc_pop_clip(rdcon);
     rdt_path_free(clip_path);
     // rc_draw_picture transfers ownership to the display list.
+}
+
+typedef struct {
+    RenderContext* rdcon;
+    ViewBlock* view;
+    ImageSurface* img;
+    bool is_svg;
+    ScaleMode tile_scale_mode;
+    ClipShape** clip_shape_stack;
+    int clip_shape_depth;
+} BackgroundImageTileContext;
+
+static void render_background_image_tile_cb(const Rect* tile_rect, void* userdata) {
+    BackgroundImageTileContext* ctx = (BackgroundImageTileContext*)userdata;
+    Rect tile_copy = *tile_rect;
+    if (ctx->is_svg) {
+        render_bg_tile_tvg(ctx->rdcon, ctx->view, ctx->img, &tile_copy);
+    } else {
+        blit_bg_tile(ctx->rdcon, ctx->img, ctx->rdcon->ui_context->surface,
+                     &tile_copy, &ctx->rdcon->block.clip,
+                     ctx->tile_scale_mode, ctx->clip_shape_stack,
+                     ctx->clip_shape_depth);
+    }
 }
 
 /**
@@ -1981,128 +2025,38 @@ static void render_background_image(RenderContext* rdcon, ViewBlock* view, Backg
 
     float s = rdcon->scale;
 
-    // Compute rendered image size (in physical pixels)
-    float render_w, render_h;
-    compute_bg_image_size(bg, img_w * s, img_h * s, rect.width, rect.height, &render_w, &render_h);
-
-    // Compute position offset (in physical pixels)
-    float pos_x, pos_y;
-    compute_bg_image_position(bg, render_w, render_h, rect.width, rect.height, &pos_x, &pos_y);
-
-    // Determine repeat mode (default: repeat in both axes)
-    CssEnum repeat_x = bg->bg_repeat_x ? bg->bg_repeat_x : CSS_VALUE_REPEAT;
-    CssEnum repeat_y = bg->bg_repeat_y ? bg->bg_repeat_y : CSS_VALUE_REPEAT;
+    BackgroundTilePlan plan = {};
+    if (!compute_background_tile_plan(bg, rect, rect, img_w * s, img_h * s, &plan)) {
+        return;
+    }
 
     log_debug("[BG-IMAGE] size=%.0fx%.0f pos=(%.0f,%.0f) repeat=(%d,%d)",
-              render_w, render_h, pos_x, pos_y, repeat_x, repeat_y);
-
-    // Compute tiling origin and iteration bounds
-    float origin_x = rect.x + pos_x;
-    float origin_y = rect.y + pos_y;
-
-    float tile_w = render_w;
-    float tile_h = render_h;
-
-    // For 'round' mode: adjust tile size to fit evenly
-    if (repeat_x == CSS_VALUE_ROUND && tile_w > 0) {
-        int count = (int)(rect.width / tile_w + 0.5f);
-        if (count < 1) count = 1;
-        tile_w = rect.width / count;
-    }
-    if (repeat_y == CSS_VALUE_ROUND && tile_h > 0) {
-        int count = (int)(rect.height / tile_h + 0.5f);
-        if (count < 1) count = 1;
-        tile_h = rect.height / count;
-    }
-
-    // Compute start and end tile indices
-    int start_col = 0, end_col = 0;
-    int start_row = 0, end_row = 0;
-
-    if (repeat_x == CSS_VALUE_NO_REPEAT) {
-        start_col = 0; end_col = 0;
-    } else if (repeat_x == CSS_VALUE_SPACE) {
-        // 'space': tile count fits without scaling, distribute gaps evenly
-        start_col = 0;
-        end_col = (tile_w > 0) ? (int)(rect.width / tile_w) - 1 : 0;
-        if (end_col < 0) end_col = 0;
-    } else {
-        // repeat or round: tile from before the box to after
-        if (tile_w > 0) {
-            start_col = (int)floorf((rect.x - origin_x) / tile_w);
-            end_col = (int)ceilf((rect.x + rect.width - origin_x) / tile_w) - 1;
-        }
-    }
-
-    if (repeat_y == CSS_VALUE_NO_REPEAT) {
-        start_row = 0; end_row = 0;
-    } else if (repeat_y == CSS_VALUE_SPACE) {
-        start_row = 0;
-        end_row = (tile_h > 0) ? (int)(rect.height / tile_h) - 1 : 0;
-        if (end_row < 0) end_row = 0;
-    } else {
-        if (tile_h > 0) {
-            start_row = (int)floorf((rect.y - origin_y) / tile_h);
-            end_row = (int)ceilf((rect.y + rect.height - origin_y) / tile_h) - 1;
-        }
-    }
-
-    // Compute 'space' gaps if needed
-    float space_gap_x = 0, space_gap_y = 0;
-    if (repeat_x == CSS_VALUE_SPACE && end_col > 0) {
-        space_gap_x = (rect.width - tile_w * (end_col + 1)) / end_col;
-    }
-    if (repeat_y == CSS_VALUE_SPACE && end_row > 0) {
-        space_gap_y = (rect.height - tile_h * (end_row + 1)) / end_row;
-    }
+              plan.tile_w, plan.tile_h, plan.origin_x - rect.x, plan.origin_y - rect.y,
+              plan.repeat_x, plan.repeat_y);
 
     // Render tiles
     bool is_svg = (img->format == IMAGE_FORMAT_SVG);
     if (!is_svg) {
         // ensure raster image pixels are decoded (lazy loading) at the tile size
-        image_surface_ensure_decoded(img, (int)tile_w, (int)tile_h);
+        image_surface_ensure_decoded(img,
+            (int)plan.tile_w,  // INT_CAST_OK: decode API accepts pixel dimensions.
+            (int)plan.tile_h); // INT_CAST_OK: decode API accepts pixel dimensions.
     }
 
     // Use wrap-around bilinear for repeating raster backgrounds so that
     // tile boundaries blend seamlessly (matching browser behavior).
-    bool is_repeating = (repeat_x != CSS_VALUE_NO_REPEAT && repeat_x != CSS_VALUE_SPACE) ||
-                        (repeat_y != CSS_VALUE_NO_REPEAT && repeat_y != CSS_VALUE_SPACE);
+    bool is_repeating = (plan.repeat_x != CSS_VALUE_NO_REPEAT && plan.repeat_x != CSS_VALUE_SPACE) ||
+                        (plan.repeat_y != CSS_VALUE_NO_REPEAT && plan.repeat_y != CSS_VALUE_SPACE);
     ScaleMode tile_scale_mode = (is_repeating && !is_svg) ? SCALE_MODE_LINEAR_WRAP : SCALE_MODE_LINEAR;
     ClipShape rounded_clip_shape = {};
     ClipShape* clip_shape_stack[RDT_MAX_CLIP_SHAPES];
     int clip_shape_depth = background_image_clip_shapes(rdcon, view, &rounded_clip_shape, clip_shape_stack);
 
-    for (int row = start_row; row <= end_row; row++) {
-        for (int col = start_col; col <= end_col; col++) {
-            Rect tile_rect;
-            if (repeat_x == CSS_VALUE_SPACE) {
-                tile_rect.x = rect.x + col * (tile_w + space_gap_x);
-            } else {
-                tile_rect.x = origin_x + col * tile_w;
-            }
-            if (repeat_y == CSS_VALUE_SPACE) {
-                tile_rect.y = rect.y + row * (tile_h + space_gap_y);
-            } else {
-                tile_rect.y = origin_y + row * tile_h;
-            }
-            tile_rect.width = tile_w;
-            tile_rect.height = tile_h;
-
-            // Skip tiles completely outside the element rect
-            if (tile_rect.x + tile_rect.width <= rect.x || tile_rect.x >= rect.x + rect.width ||
-                tile_rect.y + tile_rect.height <= rect.y || tile_rect.y >= rect.y + rect.height) {
-                continue;
-            }
-
-            if (is_svg) {
-                render_bg_tile_tvg(rdcon, view, img, &tile_rect);
-            } else {
-                blit_bg_tile(rdcon, img, rdcon->ui_context->surface, &tile_rect, &rdcon->block.clip,
-                             tile_scale_mode, clip_shape_stack, clip_shape_depth);
-            }
-        }
-    }
+    BackgroundImageTileContext tile_ctx = {
+        rdcon, view, img, is_svg, tile_scale_mode, clip_shape_stack, clip_shape_depth
+    };
+    background_for_each_tile(&plan, rect, rect, render_background_image_tile_cb, &tile_ctx);
 
     log_debug("[BG-IMAGE] Rendered background-image '%s' tiles=(%d-%d)x(%d-%d)",
-              image_url, start_col, end_col, start_row, end_row);
+              image_url, plan.start_col, plan.end_col, plan.start_row, plan.end_row);
 }

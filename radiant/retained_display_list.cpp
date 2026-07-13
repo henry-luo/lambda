@@ -143,42 +143,10 @@ static bool retained_dl_clone_item_payload(DisplayList* dst,
     return true;
 }
 
-static void retained_dl_free_item_payload(DisplayItem* item) {
-    if (!item) return;
-    switch (item->op) {
-        case DL_FILL_PATH:
-            rdt_path_free(item->fill_path.path);
-            item->fill_path.path = nullptr;
-            break;
-        case DL_STROKE_PATH:
-            rdt_path_free(item->stroke_path.path);
-            item->stroke_path.path = nullptr;
-            break;
-        case DL_FILL_LINEAR_GRADIENT:
-            rdt_path_free(item->fill_linear_gradient.path);
-            item->fill_linear_gradient.path = nullptr;
-            break;
-        case DL_FILL_RADIAL_GRADIENT:
-            rdt_path_free(item->fill_radial_gradient.path);
-            item->fill_radial_gradient.path = nullptr;
-            break;
-        case DL_DRAW_PICTURE:
-            rdt_picture_free(item->draw_picture.picture);
-            item->draw_picture.picture = nullptr;
-            break;
-        case DL_PUSH_CLIP:
-            rdt_path_free(item->push_clip.path);
-            item->push_clip.path = nullptr;
-            break;
-        default:
-            break;
-    }
-}
-
 static void retained_dl_rollback(DisplayList* dl, int target_count) {
     if (!dl || target_count < 0 || target_count > dl->count) return;
     for (int i = target_count; i < dl->count; i++) {
-        retained_dl_free_item_payload(&dl->items[i]);
+        dl_item_free_owned_payload(&dl->items[i]);
     }
     dl->count = target_count;
 }

@@ -34,6 +34,49 @@ static void transition_leave(DocState* state) {
     if (state && state->transition_depth > 0) state->transition_depth--;
 }
 
+static void state_machine_sync_selection_projection(DocState* state);
+
+struct TransitionDepthScope {
+    DocState* state;
+
+    TransitionDepthScope(DocState* state) : state(state) {
+        transition_enter(state);
+    }
+
+    ~TransitionDepthScope() {
+        transition_leave(state);
+    }
+};
+
+static bool finish_transition(DocState* state,
+                              SmTransitionGuard* sm_guard,
+                              const char* context,
+                              bool sync_selection,
+                              bool sync_editing) {
+    if (sync_selection) state_machine_sync_selection_projection(state);
+    if (sync_editing) editing_interaction_sync_projection(state);
+    sm_guard->commit();
+    radiant_state_assert_valid(state, context);
+    return radiant_state_validate_interaction(state, NULL);
+}
+
+typedef void (*SingleTargetSetter)(DocState* state, View* target);
+
+static bool single_target_transition(DocState* state,
+                                     SmFamily family,
+                                     SmEvent event,
+                                     View* target,
+                                     SingleTargetSetter setter,
+                                     const char* context) {
+    if (!state || !setter) return false;
+    SmTransitionGuard sm_guard(state, family, event, target);
+    {
+        TransitionDepthScope transition_scope(state);
+        setter(state, target);
+    }
+    return finish_transition(state, &sm_guard, context, false, false);
+}
+
 static bool focus_kind_to_sm_event(FocusTransitionKind kind,
                                    FocusTransitionArgs* args,
                                    SmEvent* out_event) {
@@ -63,31 +106,27 @@ bool focus_transition(DocState* state,
 
     SmTransitionGuard sm_guard(state, SM_FAMILY_FOCUS, event,
                                args ? args->target : NULL);
-    transition_enter(state);
-    switch (kind) {
-        case FOCUS_TRANSITION_FOCUS_ELEMENT:
-            focus_set(state, args ? args->target : NULL,
-                      args ? args->from_keyboard : false);
-            break;
-        case FOCUS_TRANSITION_BLUR_CURRENT:
-            focus_clear(state);
-            break;
-        case FOCUS_TRANSITION_MOVE:
-            if (!args) { transition_leave(state); return false; }
-            if (!focus_move(state, args->root, args->forward)) {
-                transition_leave(state);
+    {
+        TransitionDepthScope transition_scope(state);
+        switch (kind) {
+            case FOCUS_TRANSITION_FOCUS_ELEMENT:
+                focus_set(state, args ? args->target : NULL,
+                          args ? args->from_keyboard : false);
+                break;
+            case FOCUS_TRANSITION_BLUR_CURRENT:
+                focus_clear(state);
+                break;
+            case FOCUS_TRANSITION_MOVE:
+                if (!args) return false;
+                if (!focus_move(state, args->root, args->forward)) {
+                    return false;
+                }
+                break;
+            default:
                 return false;
-            }
-            break;
-        default:
-            transition_leave(state);
-            return false;
+        }
     }
-    transition_leave(state);
-    editing_interaction_sync_projection(state);
-    sm_guard.commit();
-    radiant_state_assert_valid(state, "focus_transition");
-    return radiant_state_validate_interaction(state, NULL);
+    return finish_transition(state, &sm_guard, "focus_transition", false, true);
 }
 
 static void state_machine_sync_selection_projection(DocState* state) {
@@ -150,21 +189,17 @@ bool caret_transition(DocState* state,
 
     SmTransitionGuard sm_guard(state, SM_FAMILY_SELECTION, event,
                                args ? args->target : NULL);
-    transition_enter(state);
-    switch (kind) {
-        case CARET_TRANSITION_COLLAPSE_TO_BOUNDARY:
-            state_store_caret_collapse_to_view_offset(state, args->target, args->offset);
-            break;
-        default:
-            transition_leave(state);
-            return false;
+    {
+        TransitionDepthScope transition_scope(state);
+        switch (kind) {
+            case CARET_TRANSITION_COLLAPSE_TO_BOUNDARY:
+                state_store_caret_collapse_to_view_offset(state, args->target, args->offset);
+                break;
+            default:
+                return false;
+        }
     }
-    transition_leave(state);
-    state_machine_sync_selection_projection(state);
-    editing_interaction_sync_projection(state);
-    sm_guard.commit();
-    radiant_state_assert_valid(state, "caret_transition");
-    return radiant_state_validate_interaction(state, NULL);
+    return finish_transition(state, &sm_guard, "caret_transition", true, true);
 }
 
 bool selection_transition(DocState* state,
@@ -176,52 +211,48 @@ bool selection_transition(DocState* state,
 
     SmTransitionGuard sm_guard(state, SM_FAMILY_SELECTION, event,
                                args ? args->target : NULL);
-    transition_enter(state);
-    switch (kind) {
-        case SELECTION_TRANSITION_START_POINTER_SELECTION:
-            if (!args) { transition_leave(state); return false; }
-            state_store_selection_start_pointer(state, args->target, args->focus_offset);
-            if (state->selection && state->editing.drag_anchor_view) {
-                state->selection->is_selecting = true;
-            }
-            break;
-        case SELECTION_TRANSITION_END_POINTER_SELECTION:
-            if (state->selection) state->selection->is_selecting = false;
-            break;
-        case SELECTION_TRANSITION_EXTEND_TO_BOUNDARY:
-            if (!args) { transition_leave(state); return false; }
-            state_store_selection_extend_to_offset(state, args->focus_offset);
-            break;
-        case SELECTION_TRANSITION_EXTEND_TO_VIEW:
-            if (!args) { transition_leave(state); return false; }
-            state_store_selection_extend_to_view(state, args->target, args->focus_offset);
-            break;
-        case SELECTION_TRANSITION_SET_BASE_AND_EXTENT:
-            if (!args) { transition_leave(state); return false; }
-            state_store_selection_set_view_offsets(state, args->target, args->anchor_offset, args->focus_offset);
-            break;
-        case SELECTION_TRANSITION_SELECT_ALL:
-            state_store_selection_select_all(state);
-            break;
-        case SELECTION_TRANSITION_COLLAPSE_TO_START:
-            state_store_selection_collapse_to_edge(state, true);
-            break;
-        case SELECTION_TRANSITION_COLLAPSE_TO_END:
-            state_store_selection_collapse_to_edge(state, false);
-            break;
-        case SELECTION_TRANSITION_CLEAR_SELECTION:
-            state_store_selection_clear(state);
-            break;
-        default:
-            transition_leave(state);
-            return false;
+    {
+        TransitionDepthScope transition_scope(state);
+        switch (kind) {
+            case SELECTION_TRANSITION_START_POINTER_SELECTION:
+                if (!args) return false;
+                state_store_selection_start_pointer(state, args->target, args->focus_offset);
+                if (state->selection && state->editing.drag_anchor_view) {
+                    state->selection->is_selecting = true;
+                }
+                break;
+            case SELECTION_TRANSITION_END_POINTER_SELECTION:
+                if (state->selection) state->selection->is_selecting = false;
+                break;
+            case SELECTION_TRANSITION_EXTEND_TO_BOUNDARY:
+                if (!args) return false;
+                state_store_selection_extend_to_offset(state, args->focus_offset);
+                break;
+            case SELECTION_TRANSITION_EXTEND_TO_VIEW:
+                if (!args) return false;
+                state_store_selection_extend_to_view(state, args->target, args->focus_offset);
+                break;
+            case SELECTION_TRANSITION_SET_BASE_AND_EXTENT:
+                if (!args) return false;
+                state_store_selection_set_view_offsets(state, args->target, args->anchor_offset, args->focus_offset);
+                break;
+            case SELECTION_TRANSITION_SELECT_ALL:
+                state_store_selection_select_all(state);
+                break;
+            case SELECTION_TRANSITION_COLLAPSE_TO_START:
+                state_store_selection_collapse_to_edge(state, true);
+                break;
+            case SELECTION_TRANSITION_COLLAPSE_TO_END:
+                state_store_selection_collapse_to_edge(state, false);
+                break;
+            case SELECTION_TRANSITION_CLEAR_SELECTION:
+                state_store_selection_clear(state);
+                break;
+            default:
+                return false;
+        }
     }
-    transition_leave(state);
-    state_machine_sync_selection_projection(state);
-    editing_interaction_sync_projection(state);
-    sm_guard.commit();
-    radiant_state_assert_valid(state, "selection_transition");
-    return radiant_state_validate_interaction(state, NULL);
+    return finish_transition(state, &sm_guard, "selection_transition", true, true);
 }
 
 static bool hover_kind_to_sm_event(HoverTransitionKind kind,
@@ -244,21 +275,9 @@ bool hover_transition(DocState* state,
     SmEvent event;
     if (!hover_kind_to_sm_event(kind, args, &event)) return false;
 
-    SmTransitionGuard sm_guard(state, SM_FAMILY_HOVER, event,
-                               args ? args->target : NULL);
-    transition_enter(state);
-    switch (kind) {
-        case HOVER_TRANSITION_SET_TARGET:
-            doc_state_set_hover_target(state, args ? args->target : NULL);
-            break;
-        default:
-            transition_leave(state);
-            return false;
-    }
-    transition_leave(state);
-    sm_guard.commit();
-    radiant_state_assert_valid(state, "hover_transition");
-    return radiant_state_validate_interaction(state, NULL);
+    return single_target_transition(state, SM_FAMILY_HOVER, event,
+        args ? args->target : NULL, doc_state_set_hover_target,
+        "hover_transition");
 }
 
 static bool active_kind_to_sm_event(ActiveTransitionKind kind,
@@ -281,21 +300,9 @@ bool active_transition(DocState* state,
     SmEvent event;
     if (!active_kind_to_sm_event(kind, args, &event)) return false;
 
-    SmTransitionGuard sm_guard(state, SM_FAMILY_ACTIVE, event,
-                               args ? args->target : NULL);
-    transition_enter(state);
-    switch (kind) {
-        case ACTIVE_TRANSITION_SET_TARGET:
-            doc_state_set_active_target(state, args ? args->target : NULL);
-            break;
-        default:
-            transition_leave(state);
-            return false;
-    }
-    transition_leave(state);
-    sm_guard.commit();
-    radiant_state_assert_valid(state, "active_transition");
-    return radiant_state_validate_interaction(state, NULL);
+    return single_target_transition(state, SM_FAMILY_ACTIVE, event,
+        args ? args->target : NULL, doc_state_set_active_target,
+        "active_transition");
 }
 
 static bool drag_kind_to_sm_event(DragTransitionKind kind, SmEvent* out_event) {
@@ -345,43 +352,40 @@ bool drag_transition(DocState* state,
 
     SmTransitionGuard sm_guard(state, SM_FAMILY_DRAG_DROP, event,
                                drag_transition_target(kind, args));
-    transition_enter(state);
-    switch (kind) {
-        case DRAG_TRANSITION_SET_STATE:
-            doc_state_set_drag_state(state, args ? args->target : NULL,
-                                     args ? args->dragging : false);
-            break;
-        case DRAG_TRANSITION_BEGIN_DROP:
-            if (!args) { transition_leave(state); return false; }
-            if (!doc_state_begin_drag_drop(state, args->source, args->x, args->y, args->drag_data)) {
-                transition_leave(state);
+    {
+        TransitionDepthScope transition_scope(state);
+        switch (kind) {
+            case DRAG_TRANSITION_SET_STATE:
+                doc_state_set_drag_state(state, args ? args->target : NULL,
+                                         args ? args->dragging : false);
+                break;
+            case DRAG_TRANSITION_BEGIN_DROP:
+                if (!args) return false;
+                if (!doc_state_begin_drag_drop(state, args->source, args->x, args->y, args->drag_data)) {
+                    return false;
+                }
+                break;
+            case DRAG_TRANSITION_UPDATE_DROP_MOTION:
+                if (!args) return false;
+                doc_state_update_drag_drop_motion(state, args->x, args->y);
+                break;
+            case DRAG_TRANSITION_SET_DROP_ACTIVE:
+                doc_state_set_drag_drop_active(state, args ? args->active : false);
+                break;
+            case DRAG_TRANSITION_SET_DROP_TARGET:
+                doc_state_set_drag_drop_target(state,
+                    args ? args->drop_target : NULL,
+                    args && args->has_drop_range ? &args->drop_start : NULL,
+                    args && args->has_drop_range ? &args->drop_end : NULL);
+                break;
+            case DRAG_TRANSITION_CLEAR_DROP:
+                doc_state_clear_drag_drop(state);
+                break;
+            default:
                 return false;
-            }
-            break;
-        case DRAG_TRANSITION_UPDATE_DROP_MOTION:
-            if (!args) { transition_leave(state); return false; }
-            doc_state_update_drag_drop_motion(state, args->x, args->y);
-            break;
-        case DRAG_TRANSITION_SET_DROP_ACTIVE:
-            doc_state_set_drag_drop_active(state, args ? args->active : false);
-            break;
-        case DRAG_TRANSITION_SET_DROP_TARGET:
-            doc_state_set_drag_drop_target(state,
-                args ? args->drop_target : NULL,
-                args && args->has_drop_range ? &args->drop_start : NULL,
-                args && args->has_drop_range ? &args->drop_end : NULL);
-            break;
-        case DRAG_TRANSITION_CLEAR_DROP:
-            doc_state_clear_drag_drop(state);
-            break;
-        default:
-            transition_leave(state);
-            return false;
+        }
     }
-    transition_leave(state);
-    sm_guard.commit();
-    radiant_state_assert_valid(state, "drag_transition");
-    return radiant_state_validate_interaction(state, NULL);
+    return finish_transition(state, &sm_guard, "drag_transition", false, false);
 }
 
 static void report_init(StateValidationReport* report) {
@@ -1726,12 +1730,7 @@ static void write_editing_surface_ref(JsonWriter* w,
         return;
     }
     jw_obj_begin(w);
-        jw_kv_str(w, "kind", editing_surface_kind_name(surface->kind));
-        jw_kv_str(w, "mode", editing_mode_name(surface->mode));
-        event_state_log_write_node_ref(w, "owner",
-            (const DomNode*)surface->owner);
-        event_state_log_write_node_ref(w, "target",
-            (const DomNode*)surface->view);
+        editing_log_write_surface_core_fields(w, surface, false);
     jw_obj_end(w);
 }
 

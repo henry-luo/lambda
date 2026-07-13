@@ -289,6 +289,63 @@ float compute_element_first_baseline(
     return element->height;
 }
 
+float compute_view_first_text_baseline(
+    ::LayoutContext* lycon,
+    View* parent,
+    float cumulative_y,
+    bool use_normal_line_height,
+    bool skip_block_children_of_table,
+    FirstBaselineRowCallback row_baseline
+) {
+    if (!parent) return -1.0f;
+
+    for (View* child = lam::view_require_element(parent)->first_child; child; child = child->next_sibling) {
+        if (!child->view_type) continue;
+
+        if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
+            float fallback_ascent = text->font ? text->font->font_size * 0.8f : 0.0f;
+            float ascent = compute_font_baseline_ascender(
+                lycon, text->font, use_normal_line_height, fallback_ascent);
+            float baseline = cumulative_y + child->y + ascent;
+            log_debug("compute_view_first_text_baseline: text cumulative_y=%.1f, text.y=%.1f, ascent=%.1f -> baseline=%.1f",
+                      cumulative_y, child->y, ascent, baseline);
+            return baseline;
+        }
+
+        bool is_table_structure = (child->view_type == RDT_VIEW_TABLE ||
+                                   child->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
+                                   child->view_type == RDT_VIEW_TABLE_ROW ||
+                                   child->view_type == RDT_VIEW_TABLE_CELL);
+        bool is_block_like = (child->view_type == RDT_VIEW_BLOCK ||
+                              child->view_type == RDT_VIEW_INLINE ||
+                              child->view_type == RDT_VIEW_INLINE_BLOCK ||
+                              child->view_type == RDT_VIEW_LIST_ITEM);
+
+        if (is_table_structure) {
+            float result = compute_view_first_text_baseline(
+                lycon, child, cumulative_y + child->y,
+                use_normal_line_height, skip_block_children_of_table,
+                row_baseline);
+            if (result >= 0) return result;
+            if (child->view_type == RDT_VIEW_TABLE_ROW && row_baseline) {
+                float row_result = row_baseline(lycon, child);
+                if (row_result >= 0) return cumulative_y + child->y + row_result;
+            }
+        } else if (is_block_like) {
+            bool parent_is_table = parent->view_type == RDT_VIEW_TABLE;
+            if (!skip_block_children_of_table || !parent_is_table) {
+                float result = compute_view_first_text_baseline(
+                    lycon, child, cumulative_y + child->y,
+                    use_normal_line_height, skip_block_children_of_table,
+                    row_baseline);
+                if (result >= 0) return result;
+            }
+        }
+    }
+    return -1.0f;
+}
+
 float compute_element_last_baseline(
     ::LayoutContext* lycon,
     ViewBlock* element,

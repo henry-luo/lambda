@@ -5,6 +5,7 @@
  */
 
 #include "event_state_log.hpp"
+#include "editing.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lambda/input/css/dom_element.hpp"
@@ -546,8 +547,27 @@ void event_state_log_write_node_ref(JsonWriter* w, const char* key,
                 jw_str(w, el->class_names[i]);
             }
             jw_arr_end(w);
-        }
+    }
     jw_obj_end(w);
+}
+
+void editing_log_write_surface_core_fields(JsonWriter* w,
+                                           const EditingSurface* surface,
+                                           bool include_state_flags) {
+    jw_kv_str(w, "kind", editing_surface_kind_name(
+        surface ? surface->kind : EDIT_SURFACE_NONE));
+    jw_kv_str(w, "mode", editing_mode_name(
+        surface ? surface->mode : EDIT_MODE_RICH));
+    if (include_state_flags) {
+        jw_kv_bool(w, "readonly", surface ? surface->readonly : false);
+        jw_kv_bool(w, "disabled", surface ? surface->disabled : false);
+        jw_kv_bool(w, "target_in_false_island",
+                   surface ? surface->target_in_false_island : false);
+    }
+    event_state_log_write_node_ref(w, "owner",
+        surface ? (const DomNode*)surface->owner : NULL);
+    event_state_log_write_node_ref(w, "target",
+        surface ? (const DomNode*)surface->view : NULL);
 }
 
 void event_state_log_session_start(EventStateLog* log,

@@ -30,6 +30,52 @@
 
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 
+static bool intrinsic_css_function_is(const CssValue* value, const char* name) {
+    return value && value->type == CSS_VALUE_TYPE_FUNCTION &&
+        value->data.function && value->data.function->name &&
+        strcmp(value->data.function->name, name) == 0;
+}
+
+static int intrinsic_count_grid_repeat_tracks(const CssFunction* func,
+                                              const char* log_context) {
+    if (!func || func->arg_count <= 0 || !func->args[0] ||
+        func->args[0]->type != CSS_VALUE_TYPE_NUMBER) {
+        return 1;
+    }
+    int repeat_count = (int)func->args[0]->data.number.value; // INT_CAST_OK: CSS repeat() count is an integer track multiplier.
+    int tracks_per_repeat = func->arg_count - 1;
+    if (tracks_per_repeat < 1) tracks_per_repeat = 1;
+    int expanded = repeat_count * tracks_per_repeat;
+    log_debug("[INTRINSIC_GRID_REPEAT] %s repeat(%d, %d tracks) = %d tracks",
+              log_context ? log_context : "grid-template",
+              repeat_count, tracks_per_repeat, expanded);
+    return expanded;
+}
+
+static int intrinsic_count_grid_template_tracks(const CssValue* value,
+                                                const char* log_context) {
+    if (!value) return 0;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) return 0;
+    if (intrinsic_css_function_is(value, "repeat")) {
+        return intrinsic_count_grid_repeat_tracks(value->data.function, log_context);
+    }
+    if (value->type != CSS_VALUE_TYPE_LIST) return 1;
+
+    int total_tracks = 0;
+    int list_count = value->data.list.count;
+    CssValue** list_values = value->data.list.values;
+    for (int i = 0; i < list_count; i++) {
+        CssValue* item = list_values[i];
+        if (!item) continue;
+        if (intrinsic_css_function_is(item, "repeat")) {
+            total_tracks += intrinsic_count_grid_repeat_tracks(item->data.function, log_context);
+        } else {
+            total_tracks++;
+        }
+    }
+    return total_tracks > 0 ? total_tracks : list_count;
+}
+
 static float intrinsic_resolve_line_height_for_owner(LayoutContext* lycon, const CssValue* value,
                                                      DomElement* owner, float target_font_size) {
     if (!lycon || !value) return 0;
@@ -3635,10 +3681,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (col_count == 0 && element->specified_style) {
             CssDeclaration* cols_decl = style_tree_get_declaration(
                 element->specified_style, CSS_PROPERTY_GRID_TEMPLATE_COLUMNS);
-            if (cols_decl && cols_decl->value && cols_decl->value->type == CSS_VALUE_TYPE_LIST) {
-                col_count = cols_decl->value->data.list.count;
-            } else if (cols_decl && cols_decl->value && cols_decl->value->type != CSS_VALUE_TYPE_KEYWORD) {
-                col_count = 1;
+            if (cols_decl && cols_decl->value) {
+                col_count = intrinsic_count_grid_template_tracks(
+                    cols_decl->value, "measure_element_intrinsic_widths");
             }
         }
 
@@ -5549,53 +5594,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             if (cols_decl && cols_decl->value) {
                 log_debug("calculate_max_content_height: %s grid-template-columns value type=%d",
                           element->node_name(), cols_decl->value->type);
-                // Count track values in the grid template
-                if (cols_decl->value->type == CSS_VALUE_TYPE_LIST) {
-                    // Check if list contains repeat() function
-                    int list_count = cols_decl->value->data.list.count;
-                    CssValue** list_values = cols_decl->value->data.list.values;
-                    int total_cols = 0;
-                    for (int i = 0; i < list_count; i++) {
-                        CssValue* v = list_values[i];
-                        if (!v) continue;
-                        if (v->type == CSS_VALUE_TYPE_FUNCTION && v->data.function &&
-                            v->data.function->name && strcmp(v->data.function->name, "repeat") == 0) {
-                            // repeat(n, ...) - get the count
-                            if (v->data.function->arg_count > 0 && v->data.function->args[0]) {
-                                CssValue* count_val = v->data.function->args[0];
-                                if (count_val->type == CSS_VALUE_TYPE_NUMBER) {
-                                    int repeat_count = (int)count_val->data.number.value; // INT_CAST_OK: integer count
-                                    int tracks_per_repeat = v->data.function->arg_count - 1;
-                                    if (tracks_per_repeat < 1) tracks_per_repeat = 1;
-                                    total_cols += repeat_count * tracks_per_repeat;
-                                    log_debug("calculate_max_content_height: repeat(%d, %d tracks) = %d cols",
-                                              repeat_count, tracks_per_repeat, repeat_count * tracks_per_repeat);
-                                }
-                            }
-                        } else {
-                            // Regular track (length, percentage, minmax function, etc.)
-                            total_cols++;
-                        }
-                    }
-                    grid_column_count = total_cols > 0 ? total_cols : list_count;
-                } else if (cols_decl->value->type == CSS_VALUE_TYPE_FUNCTION) {
-                    // Single function like repeat(2, 1fr)
-                    CssFunction* func = cols_decl->value->data.function;
-                    if (func && func->name && strcmp(func->name, "repeat") == 0) {
-                        if (func->arg_count > 0 && func->args[0] &&
-                            func->args[0]->type == CSS_VALUE_TYPE_NUMBER) {
-                            int repeat_count = (int)func->args[0]->data.number.value; // INT_CAST_OK: integer count
-                            int tracks_per_repeat = func->arg_count - 1;
-                            if (tracks_per_repeat < 1) tracks_per_repeat = 1;
-                            grid_column_count = repeat_count * tracks_per_repeat;
-                            log_debug("calculate_max_content_height: single repeat(%d) = %d cols",
-                                      repeat_count, grid_column_count);
-                        }
-                    }
-                } else {
-                    // Single track definition means 1 column
-                    grid_column_count = 1;
-                }
+                grid_column_count = intrinsic_count_grid_template_tracks(
+                    cols_decl->value, "calculate_max_content_height");
             }
         }
         // Get row gap

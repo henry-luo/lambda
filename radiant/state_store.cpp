@@ -3209,10 +3209,78 @@ static ViewState* view_state_get_or_create(DocState* state, View* view, ViewStat
     return view_state_primary_cache(view, created);
 }
 
-static void view_state_log_bool_transition(DocState* state, View* view,
-                                           const char* name, bool old_value,
-                                           bool new_value) {
-    if (!state || old_value == new_value || !event_state_log_enabled(state->active_event_log)) return;
+typedef enum {
+    STATE_TRANSITION_SCALAR_BOOL,
+    STATE_TRANSITION_SCALAR_INT,
+    STATE_TRANSITION_SCALAR_FLOAT
+} StateTransitionScalarKind;
+
+typedef struct {
+    StateTransitionScalarKind kind;
+    bool bool_value;
+    int int_value;
+    float float_value;
+} StateTransitionScalarValue;
+
+static StateTransitionScalarValue state_transition_scalar_bool(bool value) {
+    StateTransitionScalarValue out = {};
+    out.kind = STATE_TRANSITION_SCALAR_BOOL;
+    out.bool_value = value;
+    return out;
+}
+
+static StateTransitionScalarValue state_transition_scalar_int(int value) {
+    StateTransitionScalarValue out = {};
+    out.kind = STATE_TRANSITION_SCALAR_INT;
+    out.int_value = value;
+    return out;
+}
+
+static StateTransitionScalarValue state_transition_scalar_float(float value) {
+    StateTransitionScalarValue out = {};
+    out.kind = STATE_TRANSITION_SCALAR_FLOAT;
+    out.float_value = value;
+    return out;
+}
+
+static bool state_transition_scalar_equal(StateTransitionScalarValue old_value,
+                                          StateTransitionScalarValue new_value) {
+    if (old_value.kind != new_value.kind) return false;
+    switch (old_value.kind) {
+    case STATE_TRANSITION_SCALAR_BOOL:
+        return old_value.bool_value == new_value.bool_value;
+    case STATE_TRANSITION_SCALAR_INT:
+        return old_value.int_value == new_value.int_value;
+    case STATE_TRANSITION_SCALAR_FLOAT:
+        return old_value.float_value == new_value.float_value;
+    }
+    return false;
+}
+
+static void state_transition_write_scalar(JsonWriter* w,
+                                          StateTransitionScalarValue value) {
+    switch (value.kind) {
+    case STATE_TRANSITION_SCALAR_BOOL:
+        jw_kv_bool(w, "value", value.bool_value);
+        break;
+    case STATE_TRANSITION_SCALAR_INT:
+        jw_kv_int(w, "value", value.int_value);
+        break;
+    case STATE_TRANSITION_SCALAR_FLOAT:
+        jw_kv_double(w, "value", value.float_value);
+        break;
+    }
+}
+
+static void state_log_scalar_transition(DocState* state, View* anchor_view,
+                                        const char* scope, const char* name,
+                                        const char* fallback_name,
+                                        StateTransitionScalarValue old_value,
+                                        StateTransitionScalarValue new_value) {
+    if (!state || state_transition_scalar_equal(old_value, new_value) ||
+        !event_state_log_enabled(state->active_event_log)) {
+        return;
+    }
 
     char buf[512];
     JsonWriter w;
@@ -3220,71 +3288,43 @@ static void view_state_log_bool_transition(DocState* state, View* view,
         "state.transition", state->active_cascade_id);
     jw_key(&w, "data");
     jw_obj_begin(&w);
-        jw_kv_str(&w, "scope", "view");
-        state_transition_write_anchor(&w, state, view);
-        jw_kv_str(&w, "name", name ? name : "view.state");
+        jw_kv_str(&w, "scope", scope);
+        state_transition_write_anchor(&w, state, anchor_view);
+        jw_kv_str(&w, "name", name ? name : fallback_name);
         jw_key(&w, "old");
         jw_obj_begin(&w);
-            jw_kv_bool(&w, "value", old_value);
+            state_transition_write_scalar(&w, old_value);
         jw_obj_end(&w);
         jw_key(&w, "new");
         jw_obj_begin(&w);
-            jw_kv_bool(&w, "value", new_value);
+            state_transition_write_scalar(&w, new_value);
         jw_obj_end(&w);
     jw_obj_end(&w);
     event_state_log_finish_record(state->active_event_log, &w);
+}
+
+static void view_state_log_bool_transition(DocState* state, View* view,
+                                           const char* name, bool old_value,
+                                           bool new_value) {
+    state_log_scalar_transition(state, view, "view", name, "view.state",
+        state_transition_scalar_bool(old_value),
+        state_transition_scalar_bool(new_value));
 }
 
 static void view_state_log_int_transition(DocState* state, View* view,
                                           const char* name, int old_value,
                                           int new_value) {
-    if (!state || old_value == new_value || !event_state_log_enabled(state->active_event_log)) return;
-
-    char buf[512];
-    JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "state.transition", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
-        jw_kv_str(&w, "scope", "view");
-        state_transition_write_anchor(&w, state, view);
-        jw_kv_str(&w, "name", name ? name : "view.state");
-        jw_key(&w, "old");
-        jw_obj_begin(&w);
-            jw_kv_int(&w, "value", old_value);
-        jw_obj_end(&w);
-        jw_key(&w, "new");
-        jw_obj_begin(&w);
-            jw_kv_int(&w, "value", new_value);
-        jw_obj_end(&w);
-    jw_obj_end(&w);
-    event_state_log_finish_record(state->active_event_log, &w);
+    state_log_scalar_transition(state, view, "view", name, "view.state",
+        state_transition_scalar_int(old_value),
+        state_transition_scalar_int(new_value));
 }
 
 static void view_state_log_float_transition(DocState* state, View* view,
                                             const char* name, float old_value,
                                             float new_value) {
-    if (!state || old_value == new_value || !event_state_log_enabled(state->active_event_log)) return;
-
-    char buf[512];
-    JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "state.transition", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
-        jw_kv_str(&w, "scope", "view");
-        state_transition_write_anchor(&w, state, view);
-        jw_kv_str(&w, "name", name ? name : "view.state");
-        jw_key(&w, "old");
-        jw_obj_begin(&w);
-            jw_kv_double(&w, "value", old_value);
-        jw_obj_end(&w);
-        jw_key(&w, "new");
-        jw_obj_begin(&w);
-            jw_kv_double(&w, "value", new_value);
-        jw_obj_end(&w);
-    jw_obj_end(&w);
-    event_state_log_finish_record(state->active_event_log, &w);
+    state_log_scalar_transition(state, view, "view", name, "view.state",
+        state_transition_scalar_float(old_value),
+        state_transition_scalar_float(new_value));
 }
 
 static void view_state_log_scroll_transition(DocState* state, View* view,
@@ -3323,9 +3363,10 @@ static void view_state_log_scroll_transition(DocState* state, View* view,
     event_state_log_finish_record(state->active_event_log, &w);
 }
 
-static void doc_state_log_dropdown_owner_transition(DocState* state,
-                                                    View* old_view,
-                                                    View* new_view) {
+static void state_log_view_ref_transition(DocState* state, View* anchor_view,
+                                          const char* scope, const char* name,
+                                          const char* fallback_name,
+                                          View* old_view, View* new_view) {
     if (!state || old_view == new_view || !event_state_log_enabled(state->active_event_log)) return;
 
     char buf[768];
@@ -3334,9 +3375,9 @@ static void doc_state_log_dropdown_owner_transition(DocState* state,
         "state.transition", state->active_cascade_id);
     jw_key(&w, "data");
     jw_obj_begin(&w);
-        jw_kv_str(&w, "scope", "doc");
-        state_transition_write_anchor(&w, state, NULL);
-        jw_kv_str(&w, "name", "dropdown.owner");
+        jw_kv_str(&w, "scope", scope);
+        state_transition_write_anchor(&w, state, anchor_view);
+        jw_kv_str(&w, "name", name ? name : fallback_name);
         jw_key(&w, "old");
         jw_obj_begin(&w);
             event_state_log_write_node_ref(&w, "view", (const DomNode*)old_view);
@@ -3347,110 +3388,43 @@ static void doc_state_log_dropdown_owner_transition(DocState* state,
         jw_obj_end(&w);
     jw_obj_end(&w);
     event_state_log_finish_record(state->active_event_log, &w);
+}
+
+static void doc_state_log_dropdown_owner_transition(DocState* state,
+                                                    View* old_view,
+                                                    View* new_view) {
+    state_log_view_ref_transition(state, NULL, "doc", "dropdown.owner", "target",
+        old_view, new_view);
 }
 
 static void doc_state_log_context_menu_target_transition(DocState* state,
                                                          View* old_view,
                                                          View* new_view) {
-    if (!state || old_view == new_view || !event_state_log_enabled(state->active_event_log)) return;
-
-    char buf[768];
-    JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "state.transition", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
-        jw_kv_str(&w, "scope", "doc");
-        state_transition_write_anchor(&w, state, NULL);
-        jw_kv_str(&w, "name", "context_menu.target");
-        jw_key(&w, "old");
-        jw_obj_begin(&w);
-            event_state_log_write_node_ref(&w, "view", (const DomNode*)old_view);
-        jw_obj_end(&w);
-        jw_key(&w, "new");
-        jw_obj_begin(&w);
-            event_state_log_write_node_ref(&w, "view", (const DomNode*)new_view);
-        jw_obj_end(&w);
-    jw_obj_end(&w);
-    event_state_log_finish_record(state->active_event_log, &w);
+    state_log_view_ref_transition(state, NULL, "doc", "context_menu.target", "target",
+        old_view, new_view);
 }
 
 static void doc_state_log_context_menu_hover_transition(DocState* state,
                                                         int old_hover,
                                                         int new_hover) {
-    if (!state || old_hover == new_hover || !event_state_log_enabled(state->active_event_log)) return;
-
-    char buf[512];
-    JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "state.transition", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
-        jw_kv_str(&w, "scope", "doc");
-        state_transition_write_anchor(&w, state, NULL);
-        jw_kv_str(&w, "name", "context_menu.hover");
-        jw_key(&w, "old");
-        jw_obj_begin(&w);
-            jw_kv_int(&w, "value", old_hover);
-        jw_obj_end(&w);
-        jw_key(&w, "new");
-        jw_obj_begin(&w);
-            jw_kv_int(&w, "value", new_hover);
-        jw_obj_end(&w);
-    jw_obj_end(&w);
-    event_state_log_finish_record(state->active_event_log, &w);
+    state_log_scalar_transition(state, NULL, "doc", "context_menu.hover", "doc.state",
+        state_transition_scalar_int(old_hover),
+        state_transition_scalar_int(new_hover));
 }
 
 static void doc_state_log_view_target_transition(DocState* state,
                                                  const char* name,
                                                  View* old_view,
                                                  View* new_view) {
-    if (!state || old_view == new_view || !event_state_log_enabled(state->active_event_log)) return;
-
-    char buf[768];
-    JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "state.transition", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
-        jw_kv_str(&w, "scope", "doc");
-        state_transition_write_anchor(&w, state, NULL);
-        jw_kv_str(&w, "name", name ? name : "target");
-        jw_key(&w, "old");
-        jw_obj_begin(&w);
-            event_state_log_write_node_ref(&w, "view", (const DomNode*)old_view);
-        jw_obj_end(&w);
-        jw_key(&w, "new");
-        jw_obj_begin(&w);
-            event_state_log_write_node_ref(&w, "view", (const DomNode*)new_view);
-        jw_obj_end(&w);
-    jw_obj_end(&w);
-    event_state_log_finish_record(state->active_event_log, &w);
+    state_log_view_ref_transition(state, NULL, "doc", name, "target",
+        old_view, new_view);
 }
 
 static void doc_state_log_bool_transition(DocState* state, const char* name,
                                           bool old_value, bool new_value) {
-    if (!state || old_value == new_value || !event_state_log_enabled(state->active_event_log)) return;
-
-    char buf[512];
-    JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "state.transition", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
-        jw_kv_str(&w, "scope", "doc");
-        state_transition_write_anchor(&w, state, NULL);
-        jw_kv_str(&w, "name", name ? name : "doc.state");
-        jw_key(&w, "old");
-        jw_obj_begin(&w);
-            jw_kv_bool(&w, "value", old_value);
-        jw_obj_end(&w);
-        jw_key(&w, "new");
-        jw_obj_begin(&w);
-            jw_kv_bool(&w, "value", new_value);
-        jw_obj_end(&w);
-    jw_obj_end(&w);
-    event_state_log_finish_record(state->active_event_log, &w);
+    state_log_scalar_transition(state, NULL, "doc", name, "doc.state",
+        state_transition_scalar_bool(old_value),
+        state_transition_scalar_bool(new_value));
 }
 
 bool view_state_get_hovered(DocState* state, View* view) {
@@ -6943,6 +6917,35 @@ View* caret_get_view(DocState* state) {
     return state->caret->view;
 }
 
+typedef struct CaretSnapshotFields {
+    View* view;
+    int char_offset;
+    int line;
+    int column;
+    float x;
+    float y;
+    float height;
+    float iframe_offset_x;
+    float iframe_offset_y;
+    bool visible;
+} CaretSnapshotFields;
+
+static bool caret_read_snapshot_fields(DocState* state, CaretSnapshotFields* out) {
+    if (out) memset(out, 0, sizeof(CaretSnapshotFields));
+    if (!state || !state->caret || !out) return false;
+    out->view = state->caret->view;
+    out->char_offset = state->caret->char_offset;
+    out->line = state->caret->line;
+    out->column = state->caret->column;
+    out->x = state->caret->x;
+    out->y = state->caret->y;
+    out->height = state->caret->height;
+    out->iframe_offset_x = state->caret->iframe_offset_x;
+    out->iframe_offset_y = state->caret->iframe_offset_y;
+    out->visible = state->caret->visible;
+    return true;
+}
+
 bool caret_get_visual_snapshot(DocState* state, float* out_x, float* out_y,
                                float* out_height, float* out_iframe_offset_x,
                                float* out_iframe_offset_y) {
@@ -6951,12 +6954,13 @@ bool caret_get_visual_snapshot(DocState* state, float* out_x, float* out_y,
     if (out_height) *out_height = 0;
     if (out_iframe_offset_x) *out_iframe_offset_x = 0;
     if (out_iframe_offset_y) *out_iframe_offset_y = 0;
-    if (!state || !state->caret) return false;
-    if (out_x) *out_x = state->caret->x;
-    if (out_y) *out_y = state->caret->y;
-    if (out_height) *out_height = state->caret->height;
-    if (out_iframe_offset_x) *out_iframe_offset_x = state->caret->iframe_offset_x;
-    if (out_iframe_offset_y) *out_iframe_offset_y = state->caret->iframe_offset_y;
+    CaretSnapshotFields snapshot = {};
+    if (!caret_read_snapshot_fields(state, &snapshot)) return false;
+    if (out_x) *out_x = snapshot.x;
+    if (out_y) *out_y = snapshot.y;
+    if (out_height) *out_height = snapshot.height;
+    if (out_iframe_offset_x) *out_iframe_offset_x = snapshot.iframe_offset_x;
+    if (out_iframe_offset_y) *out_iframe_offset_y = snapshot.iframe_offset_y;
     return true;
 }
 
@@ -6972,16 +6976,17 @@ bool caret_get_render_snapshot(DocState* state, View** out_view,
     if (out_iframe_offset_x) *out_iframe_offset_x = 0;
     if (out_iframe_offset_y) *out_iframe_offset_y = 0;
     if (out_visible) *out_visible = false;
-    if (!state || !state->caret) return false;
-    if (out_view) *out_view = state->caret->view;
-    if (out_offset) *out_offset = state->caret->char_offset;
-    if (out_x) *out_x = state->caret->x;
-    if (out_y) *out_y = state->caret->y;
-    if (out_height) *out_height = state->caret->height;
-    if (out_iframe_offset_x) *out_iframe_offset_x = state->caret->iframe_offset_x;
-    if (out_iframe_offset_y) *out_iframe_offset_y = state->caret->iframe_offset_y;
-    if (out_visible) *out_visible = state->caret->visible;
-    return state->caret->view != NULL;
+    CaretSnapshotFields snapshot = {};
+    if (!caret_read_snapshot_fields(state, &snapshot)) return false;
+    if (out_view) *out_view = snapshot.view;
+    if (out_offset) *out_offset = snapshot.char_offset;
+    if (out_x) *out_x = snapshot.x;
+    if (out_y) *out_y = snapshot.y;
+    if (out_height) *out_height = snapshot.height;
+    if (out_iframe_offset_x) *out_iframe_offset_x = snapshot.iframe_offset_x;
+    if (out_iframe_offset_y) *out_iframe_offset_y = snapshot.iframe_offset_y;
+    if (out_visible) *out_visible = snapshot.visible;
+    return snapshot.view != NULL;
 }
 
 bool caret_get_debug_snapshot(DocState* state, View** out_view,
@@ -6996,15 +7001,16 @@ bool caret_get_debug_snapshot(DocState* state, View** out_view,
     if (out_y) *out_y = 0;
     if (out_height) *out_height = 0;
     if (out_visible) *out_visible = false;
-    if (!state || !state->caret) return false;
-    if (out_view) *out_view = state->caret->view;
-    if (out_offset) *out_offset = state->caret->char_offset;
-    if (out_line) *out_line = state->caret->line;
-    if (out_column) *out_column = state->caret->column;
-    if (out_x) *out_x = state->caret->x;
-    if (out_y) *out_y = state->caret->y;
-    if (out_height) *out_height = state->caret->height;
-    if (out_visible) *out_visible = state->caret->visible;
+    CaretSnapshotFields snapshot = {};
+    if (!caret_read_snapshot_fields(state, &snapshot)) return false;
+    if (out_view) *out_view = snapshot.view;
+    if (out_offset) *out_offset = snapshot.char_offset;
+    if (out_line) *out_line = snapshot.line;
+    if (out_column) *out_column = snapshot.column;
+    if (out_x) *out_x = snapshot.x;
+    if (out_y) *out_y = snapshot.y;
+    if (out_height) *out_height = snapshot.height;
+    if (out_visible) *out_visible = snapshot.visible;
     return true;
 }
 
@@ -7490,17 +7496,60 @@ bool selection_get_pointer_anchor(DocState* state, View** out_anchor_view,
     return true;
 }
 
+typedef struct SelectionSnapshotFields {
+    View* view;
+    View* anchor_view;
+    View* focus_view;
+    int anchor_offset;
+    int focus_offset;
+    int anchor_line;
+    int focus_line;
+    float start_x;
+    float start_y;
+    float end_x;
+    float end_y;
+    float iframe_offset_x;
+    float iframe_offset_y;
+    bool collapsed;
+    bool selecting;
+} SelectionSnapshotFields;
+
+static bool selection_read_snapshot_fields(DocState* state, SelectionSnapshotFields* out) {
+    if (out) {
+        memset(out, 0, sizeof(SelectionSnapshotFields));
+        out->collapsed = true;
+    }
+    if (!state || !state->selection || !out) return false;
+    SelectionState* sel = state->selection;
+    out->view = sel->view;
+    out->anchor_view = sel->anchor_view;
+    out->focus_view = sel->focus_view;
+    out->anchor_offset = sel->anchor_offset;
+    out->focus_offset = sel->focus_offset;
+    out->anchor_line = sel->anchor_line;
+    out->focus_line = sel->focus_line;
+    out->start_x = sel->start_x;
+    out->start_y = sel->start_y;
+    out->end_x = sel->end_x;
+    out->end_y = sel->end_y;
+    out->iframe_offset_x = sel->iframe_offset_x;
+    out->iframe_offset_y = sel->iframe_offset_y;
+    out->collapsed = sel->is_collapsed;
+    out->selecting = sel->is_selecting;
+    return true;
+}
+
 bool selection_get_anchor_snapshot(DocState* state, View** out_anchor_view,
                                    int* out_anchor_offset,
                                    bool* out_collapsed) {
     if (out_anchor_view) *out_anchor_view = NULL;
     if (out_anchor_offset) *out_anchor_offset = 0;
     if (out_collapsed) *out_collapsed = true;
-    if (!state || !state->selection) return false;
-
-    if (out_anchor_view) *out_anchor_view = state->selection->anchor_view;
-    if (out_anchor_offset) *out_anchor_offset = state->selection->anchor_offset;
-    if (out_collapsed) *out_collapsed = state->selection->is_collapsed;
+    SelectionSnapshotFields snapshot = {};
+    if (!selection_read_snapshot_fields(state, &snapshot)) return false;
+    if (out_anchor_view) *out_anchor_view = snapshot.anchor_view;
+    if (out_anchor_offset) *out_anchor_offset = snapshot.anchor_offset;
+    if (out_collapsed) *out_collapsed = snapshot.collapsed;
     return true;
 }
 
@@ -7514,13 +7563,13 @@ bool selection_get_focus_snapshot(DocState* state, View** out_focus_view,
     if (out_iframe_offset_x) *out_iframe_offset_x = 0;
     if (out_iframe_offset_y) *out_iframe_offset_y = 0;
     if (out_collapsed) *out_collapsed = true;
-    if (!state || !state->selection) return false;
-
-    if (out_focus_view) *out_focus_view = state->selection->focus_view;
-    if (out_focus_offset) *out_focus_offset = state->selection->focus_offset;
-    if (out_iframe_offset_x) *out_iframe_offset_x = state->selection->iframe_offset_x;
-    if (out_iframe_offset_y) *out_iframe_offset_y = state->selection->iframe_offset_y;
-    if (out_collapsed) *out_collapsed = state->selection->is_collapsed;
+    SelectionSnapshotFields snapshot = {};
+    if (!selection_read_snapshot_fields(state, &snapshot)) return false;
+    if (out_focus_view) *out_focus_view = snapshot.focus_view;
+    if (out_focus_offset) *out_focus_offset = snapshot.focus_offset;
+    if (out_iframe_offset_x) *out_iframe_offset_x = snapshot.iframe_offset_x;
+    if (out_iframe_offset_y) *out_iframe_offset_y = snapshot.iframe_offset_y;
+    if (out_collapsed) *out_collapsed = snapshot.collapsed;
     return true;
 }
 
@@ -7529,19 +7578,21 @@ bool selection_get_focus_visual_snapshot(DocState* state, float* out_x,
     if (out_x) *out_x = 0;
     if (out_y) *out_y = 0;
     if (out_collapsed) *out_collapsed = true;
-    if (!state || !state->selection) return false;
-    if (out_x) *out_x = state->selection->end_x;
-    if (out_y) *out_y = state->selection->end_y;
-    if (out_collapsed) *out_collapsed = state->selection->is_collapsed;
+    SelectionSnapshotFields snapshot = {};
+    if (!selection_read_snapshot_fields(state, &snapshot)) return false;
+    if (out_x) *out_x = snapshot.end_x;
+    if (out_y) *out_y = snapshot.end_y;
+    if (out_collapsed) *out_collapsed = snapshot.collapsed;
     return true;
 }
 
 bool selection_get_iframe_offset(DocState* state, float* out_x, float* out_y) {
     if (out_x) *out_x = 0;
     if (out_y) *out_y = 0;
-    if (!state || !state->selection) return false;
-    if (out_x) *out_x = state->selection->iframe_offset_x;
-    if (out_y) *out_y = state->selection->iframe_offset_y;
+    SelectionSnapshotFields snapshot = {};
+    if (!selection_read_snapshot_fields(state, &snapshot)) return false;
+    if (out_x) *out_x = snapshot.iframe_offset_x;
+    if (out_y) *out_y = snapshot.iframe_offset_y;
     return true;
 }
 
@@ -7589,20 +7640,19 @@ bool selection_get_debug_snapshot(DocState* state, View** out_view,
     if (out_start_y) *out_start_y = 0;
     if (out_end_x) *out_end_x = 0;
     if (out_end_y) *out_end_y = 0;
-    if (!state || !state->selection) return false;
-
-    SelectionState* sel = state->selection;
-    if (out_view) *out_view = sel->view;
-    if (out_collapsed) *out_collapsed = sel->is_collapsed;
-    if (out_selecting) *out_selecting = sel->is_selecting;
-    if (out_anchor_offset) *out_anchor_offset = sel->anchor_offset;
-    if (out_anchor_line) *out_anchor_line = sel->anchor_line;
-    if (out_focus_offset) *out_focus_offset = sel->focus_offset;
-    if (out_focus_line) *out_focus_line = sel->focus_line;
-    if (out_start_x) *out_start_x = sel->start_x;
-    if (out_start_y) *out_start_y = sel->start_y;
-    if (out_end_x) *out_end_x = sel->end_x;
-    if (out_end_y) *out_end_y = sel->end_y;
+    SelectionSnapshotFields snapshot = {};
+    if (!selection_read_snapshot_fields(state, &snapshot)) return false;
+    if (out_view) *out_view = snapshot.view;
+    if (out_collapsed) *out_collapsed = snapshot.collapsed;
+    if (out_selecting) *out_selecting = snapshot.selecting;
+    if (out_anchor_offset) *out_anchor_offset = snapshot.anchor_offset;
+    if (out_anchor_line) *out_anchor_line = snapshot.anchor_line;
+    if (out_focus_offset) *out_focus_offset = snapshot.focus_offset;
+    if (out_focus_line) *out_focus_line = snapshot.focus_line;
+    if (out_start_x) *out_start_x = snapshot.start_x;
+    if (out_start_y) *out_start_y = snapshot.start_y;
+    if (out_end_x) *out_end_x = snapshot.end_x;
+    if (out_end_y) *out_end_y = snapshot.end_y;
     return true;
 }
 

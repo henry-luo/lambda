@@ -22,41 +22,42 @@ extern "C" {
 // Display list op codes
 // ---------------------------------------------------------------------------
 
+#define DISPLAY_OP_LIST(X) \
+    X(DL_FILL_RECT, 0) \
+    X(DL_FILL_ROUNDED_RECT, 0) \
+    X(DL_FILL_PATH, 0) \
+    X(DL_STROKE_PATH, 0) \
+    X(DL_FILL_LINEAR_GRADIENT, 0) \
+    X(DL_FILL_RADIAL_GRADIENT, 0) \
+    X(DL_DRAW_IMAGE, 0) \
+    X(DL_DRAW_GLYPH, 0) \
+    X(DL_DRAW_PICTURE, 0) \
+    X(DL_PUSH_CLIP, DL_OP_FLAG_PRESERVES_REPLAY_STATE) \
+    X(DL_POP_CLIP, DL_OP_FLAG_PRESERVES_REPLAY_STATE) \
+    X(DL_FILL_SURFACE_RECT, 0) \
+    X(DL_BLIT_SURFACE_SCALED, 0) \
+    X(DL_COMPOSITE_OPACITY, DL_OP_FLAG_PRESERVES_REPLAY_STATE) \
+    X(DL_SAVE_BACKDROP, DL_OP_FLAG_PRESERVES_REPLAY_STATE) \
+    X(DL_APPLY_BLEND_MODE, DL_OP_FLAG_PRESERVES_REPLAY_STATE) \
+    X(DL_APPLY_FILTER, 0) \
+    X(DL_VIDEO_PLACEHOLDER, 0) \
+    X(DL_WEBVIEW_LAYER_PLACEHOLDER, 0) \
+    X(DL_BOX_BLUR_REGION, 0) \
+    X(DL_BOX_BLUR_INSET, 0) \
+    X(DL_SHADOW_CLIP_SAVE, DL_OP_FLAG_PRESERVES_REPLAY_STATE) \
+    X(DL_SHADOW_CLIP_RESTORE, DL_OP_FLAG_PRESERVES_REPLAY_STATE) \
+    X(DL_OUTER_SHADOW, 0) \
+    X(DL_BEGIN_ELEMENT, DL_OP_FLAG_PRESERVES_REPLAY_STATE) \
+    X(DL_END_ELEMENT, DL_OP_FLAG_PRESERVES_REPLAY_STATE)
+
+enum {
+    DL_OP_FLAG_PRESERVES_REPLAY_STATE = 1u << 0,
+};
+
 typedef enum {
-    DL_FILL_RECT,
-    DL_FILL_ROUNDED_RECT,
-    DL_FILL_PATH,
-    DL_STROKE_PATH,
-    DL_FILL_LINEAR_GRADIENT,
-    DL_FILL_RADIAL_GRADIENT,
-    DL_DRAW_IMAGE,
-    DL_DRAW_GLYPH,
-    DL_DRAW_PICTURE,
-    DL_PUSH_CLIP,
-    DL_POP_CLIP,
-    // direct-pixel operations (bypass ThorVG, operate on surface pixels)
-    DL_FILL_SURFACE_RECT,
-    DL_BLIT_SURFACE_SCALED,
-    // opacity / blend / filter layers (post-processing pixel ops)
-    DL_COMPOSITE_OPACITY,    // save backdrop + composite at opacity (CSS stacking context)
-    DL_SAVE_BACKDROP,        // save surface pixels before blend-mode element renders
-    DL_APPLY_BLEND_MODE,
-    DL_APPLY_FILTER,
-    // video frame placeholder (rect + clip only; actual blit is post-composite)
-    DL_VIDEO_PLACEHOLDER,
-    // webview layer placeholder (rect + clip; actual blit is post-composite)
-    DL_WEBVIEW_LAYER_PLACEHOLDER,
-    // box-shadow blur (deferred so it runs after the shadow fill is rasterised)
-    DL_BOX_BLUR_REGION,
-    DL_BOX_BLUR_INSET,       // inset shadow blur: blur expanded region, restore outer pixels
-    // outer box-shadow clip: save pixels before shadow fill, restore inside element after blur
-    DL_SHADOW_CLIP_SAVE,
-    DL_SHADOW_CLIP_RESTORE,
-    // self-contained outer box-shadow op: rasterise + blur in temp buffer + composite
-    DL_OUTER_SHADOW,
-    // element group markers (for retained sub-trees, Phase 2+)
-    DL_BEGIN_ELEMENT,
-    DL_END_ELEMENT,
+#define DL_OP_ENUM(name, flags) name,
+    DISPLAY_OP_LIST(DL_OP_ENUM)
+#undef DL_OP_ENUM
 } DisplayOp;
 
 // ---------------------------------------------------------------------------
@@ -345,6 +346,15 @@ typedef struct DisplayListValidationResult {
     int shadow_clip_depth;
     int element_depth;
 } DisplayListValidationResult;
+
+typedef struct DisplayOpDescriptor {
+    DisplayOp op;
+    uint32_t flags;
+} DisplayOpDescriptor;
+
+const DisplayOpDescriptor* dl_op_descriptor(DisplayOp op);
+bool dl_op_preserves_replay_state(DisplayOp op);
+void dl_item_free_owned_payload(DisplayItem* item);
 
 // ---------------------------------------------------------------------------
 // Lifecycle

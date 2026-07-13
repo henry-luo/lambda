@@ -12,21 +12,7 @@ Bound dl_item_bounds(const DisplayItem* item) {
 }
 
 static bool dl_item_preserves_replay_state(const DisplayItem* item) {
-    if (!item) return false;
-    switch (item->op) {
-        case DL_PUSH_CLIP:
-        case DL_POP_CLIP:
-        case DL_SAVE_BACKDROP:
-        case DL_APPLY_BLEND_MODE:
-        case DL_COMPOSITE_OPACITY:
-        case DL_SHADOW_CLIP_SAVE:
-        case DL_SHADOW_CLIP_RESTORE:
-        case DL_BEGIN_ELEMENT:
-        case DL_END_ELEMENT:
-            return true;
-        default:
-            return false;
-    }
+    return item && dl_op_preserves_replay_state(item->op);
 }
 
 bool dl_item_intersects_rect(const DisplayItem* item,
