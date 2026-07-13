@@ -1,0 +1,13 @@
+{
+  width: 100,
+  height: 95,
+  placements: [{
+      index: 0,
+      x: 10,
+      y: 0
+    }, {
+      index: 1,
+      x: 0,
+      y: 45
+    }]
+}

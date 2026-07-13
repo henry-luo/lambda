@@ -28,7 +28,7 @@
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lib/log.h"
-#include "layout_guards.h"  // MAX_LAYOUT_DEPTH — shared DOM-recursion depth cap
+#include "layout.hpp"  // MAX_LAYOUT_DEPTH — shared DOM-recursion depth cap
 #include "../lib/arraylist.h"
 #include "../lib/strbuf.h"
 #include "../lib/str.h"

@@ -1,11 +1,8 @@
 #include "layout_graph.hpp"
-#include "graph_dagre.hpp"
-#include "graph_edge_utils.hpp"
 #include "../lambda/mark_reader.hpp"
 #include "../lib/log.h"
 #include <string.h>
 #include "../lib/mem.h"
-#include <math.h>
 
 // Create default layout options
 GraphLayoutOptions* create_default_layout_options() {
@@ -331,134 +328,6 @@ static void free_layout_graph_internal(LayoutGraph* lg) {
     mem_free(lg);
 }
 
-// Convert internal LayoutGraph to GraphLayout result
-static GraphLayout* extract_graph_layout(LayoutGraph* lg, GraphLayoutOptions* opts) {
-    GraphLayout* layout = (GraphLayout*)mem_calloc(1, sizeof(GraphLayout), MEM_CAT_LAYOUT);
-    size_t node_count = lg->nodes->get().size();
-    size_t edge_count = lg->edges->get().size();
-    size_t subgraph_count = lg->subgraphs->get().size();
-    layout->node_positions = graph_list_new<PersistentNodePositionList>(node_count > 0 ? node_count : 1);
-    layout->edge_paths = graph_list_new<PersistentEdgePathList>(edge_count > 0 ? edge_count : 1);
-    layout->subgraph_positions = graph_list_new<PersistentSubgraphPositionList>(subgraph_count > 0 ? subgraph_count : 1);
-
-    layout->node_spacing_x = opts->node_sep;
-    layout->node_spacing_y = opts->rank_sep;
-    layout->edge_spacing = opts->edge_sep;
-    layout->algorithm = opts->algorithm;
-    layout->direction = opts->direction;
-
-    // extract node positions
-    for (size_t i = 0; i < node_count; i++) {
-        LayoutNode* node = lg->nodes->get()[i].get();
-
-        lam::SessionPtr<NodePosition> pos = lam::session_make<NodePosition>(MEM_CAT_LAYOUT);
-        if (!pos) {
-            log_error("graph_node_position_alloc_failed");
-            continue;
-        }
-        pos->node_id = node->id;
-        pos->x = node->x;
-        pos->y = node->y;
-        pos->width = node->width;
-        pos->height = node->height;
-        pos->rank = node->rank;
-        pos->order = node->order;
-
-        layout->node_positions->get().append(static_cast<lam::SessionPtr<NodePosition>&&>(pos));
-    }
-
-    // extract edge paths
-    for (size_t i = 0; i < edge_count; i++) {
-        LayoutEdge* edge = lg->edges->get()[i].get();
-
-        lam::SessionPtr<EdgePath> path = lam::session_make<EdgePath>(MEM_CAT_LAYOUT);
-        if (!path) {
-            log_error("graph_edge_path_alloc_failed");
-            continue;
-        }
-        path->from_id = edge->from_id;
-        path->to_id = edge->to_id;
-        size_t edge_point_count = point2d_list_size(edge->path_points);
-        path->points = point2d_list_new(edge_point_count > 0 ? edge_point_count : 1);
-        path->is_bezier = opts->use_splines;
-        path->directed = edge->directed;
-        path->edge_style = edge->style ? edge->style : "solid";
-        path->arrow_start = edge->arrow_start;
-        path->arrow_end = edge->arrow_end;
-
-        // copy points
-        for (size_t j = 0; j < edge_point_count; j++) {
-            Point2D* src_pt = point2d_list_at(edge->path_points, j);
-            if (src_pt) {
-                point2d_list_append(path->points, *src_pt);
-            }
-        }
-
-        layout->edge_paths->get().append(static_cast<lam::SessionPtr<EdgePath>&&>(path));
-    }
-
-    // extract subgraph positions - compute bounds from member nodes
-    for (size_t i = 0; i < subgraph_count; i++) {
-        LayoutSubgraph* sg = lg->subgraphs->get()[i].get();
-
-        // compute bounding box from member nodes
-        float min_x = 1e9f, min_y = 1e9f, max_x = -1e9f, max_y = -1e9f;
-        bool has_nodes = false;
-
-        for (size_t j = 0; j < sg->node_ids->size(); j++) {
-            const char* node_id = (*sg->node_ids)[j];
-
-            // find node position
-            for (size_t k = 0; k < node_count; k++) {
-                LayoutNode* node = lg->nodes->get()[k].get();
-                if (strcmp(node->id, node_id) == 0) {
-                    float nx1 = node->x - node->width / 2.0f;
-                    float ny1 = node->y - node->height / 2.0f;
-                    float nx2 = node->x + node->width / 2.0f;
-                    float ny2 = node->y + node->height / 2.0f;
-
-                    if (nx1 < min_x) min_x = nx1;
-                    if (ny1 < min_y) min_y = ny1;
-                    if (nx2 > max_x) max_x = nx2;
-                    if (ny2 > max_y) max_y = ny2;
-                    has_nodes = true;
-                    break;
-                }
-            }
-        }
-
-        if (!has_nodes) {
-            // empty subgraph, skip
-            continue;
-        }
-
-        // add padding and label height
-        float padding = sg->padding;
-        float label_height = sg->label_height;
-
-        lam::SessionPtr<SubgraphPosition> sgpos = lam::session_make<SubgraphPosition>(MEM_CAT_LAYOUT);
-        if (!sgpos) {
-            log_error("graph_subgraph_position_alloc_failed");
-            continue;
-        }
-        sgpos->subgraph_id = sg->id;
-        sgpos->label = sg->label;
-        sgpos->x = min_x - padding;
-        sgpos->y = min_y - padding - label_height;
-        sgpos->width = (max_x - min_x) + 2 * padding;
-        sgpos->height = (max_y - min_y) + 2 * padding + label_height;
-        sgpos->label_height = label_height;
-
-        layout->subgraph_positions->get().append(static_cast<lam::SessionPtr<SubgraphPosition>&&>(sgpos));
-    }
-
-    // compute graph bounds
-    layout->graph_width = lg->max_x - lg->min_x;
-    layout->graph_height = lg->max_y - lg->min_y;
-
-    return layout;
-}
-
 // Main layout functions
 GraphLayout* layout_graph(Element* graph) {
     const char* algorithm = get_layout_algorithm(graph);
@@ -484,30 +353,13 @@ GraphLayout* layout_graph_with_options(Element* graph, GraphLayoutOptions* opts)
     log_info("laying out graph with algorithm: %s, direction: %s",
              opts->algorithm, opts->direction);
 
-    // build internal graph representation
     LayoutGraph* lg = build_layout_graph(graph);
 
-    // dispatch to algorithm
-    if (strcmp(opts->algorithm, "dagre") == 0 || strcmp(opts->algorithm, "dot") == 0) {
-        layout_graph_dagre(lg, opts);
-    } else {
-        log_error("unknown layout algorithm: %s", opts->algorithm);
-        free_layout_graph_internal(lg);
-        return nullptr;
-    }
-
-    // post-process edges for better visual appearance
-    post_process_edges(lg, opts->direction);
-
-    // extract results
-    GraphLayout* result = extract_graph_layout(lg, opts);
-
-    // cleanup
+    // graph coordinate assignment has moved to lambda/package/graph; keep the
+    // old C ABI as a clean failure until the CLI graph render path calls Lambda.
+    log_error("layout_graph: C graph layout algorithm removed; use lambda.package.graph.graph");
     free_layout_graph_internal(lg);
-
-    log_info("layout complete: %.1f x %.1f", result->graph_width, result->graph_height);
-
-    return result;
+    return nullptr;
 }
 
 // Free layout resources

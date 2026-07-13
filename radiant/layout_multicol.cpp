@@ -1,6 +1,5 @@
 #include "layout_multicol.hpp"
 #include "layout.hpp"
-#include "layout_box.hpp"
 #include "layout_positioned.hpp"
 #include "../lib/log.h"
 #include "../lib/tagged.hpp"

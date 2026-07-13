@@ -3,14 +3,11 @@
 #include "view.hpp"
 #include "layout_flex_measurement.hpp"
 #include "form_control.hpp"
-#include "available_space.hpp"
 #include "intrinsic_sizing.hpp"
 #include "layout_alignment.hpp"
 #include "layout_axis.hpp"
-#include "layout_percentages.hpp"
 #include "../lib/mem_grow.hpp"
 #include "layout_measure.hpp"
-#include "layout_box.hpp"
 extern "C" {
 #include <stdlib.h>
 #include <string.h>
@@ -2958,23 +2955,26 @@ float apply_flex_constraint(
         float explicit_min = layout_explicit_min_axis_or(item_block, axis_is_horizontal, -1.0f);
         if (explicit_min >= 0.0f) {
             min_size = explicit_min;
-        } else if (is_main_axis && item->blk &&
-                   ((axis_is_horizontal && item->blk->given_width >= 0) ||
-                    (!axis_is_horizontal && item->blk->given_height >= 0))) {
-            // definite form-control size is the used main size;
-            // intrinsic min-size:auto was clamping 10px checkboxes back to UA 13px.
-            min_size = layout_css_size_to_border_box(
-                item->bound, layout_box_sizing(item_block),
-                axis_is_horizontal ? item->blk->given_width : item->blk->given_height,
-                axis_is_horizontal);
         } else if (is_main_axis && item->form) {
-            // min-size: auto -> intrinsic size for form controls on the main axis.
+            // Form controls still use the flex auto-min rule: content minimum,
+            // capped by a definite main-size so small explicit controls can shrink.
             float intrinsic_min = axis_is_horizontal ? item->form->intrinsic_width : item->form->intrinsic_height;
             if (intrinsic_min > 0.0f) {
                 min_size = intrinsic_min;
                 if (item->bound) {
                     min_size += layout_boundary_padding_border_axis(item->bound, axis_is_horizontal);
                 }
+            }
+            if (item->blk &&
+                ((axis_is_horizontal && item->blk->given_width >= 0) ||
+                 (!axis_is_horizontal && item->blk->given_height >= 0))) {
+                float specified_min = layout_css_size_to_border_box(
+                    item->bound, layout_box_sizing(item_block),
+                    axis_is_horizontal ? item->blk->given_width : item->blk->given_height,
+                    axis_is_horizontal);
+                min_size = min_size > 0.0f
+                    ? min(min_size, specified_min)
+                    : specified_min;
             }
         }
 

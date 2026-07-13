@@ -4,7 +4,6 @@
 #include "render.hpp"
 #include "view.hpp"
 #include "layout.hpp"
-#include "layout_box.hpp"
 #include "font_face.h"
 
 #include "../lib/tagged.hpp"

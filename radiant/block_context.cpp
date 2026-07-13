@@ -11,7 +11,6 @@
  */
 
 #include "layout.hpp"
-#include "layout_box.hpp"
 #include "layout_custom.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"

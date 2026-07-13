@@ -5,6 +5,7 @@
 #include "../../../radiant/layout_custom.hpp"
 #include "../../../radiant/render.hpp"
 #include "../../../lib/log.h"
+#include "../../../lib/mem.h"
 #include "../../../lib/mem_context.h"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/mempool.h"
@@ -54,6 +55,7 @@ Item vmap_get_by_item(VMap* vm, Item key);
 #define RADIANT_CUSTOM_LAYOUT_MAX_REGISTRY 64
 #define RADIANT_CUSTOM_LAYOUT_NAME_CAP 64
 #define RADIANT_VELMT_CHILD_DEPTH 2
+#define RADIANT_VELMT_MAGIC 0x56454c4d54ULL
 
 typedef struct RadiantCustomLayoutEntry {
     char name[RADIANT_CUSTOM_LAYOUT_NAME_CAP];
@@ -61,8 +63,19 @@ typedef struct RadiantCustomLayoutEntry {
     bool rooted;
 } RadiantCustomLayoutEntry;
 
+typedef struct RadiantVelmtHost {
+    uint64_t magic;
+    uint64_t pass_id;
+    int depth;
+    Velmt velmt;
+} RadiantVelmtHost;
+
 static RadiantCustomLayoutEntry g_radiant_custom_layouts[RADIANT_CUSTOM_LAYOUT_MAX_REGISTRY];
 static int g_radiant_custom_layout_count = 0;
+static uint64_t g_radiant_velmt_next_pass_id = 1;
+static THREAD_LOCAL uint64_t g_radiant_velmt_active_pass_id = 0;
+
+RADIANT_C_API const void* radiant_velmt_host_type(void);
 
 static Item radiant_string_item(const char* value) {
     return value ? (Item){.item = s2it(heap_create_name(value))} : ItemNull;
@@ -286,7 +299,153 @@ static Item radiant_layout_style_item(DomElement* elem) {
     return style;
 }
 
-static Item radiant_layout_velmt_item_depth(const Velmt* velmt, int depth);
+static Item radiant_layout_velmt_host_item_depth(const Velmt* velmt, int depth);
+static Item radiant_layout_view_children_item(View* view, int depth);
+
+static bool radiant_is_velmt_host_item(Item item) {
+    return get_type_id(item) == LMD_TYPE_VMAP && item.vmap &&
+        item.vmap->host_type == radiant_velmt_host_type();
+}
+
+static RadiantVelmtHost* radiant_velmt_host_from_item(Item item) {
+    if (!radiant_is_velmt_host_item(item)) return nullptr;
+    RadiantVelmtHost* host = (RadiantVelmtHost*)item.vmap->host_data;
+    if (!host || host->magic != RADIANT_VELMT_MAGIC) return nullptr;
+    return host;
+}
+
+static RadiantVelmtHost* radiant_velmt_host_active_from_item(Item item) {
+    RadiantVelmtHost* host = radiant_velmt_host_from_item(item);
+    if (!host || host->pass_id == 0 ||
+        host->pass_id != g_radiant_velmt_active_pass_id) {
+        return nullptr;
+    }
+    return host;
+}
+
+static void radiant_velmt_host_destroy(void* native) {
+    RadiantVelmtHost* host = (RadiantVelmtHost*)native;
+    if (!host) return;
+    host->magic = 0;
+    mem_free(host);
+}
+
+static Item radiant_layout_velmt_host_item_depth(const Velmt* velmt, int depth) {
+    if (!radiant_host_api || !radiant_host_api->value || !velmt ||
+        g_radiant_velmt_active_pass_id == 0) {
+        return ItemNull;
+    }
+    Item obj = radiant_host_api->value->vmap_new();
+    if (get_type_id(obj) != LMD_TYPE_VMAP || !obj.vmap) return ItemNull;
+
+    RadiantVelmtHost* host = (RadiantVelmtHost*)mem_calloc(
+        1, sizeof(RadiantVelmtHost), MEM_CAT_EVAL);
+    if (!host) return ItemNull;
+    host->magic = RADIANT_VELMT_MAGIC;
+    host->pass_id = g_radiant_velmt_active_pass_id;
+    host->depth = depth;
+    memcpy(&host->velmt, velmt, sizeof(Velmt));
+    obj.vmap->host_type = radiant_velmt_host_type();
+    obj.vmap->host_data = host;
+    return obj;
+}
+
+static Item radiant_velmt_project_property(const Velmt* velmt, int depth, const char* key) {
+    if (!velmt || !key) return ItemNull;
+    if (strcmp(key, "index") == 0) return radiant_int_item(velmt->index);
+    if (strcmp(key, "tag") == 0 || strcmp(key, "node_name") == 0) {
+        return radiant_string_item(velmt->view ? velmt->view->node_name() : "");
+    }
+    if (strcmp(key, "width") == 0 || strcmp(key, "wd") == 0) {
+        return radiant_float_item(velmt->border_box.width);
+    }
+    if (strcmp(key, "height") == 0 || strcmp(key, "hg") == 0) {
+        return radiant_float_item(velmt->border_box.height);
+    }
+    if (strcmp(key, "box") == 0) return radiant_layout_box_item(&velmt->border_box);
+    if (strcmp(key, "children") == 0) {
+        return radiant_layout_view_children_item(velmt->view, depth);
+    }
+    if (strcmp(key, "text") == 0) return radiant_layout_text_item((DomNode*)velmt->view);
+    if (strcmp(key, "style") == 0) return radiant_layout_style_item(velmt->element);
+    if (strcmp(key, "margin") == 0) return radiant_layout_edges_item(&velmt->margin);
+    if (strcmp(key, "border") == 0) return radiant_layout_edges_item(&velmt->border);
+    if (strcmp(key, "padding") == 0) return radiant_layout_edges_item(&velmt->padding);
+    if (strcmp(key, "id") == 0) {
+        return velmt->element ? radiant_string_item(velmt->element->id) : ItemNull;
+    }
+    if (strcmp(key, "attrs") == 0) {
+        return velmt->element ? radiant_layout_attrs_item(velmt->element) : ItemNull;
+    }
+    return ItemNull;
+}
+
+static int radiant_velmt_host_get_property(Item object, Item key, Item* out) {
+    if (!out) return 0;
+    RadiantVelmtHost* host = radiant_velmt_host_active_from_item(object);
+    if (!host) {
+        // Velmt handles are scoped to one custom layout callback/result parse.
+        *out = ItemNull;
+        return 1;
+    }
+    const char* key_name = fn_to_cstr(key);
+    if (!key_name) {
+        *out = ItemNull;
+        return 1;
+    }
+    *out = radiant_velmt_project_property(&host->velmt, host->depth, key_name);
+    return 1;
+}
+
+static int radiant_velmt_host_set_property(Item object, Item key, Item value, Item* out) {
+    (void)object; (void)key; (void)value;
+    if (out) *out = ItemNull;
+    return 0;
+}
+
+static int radiant_velmt_host_has_property(Item object, Item key, Item* out) {
+    Item value = ItemNull;
+    if (!radiant_velmt_host_get_property(object, key, &value)) return 0;
+    if (out) *out = radiant_bool_item(!radiant_item_is_missing(value));
+    return 1;
+}
+
+static int radiant_velmt_host_delete_property(Item object, Item key, Item* out) {
+    (void)object; (void)key;
+    if (out) *out = radiant_bool_item(false);
+    return 1;
+}
+
+static int radiant_velmt_host_own_property_names(Item object, Item* out) {
+    (void)object;
+    if (!out) return 0;
+    static const char* keys[] = {
+        "index", "tag", "id", "width", "height", "wd", "hg", "box",
+        "children", "text", "style", "margin", "border", "padding", "attrs"
+    };
+    int key_count = (int)(sizeof(keys) / sizeof(keys[0])); // INT_CAST_OK: fixed small static key table.
+    Item arr = radiant_array_new_item(key_count);
+    for (int i = 0; i < key_count; i++) {
+        radiant_array_push_item(arr, radiant_string_item(keys[i]));
+    }
+    *out = arr;
+    return 1;
+}
+
+static int radiant_velmt_host_own_property_descriptor(Item object, Item key, Item* out) {
+    Item value = ItemNull;
+    if (!out || !radiant_velmt_host_get_property(object, key, &value) ||
+        radiant_item_is_missing(value)) {
+        return 0;
+    }
+    Item desc = radiant_obj_new();
+    radiant_obj_set(desc, "value", value);
+    radiant_obj_set(desc, "writable", radiant_bool_item(false));
+    radiant_obj_set(desc, "enumerable", radiant_bool_item(true));
+    radiant_obj_set(desc, "configurable", radiant_bool_item(false));
+    *out = desc;
+    return 1;
+}
 
 static int radiant_layout_view_child_count(View* view) {
     if (!view || !view->is_element()) return 0;
@@ -312,41 +471,14 @@ static Item radiant_layout_view_children_item(View* view, int depth) {
         if (!child_view || child_view->view_type == RDT_VIEW_NONE) continue;
         Velmt child_velmt;
         custom_layout_fill_velmt_from_view(&child_velmt, child_view, index, false);
-        radiant_array_push_item(children, radiant_layout_velmt_item_depth(&child_velmt, depth - 1));
+        radiant_array_push_item(children, radiant_layout_velmt_host_item_depth(&child_velmt, depth - 1));
         index++;
     }
     return children;
 }
 
-static Item radiant_layout_velmt_item_depth(const Velmt* velmt, int depth) {
-    if (!radiant_host_api || !radiant_host_api->value || !velmt) return ItemNull;
-    Item obj = radiant_obj_new();
-    const char* tag = velmt->view ? velmt->view->node_name() : "";
-    radiant_obj_set(obj, "index", radiant_int_item(velmt->index));
-    radiant_obj_set(obj, "tag", radiant_string_item(tag));
-    radiant_obj_set(obj, "width", radiant_float_item(velmt->border_box.width));
-    radiant_obj_set(obj, "height", radiant_float_item(velmt->border_box.height));
-    radiant_obj_set(obj, "wd", radiant_float_item(velmt->border_box.width));
-    radiant_obj_set(obj, "hg", radiant_float_item(velmt->border_box.height));
-    radiant_obj_set(obj, "box", radiant_layout_box_item(&velmt->border_box));
-    radiant_obj_set(obj, "children", radiant_layout_view_children_item(velmt->view, depth));
-    radiant_obj_set(obj, "text", radiant_layout_text_item((DomNode*)velmt->view));
-    radiant_obj_set(obj, "style", radiant_layout_style_item(velmt->element));
-    radiant_obj_set(obj, "margin", radiant_layout_edges_item(&velmt->margin));
-    radiant_obj_set(obj, "border", radiant_layout_edges_item(&velmt->border));
-    radiant_obj_set(obj, "padding", radiant_layout_edges_item(&velmt->padding));
-    if (velmt->element) {
-        radiant_obj_set(obj, "id", radiant_string_item(velmt->element->id));
-        radiant_obj_set(obj, "attrs", radiant_layout_attrs_item(velmt->element));
-    } else {
-        radiant_obj_set(obj, "id", ItemNull);
-        radiant_obj_set(obj, "attrs", ItemNull);
-    }
-    return obj;
-}
-
-static Item radiant_layout_velmt_item(const Velmt* velmt) {
-    return radiant_layout_velmt_item_depth(velmt, RADIANT_VELMT_CHILD_DEPTH);
+static Item radiant_layout_velmt_host_item(const Velmt* velmt) {
+    return radiant_layout_velmt_host_item_depth(velmt, RADIANT_VELMT_CHILD_DEPTH);
 }
 
 static Item radiant_layout_parent_item(const CustomLayoutContext* context) {
@@ -375,14 +507,14 @@ static Item radiant_layout_parent_item(const CustomLayoutContext* context) {
         parent.padding.top = metrics.padding.top;
         parent.padding.bottom = metrics.padding.bottom;
     }
-    return radiant_layout_velmt_item(&parent);
+    return radiant_layout_velmt_host_item(&parent);
 }
 
 static Item radiant_layout_children_item(const CustomLayoutContext* context) {
     if (!radiant_host_api || !radiant_host_api->value || !context) return ItemNull;
     Item arr = radiant_array_new_item(context->child_count);
     for (int i = 0; i < context->child_count; i++) {
-        radiant_array_push_item(arr, radiant_layout_velmt_item(&context->children[i]));
+        radiant_array_push_item(arr, radiant_layout_velmt_host_item(&context->children[i]));
     }
     return arr;
 }
@@ -504,6 +636,11 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
         return false;
     }
 
+    uint64_t previous_pass_id = g_radiant_velmt_active_pass_id;
+    uint64_t pass_id = g_radiant_velmt_next_pass_id++;
+    if (g_radiant_velmt_next_pass_id == 0) g_radiant_velmt_next_pass_id = 1;
+    g_radiant_velmt_active_pass_id = pass_id;
+
     Item args[3];
     args[0] = radiant_layout_parent_item(context);
     args[1] = radiant_layout_children_item(context);
@@ -512,10 +649,13 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
     // call hook is JS-specific and corrupts Lambda fn call frames.
     Item result_item = radiant_lambda_fn_call3(entry->fn.function, args[0], args[1], args[2]);
     if (get_type_id(result_item) == LMD_TYPE_ERROR) {
+        g_radiant_velmt_active_pass_id = previous_pass_id;
         log_error("CUSTOM_LAYOUT_LAMBDA_EXCEPTION: layout='%s'", context->layout_name);
         return false;
     }
-    return radiant_custom_layout_parse_result(context, result_item, result);
+    bool ok = radiant_custom_layout_parse_result(context, result_item, result);
+    g_radiant_velmt_active_pass_id = previous_pass_id;
+    return ok;
 }
 
 static DomDocument* radiant_dom_document_from_node(DomNode* node) {
@@ -842,6 +982,18 @@ const JubeHostObjectOps radiant_dom_node_host_ops = {
     NULL,
 };
 
+static const JubeHostObjectOps radiant_velmt_host_ops = {
+    radiant_velmt_host_get_property,
+    radiant_velmt_host_set_property,
+    NULL,
+    radiant_velmt_host_has_property,
+    radiant_velmt_host_delete_property,
+    radiant_velmt_host_own_property_descriptor,
+    radiant_velmt_host_own_property_names,
+    NULL,
+    NULL,
+    radiant_velmt_host_destroy,
+};
 
 
 static const JubeTypeDef radiant_types[] = {
@@ -856,6 +1008,7 @@ static const JubeTypeDef radiant_types[] = {
     {"rule_style_decl", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
     {"document", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
     {"foreign_document", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
+    {"velmt", JUBE_TYPE_OWNING_NATIVE, NULL, &radiant_velmt_host_ops, NULL},
 };
 
 RADIANT_C_API const void* radiant_dom_node_host_type(void) {
@@ -896,6 +1049,10 @@ RADIANT_C_API const void* radiant_dom_document_host_type(void) {
 
 RADIANT_C_API const void* radiant_dom_foreign_document_host_type(void) {
     return &radiant_types[9];
+}
+
+RADIANT_C_API const void* radiant_velmt_host_type(void) {
+    return &radiant_types[10];
 }
 
 #pragma clang diagnostic push
