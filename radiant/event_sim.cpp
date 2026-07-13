@@ -293,11 +293,11 @@ static bool find_text_position(DomDocument* doc, const char* target_text, float*
     return find_text_position_recursive(static_cast<View*>(doc->view_tree->root), target_text, 0, 0, out_x, out_y);
 }
 
-static View* find_text_view_recursive(View* view, const char* target_text) {
-    if (!view || !target_text) return nullptr;
+static View* sim_find_text_descendant(View* view, const char* target_text) {
+    if (!view) return nullptr;
     if (view->view_type == RDT_VIEW_TEXT) {
         DomText* text_view = view->as_text();
-        if (text_view && text_view->text && strstr(text_view->text, target_text)) {
+        if (!target_text || (text_view && text_view->text && strstr(text_view->text, target_text))) {
             return view;
         }
     }
@@ -305,7 +305,7 @@ static View* find_text_view_recursive(View* view, const char* target_text) {
     if (elem) {
         View* child = static_cast<View*>(elem->first_child);
         while (child) {
-            View* found = find_text_view_recursive(child, target_text);
+            View* found = sim_find_text_descendant(child, target_text);
             if (found) return found;
             child = static_cast<View*>(child->next_sibling);
         }
@@ -314,8 +314,8 @@ static View* find_text_view_recursive(View* view, const char* target_text) {
 }
 
 static View* find_text_view(DomDocument* doc, const char* target_text) {
-    if (!doc || !doc->view_tree || !doc->view_tree->root) return nullptr;
-    return find_text_view_recursive(static_cast<View*>(doc->view_tree->root),
+    if (!doc || !doc->view_tree || !doc->view_tree->root || !target_text) return nullptr;
+    return sim_find_text_descendant(static_cast<View*>(doc->view_tree->root),
                                     target_text);
 }
 
@@ -323,18 +323,7 @@ static View* find_element_by_selector(DomDocument* doc, const char* selector_tex
                                       int index);
 
 static View* first_text_descendant(View* view) {
-    if (!view) return nullptr;
-    if (view->view_type == RDT_VIEW_TEXT) return view;
-    DomElement* elem = view->as_element();
-    if (elem) {
-        DomNode* child = elem->first_child;
-        while (child) {
-            View* found = first_text_descendant(static_cast<View*>(child));
-            if (found) return found;
-            child = child->next_sibling;
-        }
-    }
-    return nullptr;
+    return sim_find_text_descendant(view, nullptr);
 }
 
 static View* resolve_editing_range_view(DomDocument* doc, SimEvent* ev,

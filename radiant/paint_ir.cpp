@@ -40,54 +40,59 @@ void paint_list_init(PaintList* pl, Arena* backing_arena) {
     pl->arena = backing_arena;
 }
 
+static void paint_free_owned_path(RdtPath** path, bool* owns_path) {
+    if (!path || !owns_path || !*owns_path || !*path) return;
+    rdt_path_free(*path);
+    *path = nullptr;
+    *owns_path = false;
+}
+
+static void paint_free_owned_gradient_stops(const RdtGradientStop** stops,
+                                            bool* owns_stops) {
+    if (!stops || !owns_stops || !*owns_stops || !*stops) return;
+    mem_free((void*)*stops);
+    *stops = nullptr;
+    *owns_stops = false;
+}
+
+static void paint_free_owned_gradient_payload(RdtPath** path, bool* owns_path,
+                                              const RdtGradientStop** stops,
+                                              bool* owns_stops) {
+    paint_free_owned_path(path, owns_path);
+    paint_free_owned_gradient_stops(stops, owns_stops);
+}
+
+static void paint_free_owned_glyph_run_text(PaintGlyphRun* run) {
+    if (!run || !run->owns_text || !run->text) return;
+    mem_free((void*)run->text);
+    run->text = nullptr;
+    run->owns_text = false;
+}
+
 static void paint_cmd_free_owned_payload(PaintCmd* cmd) {
     if (!cmd) return;
     // deferred lowerers can transfer heap payloads into PaintList commands; central cleanup prevents backend-specific ownership switches from drifting.
     switch (cmd->op) {
     case PAINT_FILL_PATH:
-        if (cmd->fill_path.owns_path && cmd->fill_path.path) {
-            rdt_path_free(cmd->fill_path.path);
-            cmd->fill_path.path = nullptr;
-            cmd->fill_path.owns_path = false;
-        }
+        paint_free_owned_path(&cmd->fill_path.path, &cmd->fill_path.owns_path);
         break;
     case PAINT_STROKE_PATH:
-        if (cmd->stroke_path.owns_path && cmd->stroke_path.path) {
-            rdt_path_free(cmd->stroke_path.path);
-            cmd->stroke_path.path = nullptr;
-            cmd->stroke_path.owns_path = false;
-        }
+        paint_free_owned_path(&cmd->stroke_path.path, &cmd->stroke_path.owns_path);
         break;
     case PAINT_FILL_LINEAR_GRADIENT:
-        if (cmd->fill_linear_gradient.owns_path && cmd->fill_linear_gradient.path) {
-            rdt_path_free(cmd->fill_linear_gradient.path);
-            cmd->fill_linear_gradient.path = nullptr;
-            cmd->fill_linear_gradient.owns_path = false;
-        }
-        if (cmd->fill_linear_gradient.owns_stops && cmd->fill_linear_gradient.stops) {
-            mem_free((void*)cmd->fill_linear_gradient.stops);
-            cmd->fill_linear_gradient.stops = nullptr;
-            cmd->fill_linear_gradient.owns_stops = false;
-        }
+        paint_free_owned_gradient_payload(&cmd->fill_linear_gradient.path,
+                                          &cmd->fill_linear_gradient.owns_path,
+                                          &cmd->fill_linear_gradient.stops,
+                                          &cmd->fill_linear_gradient.owns_stops);
         break;
     case PAINT_FILL_RADIAL_GRADIENT:
-        if (cmd->fill_radial_gradient.owns_path && cmd->fill_radial_gradient.path) {
-            rdt_path_free(cmd->fill_radial_gradient.path);
-            cmd->fill_radial_gradient.path = nullptr;
-            cmd->fill_radial_gradient.owns_path = false;
-        }
-        if (cmd->fill_radial_gradient.owns_stops && cmd->fill_radial_gradient.stops) {
-            mem_free((void*)cmd->fill_radial_gradient.stops);
-            cmd->fill_radial_gradient.stops = nullptr;
-            cmd->fill_radial_gradient.owns_stops = false;
-        }
+        paint_free_owned_gradient_payload(&cmd->fill_radial_gradient.path,
+                                          &cmd->fill_radial_gradient.owns_path,
+                                          &cmd->fill_radial_gradient.stops,
+                                          &cmd->fill_radial_gradient.owns_stops);
         break;
     case PAINT_GLYPH_RUN:
-        if (cmd->glyph_run.owns_text && cmd->glyph_run.text) {
-            mem_free((void*)cmd->glyph_run.text);
-            cmd->glyph_run.text = nullptr;
-            cmd->glyph_run.owns_text = false;
-        }
+        paint_free_owned_glyph_run_text(&cmd->glyph_run);
         break;
     default:
         break;
@@ -97,7 +102,9 @@ static void paint_cmd_free_owned_payload(PaintCmd* cmd) {
 void paint_list_clear(PaintList* pl) {
     if (!pl) return;
     for (int i = 0; i < pl->count; i++) {
-        paint_cmd_free_owned_payload(&pl->cmds[i]);
+        if (paint_op_has_flags(pl->cmds[i].op, PAINT_OP_FLAG_OWNED_PAYLOAD)) {
+            paint_cmd_free_owned_payload(&pl->cmds[i]);
+        }
     }
     pl->count = 0;
 }
@@ -139,6 +146,42 @@ typedef struct {
     int transform_depth;
 } PaintIrValidationStack;
 
+typedef struct PaintOpDescriptor {
+    const char* name;
+    unsigned flags;
+} PaintOpDescriptor;
+
+static const PaintOpDescriptor* paint_op_descriptor(PaintOp op) {
+    static const PaintOpDescriptor descriptors[] = {
+#define PAINT_OP_DESCRIPTOR_ENTRY(op, flags) { #op, flags },
+        PAINT_OP_LIST(PAINT_OP_DESCRIPTOR_ENTRY)
+#undef PAINT_OP_DESCRIPTOR_ENTRY
+    };
+    static_assert((int)(sizeof(descriptors) / sizeof(descriptors[0])) == (int)PAINT_OP_COUNT,
+                  "PaintOp descriptor table must match PAINT_OP_LIST");
+    int op_index = (int)op;
+    if (op_index < 0 || op_index >= (int)PAINT_OP_COUNT) return nullptr;
+    return &descriptors[op_index];
+}
+
+const char* paint_op_name(PaintOp op) {
+    const PaintOpDescriptor* descriptor = paint_op_descriptor(op);
+    return descriptor ? descriptor->name : "PAINT_UNKNOWN";
+}
+
+bool paint_op_has_flags(PaintOp op, unsigned flags) {
+    const PaintOpDescriptor* descriptor = paint_op_descriptor(op);
+    return descriptor && (descriptor->flags & flags) == flags;
+}
+
+bool paint_list_has_op_flags(const PaintList* pl, unsigned flags) {
+    if (!pl) return false;
+    for (int i = 0; i < pl->count; i++) {
+        if (paint_op_has_flags(pl->cmds[i].op, flags)) return true;
+    }
+    return false;
+}
+
 static bool paint_ir_validation_fail_at(PaintIrValidationResult* result, int index,
                                         const char* message,
                                         const PaintIrValidationStack* stack) {
@@ -154,6 +197,48 @@ static bool paint_ir_validate_positive_image(const PaintDrawImage* image) {
     return image && image->pixels &&
            image->src_w > 0 && image->src_h > 0 && image->src_stride > 0 &&
            image->dst_w >= 0.0f && image->dst_h >= 0.0f;
+}
+
+static bool paint_ir_has_negative_size(float w, float h) {
+    return w < 0.0f || h < 0.0f;
+}
+
+static bool paint_ir_validate_resource_size(const void* resource, float w, float h) {
+    return resource && !paint_ir_has_negative_size(w, h);
+}
+
+static bool paint_ir_validate_gradient_payload(RdtPath* path,
+                                               const RdtGradientStop* stops,
+                                               int stop_count) {
+    return path && stops && stop_count > 0;
+}
+
+static bool paint_ir_validate_glyph_bitmap(const GlyphBitmap* bitmap) {
+    return bitmap && bitmap->buffer &&
+           bitmap->width > 0 && bitmap->height > 0 && bitmap->pitch > 0;
+}
+
+static bool paint_ir_validate_stroke_path(const PaintStrokePath* stroke) {
+    return stroke && stroke->path &&
+           stroke->width >= 0.0f &&
+           stroke->dash_count >= 0 &&
+           (stroke->dash_count == 0 || stroke->dash_array);
+}
+
+static bool paint_ir_validate_effect_group(const PaintEffectGroup* group) {
+    return group &&
+           group->bounds.right >= group->bounds.left &&
+           group->bounds.bottom >= group->bounds.top &&
+           group->opacity >= 0.0f &&
+           group->opacity <= 1.0f;
+}
+
+static bool paint_ir_validate_glyph_run(const PaintGlyphRun* run) {
+    if (!run) return false;
+    if (run->text) {
+        return run->text_len >= -1 && run->font_size >= 0.0f;
+    }
+    return run->glyph_ids && run->xs && run->ys && run->count > 0;
 }
 
 static bool paint_ir_image_resource_pixels(ImageSurface* image,
@@ -193,19 +278,65 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
         auto fail = [&](const char* message) -> bool {
             return paint_ir_validation_fail_at(result, i, message, &stack);
         };
+        const PaintOpDescriptor* descriptor = paint_op_descriptor(cmd->op);
+        if (!descriptor) return fail("unknown paint op");
+        auto has_descriptor_flags = [&](unsigned flags) -> bool {
+            return (descriptor->flags & flags) == flags;
+        };
+        auto pop_balanced = [&](int* depth, const char* message) -> bool {
+            if (*depth <= 0) return fail(message);
+            (*depth)--;
+            return true;
+        };
+        auto pop_region = [&](int* depth, float w, float h,
+                              const char* missing_message,
+                              const char* negative_message) -> bool {
+            if (*depth <= 0) return fail(missing_message);
+            if (paint_ir_has_negative_size(w, h)) return fail(negative_message);
+            (*depth)--;
+            return true;
+        };
+        auto require_non_negative_size = [&](float w, float h, const char* message) -> bool {
+            return !paint_ir_has_negative_size(w, h) || fail(message);
+        };
+        if (has_descriptor_flags(PAINT_OP_FLAG_TRANSFORM_STACK | PAINT_OP_FLAG_STACK_PUSH)) {
+            stack.transform_depth++;
+            continue;
+        }
+        if (has_descriptor_flags(PAINT_OP_FLAG_TRANSFORM_STACK | PAINT_OP_FLAG_STACK_POP)) {
+            if (!pop_balanced(&stack.transform_depth, "transform pop without matching push")) return false;
+            continue;
+        }
+        if (has_descriptor_flags(PAINT_OP_FLAG_EFFECT_STACK | PAINT_OP_FLAG_STACK_PUSH)) {
+            if (!paint_ir_validate_effect_group(&cmd->effect_group)) {
+                return fail("effect group payload is invalid");
+            }
+            stack.effect_depth++;
+            continue;
+        }
+        if (has_descriptor_flags(PAINT_OP_FLAG_EFFECT_STACK | PAINT_OP_FLAG_STACK_POP)) {
+            if (!pop_balanced(&stack.effect_depth, "effect group end without begin")) return false;
+            continue;
+        }
+        if (has_descriptor_flags(PAINT_OP_FLAG_CLIP_STACK | PAINT_OP_FLAG_STACK_PUSH)) {
+            if (!cmd->push_clip.clip_path) return fail("clip path is null");
+            stack.clip_depth++;
+            continue;
+        }
+        if (has_descriptor_flags(PAINT_OP_FLAG_CLIP_STACK | PAINT_OP_FLAG_STACK_POP)) {
+            if (!pop_balanced(&stack.clip_depth, "clip pop without matching push")) return false;
+            continue;
+        }
         switch (cmd->op) {
         case PAINT_FILL_RECT:
-            if (cmd->fill_rect.w < 0.0f || cmd->fill_rect.h < 0.0f) {
-                return fail("fill rect has negative size");
-            }
+            if (!require_non_negative_size(cmd->fill_rect.w, cmd->fill_rect.h,
+                                           "fill rect has negative size")) return false;
             break;
         case PAINT_FILL_ROUNDED_RECT:
-            if (cmd->fill_rounded_rect.w < 0.0f ||
-                cmd->fill_rounded_rect.h < 0.0f ||
-                cmd->fill_rounded_rect.rx < 0.0f ||
-                cmd->fill_rounded_rect.ry < 0.0f) {
-                return fail("rounded rect has negative size");
-            }
+            if (!require_non_negative_size(cmd->fill_rounded_rect.w, cmd->fill_rounded_rect.h,
+                                           "rounded rect has negative size")) return false;
+            if (!require_non_negative_size(cmd->fill_rounded_rect.rx, cmd->fill_rounded_rect.ry,
+                                           "rounded rect has negative size")) return false;
             break;
         case PAINT_FILL_PATH:
             if (!cmd->fill_path.path) {
@@ -213,23 +344,21 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
             }
             break;
         case PAINT_STROKE_PATH:
-            if (!cmd->stroke_path.path || cmd->stroke_path.width < 0.0f ||
-                cmd->stroke_path.dash_count < 0 ||
-                (cmd->stroke_path.dash_count > 0 && !cmd->stroke_path.dash_array)) {
+            if (!paint_ir_validate_stroke_path(&cmd->stroke_path)) {
                 return fail("stroke path payload is invalid");
             }
             break;
         case PAINT_FILL_LINEAR_GRADIENT:
-            if (!cmd->fill_linear_gradient.path ||
-                !cmd->fill_linear_gradient.stops ||
-                cmd->fill_linear_gradient.stop_count <= 0) {
+            if (!paint_ir_validate_gradient_payload(cmd->fill_linear_gradient.path,
+                                                    cmd->fill_linear_gradient.stops,
+                                                    cmd->fill_linear_gradient.stop_count)) {
                 return fail("linear gradient payload is invalid");
             }
             break;
         case PAINT_FILL_RADIAL_GRADIENT:
-            if (!cmd->fill_radial_gradient.path ||
-                !cmd->fill_radial_gradient.stops ||
-                cmd->fill_radial_gradient.stop_count <= 0 ||
+            if (!paint_ir_validate_gradient_payload(cmd->fill_radial_gradient.path,
+                                                    cmd->fill_radial_gradient.stops,
+                                                    cmd->fill_radial_gradient.stop_count) ||
                 cmd->fill_radial_gradient.r < 0.0f) {
                 return fail("radial gradient payload is invalid");
             }
@@ -240,17 +369,14 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
             }
             break;
         case PAINT_DRAW_IMAGE_RESOURCE:
-            if (!cmd->draw_image_resource.image ||
-                cmd->draw_image_resource.dst_w < 0.0f ||
-                cmd->draw_image_resource.dst_h < 0.0f) {
+            if (!paint_ir_validate_resource_size(cmd->draw_image_resource.image,
+                                                 cmd->draw_image_resource.dst_w,
+                                                 cmd->draw_image_resource.dst_h)) {
                 return fail("image resource payload is invalid");
             }
             break;
         case PAINT_DRAW_GLYPH:
-            if (!cmd->draw_glyph.bitmap.buffer ||
-                cmd->draw_glyph.bitmap.width <= 0 ||
-                cmd->draw_glyph.bitmap.height <= 0 ||
-                cmd->draw_glyph.bitmap.pitch <= 0) {
+            if (!paint_ir_validate_glyph_bitmap(&cmd->draw_glyph.bitmap)) {
                 return fail("glyph payload is invalid");
             }
             break;
@@ -260,146 +386,98 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
             }
             break;
         case PAINT_VIDEO_PLACEHOLDER:
-            if (!cmd->video_placeholder.video ||
-                cmd->video_placeholder.dst_w < 0.0f ||
-                cmd->video_placeholder.dst_h < 0.0f) {
+            if (!paint_ir_validate_resource_size(cmd->video_placeholder.video,
+                                                 cmd->video_placeholder.dst_w,
+                                                 cmd->video_placeholder.dst_h)) {
                 return fail("video placeholder payload is invalid");
             }
             break;
         case PAINT_WEBVIEW_LAYER_PLACEHOLDER:
-            if (!cmd->webview_layer_placeholder.surface ||
-                cmd->webview_layer_placeholder.dst_w < 0.0f ||
-                cmd->webview_layer_placeholder.dst_h < 0.0f) {
+            if (!paint_ir_validate_resource_size(cmd->webview_layer_placeholder.surface,
+                                                 cmd->webview_layer_placeholder.dst_w,
+                                                 cmd->webview_layer_placeholder.dst_h)) {
                 return fail("webview placeholder payload is invalid");
             }
             break;
         case PAINT_PUSH_CLIP:
-            if (!cmd->push_clip.clip_path) {
-                return fail("clip path is null");
-            }
-            stack.clip_depth++;
-            break;
         case PAINT_POP_CLIP:
-            if (stack.clip_depth <= 0) {
-                return fail("clip pop without matching push");
-            }
-            stack.clip_depth--;
-            break;
         case PAINT_PUSH_TRANSFORM:
-            stack.transform_depth++;
-            break;
         case PAINT_POP_TRANSFORM:
-            if (stack.transform_depth <= 0) {
-                return fail("transform pop without matching push");
-            }
-            stack.transform_depth--;
-            break;
+        case PAINT_BEGIN_EFFECT_GROUP:
+        case PAINT_END_EFFECT_GROUP:
+            // descriptor flags own stack validation; reaching this switch means PAINT_OP_LIST drifted.
+            return fail("stack op missing descriptor stack flags");
         case PAINT_SAVE_BACKDROP:
-            if (cmd->save_backdrop.w < 0 || cmd->save_backdrop.h < 0) {
-                return fail("saved backdrop has negative region");
-            }
+            if (!require_non_negative_size(cmd->save_backdrop.w, cmd->save_backdrop.h,
+                                           "saved backdrop has negative region")) return false;
             stack.backdrop_depth++;
             break;
         case PAINT_COMPOSITE_OPACITY:
-            if (stack.backdrop_depth <= 0) {
-                return fail("opacity composite without saved backdrop");
-            }
-            if (cmd->composite_opacity.w < 0 || cmd->composite_opacity.h < 0) {
-                return fail("opacity composite has negative region");
-            }
-            stack.backdrop_depth--;
+            if (!pop_region(&stack.backdrop_depth,
+                            cmd->composite_opacity.w, cmd->composite_opacity.h,
+                            "opacity composite without saved backdrop",
+                            "opacity composite has negative region")) return false;
             break;
         case PAINT_APPLY_BLEND_MODE:
-            if (stack.backdrop_depth <= 0) {
-                return fail("blend mode without saved backdrop");
-            }
-            if (cmd->apply_blend_mode.w < 0 || cmd->apply_blend_mode.h < 0) {
-                return fail("blend mode has negative region");
-            }
-            stack.backdrop_depth--;
+            if (!pop_region(&stack.backdrop_depth,
+                            cmd->apply_blend_mode.w, cmd->apply_blend_mode.h,
+                            "blend mode without saved backdrop",
+                            "blend mode has negative region")) return false;
             break;
         case PAINT_APPLY_FILTER:
             if (!cmd->apply_filter.filter ||
-                cmd->apply_filter.w < 0.0f ||
-                cmd->apply_filter.h < 0.0f) {
+                !require_non_negative_size(cmd->apply_filter.w, cmd->apply_filter.h,
+                                           "filter payload is invalid")) {
                 return fail("filter payload is invalid");
             }
             break;
         case PAINT_BOX_BLUR_REGION:
-            if (cmd->box_blur_region.rw < 0 ||
-                cmd->box_blur_region.rh < 0 ||
+            if (!require_non_negative_size(cmd->box_blur_region.rw, cmd->box_blur_region.rh,
+                                           "box blur region payload is invalid") ||
                 cmd->box_blur_region.blur_radius < 0.0f) {
                 return fail("box blur region payload is invalid");
             }
             break;
         case PAINT_BOX_BLUR_INSET:
-            if (cmd->box_blur_inset.rw < 0 ||
-                cmd->box_blur_inset.rh < 0 ||
+            if (!require_non_negative_size(cmd->box_blur_inset.rw, cmd->box_blur_inset.rh,
+                                           "inset blur payload is invalid") ||
                 cmd->box_blur_inset.pad < 0 ||
                 cmd->box_blur_inset.blur_radius < 0.0f) {
                 return fail("inset blur payload is invalid");
             }
             break;
         case PAINT_SHADOW_CLIP_SAVE:
-            if (cmd->shadow_clip_save.rw < 0 ||
-                cmd->shadow_clip_save.rh < 0) {
-                return fail("shadow clip save has negative region");
-            }
+            if (!require_non_negative_size(cmd->shadow_clip_save.rw, cmd->shadow_clip_save.rh,
+                                           "shadow clip save has negative region")) return false;
             stack.shadow_clip_depth++;
             break;
         case PAINT_SHADOW_CLIP_RESTORE:
-            if (stack.shadow_clip_depth <= 0) {
-                return fail("shadow clip restore without save");
-            }
-            if (cmd->shadow_clip_restore.save_rw < 0 ||
-                cmd->shadow_clip_restore.save_rh < 0) {
-                return fail("shadow clip restore has negative region");
-            }
-            stack.shadow_clip_depth--;
+            if (!pop_region(&stack.shadow_clip_depth,
+                            cmd->shadow_clip_restore.save_rw,
+                            cmd->shadow_clip_restore.save_rh,
+                            "shadow clip restore without save",
+                            "shadow clip restore has negative region")) return false;
             break;
         case PAINT_OUTER_SHADOW:
-            if (cmd->outer_shadow.shadow_w < 0.0f ||
-                cmd->outer_shadow.shadow_h < 0.0f ||
+            if (!require_non_negative_size(cmd->outer_shadow.shadow_w, cmd->outer_shadow.shadow_h,
+                                           "outer shadow payload is invalid") ||
                 cmd->outer_shadow.blur_radius < 0.0f) {
                 return fail("outer shadow payload is invalid");
             }
             break;
         case PAINT_FILL_SURFACE_RECT:
-            if (cmd->fill_surface_rect.w < 0.0f ||
-                cmd->fill_surface_rect.h < 0.0f) {
-                return fail("surface fill has negative size");
-            }
+            if (!require_non_negative_size(cmd->fill_surface_rect.w, cmd->fill_surface_rect.h,
+                                           "surface fill has negative size")) return false;
             break;
         case PAINT_BLIT_SURFACE_SCALED:
-            if (!cmd->blit_surface_scaled.src_surface ||
-                cmd->blit_surface_scaled.dst_w < 0.0f ||
-                cmd->blit_surface_scaled.dst_h < 0.0f) {
+            if (!paint_ir_validate_resource_size(cmd->blit_surface_scaled.src_surface,
+                                                 cmd->blit_surface_scaled.dst_w,
+                                                 cmd->blit_surface_scaled.dst_h)) {
                 return fail("surface blit payload is invalid");
             }
             break;
-        case PAINT_BEGIN_EFFECT_GROUP:
-            if (cmd->effect_group.bounds.right < cmd->effect_group.bounds.left ||
-                cmd->effect_group.bounds.bottom < cmd->effect_group.bounds.top ||
-                cmd->effect_group.opacity < 0.0f ||
-                cmd->effect_group.opacity > 1.0f) {
-                return fail("effect group payload is invalid");
-            }
-            stack.effect_depth++;
-            break;
-        case PAINT_END_EFFECT_GROUP:
-            if (stack.effect_depth <= 0) {
-                return fail("effect group end without begin");
-            }
-            stack.effect_depth--;
-            break;
         case PAINT_GLYPH_RUN:
-            if (cmd->glyph_run.text) {
-                if (cmd->glyph_run.text_len < -1 ||
-                    cmd->glyph_run.font_size < 0.0f) {
-                    return fail("text run payload is invalid");
-                }
-            } else if (!cmd->glyph_run.glyph_ids || !cmd->glyph_run.xs ||
-                       !cmd->glyph_run.ys || cmd->glyph_run.count <= 0) {
+            if (!paint_ir_validate_glyph_run(&cmd->glyph_run)) {
                 return fail("glyph run payload is invalid");
             }
             break;
@@ -411,26 +489,18 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
             }
             break;
         case PAINT_OP_COUNT:
-        default:
             return fail("unknown paint op");
         }
     }
 
-    if (stack.clip_depth != 0) {
-        return paint_ir_validation_fail_at(result, pl->count, "clip stack is unbalanced", &stack);
-    }
-    if (stack.backdrop_depth != 0) {
-        return paint_ir_validation_fail_at(result, pl->count, "backdrop stack is unbalanced", &stack);
-    }
-    if (stack.shadow_clip_depth != 0) {
-        return paint_ir_validation_fail_at(result, pl->count, "shadow clip stack is unbalanced", &stack);
-    }
-    if (stack.effect_depth != 0) {
-        return paint_ir_validation_fail_at(result, pl->count, "effect group stack is unbalanced", &stack);
-    }
-    if (stack.transform_depth != 0) {
-        return paint_ir_validation_fail_at(result, pl->count, "transform stack is unbalanced", &stack);
-    }
+    auto require_balanced = [&](int depth, const char* message) -> bool {
+        return depth == 0 || paint_ir_validation_fail_at(result, pl->count, message, &stack);
+    };
+    if (!require_balanced(stack.clip_depth, "clip stack is unbalanced")) return false;
+    if (!require_balanced(stack.backdrop_depth, "backdrop stack is unbalanced")) return false;
+    if (!require_balanced(stack.shadow_clip_depth, "shadow clip stack is unbalanced")) return false;
+    if (!require_balanced(stack.effect_depth, "effect group stack is unbalanced")) return false;
+    if (!require_balanced(stack.transform_depth, "transform stack is unbalanced")) return false;
 
     paint_ir_validation_set(result, true, -1, "ok", 0, 0, 0, 0);
     return true;
@@ -471,6 +541,18 @@ static void paint_copy_effect_params(float* dst, int type, const float* params) 
     }
 }
 
+static void paint_assign_optional_transform(bool* has_transform,
+                                            RdtMatrix* dst,
+                                            const RdtMatrix* transform) {
+    *has_transform = transform != nullptr;
+    if (transform) *dst = *transform;
+}
+
+static void paint_assign_optional_clip(bool* has_clip, Bound* dst, const Bound* clip) {
+    *has_clip = clip != nullptr;
+    if (clip) *dst = *clip;
+}
+
 // ---------------------------------------------------------------------------
 // PaintBuilder — recording API
 // ---------------------------------------------------------------------------
@@ -495,8 +577,8 @@ void paint_fill_path(PaintList* pl, RdtPath* path, Color color,
     cmd->fill_path.path = path;
     cmd->fill_path.color = color;
     cmd->fill_path.rule = rule;
-    cmd->fill_path.has_transform = transform != nullptr;
-    if (transform) cmd->fill_path.transform = *transform;
+    paint_assign_optional_transform(&cmd->fill_path.has_transform,
+                                    &cmd->fill_path.transform, transform);
 }
 
 void paint_stroke_path(PaintList* pl, RdtPath* path, Color color, float width,
@@ -513,8 +595,8 @@ void paint_stroke_path(PaintList* pl, RdtPath* path, Color color, float width,
     cmd->stroke_path.dash_array = dash_array;
     cmd->stroke_path.dash_count = dash_count;
     cmd->stroke_path.dash_phase = dash_phase;
-    cmd->stroke_path.has_transform = transform != nullptr;
-    if (transform) cmd->stroke_path.transform = *transform;
+    paint_assign_optional_transform(&cmd->stroke_path.has_transform,
+                                    &cmd->stroke_path.transform, transform);
 }
 
 void paint_fill_linear_gradient(PaintList* pl, RdtPath* path,
@@ -532,10 +614,10 @@ void paint_fill_linear_gradient(PaintList* pl, RdtPath* path,
     cmd->fill_linear_gradient.stops = stops;
     cmd->fill_linear_gradient.stop_count = stop_count;
     cmd->fill_linear_gradient.rule = rule;
-    cmd->fill_linear_gradient.has_transform = transform != nullptr;
-    if (transform) cmd->fill_linear_gradient.transform = *transform;
-    cmd->fill_linear_gradient.has_gradient_transform = gradient_transform != nullptr;
-    if (gradient_transform) cmd->fill_linear_gradient.gradient_transform = *gradient_transform;
+    paint_assign_optional_transform(&cmd->fill_linear_gradient.has_transform,
+                                    &cmd->fill_linear_gradient.transform, transform);
+    paint_assign_optional_transform(&cmd->fill_linear_gradient.has_gradient_transform,
+                                    &cmd->fill_linear_gradient.gradient_transform, gradient_transform);
 }
 
 void paint_fill_radial_gradient(PaintList* pl, RdtPath* path,
@@ -552,10 +634,10 @@ void paint_fill_radial_gradient(PaintList* pl, RdtPath* path,
     cmd->fill_radial_gradient.stops = stops;
     cmd->fill_radial_gradient.stop_count = stop_count;
     cmd->fill_radial_gradient.rule = rule;
-    cmd->fill_radial_gradient.has_transform = transform != nullptr;
-    if (transform) cmd->fill_radial_gradient.transform = *transform;
-    cmd->fill_radial_gradient.has_gradient_transform = gradient_transform != nullptr;
-    if (gradient_transform) cmd->fill_radial_gradient.gradient_transform = *gradient_transform;
+    paint_assign_optional_transform(&cmd->fill_radial_gradient.has_transform,
+                                    &cmd->fill_radial_gradient.transform, transform);
+    paint_assign_optional_transform(&cmd->fill_radial_gradient.has_gradient_transform,
+                                    &cmd->fill_radial_gradient.gradient_transform, gradient_transform);
 }
 
 void paint_draw_image(PaintList* pl, const uint32_t* pixels,
@@ -574,8 +656,8 @@ void paint_draw_image(PaintList* pl, const uint32_t* pixels,
     cmd->draw_image.dst_w = dst_w;
     cmd->draw_image.dst_h = dst_h;
     cmd->draw_image.opacity = opacity;
-    cmd->draw_image.has_transform = transform != nullptr;
-    if (transform) cmd->draw_image.transform = *transform;
+    paint_assign_optional_transform(&cmd->draw_image.has_transform,
+                                    &cmd->draw_image.transform, transform);
     cmd->draw_image.resource_owner = resource_owner;
 }
 
@@ -592,8 +674,8 @@ void paint_draw_image_resource(PaintList* pl, ImageSurface* image,
     cmd->draw_image_resource.dst_w = dst_w;
     cmd->draw_image_resource.dst_h = dst_h;
     cmd->draw_image_resource.opacity = opacity;
-    cmd->draw_image_resource.has_transform = transform != nullptr;
-    if (transform) cmd->draw_image_resource.transform = *transform;
+    paint_assign_optional_transform(&cmd->draw_image_resource.has_transform,
+                                    &cmd->draw_image_resource.transform, transform);
 }
 
 void paint_draw_glyph(PaintList* pl, GlyphBitmap* bitmap, int x, int y,
@@ -607,10 +689,9 @@ void paint_draw_glyph(PaintList* pl, GlyphBitmap* bitmap, int x, int y,
     cmd->draw_glyph.y = y;
     cmd->draw_glyph.color = color;
     cmd->draw_glyph.is_color_emoji = is_color_emoji;
-    cmd->draw_glyph.has_clip = clip != nullptr;
-    if (clip) cmd->draw_glyph.clip = *clip;
-    cmd->draw_glyph.has_transform = transform != nullptr;
-    if (transform) cmd->draw_glyph.transform = *transform;
+    paint_assign_optional_clip(&cmd->draw_glyph.has_clip, &cmd->draw_glyph.clip, clip);
+    paint_assign_optional_transform(&cmd->draw_glyph.has_transform,
+                                    &cmd->draw_glyph.transform, transform);
     cmd->draw_glyph.resource_generation = resource_generation;
 }
 
@@ -620,8 +701,8 @@ void paint_draw_picture(PaintList* pl, RdtPicture* picture,
     if (!cmd) return;
     cmd->draw_picture.picture = picture;
     cmd->draw_picture.opacity = opacity;
-    cmd->draw_picture.has_transform = transform != nullptr;
-    if (transform) cmd->draw_picture.transform = *transform;
+    paint_assign_optional_transform(&cmd->draw_picture.has_transform,
+                                    &cmd->draw_picture.transform, transform);
 }
 
 void paint_video_placeholder(PaintList* pl, void* video,
@@ -636,8 +717,8 @@ void paint_video_placeholder(PaintList* pl, void* video,
     cmd->video_placeholder.dst_w = dst_w;
     cmd->video_placeholder.dst_h = dst_h;
     cmd->video_placeholder.object_fit = object_fit;
-    cmd->video_placeholder.has_clip = clip != nullptr;
-    if (clip) cmd->video_placeholder.clip = *clip;
+    paint_assign_optional_clip(&cmd->video_placeholder.has_clip,
+                               &cmd->video_placeholder.clip, clip);
     cmd->video_placeholder.video_generation = video_generation;
 }
 
@@ -652,8 +733,8 @@ void paint_webview_layer_placeholder(PaintList* pl, void* surface,
     cmd->webview_layer_placeholder.dst_y = dst_y;
     cmd->webview_layer_placeholder.dst_w = dst_w;
     cmd->webview_layer_placeholder.dst_h = dst_h;
-    cmd->webview_layer_placeholder.has_clip = clip != nullptr;
-    if (clip) cmd->webview_layer_placeholder.clip = *clip;
+    paint_assign_optional_clip(&cmd->webview_layer_placeholder.has_clip,
+                               &cmd->webview_layer_placeholder.clip, clip);
     cmd->webview_layer_placeholder.surface_generation = surface_generation;
 }
 
@@ -661,8 +742,8 @@ void paint_push_clip(PaintList* pl, RdtPath* clip_path, const RdtMatrix* transfo
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_PUSH_CLIP);
     if (!cmd) return;
     cmd->push_clip.clip_path = clip_path;
-    cmd->push_clip.has_transform = transform != nullptr;
-    if (transform) cmd->push_clip.transform = *transform;
+    paint_assign_optional_transform(&cmd->push_clip.has_transform,
+                                    &cmd->push_clip.transform, transform);
 }
 
 void paint_pop_clip(PaintList* pl) {
@@ -708,8 +789,7 @@ void paint_apply_filter(PaintList* pl, float x, float y, float w, float h,
     cmd->apply_filter.w = w;
     cmd->apply_filter.h = h;
     cmd->apply_filter.filter = filter;
-    cmd->apply_filter.has_clip = clip != nullptr;
-    if (clip) cmd->apply_filter.clip = *clip;
+    paint_assign_optional_clip(&cmd->apply_filter.has_clip, &cmd->apply_filter.clip, clip);
 }
 
 void paint_box_blur_region(PaintList* pl, int rx, int ry, int rw, int rh,
@@ -794,8 +874,8 @@ void paint_fill_surface_rect(PaintList* pl, float x, float y, float w, float h,
     cmd->fill_surface_rect.w = w;
     cmd->fill_surface_rect.h = h;
     cmd->fill_surface_rect.color = color;
-    cmd->fill_surface_rect.has_clip = clip != nullptr;
-    if (clip) cmd->fill_surface_rect.clip = *clip;
+    paint_assign_optional_clip(&cmd->fill_surface_rect.has_clip,
+                               &cmd->fill_surface_rect.clip, clip);
     cmd->fill_surface_rect.clip_shapes = clip_shapes;
     cmd->fill_surface_rect.clip_depth = clip_depth;
 }
@@ -815,8 +895,8 @@ void paint_blit_surface_scaled(PaintList* pl, void* src_surface,
     cmd->blit_surface_scaled.dst_h = dst_h;
     cmd->blit_surface_scaled.scale_mode = scale_mode;
     cmd->blit_surface_scaled.opacity = opacity;
-    cmd->blit_surface_scaled.has_clip = clip != nullptr;
-    if (clip) cmd->blit_surface_scaled.clip = *clip;
+    paint_assign_optional_clip(&cmd->blit_surface_scaled.has_clip,
+                               &cmd->blit_surface_scaled.clip, clip);
     cmd->blit_surface_scaled.clip_shapes = clip_shapes;
     cmd->blit_surface_scaled.clip_depth = clip_depth;
 }
@@ -859,6 +939,15 @@ typedef struct PaintIrRasterEffectFrame {
 
 #define PAINT_IR_RASTER_EFFECT_STACK_MAX 64
 
+static const RdtMatrix* paint_optional_transform(bool has_transform,
+                                                 const RdtMatrix* transform) {
+    return has_transform ? transform : nullptr;
+}
+
+static const Bound* paint_optional_clip(bool has_clip, const Bound* clip) {
+    return has_clip ? clip : nullptr;
+}
+
 static bool paint_ir_effect_bounds_to_region(const Bound* bounds,
                                              int* x0, int* y0,
                                              int* w, int* h) {
@@ -890,7 +979,7 @@ static void paint_ir_lower_raster_effect_begin(const PaintEffectGroup* group,
                         group->bounds.right - group->bounds.left,
                         group->bounds.bottom - group->bounds.top,
                         group->backdrop_filter,
-                        group->has_clip ? &clip : nullptr);
+                        paint_optional_clip(group->has_clip, &clip));
     }
     if (group->blend_mode) {
         dl_save_backdrop(dl, x0, y0, w, h);
@@ -915,7 +1004,7 @@ static void paint_ir_lower_raster_effect_finish(const PaintEffectGroup* group,
                         group->bounds.right - group->bounds.left,
                         group->bounds.bottom - group->bounds.top,
                         group->filter,
-                        group->has_clip ? &clip : nullptr);
+                        paint_optional_clip(group->has_clip, &clip));
     }
 
     int x0 = 0, y0 = 0, w = 0, h = 0;
@@ -941,6 +1030,10 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
 
     for (int i = 0; i < pl->count; i++) {
         const PaintCmd* cmd = &pl->cmds[i];
+        if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_RASTER_NOOP)) {
+            // raster vector ops carry local transforms; stack markers are kept for validation and vector backends only.
+            continue;
+        }
         switch (cmd->op) {
         case PAINT_FILL_RECT: {
             const PaintFillRect* p = &cmd->fill_rect;
@@ -955,30 +1048,32 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
         case PAINT_FILL_PATH: {
             const PaintFillPath* p = &cmd->fill_path;
             dl_fill_path(dl, p->path, p->color, p->rule,
-                         p->has_transform ? &p->transform : nullptr);
+                         paint_optional_transform(p->has_transform, &p->transform));
             break;
         }
         case PAINT_STROKE_PATH: {
             const PaintStrokePath* p = &cmd->stroke_path;
             dl_stroke_path(dl, p->path, p->color, p->width, p->cap, p->join,
                            p->dash_array, p->dash_count, p->dash_phase,
-                           p->has_transform ? &p->transform : nullptr);
+                           paint_optional_transform(p->has_transform, &p->transform));
             break;
         }
         case PAINT_FILL_LINEAR_GRADIENT: {
             const PaintFillLinearGradient* p = &cmd->fill_linear_gradient;
             dl_fill_linear_gradient(dl, p->path, p->x1, p->y1, p->x2, p->y2,
                                     p->stops, p->stop_count, p->rule,
-                                    p->has_transform ? &p->transform : nullptr,
-                                    p->has_gradient_transform ? &p->gradient_transform : nullptr);
+                                    paint_optional_transform(p->has_transform, &p->transform),
+                                    paint_optional_transform(p->has_gradient_transform,
+                                                             &p->gradient_transform));
             break;
         }
         case PAINT_FILL_RADIAL_GRADIENT: {
             const PaintFillRadialGradient* p = &cmd->fill_radial_gradient;
             dl_fill_radial_gradient(dl, p->path, p->cx, p->cy, p->r,
                                     p->stops, p->stop_count, p->rule,
-                                    p->has_transform ? &p->transform : nullptr,
-                                    p->has_gradient_transform ? &p->gradient_transform : nullptr);
+                                    paint_optional_transform(p->has_transform, &p->transform),
+                                    paint_optional_transform(p->has_gradient_transform,
+                                                             &p->gradient_transform));
             break;
         }
         case PAINT_DRAW_IMAGE: {
@@ -986,7 +1081,7 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
             ImageSurface* owner = (ImageSurface*)p->resource_owner;
             dl_draw_image(dl, p->pixels, p->src_w, p->src_h, p->src_stride,
                           p->dst_x, p->dst_y, p->dst_w, p->dst_h, p->opacity,
-                          p->has_transform ? &p->transform : nullptr,
+                          paint_optional_transform(p->has_transform, &p->transform),
                           owner, owner ? owner->generation : 0);
             break;
         }
@@ -1002,7 +1097,7 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
                 dl_draw_image(dl, pixels, src_w, src_h, src_stride,
                               p->dst_x, p->dst_y, p->dst_w, p->dst_h,
                               p->opacity,
-                              p->has_transform ? &p->transform : nullptr,
+                              paint_optional_transform(p->has_transform, &p->transform),
                               p->image, p->image->generation);
             }
             break;
@@ -1011,21 +1106,21 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
             const PaintDrawGlyph* p = &cmd->draw_glyph;
             dl_draw_glyph(dl, (GlyphBitmap*)&p->bitmap, p->x, p->y,
                           p->color, p->is_color_emoji,
-                          p->has_clip ? &p->clip : nullptr,
-                          p->has_transform ? &p->transform : nullptr,
+                          paint_optional_clip(p->has_clip, &p->clip),
+                          paint_optional_transform(p->has_transform, &p->transform),
                           p->resource_generation);
             break;
         }
         case PAINT_DRAW_PICTURE: {
             const PaintDrawPicture* p = &cmd->draw_picture;
             dl_draw_picture(dl, p->picture, p->opacity,
-                            p->has_transform ? &p->transform : nullptr);
+                            paint_optional_transform(p->has_transform, &p->transform));
             break;
         }
         case PAINT_VIDEO_PLACEHOLDER: {
             const PaintVideoPlaceholder* p = &cmd->video_placeholder;
             dl_video_placeholder(dl, p->video, p->dst_x, p->dst_y, p->dst_w, p->dst_h,
-                                 p->object_fit, p->has_clip ? &p->clip : nullptr,
+                                 p->object_fit, paint_optional_clip(p->has_clip, &p->clip),
                                  p->video_generation);
             break;
         }
@@ -1033,13 +1128,14 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
             const PaintWebviewLayerPlaceholder* p = &cmd->webview_layer_placeholder;
             dl_webview_layer_placeholder(dl, p->surface,
                                          p->dst_x, p->dst_y, p->dst_w, p->dst_h,
-                                         p->has_clip ? &p->clip : nullptr,
+                                         paint_optional_clip(p->has_clip, &p->clip),
                                          p->surface_generation);
             break;
         }
         case PAINT_PUSH_CLIP: {
             const PaintPushClip* p = &cmd->push_clip;
-            dl_push_clip(dl, p->clip_path, p->has_transform ? &p->transform : nullptr);
+            dl_push_clip(dl, p->clip_path,
+                         paint_optional_transform(p->has_transform, &p->transform));
             break;
         }
         case PAINT_POP_CLIP:
@@ -1064,7 +1160,7 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
         case PAINT_APPLY_FILTER: {
             const PaintApplyFilter* p = &cmd->apply_filter;
             dl_apply_filter(dl, p->x, p->y, p->w, p->h, p->filter,
-                            p->has_clip ? &p->clip : nullptr);
+                            paint_optional_clip(p->has_clip, &p->clip));
             break;
         }
         case PAINT_BOX_BLUR_REGION: {
@@ -1106,7 +1202,7 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
         case PAINT_FILL_SURFACE_RECT: {
             const PaintFillSurfaceRect* p = &cmd->fill_surface_rect;
             dl_fill_surface_rect(dl, p->x, p->y, p->w, p->h,
-                                 p->color, p->has_clip ? &p->clip : nullptr,
+                                 p->color, paint_optional_clip(p->has_clip, &p->clip),
                                  p->clip_shapes, p->clip_depth);
             break;
         }
@@ -1114,7 +1210,7 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
             const PaintBlitSurfaceScaled* p = &cmd->blit_surface_scaled;
             dl_blit_surface_scaled(dl, p->src_surface,
                                    p->dst_x, p->dst_y, p->dst_w, p->dst_h,
-                                   p->scale_mode, p->has_clip ? &p->clip : nullptr,
+                                   p->scale_mode, paint_optional_clip(p->has_clip, &p->clip),
                                    p->clip_shapes, p->clip_depth,
                                    p->opacity, p->src_generation);
             break;
@@ -1151,9 +1247,6 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
 
         // Other higher-level semantic ops are target-neutral; the raster lowering
         // only consumes their pixel-domain expansions during this migration.
-        case PAINT_PUSH_TRANSFORM:
-        case PAINT_POP_TRANSFORM:
-            break;
         case PAINT_GLYPH_RUN:
             if (g_glyph_run_raster_lowerer) {
                 g_glyph_run_raster_lowerer(&cmd->glyph_run, dl);
@@ -1290,6 +1383,24 @@ static void paint_svg_append_rounded_rect_path(StrBuf* out,
         rx, ry, x + rx, y);
 }
 
+static void paint_svg_append_filled_rect(StrBuf* out, int indent_level,
+                                         float x, float y, float w, float h,
+                                         float rx, float ry, bool rounded,
+                                         Color color) {
+    paint_svg_indent(out, indent_level);
+    if (rounded) {
+        strbuf_append_format(out,
+            "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" rx=\"%.2f\" ry=\"%.2f\" fill=\"",
+            x, y, w, h, rx, ry);
+    } else {
+        strbuf_append_format(out,
+            "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"",
+            x, y, w, h);
+    }
+    paint_svg_append_color(out, color);
+    strbuf_append_str(out, "\" />\n");
+}
+
 typedef struct PaintSvgPathContext {
     StrBuf* out;
     bool has_command;
@@ -1349,19 +1460,6 @@ static bool paint_svg_path_to_string(RdtPath* path, StrBuf* out) {
     ctx.out = out;
     if (!rdt_path_visit(path, paint_svg_path_visit, &ctx)) return false;
     return ctx.has_command;
-}
-
-static const char* paint_op_name(PaintOp op) {
-    static const char* names[] = {
-#define PAINT_OP_NAME_ENTRY(op) #op,
-        PAINT_OP_LIST(PAINT_OP_NAME_ENTRY)
-#undef PAINT_OP_NAME_ENTRY
-    };
-    static_assert((int)(sizeof(names) / sizeof(names[0])) == (int)PAINT_OP_COUNT,
-                  "PaintOp name table must match PAINT_OP_LIST");
-    int op_index = (int)op;
-    if (op_index < 0 || op_index >= (int)PAINT_OP_COUNT) return "PAINT_UNKNOWN";
-    return names[op_index];
 }
 
 static void paint_svg_note_unsupported(StrBuf* out, int indent_level, PaintOp op,
@@ -1447,6 +1545,23 @@ static void paint_svg_append_gradient_stops(StrBuf* out,
     }
 }
 
+static void paint_svg_append_gradient_fill_path(StrBuf* out,
+                                                int indent_level,
+                                                const char* path_data,
+                                                const char* gradient_name,
+                                                int gradient_id,
+                                                int fill_rule,
+                                                const RdtMatrix* transform) {
+    paint_svg_indent(out, indent_level);
+    strbuf_append_format(out, "<path d=\"%s\" fill=\"url(#paint-ir-%s-%d)\"",
+                         path_data, gradient_name, gradient_id);
+    if (fill_rule == RDT_FILL_EVEN_ODD) {
+        strbuf_append_str(out, " fill-rule=\"evenodd\"");
+    }
+    paint_svg_append_matrix_attr(out, transform);
+    strbuf_append_str(out, " />\n");
+}
+
 void paint_svg_lowering_state_init(PaintSvgLoweringState* state, int indent_level) {
     if (!state) return;
     memset(state, 0, sizeof(PaintSvgLoweringState));
@@ -1483,64 +1598,85 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
     int skipped_transform_depth = state->skipped_transform_depth;
     int open_effect_depth = state->open_effect_depth;
     int skipped_effect_depth = state->skipped_effect_depth;
+    auto note_unsupported = [&](PaintOp op) {
+        paint_svg_note_unsupported(out, indent_level, op,
+                                   emit_unsupported_comments, active_stats);
+    };
+    auto skip_nested_push = [&](int* skipped_depth, PaintOp op) -> bool {
+        if (*skipped_depth <= 0) return false;
+        (*skipped_depth)++;
+        note_unsupported(op);
+        return true;
+    };
+    auto skip_nested_pop = [&](int* skipped_depth, PaintOp op) -> bool {
+        if (*skipped_depth <= 0) return false;
+        (*skipped_depth)--;
+        note_unsupported(op);
+        return true;
+    };
+    auto close_svg_group = [&](int* open_depth, PaintOp op) -> bool {
+        if (*open_depth <= 0) {
+            note_unsupported(op);
+            return false;
+        }
+        (*open_depth)--;
+        indent_level--;
+        paint_svg_indent(out, indent_level);
+        strbuf_append_str(out, "</g>\n");
+        active_stats->emitted_count++;
+        return true;
+    };
+    auto path_data_or_note = [&](RdtPath* path, PaintOp op) -> StrBuf* {
+        StrBuf* path_data = strbuf_new();
+        if (!paint_svg_path_to_string(path, path_data)) {
+            strbuf_free(path_data);
+            note_unsupported(op);
+            return nullptr;
+        }
+        return path_data;
+    };
 
     for (int i = 0; i < pl->count; i++) {
         const PaintCmd* cmd = &pl->cmds[i];
         active_stats->command_count++;
         if (skipped_effect_depth > 0 &&
-            cmd->op != PAINT_BEGIN_EFFECT_GROUP &&
-            cmd->op != PAINT_END_EFFECT_GROUP) {
-            paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                       emit_unsupported_comments, active_stats);
+            !paint_op_has_flags(cmd->op, PAINT_OP_FLAG_EFFECT_STACK)) {
+            note_unsupported(cmd->op);
             continue;
         }
         switch (cmd->op) {
         case PAINT_FILL_RECT: {
             if (!paint_svg_caps_allow_rect(caps)) {
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
+                note_unsupported(cmd->op);
                 break;
             }
             const PaintFillRect* p = &cmd->fill_rect;
-            paint_svg_indent(out, indent_level);
-            strbuf_append_format(out,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"",
-                p->x, p->y, p->w, p->h);
-            paint_svg_append_color(out, p->color);
-            strbuf_append_str(out, "\" />\n");
+            paint_svg_append_filled_rect(out, indent_level,
+                                         p->x, p->y, p->w, p->h,
+                                         0.0f, 0.0f, false, p->color);
             active_stats->emitted_count++;
             break;
         }
         case PAINT_FILL_ROUNDED_RECT: {
             if (!paint_svg_caps_allow_rounded_rect(caps)) {
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
+                note_unsupported(cmd->op);
                 break;
             }
             const PaintFillRoundedRect* p = &cmd->fill_rounded_rect;
-            paint_svg_indent(out, indent_level);
-            strbuf_append_format(out,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" rx=\"%.2f\" ry=\"%.2f\" fill=\"",
-                p->x, p->y, p->w, p->h, p->rx, p->ry);
-            paint_svg_append_color(out, p->color);
-            strbuf_append_str(out, "\" />\n");
+            paint_svg_append_filled_rect(out, indent_level,
+                                         p->x, p->y, p->w, p->h,
+                                         p->rx, p->ry, true, p->color);
             active_stats->emitted_count++;
             break;
         }
         case PAINT_FILL_PATH: {
             const PaintFillPath* p = &cmd->fill_path;
             if (!paint_svg_caps_allow_path(caps, p->has_transform)) {
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
+                note_unsupported(cmd->op);
                 break;
             }
-            StrBuf* path_data = strbuf_new();
-            if (!paint_svg_path_to_string(p->path, path_data)) {
-                strbuf_free(path_data);
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
-                break;
-            }
+            StrBuf* path_data = path_data_or_note(p->path, cmd->op);
+            if (!path_data) break;
 
             paint_svg_indent(out, indent_level);
             strbuf_append_format(out, "<path d=\"%s\" fill=\"", path_data->str);
@@ -1549,7 +1685,8 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             if (p->rule == RDT_FILL_EVEN_ODD) {
                 strbuf_append_str(out, " fill-rule=\"evenodd\"");
             }
-            paint_svg_append_matrix_attr(out, p->has_transform ? &p->transform : nullptr);
+            paint_svg_append_matrix_attr(out,
+                                         paint_optional_transform(p->has_transform, &p->transform));
             strbuf_append_str(out, " />\n");
             strbuf_free(path_data);
             active_stats->emitted_count++;
@@ -1558,17 +1695,11 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
         case PAINT_STROKE_PATH: {
             const PaintStrokePath* p = &cmd->stroke_path;
             if (!paint_svg_caps_allow_stroke(caps, p->has_transform)) {
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
+                note_unsupported(cmd->op);
                 break;
             }
-            StrBuf* path_data = strbuf_new();
-            if (!paint_svg_path_to_string(p->path, path_data)) {
-                strbuf_free(path_data);
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
-                break;
-            }
+            StrBuf* path_data = path_data_or_note(p->path, cmd->op);
+            if (!path_data) break;
 
             paint_svg_indent(out, indent_level);
             strbuf_append_format(out, "<path d=\"%s\" fill=\"none\" stroke=\"", path_data->str);
@@ -1588,7 +1719,8 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
                     strbuf_append_format(out, " stroke-dashoffset=\"%.2f\"", p->dash_phase);
                 }
             }
-            paint_svg_append_matrix_attr(out, p->has_transform ? &p->transform : nullptr);
+            paint_svg_append_matrix_attr(out,
+                                         paint_optional_transform(p->has_transform, &p->transform));
             strbuf_append_str(out, " />\n");
             strbuf_free(path_data);
             active_stats->emitted_count++;
@@ -1598,18 +1730,12 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             const PaintFillLinearGradient* p = &cmd->fill_linear_gradient;
             if (!paint_svg_caps_allow_gradient(caps, p->has_transform || p->has_gradient_transform) ||
                 !p->stops || p->stop_count <= 0) {
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
+                note_unsupported(cmd->op);
                 break;
             }
 
-            StrBuf* path_data = strbuf_new();
-            if (!paint_svg_path_to_string(p->path, path_data)) {
-                strbuf_free(path_data);
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
-                break;
-            }
+            StrBuf* path_data = path_data_or_note(p->path, cmd->op);
+            if (!path_data) break;
 
             int gradient_id = resource_id_base + i;
             paint_svg_indent(out, indent_level);
@@ -1618,21 +1744,17 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
                 "x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\"",
                 gradient_id, p->x1, p->y1, p->x2, p->y2);
             paint_svg_append_named_matrix_attr(out, "gradientTransform",
-                                               p->has_gradient_transform ? &p->gradient_transform : nullptr);
+                                               paint_optional_transform(p->has_gradient_transform,
+                                                                        &p->gradient_transform));
             strbuf_append_str(out, ">\n");
             paint_svg_append_gradient_stops(out, p->stops, p->stop_count,
                                             indent_level + 1);
             paint_svg_indent(out, indent_level);
             strbuf_append_str(out, "</linearGradient></defs>\n");
 
-            paint_svg_indent(out, indent_level);
-            strbuf_append_format(out, "<path d=\"%s\" fill=\"url(#paint-ir-linear-%d)\"",
-                                 path_data->str, gradient_id);
-            if (p->rule == RDT_FILL_EVEN_ODD) {
-                strbuf_append_str(out, " fill-rule=\"evenodd\"");
-            }
-            paint_svg_append_matrix_attr(out, p->has_transform ? &p->transform : nullptr);
-            strbuf_append_str(out, " />\n");
+            paint_svg_append_gradient_fill_path(
+                out, indent_level, path_data->str, "linear", gradient_id, p->rule,
+                paint_optional_transform(p->has_transform, &p->transform));
             strbuf_free(path_data);
             active_stats->emitted_count++;
             break;
@@ -1641,18 +1763,12 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             const PaintFillRadialGradient* p = &cmd->fill_radial_gradient;
             if (!paint_svg_caps_allow_gradient(caps, p->has_transform || p->has_gradient_transform) ||
                 !p->stops || p->stop_count <= 0) {
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
+                note_unsupported(cmd->op);
                 break;
             }
 
-            StrBuf* path_data = strbuf_new();
-            if (!paint_svg_path_to_string(p->path, path_data)) {
-                strbuf_free(path_data);
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
-                break;
-            }
+            StrBuf* path_data = path_data_or_note(p->path, cmd->op);
+            if (!path_data) break;
 
             int gradient_id = resource_id_base + i;
             paint_svg_indent(out, indent_level);
@@ -1661,21 +1777,17 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
                 "cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\"",
                 gradient_id, p->cx, p->cy, p->r);
             paint_svg_append_named_matrix_attr(out, "gradientTransform",
-                                               p->has_gradient_transform ? &p->gradient_transform : nullptr);
+                                               paint_optional_transform(p->has_gradient_transform,
+                                                                        &p->gradient_transform));
             strbuf_append_str(out, ">\n");
             paint_svg_append_gradient_stops(out, p->stops, p->stop_count,
                                             indent_level + 1);
             paint_svg_indent(out, indent_level);
             strbuf_append_str(out, "</radialGradient></defs>\n");
 
-            paint_svg_indent(out, indent_level);
-            strbuf_append_format(out, "<path d=\"%s\" fill=\"url(#paint-ir-radial-%d)\"",
-                                 path_data->str, gradient_id);
-            if (p->rule == RDT_FILL_EVEN_ODD) {
-                strbuf_append_str(out, " fill-rule=\"evenodd\"");
-            }
-            paint_svg_append_matrix_attr(out, p->has_transform ? &p->transform : nullptr);
-            strbuf_append_str(out, " />\n");
+            paint_svg_append_gradient_fill_path(
+                out, indent_level, path_data->str, "radial", gradient_id, p->rule,
+                paint_optional_transform(p->has_transform, &p->transform));
             strbuf_free(path_data);
             active_stats->emitted_count++;
             break;
@@ -1687,8 +1799,7 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
                 ? image->url->href->chars
                 : nullptr;
             if (!href || !paint_svg_caps_allow_image(caps, p->has_transform)) {
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
+                note_unsupported(cmd->op);
                 break;
             }
 
@@ -1701,22 +1812,17 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             if (p->opacity < 255) {
                 strbuf_append_format(out, " opacity=\"%.4f\"", p->opacity / 255.0f);
             }
-            paint_svg_append_matrix_attr(out, p->has_transform ? &p->transform : nullptr);
+            paint_svg_append_matrix_attr(out,
+                                         paint_optional_transform(p->has_transform, &p->transform));
             strbuf_append_str(out, " />\n");
             active_stats->emitted_count++;
             break;
         }
         case PAINT_PUSH_TRANSFORM: {
-            if (skipped_transform_depth > 0) {
-                skipped_transform_depth++;
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
-                break;
-            }
+            if (skip_nested_push(&skipped_transform_depth, cmd->op)) break;
             if (!caps || !caps->transforms) {
                 skipped_transform_depth++;
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
+                note_unsupported(cmd->op);
                 break;
             }
             const PaintPushTransform* p = &cmd->push_transform;
@@ -1730,44 +1836,21 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             break;
         }
         case PAINT_POP_TRANSFORM: {
-            if (skipped_transform_depth > 0) {
-                skipped_transform_depth--;
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
-                break;
-            }
-            if (open_transform_depth <= 0) {
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
-                break;
-            }
-            open_transform_depth--;
-            indent_level--;
-            paint_svg_indent(out, indent_level);
-            strbuf_append_str(out, "</g>\n");
-            active_stats->emitted_count++;
+            if (skip_nested_pop(&skipped_transform_depth, cmd->op)) break;
+            close_svg_group(&open_transform_depth, cmd->op);
             break;
         }
         case PAINT_PUSH_CLIP: {
             const PaintPushClip* p = &cmd->push_clip;
-            if (skipped_clip_depth > 0) {
-                skipped_clip_depth++;
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
-                break;
-            }
+            if (skip_nested_push(&skipped_clip_depth, cmd->op)) break;
             if (!paint_svg_caps_allow_clip(caps, p->has_transform)) {
                 skipped_clip_depth++;
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
+                note_unsupported(cmd->op);
                 break;
             }
-            StrBuf* path_data = strbuf_new();
-            if (!paint_svg_path_to_string(p->clip_path, path_data)) {
-                strbuf_free(path_data);
+            StrBuf* path_data = path_data_or_note(p->clip_path, cmd->op);
+            if (!path_data) {
                 skipped_clip_depth++;
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
                 break;
             }
 
@@ -1776,7 +1859,8 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             strbuf_append_format(out,
                 "<defs><clipPath id=\"paint-ir-clip-%d\"><path d=\"%s\"",
                 clip_id, path_data->str);
-            paint_svg_append_matrix_attr(out, p->has_transform ? &p->transform : nullptr);
+            paint_svg_append_matrix_attr(out,
+                                         paint_optional_transform(p->has_transform, &p->transform));
             strbuf_append_str(out, " /></clipPath></defs>\n");
             paint_svg_indent(out, indent_level);
             strbuf_append_format(out, "<g clip-path=\"url(#paint-ir-clip-%d)\">\n", clip_id);
@@ -1787,29 +1871,14 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             break;
         }
         case PAINT_POP_CLIP: {
-            if (skipped_clip_depth > 0) {
-                skipped_clip_depth--;
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
-                break;
-            }
-            if (open_clip_depth <= 0) {
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
-                break;
-            }
-            open_clip_depth--;
-            indent_level--;
-            paint_svg_indent(out, indent_level);
-            strbuf_append_str(out, "</g>\n");
-            active_stats->emitted_count++;
+            if (skip_nested_pop(&skipped_clip_depth, cmd->op)) break;
+            close_svg_group(&open_clip_depth, cmd->op);
             break;
         }
         case PAINT_GLYPH_RUN: {
             const PaintGlyphRun* p = &cmd->glyph_run;
             if (!paint_svg_caps_allow_glyph_run(caps, p)) {
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
+                note_unsupported(cmd->op);
                 break;
             }
             paint_svg_indent(out, indent_level);
@@ -1830,7 +1899,8 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             if (p->word_spacing > 0.01f) {
                 strbuf_append_format(out, " word-spacing=\"%.2f\"", p->word_spacing);
             }
-            paint_svg_append_matrix_attr(out, p->has_transform ? &p->transform : nullptr);
+            paint_svg_append_matrix_attr(out,
+                                         paint_optional_transform(p->has_transform, &p->transform));
             strbuf_append_char(out, '>');
             paint_svg_append_text_escaped(out, p->text, p->text_len);
             strbuf_append_str(out, "</text>\n");
@@ -1841,20 +1911,14 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             const PaintSvgSubscene* p = &cmd->svg_subscene;
             if (!g_svg_subscene_svg_lowerer ||
                 !g_svg_subscene_svg_lowerer(p, out, indent_level)) {
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
+                note_unsupported(cmd->op);
                 break;
             }
             active_stats->emitted_count++;
             break;
         }
         case PAINT_BEGIN_EFFECT_GROUP: {
-            if (skipped_effect_depth > 0) {
-                skipped_effect_depth++;
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
-                break;
-            }
+            if (skip_nested_push(&skipped_effect_depth, cmd->op)) break;
             const PaintEffectGroup* p = &cmd->effect_group;
             if (!paint_svg_caps_allow_opacity_group(caps, p)) {
                 log_error("[SVG_PAINT_IR] fallback effect group opacity=%.3f blend=%d filter=%p backdrop=%d backdrop_filter=%p shadow=%d isolation=%d",
@@ -1896,27 +1960,12 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             break;
         }
         case PAINT_END_EFFECT_GROUP: {
-            if (skipped_effect_depth > 0) {
-                skipped_effect_depth--;
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
-                break;
-            }
-            if (open_effect_depth <= 0) {
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
-                break;
-            }
-            open_effect_depth--;
-            indent_level--;
-            paint_svg_indent(out, indent_level);
-            strbuf_append_str(out, "</g>\n");
-            active_stats->emitted_count++;
+            if (skip_nested_pop(&skipped_effect_depth, cmd->op)) break;
+            close_svg_group(&open_effect_depth, cmd->op);
             break;
         }
         default:
-            paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                       emit_unsupported_comments, active_stats);
+            note_unsupported(cmd->op);
             break;
         }
     }

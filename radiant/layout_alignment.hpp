@@ -82,7 +82,6 @@ inline float compute_alignment_offset_simple(int32_t alignment, float free_space
  * @param alignment    CSS alignment value
  * @param free_space   Total free space to distribute
  * @param item_count   Number of items/lines
- * @param existing_gap Base gap between items (from row-gap/column-gap)
  * @return             SpaceDistribution with computed gaps
  *
  * For negative free_space, distribution falls back to flex-start alignment.
@@ -90,8 +89,7 @@ inline float compute_alignment_offset_simple(int32_t alignment, float free_space
 SpaceDistribution compute_space_distribution(
     int32_t alignment,
     float free_space,
-    int32_t item_count,
-    float existing_gap
+    int32_t item_count
 );
 
 // ============================================================================

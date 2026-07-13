@@ -67,6 +67,19 @@ static void retained_dl_copy_clip_shape_stack(DisplayList* dst,
     }
 }
 
+static bool retained_dl_clone_path(RdtPath** out, RdtPath* in) {
+    if (!out) return false; *out = in ? rdt_path_clone(in) : nullptr; return !in || *out;
+}
+
+static bool retained_dl_copy_gradient_stops(DisplayList* dst, RdtGradientStop** out,
+                                            const RdtGradientStop* stops, int count) {
+    if (!out) return false; *out = dl_copy_stops(dst, stops, count); return !stops || count <= 0 || *out;
+}
+
+static bool retained_dl_copy_dashes(DisplayList* dst, float** out, const float* dashes, int count) {
+    if (!out) return false; *out = dl_copy_dashes(dst, dashes, count); return !dashes || count <= 0 || *out;
+}
+
 static bool retained_dl_clone_item_payload(DisplayList* dst,
                                            DisplayItem* out,
                                            const DisplayItem* in,
@@ -76,42 +89,24 @@ static bool retained_dl_clone_item_payload(DisplayList* dst,
 
     switch (in->op) {
         case DL_FILL_PATH:
-            out->fill_path.path = in->fill_path.path ? rdt_path_clone(in->fill_path.path) : nullptr;
-            if (in->fill_path.path && !out->fill_path.path) return false;
+            if (!retained_dl_clone_path(&out->fill_path.path, in->fill_path.path)) return false;
             break;
         case DL_STROKE_PATH:
-            out->stroke_path.path = in->stroke_path.path ? rdt_path_clone(in->stroke_path.path) : nullptr;
-            if (in->stroke_path.path && !out->stroke_path.path) return false;
-            out->stroke_path.dash_array =
-                dl_copy_dashes(dst, in->stroke_path.dash_array, in->stroke_path.dash_count);
-            if (in->stroke_path.dash_array && in->stroke_path.dash_count > 0 &&
-                !out->stroke_path.dash_array) {
-                return false;
-            }
+            if (!retained_dl_clone_path(&out->stroke_path.path, in->stroke_path.path)) return false;
+            if (!retained_dl_copy_dashes(dst, &out->stroke_path.dash_array,
+                    in->stroke_path.dash_array, in->stroke_path.dash_count)) return false;
             break;
         case DL_FILL_LINEAR_GRADIENT:
-            out->fill_linear_gradient.path = in->fill_linear_gradient.path ?
-                rdt_path_clone(in->fill_linear_gradient.path) : nullptr;
-            if (in->fill_linear_gradient.path && !out->fill_linear_gradient.path) return false;
-            out->fill_linear_gradient.stops =
-                dl_copy_stops(dst, in->fill_linear_gradient.stops,
-                              in->fill_linear_gradient.stop_count);
-            if (in->fill_linear_gradient.stops && in->fill_linear_gradient.stop_count > 0 &&
-                !out->fill_linear_gradient.stops) {
-                return false;
-            }
+            if (!retained_dl_clone_path(&out->fill_linear_gradient.path,
+                    in->fill_linear_gradient.path)) return false;
+            if (!retained_dl_copy_gradient_stops(dst, &out->fill_linear_gradient.stops,
+                    in->fill_linear_gradient.stops, in->fill_linear_gradient.stop_count)) return false;
             break;
         case DL_FILL_RADIAL_GRADIENT:
-            out->fill_radial_gradient.path = in->fill_radial_gradient.path ?
-                rdt_path_clone(in->fill_radial_gradient.path) : nullptr;
-            if (in->fill_radial_gradient.path && !out->fill_radial_gradient.path) return false;
-            out->fill_radial_gradient.stops =
-                dl_copy_stops(dst, in->fill_radial_gradient.stops,
-                              in->fill_radial_gradient.stop_count);
-            if (in->fill_radial_gradient.stops && in->fill_radial_gradient.stop_count > 0 &&
-                !out->fill_radial_gradient.stops) {
-                return false;
-            }
+            if (!retained_dl_clone_path(&out->fill_radial_gradient.path,
+                    in->fill_radial_gradient.path)) return false;
+            if (!retained_dl_copy_gradient_stops(dst, &out->fill_radial_gradient.stops,
+                    in->fill_radial_gradient.stops, in->fill_radial_gradient.stop_count)) return false;
             break;
         case DL_DRAW_PICTURE:
             out->draw_picture.picture = in->draw_picture.picture ?
@@ -119,8 +114,7 @@ static bool retained_dl_clone_item_payload(DisplayList* dst,
             if (in->draw_picture.picture && !out->draw_picture.picture) return false;
             break;
         case DL_PUSH_CLIP:
-            out->push_clip.path = in->push_clip.path ? rdt_path_clone(in->push_clip.path) : nullptr;
-            if (in->push_clip.path && !out->push_clip.path) return false;
+            if (!retained_dl_clone_path(&out->push_clip.path, in->push_clip.path)) return false;
             break;
         case DL_FILL_SURFACE_RECT:
             retained_dl_copy_clip_shape_stack(dst, &out->fill_surface_rect.clip_shapes,
@@ -389,6 +383,15 @@ static bool retained_dl_dirty_rect_intersects_bound(const DirtyRect* dirty,
     return retained_dl_bounds_intersect(visual_bound, dirty_bound);
 }
 
+static bool retained_dl_surface_generation_current(void* surface_ptr, uint64_t generation) {
+    ImageSurface* surface = (ImageSurface*)surface_ptr;
+    return surface && generation != 0 && surface->generation == generation;
+}
+
+static bool retained_dl_generation_current(const void* resource, uint64_t generation, uint64_t current_generation) {
+    return !resource || (generation != 0 && generation == current_generation);
+}
+
 bool retained_dl_fragment_resources_valid(const RetainedDisplayListFragment* fragment,
                                           uint64_t current_video_generation,
                                           uint64_t current_glyph_generation) {
@@ -398,42 +401,26 @@ bool retained_dl_fragment_resources_valid(const RetainedDisplayListFragment* fra
         const DisplayItem* item = &list->items[i];
         switch (item->op) {
             case DL_DRAW_IMAGE: {
-                if (!item->draw_image.pixels) break;
-                ImageSurface* owner = (ImageSurface*)item->draw_image.resource_owner;
-                if (!owner || item->draw_image.resource_generation == 0 ||
-                    owner->generation != item->draw_image.resource_generation) {
-                    return false;
-                }
+                if (item->draw_image.pixels && !retained_dl_surface_generation_current(
+                        item->draw_image.resource_owner, item->draw_image.resource_generation)) return false;
                 break;
             }
             case DL_DRAW_GLYPH:
-                if (item->draw_glyph.bitmap.buffer &&
-                    (item->draw_glyph.resource_generation == 0 ||
-                     item->draw_glyph.resource_generation != current_glyph_generation)) {
-                    return false;
-                }
+                if (!retained_dl_generation_current(item->draw_glyph.bitmap.buffer,
+                        item->draw_glyph.resource_generation, current_glyph_generation)) return false;
                 break;
             case DL_BLIT_SURFACE_SCALED: {
-                ImageSurface* src = (ImageSurface*)item->blit_surface_scaled.src_surface;
-                if (!src || item->blit_surface_scaled.src_generation == 0 ||
-                    src->generation != item->blit_surface_scaled.src_generation) {
-                    return false;
-                }
+                if (!retained_dl_surface_generation_current(item->blit_surface_scaled.src_surface,
+                        item->blit_surface_scaled.src_generation)) return false;
                 break;
             }
             case DL_VIDEO_PLACEHOLDER:
-                if (item->video_placeholder.video &&
-                    (item->video_placeholder.video_generation == 0 ||
-                     item->video_placeholder.video_generation != current_video_generation)) {
-                    return false;
-                }
+                if (!retained_dl_generation_current(item->video_placeholder.video,
+                        item->video_placeholder.video_generation, current_video_generation)) return false;
                 break;
             case DL_WEBVIEW_LAYER_PLACEHOLDER: {
-                ImageSurface* surface = (ImageSurface*)item->webview_layer_placeholder.surface;
-                if (!surface || item->webview_layer_placeholder.surface_generation == 0 ||
-                    surface->generation != item->webview_layer_placeholder.surface_generation) {
-                    return false;
-                }
+                if (!retained_dl_surface_generation_current(item->webview_layer_placeholder.surface,
+                        item->webview_layer_placeholder.surface_generation)) return false;
                 break;
             }
             default:

@@ -55,6 +55,25 @@ static size_t normalize_whitespace_for_flex(const char* text, size_t length, cha
     return out_pos;
 }
 
+struct FlexMeasureTextRun {
+    const char* text;
+    size_t length;
+};
+
+static FlexMeasureTextRun flex_measure_prepare_text_run(DomNode* text_node, const char* text, size_t length) {
+    FlexMeasureTextRun run = {text, length};
+    if (!text) return run;
+
+    CssEnum ws = get_white_space_value(text_node);
+    if (!should_collapse_whitespace(ws)) return run;
+
+    static thread_local char normalized_buffer[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
+    run.length = normalize_whitespace_for_flex(text, length, normalized_buffer, sizeof(normalized_buffer));
+    run.text = normalized_buffer;
+    log_debug("flex_measure_prepare_text_run: normalized intrinsic text run for ws=%d", ws);
+    return run;
+}
+
 static bool css_flex_direction_keyword_is_row(CssEnum direction, bool* recognized) {
     if (recognized) *recognized = true;
     if (direction == CSS_VALUE_ROW || direction == CSS_VALUE_ROW_REVERSE) {
@@ -130,28 +149,58 @@ static bool flex_measurement_direction_is_row(ViewElement* elem) {
     return true;
 }
 
-// Forward declaration for recursive function
-static float measure_content_height_recursive(DomNode* node, LayoutContext* lycon, int depth);
+static bool flex_measurement_is_flex_container(ViewElement* elem) {
+    if (!elem) return false;
+    if (elem->display.inner == CSS_VALUE_FLEX) return true;
 
-// Helper to get explicit CSS width from DOM element's specified_style
-// Returns -1 if no explicit width is set, otherwise returns the width in pixels
-static float get_explicit_css_width(LayoutContext* lycon, ViewElement* elem) {
-    if (!elem || !elem->specified_style) return -1;
-
-    CssDeclaration* width_decl = style_tree_get_declaration(
-        elem->specified_style, CSS_PROPERTY_WIDTH);
-
-    if (!width_decl || !width_decl->value) return -1;
-
-    // Only consider absolute length values (not percentages, auto, etc.)
-    if (width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-        float width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
-        if (!isnan(width) && width > 0) {
-            return width;
+    if (elem->specified_style) {
+        CssDeclaration* display_decl = style_tree_get_declaration(
+            elem->specified_style, CSS_PROPERTY_DISPLAY);
+        if (display_decl && display_decl->value &&
+            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            CssEnum display_val = display_decl->value->data.keyword;
+            if (display_val == CSS_VALUE_FLEX || display_val == CSS_VALUE_INLINE_FLEX) {
+                return true;
+            }
         }
     }
 
-    return -1;
+    ViewBlock* block_view = lam::view_as_block(elem);
+    return block_view && block_view->embed && block_view->embed->flex;
+}
+
+static void flex_accumulate_child_cross_height(bool use_max_height, float height,
+                                               float* max_height, float* sum_height) {
+    if (use_max_height) {
+        *max_height = fmax(*max_height, height);
+    } else {
+        *sum_height += height;
+    }
+}
+
+static void flex_accumulate_intrinsic_child_height(bool is_row_flex, float height,
+                                                   float* total_height) {
+    if (is_row_flex) {
+        *total_height = fmax(*total_height, height);
+    } else {
+        *total_height += height;
+    }
+}
+
+// Forward declaration for recursive function
+static float measure_content_height_recursive(DomNode* node, LayoutContext* lycon, int depth);
+
+static float get_explicit_css_length(LayoutContext* lycon, ViewElement* elem,
+                                     CssPropertyId property_id) {
+    if (!elem || !elem->specified_style) return -1.0f;
+    CssDeclaration* decl = style_tree_get_declaration(elem->specified_style, property_id);
+    if (!decl || !decl->value || decl->value->type != CSS_VALUE_TYPE_LENGTH) return -1.0f;
+    float size = resolve_length_value(lycon, property_id, decl->value);
+    return !isnan(size) && size > 0.0f ? size : -1.0f;
+}
+
+static float get_explicit_css_width(LayoutContext* lycon, ViewElement* elem) {
+    return get_explicit_css_length(lycon, elem, CSS_PROPERTY_WIDTH);
 }
 
 static float resolve_flex_line_height_for_owner(LayoutContext* lycon, const CssValue* value,
@@ -242,23 +291,12 @@ static float resolve_flex_inherited_line_height(LayoutContext* lycon, DomElement
     return 0;
 }
 
-// Helper to get explicit CSS height from DOM element's specified_style
 static float get_explicit_css_height(LayoutContext* lycon, ViewElement* elem) {
-    if (!elem || !elem->specified_style) return -1;
+    return get_explicit_css_length(lycon, elem, CSS_PROPERTY_HEIGHT);
+}
 
-    CssDeclaration* height_decl = style_tree_get_declaration(
-        elem->specified_style, CSS_PROPERTY_HEIGHT);
-
-    if (!height_decl || !height_decl->value) return -1;
-
-    if (height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-        float height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-        if (!isnan(height) && height > 0) {
-            return height;
-        }
-    }
-
-    return -1;
+static float get_explicit_dom_css_height(LayoutContext* lycon, DomElement* elem) {
+    return elem ? get_explicit_css_height(lycon, lam::view_as_element(elem)) : -1.0f;
 }
 
 static CssValue* flex_margin_side_value(const CssValue* value, CssPropertyId property_id) {
@@ -410,32 +448,810 @@ static float flex_measure_existing_view_height(ViewElement* elem) {
     return -1.0f;
 }
 
+static bool flex_measurement_tag_is_inline(uintptr_t tag) {
+    switch (tag) {
+    case HTM_TAG_A: case HTM_TAG_SPAN: case HTM_TAG_EM: case HTM_TAG_STRONG:
+    case HTM_TAG_B: case HTM_TAG_I: case HTM_TAG_SMALL: case HTM_TAG_SUB:
+    case HTM_TAG_SUP: case HTM_TAG_ABBR: case HTM_TAG_CODE: case HTM_TAG_KBD:
+    case HTM_TAG_MARK: case HTM_TAG_Q: case HTM_TAG_S: case HTM_TAG_SAMP:
+    case HTM_TAG_VAR: case HTM_TAG_TIME: case HTM_TAG_U: case HTM_TAG_CITE:
+    case HTM_TAG_BDI: case HTM_TAG_BDO: case HTM_TAG_BR:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static CssEnum flex_measure_resolve_text_transform(DomNode* start) {
+    for (DomNode* node = start; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* elem = node->as_element();
+        ViewBlock* view = lam::view_as_block(elem);
+        if (view && view->blk && view->blk->text_transform != 0 &&
+            view->blk->text_transform != CSS_VALUE_INHERIT) {
+            return view->blk->text_transform;
+        }
+        if (!elem->specified_style) continue;
+        CssDeclaration* decl = style_tree_get_declaration(
+            elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
+        if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            CssEnum val = decl->value->data.keyword;
+            if (val != CSS_VALUE_INHERIT && val != CSS_VALUE_NONE) {
+                return val;
+            }
+        }
+    }
+    return CSS_VALUE_NONE;
+}
+
+static float flex_measure_normal_line_height_for_font(LayoutContext* lycon,
+                                                      FontProp* font,
+                                                      float fallback) {
+    if (!lycon || !lycon->ui_context || !font || font->font_size <= 0.0f) {
+        return fallback;
+    }
+    FontBox temp_font;
+    setup_font(lycon->ui_context, &temp_font, font);
+    if (temp_font.font_handle) {
+        return calc_normal_line_height(temp_font.font_handle);
+    }
+    return fallback;
+}
+
+static float flex_measure_intrinsic_max_height(LayoutContext* lycon, DomNode* node, float width) {
+    if (!lycon || !node) return 0.0f;
+    ViewBlock* block = node->is_element() ? lam::view_as_block(node->as_element()) : NULL;
+    if (!block) return calculate_max_content_height(lycon, node, width);
+
+    AvailableSpace available = AvailableSpace::make_width_definite(width);
+    IntrinsicSizesBidirectional sizes = measure_intrinsic_sizes(lycon, block, available);
+    return sizes.max_content_height;
+}
+
+static bool flex_measure_child_height_fallback(DomNode* child, LayoutContext* lycon, float* child_height) {
+    if (!lycon) return false;
+
+    ViewElement* child_view = lam::view_require_element(child);
+    if (!child_view) return true;
+
+    float existing_height = flex_measure_existing_view_height(child_view);
+    if (existing_height >= 0.0f) {
+        *child_height = existing_height;
+        log_debug("measure_content_height_recursive: child %s existing height=%.1f",
+                  child->node_name(), *child_height);
+        return true;
+    }
+
+    *child_height = flex_measure_intrinsic_max_height(lycon, child, 10000.0f);
+    log_debug("measure_content_height_recursive: child %s from calculate_max_content_height=%.1f",
+              child->node_name(), *child_height);
+    return true;
+}
+
+static float flex_measure_recursive_child_height(DomNode* child, LayoutContext* lycon, int depth) {
+    float child_height = measure_content_height_recursive(child, lycon, depth + 1);
+    if (child_height != 0.0f ||
+        !flex_measure_child_height_fallback(child, lycon, &child_height)) {
+        log_debug("measure_content_height_recursive: child %s height=%.1f",
+                  child->node_name(), child_height);
+    }
+    return child_height;
+}
+
+struct FlexChildExplicitSizes {
+    bool has_width;
+    bool has_height;
+    float width;
+    float height;
+};
+
+struct FlexNestedContentSummary {
+    bool has_text_content;
+    bool has_element_content;
+    bool has_child_with_explicit_height;
+};
+
+struct FlexDirectContentSummary {
+    bool has_text_content;
+    bool has_block_element;
+    bool has_inline_element;
+    int element_count;
+};
+
+struct FlexNestedHeightResult {
+    float height;
+    bool has_explicit_height_css;
+};
+
+struct FlexMeasuredElementHeight {
+    float height;
+    bool has_explicit_height_css;
+};
+
+static FlexNestedContentSummary flex_measure_nested_content_summary(LayoutContext* lycon,
+                                                                    DomElement* elem) {
+    FlexNestedContentSummary summary = {false, false, false};
+    for (DomNode* content = elem ? elem->first_child : NULL; content; content = content->next_sibling) {
+        if (layout_text_node_has_content(content)) {
+            summary.has_text_content = true;
+        } else if (content->is_element()) {
+            summary.has_element_content = true;
+            DomElement* nested = content->as_element();
+            if (get_explicit_dom_css_height(lycon, nested) > 0.0f) {
+                summary.has_child_with_explicit_height = true;
+            }
+        }
+    }
+    return summary;
+}
+
+static FlexDirectContentSummary flex_measure_direct_content_summary(DomElement* elem) {
+    FlexDirectContentSummary summary = {false, false, false, 0};
+    for (DomNode* content = elem ? elem->first_child : nullptr;
+         content; content = content->next_sibling) {
+        if (content->is_element()) {
+            summary.element_count++;
+            if (flex_measurement_tag_is_inline(content->tag())) {
+                summary.has_inline_element = true;
+            } else {
+                summary.has_block_element = true;
+            }
+        } else if (layout_text_node_has_content(content)) {
+            summary.has_text_content = true;
+        }
+    }
+    return summary;
+}
+
+static FlexNestedHeightResult flex_measure_nested_flex_height(LayoutContext* lycon,
+                                                              DomElement* elem,
+                                                              float text_line_height) {
+    FlexNestedContentSummary content_summary =
+        flex_measure_nested_content_summary(lycon, elem);
+    if (!content_summary.has_text_content &&
+        !content_summary.has_element_content) {
+        log_debug("Nested flex container: empty, height=0");
+        return {0.0f, true};
+    }
+
+    float recursive_height = measure_content_height_recursive(
+        static_cast<DomNode*>(elem), lycon, 0);
+    if (content_summary.has_child_with_explicit_height) {
+        if (recursive_height > 0.0f) {
+            log_debug("Nested flex container: measured content height=%.1f", recursive_height);
+            return {recursive_height, true};
+        }
+        log_debug("Nested flex container: measurement returned 0, using 0");
+        return {0.0f, false};
+    }
+
+    if (recursive_height > 0.0f) {
+        log_debug("Nested flex container with content: recursive measured height=%.1f",
+                  recursive_height);
+        return {recursive_height, true};
+    }
+    if (content_summary.has_text_content) {
+        // Text-only nested flex fallback is not a final explicit height; later
+        // flex layout may still resolve a more exact cross size.
+        log_debug("Nested flex container with text content: using text_line_height=%.1f",
+                  text_line_height);
+        return {text_line_height, false};
+    }
+
+    log_debug("Nested flex container: element children but recursive=0, using 0");
+    return {0.0f, true};
+}
+
+static FlexChildExplicitSizes flex_measure_child_explicit_sizes(LayoutContext* lycon, ViewElement* child_view) {
+    FlexChildExplicitSizes sizes = {
+        child_view->blk && child_view->blk->given_width >= 0.0f,
+        child_view->blk && child_view->blk->given_height >= 0.0f,
+        child_view->blk ? child_view->blk->given_width : -1.0f,
+        child_view->blk ? child_view->blk->given_height : -1.0f
+    };
+
+    if (!sizes.has_width && lycon) {
+        float dom_css_width = get_explicit_css_width(lycon, child_view);
+        if (dom_css_width > 0.0f) {
+            sizes.has_width = true;
+            sizes.width = dom_css_width;
+            log_debug("Got explicit CSS width from DOM: %.1f", dom_css_width);
+        }
+    }
+
+    if (!sizes.has_height && lycon) {
+        float dom_css_height = get_explicit_css_height(lycon, child_view);
+        if (dom_css_height > 0.0f) {
+            sizes.has_height = true;
+            sizes.height = dom_css_height;
+            log_debug("Got explicit CSS height from DOM: %.1f", dom_css_height);
+        }
+    }
+
+    return sizes;
+}
+
+static float flex_measure_vertical_padding_sum(LayoutContext* lycon, DomElement* elem) {
+    if (!elem || !elem->specified_style) return 0.0f;
+
+    float pad_top = 0.0f;
+    float pad_bottom = 0.0f;
+    CssDeclaration* pt = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_PADDING_TOP);
+    if (pt && pt->value && pt->value->type == CSS_VALUE_TYPE_LENGTH) {
+        pad_top = resolve_length_value(lycon, CSS_PROPERTY_PADDING_TOP, pt->value);
+    }
+    CssDeclaration* pb = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_PADDING_BOTTOM);
+    if (pb && pb->value && pb->value->type == CSS_VALUE_TYPE_LENGTH) {
+        pad_bottom = resolve_length_value(lycon, CSS_PROPERTY_PADDING_BOTTOM, pb->value);
+    }
+    if (pad_top != 0.0f || pad_bottom != 0.0f) {
+        return pad_top + pad_bottom;
+    }
+
+    CssDeclaration* pad_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_PADDING);
+    if (!pad_sh || !pad_sh->value) return 0.0f;
+
+    const CssValue* top_value = css_box_shorthand_side_value(pad_sh->value, 0);
+    const CssValue* bottom_value = css_box_shorthand_side_value(pad_sh->value, 2);
+    if (top_value) {
+        pad_top = resolve_length_value(lycon, CSS_PROPERTY_PADDING, top_value);
+    }
+    if (bottom_value) {
+        pad_bottom = resolve_length_value(lycon, CSS_PROPERTY_PADDING, bottom_value);
+    }
+    return pad_top + pad_bottom;
+}
+
+static float flex_measure_border_all_width(LayoutContext* lycon, CssValue* value) {
+    if (!value) return 0.0f;
+
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int bi = 0; bi < value->data.list.count; bi++) {
+            CssValue* bv = value->data.list.values[bi];
+            if (bv->type == CSS_VALUE_TYPE_LENGTH || bv->type == CSS_VALUE_TYPE_NUMBER) {
+                return resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bv);
+            }
+        }
+        return 0.0f;
+    }
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        return resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, value);
+    }
+    return 0.0f;
+}
+
+static float flex_measure_vertical_border_sum(LayoutContext* lycon, DomElement* elem) {
+    if (!elem || !elem->specified_style) return 0.0f;
+
+    float brd_top = 0.0f;
+    float brd_bottom = 0.0f;
+    CssDeclaration* bt_d = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER_TOP_WIDTH);
+    if (bt_d && bt_d->value && bt_d->value->type == CSS_VALUE_TYPE_LENGTH) {
+        brd_top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_TOP_WIDTH, bt_d->value);
+    }
+    CssDeclaration* bb_d = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER_BOTTOM_WIDTH);
+    if (bb_d && bb_d->value && bb_d->value->type == CSS_VALUE_TYPE_LENGTH) {
+        brd_bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, bb_d->value);
+    }
+    if (brd_top != 0.0f || brd_bottom != 0.0f) {
+        return brd_top + brd_bottom;
+    }
+
+    CssDeclaration* bw_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER_WIDTH);
+    if (bw_sh && bw_sh->value) {
+        const CssValue* top_value = css_box_shorthand_side_value(bw_sh->value, 0);
+        const CssValue* bottom_value = css_box_shorthand_side_value(bw_sh->value, 2);
+        if (top_value) {
+            brd_top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, top_value);
+        }
+        if (bottom_value) {
+            brd_bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bottom_value);
+        }
+        if (brd_top != 0.0f || brd_bottom != 0.0f) {
+            return brd_top + brd_bottom;
+        }
+    }
+
+    CssDeclaration* b_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER);
+    float border_width = flex_measure_border_all_width(lycon, b_sh ? b_sh->value : nullptr);
+    return border_width * 2.0f;
+}
+
+static float flex_measure_text_child_vertical_extra(LayoutContext* lycon,
+                                                    DomElement* elem,
+                                                    ViewElement* sub_view) {
+    if (sub_view && sub_view->bound) {
+        float vert_extra = layout_boundary_metrics(sub_view->bound).pad_border_v;
+        if (vert_extra != 0.0f || !elem || !elem->specified_style) {
+            return vert_extra;
+        }
+    }
+    if (!elem || !elem->specified_style) return 0.0f;
+    return flex_measure_vertical_padding_sum(lycon, elem) +
+           flex_measure_vertical_border_sum(lycon, elem);
+}
+
+static float flex_measure_direct_text_children_max_width(LayoutContext* lycon,
+                                                         DomElement* elem,
+                                                         CssEnum text_transform = CSS_VALUE_NONE) {
+    float max_text_width = 0.0f;
+    for (DomNode* tc = elem ? elem->first_child : nullptr; tc; tc = tc->next_sibling) {
+        DomText* dt = tc->as_text();
+        if (dt && dt->text && dt->length > 0) {
+            TextIntrinsicWidths tw =
+                measure_text_intrinsic_widths(lycon, dt->text, dt->length, text_transform);
+            if (tw.max_content > max_text_width) max_text_width = tw.max_content;
+        }
+    }
+    return max_text_width;
+}
+
+static float flex_measure_select_max_option_text_width(LayoutContext* lycon,
+                                                       ViewElement* elem) {
+    float max_text_width = 0.0f;
+    for (DomNode* opt = elem ? elem->first_child : nullptr; opt; opt = opt->next_sibling) {
+        if (!opt->is_element()) continue;
+        DomElement* oe = opt->as_element();
+        uintptr_t otag = oe->tag();
+        if (otag == HTM_TAG_OPTION) {
+            float option_width = flex_measure_direct_text_children_max_width(lycon, oe);
+            if (option_width > max_text_width) max_text_width = option_width;
+        } else if (otag == HTM_TAG_OPTGROUP) {
+            const char* lbl = oe->get_attribute("label");
+            if (lbl) {
+                size_t ll = strlen(lbl);
+                if (ll > 0) {
+                    TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, lbl, ll);
+                    if (tw.max_content > max_text_width) max_text_width = tw.max_content;
+                }
+            }
+            for (DomNode* gc = oe->first_child; gc; gc = gc->next_sibling) {
+                if (!gc->is_element() || gc->as_element()->tag() != HTM_TAG_OPTION) continue;
+                float opt_text_width =
+                    flex_measure_direct_text_children_max_width(lycon, gc->as_element());
+                float effective = opt_text_width + FormDefaults::OPTGROUP_OPTION_INDENT;
+                if (effective < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH) {
+                    effective = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
+                }
+                if (effective > max_text_width) max_text_width = effective;
+            }
+        }
+    }
+    return max_text_width;
+}
+
+static float flex_child_height_fallback_available_width(LayoutContext* lycon,
+                                                        ViewElement* item,
+                                                        ViewElement* child_view,
+                                                        FlexContainerLayout* flex_layout,
+                                                        bool is_row_flex_container,
+                                                        bool resolve_percent_width) {
+    float available_width = 10000.0f;
+    if (is_row_flex_container || !item) return available_width;
+
+    float parent_cw = -1.0f;
+    if (item->blk && item->blk->given_width >= 0.0f) {
+        parent_cw = layout_css_size_to_content_box(
+            item->bound, layout_box_sizing(lam::view_as_block(item)), item->blk->given_width, true);
+    } else if (flex_layout && flex_layout->cross_axis_size > 0.0f) {
+        if (resolve_percent_width && item->specified_style) {
+            // Nested flex fallback historically re-resolves percentage width here; keep
+            // non-percentage specified widths on the legacy unconstrained path.
+            CssDeclaration* w_decl = style_tree_get_declaration(
+                item->specified_style, CSS_PROPERTY_WIDTH);
+            bool resolved_percent_width = w_decl && w_decl->value &&
+                layout_resolve_percentage_value(w_decl->value, flex_layout->cross_axis_size, &parent_cw);
+            if (!resolved_percent_width && (!w_decl || !w_decl->value ||
+                (w_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                 w_decl->value->data.keyword == CSS_VALUE_AUTO))) {
+                parent_cw = flex_layout->cross_axis_size;
+                if (item->bound) {
+                    parent_cw -= item->bound->margin.left + item->bound->margin.right;
+                }
+            }
+            if (parent_cw > 0.0f && item->blk) {
+                parent_cw = layout_css_size_to_content_box(
+                    item->bound, layout_box_sizing(lam::view_as_block(item)), parent_cw, true);
+            }
+        } else if (!resolve_percent_width) {
+            parent_cw = flex_layout->cross_axis_size;
+            if (item->bound) {
+                parent_cw -= item->bound->margin.left + item->bound->margin.right;
+            }
+            if (item->blk) {
+                parent_cw = layout_css_size_to_content_box(
+                    item->bound, layout_box_sizing(lam::view_as_block(item)), parent_cw, true);
+            }
+        }
+    }
+
+    if (parent_cw > 0.0f) {
+        float child_margins = get_child_horizontal_margins(lycon, child_view, parent_cw);
+        available_width = fmax(parent_cw - child_margins, 0.0f);
+    }
+    return available_width;
+}
+
+static float flex_measure_zero_child_height_fallback(DomNode* child,
+                                                     LayoutContext* lycon,
+                                                     ViewElement* item,
+                                                     ViewElement* child_view,
+                                                     FlexContainerLayout* flex_layout,
+                                                     bool is_row_flex_container) {
+    DisplayValue child_display = resolve_display_value((void*)child);
+    log_debug("Child height is 0, checking display - display.inner=%d, display.outer=%d",
+              child_display.inner, child_display.outer);
+    if (child_display.inner == CSS_VALUE_FLEX) {
+        // For flex containers, use recursive DOM-based measurement
+        float child_height = measure_content_height_recursive(child, lycon, 0);
+        log_debug("Nested flex child height from recursive measurement: %.1f", child_height);
+        // Fallback: if recursive returned 0 (e.g., text-only flex container),
+        // use calculate_max_content_height with parent's cross-axis size
+        if (child_height == 0.0f && lycon) {
+            float avail_w = flex_child_height_fallback_available_width(
+                lycon, item, child_view, flex_layout, is_row_flex_container, true);
+            child_height = flex_measure_intrinsic_max_height(lycon, child, avail_w);
+            log_debug("Nested flex child height fallback: avail_w=%.1f, child_height=%.1f, child_bound=%p",
+                      avail_w, child_height, (void*)child_view->bound);
+        }
+        return child_height;
+    }
+    if (child_display.outer == CSS_VALUE_BLOCK && lycon) {
+        // For regular block elements, measure content height.
+        // In column flex, use the item's resolved cross-axis width
+        // so text wraps correctly during measurement.
+        float available_width = flex_child_height_fallback_available_width(
+            lycon, item, child_view, flex_layout, is_row_flex_container, false);
+        float child_height = flex_measure_intrinsic_max_height(lycon, child, available_width);
+        log_debug("Block child height from calculate_max_content_height: avail_w=%.1f, h=%.1f",
+                  available_width, child_height);
+        return child_height;
+    }
+    return 0.0f;
+}
+
+static float flex_measure_row_child_height_at_estimated_share(LayoutContext* lycon,
+                                                              DomNode* child,
+                                                              ViewElement* item,
+                                                              ViewElement* child_view,
+                                                              FlexContainerLayout* flex_layout) {
+    // row flex items in a column parent: compute height at the item's
+    // estimated width share, not the grandparent's full cross-axis size.
+    float row_width = flex_layout->cross_axis_size;
+    if (item->bound) {
+        row_width -= item->bound->margin.left + item->bound->margin.right;
+    }
+    if (layout_uses_border_box(lam::view_as_block(item))) {
+        if (item->blk->given_width >= 0.0f) {
+            row_width = item->blk->given_width;
+        }
+        row_width = layout_clamp_positive_min_max_width(
+            lam::view_as_block(item), row_width);
+    }
+    row_width = layout_boundary_content_size_from_border_box(item->bound, row_width, true);
+    if (item->blk && !layout_uses_border_box(lam::view_as_block(item))) {
+        if (item->blk->given_width >= 0.0f) {
+            row_width = item->blk->given_width;
+        }
+        row_width = layout_clamp_positive_min_max_width(
+            lam::view_as_block(item), row_width);
+    }
+    if (row_width <= 0.0f) row_width = flex_layout->cross_axis_size;
+
+    float gap = 0.0f;
+    if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
+        ViewBlock* bv = lam::view_as_block(item);
+        if (bv->embed && bv->embed->flex) {
+            gap = bv->embed->flex->column_gap;
+        }
+    }
+    int n_flex_children = 0;
+    for (DomNode* sibling = item->first_child; sibling; sibling = sibling->next_sibling) {
+        if (sibling->is_element()) n_flex_children++;
+    }
+
+    float child_share = row_width;
+    if (n_flex_children > 1) {
+        child_share = (row_width - gap * (n_flex_children - 1)) / n_flex_children;
+    }
+
+    float child_content_w = child_share;
+    if (child_view->bound) {
+        child_content_w = layout_boundary_content_size_from_border_box(
+            child_view->bound, child_content_w, true);
+    } else if (child_view->specified_style) {
+        // fallback: resolve padding/border from CSS when bound not yet computed
+        float cp = 0.0f;
+        float cb = 0.0f;
+        CssDeclaration* pad_decl = style_tree_get_declaration(
+            child_view->specified_style, CSS_PROPERTY_PADDING);
+        if (pad_decl && pad_decl->value && pad_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            float p = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_decl->value);
+            cp = p * 2.0f; // left + right
+        } else {
+            CssDeclaration* pl = style_tree_get_declaration(
+                child_view->specified_style, CSS_PROPERTY_PADDING_LEFT);
+            CssDeclaration* pr = style_tree_get_declaration(
+                child_view->specified_style, CSS_PROPERTY_PADDING_RIGHT);
+            if (pl && pl->value && pl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                cp += resolve_length_value(lycon, CSS_PROPERTY_PADDING_LEFT, pl->value);
+            }
+            if (pr && pr->value && pr->value->type == CSS_VALUE_TYPE_LENGTH) {
+                cp += resolve_length_value(lycon, CSS_PROPERTY_PADDING_RIGHT, pr->value);
+            }
+        }
+        CssDeclaration* bw_decl = style_tree_get_declaration(
+            child_view->specified_style, CSS_PROPERTY_BORDER_WIDTH);
+        if (bw_decl && bw_decl->value && bw_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            float b = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bw_decl->value);
+            cb = b * 2.0f;
+        } else {
+            // check border shorthand (e.g., "border: 1px solid #color")
+            CssDeclaration* b_sh = style_tree_get_declaration(
+                child_view->specified_style, CSS_PROPERTY_BORDER);
+            if (b_sh && b_sh->value) {
+                float bw = 0.0f;
+                if (b_sh->value->type == CSS_VALUE_TYPE_LIST) {
+                    for (int bi = 0; bi < b_sh->value->data.list.count; bi++) {
+                        CssValue* bv = b_sh->value->data.list.values[bi];
+                        if (bv->type == CSS_VALUE_TYPE_LENGTH ||
+                            bv->type == CSS_VALUE_TYPE_NUMBER) {
+                            bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bv);
+                            break;
+                        }
+                    }
+                } else if (b_sh->value->type == CSS_VALUE_TYPE_LENGTH) {
+                    bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, b_sh->value);
+                }
+                cb = bw * 2.0f;
+            }
+        }
+        child_content_w -= cp + cb;
+    }
+    if (child_content_w < 0.0f) child_content_w = 0.0f;
+    float child_height = flex_measure_intrinsic_max_height(lycon, child, child_content_w);
+    log_debug("Row flex child height at estimated share: share=%.1f, content_w=%.1f, h=%.1f",
+              child_share, child_content_w, child_height);
+    return child_height;
+}
+
+static FlexMeasuredElementHeight flex_measure_direct_element_height(LayoutContext* lycon,
+                                                                    DomNode* sub_child,
+                                                                    DomElement* elem,
+                                                                    float text_line_height) {
+    FlexMeasuredElementHeight result = {0.0f, false};
+    if (!sub_child) return result;
+
+    uintptr_t tag = sub_child->tag();
+    if (tag == HTM_TAG_H1) result.height = 32.0f;
+    else if (tag == HTM_TAG_H2) result.height = 28.0f;
+    else if (tag == HTM_TAG_H3) result.height = 24.0f;
+    else if (tag == HTM_TAG_H4) result.height = 20.0f;
+    else if (tag == HTM_TAG_H5 || tag == HTM_TAG_H6) result.height = 18.0f;
+    else if (tag == HTM_TAG_P) result.height = 36.0f;  // typically 2-3 lines
+    else if (tag == HTM_TAG_SVG) {
+        const char* attr_h = elem ? elem->get_attribute("height") : nullptr;
+        if (attr_h) {
+            float attr_height = (float)atoi(attr_h);
+            if (attr_height > 0.0f) {
+                result.height = attr_height;
+                result.has_explicit_height_css = true;
+                log_debug("SVG height from attribute: %.1f", result.height);
+            }
+        }
+        if (!result.has_explicit_height_css) {
+            float css_height = get_explicit_dom_css_height(lycon, elem);
+            if (css_height > 0.0f) {
+                result.height = css_height;
+                result.has_explicit_height_css = true;
+                log_debug("SVG height from CSS: %.1f", result.height);
+            }
+        }
+        if (!result.has_explicit_height_css) {
+            result.height = 150.0f;  // HTML default SVG height
+        }
+    }
+    else if (tag == HTM_TAG_IFRAME || tag == HTM_TAG_IMG ||
+             tag == HTM_TAG_VIDEO || tag == HTM_TAG_CANVAS) {
+        float css_height = get_explicit_dom_css_height(lycon, elem);
+        if (css_height > 0.0f) {
+            result.height = css_height;
+            result.has_explicit_height_css = true;
+            log_debug("Replaced element %s has explicit CSS height=%.1f",
+                      sub_child->node_name(), result.height);
+        }
+        if (!result.has_explicit_height_css) {
+            if (tag == HTM_TAG_IFRAME) result.height = 150.0f;  // CSS default iframe height
+            else if (tag == HTM_TAG_VIDEO) result.height = 150.0f;
+            else result.height = 0.0f;  // other replaced elements need explicit size
+        }
+    }
+    else if (tag == HTM_TAG_UL || tag == HTM_TAG_OL) {
+        FlexDirectContentSummary list_summary = flex_measure_direct_content_summary(elem);
+        bool is_list_flex_row = false;
+        if (elem) {
+            ViewElement* list_view = lam::view_require_element(elem);
+            if (flex_measurement_is_flex_container(list_view)) {
+                is_list_flex_row = flex_measurement_direction_is_row(list_view);
+            }
+        }
+        if (is_list_flex_row) {
+            result.height = list_summary.element_count > 0 ? 18.0f : 0.0f;  // row: max of children
+        } else {
+            result.height = list_summary.element_count * 18.0f;  // column/block: sum of children
+        }
+    }
+    else if (tag == HTM_TAG_DIV || tag == HTM_TAG_SECTION ||
+             tag == HTM_TAG_ARTICLE || tag == HTM_TAG_NAV ||
+             tag == HTM_TAG_HEADER || tag == HTM_TAG_FOOTER ||
+             tag == HTM_TAG_ASIDE || tag == HTM_TAG_MAIN) {
+        ViewElement* nested_view = lam::view_require_element(elem);
+        bool is_nested_flex = flex_measurement_is_flex_container(nested_view);
+        if (is_nested_flex && nested_view &&
+            nested_view->display.inner != CSS_VALUE_FLEX) {
+            log_debug("Nested flex container detected before resolved display");
+        }
+
+        if (is_nested_flex) {
+            FlexNestedHeightResult nested_height =
+                flex_measure_nested_flex_height(lycon, elem, text_line_height);
+            result.height = nested_height.height;
+            result.has_explicit_height_css = nested_height.has_explicit_height_css;
+        } else {
+            FlexDirectContentSummary content_summary =
+                flex_measure_direct_content_summary(elem);
+            if (content_summary.has_block_element) {
+                result.height = 56.0f;
+                log_debug("Non-flex div with block elements: using estimate height=56");
+            } else if (content_summary.has_inline_element ||
+                       content_summary.has_text_content) {
+                result.height = text_line_height;
+                log_debug("Non-flex div with inline/text content: using text_line_height=%.1f",
+                          result.height);
+            } else {
+                result.height = 0.0f;
+            }
+        }
+    }
+    else {
+        FlexDirectContentSummary content_summary = flex_measure_direct_content_summary(elem);
+        if (content_summary.has_text_content) {
+            float child_content_height = text_line_height;
+            ViewElement* sub_view = lam::view_require_element(elem);
+            float inherited_lh = resolve_flex_inherited_line_height(lycon, elem);
+            if (inherited_lh > 0.0f) {
+                child_content_height = inherited_lh;
+            }
+            result.height = child_content_height;
+
+            float vert_extra = flex_measure_text_child_vertical_extra(lycon, elem, sub_view);
+            result.height += vert_extra;
+            if (vert_extra > 0.0f) result.has_explicit_height_css = true;
+            log_debug("Element %s: content_height=%.1f, padding+border=%.1f, total=%.1f",
+                      sub_child->node_name(), child_content_height, vert_extra, result.height);
+        } else {
+            ViewElement* sub_view = lam::view_as_element(sub_child);
+            if (sub_view && sub_view->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                sub_view->form && sub_view->form->intrinsic_height > 0.0f) {
+                result.height = sub_view->form->intrinsic_height;
+                result.has_explicit_height_css = true;
+                log_debug("Element %s using form intrinsic height=%.1f",
+                          sub_child->node_name(), result.height);
+            }
+
+            if (!result.has_explicit_height_css) {
+                log_debug("Checking explicit CSS height for %s, elem=%p, specified_style=%p",
+                          sub_child->node_name(), elem, elem ? elem->specified_style : nullptr);
+            }
+            if (!result.has_explicit_height_css) {
+                float css_height = get_explicit_dom_css_height(lycon, elem);
+                if (css_height > 0.0f) {
+                    result.height = css_height;
+                    result.has_explicit_height_css = true;
+                    log_debug("Element %s has explicit CSS height=%.1f",
+                              sub_child->node_name(), result.height);
+                }
+            }
+            if (!result.has_explicit_height_css) {
+                result.height = 20.0f;  // default element height
+                log_debug("Element %s using default height=20", sub_child->node_name());
+            }
+        }
+    }
+    return result;
+}
+
+static void flex_accumulate_direct_element_height(uintptr_t tag,
+                                                  FlexMeasuredElementHeight measured,
+                                                  float text_line_height,
+                                                  bool is_row_flex,
+                                                  float* max_child_height,
+                                                  float* measured_height) {
+    if (measured.height <= 0.0f) return;
+
+    bool is_inline_child = flex_measurement_tag_is_inline(tag) && tag != HTM_TAG_BR;
+    bool use_max_height = is_row_flex || is_inline_child;
+    float margin =
+        (use_max_height && (measured.height == text_line_height ||
+                            measured.has_explicit_height_css || is_inline_child)) ||
+        (!use_max_height && measured.has_explicit_height_css)
+            ? 0.0f : 10.0f;
+    flex_accumulate_child_cross_height(use_max_height, measured.height + margin,
+                                       max_child_height, measured_height);
+}
+
+static IntrinsicSizes flex_measure_child_intrinsic_widths(LayoutContext* lycon,
+                                                          ViewElement* child_view,
+                                                          bool content_only) {
+    FontBox saved_child_font = lycon->font;
+    bool child_font_changed = false;
+    if (child_view->font) {
+        // Intrinsic text width must be measured in the child font; parent font state
+        // is restored immediately so sibling measurement keeps its inherited context.
+        setup_font(lycon->ui_context, &lycon->font, child_view->font);
+        child_font_changed = true;
+    }
+
+    IntrinsicSizes child_sizes = measure_element_intrinsic_widths(
+        lycon, lam::dom_require<DOM_NODE_ELEMENT>(child_view), content_only);
+
+    if (child_font_changed) {
+        lycon->font = saved_child_font;
+    }
+    return child_sizes;
+}
+
+static bool flex_measure_recursive_existing_height(LayoutContext* lycon,
+                                                   ViewElement* elem,
+                                                   float* measured_height) {
+    if (!elem || !measured_height) return false;
+
+    log_debug("measure_content_height_recursive: checking elem %s, blk=%p height=%.1f",
+              elem->tag_name ? elem->tag_name : "(null)",
+              (void*)elem->blk, elem->height);
+    float existing_height = flex_measure_existing_view_height(elem);
+    if (existing_height >= 0.0f) {
+        log_debug("measure_content_height_recursive: elem %s has existing height=%.1f",
+                  elem->tag_name ? elem->tag_name : "(null)", existing_height);
+        *measured_height = existing_height;
+        return true;
+    }
+
+    float explicit_height = get_explicit_css_height(lycon, elem);
+    if (explicit_height > 0.0f) {
+        log_debug("measure_content_height_recursive: elem %s has specified height=%.1fpx",
+                  elem->tag_name ? elem->tag_name : "(null)", explicit_height);
+        *measured_height = explicit_height;
+        return true;
+    }
+    return false;
+}
+
+static float flex_measure_recursive_children_height(DomElement* dom_elem,
+                                                    LayoutContext* lycon,
+                                                    int depth,
+                                                    bool is_row) {
+    float max_child_height = 0.0f;
+    float sum_child_height = 0.0f;
+    for (DomNode* child = dom_elem ? dom_elem->first_child : nullptr;
+         child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        float child_height = flex_measure_recursive_child_height(child, lycon, depth);
+        flex_accumulate_child_cross_height(is_row, child_height,
+                                           &max_child_height, &sum_child_height);
+    }
+    return is_row ? max_child_height : sum_child_height;
+}
+
 static float measure_content_height_recursive(DomNode* node, LayoutContext* lycon, int depth) {
     if (!node || !node->is_element()) return 0;
     if (depth > MAX_MEASURE_DEPTH) return 0;
 
     // Check if the View is already set with an explicit height
     ViewElement* elem = lam::view_require_element(node);
-    if (elem) {
-        log_debug("measure_content_height_recursive: checking elem %s, blk=%p height=%.1f",
-                  elem->tag_name ? elem->tag_name : "(null)",
-                  (void*)elem->blk, elem->height);
-        float existing_height = flex_measure_existing_view_height(elem);
-        if (existing_height >= 0.0f) {
-            log_debug("measure_content_height_recursive: elem %s has existing height=%.1f",
-                      elem->tag_name ? elem->tag_name : "(null)", existing_height);
-            return existing_height;
-        }
-
-        // Also check specified_style for explicit height
-        if (elem->specified_style) {
-            float explicit_height = get_explicit_css_height(lycon, elem);
-            if (explicit_height > 0.0f) {
-                log_debug("measure_content_height_recursive: elem %s has specified height=%.1fpx",
-                          elem->tag_name ? elem->tag_name : "(null)", explicit_height);
-                return explicit_height;
-            }
-        }
+    float measured_height = 0.0f;
+    if (flex_measure_recursive_existing_height(lycon, elem, &measured_height)) {
+        return measured_height;
     }
 
     // Check if this is a flex container
@@ -452,50 +1268,11 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
         is_row = flex_measurement_direction_is_row(elem);
     }
 
-    float max_child_height = 0;
-    float sum_child_height = 0;
-
     // Only elements can have children - get as_element() to access first_child
     DomElement* dom_elem = node->as_element();
     if (!dom_elem) return 0;
 
-    DomNode* child = dom_elem->first_child;
-    while (child) {
-        if (child->is_element()) {
-            float child_height = measure_content_height_recursive(child, lycon, depth + 1);
-
-            // If recursive measurement returned 0, try other measurement methods
-            if (child_height == 0.0f && lycon) {
-                ViewElement* child_view = lam::view_require_element(child);
-                if (child_view) {
-                    // Check for explicit height first
-                    float existing_height = flex_measure_existing_view_height(child_view);
-                    if (existing_height >= 0.0f) {
-                        child_height = existing_height;
-                        log_debug("measure_content_height_recursive: child %s existing height=%.1f",
-                                  child->node_name(), child_height);
-                    } else {
-                        // Use calculate_max_content_height as fallback
-                        child_height = calculate_max_content_height(lycon, child, 10000.0f);
-                        log_debug("measure_content_height_recursive: child %s from calculate_max_content_height=%.1f",
-                                  child->node_name(), child_height);
-                    }
-                }
-            } else {
-                log_debug("measure_content_height_recursive: child %s height=%.1f",
-                          child->node_name(), child_height);
-            }
-
-            if (is_row) {
-                max_child_height = fmax(max_child_height, child_height);
-            } else {
-                sum_child_height += child_height;
-            }
-        }
-        child = child->next_sibling;
-    }
-
-    float result = is_row ? max_child_height : sum_child_height;
+    float result = flex_measure_recursive_children_height(dom_elem, lycon, depth, is_row);
     log_debug("measure_content_height_recursive: node %s = %.1f (is_row=%d)",
               node->node_name(), result, is_row);
     return result;
@@ -670,7 +1447,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         // Measure child content heights by traversing the subtree
         // The child parameter is the flex item element - get its first_child
         measured_height = 0;
-        int max_child_height = 0;  // For row flex containers
+        float max_child_height = 0.0f;  // For row flex containers
         measured_width = 0;
         DomElement* child_elem = child->as_element();
 
@@ -684,14 +1461,9 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         // Calculate actual line height using the font's metrics (Chrome-compatible)
         // This requires setting up the font first to get accurate font metrics
         float text_line_height = elem_font_size;  // fallback
-        if (lycon->ui_context && view_elem && view_elem->font) {
-            // Set up font at the element's font size
-            FontBox temp_font;
-            setup_font(lycon->ui_context, &temp_font, view_elem->font);
-            if (temp_font.font_handle) {
-                // Use the Chrome-compatible line height calculation
-                text_line_height = calc_normal_line_height(temp_font.font_handle);
-            }
+        if (view_elem) {
+            text_line_height =
+                flex_measure_normal_line_height_for_font(lycon, view_elem->font, text_line_height);
         }
         log_debug("measure_flex_child_content: elem_font_size=%.1f, text_line_height=%.1f",
                   elem_font_size, text_line_height);
@@ -701,434 +1473,22 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
             while (sub_child) {
                 if (layout_text_node_has_content(sub_child)) {
                     // Use computed line height based on element's font-size
-                    int text_height = text_line_height;
+                    float text_height = text_line_height;
                     // Text content is always inline - use MAX, not SUM
                     // Text flows horizontally and should not stack heights
-                    if (text_height > max_child_height) {
-                        max_child_height = text_height;
-                    }
+                    flex_accumulate_child_cross_height(true, text_height,
+                                                       &max_child_height, &measured_height);
                 } else if (sub_child->is_element()) {
                     // Element - check for block-level element heights
                     DomElement* elem = sub_child->as_element();
 
                     // Estimate element height based on type
                     uintptr_t tag = sub_child->tag();
-                    float elem_height = 0;
-                    bool has_explicit_height_css = false;  // Track if element has explicit CSS height
-
-                    // Common block elements with typical heights
-                    if (tag == HTM_TAG_H1) elem_height = 32;
-                    else if (tag == HTM_TAG_H2) elem_height = 28;
-                    else if (tag == HTM_TAG_H3) elem_height = 24;
-                    else if (tag == HTM_TAG_H4) elem_height = 20;
-                    else if (tag == HTM_TAG_H5 || tag == HTM_TAG_H6) elem_height = 18;
-                    else if (tag == HTM_TAG_P) elem_height = 36;  // Typically 2-3 lines
-                    else if (tag == HTM_TAG_SVG) {
-                        // Inline SVG: use height HTML attribute or intrinsic size
-                        const char* attr_h = elem ? elem->get_attribute("height") : nullptr;
-                        if (attr_h) {
-                            int h = atoi(attr_h);
-                            if (h > 0) {
-                                elem_height = h;
-                                has_explicit_height_css = true;
-                                log_debug("SVG height from attribute: %.1f", elem_height);
-                            }
-                        }
-                        if (!has_explicit_height_css && elem && elem->specified_style) {
-                            float css_height = get_explicit_css_height(
-                                lycon, lam::view_require_element(elem));
-                            if (css_height > 0.0f) {
-                                elem_height = css_height;
-                                has_explicit_height_css = true;
-                                log_debug("SVG height from CSS: %.1f", elem_height);
-                            }
-                        }
-                        if (!has_explicit_height_css) {
-                            elem_height = 150;  // HTML default SVG height
-                        }
-                    }
-                    else if (tag == HTM_TAG_IFRAME || tag == HTM_TAG_IMG ||
-                             tag == HTM_TAG_VIDEO || tag == HTM_TAG_CANVAS) {
-                        // Replaced elements - use explicit CSS dimensions if available
-                        if (elem && elem->specified_style) {
-                            float css_height = get_explicit_css_height(
-                                lycon, lam::view_require_element(elem));
-                            if (css_height > 0.0f) {
-                                elem_height = css_height;
-                                has_explicit_height_css = true;
-                                log_debug("Replaced element %s has explicit CSS height=%d",
-                                          sub_child->node_name(), elem_height);
-                            }
-                        }
-                        // Default sizes for replaced elements without explicit height
-                        if (!has_explicit_height_css) {
-                            if (tag == HTM_TAG_IFRAME) elem_height = 150;  // CSS default iframe height
-                            else if (tag == HTM_TAG_VIDEO) elem_height = 150;
-                            else elem_height = 0;  // Other replaced elements need explicit size
-                        }
-                    }
-                    else if (tag == HTM_TAG_UL || tag == HTM_TAG_OL) {
-                        // Count list items
-                        int li_count = 0;
-                        if (elem) {
-                            DomNode* li = elem->first_child;
-                            while (li) {
-                                if (li->is_element()) li_count++;
-                                li = li->next_sibling;
-                            }
-                        }
-                        // Check if this list is a flex row container
-                        // In flex row, items are laid out horizontally so height = max(child heights)
-                        bool is_list_flex_row = false;
-                        if (elem) {
-                            ViewElement* list_view = lam::view_require_element(elem);
-                            if (list_view->display.inner == CSS_VALUE_FLEX) {
-                                is_list_flex_row = true;  // default direction is row
-                            }
-                            if (!is_list_flex_row && elem->specified_style) {
-                                CssDeclaration* dd = style_tree_get_declaration(
-                                    elem->specified_style, CSS_PROPERTY_DISPLAY);
-                                if (dd && dd->value && dd->value->type == CSS_VALUE_TYPE_KEYWORD &&
-                                    (dd->value->data.keyword == CSS_VALUE_FLEX ||
-                                     dd->value->data.keyword == CSS_VALUE_INLINE_FLEX)) {
-                                    is_list_flex_row = true;
-                                }
-                            }
-                            // Check if flex-direction is column (overrides row assumption)
-                            if (is_list_flex_row && elem->specified_style) {
-                                CssDeclaration* dir_decl = style_tree_get_declaration(
-                                    elem->specified_style, CSS_PROPERTY_FLEX_DIRECTION);
-                                if (dir_decl && dir_decl->value &&
-                                    dir_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                                    CssEnum d = dir_decl->value->data.keyword;
-                                    if (d == CSS_VALUE_COLUMN || d == CSS_VALUE_COLUMN_REVERSE) {
-                                        is_list_flex_row = false;
-                                    }
-                                }
-                            }
-                        }
-                        if (is_list_flex_row) {
-                            elem_height = li_count > 0 ? 18 : 0;  // row: max of children
-                        } else {
-                            elem_height = li_count * 18;  // column/block: sum of children
-                        }
-                    }
-                    else if (tag == HTM_TAG_DIV || tag == HTM_TAG_SECTION ||
-                             tag == HTM_TAG_ARTICLE || tag == HTM_TAG_NAV ||
-                             tag == HTM_TAG_HEADER || tag == HTM_TAG_FOOTER ||
-                             tag == HTM_TAG_ASIDE || tag == HTM_TAG_MAIN) {
-                        // Container elements - check if it's a flex container and has actual content
-                        // For empty containers (especially flex items), height should be 0
-                        // For nested flex containers, DON'T use estimation - let flex layout
-                        // determine height based on actual content
-
-                        // Check if this is a flex container by looking at DOM's specified_style
-                        // (display.inner may not be resolved yet during measurement pass)
-                        bool is_nested_flex = false;
-
-                        // First check view's display.inner if already resolved
-                        ViewElement* nested_view = lam::view_require_element(elem);
-                        if (nested_view && nested_view->display.inner == CSS_VALUE_FLEX) {
-                            is_nested_flex = true;
-                        }
-
-                        // If not resolved, check DOM's specified CSS style
-                        if (!is_nested_flex && elem && elem->specified_style) {
-                            CssDeclaration* display_decl = style_tree_get_declaration(
-                                elem->specified_style, CSS_PROPERTY_DISPLAY);
-                            if (display_decl && display_decl->value &&
-                                display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                                CssEnum display_value = display_decl->value->data.keyword;
-                                if (display_value == CSS_VALUE_FLEX ||
-                                    display_value == CSS_VALUE_INLINE_FLEX) {
-                                    is_nested_flex = true;
-                                    log_debug("Nested flex container detected via specified_style");
-                                }
-                            }
-                        }
-
-                        if (is_nested_flex) {
-                            // Nested flex container - check if it has actual content
-                            // For empty flex containers (e.g., flex items with no children or
-                            // only empty children), the height should be 0
-                            // For flex containers with content, use recursive measurement or estimate
-
-                            // First check if direct children have explicit heights
-                            bool has_children_with_explicit_height = false;
-                            bool has_text_content = false;
-                            bool has_element_content = false;
-                            if (elem) {
-                                DomNode* content = elem->first_child;
-                                while (content) {
-                                    if (layout_text_node_has_content(content)) {
-                                        has_text_content = true;
-                                    } else if (content->is_element()) {
-                                        has_element_content = true;
-                                        // Check if this nested element has explicit height
-                                        DomElement* nested = content->as_element();
-                                        if (nested && nested->specified_style) {
-                                            float h = get_explicit_css_height(
-                                                lycon, lam::view_require_element(nested));
-                                            if (h > 0.0f) {
-                                                has_children_with_explicit_height = true;
-                                            }
-                                        }
-                                    }
-                                    content = content->next_sibling;
-                                }
-                            }
-
-                            if (!has_text_content && !has_element_content) {
-                                // Empty flex container - height is 0
-                                elem_height = 0;
-                                has_explicit_height_css = true;  // 0 is reliable, no margin needed
-                                log_debug("Nested flex container: empty, height=0");
-                            } else if (has_children_with_explicit_height) {
-                                // Children have explicit heights - use recursive measurement
-                                float content_height = measure_content_height_recursive(static_cast<DomNode*>(elem), lycon, 0);
-                                if (content_height > 0) {
-                                    elem_height = content_height;
-                                    has_explicit_height_css = true;  // Reliable measured height
-                                    log_debug("Nested flex container: measured content height=%.1f", elem_height);
-                                } else {
-                                    // Fallback: use 0 and let flex layout determine height
-                                    elem_height = 0;
-                                    has_explicit_height_css = false;
-                                    log_debug("Nested flex container: measurement returned 0, using 0");
-                                }
-                            } else {
-                                // Has content (text or elements) but no explicit heights
-                                // Try recursive measurement first for accurate sizing
-                                float recursive_height = measure_content_height_recursive(static_cast<DomNode*>(elem), lycon, 0);
-                                if (recursive_height > 0) {
-                                    elem_height = recursive_height;
-                                    has_explicit_height_css = true;  // Measured height is reliable
-                                    log_debug("Nested flex container with content: recursive measured height=%.1f", elem_height);
-                                } else if (has_text_content) {
-                                    // Only use text_line_height if there's actual text content
-                                    elem_height = text_line_height;
-                                    has_explicit_height_css = false;
-                                    log_debug("Nested flex container with text content: using text_line_height=%.1f", elem_height);
-                                } else {
-                                    // Element children only, but recursive measurement returned 0
-                                    // Children are likely empty flex containers — use 0
-                                    elem_height = 0;
-                                    has_explicit_height_css = true;
-                                    log_debug("Nested flex container: element children but recursive=0, using 0");
-                                }
-                            }
-                        } else {
-                            // Non-flex container div - distinguish text-only vs. nested elements
-                            bool has_text_content = false;
-                            bool has_block_element = false;
-                            bool has_inline_element = false;
-                            if (elem) {
-                                DomNode* content = elem->first_child;
-                                while (content) {
-                                    if (content->is_element()) {
-                                        // Check if this is an inline element (a, span, etc.) or block
-                                        uintptr_t child_tag = content->tag();
-                                        bool is_inline = (child_tag == HTM_TAG_A || child_tag == HTM_TAG_SPAN ||
-                                                          child_tag == HTM_TAG_EM || child_tag == HTM_TAG_STRONG ||
-                                                          child_tag == HTM_TAG_B || child_tag == HTM_TAG_I ||
-                                                          child_tag == HTM_TAG_SMALL || child_tag == HTM_TAG_SUB ||
-                                                          child_tag == HTM_TAG_SUP || child_tag == HTM_TAG_ABBR ||
-                                                          child_tag == HTM_TAG_CODE || child_tag == HTM_TAG_KBD ||
-                                                          child_tag == HTM_TAG_MARK || child_tag == HTM_TAG_Q ||
-                                                          child_tag == HTM_TAG_S || child_tag == HTM_TAG_SAMP ||
-                                                          child_tag == HTM_TAG_VAR || child_tag == HTM_TAG_TIME ||
-                                                          child_tag == HTM_TAG_U || child_tag == HTM_TAG_CITE ||
-                                                          child_tag == HTM_TAG_BDI || child_tag == HTM_TAG_BDO ||
-                                                          child_tag == HTM_TAG_BR);
-                                        if (is_inline) {
-                                            has_inline_element = true;
-                                        } else {
-                                            has_block_element = true;
-                                        }
-                                    } else if (layout_text_node_has_content(content)) {
-                                        has_text_content = true;
-                                    }
-                                    content = content->next_sibling;
-                                }
-                            }
-                            // Estimate height based on content type:
-                            // - Divs with block elements: use 56 as fallback
-                            // - Divs with only inline elements or text: use text_line_height
-                            // - Empty divs: use 0
-                            if (has_block_element) {
-                                elem_height = 56;
-                                log_debug("Non-flex div with block elements: using estimate height=56");
-                            } else if (has_inline_element || has_text_content) {
-                                elem_height = text_line_height;
-                                log_debug("Non-flex div with inline/text content: using text_line_height=%.1f", elem_height);
-                            } else {
-                                elem_height = 0;
-                            }
-                        }
-                    }
-                    else {
-                        // For other elements (span, a, etc.), check if they have text content
-                        // and use text_line_height if so
-                        bool has_text_content = false;
-                        if (elem) {
-                            DomNode* content = elem->first_child;
-                            while (content) {
-                                if (layout_text_node_has_content(content)) {
-                                    has_text_content = true;
-                                }
-                                if (has_text_content) break;
-                                content = content->next_sibling;
-                            }
-                        }
-                        if (has_text_content) {
-                            // Resolve child's CSS line-height for content height
-                            // (text_line_height is the font-metric "normal" line height,
-                            //  but CSS line-height may differ, e.g. Bootstrap line-height:1.5)
-                            float child_content_height = text_line_height;
-                            ViewElement* sub_view = lam::view_require_element(elem);
-                            float inherited_lh = resolve_flex_inherited_line_height(lycon, elem);
-                            if (inherited_lh > 0) {
-                                child_content_height = inherited_lh;
-                            }
-                            elem_height = child_content_height;
-
-                            // Add child's vertical padding and border (CSS box model)
-                            float vert_extra = 0;
-                            if (sub_view && sub_view->bound) {
-                                vert_extra += layout_boundary_metrics(sub_view->bound).pad_border_v;
-                            }
-                            if (vert_extra == 0 && elem && elem->specified_style) {
-                                // Fallback: resolve from specified_style (handles shorthand)
-                                float pad_top = 0, pad_bottom = 0;
-                                CssDeclaration* pt = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_PADDING_TOP);
-                                if (pt && pt->value && pt->value->type == CSS_VALUE_TYPE_LENGTH)
-                                    pad_top = resolve_length_value(lycon, CSS_PROPERTY_PADDING_TOP, pt->value);
-                                CssDeclaration* pb = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_PADDING_BOTTOM);
-                                if (pb && pb->value && pb->value->type == CSS_VALUE_TYPE_LENGTH)
-                                    pad_bottom = resolve_length_value(lycon, CSS_PROPERTY_PADDING_BOTTOM, pb->value);
-                                if (pad_top == 0 && pad_bottom == 0) {
-                                    CssDeclaration* pad_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_PADDING);
-                                    if (pad_sh && pad_sh->value) {
-                                        const CssValue* top_value = css_box_shorthand_side_value(pad_sh->value, 0);
-                                        const CssValue* bottom_value = css_box_shorthand_side_value(pad_sh->value, 2);
-                                        if (top_value) {
-                                            pad_top = resolve_length_value(lycon, CSS_PROPERTY_PADDING, top_value);
-                                        }
-                                        if (bottom_value) {
-                                            pad_bottom = resolve_length_value(lycon, CSS_PROPERTY_PADDING, bottom_value);
-                                        }
-                                    }
-                                }
-                                float brd_top = 0, brd_bottom = 0;
-                                CssDeclaration* bt_d = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER_TOP_WIDTH);
-                                if (bt_d && bt_d->value && bt_d->value->type == CSS_VALUE_TYPE_LENGTH)
-                                    brd_top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_TOP_WIDTH, bt_d->value);
-                                CssDeclaration* bb_d = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER_BOTTOM_WIDTH);
-                                if (bb_d && bb_d->value && bb_d->value->type == CSS_VALUE_TYPE_LENGTH)
-                                    brd_bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, bb_d->value);
-                                if (brd_top == 0 && brd_bottom == 0) {
-                                    CssDeclaration* bw_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER_WIDTH);
-                                    if (bw_sh && bw_sh->value) {
-                                        const CssValue* top_value = css_box_shorthand_side_value(bw_sh->value, 0);
-                                        const CssValue* bottom_value = css_box_shorthand_side_value(bw_sh->value, 2);
-                                        if (top_value) {
-                                            brd_top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, top_value);
-                                        }
-                                        if (bottom_value) {
-                                            brd_bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bottom_value);
-                                        }
-                                    }
-                                    if (brd_top == 0 && brd_bottom == 0) {
-                                        CssDeclaration* b_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER);
-                                        if (b_sh && b_sh->value) {
-                                            float bw = 0;
-                                            if (b_sh->value->type == CSS_VALUE_TYPE_LIST) {
-                                                for (int bi = 0; bi < b_sh->value->data.list.count; bi++) {
-                                                    CssValue* bv = b_sh->value->data.list.values[bi];
-                                                    if (bv->type == CSS_VALUE_TYPE_LENGTH || bv->type == CSS_VALUE_TYPE_NUMBER) {
-                                                        bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bv);
-                                                        break;
-                                                    }
-                                                }
-                                            } else if (b_sh->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                                bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, b_sh->value);
-                                            }
-                                            brd_top = brd_bottom = bw;
-                                        }
-                                    }
-                                }
-                                vert_extra = pad_top + pad_bottom + brd_top + brd_bottom;
-                            }
-                            elem_height += vert_extra;
-                            if (vert_extra > 0) has_explicit_height_css = true;
-                            log_debug("Element %s: content_height=%d, padding+border=%.1f, total=%d",
-                                      sub_child->node_name(), child_content_height, vert_extra, elem_height);
-                        } else {
-                            // Form controls are replaced controls with intrinsic dimensions.
-                            // They should not fall through to the generic 20px + margin
-                            // estimate; that inflates checkbox/radio flex labels.
-                            ViewElement* sub_view = lam::view_as_element(sub_child);
-                            if (sub_view && sub_view->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                                sub_view->form && sub_view->form->intrinsic_height > 0) {
-                                elem_height = sub_view->form->intrinsic_height;
-                                has_explicit_height_css = true;
-                                log_debug("Element %s using form intrinsic height=%.1f",
-                                          sub_child->node_name(), elem_height);
-                            }
-
-                            // Check for explicit CSS height property before using default
-                            if (!has_explicit_height_css) {
-                                log_debug("Checking explicit CSS height for %s, elem=%p, specified_style=%p",
-                                          sub_child->node_name(), elem, elem ? elem->specified_style : nullptr);
-                            }
-                            if (!has_explicit_height_css && elem && elem->specified_style) {
-                                float css_height = get_explicit_css_height(
-                                    lycon, lam::view_require_element(elem));
-                                if (css_height > 0.0f) {
-                                    elem_height = css_height;
-                                    has_explicit_height_css = true;
-                                    log_debug("Element %s has explicit CSS height=%.1f",
-                                              sub_child->node_name(), elem_height);
-                                }
-                            }
-                            if (!has_explicit_height_css) {
-                                elem_height = 20;  // Default element height
-                                log_debug("Element %s using default height=20", sub_child->node_name());
-                            }
-                        }
-                    }
-
-                    // Add margins only if element has height
-                    // Don't add margin for elements with explicit CSS height or text content
-                    if (elem_height > 0) {
-                        // Check if this child is an inline element (a, span, etc.)
-                        // Inline elements should not be summed - they flow on the same line
-                        bool is_inline_child = false;
-                        if (tag == HTM_TAG_A || tag == HTM_TAG_SPAN || tag == HTM_TAG_EM ||
-                            tag == HTM_TAG_STRONG || tag == HTM_TAG_B || tag == HTM_TAG_I ||
-                            tag == HTM_TAG_SMALL || tag == HTM_TAG_SUB || tag == HTM_TAG_SUP ||
-                            tag == HTM_TAG_ABBR || tag == HTM_TAG_CODE || tag == HTM_TAG_KBD ||
-                            tag == HTM_TAG_MARK || tag == HTM_TAG_Q || tag == HTM_TAG_S ||
-                            tag == HTM_TAG_SAMP || tag == HTM_TAG_VAR || tag == HTM_TAG_TIME ||
-                            tag == HTM_TAG_U || tag == HTM_TAG_CITE || tag == HTM_TAG_BDI ||
-                            tag == HTM_TAG_BDO) {
-                            is_inline_child = true;
-                        }
-
-                        if (is_row_flex || is_inline_child) {
-                            // Row flex or inline children: use MAX of child heights
-                            // Don't add margin for text-containing inline elements or explicit height elements
-                            int margin = (elem_height == text_line_height || has_explicit_height_css || is_inline_child) ? 0 : 10;
-                            int total_elem_height = elem_height + margin;
-                            if (total_elem_height > max_child_height) {
-                                max_child_height = total_elem_height;
-                            }
-                        } else {
-                            // Column flex or normal block with block children: SUM of child heights
-                            int margin = has_explicit_height_css ? 0 : 10;
-                            measured_height += elem_height + margin;
-                        }
-                    }
+                    FlexMeasuredElementHeight measured_elem =
+                        flex_measure_direct_element_height(lycon, sub_child, elem, text_line_height);
+                    flex_accumulate_direct_element_height(tag, measured_elem, text_line_height,
+                                                          is_row_flex, &max_child_height,
+                                                          &measured_height);
                 }
                 sub_child = sub_child->next_sibling;
             }
@@ -1171,12 +1531,9 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
             // (CSS may override UA font-size, so intrinsic_height from UA phase may be stale)
             if (elem->form->control_type == FORM_CONTROL_TEXT &&
                 elem->font && elem->font->font_size > 0 && lycon->ui_context) {
-                FontBox temp_font;
-                setup_font(lycon->ui_context, &temp_font, elem->font);
-                if (temp_font.font_handle) {
-                    float line_h = calc_normal_line_height(temp_font.font_handle);
-                    if (line_h > content_height) content_height = line_h;
-                }
+                float line_h =
+                    flex_measure_normal_line_height_for_font(lycon, elem->font, content_height);
+                if (line_h > content_height) content_height = line_h;
             }
 
             // SELECT (combo box): measure max option text + arrow overhead so
@@ -1189,46 +1546,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                 if (elem->font && elem->font->font_size > 0 && lycon->ui_context) {
                     setup_font(lycon->ui_context, &lycon->font, elem->font);
                 }
-                float max_text_width = 0;
-                for (DomNode* opt = elem->first_child; opt; opt = opt->next_sibling) {
-                    if (!opt->is_element()) continue;
-                    DomElement* oe = opt->as_element();
-                    uintptr_t otag = oe->tag();
-                    if (otag == HTM_TAG_OPTION) {
-                        for (DomNode* tc = oe->first_child; tc; tc = tc->next_sibling) {
-                            DomText* dt = tc->as_text();
-                            if (dt && dt->text && dt->length > 0) {
-                                TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
-                                if (tw.max_content > max_text_width) max_text_width = tw.max_content;
-                            }
-                        }
-                    } else if (otag == HTM_TAG_OPTGROUP) {
-                        const char* lbl = oe->get_attribute("label");
-                        if (lbl) {
-                            size_t ll = strlen(lbl);
-                            if (ll > 0) {
-                                TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, lbl, ll);
-                                if (tw.max_content > max_text_width) max_text_width = tw.max_content;
-                            }
-                        }
-                        for (DomNode* gc = oe->first_child; gc; gc = gc->next_sibling) {
-                            if (gc->is_element() && gc->as_element()->tag() == HTM_TAG_OPTION) {
-                                float opt_text_width = 0;
-                                for (DomNode* tc = gc->as_element()->first_child; tc; tc = tc->next_sibling) {
-                                    DomText* dt = tc->as_text();
-                                    if (dt && dt->text && dt->length > 0) {
-                                        TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
-                                        if (tw.max_content > opt_text_width) opt_text_width = tw.max_content;
-                                    }
-                                }
-                                float effective = opt_text_width + FormDefaults::OPTGROUP_OPTION_INDENT;
-                                if (effective < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH)
-                                    effective = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
-                                if (effective > max_text_width) max_text_width = effective;
-                            }
-                        }
-                    }
-                }
+                float max_text_width = flex_measure_select_max_option_text_width(lycon, elem);
                 lycon->font = saved_font;
                 float overhead = FormDefaults::SELECT_ARROW_WIDTH + 1.0f;
                 float min_select_width = FormDefaults::SELECT_HEIGHT + 3.0f;
@@ -1249,54 +1567,17 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
             if (elem->form->control_type == FORM_CONTROL_BUTTON &&
                 elem->form->intrinsic_width <= 0 && elem->first_child) {
                 // Get text-transform from parent element chain
-                CssEnum btn_text_transform = CSS_VALUE_NONE;
-                DomNode* tt_node = elem;
-                while (tt_node) {
-                    if (tt_node->is_element()) {
-                        DomElement* tt_elem = tt_node->as_element();
-                        ViewBlock* tt_view = lam::view_as_block(tt_elem);
-                        if (tt_view && tt_view->blk && tt_view->blk->text_transform != 0 &&
-                            tt_view->blk->text_transform != CSS_VALUE_INHERIT) {
-                            btn_text_transform = tt_view->blk->text_transform;
-                            break;
-                        }
-                        if (tt_elem->specified_style) {
-                            CssDeclaration* decl = style_tree_get_declaration(
-                                tt_elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
-                            if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                                CssEnum val = decl->value->data.keyword;
-                                if (val != CSS_VALUE_INHERIT && val != CSS_VALUE_NONE) {
-                                    btn_text_transform = val;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    tt_node = tt_node->parent;
-                }
+                CssEnum btn_text_transform = flex_measure_resolve_text_transform(elem);
 
                 // Measure text content of button
-                DomNode* btn_child = elem->first_child;
-                float max_text_width = 0;
                 // Set up button's own font for measurement (UA default 13.3333px Arial,
                 // not parent's inherited font which may differ)
                 FontBox saved_font = lycon->font;
                 if (elem->font && elem->font->font_size > 0 && lycon->ui_context) {
                     setup_font(lycon->ui_context, &lycon->font, elem->font);
                 }
-                while (btn_child) {
-                    if (btn_child->is_text()) {
-                        const char* text = (const char*)btn_child->text_data();
-                        if (text && *text) {
-                            size_t len = strlen(text);
-                            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, len, btn_text_transform);
-                            if (widths.max_content > max_text_width) {
-                                max_text_width = widths.max_content;
-                            }
-                        }
-                    }
-                    btn_child = btn_child->next_sibling;
-                }
+                float max_text_width =
+                    flex_measure_direct_text_children_max_width(lycon, elem, btn_text_transform);
                 lycon->font = saved_font;  // restore parent font
                 if (max_text_width > 0) {
                     // Store intrinsic size in form property for flex-basis calculation
@@ -1307,11 +1588,9 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                     float btn_content_height = FormDefaults::TEXT_HEIGHT
                         - 2 * (FormDefaults::BUTTON_PADDING_V + FormDefaults::BUTTON_BORDER);  // fallback: 15
                     if (elem->font && elem->font->font_size > 0 && lycon->ui_context) {
-                        FontBox temp_font;
-                        setup_font(lycon->ui_context, &temp_font, elem->font);
-                        if (temp_font.font_handle) {
-                            btn_content_height = calc_normal_line_height(temp_font.font_handle);
-                        }
+                        btn_content_height =
+                            flex_measure_normal_line_height_for_font(
+                                lycon, elem->font, btn_content_height);
                     }
                     elem->form->intrinsic_height = btn_content_height;
 
@@ -1826,50 +2105,15 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             size_t len = strlen(text);
             LayoutContext* lycon = flex_layout ? flex_layout->lycon : nullptr;
             if (lycon) {
-                // CRITICAL FIX: Normalize whitespace according to CSS white-space property
-                // before measuring. For normal/nowrap, trailing whitespace should be collapsed.
-                CssEnum ws = get_white_space_value(child);
-                const char* measure_text = text;
-                size_t measure_len = len;
-                static thread_local char normalized_buffer[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
+                // Normalize whitespace according to the text node's CSS white-space property
+                // before measuring so collapsed trailing spaces do not inflate intrinsic width.
+                FlexMeasureTextRun run = flex_measure_prepare_text_run(child, text, len);
 
-                if (should_collapse_whitespace(ws)) {
-                    measure_len = normalize_whitespace_for_flex(text, len, normalized_buffer, sizeof(normalized_buffer));
-                    measure_text = normalized_buffer;
-                    log_debug("Normalized text for intrinsic sizing: '%s' -> '%s' (ws=%d)",
-                              text, normalized_buffer, ws);
-                }
-
-                // Get text-transform from parent element (text inherits from parent)
-                // Look up parent chain since text-transform is inherited
-                CssEnum text_transform = CSS_VALUE_NONE;
-                DomNode* tt_node = item;
-                while (tt_node) {
-                    if (tt_node->is_element()) {
-                        DomElement* tt_elem = lam::dom_require<DOM_NODE_ELEMENT>(tt_node);
-                        ViewBlock* tt_view = lam::view_as_block(tt_elem);
-                        if (tt_view && tt_view->blk && tt_view->blk->text_transform != 0 &&
-                            tt_view->blk->text_transform != CSS_VALUE_INHERIT) {
-                            text_transform = tt_view->blk->text_transform;
-                            break;
-                        }
-                        if (tt_elem->specified_style) {
-                            CssDeclaration* decl = style_tree_get_declaration(
-                                tt_elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
-                            if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                                CssEnum val = decl->value->data.keyword;
-                                if (val != CSS_VALUE_INHERIT && val != CSS_VALUE_NONE) {
-                                    text_transform = val;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    tt_node = tt_node->parent;
-                }
+                // Look up the inherited text-transform before measuring text widths.
+                CssEnum text_transform = flex_measure_resolve_text_transform(item);
 
                 // Use accurate backend font measurement
-                TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len, text_transform);
+                TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, run.text, run.length, text_transform);
                 min_width = widths.min_content;
                 max_width = widths.max_content;
 
@@ -1947,46 +2191,12 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // Check if this item is a row flex container
         // For row flex containers, the cached height from measure_flex_child_content might be incorrect
         // because it sums child heights instead of taking the max
-        bool is_row_flex_container = false;
-        bool is_flex_container = false;
-        // Check both block and inline-block view types for flex detection
-        // Also check display.inner for flex containers whose embed->flex isn't allocated yet
-        // (e.g., nested flex items measured during parent's resolve_flex_item_constraints
-        // before their own flex layout starts)
-        bool item_style_is_flex = item->display.inner == CSS_VALUE_FLEX;
-        if (!item_style_is_flex && item->specified_style) {
-            CssDeclaration* display_decl = style_tree_get_declaration(
-                item->specified_style, CSS_PROPERTY_DISPLAY);
-            if (display_decl && display_decl->value &&
-                display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum display_val = display_decl->value->data.keyword;
-                item_style_is_flex = display_val == CSS_VALUE_FLEX ||
-                    display_val == CSS_VALUE_INLINE_FLEX;
-            }
-        }
-        if (item_style_is_flex) {
-            is_flex_container = true;
-            // Try to get direction from embed->flex if available
-            if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
-                ViewBlock* block_view = lam::view_as_block(item);
-                if (block_view->embed && block_view->embed->flex) {
-                    is_row_flex_container = flex_measurement_direction_is_row(item);
-                } else {
-                    // embed->flex not yet allocated - resolve direction from CSS
-                    // Default is row per CSS spec
-                    is_row_flex_container = flex_measurement_direction_is_row(item);
-                }
-            }
+        bool is_flex_container = flex_measurement_is_flex_container(item);
+        bool is_row_flex_container = is_flex_container ?
+            flex_measurement_direction_is_row(item) : false;
+        if (is_flex_container) {
             log_debug("calculate_item_intrinsic_sizes: is_flex_container=1, is_row=%d (display flex)",
                       is_row_flex_container);
-        } else if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
-            ViewBlock* block_view = lam::view_as_block(item);
-            if (block_view->embed && block_view->embed->flex) {
-                is_flex_container = true;
-                is_row_flex_container = flex_measurement_direction_is_row(item);
-                log_debug("calculate_item_intrinsic_sizes: is_row_flex_container=%d (direction=%d)",
-                          is_row_flex_container, block_view->embed->flex->direction);
-            }
         }
 
         // CRITICAL FIX: For non-flex containers (regular block elements with inline content),
@@ -2062,7 +2272,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     }
                     if (available_width <= 0) available_width = 10000.0f;
                 }
-                min_height = max_height = calculate_max_content_height(
+                min_height = max_height = flex_measure_intrinsic_max_height(
                     lycon, static_cast<DomNode*>(item), available_width);
                 // calculate_max_content_height returns border-box values (includes the
                 // element's own padding+border). Convert back to content-box so all
@@ -2145,49 +2355,14 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             while (c) {
                 if (layout_text_node_has_content(c)) {
                     const char* text = (const char*)c->text_data();
-                    int text_len = strlen(text);
+                    size_t text_len = strlen(text);
                     float text_min_width, text_max_width, text_height;
                     if (lycon) {
-                        // CRITICAL FIX: Normalize whitespace according to CSS white-space property
-                        CssEnum ws = get_white_space_value(c);
-                        const char* measure_text = text;
-                        size_t measure_len = text_len;
-                        static thread_local char normalized_buffer2[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
+                        FlexMeasureTextRun run = flex_measure_prepare_text_run(c, text, text_len);
 
-                        if (should_collapse_whitespace(ws)) {
-                            measure_len = normalize_whitespace_for_flex(text, text_len,
-                                                                         normalized_buffer2, sizeof(normalized_buffer2));
-                            measure_text = normalized_buffer2;
-                        }
+                        CssEnum text_transform = flex_measure_resolve_text_transform(item);
 
-                        // Get text-transform from parent element chain
-                        CssEnum text_transform = CSS_VALUE_NONE;
-                        DomNode* tt_node = item;
-                        while (tt_node) {
-                            if (tt_node->is_element()) {
-                                DomElement* tt_elem = lam::dom_require<DOM_NODE_ELEMENT>(tt_node);
-                                ViewBlock* tt_view = lam::view_as_block(tt_elem);
-                                if (tt_view && tt_view->blk && tt_view->blk->text_transform != 0 &&
-                                    tt_view->blk->text_transform != CSS_VALUE_INHERIT) {
-                                    text_transform = tt_view->blk->text_transform;
-                                    break;
-                                }
-                                if (tt_elem->specified_style) {
-                                    CssDeclaration* decl = style_tree_get_declaration(
-                                        tt_elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
-                                    if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                                        CssEnum val = decl->value->data.keyword;
-                                        if (val != CSS_VALUE_INHERIT && val != CSS_VALUE_NONE) {
-                                            text_transform = val;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                            tt_node = tt_node->parent;
-                        }
-
-                        TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len, text_transform);
+                        TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, run.text, run.length, text_transform);
                         text_min_width = widths.min_content;
                         text_max_width = widths.max_content;
                         // BUGFIX: Use line height instead of font size for text height
@@ -2218,11 +2393,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     }
 
                     // For height, row flex takes max, column flex sums
-                    if (is_row_flex_container) {
-                        total_child_height = max(total_child_height, text_height);
-                    } else {
-                        total_child_height += text_height;
-                    }
+                    flex_accumulate_intrinsic_child_height(
+                        is_row_flex_container, text_height, &total_child_height);
                 } else if (c->is_element()) {
                     ViewElement* child_view = lam::view_require_element(c);
                     if (child_view) {
@@ -2260,64 +2432,25 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             }
                         }
 
-                        // First check View-level resolved dimensions
-                        bool child_has_explicit_width = (child_view->blk && child_view->blk->given_width >= 0);
-                        bool child_has_explicit_height = (child_view->blk && child_view->blk->given_height >= 0);
-
-                        // If View-level dimensions aren't set yet, check DOM CSS
-                        // This handles the case where intrinsic sizing runs before CSS resolution
-                        float dom_css_width = -1;
-                        float dom_css_height = -1;
                         LayoutContext* lycon = flex_layout ? flex_layout->lycon : nullptr;
-
-                        if (!child_has_explicit_width && lycon) {
-                            dom_css_width = get_explicit_css_width(lycon, child_view);
-                            if (dom_css_width > 0) {
-                                child_has_explicit_width = true;
-                                log_debug("Got explicit CSS width from DOM: %.1f", dom_css_width);
-                            }
-                        }
-
-                        if (!child_has_explicit_height && lycon) {
-                            dom_css_height = get_explicit_css_height(lycon, child_view);
-                            if (dom_css_height > 0) {
-                                child_has_explicit_height = true;
-                                log_debug("Got explicit CSS height from DOM: %.1f", dom_css_height);
-                            }
-                        }
+                        FlexChildExplicitSizes child_explicit =
+                            flex_measure_child_explicit_sizes(lycon, child_view);
 
                         float child_min_width = 0.0f;
                         float child_max_width = 0.0f;
                         float child_height = 0.0f;
 
                         // Get child width - explicit (from View or DOM) or intrinsic
-                        if (child_has_explicit_width) {
-                            float explicit_w = 0.0f;
-                            if (child_view->blk && child_view->blk->given_width >= 0) {
-                                explicit_w = child_view->blk->given_width;
-                            } else if (dom_css_width > 0) {
-                                explicit_w = dom_css_width;
-                            }
+                        if (child_explicit.has_width) {
                             // Explicit width is both min and max
-                            child_min_width = child_max_width = explicit_w;
+                            child_min_width = child_max_width = child_explicit.width;
                         } else if (child_display.inner == CSS_VALUE_FLEX && lycon) {
-                            FontBox saved_child_font = lycon->font;
-                            bool child_font_changed = false;
-                            if (child_view->font) {
-                                setup_font(lycon->ui_context, &lycon->font, child_view->font);
-                                child_font_changed = true;
-                            }
-
-                            IntrinsicSizes child_sizes = measure_element_intrinsic_widths(
-                                lycon, lam::dom_require<DOM_NODE_ELEMENT>(child_view), /*content_only=*/true);
+                            IntrinsicSizes child_sizes = flex_measure_child_intrinsic_widths(
+                                lycon, child_view, /*content_only=*/true);
                             child_min_width = child_sizes.min_content;
                             child_max_width = child_sizes.max_content;
                             log_debug("Used flex container intrinsic widths for child: min=%.1f, max=%.1f",
                                       child_min_width, child_max_width);
-
-                            if (child_font_changed) {
-                                lycon->font = saved_child_font;
-                            }
                         } else if (child_view->item_prop_type == DomElement::ITEM_PROP_FORM && child_view->form) {
                             child_min_width = child_view->form->intrinsic_width;
                             child_max_width = child_view->form->intrinsic_width;
@@ -2339,133 +2472,26 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         } else if (lycon) {
                             // Child doesn't have fi yet - use measure_element_intrinsic_widths
                             // This handles the case where intrinsic sizing runs before fi is initialized
-
-                            // CRITICAL FIX: Set up child's font context before measuring
-                            // Otherwise text will be measured with parent's font (wrong width)
-                            FontBox saved_child_font = lycon->font;
-                            bool child_font_changed = false;
-                            if (child_view->font) {
-                                setup_font(lycon->ui_context, &lycon->font, child_view->font);
-                                child_font_changed = true;
-                            }
-
-                            IntrinsicSizes child_sizes = measure_element_intrinsic_widths(
-                                lycon, lam::dom_require<DOM_NODE_ELEMENT>(child_view));
+                            IntrinsicSizes child_sizes = flex_measure_child_intrinsic_widths(
+                                lycon, child_view, /*content_only=*/false);
                             child_min_width = child_sizes.min_content;
                             child_max_width = child_sizes.max_content;
                             log_debug("Used measure_element_intrinsic_widths for child: min=%.1f, max=%.1f",
                                       child_min_width, child_max_width);
-
-                            // Restore parent font
-                            if (child_font_changed) {
-                                lycon->font = saved_child_font;
-                            }
                         }
 
                         // Get child height - explicit (from View or DOM) or intrinsic
-                        if (child_has_explicit_height) {
-                            if (child_view->blk && child_view->blk->given_height >= 0) {
-                                child_height = child_view->blk->given_height;
-                            } else if (dom_css_height > 0) {
-                                child_height = dom_css_height;
-                            }
+                        if (child_explicit.has_height) {
+                            child_height = child_explicit.height;
                         } else if (is_row_flex_container && lycon && flex_layout &&
                                    !is_main_axis_horizontal(flex_layout) &&
                                    flex_layout->cross_axis_size > 0) {
-                            // Row flex items in a column parent: compute height at
-                            // the item's estimated width share, not the grandparent's
-                            // full cross-axis size (which would prevent text wrapping).
-                            float row_width = flex_layout->cross_axis_size;
-                            if (item->bound) {
-                                row_width -= item->bound->margin.left + item->bound->margin.right;
-                            }
-                            if (layout_uses_border_box(lam::view_as_block(item))) {
-                                if (item->blk->given_width >= 0.0f) {
-                                    row_width = item->blk->given_width;
-                                }
-                                row_width = layout_clamp_positive_min_max_width(
-                                    lam::view_as_block(item), row_width);
-                            }
-                            row_width = layout_boundary_content_size_from_border_box(item->bound, row_width, true);
-                            if (item->blk && !layout_uses_border_box(lam::view_as_block(item))) {
-                                if (item->blk->given_width >= 0.0f) {
-                                    row_width = item->blk->given_width;
-                                }
-                                row_width = layout_clamp_positive_min_max_width(
-                                    lam::view_as_block(item), row_width);
-                            }
-                            if (row_width <= 0.0f) row_width = flex_layout->cross_axis_size;
-                            // Estimate each child's share of the row (assumes flex:1 equal split)
-                            float gap = 0;
-                            if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
-                                ViewBlock* bv = lam::view_as_block(item);
-                                if (bv->embed && bv->embed->flex)
-                                    gap = bv->embed->flex->column_gap;
-                            }
-                            int n_flex_children = 0;
-                            for (DomNode* sc = item->first_child; sc; sc = sc->next_sibling)
-                                if (sc->is_element()) n_flex_children++;
-                            float child_share = row_width;
-                            if (n_flex_children > 1)
-                                child_share = (row_width - gap * (n_flex_children - 1)) / n_flex_children;
-                            // Subtract child's own padding+border to get content width
-                            float child_content_w = child_share;
-                            if (child_view->bound) {
-                                child_content_w = layout_boundary_content_size_from_border_box(
-                                    child_view->bound, child_content_w, true);
-                            } else if (child_view->specified_style) {
-                                // Fallback: resolve padding/border from CSS when bound not yet computed
-                                float cp = 0, cb = 0;
-                                CssDeclaration* pad_decl = style_tree_get_declaration(
-                                    child_view->specified_style, CSS_PROPERTY_PADDING);
-                                if (pad_decl && pad_decl->value && pad_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                    float p = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_decl->value);
-                                    cp = p * 2; // left + right
-                                } else {
-                                    CssDeclaration* pl = style_tree_get_declaration(
-                                        child_view->specified_style, CSS_PROPERTY_PADDING_LEFT);
-                                    CssDeclaration* pr = style_tree_get_declaration(
-                                        child_view->specified_style, CSS_PROPERTY_PADDING_RIGHT);
-                                    if (pl && pl->value && pl->value->type == CSS_VALUE_TYPE_LENGTH)
-                                        cp += resolve_length_value(lycon, CSS_PROPERTY_PADDING_LEFT, pl->value);
-                                    if (pr && pr->value && pr->value->type == CSS_VALUE_TYPE_LENGTH)
-                                        cp += resolve_length_value(lycon, CSS_PROPERTY_PADDING_RIGHT, pr->value);
-                                }
-                                CssDeclaration* bw_decl = style_tree_get_declaration(
-                                    child_view->specified_style, CSS_PROPERTY_BORDER_WIDTH);
-                                if (bw_decl && bw_decl->value && bw_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                    float b = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bw_decl->value);
-                                    cb = b * 2;
-                                } else {
-                                    // Check border shorthand (e.g., "border: 1px solid #color")
-                                    CssDeclaration* b_sh = style_tree_get_declaration(
-                                        child_view->specified_style, CSS_PROPERTY_BORDER);
-                                    if (b_sh && b_sh->value) {
-                                        float bw = 0;
-                                        if (b_sh->value->type == CSS_VALUE_TYPE_LIST) {
-                                            for (int bi = 0; bi < b_sh->value->data.list.count; bi++) {
-                                                CssValue* bv = b_sh->value->data.list.values[bi];
-                                                if (bv->type == CSS_VALUE_TYPE_LENGTH || bv->type == CSS_VALUE_TYPE_NUMBER) {
-                                                    bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bv);
-                                                    break;
-                                                }
-                                            }
-                                        } else if (b_sh->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                            bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, b_sh->value);
-                                        }
-                                        cb = bw * 2;
-                                    }
-                                }
-                                child_content_w -= cp + cb;
-                            }
-                            if (child_content_w < 0) child_content_w = 0;
-                            child_height = calculate_max_content_height(lycon, c, child_content_w);
-                            log_debug("Row flex child height at estimated share: share=%.1f, content_w=%.1f, h=%.1f",
-                                      child_share, child_content_w, child_height);
+                            child_height = flex_measure_row_child_height_at_estimated_share(
+                                lycon, c, item, child_view, flex_layout);
                         } else if (child_view->item_prop_type == DomElement::ITEM_PROP_FORM && child_view->form) {
                             child_height = child_view->form->intrinsic_height;
                             if (child_height <= 0.0f && lycon) {
-                                child_height = calculate_max_content_height(lycon, c, child_max_width);
+                                child_height = flex_measure_intrinsic_max_height(lycon, c, child_max_width);
                             }
                         } else if (has_flex_item_prop(child_view)) {
                             // Child has fi - use cached intrinsic or calculate recursively
@@ -2479,80 +2505,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
 
                         // CRITICAL: If child height is still 0 without explicit height,
                         // try to measure content-based height from the DOM tree
-                        if (child_height == 0.0f && !child_has_explicit_height) {
-                            DisplayValue child_display = resolve_display_value((void*)c);
-                            log_debug("Child height is 0, checking display - display.inner=%d, display.outer=%d",
-                                      child_display.inner, child_display.outer);
-                            if (child_display.inner == CSS_VALUE_FLEX) {
-                                // For flex containers, use recursive DOM-based measurement
-                                child_height = measure_content_height_recursive(c, lycon, 0);
-                                log_debug("Nested flex child height from recursive measurement: %.1f", child_height);
-                                // Fallback: if recursive returned 0 (e.g., text-only flex container),
-                                // use calculate_max_content_height with parent's cross-axis size
-                                if (child_height == 0.0f && lycon) {
-                                    float avail_w = 10000.0f;
-                                    // For column flex parents, determine item's content width for text wrapping
-                                    if (!is_row_flex_container) {
-                                        float parent_cw = -1;
-                                        if (item->blk && item->blk->given_width >= 0) {
-                                            parent_cw = layout_css_size_to_content_box(
-                                                item->bound, layout_box_sizing(lam::view_as_block(item)), item->blk->given_width, true);
-                                        } else if (flex_layout && flex_layout->cross_axis_size > 0 && item->specified_style) {
-                                            // Try resolving percentage width against container cross-axis
-                                            CssDeclaration* w_decl = style_tree_get_declaration(
-                                                item->specified_style, CSS_PROPERTY_WIDTH);
-                                            bool resolved_percent_width = w_decl && w_decl->value &&
-                                                layout_resolve_percentage_value(w_decl->value, flex_layout->cross_axis_size, &parent_cw);
-                                            if (!resolved_percent_width && (!w_decl || !w_decl->value ||
-                                                (w_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-                                                 w_decl->value->data.keyword == CSS_VALUE_AUTO))) {
-                                                // Auto width → stretch to cross-axis minus margins
-                                                parent_cw = flex_layout->cross_axis_size;
-                                                if (item->bound)
-                                                    parent_cw -= item->bound->margin.left + item->bound->margin.right;
-                                            }
-                                            // Convert border-box to content-box
-                                            if (parent_cw > 0 && item->blk) {
-                                                parent_cw = layout_css_size_to_content_box(
-                                                    item->bound, layout_box_sizing(lam::view_as_block(item)), parent_cw, true);
-                                            }
-                                        }
-                                        if (parent_cw > 0) {
-                                            float chm = get_child_horizontal_margins(lycon, child_view, parent_cw);
-                                            avail_w = fmax(parent_cw - chm, 0.0f);
-                                        }
-                                    }
-                                    child_height = calculate_max_content_height(lycon, c, avail_w);
-                                    log_debug("Nested flex child height fallback: avail_w=%.1f, child_height=%.1f, child_bound=%p",
-                                              avail_w, child_height, (void*)child_view->bound);
-                                }
-                            } else if (child_display.outer == CSS_VALUE_BLOCK && lycon) {
-                                // For regular block elements, measure content height.
-                                // In column flex, use the item's resolved cross-axis width
-                                // so text wraps correctly during measurement.
-                                float available_width = 10000.0f;
-                                if (!is_row_flex_container) {
-                                    float parent_cw = -1;
-                                    if (item->blk && item->blk->given_width >= 0) {
-                                        parent_cw = layout_css_size_to_content_box(
-                                            item->bound, layout_box_sizing(lam::view_as_block(item)), item->blk->given_width, true);
-                                    } else if (flex_layout && flex_layout->cross_axis_size > 0) {
-                                        parent_cw = flex_layout->cross_axis_size;
-                                        if (item->bound)
-                                            parent_cw -= item->bound->margin.left + item->bound->margin.right;
-                                        if (item->blk) {
-                                            parent_cw = layout_css_size_to_content_box(
-                                                item->bound, layout_box_sizing(lam::view_as_block(item)), parent_cw, true);
-                                        }
-                                    }
-                                    if (parent_cw > 0) {
-                                        float chm = get_child_horizontal_margins(lycon, child_view, parent_cw);
-                                        available_width = fmax(parent_cw - chm, 0.0f);
-                                    }
-                                }
-                                child_height = calculate_max_content_height(lycon, c, available_width);
-                                log_debug("Block child height from calculate_max_content_height: avail_w=%.1f, h=%.1f", available_width, child_height);
-                            }
+                        if (child_height == 0.0f && !child_explicit.has_height) {
+                            child_height = flex_measure_zero_child_height_fallback(
+                                c, lycon, item, child_view, flex_layout, is_row_flex_container);
                         }
 
                         // CSS Flexbox §9.9.1: Each flex item's contribution to the container's
@@ -2576,14 +2531,13 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         child_count++;
 
                         // For height, column flex containers sum heights, row flex takes max
-                        if (is_row_flex_container) {
-                            total_child_height = max(total_child_height, child_height + child_v_margin);
-                        } else {
-                            total_child_height += child_height + child_v_margin;
-                        }
+                        flex_accumulate_intrinsic_child_height(
+                            is_row_flex_container, child_height + child_v_margin,
+                            &total_child_height);
 
                         log_debug("Child element: min_width=%.1f, max_width=%.1f, height=%.1f (explicit=%d/%d)",
-                                  child_min_width, child_max_width, child_height, child_has_explicit_width, child_has_explicit_height);
+                                  child_min_width, child_max_width, child_height,
+                                  child_explicit.has_width, child_explicit.has_height);
                     }
                 }
                 c = c->next_sibling;

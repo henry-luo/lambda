@@ -29,7 +29,7 @@ static DomElement* dom_parent_element(DomElement* element) {
     return (element && element->parent) ? lam::dom_require_element(element->parent) : nullptr;
 }
 
-static const char* css_enum_name_or_unknown(const CssEnumInfo* info) {
+[[maybe_unused]] static const char* css_enum_name_or_unknown(const CssEnumInfo* info) {
     return info ? info->name : "unknown";
 }
 
