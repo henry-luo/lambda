@@ -1561,6 +1561,28 @@ static void paint_svg_append_gradient_fill_path(StrBuf* out,
     strbuf_append_str(out, " />\n");
 }
 
+// linear and radial gradient SVG lowering share this <defs>+gradient+fill-path
+// scene; only the gradient element name, url kind, and coordinate attributes differ.
+static void paint_svg_append_gradient_scene(StrBuf* out, int indent_level, int gradient_id,
+                                            const char* element_name, const char* kind_name,
+                                            const char* coord_attrs,
+                                            const RdtMatrix* gradient_transform,
+                                            const RdtGradientStop* stops, int stop_count,
+                                            const char* path_data, int fill_rule,
+                                            const RdtMatrix* fill_transform) {
+    paint_svg_indent(out, indent_level);
+    strbuf_append_format(out,
+        "<defs><%s id=\"paint-ir-%s-%d\" gradientUnits=\"userSpaceOnUse\" %s",
+        element_name, kind_name, gradient_id, coord_attrs);
+    paint_svg_append_named_matrix_attr(out, "gradientTransform", gradient_transform);
+    strbuf_append_str(out, ">\n");
+    paint_svg_append_gradient_stops(out, stops, stop_count, indent_level + 1);
+    paint_svg_indent(out, indent_level);
+    strbuf_append_format(out, "</%s></defs>\n", element_name);
+    paint_svg_append_gradient_fill_path(out, indent_level, path_data, kind_name,
+                                        gradient_id, fill_rule, fill_transform);
+}
+
 void paint_svg_lowering_state_init(PaintSvgLoweringState* state, int indent_level) {
     if (!state) return;
     memset(state, 0, sizeof(PaintSvgLoweringState));
@@ -1737,22 +1759,14 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             if (!path_data) break;
 
             int gradient_id = resource_id_base + i;
-            paint_svg_indent(out, indent_level);
-            strbuf_append_format(out,
-                "<defs><linearGradient id=\"paint-ir-linear-%d\" gradientUnits=\"userSpaceOnUse\" "
-                "x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\"",
-                gradient_id, p->x1, p->y1, p->x2, p->y2);
-            paint_svg_append_named_matrix_attr(out, "gradientTransform",
-                                               paint_optional_transform(p->has_gradient_transform,
-                                                                        &p->gradient_transform));
-            strbuf_append_str(out, ">\n");
-            paint_svg_append_gradient_stops(out, p->stops, p->stop_count,
-                                            indent_level + 1);
-            paint_svg_indent(out, indent_level);
-            strbuf_append_str(out, "</linearGradient></defs>\n");
-
-            paint_svg_append_gradient_fill_path(
-                out, indent_level, path_data->str, "linear", gradient_id, p->rule,
+            char coord_attrs[128];
+            snprintf(coord_attrs, sizeof(coord_attrs),
+                     "x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\"",
+                     p->x1, p->y1, p->x2, p->y2);
+            paint_svg_append_gradient_scene(
+                out, indent_level, gradient_id, "linearGradient", "linear", coord_attrs,
+                paint_optional_transform(p->has_gradient_transform, &p->gradient_transform),
+                p->stops, p->stop_count, path_data->str, p->rule,
                 paint_optional_transform(p->has_transform, &p->transform));
             strbuf_free(path_data);
             active_stats->emitted_count++;
@@ -1770,22 +1784,14 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             if (!path_data) break;
 
             int gradient_id = resource_id_base + i;
-            paint_svg_indent(out, indent_level);
-            strbuf_append_format(out,
-                "<defs><radialGradient id=\"paint-ir-radial-%d\" gradientUnits=\"userSpaceOnUse\" "
-                "cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\"",
-                gradient_id, p->cx, p->cy, p->r);
-            paint_svg_append_named_matrix_attr(out, "gradientTransform",
-                                               paint_optional_transform(p->has_gradient_transform,
-                                                                        &p->gradient_transform));
-            strbuf_append_str(out, ">\n");
-            paint_svg_append_gradient_stops(out, p->stops, p->stop_count,
-                                            indent_level + 1);
-            paint_svg_indent(out, indent_level);
-            strbuf_append_str(out, "</radialGradient></defs>\n");
-
-            paint_svg_append_gradient_fill_path(
-                out, indent_level, path_data->str, "radial", gradient_id, p->rule,
+            char coord_attrs[128];
+            snprintf(coord_attrs, sizeof(coord_attrs),
+                     "cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\"",
+                     p->cx, p->cy, p->r);
+            paint_svg_append_gradient_scene(
+                out, indent_level, gradient_id, "radialGradient", "radial", coord_attrs,
+                paint_optional_transform(p->has_gradient_transform, &p->gradient_transform),
+                p->stops, p->stop_count, path_data->str, p->rule,
                 paint_optional_transform(p->has_transform, &p->transform));
             strbuf_free(path_data);
             active_stats->emitted_count++;
@@ -1919,7 +1925,10 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
         case PAINT_BEGIN_EFFECT_GROUP: {
             if (skip_nested_push(&skipped_effect_depth, cmd->op)) break;
             const PaintEffectGroup* p = &cmd->effect_group;
-            if (!paint_svg_caps_allow_opacity_group(caps, p)) {
+            // fallback wraps in a plain <g> and only honors a transform when caps
+            // allow it; the supported path already guarantees transform capability.
+            bool fallback = !paint_svg_caps_allow_opacity_group(caps, p);
+            if (fallback) {
                 log_error("[SVG_PAINT_IR] fallback effect group opacity=%.3f blend=%d filter=%p backdrop=%d backdrop_filter=%p shadow=%d isolation=%d",
                           p ? p->opacity : 1.0f,
                           p ? p->blend_mode : 0,
@@ -1928,34 +1937,20 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
                           p ? p->backdrop_filter : nullptr,
                           p && p->shadow ? 1 : 0,
                           p && p->isolation ? 1 : 0);
-
-                paint_svg_indent(out, indent_level);
-                strbuf_append_str(out, "<g data-radiant-fallback=\"effect\"");
-                if (p && p->opacity < 0.9995f) {
-                    strbuf_append_format(out, " opacity=\"%.4f\"", p->opacity);
-                }
-                if (p && p->has_transform && caps && caps->transforms) {
-                    paint_svg_append_matrix_attr(out, &p->transform);
-                }
-                strbuf_append_str(out, ">\n");
-                open_effect_depth++;
-                indent_level++;
-                active_stats->emitted_count++;
-                active_stats->fallback_count++;
-                break;
             }
             paint_svg_indent(out, indent_level);
-            strbuf_append_str(out, "<g");
-            if (p->opacity < 0.9995f) {
+            strbuf_append_str(out, fallback ? "<g data-radiant-fallback=\"effect\"" : "<g");
+            if (p && p->opacity < 0.9995f) {
                 strbuf_append_format(out, " opacity=\"%.4f\"", p->opacity);
             }
-            if (p->has_transform) {
+            if (p && p->has_transform && (!fallback || (caps && caps->transforms))) {
                 paint_svg_append_matrix_attr(out, &p->transform);
             }
             strbuf_append_str(out, ">\n");
             open_effect_depth++;
             indent_level++;
             active_stats->emitted_count++;
+            if (fallback) active_stats->fallback_count++;
             break;
         }
         case PAINT_END_EFFECT_GROUP: {
