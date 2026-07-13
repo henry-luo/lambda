@@ -89,6 +89,7 @@ A macro that in **all** build modes evaluates its condition and, on failure, `lo
 - Convert the ~7 real-invariant asserts (layout_table.cpp:3027, event.cpp:857, layout_positioned.cpp:993/1126, layout_block.cpp:6289, resolve_css_style.cpp:3890) to `RADIANT_CHECK`.
 - Keep bare `assert` for pure debug diagnostics (the `#ifndef NDEBUG` validation blocks stay).
 - Consider a `RADIANT_CHECK_DEGRADE(cond, action)` variant for spots where clean degradation beats abort (e.g. skip a malformed subtree). Decide per site; default to abort for memory-safety invariants, degrade for content invariants.
+- Expose the pair `RADIANT_EXPECTS`/`RADIANT_ENSURES` (thin aliases, §7.3) so call sites read as GSL/Core-Guidelines precondition/postcondition contracts; use them at the C+ owner-class method entries.
 
 ### F2 — Finite-scrub choke point at layout→render (fixes N1, N6; N2 enforces it)
 - Add a single ingestion point — the display-list record path / paint_ir command construction — that runs `isfinite()` on every coordinate/dimension and clamps to a sane range (reuse the ±2²⁵ constant already in resolve_css_style.cpp:5404), with a debug `assert(isfinite(x))` to catch producers. Kills the whole `render_raster.cpp:157` class at one site instead of auditing 150 casts.
@@ -120,6 +121,7 @@ A macro that in **all** build modes evaluates its condition and, on failure, `lo
 - **T6:** convert both cast-lint rules from hardcoded file lists to `radiant/**` glob + exclusions, and extend them to match `reinterpret_cast<(View|Dom)…>` (catches T3/T4 outside tagged.hpp).
 - **N3:** route surface/image sizing through `lib/checked_math.hpp` (`__builtin_mul_overflow`) + an explicit max-dimension clamp (~16384, browser-like); compute in `size_t`.
 - **N4/N5:** adopt the lib `Str`/`StrBuf` tier in the selector builders (drop the `[256]`/`[512]` pair, detect truncation); add an ast-grep rule flagging `strncpy` not followed by explicit NUL-termination.
+- **Bounds accessors:** introduce `lam::span<T>` (§7.2, a permanent bounds-checked `lib/` view, `std::`-free per rule 3) and route the grid/flex/table/display-list hot accessors through it — the clamped-index need becomes one type instead of hand-rolled clamps.
 - **T5:** audit the `CssTempDecl` write path for mutation through the cast-away-const pointer.
 - **E6:** replace the substring paste stripper with an allow-list DOM sanitizer (strip event-handler attrs, `javascript:`/`data:` URLs, embedded `<script>`) before pasted HTML reaches script dispatch.
 - **E8:** state the LayoutCache invalidation contract in layout_cache.hpp, and clear ancestor caches when a subtree is dirtied (the RAD_04 dirty-propagation proposal). Add a debug/fuzz-mode cross-check: on cache hit, re-measure and `assert` equality with the cached result — turns a silently-served stale measurement into a diagnosable failure.
@@ -199,7 +201,45 @@ Reference point: this combined stack — pattern lints + CSA + fuzzing farm + ge
 
 ---
 
-## 7. Enhancing the fuzz harness to cover the observed issues
+## 7. Microsoft GSL — reference, and what to adopt from it
+
+### 7.1 What GSL is (reference)
+
+The **Guidelines Support Library** (github.com/microsoft/GSL, header-only) is Microsoft's reference implementation of the vocabulary types the **C++ Core Guidelines** assume exist. It is not a framework — it's a thin set of types plus annotations that make the Guidelines *checkable* by static analyzers. (Note: unrelated to the GNU Scientific Library, which shares the acronym.)
+
+Its contents, by safety purpose:
+
+| GSL item | Purpose | Relevance to radiant |
+|---|---|---|
+| `gsl::span<T>` | (pointer, length) view over a contiguous range | inspires a `lib/`-local **`lam::span`** (§7.2) for the F7 bounds-checked accessor — NOT `std::span` (rule 3) |
+| `gsl::not_null<T*>` | non-null in the type, not a comment | overlaps the F1/`RADIANT_CHECK` intent |
+| `gsl::owner<T*>` | annotation marking an owning raw pointer (no codegen) | the ownership info the `-Wlifetime` profile (§6.2) reads; the annotation Rust's type system supplies automatically |
+| `gsl::Expects(c)` / `gsl::Ensures(c)` | precondition / postcondition contract checks | **same shape as F1's `RADIANT_CHECK`** |
+| `gsl::narrow<T>()` / `narrow_cast` | checked vs. explicitly-unchecked narrowing | the float→int / size-truncation class (N1/N3) |
+| `gsl::final_action` / `finally` | scope-guard RAII | the Shape-B RAII idiom (memory doc §5) |
+
+**Decision: do NOT adopt GSL as a dependency.** The `[[gsl::Owner]]`/`[[gsl::Pointer]]` annotation regime (the only part that would raise the lifetime-analysis ceiling) is a large, unsound, not-production-stable project (§6.2), and radiant's DOM/view pointer graphs are exactly the shapes that need arenas+indices anyway. GSL's lasting value here is as a **reference vocabulary**: two of its concepts are worth adopting *as ideas*, implemented in `lib/` without the dependency.
+
+### 7.2 Adopt: `lam::span<T>` (the permanent `lib/` type — NOT `std::span`)
+
+**Decision: `lam::span` is the permanent home, `std::span` is never used** — this is a deliberate preference, not a C++17 workaround. It matches CLAUDE.md/AGENTS.md **rule 3** (no `std::` types; use `lib/` equivalents like `Str`/`ArrayList`/`HashMap`), which keeps the codebase free of `std::` container/view dependencies regardless of language-standard level. Two reasons it's *better* than `std::span` here beyond the rule: (a) `lam::span::operator[]` can carry an always-on `RADIANT_CHECK` bounds check (the whole point — `std::span::operator[]` is unchecked UB on OOB); (b) it stays available and identical whether the project is on C++17 (current, `build_lambda_config.json:510` `std=c++17`) or any later standard — no dependency on C++20, and no `gsl::span` (which would take the GSL dependency §7.1 declines).
+
+**Plan:** add `lam::span<T>` to `lib/` (next to `mem_grow.hpp`/`arraylist`) — a `{T* ptr; size_t len;}` view with bounds-checked `operator[]` / `at()` (via `RADIANT_CHECK`), `size()`, `data()`, `begin()/end()`, `subspan()`, `first()/last()`. If the project ever moves to C++20, `lam::span` may be *implemented over* `std::span` internally (for iterator/ranges interop) but the **public type stays `lam::span`** — call sites never name `std::span`, exactly as `Str` wraps but never exposes `std::string`. Then:
+- Replace the raw `(T* ptr, int count)` parameter pairs in the grid track / flex line-item / table col-row / display-list-item accessors with `lam::span<T>` — the F7 clamped-index need becomes one type instead of a hand-rolled helper.
+- The grid code's existing correct clamp (grid_positioning.cpp:485) becomes `span::at()`/`operator[]`, uniform and reviewable.
+- Lint follow-on: once `lam::span` exists, an ast-grep rule can flag *new* `(T*, count)` pair parameters in the hot accessor files, steering toward the span; the existing `no-std-types`-style rule (if present) already keeps `std::span` out.
+
+### 7.3 Adopt: `Expects`/`Ensures` contract shape — already F1
+
+GSL's `Expects`/`Ensures` and this doc's **F1 `RADIANT_CHECK` are the same construct** (always-on condition → log + controlled abort). No new mechanism is needed — F1 *is* the contract-check adoption. Two refinements to fold into F1 so it reads as a contract vocabulary:
+- Provide the pair as named macros — `RADIANT_EXPECTS(cond, msg)` (precondition) and `RADIANT_ENSURES(cond, msg)` (postcondition) — thin aliases over `RADIANT_CHECK`, so call sites document *which* contract they assert (matching the GSL/Core-Guidelines idiom reviewers already know).
+- Use `RADIANT_EXPECTS` at the public entry of the C+ owner-class methods (memory doc §5) — e.g. `PaintList::destroy` expects a valid list, `wd_resolve_element` expects a live session — making the F1 rollout and the class-method migration land the same guards.
+
+**Net:** GSL stays a reference, not a dependency; radiant gains `lam::span` (a permanent `lib/` type, bounds-checked, `std::`-free per rule 3) and a contract-macro vocabulary that is just F1 with Core-Guidelines-familiar names. Both are C++17-clean, `std::`-free, and add zero third-party code.
+
+---
+
+## 8. Enhancing the fuzz harness to cover the observed issues
 
 ### 7.1 What exists today
 
@@ -262,6 +302,6 @@ These map 1:1 onto F8 in §3 — this section is the build-out detail for that f
 
 ---
 
-## 8. Implementation note
+## 9. Implementation note
 
-This document is the **design/findings** record. A phased implementation plan (analogous to `Radiant_Impl_Mem_Mgt.md`) should be written next if approved — the natural phases are: RB0 F1 (check macro + convert asserts), RB1 F2 (scrub + lint scope), RB2 F3 (recursion guards + cycle detection), RB3 F8 (fuzz corpus/targets), RB4 F4/F6 (external + concurrency), RB5 F5/F7 (breadth), each gated by `make test-radiant-baseline` + the fuzz run + `make lint`.
+This document is the **design/findings** record. A phased implementation plan (analogous to `Radiant_Impl_Mem_Mgt.md`) should be written next if approved — the natural phases are: RB0 F1 (check macro + `RADIANT_EXPECTS/ENSURES` aliases + convert asserts), RB1 F2 (scrub + lint scope), RB2 F3 (recursion guards + cycle detection), RB3 F8 (fuzz corpus/targets), RB4 F4/F6 (external + concurrency), RB5 F5/F7 (breadth, incl. `lam::span` + hot-accessor migration), each gated by `make test-radiant-baseline` + the fuzz run + `make lint`. `lam::span` (§7.2) lands in `lib/` in RB5 (or earlier if F7 accessors are done first).

@@ -156,6 +156,7 @@ struct LayoutPassScope {
 ### 5.1 Conversion catalog (by subsystem, ranked within each)
 
 **Layout** (fixes S2, S5; retires the §1.3 policy violations):
+
 | Class | Shape | Absorbs | Wins |
 |---|---|---|---|
 | `LayoutPassScope` / `LayoutContext` | B | layout_init/layout_cleanup | kills S2 structurally |
@@ -165,12 +166,14 @@ struct LayoutPassScope {
 | `BlockContext` | already has `BlockContextScope` RAII | formalize block_context_* as methods | pattern precedent — cite it as the house example |
 
 **View/DOM**:
+
 | Class | Shape | Absorbs | Wins |
 |---|---|---|---|
 | `ViewTree` | A | view_pool_init/destroy/reset_retained/alloc_prop/free_view + teardown walk | R6 destroy symmetry; S8 null policy centralized |
 | `DomDocument` | A | dom_document_create/destroy | pairs with ViewTree; owns pool+arena symmetrically |
 
 **Render/display** (fixes S3; de-risks S7):
+
 | Class | Shape | Absorbs | Wins |
 |---|---|---|---|
 | `PaintList` | A | paint_list_init/clear/destroy + recorders | **dtor/clear runs the owned-payload free loop → S3 fixed by construction**; delete dead `arena` field |
@@ -182,6 +185,7 @@ struct LayoutPassScope {
 | `GifAnimation` / `LottiePlayer` | A | create/tick/finish triads | dtor centralizes the "null surface->pixels + bump generation" invariant |
 
 **Event/state** (fixes S1, S4; bounds S6):
+
 | Class | Shape | Absorbs | Wins |
 |---|---|---|---|
 | `BrowsingSession` | A | session_create/destroy/navigate/go_back/go_forward | **`navigate()` owns old-document disposal → S1 fixed at the API level** (callers can't forget); `init()` takes the borrowed network context (`thread_pool`/`file_cache`) as explicit params, encoding the owns-vs-borrows contract in the declaration (S12) |

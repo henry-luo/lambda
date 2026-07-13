@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 
+struct hashmap;  // forward decl — MirEmitter holds an opaque import-cache handle
+
 // Max positional args for an emitted MIR call. 8 accommodates fn_hash_join_tuples
 // (join tuple stream + prior keys + rows + row keys + name + optional + index name/values).
 #define MIR_SHARED_MAX_CALL_ARGS 8
@@ -37,6 +39,42 @@ static inline void mir_append_emit_label(MIR_context_t ctx,
                                          MIR_item_t func_item,
                                          MIR_label_t label) {
     MIR_append_insn(ctx, func_item, label);
+}
+
+// ============================================================================
+// MirEmitter — bundled emit state shared by both transpilers (Lambda + JS).
+// Holds the immutable MIR context handle plus the per-function emit cursor
+// (current function item/reg-alloc target, register + label counters) and the
+// import cache. Both MirTranspiler and JsMirTranspiler embed one and route
+// their primitive emit helpers (new_reg / emit_insn / emit_label / calls)
+// through the em_* functions below, so the primitives exist once instead of
+// once per transpiler (Unified-AST plan Phase 0, P0.1).
+// ============================================================================
+struct MirEmitter {
+    MIR_context_t ctx;            // MIR context — immutable after init (cached from owner)
+    MIR_item_t func_item;         // current function item — emit target cursor
+    MIR_func_t func;              // current function — register-allocation target
+    int reg_counter;              // monotonic register-id source
+    int label_counter;            // monotonic label/proto-id source
+    struct hashmap* import_cache; // name -> import (proto+import) memo
+};
+
+static inline MIR_reg_t em_new_reg(MirEmitter* em, const char* prefix,
+                                   MIR_type_t type) {
+    return mir_new_numbered_reg(em->ctx, em->func, &em->reg_counter, prefix,
+                                type, true);
+}
+
+static inline MIR_label_t em_new_label(MirEmitter* em) {
+    return mir_new_emit_label(em->ctx);
+}
+
+static inline void em_emit_insn(MirEmitter* em, MIR_insn_t insn) {
+    mir_append_emit_insn(em->ctx, em->func_item, insn);
+}
+
+static inline void em_emit_label(MirEmitter* em, MIR_label_t label) {
+    mir_append_emit_label(em->ctx, em->func_item, label);
 }
 
 static inline void mir_emit_i64_const_to_reg(MIR_context_t ctx,
