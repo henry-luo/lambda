@@ -184,6 +184,20 @@ static bool radiant_item_to_index(Item item, int* out) {
     return false;
 }
 
+static bool radiant_item_to_int(Item item, int* out) {
+    if (!out) return false;
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
+        type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64 ||
+        type == LMD_TYPE_NUM_SIZED || type == LMD_TYPE_UINT64) {
+        int64_t value = it2i(item);
+        if (value < INT_MIN || value > INT_MAX) return false;
+        *out = (int)value; // INT_CAST_OK: z-index is stored in PositionProp as native int.
+        return true;
+    }
+    return false;
+}
+
 static void radiant_layout_collect_text(DomNode* node, StrBuf* text) {
     if (!node || !text) return;
     if (node->is_text()) {
@@ -460,7 +474,7 @@ static bool radiant_custom_layout_parse_result(const CustomLayoutContext* contex
         } else {
             Item z_item = radiant_obj_get(placement, "z");
             int z = 0;
-            if (radiant_item_to_index(z_item, &z)) {
+            if (radiant_item_to_int(z_item, &z)) {
                 CustomLayoutPlacement* stored = &result->placements[result->placement_count - 1];
                 stored->z = z;
                 stored->has_z = true;
@@ -714,12 +728,20 @@ RADIANT_C_API Item fn_radiant_velmt_id(Item velmt_item) {
     return radiant_obj_get(velmt_item, "id");
 }
 
-RADIANT_C_API Item fn_radiant_velmt_attr(Item velmt_item, Item name_item) {
+static Item radiant_velmt_attr_or(Item velmt_item, Item name_item, Item default_item) {
     Item attrs = radiant_obj_get(velmt_item, "attrs");
     const char* name = fn_to_cstr(name_item);
-    if (!name || name[0] == '\0') return ItemNull;
+    if (!name || name[0] == '\0') return default_item;
     Item value = radiant_obj_get(attrs, name);
-    return radiant_item_is_missing(value) ? ItemNull : value;
+    return radiant_item_is_missing(value) ? default_item : value;
+}
+
+RADIANT_C_API Item fn_radiant_velmt_attr(Item velmt_item, Item name_item) {
+    return radiant_velmt_attr_or(velmt_item, name_item, ItemNull);
+}
+
+RADIANT_C_API Item fn_radiant_velmt_attr_or(Item velmt_item, Item name_item, Item default_item) {
+    return radiant_velmt_attr_or(velmt_item, name_item, default_item);
 }
 
 RADIANT_C_API Item fn_radiant_velmt_width(Item velmt_item) {
@@ -744,12 +766,20 @@ RADIANT_C_API Item fn_radiant_velmt_text(Item velmt_item) {
     return radiant_item_is_missing(text) ? radiant_string_item("") : text;
 }
 
-RADIANT_C_API Item fn_radiant_velmt_style(Item velmt_item, Item name_item) {
+static Item radiant_velmt_style_or(Item velmt_item, Item name_item, Item default_item) {
     Item style = radiant_obj_get(velmt_item, "style");
     const char* name = fn_to_cstr(name_item);
-    if (!name || name[0] == '\0') return ItemNull;
+    if (!name || name[0] == '\0') return default_item;
     Item value = radiant_obj_get(style, name);
-    return radiant_item_is_missing(value) ? ItemNull : value;
+    return radiant_item_is_missing(value) ? default_item : value;
+}
+
+RADIANT_C_API Item fn_radiant_velmt_style(Item velmt_item, Item name_item) {
+    return radiant_velmt_style_or(velmt_item, name_item, ItemNull);
+}
+
+RADIANT_C_API Item fn_radiant_velmt_style_or(Item velmt_item, Item name_item, Item default_item) {
+    return radiant_velmt_style_or(velmt_item, name_item, default_item);
 }
 
 RADIANT_C_API Item fn_radiant_velmt_margin(Item velmt_item) {
@@ -887,6 +917,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_velmt_id(Item velmt)", (fn_ptr)fn_radiant_velmt_id},
     {"velmt_attr", "fn(velmt: map, name: string) -> any", (fn_ptr)fn_radiant_velmt_attr, JUBE_FN_NONE,
      "Item fn_radiant_velmt_attr(Item velmt, Item name)", (fn_ptr)fn_radiant_velmt_attr},
+    {"velmt_attr_or", "fn(velmt: map, name: string, default_value: any) -> any", (fn_ptr)fn_radiant_velmt_attr_or, JUBE_FN_NONE,
+     "Item fn_radiant_velmt_attr_or(Item velmt, Item name, Item default_value)", (fn_ptr)fn_radiant_velmt_attr_or},
     {"velmt_width", "fn(velmt: map) -> float|null", (fn_ptr)fn_radiant_velmt_width, JUBE_FN_NONE,
      "Item fn_radiant_velmt_width(Item velmt)", (fn_ptr)fn_radiant_velmt_width},
     {"velmt_height", "fn(velmt: map) -> float|null", (fn_ptr)fn_radiant_velmt_height, JUBE_FN_NONE,
@@ -899,6 +931,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_velmt_text(Item velmt)", (fn_ptr)fn_radiant_velmt_text},
     {"velmt_style", "fn(velmt: map, name: string) -> any", (fn_ptr)fn_radiant_velmt_style, JUBE_FN_NONE,
      "Item fn_radiant_velmt_style(Item velmt, Item name)", (fn_ptr)fn_radiant_velmt_style},
+    {"velmt_style_or", "fn(velmt: map, name: string, default_value: any) -> any", (fn_ptr)fn_radiant_velmt_style_or, JUBE_FN_NONE,
+     "Item fn_radiant_velmt_style_or(Item velmt, Item name, Item default_value)", (fn_ptr)fn_radiant_velmt_style_or},
     {"velmt_margin", "fn(velmt: map) -> map|null", (fn_ptr)fn_radiant_velmt_margin, JUBE_FN_NONE,
      "Item fn_radiant_velmt_margin(Item velmt)", (fn_ptr)fn_radiant_velmt_margin},
     {"velmt_border", "fn(velmt: map) -> map|null", (fn_ptr)fn_radiant_velmt_border, JUBE_FN_NONE,

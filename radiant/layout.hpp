@@ -22,6 +22,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lib/scratch_arena.h"
+#include <math.h>
 
 typedef struct StyleContext {
     struct StyleElement* parent;
@@ -516,6 +517,25 @@ void block_context_calc_bfc_offset(ViewElement* view, BlockContext* bfc, float* 
 // ============================================================================
 // Property Allocation
 // ============================================================================
+
+static inline void position_prop_init_defaults(PositionProp* prop) {
+    if (!prop) return;
+    prop->position = CSS_VALUE_STATIC;
+    prop->top = prop->right = prop->bottom = prop->left = 0.0f;
+    prop->top_percent = prop->right_percent = prop->bottom_percent = prop->left_percent = NAN;
+    prop->z_index = 0;
+    prop->custom_layout_z_index = 0;
+    prop->has_top = prop->has_right = prop->has_bottom = prop->has_left = false;
+    prop->has_custom_layout_z_index = false;
+    prop->clear = CSS_VALUE_NONE;
+    prop->float_prop = CSS_VALUE_NONE;
+    prop->static_x_needs_parent_offset = false;
+    prop->static_y_needs_parent_offset = false;
+    prop->has_static_parent_offset_x = false;
+    prop->has_static_parent_offset_y = false;
+    prop->static_parent_offset_x = 0.0f;
+    prop->static_parent_offset_y = 0.0f;
+}
 
 void* alloc_prop(LayoutContext* lycon, size_t size);
 InlineProp* alloc_inline_prop(LayoutContext* lycon);

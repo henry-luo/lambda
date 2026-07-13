@@ -101,6 +101,52 @@ static bool custom_layout_placement_valid(const CustomLayoutContext* context,
         placement->child_index < context->child_count;
 }
 
+static void custom_layout_clear_child_z(const Velmt* child) {
+    if (!child || !child->view) return;
+    ViewElement* element = lam::view_as_element(child->view);
+    if (!element || !element->position) return;
+
+    element->position->has_custom_layout_z_index = false;
+    element->position->custom_layout_z_index = 0;
+}
+
+static PositionProp* custom_layout_alloc_position_prop(LayoutContext* lycon) {
+    if (!lycon) return nullptr;
+    Pool* pool = nullptr;
+    if (lycon->doc && lycon->doc->view_tree) {
+        pool = lycon->doc->view_tree->pool;
+    }
+    if (!pool) {
+        pool = lycon->pool;
+    }
+    if (!pool) return nullptr;
+
+    PositionProp* prop = (PositionProp*)pool_calloc(pool, sizeof(PositionProp));
+    if (!prop) return nullptr;
+    // Custom z can be attached to otherwise unpositioned children, so use the
+    // shared static-position defaults before applying the pass-scoped overlay.
+    position_prop_init_defaults(prop);
+    return prop;
+}
+
+static bool custom_layout_apply_child_z(LayoutContext* lycon, const Velmt* child, int z) {
+    if (!lycon || !child || !child->view) return false;
+    ViewElement* element = lam::view_as_element(child->view);
+    if (!element) return false;
+    if (!element->position) {
+        element->position = custom_layout_alloc_position_prop(lycon);
+    }
+    if (!element->position) {
+        log_error("CUSTOM_LAYOUT_Z_ALLOC_FAILED child_index=%d", child->index);
+        return false;
+    }
+    // z from layout(fn) is a pass-scoped paint/hit-test overlay, not authored
+    // CSS z-index; clear_child_z resets stale values before every callback.
+    element->position->custom_layout_z_index = z;
+    element->position->has_custom_layout_z_index = true;
+    return true;
+}
+
 static bool custom_layout_copy_name(char* dst, const char* name, const char* log_prefix) {
     if (!dst || !name || name[0] == '\0') return false;
     size_t name_len = strlen(name);
@@ -310,6 +356,9 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
     }
 
     child_count = custom_layout_collect_children(block, children, scratch_child_capacity);
+    for (int i = 0; i < child_count; i++) {
+        custom_layout_clear_child_z(&children[i]);
+    }
     CustomLayoutContext context;
     memset(&context, 0, sizeof(context));
     context.lycon = lycon;
@@ -357,6 +406,9 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
         Velmt* child = &context.children[placement->child_index];
         child->view->x = placement->x;
         child->view->y = placement->y;
+        if (placement->has_z) {
+            custom_layout_apply_child_z(lycon, child, placement->z);
+        }
         placed_children[placement->child_index] = true;
 
         float child_left = placement->x;

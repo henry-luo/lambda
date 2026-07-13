@@ -2372,7 +2372,8 @@
                         ],
                         "additional_sources": [
                             "radiant/layout_custom.cpp",
-                            "radiant/layout_box.cpp"
+                            "radiant/layout_box.cpp",
+                            "radiant/stacking_order.cpp"
                         ],
                         "binary": "test_layout_custom_gtest.exe",
                         "icon": "📐"

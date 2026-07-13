@@ -955,7 +955,9 @@ typedef struct PositionProp {
     float top, right, bottom, left;  // offset values in pixels
     float top_percent, right_percent, bottom_percent, left_percent;  // raw percentage if percentage value (NaN if not percentage)
     int z_index;            // stacking order
+    int custom_layout_z_index; // layout(fn) pass-scoped stacking overlay
     bool has_top, has_right, has_bottom, has_left;  // which offsets are set
+    bool has_custom_layout_z_index;
     CssEnum clear;        // clear property for floats
     CssEnum float_prop;   // float property (left, right, none)
     ViewBlock* first_abs_child;   // first child absolute/fixed positioned view

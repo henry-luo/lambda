@@ -604,20 +604,7 @@ FontProp* alloc_font_prop(LayoutContext* lycon) {
 
 PositionProp* alloc_position_prop(LayoutContext* lycon) {
     PositionProp* prop = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
-    // set defaults using actual Lexbor constants
-    prop->position = CSS_VALUE_STATIC;  // default position
-    prop->top = prop->right = prop->bottom = prop->left = 0;  // default offsets
-    prop->top_percent = prop->right_percent = prop->bottom_percent = prop->left_percent = NAN;  // NAN means not percentage
-    prop->z_index = 0;  // default z-index
-    prop->has_top = prop->has_right = prop->has_bottom = prop->has_left = false;  // no offsets set
-    prop->clear = CSS_VALUE_NONE;  // default clear
-    prop->float_prop = CSS_VALUE_NONE;  // default float
-    prop->static_x_needs_parent_offset = false;
-    prop->static_y_needs_parent_offset = false;
-    prop->has_static_parent_offset_x = false;
-    prop->has_static_parent_offset_y = false;
-    prop->static_parent_offset_x = 0;
-    prop->static_parent_offset_y = 0;
+    position_prop_init_defaults(prop);
     return prop;
 }
 

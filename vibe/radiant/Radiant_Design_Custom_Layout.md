@@ -1,6 +1,6 @@
 # Radiant Custom Layout - Lambda/Houdini Proposal
 
-**Status:** in progress; MVP hook, Lambda registration, and map-backed Velmt snapshots are implemented, while full Velmt/VMap host handles remain future work.
+**Status:** in progress; MVP hook, Lambda registration, map-backed Velmt snapshots, parent sizing, BFC behavior, and positive custom `z` stacking are implemented, while full Velmt/VMap host handles remain future work.
 **Primary goal:** add a small, engine-supported custom layout surface for Lambda, enough to port Radiant graph layout out of C+ and into Lambda.
 **Secondary goal:** keep the shape compatible with a future LambdaJS-facing API, without making JS/reflow the first implementation path.
 
@@ -228,7 +228,9 @@ The helper functions currently exported by the `radiant` module are:
 radiant.velmt_tag(v)
 radiant.velmt_id(v)
 radiant.velmt_attr(v, name)
+radiant.velmt_attr_or(v, name, default)
 radiant.velmt_style(v, name)
+radiant.velmt_style_or(v, name, default)
 radiant.velmt_children(v)
 radiant.velmt_text(v)
 radiant.velmt_width(v)
@@ -238,6 +240,12 @@ radiant.velmt_margin(v)
 radiant.velmt_border(v)
 radiant.velmt_padding(v)
 ```
+
+MVP note: the ideal public shape remains `attr(v, name, default = null)` and
+`style(v, name, default = null)`. Jube top-level native functions are currently
+resolved by fixed arity, so the MVP exposes `velmt_attr_or` and
+`velmt_style_or` for explicit default fallbacks until optional native module
+arguments are supported.
 
 ### 6.2 CSS entry
 
@@ -539,7 +547,9 @@ Placement order and paint order should be separate:
 
 - Lambda may return optional `z`
 - default paint order remains child tree order
-- a future extension can allow custom paint order if needed
+- positive `z` values are implemented as a pass-scoped custom-layout stacking overlay, wired into Radiant's shared render and hit-test stacking helper
+- absent `z` clears any previous custom-layout stacking overlay on the next layout pass
+- negative `z` and richer paint-layer ordering remain future design work
 
 ## 10. API discipline
 
@@ -586,6 +596,7 @@ A closer Houdini-compatible API can be evaluated later, but it should not pull i
 - define Velmt handle type - partial: map-backed snapshots exist
 - define lifetime/generation checks
 - expose `tag`, `id`, `attr`, `style`, `children`, `text` - initial helper API exists
+- expose explicit default fallback helpers for `attr`/`style` - implemented as `_or` helpers
 - expose `width`, `height`, `box`, `margin`, `border`, `padding` - initial helper API exists
 - add C+ tests for stale handle behavior
 - keep mutation and child measurement out of scope
@@ -610,6 +621,7 @@ A closer Houdini-compatible API can be evaluated later, but it should not pull i
 - validate returned placements - implemented
 - write child `x, y` back to the view tree - implemented
 - compute parent size from CSS or containing box - implemented
+- apply positive custom `z` through shared paint/hit-test stacking order - implemented
 
 ### Phase 4: Port graph layout to Lambda
 
