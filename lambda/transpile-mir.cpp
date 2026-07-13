@@ -99,24 +99,6 @@ extern "C" {
 // MIR Transpiler Context
 // ============================================================================
 
-struct MirImportEntry {
-    MIR_item_t proto;
-    MIR_item_t import;
-};
-
-// Variable entry in scope
-struct MirVarEntry {
-    MIR_reg_t reg;
-    int root_slot;
-    MIR_type_t mir_type;
-    TypeId type_id;
-    TypeId elem_type;  // P4-3.1: element type for container vars (from fill() or annotation)
-    NumSizedType num_type;  // compact scalar subtype for NUM_SIZED annotations
-    int env_offset;  // >= 0 if captured variable (byte offset in env struct), -1 otherwise
-    bool is_state_var;  // true for view/edit state variables (writes go to template state store)
-    const char* state_name_ptr;  // interned state name pointer (only valid if is_state_var)
-};
-
 // Loop label pair for break/continue
 struct LoopLabels {
     MIR_label_t continue_label;
@@ -139,11 +121,12 @@ struct MirTranspiler {
     // MIR context
     MIR_context_t ctx;
     MIR_module_t module;
-    MIR_item_t current_func_item;
-    MIR_func_t current_func;
 
-    // Import cache: name -> MirImportEntry
-    struct hashmap* import_cache;
+    // Shared emit substrate (Phase 0 / P0.1): owns the per-function emit cursor
+    // (func_item/func), the register + label counters, and the import cache.
+    // em.ctx mirrors `ctx` above (immutable after init). Access via em.func /
+    // em.func_item / em.reg_counter / em.label_counter / em.import_cache.
+    MirEmitter em;
 
     // Local function items: name -> MIR_item_t
     struct hashmap* local_funcs;
@@ -158,10 +141,6 @@ struct MirTranspiler {
     // Loop label stack
     LoopLabels loop_stack[32];
     int loop_depth;
-
-    // Counters
-    int reg_counter;
-    int label_counter;
 
     // Runtime pointer register (loaded at function entry)
     MIR_reg_t rt_reg;
@@ -260,18 +239,6 @@ struct MirTranspiler {
 // ============================================================================
 // Hashmap helpers for import_cache and var_scopes
 // ============================================================================
-
-struct ImportCacheEntry {
-    char name[128];
-    MirImportEntry entry;
-};
-HASHMAP_DEFINE_STRKEY(import_cache, struct ImportCacheEntry, name)
-
-struct VarScopeEntry {
-    char name[128];
-    MirVarEntry var;
-};
-HASHMAP_DEFINE_STRKEY(var_scope, struct VarScopeEntry, name)
 
 struct LocalFuncEntry {
     char name[128];
@@ -428,21 +395,23 @@ static bool mir_var_rhs_keeps_mutable_alias(AstNode* rhs) {
     return root && root->entry && root->entry->is_mutable;
 }
 
+// Thin wrappers over the shared emitter primitives (P0.1). These delegate to
+// the em_* functions in mir_emitter_shared.hpp so the register/label/insn
+// emit logic lives once and JsMirTranspiler can adopt the same primitives.
 static MIR_reg_t new_reg(MirTranspiler* mt, const char* prefix, MIR_type_t type) {
-    return mir_new_numbered_reg(mt->ctx, mt->current_func, &mt->reg_counter,
-                                prefix, type, true);
+    return em_new_reg(&mt->em, prefix, type);
 }
 
 static MIR_label_t new_label(MirTranspiler* mt) {
-    return mir_new_emit_label(mt->ctx);
+    return em_new_label(&mt->em);
 }
 
 static void emit_insn(MirTranspiler* mt, MIR_insn_t insn) {
-    mir_append_emit_insn(mt->ctx, mt->current_func_item, insn);
+    em_emit_insn(&mt->em, insn);
 }
 
 static void emit_label(MirTranspiler* mt, MIR_label_t label) {
-    mir_append_emit_label(mt->ctx, mt->current_func_item, label);
+    em_emit_label(&mt->em, label);
 }
 
 // emit a register holding the boxed null Item. Used as the "value" of statements that
@@ -452,7 +421,7 @@ static void emit_label(MirTranspiler* mt, MIR_label_t label) {
 static MIR_reg_t emit_null_item_reg(MirTranspiler* mt) {
     MIR_reg_t r = new_reg(mt, "stmt_null", MIR_T_I64);
     uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-    mir_emit_i64_const_to_reg(mt->ctx, mt->current_func_item, r, (int64_t)NULL_VAL);
+    mir_emit_i64_const_to_reg(mt->ctx, mt->em.func_item, r, (int64_t)NULL_VAL);
     return r;
 }
 
@@ -548,7 +517,7 @@ static MIR_reg_t root_gc_result_if_needed(MirTranspiler* mt, MIR_reg_t result,
 static void push_scope(MirTranspiler* mt) {
     if (mt->scope_depth >= 63) { log_error("mir: scope overflow"); return; }
     mt->scope_depth++;
-    mt->var_scopes[mt->scope_depth] = var_scope_new(16);
+    mt->var_scopes[mt->scope_depth] = em_var_scope_new(16);
 }
 
 static void pop_scope(MirTranspiler* mt) {
@@ -711,28 +680,7 @@ static TypeId resolve_declared_param_type(AstNamedNode* param, TypeParam* type_p
 // Get or create import + proto for a runtime function
 static MirImportEntry* ensure_import(MirTranspiler* mt, const char* name,
     MIR_type_t ret_type, int nargs, MIR_var_t* args, int nres) {
-    ImportCacheEntry key;
-    memset(&key, 0, sizeof(key));
-    mir_format_import_key(key.name, sizeof(key.name), name,
-        ret_type, nargs, args, nres, false);
-
-    ImportCacheEntry* found = (ImportCacheEntry*)hashmap_get(mt->import_cache, &key);
-    if (found) return &found->entry;
-
-    MIR_item_t proto = NULL;
-    MIR_item_t imp = NULL;
-    mir_create_import_proto_pair(mt->ctx, name, ret_type, nargs, args, nres,
-        false, &proto, &imp);
-
-    ImportCacheEntry new_entry;
-    memset(&new_entry, 0, sizeof(new_entry));
-    snprintf(new_entry.name, sizeof(new_entry.name), "%s", key.name);
-    new_entry.entry.proto = proto;
-    new_entry.entry.import = imp;
-    hashmap_set(mt->import_cache, &new_entry);
-
-    found = (ImportCacheEntry*)hashmap_get(mt->import_cache, &key);
-    return &found->entry;
+    return em_ensure_import(&mt->em, name, ret_type, nargs, args, nres, false);
 }
 
 // ============================================================================
@@ -747,7 +695,7 @@ static MIR_reg_t emit_vararg_call(MirTranspiler* mt, const char* fn_name,
     int n_varargs, MIR_op_t* vararg_ops) {
     // Create unique vararg proto name per call site
     char proto_name[160];
-    snprintf(proto_name, sizeof(proto_name), "%s_vp%d", fn_name, mt->label_counter++);
+    snprintf(proto_name, sizeof(proto_name), "%s_vp%d", fn_name, mt->em.label_counter++);
 
     // Mandatory arg
     MIR_var_t mandatory_var = {mandatory_type, "m", 0};
@@ -755,22 +703,22 @@ static MIR_reg_t emit_vararg_call(MirTranspiler* mt, const char* fn_name,
     MIR_item_t proto = MIR_new_vararg_proto_arr(mt->ctx, proto_name, nres, res_types, 1, &mandatory_var);
 
     // Import
-    ImportCacheEntry key;
+    MirImportCacheEntry key;
     memset(&key, 0, sizeof(key));
     snprintf(key.name, sizeof(key.name), "%s", fn_name);
-    ImportCacheEntry* found = (ImportCacheEntry*)hashmap_get(mt->import_cache, &key);
+    MirImportCacheEntry* found = (MirImportCacheEntry*)hashmap_get(mt->em.import_cache, &key);
     MIR_item_t imp;
     if (found) {
         imp = found->entry.import;
     } else {
         imp = MIR_new_import(mt->ctx, fn_name);
         // Cache only the import, not proto (proto is unique per call)
-        ImportCacheEntry new_entry;
+        MirImportCacheEntry new_entry;
         memset(&new_entry, 0, sizeof(new_entry));
         snprintf(new_entry.name, sizeof(new_entry.name), "%s", fn_name);
         new_entry.entry.import = imp;
         new_entry.entry.proto = proto; // store last proto
-        hashmap_set(mt->import_cache, &new_entry);
+        hashmap_set(mt->em.import_cache, &new_entry);
     }
 
     // Build call: proto, import, [result], mandatory, varargs...
@@ -800,27 +748,27 @@ static MIR_reg_t emit_vararg_call_2(MirTranspiler* mt, const char* fn_name,
     MIR_type_t m2_type, MIR_op_t m2_op,
     int n_varargs, MIR_op_t* vararg_ops) {
     char proto_name[160];
-    snprintf(proto_name, sizeof(proto_name), "%s_vp%d", fn_name, mt->label_counter++);
+    snprintf(proto_name, sizeof(proto_name), "%s_vp%d", fn_name, mt->em.label_counter++);
 
     MIR_var_t mandatory_vars[2] = {{m1_type, "m1", 0}, {m2_type, "m2", 0}};
     MIR_type_t res_types[1] = { ret_type };
     MIR_item_t proto = MIR_new_vararg_proto_arr(mt->ctx, proto_name, nres, res_types, 2, mandatory_vars);
 
-    ImportCacheEntry key;
+    MirImportCacheEntry key;
     memset(&key, 0, sizeof(key));
     snprintf(key.name, sizeof(key.name), "%s", fn_name);
-    ImportCacheEntry* found = (ImportCacheEntry*)hashmap_get(mt->import_cache, &key);
+    MirImportCacheEntry* found = (MirImportCacheEntry*)hashmap_get(mt->em.import_cache, &key);
     MIR_item_t imp;
     if (found) {
         imp = found->entry.import;
     } else {
         imp = MIR_new_import(mt->ctx, fn_name);
-        ImportCacheEntry new_entry;
+        MirImportCacheEntry new_entry;
         memset(&new_entry, 0, sizeof(new_entry));
         snprintf(new_entry.name, sizeof(new_entry.name), "%s", fn_name);
         new_entry.entry.import = imp;
         new_entry.entry.proto = proto;
-        hashmap_set(mt->import_cache, &new_entry);
+        hashmap_set(mt->em.import_cache, &new_entry);
     }
 
     int nops = (nres > 0 ? 3 : 2) + 2 + n_varargs; // +2 for m1 and m2
@@ -853,16 +801,7 @@ static MIR_reg_t emit_call_with_args(MirTranspiler* mt, const char* fn_name,
         log_error("[MIR_CALL] unsupported return-call arity %d for %s", nargs, fn_name);
         return 0;
     }
-    MIR_var_t args[MIR_SHARED_MAX_CALL_ARGS];
-    if (nargs > 0) {
-        mir_prepare_call_args(args, arg_types, nargs);
-    }
-    MirImportEntry* ie = ensure_import(mt, fn_name, ret_type, nargs,
-        nargs ? args : NULL, 1);
-    MIR_reg_t res = new_reg(mt, fn_name, ret_type);
-    emit_insn(mt, mir_new_call_with_args(mt->ctx, ie->proto, ie->import,
-        res, nargs, arg_ops));
-    return res;
+    return em_call_with_args(&mt->em, fn_name, ret_type, nargs, arg_types, arg_ops, false);
 }
 
 static void emit_call_void_with_args(MirTranspiler* mt, const char* fn_name,
@@ -871,14 +810,7 @@ static void emit_call_void_with_args(MirTranspiler* mt, const char* fn_name,
         log_error("[MIR_CALL] unsupported void-call arity %d for %s", nargs, fn_name);
         return;
     }
-    MIR_var_t args[MIR_SHARED_MAX_CALL_ARGS];
-    if (nargs > 0) {
-        mir_prepare_call_args(args, arg_types, nargs);
-    }
-    MirImportEntry* ie = ensure_import(mt, fn_name, MIR_T_I64, nargs,
-        nargs ? args : NULL, 0);
-    emit_insn(mt, mir_new_call_with_args(mt->ctx, ie->proto, ie->import,
-        0, nargs, arg_ops));
+    em_call_void_with_args(&mt->em, fn_name, nargs, arg_types, arg_ops, false);
 }
 
 static MIR_reg_t emit_call_0(MirTranspiler* mt, const char* fn_name,
@@ -1548,11 +1480,9 @@ static bool parse_bool_literal(const char* source, TSNode node) {
 // ============================================================================
 
 static MIR_reg_t emit_load_const(MirTranspiler* mt, int const_index, MIR_type_t as_type) {
-    // consts_reg points to rt->consts (void**)
-    // Load consts[index] = *(consts_reg + index*8)
-    MIR_reg_t ptr = new_reg(mt, "cptr", MIR_T_P);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ptr),
-        MIR_new_mem_op(mt->ctx, MIR_T_P, const_index * 8, mt->consts_reg, 0, 1)));
+    mt->em.consts_reg = mt->consts_reg;
+    MIR_reg_t ptr = em_load_const(&mt->em, const_index, as_type);
+    mt->consts_reg = mt->em.consts_reg;
     return ptr;
 }
 
@@ -1561,6 +1491,13 @@ static MIR_reg_t emit_load_module_type_list(MirTranspiler* mt) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, type_list),
         MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)mt->type_list)));
     return type_list;
+}
+
+static MIR_reg_t emit_load_module_consts(MirTranspiler* mt) {
+    mt->em.consts_bss = mt->consts_bss;
+    MIR_reg_t consts = em_load_consts_from_bss(&mt->em);
+    mt->consts_reg = consts;
+    return consts;
 }
 
 // Load const and box as Item based on TypeId
@@ -1671,9 +1608,8 @@ static MIR_reg_t emit_load_const_boxed(MirTranspiler* mt, int const_index, TypeI
 static bool static_const_item_from_node(MirTranspiler* mt, AstNode* node, Item* out);
 
 static int append_static_container_const(MirTranspiler* mt, void* ptr) {
-    if (!mt || !mt->const_list || !ptr) return -1;
-    arraylist_append(mt->const_list, ptr);
-    return mt->const_list->length - 1;
+    mt->em.const_list = mt->const_list;
+    return em_add_const(&mt->em, ptr);
 }
 
 static bool static_store_field_value(void* field_ptr, TypeId field_type, Item value) {
@@ -8018,7 +7954,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
 
             // Create unique vararg proto name per call site
             char proto_name[160];
-            snprintf(proto_name, sizeof(proto_name), "%s_sp%d", sys_fn_name, mt->label_counter++);
+            snprintf(proto_name, sizeof(proto_name), "%s_sp%d", sys_fn_name, mt->em.label_counter++);
 
             // First arg is mandatory, rest are varargs
             MIR_var_t first_arg = {MIR_T_I64, "a", 0};
@@ -8190,7 +8126,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
 
             // Create proto and import for the cross-module call
             char proto_name[160];
-            snprintf(proto_name, sizeof(proto_name), "%s_ip%d", fn_import_name->str, mt->label_counter++);
+            snprintf(proto_name, sizeof(proto_name), "%s_ip%d", fn_import_name->str, mt->em.label_counter++);
 
             // Import the target function
             MIR_item_t imp_item = MIR_new_import(mt->ctx, fn_import_name->str);
@@ -8583,7 +8519,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
 
             // Create proto for the call (unique name per call site)
             char proto_name[160];
-            snprintf(proto_name, sizeof(proto_name), "%s_cp%d", fn_mangled, mt->label_counter++);
+            snprintf(proto_name, sizeof(proto_name), "%s_cp%d", fn_mangled, mt->em.label_counter++);
             MIR_type_t res_types[1] = { ret_type };
             MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, res_types, ai, arg_vars);
 
@@ -9103,7 +9039,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
     // Helper: emit restore_vargs before returning from variadic function
     auto emit_vargs_restore = [&]() {
         if (mt->in_variadic_body) {
-            MIR_reg_t saved_vargs = MIR_reg(mt->ctx, "_saved_vargs", mt->current_func);
+            MIR_reg_t saved_vargs = MIR_reg(mt->ctx, "_saved_vargs", mt->em.func);
             emit_call_void_1(mt, "restore_vargs", MIR_T_P, MIR_new_reg_op(mt->ctx, saved_vargs));
         }
     };
@@ -11684,16 +11620,16 @@ static void emit_native_boxed_wrapper(MirTranspiler* mt, const char* native_name
     }
 
     // Save outer function context
-    MIR_item_t saved_func_item = mt->current_func_item;
-    MIR_func_t saved_func = mt->current_func;
+    MIR_item_t saved_func_item = mt->em.func_item;
+    MIR_func_t saved_func = mt->em.func;
     MIR_reg_t saved_consts = mt->consts_reg;
 
     // Create wrapper function
     MIR_type_t ret_type = MIR_T_I64;
     MIR_item_t wrapper_item = MIR_new_func_arr(mt->ctx, wrapper_name->str, 1, &ret_type, param_count, params);
     MIR_func_t wrapper_func = MIR_get_item_func(mt->ctx, wrapper_item);
-    mt->current_func_item = wrapper_item;
-    mt->current_func = wrapper_func;
+    mt->em.func_item = wrapper_item;
+    mt->em.func = wrapper_func;
 
     // Free strdup copies
     for (int i = 0; i < param_count; i++) raw_free(param_name_copies[i]);
@@ -11727,7 +11663,7 @@ static void emit_native_boxed_wrapper(MirTranspiler* mt, const char* native_name
 
     // P4-3.3: Proto return type matches native function's return type
     char proto_name[160];
-    snprintf(proto_name, sizeof(proto_name), "%s_wp%d", native_name, mt->label_counter++);
+    snprintf(proto_name, sizeof(proto_name), "%s_wp%d", native_name, mt->em.label_counter++);
     MIR_type_t native_ret = nfi->return_mir;
     MIR_type_t res_types[1] = {native_ret};
     MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, res_types,
@@ -11760,8 +11696,8 @@ static void emit_native_boxed_wrapper(MirTranspiler* mt, const char* native_name
     log_debug("mir: boxed wrapper '%s' generated successfully", wrapper_name->str);
 
     // Restore outer function context
-    mt->current_func_item = saved_func_item;
-    mt->current_func = saved_func;
+    mt->em.func_item = saved_func_item;
+    mt->em.func = saved_func;
     mt->consts_reg = saved_consts;
 
     strbuf_free(wrapper_name);
@@ -11934,8 +11870,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     }
 
     // Save current function context
-    MIR_item_t saved_func_item = mt->current_func_item;
-    MIR_func_t saved_func = mt->current_func;
+    MIR_item_t saved_func_item = mt->em.func_item;
+    MIR_func_t saved_func = mt->em.func;
     MIR_reg_t saved_consts_reg = mt->consts_reg;
     MIR_reg_t saved_gc_reg = mt->gc_reg;
     int saved_jit_root_next = mt->jit_root_next;
@@ -11951,14 +11887,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Create function (MIR replaces params[i].name with internal copies)
     MIR_item_t func_item = MIR_new_func_arr(mt->ctx, name_buf->str, 1, &ret_type, param_count, params);
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
-    mt->current_func_item = func_item;
-    mt->current_func = func;
+    mt->em.func_item = func_item;
+    mt->em.func = func;
 
     // Free our strdup copies (MIR made its own)
     for (int i = 0; i < param_count; i++) raw_free(param_name_copies[i]);
 
-    // Set up consts_reg from per-module BSS _mod_consts_ptr so that cross-module
-    // function calls always use this module's own const_list (not context->consts).
+    // Load runtime context from _lambda_rt before setting up module-local state.
     MIR_item_t rt_import_fn = MIR_new_import(mt->ctx, "_lambda_rt");
     MIR_reg_t rt_addr_fn = new_reg(mt, "rt_addr", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_addr_fn),
@@ -11967,14 +11902,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     MIR_reg_t runtime_fn = new_reg(mt, "runtime", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, runtime_fn),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, rt_addr_fn, 0, 1)));
-    // Load this module's consts from the per-module BSS (module-local address, so correct even
-    // when the function is called from another module that has a different context->consts).
-    MIR_reg_t mod_consts_bss_addr_fn = new_reg(mt, "mod_consts_bss", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mod_consts_bss_addr_fn),
-        MIR_new_ref_op(mt->ctx, mt->consts_bss)));
-    mt->consts_reg = new_reg(mt, "consts", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->consts_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, mod_consts_bss_addr_fn, 0, 1)));
+    emit_load_module_consts(mt);
 
     // Load this module's type_list from per-module BSS _mod_type_list_ptr. Used by
     // map_with_tl/elmt_with_tl/etc. to pass the module's own type_list to those calls.
@@ -12108,7 +12036,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         MIR_reg_t saved_reg = emit_call_1(mt, "set_vargs", MIR_T_P, MIR_T_P,
             MIR_new_reg_op(mt->ctx, vargs_reg));
         // Store in a named register so we can reference it at function exit
-        MIR_reg_t named_saved = MIR_new_func_reg(mt->ctx, mt->current_func, MIR_T_I64, "_saved_vargs");
+        MIR_reg_t named_saved = MIR_new_func_reg(mt->ctx, mt->em.func, MIR_T_I64, "_saved_vargs");
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, named_saved),
             MIR_new_reg_op(mt->ctx, saved_reg)));
@@ -12444,8 +12372,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     }
 
     // Restore function context
-    mt->current_func_item = saved_func_item;
-    mt->current_func = saved_func;
+    mt->em.func_item = saved_func_item;
+    mt->em.func = saved_func;
     mt->consts_reg = saved_consts_reg;
     mt->gc_reg = saved_gc_reg;
     mt->jit_root_next = saved_jit_root_next;
@@ -13024,8 +12952,8 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     log_debug("mir: transpile_view_def '%s' (is_edit=%d)", name_buf, view->is_edit);
 
     // save outer function context
-    MIR_item_t saved_func_item = mt->current_func_item;
-    MIR_func_t saved_func = mt->current_func;
+    MIR_item_t saved_func_item = mt->em.func_item;
+    MIR_func_t saved_func = mt->em.func;
     MIR_reg_t saved_consts_reg = mt->consts_reg;
     MIR_reg_t saved_gc_reg = mt->gc_reg;
     MIR_reg_t saved_tl_reg = mt->type_list_reg;
@@ -13045,8 +12973,8 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
 
     MIR_item_t func_item = MIR_new_func_arr(mt->ctx, name_buf, 1, &ret_type, 1, params);
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
-    mt->current_func_item = func_item;
-    mt->current_func = func;
+    mt->em.func_item = func_item;
+    mt->em.func = func;
     raw_free(param_name_copy);
 
     // load runtime context from _lambda_rt
@@ -13058,13 +12986,7 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, runtime_reg),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, rt_addr, 0, 1)));
 
-    // load consts from per-module BSS
-    MIR_reg_t mod_consts_bss_addr = new_reg(mt, "mod_consts_bss", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mod_consts_bss_addr),
-        MIR_new_ref_op(mt->ctx, mt->consts_bss)));
-    mt->consts_reg = new_reg(mt, "consts", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->consts_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, mod_consts_bss_addr, 0, 1)));
+    emit_load_module_consts(mt);
 
     // load type_list from per-module BSS
     MIR_reg_t mod_tl_bss_addr = new_reg(mt, "mod_tl_bss", MIR_T_I64);
@@ -13162,8 +13084,8 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     mt->view_template_ref = saved_view_template_ref;
 
     // restore outer function context
-    mt->current_func_item = saved_func_item;
-    mt->current_func = saved_func;
+    mt->em.func_item = saved_func_item;
+    mt->em.func = saved_func;
     mt->consts_reg = saved_consts_reg;
     mt->gc_reg = saved_gc_reg;
     mt->type_list_reg = saved_tl_reg;
@@ -13191,8 +13113,8 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     log_debug("mir: transpile_handler_def '%s' event='%s'", handler_name, event_name);
 
     // save outer function context
-    MIR_item_t saved_func_item = mt->current_func_item;
-    MIR_func_t saved_func = mt->current_func;
+    MIR_item_t saved_func_item = mt->em.func_item;
+    MIR_func_t saved_func = mt->em.func;
     MIR_reg_t saved_consts_reg = mt->consts_reg;
     MIR_reg_t saved_gc_reg = mt->gc_reg;
     MIR_reg_t saved_tl_reg = mt->type_list_reg;
@@ -13220,8 +13142,8 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
 
     MIR_item_t func_item = MIR_new_func_arr(mt->ctx, handler_name, 1, &ret_type, 2, params);
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
-    mt->current_func_item = func_item;
-    mt->current_func = func;
+    mt->em.func_item = func_item;
+    mt->em.func = func;
     raw_free(param_name_copy);
     raw_free(event_name_copy);
 
@@ -13234,13 +13156,7 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, runtime_reg),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, rt_addr, 0, 1)));
 
-    // load consts from per-module BSS
-    MIR_reg_t mod_consts_bss_addr = new_reg(mt, "mod_consts_bss", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mod_consts_bss_addr),
-        MIR_new_ref_op(mt->ctx, mt->consts_bss)));
-    mt->consts_reg = new_reg(mt, "consts", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->consts_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, mod_consts_bss_addr, 0, 1)));
+    emit_load_module_consts(mt);
 
     // load type_list from per-module BSS
     MIR_reg_t mod_tl_bss_addr = new_reg(mt, "mod_tl_bss", MIR_T_I64);
@@ -13344,8 +13260,8 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     mt->view_is_edit = saved_view_is_edit;
     mt->view_model_reg = saved_view_model_reg;
     mt->view_template_ref = saved_view_template_ref;
-    mt->current_func_item = saved_func_item;
-    mt->current_func = saved_func;
+    mt->em.func_item = saved_func_item;
+    mt->em.func = saved_func;
     mt->consts_reg = saved_consts_reg;
     mt->gc_reg = saved_gc_reg;
     mt->type_list_reg = saved_tl_reg;
@@ -13577,6 +13493,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     MirTranspiler mt;
     memset(&mt, 0, sizeof(mt));
     mt.ctx = ctx;
+    mt.em.ctx = ctx;  // emitter caches the immutable MIR context handle
     mt.script = script;
     mt.source = source;
     mt.is_main = true;
@@ -13587,7 +13504,8 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     mt.native_return_tid = LMD_TYPE_ANY;  // P4-3.4: no native return at module level
 
     // Init import cache
-    mt.import_cache = import_cache_new(128);
+    mt.em.import_cache = em_import_cache_new(128);
+    mt.em.const_list = const_list;
     mt.local_funcs  = local_func_new(32);
     mt.global_vars  = global_var_new(32);
     mt.infer_cache  = infer_cache_new(32);
@@ -13598,6 +13516,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     // Per-module BSS: stores this module's const_list pointer so that all functions
     // (including those called cross-module) load their own module's consts.
     mt.consts_bss = MIR_new_bss(ctx, "_mod_consts_ptr", 8);
+    mt.em.consts_bss = mt.consts_bss;
 
     // Per-module BSS: stores this module's type_list pointer so that cross-module
     // map/element/object allocations use the right type_list.
@@ -13623,8 +13542,8 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     MIR_type_t main_ret = MIR_T_I64;
     MIR_item_t main_item = MIR_new_func_arr(ctx, "main", 1, &main_ret, 1, main_vars);
     MIR_func_t main_func = MIR_get_item_func(ctx, main_item);
-    mt.current_func_item = main_item;
-    mt.current_func = main_func;
+    mt.em.func_item = main_item;
+    mt.em.func = main_func;
 
     // Get the runtime parameter register
     MIR_reg_t runtime_reg = MIR_reg(ctx, "runtime", main_func);
@@ -13642,15 +13561,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
         MIR_new_mem_op(ctx, MIR_T_I64, 0, rt_addr, 0, 1),
         MIR_new_reg_op(ctx, runtime_reg)));
 
-    // Load consts from per-module BSS _mod_consts_ptr (set by compile_script_as_mir_direct
-    // after MIR_link). This ensures all functions in this module use the module's own
-    // const_list even when called from a different module with a different context->consts.
-    MIR_reg_t mod_consts_bss_addr = new_reg(&mt, "mod_consts_bss", MIR_T_I64);
-    emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, mod_consts_bss_addr),
-        MIR_new_ref_op(ctx, mt.consts_bss)));
-    mt.consts_reg = new_reg(&mt, "consts", MIR_T_I64);
-    emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, mt.consts_reg),
-        MIR_new_mem_op(ctx, MIR_T_I64, 0, mod_consts_bss_addr, 0, 1)));
+    emit_load_module_consts(&mt);
 
     // Load type_list from per-module BSS _mod_type_list_ptr so all map/elmt/object
     // allocations in this module use the module's own type_list via the _with_tl wrappers.
@@ -13756,7 +13667,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
                 if (main_func) {
                     // Local function: call directly with MIR_new_ref_op
                     char proto_name[160];
-                    snprintf(proto_name, sizeof(proto_name), "%s_mp%d", main_name->str, mt.label_counter++);
+                    snprintf(proto_name, sizeof(proto_name), "%s_mp%d", main_name->str, mt.em.label_counter++);
                     MIR_type_t res_types[1] = { MIR_T_I64 };
                     MIR_item_t proto = MIR_new_proto_arr(ctx, proto_name, 1, res_types, 0, NULL);
                     MIR_reg_t main_result = new_reg(&mt, "main_call", MIR_T_I64);
@@ -13811,7 +13722,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     MIR_load_module(ctx, mt.module);
 
     // Cleanup
-    hashmap_free(mt.import_cache);
+    hashmap_free(mt.em.import_cache);
     hashmap_free(mt.local_funcs);
     hashmap_free(mt.global_vars);
     hashmap_free(mt.infer_cache);

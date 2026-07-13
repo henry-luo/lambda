@@ -2,6 +2,7 @@
 #include "../../input/css/dom_element.hpp"
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
+#include "../../../radiant/layout_custom.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/mem_context.h"
 #include "../../../lib/mem_factory.h"
@@ -37,8 +38,277 @@ RADIANT_C_API Item radiant_dom_document_host_prototype(Item object);
 
 const JubeHostAPI* radiant_host_api = nullptr;
 
+#define RADIANT_CUSTOM_LAYOUT_MAX_REGISTRY 64
+
+typedef struct RadiantCustomLayoutEntry {
+    const char* name;
+    Item fn;
+    bool rooted;
+} RadiantCustomLayoutEntry;
+
+static RadiantCustomLayoutEntry g_radiant_custom_layouts[RADIANT_CUSTOM_LAYOUT_MAX_REGISTRY];
+static int g_radiant_custom_layout_count = 0;
+
 static Item radiant_string_item(const char* value) {
     return value ? (Item){.item = s2it(heap_create_name(value))} : ItemNull;
+}
+
+static Item radiant_int_item(int64_t value) {
+    return (Item){.item = i2it(value)};
+}
+
+static Item radiant_bool_item(bool value) {
+    return (Item){.item = b2it(value ? 1 : 0)};
+}
+
+static Item radiant_float_item(double value) {
+    double* ptr = (double*)heap_calloc(sizeof(double), LMD_TYPE_FLOAT);
+    if (!ptr) return ItemNull;
+    *ptr = value;
+    return (Item){.item = d2it(ptr)};
+}
+
+static Item radiant_key_item(const char* key) {
+    return radiant_string_item(key);
+}
+
+static void radiant_obj_set(Item obj, const char* key, Item value) {
+    if (!radiant_host_api || !radiant_host_api->value || !key) return;
+    radiant_host_api->value->property_set(obj, radiant_key_item(key), value);
+}
+
+static void radiant_obj_set_optional_float(Item obj, const char* key, float value) {
+    radiant_obj_set(obj, key, value >= 0.0f ? radiant_float_item(value) : ItemNull);
+}
+
+static Item radiant_obj_get(Item obj, const char* key) {
+    if (!radiant_host_api || !radiant_host_api->value || !key) return ItemNull;
+    return radiant_host_api->value->property_get(obj, radiant_key_item(key));
+}
+
+static bool radiant_item_to_float(Item item, float* out) {
+    if (!out) return false;
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
+        type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64 ||
+        type == LMD_TYPE_NUM_SIZED || type == LMD_TYPE_UINT64) {
+        *out = (float)it2d(item);
+        return true;
+    }
+    return false;
+}
+
+static bool radiant_item_to_index(Item item, int* out) {
+    if (!out) return false;
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
+        type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64 ||
+        type == LMD_TYPE_NUM_SIZED || type == LMD_TYPE_UINT64) {
+        *out = (int)it2i(item);
+        return true;
+    }
+    return false;
+}
+
+static Item radiant_layout_edges_item(const VelmtEdges* edges) {
+    if (!radiant_host_api || !radiant_host_api->value || !edges) return ItemNull;
+    Item obj = radiant_host_api->value->new_object();
+    radiant_obj_set(obj, "left", radiant_float_item(edges->left));
+    radiant_obj_set(obj, "right", radiant_float_item(edges->right));
+    radiant_obj_set(obj, "top", radiant_float_item(edges->top));
+    radiant_obj_set(obj, "bottom", radiant_float_item(edges->bottom));
+    return obj;
+}
+
+static Item radiant_layout_box_item(const VelmtBox* box) {
+    if (!radiant_host_api || !radiant_host_api->value || !box) return ItemNull;
+    Item obj = radiant_host_api->value->new_object();
+    radiant_obj_set(obj, "x", radiant_float_item(box->x));
+    radiant_obj_set(obj, "y", radiant_float_item(box->y));
+    radiant_obj_set(obj, "width", radiant_float_item(box->width));
+    radiant_obj_set(obj, "height", radiant_float_item(box->height));
+    return obj;
+}
+
+static Item radiant_layout_attrs_item(DomElement* elem) {
+    if (!radiant_host_api || !radiant_host_api->value || !elem) return ItemNull;
+    Item attrs = radiant_host_api->value->new_object();
+    int attr_count = 0;
+    const char** names = dom_element_get_attribute_names(elem, &attr_count);
+    for (int i = 0; names && i < attr_count; i++) {
+        const char* name = names[i];
+        if (!name) continue;
+        const char* value = dom_element_get_attribute(elem, name);
+        radiant_obj_set(attrs, name, radiant_string_item(value ? value : ""));
+    }
+    return attrs;
+}
+
+static Item radiant_layout_velmt_item(const Velmt* velmt) {
+    if (!radiant_host_api || !radiant_host_api->value || !velmt) return ItemNull;
+    Item obj = radiant_host_api->value->new_object();
+    const char* tag = velmt->view ? velmt->view->node_name() : "";
+    radiant_obj_set(obj, "index", radiant_int_item(velmt->index));
+    radiant_obj_set(obj, "tag", radiant_string_item(tag));
+    radiant_obj_set(obj, "width", radiant_float_item(velmt->border_box.width));
+    radiant_obj_set(obj, "height", radiant_float_item(velmt->border_box.height));
+    radiant_obj_set(obj, "wd", radiant_float_item(velmt->border_box.width));
+    radiant_obj_set(obj, "hg", radiant_float_item(velmt->border_box.height));
+    radiant_obj_set(obj, "box", radiant_layout_box_item(&velmt->border_box));
+    radiant_obj_set(obj, "margin", radiant_layout_edges_item(&velmt->margin));
+    radiant_obj_set(obj, "border", radiant_layout_edges_item(&velmt->border));
+    radiant_obj_set(obj, "padding", radiant_layout_edges_item(&velmt->padding));
+    if (velmt->element) {
+        radiant_obj_set(obj, "id", radiant_string_item(velmt->element->id));
+        radiant_obj_set(obj, "attrs", radiant_layout_attrs_item(velmt->element));
+    } else {
+        radiant_obj_set(obj, "id", ItemNull);
+        radiant_obj_set(obj, "attrs", ItemNull);
+    }
+    return obj;
+}
+
+static Item radiant_layout_parent_item(const CustomLayoutContext* context) {
+    if (!radiant_host_api || !radiant_host_api->value || !context || !context->parent) return ItemNull;
+    Velmt parent;
+    memset(&parent, 0, sizeof(parent));
+    parent.view = (View*)context->parent;
+    parent.element = context->parent;
+    parent.index = -1;
+    parent.border_box.x = 0.0f;
+    parent.border_box.y = 0.0f;
+    parent.border_box.width = context->parent->width;
+    parent.border_box.height = context->parent->height;
+    if (context->parent) {
+        BoxMetrics metrics = layout_box_metrics(context->parent);
+        parent.margin.left = metrics.margin.left;
+        parent.margin.right = metrics.margin.right;
+        parent.margin.top = metrics.margin.top;
+        parent.margin.bottom = metrics.margin.bottom;
+        parent.border.left = metrics.border.left;
+        parent.border.right = metrics.border.right;
+        parent.border.top = metrics.border.top;
+        parent.border.bottom = metrics.border.bottom;
+        parent.padding.left = metrics.padding.left;
+        parent.padding.right = metrics.padding.right;
+        parent.padding.top = metrics.padding.top;
+        parent.padding.bottom = metrics.padding.bottom;
+    }
+    return radiant_layout_velmt_item(&parent);
+}
+
+static Item radiant_layout_children_item(const CustomLayoutContext* context) {
+    if (!radiant_host_api || !radiant_host_api->value || !context) return ItemNull;
+    Item arr = radiant_host_api->value->array_new(context->child_count);
+    for (int i = 0; i < context->child_count; i++) {
+        radiant_host_api->value->array_push(arr, radiant_layout_velmt_item(&context->children[i]));
+    }
+    return arr;
+}
+
+static Item radiant_layout_context_item(const CustomLayoutContext* context) {
+    if (!radiant_host_api || !radiant_host_api->value || !context) return ItemNull;
+    Item obj = radiant_host_api->value->new_object();
+    radiant_obj_set(obj, "layout_name", radiant_string_item(context->layout_name));
+    radiant_obj_set(obj, "available_width", radiant_float_item(context->available_width));
+    radiant_obj_set(obj, "available_height", radiant_float_item(context->available_height));
+    radiant_obj_set_optional_float(obj, "css_width", context->css_width);
+    radiant_obj_set_optional_float(obj, "css_height", context->css_height);
+    radiant_obj_set(obj, "direction", radiant_string_item(
+        context->direction == CSS_VALUE_RTL ? "rtl" : "ltr"));
+    radiant_obj_set(obj, "writing_mode", radiant_string_item(
+        context->writing_mode ? context->writing_mode : "horizontal-tb"));
+    radiant_obj_set(obj, "child_count", radiant_int_item(context->child_count));
+    return obj;
+}
+
+static RadiantCustomLayoutEntry* radiant_custom_layout_entry(const char* name) {
+    if (!name || name[0] == '\0') return nullptr;
+    for (int i = 0; i < g_radiant_custom_layout_count; i++) {
+        if (strcmp(g_radiant_custom_layouts[i].name, name) == 0) {
+            return &g_radiant_custom_layouts[i];
+        }
+    }
+    return nullptr;
+}
+
+static bool radiant_custom_layout_parse_result(const CustomLayoutContext* context,
+                                               Item result_item,
+                                               CustomLayoutResult* result) {
+    if (!context || !result) return false;
+    Item width_item = radiant_obj_get(result_item, "width");
+    float width = 0.0f;
+    if (!radiant_item_to_float(width_item, &width)) {
+        width_item = radiant_obj_get(result_item, "wd");
+    }
+    if (radiant_item_to_float(width_item, &width)) {
+        result->width = width;
+        result->has_width = true;
+    }
+    Item height_item = radiant_obj_get(result_item, "height");
+    float height = 0.0f;
+    if (!radiant_item_to_float(height_item, &height)) {
+        height_item = radiant_obj_get(result_item, "hg");
+    }
+    if (radiant_item_to_float(height_item, &height)) {
+        result->height = height;
+        result->has_height = true;
+    }
+
+    Item placements = radiant_obj_get(result_item, "placements");
+    if (get_type_id(placements) != LMD_TYPE_ARRAY || !placements.array) {
+        log_error("CUSTOM_LAYOUT_LAMBDA_RESULT: result.placements must be an array");
+        return false;
+    }
+
+    bool ok = true;
+    for (int i = 0; i < placements.array->length; i++) {
+        Item placement = placements.array->items[i];
+        Item index_item = radiant_obj_get(placement, "index");
+        int child_index = -1;
+        if (!radiant_item_to_index(index_item, &child_index)) {
+            index_item = radiant_obj_get(placement, "child_index");
+            radiant_item_to_index(index_item, &child_index);
+        }
+        if (child_index < 0) {
+            Item child = radiant_obj_get(placement, "child");
+            Item child_index_item = radiant_obj_get(child, "index");
+            radiant_item_to_index(child_index_item, &child_index);
+        }
+
+        float x = 0.0f;
+        float y = 0.0f;
+        bool has_x = radiant_item_to_float(radiant_obj_get(placement, "x"), &x);
+        bool has_y = radiant_item_to_float(radiant_obj_get(placement, "y"), &y);
+        if (!has_x || !has_y || child_index < 0 || child_index >= context->child_count ||
+            !custom_layout_result_place(result, child_index, x, y)) {
+            log_error("CUSTOM_LAYOUT_LAMBDA_PLACEMENT: invalid placement at index %d", i);
+            ok = false;
+        }
+    }
+    return ok;
+}
+
+static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* context,
+                                                  CustomLayoutResult* result) {
+    if (!radiant_host_api || !radiant_host_api->script || !context || !result) return false;
+    RadiantCustomLayoutEntry* entry = radiant_custom_layout_entry(context->layout_name);
+    if (!entry || get_type_id(entry->fn) != LMD_TYPE_FUNC) {
+        log_error("CUSTOM_LAYOUT_LAMBDA_MISSING_FN: layout='%s'",
+                  context && context->layout_name ? context->layout_name : "(null)");
+        return false;
+    }
+
+    Item args[3];
+    args[0] = radiant_layout_parent_item(context);
+    args[1] = radiant_layout_children_item(context);
+    args[2] = radiant_layout_context_item(context);
+    Item result_item = radiant_host_api->script->call_function(entry->fn, ItemNull, args, 3);
+    if (radiant_host_api->script->check_exception()) {
+        log_error("CUSTOM_LAYOUT_LAMBDA_EXCEPTION: layout='%s'", context->layout_name);
+        return false;
+    }
+    return radiant_custom_layout_parse_result(context, result_item, result);
 }
 
 static DomDocument* radiant_dom_document_from_node(DomNode* node) {
@@ -166,6 +436,41 @@ RADIANT_C_API Item fn_radiant_poc_attr(Item path_item) {
     return result;
 }
 
+RADIANT_C_API Item fn_radiant_register_layout(Item name_item, Item fn_item) {
+    const char* name = fn_to_cstr(name_item);
+    if (!name || name[0] == '\0' || get_type_id(fn_item) != LMD_TYPE_FUNC) {
+        log_error("JUBE_RADIANT_REGISTER_LAYOUT: expected name and fn callback");
+        return radiant_bool_item(false);
+    }
+    if (!radiant_host_api || !radiant_host_api->gc) {
+        log_error("JUBE_RADIANT_REGISTER_LAYOUT: radiant host API not initialized");
+        return radiant_bool_item(false);
+    }
+
+    RadiantCustomLayoutEntry* entry = radiant_custom_layout_entry(name);
+    if (!entry) {
+        if (g_radiant_custom_layout_count >= RADIANT_CUSTOM_LAYOUT_MAX_REGISTRY) {
+            log_error("JUBE_RADIANT_REGISTER_LAYOUT: registry full for '%s'", name);
+            return radiant_bool_item(false);
+        }
+        entry = &g_radiant_custom_layouts[g_radiant_custom_layout_count];
+        memset(entry, 0, sizeof(*entry));
+        entry->name = heap_create_name(name)->chars;
+        entry->fn = ItemNull;
+        radiant_host_api->gc->register_root(&entry->fn.item);
+        entry->rooted = true;
+        g_radiant_custom_layout_count++;
+    }
+
+    entry->fn = fn_item;
+    if (!custom_layout_register(entry->name, radiant_lambda_custom_layout_callback)) {
+        log_error("JUBE_RADIANT_REGISTER_LAYOUT: native registry failed for '%s'", entry->name);
+        return radiant_bool_item(false);
+    }
+    log_info("JUBE_RADIANT_REGISTER_LAYOUT: registered custom layout '%s'", entry->name);
+    return radiant_bool_item(true);
+}
+
 static int radiant_module_init(const JubeHostAPI* host) {
     if (!host || host->api_version != JUBE_ABI_VERSION ||
         !host->gc || !host->value || !host->script || !host->dom) {
@@ -262,6 +567,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_free(Item node)", (fn_ptr)fn_radiant_free},
     {"poc_attr", "fn(path: string) -> string", (fn_ptr)fn_radiant_poc_attr, JUBE_FN_NONE,
      "Item fn_radiant_poc_attr(Item path)", (fn_ptr)fn_radiant_poc_attr},
+    {"register_layout", "fn(name: string, callback: fn) -> bool", (fn_ptr)fn_radiant_register_layout, JUBE_FN_NONE,
+     "Item fn_radiant_register_layout(Item name, Item callback)", (fn_ptr)fn_radiant_register_layout},
 };
 #pragma clang diagnostic pop
 

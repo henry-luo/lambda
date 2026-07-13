@@ -163,7 +163,7 @@ static JsMirVarEntry* jm_find_enclosing_var_env_binding(JsMirTranspiler* mt, con
 
 static bool jm_statement_function_decl_is_direct_binding(JsFunctionNode* fn) {
     if (!fn) return false;
-    TSNode fn_node = fn->base.node;
+    TSNode fn_node = fn->node;
     if (ts_node_is_null(fn_node)) return false;
     TSNode parent = ts_node_parent(fn_node);
     if (ts_node_is_null(parent)) return false;
@@ -733,7 +733,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
 
                     // Phase 3.4: override with TS type annotation if present
                     if (d->ts_type && d->ts_type->type_expr &&
-                        d->ts_type->type_expr->base.node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                        d->ts_type->type_expr->node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
                         TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)d->ts_type->type_expr;
                         TypeId ann_type = pt->predefined_id;
                         if (ann_type == LMD_TYPE_FLOAT || ann_type == LMD_TYPE_INT ||
@@ -890,7 +890,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         // Phase 3.4: if annotated with a non-predefined TS type (e.g. interface/type alias),
                         // resolve it and store TypeMap in full_type for member access inference.
                         if (d->ts_type && d->ts_type->type_expr && mt->tp &&
-                            d->ts_type->type_expr->base.node_type != (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                            d->ts_type->type_expr->node_type != (int)TS_AST_NODE_PREDEFINED_TYPE) {
                             Type* resolved = ts_resolve_type((TsTranspiler*)mt->tp, d->ts_type->type_expr);
                             if (resolved && resolved->type_id == LMD_TYPE_MAP) {
                                 JsMirVarEntry* var_entry = jm_find_var(mt, vname);
@@ -2079,7 +2079,7 @@ static MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntr
     if (!mt || !ce || !ce->name) return 0;
     JsIdentifierNode tmp_id;
     memset(&tmp_id, 0, sizeof(tmp_id));
-    tmp_id.base.node_type = JS_AST_NODE_IDENTIFIER;
+    tmp_id.node_type = JS_AST_NODE_IDENTIFIER;
     tmp_id.name = ce->name;
     return jm_transpile_box_item(mt, (JsAstNode*)&tmp_id);
 }
@@ -2485,8 +2485,8 @@ static JsClassEntry* jm_find_enclosing_class_for_new(JsMirTranspiler* mt, JsAstN
                 JsClassNode* cls = (JsClassNode*)s;
                 if (cls->name && (int)cls->name->len == len &&
                     strncmp(cls->name->chars, name, len) == 0 &&
-                    !ts_node_is_null(cls->base.node) &&
-                    ts_node_start_byte(cls->base.node) <= ts_node_start_byte(target->node)) {
+                    !ts_node_is_null(cls->node) &&
+                    ts_node_start_byte(cls->node) <= ts_node_start_byte(target->node)) {
                     candidate = jm_find_class_entry_by_node(mt, cls);
                 }
             }
@@ -2504,8 +2504,8 @@ static JsClassEntry* jm_find_enclosing_class_for_new(JsMirTranspiler* mt, JsAstN
                 JsClassNode* cls = (JsClassNode*)s;
                 if (cls->name && (int)cls->name->len == len &&
                     strncmp(cls->name->chars, name, len) == 0 &&
-                    !ts_node_is_null(cls->base.node) &&
-                    ts_node_start_byte(cls->base.node) <= ts_node_start_byte(target->node)) {
+                    !ts_node_is_null(cls->node) &&
+                    ts_node_start_byte(cls->node) <= ts_node_start_byte(target->node)) {
                     candidate = jm_find_class_entry_by_node(mt, cls);
                 }
             }
@@ -2547,8 +2547,8 @@ static JsClassEntry* jm_find_preceding_class_for_new(JsMirTranspiler* mt, JsAstN
         JsClassEntry* ce = &mt->class_entries[ci];
         if (!ce->name || (int)ce->name->len != len) continue;
         if (strncmp(ce->name->chars, name, len) != 0) continue;
-        if (!ce->node || ts_node_is_null(ce->node->base.node)) continue;
-        uint32_t class_start = ts_node_start_byte(ce->node->base.node);
+        if (!ce->node || ts_node_is_null(ce->node->node)) continue;
+        uint32_t class_start = ts_node_start_byte(ce->node->node);
         if (class_start > target_start) continue;
         if (!best || class_start >= best_start) {
             best = ce;
@@ -2578,8 +2578,8 @@ static JsClassEntry* jm_find_class_for_identifier_binding(JsMirTranspiler* mt, J
         uint32_t bind_end = ts_node_end_byte(binding_node->node);
         for (int ci = 0; ci < mt->class_count; ci++) {
             JsClassEntry* ce = &mt->class_entries[ci];
-            if (!ce->node || ts_node_is_null(ce->node->base.node)) continue;
-            TSNode class_name = ts_node_child_by_field_name(ce->node->base.node, "name", 4);
+            if (!ce->node || ts_node_is_null(ce->node->node)) continue;
+            TSNode class_name = ts_node_child_by_field_name(ce->node->node, "name", 4);
             if (ts_node_is_null(class_name)) continue;
             if (ts_node_start_byte(class_name) == bind_start &&
                 ts_node_end_byte(class_name) == bind_end) {
@@ -4067,7 +4067,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     // Create loop variable (for simple case) or temp var (for destructuring)
     MIR_reg_t loop_var;
-    bool is_for_in = (fo->base.node_type == JS_AST_NODE_FOR_IN_STATEMENT);
+    bool is_for_in = (fo->node_type == JS_AST_NODE_FOR_IN_STATEMENT);
     bool is_for_await = !is_for_in && fo->is_await;
     bool is_let_const_loop = false;
     bool is_const_loop = false;
@@ -5579,7 +5579,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             if (sc) {
                                 JsIdentifierNode tmp_id2;
                                 memset(&tmp_id2, 0, sizeof(tmp_id2));
-                                tmp_id2.base.node_type = JS_AST_NODE_IDENTIFIER;
+                                tmp_id2.node_type = JS_AST_NODE_IDENTIFIER;
                                 tmp_id2.name = sc->name;
                                 MIR_reg_t super_val = jm_transpile_box_item(mt, (JsAstNode*)&tmp_id2);
                                 MIR_reg_t sp_key = jm_box_string_literal(mt, "prototype", 9);

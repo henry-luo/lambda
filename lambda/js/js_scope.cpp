@@ -405,6 +405,7 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     tp->in_expression = false;
     tp->has_errors = false;
     tp->strict_js = true;  // default: pure JS mode (reject TS syntax)
+    tp->profile = &js_profile;
     tp->runtime = runtime;
 
     return tp;

@@ -47,7 +47,7 @@ Type* ts_resolve_type(TsTranspiler* tp, TsTypeNode* node) {
 
     Pool* pool = tp->ast_pool;
 
-    switch ((TsAstNodeType)node->base.node_type) {
+    switch ((TsAstNodeType)node->node_type) {
 
     case TS_AST_NODE_PREDEFINED_TYPE: {
         TsPredefinedTypeNode* pn = (TsPredefinedTypeNode*)node;

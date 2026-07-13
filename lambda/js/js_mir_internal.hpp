@@ -80,8 +80,6 @@ typedef struct JsMirLexicalThisRebind {
 } JsMirLexicalThisRebind;
 
 // internal function declarations
-int js_import_cache_cmp(const void *a, const void *b, void *udata);
-uint64_t js_import_cache_hash(const void *item, uint64_t seed0, uint64_t seed1);
 int js_var_scope_cmp(const void *a, const void *b, void *udata);
 uint64_t js_var_scope_hash(const void *item, uint64_t seed0, uint64_t seed1);
 int js_local_func_cmp(const void *a, const void *b, void *udata);

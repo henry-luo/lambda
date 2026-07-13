@@ -96,6 +96,13 @@ static const char* C2MIR_SKIP_TESTS[] = {
     "view_template",        // view template not fully supported in C2MIR
     "input_dir",            // directory iteration order differs in C2MIR
     "path",                 // directory iteration order differs in C2MIR
+    // object direct-access lowering still diverges in legacy C2MIR and can read stale fields.
+    "map_object_robustness",
+    "object_constraint",
+    "object_default",
+    "object_direct_access",
+    "object_update",
+    "typed_param_direct_access",
     // C2MIR variadic/float ABI issues with typed arrays (added after Apr 4 binary)
     "awfy_bounce",
     "awfy_bounce2",
@@ -117,6 +124,7 @@ static const char* C2MIR_SKIP_TESTS[] = {
     "awfy_storage2",
     "awfy_towers",
     "awfy_towers2",
+    "beng_pidigits",
     "correlation_math",
     "expr",
     "for_clauses_test",

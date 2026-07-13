@@ -1290,6 +1290,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     Script *new_script = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_SYSTEM);
     new_script->reference = mem_strdup(lookup_path, MEM_CAT_SYSTEM);
     new_script->is_loading = true;
+    new_script->profile = &lambda_profile;
     runtime_register_script(runtime, new_script);
 #ifndef _WIN32
     pthread_mutex_unlock(&scripts_mutex);

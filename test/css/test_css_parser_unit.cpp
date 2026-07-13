@@ -18,6 +18,7 @@
 extern "C" {
 #include "lambda/input/css/css_parser.hpp"
 #include "lambda/input/css/css_style.hpp"
+#include "lambda/input/css/css_value_parser.hpp"
 }
 
 using namespace CssTestHelpers;
@@ -482,6 +483,45 @@ TEST_F(CssParserUnitTest, Declaration_CustomProperty_Var) {
     ASSERT_NE(decl, nullptr);
     EXPECT_EQ(decl->property_id, css_property_id_from_name("color"));
     ASSERT_NE(decl->value, nullptr);
+}
+
+TEST_F(CssParserUnitTest, Declaration_Display_CustomLayoutFunctionArgument) {
+    auto parser = CreateParser();
+    auto tokenizer = parser.Tokenize("layout(graph)");
+    CssPropertyValueParser* value_parser = css_property_value_parser_create(pool.get());
+    CssValue* value = css_parse_property_value(
+        value_parser, tokenizer.tokens(), (int)tokenizer.count(), "display");
+
+    ASSERT_NE(value, nullptr);
+    EXPECT_EQ(value->type, CSS_VALUE_TYPE_FUNCTION);
+    CssFunction* fn = value->data.function;
+    ASSERT_NE(fn, nullptr);
+    EXPECT_STREQ(fn->name, "layout");
+    ASSERT_EQ(fn->arg_count, 1);
+    ASSERT_NE(fn->args, nullptr);
+    ASSERT_NE(fn->args[0], nullptr);
+    EXPECT_EQ(fn->args[0]->type, CSS_VALUE_TYPE_CUSTOM);
+    ASSERT_NE(fn->args[0]->data.custom_property.name, nullptr);
+    EXPECT_STREQ(fn->args[0]->data.custom_property.name, "graph");
+}
+
+TEST_F(CssParserUnitTest, Declaration_Display_CustomLayoutDeclarationParser) {
+    auto parser = CreateParser();
+    auto decl = parser.ParseDeclaration("display: LaYoUt(graph)");
+
+    ASSERT_NE(decl, nullptr);
+    EXPECT_EQ(decl->property_id, css_property_id_from_name("display"));
+    ASSERT_NE(decl->value, nullptr);
+    EXPECT_EQ(decl->value->type, CSS_VALUE_TYPE_FUNCTION);
+    CssFunction* fn = decl->value->data.function;
+    ASSERT_NE(fn, nullptr);
+    EXPECT_STREQ(fn->name, "LaYoUt");
+    ASSERT_EQ(fn->arg_count, 1);
+    ASSERT_NE(fn->args, nullptr);
+    ASSERT_NE(fn->args[0], nullptr);
+    EXPECT_EQ(fn->args[0]->type, CSS_VALUE_TYPE_CUSTOM);
+    ASSERT_NE(fn->args[0]->data.custom_property.name, nullptr);
+    EXPECT_STREQ(fn->args[0]->data.custom_property.name, "graph");
 }
 
 // =============================================================================
