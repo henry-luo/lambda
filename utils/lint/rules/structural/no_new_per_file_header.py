@@ -25,8 +25,6 @@ ALLOW_LIST = {
     "render_glyph_run_raster_lower.hpp",
     "state_store_internal.hpp",
     "event_sim.hpp",
-    "graph_dagre.hpp",
-    "graph_edge_utils.hpp",
     "graph_layout_types.hpp",
     "graph_theme.hpp",
     "graph_to_svg.hpp",
