@@ -29,7 +29,7 @@
 #undef max
 #endif
 
-#include "grid_types.hpp"
+#include "layout.hpp"
 #include "grid_occupancy.hpp"
 #include "../lib/log.h"
 

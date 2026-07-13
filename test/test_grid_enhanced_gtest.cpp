@@ -10,7 +10,7 @@
  */
 
 #include <gtest/gtest.h>
-#include "../radiant/grid_types.hpp"
+#include "../radiant/layout.hpp"
 #include "../radiant/grid_occupancy.hpp"
 #include "../radiant/grid_track.hpp"
 #include "../radiant/grid_sizing_algorithm.hpp"

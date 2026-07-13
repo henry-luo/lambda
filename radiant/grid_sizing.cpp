@@ -1,4 +1,4 @@
-#include "grid.hpp"
+#include "layout.hpp"
 #include "grid_enhanced_adapter.hpp"  // Enhanced track sizing algorithm
 
 extern "C" {

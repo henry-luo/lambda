@@ -11,12 +11,14 @@
 // ============================================================================
 
 #include "view.hpp"
+#include "form_control.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lib/arraylist.h"
 #include "../lib/arraylist.hpp"
 #include "../lib/hashmap.h"
 #include "../lib/scratch_arena.h"
+#include <cassert>
 #include <cstdint>
 #include <stdarg.h>
 #include <math.h>
@@ -1407,7 +1409,44 @@ typedef enum LineFillStatus {
 //     ArrayList* positioned_children; // list of positioned child elements
 // } StackingBox;
 
-// Integrated flex container layout state
+// ============================================================================
+// Flex Layout
+// ============================================================================
+
+typedef enum {
+    DIR_ROW = CSS_VALUE_ROW,
+    DIR_ROW_REVERSE = CSS_VALUE_ROW_REVERSE,
+    DIR_COLUMN = CSS_VALUE_COLUMN,
+    DIR_COLUMN_REVERSE = CSS_VALUE_COLUMN_REVERSE
+} FlexDirection;
+
+typedef enum {
+    WRAP_NOWRAP = CSS_VALUE_NOWRAP,
+    WRAP_WRAP = CSS_VALUE_WRAP,
+    WRAP_WRAP_REVERSE = CSS_VALUE_WRAP_REVERSE
+} FlexWrap;
+
+typedef enum {
+    JUSTIFY_START = CSS_VALUE_FLEX_START,
+    JUSTIFY_END = CSS_VALUE_FLEX_END,
+    JUSTIFY_CENTER = CSS_VALUE_CENTER,
+    JUSTIFY_SPACE_BETWEEN = CSS_VALUE_SPACE_BETWEEN,
+    JUSTIFY_SPACE_AROUND = CSS_VALUE_SPACE_AROUND,
+    JUSTIFY_SPACE_EVENLY = CSS_VALUE_SPACE_EVENLY
+} JustifyContent;
+
+typedef struct FlexLineInfo {
+    View** items;
+    int item_count;
+    float main_size;
+    float cross_size;
+    float cross_position;
+    float free_space;
+    float total_flex_grow;
+    float total_flex_shrink;
+    float baseline;
+} FlexLineInfo;
+
 typedef struct FlexContainerLayout : FlexProp {
     // Layout state (computed during layout)
     View** flex_items;  // Array of child flex items
@@ -1553,7 +1592,350 @@ inline float flex_gap_for_axis(FlexContainerLayout* flex, LayoutAxis axis) {
     return axis == LAYOUT_AXIS_X ? flex->column_gap : flex->row_gap;
 }
 
-typedef struct GridContainerLayout GridContainerLayout;
+void init_flex_container(LayoutContext* lycon, ViewBlock* container);
+void cleanup_flex_container(LayoutContext* lycon);
+int collect_and_prepare_flex_items(LayoutContext* lycon, FlexContainerLayout* flex_layout, ViewBlock* container);
+float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout);
+void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_layout);
+void apply_constraints_to_flex_items(FlexContainerLayout* flex_layout);
+float apply_flex_constraint(ViewElement* item, float computed_size, bool is_main_axis,
+                          FlexContainerLayout* flex_layout, bool* hit_min, bool* hit_max);
+float apply_flex_constraint(ViewElement* item, float computed_size, bool is_main_axis,
+                          FlexContainerLayout* flex_layout);
+float apply_stretch_constraint(ViewElement* item, float container_cross_size,
+                             FlexContainerLayout* flex_layout);
+void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line);
+void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line);
+void align_content(FlexContainerLayout* flex_layout);
+void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container);
+bool is_main_axis_horizontal(FlexProp* flex);
+float get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
+float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
+float get_cross_axis_position(ViewElement* item, FlexContainerLayout* flex_layout);
+void set_main_axis_position(ViewElement* item, float position, FlexContainerLayout* flex_layout);
+void set_cross_axis_position(ViewElement* item, float position, FlexContainerLayout* flex_layout);
+void set_main_axis_size(ViewElement* item, float size, FlexContainerLayout* flex_layout);
+void set_cross_axis_size(ViewElement* item, float size, FlexContainerLayout* flex_layout);
+float get_item_flex_grow(ViewElement* item);
+float get_item_flex_shrink(ViewElement* item);
+float get_item_flex_basis(ViewElement* item);
+bool get_item_flex_basis_is_percent(ViewElement* item);
+float find_max_baseline(FlexLineInfo* line, int container_align_items);
+float calculate_gap_space(FlexContainerLayout* flex_layout, int item_count, bool is_main_axis);
+
+typedef struct MeasurementCacheEntry {
+    DomNode* node;
+    float measured_width;
+    float measured_height;
+    float content_width;
+    float content_height;
+    float context_width;
+    uint32_t generation;
+} MeasurementCacheEntry;
+
+void measure_flex_child_content(LayoutContext* lycon, DomNode* child);
+void measure_all_flex_children_content(LayoutContext* lycon, ViewBlock* flex_container);
+bool requires_content_measurement(ViewBlock* flex_container);
+void measure_text_content(LayoutContext* lycon, DomNode* text_node, int* width, int* height);
+int estimate_text_width(LayoutContext* lycon, const unsigned char* text, size_t length);
+void cleanup_temporary_view(ViewBlock* temp_view);
+void calculate_intrinsic_sizes(ViewBlock* view, LayoutContext* lycon);
+void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout);
+void measure_text_content_accurate(LayoutContext* lycon, DomNode* text_node,
+    int* min_width, int* max_width, int* height);
+void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
+    int* min_width, int* max_width, int* height);
+void store_measured_sizes(DomNode* node, ViewBlock* measured_view, LayoutContext* lycon);
+void store_in_measurement_cache(DomNode* node, float width, float height, float content_width, float content_height, float context_width = -1);
+MeasurementCacheEntry* get_from_measurement_cache(DomNode* node);
+void clear_measurement_cache();
+void invalidate_measurement_cache_for_node(DomNode* node);
+void advance_measurement_cache_generation();
+uint32_t get_measurement_cache_generation();
+void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node);
+void init_flex_item_view(LayoutContext* lycon, DomNode* node);
+void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNode* node);
+void layout_block_with_measured_size(LayoutContext* lycon, DomNode* node,
+    DisplayValue display, MeasurementCacheEntry* cached);
+
+void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* flex_container);
+void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
+void layout_flex_item_final_content(LayoutContext* lycon, ViewBlock* flex_item);
+
+// ============================================================================
+// Grid Layout
+// ============================================================================
+
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+
+namespace radiant {
+namespace grid {
+
+struct TrackCounts;
+
+template <typename T>
+constexpr T grid_min_value(T a, T b) {
+    return (a < b) ? a : b;
+}
+
+template <typename T>
+constexpr T grid_max_value(T a, T b) {
+    return (a > b) ? a : b;
+}
+
+enum class CellOccupancyState : uint8_t {
+    Unoccupied = 0,
+    DefinitelyPlaced = 1,
+    AutoPlaced = 2
+};
+
+struct OriginZeroLine {
+    int16_t value;
+
+    constexpr OriginZeroLine() : value(0) {}
+    constexpr explicit OriginZeroLine(int16_t v) : value(v) {}
+
+    constexpr OriginZeroLine operator+(OriginZeroLine other) const {
+        return OriginZeroLine(value + other.value);
+    }
+    constexpr OriginZeroLine operator-(OriginZeroLine other) const {
+        return OriginZeroLine(value - other.value);
+    }
+    constexpr OriginZeroLine operator+(uint16_t n) const {
+        return OriginZeroLine(value + static_cast<int16_t>(n));
+    }
+    constexpr OriginZeroLine operator-(uint16_t n) const {
+        return OriginZeroLine(value - static_cast<int16_t>(n));
+    }
+    OriginZeroLine& operator+=(uint16_t n) {
+        value += static_cast<int16_t>(n);
+        return *this;
+    }
+
+    constexpr bool operator==(OriginZeroLine other) const { return value == other.value; }
+    constexpr bool operator!=(OriginZeroLine other) const { return value != other.value; }
+    constexpr bool operator<(OriginZeroLine other) const { return value < other.value; }
+    constexpr bool operator<=(OriginZeroLine other) const { return value <= other.value; }
+    constexpr bool operator>(OriginZeroLine other) const { return value > other.value; }
+    constexpr bool operator>=(OriginZeroLine other) const { return value >= other.value; }
+};
+
+struct GridLine {
+    int16_t value;
+
+    constexpr GridLine() : value(0) {}
+    constexpr explicit GridLine(int16_t v) : value(v) {}
+
+    constexpr int16_t as_i16() const { return value; }
+    constexpr bool is_valid() const { return value != 0; }
+};
+
+struct LineSpan {
+    OriginZeroLine start;
+    OriginZeroLine end;
+
+    constexpr LineSpan() : start(), end() {}
+    constexpr LineSpan(OriginZeroLine s, OriginZeroLine e) : start(s), end(e) {}
+
+    constexpr uint16_t span() const {
+        int16_t diff = end.value - start.value;
+        return diff > 0 ? static_cast<uint16_t>(diff) : 0;
+    }
+};
+
+struct TrackCounts {
+    uint16_t negative_implicit;
+    uint16_t explicit_count;
+    uint16_t positive_implicit;
+
+    constexpr TrackCounts() : negative_implicit(0), explicit_count(0), positive_implicit(0) {}
+    constexpr TrackCounts(uint16_t neg, uint16_t exp, uint16_t pos)
+        : negative_implicit(neg), explicit_count(exp), positive_implicit(pos) {}
+
+    constexpr size_t len() const {
+        return static_cast<size_t>(negative_implicit + explicit_count + positive_implicit);
+    }
+
+    constexpr OriginZeroLine implicit_start_line() const {
+        return OriginZeroLine(-static_cast<int16_t>(negative_implicit));
+    }
+
+    constexpr OriginZeroLine implicit_end_line() const {
+        return OriginZeroLine(static_cast<int16_t>(explicit_count + positive_implicit));
+    }
+
+    constexpr int16_t oz_line_to_next_track(OriginZeroLine line) const {
+        return line.value + static_cast<int16_t>(negative_implicit);
+    }
+
+    constexpr void oz_line_range_to_track_range(
+        LineSpan span,
+        int16_t& out_start,
+        int16_t& out_end
+    ) const {
+        out_start = oz_line_to_next_track(span.start);
+        out_end = oz_line_to_next_track(span.end);
+    }
+
+    constexpr OriginZeroLine track_to_prev_oz_line(uint16_t track_idx) const {
+        return OriginZeroLine(static_cast<int16_t>(track_idx) - static_cast<int16_t>(negative_implicit));
+    }
+};
+
+enum class AbsoluteAxis : uint8_t {
+    Horizontal = 0,
+    Vertical = 1
+};
+
+constexpr AbsoluteAxis other_axis(AbsoluteAxis axis) {
+    return axis == AbsoluteAxis::Horizontal ? AbsoluteAxis::Vertical : AbsoluteAxis::Horizontal;
+}
+
+} // namespace grid
+} // namespace radiant
+
+inline GridItemProp* grid_item_prop(ViewBlock* item) {
+    if (!item) return nullptr;
+    if (item->item_prop_type == DomElement::ITEM_PROP_GRID) return item->gi;
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) return item->form->grid_item;
+    return nullptr;
+}
+
+typedef enum GridTrackSizeType {
+    GRID_TRACK_SIZE_LENGTH,
+    GRID_TRACK_SIZE_PERCENTAGE,
+    GRID_TRACK_SIZE_FR,
+    GRID_TRACK_SIZE_MIN_CONTENT,
+    GRID_TRACK_SIZE_MAX_CONTENT,
+    GRID_TRACK_SIZE_AUTO,
+    GRID_TRACK_SIZE_FIT_CONTENT,
+    GRID_TRACK_SIZE_MINMAX,
+    GRID_TRACK_SIZE_REPEAT
+} GridTrackSizeType;
+
+typedef struct GridTrackSize {
+    GridTrackSizeType type;
+    int value;
+    bool is_percentage;
+    struct GridTrackSize* min_size;
+    struct GridTrackSize* max_size;
+    int fit_content_limit;
+    int repeat_count;
+    struct GridTrackSize** repeat_tracks;
+    int repeat_track_count;
+    bool is_auto_fill;
+    bool is_auto_fit;
+} GridTrackSize;
+
+typedef struct GridTrackList {
+    GridTrackSize** tracks;
+    int track_count;
+    int allocated_tracks;
+    char** line_names;
+    int line_name_count;
+    bool is_repeat;
+    int repeat_count;
+} GridTrackList;
+
+typedef struct GridTrack {
+    GridTrackSize* size;
+    float computed_size;
+    float base_size;
+    float growth_limit;
+    bool is_flexible;
+    bool is_implicit;
+    bool owns_size;
+} GridTrack;
+
+typedef struct GridArea {
+    char* name;
+    int row_start;
+    int row_end;
+    int column_start;
+    int column_end;
+} GridArea;
+
+typedef struct GridLineName {
+    char* name;
+    int line_number;
+    bool is_row;
+} GridLineName;
+
+typedef struct GridContainerLayout : GridProp {
+    GridTrack* computed_rows;
+    GridTrack* computed_columns;
+    struct ViewBlock** grid_items;
+    int item_count;
+    int allocated_items;
+    GridLineName* line_names;
+    int line_name_count;
+    int allocated_line_names;
+    bool needs_reflow;
+    int explicit_row_count;
+    int explicit_column_count;
+    int implicit_row_count;
+    int implicit_column_count;
+    int negative_implicit_row_count;
+    int negative_implicit_column_count;
+    int auto_row_cursor;
+    int auto_col_cursor;
+    float container_width;
+    float container_height;
+    float content_width;
+    float content_height;
+    bool has_explicit_height;
+    bool is_shrink_to_fit_width;
+    float row_intrinsic_height;
+    struct LayoutContext* lycon;
+    bool auto_fit_columns[64];
+    bool auto_fit_rows[64];
+    int auto_fit_col_count;
+    int auto_fit_row_count;
+    bool owns_template_rows;
+    bool owns_template_columns;
+    bool owns_auto_rows;
+    bool owns_auto_columns;
+    bool owns_grid_areas;
+} GridContainerLayout;
+
+void init_grid_container(LayoutContext* lycon, struct ViewBlock* container);
+void cleanup_grid_container(LayoutContext* lycon);
+GridTrackList* create_grid_track_list(int initial_capacity);
+void destroy_grid_track_list(GridTrackList* track_list);
+GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value);
+GridTrackSize* clone_grid_track_size(const GridTrackSize* track_size);
+void destroy_grid_track_size(GridTrackSize* track_size);
+GridArea* create_grid_area(const char* name, int row_start, int row_end, int column_start, int column_end);
+void destroy_grid_area(GridArea* area);
+void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_number, bool is_row);
+int find_grid_line_by_name(GridContainerLayout* grid, const char* name, bool is_row);
+int collect_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, struct ViewBlock*** items);
+void determine_grid_size(GridContainerLayout* grid_layout);
+void initialize_track_sizes(GridContainerLayout* grid_layout);
+void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, struct ViewBlock* container);
+void position_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, ScratchArena* sa);
+void align_grid_items(GridContainerLayout* grid_layout);
+void align_grid_item(struct ViewBlock* item, GridContainerLayout* grid_layout);
+void parse_grid_template_areas(GridProp* grid_layout, const char* areas_string, ScratchArena* sa);
+void resolve_grid_template_areas(GridContainerLayout* grid_layout);
+IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlock* item, bool is_row_axis);
+void layout_grid_container(LayoutContext* lycon, ViewBlock* container);
+void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
+int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container);
+void init_grid_item_view(LayoutContext* lycon, DomNode* child);
+void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout);
+void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
+                                  float* min_width, float* max_width,
+                                  float* min_height, float* max_height);
+void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_layout);
+bool grid_item_is_nested_container(ViewBlock* item);
+void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container);
+
 typedef struct LayoutContext {
     View* view;  // current view
     DomNode* elmt;  // current dom element, used before the view is created
@@ -1664,6 +2046,21 @@ void layout_reresolve_percentage_box(ViewBlock* block, float inline_base);
 
 float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_width);
 float adjust_table_caption_width(ViewBlock* cap, float wrapper_content_width);
+
+// ============================================================================
+// Table Layout
+// ============================================================================
+
+void layout_table_content(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
+struct ViewTable* build_table_tree(LayoutContext* lycon, DomNode* elmt);
+void table_auto_layout(LayoutContext* lycon, struct ViewTable* table);
+void adjust_table_text_positions_final(struct ViewTable* table);
+float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y, bool use_normal_lh = false);
+void adjust_row_text_positions_final(struct ViewTable* table, struct ViewBlock* row,
+    float table_abs_x, float cell_border, float cell_padding);
+void adjust_cell_text_positions_final(struct ViewBlock* cell, float text_abs_x);
+bool wrap_orphaned_table_children(LayoutContext* lycon, struct DomElement* parent);
+bool is_table_internal_display(CssEnum display);
 
 // ============================================================================
 // Absolute Children

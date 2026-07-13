@@ -1,4 +1,3 @@
-#include "layout_table.hpp"
 #include "layout.hpp"
 #include "form_control.hpp"  // For FormDefaults (radio/checkbox margin constants)
 #include "render.hpp"
