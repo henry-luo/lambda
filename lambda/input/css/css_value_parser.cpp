@@ -442,7 +442,18 @@ CssValue* css_parse_generic_function(CssPropertyValueParser* parser,
     if (!value->data.function) {
         return NULL;
     }
-    value->data.function->name = pool_strdup(parser->pool, function_name);
+    const char* clean_function_name = function_name;
+    size_t function_name_len = strlen(function_name);
+    if (function_name_len > 0 && function_name[function_name_len - 1] == '(') {
+        char* clean_name = (char*)pool_calloc(parser->pool, function_name_len);
+        if (clean_name) {
+            // function tokens include the opening paren; CssFunction::name must not.
+            memcpy(clean_name, function_name, function_name_len - 1);
+            clean_name[function_name_len - 1] = '\0';
+            clean_function_name = clean_name;
+        }
+    }
+    value->data.function->name = pool_strdup(parser->pool, clean_function_name);
     value->data.function->args = NULL;
     value->data.function->arg_count = 0;
 

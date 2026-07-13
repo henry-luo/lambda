@@ -297,7 +297,7 @@ TypeId jm_detect_ctor_field_type(JsAstNode* rhs);
 void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body);
 JsClassEntry* jm_find_class(JsMirTranspiler* mt, const char* name, int name_len);
 void jm_infer_walk(JsAstNode* node, const char param_names[][128],
-                          JsParamEvidence* evidence, int param_count,
+                          FnParamEvidence* evidence, int param_count,
                           const char* self_name);
 void jm_infer_param_types(JsFuncCollected* fc);
 bool jm_add_chain_has_string(JsAstNode* expr);
@@ -424,7 +424,7 @@ TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg);
 void jm_p4b_ctor_walk(JsMirTranspiler* mt, JsAstNode* node,
                               P4bCtorEvidence* evidence);
 void jm_p6_narrow_walk(JsMirTranspiler* mt, JsAstNode* node,
-                               P6NarrowEvidence evidence[][16]);
+                               FnParamEvidence evidence[][16]);
 void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node);
 void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body);
 void jm_emit_eval_local_ensure_frame(JsMirTranspiler* mt);

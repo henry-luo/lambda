@@ -518,6 +518,61 @@ static JsAstNode* build_js_binding_identifier(JsTranspiler* tp, TSNode id_node) 
     return (JsAstNode*)identifier;
 }
 
+static void js_bind_pattern_names(JsTranspiler* tp, JsAstNode* pattern, JsVarKind kind) {
+    if (!pattern) return;
+    if (pattern->node_type == (int)TS_AST_NODE_PARAMETER) {
+        TsParameterNode* param = (TsParameterNode*)pattern;
+        js_bind_pattern_names(tp, param->pattern, kind);
+        return;
+    }
+    switch (pattern->node_type) {
+    case JS_AST_NODE_IDENTIFIER: {
+        JsIdentifierNode* id = (JsIdentifierNode*)pattern;
+        NameEntry* entry = js_scope_define(tp, id->name, pattern, kind);
+        id->entry = entry;
+        id->type = entry && entry->node ? entry->node->type : &TYPE_ANY;
+        break;
+    }
+    case JS_AST_NODE_ASSIGNMENT_PATTERN: {
+        JsAssignmentPatternNode* pat = (JsAssignmentPatternNode*)pattern;
+        js_bind_pattern_names(tp, pat->left, kind);
+        break;
+    }
+    case JS_AST_NODE_REST_ELEMENT: {
+        JsSpreadElementNode* rest = (JsSpreadElementNode*)pattern;
+        js_bind_pattern_names(tp, rest->argument, kind);
+        break;
+    }
+    case JS_AST_NODE_ARRAY_PATTERN:
+    case JS_AST_NODE_ARRAY_EXPRESSION: {
+        JsArrayNode* arr = (JsArrayNode*)pattern;
+        JsAstNode* item = arr->elements;
+        while (item) {
+            js_bind_pattern_names(tp, item, kind);
+            item = item->next;
+        }
+        break;
+    }
+    case JS_AST_NODE_OBJECT_PATTERN:
+    case JS_AST_NODE_OBJECT_EXPRESSION: {
+        JsObjectNode* obj = (JsObjectNode*)pattern;
+        JsAstNode* prop = obj->properties;
+        while (prop) {
+            if (prop->node_type == JS_AST_NODE_PROPERTY) {
+                JsPropertyNode* p = (JsPropertyNode*)prop;
+                js_bind_pattern_names(tp, p->value, kind);
+            } else {
+                js_bind_pattern_names(tp, prop, kind);
+            }
+            prop = prop->next;
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 static JsAstNode* make_js_identifier_name(JsTranspiler* tp, TSNode node, const char* name, int len) {
     JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, node, sizeof(JsIdentifierNode));
     identifier->name = name_pool_create_len(tp->name_pool, name, len);
@@ -1301,6 +1356,13 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
         func->name = js_decode_identifier_name(tp, name_source.str, (int)name_source.length);
     }
 
+    // Build-time binding owns the function parameter environment. The body
+    // block is nested below this scope so var declarations still target the
+    // function scope while top-level lexical declarations keep their own entries.
+    JsScope* fn_scope = js_scope_create(tp, JS_SCOPE_FUNCTION, tp->current_scope);
+    func->vars = fn_scope;
+    js_scope_push(tp, fn_scope);
+
     // Get parameters - arrow functions can have "parameter" (singular) for single-param without parens
     // or "parameters" (plural) for multiple params or parens
     TSNode params_node = ts_node_child_by_field_name(func_node, "parameters", strlen("parameters"));
@@ -1365,6 +1427,7 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
 
             param_done:
             if (param) {
+                js_bind_pattern_names(tp, param, JS_VAR_VAR);
                 if (!prev_param) {
                     func->params = param;
                 } else {
@@ -1379,10 +1442,11 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
         if (!ts_node_is_null(param_node)) {
             const char* ptype = ts_node_type(param_node);
             if (strcmp(ptype, "identifier") == 0) {
-                func->params = build_js_identifier(tp, param_node);
+                func->params = build_js_binding_identifier(tp, param_node);
             } else {
                 func->params = build_js_expression(tp, param_node);
             }
+            js_bind_pattern_names(tp, func->params, JS_VAR_VAR);
         }
     }
 
@@ -1392,7 +1456,7 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
         const char* body_type = ts_node_type(body_node);
         if (strcmp(body_type, "statement_block") == 0) {
             func->has_use_strict_directive = js_ts_body_has_use_strict_directive(tp, body_node);
-            func->body = build_js_block_statement(tp, body_node, JS_SCOPE_FUNCTION);
+            func->body = build_js_block_statement(tp, body_node, JS_SCOPE_BLOCK);
         } else {
             // Arrow function with expression body
             func->body = build_js_expression(tp, body_node);
@@ -1402,12 +1466,14 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
             uint32_t start = ts_node_start_byte(body_node);
             StrView body_src = js_node_source(tp, body_node);
             log_error("Failed to build function body (body_type=%s, start=%u, src=%.*s)", body_type, start, (int)(body_src.length > 60 ? 60 : body_src.length), body_src.str);
+            js_scope_pop(tp);
             tp->in_async_function = saved_in_async_function;
             return NULL;
         }
     }
 
     func->type = &TYPE_FUNC;
+    js_scope_pop(tp);
 
     // Add function to scope if it has a name — but NOT for class method definitions,
     // which should not pollute the enclosing scope with their method names.
@@ -1532,6 +1598,7 @@ JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node, JsScope
 
     // Create new scope (JS_SCOPE_FUNCTION for function bodies, JS_SCOPE_BLOCK otherwise)
     JsScope* block_scope = js_scope_create(tp, scope_type, tp->current_scope);
+    block->vars = block_scope;
     js_scope_push(tp, block_scope);
 
     uint32_t stmt_count = ts_node_named_child_count(block_node);
@@ -1592,6 +1659,7 @@ static TSNode js_leading_object_expression_node(TSNode expr_node) {
 static JsAstNode* build_js_statement_block_from_object_expression(JsTranspiler* tp, TSNode stmt_node, TSNode object_node) {
     JsBlockNode* block = (JsBlockNode*)alloc_js_ast_node(tp, JS_AST_NODE_BLOCK_STATEMENT, stmt_node, sizeof(JsBlockNode));
     JsScope* block_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+    block->vars = block_scope;
     js_scope_push(tp, block_scope);
 
     uint32_t child_count = ts_node_named_child_count(object_node);
@@ -1732,7 +1800,8 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
                 JsIdentifierNode* id = (JsIdentifierNode*)declarator->id;
                 log_debug("var-decl-scope: defining '%.*s', declarator=%p, base.type=%p", 
                     (int)id->name->len, id->name->chars, declarator, declarator->type);
-                js_scope_define(tp, id->name, (JsAstNode*)declarator, (JsVarKind)var_decl->kind);
+                NameEntry* entry = js_scope_define(tp, id->name, (JsAstNode*)declarator, (JsVarKind)var_decl->kind);
+                id->entry = entry;
             }
 
             if (!prev_declarator) {
@@ -4046,14 +4115,16 @@ static JsAstNode* build_ts_parameter_u(JsTranspiler* tp, TSNode param_node, bool
             JS_AST_NODE_REST_ELEMENT, param_node, sizeof(JsSpreadElementNode));
         if (ts_node_named_child_count(param_node) > 0) {
             TSNode inner = ts_node_named_child(param_node, 0);
-            rest->argument = build_js_expression(tp, inner);
+            const char* inner_type = ts_node_type(inner);
+            rest->argument = strcmp(inner_type, "identifier") == 0 ?
+                build_js_binding_identifier(tp, inner) : build_js_expression(tp, inner);
         }
         rest->type = &TYPE_ARRAY;
         return (JsAstNode*)rest;
     }
 
     if (strcmp(ptype, "identifier") == 0) {
-        return build_js_identifier(tp, param_node);
+        return build_js_binding_identifier(tp, param_node);
     }
 
     if (strcmp(ptype, "required_parameter") == 0 || strcmp(ptype, "optional_parameter") == 0) {
@@ -4079,7 +4150,7 @@ static JsAstNode* build_ts_parameter_u(JsTranspiler* tp, TSNode param_node, bool
         if (!ts_node_is_null(name_node)) {
             const char* ntype = ts_node_type(name_node);
             if (strcmp(ntype, "identifier") == 0) {
-                name_ast = build_js_identifier(tp, name_node);
+                name_ast = build_js_binding_identifier(tp, name_node);
             } else {
                 name_ast = build_js_expression(tp, name_node);
             }
@@ -4171,6 +4242,10 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
         func->name = name_pool_create_strview(tp->name_pool, {.str = text, .length = (size_t)len});
     }
 
+    JsScope* fn_scope = js_scope_create(tp, JS_SCOPE_FUNCTION, tp->current_scope);
+    func->vars = fn_scope;
+    js_scope_push(tp, fn_scope);
+
     // return type annotation (TS-specific)
     TSNode return_type_node = ts_node_child_by_field_name(func_node, "return_type", 11);
     if (!ts_node_is_null(return_type_node)) {
@@ -4210,6 +4285,7 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
             TSNode param_node = ts_node_named_child(params_node, i);
             JsAstNode* param = build_ts_parameter_u(tp, param_node, false);
             if (param) {
+                js_bind_pattern_names(tp, param, JS_VAR_VAR);
                 if (!prev_param) { func->params = param; }
                 else { prev_param->next = param; }
                 prev_param = param;
@@ -4219,6 +4295,7 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
         TSNode param_node = ts_node_child_by_field_name(func_node, "parameter", 9);
         if (!ts_node_is_null(param_node)) {
             func->params = build_ts_parameter_u(tp, param_node, false);
+            js_bind_pattern_names(tp, func->params, JS_VAR_VAR);
         }
     }
 
@@ -4227,13 +4304,14 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
     if (!ts_node_is_null(body_node)) {
         const char* body_type = ts_node_type(body_node);
         if (strcmp(body_type, "statement_block") == 0) {
-            func->body = build_js_block_statement(tp, body_node, JS_SCOPE_FUNCTION);
+            func->body = build_js_block_statement(tp, body_node, JS_SCOPE_BLOCK);
         } else {
             func->body = build_js_expression(tp, body_node);
         }
     }
 
     func->type = &TYPE_FUNC;
+    js_scope_pop(tp);
 
     bool is_method_def = (strcmp(node_type, "method_definition") == 0);
     if (func->name && !is_method_def) {
@@ -4537,7 +4615,8 @@ static JsAstNode* build_ts_variable_decl_u(JsTranspiler* tp, TSNode var_node) {
 
         if (declarator->id && declarator->id->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* id = (JsIdentifierNode*)declarator->id;
-            js_scope_define(tp, id->name, (JsAstNode*)declarator, (JsVarKind)var_decl->kind);
+            NameEntry* entry = js_scope_define(tp, id->name, (JsAstNode*)declarator, (JsVarKind)var_decl->kind);
+            id->entry = entry;
         }
 
         if (!prev_declarator) {

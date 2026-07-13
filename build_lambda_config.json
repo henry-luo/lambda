@@ -2360,6 +2360,25 @@
                         "icon": "🧾"
                     },
                     {
+                        "source": "test/test_layout_custom_gtest.cpp",
+                        "name": "Custom Layout Engine Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "radiant/layout_custom.cpp",
+                            "radiant/layout_box.cpp",
+                            "radiant/stacking_order.cpp"
+                        ],
+                        "binary": "test_layout_custom_gtest.exe",
+                        "icon": "📐"
+                    },
+                    {
                         "source": "lib/test_pdf_writer_gtest.cpp",
                         "name": "PDF Writer Tests",
                         "dependencies": [
@@ -3876,6 +3895,7 @@
                             "gtest",
                             "gtest_main"
                         ],
+                        "parallel": false,
                         "icon": "📦"
                     },
                     {

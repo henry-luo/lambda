@@ -1,0 +1,18 @@
+{
+  registered: true,
+  tag: "DIV",
+  id: "node-a",
+  role: "node",
+  missing: null,
+  missing_default: "fallback-role",
+  width: 120.5,
+  height: 48,
+  box_width: 120.5,
+  child_count: 1,
+  text: "Alpha",
+  display: "block",
+  style_default: "static",
+  margin_top: 3,
+  border_left: 5,
+  padding_bottom: 12
+}

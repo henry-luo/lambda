@@ -45,7 +45,7 @@ static TsTranspiler* ts_transpiler_create(Runtime* runtime) {
     tp->strict_js = false;           // allow TS syntax
     tp->strict_mode = true;          // TS always implies strict mode
     tp->emit_runtime_checks = false;
-    tp->global_scope->strict_mode = true;
+    tp->global_scope->strict = true;
 
     // initialize type registry
     ts_type_registry_init(tp);

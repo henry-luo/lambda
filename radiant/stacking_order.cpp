@@ -7,11 +7,18 @@ extern "C" {
 
 static int radiant_stack_view_z_index(View* view) {
     ViewElement* element = lam::view_as_element(view);
-    return element && element->position ? element->position->z_index : 0;
+    if (!element || !element->position) return 0;
+    return element->position->has_custom_layout_z_index ?
+        element->position->custom_layout_z_index : element->position->z_index;
 }
 
 bool radiant_stack_is_positive_z_positioned(View* view) {
     ViewElement* element = lam::view_as_element(view);
+    if (element && element->position && element->position->has_custom_layout_z_index) {
+        // custom layout places normal-flow children but may still request
+        // paint/hit-test stacking without rewriting authored CSS position.
+        return element->position->custom_layout_z_index > 0;
+    }
     return element && element->position &&
         element->position->z_index > 0 &&
         element->position->position != CSS_VALUE_STATIC;

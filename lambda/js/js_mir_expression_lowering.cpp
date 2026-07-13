@@ -12648,7 +12648,7 @@ static bool jm_closure_has_scope_env_slot(JsFuncCollected* fc) {
     return false;
 }
 
-static bool jm_capture_matches_scope_env_name(JsCaptureEntry* cap, const char* scope_name) {
+static bool jm_capture_matches_scope_env_name(FnCapture* cap, const char* scope_name) {
     if (!cap || !scope_name) return false;
     // duplicate block lexicals share the same source name; scope_env_key keeps
     // the closure wired to the binding range selected during scope-env layout.

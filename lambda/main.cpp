@@ -535,6 +535,7 @@ extern "C" {
     int js_node_test_pass_count(void);
     int js_node_test_fail_count(void);
     void js_promise_set_unhandled_rejections_mode(int64_t strict_mode);
+    void js_set_call_stack_limit(int64_t limit);
 }
 
 // System includes for environment and string functions
@@ -2175,6 +2176,7 @@ int main(int argc, char *argv[]) {
             bool tls_min_v13 = false;
             bool tls_max_v12 = false;
             bool force_interactive = false;
+            int64_t js_stack_size_kb = 0;
             int js_file_arg_index = -1;
             int eval_option_index = -1;
             for (int i = 2; i < argc; i++) {
@@ -2193,6 +2195,10 @@ int main(int argc, char *argv[]) {
                     fputs("invalid value for --unhandled-rejections\n", stderr);
                     runtime_cleanup(&runtime);
                     return lambda_main_finish(9);
+                } else if (strncmp(argv[i], "--stack_size=", 13) == 0) {
+                    js_stack_size_kb = atoi(argv[i] + 13);
+                } else if (strncmp(argv[i], "--stack-size=", 13) == 0) {
+                    js_stack_size_kb = atoi(argv[i] + 13);
                 } else if (strcmp(argv[i], "--tls-min-v1.3") == 0) {
                     tls_min_v13 = true;
                 } else if (strcmp(argv[i], "--tls-max-v1.2") == 0) {
@@ -2272,6 +2278,13 @@ int main(int argc, char *argv[]) {
                 }
             }
             js_promise_set_unhandled_rejections_mode(unhandled_rejections_strict ? 1 : 0);
+            if (js_stack_size_kb > 0) {
+                // V8's --stack_size is in KB; the MIR bridge uses a logical JS
+                // call-depth guard, so scale conservatively before user code runs.
+                js_set_call_stack_limit(js_stack_size_kb * 2);
+            } else {
+                js_set_call_stack_limit(0);
+            }
 
             // If --document is provided, load HTML and set up DOM context
             if (html_file) {
@@ -2332,6 +2345,11 @@ int main(int argc, char *argv[]) {
                     if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
                     if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) continue;
                     if (strcmp(argv[i], "--input-type=module") == 0) continue;
+                    if (strncmp(argv[i], "--stack_size=", 13) == 0 ||
+                        strncmp(argv[i], "--stack-size=", 13) == 0) {
+                        js_exec_argv_store[js_exec_argc_store++] = argv[i];
+                        continue;
+                    }
                     if (strcmp(argv[i], "--mir-interp") == 0) continue;
                     if (strcmp(argv[i], "--diagnose") == 0) continue;
                     if (strncmp(argv[i], "--opt-level=", 12) == 0) continue;
@@ -2362,6 +2380,10 @@ int main(int argc, char *argv[]) {
                     if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
                     if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) continue;
                     if (strcmp(argv[i], "--input-type=module") == 0) continue;
+                    if (strncmp(argv[i], "--stack_size=", 13) == 0 ||
+                        strncmp(argv[i], "--stack-size=", 13) == 0) {
+                        continue;
+                    }
                     if (strcmp(argv[i], "--mir-interp") == 0) continue;
                     if (strcmp(argv[i], "--diagnose") == 0) continue;
                     if (strncmp(argv[i], "--opt-level=", 12) == 0) continue;

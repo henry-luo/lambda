@@ -1761,27 +1761,39 @@ static bool js_util_key_is_symbol(Item key) {
 }
 
 static Item js_util_enumerable_own_keys(Item object, bool include_symbols) {
-    Item result = js_object_keys(object);
+    // Typed-array indexed storage is already compared by raw bytes; materializing
+    // Object.keys for every numeric index makes large assert.deep* cases time out.
+    Item result = js_is_typed_array(object)
+        ? js_typed_array_enumerable_custom_keys(object)
+        : js_object_keys(object);
     if (get_type_id(result) != LMD_TYPE_ARRAY) result = js_array_new(0);
     int64_t result_len = js_array_length(result);
     Item filtered = ItemNull;
-    bool filtered_marker = false;
+    bool filtered_any = false;
     for (int64_t i = 0; i < result_len; i++) {
         Item key = js_array_get_int(result, i);
         String* ks = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
+        bool skip_key = false;
         if (ks && ks->len == 20 && memcmp(ks->chars, "__strict_arguments__", 20) == 0) {
             // The strict Arguments marker is runtime bookkeeping, not an
             // enumerable user key for Node-compatible deep equality.
-            filtered_marker = true;
+            skip_key = true;
+        }
+        if (skip_key) {
+            if (!filtered_any) {
+                filtered = js_array_new(0);
+                for (int64_t j = 0; j < i; j++) js_array_push(filtered, js_array_get_int(result, j));
+            }
+            filtered_any = true;
             continue;
         }
-        if (filtered_marker && get_type_id(filtered) != LMD_TYPE_ARRAY) {
+        if (filtered_any && get_type_id(filtered) != LMD_TYPE_ARRAY) {
             filtered = js_array_new(0);
             for (int64_t j = 0; j < i; j++) js_array_push(filtered, js_array_get_int(result, j));
         }
         if (get_type_id(filtered) == LMD_TYPE_ARRAY) js_array_push(filtered, key);
     }
-    if (filtered_marker) {
+    if (filtered_any) {
         if (get_type_id(filtered) != LMD_TYPE_ARRAY) filtered = js_array_new(0);
         result = filtered;
     }
@@ -2496,7 +2508,13 @@ extern "C" Item js_util_types_isModuleNamespaceObject(Item obj) {
 
 extern "C" Item js_util_getCallSites(Item frame_count_item) {
     int64_t frame_count = 10;
-    if (get_type_id(frame_count_item) == LMD_TYPE_INT) frame_count = it2i(frame_count_item);
+    TypeId frame_count_type = get_type_id(frame_count_item);
+    if (frame_count_type == LMD_TYPE_INT || frame_count_type == LMD_TYPE_INT64 ||
+            frame_count_type == LMD_TYPE_FLOAT) {
+        // JS numeric literals may arrive boxed as floats, so the explicit frame
+        // count must be read before the default would fabricate extra frames.
+        frame_count = (int64_t)it2d(frame_count_item);
+    }
     if (frame_count < 1) frame_count = 1;
     if (frame_count > 200) frame_count = 200;
 

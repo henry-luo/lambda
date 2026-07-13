@@ -480,6 +480,7 @@ typedef struct AstCompoundAssignNode : AstAssignNode {
 
 typedef struct AstBlockNode : AstNode {
     AstNode* statements;
+    NameScope* vars;
 } AstBlockNode;
 
 typedef struct AstExprStmtNode : AstNode {
@@ -524,7 +525,8 @@ typedef struct AstCatchNode : AstNode {
 } AstCatchNode;
 
 // Forward declare for capture list
-struct CaptureInfo;
+struct FnCapture;
+struct FnAnalysis;
 
 // aligned with AstNamedNode on name
 typedef struct AstFuncNode : AstNode {
@@ -535,7 +537,8 @@ typedef struct AstFuncNode : AstNode {
     };
     AstNode *body;
     NameScope *vars;
-    struct CaptureInfo* captures;
+    struct FnCapture* captures;
+    struct FnAnalysis* analysis;
     bool is_arrow;
     bool is_async;
     bool is_generator;
@@ -557,12 +560,38 @@ typedef struct AstMethodNode : AstFuncNode {
     bool static_method;
 } AstMethodNode;
 
-typedef struct CaptureInfo {
-    String* name;
+typedef struct FnCapture {
+    char name[128];
+    char scope_env_key[128];
+    String* lambda_name;
     NameEntry* entry;
+    int scope_env_slot;
+    int grandparent_slot;
     bool is_mutable;
-    struct CaptureInfo* next;
-} CaptureInfo;
+    bool is_let_const;
+    bool is_const;
+    bool is_nfe_binding;
+    bool force_env_capture;
+    struct FnCapture* next;
+} FnCapture;
+
+enum {
+    FN_PARAM_MAX_ALIASES = 8,
+};
+
+typedef struct FnParamEvidence {
+    int evidence;
+    int int_evidence;
+    int float_evidence;
+    int string_evidence;
+    int other_evidence;
+    int name_count;
+    char names[FN_PARAM_MAX_ALIASES][64];
+    int name_lens[FN_PARAM_MAX_ALIASES];
+    bool used_as_container;
+    bool compared_with_non_numeric;
+    bool param_reassigned;
+} FnParamEvidence;
 
 // root of the AST
 typedef struct AstScript : AstNode {
@@ -646,8 +675,10 @@ typedef struct AstExportSpecifierNode : AstNode {
 } AstExportSpecifierNode;
 
 typedef struct FnAnalysis {
-    void* captures;
-    void* evidence;
+    FnCapture* captures;
+    FnParamEvidence* evidence;
+    int capture_count;
+    int evidence_count;
 } FnAnalysis;
 
 typedef union FnExt {

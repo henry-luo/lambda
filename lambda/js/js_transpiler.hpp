@@ -9,7 +9,7 @@ extern "C" {
 
 // Forward declarations
 typedef struct JsTranspiler JsTranspiler;
-typedef struct JsScope JsScope;
+typedef NameScope JsScope;
 
 // JavaScript variable declaration types
 typedef enum JsVarKind {
@@ -25,16 +25,6 @@ typedef enum JsScopeType {
     JS_SCOPE_BLOCK,
     JS_SCOPE_MODULE
 } JsScopeType;
-
-// JavaScript scope structure
-typedef struct JsScope {
-    JsScopeType scope_type;
-    NameEntry* first;               // First name entry in scope
-    NameEntry* last;                // Last name entry in scope
-    struct JsScope* parent;         // Parent scope
-    bool strict_mode;               // Strict mode flag
-    JsFunctionNode* function;       // Associated function (if function scope)
-} JsScope;
 
 // JavaScript transpiler context
 typedef struct JsTranspiler {
@@ -90,7 +80,7 @@ void js_scope_push(JsTranspiler* tp, JsScope* scope);
 void js_scope_pop(JsTranspiler* tp);
 NameEntry* js_scope_lookup(JsTranspiler* tp, String* name);
 NameEntry* js_scope_lookup_current(JsTranspiler* tp, String* name);
-void js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVarKind kind);
+NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVarKind kind);
 
 // AST building functions (build_js_ast.cpp)
 JsAstNode* build_js_ast(JsTranspiler* tp, TSNode root);

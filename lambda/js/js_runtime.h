@@ -242,6 +242,7 @@ void js_mark_eval_initializer_func_if_active(Item fn_item);
 Item js_get_constructor(Item name_item);
 Item js_get_intrinsic_prototype_for_class(int class_id);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+void js_set_call_stack_limit(int64_t limit);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_apply_constructor(Item constructor, Item args_array);
 void js_set_internal_class_name(Item obj, Item class_name);
@@ -386,6 +387,7 @@ Item js_nullish_coalesce(Item left, Item right);
 // =============================================================================
 
 Item js_object_keys(Item object);
+Item js_typed_array_enumerable_custom_keys(Item object);
 Item js_for_in_keys(Item object);
 Item js_object_get_own_property_names(Item object);
 Item js_object_get_own_property_symbols(Item object);

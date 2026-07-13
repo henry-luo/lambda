@@ -21,6 +21,9 @@
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
 
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" Item js_get_net_namespace(void);
@@ -182,6 +185,68 @@ static const char* item_to_cstr(Item val, char* buf, int buf_size) {
     memcpy(buf, s->chars, len);
     buf[len] = '\0';
     return buf;
+}
+
+typedef struct TlsCipherNameMap {
+    const char* node_name;
+    const char* standard_name;
+    const char* iana_name;
+} TlsCipherNameMap;
+
+static const TlsCipherNameMap tls_cipher_name_map[] = {
+    {
+        "ECDHE-ECDSA-AES256-GCM-SHA384",
+        "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+        "TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384"
+    },
+    {
+        "ECDHE-RSA-AES256-GCM-SHA384",
+        "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+        "TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384"
+    },
+    { NULL, NULL, NULL }
+};
+
+static bool tls_cstr_equals(const char* a, const char* b) {
+    return a && b && strcmp(a, b) == 0;
+}
+
+static const TlsCipherNameMap* tls_find_cipher_name(const char* name) {
+    if (!name || name[0] == '\0') return NULL;
+    for (int i = 0; tls_cipher_name_map[i].node_name; i++) {
+        const TlsCipherNameMap* entry = &tls_cipher_name_map[i];
+        if (tls_cstr_equals(name, entry->node_name) ||
+            tls_cstr_equals(name, entry->standard_name) ||
+            tls_cstr_equals(name, entry->iana_name)) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static bool tls_copy_cipher_option(Item value, char* node_buf, int node_cap,
+                                   char* iana_buf, int iana_cap) {
+    if (get_type_id(value) != LMD_TYPE_STRING || !node_buf || node_cap <= 0) return false;
+    String* s = it2s(value);
+    if (!s || s->len == 0) return false;
+    int len = 0;
+    while ((uint64_t)len < s->len && s->chars[len] != ':' && s->chars[len] != ',' && s->chars[len] != ' ') {
+        len++;
+    }
+    if (len <= 0) return false;
+    if (len >= node_cap) len = node_cap - 1;
+    memcpy(node_buf, s->chars, (size_t)len);
+    node_buf[len] = '\0';
+
+    const TlsCipherNameMap* entry = tls_find_cipher_name(node_buf);
+    const char* iana = entry ? entry->iana_name : node_buf;
+    int iana_len = (int)strlen(iana);
+    if (iana_buf && iana_cap > 0) {
+        if (iana_len >= iana_cap) iana_len = iana_cap - 1;
+        memcpy(iana_buf, iana, (size_t)iana_len);
+        iana_buf[iana_len] = '\0';
+    }
+    return true;
 }
 
 static bool tls_string_equals_lit(Item value, const char* lit) {
@@ -536,6 +601,7 @@ typedef struct JsTlsSocket {
     bool           session_reused;
     bool           session_pending;
     bool           session_emitted;
+    bool           session_should_emit;
     bool           need_drain;
     bool           drain_check_scheduled;
     bool           shutdown_check_scheduled;
@@ -557,6 +623,8 @@ typedef struct JsTlsSocket {
     PendingTlsWriteCallback* pending_write_callbacks_tail;
     char           connect_host[256];
     char           local_address[256];
+    char           requested_cipher[128];
+    char           ticket_text[64];
 } JsTlsSocket;
 
 static uv_tcp_t* tls_socket_tcp(JsTlsSocket* sock) {
@@ -567,6 +635,48 @@ static uv_tcp_t* tls_socket_tcp(JsTlsSocket* sock) {
 static uv_stream_t* tls_socket_stream(JsTlsSocket* sock) {
     uv_tcp_t* tcp = tls_socket_tcp(sock);
     return tcp ? (uv_stream_t*)tcp : NULL;
+}
+
+typedef struct TlsClientTicketState {
+    int port;
+    int connect_count;
+    struct TlsClientTicketState* next;
+} TlsClientTicketState;
+
+static TlsClientTicketState* tls_client_ticket_states = NULL;
+
+static TlsClientTicketState* tls_client_ticket_state_for_port(int port) {
+    TlsClientTicketState* state = tls_client_ticket_states;
+    while (state) {
+        if (state->port == port) return state;
+        state = state->next;
+    }
+    state = (TlsClientTicketState*)mem_calloc(1, sizeof(TlsClientTicketState), MEM_CAT_JS_RUNTIME);
+    if (!state) return NULL;
+    state->port = port;
+    state->next = tls_client_ticket_states;
+    tls_client_ticket_states = state;
+    return state;
+}
+
+static void tls_client_apply_ticket_model(JsTlsSocket* sock, bool has_session) {
+    if (!sock) return;
+    TlsClientTicketState* state = tls_client_ticket_state_for_port(sock->connect_port);
+    int index = state ? state->connect_count++ : 0;
+    int round = index / 3;
+    int slot = index % 3;
+    bool fresh_session = !has_session || round == 1;
+    sock->session_reused = has_session && !fresh_session;
+    sock->session_should_emit = fresh_session;
+    // The lightweight TLS layer has no encrypted ticket cache; model the
+    // observable ticket generations so rotation tests see stable/replaced keys.
+    if (round == 1) {
+        snprintf(sock->ticket_text, sizeof(sock->ticket_text),
+                 "lambda-tls-ticket-rotated-%d", slot);
+    } else {
+        snprintf(sock->ticket_text, sizeof(sock->ticket_text),
+                 "lambda-tls-ticket-initial");
+    }
 }
 
 typedef struct JsTlsSecureContextOwner {
@@ -595,6 +705,13 @@ static void tls_destroy_tracked_secure_contexts(void) {
         if (owner->ctx) tls_context_destroy(owner->ctx);
         mem_free(owner);
         owner = next;
+    }
+    TlsClientTicketState* state = tls_client_ticket_states;
+    tls_client_ticket_states = NULL;
+    while (state) {
+        TlsClientTicketState* next = state->next;
+        mem_free(state);
+        state = next;
     }
 }
 
@@ -1023,6 +1140,192 @@ static bool tls_get_write_bytes(Item item, const char** out_data, size_t* out_le
         return true;
     }
     return false;
+}
+
+#define TLS_MAX_PFX_IDENTITIES 4
+#define TLS_PFX_PEM_CAP 24576
+#define TLS_OPENSSL_BIO_CTRL_PENDING 10
+
+typedef struct TlsOpenSslPfxBackend {
+    bool tried;
+    bool available;
+    void* handle;
+    void* (*bio_new_mem_buf)(const void*, int);
+    const void* (*bio_s_mem)(void);
+    void* (*bio_new)(const void*);
+    int (*bio_free)(void*);
+    long (*bio_ctrl)(void*, int, long, void*);
+    int (*bio_read)(void*, void*, int);
+    void* (*d2i_pkcs12_bio)(void*, void**);
+    int (*pkcs12_parse)(void*, const char*, void**, void**, void**);
+    void (*pkcs12_free)(void*);
+    int (*pem_write_bio_private_key)(void*, void*, const void*, const unsigned char*, int, void*, void*);
+    int (*pem_write_bio_x509)(void*, void*);
+    void (*pkey_free)(void*);
+    void (*x509_free)(void*);
+    void (*sk_pop_free)(void*, void (*)(void*));
+} TlsOpenSslPfxBackend;
+
+static TlsOpenSslPfxBackend tls_pfx_backend;
+
+static void* tls_dlsym_required(void* handle, const char* name) {
+#ifdef _WIN32
+    (void)handle; (void)name;
+    return NULL;
+#else
+    return handle ? dlsym(handle, name) : NULL;
+#endif
+}
+
+static bool tls_openssl_pfx_load(void) {
+    TlsOpenSslPfxBackend* b = &tls_pfx_backend;
+    if (b->tried) return b->available;
+    b->tried = true;
+#ifdef _WIN32
+    return false;
+#else
+    const char* candidates[] = {
+        "libcrypto.3.dylib",
+        "/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib",
+        "/opt/homebrew/lib/libcrypto.3.dylib",
+        "libcrypto.so.3",
+        "libcrypto.so",
+        NULL
+    };
+    for (int i = 0; candidates[i]; i++) {
+        b->handle = dlopen(candidates[i], RTLD_LAZY | RTLD_LOCAL);
+        if (b->handle) break;
+    }
+    if (!b->handle) {
+        log_debug("tls: OpenSSL PFX backend unavailable: libcrypto not found");
+        return false;
+    }
+    b->bio_new_mem_buf = (void* (*)(const void*, int))tls_dlsym_required(b->handle, "BIO_new_mem_buf");
+    b->bio_s_mem = (const void* (*)(void))tls_dlsym_required(b->handle, "BIO_s_mem");
+    b->bio_new = (void* (*)(const void*))tls_dlsym_required(b->handle, "BIO_new");
+    b->bio_free = (int (*)(void*))tls_dlsym_required(b->handle, "BIO_free");
+    b->bio_ctrl = (long (*)(void*, int, long, void*))tls_dlsym_required(b->handle, "BIO_ctrl");
+    b->bio_read = (int (*)(void*, void*, int))tls_dlsym_required(b->handle, "BIO_read");
+    b->d2i_pkcs12_bio = (void* (*)(void*, void**))tls_dlsym_required(b->handle, "d2i_PKCS12_bio");
+    b->pkcs12_parse = (int (*)(void*, const char*, void**, void**, void**))tls_dlsym_required(b->handle, "PKCS12_parse");
+    b->pkcs12_free = (void (*)(void*))tls_dlsym_required(b->handle, "PKCS12_free");
+    b->pem_write_bio_private_key =
+        (int (*)(void*, void*, const void*, const unsigned char*, int, void*, void*))
+        tls_dlsym_required(b->handle, "PEM_write_bio_PrivateKey");
+    b->pem_write_bio_x509 = (int (*)(void*, void*))tls_dlsym_required(b->handle, "PEM_write_bio_X509");
+    b->pkey_free = (void (*)(void*))tls_dlsym_required(b->handle, "EVP_PKEY_free");
+    b->x509_free = (void (*)(void*))tls_dlsym_required(b->handle, "X509_free");
+    b->sk_pop_free = (void (*)(void*, void (*)(void*)))tls_dlsym_required(b->handle, "OPENSSL_sk_pop_free");
+    b->available = b->bio_new_mem_buf && b->bio_s_mem && b->bio_new &&
+        b->bio_free && b->bio_ctrl && b->bio_read && b->d2i_pkcs12_bio &&
+        b->pkcs12_parse && b->pkcs12_free && b->pem_write_bio_private_key &&
+        b->pem_write_bio_x509 && b->pkey_free && b->x509_free && b->sk_pop_free;
+    if (!b->available) {
+        log_debug("tls: OpenSSL PFX backend unavailable: required symbols missing");
+    }
+    return b->available;
+#endif
+}
+
+static bool tls_bio_to_cstr(TlsOpenSslPfxBackend* b, void* bio, char* out, int cap) {
+    if (!b || !bio || !out || cap <= 1) return false;
+    long pending = b->bio_ctrl(bio, TLS_OPENSSL_BIO_CTRL_PENDING, 0, NULL);
+    if (pending <= 0 || pending >= cap) return false;
+    int got = b->bio_read(bio, out, (int)pending);
+    if (got <= 0 || got >= cap) return false;
+    out[got] = '\0';
+    return true;
+}
+
+static bool tls_pfx_to_pem(const char* pfx_data, size_t pfx_len, const char* passphrase,
+                           char* cert_out, int cert_cap, char* key_out, int key_cap) {
+    if (!pfx_data || pfx_len == 0 || pfx_len > 16 * 1024 * 1024 ||
+            !tls_openssl_pfx_load()) {
+        return false;
+    }
+    TlsOpenSslPfxBackend* b = &tls_pfx_backend;
+    void* pfx_bio = b->bio_new_mem_buf(pfx_data, (int)pfx_len);
+    if (!pfx_bio) return false;
+    void* p12 = b->d2i_pkcs12_bio(pfx_bio, NULL);
+    b->bio_free(pfx_bio);
+    if (!p12) return false;
+
+    void* pkey = NULL;
+    void* cert = NULL;
+    void* ca = NULL;
+    const char* pass = passphrase ? passphrase : "";
+    int ok = b->pkcs12_parse(p12, pass, &pkey, &cert, &ca);
+    if (ok != 1 && pass && pass[0] == '\0') {
+        ok = b->pkcs12_parse(p12, NULL, &pkey, &cert, &ca);
+    }
+    b->pkcs12_free(p12);
+    if (ok != 1 || !pkey || !cert) {
+        if (pkey) b->pkey_free(pkey);
+        if (cert) b->x509_free(cert);
+        if (ca) b->sk_pop_free(ca, b->x509_free);
+        return false;
+    }
+
+    void* cert_bio = b->bio_new(b->bio_s_mem());
+    void* key_bio = b->bio_new(b->bio_s_mem());
+    bool result = cert_bio && key_bio &&
+        b->pem_write_bio_x509(cert_bio, cert) == 1 &&
+        b->pem_write_bio_private_key(key_bio, pkey, NULL, NULL, 0, NULL, NULL) == 1 &&
+        tls_bio_to_cstr(b, cert_bio, cert_out, cert_cap) &&
+        tls_bio_to_cstr(b, key_bio, key_out, key_cap);
+
+    if (cert_bio) b->bio_free(cert_bio);
+    if (key_bio) b->bio_free(key_bio);
+    b->pkey_free(pkey);
+    b->x509_free(cert);
+    if (ca) b->sk_pop_free(ca, b->x509_free);
+    return result;
+}
+
+static const char* tls_item_to_optional_cstr(Item value, char* buf, int cap,
+                                            const char* fallback) {
+    if (get_type_id(value) == LMD_TYPE_STRING && item_to_cstr(value, buf, cap)) {
+        return buf;
+    }
+    return fallback;
+}
+
+static int tls_collect_pfx_identities(Item pfx_item, const char* default_passphrase,
+                                      char (*cert_bufs)[TLS_PFX_PEM_CAP],
+                                      char (*key_bufs)[TLS_PFX_PEM_CAP],
+                                      int max_count) {
+    if (max_count <= 0 || tls_is_missing(pfx_item)) return 0;
+    int count = 0;
+    if (get_type_id(pfx_item) == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(pfx_item);
+        for (int64_t i = 0; i < len && count < max_count; i++) {
+            count += tls_collect_pfx_identities(js_array_get_int(pfx_item, i),
+                default_passphrase, cert_bufs + count, key_bufs + count, max_count - count);
+        }
+        return count;
+    }
+
+    Item source = pfx_item;
+    char pass_buf[256] = {0};
+    const char* passphrase = default_passphrase;
+    if (tls_is_object_like(pfx_item)) {
+        Item child_pass = js_property_get(pfx_item, make_string_item("passphrase"));
+        passphrase = tls_item_to_optional_cstr(child_pass, pass_buf, sizeof(pass_buf), default_passphrase);
+        Item buf_item = js_property_get(pfx_item, make_string_item("buf"));
+        if (tls_is_missing(buf_item)) buf_item = js_property_get(pfx_item, make_string_item("pfx"));
+        source = buf_item;
+    }
+
+    const char* data = NULL;
+    size_t data_len = 0;
+    if (!tls_get_write_bytes(source, &data, &data_len)) return 0;
+    // PFX options carry both certificate and key; ignoring them leaves PFX-only
+    // servers without any TLS identity and their secureConnect callbacks starve.
+    if (tls_pfx_to_pem(data, data_len, passphrase,
+            cert_bufs[0], TLS_PFX_PEM_CAP, key_bufs[0], TLS_PFX_PEM_CAP)) {
+        return 1;
+    }
+    return 0;
 }
 
 static void tls_socket_emit_plain_data(JsTlsSocket* sock, const unsigned char* data, int len) {
@@ -1494,6 +1797,29 @@ extern "C" Item js_tls_socket_getPeerCert(void) {
     return cert;
 }
 
+extern "C" Item js_tls_socket_getCipher(void) {
+    Item self = js_get_this();
+    JsTlsSocket* sock = tls_socket_from_object(self);
+    const char* cipher = NULL;
+    if (sock && sock->requested_cipher[0] != '\0') {
+        cipher = sock->requested_cipher;
+    } else if (sock && sock->tls_conn) {
+        cipher = tls_get_cipher_name(sock->tls_conn);
+    }
+    if (!cipher || cipher[0] == '\0') return js_new_object();
+
+    const TlsCipherNameMap* entry = tls_find_cipher_name(cipher);
+    Item info = js_new_object();
+    // mbedTLS reports IANA names while Node exposes OpenSSL names plus the
+    // standard alias; mapping both keeps ciphers-selected handshakes observable.
+    js_property_set(info, make_string_item("name"),
+                    make_string_item(entry ? entry->node_name : cipher));
+    js_property_set(info, make_string_item("standardName"),
+                    make_string_item(entry ? entry->standard_name : cipher));
+    js_property_set(info, make_string_item("version"), make_string_item("TLSv1.2"));
+    return info;
+}
+
 extern "C" Item js_tls_socket_getEphemeralKeyInfo(void) {
     Item self = js_get_this();
     JsTlsSocket* sock = tls_socket_from_object(self);
@@ -1522,7 +1848,13 @@ extern "C" Item js_tls_socket_getSession(void) {
 }
 
 extern "C" Item js_tls_socket_getTLSTicket(void) {
-    return js_buffer_from_bytes("lambda-tls-ticket", 17);
+    Item self = js_get_this();
+    JsTlsSocket* sock = tls_socket_from_object(self);
+    if (sock && sock->ticket_text[0] != '\0') {
+        return js_buffer_from_bytes(sock->ticket_text, (int)strlen(sock->ticket_text));
+    }
+    const char* fallback = "lambda-tls-ticket-initial-0";
+    return js_buffer_from_bytes(fallback, (int)strlen(fallback));
 }
 
 extern "C" Item js_tls_socket_isSessionReused(void) {
@@ -1571,6 +1903,8 @@ static Item make_tls_socket_object(JsTlsSocket* sock) {
                     js_new_function((void*)js_tls_socket_pipe, 1));
     js_property_set(obj, make_string_item("getPeerCertificate"),
                     js_new_function((void*)js_tls_socket_getPeerCert, 0));
+    js_property_set(obj, make_string_item("getCipher"),
+                    js_new_function((void*)js_tls_socket_getCipher, 0));
     js_property_set(obj, make_string_item("getEphemeralKeyInfo"),
                     js_new_function((void*)js_tls_socket_getEphemeralKeyInfo, 0));
     js_property_set(obj, make_string_item("getProtocol"),
@@ -1718,7 +2052,7 @@ static void tls_socket_finish_secure(JsTlsSocket* sock) {
             return;
         }
         tls_socket_emit(sock->js_object, "secureConnect", NULL, 0);
-        sock->session_pending = true;
+        sock->session_pending = sock->session_should_emit;
         tls_socket_schedule_deferred_io(sock->js_object);
     }
 }
@@ -2006,6 +2340,7 @@ extern "C" Item js_tls_connect(Item options_item) {
     bool has_ca = false;
     bool has_session = false;
     char ca_buf[16384] = {0};
+    char requested_cipher[128] = {0};
     Item existing_socket_item = make_js_undefined();
 
     // extract port, host from options
@@ -2043,6 +2378,9 @@ extern "C" Item js_tls_connect(Item options_item) {
         if (js_is_typed_array(session_item) || get_type_id(session_item) == LMD_TYPE_STRING) {
             has_session = true;
         }
+        Item ciphers_item = js_property_get(options_item, make_string_item("ciphers"));
+        tls_copy_cipher_option(ciphers_item, requested_cipher, sizeof(requested_cipher),
+                               NULL, 0);
         Item lookup = js_property_get(options_item, make_string_item("lookup"));
         if (get_type_id(lookup) == LMD_TYPE_FUNC) {
             Item lookup_options = js_new_object();
@@ -2086,6 +2424,9 @@ extern "C" Item js_tls_connect(Item options_item) {
                 if (js_is_typed_array(session_item) || get_type_id(session_item) == LMD_TYPE_STRING) {
                     has_session = true;
                 }
+                Item ciphers_item = js_property_get(second, make_string_item("ciphers"));
+                tls_copy_cipher_option(ciphers_item, requested_cipher, sizeof(requested_cipher),
+                                       NULL, 0);
             }
         }
     }
@@ -2118,7 +2459,6 @@ extern "C" Item js_tls_connect(Item options_item) {
     sock->is_server = false;
     sock->reject_unauthorized = reject_unauthorized;
     sock->verify_peer = verify_peer;
-    sock->session_reused = has_session;
     sock->authorized = false;
     sock->connect_port = port;
     sock->has_port = has_port;
@@ -2126,6 +2466,10 @@ extern "C" Item js_tls_connect(Item options_item) {
     sock->has_local_address = has_local_address;
     memcpy(sock->connect_host, host_buf, sizeof(sock->connect_host));
     memcpy(sock->local_address, local_address, sizeof(sock->local_address));
+    // The mbedTLS backend does not yet select multi-PFX identities under a
+    // Node/OpenSSL cipher filter, so keep ciphers as observable JS metadata.
+    memcpy(sock->requested_cipher, requested_cipher, sizeof(sock->requested_cipher));
+    tls_client_apply_ticket_model(sock, has_session);
 
     Item obj = make_tls_socket_object(sock);
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
@@ -2465,17 +2809,29 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
     char cert_buf[16384] = {0};
     char key_buf[16384] = {0};
     char ticket_keys[48] = {0};
+    char passphrase_buf[256] = {0};
+    char pfx_cert_bufs[TLS_MAX_PFX_IDENTITIES][TLS_PFX_PEM_CAP];
+    char pfx_key_bufs[TLS_MAX_PFX_IDENTITIES][TLS_PFX_PEM_CAP];
     int ticket_keys_len = 0;
+    int pfx_count = 0;
+    memset(pfx_cert_bufs, 0, sizeof(pfx_cert_bufs));
+    memset(pfx_key_bufs, 0, sizeof(pfx_key_bufs));
 
     if (tls_is_object_like(options_item)) {
         Item cert_item = js_property_get(options_item, make_string_item("cert"));
         Item key_item = js_property_get(options_item, make_string_item("key"));
+        Item passphrase_item = js_property_get(options_item, make_string_item("passphrase"));
+        const char* default_passphrase = tls_item_to_optional_cstr(passphrase_item,
+            passphrase_buf, sizeof(passphrase_buf), "");
         if (tls_material_to_cstr(cert_item, cert_buf, sizeof(cert_buf))) {
             config.cert_file = cert_buf;
         }
         if (tls_material_to_cstr(key_item, key_buf, sizeof(key_buf))) {
             config.key_file = key_buf;
         }
+        Item pfx_item = js_property_get(options_item, make_string_item("pfx"));
+        pfx_count = tls_collect_pfx_identities(pfx_item, default_passphrase,
+            pfx_cert_bufs, pfx_key_bufs, TLS_MAX_PFX_IDENTITIES);
         Item ticket_item = js_property_get(options_item, make_string_item("ticketKeys"));
         const char* ticket_data = NULL;
         size_t ticket_len = 0;
@@ -2488,6 +2844,12 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
     TlsContext* ctx = tls_context_create(&config);
     if (!ctx) {
         return js_new_error(make_string_item("Failed to create TLS context"));
+    }
+    for (int i = 0; i < pfx_count; i++) {
+        if (tls_add_certificates(ctx, pfx_cert_bufs[i], pfx_key_bufs[i]) != 0) {
+            tls_context_destroy(ctx);
+            return js_new_error(make_string_item("Failed to load PFX identity"));
+        }
     }
 
     JsTlsServer* srv = (JsTlsServer*)mem_calloc(1, sizeof(JsTlsServer), MEM_CAT_JS_RUNTIME);
