@@ -6,6 +6,20 @@
 
 ---
 
+## Implementation Progress
+
+| Phase | Step | Status |
+|---|---|---|
+| **0** | P0.1 — extract `MirEmitter` | 🟡 **in progress** — Lambda side ✅ done; JS side + shared `em_call_*`/`em_ensure_import` (import-cache unify) pending |
+| 0 | P0.2 — G1 honest GC-rooting | ⬜ not started |
+| 0 | P0.3 — unified `VarEntry` + scopes | ⬜ not started |
+| 0 | P0.4 — const-pool API | ⬜ not started |
+| 1–5 | — | ⬜ not started |
+
+**Latest (2026-07-13):** `struct MirEmitter` + inline `em_new_reg`/`em_new_label`/`em_emit_insn`/`em_emit_label` primitives added to `lambda/mir_emitter_shared.hpp` (building on the already-shared *stateless* helpers there). `MirTranspiler` now embeds a `MirEmitter em`, with its per-function emit cursor / counters / import-cache fields removed and all accesses routed through `mt->em.*`; the `new_reg`/`new_label`/`emit_insn`/`emit_label` wrappers delegate to the `em_*` functions. Build clean (0/0); every individual Lambda test passes (baseline gate confirmed modulo known parallel-load timeout flakiness on heavy tests). Change staged, uncommitted.
+
+---
+
 ## 1. Scope and Ground Rules
 
 ### 1.1 What this plan delivers
@@ -55,21 +69,24 @@ TS today: `TsTranspiler` *is* `JsTranspiler`; the default fast path strips TS an
 
 ### Steps
 
-**P0.1 — Extract `MirEmitter`.**
+**P0.1 — Extract `MirEmitter`.** 🟡 *in progress (Lambda side landed 2026-07-13)*
 ```c
-struct MirEmitter {
-    MIR_context_t ctx;  MIR_module_t module;
-    MIR_item_t func_item;  MIR_func_t func;
-    int reg_counter;  int label_counter;
-    hashmap* import_cache;                 // ensure_import memo
-    MIR_reg_t rt_reg, gc_reg;
+struct MirEmitter {                        // ✅ landed in lambda/mir_emitter_shared.hpp
+    MIR_context_t ctx;                     // ✅ (cached; MIR_module_t module kept on owner for now)
+    MIR_item_t func_item;  MIR_func_t func;// ✅ per-function emit cursor
+    int reg_counter;  int label_counter;   // ✅
+    hashmap* import_cache;                 // ✅ ensure_import memo (handle held; shared em_ensure_import still TODO)
+    // MIR_reg_t rt_reg, gc_reg;           // ⬜ deferred — not needed by the shared primitives yet
     // GC root slots (P0.2), consts/type_list BSS regs (P0.4)
 };
-// primitives: em_new_reg, em_insn, em_label, em_call_0..6 (+void variants),
-// em_null_item, em_box_* / em_unbox_* bridge points, em_ensure_import
+// primitives: em_new_reg ✅, em_new_label ✅, em_emit_insn ✅, em_emit_label ✅,
+//   em_call_0..6 (+void variants) ⬜, em_null_item ⬜, em_box_*/em_unbox_* bridge ⬜, em_ensure_import ⬜
 ```
 Sources to unify: `transpile-mir.cpp:434–490` (`new_reg/emit_insn/emit_label/emit_call_N/ensure_import`) ≡ `js_mir_internal.hpp:96–204` + `js_mir_calls_boxing_types.cpp:168+` (`jm_*`).
 **Mechanics:** `MirTranspiler` and `JsMirTranspiler` *embed* a `MirEmitter`; the old function names become thin inline wrappers (`#define`/inline forwarding) so the initial diff is small and reviewable; wrappers are deleted at the end of the phase (or mechanically inlined). The JS-side `js_exec_profile_note_mir_call` hook becomes an optional emitter callback.
+
+- ✅ **Done (Lambda):** `MirEmitter` struct + `em_new_reg`/`em_new_label`/`em_emit_insn`/`em_emit_label` in `mir_emitter_shared.hpp`; `MirTranspiler` embeds `MirEmitter em`, its cursor/counter/import-cache fields removed and accesses migrated to `mt->em.*`; the four primitive wrappers delegate to `em_*`. (Watch-out found: greedy field rename also hits the unrelated `current_func_can_raise` field — keep that on `MirTranspiler`.)
+- ⬜ **TODO (JS + dedup payoff):** `JsMirTranspiler` embeds `MirEmitter`; promote `emit_call_*`/`ensure_import` ⇄ `jm_call_*`/`jm_ensure_import` into shared `em_call_*`/`em_ensure_import`, then delete both copies. Import-cache unification is feasible — Lambda `ImportCacheEntry` and JS `JsImportCacheEntry` share an identical layout (`char name[128]; {MIR_item_t proto; MIR_item_t import;}`).
 
 **P0.2 — G1 honest-rooting fix, in the emitter.** Implement the honest-local-typing design from `vibe/Lambda_GC_Root_Issue.md`: root slots are allocated **only** for locals whose `VarEntry.type_id` is actually a GC-managed `Item`/pointer type; native ints/doubles and non-GC pointers are never blanket-rooted as `MIR_T_I64` Items. This is the single most delicate step of Phase 0:
 - Known tripwires (from prior sessions): deltablue holds pointer locals in int-typed registers (why blanket rooting was "load-bearing"); the StackOverflow test hangs under naive blanket rooting; BUG-001 (`array_end`→GC use-after-free) reproduces deterministically via havlak+push.
