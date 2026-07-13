@@ -23,6 +23,7 @@ protected:
         lycon.pool = pool;
         scratch_init(&lycon.scratch, arena);
         lycon.block.direction = CSS_VALUE_LTR;
+        lycon.available_space = AvailableSpace::make_indefinite();
         parent_blk.given_width = -1.0f;
         parent_blk.given_height = -1.0f;
         parent_blk.given_min_width = -1.0f;
@@ -72,6 +73,18 @@ static bool custom_layout_test_negative_bounds(const CustomLayoutContext* contex
 static bool custom_layout_test_explicit_size(const CustomLayoutContext* context,
                                              CustomLayoutResult* result) {
     if (!context || !result || context->child_count != 1) return false;
+    if (!context->child_available_width_definite ||
+        !context->child_available_height_definite) {
+        return false;
+    }
+    if (context->child_available_width != 123.0f ||
+        context->child_available_height != 45.0f) {
+        return false;
+    }
+    if (strcmp(context->child_available_width_source, "css") != 0 ||
+        strcmp(context->child_available_height_source, "css") != 0) {
+        return false;
+    }
     result->baseline = 17.0f;
     result->has_baseline = true;
     return custom_layout_result_place(result, 0, 200.0f, 120.0f);
@@ -103,6 +116,39 @@ static bool custom_layout_test_three_no_z(const CustomLayoutContext* context,
     return custom_layout_result_place(result, 0, 0.0f, 0.0f) &&
         custom_layout_result_place(result, 1, 10.0f, 0.0f) &&
         custom_layout_result_place(result, 2, 20.0f, 0.0f);
+}
+
+static bool custom_layout_test_child_constraints(const CustomLayoutContext* context,
+                                                 CustomLayoutResult* result) {
+    if (!context || !result || context->child_count != 1) return false;
+    if (!context->child_available_width_definite ||
+        context->child_available_width != 80.0f) {
+        return false;
+    }
+    if (strcmp(context->child_available_width_source, "available") != 0) {
+        return false;
+    }
+    if (context->child_available_height_definite ||
+        context->child_available_height != context->available_height) {
+        return false;
+    }
+    if (strcmp(context->child_available_height_source, "fallback") != 0) {
+        return false;
+    }
+    return custom_layout_result_place(result, 0, 6.0f, 4.0f);
+}
+
+static bool custom_layout_test_intrinsic_constraints(const CustomLayoutContext* context,
+                                                     CustomLayoutResult* result) {
+    if (!context || !result || context->child_count != 1) return false;
+    if (context->child_available_width_definite ||
+        context->child_available_width != context->available_width) {
+        return false;
+    }
+    if (strcmp(context->child_available_width_source, "intrinsic") != 0) {
+        return false;
+    }
+    return custom_layout_result_place(result, 0, 3.0f, 2.0f);
 }
 
 TEST_F(CustomLayoutTest, AutoParentSizeUsesPlacedChildContainingBox) {
@@ -264,4 +310,53 @@ TEST_F(CustomLayoutTest, MissingPlacementZClearsPreviousCustomStackingOverlay) {
     EXPECT_EQ(first.position->custom_layout_z_index, 0);
     EXPECT_FALSE(radiant_stack_is_deferred_from_normal_flow((View*)&first));
     EXPECT_FALSE(radiant_stack_is_deferred_from_normal_flow((View*)&third));
+}
+
+TEST_F(CustomLayoutTest, PercentWidthChildInAutoWidthParentStillUsesCustomPlacement) {
+    ViewBlock parent;
+    ViewBlock child;
+    BlockProp child_blk = {};
+    child_blk.given_width = -1.0f;
+    child_blk.given_height = -1.0f;
+    child_blk.given_min_width = -1.0f;
+    child_blk.given_max_width = -1.0f;
+    child_blk.given_min_height = -1.0f;
+    child_blk.given_max_height = -1.0f;
+    child_blk.given_width_percent = 50.0f;
+    child_blk.given_height_percent = 25.0f;
+    child_blk.given_min_width_percent = NAN;
+    child_blk.given_max_width_percent = NAN;
+    child_blk.given_min_height_percent = NAN;
+    child_blk.given_max_height_percent = NAN;
+
+    init_parent(&parent, 0.0f, 0.0f);
+    init_block(&child, "section", 40.0f, 10.0f);
+    child.blk = &child_blk;
+    ASSERT_TRUE(parent.append_child(&child));
+
+    lycon.available_space = AvailableSpace::make_width_definite(80.0f);
+
+    ASSERT_TRUE(custom_layout_register("unit-percent-child", custom_layout_test_child_constraints));
+    ASSERT_TRUE(layout_custom_apply(&lycon, &parent, "unit-percent-child"));
+
+    EXPECT_FLOAT_EQ(child.x, 6.0f);
+    EXPECT_FLOAT_EQ(child.y, 4.0f);
+    EXPECT_FLOAT_EQ(parent.content_width, 40.0f);
+    EXPECT_FLOAT_EQ(parent.content_height, 10.0f);
+}
+
+TEST_F(CustomLayoutTest, IntrinsicWidthConstraintIsReportedAsNonDefinite) {
+    ViewBlock parent;
+    ViewBlock child;
+    init_parent(&parent, 52.0f, 0.0f);
+    init_block(&child, "section", 40.0f, 10.0f);
+    ASSERT_TRUE(parent.append_child(&child));
+    lycon.available_space = AvailableSpace::make_min_content();
+
+    ASSERT_TRUE(custom_layout_register("unit-intrinsic-child", custom_layout_test_intrinsic_constraints));
+    ASSERT_TRUE(layout_custom_apply(&lycon, &parent, "unit-intrinsic-child"));
+
+    EXPECT_FLOAT_EQ(child.x, 3.0f);
+    EXPECT_FLOAT_EQ(child.y, 2.0f);
+    EXPECT_FLOAT_EQ(parent.content_width, 40.0f);
 }

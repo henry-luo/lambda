@@ -9,6 +9,10 @@
 #define CUSTOM_LAYOUT_MAX_REGISTRY 64
 #define CUSTOM_LAYOUT_NAME_CAP 64
 #define CUSTOM_LAYOUT_MAX_UNKNOWN_LOGS 128
+#define CUSTOM_LAYOUT_CONSTRAINT_SOURCE_CSS "css"
+#define CUSTOM_LAYOUT_CONSTRAINT_SOURCE_AVAILABLE "available"
+#define CUSTOM_LAYOUT_CONSTRAINT_SOURCE_INTRINSIC "intrinsic"
+#define CUSTOM_LAYOUT_CONSTRAINT_SOURCE_FALLBACK "fallback"
 
 typedef struct CustomLayoutRegistryEntry {
     char name[CUSTOM_LAYOUT_NAME_CAP];
@@ -145,6 +149,112 @@ static bool custom_layout_apply_child_z(LayoutContext* lycon, const Velmt* child
     element->position->custom_layout_z_index = z;
     element->position->has_custom_layout_z_index = true;
     return true;
+}
+
+static bool custom_layout_child_has_percent_size(const Velmt* child, bool horizontal) {
+    if (!child || !child->view) return false;
+    ViewBlock* block = lam::view_as_block(child->view);
+    if (!block || !block->blk) return false;
+    if (horizontal) {
+        return !isnan(block->blk->given_width_percent) ||
+            !isnan(block->blk->given_min_width_percent) ||
+            !isnan(block->blk->given_max_width_percent);
+    }
+    return !isnan(block->blk->given_height_percent) ||
+        !isnan(block->blk->given_min_height_percent) ||
+        !isnan(block->blk->given_max_height_percent);
+}
+
+static void custom_layout_warn_auto_axis_percent_children(const CustomLayoutContext* context,
+                                                          bool horizontal) {
+    if (!context || !context->parent) return;
+    float css_size = horizontal ? context->css_width : context->css_height;
+    if (css_size >= 0.0f) return;
+
+    int percent_child_count = 0;
+    int first_percent_child_index = -1;
+    const char* first_percent_child_loc = nullptr;
+    for (int i = 0; i < context->child_count; i++) {
+        const Velmt* child = &context->children[i];
+        if (!custom_layout_child_has_percent_size(child, horizontal)) continue;
+        if (first_percent_child_index < 0) {
+            first_percent_child_index = i;
+            first_percent_child_loc = child->view ? child->view->source_loc() : "(unknown)";
+        }
+        percent_child_count++;
+    }
+    if (percent_child_count <= 0) return;
+
+    float child_available = horizontal ?
+        context->child_available_width : context->child_available_height;
+    bool child_available_definite = horizontal ?
+        context->child_available_width_definite : context->child_available_height_definite;
+    const char* source = horizontal ?
+        context->child_available_width_source : context->child_available_height_source;
+    const char* code = horizontal ?
+        "CUSTOM_LAYOUT_PERCENT_CHILD_AUTO_WIDTH" :
+        "CUSTOM_LAYOUT_PERCENT_CHILD_AUTO_HEIGHT";
+    const char* axis = horizontal ? "width" : "height";
+
+    // Percent child sizes need a containing size before custom placement, but
+    // auto custom parents may derive that axis only after placements return.
+    log_warn("%s %s layout='%s' children=%d first_child=%d first_loc=%s child_%s=%.1f child_%s_definite=%d child_%s_source=%s",
+             code, context->parent->source_loc(),
+             context->layout_name ? context->layout_name : "(null)",
+             percent_child_count, first_percent_child_index,
+             first_percent_child_loc ? first_percent_child_loc : "(unknown)",
+             axis, child_available, axis, child_available_definite,
+             axis, source ? source : CUSTOM_LAYOUT_CONSTRAINT_SOURCE_FALLBACK);
+}
+
+static void custom_layout_set_axis_constraint(float css_size,
+                                              const AvailableSize* available,
+                                              float css_used_size,
+                                              float fallback_size,
+                                              float* out_size,
+                                              bool* out_definite,
+                                              const char** out_source) {
+    if (!out_size || !out_definite || !out_source) return;
+
+    if (css_size >= 0.0f) {
+        *out_size = css_used_size;
+        *out_definite = true;
+        *out_source = CUSTOM_LAYOUT_CONSTRAINT_SOURCE_CSS;
+        return;
+    }
+    if (available && available->is_definite()) {
+        *out_size = available->value;
+        *out_definite = true;
+        *out_source = CUSTOM_LAYOUT_CONSTRAINT_SOURCE_AVAILABLE;
+        return;
+    }
+    if (available && available->is_intrinsic()) {
+        *out_size = fallback_size;
+        *out_definite = false;
+        *out_source = CUSTOM_LAYOUT_CONSTRAINT_SOURCE_INTRINSIC;
+        return;
+    }
+
+    // Auto custom parents may derive final size after placement, so callbacks
+    // get the visible fallback without treating it as a definite CSS constraint.
+    *out_size = fallback_size;
+    *out_definite = false;
+    *out_source = CUSTOM_LAYOUT_CONSTRAINT_SOURCE_FALLBACK;
+}
+
+static void custom_layout_set_child_constraints(CustomLayoutContext* context) {
+    if (!context || !context->parent) return;
+
+    AvailableSize* available_width = context->lycon ? &context->lycon->available_space.width : nullptr;
+    AvailableSize* available_height = context->lycon ? &context->lycon->available_space.height : nullptr;
+    custom_layout_set_axis_constraint(context->css_width, available_width,
+        context->parent->content_width, context->available_width,
+        &context->child_available_width, &context->child_available_width_definite,
+        &context->child_available_width_source);
+    custom_layout_set_axis_constraint(context->css_height, available_height,
+        context->parent->content_height, context->available_height,
+        &context->child_available_height, &context->child_available_height_definite,
+        &context->child_available_height_source);
 }
 
 static bool custom_layout_copy_name(char* dst, const char* name, const char* log_prefix) {
@@ -373,6 +483,9 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
     context.direction = (block->blk && block->blk->direction) ?
         block->blk->direction : lycon->block.direction;
     context.writing_mode = "horizontal-tb";
+    custom_layout_set_child_constraints(&context);
+    custom_layout_warn_auto_axis_percent_children(&context, true);
+    custom_layout_warn_auto_axis_percent_children(&context, false);
 
     CustomLayoutResult result;
     memset(&result, 0, sizeof(result));

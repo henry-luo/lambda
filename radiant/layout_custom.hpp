@@ -36,6 +36,12 @@ typedef struct CustomLayoutContext {
     float available_height;
     float css_width;
     float css_height;
+    float child_available_width;
+    float child_available_height;
+    bool child_available_width_definite;
+    bool child_available_height_definite;
+    const char* child_available_width_source;
+    const char* child_available_height_source;
     CssEnum direction;
     const char* writing_mode;
 } CustomLayoutContext;
