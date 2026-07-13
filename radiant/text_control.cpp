@@ -2,7 +2,7 @@
 // See radiant/text_control.hpp for the public surface and design rationale.
 
 #include "event.hpp"
-#include "form_control.hpp"
+#include "view.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/strbuf.h"
 #include "../lib/log.h"

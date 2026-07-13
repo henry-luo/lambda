@@ -11,7 +11,6 @@
 // ============================================================================
 
 #include "view.hpp"
-#include "form_control.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lib/arraylist.h"
@@ -2315,51 +2314,6 @@ int map_lambda_font_weight_keyword(const char* keyword);
  * @return const char* font family name
  */
 const char* map_lambda_font_family_keyword(const char* keyword);
-
-// ============================================================================
-// Value Conversion: Lambda CSS → Radiant Property Structures
-// ============================================================================
-
-/**
- * Convert Lambda CSS length/percentage to pixels
- *
- * @param value CssValue with length or percentage type
- * @param lycon Layout context for font size, viewport calculations
- * @param prop_id Property ID for context-specific resolution
- * @return Float value in pixels
- */
-float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon,
-                                   CssPropertyId prop_id);
-
-// Convert Lambda CSS color to Radiant Color type
-Color resolve_color_value(const CssValue* value);
-Color color_name_to_rgb(CssEnum color_name);
-
-/**
- * Get specificity value from Lambda CSS declaration
- * Converts Lambda CssDeclaration to a full cascade priority value encoding
- * cascade level, CSS specificity, and source order for correct shorthand vs
- * longhand resolution.
- *
- * @param decl CSS declaration with specificity info
- * @return int64_t cascade priority value (higher = higher priority)
- */
-int64_t get_cascade_priority(const CssDeclaration* decl);
-
-// Resolve CSS length value to pixels
-float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
-
-// Resolve var() function to get the actual CSS value
-const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
-
-// Resolve Lambda CSS styles for a DomElement
-void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon);
-
-// Process single Lambda CSS property declaration
-// Called for each property in DomElement->specified_style
-void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon);
-DisplayValue resolve_display_value(void* child); // Unified function for both Lexbor and Lambda CSS
-DisplayValue blockify_display(DisplayValue display); // CSS Display Level 3 §3: blockify inline-level displays
 
 void line_break(LayoutContext* lycon);
 void line_align(LayoutContext* lycon);

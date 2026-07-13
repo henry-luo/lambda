@@ -37,7 +37,6 @@
 #include "../input/css/css_formatter.hpp"
 #include "../input/css/selector_matcher.hpp"
 #include "../../radiant/view.hpp"
-#include "../../radiant/form_control.hpp"
 #include "../../radiant/event.hpp"
 #include "../../radiant/render.hpp"
 #include "../input/html5/html5_parser.h"

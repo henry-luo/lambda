@@ -9,7 +9,7 @@
 #include <gtest/gtest.h>
 #include <type_traits>
 
-#include "../../radiant/css_temp_decl.hpp"
+#include "../../radiant/view.hpp"
 
 // Capture of the most recent resolve_css_property() call. Defined in the
 // global namespace to satisfy the forward declaration in css_temp_decl.hpp.

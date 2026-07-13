@@ -6,10 +6,9 @@
  */
 
 #include "layout.hpp"
-#include "form_control.hpp" // For FormDefaults
+#include "view.hpp" // For FormDefaults
 #include "rdt_video.h"
 #include "render.hpp"
-#include "font_face.h"
 #include "../lib/font/font.h"
 #include "../lib/utf.h"
 #include "../lib/str.h"

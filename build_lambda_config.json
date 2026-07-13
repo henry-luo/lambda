@@ -2326,6 +2326,7 @@
                         "additional_sources": [
                             "radiant/display_list_bounds.cpp",
                             "radiant/display_list_storage.cpp",
+                            "radiant/view_clip.cpp",
                             "radiant/retained_display_list.cpp",
                             "test/test_retained_display_list_stubs.cpp"
                         ],
@@ -2346,6 +2347,7 @@
                         "additional_sources": [
                             "radiant/display_list_bounds.cpp",
                             "radiant/display_list_storage.cpp",
+                            "radiant/view_clip.cpp",
                             "radiant/display_list_record_vector.cpp",
                             "radiant/display_list_record_effects.cpp",
                             "radiant/display_list_record_raster.cpp",
@@ -2429,6 +2431,7 @@
                             "radiant/animation.cpp",
                             "radiant/display_list_bounds.cpp",
                             "radiant/display_list_storage.cpp",
+                            "radiant/view_clip.cpp",
                             "radiant/dom_range.cpp",
                             "radiant/dom_range_resolver.cpp",
                             "radiant/editing_host.cpp",

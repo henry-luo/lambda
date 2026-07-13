@@ -8,7 +8,6 @@
 #include <thorvg_capi.h>
 #include "view.hpp"
 #include "event.hpp"
-#include "clip_shape.h"
 #include "animation.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/lambda-data.hpp"
@@ -42,13 +41,6 @@
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-// 3x3 affine transform matrix (same layout as Tvg_Matrix)
-typedef struct {
-    float e11, e12, e13;   // row 1: scale-x, shear-x, translate-x
-    float e21, e22, e23;   // row 2: shear-y, scale-y, translate-y
-    float e31, e32, e33;   // row 3: 0, 0, 1
-} RdtMatrix;
 
 typedef enum {
     RDT_CAP_BUTT   = 0,
@@ -309,61 +301,6 @@ void rdt_set_font_context(struct FontContext* ctx);
 RdtPicture* rdt_picture_take_tvg_paint(Tvg_Paint paint, float w, float h);
 
 #endif
-
-static inline RdtMatrix rdt_matrix_identity(void) {
-    RdtMatrix m = { 1, 0, 0,  0, 1, 0,  0, 0, 1 };
-    return m;
-}
-
-// multiply two 3x3 affine matrices: result = a * b
-static inline RdtMatrix rdt_matrix_multiply(const RdtMatrix* a, const RdtMatrix* b) {
-    RdtMatrix r;
-    r.e11 = a->e11 * b->e11 + a->e12 * b->e21 + a->e13 * b->e31;
-    r.e12 = a->e11 * b->e12 + a->e12 * b->e22 + a->e13 * b->e32;
-    r.e13 = a->e11 * b->e13 + a->e12 * b->e23 + a->e13 * b->e33;
-    r.e21 = a->e21 * b->e11 + a->e22 * b->e21 + a->e23 * b->e31;
-    r.e22 = a->e21 * b->e12 + a->e22 * b->e22 + a->e23 * b->e32;
-    r.e23 = a->e21 * b->e13 + a->e22 * b->e23 + a->e23 * b->e33;
-    r.e31 = a->e31 * b->e11 + a->e32 * b->e21 + a->e33 * b->e31;
-    r.e32 = a->e31 * b->e12 + a->e32 * b->e22 + a->e33 * b->e32;
-    r.e33 = a->e31 * b->e13 + a->e32 * b->e23 + a->e33 * b->e33;
-    return r;
-}
-
-static inline void rdt_matrix_transform_point(const RdtMatrix* m,
-                                              float x, float y,
-                                              float* out_x, float* out_y) {
-    if (!m || !out_x || !out_y) return;
-    *out_x = m->e11 * x + m->e12 * y + m->e13;
-    *out_y = m->e21 * x + m->e22 * y + m->e23;
-}
-
-static inline void rdt_matrix_transform_rect_bounds(const RdtMatrix* m,
-                                                    float left, float top,
-                                                    float right, float bottom,
-                                                    float* out_left,
-                                                    float* out_top,
-                                                    float* out_right,
-                                                    float* out_bottom) {
-    if (!m || !out_left || !out_top || !out_right || !out_bottom) return;
-
-    float tx0, ty0, tx1, ty1, tx2, ty2, tx3, ty3;
-    rdt_matrix_transform_point(m, left, top, &tx0, &ty0);
-    rdt_matrix_transform_point(m, right, top, &tx1, &ty1);
-    rdt_matrix_transform_point(m, right, bottom, &tx2, &ty2);
-    rdt_matrix_transform_point(m, left, bottom, &tx3, &ty3);
-
-    *out_left = LMB_MIN(LMB_MIN(tx0, tx1), LMB_MIN(tx2, tx3));
-    *out_right = LMB_MAX(LMB_MAX(tx0, tx1), LMB_MAX(tx2, tx3));
-    *out_top = LMB_MIN(LMB_MIN(ty0, ty1), LMB_MIN(ty2, ty3));
-    *out_bottom = LMB_MAX(LMB_MAX(ty0, ty1), LMB_MAX(ty2, ty3));
-}
-
-// create a translation matrix
-static inline RdtMatrix rdt_matrix_translate(float tx, float ty) {
-    RdtMatrix m = { 1, 0, tx,  0, 1, ty,  0, 0, 1 };
-    return m;
-}
 
 // ===== display_list.h =====
 // ==========================================================================

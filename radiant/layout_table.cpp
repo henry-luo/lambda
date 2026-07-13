@@ -1,5 +1,5 @@
 #include "layout.hpp"
-#include "form_control.hpp"  // For FormDefaults (radio/checkbox margin constants)
+#include "view.hpp"  // For FormDefaults (radio/checkbox margin constants)
 #include "render.hpp"
 #include "../lib/log.h"
 #include "../lib/strview.h"

@@ -13,7 +13,7 @@
 #include "../lib/shell.h"
 #include "../lib/uv_loop.h"
 #include "layout.hpp"
-#include "font_face.h"
+#include "view.hpp"
 #include "event.hpp"
 #include "event_sim.hpp"
 #include "webview.h"

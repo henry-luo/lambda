@@ -3,15 +3,9 @@
  * @brief Unified symbol resolution for rendering HTML entities and emoji shortcodes
  */
 
-#include "symbol_resolver.h"
+#include "view.hpp"
 #include "../lib/html_entities.h"
 #include <cstring>
-
-// String structure from Lambda (for resolve_symbol_string)
-typedef struct String {
-    uint32_t len;
-    char chars[];
-} String;
 
 // Emoji shortcode table (without : delimiters)
 // This is a curated subset of the most commonly used emoji
@@ -520,6 +514,7 @@ SymbolResolution resolve_symbol_string(const void* string_ptr) {
         return result;
     }
 
+    // view.hpp exposes the canonical Lambda String; keep symbol decoding on that single layout.
     const String* str = (const String*)string_ptr;
     return resolve_symbol(str->chars, str->len);
 }

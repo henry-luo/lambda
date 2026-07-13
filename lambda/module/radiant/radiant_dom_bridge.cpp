@@ -9,7 +9,7 @@
 #include "../../input/css/css_tokenizer.hpp"
 #include "../../input/css/selector_matcher.hpp"
 #include "../../js/js_class.h"
-#include "../../../radiant/form_control.hpp"
+#include "../../../radiant/view.hpp"
 #include "../../../radiant/event.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/hashmap.h"

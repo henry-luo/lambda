@@ -6,7 +6,6 @@
 #include "render_glyph_run_raster_lower.hpp"
 #include "render.hpp"
 #include "event.hpp"
-#include "font_face.h"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/font/font.h"

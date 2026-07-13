@@ -1,4 +1,5 @@
 #pragma once
+#include "animation.h"
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
@@ -7,11 +8,81 @@
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/math_utils.h"
+#include "../lib/memtrack.h"
 #include "../lib/font/font.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_value.hpp"
+#include "../lambda/input/css/css_style.hpp"
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <math.h>
+#include <string.h>
+
+// 3x3 affine transform matrix shared by view transforms and render backends.
+// The layout matches ThorVG's Tvg_Matrix, but the type itself is Radiant-owned.
+typedef struct {
+    float e11, e12, e13;   // row 1: scale-x, shear-x, translate-x
+    float e21, e22, e23;   // row 2: shear-y, scale-y, translate-y
+    float e31, e32, e33;   // row 3: 0, 0, 1
+} RdtMatrix;
+
+static inline RdtMatrix rdt_matrix_identity(void) {
+    RdtMatrix m = { 1, 0, 0,  0, 1, 0,  0, 0, 1 };
+    return m;
+}
+
+// multiply two 3x3 affine matrices: result = a * b
+static inline RdtMatrix rdt_matrix_multiply(const RdtMatrix* a, const RdtMatrix* b) {
+    RdtMatrix r;
+    r.e11 = a->e11 * b->e11 + a->e12 * b->e21 + a->e13 * b->e31;
+    r.e12 = a->e11 * b->e12 + a->e12 * b->e22 + a->e13 * b->e32;
+    r.e13 = a->e11 * b->e13 + a->e12 * b->e23 + a->e13 * b->e33;
+    r.e21 = a->e21 * b->e11 + a->e22 * b->e21 + a->e23 * b->e31;
+    r.e22 = a->e21 * b->e12 + a->e22 * b->e22 + a->e23 * b->e32;
+    r.e23 = a->e21 * b->e13 + a->e22 * b->e23 + a->e23 * b->e33;
+    r.e31 = a->e31 * b->e11 + a->e32 * b->e21 + a->e33 * b->e31;
+    r.e32 = a->e31 * b->e12 + a->e32 * b->e22 + a->e33 * b->e32;
+    r.e33 = a->e31 * b->e13 + a->e32 * b->e23 + a->e33 * b->e33;
+    return r;
+}
+
+static inline void rdt_matrix_transform_point(const RdtMatrix* m,
+                                              float x, float y,
+                                              float* out_x, float* out_y) {
+    if (!m || !out_x || !out_y) return;
+    *out_x = m->e11 * x + m->e12 * y + m->e13;
+    *out_y = m->e21 * x + m->e22 * y + m->e23;
+}
+
+static inline void rdt_matrix_transform_rect_bounds(const RdtMatrix* m,
+                                                    float left, float top,
+                                                    float right, float bottom,
+                                                    float* out_left,
+                                                    float* out_top,
+                                                    float* out_right,
+                                                    float* out_bottom) {
+    if (!m || !out_left || !out_top || !out_right || !out_bottom) return;
+
+    float tx0, ty0, tx1, ty1, tx2, ty2, tx3, ty3;
+    rdt_matrix_transform_point(m, left, top, &tx0, &ty0);
+    rdt_matrix_transform_point(m, right, top, &tx1, &ty1);
+    rdt_matrix_transform_point(m, right, bottom, &tx2, &ty2);
+    rdt_matrix_transform_point(m, left, bottom, &tx3, &ty3);
+
+    *out_left = LMB_MIN(LMB_MIN(tx0, tx1), LMB_MIN(tx2, tx3));
+    *out_right = LMB_MAX(LMB_MAX(tx0, tx1), LMB_MAX(tx2, tx3));
+    *out_top = LMB_MIN(LMB_MIN(ty0, ty1), LMB_MIN(ty2, ty3));
+    *out_bottom = LMB_MAX(LMB_MAX(ty0, ty1), LMB_MAX(ty2, ty3));
+}
+
+// create a translation matrix
+static inline RdtMatrix rdt_matrix_translate(float tx, float ty) {
+    RdtMatrix m = { 1, 0, tx,  0, 1, ty,  0, 0, 1 };
+    return m;
+}
 
 #ifndef LAMBDA_HEADLESS
 // On macOS, explicitly include OpenGL headers before GLFW
@@ -1483,6 +1554,917 @@ typedef struct {
     CssEnum list_style_type;
     int item_index;
 } ListBlot;
+
+
+// consolidated Radiant view/style API (DD4); declarations below retain source-file section names for history lookup.
+
+// ===== symbol resolver =====
+
+/**
+ * @file symbol_resolver.h
+ * @brief Unified symbol resolution for rendering HTML entities and emoji shortcodes
+ *
+ * This module provides a unified API for resolving Symbol items to their
+ * UTF-8 string representations during rendering. It combines:
+ * - HTML entity names (copy → ©, mdash → —, etc.)
+ * - Emoji shortcodes (smile → 😄, heart → ❤️, etc.)
+ *
+ * Resolution priority:
+ * 1. Emoji shortcodes (if enabled)
+ * 2. HTML entity names
+ */
+
+
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * Symbol type after resolution
+ */
+typedef enum {
+    SYMBOL_UNKNOWN = 0,     // Unknown symbol
+    SYMBOL_HTML_ENTITY,     // HTML entity (copy, mdash, etc.)
+    SYMBOL_EMOJI            // Emoji shortcode (smile, heart, etc.)
+} SymbolType;
+
+/**
+ * Result of symbol resolution
+ */
+typedef struct {
+    SymbolType type;
+    const char* utf8;           // UTF-8 string representation (static, do not free)
+    size_t utf8_len;            // Length of UTF-8 string
+    uint32_t codepoint;         // Primary Unicode codepoint (for single-codepoint symbols)
+} SymbolResolution;
+
+/**
+ * Resolve a symbol name to its UTF-8 representation
+ *
+ * @param name Symbol name (without & ; or : delimiters)
+ * @param len Length of symbol name
+ * @return SymbolResolution with UTF-8 string and metadata
+ *
+ * Example:
+ *   SymbolResolution r = resolve_symbol("copy", 4);
+ *   // r.type == SYMBOL_HTML_ENTITY
+ *   // r.utf8 == "©"
+ *   // r.codepoint == 0x00A9
+ *
+ *   SymbolResolution r = resolve_symbol("smile", 5);
+ *   // r.type == SYMBOL_EMOJI
+ *   // r.utf8 == "😄"
+ */
+SymbolResolution resolve_symbol(const char* name, size_t len);
+
+/**
+ * Resolve a symbol from a Lambda String* symbol
+ * Convenience wrapper that extracts name from String
+ */
+SymbolResolution resolve_symbol_string(const void* string_ptr);
+
+/**
+ * Check if a symbol name is a known emoji shortcode
+ */
+bool is_emoji_shortcode(const char* name, size_t len);
+
+/**
+ * Check if a symbol name is a known HTML entity
+ */
+bool is_html_entity(const char* name, size_t len);
+
+#ifdef __cplusplus
+}
+#endif
+
+
+// ===== font face =====
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Forward declarations
+struct LayoutContext;
+struct UiContext;
+
+// Maximum number of src entries in a single @font-face rule
+#define FONT_FACE_MAX_SRC 8
+
+// Individual src entry with path and format
+typedef struct FontFaceSrc {
+    char* path;                  // Resolved local path
+    char* format;                // Format string: "woff", "truetype", "opentype", etc.
+} FontFaceSrc;
+
+// Font face descriptor for @font-face support
+// Descriptors are registered with the unified font module (lib/font) via
+// font_face_register(). Actual font loading is handled entirely by the
+// unified module; this struct only stores the CSS @font-face metadata.
+typedef struct FontFaceDescriptor {
+    char* family_name;           // font-family value
+    char* src_local_path;        // local font file path (no web URLs) - first/fallback
+    char* src_local_name;        // src: local() font name value
+    FontFaceSrc* src_entries;    // Array of all src entries with formats
+    int src_count;               // Number of entries in src_entries array
+    CssEnum font_style;         // normal, italic, oblique
+    CssEnum font_weight;        // 100-900, normal, bold
+    CssEnum font_display;       // auto, block, swap, fallback, optional
+    bool is_loaded;              // loading state
+} FontFaceDescriptor;
+
+// ============================================================================
+// Text flow logging categories
+// ============================================================================
+
+extern log_category_t* font_log;
+extern log_category_t* text_log;
+extern log_category_t* layout_log;
+
+// Logging initialization
+void init_text_flow_logging(void);
+void setup_text_flow_log_categories(void);
+
+// Structured logging for font operations
+void log_font_loading_attempt(const char* family_name, const char* path);
+void log_font_loading_result(const char* family_name, bool success, const char* error);
+void log_font_fallback_triggered(const char* requested, const char* fallback);
+
+// ============================================================================
+// CSS @font-face parsing and registration
+// ============================================================================
+
+// Forward declarations for CSS types
+struct CssStylesheet;
+
+// Parse and register @font-face rules from a CSS rule node
+void parse_font_face_rule(struct LayoutContext* lycon, void* rule);
+
+// Register a font face descriptor with UiContext (and bridge to unified FontContext)
+void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor);
+
+// Process all @font-face rules from a stylesheet
+void process_font_face_rules_from_stylesheet(UiContext* uicon, struct CssStylesheet* stylesheet, const char* base_path);
+
+// Process all @font-face rules from all stylesheets in a document
+void process_document_font_faces(UiContext* uicon, struct DomDocument* doc);
+
+#ifdef __cplusplus
+}
+#endif
+
+
+// ===== font API =====
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Forward declarations
+struct UiContext;
+struct FontBox;
+struct FontProp;
+
+// Function declarations
+void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
+void fontface_cleanup(UiContext* uicon);
+
+#ifdef __cplusplus
+}
+#endif
+
+
+// ===== clip shapes =====
+
+// ============================================================================
+// Vector clip shapes for overflow:hidden and CSS clip-path
+// ============================================================================
+
+enum ClipShapeType {
+    CLIP_SHAPE_NONE = 0,
+    CLIP_SHAPE_POLYGON,
+    CLIP_SHAPE_CIRCLE,
+    CLIP_SHAPE_ELLIPSE,
+    CLIP_SHAPE_INSET,
+    CLIP_SHAPE_ROUNDED_RECT
+};
+
+struct ClipShape {
+    ClipShapeType type;
+    union {
+        struct { float* vx; float* vy; int count; } polygon;
+        struct { float cx, cy, r; } circle;
+        struct { float cx, cy, rx, ry; } ellipse;
+        struct { float x, y, w, h, rx, ry; } inset;
+        struct { float x, y, w, h, r_tl, r_tr, r_br, r_bl; } rounded_rect;
+    };
+};
+
+#define RDT_MAX_CLIP_SHAPES 8
+
+bool clip_point_in_rounded_rect(float px, float py,
+    float rx, float ry, float rw, float rh,
+    float r_tl, float r_tr, float r_br, float r_bl);
+void clip_scanline_rounded_rect(
+    float rx, float ry, float rw, float rh,
+    float r_tl, float r_tr, float r_br, float r_bl,
+    float y, float* out_left, float* out_right);
+bool clip_point_in_circle(float px, float py, float cx, float cy, float r);
+bool clip_point_in_ellipse(float px, float py, float cx, float cy, float rx, float ry);
+bool clip_point_in_inset(float px, float py, float ix, float iy, float iw, float ih);
+bool clip_point_in_polygon(float px, float py, const float* vx, const float* vy, int count);
+bool clip_point_in_shape(ClipShape* cs, float px, float py);
+void clip_scanline_circle(float cx, float cy, float r,
+    float y, float* out_left, float* out_right);
+void clip_scanline_ellipse(float cx, float cy, float rx, float ry,
+    float y, float* out_left, float* out_right);
+void clip_scanline_polygon(const float* vx, const float* vy, int count,
+    float y, float* out_left, float* out_right);
+bool clip_shape_rect_inside(ClipShape* cs, float x, float y, float w, float h);
+bool clip_shapes_rect_inside(ClipShape** shapes, int depth,
+    float x, float y, float w, float h);
+void clip_shapes_scanline_bounds(ClipShape** shapes, int depth,
+    float y, int base_left, int base_right, int* out_left, int* out_right);
+ClipShape clip_shape_from_params(int type, const float* params);
+void clip_shape_to_params(const ClipShape* cs, int* out_type, float* out_params);
+
+
+// ===== form controls =====
+
+struct DomElement;
+struct FontProp;
+struct GridItemProp;
+struct ViewState;
+
+// Forward decl from text_edit.hpp (avoids circular include).
+struct EditHistory;
+void te_history_free(EditHistory* h);
+
+/**
+ * Form Control Support for Radiant
+ *
+ * Form elements (input, button, select, textarea) are "replaced elements"
+ * with intrinsic dimensions determined by control type rather than content flow.
+ */
+
+// Form control types
+enum FormControlType {
+    FORM_CONTROL_NONE = 0,
+    FORM_CONTROL_TEXT,          // text, password, email, url, search, tel, number
+    FORM_CONTROL_CHECKBOX,
+    FORM_CONTROL_RADIO,
+    FORM_CONTROL_BUTTON,        // button, submit, reset
+    FORM_CONTROL_SELECT,
+    FORM_CONTROL_TEXTAREA,
+    FORM_CONTROL_RANGE,
+    FORM_CONTROL_IMAGE,         // type="image" - replaced element (image button)
+    FORM_CONTROL_HIDDEN,        // type="hidden" - no visual
+};
+
+// Default intrinsic sizes (CSS pixels at 1x pixel ratio)
+// All dimensions are border-box values matching Chrome UA defaults
+namespace FormDefaults {
+    // Text input: ~20 characters wide
+    // Chrome default: 153x21 border-box (1px border, 1px padding top/bottom, 2px padding left/right)
+    constexpr float TEXT_WIDTH = 153.0f;   // border-box width
+    constexpr float TEXT_HEIGHT = 21.0f;   // border-box height
+    constexpr float TEXT_PADDING_H = 2.0f;
+    constexpr float TEXT_PADDING_V = 1.0f;
+    constexpr float TEXT_BORDER = 2.0f;
+    constexpr int   TEXT_SIZE_CHARS = 20;  // default size attribute
+
+    // Checkbox/Radio: square controls
+    constexpr float CHECK_SIZE = 13.0f;
+    constexpr float CHECK_MARGIN = 3.0f;
+    // Radio: margin-left=5, margin-right=3 (Chrome UA stylesheet)
+    constexpr float RADIO_MARGIN_LEFT = 5.0f;
+    constexpr float RADIO_MARGIN_RIGHT = 3.0f;
+    // Checkbox: margin-left=4, margin-right=3 (Chrome UA stylesheet)
+    constexpr float CHECKBOX_MARGIN_LEFT = 4.0f;
+    constexpr float CHECKBOX_MARGIN_RIGHT = 3.0f;
+
+    // Button: content-based + padding + 2px border
+    constexpr float BUTTON_PADDING_H = 6.0f;
+    constexpr float BUTTON_PADDING_V = 1.0f;
+    constexpr float BUTTON_BORDER = 2.0f;   // Chrome: 2px outset border
+    constexpr float BUTTON_MIN_WIDTH = 52.0f;  // minimum button width
+
+    // Select dropdown
+    // Chrome default: height=19 border-box, width depends on content
+    constexpr float SELECT_WIDTH = 57.0f;  // typical default for short options
+    constexpr float SELECT_HEIGHT = 19.0f; // border-box height
+    constexpr float SELECT_ARROW_WIDTH = 16.0f;
+    // Options inside an <optgroup> are indented in the dropdown popup on macOS Chrome.
+    // The indent contributes to the intrinsic select width for each optgroup option.
+    constexpr float OPTGROUP_OPTION_INDENT = 17.0f;
+    // A blank option inside an optgroup still occupies at least this much display width
+    // (the indent area itself), even if its text is empty.
+    constexpr float OPTGROUP_OPTION_MIN_WIDTH = 20.0f;
+
+    // Textarea: default cols/rows
+    // Chrome default: 182x36 border-box (20 cols, 2 rows)
+    constexpr int   TEXTAREA_COLS = 20;
+    constexpr int   TEXTAREA_ROWS = 2;
+    constexpr float TEXTAREA_PADDING = 2.0f;
+    constexpr float TEXTAREA_BORDER = 1.0f;
+
+    // Range slider
+    constexpr float RANGE_WIDTH = 129.0f;
+    constexpr float RANGE_HEIGHT = 16.0f;        // Chrome: 16px border-box (no list)
+    constexpr float RANGE_HEIGHT_WITH_LIST = 22.0f;  // Chrome: 22px border-box (with list/datalist for tick marks)
+    constexpr float RANGE_TRACK_HEIGHT = 5.0f;
+    constexpr float RANGE_THUMB_SIZE = 13.0f;
+
+    // Meter: Chrome default 80x16
+    constexpr float METER_WIDTH = 80.0f;
+    constexpr float METER_HEIGHT = 16.0f;
+
+    // Progress: Chrome default 160x16
+    constexpr float PROGRESS_WIDTH = 160.0f;
+    constexpr float PROGRESS_HEIGHT = 16.0f;
+
+    // Fieldset
+    constexpr float FIELDSET_PADDING = 10.0f;
+    constexpr float FIELDSET_BORDER_WIDTH = 2.0f;
+
+    // Image input (broken image fallback): Chrome shows ~57.5x16
+    constexpr float IMAGE_INPUT_WIDTH = 57.5f;
+    constexpr float IMAGE_INPUT_HEIGHT = 16.0f;
+
+    // Common border colors (3D effect)
+    constexpr uint32_t BORDER_LIGHT = 0xFFFFFFFF;   // white highlight
+    constexpr uint32_t BORDER_DARK = 0xFF767676;    // dark shadow
+    constexpr uint32_t BORDER_MID = 0xFFA0A0A0;     // mid gray
+    constexpr uint32_t INPUT_BG = 0xFFFFFFFF;       // white background
+    constexpr uint32_t BUTTON_BG = 0xFFE0E0E0;      // light gray button
+    constexpr uint32_t PLACEHOLDER_COLOR = 0xFF757575;  // gray placeholder text
+}
+
+/**
+ * FormControlProp - Properties for form control elements
+ */
+struct FormControlProp {
+    // Fast-read pointer to centralized state owner. Writers must use state_store APIs.
+    struct DocState* state_ref;
+    ViewState* form_state_ref;
+    ViewState* scroll_state_ref;
+
+    FormControlType control_type;
+    const char* input_type;     // Original type attribute value
+    const char* value;          // Current value (for display)
+    const char* placeholder;    // Placeholder text
+    const char* name;           // Form field name
+
+    // Sizing attributes
+    int size;                   // Character width for text inputs (size attr)
+    int cols;                   // Textarea columns
+    int rows;                   // Textarea rows
+    int maxlength;              // Max input length
+
+    // Range input properties
+    float range_min;
+    float range_max;
+    float range_step;
+    float range_value;          // Current position (normalized 0-1)
+
+    // State flags (bitfield)
+    uint8_t disabled : 1;
+    uint8_t readonly : 1;
+    uint8_t checked : 1;        // For checkbox/radio
+    uint8_t required : 1;
+    uint8_t autofocus : 1;
+    uint8_t multiple : 1;       // For select
+    uint8_t dropdown_open : 1;  // For select: dropdown is currently open
+    uint8_t appearance_none : 1; // CSS appearance: none — suppress UA-rendered chrome (arrow, etc.)
+
+    // Select dropdown properties
+    int selected_index;         // Index of currently selected option (0-based, -1 if none)
+    int option_count;           // Total number of options
+    int hover_index;            // Index of currently hovered option in dropdown (-1 if none)
+    int select_size;            // Visible rows for select listbox (HTML size attr; 0 = not set)
+
+    // Computed intrinsic dimensions (in physical pixels)
+    float intrinsic_width;
+    float intrinsic_height;
+
+    // Computed ::placeholder pseudo-element rendering style.
+    FontProp* placeholder_font;
+    uint8_t placeholder_color_r;
+    uint8_t placeholder_color_g;
+    uint8_t placeholder_color_b;
+    uint8_t placeholder_color_a;
+    float placeholder_opacity;
+    uint8_t placeholder_has_color : 1;
+    uint8_t placeholder_has_opacity : 1;
+    uint8_t heap_allocated : 1;
+
+    // Flex item properties (when form control is a flex item)
+    // These are needed because form controls use FormControlProp instead of FlexItemProp
+    float flex_grow;
+    float flex_shrink;
+    float flex_basis;
+    uint8_t flex_basis_is_percent : 1;
+
+    // Grid item properties (when form control is a grid item). The view's item
+    // property union can hold only one pointer, so form controls preserve the
+    // original GridItemProp here after switching item_prop_type to FORM.
+    GridItemProp* grid_item;
+
+    // ------------------------------------------------------------------
+    // Text-control selection state (input text-types and textarea only)
+    //   - current_value:  mutable user-edited value (UTF-8). When non-null
+    //     this is the live `.value` IDL attribute. nullptr ⇒ fall back to
+    //     `value` HTML attribute (for input) or text content (for textarea).
+    //     Heap-allocated via malloc/realloc; freed in destructor.
+    //   - selection_start/end:  UTF-16 code-unit offsets into the value.
+    //   - selection_direction:  0=none, 1=forward, 2=backward.
+    //   - tc_initialized: lazy-init flag (selection set to (len,len) on
+    //     first access per HTML spec default).
+    // See vibe/radiant/Radiant_Design_Selection.md §8.
+    // ------------------------------------------------------------------
+    char*    current_value;
+    uint32_t current_value_len;       // UTF-8 byte length
+    uint32_t current_value_u16_len;   // cached UTF-16 length
+    uint32_t selection_start;         // UTF-16 code units
+    uint32_t selection_end;           // UTF-16 code units
+    uint8_t  selection_direction;     // 0=none, 1=forward, 2=backward
+    uint8_t  tc_initialized : 1;
+    uint8_t  tc_sc_pending : 1;       // queued in state->tc_selectionchange_head
+
+    // Phase 8E: per-text-control selectionchange coalescing list link.
+    // Single-linked through this pointer when the element is on the pending
+    // list; nullptr otherwise.
+    DomElement* tc_sc_next_pending;
+
+    // Constraint Validation API (§4.10.20)
+    // Custom validity error message set via setCustomValidity(msg).
+    // nullptr or "" means no custom error.
+    char* custom_validity_msg;
+
+    // ------------------------------------------------------------------
+    // F1 (Radiant_Design_Form_Input.md §3.1):
+    //   - value_at_focus: snapshot of current_value taken when this text
+    //     control receives focus. Used by te_blur_dispatch_change() to
+    //     decide whether to fire `change` on blur (HTML §4.10.5.5).
+    //   - history: undo/redo ring (lazy-allocated by text_edit.cpp).
+    //     Opaque here; defined in text_edit.hpp.
+    // ------------------------------------------------------------------
+    char*    value_at_focus;
+    uint32_t value_at_focus_len;
+    void*    history;   // EditHistory*; lazy
+
+    // ------------------------------------------------------------------
+    // F4 (Radiant_Design_Form_Input.md §3.1, §3.8):
+    //   - scroll_x / scroll_y: viewport offset for auto-scroll. The text
+    //     content is shifted left/up by these amounts so the caret stays
+    //     visible inside the content box. Updated by render_form before
+    //     drawing the caret.
+    //   - caret_blink_t: monotonic seconds since the last caret toggle.
+    //   - caret_on: visibility flag toggled by the blink timer (always
+    //     true in headless renders so snapshots stay deterministic).
+    //   - pseudo-state bits live in StateStore; FormControlProp keeps only
+    //     text rendering/session projection fields here.
+    // ------------------------------------------------------------------
+    float    scroll_x;
+    float    scroll_y;
+    float    caret_blink_t;
+    uint8_t  caret_on : 1;
+    uint8_t  password_reveal_active : 1;
+    uint32_t password_reveal_start;
+    uint32_t password_reveal_end;
+    double   password_reveal_elapsed;
+
+    // ------------------------------------------------------------------
+    // F7 (Radiant_Design_Form_Input.md §3.7): IME / composition preedit.
+    // The preedit string is the partially-entered text shown by the OS
+    // input method between `compositionstart` and `compositionend`. It is
+    // NOT part of `current_value` until commit. The renderer overlays it
+    // at the caret with an underline so the user can see what they're
+    // composing. `preedit_caret` is the codepoint offset inside preedit
+    // (where the IME's own caret sits).
+    // ------------------------------------------------------------------
+    char*    preedit_utf8;
+    uint32_t preedit_len;
+    uint32_t preedit_caret;
+
+    // FormControlProp is a POD (no C++ ctor/dtor) per the C+ convention; use
+    // form_control_prop_init / form_control_prop_release for lifecycle.
+};
+
+// Apply the non-zero default field values. Memory pointed to by `f` must be
+// either zeroed (e.g. from pool_calloc / mem_calloc) or freshly-allocated
+// scratch — this function only assigns the non-zero defaults.
+void form_control_prop_init(FormControlProp* f);
+
+// Release owned heap pointers (current_value, custom_validity_msg,
+// value_at_focus, history, preedit_utf8). Does NOT free `f` itself.
+void form_control_prop_release(FormControlProp* f);
+
+// Release a form-control property attached to a DOM element. This is used by
+// both layout-owned views and JS-created detached nodes.
+void form_control_release_prop(DomElement* elem);
+
+// Helper functions
+
+/**
+ * Determine FormControlType from input type attribute
+ */
+inline FormControlType get_input_control_type(const char* type) {
+    if (!type || !*type) return FORM_CONTROL_TEXT;  // default is text
+
+    // Text-like inputs
+    if (strcmp(type, "text") == 0 ||
+        strcmp(type, "password") == 0 ||
+        strcmp(type, "email") == 0 ||
+        strcmp(type, "url") == 0 ||
+        strcmp(type, "search") == 0 ||
+        strcmp(type, "tel") == 0 ||
+        strcmp(type, "number") == 0) {
+        return FORM_CONTROL_TEXT;
+    }
+
+    // Toggle controls
+    if (strcmp(type, "checkbox") == 0) return FORM_CONTROL_CHECKBOX;
+    if (strcmp(type, "radio") == 0) return FORM_CONTROL_RADIO;
+
+    // Button types
+    if (strcmp(type, "submit") == 0 ||
+        strcmp(type, "reset") == 0 ||
+        strcmp(type, "button") == 0) {
+        return FORM_CONTROL_BUTTON;
+    }
+
+    // Image button - replaced element with image dimensions
+    if (strcmp(type, "image") == 0) return FORM_CONTROL_IMAGE;
+
+    // Special types
+    if (strcmp(type, "hidden") == 0) return FORM_CONTROL_HIDDEN;
+    if (strcmp(type, "range") == 0) return FORM_CONTROL_RANGE;
+
+    // File, date, color etc. - treat as text for now
+    return FORM_CONTROL_TEXT;
+}
+
+/**
+ * Check if input type is text-like (has text box appearance)
+ */
+inline bool is_text_input_type(const char* type) {
+    FormControlType ct = get_input_control_type(type);
+    return ct == FORM_CONTROL_TEXT || ct == FORM_CONTROL_RANGE;
+}
+
+
+// ===== CSS animations =====
+
+// Forward declarations
+struct DomElement;
+struct DomDocument;
+struct LayoutContext;
+
+// ============================================================================
+// Animated Property Values
+// ============================================================================
+
+typedef enum CssAnimValueType {
+    ANIM_VAL_NONE = 0,
+    ANIM_VAL_FLOAT,         // opacity, numeric values
+    ANIM_VAL_COLOR,         // color, background-color, border-*-color
+    ANIM_VAL_LENGTH,        // width, height, margin-*, padding-*, top/right/bottom/left
+    ANIM_VAL_TRANSFORM,     // transform function list
+} CssAnimValueType;
+
+// Forward declaration from view.hpp
+struct TransformFunction;
+
+typedef struct CssAnimatedProp {
+    CssPropertyId property_id;
+    CssAnimValueType value_type;
+    union {
+        float f;                // ANIM_VAL_FLOAT
+        Color color;            // ANIM_VAL_COLOR
+        struct {
+            float value;
+            bool is_percent;
+        } length;               // ANIM_VAL_LENGTH
+        TransformFunction* transform;  // ANIM_VAL_TRANSFORM (linked list)
+    } value;
+} CssAnimatedProp;
+
+// ============================================================================
+// Keyframe Data Structures
+// ============================================================================
+
+// A single keyframe stop (e.g., "50% { opacity: 0.5; transform: scale(1.2); }")
+typedef struct CssKeyframeStop {
+    float offset;               // 0.0 (from) to 1.0 (to)
+    CssAnimatedProp* properties;
+    int property_count;
+    TimingFunction* timing;     // per-keyframe easing (NULL = use animation easing)
+} CssKeyframeStop;
+
+// A parsed @keyframes rule
+typedef struct CssKeyframes {
+    const char* name;           // animation name (e.g., "fadeIn")
+    CssKeyframeStop* stops;     // sorted by offset ascending
+    int stop_count;
+} CssKeyframes;
+
+// ============================================================================
+// Keyframe Registry (per document)
+// ============================================================================
+
+typedef struct KeyframeRegistry {
+    CssKeyframes** entries;
+    int count;
+    int capacity;
+    Pool* pool;
+} KeyframeRegistry;
+
+// Create a keyframe registry from all @keyframes rules in the document's stylesheets
+KeyframeRegistry* keyframe_registry_create(DomDocument* doc, Pool* pool);
+
+// Look up a @keyframes rule by name
+CssKeyframes* keyframe_registry_find(KeyframeRegistry* registry, const char* name);
+
+// Destroy a keyframe registry
+void keyframe_registry_destroy(KeyframeRegistry* registry);
+
+// ============================================================================
+// CSS Animation Configuration (per element, populated during style resolution)
+// ============================================================================
+
+typedef struct CssAnimProp {
+    const char* name;           // animation-name (keyframes reference)
+    float duration;             // animation-duration in seconds
+    float delay;                // animation-delay in seconds
+    int iteration_count;        // -1 = infinite
+    AnimationDirection direction;
+    AnimationFillMode fill_mode;
+    AnimationPlayState play_state;
+    TimingFunction timing;      // animation-timing-function
+} CssAnimProp;
+
+// ============================================================================
+// CSS Transition Configuration (per element)
+// ============================================================================
+
+typedef struct CssTransitionProp {
+    CssPropertyId* properties;  // transitioned property IDs (NULL = all)
+    int property_count;         // -1 = "all"
+    float duration;             // transition-duration in seconds
+    float delay;                // transition-delay in seconds
+    TimingFunction timing;      // transition-timing-function
+} CssTransitionProp;
+
+// ============================================================================
+// CSS Animation Runtime State (attached to AnimationInstance.state)
+// ============================================================================
+
+typedef struct CssAnimState {
+    CssKeyframes* keyframes;
+    DomElement* element;
+} CssAnimState;
+
+// ============================================================================
+// CSS Transition Runtime State
+// ============================================================================
+
+// The set of properties this vertical slice can transition. Only value types
+// that both apply_animated_value (write side) and the used-value snapshot
+// (read side) already handle are supported; others are deferred.
+#define CSS_TRANSITION_MAX_TRACKED 3   // opacity, color, background-color
+
+// One tracked transitionable property: its last-applied used value (the
+// snapshot) plus the currently running transition instance (if any).
+typedef struct CssTransitionTrack {
+    CssPropertyId property_id;
+    CssAnimValueType value_type;
+    bool has_snapshot;              // false until the first used value is observed
+    union {
+        float f;                    // ANIM_VAL_FLOAT (opacity)
+        Color color;                // ANIM_VAL_COLOR (color, background-color)
+    } snapshot;                     // last-applied used value
+} CssTransitionTrack;
+
+// Persistent per-element transition state (pointed to by DomElement.transition_state).
+typedef struct CssTransitionElemState {
+    CssTransitionTrack tracks[CSS_TRANSITION_MAX_TRACKED];
+    int track_count;
+} CssTransitionElemState;
+
+// Per-instance transition state (attached to AnimationInstance.state).
+typedef struct CssTransitionState {
+    DomElement* element;
+    CssPropertyId property_id;
+    CssAnimValueType value_type;
+    union {
+        float f;
+        Color color;
+    } from;
+    union {
+        float f;
+        Color color;
+    } to;
+} CssTransitionState;
+
+// ============================================================================
+// Property Interpolation
+// ============================================================================
+
+// Interpolate a float value: a + (b - a) * t
+float css_interpolate_float(float a, float b, float t);
+
+// Interpolate a color (per-channel linear in sRGB)
+Color css_interpolate_color(Color a, Color b, float t);
+
+// ============================================================================
+// CSS Animation Lifecycle
+// ============================================================================
+
+// Create a CSS animation instance from animation properties and keyframes.
+// Returns the AnimationInstance (already added to scheduler), or NULL on failure.
+AnimationInstance* css_animation_create(AnimationScheduler* scheduler,
+                                        DomElement* element,
+                                        CssAnimProp* anim_prop,
+                                        CssKeyframes* keyframes,
+                                        double now,
+                                        Pool* pool);
+
+// Animation tick callback (applied by AnimationScheduler)
+void css_animation_tick(AnimationInstance* anim, float t);
+
+// Animation finish callback
+void css_animation_finish(AnimationInstance* anim);
+
+// ============================================================================
+// Integration with Style Resolution
+// ============================================================================
+
+// Process animation properties during style resolution and start animations
+// if animation-name references valid @keyframes. Called after resolve_css_styles.
+void css_animation_resolve(DomElement* element, LayoutContext* lycon);
+
+// ============================================================================
+// CSS Transition Lifecycle
+// ============================================================================
+
+// Transition tick callback: interpolates from→to and applies via apply_animated_value.
+void css_transition_tick(AnimationInstance* anim, float t);
+
+// Transition finish callback.
+void css_transition_finish(AnimationInstance* anim);
+
+// Process transition-* properties during style resolution. Reads the element's
+// newly-computed used values (opacity/color/background-color), compares them to
+// the persistent per-element snapshot, and starts an ANIM_CSS_TRANSITION for each
+// property that actually changed (given a matching transition declaration).
+// Called from layout, right after resolve_css_styles + css_animation_resolve.
+void css_transition_resolve(DomElement* element, LayoutContext* lycon);
+
+
+// ===== CSS temporary declarations =====
+
+// CSS shorthand resolve-only declaration helpers.
+//
+// Background: shorthand expansion in resolve_css_style.cpp copies a parsed
+// CssDeclaration, rewrites property_id, and points value at a longhand
+// CSS value before calling resolve_css_property(). When the value is a small
+// synthetic list built on the stack, the list must stay alive for the whole
+// resolve call. Manually assigning decl.value = &local_list is fragile: a
+// narrower lexical scope for the list leads to stack-use-after-scope (see
+// vibe/Memory_Safety_Template4.md §1).
+//
+// These helpers tie the scratch list storage to the resolve() call so the
+// stack value cannot outlive — or under-live — the call. The copied
+// declaration is never handed back to callers, so it cannot be re-pointed at
+// a narrower-scope value after construction.
+//
+// Contract (Template4 §3, §9): resolve_css_property() may read decl->value
+// during the call but must not retain a pointer from a resolve-only
+// declaration. Persistent CSS values use the PersistentField path instead.
+
+// CssDeclaration, CssValue, CssPropertyId, CSS_VALUE_TYPE_LIST
+
+// LayoutContext lives in radiant/layout.hpp. Forward declare it here so view
+// helpers can expose style-resolution entry points without dragging in layout.
+struct LayoutContext;
+
+// ===== style resolution =====
+
+float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon,
+                                   CssPropertyId prop_id);
+Color resolve_color_value(const CssValue* value);
+Color color_name_to_rgb(CssEnum color_name);
+int64_t get_cascade_priority(const CssDeclaration* decl);
+float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
+const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
+void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon);
+void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon);
+DisplayValue resolve_display_value(void* child);
+DisplayValue blockify_display(DisplayValue display);
+
+namespace lam {
+
+// Resolve-only single-value declaration. Routes one parsed shorthand
+// component to a longhand resolver without exposing the copied declaration.
+class CssTempDecl {
+    CssDeclaration decl_;
+
+public:
+    CssTempDecl(const CssDeclaration* base, CssPropertyId prop, const CssValue* value)
+        : decl_(*base) {
+        decl_.property_id = prop;
+        // resolve-only contract: value is read during the call, never retained
+        decl_.value = const_cast<CssValue*>(value);
+    }
+
+    CssTempDecl(const CssTempDecl&) = delete;
+    CssTempDecl& operator=(const CssTempDecl&) = delete;
+
+    void resolve(LayoutContext* lycon) {
+        resolve_css_property(decl_.property_id, &decl_, lycon);
+    }
+};
+
+// Resolve-only list declaration with compile-time capacity N. The scratch
+// list value and its backing pointer array live inside the helper, so they
+// stay alive for the whole resolve() call. Appending past capacity returns
+// false instead of overflowing.
+template<int N>
+class CssTempListDecl {
+    CssDeclaration decl_;
+    CssValue list_;
+    const CssValue* values_[N];
+    int count_;
+
+public:
+    CssTempListDecl(const CssDeclaration* base, CssPropertyId prop)
+        : decl_(*base), list_(), count_(0) {
+        decl_.property_id = prop;
+        for (int i = 0; i < N; i++) values_[i] = nullptr;
+    }
+
+    CssTempListDecl(const CssTempListDecl&) = delete;
+    CssTempListDecl& operator=(const CssTempListDecl&) = delete;
+
+    int count() const { return count_; }
+
+    // Append a borrowed shorthand component. Returns false on null value or
+    // when the compile-time capacity N is already reached.
+    bool append(const CssValue* value) {
+        if (!value || count_ >= N) return false;
+        values_[count_++] = value;
+        return true;
+    }
+
+    // Route the collected components to the longhand resolver. A single
+    // component is passed directly; multiple components are wrapped in the
+    // helper-owned scratch list value. No-op when nothing was appended.
+    void resolve(LayoutContext* lycon) {
+        if (count_ <= 0) return;
+        // resolve-only contract: components are read during the call, never retained
+        if (count_ == 1) {
+            decl_.value = const_cast<CssValue*>(values_[0]);
+        } else {
+            list_.type = CSS_VALUE_TYPE_LIST;
+            list_.data.list.values = const_cast<CssValue**>(values_);
+            list_.data.list.count = count_;
+            decl_.value = &list_;  // CSS_TEMP_DECL_OK: list_ outlives this resolve call.
+        }
+        resolve_css_property(decl_.property_id, &decl_, lycon);
+    }
+};
+
+} // namespace lam
+
+
+// ===== CSS transform helpers =====
+
+/**
+ * transform.hpp - CSS Transform utilities for Radiant Layout Engine
+ *
+ * Provides functions to:
+ * 1. Compute combined transform matrix from TransformFunction chain
+ * 2. Apply transform matrix to ThorVG paint objects
+ * 3. Convert between coordinate systems
+ */
+
+
+
+namespace radiant {
+
+extern RdtMatrix compute_transform_matrix(TransformFunction* functions,
+                                          float width, float height,
+                                          float origin_x, float origin_y,
+                                          float perspective_distance = 0.0f,
+                                          float perspective_origin_x = 0.0f,
+                                          float perspective_origin_y = 0.0f);
+extern bool has_transform(DomElement* elem);
+extern void transform_point(float& x, float& y, const RdtMatrix& m);
+
+} // namespace radiant
+
 
 #ifndef LAMBDA_HEADLESS
 typedef struct {

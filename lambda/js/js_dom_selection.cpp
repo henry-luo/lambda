@@ -34,7 +34,7 @@
 #include "../../lib/memtrack.h"
 
 #include "../../radiant/event.hpp"
-#include "../../radiant/form_control.hpp"
+#include "../../radiant/view.hpp"
 #include "../../radiant/event.hpp"
 #include <cstring>
 #include <cstdlib>

@@ -1,6 +1,5 @@
 #include "view.hpp"
 #include "render.hpp"
-#include "clip_shape.h"
 #include "render.hpp"
 #include "event.hpp"
 #include "render.hpp"

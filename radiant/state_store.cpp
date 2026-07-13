@@ -8,12 +8,11 @@
 #include "../lib/escape.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
-#include "form_control.hpp"
+#include "view.hpp"
 #include "render.hpp"
 #include "../lambda/ast.hpp"
 #include "../lambda/mark_builder.hpp"
 // str.h included via view.hpp
-#include "view.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/arraylist.h"
 

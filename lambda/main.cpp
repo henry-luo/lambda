@@ -47,7 +47,7 @@
 #include "../radiant/graph_to_svg.hpp"
 #include "../radiant/graph_theme.hpp"
 #include "../radiant/event.hpp"
-#include "../radiant/font_face.h"
+#include "../radiant/view.hpp"
 #include "../radiant/render.hpp"
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
 #include "input/css/css_style.hpp"   // css_property_system_init

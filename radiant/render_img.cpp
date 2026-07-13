@@ -1,7 +1,6 @@
 #include "render.hpp"
 #include "view.hpp"
 #include "layout.hpp"
-#include "font_face.h"
 #include "../lib/tagged.hpp"
 extern "C" {
 #include "../lib/url.h"
