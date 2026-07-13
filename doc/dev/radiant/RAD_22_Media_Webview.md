@@ -2,7 +2,7 @@
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the two subsystems that push *external* content into a Radiant document: animated media (GIF, Lottie, video) and native embedded web views (`<webview>`). Their code lives in separate files but they are the same design: content that Radiant does not lay out or paint itself is decoded/rendered by an outside engine into an `ImageSurface`, then composited into the window surface at a layout-computed rect. Both share the `#ifdef`-selected mac/linux/stub platform-abstraction pattern and the same main-loop dirty-poll/wake hooks. This doc describes that unifying pattern, each media player, the placeholder-plus-post-composite render split, and the webview child-window/layer modes.
 >
-> **Primary sources:** media — `radiant/gif_player.{h,cpp}`, `radiant/lottie_player.{h,cpp}`, `radiant/rdt_video.h` + `radiant/rdt_video_avf.mm` + `radiant/rdt_video_stub.cpp`, `radiant/render_media.{hpp,cpp}`, `radiant/render_video.{hpp,cpp}`, `radiant/image_surface_generation.cpp`, `radiant/video_frame_wake.cpp`; webview — `radiant/webview.h`, `radiant/webview_manager.cpp`, `radiant/webview_child_{mac.mm,linux.cpp,stub.cpp}`, `radiant/webview_layer_{mac.mm,linux.cpp,stub.cpp}`, `radiant/webview_handle_{mac,linux}.h`.
+> **Primary sources:** media — `radiant/render.hpp` + `radiant/gif_player.cpp`, `radiant/render.hpp` + `radiant/lottie_player.cpp`, `radiant/rdt_video.h` + `radiant/rdt_video_avf.mm` + `radiant/rdt_video_stub.cpp`, `radiant/render.hpp` + `radiant/render_media.cpp`, `radiant/render.hpp` + `radiant/render_video.cpp`, `radiant/image_surface_generation.cpp`, `radiant/render.hpp` + `radiant/video_frame_wake.cpp`; webview — `radiant/radiant.hpp`, `radiant/webview_manager.cpp`, `radiant/webview_child_{mac.mm,linux.cpp,stub.cpp}`, `radiant/webview_layer_{mac.mm,linux.cpp,stub.cpp}`, `radiant/webview_handle_{mac,linux}.h`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -25,11 +25,11 @@ The second half of the pattern is the **wake/dirty-poll loop**. Because external
 
 ## 2. Media players — three engines behind one animation seam
 
-GIF and Lottie are *animations*: they register with the shared `AnimationScheduler` ([RAD_16](RAD_16_Animation_Frame_Scheduling.md)) as an `AnimationInstance` (`animation.h:98`, with `void* state` and a `tick`/`on_finish` pair). Video is deliberately *not* on the scheduler — it is driven by its own decode thread and wakes the loop directly ([§2.3](#23-video-mac-avfoundation-stub-elsewhere)). All three are attached during style resolution / surface decode: `surface.cpp` calls `lottie_detect_by_*` then `lottie_player_create_*` (`surface.cpp:786-807`) and `gif_detect_animated*` then `gif_animation_create` (`surface.cpp:930-937`); `resolve_htm_style.cpp:862,916` calls `rdt_video_create` for `<video>` elements.
+GIF and Lottie are *animations*: they register with the shared `AnimationScheduler` ([RAD_16](RAD_16_Animation_Frame_Scheduling.md)) as an `AnimationInstance` (`view.hpp`, with `void* state` and a `tick`/`on_finish` pair). Video is deliberately *not* on the scheduler — it is driven by its own decode thread and wakes the loop directly ([§2.3](#23-video-mac-avfoundation-stub-elsewhere)). All three are attached during style resolution / surface decode: `surface.cpp` calls `lottie_detect_by_*` then `lottie_player_create_*` (`surface.cpp:786-807`) and `gif_detect_animated*` then `gif_animation_create` (`surface.cpp:930-937`); `resolve_htm_style.cpp:862,916` calls `rdt_video_create` for `<video>` elements.
 
 ### 2.1 GIF — frame-swap, no re-decode
 
-`gif_player.cpp` does **not** decode GIFs itself. `gif_detect_animated` (`gif_player.cpp:137`) checks the `.gif` extension and delegates to `image_gif_load` (`lib/image.h`), returning a pre-decoded `GifFrames*` only when it is multi-frame; `gif_detect_animated_from_memory` (`gif_player.cpp:153`) does the same from bytes after checking the `GIF` magic. `gif_animation_create` (`gif_player.cpp:74`) wraps those frames in a `GifAnimation` (`gif_player.h:20`) and registers an `ANIM_GIF` instance whose scheduler `duration` is one loop's total delay, with infinite iterations handled internally.
+`gif_player.cpp` does **not** decode GIFs itself. `gif_detect_animated` (`gif_player.cpp:137`) checks the `.gif` extension and delegates to `image_gif_load` (`lib/image.h`), returning a pre-decoded `GifFrames*` only when it is multi-frame; `gif_detect_animated_from_memory` (`gif_player.cpp:153`) does the same from bytes after checking the `GIF` magic. `gif_animation_create` (`gif_player.cpp:74`) wraps those frames in a `GifAnimation` (`render.hpp`) and registers an `ANIM_GIF` instance whose scheduler `duration` is one loop's total delay, with infinite iterations handled internally.
 
 The tick is cheap: `gif_animation_tick` (`gif_player.cpp:12`) advances `current_frame` when `now >= frame_end_time`, points `surface->pixels` straight at the next frame's already-decoded `pixels` (`gif_player.cpp:37`), and bumps the surface generation. No pixels are copied or re-decoded — the surface pointer is just swapped. Loop counting (from the GIF NETSCAPE extension) is done in the tick, not by the scheduler. `gif_animation_finish` (`gif_player.cpp:47`) frees the frames via `image_gif_free` and nulls `surface->pixels`.
 
@@ -51,13 +51,13 @@ State is tracked via KVO on `AVPlayerItem.status` and `AVPlayer.timeControlStatu
 
 ## 3. Embedded webview — a native web engine as a child or a layer
 
-A `<webview>` element (`HTM_TAG_WEBVIEW`) embeds a full native browser engine inside a Radiant document. The public API and per-element state live in `webview.h`: `enum WebViewMode { WEBVIEW_MODE_WINDOW = 0, WEBVIEW_MODE_LAYER = 1 }` (`webview.h:27`) and `struct WebViewProp` (`webview.h:38`), hung off the element's `embed->webview`. `WebViewProp` carries the opaque `WebViewHandle*`, the `src`/`srcdoc` (borrowed from DOM attributes), cached bounds `last_x/y/w/h`, and — for layer mode — the snapshot `ImageSurface* surface`, a `dirty` flag, and `visible`/`loaded`/`needs_create` flags.
+A `<webview>` element (`HTM_TAG_WEBVIEW`) embeds a full native browser engine inside a Radiant document. The public API and per-element state live in `radiant.hpp`: `enum WebViewMode { WEBVIEW_MODE_WINDOW = 0, WEBVIEW_MODE_LAYER = 1 }` and `struct WebViewProp`, hung off the element's `embed->webview`. `WebViewProp` carries the opaque `WebViewHandle*`, the `src`/`srcdoc` (borrowed from DOM attributes), cached bounds `last_x/y/w/h`, and — for layer mode — the snapshot `ImageSurface* surface`, a `dirty` flag, and `visible`/`loaded`/`needs_create` flags.
 
 ### 3.1 The two modes
 
 **Child-window mode** (`WEBVIEW_MODE_WINDOW`, the default) creates a native web view as an always-on-top overlay parented to the GLFW window. On macOS, `webview_platform_create` (`webview_child_mac.mm:170`) gets the `NSWindow` via `glfwGetCocoaWindow`, adds a `WKWebView` as a subview of the content view, and positions it in flipped-Y NSView coordinates (`webview_child_mac.mm:232`). On Linux, `webview_platform_create` (`webview_child_linux.cpp:261`) creates a `GTK_WINDOW_POPUP` hosting a `WebKitWebView`, positioned at absolute screen coordinates (GLFW window pos + layout offset) and pumped via `gtk_main_iteration_do`. The overlay renders itself; Radiant never composites its pixels, so it is always on top and has no z-order relationship with document content.
 
-**Layer/compositing mode** (`WEBVIEW_MODE_LAYER`, "Stage 2" per `webview.h:29`) renders the web engine *offscreen* and snapshots it into an `ImageSurface` that Radiant composites with correct z-order. On macOS, `webview_layer_platform_create` (`webview_layer_mac.mm:156`) builds a hidden `WKWebView`; `webview_layer_platform_snapshot` (`webview_layer_mac.mm:306`) calls the async `takeSnapshotWithConfiguration` and — because the render pipeline needs the result synchronously — spins the run loop up to 500 ms until it completes (`webview_layer_mac.mm:379-385`), guarded by `snapshot_in_progress`. On Linux, `webview_layer_platform_create` (`webview_layer_linux.cpp:314`) uses a `GtkOffscreenWindow` with software rendering forced on, and `on_snapshot_ready` (`webview_layer_linux.cpp:230`) converts WebKit's cairo `ARGB32`-premultiplied surface to non-premultiplied RGBA row-by-row (`webview_layer_linux.cpp:277-301`).
+**Layer/compositing mode** (`WEBVIEW_MODE_LAYER`, "Stage 2" in `radiant.hpp`) renders the web engine *offscreen* and snapshots it into an `ImageSurface` that Radiant composites with correct z-order. On macOS, `webview_layer_platform_create` (`webview_layer_mac.mm:156`) builds a hidden `WKWebView`; `webview_layer_platform_snapshot` (`webview_layer_mac.mm:306`) calls the async `takeSnapshotWithConfiguration` and — because the render pipeline needs the result synchronously — spins the run loop up to 500 ms until it completes (`webview_layer_mac.mm:379-385`), guarded by `snapshot_in_progress`. On Linux, `webview_layer_platform_create` (`webview_layer_linux.cpp:314`) uses a `GtkOffscreenWindow` with software rendering forced on, and `on_snapshot_ready` (`webview_layer_linux.cpp:230`) converts WebKit's cairo `ARGB32`-premultiplied surface to non-premultiplied RGBA row-by-row (`webview_layer_linux.cpp:277-301`).
 
 ### 3.2 The manager and its post-layout sync
 
@@ -67,7 +67,7 @@ The core walk is `sync_walk` (`webview_manager.cpp:177`): it accumulates absolut
 
 ### 3.3 Event injection and hit-testing
 
-Child-window webviews receive input natively (they are real OS windows). Layer-mode webviews are offscreen, so Radiant must forward input: `webview_layer_platform_inject_{mouse,key,text,scroll}` (`webview.h:141-147`) translate Radiant events into JavaScript `dispatchEvent` calls that run inside the web content — e.g. the mac mouse injector runs `document.elementFromPoint(x,y).dispatchEvent(...)` (`webview_layer_mac.mm:427-447`), the Linux path is identical (`webview_layer_linux.cpp:490-508`). Hit-testing a click onto a layer webview — deciding that a point falls inside the composited surface and should be forwarded — is the [RAD_15](RAD_15_Events_Input.md) event-routing seam; this doc owns only the injection side.
+Child-window webviews receive input natively (they are real OS windows). Layer-mode webviews are offscreen, so Radiant must forward input: `webview_layer_platform_inject_{mouse,key,text,scroll}` (`radiant.hpp`) translate Radiant events into JavaScript `dispatchEvent` calls that run inside the web content — e.g. the mac mouse injector runs `document.elementFromPoint(x,y).dispatchEvent(...)` (`webview_layer_mac.mm:427-447`), the Linux path is identical (`webview_layer_linux.cpp:490-508`). Hit-testing a click onto a layer webview — deciding that a point falls inside the composited surface and should be forwarded — is the [RAD_15](RAD_15_Events_Input.md) event-routing seam; this doc owns only the injection side.
 
 ---
 
@@ -106,7 +106,7 @@ The end-to-end tick is therefore: async change → wake bridge marks dirty + pos
 6. **Poster image is not plumbed.** The idle/loading branch of `render_video_frames` (`render_video.cpp:452-457`) comments that a poster "would need to be passed through" and falls back to the play button; `poster` attribute support is missing.
 7. **GIF finish leaves a dangling `surface->pixels` briefly.** `gif_animation_finish` frees the frames, after which `surface->pixels` points at freed memory until it is nulled two lines later (`gif_player.cpp:55-64`) — a narrow window, but any interleaved read during teardown would be a use-after-free.
 8. **No macOS child-mode compositing / z-order.** Child-window webviews are always-on-top overlays with no relationship to document z-order; only layer mode composites correctly. Mixing a child webview under other content is impossible.
-9. **`WebViewProp.src`/`srcdoc` are borrowed pointers.** They are documented as "borrowed from DOM attribute" (`webview.h:42-43`); their lifetime is tied to the DOM node and is not retained through a `view_pool_reset_retained` ([RAD_01 §6](RAD_01_View_and_DOM_Model.md)) — a relayout that frees attribute storage while a webview holds `src` would dangle. No `PersistentFieldRef` guards them.
+9. **`WebViewProp.src`/`srcdoc` are borrowed pointers.** They are documented as borrowed DOM-attribute storage in `radiant.hpp`; their lifetime is tied to the DOM node and is not retained through a `view_pool_reset_retained` ([RAD_01 §6](RAD_01_View_and_DOM_Model.md)) — a relayout that frees attribute storage while a webview holds `src` would dangle. No `PersistentFieldRef` guards them.
 
 ---
 
@@ -114,16 +114,16 @@ The end-to-end tick is therefore: async change → wake bridge marks dirty + pos
 
 | File | Responsibility (this doc) |
 |---|---|
-| `radiant/gif_player.{h,cpp}` | `GifAnimation`, `gif_detect_animated*`, `gif_animation_create/tick/finish` — frame-swap GIF, no re-decode. |
-| `radiant/lottie_player.{h,cpp}` | `LottiePlayer`, ThorVG init/tick re-raster, `lottie_detect_by_*`. |
+| `radiant/render.hpp` + `radiant/gif_player.cpp` | `GifAnimation`, `gif_detect_animated*`, `gif_animation_create/tick/finish` — frame-swap GIF, no re-decode. |
+| `radiant/render.hpp` + `radiant/lottie_player.cpp` | `LottiePlayer`, ThorVG init/tick re-raster, `lottie_detect_by_*`. |
 | `radiant/rdt_video.h` | Platform-agnostic video C API: `RdtVideo`, `RdtVideoState`, `RdtVideoFrame`, `RdtVideoCallbacks`. |
 | `radiant/rdt_video_avf.mm` | macOS AVFoundation backend — `AVPlayer` timing + `AVAssetImageGenerator` frames + KVO state. |
 | `radiant/rdt_video_stub.cpp` | No-op video stub (Linux/Windows) — stuck at IDLE. |
-| `radiant/render_media.{hpp,cpp}` | Layout→display-list bridge: inline image blit, `render_video_content`/`render_webview_layer_content` placeholder emit. |
-| `radiant/render_video.{hpp,cpp}` | Post-composite video blit + controls/error/play-button chrome; cached fast path. |
+| `radiant/render.hpp` + `radiant/render_media.cpp` | Layout→display-list bridge: inline image blit, `render_video_content`/`render_webview_layer_content` placeholder emit. |
+| `radiant/render.hpp` + `radiant/render_video.cpp` | Post-composite video blit + controls/error/play-button chrome; cached fast path. |
 | `radiant/image_surface_generation.cpp` | `image_surface_bump_generation` — the cache-invalidation counter shared by all players. |
 | `radiant/video_frame_wake.cpp` | Global wake bridge: `radiant_video_set_wake_callback` / `radiant_video_notify_frame_ready`. |
-| `radiant/webview.h` | `WebViewMode`, `WebViewProp`, manager + platform API declarations. |
+| `radiant/radiant.hpp` | `WebViewMode`, `WebViewProp`, manager + platform API declarations. |
 | `radiant/webview_manager.cpp` | `WebViewManager`, lazy creation, `sync_walk` post-layout sync, `poll_dirty_walk`. |
 | `radiant/webview_child_{mac.mm,linux.cpp,stub.cpp}` | Child-window native overlay backends + `lambda://` scheme handler + IPC. |
 | `radiant/webview_layer_{mac.mm,linux.cpp,stub.cpp}` | Offscreen snapshot backends + JS-`dispatchEvent` input injection + MutationObserver dirty. |

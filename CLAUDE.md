@@ -78,7 +78,7 @@ CSS layout and rendering engine for HTML/CSS document presentation.
 - **DOM/View Tree**: `DomNode` → `DomText`/`DomElement` (both DOM and layout views)
 - **Layout**: `layout_block.cpp`, `layout_inline.cpp`, `layout_flex.cpp`, `layout_grid.cpp`, `layout_table.cpp`
 - **CSS Resolution**: `resolve_css_style.cpp`
-- **Core structs**: `view.hpp` (view hierarchy), `layout.hpp` (`LayoutContext`, `BlockContext`, `Linebox`)
+- **Coherent subsystem headers**: `view.hpp` (view/style/animation data), `layout.hpp` (`LayoutContext`, `BlockContext`, `Linebox`), `render.hpp` (paint/display/render/media APIs), `event.hpp` (input/events), `radiant.hpp` (application shell/public API)
 
 ## Lambda CLI Commands
 
@@ -145,7 +145,7 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 | Data construction | `lambda/mark_builder.hpp`, `lambda/mark_reader.hpp`, `lambda/mark_editor.hpp` |
 | Input parsers | `lambda/input/input.cpp` (dispatcher), `lambda/input/input-*.cpp` |
 | Output formatters | `lambda/format/` |
-| CSS, layout, rendering & interaction | `radiant/` — detailed design in `doc/dev/radiant/RAD_00_Overview.md` (view/DOM model, CSS resolution, layout, rendering, SVG, events, editing, state, shell, JS scripting, WebDriver) |
+| CSS, layout, rendering & interaction | `radiant/` — start with `radiant/view.hpp`, `radiant/layout.hpp`, `radiant/render.hpp`, `radiant/event.hpp`, `radiant/radiant.hpp`; detailed design in `doc/dev/radiant/RAD_00_Overview.md` (view/DOM model, CSS resolution, layout, rendering, SVG, events, editing, state, shell, JS scripting, WebDriver) |
 | LambdaJS (JS engine) | `lambda/js/` — detailed design in `doc/dev/js/JS_00_Overview.md` |
 | Core runtime internals | `lambda/` (core) — detailed design in `doc/dev/lambda/LR_00_Overview.md` (value model, transpilers, MIR JIT, memory & GC, builtins) |
 | Custom lib types | `lib/str.h`, `lib/strbuf.h`, `lib/arraylist.h`, `lib/hashmap.h`, `lib/mempool.h` |

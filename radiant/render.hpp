@@ -2323,7 +2323,7 @@ int             rdt_video_get_frame(RdtVideo* video, RdtVideoFrame* frame);
 
 #endif // RADIANT_RDT_VIDEO_API
 
-// ===== gif_player.h =====
+// ===== GIF player declarations =====
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -2374,7 +2374,7 @@ GifFrames* gif_detect_animated_from_memory(const unsigned char* data, size_t len
 }
 #endif
 
-// ===== lottie_player.h =====
+// ===== Lottie player declarations =====
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -2440,7 +2440,7 @@ bool lottie_detect_by_content(const unsigned char* data, size_t length);
 }
 #endif
 
-// ===== video_frame_wake.h =====
+// ===== video frame wake declarations =====
 struct DocState;
 
 typedef void (*RadiantVideoWakeCallback)(void* user_data);
@@ -3298,7 +3298,7 @@ void render_list_bullet(struct RenderContext* rdcon, ViewBlock* list_item);
 void render_litem_view(struct RenderContext* rdcon, ViewBlock* list_item);
 void render_list_view(struct RenderContext* rdcon, ViewBlock* view);
 
-// ===== render_media.hpp =====
+// ===== media render declarations =====
 struct RenderContext;
 
 bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
@@ -3550,7 +3550,7 @@ struct RenderContext;
 
 void render_vector_path(struct RenderContext* rdcon, ViewBlock* block);
 
-// ===== render_video.hpp =====
+// ===== video render declarations =====
 struct DisplayList;
 struct DocState;
 struct ImageSurface;
