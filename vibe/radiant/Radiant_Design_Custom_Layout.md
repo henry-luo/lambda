@@ -1,6 +1,6 @@
-# Radiant Custom Layout — Lambda/Houdini Proposal
+# Radiant Custom Layout - Lambda/Houdini Proposal
 
-**Status:** proposal
+**Status:** in progress; MVP hook, Lambda registration, and map-backed Velmt snapshots are implemented, while full Velmt/VMap host handles remain future work.
 **Primary goal:** add a small, engine-supported custom layout surface for Lambda, enough to port Radiant graph layout out of C+ and into Lambda.
 **Secondary goal:** keep the shape compatible with a future LambdaJS-facing API, without making JS/reflow the first implementation path.
 
@@ -46,7 +46,7 @@ This does not mean geometry reads are useless. They are needed for library compa
 
 ## 3. Why text-only measurement is not enough
 
-Pretext is the right inspiration for one important lesson: avoid DOM reflow by providing a dedicated measurement/layout API. Its split is attractive:
+Pretext is the right inspiration for one important lesson: avoid DOM reflow by providing a dedicated text layout path. Its split is attractive:
 
 ```
 prepare(text, font, options) -> prepared
@@ -65,47 +65,44 @@ However, a graph node is not always just inline text. A useful diagram node may 
 - images or SVG fragments
 - CSS padding, border, min/max constraints
 
-So an inline text subset is valuable, but insufficient as the custom layout foundation. The custom layout API needs two measurement levels:
+So an inline text subset is valuable, but insufficient as the custom layout foundation. The core custom layout API should not ask Lambda to measure arbitrary rich content. Radiant already has layout engines for block, inline, flex, grid, table, SVG, replaced elements, and text. The better boundary is:
 
-1. **Inline text measurement** for labels and animation-friendly text effects.
-2. **Child fragment measurement** for rich nested content, where the engine measures a child under constraints and returns a fragment size.
+```
+Radiant lays out each child with existing layout -> Lambda receives sized child views -> Lambda returns placements
+```
 
-Pretext shows that a constrained subset can be genuinely powerful. Radiant should copy that lesson, not limit custom layout to text.
+Pretext still demonstrates that an inline subset can be useful and interesting, especially for labels and text animation, but it should be an optional helper surface. It is not the primitive for graph node sizing.
 
-## 4. Design direction: Houdini-inspired, Lambda-first
+## 4. Design direction: custom layout as a Radiant sub-layout
 
-CSS Houdini Layout API is the closest platform design to what we want. It proposes:
+Custom layout should hook into the current Radiant layout pipeline as another sub-layout mode, like table, flex, and grid.
 
-- a named custom layout mode
-- an `intrinsicSizes()` callback
-- a `layout()` callback
-- child fragments measured under constraints
-- declared input properties
-- a worklet-like environment separated from normal DOM scripting
+The model is:
 
-Radiant should implement the same idea in a simpler Lambda-native form.
+1. CSS selects a custom layout container, for example `display: layout(graph)`.
+2. Radiant resolves styles for the container and its children.
+3. Radiant lays out all in-flow children with the existing layout machinery.
+4. Each child view now has a local border-box shape, initially normalized as `(x=0, y=0, width, height)`.
+5. Radiant wraps those laid-out child views as `Velmt` handles.
+6. Radiant calls the Lambda custom layout `fn`.
+7. The `fn` returns `x, y` placements for child Velmts, plus optional parent sizing metadata.
+8. Radiant writes those `x, y` values back to the child views.
+9. Radiant computes the parent graph/container size from the containing box of the placed children, unless CSS width/height properties explicitly set or constrain it.
 
-The first version does not need the full CSS Houdini API. It needs only enough to port graph layout:
-
-- register or resolve a custom layout by name
-- expose the layout container and children as virtual elements
-- let Lambda ask the engine to measure children
-- let Lambda return container size and child placements
-- keep mutation out of the layout callback
-- allow the result to become normal Radiant view geometry
+This is Houdini-inspired but simpler. Houdini lets author code measure child fragments during layout. Radiant's first design should avoid that callback-driven measurement step. Child sizing remains owned by Radiant; Lambda only computes arrangement.
 
 Future JS support can use the same host objects and callback contract, but Lambda should come first because:
 
 - graph layout can be ported as pure Lambda data/code
 - Lambda already owns the document/data transform story
 - the engine can keep callbacks deterministic and non-mutating
-- we avoid baking browser-JS layout thrashing into the design
+- the model avoids browser-JS layout thrashing by construction
 
 ## 5. Prerequisite: Velmt
 
-Before custom layout, design and implement **Velmt**: a virtual element wrapper over Radiant's view/DOM tree.
+Before custom layout, design and implement **Velmt**: a virtual element wrapper over Radiant's already-laid-out view tree.
 
-Velmt is the Lambda-facing equivalent of a VMap host object: a lightweight handle to a `DomNode` / `View` that exposes safe layout-time operations without exposing raw C+ pointers or mutable internals.
+Velmt is the Lambda-facing equivalent of a VMap host object: a lightweight handle to a `DomNode` / `View` that exposes safe layout-time reads without exposing raw C+ pointers or mutable internals.
 
 Name rationale:
 
@@ -117,9 +114,9 @@ Name rationale:
 
 Velmt should:
 
-- wrap a `DomNode*` or layout child handle with stable identity for the current layout pass
-- expose read-only structural and style data needed by layout
-- expose measurement methods controlled by Radiant
+- wrap a laid-out `DomNode*` or layout child handle with stable identity for the current layout pass
+- expose read-only structural, attribute, style, and geometry data needed by custom layout
+- expose the child view's current border-box size
 - expose no arbitrary DOM mutation during layout
 - be cheap to pass through Lambda values
 - be valid only inside the owning document/layout session
@@ -134,8 +131,9 @@ Velmt is not:
 - a mutable MarkEditor surface
 - a retained user object that survives arbitrary document mutations
 - a browser `HTMLElement`
+- a child measurement API
 
-During layout, mutation is forbidden. The layout callback computes geometry; it does not edit the tree.
+During layout, mutation is forbidden. The layout callback computes geometry; it does not edit the tree and does not ask Radiant to relayout children.
 
 ### 5.3 Velmt minimal API
 
@@ -148,41 +146,28 @@ velmt.attr(v, name, default = null) -> value
 velmt.style(v, property, default = null) -> value
 velmt.children(v) -> array<Velmt>
 velmt.text(v) -> string
-velmt.measure(v, constraints) -> Fragment
-velmt.measure_text(text, font, options = {}) -> TextMetrics
+velmt.width(v) -> float
+velmt.height(v) -> float
+velmt.margin(v) -> Edges
+velmt.border(v) -> Edges
+velmt.padding(v) -> Edges
+velmt.box(v) -> Box
 ```
 
-`measure()` delegates to Radiant layout in a constrained, side-effect-contained mode. It should return a fragment-like record:
+`box(v)` returns the prelayout box for the child. For custom layout input, the child position is normalized:
 
 ```lambda
 {
+  x: 0.0,
+  y: 0.0,
   width: 120.0,
-  height: 48.0,
-  baseline: 34.0,
-  min_width: 80.0,
-  max_width: 180.0
+  height: 48.0
 }
 ```
 
-`measure_text()` is useful for labels, edge text, and animation. It should be implemented over Radiant's font engine, not through DOM layout.
+The custom layout function returns where that already-sized child should be placed.
 
-### 5.4 Constraints
-
-Use explicit constraints instead of implicit viewport state:
-
-```lambda
-{
-  available_width: 320.0 | infinite,
-  available_height: auto | 200.0,
-  writing_mode: "horizontal-tb",
-  direction: "ltr",
-  mode: "measure" | "layout"
-}
-```
-
-All dimensions are floats.
-
-### 5.5 Safety and lifecycle
+### 5.4 Safety and lifecycle
 
 Velmt handles should be scoped:
 
@@ -193,9 +178,11 @@ Velmt handles should be scoped:
 
 If a stale Velmt is used, the API should return an error value and log a distinct prefix such as `VELMT_STALE_HANDLE`.
 
+Current MVP note: the first implementation uses map-backed Velmt snapshots built per callback invocation. This avoids stale native pointer exposure while the full VMap/host-object Velmt design is deferred. The snapshot already exposes `tag`, `id`, `attrs`, `style`, bounded `children`, descendant `text`, box metrics, and edge metrics. A future Velmt host object should preserve the same public shape while adding document/layout generation checks.
+
 ## 6. Custom layout API
 
-The custom layout API should mirror Houdini's two callback phases, but in Lambda terms.
+The custom layout API is a pure placement callback.
 
 ### 6.1 Registration
 
@@ -204,10 +191,7 @@ There are two possible registration models.
 **Static package registration:**
 
 ```lambda
-layout.register("graph", {
-  intrinsic: graph_intrinsic,
-  layout: graph_layout
-})
+layout.register("graph", graph_layout)
 ```
 
 **Document/import registration:**
@@ -215,13 +199,45 @@ layout.register("graph", {
 ```lambda
 import radiant/layout
 
-layout "graph" {
-  intrinsic(container, children, style, ctx) { ... }
-  layout(container, children, constraints, style, ctx) { ... }
-}
+layout.register("graph", fn(parent, children, ctx) {
+  ...
+})
 ```
 
 For the MVP, a simple function table is enough. Syntax can come later.
+
+The design contract is that registered callbacks are pure Lambda `fn`s, not `pn`s. However, first-class function values do not currently carry reliable `fn`/`pn` metadata at runtime, so the MVP should not pretend to enforce this at registration. Runtime enforcement is deferred until function values expose a stable procedure/purity bit. Until then, the API documentation and examples should require `fn`, and the layout bridge should still forbid layout-time DOM mutation, measurement flushes, I/O, timers, and other side-effecting host APIs.
+
+Current MVP API:
+
+```lambda
+import radiant;
+
+radiant.register_layout("graph", (parent, children, ctx) => {
+  placements: [for (child in children) {
+    child: child,
+    x: 0,
+    y: child.index * (radiant.velmt_height(child) + 24)
+  }]
+})
+```
+
+The helper functions currently exported by the `radiant` module are:
+
+```lambda
+radiant.velmt_tag(v)
+radiant.velmt_id(v)
+radiant.velmt_attr(v, name)
+radiant.velmt_style(v, name)
+radiant.velmt_children(v)
+radiant.velmt_text(v)
+radiant.velmt_width(v)
+radiant.velmt_height(v)
+radiant.velmt_box(v)
+radiant.velmt_margin(v)
+radiant.velmt_border(v)
+radiant.velmt_padding(v)
+```
 
 ### 6.2 CSS entry
 
@@ -242,46 +258,59 @@ Fallback behavior:
 ### 6.3 Callback shape
 
 ```lambda
-fn intrinsic(container: Velmt, children: [Velmt], style: StyleMap, ctx: LayoutContext) -> IntrinsicSizes
+fn graph_layout(parent: Velmt, children: [Velmt], ctx: CustomLayoutContext) -> LayoutResult
+```
 
-fn layout(
-  container: Velmt,
-  children: [Velmt],
-  constraints: LayoutConstraints,
-  style: StyleMap,
-  ctx: LayoutContext
-) -> LayoutResult
+The callback receives children after Radiant has already laid them out. It must not call back into layout measurement. It computes only placement and optional parent sizing.
+
+Input context:
+
+```lambda
+type CustomLayoutContext = {
+  layout_name: string,
+  available_width: float|null,
+  available_height: float|null,
+  css_width: float|null,
+  css_height: float|null,
+  direction: string,
+  writing_mode: string
+}
 ```
 
 Return types:
 
 ```lambda
-type IntrinsicSizes = {
-  min_width: float,
-  max_width: float,
-  min_height?: float,
-  max_height?: float
-}
-
 type LayoutResult = {
-  width: float,
-  height: float,
+  width?: float,
+  height?: float,
   baseline?: float,
-  fragments: [PlacedFragment]
+  placements: [PlacedChild]
 }
 
-type PlacedFragment = {
+type PlacedChild = {
   child: Velmt,
   x: float,
   y: float,
-  width: float,
-  height: float,
-  z?: int,
-  transform?: value
+  z?: int
 }
 ```
 
-For graph-to-SVG generation, a custom layout may also return generated content in a later phase, but the first version should keep layout and generation separate.
+Child width and height are not returned because they were already resolved by Radiant. A later extension could allow explicit child resizing, but that would reintroduce a measurement loop and should stay out of the graph-layout MVP.
+
+### 6.4 Parent sizing
+
+If CSS explicitly sets width/height, CSS wins subject to the normal min/max constraints.
+
+If width/height are auto, Radiant computes the custom layout container's border-box size from the containing box of placed children:
+
+```
+parent_width  = max(child.x + child.width)  - min(child.x)
+parent_height = max(child.y + child.height) - min(child.y)
+```
+
+If placements include negative coordinates, Radiant should preserve them and create normal CSS overflow. This follows the existing Radiant/CSS model: positioned child boxes may extend outside the parent content box, and `overflow` decides whether the extra area is visible, clipped, or scrollable.
+
+Auto parent sizing still uses the containing box of the placed children. If the minimum child x/y is negative, the containing box expands accordingly, but child coordinates are not rewritten just to avoid negative values.
 
 ## 7. Graph layout MVP
 
@@ -306,43 +335,29 @@ The Lambda port should own:
 - ranking / crossing reduction / coordinate assignment
 - edge routing
 - theme selection and graph options
-- SVG element generation
+- node placement decisions
 
 Radiant should still own:
 
 - parsing Mermaid/D2/DOT into graph elements
-- measuring rich node content through Velmt
-- measuring text through the font engine
-- rendering the resulting SVG
-- integrating generated SVG into the document pipeline
+- laying out rich child node views with existing layout engines
+- exposing already-sized children as Velmts
+- rendering the resulting view tree or generated SVG
+- integrating the custom layout result into the document pipeline
 
-### 7.3 Minimal graph layout functions
-
-```lambda
-fn graph_layout(graph: Element, opts: GraphOptions, ctx: LayoutContext) -> GraphLayout
-fn graph_to_svg(graph: Element, layout: GraphLayout, opts: SvgOptions) -> Element
-```
-
-When graph nodes correspond to rich DOM/View children:
+### 7.3 Minimal graph layout function
 
 ```lambda
-let child_box = velmt.measure(node_view, {
-  available_width: opts.max_node_width,
-  available_height: auto
-})
+fn graph_layout(parent: Velmt, children: [Velmt], ctx: CustomLayoutContext) -> LayoutResult {
+  ...
+}
 ```
 
-When graph nodes are simple labels:
+The graph layout function reads each child Velmt's width/height and any graph attributes needed for node ids, edge endpoints, shape, rank hints, labels, and grouping.
 
-```lambda
-let text_box = velmt.measure_text(label, font, {
-  max_width: opts.max_node_width,
-  line_height: opts.line_height,
-  white_space: "normal"
-})
-```
+For graph nodes with rich nested content, Radiant has already computed the node's `width` and `height`. For simple label nodes, that can still be represented as ordinary Radiant inline/block content inside the node, so the same prelayout flow applies.
 
-This gives the Pretext-like fast path for labels and the richer fragment path for nested content.
+This means the Lambda algorithm no longer needs `measure_text()` or `measure(child, constraints)` to place nodes. It receives concrete child boxes and returns positions.
 
 ## 8. Engine integration
 
@@ -360,35 +375,173 @@ layout_flow_node
 `layout_custom_content` should:
 
 1. collect in-flow children
-2. build scoped Velmt handles
-3. call intrinsic callback when needed by parent measurement
-4. call layout callback with explicit constraints
-5. validate returned fragments
-6. write final geometry back to child views
-7. set container width/height/baseline
+2. lay out each child with the existing Radiant layout machinery
+3. normalize each child view to local `(0, 0, width, height)` for the Velmt input
+4. build scoped Velmt handles
+5. call the registered Lambda `fn`
+6. validate returned placements
+7. write final `x, y` back to child views
+8. compute the parent size from CSS explicit sizes or the placed-child containing box
+9. set container width/height/baseline
 
-### 8.2 Measurement isolation
+### 8.2 Child prelayout constraints
 
-Child measurement must not commit final geometry unless explicitly requested by the custom layout result.
+This is the main issue to define carefully.
 
-This follows Radiant's existing measure-then-place pattern:
+Radiant must choose constraints for laying out children before the custom layout function runs. The default should be:
 
-- flex has a measurement pass
-- grid has track sizing and item measurement
-- intrinsic sizing has `RunMode::ComputeSize`
+- use the custom container's resolved content width when definite
+- otherwise use the parent layout context's available width
+- honor each child's own explicit width/height/min/max properties
+- honor custom-layout-specific CSS variables such as `--node-max-width` if we add them
 
-Custom layout should reuse that vocabulary instead of inventing a separate measurement stack.
+This avoids a circular dependency where:
 
-### 8.3 Caching
+```
+parent width depends on graph placement
+graph placement depends on child size
+child size depends on parent width
+```
 
-Custom layout needs two cache layers:
+For the MVP, custom layout should document a simple invariant:
 
-- **Velmt child measurement cache** keyed by child id, constraints, style generation
-- **custom layout result cache** keyed by container id, layout name, input properties, child style generation, constraints
+> Child sizes are computed before placement. Custom layout may position children but may not change their size.
 
-The first implementation can use conservative invalidation. Correctness beats cleverness.
+If an algorithm needs different child wrapping, it must express that through ordinary CSS on the child before prelayout, for example a node `max-width`.
 
-## 9. API discipline
+### 8.3 CSS box semantics
+
+Define all placement coordinates as child border-box top-left positions in the custom container's content box. This follows Radiant's existing view geometry convention: `x` and `y` on a child view identify its border-box top-left relative to the parent layout coordinate space.
+
+Open details:
+
+- Whether margins are included in graph spacing or simply exposed to the Lambda function.
+- Whether custom layout containers allow margin collapse. Recommendation: no; establish a formatting context like flex/grid.
+- How absolutely positioned children are handled. Recommendation: exclude them from custom layout's child array and lay them out through the normal abs-position path.
+
+### 8.4 Purity and re-entry
+
+The custom layout callback is specified as a pure Lambda `fn`, not a `pn`.
+
+Requirements:
+
+- no state
+- no side effects
+- no DOM mutation
+- no I/O
+- no timers
+- deterministic result for the same inputs
+
+This matters because Radiant may need to run the callback more than once:
+
+- during parent intrinsic sizing
+- during a real layout pass
+- after style invalidation
+- under cache verification
+
+The API must treat repeated execution as normal.
+
+Implementation note: because runtime `Function` values currently do not reliably expose whether they originated from `fn` or `pn`, the first implementation should defer a hard registration-time `fn`/`pn` check. Add that check after first-class function values carry stable metadata. The important MVP invariant is that the host surface available during layout remains side-effect-free.
+
+### 8.5 Caching
+
+Custom layout needs three separate caches. They should not be collapsed into one concept.
+
+**Runtime cache.** The Lambda script runtime that owns custom layout packages must be retained across layout passes. A page can relayout many times during load, resize, animation, editing, DOM mutation, and interactive state changes. Recreating the runtime for every layout pass would make custom layout unusable.
+
+The runtime cache should be scoped at least per `DomDocument`, with module/package entries keyed by source identity:
+
+- resolved source path or package id
+- source content hash or mtime/size stamp
+- Lambda compiler/runtime version
+- ABI version of the Velmt host surface
+
+If any key changes, the cached runtime entry is invalidated and rebuilt.
+
+**Compiled function cache.** Registered custom layout `fn`s must be JIT compiled once and retained. `layout_custom_content` should call an already-compiled function handle, not parse/transpile/JIT the function body during layout. The cache entry should hold:
+
+- layout name, for example `graph`
+- compiled function item/handle
+- owning runtime context
+- source generation
+- declared API version
+
+This is similar in spirit to Radiant's retained page-script runtime and inline event-handler reuse: code is compiled once, then invoked repeatedly by the engine.
+
+**Layout result cache.** The result of invoking the pure custom layout `fn` can be cached separately, keyed by:
+
+- container id
+- layout name
+- available constraints
+- parent style generation
+- child ids
+- child prelayout sizes
+- child style generations
+- graph-relevant attributes
+
+The first implementation can use conservative invalidation for layout results. Correctness beats cleverness. Runtime/function caching, however, is not optional; it is part of the minimum viable performance story.
+
+### 8.6 Invocation fast path
+
+The hot path should look like:
+
+```
+layout_custom_content
+  -> prelayout children with existing Radiant layout
+  -> build temporary Velmt handles
+  -> lookup retained CustomLayoutRuntime
+  -> lookup compiled layout fn by layout name
+  -> check layout result cache
+  -> call compiled fn only on cache miss
+  -> apply returned placements
+```
+
+No source loading, parsing, transpilation, MIR generation, or package initialization should happen on the hot layout path after warm-up.
+
+The callback is still pure. Retaining the runtime does not mean layout code may keep mutable layout state. It only means the compiled code, immutable module constants, interned names, and runtime support objects survive across calls.
+
+## 9. Potential issues with this flow
+
+The design is sound, but a few rules need to be nailed down before implementation.
+
+### 9.1 Sizing cycles
+
+The only serious issue is child sizing dependency. If a child has `width: 50%`, what is the percentage relative to when the custom parent itself is auto-sized from child placements?
+
+MVP rule:
+
+- percentage child sizes resolve against the custom container's available width if definite
+- otherwise use the outer parent layout context's available width
+- if neither is definite, treat percentage widths as auto and log a custom-layout diagnostic
+
+### 9.2 Child size is fixed for the callback
+
+Since the callback cannot measure or relayout children, it cannot say "wrap this node at 160px, that node at 240px" unless those constraints were already encoded in CSS before child prelayout.
+
+This is acceptable for the graph MVP. Add a later multi-pass extension only if a real layout needs it.
+
+### 9.3 Edges are not ordinary child boxes
+
+Graph edges are relationships, not child views with width/height. There are two viable designs:
+
+- edges are graph data attributes read by the Lambda function, while only nodes are child Velmts
+- edges are generated SVG/path content in a separate graph-to-SVG transform
+
+The MVP should keep edge rendering separate from the custom placement API. Custom layout places nodes; graph rendering can consume the same layout result to draw edges.
+
+### 9.4 Parent size vs overflow
+
+If CSS explicitly sets the parent size smaller than the placed children, the result should overflow according to normal CSS overflow rules. Negative child placements create overflow too; they are not normalized away. If CSS size is auto, the parent grows to the containing box of placed children, including negative extents.
+
+### 9.5 Ordering
+
+Placement order and paint order should be separate:
+
+- Lambda may return optional `z`
+- default paint order remains child tree order
+- a future extension can allow custom paint order if needed
+
+## 10. API discipline
 
 Custom layout callbacks must be declarative:
 
@@ -396,78 +549,79 @@ Custom layout callbacks must be declarative:
 - no network
 - no timers
 - no global document layout flush
+- no child measurement call
 - no reading stale arbitrary geometry
 - no storing non-regeneratable state in Velmt
 
 Allowed:
 
 - read attributes / selected computed style properties
-- enumerate children
-- measure child fragments under constraints
-- measure text
+- enumerate already-laid-out children
+- read child width/height/box/margins
 - allocate local Lambda data
-- return layout fragments
+- return placements and optional parent size
 
-This keeps the engine free to cache, replay, and run measurement multiple times.
+This keeps the engine free to cache, replay, and run layout multiple times.
 
-## 10. Future JS support
+## 11. Future JS support
 
 After Lambda custom layout works, expose the same model to LambdaJS:
 
 ```js
-CSS.layoutWorklet.addModule("graph-layout.js")
-```
-
-or a Radiant-specific first step:
-
-```js
-RadiantLayout.register("graph", class {
-  intrinsic(container, children, style, ctx) { ... }
-  layout(container, children, constraints, style, ctx) { ... }
-})
+RadiantLayout.register("graph", function(parent, children, ctx) {
+  return {
+    placements: children.map(child => ({ child, x: 0, y: 0 }))
+  };
+});
 ```
 
 The important part is that JS receives Velmt-like layout children, not live mutable DOM elements. That follows Houdini's spirit and avoids procedural reflow loops.
 
-## 11. Implementation phases
+A closer Houdini-compatible API can be evaluated later, but it should not pull in callback-driven child measurement unless the Lambda design proves we need it.
+
+## 12. Implementation phases
 
 ### Phase 1: Velmt design and host representation
 
-- define Velmt handle type
+- define Velmt handle type - partial: map-backed snapshots exist
 - define lifetime/generation checks
-- expose `tag`, `id`, `attr`, `style`, `children`, `text`
+- expose `tag`, `id`, `attr`, `style`, `children`, `text` - initial helper API exists
+- expose `width`, `height`, `box`, `margin`, `border`, `padding` - initial helper API exists
 - add C+ tests for stale handle behavior
-- keep mutation out of scope
+- keep mutation and child measurement out of scope
 
-### Phase 2: Measurement API
+### Phase 2: CSS and layout dispatch
 
-- expose `velmt.measure_text`
-- expose constrained child `velmt.measure`
-- route child measurement through existing Radiant measurement machinery
-- add baseline and intrinsic size fields
-- add cache keys and conservative invalidation
+- parse/represent `display: layout(name)` - implemented
+- add `layout_custom_content` - implemented as `layout_custom_apply`
+- establish custom layout as a formatting context
+- define child prelayout constraints
+- lay out children through existing block/inline/flex/grid/table paths - implemented by running after child layout
 
-### Phase 3: Custom layout dispatch
+### Phase 3: Lambda callback invocation
 
-- parse/represent `display: layout(name)`
-- add `layout_custom_content`
-- implement Lambda callback invocation
-- validate returned fragments
-- write child geometry back to the view tree
+- implement custom layout registration - implemented as `radiant.register_layout`
+- document registered callbacks as Lambda `fn` - implemented in this proposal; enforcement deferred
+- defer hard `fn`/`pn` runtime validation until first-class function values expose stable procedure metadata
+- add retained custom-layout runtime cache - partial: callback `Item`s are rooted and reused
+- add JIT compiled layout `fn` cache - partial: registered function handles are retained
+- build scoped Velmt arrays for laid-out children - implemented with map snapshots
+- invoke the callback from `layout_custom_content` - implemented
+- validate returned placements - implemented
+- write child `x, y` back to the view tree - implemented
+- compute parent size from CSS or containing box - implemented
 
 ### Phase 4: Port graph layout to Lambda
 
 - port graph extraction
+- read node sizes from Velmt width/height
 - port ranking/order/coordinate assignment
 - port edge routing utilities
-- use `measure_text` for simple labels
-- use `measure` for rich node content
 - keep C+ graph implementation behind a temporary flag until parity is proven
 
-### Phase 5: SVG generation and integration
+### Phase 5: SVG or graph rendering integration
 
-- port `graph_to_svg` to Lambda
-- render generated SVG through existing Radiant SVG pipeline
+- decide whether graph rendering remains graph-to-SVG or paints through child views plus generated edges
 - add golden tests for Mermaid/D2/DOT fixtures
 - compare against current C+ output before deleting old code
 
@@ -477,25 +631,24 @@ The important part is that JS receives Velmt-like layout children, not live muta
 - expose custom layout registration to LambdaJS
 - evaluate Houdini-compatible names only after the Lambda API stabilizes
 
-## 12. Open questions
+## 13. Open questions
 
 1. Should Velmt wrap `DomNode*` directly, or an intermediate layout-child object?
-2. Should custom layout return generated children, or should generation be a separate transform phase?
+2. Are graph edges represented as data only, generated SVG children, or a custom paint layer?
 3. How much computed style should be visible in `style()` initially?
 4. Should `display: layout(graph)` be accepted in CSS before custom layout registration exists?
-5. Can Lambda callbacks be safely re-entered during intrinsic measurement from flex/grid parents?
-6. What is the smallest useful rich-content measurement subset for graph nodes?
-7. Should graph layout remain data-transform-only for SVG output, or also become a true CSS layout mode for DOM children?
+5. What exact constraints should child prelayout use when the parent graph width is auto?
+6. Should custom layout be allowed to return parent width/height when CSS explicitly sets them, or should CSS always override?
+7. Should a future extension allow callback-driven child resizing, or is CSS-driven prelayout enough?
 
-## 13. Recommendation
+## 14. Recommendation
 
 Implement **Velmt first**. Without a safe virtual element abstraction, every custom layout path will be tempted to grow its own ad-hoc bridge into Radiant's view tree.
 
 Then implement a minimal Houdini-inspired Lambda custom layout API:
 
 ```
-Velmt + measure_text + measure(child, constraints) + layout callback -> fragments
+Radiant prelayouts children -> Velmt sized child views -> pure fn returns x/y placements
 ```
 
 Use graph layout as the proving ground. It is complex enough to validate the API, but contained enough to avoid designing a whole browser extension platform in one pass.
-

@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_custom.hpp"
 #include "grid.hpp"
 #include "form_control.hpp"
 #include "retained_fields.hpp"
@@ -30,7 +31,7 @@ static DomElement* dom_parent_element(DomElement* element) {
 }
 
 // release builds compile log_debug arguments away, so trace-only helpers must be allowed to vanish.
-static const char* __attribute__((unused)) css_enum_name_or_unknown(const CssEnumInfo* info) {
+[[maybe_unused]] static const char* css_enum_name_or_unknown(const CssEnumInfo* info) {
     return info ? info->name : "unknown";
 }
 
@@ -2303,6 +2304,13 @@ DisplayValue resolve_display_value(void* child) {
                     StyleNode* style_node = (StyleNode*)node->declaration;
                     if (style_node && style_node->winning_decl) {
                         CssDeclaration* decl = style_node->winning_decl;
+                        const char* custom_layout_name = custom_layout_name_from_css_value(decl->value);
+                        if (custom_layout_name && custom_layout_name[0] != '\0') {
+                            display.outer = CSS_VALUE_BLOCK;
+                            display.inner = CSS_VALUE_FLOW;
+                            log_debug("[CSS] matched custom layout display: layout(%s)", custom_layout_name);
+                            return needs_blockify ? blockify_display(display) : display;
+                        }
                         if (decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
                             CssEnum keyword = decl->value->data.keyword;
                             log_debug("[CSS] display keyword value = %d (FLEX=%d, BLOCK=%d, GRID=%d)", keyword, CSS_VALUE_FLEX, CSS_VALUE_BLOCK, CSS_VALUE_GRID);
@@ -2548,6 +2556,12 @@ DisplayValue resolve_display_value(void* child) {
                     }
                 }
             }
+        }
+
+        if (custom_layout_name_for_element(dom_elem)) {
+            display.outer = CSS_VALUE_BLOCK;
+            display.inner = CSS_VALUE_FLOW;
+            return needs_blockify ? blockify_display(display) : display;
         }
 
         // Fall back to default display values based on tag ID

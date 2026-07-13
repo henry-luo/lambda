@@ -1,0 +1,8 @@
+{
+  registered: true,
+  layout: true,
+  graph: [0, 0, 20, 10],
+  child: [0, 0, 20, 10],
+  after: [0, 10, 5, 5],
+  free: null
+}

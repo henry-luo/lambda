@@ -47,6 +47,13 @@ static inline ViewBlock* table_array_view_block(ArrayList* list, int index) {
     return lam::view_require_block(view);
 }
 
+static View* table_next_view_of_type(View* view, int view_type) {
+    for (; view; view = static_cast<View*>(view->next_sibling)) {
+        if (view->view_type == view_type) return view;
+    }
+    return nullptr;
+}
+
 ViewTableRow* ViewTable::first_row() {
     // Direct children first (handles both normal rows and acts_as_tbody case)
     for (View* child = static_cast<View*>(first_child); child; child = static_cast<View*>(child->next_sibling)) {
@@ -66,10 +73,9 @@ ViewBlock* ViewTable::first_row_group() {
     // If table acts as tbody, return self; otherwise find first row group child
     if (acts_as_tbody()) return this;
 
-    for (View* child = static_cast<View*>(first_child); child; child = static_cast<View*>(child->next_sibling)) {
-        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) return lam::view_require_block(child);
-    }
-    return nullptr;
+    View* group = table_next_view_of_type(static_cast<View*>(first_child),
+                                          RDT_VIEW_TABLE_ROW_GROUP);
+    return group ? lam::view_require_block(group) : nullptr;
 }
 
 ViewTableRow* ViewTable::next_row(ViewTableRow* current) {
@@ -115,44 +121,125 @@ TableSectionType ViewTableRowGroup::get_section_type() const {
 
     // Default to TBODY for table-row-group and anonymous groups
     return TABLE_SECTION_TBODY;
-}ViewTableRow* ViewTableRowGroup::first_row() {
-    for (View* child = static_cast<View*>(first_child); child; child = static_cast<View*>(child->next_sibling)) {
-        if (child->view_type == RDT_VIEW_TABLE_ROW) {
-            return lam::view_require<RDT_VIEW_TABLE_ROW>(child);
-        }
-    }
-    return nullptr;
+}
+
+ViewTableRow* ViewTableRowGroup::first_row() {
+    View* row = table_next_view_of_type(static_cast<View*>(first_child),
+                                        RDT_VIEW_TABLE_ROW);
+    return row ? lam::view_require<RDT_VIEW_TABLE_ROW>(row) : nullptr;
 }
 
 ViewTableRow* ViewTableRowGroup::next_row(ViewTableRow* current) {
     if (!current) return nullptr;
 
-    for (View* sibling = static_cast<View*>(current->next_sibling); sibling; sibling = static_cast<View*>(sibling->next_sibling)) {
-        if (sibling->view_type == RDT_VIEW_TABLE_ROW) {
-            return lam::view_require<RDT_VIEW_TABLE_ROW>(sibling);
-        }
-    }
-    return nullptr;
+    View* row = table_next_view_of_type(static_cast<View*>(current->next_sibling),
+                                        RDT_VIEW_TABLE_ROW);
+    return row ? lam::view_require<RDT_VIEW_TABLE_ROW>(row) : nullptr;
 }
 
 ViewTableCell* ViewTableRow::first_cell() {
-    for (View* child = static_cast<View*>(first_child); child; child = static_cast<View*>(child->next_sibling)) {
-        if (child->view_type == RDT_VIEW_TABLE_CELL) {
-            return lam::view_require<RDT_VIEW_TABLE_CELL>(child);
-        }
-    }
-    return nullptr;
+    View* cell = table_next_view_of_type(static_cast<View*>(first_child),
+                                         RDT_VIEW_TABLE_CELL);
+    return cell ? lam::view_require<RDT_VIEW_TABLE_CELL>(cell) : nullptr;
 }
 
 ViewTableCell* ViewTableRow::next_cell(ViewTableCell* current) {
     if (!current) return nullptr;
 
-    for (View* sibling = static_cast<View*>(current->next_sibling); sibling; sibling = static_cast<View*>(sibling->next_sibling)) {
-        if (sibling->view_type == RDT_VIEW_TABLE_CELL) {
-            return lam::view_require<RDT_VIEW_TABLE_CELL>(sibling);
+    View* cell = table_next_view_of_type(static_cast<View*>(current->next_sibling),
+                                         RDT_VIEW_TABLE_CELL);
+    return cell ? lam::view_require<RDT_VIEW_TABLE_CELL>(cell) : nullptr;
+}
+
+template <typename Fn>
+static void for_each_table_row_cell(ViewTableRow* row, Fn fn) {
+    if (!row) return;
+    for (ViewTableCell* cell = row->first_cell(); cell; cell = row->next_cell(cell)) {
+        fn(cell);
+    }
+}
+
+static float table_row_collapsed_vertical_border_contribution(ViewTableRow* row,
+                                                              float* max_top_border,
+                                                              float* max_bottom_border) {
+    if (max_top_border) *max_top_border = 0.0f;
+    if (max_bottom_border) *max_bottom_border = 0.0f;
+    for_each_table_row_cell(row, [&](ViewTableCell* cell) {
+        if (cell->td->top_resolved && max_top_border &&
+            cell->td->top_resolved->width > *max_top_border) {
+            *max_top_border = cell->td->top_resolved->width;
+        }
+        if (cell->td->bottom_resolved && max_bottom_border &&
+            cell->td->bottom_resolved->width > *max_bottom_border) {
+            *max_bottom_border = cell->td->bottom_resolved->width;
+        }
+    });
+    float top = max_top_border ? *max_top_border : 0.0f;
+    float bottom = max_bottom_border ? *max_bottom_border : 0.0f;
+    return top / 2.0f + bottom / 2.0f;
+}
+
+template <typename Fn>
+static void for_each_table_row(ViewTable* table, Fn fn) {
+    if (!table) return;
+    for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
+        fn(row);
+    }
+}
+
+template <typename Fn>
+static void for_each_table_row_in_group(ViewTableRowGroup* group, Fn fn) {
+    if (!group) return;
+    for (ViewTableRow* row = group->first_row(); row; row = group->next_row(row)) {
+        fn(row, static_cast<ViewBlock*>(row));
+    }
+}
+
+static int table_row_group_row_count(ViewTableRowGroup* group) {
+    int count = 0;
+    for_each_table_row_in_group(group, [&](ViewTableRow* row, ViewBlock* row_block) {
+        (void)row;
+        (void)row_block;
+        count++;
+    });
+    return count;
+}
+
+template <typename Predicate>
+static ViewTableCell* find_table_cell(ViewTable* table, Predicate predicate) {
+    if (!table) return nullptr;
+    for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
+        for (ViewTableCell* cell = row->first_cell(); cell; cell = row->next_cell(cell)) {
+            if (predicate(row, cell)) return cell;
         }
     }
     return nullptr;
+}
+
+template <typename Fn>
+static void for_each_table_colgroup_column(ViewElement* colgroup, Fn fn) {
+    if (!colgroup) return;
+    for (View* col_view = static_cast<View*>(colgroup->first_child); col_view;
+         col_view = static_cast<View*>(col_view->next_sibling)) {
+        ViewElement* col = lam::view_as_element(col_view);
+        if (col && col->view_type == RDT_VIEW_TABLE_COLUMN) {
+            fn(col);
+        }
+    }
+}
+
+template <typename Fn>
+static void for_each_table_column_source(ViewTable* table, Fn fn) {
+    if (!table) return;
+    for (View* child_view = static_cast<View*>(table->first_child); child_view;
+         child_view = static_cast<View*>(child_view->next_sibling)) {
+        ViewElement* child = lam::view_as_element(child_view);
+        if (!child) continue;
+        if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP ||
+            child->view_type == RDT_VIEW_TABLE_COLUMN) {
+            fn(child);
+        }
+    }
 }
 
 ViewBlock* ViewTableRow::parent_row_group() {
@@ -167,24 +254,18 @@ ViewBlock* ViewTableRow::parent_row_group() {
 ViewTableCell* ViewTable::first_direct_cell() {
     if (!acts_as_row()) return nullptr;
 
-    for (View* child = static_cast<View*>(first_child); child; child = static_cast<View*>(child->next_sibling)) {
-        if (child->view_type == RDT_VIEW_TABLE_CELL) {
-            return lam::view_require<RDT_VIEW_TABLE_CELL>(child);
-        }
-    }
-    return nullptr;
+    View* cell = table_next_view_of_type(static_cast<View*>(first_child),
+                                         RDT_VIEW_TABLE_CELL);
+    return cell ? lam::view_require<RDT_VIEW_TABLE_CELL>(cell) : nullptr;
 }
 
 // Get next cell when table acts as its own row
 ViewTableCell* ViewTable::next_direct_cell(ViewTableCell* current) {
     if (!current || !acts_as_row()) return nullptr;
 
-    for (View* sibling = static_cast<View*>(current->next_sibling); sibling; sibling = static_cast<View*>(sibling->next_sibling)) {
-        if (sibling->view_type == RDT_VIEW_TABLE_CELL) {
-            return lam::view_require<RDT_VIEW_TABLE_CELL>(sibling);
-        }
-    }
-    return nullptr;
+    View* cell = table_next_view_of_type(static_cast<View*>(current->next_sibling),
+                                         RDT_VIEW_TABLE_CELL);
+    return cell ? lam::view_require<RDT_VIEW_TABLE_CELL>(cell) : nullptr;
 }
 
 // =============================================================================
@@ -209,6 +290,23 @@ static ViewTable* get_parent_table(ViewTableCell* cell) {
 
 // Forward declaration for layout_table_cell_content (defined later in the file)
 static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, ViewBlock* table = nullptr);
+
+static void table_apply_positioned_layout(LayoutContext* lycon, ViewBlock* block) {
+    if (!block || !block->position) return;
+    if (block->position->position == CSS_VALUE_RELATIVE) {
+        layout_relative_positioned(lycon, block);
+    } else if (block->position->position == CSS_VALUE_STICKY) {
+        layout_sticky_positioned(lycon, block);
+    }
+}
+
+static void table_apply_positioned_row(LayoutContext* lycon, ViewTableRow* row) {
+    if (!row) return;
+    table_apply_positioned_layout(lycon, static_cast<ViewBlock*>(row));
+    for_each_table_row_cell(row, [&](ViewTableCell* tcell) {
+        table_apply_positioned_layout(lycon, lam::view_require_block(tcell));
+    });
+}
 
 static float resolve_table_relative_width(LayoutContext* lycon, const CssValue* value, float table_content_width) {
     if (!value) return 0.0f;
@@ -274,32 +372,36 @@ static bool table_direct_float_overlaps_y(ViewBlock* floating, ViewTable* table,
     return y >= rel_y && y < rel_y + floating->height + margin_bottom;
 }
 
-static float table_direct_left_float_intrusion(ViewTable* table, float y, float table_width) {
-    if (!table) return 0.0f;
-    float intrusion = 0.0f;
+template <typename Fn>
+static void for_each_table_direct_float(ViewTable* table, Fn fn) {
+    if (!table) return;
     for (View* child = table->first_child; child; child = child->next_sibling) {
         if (!child->is_block()) continue;
         ViewBlock* floating = lam::view_require_block(child);
-        if (!floating->position || floating->position->float_prop != CSS_VALUE_LEFT) continue;
-        if (!table_direct_float_overlaps_y(floating, table, y)) continue;
+        if (layout_position_is_floated(floating->position)) fn(floating);
+    }
+}
+
+static float table_direct_left_float_intrusion(ViewTable* table, float y, float table_width) {
+    float intrusion = 0.0f;
+    for_each_table_direct_float(table, [&](ViewBlock* floating) {
+        if (floating->position->float_prop != CSS_VALUE_LEFT) return;
+        if (!table_direct_float_overlaps_y(floating, table, y)) return;
 
         float rel_x = floating->x - table->x;
         float margin_right = floating->bound ? floating->bound->margin.right : 0.0f;
         float right = rel_x + floating->width + margin_right;
         if (table_width > 0.0f && right > table_width) right = table_width;
         if (right > intrusion) intrusion = right;
-    }
+    });
     return intrusion;
 }
 
 static float table_direct_right_float_intrusion(ViewTable* table, float y, float table_width) {
-    if (!table) return 0.0f;
     float intrusion = 0.0f;
-    for (View* child = table->first_child; child; child = child->next_sibling) {
-        if (!child->is_block()) continue;
-        ViewBlock* floating = lam::view_require_block(child);
-        if (!floating->position || floating->position->float_prop != CSS_VALUE_RIGHT) continue;
-        if (!table_direct_float_overlaps_y(floating, table, y)) continue;
+    for_each_table_direct_float(table, [&](ViewBlock* floating) {
+        if (floating->position->float_prop != CSS_VALUE_RIGHT) return;
+        if (!table_direct_float_overlaps_y(floating, table, y)) return;
 
         float rel_x = floating->x - table->x;
         if (rel_x < 0.0f) rel_x = 0.0f;
@@ -307,40 +409,46 @@ static float table_direct_right_float_intrusion(ViewTable* table, float y, float
         if (left_edge > table_width) left_edge = table_width;
         float candidate = table_width - left_edge;
         if (candidate > intrusion) intrusion = candidate;
-    }
+    });
     return intrusion;
 }
 
 static float table_direct_float_next_clear_y(ViewTable* table, float y) {
-    if (!table) return y;
     float next_y = y;
-    for (View* child = table->first_child; child; child = child->next_sibling) {
-        if (!child->is_block()) continue;
-        ViewBlock* floating = lam::view_require_block(child);
-        if (!floating->position ||
-            (floating->position->float_prop != CSS_VALUE_LEFT &&
-             floating->position->float_prop != CSS_VALUE_RIGHT)) {
-            continue;
-        }
-        if (!table_direct_float_overlaps_y(floating, table, y)) continue;
+    for_each_table_direct_float(table, [&](ViewBlock* floating) {
+        if (!table_direct_float_overlaps_y(floating, table, y)) return;
 
         float margin_bottom = floating->bound ? floating->bound->margin.bottom : 0.0f;
         float candidate = floating->height + margin_bottom;
         if (candidate > next_y) next_y = candidate;
-    }
+    });
     return next_y;
 }
 
 static bool table_has_direct_float(ViewTable* table) {
-    if (!table) return false;
-    for (View* child = table->first_child; child; child = child->next_sibling) {
-        if (!child->is_block()) continue;
-        ViewBlock* floating = lam::view_require_block(child);
-        if (layout_position_is_floated(floating->position)) {
-            return true;
+    bool found = false;
+    for_each_table_direct_float(table, [&](ViewBlock* floating) {
+        (void)floating;
+        found = true;
+    });
+    return found;
+}
+
+static float table_clear_direct_float_intrusion(ViewTable* table, float y,
+                                                float content_width,
+                                                bool has_direct_float) {
+    if (!has_direct_float || table->width <= 0.0f || content_width <= 0.0f) return y;
+    for (int guard = 0; guard < 32; guard++) {
+        float left_intrusion = table_direct_left_float_intrusion(table, y, table->width);
+        float right_intrusion = table_direct_right_float_intrusion(table, y, table->width);
+        if (left_intrusion + content_width + right_intrusion <= table->width + 0.01f) {
+            break;
         }
+        float next_y = table_direct_float_next_clear_y(table, y);
+        if (next_y <= y + 0.01f) break;
+        y = next_y;
     }
-    return false;
+    return y;
 }
 
 static bool table_cell_calc_width_is_indefinite_constraint(const CssValue* value) {
@@ -608,6 +716,16 @@ static float find_descendant_float_max_y(ViewElement* parent, float y_offset) {
 
 static bool table_cell_vertical_align_skips_child(View* child);
 
+template <typename Fn>
+static void for_each_table_cell_vertical_align_child(ViewElement* cell, Fn fn) {
+    if (!cell) return;
+    for (View* child = cell->first_child; child; child = child->next_sibling) {
+        if (!child->view_type) continue;
+        if (table_cell_vertical_align_skips_child(child)) continue;
+        fn(child);
+    }
+}
+
 static bool table_inline_span_has_inline_axis_decoration(ViewSpan* span) {
     if (!span || !span->bound) return false;
     if (span->bound->margin.left != 0.0f || span->bound->margin.right != 0.0f ||
@@ -668,10 +786,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     lycon->font = saved_font;
     // block auto-restored by bscope destructor
 
-    for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
-        if (table_cell_vertical_align_skips_child(child)) {
-            continue;
-        }
+    for_each_table_cell_vertical_align_child(lam::view_require_element(tcell), [&](View* child) {
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             // Track min/max Y for text content to handle multi-line cells with <br> elements
@@ -710,7 +825,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             if (child->view_type == RDT_VIEW_INLINE &&
                 table_inline_span_is_phantom_for_cell_height(
                     lam::view_require<RDT_VIEW_INLINE>(child))) {
-                continue;
+                return;
             }
             ViewElement* block = lam::view_require_element(child);
             // Use the actual rendered border-box height (block->height), not the CSS content height
@@ -789,7 +904,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
                 block_content_max_y = table_bottom;
             }
         }
-    }
+    });
 
     // Compute combined content height as the full extent from earliest to latest content
     // When a cell has both block and inline content (e.g., a div followed by text),
@@ -961,15 +1076,20 @@ static float find_table_row_baseline(LayoutContext* lycon, ViewTableRow* trow) {
     if (!trow) return -1.0f;
 
     float row_baseline = -1.0f;
-    for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-        if (!tcell->td) continue;
+    for_each_table_row_cell(trow, [&](ViewTableCell* tcell) {
+        if (!tcell->td) return;
         float cell_baseline = tcell->y + find_cell_baseline(lycon, tcell);
         if (cell_baseline > row_baseline) {
             row_baseline = cell_baseline;
         }
-    }
+    });
     log_debug("%s find_table_row_baseline: baseline=%.1f", trow->source_loc(), row_baseline);
     return row_baseline;
+}
+
+static bool table_cell_is_baseline_aligned(ViewTableCell* tcell) {
+    return tcell->td && tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BASELINE &&
+        !tcell->td->is_empty;
 }
 
 // CSS 2.1 §17.5.4: Apply baseline alignment across all cells in a row.
@@ -979,13 +1099,11 @@ static float find_table_row_baseline(LayoutContext* lycon, ViewTableRow* trow) {
 static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* trow, float* row_height) {
     // Step 1: Check if any cells have baseline alignment
     bool has_baseline_cells = false;
-    for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-        if (tcell->td && tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BASELINE &&
-            !tcell->td->is_empty) {
+    for_each_table_row_cell(trow, [&](ViewTableCell* tcell) {
+        if (table_cell_is_baseline_aligned(tcell)) {
             has_baseline_cells = true;
-            break;
         }
-    }
+    });
     if (!has_baseline_cells) return 0;
 
     log_debug("%s apply_row_baseline_alignment: processing row with baseline-aligned cells", trow->source_loc());
@@ -993,16 +1111,15 @@ static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* tr
     // Step 2: Find each baseline-aligned cell's baseline (only cells with real baselines)
     float max_baseline = 0;
     int baseline_cell_count = 0;
-    for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-        if (tcell->td && tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BASELINE &&
-            !tcell->td->is_empty) {
+    for_each_table_row_cell(trow, [&](ViewTableCell* tcell) {
+        if (table_cell_is_baseline_aligned(tcell)) {
             float baseline = find_cell_baseline(lycon, tcell);
             if (baseline >= 0) {
                 if (baseline > max_baseline) max_baseline = baseline;
                 baseline_cell_count++;
             }
         }
-    }
+    });
     log_debug("%s   row baseline = %.1f (%d cells with real baselines)", trow->source_loc(), max_baseline, baseline_cell_count);
 
     // Need at least 2 cells with real baselines for alignment to make sense
@@ -1010,20 +1127,17 @@ static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* tr
 
     // Step 3: Shift content in each baseline-aligned cell to align baselines
     // Only shift cells that have a real text baseline (skip cells with no line box)
-    for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-        if (tcell->td && tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BASELINE &&
-            !tcell->td->is_empty) {
+    for_each_table_row_cell(trow, [&](ViewTableCell* tcell) {
+        if (table_cell_is_baseline_aligned(tcell)) {
             float cell_baseline = find_cell_baseline(lycon, tcell);
-            if (cell_baseline < 0) continue;  // Skip cells without real baselines
+            if (cell_baseline < 0) return;  // Skip cells without real baselines
             float shift = max_baseline - cell_baseline;
 
             if (shift > 0.5f) {
                 log_debug("%s   cell col=%d: baseline=%.1f, shift=%.1f", trow->source_loc(), tcell->td->col_index, cell_baseline, shift);
 
                 // Shift all children down
-                for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
-                    if (!child->view_type) continue;
-                    if (table_cell_vertical_align_skips_child(child)) continue;
+                for_each_table_cell_vertical_align_child(lam::view_require_element(tcell), [&](View* child) {
                     child->y += shift;
                     // Also update TextRect positions for ViewText nodes
                     if (child->view_type == RDT_VIEW_TEXT) {
@@ -1032,7 +1146,7 @@ static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* tr
                             rect->y += shift;
                         }
                     }
-                }
+                });
 
                 // The cell now needs more height to accommodate the shifted content
                 float content_height = measure_cell_content_height(lycon, tcell);
@@ -1055,15 +1169,15 @@ static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* tr
                 }
             }
         }
-    }
+    });
 
     // Step 4: Recalculate row height considering baseline-adjusted cells
     float new_row_height = *row_height;
-    for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+    for_each_table_row_cell(trow, [&](ViewTableCell* tcell) {
         if (tcell->td && tcell->td->row_span <= 1 && tcell->height > new_row_height) {
             new_row_height = tcell->height;
         }
-    }
+    });
 
     if (new_row_height > *row_height) {
         log_debug("%s   row height increased: %.1f -> %.1f (baseline alignment)", trow->source_loc(), *row_height, new_row_height);
@@ -1177,12 +1291,9 @@ static void shift_table_cell_vertical_align_child(View* child, float y_adjustmen
 
     if (child->view_type == RDT_VIEW_INLINE) {
         ViewElement* element = lam::view_require_element(child);
-        for (View* grandchild = element->first_child; grandchild; grandchild = grandchild->next_sibling) {
-            if (table_cell_vertical_align_skips_child(grandchild)) {
-                continue;
-            }
+        for_each_table_cell_vertical_align_child(element, [&](View* grandchild) {
             shift_table_cell_vertical_align_child(grandchild, y_adjustment);
-        }
+        });
     }
 }
 
@@ -1255,11 +1366,7 @@ static void apply_cell_vertical_align(LayoutContext* lycon, ViewTableCell* tcell
     // adjustment is relative to the margin-box top, not the child's border-box position.
     // Skip children with view_type == 0 (uninitialized views, e.g. collapsed whitespace nodes).
     float current_content_top = 1e8f;
-    for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
-        if (!child->view_type) continue; // skip uninitialized view nodes
-        if (table_cell_vertical_align_skips_child(child)) {
-            continue;
-        }
+    for_each_table_cell_vertical_align_child(lam::view_require_element(tcell), [&](View* child) {
         float ct = child->y;
         if (child->view_type == RDT_VIEW_BLOCK ||
             child->view_type == RDT_VIEW_LIST_ITEM ||
@@ -1270,7 +1377,7 @@ static void apply_cell_vertical_align(LayoutContext* lycon, ViewTableCell* tcell
             }
         }
         if (ct < current_content_top) current_content_top = ct;
-    }
+    });
     if (current_content_top >= 1e8f) return; // no content
 
     current_content_top = find_cell_content_top_for_vertical_align(lycon, tcell, current_content_top);
@@ -1280,13 +1387,9 @@ static void apply_cell_vertical_align(LayoutContext* lycon, ViewTableCell* tcell
              target_y, current_content_top, y_adjustment);
 
     if (y_adjustment != 0) {
-        for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
-            if (!child->view_type) continue; // skip uninitialized view nodes
-            if (table_cell_vertical_align_skips_child(child)) {
-                continue;
-            }
+        for_each_table_cell_vertical_align_child(lam::view_require_element(tcell), [&](View* child) {
             shift_table_cell_vertical_align_child(child, y_adjustment);
-        }
+        });
     }
 }
 
@@ -1545,6 +1648,57 @@ static int table_positive_span_attr(ViewElement* element) {
     return span > 0 ? span : 1;
 }
 
+static float table_resolve_fixed_explicit_width(LayoutContext* lycon, ViewTable* table) {
+    float fixed_explicit_width = 0.0f;
+    if (table->node_type == DOM_NODE_ELEMENT) {
+        DomElement* dom_elem = table->as_element();
+        if (dom_elem && dom_elem->specified_style) {
+            CssDeclaration* width_decl = style_tree_get_declaration(
+                dom_elem->specified_style, CSS_PROPERTY_WIDTH);
+            if (width_decl && width_decl->value) {
+                if (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    double percentage = width_decl->value->data.percentage.value;
+                    float container_width = lycon->available_space.width.is_definite()
+                        ? lycon->available_space.width.value
+                        : lycon->block.content_width;
+                    if (container_width <= 0.0f) {
+                        container_width = lycon->line.right - lycon->line.left;
+                    }
+                    if (container_width > 0.0f) {
+                        fixed_explicit_width = container_width * percentage / 100.0;
+                        log_debug("FIXED LAYOUT - percentage width: %.1f%% of %.1fpx = %.1fpx",
+                                  percentage, container_width, fixed_explicit_width);
+                    }
+                } else if (width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                    fixed_explicit_width = resolve_length_value(
+                        lycon, CSS_PROPERTY_WIDTH, width_decl->value);
+                    log_debug("FIXED LAYOUT - read table CSS width: %.1fpx",
+                              fixed_explicit_width);
+                }
+            }
+        }
+    }
+
+    if (fixed_explicit_width == 0.0f && lycon->block.given_width > 0.0f) {
+        fixed_explicit_width = lycon->block.given_width;
+        log_debug("FIXED LAYOUT - using given_width: %.1fpx", fixed_explicit_width);
+    }
+    return fixed_explicit_width;
+}
+
+static float table_resolve_percent_or_length_width(LayoutContext* lycon,
+                                                   const CssValue* value,
+                                                   float percentage_basis) {
+    if (!value) return 0.0f;
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        return (float)(percentage_basis * value->data.percentage.value / 100.0);
+    }
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        return resolve_length_value(lycon, CSS_PROPERTY_WIDTH, value);
+    }
+    return 0.0f;
+}
+
 static float table_resolve_fixed_column_css_width(LayoutContext* lycon, ViewElement* column,
                                                   float content_width) {
     if (!column || column->node_type != DOM_NODE_ELEMENT) return 0.0f;
@@ -1553,13 +1707,121 @@ static float table_resolve_fixed_column_css_width(LayoutContext* lycon, ViewElem
 
     CssDeclaration* w_decl = style_tree_get_declaration(dom_col->specified_style, CSS_PROPERTY_WIDTH);
     if (!w_decl || !w_decl->value) return 0.0f;
-    if (w_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        return (float)(content_width * w_decl->value->data.percentage.value / 100.0);
+    return table_resolve_percent_or_length_width(lycon, w_decl->value, content_width);
+}
+
+static int table_apply_fixed_column_css_width(LayoutContext* lycon, ViewElement* column,
+                                              float* explicit_col_widths, int col_idx,
+                                              int columns, float content_width,
+                                              float* total_explicit, const char* source_desc) {
+    int span = table_positive_span_attr(column);
+    float col_width = table_resolve_fixed_column_css_width(lycon, column, content_width);
+    if (col_width > 0.0f) {
+        float per_col = col_width / span;
+        table_assign_span_columns(explicit_col_widths, col_idx, span,
+                                  columns, per_col, total_explicit);
+        log_debug("FIXED LAYOUT col %d (span=%d): %.1fpx %s",
+                  col_idx, span, col_width, source_desc);
     }
-    if (w_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-        return resolve_length_value(lycon, CSS_PROPERTY_WIDTH, w_decl->value);
+    return span;
+}
+
+static float table_resolve_fixed_first_row_cell_width(LayoutContext* lycon, ViewTable* table,
+                                                      ViewTableCell* cell, float content_width,
+                                                      int col) {
+    float cell_width = 0.0f;
+    if (cell->node_type == DOM_NODE_ELEMENT) {
+        DomElement* dom_elem = cell->as_element();
+        if (dom_elem && dom_elem->specified_style) {
+            CssDeclaration* width_decl = style_tree_get_declaration(
+                dom_elem->specified_style, CSS_PROPERTY_WIDTH);
+            if (width_decl && width_decl->value) {
+                cell_width = table_resolve_percent_or_length_width(
+                    lycon, width_decl->value, content_width);
+                if (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    double percentage = width_decl->value->data.percentage.value;
+                    log_debug("  Column %d: percentage width %.1f%% of %.1fpx = %.1fpx",
+                              col, percentage, content_width, cell_width);
+                } else if (width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                    log_debug("  Column %d: absolute width %.1fpx", col, cell_width);
+                }
+            }
+        }
     }
-    return 0.0f;
+
+    if (cell_width <= 0.0f || layout_uses_border_box(cell)) return cell_width;
+    if (cell->bound && cell->bound->padding.left >= 0 && cell->bound->padding.right >= 0) {
+        cell_width += layout_box_metrics(cell).padding_h;
+    }
+    if (!table->tb->border_collapse && cell->bound && cell->bound->border) {
+        if (cell->bound->border->left_style != CSS_VALUE_NONE) {
+            cell_width += cell->bound->border->width.left;
+        }
+        if (cell->bound->border->right_style != CSS_VALUE_NONE) {
+            cell_width += cell->bound->border->width.right;
+        }
+    }
+    return cell_width;
+}
+
+static int table_apply_fixed_first_row_cell_width(LayoutContext* lycon, ViewTable* table,
+                                                  ViewTableCell* cell,
+                                                  float* explicit_col_widths, int col,
+                                                  int columns, float content_width,
+                                                  float* total_explicit,
+                                                  int* unspecified_cols) {
+    int span = cell->td->col_span;
+    if (explicit_col_widths[col] > 0.0f) {
+        log_debug("  Column %d: already set by <col> element (%.1fpx), skipping cell",
+                  col, explicit_col_widths[col]);
+        return span;
+    }
+
+    float cell_width = table_resolve_fixed_first_row_cell_width(
+        lycon, table, cell, content_width, col);
+    if (cell_width > 0.0f) {
+        float per_col_width = cell_width / span;
+        table_assign_span_columns(explicit_col_widths, col, span,
+                                  columns, per_col_width, total_explicit);
+        log_debug("  Column %d (span=%d): %.1fpx each (total=%.1fpx)",
+                  col, span, per_col_width, cell_width);
+    } else {
+        *unspecified_cols += span;
+        log_debug("  Column %d (span=%d): no explicit width", col, span);
+    }
+    return span;
+}
+
+static void table_distribute_fixed_column_widths(float* explicit_col_widths, int columns,
+                                                 float* content_width,
+                                                 float total_explicit,
+                                                 int unspecified_cols) {
+    if (!explicit_col_widths || columns <= 0 || !content_width) return;
+    if (total_explicit > 0.0f) {
+        log_debug("Found %d columns with explicit widths (total: %.1fpx), %d unspecified",
+                  columns - unspecified_cols, total_explicit, unspecified_cols);
+
+        float remaining_width = *content_width - total_explicit;
+        if (unspecified_cols > 0 && remaining_width > 0.0f) {
+            float width_per_unspecified = remaining_width / unspecified_cols;
+            for (int i = 0; i < columns; i++) {
+                if (explicit_col_widths[i] == 0.0f) {
+                    explicit_col_widths[i] = width_per_unspecified;
+                }
+            }
+            log_debug("Distributing %.1fpx to %d unspecified columns (%.1fpx each)",
+                      remaining_width, unspecified_cols, width_per_unspecified);
+        } else if (remaining_width < 0.0f) {
+            // CSS 2.1 §17.5.2.1: if explicit columns exceed table width, the table widens.
+            log_debug("FIXED LAYOUT: column widths exceed table width (%.1f > %.1f), expanding table",
+                      total_explicit, *content_width);
+            *content_width = total_explicit;
+        }
+    } else {
+        float width_per_col = *content_width / columns;
+        table_assign_columns(explicit_col_widths, columns, width_per_col);
+        log_debug("No explicit widths - equal distribution: %.1fpx per column", width_per_col);
+    }
 }
 
 static void table_raise_column_width_constraints(TableMetadata* meta, float* col_widths,
@@ -1575,6 +1837,18 @@ static void table_clamp_column_max_width(TableMetadata* meta, float* col_widths,
     if (!meta || !col_widths || col < 0 || col >= meta->column_count || max_width < 0.0f) return;
     if (meta->col_max_widths[col] > max_width) meta->col_max_widths[col] = max_width;
     if (col_widths[col] > max_width) col_widths[col] = max_width;
+}
+
+static float table_resolve_column_length_constraint(LayoutContext* lycon, ViewBlock* col_elem,
+                                                    CssPropertyId property, float box_value,
+                                                    bool has_box_value, float unset_value) {
+    if (has_box_value) return box_value;
+    if (!col_elem || !col_elem->specified_style) return unset_value;
+    CssDeclaration* decl = style_tree_get_declaration(col_elem->specified_style, property);
+    if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+        return resolve_length_value(lycon, property, decl->value);
+    }
+    return unset_value;
 }
 
 static float table_sum_cell_span_columns(ViewTableCell* tcell, float* col_widths, int columns) {
@@ -1820,13 +2094,13 @@ static void update_row_cells_after_height_change(LayoutContext* lycon, ViewTable
                                                  float row_height, bool only_single_rowspan,
                                                  bool grow_only) {
     if (!trow) return;
-    for (ViewTableCell* cell = trow->first_cell(); cell; cell = trow->next_cell(cell)) {
-        if (only_single_rowspan && (!cell->td || cell->td->row_span != 1)) continue;
-        if (grow_only && cell->height >= row_height) continue;
+    for_each_table_row_cell(trow, [&](ViewTableCell* cell) {
+        if (only_single_rowspan && (!cell->td || cell->td->row_span != 1)) return;
+        if (grow_only && cell->height >= row_height) return;
         cell->height = row_height;
         float content_height = measure_cell_content_height(lycon, cell);
         apply_cell_vertical_align(lycon, cell, cell->height, content_height);
-    }
+    });
 }
 
 static void apply_fixed_row_height(LayoutContext* lycon, ViewTableRow* trow, float fixed_height) {
@@ -1925,9 +2199,7 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
     int current_col = 0;
 
     // Iterate through table children to find column groups and columns
-    for (View* child_view = static_cast<View*>(table->first_child); child_view; child_view = static_cast<View*>(child_view->next_sibling)) {
-        ViewElement* child = lam::view_as_element(child_view);
-        if (!child) continue;
+    for_each_table_column_source(table, [&](ViewElement* child) {
         if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
             // Column group: spans multiple columns
             // Find the first and last column indices this group covers
@@ -1937,24 +2209,14 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
             // Count columns in this group by iterating its children.
             // A <col> box covers its declared span in static table geometry.
             int col_count = 0;
-            for (View* col_view = static_cast<View*>(child->first_child); col_view; col_view = static_cast<View*>(col_view->next_sibling)) {
-                ViewElement* col = lam::view_as_element(col_view);
-                if (!col) continue;
-                if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
-                    const char* col_span_str = col->get_attribute("span");
-                    int col_span = (col_span_str && *col_span_str) ? (int)str_to_int64_default(col_span_str, strlen(col_span_str), 0) : 1; // INT_CAST_OK: span count
-                    if (col_span <= 0) col_span = 1;
-                    col_count += col_span;
-                }
-            }
+            for_each_table_colgroup_column(child, [&](ViewElement* col) {
+                col_count += table_positive_span_attr(col);
+            });
 
             // If no col children, colgroup with span attribute would handle columns
             // For now, assume each colgroup without children represents 1 column
             if (col_count == 0) {
-                // Check span attribute
-                const char* span_str = child->get_attribute("span");
-                col_count = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: string length
-                if (col_count <= 0) col_count = 1;
+                col_count = table_positive_span_attr(child);
             }
 
             last_col = first_col + col_count - 1;
@@ -1983,15 +2245,11 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
 
             // Now set dimensions for child column elements
             // Column x is relative to parent colgroup, not to table
-	            float colgroup_x = child->x;  // Colgroup's x relative to table
-	            int col_idx = first_col;
-	            for (View* col_view = static_cast<View*>(child->first_child); col_view; col_view = static_cast<View*>(col_view->next_sibling)) {
-	                ViewElement* col = lam::view_as_element(col_view);
-	                if (!col) continue;
-                if (col->view_type == RDT_VIEW_TABLE_COLUMN && col_idx < columns) {
-                    const char* col_span_str = col->get_attribute("span");
-                    int col_span = (col_span_str && *col_span_str) ? (int)str_to_int64_default(col_span_str, strlen(col_span_str), 0) : 1; // INT_CAST_OK: span count
-                    if (col_span <= 0) col_span = 1;
+            float colgroup_x = child->x;  // Colgroup's x relative to table
+            int col_idx = first_col;
+            for_each_table_colgroup_column(child, [&](ViewElement* col) {
+                if (col_idx < columns) {
+                    int col_span = table_positive_span_attr(col);
                     int col_end = col_idx + col_span - 1;
                     if (col_end >= columns) col_end = columns - 1;
 
@@ -2012,16 +2270,14 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
                               col_idx, col_end, col_x, col_x_in_table, col_width, col->height);
                     col_idx = col_end + 1;
                 }
-            }
+            });
 
             current_col = last_col + 1;
         }
         else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
             // Standalone column (not in a colgroup)
             if (current_col < columns) {
-                const char* span_str = child->get_attribute("span");
-                int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: span count
-                if (span <= 0) span = 1;
+                int span = table_positive_span_attr(child);
                 int col_end = current_col + span - 1;
                 if (col_end >= columns) col_end = columns - 1;
 
@@ -2041,7 +2297,7 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
                 current_col = col_end + 1;
             }
         }
-    }
+    });
 }
 
 // =============================================================================
@@ -2204,9 +2460,7 @@ static ViewBlock* find_rowgroup_for_row(ViewTable* table, int target_row,
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
             int first_in_group = row_idx;
             ViewTableRowGroup* rg = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
-            for (ViewTableRow* r = rg->first_row(); r; r = rg->next_row(r)) {
-                row_idx++;
-            }
+            row_idx += table_row_group_row_count(rg);
             int last_in_group = row_idx - 1;
             if (target_row >= first_in_group && target_row <= last_in_group) {
                 if (out_first_row_in_group) *out_first_row_in_group = first_in_group;
@@ -2258,79 +2512,78 @@ static void append_visible_collapsed_border_candidate(CollapsedBorderList& candi
 // Returns the ViewBlock for the <col> element, or NULL if not found
 static ViewBlock* find_column_element(ViewTable* table, int target_col) {
     int current_col = 0;
-    for (View* child_view = static_cast<View*>(table->first_child); child_view; child_view = static_cast<View*>(child_view->next_sibling)) {
-        ViewElement* child = lam::view_as_element(child_view);
-        if (!child) continue;
+    ViewBlock* found_col = nullptr;
+    for_each_table_column_source(table, [&](ViewElement* child) {
+        if (found_col) return;
         if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
-            for (View* col_view = static_cast<View*>(child->first_child); col_view; col_view = static_cast<View*>(col_view->next_sibling)) {
-                ViewElement* col = lam::view_as_element(col_view);
-                if (!col) continue;
-                if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
-                    if (current_col == target_col) return lam::view_require_block(col);
-                    current_col++;
-                }
-            }
+            for_each_table_colgroup_column(child, [&](ViewElement* col) {
+                if (found_col) return;
+                if (current_col == target_col) found_col = lam::view_require_block(col);
+                current_col++;
+            });
             // colgroup without col children
-            if (current_col <= target_col) {
-                const char* span_str = child->get_attribute("span");
-                int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: string length
-                if (span <= 0) span = 1;
-                current_col += span;
+            if (!found_col && current_col <= target_col) {
+                current_col += table_positive_span_attr(child);
             }
         } else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
-            if (current_col == target_col) return lam::view_require_block(child);
+            if (current_col == target_col) found_col = lam::view_require_block(child);
             current_col++;
         }
-    }
-    return nullptr;
+    });
+    return found_col;
 }
 
 // Find colgroup element that contains a given column index
 // Returns the ViewBlock for the <colgroup> element, or NULL if not found
 static ViewBlock* find_colgroup_element(ViewTable* table, int target_col) {
     int current_col = 0;
-    for (View* child_view = static_cast<View*>(table->first_child); child_view; child_view = static_cast<View*>(child_view->next_sibling)) {
-        ViewElement* child = lam::view_as_element(child_view);
-        if (!child) continue;
+    ViewBlock* found_colgroup = nullptr;
+    for_each_table_column_source(table, [&](ViewElement* child) {
+        if (found_colgroup) return;
         if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
             int first_col = current_col;
             int col_count = 0;
-            for (View* col_view = static_cast<View*>(child->first_child); col_view; col_view = static_cast<View*>(col_view->next_sibling)) {
-                ViewElement* col = lam::view_as_element(col_view);
-                if (!col) continue;
-                if (col->view_type == RDT_VIEW_TABLE_COLUMN) col_count++;
-            }
+            for_each_table_colgroup_column(child, [&](ViewElement* col) {
+                (void)col;
+                col_count++;
+            });
             if (col_count == 0) {
-                const char* span_str = child->get_attribute("span");
-                col_count = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: string length
-                if (col_count <= 0) col_count = 1;
+                col_count = table_positive_span_attr(child);
             }
             int last_col = first_col + col_count - 1;
-            if (target_col >= first_col && target_col <= last_col) return lam::view_require_block(child);
+            if (target_col >= first_col && target_col <= last_col) {
+                found_colgroup = lam::view_require_block(child);
+            }
             current_col = last_col + 1;
         } else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
             current_col++;
         }
+    });
+    return found_colgroup;
+}
+
+static ViewTableRow* table_row_at_index(ViewTable* table, int target_row) {
+    if (!table || target_row < 0) return nullptr;
+    int row_index = 0;
+    for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
+        if (row_index == target_row) return row;
+        row_index++;
     }
     return nullptr;
 }
 
 // Find cell at specific grid position (handles rowspan/colspan)
 static ViewTableCell* find_cell_at(ViewTable* table, int target_row, int target_col) {
-    for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
-        for (ViewTableCell* cell = row->first_cell(); cell; cell = row->next_cell(cell)) {
-            int row_start = cell->td->row_index;
-            int row_end = row_start + cell->td->row_span;
-            int col_start = cell->td->col_index;
-            int col_end = col_start + cell->td->col_span;
+    return find_table_cell(table, [&](ViewTableRow* row, ViewTableCell* cell) {
+        (void)row;
+        int row_start = cell->td->row_index;
+        int row_end = row_start + cell->td->row_span;
+        int col_start = cell->td->col_index;
+        int col_end = col_start + cell->td->col_span;
 
-            if (target_row >= row_start && target_row < row_end &&
-                target_col >= col_start && target_col < col_end) {
-                return cell;
-            }
-        }
-    }
-    return nullptr;
+        return target_row >= row_start && target_row < row_end &&
+            target_col >= col_start && target_col < col_end;
+    });
 }
 
 static bool is_out_of_flow_table_cell_slot(View* view) {
@@ -2341,6 +2594,17 @@ static bool is_out_of_flow_table_cell_slot(View* view) {
     if (tag != HTM_TAG_TD && tag != HTM_TAG_TH) return false;
 
     return layout_view_is_out_of_flow_positioned(view);
+}
+
+template <typename Fn>
+static void for_each_table_row_cell_slot(ViewTableRow* row, Fn fn) {
+    if (!row) return;
+    for (View* child = static_cast<View*>(row->first_child); child;
+         child = static_cast<View*>(child->next_sibling)) {
+        if (child->view_type == RDT_VIEW_TABLE_CELL || is_out_of_flow_table_cell_slot(child)) {
+            fn(child);
+        }
+    }
 }
 
 // Resolve collapsed borders for all cells in table
@@ -2385,25 +2649,17 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
             // Row borders (if row elements have borders)
             // Check row above (bottom border) - for interior and top edge
             if (row > 0) {
-                int curr = 0;
-                for (ViewTableRow* r = table->first_row(); r; r = table->next_row(r)) {
-                    if (curr == row - 1) {
-                        append_visible_collapsed_border_candidate(candidates, get_row_border(r, 2)); // bottom of row above
-                        break;
-                    }
-                    curr++;
+                ViewTableRow* row_above = table_row_at_index(table, row - 1);
+                if (row_above) {
+                    append_visible_collapsed_border_candidate(candidates, get_row_border(row_above, 2)); // bottom of row above
                 }
             }
 
             // Check row below (top border) - for interior and bottom edge
             if (row < meta->row_count) {
-                int curr = 0;
-                for (ViewTableRow* r = table->first_row(); r; r = table->next_row(r)) {
-                    if (curr == row) {
-                        append_visible_collapsed_border_candidate(candidates, get_row_border(r, 0)); // top of row below
-                        break;
-                    }
-                    curr++;
+                ViewTableRow* row_below = table_row_at_index(table, row);
+                if (row_below) {
+                    append_visible_collapsed_border_candidate(candidates, get_row_border(row_below, 0)); // top of row below
                 }
             }
 
@@ -2510,15 +2766,10 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
 
             // Row borders at left and right edges (CSS 2.1 §17.6.2: rows can have borders)
             if (col == 0 || col == meta->column_count) {
-                // Find the row at this position
-                int curr = 0;
-                for (ViewTableRow* r = table->first_row(); r; r = table->next_row(r)) {
-                    if (curr == row) {
-                        int side = (col == 0) ? 3 : 1; // left or right
-                        append_visible_collapsed_border_candidate(candidates, get_row_border(r, side));
-                        break;
-                    }
-                    curr++;
+                ViewTableRow* edge_row = table_row_at_index(table, row);
+                if (edge_row) {
+                    int side = (col == 0) ? 3 : 1; // left or right
+                    append_visible_collapsed_border_candidate(candidates, get_row_border(edge_row, side));
                 }
             }
 
@@ -2704,8 +2955,8 @@ static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
     ArrayList* rowspan_cells = arraylist_new(8);
 
     // Collect all rowspan cells
-    for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
-        for (ViewTableCell* tcell = row->first_cell(); tcell; tcell = row->next_cell(tcell)) {
+    for_each_table_row(table, [&](ViewTableRow* row) {
+        for_each_table_row_cell(row, [&](ViewTableCell* tcell) {
             if (tcell->td->row_span > 1) {
                 int start_row = tcell->td->row_index;
                 int end_row = start_row + tcell->td->row_span;
@@ -2737,8 +2988,8 @@ static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
                              start_row, tcell->td->row_span, required_height, current_total);
                 }
             }
-        }
-    }
+        });
+    });
 
     // Distribute excess height for each rowspan cell
     for (int i = 0; i < rowspan_cells->length; i++) {
@@ -3275,6 +3526,13 @@ static inline bool is_column_display(CssEnum display) {
 // Helper: Check if a display value is a caption type
 static inline bool is_caption_display(CssEnum display) {
     return display == CSS_VALUE_TABLE_CAPTION;
+}
+
+static bool table_view_is_caption(ViewBlock* child) {
+    if (!child) return false;
+    DisplayValue child_display = resolve_display_value((void*)child);
+    return child->tag() == HTM_TAG_CAPTION ||
+        is_caption_display(child_display.inner);
 }
 
 static CssEnum element_specified_keyword(DomElement* elem, CssPropertyId property) {
@@ -4574,10 +4832,7 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
     bool has_content = false;
 
     // Find the bounding box of all child content
-    for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
-        if (table_cell_vertical_align_skips_child(child)) {
-            continue;
-        }
+    for_each_table_cell_vertical_align_child(lam::view_require_element(tcell), [&](View* child) {
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             if (text->y < min_y) min_y = text->y;
@@ -4594,7 +4849,7 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
             if (child_bottom > max_y) max_y = child_bottom;
             has_content = true;
         }
-    }
+    });
 
     if (!has_content) return;
 
@@ -4637,16 +4892,13 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
 
     // Apply offset to all child content
     if (vertical_offset != 0.0f) {
-        for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
-            if (table_cell_vertical_align_skips_child(child)) {
-                continue;
-            }
+        for_each_table_cell_vertical_align_child(lam::view_require_element(tcell), [&](View* child) {
             shift_table_cell_vertical_align_child(child, vertical_offset);
             if (child->view_type == RDT_VIEW_TEXT) {
                 log_debug("%s CSS vertical-align: adjusted text Y by +%.1fpx (align=%d)", tcell->source_loc(),
                          vertical_offset, (int)valign);
             }
-        }
+        });
     }
 }
 
@@ -4775,11 +5027,28 @@ static float table_rowspan_spanned_height(ViewTable* table, TableMetadata* meta,
 
 template <typename Fn>
 static void for_each_table_cell(ViewTable* table, Fn fn) {
-    for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
-        for (ViewTableCell* tcell = row->first_cell(); tcell; tcell = row->next_cell(tcell)) {
+    for_each_table_row(table, [&](ViewTableRow* row) {
+        for_each_table_row_cell(row, [&](ViewTableCell* tcell) {
             fn(row, tcell);
-        }
+        });
+    });
+}
+
+template <typename Fn>
+static void for_each_direct_table_block(ViewTable* table, Fn fn) {
+    if (!table) return;
+    for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
+        if (!child_view->is_block()) continue;
+        fn(lam::view_require_block(child_view));
     }
+}
+
+template <typename Fn>
+static void for_each_direct_table_row_group(ViewTable* table, Fn fn) {
+    for_each_direct_table_block(table, [&](ViewBlock* child) {
+        if (child->view_type != RDT_VIEW_TABLE_ROW_GROUP) return;
+        fn(lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child), child);
+    });
 }
 
 static void update_rowspan_cell_heights(ViewTable* table, TableMetadata* meta) {
@@ -4806,6 +5075,34 @@ static void update_rowspan_cell_heights(ViewTable* table, TableMetadata* meta) {
     });
 }
 
+static float table_row_float_content_bottom(ViewBlock* row) {
+    float max_float_bottom = 0.0f;
+    if (!row) return max_float_bottom;
+    for (View* child = row->first_child; child; child = child->next_sibling) {
+        if (!child->view_type || !child->is_block()) continue;
+        ViewBlock* block = lam::view_require_block(child);
+        if (layout_position_is_floated(block->position)) {
+            float bottom = block->y + block->height;
+            if (bottom > max_float_bottom) max_float_bottom = bottom;
+        }
+    }
+    return max_float_bottom;
+}
+
+static void table_size_float_containing_row(ViewTable* table, ViewBlock* row,
+                                            float* group_height) {
+    float max_float_bottom = table_row_float_content_bottom(row);
+    if (max_float_bottom > 0.0f) {
+        row->width = table->width;
+        row->height = max_float_bottom;
+        log_debug("Float-containing row sized: width=%.0f, height=%.0f",
+                  row->width, row->height);
+    }
+    if (group_height && row->height > *group_height) {
+        *group_height = row->height;
+    }
+}
+
 static int table_row_metadata_index_from_row(ViewTableRow* trow, int fallback_index) {
     if (!trow) return fallback_index;
     ViewTableCell* first_cell = trow->first_cell();
@@ -4823,17 +5120,71 @@ static int table_row_metadata_index(ViewBlock* row, int fallback_index) {
 
 template <typename Fn>
 static void for_each_table_body_group_row(ViewTable* table, Fn fn) {
-    if (!table) return;
-    for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
-        if (!child_view->is_block()) continue;
-        ViewBlock* child = lam::view_require_block(child_view);
-        if (child->view_type != RDT_VIEW_TABLE_ROW_GROUP) continue;
-        ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
-        if (group->get_section_type() != TABLE_SECTION_TBODY) continue;
-        for (ViewTableRow* row = group->first_row(); row; row = group->next_row(row)) {
+    for_each_direct_table_row_group(table, [&](ViewTableRowGroup* group, ViewBlock* child) {
+        (void)child;
+        if (group->get_section_type() != TABLE_SECTION_TBODY) return;
+        for_each_table_row_in_group(group, [&](ViewTableRow* row, ViewBlock* row_block) {
+            (void)row_block;
             fn(group, row);
+        });
+    });
+}
+
+struct TableHeightSectionSummary {
+    float non_body_grid_height;
+    float body_natural_height;
+    int body_row_count;
+    int section_count;
+};
+
+static TableHeightSectionSummary table_collect_height_section_summary(ViewTable* table,
+                                                                      TableMetadata* meta) {
+    TableHeightSectionSummary summary = {};
+    if (!table || !meta) return summary;
+
+    log_debug("%s Calculating natural heights for each section", table->source_loc());
+    for_each_direct_table_block(table, [&](ViewBlock* child) {
+        if (table_view_is_caption(child)) {
+            log_debug("%s   Caption height outside grid: %.1f",
+                      table->source_loc(), child->height);
+        } else if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+            ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
+            TableSectionType section_type = group->get_section_type();
+            bool is_body_group = (section_type == TABLE_SECTION_TBODY);
+
+            log_debug("%s   Row group section_type=%d (TBODY=%d), is_body=%d",
+                      table->source_loc(), section_type, TABLE_SECTION_THEAD,
+                      TABLE_SECTION_TBODY, is_body_group);
+
+            float group_height = 0.0f;
+            int row_count_in_group = 0;
+            for_each_table_row_in_group(group, [&](ViewTableRow* row, ViewBlock* row_block) {
+                (void)row_block;
+                int row_idx = table_row_metadata_index_from_row(row, -1);
+                if (row_idx < 0 || row_idx >= meta->row_count) return;
+
+                float row_height = meta->row_heights[row_idx];
+                group_height += row_height;
+                row_count_in_group++;
+                log_debug("%s     Row %d natural height: %.1f",
+                          table->source_loc(), row_idx, row_height);
+            });
+
+            if (is_body_group) {
+                summary.body_natural_height += group_height;
+                summary.body_row_count += row_count_in_group;
+                summary.section_count++;
+                log_debug("%s   Body group natural height: %.1f (rows only), rows: %d",
+                          table->source_loc(), group_height, row_count_in_group);
+            } else {
+                summary.non_body_grid_height += group_height;
+                summary.section_count++;
+                log_debug("%s   Header/Footer group natural height: %.1f (rows only)",
+                          table->source_loc(), group_height);
+            }
         }
-    }
+    });
+    return summary;
 }
 
 static float table_explicit_height_row_start_y(ViewTable* table, float table_border_top,
@@ -4850,6 +5201,103 @@ static float table_explicit_height_row_start_y(ViewTable* table, float table_bor
     return y_accum;
 }
 
+static float table_explicit_height_grid_spacing(ViewTable* table, TableMetadata* meta,
+                                                int section_count) {
+    if (!table || !meta || table->tb->border_collapse ||
+        table->tb->border_spacing_v <= 0.0f) return 0.0f;
+
+    float total_spacing = section_count > 0
+        ? (section_count + 1) * table->tb->border_spacing_v : 0.0f;
+    int within_group_boundaries = meta->row_count - section_count;
+    if (within_group_boundaries < 0) within_group_boundaries = 0;
+    return total_spacing + within_group_boundaries * table->tb->border_spacing_v;
+}
+
+static float table_caption_positive_margin_top(ViewBlock* caption) {
+    return (caption && caption->bound && caption->bound->margin.top > 0.0f)
+        ? caption->bound->margin.top : 0.0f;
+}
+
+static float table_caption_positive_margin_left(ViewBlock* caption) {
+    return (caption && caption->bound &&
+            caption->bound->margin.left_type != CSS_VALUE_AUTO &&
+            caption->bound->margin.left > 0.0f)
+        ? caption->bound->margin.left : 0.0f;
+}
+
+static float table_caption_positive_margin_right(ViewBlock* caption) {
+    return (caption && caption->bound &&
+            caption->bound->margin.right_type != CSS_VALUE_AUTO &&
+            caption->bound->margin.right > 0.0f)
+        ? caption->bound->margin.right : 0.0f;
+}
+
+static float table_caption_positive_horizontal_margin(ViewBlock* caption) {
+    return table_caption_positive_margin_left(caption) +
+        table_caption_positive_margin_right(caption);
+}
+
+static float table_caption_positive_vertical_margin(ViewBlock* caption) {
+    float margin_v = 0.0f;
+    if (caption && caption->bound) {
+        float mt = caption->bound->margin.top > 0.0f ? caption->bound->margin.top : 0.0f;
+        float mb = caption->bound->margin.bottom > 0.0f ? caption->bound->margin.bottom : 0.0f;
+        margin_v = mt + mb;
+    }
+    return margin_v;
+}
+
+static float table_caption_height_with_margins(ViewBlock* caption) {
+    if (!caption) return 0.0f;
+    float margin_v = table_caption_positive_vertical_margin(caption);
+    return caption->height + margin_v;
+}
+
+template <typename Fn>
+static void for_each_table_caption(ArrayList* captions, Fn fn) {
+    if (!captions) return;
+    for (int ci = 0; ci < captions->length; ci++) {
+        fn(table_array_view_block(captions, ci), ci);
+    }
+}
+
+static void table_position_caption_with_margins(ViewBlock* caption, float base_y) {
+    if (!caption) return;
+    caption->x = table_caption_positive_margin_left(caption);
+    caption->y = base_y + table_caption_positive_margin_top(caption);
+}
+
+enum TableCaptionWidthChangeReference {
+    TABLE_CAPTION_WIDTH_REFERENCE_ADJUSTED_CAP,
+    TABLE_CAPTION_WIDTH_REFERENCE_WRAPPER
+};
+
+static float table_adjust_caption_width_and_height(LayoutContext* lycon,
+                                                   ViewTable* table,
+                                                   ViewBlock* caption,
+                                                   float table_width,
+                                                   float wrapper_content_width,
+                                                   int caption_index,
+                                                   TableCaptionWidthChangeReference reference) {
+    float old_width = caption->width;
+    adjust_table_caption_width(caption, wrapper_content_width);
+
+    float comparison_width = reference == TABLE_CAPTION_WIDTH_REFERENCE_ADJUSTED_CAP
+        ? caption->width : wrapper_content_width;
+    if (fabs(comparison_width - old_width) <= 0.5f) {
+        return table_caption_height_with_margins(caption);
+    }
+
+    if (reference == TABLE_CAPTION_WIDTH_REFERENCE_ADJUSTED_CAP) {
+        log_debug("Caption %d width changed: %.1f -> %.1f, re-laying out",
+                  caption_index, old_width, caption->width);
+    } else {
+        log_debug("%s Bottom caption %d width changed: %.1f -> %.1f, re-laying out",
+                  table->source_loc(), caption_index, old_width, table_width);
+    }
+    return relayout_table_caption(lycon, caption, table_width);
+}
+
 static void table_recalculate_row_y_positions(ViewTable* table, TableMetadata* meta,
                                               float y_accum) {
     if (!table || !meta) return;
@@ -4860,6 +5308,188 @@ static void table_recalculate_row_y_positions(ViewTable* table, TableMetadata* m
             y_accum += table->tb->border_spacing_v;
         }
     }
+}
+
+static void table_recalculate_explicit_height_row_y_positions(
+    ViewTable* table, TableMetadata* meta, float table_border_top,
+    float table_padding_top, ViewBlock* caption, float caption_height) {
+    float y_accum = table_explicit_height_row_start_y(
+        table, table_border_top, table_padding_top, caption, caption_height);
+    table_recalculate_row_y_positions(table, meta, y_accum);
+}
+
+static float table_apply_explicit_height_row_extra(ViewTable* table, TableMetadata* meta,
+                                                   int row_idx, float extra_height,
+                                                   int eligible_row_count,
+                                                   float eligible_height_total,
+                                                   const char* row_label,
+                                                   const char* log_indent) {
+    if (!table || !meta || row_idx < 0 || row_idx >= meta->row_count ||
+        eligible_row_count <= 0) return 0.0f;
+    float natural_height = meta->row_heights[row_idx];
+    float row_extra = eligible_height_total > 0.0f
+        ? extra_height * natural_height / eligible_height_total
+        : extra_height / eligible_row_count;
+    meta->row_heights[row_idx] += row_extra;
+    log_debug("%s%s%s row %d: natural=%.1f + extra=%.1f = %.1f",
+              table->source_loc(), log_indent ? log_indent : "     ",
+              row_label, row_idx, natural_height,
+              row_extra, meta->row_heights[row_idx]);
+    return row_extra;
+}
+
+static float table_resolve_row_explicit_height(LayoutContext* lycon, ViewTable* table,
+                                               TableMetadata* meta, ViewBlock* row,
+                                               int row_idx, const char* row_label) {
+    if (!row || !row->is_element()) return 0.0f;
+    DomElement* row_elem = row->as_element();
+    if (!row_elem->specified_style) return 0.0f;
+
+    CssDeclaration* height_decl = style_tree_get_declaration(
+        row_elem->specified_style, CSS_PROPERTY_HEIGHT);
+    if (!height_decl || !height_decl->value) return 0.0f;
+
+    // CSS 2.1 §17.5.3: percentage row heights compute to auto but still
+    // need to be remembered so explicit table-height distribution skips them.
+    if (height_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        if (row_idx >= 0 && row_idx < meta->row_count) {
+            meta->row_has_percent_height[row_idx] = true;
+            log_debug("%s %s %d has percentage height - treating as auto",
+                      table->source_loc(), row_label, row_idx);
+        }
+        return 0.0f;
+    }
+
+    float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+    if (resolved_height > 0.0f) {
+        log_debug("%s %s has explicit CSS height: %.1fpx",
+                  table->source_loc(), row_label, resolved_height);
+        return resolved_height;
+    }
+    return 0.0f;
+}
+
+static void table_place_collapsed_row(ViewTable* table, TableMetadata* meta,
+                                      ViewTableRow* trow, float row_y,
+                                      float row_width, float metadata_y,
+                                      float* col_widths, float* col_x_positions,
+                                      int columns, int row_idx,
+                                      const char* row_label) {
+    trow->x = 0.0f;
+    trow->y = row_y;
+    trow->width = row_width;
+    trow->height = 0.0f;
+
+    for_each_table_row_cell(trow, [&](ViewTableCell* tcell) {
+        ViewBlock* cell = lam::view_require_block(tcell);
+        float cell_abs_x = table_column_visual_x(table, col_widths, col_x_positions,
+                                                 tcell->td->col_index,
+                                                 tcell->td->col_span, columns);
+        cell->x = cell_abs_x - col_x_positions[0];
+        cell->y = 0.0f;
+        cell->width = calculate_cell_width_from_columns(tcell, col_widths, columns);
+        cell->height = 0.0f;
+    });
+
+    if (row_idx >= 0 && row_idx < meta->row_count) {
+        meta->row_y_positions[row_idx] = metadata_y;
+        meta->row_heights[row_idx] = 0.0f;
+        log_debug("%s Collapsed %s %d: y=%.1f, height=0",
+                  table->source_loc(), row_label, row_idx, metadata_y);
+    }
+}
+
+static float table_measure_row_cells(LayoutContext* lycon, ViewTable* table,
+                                     TableMetadata* meta, ViewTableRow* trow,
+                                     float* col_widths, float* col_x_positions,
+                                     int columns) {
+    float row_height = 0.0f;
+    for_each_table_row_cell(trow, [&](ViewTableCell* tcell) {
+        float height_for_row = process_table_cell(
+            lycon, tcell, table, col_widths, col_x_positions, columns,
+            meta->col_edge_max_border, meta->col_collapsed, meta->col_original_widths);
+        if (height_for_row > row_height) {
+            row_height = height_for_row;
+        }
+    });
+    return row_height;
+}
+
+static void table_update_row_views_from_metadata(LayoutContext* lycon, ViewTable* table,
+                                                 TableMetadata* meta) {
+    if (!table || !meta) return;
+
+    for_each_direct_table_block(table, [&](ViewBlock* child) {
+        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+            float group_max_y = 0.0f;
+            ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
+
+            for_each_table_row_in_group(group, [&](ViewTableRow* trow, ViewBlock* row) {
+                int row_idx = table_row_metadata_index_from_row(trow, -1);
+                if (row_idx < 0 || row_idx >= meta->row_count) return;
+
+                row->height = meta->row_heights[row_idx];
+                row->y = meta->row_y_positions[row_idx] - child->y;
+
+                float row_bottom = row->y + row->height;
+                if (row_bottom > group_max_y) group_max_y = row_bottom;
+
+                update_row_cells_after_height_change(lycon, trow, row->height, true, false);
+            });
+
+            if (group_max_y > 0.0f) {
+                float old_group_height = child->height;
+                child->height = group_max_y;
+                log_debug("%s Updated row group height from %.1f to %.1f",
+                          table->source_loc(), old_group_height, child->height);
+            }
+        } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
+            ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(child);
+            int row_idx = table_row_metadata_index_from_row(trow, -1);
+            if (row_idx < 0 || row_idx >= meta->row_count) return;
+
+            child->height = meta->row_heights[row_idx];
+            child->y = meta->row_y_positions[row_idx];
+            update_row_cells_after_height_change(lycon, trow, child->height, true, false);
+        }
+    });
+}
+
+static void table_reposition_row_groups_from_metadata(ViewTable* table, TableMetadata* meta) {
+    if (!table || !meta || !table->tb) return;
+
+    float group_y_accum = -1.0f;
+    for_each_direct_table_block(table, [&](ViewBlock* child) {
+        if (child->view_type != RDT_VIEW_TABLE_ROW_GROUP) return;
+
+        if (group_y_accum >= 0.0f) {
+            float old_y = child->y;
+            child->y = group_y_accum;
+            if (old_y != child->y) {
+                log_debug("%s Repositioned row group from y=%.1f to y=%.1f",
+                          table->source_loc(), old_y, child->y);
+            }
+        } else {
+            group_y_accum = child->y;
+        }
+
+        float group_max_y = 0.0f;
+        ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
+        for_each_table_row_in_group(group, [&](ViewTableRow* trow, ViewBlock* row) {
+            int row_idx = table_row_metadata_index_from_row(trow, -1);
+            if (row_idx < 0 || row_idx >= meta->row_count) return;
+
+            row->y = meta->row_y_positions[row_idx] - child->y;
+            float row_bottom = row->y + row->height;
+            if (row_bottom > group_max_y) group_max_y = row_bottom;
+        });
+        if (group_max_y > 0.0f) child->height = group_max_y;
+
+        group_y_accum = child->y + child->height;
+        if (!table->tb->border_collapse && table->tb->border_spacing_v > 0.0f) {
+            group_y_accum += table->tb->border_spacing_v;
+        }
+    });
 }
 
 static void update_single_row_cells_after_height_change(LayoutContext* lycon, ViewTableRow* trow,
@@ -4883,13 +5513,11 @@ static float reflow_table_rows_from_metadata(LayoutContext* lycon, ViewTable* ta
             float group_start_y = cursor_y;
             float group_max_y = 0.0f;
             child->y = group_start_y;
+            ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
 
-            for (View* row_view = child->first_child; row_view; row_view = row_view->next_sibling) {
-                ViewBlock* row = lam::view_as_block(row_view);
-                if (!row || row->view_type != RDT_VIEW_TABLE_ROW) continue;
-
+            for_each_table_row_in_group(group, [&](ViewTableRow* trow, ViewBlock* row) {
                 int row_idx = table_row_metadata_index(row, visual_row_index);
-                if (row_idx < 0 || row_idx >= meta->row_count) continue;
+                if (row_idx < 0 || row_idx >= meta->row_count) return;
 
                 float row_height = meta->row_heights[row_idx];
                 bool is_collapsed = meta->row_collapsed && meta->row_collapsed[row_idx];
@@ -4898,7 +5526,7 @@ static float reflow_table_rows_from_metadata(LayoutContext* lycon, ViewTable* ta
                 row->height = row_height;
 
                 update_single_row_cells_after_height_change(
-                    lycon, lam::view_require<RDT_VIEW_TABLE_ROW>(row), row_height);
+                    lycon, trow, row_height);
 
                 float row_bottom = row->y + row->height;
                 if (row_bottom > group_max_y) group_max_y = row_bottom;
@@ -4910,7 +5538,7 @@ static float reflow_table_rows_from_metadata(LayoutContext* lycon, ViewTable* ta
                     visual_row_index < meta->row_count) {
                     cursor_y += table->tb->border_spacing_v;
                 }
-            }
+            });
 
             child->height = group_max_y;
         } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
@@ -4939,6 +5567,24 @@ static float reflow_table_rows_from_metadata(LayoutContext* lycon, ViewTable* ta
     log_debug("%s Row reflow from metadata: start=%.1f, end=%.1f, rows=%d",
               table->source_loc(), content_area_top_y, cursor_y, visual_row_index);
     return cursor_y;
+}
+
+static void table_apply_rowspan_distributed_height(LayoutContext* lycon,
+                                                   ViewTable* table,
+                                                   TableMetadata* meta,
+                                                   ViewTableRow* trow,
+                                                   ViewBlock* row,
+                                                   const char* row_label) {
+    int row_idx = table_row_metadata_index_from_row(trow, -1);
+    if (row_idx < 0 || row_idx >= meta->row_count) return;
+
+    float old_height = row->height;
+    row->height = meta->row_heights[row_idx];
+    if (row->height == old_height) return;
+
+    log_debug("%s Updated %s %d height: %.1fpx -> %.1fpx (after rowspan distribution)",
+              table->source_loc(), row_label, row_idx, old_height, row->height);
+    update_row_cells_after_height_change(lycon, trow, row->height, true, true);
 }
 
 // Layout cell content with correct parent width (after cell dimensions are set)
@@ -5538,6 +6184,47 @@ static float table_unresolved_html_cell_horizontal_box_extra(DomElement* cell) {
     return extra;
 }
 
+static float table_intrinsic_child_horizontal_margin(LayoutContext* lycon,
+                                                    DomElement* child_elem,
+                                                    bool include_shorthand) {
+    if (!child_elem) return 0.0f;
+    float margin_h = 0.0f;
+    if (child_elem->bound) {
+        if (child_elem->bound->margin.left_type != CSS_VALUE_AUTO) {
+            margin_h += child_elem->bound->margin.left;
+        }
+        if (child_elem->bound->margin.right_type != CSS_VALUE_AUTO) {
+            margin_h += child_elem->bound->margin.right;
+        }
+        return margin_h;
+    }
+    if (!child_elem->specified_style) return 0.0f;
+
+    CssDeclaration* ml = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
+    if (ml && ml->value && ml->value->type == CSS_VALUE_TYPE_LENGTH) {
+        margin_h += resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, ml->value);
+    }
+    CssDeclaration* mr = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_RIGHT);
+    if (mr && mr->value && mr->value->type == CSS_VALUE_TYPE_LENGTH) {
+        margin_h += resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, mr->value);
+    }
+    if (!include_shorthand || margin_h != 0.0f) return margin_h;
+
+    CssDeclaration* m = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN);
+    if (!m || !m->value) return margin_h;
+    if (m->value->type == CSS_VALUE_TYPE_LENGTH) {
+        return 2.0f * resolve_length_value(lycon, CSS_PROPERTY_MARGIN, m->value);
+    }
+    if (m->value->type == CSS_VALUE_TYPE_LIST) {
+        const CssValue* ml_value = css_box_shorthand_side_value(m->value, 3);
+        const CssValue* mr_value = css_box_shorthand_side_value(m->value, 1);
+        float ml_resolved = ml_value ? resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, ml_value) : 0.0f;
+        float mr_resolved = mr_value ? resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, mr_value) : 0.0f;
+        return ml_resolved + mr_resolved;
+    }
+    return margin_h;
+}
+
 static bool table_element_is_floated(DomElement* element) {
     if (!element) return false;
 
@@ -5796,20 +6483,9 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
                     log_debug("%s Cell widths: adding inter-element space width=%.2f", cell->source_loc(), lycon->font.style->space_width);
                 }
                 // CSS 2.1: inline element horizontal margins contribute to line box width
-                float inline_margin_h = 0;
-                if (child_elem->bound) {
-                    if (child_elem->bound->margin.left_type != CSS_VALUE_AUTO)
-                        inline_margin_h += child_elem->bound->margin.left;
-                    if (child_elem->bound->margin.right_type != CSS_VALUE_AUTO)
-                        inline_margin_h += child_elem->bound->margin.right;
-                } else if (child_elem->specified_style) {
-                    CssDeclaration* ml = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
-                    if (ml && ml->value && ml->value->type == CSS_VALUE_TYPE_LENGTH)
-                        inline_margin_h += resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, ml->value);
-                    CssDeclaration* mr = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_RIGHT);
-                    if (mr && mr->value && mr->value->type == CSS_VALUE_TYPE_LENGTH)
-                        inline_margin_h += resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, mr->value);
-                } else {
+                float inline_margin_h = table_intrinsic_child_horizontal_margin(
+                    lycon, child_elem, false);
+                if (!child_elem->bound && !child_elem->specified_style) {
                     // No resolved styles yet (measurement pass before layout).
                     // Apply UA default margins for known form controls to get accurate sizing.
                     // These mirror the values set in resolve_htm_style.cpp for checkbox/radio.
@@ -5843,34 +6519,8 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
                 }
 
                 // Block element: account for horizontal margins (including negative)
-                float margin_h = 0;
-                if (child_elem->bound) {
-                    if (child_elem->bound->margin.left_type != CSS_VALUE_AUTO)
-                        margin_h += child_elem->bound->margin.left;
-                    if (child_elem->bound->margin.right_type != CSS_VALUE_AUTO)
-                        margin_h += child_elem->bound->margin.right;
-                } else if (child_elem->specified_style) {
-                    CssDeclaration* ml = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
-                    if (ml && ml->value && ml->value->type == CSS_VALUE_TYPE_LENGTH)
-                        margin_h += resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, ml->value);
-                    CssDeclaration* mr = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_RIGHT);
-                    if (mr && mr->value && mr->value->type == CSS_VALUE_TYPE_LENGTH)
-                        margin_h += resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, mr->value);
-                    if (margin_h == 0) {
-                        CssDeclaration* m = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN);
-                        if (m && m->value) {
-                            if (m->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                margin_h = 2 * resolve_length_value(lycon, CSS_PROPERTY_MARGIN, m->value);
-                            } else if (m->value->type == CSS_VALUE_TYPE_LIST) {
-                                const CssValue* ml = css_box_shorthand_side_value(m->value, 3);
-                                const CssValue* mr = css_box_shorthand_side_value(m->value, 1);
-                                float ml_val = ml ? resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, ml) : 0.0f;
-                                float mr_val = mr ? resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, mr) : 0.0f;
-                                margin_h = ml_val + mr_val;
-                            }
-                        }
-                    }
-                }
+                float margin_h = table_intrinsic_child_horizontal_margin(
+                    lycon, child_elem, true);
                 float block_outer_max = child_max + margin_h;
                 if (block_outer_max < 0) block_outer_max = 0;
                 float block_outer_min = child_min + margin_h;
@@ -6007,9 +6657,9 @@ static bool normalize_rowspans_to_row_groups(ViewTable* table) {
     bool changed = false;
     if (!table) return changed;
 
-    for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
+    for_each_table_row(table, [&](ViewTableRow* row) {
         int remaining_in_group = table_row_remaining_in_group(row);
-        for (ViewTableCell* cell = row->first_cell(); cell; cell = row->next_cell(cell)) {
+        for_each_table_row_cell(row, [&](ViewTableCell* cell) {
             int original_span = cell->td->row_span;
             int used_span = original_span;
             if (used_span == 0) {
@@ -6027,10 +6677,35 @@ static bool normalize_rowspans_to_row_groups(ViewTable* table) {
                 cell->td->row_span = used_span;
                 changed = true;
             }
-        }
-    }
+        });
+    });
 
     return changed;
+}
+
+static int table_occupancy_place_span(bool* occupied, int rows, int columns, int row, int col,
+                                      int row_span, int col_span, int* max_col_used) {
+    while (col < columns && occupied[row * columns + col]) col++;
+    for (int r = row; r < row + row_span && r < rows; r++) {
+        for (int c = col; c < col + col_span && c < columns; c++) {
+            occupied[r * columns + c] = true;
+        }
+    }
+    int right = col + col_span;
+    if (max_col_used && right > *max_col_used) *max_col_used = right;
+    return right;
+}
+
+static int table_metadata_place_span(TableMetadata* meta, int rows, int columns, int row, int col,
+                                     int row_span, int col_span, int* start_col) {
+    while (col < columns && meta->grid(row, col)) col++;
+    if (start_col) *start_col = col;
+    for (int r = row; r < row + row_span && r < rows; r++) {
+        for (int c = col; c < col + col_span && c < columns; c++) {
+            meta->grid(r, c) = true;
+        }
+    }
+    return col + col_span;
 }
 
 static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* table) {
@@ -6040,52 +6715,37 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
 
     // Iterate all rows using navigation helpers
     // CSS 2.1 §17.5.5: Collapsed rows still contribute to column width calculation
-    for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
+    for_each_table_row(table, [&](ViewTableRow* row) {
         rows++;
         int row_cells = 0;
-        for (View* child = static_cast<View*>(row->first_child); child; child = static_cast<View*>(child->next_sibling)) {
+        for_each_table_row_cell_slot(row, [&](View* child) {
             if (child->view_type == RDT_VIEW_TABLE_CELL) {
                 ViewTableCell* cell = lam::view_require<RDT_VIEW_TABLE_CELL>(child);
                 row_cells += cell->td->col_span;
-            } else if (is_out_of_flow_table_cell_slot(child)) {
+            } else {
                 row_cells++;
             }
-        }
+        });
         if (row_cells > columns) columns = row_cells;
-    }
+    });
 
     // CSS 2.1 §17.2.1: Column count is max(cells_per_row, col_element_count)
     {
         int col_count = 0;
-        for (View* child_view = static_cast<View*>(table->first_child); child_view; child_view = static_cast<View*>(child_view->next_sibling)) {
-            ViewElement* child = lam::view_as_element(child_view);
-            if (!child) continue;
+        for_each_table_column_source(table, [&](ViewElement* child) {
             if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
                 bool has_col = false;
-                for (View* col_view = static_cast<View*>(child->first_child); col_view; col_view = static_cast<View*>(col_view->next_sibling)) {
-                    ViewElement* col = lam::view_as_element(col_view);
-                    if (!col) continue;
-                    if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
-                        const char* span_str = col->get_attribute("span");
-                        int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: span count
-                        if (span <= 0) span = 1;
-                        col_count += span;
-                        has_col = true;
-                    }
-                }
+                for_each_table_colgroup_column(child, [&](ViewElement* col) {
+                    col_count += table_positive_span_attr(col);
+                    has_col = true;
+                });
                 if (!has_col) {
-                    const char* span_str = child->get_attribute("span");
-                    int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: string length
-                    if (span <= 0) span = 1;
-                    col_count += span;
+                    col_count += table_positive_span_attr(child);
                 }
             } else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
-                const char* span_str = child->get_attribute("span");
-                int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: span count
-                if (span <= 0) span = 1;
-                col_count += span;
+                col_count += table_positive_span_attr(child);
             }
-        }
+        });
         if (col_count > columns) columns = col_count;
     }
 
@@ -6107,34 +6767,22 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
             int max_col_used = 0;
 
             int cur_row = 0;
-            for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
+            for_each_table_row(table, [&](ViewTableRow* row) {
                 int col = 0;
-                for (View* child = static_cast<View*>(row->first_child); child; child = static_cast<View*>(child->next_sibling)) {
+                for_each_table_row_cell_slot(row, [&](View* child) {
                     if (is_out_of_flow_table_cell_slot(child)) {
-                        while (col < est_cols && occupied[cur_row * est_cols + col]) col++;
-                        if (col < est_cols) occupied[cur_row * est_cols + col] = true;
-                        int right = col + 1;
-                        if (right > max_col_used) max_col_used = right;
-                        col++;
-                        continue;
+                        col = table_occupancy_place_span(occupied, rows, est_cols,
+                                                         cur_row, col, 1, 1, &max_col_used);
+                        return;
                     }
-                    if (child->view_type != RDT_VIEW_TABLE_CELL) continue;
 
                     ViewTableCell* cell = lam::view_require<RDT_VIEW_TABLE_CELL>(child);
-                    // Find next free column
-                    while (col < est_cols && occupied[cur_row * est_cols + col]) col++;
-                    // Mark occupied
-                    for (int r = cur_row; r < cur_row + cell->td->row_span && r < rows; r++) {
-                        for (int c = col; c < col + cell->td->col_span && c < est_cols; c++) {
-                            occupied[r * est_cols + c] = true;
-                        }
-                    }
-                    int right = col + cell->td->col_span;
-                    if (right > max_col_used) max_col_used = right;
-                    col += cell->td->col_span;
-                }
+                    col = table_occupancy_place_span(occupied, rows, est_cols,
+                                                     cur_row, col, cell->td->row_span,
+                                                     cell->td->col_span, &max_col_used);
+                });
                 cur_row++;
-            }
+            });
             mem_free(occupied);
             if (max_col_used > columns) {
                 log_debug("%s Recount columns after rowspan normalization: %d -> %d", table->source_loc(), columns, max_col_used);
@@ -6148,7 +6796,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
 
     // Second pass: assign column indices, measure widths, and track collapsed rows
     int current_row = 0;
-    for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
+    for_each_table_row(table, [&](ViewTableRow* row) {
         // Track visibility: collapse for this row
         // CSS 2.1 §17.5.5: Rows with visibility: collapse don't contribute to height
         if (is_visibility_collapse(lam::view_require_block(row))) {
@@ -6157,74 +6805,49 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
         }
 
         int col = 0;
-        for (View* child = static_cast<View*>(row->first_child); child; child = static_cast<View*>(child->next_sibling)) {
+        for_each_table_row_cell_slot(row, [&](View* child) {
             if (is_out_of_flow_table_cell_slot(child)) {
-                while (col < columns && meta->grid(current_row, col)) {
-                    col++;
-                }
-                if (col < columns) {
-                    meta->grid(current_row, col) = true;
-                }
-                col++;
-                continue;
+                col = table_metadata_place_span(meta, rows, columns, current_row, col, 1, 1, nullptr);
+                return;
             }
-            if (child->view_type != RDT_VIEW_TABLE_CELL) continue;
 
             ViewTableCell* cell = lam::view_require<RDT_VIEW_TABLE_CELL>(child);
-            // Find next available column
-            while (col < columns && meta->grid(current_row, col)) {
-                col++;
-            }
+            int start_col = 0;
+            col = table_metadata_place_span(meta, rows, columns, current_row, col,
+                                            cell->td->row_span, cell->td->col_span, &start_col);
 
-            // Assign indices. An over-full row can leave col == columns; clamp the stored
+            // Assign indices. An over-full row can leave start_col == columns; clamp the stored
             // column index so it never indexes one past the columns-sized width arrays
-            // (col_widths/col_min_widths/col_max_widths). The grid-marking loop below uses
-            // the raw col and is already bounded by `c < columns`.
-            cell->td->col_index = (col < columns) ? col : (columns > 0 ? columns - 1 : 0);
+            // (col_widths/col_min_widths/col_max_widths). The grid placement helper marks
+            // from the raw start_col and is already bounded by `c < columns`.
+            cell->td->col_index = (start_col < columns) ? start_col : (columns > 0 ? columns - 1 : 0);
             cell->td->row_index = current_row;
-
-            // Mark grid as occupied
-            for (int r = current_row; r < current_row + cell->td->row_span && r < rows; r++) {
-                for (int c = col; c < col + cell->td->col_span && c < columns; c++) {
-                    meta->grid(r, c) = true;
-                }
-            }
-
-            col += cell->td->col_span;
-        }
+        });
         current_row++;
-    }
+    });
 
     // CSS 2.1 §17.5.5: Track visibility: collapse for columns
     // Walk column/colgroup elements and check visibility on each column
     {
         int col_idx = 0;
-        for (View* child_view = static_cast<View*>(table->first_child); child_view; child_view = static_cast<View*>(child_view->next_sibling)) {
-            ViewElement* child = lam::view_as_element(child_view);
-            if (!child) continue;
+        for_each_table_column_source(table, [&](ViewElement* child) {
             if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
                 // Check if the colgroup itself is collapsed
                 bool colgroup_collapsed = is_visibility_collapse(lam::view_require_block(child));
                 bool has_col_children = false;
-                for (View* col_view = static_cast<View*>(child->first_child); col_view; col_view = static_cast<View*>(col_view->next_sibling)) {
-                    ViewElement* col = lam::view_as_element(col_view);
-                    if (!col) continue;
-                    if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
-                        has_col_children = true;
-                        if (col_idx < columns) {
-                            if (colgroup_collapsed || is_visibility_collapse(lam::view_require_block(col))) {
-                                meta->col_collapsed[col_idx] = true;
-                                log_debug("%s Column %d has visibility: collapse", table->source_loc(), col_idx);
-                            }
-                            col_idx++;
+                for_each_table_colgroup_column(child, [&](ViewElement* col) {
+                    has_col_children = true;
+                    if (col_idx < columns) {
+                        if (colgroup_collapsed || is_visibility_collapse(lam::view_require_block(col))) {
+                            meta->col_collapsed[col_idx] = true;
+                            log_debug("%s Column %d has visibility: collapse", table->source_loc(), col_idx);
                         }
+                        col_idx++;
                     }
-                }
+                });
                 // Colgroup without col children implicitly defines span columns
                 if (!has_col_children) {
-                    const char* span_str = child->get_attribute("span");
-                    int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: string length
-                    if (span <= 0) span = 1;
+                    int span = table_positive_span_attr(child);
                     for (int s = 0; s < span && col_idx < columns; s++) {
                         if (colgroup_collapsed) {
                             meta->col_collapsed[col_idx] = true;
@@ -6240,7 +6863,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
                 }
                 col_idx++;
             }
-        }
+        });
     }
 
     return meta;
@@ -6276,23 +6899,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         ViewBlock* child = lam::view_as_block(child_view);
         if (!child) continue;
         // Check for HTML <caption> tag OR CSS display: table-caption
-        DisplayValue child_display = resolve_display_value((void*)child);
-        bool is_caption = (child->tag() == HTM_TAG_CAPTION) ||
-                         (child_display.inner == CSS_VALUE_TABLE_CAPTION);
-        if (is_caption) {
+        if (table_view_is_caption(child)) {
             arraylist_append(captions, child);
             if (!caption) caption = child;
             // Caption height calculation: caption->height already includes content+padding+border
             if (child->height > 0) {
-                float margin_v = 0;
-                if (child->bound) {
-                    // Include both vertical margins of the caption in the height contribution.
-                    // CSS 2.1 §17.4: The caption box occupies space including its margins.
-                    float mt = child->bound->margin.top > 0 ? child->bound->margin.top : 0;
-                    float mb = child->bound->margin.bottom > 0 ? child->bound->margin.bottom : 0;
-                    margin_v = mt + mb;
-                }
-                caption_height += child->height + margin_v;
+                float margin_v = table_caption_positive_vertical_margin(child);
+                caption_height += table_caption_height_with_margins(child);
                 log_debug("Caption height calculation: height(content+padding+border)=%.1f, margin_v=%.1f, total_so_far=%.1f",
                     child->height, margin_v, caption_height);
             }
@@ -6335,30 +6948,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             float caption_box_width = table_width;  // Caption's own box width (without margins)
             // CSS 2.1 §17.4: The table wrapper must accommodate the caption's margin-box.
             // Add fixed horizontal margins to the table wrapper width without affecting caption width.
-            if (caption->bound) {
-                float ml = (caption->bound->margin.left_type != CSS_VALUE_AUTO && caption->bound->margin.left > 0)
-                           ? caption->bound->margin.left : 0;
-                float mr = (caption->bound->margin.right_type != CSS_VALUE_AUTO && caption->bound->margin.right > 0)
-                           ? caption->bound->margin.right : 0;
-                table_width += ml + mr;
-            }
+            table_width += table_caption_positive_horizontal_margin(caption);
 
             // Position caption: margin-left determines x offset within table wrapper
             float cap_y = 0;
-            for (int ci = 0; ci < captions->length; ci++) {
-                ViewBlock* cap = table_array_view_block(captions, ci);
-                float cap_ml = (cap->bound && cap->bound->margin.left_type != CSS_VALUE_AUTO && cap->bound->margin.left > 0)
-                                   ? cap->bound->margin.left : 0;
-                float cap_mt = (cap->bound && cap->bound->margin.top > 0) ? cap->bound->margin.top : 0;
-                cap->x = cap_ml;
-                cap->y = cap_y + cap_mt;
+            for_each_table_caption(captions, [&](ViewBlock* cap, int ci) {
+                table_position_caption_with_margins(cap, cap_y);
                 cap->width = caption_box_width;
-                cap_y += cap->height;
-                if (cap->bound) {
-                    cap_y += (cap->bound->margin.top > 0 ? cap->bound->margin.top : 0);
-                    cap_y += (cap->bound->margin.bottom > 0 ? cap->bound->margin.bottom : 0);
-                }
-            }
+                cap_y += table_caption_height_with_margins(cap);
+            });
 
             // CSS 2.1 §17.5.3: The 'height' property on the table element sets the
             // minimum height of the table grid. Even when the grid has no rows,
@@ -6481,44 +7079,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 float group_height = 0;
 
                 if (is_row) {
-                    // Direct row child of table: scan for floated children
-                    float max_float_bottom = 0;
-                    for (View* rch = tblk->first_child; rch; rch = rch->next_sibling) {
-                        if (!rch->view_type || !rch->is_block()) continue;
-                        ViewBlock* rvb = lam::view_require_block(rch);
-                        if (layout_position_is_floated(rvb->position)) {
-                            float bottom = rvb->y + rvb->height;
-                            if (bottom > max_float_bottom) max_float_bottom = bottom;
-                        }
-                    }
-                    if (max_float_bottom > 0) {
-                        tblk->width = table->width;
-                        tblk->height = max_float_bottom;
-                        log_debug("Float-containing row sized: width=%.0f, height=%.0f",
-                                  tblk->width, tblk->height);
-                    }
+                    table_size_float_containing_row(table, tblk, nullptr);
                 } else {
                     // Row group: process each child row
                     for (View* rch = tblk->first_child; rch; rch = rch->next_sibling) {
                         if (!rch->view_type) continue;
                         ViewBlock* row = lam::view_require_block(rch);
                         if (row->view_type != RDT_VIEW_TABLE_ROW) continue;
-                        float max_float_bottom = 0;
-                        for (View* cch = row->first_child; cch; cch = cch->next_sibling) {
-                            if (!cch->view_type || !cch->is_block()) continue;
-                            ViewBlock* cvb = lam::view_require_block(cch);
-                            if (layout_position_is_floated(cvb->position)) {
-                                float bottom = cvb->y + cvb->height;
-                                if (bottom > max_float_bottom) max_float_bottom = bottom;
-                            }
-                        }
-                        if (max_float_bottom > 0) {
-                            row->width = table->width;
-                            row->height = max_float_bottom;
-                            log_debug("Float-containing row sized: width=%.0f, height=%.0f",
-                                      row->width, row->height);
-                        }
-                        if (row->height > group_height) group_height = row->height;
+                        table_size_float_containing_row(table, row, &group_height);
                     }
                     if (group_height > 0) {
                         tblk->width = table->width;
@@ -6683,8 +7251,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Assign column indices and measure content with grid support
     // Use navigation helpers to iterate over all cells uniformly
-    for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
-        for (ViewTableCell* tcell = row->first_cell(); tcell; tcell = row->next_cell(tcell)) {
+    for_each_table_cell(table, [&](ViewTableRow* row, ViewTableCell* tcell) {
+            (void)row;
             // Use pre-assigned column index from analyze_table_structure()
             int col = tcell->td->col_index;
 
@@ -6804,8 +7372,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
             // Restore parent font context after cell width measurement
             lycon->font = saved_font_cell;
-        }
-    }
+    });
 
     arraylist_sort(colspan_widths, compare_colspan_width_contributions);
     for (int i = 0; i < colspan_widths->length; i++) {
@@ -6827,22 +7394,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // the columns it spans.
             col_elem = find_colgroup_element(table, c);
             if (!col_elem) continue;
-            const char* span_str = col_elem->get_attribute("span");
-            int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: span count from attribute
-            if (span <= 0) span = 1;
+            int span = table_positive_span_attr(col_elem);
             width_divisor = (float)span;
         }
 
-        // Read width from <col> CSS
-        float col_css_width = 0;
-        if (col_elem->blk && col_elem->blk->given_width > 0) {
-            col_css_width = col_elem->blk->given_width;
-        } else if (col_elem->specified_style) {
-            CssDeclaration* w_decl = style_tree_get_declaration(col_elem->specified_style, CSS_PROPERTY_WIDTH);
-            if (w_decl && w_decl->value && w_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                col_css_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, w_decl->value);
-            }
-        }
+        float col_css_width = table_resolve_column_length_constraint(
+            lycon, col_elem, CSS_PROPERTY_WIDTH,
+            col_elem->blk ? col_elem->blk->given_width : 0.0f,
+            col_elem->blk && col_elem->blk->given_width > 0.0f, 0.0f);
         if (col_css_width > 0 && width_divisor > 1.0f) {
             col_css_width /= width_divisor;
         }
@@ -6850,16 +7409,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             table_raise_column_width_constraints(meta, col_widths, c, col_css_width);
         }
 
-        // Read min-width from <col> CSS
-        float col_min_w = -1;
-        if (col_elem->blk && col_elem->blk->given_min_width >= 0) {
-            col_min_w = col_elem->blk->given_min_width;
-        } else if (col_elem->specified_style) {
-            CssDeclaration* mw_decl = style_tree_get_declaration(col_elem->specified_style, CSS_PROPERTY_MIN_WIDTH);
-            if (mw_decl && mw_decl->value && mw_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                col_min_w = resolve_length_value(lycon, CSS_PROPERTY_MIN_WIDTH, mw_decl->value);
-            }
-        }
+        float col_min_w = table_resolve_column_length_constraint(
+            lycon, col_elem, CSS_PROPERTY_MIN_WIDTH,
+            col_elem->blk ? col_elem->blk->given_min_width : -1.0f,
+            col_elem->blk && col_elem->blk->given_min_width >= 0.0f, -1.0f);
         if (col_min_w > 0 && width_divisor > 1.0f) {
             col_min_w /= width_divisor;
         }
@@ -6867,16 +7420,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             table_raise_column_width_constraints(meta, col_widths, c, col_min_w);
         }
 
-        // Read max-width from <col> CSS
-        float col_max_w = -1;
-        if (col_elem->blk && col_elem->blk->given_max_width >= 0) {
-            col_max_w = col_elem->blk->given_max_width;
-        } else if (col_elem->specified_style) {
-            CssDeclaration* mw_decl = style_tree_get_declaration(col_elem->specified_style, CSS_PROPERTY_MAX_WIDTH);
-            if (mw_decl && mw_decl->value && mw_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                col_max_w = resolve_length_value(lycon, CSS_PROPERTY_MAX_WIDTH, mw_decl->value);
-            }
-        }
+        float col_max_w = table_resolve_column_length_constraint(
+            lycon, col_elem, CSS_PROPERTY_MAX_WIDTH,
+            col_elem->blk ? col_elem->blk->given_max_width : -1.0f,
+            col_elem->blk && col_elem->blk->given_max_width >= 0.0f, -1.0f);
         if (col_max_w >= 0 && width_divisor > 1.0f) {
             col_max_w /= width_divisor;
         }
@@ -6891,47 +7438,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         log_debug("=== CSS 2.1 FIXED LAYOUT ALGORITHM ===");
 
         // STEP 1: Get explicit table width from CSS (CSS 2.1 Section 17.5.2)
-        float fixed_explicit_width = 0;
-
-        // Try to read width directly from table element's CSS
-        if (table->node_type == DOM_NODE_ELEMENT) {
-            DomElement* dom_elem = table->as_element();
-            if (dom_elem->specified_style) {
-                CssDeclaration* width_decl = style_tree_get_declaration(
-                    dom_elem->specified_style, CSS_PROPERTY_WIDTH);
-                if (width_decl && width_decl->value) {
-                    // Handle percentage width
-                    if (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                        double percentage = width_decl->value->data.percentage.value;
-                        // Use AvailableSpace if definite, otherwise fall back to BlockContext
-                        float container_width_f = lycon->available_space.width.is_definite()
-                            ? lycon->available_space.width.value
-                            : lycon->block.content_width;
-                        float container_width = container_width_f;
-                        if (container_width <= 0) {
-                            container_width = lycon->line.right - lycon->line.left;
-                        }
-                        if (container_width > 0) {
-                            fixed_explicit_width = container_width * percentage / 100.0;
-                            log_debug("FIXED LAYOUT - percentage width: %.1f%% of %.1fpx = %.1fpx",
-                                    percentage, container_width, fixed_explicit_width);
-                        }
-                    }
-                    // Handle length value
-                    else if (width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                        float resolved_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
-                        fixed_explicit_width = resolved_width;
-                        log_debug("FIXED LAYOUT - read table CSS width: %.1fpx", fixed_explicit_width);
-                    }
-                }
-            }
-        }
-
-        // Fallback to lycon->block.given_width (e.g., from HTML width attribute)
-        if (fixed_explicit_width == 0 && lycon->block.given_width > 0) {
-            fixed_explicit_width = lycon->block.given_width;
-            log_debug("FIXED LAYOUT - using given_width: %.1fpx", fixed_explicit_width);
-        }
+        float fixed_explicit_width = table_resolve_fixed_explicit_width(lycon, table);
 
         // CSS 2.1 §17.5.2.1: "A value of 'auto' (for both 'display: table' and
         // 'display: inline-table') means use the automatic table layout algorithm."
@@ -6978,41 +7485,23 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         float total_explicit = 0.0f;  int unspecified_cols = 0;
 
         // STEP 3a: Read explicit widths from <col>/<colgroup> elements first
-	        {
-	            int col_idx = 0;
-	            for (View* child_view = static_cast<View*>(table->first_child); child_view && col_idx < columns;
-	                 child_view = static_cast<View*>(child_view->next_sibling)) {
-	                ViewElement* child = lam::view_as_element(child_view);
-	                if (!child) continue;
-	                if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
-	                    for (View* col_view = static_cast<View*>(child->first_child); col_view && col_idx < columns;
-	                         col_view = static_cast<View*>(col_view->next_sibling)) {
-	                        ViewElement* col = lam::view_as_element(col_view);
-	                        if (!col) continue;
-	                        if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
-                            int span = table_positive_span_attr(col);
-                            float col_width = table_resolve_fixed_column_css_width(lycon, col, content_width);
-                            if (col_width > 0) {
-                                float per_col = col_width / span;
-                                table_assign_span_columns(explicit_col_widths, col_idx, span,
-                                                          columns, per_col, &total_explicit);
-                                log_debug("FIXED LAYOUT col %d (span=%d): %.1fpx from <col> element", col_idx, span, col_width);
-                            }
-                            col_idx += span;
-                        }
-                    }
+        {
+            int col_idx = 0;
+            for_each_table_column_source(table, [&](ViewElement* child) {
+                if (col_idx >= columns) return;
+                if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
+                    for_each_table_colgroup_column(child, [&](ViewElement* col) {
+                        if (col_idx >= columns) return;
+                        col_idx += table_apply_fixed_column_css_width(
+                            lycon, col, explicit_col_widths, col_idx, columns,
+                            content_width, &total_explicit, "from <col> element");
+                    });
                 } else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
-                    int span = table_positive_span_attr(child);
-                    float col_width = table_resolve_fixed_column_css_width(lycon, child, content_width);
-                    if (col_width > 0) {
-                        float per_col = col_width / span;
-                        table_assign_span_columns(explicit_col_widths, col_idx, span,
-                                                  columns, per_col, &total_explicit);
-                        log_debug("FIXED LAYOUT col %d (span=%d): %.1fpx from standalone <col>", col_idx, span, col_width);
-                    }
-                    col_idx += span;
+                    col_idx += table_apply_fixed_column_css_width(
+                        lycon, child, explicit_col_widths, col_idx, columns,
+                        content_width, &total_explicit, "from standalone <col>");
                 }
-            }
+            });
         }
 
         // STEP 3b: Read cell widths from first row (only for columns not yet specified by col elements)
@@ -7023,105 +7512,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         if (first_row) {
             int col = 0;
             log_debug("Reading first row cell widths...");
-            for (ViewTableCell* cell = first_row->first_cell();
-                 cell && col < columns;
-                 cell = first_row->next_cell(cell)) {
-
-                    // Skip columns already specified by col elements
-                    if (explicit_col_widths[col] > 0) {
-                        log_debug("  Column %d: already set by <col> element (%.1fpx), skipping cell", col, explicit_col_widths[col]);
-                        col += cell->td->col_span;
-                        continue;
-                    }
-
-                    // Try to get explicit width from CSS
-                    float cell_width = 0.0f;
-                    if (cell->node_type == DOM_NODE_ELEMENT) {
-                        DomElement* dom_elem = cell->as_element();
-                        if (dom_elem->specified_style) {
-                            CssDeclaration* width_decl = style_tree_get_declaration(
-                                dom_elem->specified_style, CSS_PROPERTY_WIDTH);
-                            if (width_decl && width_decl->value) {
-                                // Check if it's a percentage value
-                                if (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                                    // Calculate percentage relative to table content width
-                                    double percentage = width_decl->value->data.percentage.value;
-                                    cell_width = (float)(content_width * percentage / 100.0);
-                                    log_debug("  Column %d: percentage width %.1f%% of %dpx = %.1fpx",
-                                            col, percentage, content_width, cell_width);
-                                } else if (width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                    // Resolve length value (handles em, rem, px, etc.)
-                                    cell_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
-                                    log_debug("  Column %d: absolute width %.1fpx", col, cell_width);
-                                }
-                            }
-                        }
-                    }
-
-                    // CSS 2.1 §17.5.2.1: Column width includes cell padding and borders
-                    // (in separate-border mode). CSS width is content-box by default.
-                    // For border-box cells, the CSS width already includes padding+border.
-                    if (cell_width > 0.0f) {
-                        bool is_border_box = layout_uses_border_box(cell);
-                        if (!is_border_box) {
-                            if (cell->bound && cell->bound->padding.left >= 0 && cell->bound->padding.right >= 0) {
-                                cell_width += layout_box_metrics(cell).padding_h;
-                            }
-                            if (!table->tb->border_collapse && cell->bound && cell->bound->border) {
-                                if (cell->bound->border->left_style != CSS_VALUE_NONE)
-                                    cell_width += cell->bound->border->width.left;
-                                if (cell->bound->border->right_style != CSS_VALUE_NONE)
-                                    cell_width += cell->bound->border->width.right;
-                            }
-                        }
-                    }
-
-                    if (cell_width > 0.0f) {
-                        // CSS 2.1 §17.5.2.1: If cell spans more than one column,
-                        // divide the width evenly among the spanned columns.
-                        int span = cell->td->col_span;
-                        float per_col_width = cell_width / span;
-                        table_assign_span_columns(explicit_col_widths, col, span,
-                                                  columns, per_col_width, &total_explicit);
-                        log_debug("  Column %d (span=%d): %.1fpx each (total=%.1fpx)", col, span, per_col_width, cell_width);
-                    } else {
-                        unspecified_cols += cell->td->col_span;
-                        log_debug("  Column %d (span=%d): no explicit width", col, cell->td->col_span);
-                    }
-                    col += cell->td->col_span;
-            }
+            for_each_table_row_cell(first_row, [&](ViewTableCell* cell) {
+                if (col >= columns) return;
+                col += table_apply_fixed_first_row_cell_width(
+                    lycon, table, cell, explicit_col_widths, col, columns,
+                    content_width, &total_explicit, &unspecified_cols);
+            });
         }
 
         // STEP 4: Distribute widths according to CSS table-layout: fixed algorithm
-        if (total_explicit > 0.0f) {
-            log_debug("Found %d columns with explicit widths (total: %.1fpx), %d unspecified",
-                columns - unspecified_cols, total_explicit, unspecified_cols);
-
-            // Distribute remaining width to unspecified columns
-            float remaining_width = content_width - total_explicit;
-            if (unspecified_cols > 0 && remaining_width > 0.0f) {
-                float width_per_unspecified = remaining_width / unspecified_cols;
-                for (int i = 0; i < columns; i++) {
-                    if (explicit_col_widths[i] == 0.0f) {
-                        explicit_col_widths[i] = width_per_unspecified;
-                    }
-                }
-                log_debug("Distributing %.1fpx to %d unspecified columns (%.1fpx each)",
-                       remaining_width, unspecified_cols, width_per_unspecified);
-            } else if (remaining_width < 0.0f) {
-                // CSS 2.1 §17.5.2.1: "If the table's width is then smaller than
-                // the sum of the column widths, the user agent must widen the table."
-                // Keep explicit col widths; give unspecified columns zero width.
-                log_debug("FIXED LAYOUT: column widths exceed table width (%.1f > %.1f), expanding table",
-                       total_explicit, content_width);
-                content_width = total_explicit;
-            }
-        } else {
-            // No explicit widths, distribute equally
-            float width_per_col = (float)content_width / columns;
-            table_assign_columns(explicit_col_widths, columns, width_per_col);
-            log_debug("No explicit widths - equal distribution: %.1fpx per column", width_per_col);
-        }
+        table_distribute_fixed_column_widths(
+            explicit_col_widths, columns, &content_width, total_explicit, unspecified_cols);
 
         // STEP 5: Replace col_widths with fixed layout widths
         memcpy(col_widths, explicit_col_widths, columns * sizeof(float));
@@ -7281,10 +7682,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // Include fixed horizontal margins (non-auto) in the caption width contribution so
         // the table expands if the caption's margin-box exceeds the table content width.
         if (caption->bound) {
-            float ml = (caption->bound->margin.left_type != CSS_VALUE_AUTO && caption->bound->margin.left > 0)
-                           ? caption->bound->margin.left : 0;
-            float mr = (caption->bound->margin.right_type != CSS_VALUE_AUTO && caption->bound->margin.right > 0)
-                           ? caption->bound->margin.right : 0;
+            float ml = table_caption_positive_margin_left(caption);
+            float mr = table_caption_positive_margin_right(caption);
             if (ml + mr > 0) {
                 caption_width_contribution += ml + mr;
                 log_debug("Caption margin-box: added margins (left=%.0f, right=%.0f) -> contribution=%.1fpx",
@@ -7889,36 +8288,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (captions->length > 0 && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
         float cap_y = 0;
         caption_height = 0;  // recalculate from scratch during positioning
-        for (int ci = 0; ci < captions->length; ci++) {
-            ViewBlock* cap = table_array_view_block(captions, ci);
-            float cap_ml = (cap->bound && cap->bound->margin.left_type != CSS_VALUE_AUTO && cap->bound->margin.left > 0)
-                               ? cap->bound->margin.left : 0;
-            cap->x = cap_ml;
-            float cap_mt = (cap->bound && cap->bound->margin.top > 0) ? cap->bound->margin.top : 0;
-            cap->y = cap_y + cap_mt;
+        for_each_table_caption(captions, [&](ViewBlock* cap, int ci) {
+            table_position_caption_with_margins(cap, cap_y);
 
-            // Adjust width and re-layout if needed
-            float old_width = cap->width;
-            adjust_table_caption_width(cap, wrapper_content_width);
-
-            float this_cap_height;
-            if (fabs(cap->width - old_width) > 0.5f) {
-                log_debug("Caption %d width changed: %.1f -> %.1f, re-laying out", ci, old_width, cap->width);
-                this_cap_height = relayout_table_caption(lycon, cap, table_width);
-            } else {
-                float margin_v = 0;
-                if (cap->bound) {
-                    float mt = cap->bound->margin.top > 0 ? cap->bound->margin.top : 0;
-                    float mb = cap->bound->margin.bottom > 0 ? cap->bound->margin.bottom : 0;
-                    margin_v = mt + mb;
-                }
-                this_cap_height = cap->height + margin_v;
-            }
+            float this_cap_height = table_adjust_caption_width_and_height(
+                lycon, table, cap, table_width, wrapper_content_width, ci,
+                TABLE_CAPTION_WIDTH_REFERENCE_ADJUSTED_CAP);
 
             caption_height += this_cap_height;
             cap_y += this_cap_height;
             log_debug("Positioned caption %d at top: y=%.1f, height=%.1f, total=%.1f", ci, cap->y, cap->height, caption_height);
-        }
+        });
 
         // Update current_y with total caption height
         current_y = caption_height + table_border_top + table_padding_top;
@@ -7981,6 +8361,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         ViewBlock* child = table_array_view_block(ordered_elements, _i);
         log_info("%s Processing ordered element %d: view_type=%d", table->source_loc(), _i, child->view_type);
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+            ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
             float group_start_y = current_y;
 
             // Position row group at table content area (after padding and border-spacing)
@@ -8011,18 +8392,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 log_debug("%s No columns: using table->width %.1f for tbody_content_width", table->source_loc(), table->width);
             }
 
-            if (has_direct_float && table->width > 0.0f && tbody_content_width > 0.0f) {
-                for (int guard = 0; guard < 32; guard++) {
-                    float left_intrusion = table_direct_left_float_intrusion(table, current_y, table->width);
-                    float right_intrusion = table_direct_right_float_intrusion(table, current_y, table->width);
-                    if (left_intrusion + tbody_content_width + right_intrusion <= table->width + 0.01f) {
-                        break;
-                    }
-                    float next_y = table_direct_float_next_clear_y(table, current_y);
-                    if (next_y <= current_y + 0.01f) break;
-                    current_y = next_y;
-                }
-            }
+            current_y = table_clear_direct_float_intrusion(
+                table, current_y, tbody_content_width, has_direct_float);
             group_start_y = current_y;
             float group_content_end_y = group_start_y;
 
@@ -8078,166 +8449,108 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 }
             }
 
-	            for (View* row_view = child->first_child; row_view; row_view = row_view->next_sibling) {
-	                ViewBlock* row = lam::view_as_block(row_view);
-	                if (!row) continue;
-	                if (row->view_type == RDT_VIEW_TABLE_ROW) {
-                    // CSS 2.1 §17.5.3: If row group has percentage height, mark all its rows
-                    if (group_has_percent_height && global_row_index < meta->row_count) {
-                        meta->row_has_percent_height[global_row_index] = true;
-                    }
+            for_each_table_row_in_group(group, [&](ViewTableRow* trow, ViewBlock* row) {
+                // CSS 2.1 §17.5.3: If row group has percentage height, mark all its rows
+                if (group_has_percent_height && global_row_index < meta->row_count) {
+                    meta->row_has_percent_height[global_row_index] = true;
+                }
 
-                    // CSS 2.1 §17.5.5: Check for visibility: collapse
-                    // Collapsed rows don't render and don't contribute to height
-                    bool is_collapsed = (global_row_index < meta->row_count &&
-                                         meta->row_collapsed[global_row_index]);
+                // CSS 2.1 §17.5.5: Check for visibility: collapse
+                // Collapsed rows don't render and don't contribute to height
+                bool is_collapsed = (global_row_index < meta->row_count &&
+                                     meta->row_collapsed[global_row_index]);
 
-                    if (is_collapsed) {
-                        // Position row but with zero height
-                        row->x = 0;
-                        row->y = current_y - group_start_y;
-                        row->width = child->width;
-                        row->height = 0;
-
-                        // Still process cells for column width contribution
-                        // but don't let them affect row height
-                        ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(row);
-                        for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                            // Position cell but with zero height
-                            ViewBlock* cell = lam::view_require_block(tcell);
-                            float cell_abs_x = table_column_visual_x(table, col_widths, col_x_positions,
-                                                                     tcell->td->col_index, tcell->td->col_span, columns);
-                            cell->x = cell_abs_x - col_x_positions[0];
-                            cell->y = 0;
-                            cell->width = calculate_cell_width_from_columns(tcell, col_widths, columns);
-                            cell->height = 0;
-                        }
-
-                        // Track collapsed row
-                        if (global_row_index < meta->row_count) {
-                            meta->row_y_positions[global_row_index] = current_y;
-                            meta->row_heights[global_row_index] = 0;
-                            log_debug("%s Collapsed row %d: y=%.1f, height=0", table->source_loc(), global_row_index, current_y);
-                        }
-                        global_row_index++;
-
-                        // No height contribution, no spacing after collapsed row
-                        continue;
-                    }
-
-                    // Position row relative to row group
-                    row->x = 0;
-                    row->y = current_y - group_start_y; // Relative to row group
-                    row->width = child->width; // Match tbody width
-                    log_debug("%s Row positioned at x=%.1f, y=%.1f (relative to group), width=%.1f", table->source_loc(),
-                        row->x, row->y, row->width);
-
-                    // Calculate row height and position cells
-                    float row_height = 0.0f;
-                    ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(row);
-                    for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                        float height_for_row = process_table_cell(lycon, tcell, table, col_widths, col_x_positions, columns, meta->col_edge_max_border, meta->col_collapsed, meta->col_original_widths);
-                        if (height_for_row > row_height) {
-                            row_height = height_for_row;
-                        }
-                    }
-
-                    // CSS 2.1 §9.4.1: Tables establish a BFC. When a row contains
-                    // floated children (blockified table-internal elements per §9.7),
-                    // the row expands to contain them.
-	                    for (DomNode* rchild = row->first_child; rchild; rchild = rchild->next_sibling) {
-	                        if (!rchild->is_element()) continue;
-	                        ViewBlock* rvb = lam::view_as_block(static_cast<View*>(rchild));
-	                        if (!rvb) continue;
-	                        if (layout_position_is_floated(rvb->position)) {
-                            float float_bottom = rvb->height;
-                            if (float_bottom > row_height) {
-                                log_debug("%s Row float containment: expanding height %.1f -> %.1f for floated child", table->source_loc(),
-                                          row_height, float_bottom);
-                                row_height = float_bottom;
-                            }
-                        }
-                    }
-
-                    // CSS 2.1 §17.5.4: Apply baseline alignment across cells in this row.
-                    // This must happen after all cells are laid out but before row height is finalized,
-                    // because baseline alignment may shift content and increase cell/row heights.
-                    apply_row_baseline_alignment(lycon, trow, &row_height);
-
-                    // CSS 2.1 §17.5.3: Check for explicit CSS height on the row
-                    // "The height of a 'table-row' element's box is calculated once the user
-                    // agent has all the cells in the row available... Percentages for 'height'
-                    // on table cells, table rows, and table row groups [compute to 'auto']"
-                    float explicit_row_height = 0.0f;
-                    if (row->is_element()) {
-                        DomElement* row_elem = row->as_element();
-                        if (row_elem->specified_style) {
-                            CssDeclaration* height_decl = style_tree_get_declaration(
-                                row_elem->specified_style, CSS_PROPERTY_HEIGHT);
-                            if (height_decl && height_decl->value) {
-                                // CSS 2.1 §17.5.3: Percentage heights on table rows compute to auto
-                                if (height_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                                    // Mark this row as having percentage height - computes to auto
-                                    if (global_row_index < meta->row_count) {
-                                        meta->row_has_percent_height[global_row_index] = true;
-                                        log_debug("%s Row %d has percentage height - treating as auto", table->source_loc(), global_row_index);
-                                    }
-                                } else {
-                                    float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-                                    if (resolved_height > 0) {
-                                        explicit_row_height = resolved_height;
-                                        log_debug("%s Row has explicit CSS height: %.1fpx", table->source_loc(), explicit_row_height);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Use the larger of content height and explicit CSS height
-                    if (explicit_row_height > row_height) {
-                        row_height = explicit_row_height;
-                        log_debug("%s Using explicit row height %.1fpx instead of content height", table->source_loc(), row_height);
-                    }
-
-                    // Apply fixed layout height if specified
-                    if (table->tb->fixed_row_height > 0) {
-                        apply_fixed_row_height(lycon, trow, table->tb->fixed_row_height);
-                    } else {
-                        row->height = row_height;
-
-                        // CSS 2.1 §17.6.2: In border-collapse mode, cell heights already include
-                        // half of the collapsed borders (via calculate_cell_height).
-                        // Row height = max(cell heights), no additional border adjustment needed.
-                        // The row's reported height from getBoundingClientRect should match
-                        // the tallest cell's height.
-                        log_debug("%s Row height from cells: %.1f (border-collapse=%d)", table->source_loc(),
-                                row_height, table->tb->border_collapse);
-
-                        update_row_cells_after_height_change(lycon, trow, row->height, false, true);
-                    }
-
-                    // Track row height and Y position for rowspan calculation
-                    if (global_row_index < meta->row_count) {
-                        meta->row_y_positions[global_row_index] = current_y;
-                        meta->row_heights[global_row_index] = row->height;
-                        log_debug("%s Tracking row %d: y=%.1f, height=%.1f", table->source_loc(), global_row_index, current_y, row->height);
-                    }
+                if (is_collapsed) {
+                    table_place_collapsed_row(
+                        table, meta, trow, current_y - group_start_y, child->width,
+                        current_y, col_widths, col_x_positions, columns,
+                        global_row_index, "row");
                     global_row_index++;
 
-                    current_y += row->height;
-                    group_content_end_y = current_y;
+                    // No height contribution, no spacing after collapsed row
+                    return;
+                }
 
-                    // Add vertical border-spacing after each row except the last row in the table.
-                    // CSS 2.1 §17.6.1: border-spacing applies between adjacent cell borders,
-                    // regardless of row group boundaries. The bottom edge spacing (after the
-                    // last row) is handled separately when finalizing table height.
-                    // Note: global_row_index was already incremented above.
-                    if (!table->tb->border_collapse && table->tb->border_spacing_v > 0 && global_row_index < meta->row_count) {
-                        current_y += table->tb->border_spacing_v;
-                        log_debug("%s Added vertical spacing after row: +%.1fpx", table->source_loc(), table->tb->border_spacing_v);
+                // Position row relative to row group
+                row->x = 0;
+                row->y = current_y - group_start_y; // Relative to row group
+                row->width = child->width; // Match tbody width
+                log_debug("%s Row positioned at x=%.1f, y=%.1f (relative to group), width=%.1f", table->source_loc(),
+                    row->x, row->y, row->width);
+
+                // Calculate row height and position cells
+                float row_height = table_measure_row_cells(
+                    lycon, table, meta, trow, col_widths, col_x_positions, columns);
+
+                // CSS 2.1 §9.4.1: Tables establish a BFC. When a row contains
+                // floated children (blockified table-internal elements per §9.7),
+                // the row expands to contain them.
+                for (DomNode* rchild = row->first_child; rchild; rchild = rchild->next_sibling) {
+                    if (!rchild->is_element()) continue;
+                    ViewBlock* rvb = lam::view_as_block(static_cast<View*>(rchild));
+                    if (!rvb) continue;
+                    if (layout_position_is_floated(rvb->position)) {
+                        float float_bottom = rvb->height;
+                        if (float_bottom > row_height) {
+                            log_debug("%s Row float containment: expanding height %.1f -> %.1f for floated child", table->source_loc(),
+                                      row_height, float_bottom);
+                            row_height = float_bottom;
+                        }
                     }
                 }
-            }
+
+                // CSS 2.1 §17.5.4: Apply baseline alignment across cells in this row.
+                // This must happen after all cells are laid out but before row height is finalized,
+                // because baseline alignment may shift content and increase cell/row heights.
+                apply_row_baseline_alignment(lycon, trow, &row_height);
+
+                float explicit_row_height = table_resolve_row_explicit_height(
+                    lycon, table, meta, row, global_row_index, "Row");
+
+                // Use the larger of content height and explicit CSS height
+                if (explicit_row_height > row_height) {
+                    row_height = explicit_row_height;
+                    log_debug("%s Using explicit row height %.1fpx instead of content height", table->source_loc(), row_height);
+                }
+
+                // Apply fixed layout height if specified
+                if (table->tb->fixed_row_height > 0) {
+                    apply_fixed_row_height(lycon, trow, table->tb->fixed_row_height);
+                } else {
+                    row->height = row_height;
+
+                    // CSS 2.1 §17.6.2: In border-collapse mode, cell heights already include
+                    // half of the collapsed borders (via calculate_cell_height).
+                    // Row height = max(cell heights), no additional border adjustment needed.
+                    // The row's reported height from getBoundingClientRect should match
+                    // the tallest cell's height.
+                    log_debug("%s Row height from cells: %.1f (border-collapse=%d)", table->source_loc(),
+                            row_height, table->tb->border_collapse);
+
+                    update_row_cells_after_height_change(lycon, trow, row->height, false, true);
+                }
+
+                // Track row height and Y position for rowspan calculation
+                if (global_row_index < meta->row_count) {
+                    meta->row_y_positions[global_row_index] = current_y;
+                    meta->row_heights[global_row_index] = row->height;
+                    log_debug("%s Tracking row %d: y=%.1f, height=%.1f", table->source_loc(), global_row_index, current_y, row->height);
+                }
+                global_row_index++;
+
+                current_y += row->height;
+                group_content_end_y = current_y;
+
+                // Add vertical border-spacing after each row except the last row in the table.
+                // CSS 2.1 §17.6.1: border-spacing applies between adjacent cell borders,
+                // regardless of row group boundaries. The bottom edge spacing (after the
+                // last row) is handled separately when finalizing table height.
+                // Note: global_row_index was already incremented above.
+                if (!table->tb->border_collapse && table->tb->border_spacing_v > 0 && global_row_index < meta->row_count) {
+                    current_y += table->tb->border_spacing_v;
+                    log_debug("%s Added vertical spacing after row: +%.1fpx", table->source_loc(), table->tb->border_spacing_v);
+                }
+            });
 
             // Set row group dimensions (relative to table) - preserve our calculated positioning
             // Don't override x and y - they were set earlier with proper calculations
@@ -8261,24 +8574,20 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
                 // Count eligible rows for distribution
                 int eligible_rows = 0;
-                for (View* r_view = child->first_child; r_view; r_view = r_view->next_sibling) {
-                    ViewBlock* r = lam::view_as_block(r_view);
-                    if (!r) continue;
-                    if (r->view_type == RDT_VIEW_TABLE_ROW && r->height > 0) eligible_rows++;
-                }
+                for_each_table_row_in_group(group, [&](ViewTableRow* trow, ViewBlock* r) {
+                    (void)trow;
+                    if (r->height > 0) eligible_rows++;
+                });
                 if (eligible_rows > 0) {
                     float extra_per_row = extra / eligible_rows;
                     float y_accum = 0;
-                    for (View* r_view = child->first_child; r_view; r_view = r_view->next_sibling) {
-                        ViewBlock* r = lam::view_as_block(r_view);
-                        if (!r) continue;
-                        if (r->view_type == RDT_VIEW_TABLE_ROW && r->height > 0) {
+                    for_each_table_row_in_group(group, [&](ViewTableRow* trow, ViewBlock* r) {
+                        if (r->height > 0) {
                             r->y = y_accum;
                             r->height += extra_per_row;
                             log_debug("%s Row expanded to %.1fpx (added %.1fpx)", table->source_loc(), r->height, extra_per_row);
 
                             // Update row height in meta
-                            ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(r);
                             int row_idx = table_row_metadata_index_from_row(trow, -1);
                             if (row_idx >= 0 && row_idx < meta->row_count) {
                                 meta->row_heights[row_idx] = r->height;
@@ -8292,11 +8601,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                 y_accum += table->tb->border_spacing_v;
                             }
                         }
-                    }
+                    });
                 }
             }
-            // printf("DEBUG: Final row group dimensions - x=%.1f, y=%.1f, width=%.1f, height=%.1f\n",
-            //        child->x, child->y, child->width, child->height);
         }
         else if (child->view_type == RDT_VIEW_TABLE_ROW) {
             // Handle direct table rows (part of implicit tbody, positioned with other tbody content)
@@ -8307,92 +8614,32 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                  meta->row_collapsed[global_row_index]);
 
             if (is_collapsed) {
-                // Position row but with zero height
-                trow->x = 0;
-                trow->y = current_y;
-                trow->width = table_width;
-                trow->height = 0;
-
-                // Still process cells for column width but with zero height
-                for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                    ViewBlock* cell = lam::view_require_block(tcell);
-                    float cell_abs_x = table_column_visual_x(table, col_widths, col_x_positions,
-                                                             tcell->td->col_index, tcell->td->col_span, columns);
-                    cell->x = cell_abs_x - col_x_positions[0];
-                    cell->y = 0;
-                    cell->width = calculate_cell_width_from_columns(tcell, col_widths, columns);
-                    cell->height = 0;
-                }
-
-                // Track collapsed row
-                if (global_row_index < meta->row_count) {
-                    meta->row_y_positions[global_row_index] = current_y;
-                    meta->row_heights[global_row_index] = 0;
-                    log_debug("%s Collapsed direct row %d: y=%.1f, height=0", table->source_loc(), global_row_index, current_y);
-                }
+                table_place_collapsed_row(
+                    table, meta, trow, current_y, table_width, current_y,
+                    col_widths, col_x_positions, columns, global_row_index,
+                    "direct row");
                 global_row_index++;
 
                 // No height contribution, no spacing after collapsed row
                 continue;
             }
 
-            if (has_direct_float && table->width > 0.0f && table_width > 0.0f) {
-                for (int guard = 0; guard < 32; guard++) {
-                    float left_intrusion = table_direct_left_float_intrusion(table, current_y, table->width);
-                    float right_intrusion = table_direct_right_float_intrusion(table, current_y, table->width);
-                    if (left_intrusion + table_width + right_intrusion <= table->width + 0.01f) {
-                        break;
-                    }
-                    float next_y = table_direct_float_next_clear_y(table, current_y);
-                    if (next_y <= current_y + 0.01f) break;
-                    current_y = next_y;
-                }
-            }
+            current_y = table_clear_direct_float_intrusion(
+                table, current_y, table_width, has_direct_float);
 
             trow->x = 0;  trow->y = current_y; // Relative to table
             trow->width = table_width;
             log_debug("%s Direct row positioned at x=%.1f, y=%.1f (relative to table), width=%.1f", table->source_loc(),
                    trow->x, trow->y, trow->width);
 
-            float row_height = 0.0f;
-            for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                float height_for_row = process_table_cell(lycon, tcell, table, col_widths, col_x_positions, columns, meta->col_edge_max_border, meta->col_collapsed, meta->col_original_widths);
-                if (height_for_row > row_height) {
-                    row_height = height_for_row;
-                }
-            }
+            float row_height = table_measure_row_cells(
+                lycon, table, meta, trow, col_widths, col_x_positions, columns);
 
             // CSS 2.1 §17.5.4: Apply baseline alignment across cells in this row
             apply_row_baseline_alignment(lycon, trow, &row_height);
 
-            // CSS 2.1 §17.5.3: Check for explicit CSS height on the row
-            // "The height of a 'table-row' element's box is calculated once the user
-            // agent has all the cells in the row available... Percentages for 'height'
-            // on table cells, table rows, and table row groups [compute to 'auto']"
-            float explicit_row_height = 0.0f;
-            if (trow->is_element()) {
-                DomElement* row_elem = trow->as_element();
-                if (row_elem->specified_style) {
-                    CssDeclaration* height_decl = style_tree_get_declaration(
-                        row_elem->specified_style, CSS_PROPERTY_HEIGHT);
-                    if (height_decl && height_decl->value) {
-                        // CSS 2.1 §17.5.3: Percentage heights on table rows compute to auto
-                        if (height_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                            // Mark this row as having percentage height - computes to auto
-                            if (global_row_index < meta->row_count) {
-                                meta->row_has_percent_height[global_row_index] = true;
-                                log_debug("%s Direct row %d has percentage height - treating as auto", table->source_loc(), global_row_index);
-                            }
-                        } else {
-                            float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-                            if (resolved_height > 0) {
-                                explicit_row_height = resolved_height;
-                                log_debug("%s Direct row has explicit CSS height: %.1fpx", table->source_loc(), explicit_row_height);
-                            }
-                        }
-                    }
-                }
-            }
+            float explicit_row_height = table_resolve_row_explicit_height(
+                lycon, table, meta, trow, global_row_index, "Direct row");
 
             // Use the larger of content height and explicit CSS height
             if (explicit_row_height > row_height) {
@@ -8405,16 +8652,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // CSS 2.1 §17.6.2: In border-collapse mode, row height includes
             // half of the collapsed top border + half of the collapsed bottom border.
             if (table->tb->border_collapse) {
-                float max_top_border = 0, max_bottom_border = 0;
-                for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                    if (tcell->td->top_resolved && tcell->td->top_resolved->width > max_top_border) {
-                        max_top_border = tcell->td->top_resolved->width;
-                    }
-                    if (tcell->td->bottom_resolved && tcell->td->bottom_resolved->width > max_bottom_border) {
-                        max_bottom_border = tcell->td->bottom_resolved->width;
-                    }
-                }
-                float border_contribution = max_top_border / 2.0f + max_bottom_border / 2.0f;
+                float max_top_border = 0.0f, max_bottom_border = 0.0f;
+                float border_contribution = table_row_collapsed_vertical_border_contribution(
+                    trow, &max_top_border, &max_bottom_border);
                 trow->height += border_contribution;
                 log_debug("%s Border-collapse direct row height adjustment: +%.1f (top %.1f + bottom %.1f) / 2", table->source_loc(),
                         border_contribution, max_top_border, max_bottom_border);
@@ -8452,41 +8692,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // After distribution, update actual row heights to match meta->row_heights
     // This ensures rows reflect the distributed heights
-    for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
-        if (!child_view->is_block()) continue;
-        ViewBlock* child = lam::view_require_block(child_view);
+    for_each_direct_table_block(table, [&](ViewBlock* child) {
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-            for (View* row_view = child->first_child; row_view; row_view = row_view->next_sibling) {
-                if (!row_view->is_block()) continue;
-                ViewBlock* row = lam::view_require_block(row_view);
-                if (row->view_type == RDT_VIEW_TABLE_ROW) {
-                    ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(row);
-                    int row_idx = table_row_metadata_index_from_row(trow, -1);
-                    if (row_idx >= 0 && row_idx < meta->row_count) {
-                        float old_height = row->height;
-                        row->height = meta->row_heights[row_idx];
-                        if (row->height != old_height) {
-                            log_debug("%s Updated row %d height: %.1fpx -> %.1fpx (after rowspan distribution)", table->source_loc(),
-                                     row_idx, old_height, row->height);
-                            update_row_cells_after_height_change(lycon, trow, row->height, true, true);
-                        }
-                    }
-                }
-            }
+            ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
+            for_each_table_row_in_group(group, [&](ViewTableRow* trow, ViewBlock* row) {
+                table_apply_rowspan_distributed_height(
+                    lycon, table, meta, trow, row, "row");
+            });
         } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
             ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(child);
-            int row_idx = table_row_metadata_index_from_row(trow, -1);
-            if (row_idx >= 0 && row_idx < meta->row_count) {
-                float old_height = child->height;
-                child->height = meta->row_heights[row_idx];
-                if (child->height != old_height) {
-                    log_debug("%s Updated direct row %d height: %.1fpx -> %.1fpx (after rowspan distribution)", table->source_loc(),
-                             row_idx, old_height, child->height);
-                    update_row_cells_after_height_change(lycon, trow, child->height, true, true);
-                }
-            }
+            table_apply_rowspan_distributed_height(
+                lycon, table, meta, trow, child, "direct row");
         }
-    }
+    });
 
     // Rowspanning distribution changes row heights after the first layout pass.
     // Rebuild row y positions and the table cursor from the final row metadata
@@ -8589,76 +8807,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // CSS 2.1 table captions are outside the table grid box. The table
             // height applies to the grid; captions are added to the wrapper
             // before or after it, so they must not consume row height.
-            float non_body_grid_height = 0;
-            float body_natural_height = 0;
-            int body_row_count = 0;
-            int section_count = 0;  // Count row-group sections for grid spacing
+            TableHeightSectionSummary section_summary =
+                table_collect_height_section_summary(table, meta);
+            float non_body_grid_height = section_summary.non_body_grid_height;
+            float body_natural_height = section_summary.body_natural_height;
+            int body_row_count = section_summary.body_row_count;
+            int section_count = section_summary.section_count;  // Count row-group sections for grid spacing
             float distributed_height_delta = 0.0f;
 
-            log_debug("%s Calculating natural heights for each section", table->source_loc());
-            for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
-                if (!child_view->is_block()) continue;
-                ViewBlock* child = lam::view_require_block(child_view);
-                // Check for caption (HTML tag or CSS display)
-                DisplayValue child_display = resolve_display_value((void*)child);
-                bool is_caption = (child->tag() == HTM_TAG_CAPTION) ||
-                                 (child_display.inner == CSS_VALUE_TABLE_CAPTION);
-
-                if (is_caption) {
-                    log_debug("%s   Caption height outside grid: %.1f", table->source_loc(), child->height);
-                } else if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-                    ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
-                    TableSectionType section_type = group->get_section_type();
-                    bool is_body_group = (section_type == TABLE_SECTION_TBODY);
-
-                    log_debug("%s   Row group section_type=%d (TBODY=%d), is_body=%d", table->source_loc(),
-                             section_type, TABLE_SECTION_THEAD, TABLE_SECTION_TBODY, is_body_group);
-
-                    // Calculate this group's natural height (rows only, no inter-row spacing yet)
-                    float group_height = 0;
-                    int row_count_in_group = 0;
-                    for (ViewTableRow* row = group->first_row(); row; row = group->next_row(row)) {
-                        int row_idx = table_row_metadata_index_from_row(row, -1);
-                        if (row_idx >= 0 && row_idx < meta->row_count) {
-                            float row_height = meta->row_heights[row_idx];
-                            group_height += row_height;
-                            row_count_in_group++;
-                            log_debug("%s     Row %d natural height: %.1f", table->source_loc(), row_idx, row_height);
-                        }
-                    }
-
-                    // DON'T add inter-row spacing here - it's already in the calculation
-                    // We'll account for ALL spacing (inter-row and inter-section) separately
-
-                    if (is_body_group) {
-                        body_natural_height += group_height;
-                        body_row_count += row_count_in_group;
-                        section_count++;
-                        log_debug("%s   Body group natural height: %.1f (rows only), rows: %d", table->source_loc(), group_height, row_count_in_group);
-                    } else {
-                        non_body_grid_height += group_height;
-                        section_count++;
-                        log_debug("%s   Header/Footer group natural height: %.1f (rows only)", table->source_loc(), group_height);
-                    }
-                }
-            }
-
-            // Calculate total spacing: edge spacing + inter-section spacing
-            // With border-spacing and N sections, there are N+1 spacing gaps:
-            // [top edge] section1 [spacing] section2 [spacing] ... sectionN [bottom edge]
-            float total_spacing = 0;
-            if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
-                // Inter-section spacing (between caption, header, body groups)
-                if (section_count > 0) {
-                    total_spacing = (section_count + 1) * table->tb->border_spacing_v;
-                }
-                // Add inter-row spacing WITHIN groups only (between-group boundaries
-                // are already counted in the section spacing above).
-                // Total within-group boundaries = total_rows - section_count
-                int within_group_boundaries = meta->row_count - section_count;
-                if (within_group_boundaries < 0) within_group_boundaries = 0;
-                total_spacing += within_group_boundaries * table->tb->border_spacing_v;
-            }
+            float total_spacing = table_explicit_height_grid_spacing(table, meta, section_count);
 
             // Now calculate extra height available for body rows
             // Formula: extra_for_body = available - padding - all_grid_spacing - header/footer - body_natural
@@ -8704,23 +8861,16 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             log_debug("%s     Skipping row %d (percentage height)", table->source_loc(), row_idx);
                             return;
                         }
-                        float natural_height = meta->row_heights[row_idx];
-                        float row_extra = eligible_height_total > 0.0f
-                            ? extra_for_body * natural_height / eligible_height_total
-                            : extra_for_body / eligible_row_count;
-                        meta->row_heights[row_idx] += row_extra;
-                        log_debug("%s     Body row %d: natural=%.1f + extra=%.1f = %.1f", table->source_loc(),
-                                 row_idx, natural_height, row_extra, meta->row_heights[row_idx]);
+                        table_apply_explicit_height_row_extra(
+                            table, meta, row_idx, extra_for_body, eligible_row_count,
+                            eligible_height_total, "Body", "     ");
                     });
                 } else {
                     log_debug("%s No eligible rows for height distribution (all have percentage heights)", table->source_loc());
                 }
 
-                // Second pass: recalculate row y positions after height changes
-                // Must include caption (if top) + border + padding, matching the first pass current_y
-                float y_accum = table_explicit_height_row_start_y(
-                    table, table_border_top, table_padding_top, caption, caption_height);
-                table_recalculate_row_y_positions(table, meta, y_accum);
+                table_recalculate_explicit_height_row_y_positions(
+                    table, meta, table_border_top, table_padding_top, caption, caption_height);
             } else if (extra_for_body > 0 && body_row_count == 0 && meta->row_count > 0) {
                 // CSS Tables 3: no tbody rows exist — distribute extra height to all
                 // rows in header/footer groups (thead/tfoot receive the space).
@@ -8740,19 +8890,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         }
                     }
                     for (int r = 0; r < meta->row_count; r++) {
-                        float natural_height = meta->row_heights[r];
-                        float row_extra = eligible_height_total > 0.0f
-                            ? extra_for_body * natural_height / eligible_height_total
-                            : extra_for_body / eligible_row_count;
-                        meta->row_heights[r] += row_extra;
-                        log_debug("%s   Non-body row %d: natural=%.1f + extra=%.1f = %.1f", table->source_loc(),
-                                  r, natural_height, row_extra, meta->row_heights[r]);
+                        table_apply_explicit_height_row_extra(
+                            table, meta, r, extra_for_body, eligible_row_count,
+                            eligible_height_total, "Non-body", "   ");
                     }
-                    // Recalculate y positions after height changes
-                    // Must include caption (if top) + border + padding, matching the first pass current_y
-                    float y_accum = table_explicit_height_row_start_y(
-                        table, table_border_top, table_padding_top, caption, caption_height);
-                    table_recalculate_row_y_positions(table, meta, y_accum);
+                    table_recalculate_explicit_height_row_y_positions(
+                        table, meta, table_border_top, table_padding_top, caption, caption_height);
                 } else {
                     log_debug("%s No eligible non-body rows for height distribution", table->source_loc());
                 }
@@ -8760,53 +8903,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 log_debug("%s No body rows found, skipping height distribution", table->source_loc());
             }
 
-            // Now update all row and cell views with new heights
-            // Iterate through row groups and direct rows to update their dimensions
-            for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
-                if (!child_view->is_block()) continue;
-                ViewBlock* child = lam::view_require_block(child_view);
-                if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-                    // Track max extent within group for updating group height
-                    float group_max_y = 0;
-
-                    // Update rows within group
-                    for (View* row_view = child->first_child; row_view; row_view = row_view->next_sibling) {
-                        if (!row_view->is_block()) continue;
-                        ViewBlock* row = lam::view_require_block(row_view);
-                        if (row->view_type == RDT_VIEW_TABLE_ROW) {
-                            ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(row);
-                            int row_idx = table_row_metadata_index_from_row(trow, -1);
-                            if (row_idx >= 0 && row_idx < meta->row_count) {
-                                row->height = meta->row_heights[row_idx];
-                                row->y = meta->row_y_positions[row_idx] - child->y;  // Adjust for group offset
-
-                                // Track max extent for group height
-                                float row_bottom = row->y + row->height;
-                                if (row_bottom > group_max_y) {
-                                    group_max_y = row_bottom;
-                                }
-
-                                update_row_cells_after_height_change(lycon, trow, row->height, true, false);
-                            }
-                        }
-                    }
-
-                    // Update group height to encompass all rows after height distribution
-                    if (group_max_y > 0) {
-                        float old_group_height = child->height;
-                        child->height = group_max_y;
-                        log_debug("%s Updated row group height from %.1f to %.1f", table->source_loc(), old_group_height, child->height);
-                    }
-                } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
-                    ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(child);
-                    int row_idx = table_row_metadata_index_from_row(trow, -1);
-                    if (row_idx >= 0 && row_idx < meta->row_count) {
-                        child->height = meta->row_heights[row_idx];
-                        child->y = meta->row_y_positions[row_idx];
-                        update_row_cells_after_height_change(lycon, trow, child->height, true, false);
-                    }
-                }
-            }
+            table_update_row_views_from_metadata(lycon, table, meta);
 
             // Update current_y to reflect expanded height
             current_y += distributed_height_delta;
@@ -8818,53 +8915,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // The view update loop above computed group heights using stale group y positions,
             // so we must reposition groups sequentially and recalculate both row-relative
             // positions and group heights from the authoritative meta->row_y_positions.
-            {
-                float group_y_accum = -1;
-                for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
-                    if (!child_view->is_block()) continue;
-                    ViewBlock* child = lam::view_require_block(child_view);
-                    if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-                        if (group_y_accum >= 0) {
-                            float old_y = child->y;
-                            child->y = group_y_accum;
-                            if (old_y != child->y) {
-                                log_debug("%s Repositioned row group from y=%.1f to y=%.1f", table->source_loc(), old_y, child->y);
-                            }
-                        } else {
-                            // First group keeps its original y
-                            group_y_accum = child->y;
-                        }
-
-                        // Recalculate row positions within group relative to the (possibly updated) group y,
-                        // and recompute group height from the corrected row extents.
-                        float group_max_y = 0;
-                        for (View* row_view = child->first_child; row_view; row_view = row_view->next_sibling) {
-                            if (!row_view->is_block()) continue;
-                            ViewBlock* row = lam::view_require_block(row_view);
-                            if (row->view_type == RDT_VIEW_TABLE_ROW) {
-                                ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(row);
-                                int row_idx = table_row_metadata_index_from_row(trow, -1);
-                                if (row_idx >= 0 && row_idx < meta->row_count) {
-                                    row->y = meta->row_y_positions[row_idx] - child->y;
-                                    float row_bottom = row->y + row->height;
-                                    if (row_bottom > group_max_y) {
-                                        group_max_y = row_bottom;
-                                    }
-                                }
-                            }
-                        }
-                        if (group_max_y > 0) {
-                            child->height = group_max_y;
-                        }
-
-                        group_y_accum = child->y + child->height;
-                        // Add border-spacing between groups
-                        if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
-                            group_y_accum += table->tb->border_spacing_v;
-                        }
-                    }
-                }
-            }
+            table_reposition_row_groups_from_metadata(table, meta);
 
             // Explicit table height changes row heights after the initial rowspan
             // pass, so rowspanning cell boxes must be refreshed from the final rows.
@@ -8898,35 +8949,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (captions->length > 0 && table->tb->caption_side == TableProp::CAPTION_SIDE_BOTTOM) {
         float cap_y = final_table_height;
         float total_bottom_caption_height = 0;
-        for (int ci = 0; ci < captions->length; ci++) {
-            ViewBlock* cap = table_array_view_block(captions, ci);
-            float cap_ml = (cap->bound && cap->bound->margin.left_type != CSS_VALUE_AUTO && cap->bound->margin.left > 0)
-                               ? cap->bound->margin.left : 0;
-            cap->x = cap_ml;
-            float cap_mt = (cap->bound && cap->bound->margin.top > 0) ? cap->bound->margin.top : 0;
-            cap->y = cap_y + cap_mt;
+        for_each_table_caption(captions, [&](ViewBlock* cap, int ci) {
+            table_position_caption_with_margins(cap, cap_y);
 
-            float old_width = cap->width;
-            adjust_table_caption_width(cap, wrapper_content_width);
-
-            float this_cap_height;
-            if (fabs(wrapper_content_width - old_width) > 0.5f) {
-                log_debug("%s Bottom caption %d width changed: %.1f -> %.1f, re-laying out", table->source_loc(), ci, old_width, table_width);
-                this_cap_height = relayout_table_caption(lycon, cap, table_width);
-            } else {
-                float margin_v = 0;
-                if (cap->bound) {
-                    float mt = cap->bound->margin.top > 0 ? cap->bound->margin.top : 0;
-                    float mb = cap->bound->margin.bottom > 0 ? cap->bound->margin.bottom : 0;
-                    margin_v = mt + mb;
-                }
-                this_cap_height = cap->height + margin_v;
-            }
+            float this_cap_height = table_adjust_caption_width_and_height(
+                lycon, table, cap, table_width, wrapper_content_width, ci,
+                TABLE_CAPTION_WIDTH_REFERENCE_WRAPPER);
 
             cap_y += this_cap_height;
             total_bottom_caption_height += this_cap_height;
             log_debug("%s Positioned caption %d at bottom: y=%.1f, height=%.1f", table->source_loc(), ci, cap->y, cap->height);
-        }
+        });
         final_table_height += total_bottom_caption_height;
         caption_height = total_bottom_caption_height;
         log_debug("%s Total bottom caption height: %.1f", table->source_loc(), total_bottom_caption_height);
@@ -8977,24 +9010,20 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         float available_for_groups = final_table_height - content_area_top_y - bottom_overhead;
         if (available_for_groups > 0) {
             int row_group_count = 0;
-            for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
-                if (!child_view->is_block()) continue;
-                ViewBlock* child = lam::view_require_block(child_view);
-                if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) row_group_count++;
-            }
+            for_each_direct_table_row_group(table, [&](ViewTableRowGroup* group, ViewBlock* child) {
+                (void)group; (void)child;
+                row_group_count++;
+            });
             if (row_group_count > 0) {
                 float height_per_group = available_for_groups / row_group_count;
                 log_debug("%s No-row table: expanding %d row groups to %.1fpx each (available=%.1f)", table->source_loc(),
                          row_group_count, height_per_group, available_for_groups);
-                for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
-                    if (!child_view->is_block()) continue;
-                    ViewBlock* child = lam::view_require_block(child_view);
-                    if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-                        if (height_per_group > child->height) {
-                            child->height = height_per_group;
-                        }
+                for_each_direct_table_row_group(table, [&](ViewTableRowGroup* group, ViewBlock* child) {
+                    (void)group;
+                    if (height_per_group > child->height) {
+                        child->height = height_per_group;
                     }
-                }
+                });
             }
         }
     }
@@ -9609,49 +9638,19 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
     // CSS Position 3 §3.4: Apply relative/sticky positioning to table sub-elements
     // (table cells, rows, row groups, captions) after all table layout is finalized.
     // Table-internal elements can be relatively positioned per CSS 2.1 §17.5.1.
-    for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
-        // Skip non-block views (text nodes, br, inline, etc.) — they don't have position properties
-        if (!child_view->is_block()) continue;
-        ViewBlock* child = lam::view_require_block(child_view);
+    for_each_direct_table_block(table, [&](ViewBlock* child) {
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-            if (child->position && child->position->position == CSS_VALUE_RELATIVE)
-                layout_relative_positioned(lycon, child);
-            else if (child->position && child->position->position == CSS_VALUE_STICKY)
-                layout_sticky_positioned(lycon, child);
-            for (View* row_view = child->first_child; row_view; row_view = row_view->next_sibling) {
-                if (!row_view->is_block()) continue;
-                ViewBlock* row = lam::view_require_block(row_view);
-                if (row->view_type == RDT_VIEW_TABLE_ROW) {
-                    if (row->position && row->position->position == CSS_VALUE_RELATIVE)
-                        layout_relative_positioned(lycon, row);
-                    else if (row->position && row->position->position == CSS_VALUE_STICKY)
-                        layout_sticky_positioned(lycon, row);
-                    ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(row);
-                    for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                        if (tcell->position && tcell->position->position == CSS_VALUE_RELATIVE)
-                            layout_relative_positioned(lycon, lam::view_require_block(tcell));
-                        else if (tcell->position && tcell->position->position == CSS_VALUE_STICKY)
-                            layout_sticky_positioned(lycon, lam::view_require_block(tcell));
-                    }
-                }
-            }
+            table_apply_positioned_layout(lycon, child);
+            ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
+            for_each_table_row_in_group(group, [&](ViewTableRow* row, ViewBlock* row_block) {
+                (void)row_block;
+                table_apply_positioned_row(lycon, row);
+            });
         } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
-            if (child->position && child->position->position == CSS_VALUE_RELATIVE)
-                layout_relative_positioned(lycon, child);
-            else if (child->position && child->position->position == CSS_VALUE_STICKY)
-                layout_sticky_positioned(lycon, child);
-            ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(child);
-            for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                if (tcell->position && tcell->position->position == CSS_VALUE_RELATIVE)
-                    layout_relative_positioned(lycon, lam::view_require_block(tcell));
-                else if (tcell->position && tcell->position->position == CSS_VALUE_STICKY)
-                    layout_sticky_positioned(lycon, lam::view_require_block(tcell));
-            }
-        } else if (child->position && child->position->position == CSS_VALUE_RELATIVE) {
-            layout_relative_positioned(lycon, child);
-        } else if (child->position && child->position->position == CSS_VALUE_STICKY) {
-            layout_sticky_positioned(lycon, child);
+            table_apply_positioned_row(lycon, lam::view_require<RDT_VIEW_TABLE_ROW>(child));
+        } else {
+            table_apply_positioned_layout(lycon, child);
         }
-    }
+    });
 
 }

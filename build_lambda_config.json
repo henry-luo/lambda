@@ -45,7 +45,6 @@
     "exclude_source_files": [
         "lambda/transpile.cpp",
         "lambda/transpile-call.cpp",
-        "radiant/radiant.cpp",
         "radiant/rdt_vector_cg.mm",
         "lambda/format/format_latex_html_v2.cpp",
         "lambda/input/input-adoc.cpp",
@@ -690,7 +689,6 @@
             ],
             "build_dir": "build_jube",
             "exclude_source_files": [
-                "radiant/radiant.cpp",
                 "radiant/rdt_vector_cg.mm",
                 "lambda/format/format_latex_html_v2.cpp",
                 "lambda/input/input-adoc.cpp",
@@ -1359,7 +1357,6 @@
         "macos": {
             "exclude_source_files": [
                 "lib/clock_compat.c",
-                "radiant/radiant.cpp",
                 "radiant/rdt_video_stub.cpp"
             ],
             "additional_source_files": [
@@ -2361,6 +2358,24 @@
                         ],
                         "binary": "test_display_list_gtest.exe",
                         "icon": "🧾"
+                    },
+                    {
+                        "source": "test/test_layout_custom_gtest.cpp",
+                        "name": "Custom Layout Engine Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "radiant/layout_custom.cpp",
+                            "radiant/layout_box.cpp"
+                        ],
+                        "binary": "test_layout_custom_gtest.exe",
+                        "icon": "📐"
                     },
                     {
                         "source": "lib/test_pdf_writer_gtest.cpp",

@@ -12,7 +12,7 @@ Bound dl_item_bounds(const DisplayItem* item) {
 }
 
 static bool dl_item_preserves_replay_state(const DisplayItem* item) {
-    return item && dl_op_preserves_replay_state(item->op);
+    return item && dl_op_has_flags(item->op, DL_OP_FLAG_PRESERVES_REPLAY_STATE);
 }
 
 bool dl_item_intersects_rect(const DisplayItem* item,

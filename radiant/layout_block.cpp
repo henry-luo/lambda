@@ -14,6 +14,7 @@
 #include "layout_table.hpp"
 #include "layout_box.hpp"
 #include "layout_alignment.hpp"
+#include "layout_custom.hpp"
 #include "grid.hpp"
 #include "form_control.hpp"
 #include "render_svg_inline.hpp"
@@ -49,6 +50,21 @@ static bool line_has_prior_flow_content(const Linebox* line) {
          line->has_replaced_content ||
          line->has_c1_control_text ||
          line->has_non_c1_text);
+}
+
+static const char* stabilize_custom_layout_name(const char* name, char* storage, size_t storage_size) {
+    if (!name || !storage || storage_size == 0) return nullptr;
+    size_t i = 0;
+    while (i + 1 < storage_size && name[i] != '\0') {
+        storage[i] = name[i];
+        i++;
+    }
+    storage[i] = '\0';
+    if (name[i] != '\0') {
+        log_error("CUSTOM_LAYOUT_NAME_TOO_LONG name starts with '%s'", storage);
+        return nullptr;
+    }
+    return storage;
 }
 
 // Check if a view element is a descendant of another view element
@@ -7592,11 +7608,21 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // Try cache lookup for early bailout when dimensions already computed
     // =========================================================================
     DomElement* dom_elem = elmt->is_element() ? elmt->as_element() : nullptr;
+    const char* custom_layout_name = custom_layout_name_for_element(dom_elem);
+    char custom_layout_name_storage[128];
+    if (custom_layout_name && custom_layout_name[0] != '\0') {
+        // CSS value nodes may be revisited while laying out children; keep this
+        // block's selected custom layout key stable until the callback runs.
+        custom_layout_name = stabilize_custom_layout_name(
+            custom_layout_name, custom_layout_name_storage, sizeof(custom_layout_name_storage));
+    }
+    bool has_custom_layout = custom_layout_name && custom_layout_name[0] != '\0';
     radiant::KnownDimensions known_dims = radiant::layout_known_dimensions_from_block(block);
 
     // Try cache lookup
     radiant::SizeF cached_size;
-    if (radiant::layout_pass_cache_get(lycon, dom_elem, known_dims, &cached_size, "BLOCK")) {
+    if (!has_custom_layout &&
+        radiant::layout_pass_cache_get(lycon, dom_elem, known_dims, &cached_size, "BLOCK")) {
         block->width = cached_size.width;
         block->height = cached_size.height;
         // Restore parent context and return early
@@ -7609,7 +7635,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     // Early bailout for ComputeSize mode when both dimensions are known
-    if (lycon->run_mode == radiant::RunMode::ComputeSize) {
+    if (!has_custom_layout && lycon->run_mode == radiant::RunMode::ComputeSize) {
         bool has_definite_width = (block->blk && block->blk->given_width > 0);
         bool has_definite_height = (block->blk && block->blk->given_height > 0);
 
@@ -7682,6 +7708,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     } else {
         // layout block content to determine content width and height
         layout_block_content(lycon, block, &pa_block, &pa_line);
+        if (has_custom_layout) {
+            // custom layout consumes already-laid-out child border boxes, so the
+            // callback must run before this block contributes size to its parent.
+            layout_custom_apply(lycon, block, custom_layout_name);
+        }
         bool child_line_clamp_inherited = block->blk && block->blk->line_clamp_inherited;
         bool child_line_clamped = block->blk && block->blk->line_clamped;
         int child_line_number = lycon->block.line_number;
@@ -8989,8 +9020,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // =========================================================================
     // CACHE STORE: Save computed dimensions for future lookups
     // =========================================================================
-    radiant::SizeF result = radiant::size_f(block->width, block->height);
-    radiant::layout_pass_cache_store(lycon, dom_elem, known_dims, result, "BLOCK");
+    if (!has_custom_layout) {
+        radiant::SizeF result = radiant::size_f(block->width, block->height);
+        radiant::layout_pass_cache_store(lycon, dom_elem, known_dims, result, "BLOCK");
+    }
 
     log_leave();
 

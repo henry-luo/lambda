@@ -119,11 +119,6 @@ static bool parse_color_value(const char* val, Color* out) {
     return false;
 }
 
-// Map a CSS property name string to CssPropertyId
-static CssPropertyId property_name_to_id(const char* name) {
-    return (CssPropertyId)css_property_id_from_name(name);
-}
-
 // Determine the animation value type for a property
 static CssAnimValueType property_value_type(CssPropertyId id) {
     switch (id) {
@@ -415,7 +410,7 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
             if (*p == ';') p++;
 
             // resolve property and parse value
-            CssPropertyId prop_id = property_name_to_id(prop_name);
+            CssPropertyId prop_id = (CssPropertyId)css_property_id_from_name(prop_name);
             if (prop_id != (CssPropertyId)0) {
                 if (parse_property_value(prop_id, val_buf, &temp_props[prop_count], pool)) {
                     prop_count++;

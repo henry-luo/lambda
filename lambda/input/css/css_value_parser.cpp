@@ -442,9 +442,95 @@ CssValue* css_parse_generic_function(CssPropertyValueParser* parser,
     if (!value->data.function) {
         return NULL;
     }
-    value->data.function->name = pool_strdup(parser->pool, function_name);
+    const char* clean_function_name = function_name;
+    size_t function_name_len = strlen(function_name);
+    if (function_name_len > 0 && function_name[function_name_len - 1] == '(') {
+        char* clean_name = (char*)pool_calloc(parser->pool, function_name_len);
+        if (clean_name) {
+            // function tokens include the opening paren; CssFunction::name must not.
+            memcpy(clean_name, function_name, function_name_len - 1);
+            clean_name[function_name_len - 1] = '\0';
+            clean_function_name = clean_name;
+        }
+    }
+    value->data.function->name = pool_strdup(parser->pool, clean_function_name);
     value->data.function->args = NULL;
     value->data.function->arg_count = 0;
+
+    int arg_count = 0;
+    int arg_start = 0;
+    int depth = 0;
+    bool has_arg_content = false;
+    for (int i = 0; i <= token_count; i++) {
+        CssTokenType type = (i < token_count) ? tokens[i].type : CSS_TOKEN_COMMA;
+        if (i < token_count && type == CSS_TOKEN_RIGHT_PAREN && depth == 0) {
+            type = CSS_TOKEN_COMMA;
+        }
+        if (i < token_count && type == CSS_TOKEN_FUNCTION) {
+            depth++;
+            has_arg_content = true;
+            continue;
+        }
+        if (i < token_count && type == CSS_TOKEN_LEFT_PAREN) {
+            depth++;
+            has_arg_content = true;
+            continue;
+        }
+        if (i < token_count && type == CSS_TOKEN_RIGHT_PAREN && depth > 0) {
+            depth--;
+            has_arg_content = true;
+            continue;
+        }
+        if ((i == token_count || type == CSS_TOKEN_COMMA) && depth == 0) {
+            if (has_arg_content || i > arg_start) {
+                arg_count++;
+            }
+            arg_start = i + 1;
+            has_arg_content = false;
+            continue;
+        }
+        if (i < token_count && type != CSS_TOKEN_WHITESPACE) {
+            has_arg_content = true;
+        }
+    }
+
+    if (arg_count <= 0) return value;
+
+    value->data.function->args = (CssValue**)pool_calloc(parser->pool, sizeof(CssValue*) * arg_count);
+    if (!value->data.function->args) return value;
+    value->data.function->arg_count = arg_count;
+
+    int arg_index = 0;
+    arg_start = 0;
+    depth = 0;
+    for (int i = 0; i <= token_count && arg_index < arg_count; i++) {
+        CssTokenType type = (i < token_count) ? tokens[i].type : CSS_TOKEN_COMMA;
+        bool closes_function = i < token_count && type == CSS_TOKEN_RIGHT_PAREN && depth == 0;
+        if (closes_function) type = CSS_TOKEN_COMMA;
+        if (i < token_count && type == CSS_TOKEN_FUNCTION) {
+            depth++;
+            continue;
+        }
+        if (i < token_count && type == CSS_TOKEN_LEFT_PAREN) {
+            depth++;
+            continue;
+        }
+        if (i < token_count && type == CSS_TOKEN_RIGHT_PAREN && depth > 0) {
+            depth--;
+            continue;
+        }
+        if ((i == token_count || type == CSS_TOKEN_COMMA) && depth == 0) {
+            int start = arg_start;
+            int end = i;
+            while (start < end && tokens[start].type == CSS_TOKEN_WHITESPACE) start++;
+            while (end > start && tokens[end - 1].type == CSS_TOKEN_WHITESPACE) end--;
+            if (end > start) {
+                value->data.function->args[arg_index++] =
+                    css_parse_property_value(parser, tokens + start, end - start, NULL);
+            }
+            arg_start = i + 1;
+        }
+    }
 
     return value;
 }
