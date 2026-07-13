@@ -257,6 +257,30 @@ static bool form_control_has_focus(const FormControlBox* box, ViewBlock* block) 
     return box && box->state && focus_get(box->state) == static_cast<View*>(block);
 }
 
+static void paint_default_text_control_box(RenderContext* rdcon, ViewBlock* block,
+                                           const FormControlBox* box) {
+    if (!rdcon || !block || !box) return;
+
+    // Author backgrounds and borders are painted by render_block_view; the
+    // fallback chrome only fills the content area so it does not cover them.
+    if (!box->has_css_background) {
+        Color bg = make_color(255, 255, 255);
+        float bx = box->x, by = box->y, bw = box->w, bh = box->h;
+        if (box->has_css_border && block->bound && block->bound->border) {
+            float bl = block->bound->border->width.left * box->s;
+            float br = block->bound->border->width.right * box->s;
+            float bt = block->bound->border->width.top * box->s;
+            float bb = block->bound->border->width.bottom * box->s;
+            bx += bl; by += bt;
+            bw -= bl + br; bh -= bt + bb;
+        }
+        fill_rect(rdcon, bx, by, bw, bh, bg);
+    }
+    if (box->use_default_border) {
+        draw_3d_border(rdcon, box->x, box->y, box->w, box->h, true, 1 * box->s);
+    }
+}
+
 /**
  * Render a simple string at the given position using the specified font.
  * @param rdcon Render context
@@ -458,6 +482,20 @@ static uint32_t utf8_byte_offset_for_codepoints(const char* text, uint32_t len,
     return i > len ? len : i;
 }
 
+struct TextControlDisplayText {
+    const char* value_text;
+    uint32_t value_len;
+    const char* text;
+    uint32_t selection_start;
+    uint32_t selection_end;
+    uint32_t preedit_start;
+    uint32_t preedit_end;
+    uint32_t preedit_caret_byte;
+    char* preedit_display;
+    bool has_preedit;
+    bool is_placeholder;
+};
+
 static char* build_preedit_display_text(FormControlProp* form,
                                         const char* value,
                                         uint32_t value_len,
@@ -494,6 +532,37 @@ static char* build_preedit_display_text(FormControlProp* form,
     return display;
 }
 
+static void resolve_text_control_display_text(FormControlProp* form,
+                                              DocState* state,
+                                              View* view,
+                                              bool placeholder_requires_text,
+                                              TextControlDisplayText* out) {
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    const char* value_text = (form && form->value) ? form->value : "";
+    out->value_text = value_text;
+    out->value_len = (uint32_t)strlen(value_text);
+    out->text = value_text;
+
+    form_control_get_selection(state, view, &out->selection_start,
+                               &out->selection_end, NULL);
+    out->has_preedit = form && form->preedit_utf8 && form->preedit_len > 0;
+    if (out->has_preedit) {
+        out->preedit_display = build_preedit_display_text(form, value_text,
+            out->value_len, out->selection_start, out->selection_end,
+            &out->preedit_start, &out->preedit_end,
+            &out->preedit_caret_byte);
+        if (out->preedit_display) out->text = out->preedit_display;
+    } else if (!out->text || !*out->text) {
+        bool can_use_placeholder = !placeholder_requires_text ||
+            (form && form->placeholder && *form->placeholder);
+        if (can_use_placeholder) {
+            out->text = form ? form->placeholder : nullptr;
+            out->is_placeholder = true;
+        }
+    }
+}
+
 /**
  * Render a text input control (text, password, email, etc.)
  */
@@ -504,64 +573,29 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
     float y = fc.y;
     float w = fc.w;
     float h = fc.h;
-
-    // Background (white) - only when CSS doesn't specify a background.
-    // When the author sets background-color (or background image), render_block_view
-    // has already painted it, so do not overdraw with white here.
-    // Also: clip the white fill to the inside of any CSS border, otherwise the
-    // fill stomps the border (which render_bound painted just before us).
-    bool has_css_background = fc.has_css_background;
     bool has_css_border = fc.has_css_border;
     bool use_default_border = fc.use_default_border;
-    if (!has_css_background) {
-        Color bg = make_color(255, 255, 255);
-        float bx = x, by = y, bw_w = w, bh_h = h;
-        if (has_css_border) {
-            float bl = block->bound->border->width.left * s;
-            float br = block->bound->border->width.right * s;
-            float bt = block->bound->border->width.top * s;
-            float bb = block->bound->border->width.bottom * s;
-            bx += bl; by += bt;
-            bw_w -= bl + br; bh_h -= bt + bb;
-        }
-        fill_rect(rdcon, bx, by, bw_w, bh_h, bg);
-    }
 
-    // 3D inset border (text inputs have inset appearance) - only when the author
-    // didn't specify a border. If a border is set in CSS, render_block_view has
-    // already drawn it (and respects border-color/border-radius); avoid stomping
-    // it with the default 3D chrome.
-    if (use_default_border) {
-        draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
-    }
+    paint_default_text_control_box(rdcon, block, &fc);
 
     // Source value vs displayed value. F4: for password fields we substitute
     // every codepoint with U+25CF so the existing measurement and rendering
     // paths can treat it uniformly. The unmasked `src_text` is still used
     // for caret-byte→codepoint mapping.
-    const char* value_text = form->value ? form->value : "";
-    uint32_t value_len = (uint32_t)strlen(value_text);
     DocState* state = fc.state;
     bool focused_here = form_control_has_focus(&fc, block);
-    uint32_t selection_start = 0, selection_end = 0;
-    form_control_get_selection(state, static_cast<View*>(block), &selection_start, &selection_end, NULL);
-    uint32_t preedit_start = 0;
-    uint32_t preedit_end = 0;
-    uint32_t preedit_caret_byte = 0;
-    char* preedit_display = nullptr;
-    bool has_preedit = form->preedit_utf8 && form->preedit_len > 0;
-    const char* src_text = value_text;
-    bool is_placeholder = false;
-    if (has_preedit) {
-        preedit_display = build_preedit_display_text(form, value_text, value_len,
-                                                     selection_start, selection_end,
-                                                     &preedit_start, &preedit_end,
-                                                     &preedit_caret_byte);
-        if (preedit_display) src_text = preedit_display;
-    } else if (!src_text || !*src_text) {
-        src_text = form->placeholder;
-        is_placeholder = true;
-    }
+    TextControlDisplayText display;
+    resolve_text_control_display_text(form, state, static_cast<View*>(block),
+                                      false, &display);
+    const char* src_text = display.text;
+    uint32_t selection_start = display.selection_start;
+    uint32_t selection_end = display.selection_end;
+    uint32_t preedit_start = display.preedit_start;
+    uint32_t preedit_end = display.preedit_end;
+    uint32_t preedit_caret_byte = display.preedit_caret_byte;
+    char* preedit_display = display.preedit_display;
+    bool has_preedit = display.has_preedit;
+    bool is_placeholder = display.is_placeholder;
     bool is_password = !has_preedit && !is_placeholder && src_text
         && form->input_type && strcmp(form->input_type, "password") == 0;
     uint32_t password_reveal_start = 0;
@@ -1309,56 +1343,26 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
     float y = fc.y;
     float w = fc.w;
     float h = fc.h;
-
-    // Background and border are painted by render_bound when the author set them
-    // (respecting border-radius / border-color). Only fall back to the default
-    // white background + 3D inset border when the author didn't.
-    bool has_css_background = fc.has_css_background;
     bool has_css_border = fc.has_css_border;
     bool use_default_border = fc.use_default_border;
-    if (!has_css_background) {
-        Color bg = make_color(255, 255, 255);
-        float bx = x, by = y, bw_w = w, bh_h = h;
-        if (has_css_border) {
-            float bl = block->bound->border->width.left * s;
-            float br = block->bound->border->width.right * s;
-            float bt = block->bound->border->width.top * s;
-            float bb = block->bound->border->width.bottom * s;
-            bx += bl; by += bt;
-            bw_w -= bl + br; bh_h -= bt + bb;
-        }
-        fill_rect(rdcon, bx, by, bw_w, bh_h, bg);
-    }
-    if (use_default_border) {
-        draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
-    }
+
+    paint_default_text_control_box(rdcon, block, &fc);
 
     // Determine text content or placeholder. Only enter placeholder mode
     // when an actual placeholder string is present — otherwise an empty
     // textarea would be flagged as a placeholder and the caret-render
     // path (guarded by !is_placeholder) would skip drawing the caret.
-    const char* value_text = form->value ? form->value : "";
-    uint32_t value_len = (uint32_t)strlen(value_text);
     DocState* state = fc.state;
-    uint32_t selection_start = 0, selection_end = 0;
-    form_control_get_selection(state, static_cast<View*>(block), &selection_start, &selection_end, NULL);
-    uint32_t preedit_start = 0;
-    uint32_t preedit_end = 0;
-    uint32_t preedit_caret_byte = 0;
-    char* preedit_display = nullptr;
-    bool has_preedit = form->preedit_utf8 && form->preedit_len > 0;
-    const char* text = value_text;
-    bool is_placeholder = false;
-    if (has_preedit) {
-        preedit_display = build_preedit_display_text(form, value_text, value_len,
-                                                     selection_start, selection_end,
-                                                     &preedit_start, &preedit_end,
-                                                     &preedit_caret_byte);
-        if (preedit_display) text = preedit_display;
-    } else if ((!text || !*text) && form->placeholder && *form->placeholder) {
-        text = form->placeholder;
-        is_placeholder = true;
-    }
+    TextControlDisplayText display;
+    resolve_text_control_display_text(form, state, static_cast<View*>(block),
+                                      true, &display);
+    const char* text = display.text;
+    uint32_t preedit_start = display.preedit_start;
+    uint32_t preedit_end = display.preedit_end;
+    uint32_t preedit_caret_byte = display.preedit_caret_byte;
+    char* preedit_display = display.preedit_display;
+    bool has_preedit = display.has_preedit;
+    bool is_placeholder = display.is_placeholder;
     FontProp* render_font = form_render_font(block, form, is_placeholder);
 
     // Compute internal metrics
