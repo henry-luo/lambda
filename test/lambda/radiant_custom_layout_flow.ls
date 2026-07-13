@@ -4,9 +4,9 @@ let ok = radiant.register_layout("flow_smoke", (parent, children, ctx) => {
   baseline: 12,
   placements: [for (child in children) {
     child: child,
-    x: radiant.velmt_index(child) * 50 + (if (ctx.child_available_width_definite and ctx.child_available_width_source == "available") -10 else -20),
-    y: radiant.velmt_index(child) * 30 + (if (ctx.child_available_height_definite and ctx.child_available_height_source == "available") 0 else 1000),
-    z: radiant.velmt_index(child)
+    x: child.index * 50 + (if (ctx.child_available_width_definite and ctx.child_available_width_source == "available") -10 else -20),
+    y: child.index * 30 + (if (ctx.child_available_height_definite and ctx.child_available_height_source == "available") 0 else 1000),
+    z: child.index
   }]
 })
 
