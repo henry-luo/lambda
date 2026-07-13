@@ -32,6 +32,7 @@ SCAN_ROOTS=(lambda radiant lib test)
 # counts as failed iff the command exits non-zero.
 STRUCTURAL_CHECKS=(
   "state-machine:python3 $ROOT/utils/check_state_machine.py"
+  "no-new-per-file-header:python3 $ROOT/utils/lint/rules/structural/no_new_per_file_header.py"
   # ls-test-has-golden moved from Python to alint (see .alint.yml).
   # `check_state_machine.py` stays — it parses C++ enum tables and correlates,
   # which neither ast-grep nor alint can express.
