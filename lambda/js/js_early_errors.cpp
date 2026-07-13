@@ -581,7 +581,7 @@ static void check_binding_pattern_reserved(EarlyErrorCtx* ctx, JsAstNode* node) 
 
 static void check_function_name_reserved(EarlyErrorCtx* ctx, JsFunctionNode* func) {
     if (!ctx->in_strict || !func || !func->name) return;
-    if (strcmp(ts_node_type(func->base.node), "method_definition") == 0) return;
+    if (strcmp(ts_node_type(func->node), "method_definition") == 0) return;
     const char* name = func->name->chars;
     if (strcmp(name, "eval") == 0 || strcmp(name, "arguments") == 0) {
         ee_error(ctx, (JsAstNode*)func, "'%s' cannot be used as a function name in strict mode", name);
@@ -791,7 +791,8 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
 
         case JS_AST_NODE_ARROW_FUNCTION:
         case JS_AST_NODE_FUNCTION_EXPRESSION:
-        case JS_AST_NODE_FUNCTION_DECLARATION: {
+        case JS_AST_NODE_FUNCTION_DECLARATION:
+        case JS_AST_NODE_METHOD_DEFINITION: {
             JsFunctionNode* fn = (JsFunctionNode*)node;
             bool was_gen = ctx->in_generator;
             bool was_async = ctx->in_async;
@@ -1136,8 +1137,7 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
         }
 
         case JS_AST_NODE_METHOD_DEFINITION: {
-            JsMethodDefinitionNode* md = (JsMethodDefinitionNode*)node;
-            walk_expression(ctx, md->value);
+            walk_expression(ctx, node);
             break;
         }
 

@@ -5,8 +5,10 @@
 
 #ifdef __cplusplus
 #include "lambda.hpp"
+#include "ast-core.hpp"
 #else
 #include "lambda.h"
+typedef struct LangProfile LangProfile;
 #endif
 
 #ifdef __cplusplus
@@ -17,6 +19,7 @@ extern "C" {
 typedef struct ModuleDescriptor {
     const char* path;           // resolved absolute path (unique key, owned)
     const char* source_lang;    // "lambda", "js", "python", ... (static string, not owned)
+    LangProfile* profile;       // resolved language profile for shared AST phases
     Item namespace_obj;         // namespace Item (map of exported symbols)
     void* mir_ctx;              // compiled MIR context (opaque, for function lookup)
     bool initialized;           // true after module code has executed

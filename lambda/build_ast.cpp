@@ -7773,6 +7773,14 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         // build value expression
         ast_node->value = build_expr(tp, value_node);
         ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ANY;
+        ast_node->op = OPERATOR_ASSIGN;
+        AstFieldNode* left = (AstFieldNode*)alloc_ast_node(tp, AST_NODE_INDEX_EXPR, target_node, sizeof(AstFieldNode));
+        left->object = ast_node->object;
+        left->field = ast_node->key;
+        left->computed = true;
+        left->type = &TYPE_ANY;
+        ast_node->left = (AstNode*)left;
+        ast_node->right = ast_node->value;
 
         return (AstNode*)ast_node;
     }
@@ -7803,6 +7811,14 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         // build value expression
         ast_node->value = build_expr(tp, value_node);
         ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ANY;
+        ast_node->op = OPERATOR_ASSIGN;
+        AstFieldNode* left = (AstFieldNode*)alloc_ast_node(tp, AST_NODE_MEMBER_EXPR, target_node, sizeof(AstFieldNode));
+        left->object = ast_node->object;
+        left->field = ast_node->key;
+        left->computed = false;
+        left->type = &TYPE_ANY;
+        ast_node->left = (AstNode*)left;
+        ast_node->right = ast_node->value;
 
         return (AstNode*)ast_node;
     }
@@ -7818,6 +7834,12 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         NameEntry* entry = lookup_name(tp, target_str);
         ast_node->target_node = entry ? entry->node : NULL;
         ast_node->target_entry = entry;
+        ast_node->op = OPERATOR_ASSIGN;
+        AstIdentNode* left = (AstIdentNode*)alloc_ast_node(tp, AST_NODE_IDENT, target_node, sizeof(AstIdentNode));
+        left->name = ast_node->target;
+        left->entry = entry;
+        left->type = (entry && entry->node && entry->node->type) ? entry->node->type : &TYPE_ANY;
+        ast_node->left = (AstNode*)left;
 
         // check that the target is a mutable variable (declared with var)
         // Exception: in pn method bodies, object fields (AST_NODE_KEY_EXPR) are mutable
@@ -7841,6 +7863,7 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         // build value expression
         ast_node->value = build_expr(tp, value_node);
         ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ANY;
+        ast_node->right = ast_node->value;
 
         // type analysis for var assignment
         if (entry && entry->is_mutable && ast_node->value && ast_node->value->type && entry->node->type) {

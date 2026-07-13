@@ -16,7 +16,7 @@ static bool jm_test262_fast_paths_enabled(JsMirTranspiler* mt) {
 
 static void jm_emit_pending_call_source(JsMirTranspiler* mt, JsCallNode* call) {
     if (!mt || !call || !mt->tp || !mt->tp->source) return;
-    TSNode node = call->base.node;
+    TSNode node = call->node;
     if (ts_node_is_null(node)) return;
     uint32_t start = ts_node_start_byte(node);
     uint32_t end = ts_node_end_byte(node);
@@ -216,7 +216,7 @@ static const char* jm_profile_shape_guard_label(JsMirTranspiler* mt,
         class_name = ce->alias_name->chars;
         class_len = (int)ce->alias_name->len;
     }
-    TSPoint point = ts_node_start_point(mem->base.node);
+    TSPoint point = ts_node_start_point(mem->node);
     char label[192];
     int len = snprintf(label, sizeof(label), "%.*s.%.*s#%d@%u:%u",
         class_len, class_name,
@@ -249,7 +249,7 @@ static const char* jm_profile_property_set_label(JsMirTranspiler* mt, JsMemberNo
         }
     }
 
-    TSPoint point = ts_node_start_point(mem->base.node);
+    TSPoint point = ts_node_start_point(mem->node);
     char label[192];
     int len = snprintf(label, sizeof(label), "%.*s.%.*s@%u:%u",
         object_len, object_name,
@@ -288,7 +288,7 @@ static void jm_emit_profile_property_set_site(JsMirTranspiler* mt, JsMemberNode*
 // which is exactly what the direct-dispatch fast path needs.
 static bool jm_declarator_is_const(JsVariableDeclaratorNode* dn) {
     if (!dn) return false;
-    TSNode dts = dn->base.node;
+    TSNode dts = dn->node;
     if (ts_node_is_null(dts)) return false;
     TSNode parent = ts_node_parent(dts);
     if (ts_node_is_null(parent)) return false;
@@ -305,7 +305,7 @@ static bool jm_declarator_is_const(JsVariableDeclaratorNode* dn) {
 
 static bool jm_function_decl_entry_is_direct_binding(JsFunctionNode* fn) {
     if (!fn) return false;
-    TSNode fn_node = fn->base.node;
+    TSNode fn_node = fn->node;
     if (ts_node_is_null(fn_node)) return false;
     TSNode parent = ts_node_parent(fn_node);
     if (ts_node_is_null(parent)) return false;
@@ -333,7 +333,7 @@ static JsFuncCollected* jm_find_direct_function_decl_by_vname(JsMirTranspiler* m
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];
         JsFunctionNode* fn = fc->node;
-        if (!fn || !fn->name || fn->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        if (!fn || !fn->name || fn->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
         if (!jm_function_decl_entry_is_direct_binding(fn)) continue;
         char fname[128];
         snprintf(fname, sizeof(fname), "_js_%.*s", (int)fn->name->len, fn->name->chars);
@@ -466,9 +466,9 @@ static bool jm_class_declares_private_name(JsClassEntry* ce, const char* suffix,
 }
 
 static bool jm_class_contains_node(JsClassEntry* ce, JsAstNode* node, uint32_t* class_start, uint32_t* class_end) {
-    if (!ce || !ce->node || !node || ts_node_is_null(ce->node->base.node) || ts_node_is_null(node->node)) return false;
-    uint32_t cs = ts_node_start_byte(ce->node->base.node);
-    uint32_t ce_end = ts_node_end_byte(ce->node->base.node);
+    if (!ce || !ce->node || !node || ts_node_is_null(ce->node->node) || ts_node_is_null(node->node)) return false;
+    uint32_t cs = ts_node_start_byte(ce->node->node);
+    uint32_t ce_end = ts_node_end_byte(ce->node->node);
     uint32_t ns = ts_node_start_byte(node->node);
     uint32_t ne = ts_node_end_byte(node->node);
     if (ns < cs || ne > ce_end) return false;
@@ -528,7 +528,7 @@ static MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntr
     if (!mt || !ce || !ce->name) return 0;
     JsIdentifierNode tmp_id;
     memset(&tmp_id, 0, sizeof(tmp_id));
-    tmp_id.base.node_type = JS_AST_NODE_IDENTIFIER;
+    tmp_id.node_type = JS_AST_NODE_IDENTIFIER;
     tmp_id.name = ce->name;
     return jm_transpile_box_item(mt, (JsAstNode*)&tmp_id);
 }
@@ -887,7 +887,7 @@ static bool jm_super_reference_before_constructor_super_call(JsMirTranspiler* mt
     uint32_t first_super_start = UINT32_MAX;
     bool has_super_call = false;
     if (mt->current_fc->node) {
-        has_super_call = jm_ts_find_first_super_call(mt->current_fc->node->base.node, &first_super_start);
+        has_super_call = jm_ts_find_first_super_call(mt->current_fc->node->node, &first_super_start);
     }
     return !has_super_call || ref_start < first_super_start;
 }
@@ -1274,9 +1274,9 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
         // Unsupported identifier-shaped AST nodes can reach expression lowering
         // without a parsed name; keep the runtime graceful instead of crashing
         // while resolving an unnameable binding.
-        bool has_ts_node = id && !ts_node_is_null(id->base.node);
-        TSPoint point = has_ts_node ? ts_node_start_point(id->base.node) : (TSPoint){0, 0};
-        const char* ts_type = has_ts_node ? ts_node_type(id->base.node) : "(null)";
+        bool has_ts_node = id && !ts_node_is_null(id->node);
+        TSPoint point = has_ts_node ? ts_node_start_point(id->node) : (TSPoint){0, 0};
+        const char* ts_type = has_ts_node ? ts_node_type(id->node) : "(null)";
         log_warn("js-mir: nameless identifier node at %u:%u (%s); emitting undefined",
             point.row + 1, point.column + 1, ts_type ? ts_type : "(unknown)");
         return jm_emit_undefined(mt);
@@ -7303,7 +7303,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             if (mt->current_class->name) {
                                 JsIdentifierNode class_id;
                                 memset(&class_id, 0, sizeof(class_id));
-                                class_id.base.node_type = JS_AST_NODE_IDENTIFIER;
+                                class_id.node_type = JS_AST_NODE_IDENTIFIER;
                                 class_id.name = mt->current_class->name;
                                 MIR_reg_t class_obj = jm_transpile_box_item(mt, (JsAstNode*)&class_id);
                                 MIR_reg_t super_key = jm_box_string_literal(mt, "__super_class__", 15);
@@ -7358,7 +7358,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     if (mt->current_class->name) {
                         JsIdentifierNode class_id;
                         memset(&class_id, 0, sizeof(class_id));
-                        class_id.base.node_type = JS_AST_NODE_IDENTIFIER;
+                        class_id.node_type = JS_AST_NODE_IDENTIFIER;
                         class_id.name = mt->current_class->name;
                         MIR_reg_t class_obj = jm_transpile_box_item(mt, (JsAstNode*)&class_id);
                         MIR_reg_t super_ctor_key = jm_box_string_literal(mt, "__super_ctor__", 14);
@@ -12216,8 +12216,7 @@ static struct hashmap* jm_clone_var_scope_map(struct hashmap* src) {
     size_t count = hashmap_count(src);
     size_t cap = count + 8;
     if (cap < 16) cap = 16;
-    struct hashmap* dst = hashmap_new(sizeof(JsVarScopeEntry), cap, 0, 0,
-        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
+    struct hashmap* dst = em_var_scope_new((int)cap); // INT_CAST_OK: hashmap capacity is count-sized API.
     if (!dst) return NULL;
 
     size_t iter = 0;
@@ -12576,7 +12575,7 @@ MIR_reg_t jm_transpile_tagged_template(JsMirTranspiler* mt, JsTaggedTemplateNode
 
     uint64_t site_id = 14695981039346656037ULL;
     if (tmpl) {
-        TSNode node = tmpl->base.node;
+        TSNode node = tmpl->node;
         uint64_t source_part = (mt->tp && mt->tp->source) ? (uint64_t)(uintptr_t)mt->tp->source : 0;
         uint64_t start_part = ts_node_is_null(node) ? 0 : (uint64_t)ts_node_start_byte(node);
         uint64_t end_part = ts_node_is_null(node) ? 0 : (uint64_t)ts_node_end_byte(node);
@@ -13779,7 +13778,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         if (!mt->in_generator && !yield_node->argument && !yield_node->delegate) {
             JsIdentifierNode yield_id;
             memset(&yield_id, 0, sizeof(yield_id));
-            yield_id.base.node_type = JS_AST_NODE_IDENTIFIER;
+            yield_id.node_type = JS_AST_NODE_IDENTIFIER;
             yield_id.name = name_pool_create_len(mt->tp->name_pool, "yield", 5);
             return jm_transpile_identifier(mt, &yield_id);
         }
@@ -14352,7 +14351,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         // Link prototype to parent's actual .prototype for identity correctness
                         JsIdentifierNode tmp_id;
                         memset(&tmp_id, 0, sizeof(tmp_id));
-                        tmp_id.base.node_type = JS_AST_NODE_IDENTIFIER;
+                        tmp_id.node_type = JS_AST_NODE_IDENTIFIER;
                         tmp_id.name = sc->name;
                         MIR_reg_t super_val = jm_transpile_box_item(mt, (JsAstNode*)&tmp_id);
                         MIR_reg_t sp_key = jm_box_string_literal(mt, "prototype", 9);
@@ -14388,7 +14387,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                                 // pass, and inherited properties like .name are found correctly.
                                 JsIdentifierNode tmp_sid;
                                 memset(&tmp_sid, 0, sizeof(tmp_sid));
-                                tmp_sid.base.node_type = JS_AST_NODE_IDENTIFIER;
+                                tmp_sid.node_type = JS_AST_NODE_IDENTIFIER;
                                 tmp_sid.name = super_id->name;
                                 MIR_reg_t super_ctor = jm_transpile_box_item(mt, (JsAstNode*)&tmp_sid);
                                 MIR_reg_t sp_key2 = jm_box_string_literal(mt, "prototype", 9);

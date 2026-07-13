@@ -133,52 +133,7 @@ static const int JS_MIR_MAX_COLLECTED_FUNCTIONS = 32768;
 static const int JS_MIR_MAX_COLLECTED_CLASSES = 4096;
 static const int JS_MIR_LAST_CLOSURE_CAPTURE_MAX = 512;
 
-struct JsMirImportEntry {
-    MIR_item_t proto;
-    MIR_item_t import;
-};
-
-struct JsImportCacheEntry {
-    char name[128];
-    JsMirImportEntry entry;
-};
-
-struct JsMirVarEntry {
-    MIR_reg_t reg;
-    MIR_type_t mir_type;     // MIR_T_I64 for int/boxed, MIR_T_D for native double
-    TypeId type_id;          // LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL, LMD_TYPE_ANY (boxed)
-    bool from_env;           // true if loaded from closure env
-    int env_slot;            // slot index in env array
-    MIR_reg_t env_reg;       // register holding env pointer (for write-back)
-    bool from_shared_env;    // true if captured from a shared scope_env (reload after calls)
-    bool in_scope_env;       // true if this var is in parent func's scope env (write-back on assign)
-    int scope_env_slot;      // slot in scope env
-    MIR_reg_t scope_env_reg; // register holding scope env pointer
-    int typed_array_type;    // P9: JsTypedArrayType enum value, -1 if not a typed array
-    bool is_js_array;        // A2: true if variable is known to hold a regular JS array
-    JsClassEntry* class_entry;  // P4: non-NULL if variable is a known class instance
-    Type* full_type;         // P3.4: full Type* (e.g. TypeMap for interface vars; NULL otherwise)
-    bool is_let_const;       // v20: true if declared with let/const (TDZ enforcement)
-    bool is_const;           // true if declared with const (prevents reassignment)
-    bool is_nfe_binding;     // true for named function expression self-binding
-    bool from_block_func_decl; // true for lexical block function declaration binding
-    bool from_catch_param;   // true for simple catch parameter binding
-    bool tdz_active;         // v20: true if still in temporal dead zone (before declaration)
-    MIR_reg_t hoisted_data_reg;  // P4h: hoisted items/data pointer for loop optimization (0 = not active)
-    MIR_reg_t hoisted_len_reg;   // P4h: hoisted length register for loop optimization (0 = not active)
-    bool from_hoist;             // v50: true if created by var-hoisting (not a parameter)
-    // Js57 P3 (Track B2): live binding to another module's default export.
-    // Used for self-imports (`import self from "./self.js"` inside self.js)
-    // so reads see the current state of `namespace.default` rather than the
-    // import-time snapshot (which is TDZ before `export default` runs).
-    bool is_live_default_binding;
-    const char* live_binding_specifier; // resolved module path, NamePool-owned
-};
-
-struct JsVarScopeEntry {
-    char name[128];
-    JsMirVarEntry var;
-};
+typedef MirImportEntry JsMirImportEntry;
 
 struct JsLocalFuncEntry {
     char name[128];
@@ -378,6 +333,10 @@ struct JsMirTranspiler {
     MIR_item_t current_func_item;
     MIR_func_t current_func;
 
+    // Shared emit substrate. The legacy JS fields remain as compatibility
+    // mirrors while Phase 0 moves call sites onto MirEmitter one helper at a time.
+    MirEmitter em;
+
     // Import cache: name -> JsMirImportEntry
     struct hashmap* import_cache;
 
@@ -529,9 +488,30 @@ struct JsMirTranspiler {
     bool module_scope_env_active;             // true if module_fc has been initialised and scope_env is live
 };
 
+static inline void jm_sync_emitter_from_compat(JsMirTranspiler* mt) {
+    mt->em.ctx = mt->ctx;
+    mt->em.func_item = mt->current_func_item;
+    mt->em.func = mt->current_func;
+    mt->em.reg_counter = mt->reg_counter;
+    mt->em.label_counter = mt->label_counter;
+    mt->em.import_cache = mt->import_cache;
+}
+
+static inline void jm_sync_compat_from_emitter(JsMirTranspiler* mt) {
+    mt->current_func_item = mt->em.func_item;
+    mt->current_func = mt->em.func;
+    mt->reg_counter = mt->em.reg_counter;
+    mt->label_counter = mt->em.label_counter;
+    mt->import_cache = mt->em.import_cache;
+}
+
 static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspiler* mt) {
     if (!mt) return;
-    if (mt->import_cache) {
+    if (mt->em.import_cache) {
+        hashmap_free(mt->em.import_cache);
+        mt->em.import_cache = NULL;
+        mt->import_cache = NULL;
+    } else if (mt->import_cache) {
         hashmap_free(mt->import_cache);
         mt->import_cache = NULL;
     }

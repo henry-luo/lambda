@@ -30,7 +30,8 @@ static DomElement* dom_parent_element(DomElement* element) {
     return (element && element->parent) ? lam::dom_require_element(element->parent) : nullptr;
 }
 
-static const char* css_enum_name_or_unknown(const CssEnumInfo* info) {
+// release builds compile log_debug arguments away, so trace-only helpers must be allowed to vanish.
+static const char* __attribute__((unused)) css_enum_name_or_unknown(const CssEnumInfo* info) {
     return info ? info->name : "unknown";
 }
 

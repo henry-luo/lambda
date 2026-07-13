@@ -46,6 +46,7 @@ class SchemaValidator;
 
 #include "name_pool.hpp"
 #include "shape_pool.hpp"
+#include "ast-core.hpp"
 
 // void *memcpy(void *dest, const void *src, size_t n);
 // void *memset(void *s, int c, size_t n);
@@ -540,62 +541,6 @@ typedef struct TypeObject : TypeMap {
     struct AstNode* constraint; // object-level that(...) constraint AST (NULL if none)
     ConstraintFn constraint_fn; // JIT-compiled constraint checker (NULL if none)
 } TypeObject;
-
-typedef enum Operator {
-    // unary
-    OPERATOR_NOT,
-    OPERATOR_NEG,
-    OPERATOR_POS,
-    OPERATOR_SPREAD, // * spread operator
-    OPERATOR_IS_ERROR, // ^expr - error type check shorthand
-
-    // binary
-    OPERATOR_ADD,
-    OPERATOR_JOIN,
-    OPERATOR_SUB,
-    OPERATOR_MUL,
-    OPERATOR_POW,
-    OPERATOR_DIV,
-    OPERATOR_IDIV,
-    OPERATOR_MOD,
-
-    OPERATOR_AND,
-    OPERATOR_OR,
-
-    OPERATOR_EQ,
-    OPERATOR_NE,
-    OPERATOR_LT,
-    OPERATOR_LE,
-    OPERATOR_GT,
-    OPERATOR_GE,
-    OPERATOR_ELEM_EQ,
-    OPERATOR_ELEM_NE,
-    OPERATOR_ELEM_LT,
-    OPERATOR_ELEM_LE,
-    OPERATOR_ELEM_GT,
-    OPERATOR_ELEM_GE,
-
-    OPERATOR_TO,
-    OPERATOR_UNION,
-    OPERATOR_INTERSECT,
-    OPERATOR_EXCLUDE,
-    OPERATOR_IS,
-    OPERATOR_IS_NAN,  // expr is nan — IEEE NaN check
-    OPERATOR_IN,
-    OPERATOR_AT,
-
-    // pipe operators
-    OPERATOR_PIPE,      // | pipe operator
-    OPERATOR_WHERE,     // where filter clause
-    OPERATOR_PIPE_FILE,     // |> pipe to file (write)
-    OPERATOR_PIPE_APPEND,   // |>> pipe to file (append)
-
-    // occurrence
-    OPERATOR_OPTIONAL,  // ?
-    OPERATOR_ONE_MORE,  // +
-    OPERATOR_ZERO_MORE,  // *
-    OPERATOR_REPEAT,    // {n}, {n,}, {n,m} for patterns
-} Operator;
 
 // Character class types for pattern matching
 typedef enum PatternCharClass {

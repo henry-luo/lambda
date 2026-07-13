@@ -46,6 +46,7 @@ typedef struct JsTranspiler {
     const char* source;             // JavaScript source code
     size_t source_length;           // Source code length
     char* normalized_source;        // Owned parse buffer when source normalization is applied
+    LangProfile* profile;           // dormant Phase-1 language profile hook table
     
     // Scoping and symbol management
     JsScope* current_scope;         // Current lexical scope

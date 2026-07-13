@@ -64,12 +64,12 @@ static void ts_transpiler_destroy(TsTranspiler* tp) {
 // Lower: enum Direction { Up, Down = 5, Left }
 // Into:  const Direction = { Up: 0, Down: 5, Left: 6, 0: "Up", 5: "Down", 6: "Left" };
 static JsAstNode* ts_lower_enum_to_js(TsTranspiler* tp, TsEnumDeclarationNode* enum_decl) {
-    TSNode dummy = enum_decl->base.node;
+    TSNode dummy = enum_decl->node;
 
     // build object literal with forward (name → value) and reverse (value → name) mappings
     JsObjectNode* obj = (JsObjectNode*)alloc_ts_ast_node(tp,
         JS_AST_NODE_OBJECT_EXPRESSION, dummy, sizeof(JsObjectNode));
-    obj->base.type = &TYPE_MAP;
+    obj->type = &TYPE_MAP;
 
     JsAstNode* prev_prop = NULL;
     // forward mappings: Name → value
@@ -86,7 +86,7 @@ static JsAstNode* ts_lower_enum_to_js(TsTranspiler* tp, TsEnumDeclarationNode* e
         JsIdentifierNode* key = (JsIdentifierNode*)alloc_ts_ast_node(tp,
             JS_AST_NODE_IDENTIFIER, dummy, sizeof(JsIdentifierNode));
         key->name = em->name;
-        key->base.type = &TYPE_STRING;
+        key->type = &TYPE_STRING;
         prop->key = (JsAstNode*)key;
 
         // value: numeric literal from auto_value (or string initializer)
@@ -99,11 +99,11 @@ static JsAstNode* ts_lower_enum_to_js(TsTranspiler* tp, TsEnumDeclarationNode* e
             val->literal_type = JS_LITERAL_NUMBER;
             val->has_decimal = false;
             val->value.number_value = (double)em->auto_value;
-            val->base.type = &TYPE_INT;
+            val->type = &TYPE_INT;
             prop->value = (JsAstNode*)val;
         }
 
-        prop->base.type = prop->value ? prop->value->type : &TYPE_ANY;
+        prop->type = prop->value ? prop->value->type : &TYPE_ANY;
 
         if (!prev_prop) {
             obj->properties = (JsAstNode*)prop;
@@ -129,7 +129,7 @@ static JsAstNode* ts_lower_enum_to_js(TsTranspiler* tp, TsEnumDeclarationNode* e
         rkey->literal_type = JS_LITERAL_NUMBER;
         rkey->has_decimal = false;
         rkey->value.number_value = (double)em->auto_value;
-        rkey->base.type = &TYPE_INT;
+        rkey->type = &TYPE_INT;
         rprop->key = (JsAstNode*)rkey;
 
         // value: string literal with member name
@@ -137,10 +137,10 @@ static JsAstNode* ts_lower_enum_to_js(TsTranspiler* tp, TsEnumDeclarationNode* e
             JS_AST_NODE_LITERAL, dummy, sizeof(JsLiteralNode));
         rval->literal_type = JS_LITERAL_STRING;
         rval->value.string_value = em->name;
-        rval->base.type = &TYPE_STRING;
+        rval->type = &TYPE_STRING;
         rprop->value = (JsAstNode*)rval;
 
-        rprop->base.type = &TYPE_STRING;
+        rprop->type = &TYPE_STRING;
 
         if (!prev_prop) {
             obj->properties = (JsAstNode*)rprop;
@@ -156,16 +156,16 @@ static JsAstNode* ts_lower_enum_to_js(TsTranspiler* tp, TsEnumDeclarationNode* e
     JsIdentifierNode* id = (JsIdentifierNode*)alloc_ts_ast_node(tp,
         JS_AST_NODE_IDENTIFIER, dummy, sizeof(JsIdentifierNode));
     id->name = enum_decl->name;
-    id->base.type = &TYPE_MAP;
+    id->type = &TYPE_MAP;
     declarator->id = (JsAstNode*)id;
     declarator->init = (JsAstNode*)obj;
-    declarator->base.type = &TYPE_MAP;
+    declarator->type = &TYPE_MAP;
 
     JsVariableDeclarationNode* var_decl = (JsVariableDeclarationNode*)alloc_ts_ast_node(tp,
         JS_AST_NODE_VARIABLE_DECLARATION, dummy, sizeof(JsVariableDeclarationNode));
     var_decl->kind = JS_VAR_CONST;
     var_decl->declarations = (JsAstNode*)declarator;
-    var_decl->base.type = &TYPE_NULL;
+    var_decl->type = &TYPE_NULL;
 
     // register in scope
     if (enum_decl->name) {
@@ -407,7 +407,9 @@ static JsAstNode* ts_lower_expr_tree(TsTranspiler* tp, JsAstNode* node) {
     }
     case JS_AST_NODE_METHOD_DEFINITION: {
         JsMethodDefinitionNode* md = (JsMethodDefinitionNode*)node;
-        md->value = ts_lower_expr_tree(tp, md->value);
+        if (md->computed) md->key = ts_lower_expr_tree(tp, md->key);
+        md->params = ts_lower_expr_list(tp, md->params);
+        md->body = ts_lower_expr_tree(tp, md->body);
         break;
     }
     case JS_AST_NODE_FIELD_DEFINITION: {
@@ -436,7 +438,7 @@ static JsAstNode* ts_lower_expr_tree(TsTranspiler* tp, JsAstNode* node) {
 // ============================================================================
 
 static JsAstNode* ts_lower_namespace_to_js(TsTranspiler* tp, TsNamespaceDeclarationNode* ns) {
-    TSNode dummy = ns->base.node;
+    TSNode dummy = ns->node;
 
     // create: var Foo;
     JsVariableDeclaratorNode* ns_decl = (JsVariableDeclaratorNode*)alloc_ts_ast_node(tp,
@@ -488,7 +490,7 @@ static JsAstNode* ts_lower_namespace_to_js(TsTranspiler* tp, TsNamespaceDeclarat
             mem->computed = false;
 
             // change function decl to expression
-            fn->base.node_type = JS_AST_NODE_FUNCTION_EXPRESSION;
+            fn->node_type = JS_AST_NODE_FUNCTION_EXPRESSION;
 
             JsAssignmentNode* assign = (JsAssignmentNode*)alloc_ts_ast_node(tp,
                 JS_AST_NODE_ASSIGNMENT_EXPRESSION, dummy, sizeof(JsAssignmentNode));
@@ -599,7 +601,7 @@ static JsAstNode* ts_lower_namespace_to_js(TsTranspiler* tp, TsNamespaceDeclarat
     }
 
     // link: var Foo; → (function(Foo) { ... })(Foo || (Foo = {}));
-    var_stmt->base.next = (JsAstNode*)call_stmt;
+    var_stmt->next = (JsAstNode*)call_stmt;
     return (JsAstNode*)var_stmt;
 }
 
@@ -618,7 +620,7 @@ static JsAstNode* ts_lower_class_with_decorators(TsTranspiler* tp,
     if (!cls->name) return class_node;
 
     // convert class declaration to expression: let ClassName = class ClassName { }
-    cls->base.node_type = JS_AST_NODE_CLASS_EXPRESSION;
+    cls->node_type = JS_AST_NODE_CLASS_EXPRESSION;
 
     JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)alloc_ts_ast_node(tp,
         JS_AST_NODE_VARIABLE_DECLARATOR, dummy, sizeof(JsVariableDeclaratorNode));

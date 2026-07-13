@@ -66,6 +66,7 @@ void module_register(const char* path, const char* lang, Item namespace_obj, voi
     if (existing && existing->desc) {
         existing->desc->namespace_obj = namespace_obj;
         existing->desc->mir_ctx = mir_ctx;
+        existing->desc->profile = lang_profile_for_name(lang);
         existing->desc->initialized = true;
         existing->desc->loading = false;
         log_debug("module_registry: updated module '%s' (lang=%s)", path, lang);
@@ -75,6 +76,7 @@ void module_register(const char* path, const char* lang, Item namespace_obj, voi
     ModuleDescriptor* desc = (ModuleDescriptor*)mem_calloc(1, sizeof(ModuleDescriptor), MEM_CAT_SYSTEM);
     desc->path = mem_strdup(path, MEM_CAT_SYSTEM);
     desc->source_lang = lang;  // static string, not owned
+    desc->profile = lang_profile_for_name(lang);
     desc->namespace_obj = namespace_obj;
     desc->mir_ctx = mir_ctx;
     desc->initialized = true;
@@ -106,12 +108,14 @@ ModuleDescriptor* module_register_loading(const char* path, const char* lang) {
     const RegistryEntry* existing = (const RegistryEntry*)hashmap_get(registry_map, &lookup);
     if (existing && existing->desc) {
         existing->desc->loading = true;
+        existing->desc->profile = lang_profile_for_name(lang);
         return existing->desc;
     }
 
     ModuleDescriptor* desc = (ModuleDescriptor*)mem_calloc(1, sizeof(ModuleDescriptor), MEM_CAT_SYSTEM);
     desc->path = mem_strdup(path, MEM_CAT_SYSTEM);
     desc->source_lang = lang;
+    desc->profile = lang_profile_for_name(lang);
     desc->namespace_obj = js_new_object();
     desc->mir_ctx = NULL;
     desc->initialized = false;
@@ -214,6 +218,8 @@ void* create_js_import_script(const char* resolved_path, Item namespace_obj, voi
     script->reference = mem_strdup(resolved_path, MEM_CAT_SYSTEM);
     script->is_main = false;
     script->is_loading = false;
+    // Synthetic import scripts expose JS namespaces through Lambda's importer.
+    script->profile = &js_profile;
     script->const_list = arraylist_new(4);
     script->type_list = arraylist_new(4);
 

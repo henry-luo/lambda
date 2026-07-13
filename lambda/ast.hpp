@@ -202,128 +202,11 @@ extern "C" {
 #include "lambda-data.hpp"
 #include "sys_func_registry.h"
 
-typedef struct NamePool NamePool;
-typedef struct AstNode AstNode;
-typedef struct AstImportNode AstImportNode;
-
-// entry in the name_stack
-typedef struct NameEntry {
-    String* name;               // Changed from StrView to String* (from name pool)
-    AstNode* node;              // AST node that defines the name
-    struct NameEntry* next;
-    AstImportNode* import;      // the module that the name is imported from, if any
-    struct NameScope* scope;    // the scope where this entry was defined
-    bool is_mutable;            // true for var declarations, false for let/param
-    bool is_var_param;          // true for pn `var` parameters
-    bool has_type_annotation;   // true if explicit type annotation was provided
-    bool type_widened;          // true if type was widened to Item due to inconsistent assignments
-} NameEntry;
-
-// name_scope
-typedef struct NameScope {
-    NameEntry* first;   // start name entry in the current scope
-    NameEntry* last;    // last name entry in the current scope
-    bool is_proc;       // whether is inside a procedural scope
-    struct NameScope* parent;  // parent scope
-} NameScope;
-
 typedef struct JubeModuleImport {
     String* module;
     String* alias;
     struct JubeModuleImport* next;
 } JubeModuleImport;
-
-typedef enum AstNodeType {
-    AST_NODE_NULL,
-    AST_NODE_PRIMARY,
-    AST_NODE_UNARY,
-    AST_NODE_SPREAD,        // spread expression (*expr)
-    AST_NODE_BINARY,
-    AST_NODE_PIPE,          // pipe expression (| and where)
-    AST_NODE_CURRENT_ITEM,  // ~ current item reference
-    AST_NODE_CURRENT_INDEX, // ~# current key/index reference
-    AST_NODE_LAST_INDEX,    // last keyword inside subscripts
-    AST_NODE_LIST,
-    AST_NODE_CONTENT,
-    AST_NODE_ARRAY,
-    AST_NODE_MAP,
-    AST_NODE_ELEMENT,
-    AST_NODE_KEY_EXPR,
-    AST_NODE_ASSIGN,
-    AST_NODE_DECOMPOSE,     // multi-variable decomposition (let a, b = expr)
-    AST_NODE_LOOP,
-    AST_NODE_ORDER_SPEC,    // order by specification (expr [asc|desc])
-    AST_NODE_GROUP_CLAUSE,  // group by clause
-    AST_NODE_JOIN_KEY,      // join on equi-key pair
-    AST_NODE_IF_EXPR,
-    AST_NODE_MATCH_EXPR,
-    AST_NODE_MATCH_ARM,
-    AST_NODE_FOR_EXPR,
-    AST_NODE_FOR_STAM,
-    AST_NODE_WHILE_STAM,    // while statement (procedural only)
-    AST_NODE_BREAK_STAM,    // break statement (procedural only)
-    AST_NODE_CONTINUE_STAM, // continue statement (procedural only)
-    AST_NODE_RETURN_STAM,   // return statement (procedural only)
-    AST_NODE_RAISE_STAM,    // raise statement (procedural only)
-    AST_NODE_RAISE_EXPR,    // raise expression (functional)
-    AST_NODE_VAR_STAM,      // var statement (procedural only)
-    AST_NODE_ASSIGN_STAM,   // assignment statement (procedural only)
-    AST_NODE_INDEX_ASSIGN_STAM,  // array indexed assignment: arr[i] = val (procedural only)
-    AST_NODE_MEMBER_ASSIGN_STAM, // map field assignment: obj.field = val (procedural only)
-    AST_NODE_PIPE_FILE_STAM, // pipe to file statement (procedural only): |> and |>>
-    AST_NODE_LET_STAM,
-    AST_NODE_PUB_STAM,
-    AST_NODE_TYPE_STAM,
-    AST_NODE_INDEX_EXPR,
-    AST_NODE_MEMBER_EXPR,
-    AST_NODE_PATH_EXPR,         // path expression (file.etc.hosts, http.api.example.com)
-    AST_NODE_PATH_INDEX_EXPR,   // path subscript expression - adds dynamic segment: path[expr]
-    AST_NODE_PARENT_EXPR,        // parent access shorthand: expr.. for .parent
-    AST_NODE_CALL_EXPR,
-    AST_NODE_QUERY_EXPR,     // query expression: expr?T or expr.?T
-    AST_NODE_SYS_FUNC,
-    AST_NODE_IDENT,
-    AST_NODE_PARAM,
-    AST_NODE_NAMED_ARG,     // named argument in function call
-    AST_NODE_TYPE,  // base type
-    AST_NODE_CONTENT_TYPE,
-    AST_NODE_LIST_TYPE,
-    AST_NODE_ARRAY_TYPE,
-    AST_NODE_MAP_TYPE,
-    AST_NODE_ELMT_TYPE,
-    AST_NODE_FUNC_TYPE,
-    AST_NODE_BINARY_TYPE,
-    AST_NODE_UNARY_TYPE,
-    AST_NODE_CONSTRAINED_TYPE,  // type with where constraint
-    AST_NODE_OBJECT_TYPE,        // object type definition: type Point { x: float; fn ... }
-    AST_NODE_OBJECT_LITERAL,     // object literal: {Point x: 1.0, y: 2.0}
-    AST_NODE_FUNC,
-    AST_NODE_FUNC_EXPR,
-    AST_NODE_PROC, // procedural function
-    AST_NODE_IMPORT,
-    // String/Symbol Pattern nodes
-    AST_NODE_STRING_PATTERN,    // string name = pattern
-    AST_NODE_SYMBOL_PATTERN,    // symbol name = pattern
-    AST_NODE_PATTERN_RANGE,     // "a" to "z"
-    AST_NODE_PATTERN_CHAR_CLASS, // \d, \w, \s, \a, .
-    AST_NODE_PATTERN_SEQ,       // sequence of patterns (concatenation)
-    // View/Edit reactive template nodes
-    AST_NODE_VIEW,              // view/edit template declaration
-    AST_NODE_STATE_ENTRY,       // state name: value entry
-    AST_NODE_EVENT_HANDLER,     // on event(param) { body } handler
-    AST_SCRIPT,
-} AstNodeType;
-
-struct AstNode {
-    AstNodeType node_type;
-    Type *type;
-    struct AstNode* next;
-    TSNode node;
-};
-
-typedef struct AstFieldNode : AstNode {
-    AstNode *object, *field;
-} AstFieldNode;
 
 // Query expression: expr?T (recursive) or expr.?T (direct)
 typedef struct AstQueryNode : AstNode {
@@ -331,14 +214,6 @@ typedef struct AstQueryNode : AstNode {
     AstNode *query;      // the type pattern to match (primary_type)
     bool direct;         // true for .? (self-inclusive query)
 } AstQueryNode;
-
-typedef struct AstCallNode : AstNode {
-    AstNode *function;
-    AstNode *argument;
-    bool pipe_inject;  // true if this call has an injected first arg from pipe context
-    bool propagate;    // true if '?' postfix was used (error propagation)
-    bool can_raise;    // true if the callee can return errors (from SysFuncInfo or TypeFunc)
-} AstCallNode;
 
 // Path segment info for AstPathNode
 typedef struct AstPathSegment {
@@ -371,41 +246,12 @@ typedef struct AstSysFuncNode : AstNode {
     SysFuncInfo* fn_info;
 } AstSysFuncNode;
 
-typedef struct AstPrimaryNode : AstNode {
-    AstNode *expr;
-} AstPrimaryNode;
-
-typedef AstNode AstTypeNode;
-
-typedef struct AstUnaryNode : AstNode {
-    AstNode *operand;
-    StrView op_str;
-    Operator op;
-} AstUnaryNode;
-
-typedef struct AstBinaryNode : AstNode {
-    AstNode *left, *right;
-    StrView op_str;
-    Operator op;
-} AstBinaryNode;
-
-// Pipe expression (| and where) - same structure as binary, different semantics
-typedef AstBinaryNode AstPipeNode;
-
 // Constrained type: type where (constraint)
 // e.g., int where (5 < ~ < 10), string where (len(~) > 0)
 typedef struct AstConstrainedTypeNode : AstNode {
     AstNode *base;          // base type (e.g., int, string)
     AstNode *constraint;    // constraint expression (uses ~ to refer to value)
 } AstConstrainedTypeNode;
-
-// for AST_NODE_ASSIGN, AST_NODE_KEY_EXPR, AST_NODE_PARAM
-typedef struct AstNamedNode : AstNode {
-    String* name;               // Changed from StrView to String* (from name pool)
-    AstNode *as;
-    String* error_name;         // for error destructuring: let a^err = expr (NULL if not used)
-    struct NameEntry* entry;    // back-pointer to NameEntry (set for var declarations)
-} AstNamedNode;
 
 // Loop key filter: controls which entries to iterate
 enum LoopKeyFilter {
@@ -431,31 +277,6 @@ typedef struct AstLoopNode : AstNode {
     bool optional;              // true for null-padded left join (`name? in ... on ...`)
     int join_key_count;
 } AstLoopNode;
-
-// for AST_NODE_ASSIGN with decomposition (let a, b = expr / let a, b at expr)
-typedef struct AstDecomposeNode : AstNode {
-    String** names;             // array of variable names
-    int name_count;             // number of variables
-    AstNode *as;                // source expression
-    bool is_named;              // true if 'at' keyword used (named decomposition)
-} AstDecomposeNode;
-
-typedef struct AstIdentNode : AstNode {
-    String* name;               // Changed from StrView to String* (from name pool)
-    NameEntry *entry;
-} AstIdentNode;
-
-struct AstImportNode : AstNode {
-    String* alias;              // Changed from StrView to String* (from name pool)
-    StrView module;             // Keep module as StrView (file path)
-    Script* script;             // imported script
-    bool is_relative;
-    bool is_cross_lang;         // true if importing a module from another language (e.g., JS from Lambda)
-};
-
-typedef struct AstLetNode : AstNode {
-    AstNode *declare;  // declarations in let expression
-} AstLetNode;
 
 // Order specification within for-expression: expr [asc|desc]
 typedef struct AstOrderSpec : AstNode {
@@ -488,94 +309,15 @@ typedef struct AstForNode : AstNode {
     NameScope *vars;     // scope for the variables in the loop
 } AstForNode;
 
-typedef struct AstIfNode : AstNode {
-    AstNode *cond;
-    AstNode *then;
-    AstNode *otherwise;
-} AstIfNode;
-
-// match arm: case <pattern>: <body> or case <pattern> { <body> }
-typedef struct AstMatchArm : AstNode {
-    AstNode *pattern;   // type expression to match against (NULL for default arm)
-    AstNode *body;      // expression or content block
-} AstMatchArm;
-
-// match expression/statement: match <scrutinee> case ... case ... default ...
-typedef struct AstMatchNode : AstNode {
-    AstNode *scrutinee;     // expression being matched
-    AstMatchArm *first_arm; // first arm (linked list via AstNode::next)
-    int arm_count;          // number of arms
-} AstMatchNode;
-
-// while statement (procedural only)
-typedef struct AstWhileNode : AstNode {
-    AstNode *cond;
-    AstNode *body;
-    NameScope *vars;  // scope for the variables in the while
-} AstWhileNode;
-
-// return statement (procedural only)
-typedef struct AstReturnNode : AstNode {
-    AstNode *value;  // optional return value
-} AstReturnNode;
-
-// raise statement/expression - raises an error to the caller
-// Used for both AST_NODE_RAISE_STAM (procedural) and AST_NODE_RAISE_EXPR (functional)
-typedef struct AstRaiseNode : AstNode {
-    AstNode *value;  // error expression to raise (required)
-} AstRaiseNode;
-
-// assignment statement (procedural only)
-typedef struct AstAssignStamNode : AstNode {
-    String* target;       // variable name to assign to
-    AstNode *target_node; // AST node of the target variable (for type info)
-    AstNode *value;       // value expression
-    struct NameEntry* target_entry;  // name entry for the target variable
-} AstAssignStamNode;
-
-// compound assignment statement: arr[i] = val or obj.field = val (procedural only)
-typedef struct AstCompoundAssignNode : AstNode {
-    AstNode *object;     // the array or map being mutated
-    AstNode *key;        // index expression (for arr[i]) or field name node (for obj.field)
-    AstNode *value;      // value expression to assign
-} AstCompoundAssignNode;
-
-typedef struct AstArrayNode : AstNode {
-    AstNode *item;  // first item in the array
-} AstArrayNode;
-
 typedef struct AstListNode : AstArrayNode {
     AstNode *declare;  // declarations in the list
     NameScope *vars;  // scope for the variables in the list
     TypeList* list_type;
 } AstListNode;
 
-typedef struct AstMapNode : AstNode {
-    AstNode *item;  // first item in the map
-} AstMapNode;
-
 typedef struct AstElementNode : AstMapNode {
     AstNode *content;  // first content node
 } AstElementNode;
-
-// Object type definition node
-// Object (no content): type Point { x: float, y: float; fn magnitude() => ... }
-// Element (with content): type Article { title: string\n string, element }
-// Extends AstNamedNode so it can be registered in the name scope via push_name
-typedef struct AstObjectTypeNode : AstNamedNode {
-    AstNode* item;              // linked list of field declaration AST nodes
-    AstNode* base_type;         // base type identifier for inheritance (NULL if none)
-    AstNode* content;           // content type schema (NULL if none → object, non-NULL → element)
-    AstNode* methods;           // linked list of fn/pn AST nodes
-    AstNode* constraints;       // linked list of that-constraint AST nodes
-    bool is_public;             // true when declared with 'pub type T { ... }'
-    int local_type_index;       // type_index in importing script's type_list (-1 = use TypeObject's own)
-} AstObjectTypeNode;
-
-// Object literal node: {TypeName key: value, ...}
-typedef struct AstObjectLiteralNode : AstMapNode {
-    String* type_name;          // the type name identifier
-} AstObjectLiteralNode;
 
 // ==================== String/Symbol Pattern AST Nodes ====================
 
@@ -630,32 +372,6 @@ typedef struct AstEventHandler : AstNode {
     struct AstEventHandler* next_handler; // next handler in list
 } AstEventHandler;
 
-// Forward declare for capture list
-struct CaptureInfo;
-
-// aligned with AstNamedNode on name
-typedef struct AstFuncNode : AstNode {
-    String* name;               // Changed from StrView to String* (from name pool)
-    AstNamedNode *param;        // first parameter of the function
-    AstNode *body;
-    NameScope *vars;            // vars including params and local variables
-    struct CaptureInfo* captures; // list of captured variables (NULL if no captures)
-} AstFuncNode;
-
-// Capture info for closures
-typedef struct CaptureInfo {
-    String* name;              // captured variable name
-    NameEntry* entry;          // reference to the captured variable's scope entry
-    bool is_mutable;           // true if the captured variable is modified
-    struct CaptureInfo* next;  // next capture in list
-} CaptureInfo;
-
-// root of the AST
-typedef struct AstScript : AstNode {
-    AstNode *child;  // first child
-    NameScope *global_vars;  // global variables
-} AstScript;
-
 typedef Item (*main_func_t)(Context*);
 typedef struct MIR_context *MIR_context_t;
 
@@ -670,6 +386,7 @@ struct Script : Input {
     bool cache_retired;         // true when a retained cache slot has been invalidated
     bool cache_cross_lang_tainted;  // true when the import subtree contains a cross-language module
     const char* source;
+    LangProfile* profile;       // dormant Phase-1 language profile hook table
     time_t src_mtime;           // file timestamp captured when loaded
     off_t src_size;             // file size captured when loaded
     TSTree* syntax_tree;
