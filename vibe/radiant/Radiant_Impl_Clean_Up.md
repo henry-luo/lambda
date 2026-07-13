@@ -6,6 +6,8 @@
 
 **Relationship to `vibe/Lambda_Code_Clean_Up.md`:** that ledger's radiant items (§4.x layout, §5.x paint) are largely done or quantified-partial. This proposal picks up its open remainders (§4.5 baseline walkers, §4.6 flex percentages, §5.1 replay switches, §5.3 paint-op table, §5.7 audit slices) and adds a fresh sweep of subsystems the ledger never covered: CSS property resolution, event/state logging, view_pool dumpers, cmd_layout, and the form/background painters.
 
+**Progress markers:** ✅ means the item has landed and passed its recorded focused gates; partial/open items keep their plain ID and are described in the phase status notes below.
+
 ---
 
 ## 1. Current shape of the code
@@ -81,21 +83,21 @@ Grouped by subsystem; each entry: **what / where / how to unify / est. net LOC s
 
 | ID | Finding | Where | Save | Risk |
 |---|---|---|---|---|
-| C1 | Missing `ensure_bound`/`ensure_border` helpers: the 3-line `if (!span->bound) … alloc_prop` block repeats ×85, border variant ×40, `if (!span->blk)` ×19. resolve_htm_style.cpp already has exactly these helpers (`ensure_html_border_prop`:156) — the pattern is sanctioned, this file never got them. | resolve_css_style.cpp, throughout the switch | ~250 | very low |
-| C2 | 4-side border expansion: `BORDER_{TOP,RIGHT,BOTTOM,LEFT}_WIDTH` are four ~56-line blocks identical except the side suffix (8120–8344); same for `*_STYLE` (8345–8431) and `*_COLOR` (8433–8488). One `resolve_border_side_{width,style,color}(span, side, value, specificity)` each. | resolve_css_style.cpp:8120–8488 | ~235 | low |
-| C3 | Margin/padding/inset per-side clones + logical-property fan-out: 4 margin sides (5918–5965) + 6 logical margin cases re-expanding to the same fields (5966–6056); padding mirrors; ~10 inset/top/left/right/bottom clones (9609+). Drive via `{prop_id → side}` over shared `resolve_box_side()`. Also extract the 15× repeated keyword/percent type-ternary into `css_value_axis_type()`. **Bonus: fixes live drift — `TOP` (9629) has isnan/calc handling that `LEFT`/`RIGHT`/`BOTTOM` lack.** Preserve the hard-wired LTR/horizontal-tb logical mapping (comments at 6011, 6023). | resolve_css_style.cpp:5918–6056, 9609+ | ~200 | low-med |
-| C4 | `property_name_to_id` in css_animation.cpp (123–152) reimplements the parser's `css_property_id_from_name()` (css_properties.cpp:448) as a 26-entry strcmp chain. Delegate. | css_animation.cpp:123–152 | ~28 | low |
-| C5 | 5 no-op cases that only `log_debug` and store nothing — `TABLE_LAYOUT` (12114), `BORDER_COLLAPSE` (12130), `BORDER_SPACING` (12145), `CAPTION_SIDE` (12156), `EMPTY_CELLS` (12172); consumers read raw declarations directly (layout_table.cpp:2876). Fold into `default:`. Plus the tree's only `#if 0` block (6065, 46 lines). | resolve_css_style.cpp | ~120 | low |
+| ✅ C1 | Missing `ensure_bound`/`ensure_border` helpers: the 3-line `if (!span->bound) … alloc_prop` block repeats ×85, border variant ×40, `if (!span->blk)` ×19. resolve_htm_style.cpp already has exactly these helpers (`ensure_html_border_prop`:156) — the pattern is sanctioned, this file never got them. | resolve_css_style.cpp, throughout the switch | ~250 | very low |
+| ✅ C2 | 4-side border expansion: `BORDER_{TOP,RIGHT,BOTTOM,LEFT}_WIDTH` are four ~56-line blocks identical except the side suffix (8120–8344); same for `*_STYLE` (8345–8431) and `*_COLOR` (8433–8488). One `resolve_border_side_{width,style,color}(span, side, value, specificity)` each. | resolve_css_style.cpp:8120–8488 | ~235 | low |
+| ✅ C3 | Margin/padding/inset per-side clones + logical-property fan-out: 4 margin sides (5918–5965) + 6 logical margin cases re-expanding to the same fields (5966–6056); padding mirrors; ~10 inset/top/left/right/bottom clones (9609+). Drive via `{prop_id → side}` over shared `resolve_box_side()`. Also extract the 15× repeated keyword/percent type-ternary into `css_value_axis_type()`. **Bonus: fixes live drift — `TOP` (9629) has isnan/calc handling that `LEFT`/`RIGHT`/`BOTTOM` lack.** Preserve the hard-wired LTR/horizontal-tb logical mapping (comments at 6011, 6023). | resolve_css_style.cpp:5918–6056, 9609+ | ~200 | low-med |
+| ✅ C4 | `property_name_to_id` in css_animation.cpp (123–152) reimplements the parser's `css_property_id_from_name()` (css_properties.cpp:448) as a 26-entry strcmp chain. Delegate. | css_animation.cpp:123–152 | ~28 | low |
+| ✅ C5 | 5 no-op cases that only `log_debug` and store nothing — `TABLE_LAYOUT` (12114), `BORDER_COLLAPSE` (12130), `BORDER_SPACING` (12145), `CAPTION_SIDE` (12156), `EMPTY_CELLS` (12172); consumers read raw declarations directly (layout_table.cpp:2876). Fold into `default:`. Plus the tree's only `#if 0` block (6065, 46 lines). | resolve_css_style.cpp | ~120 | low |
 | C6 | *(optional, policy)* logging macro: `info ? info->name : "unknown"` idiom ×42, 957 `log_debug` lines total. `LOG_ENUM_PROP` macro slice only. | resolve_css_style.cpp | ~100–150 | med (debug-value tradeoff) |
 
 ### Layout — est. ~480–740 safe, +800–1500 structural
 
 | ID | Finding | Where | Save | Risk |
 |---|---|---|---|---|
-| L1 | Dead computation: `calculate_initial_grid_extent` is pure and its only call discards the result (`(void)…`); the next step recomputes independently. | grid_enhanced_adapter.hpp:520–558, 635 | ~40 | very low |
-| L2 | 5 near-identical border-source getters (`get_cell_border`, `get_table_border`, `get_row_border`, `get_rowgroup_border`, `get_column_border`) — same shape, different source struct. One parameterized getter. | layout_table.cpp:1880–2120 | ~80 | low-med |
+| ✅ L1 | Dead computation: `calculate_initial_grid_extent` is pure and its only call discards the result (`(void)…`); the next step recomputes independently. | grid_enhanced_adapter.hpp:520–558, 635 | ~40 | very low |
+| ✅ L2 | 5 near-identical border-source getters (`get_cell_border`, `get_table_border`, `get_row_border`, `get_rowgroup_border`, `get_column_border`) — same shape, different source struct. One parameterized getter. | layout_table.cpp:1880–2120 | ~80 | low-med |
 | L3 | 3 recursive first-baseline walkers (ledger §4.5, still open): the shared `compute_element_first_baseline` (layout_alignment.cpp:255) is used by grid; flex has its own ~200-LOC family (layout_flex.cpp:3131–3330), table a ~290-LOC third (layout_table.cpp:894–1182). Fold flex + table onto the shared walker, parameterizing the row/cell strut case. | layout_flex.cpp, layout_table.cpp | ~300 | med |
-| L4 | Flex justify-content distribution (`align_items_main_axis`, layout_flex.cpp:4123–4294) still partially hand-rolls what `compute_space_distribution` owns; the rest of the alignment layer is already shared. | layout_flex.cpp:4123–4294 | ~60 | med |
+| ✅ L4 | Flex justify-content distribution (`align_items_main_axis`, layout_flex.cpp:4123–4294) still partially hand-rolls what `compute_space_distribution` owns; the rest of the alignment layer is already shared. | layout_flex.cpp:4123–4294 | ~60 | med |
 | L5 | Parallel flex height walker: `measure_content_height_recursive` (layout_flex_measurement.cpp:402–520) + parts of `measure_flex_child_content` (609–1382) predate the file's later delegation to the intrinsic-sizing API and run their own math (the §4.6 "flex bypasses re-resolver" symptom). Route through the intrinsic height API. | layout_flex_measurement.cpp | ~120–250 | med-high |
 | L6 | **intrinsic_sizing.cpp mirrors real layout, twice per engine**: `measure_element_intrinsic_widths` (1970–5027) and `calculate_max_content_height` (5122–6163) each re-implement grid track selection (incl. `repeat()` expansion that also lives in grid_placement.hpp — written 3×), flex line packing (vs `create_flex_lines`/`calculate_flex_basis`), and table column min/max. Extract per-engine "intrinsic contribution" helpers shared by real layout and the intrinsic pass. **Attack incrementally, starting with the self-contained `repeat()` expansion.** | intrinsic_sizing.cpp | ~800–1500 | HIGH |
 | L7 | *(restructure, modest net)* `table_auto_layout` (layout_table.cpp:6089, 3,215 LOC, 109 row/col/cell loops) — extract a cell/row/column iterator. | layout_table.cpp | ~150–300 | med |
@@ -106,10 +108,10 @@ Test coverage is strong: 494 flex + 344 grid + 703 table layout fixtures, 12,310
 
 | ID | Finding | Where | Save | Risk |
 |---|---|---|---|---|
-| P1 | 7 form-control painters open with a byte-identical geometry prologue (scale/x/y/w/h), plus the CSS-override query block ×4 and the DocState/disabled block ×7. One `FormControlBox` struct + `form_control_box()` helper. | render_form.cpp:452–1577 | ~60 | low |
-| P2 | Rounded-rect clip-path computed 3–4× (`background_gradient_clip_path`:289, `background_image_clip_path`:1920, `background_image_clip_shapes`:1888, inline in radial:450+). One `background_rounded_clip_path()`. | render_background.cpp | ~35 | low |
-| P3 | Gradient/image tile loops are near-clones (`render_linear_gradient_layer`:1837 vs `render_radial_gradient_layer`:1858 + image tiling): same plan→row/col→tile-rect→skip→leaf shape. One `background_for_each_tile(…, callback)`. Preserve radial's deliberate position_rect ignore (:1862). Plus: `svg_color_to_string` (render_svg.cpp:282) ≡ `paint_svg_append_color` (paint_ir.cpp:1205) — share one. | render_background.cpp, render_svg.cpp | ~45 | low-med |
-| P4 | DL descriptor table, safe slice (extends ledger §5.1): the ~26-op `DL_` set is hand-enumerated in **11 switch sites / 6 files** — storage serialize/deserialize/free (:114/:221/:506), retained dup/free (:77/:148/:431), bounds (:16), tile (:321/:350), replay (:90). An X-macro `DL_OP_LIST` descriptor {size, serialize, free, bounds} drives storage+retained+bounds first; **defer the replay-core merge** (the risky half). | display_list_storage.cpp, retained_display_list.cpp, display_list_bounds.cpp | ~80–140 | med (storage/retained low) |
+| ✅ P1 | 7 form-control painters open with a byte-identical geometry prologue (scale/x/y/w/h), plus the CSS-override query block ×4 and the DocState/disabled block ×7. One `FormControlBox` struct + `form_control_box()` helper. | render_form.cpp:452–1577 | ~60 | low |
+| ✅ P2 | Rounded-rect clip-path computed 3–4× (`background_gradient_clip_path`:289, `background_image_clip_path`:1920, `background_image_clip_shapes`:1888, inline in radial:450+). One `background_rounded_clip_path()`. | render_background.cpp | ~35 | low |
+| ✅ P3 | Gradient/image tile loops are near-clones (`render_linear_gradient_layer`:1837 vs `render_radial_gradient_layer`:1858 + image tiling): same plan→row/col→tile-rect→skip→leaf shape. One `background_for_each_tile(…, callback)`. Preserve radial's deliberate position_rect ignore (:1862). Plus: `svg_color_to_string` (render_svg.cpp:282) ≡ `paint_svg_append_color` (paint_ir.cpp:1205) — share one. | render_background.cpp, render_svg.cpp | ~45 | low-med |
+| ✅ P4 | DL descriptor table, safe slice (extends ledger §5.1): the ~26-op `DL_` set is hand-enumerated in **11 switch sites / 6 files** — storage serialize/deserialize/free (:114/:221/:506), retained dup/free (:77/:148/:431), bounds (:16), tile (:321/:350), replay (:90). An X-macro `DL_OP_LIST` descriptor {size, serialize, free, bounds} drives storage+retained+bounds first; **defer the replay-core merge** (the risky half). | display_list_storage.cpp, retained_display_list.cpp, display_list_bounds.cpp | ~80–140 | med (storage/retained low) |
 | P5 | Paint-op descriptor table incl. PDF (extends ledger §5.3): `render_pdf.cpp` is a **fourth** parallel lowering backend with its own 21-case switches (:119, :1019, :1126), parallel to paint_ir validate (:130), lower-raster (:958), lower-svg (:1504). Extend `PAINT_OP_LIST` into a descriptor table {bounds-fn, per-backend lower fn}; scaffolding and validate/bounds boilerplate collapse, bodies stay. | paint_ir.cpp, render_pdf.cpp | ~120–180 | med-high |
 | P6 | *(parity work, defer)* render_svg legacy direct-emission layer: borders still hand-emit SVG polygons (~140 LOC, `svg_emit_border_side`:688 etc.) while backgrounds already route through paint ops; decorated/shadowed text has a dual path (:491–566, ~75 LOC). Requires PaintIR SVG lowering to reach feature parity first — the §5.7 deferred slice. | render_svg.cpp | ~140–215 | med-high |
 
@@ -117,23 +119,23 @@ Test coverage is strong: 494 flex + 344 grid + 703 table layout fixtures, 12,310
 
 | ID | Finding | Where | Save | Risk |
 |---|---|---|---|---|
-| E1 | 9 near-identical ~24-line state-transition JSON loggers (bool/int/float/scroll/dropdown-owner/ctx-menu-target/ctx-menu-hover/view-target/doc-bool). Two helpers: scalar-transition + view-ref-transition; scroll stays bespoke. | state_store.cpp:3212–3460 | ~90 | low |
-| E2 | 9 `radiant_dispatch_*_event` functions repeat an identical 8–11-line scaffold (dom-resolve, JsCtxScope enter, timer, wrap, dispatch, read-prevented, exit); re-scaffolded again in 2 sim bridges. RAII `JsDispatchScope` + `radiant_dispatch_built_event()`; each function shrinks to its builder line. Watch the void-returning composition/focus variants. | event.cpp:4757–5126 | ~65 | low-med |
-| E3 | state_machine `*_transition` family shares the enter/guard/leave/commit/assert epilogue ×6; `hover_transition` (240) and `active_transition` (277) are line-for-line identical except family/event/setter — merge into `single_target_transition()`. Transition ordering is load-bearing; preserve guard early-returns. | state_machine.cpp:57–385 | ~40 | low-med |
-| E4 | 3 file-local "editing surface" JSON writers emit the same core object (event.cpp:229, editing_dispatch.cpp:524, state_machine.cpp:1722). One shared `editing_log_write_surface_core_fields()` in event_state_log; callers keep their extra fields. Removes a 3-way format-drift risk. | 3 files | ~18 | low |
+| ✅ E1 | 9 near-identical ~24-line state-transition JSON loggers (bool/int/float/scroll/dropdown-owner/ctx-menu-target/ctx-menu-hover/view-target/doc-bool). Two helpers: scalar-transition + view-ref-transition; scroll stays bespoke. | state_store.cpp:3212–3460 | ~90 | low |
+| ✅ E2 | 9 `radiant_dispatch_*_event` functions repeat an identical 8–11-line scaffold (dom-resolve, JsCtxScope enter, timer, wrap, dispatch, read-prevented, exit); re-scaffolded again in 2 sim bridges. RAII `JsDispatchScope` + `radiant_dispatch_built_event()`; each function shrinks to its builder line. Watch the void-returning composition/focus variants. | event.cpp:4757–5126 | ~65 | low-med |
+| ✅ E3 | state_machine `*_transition` family shares the enter/guard/leave/commit/assert epilogue ×6; `hover_transition` (240) and `active_transition` (277) are line-for-line identical except family/event/setter — merge into `single_target_transition()`. Transition ordering is load-bearing; preserve guard early-returns. | state_machine.cpp:57–385 | ~40 | low-med |
+| ✅ E4 | 3 file-local "editing surface" JSON writers emit the same core object (event.cpp:229, editing_dispatch.cpp:524, state_machine.cpp:1722). One shared `editing_log_write_surface_core_fields()` in event_state_log; callers keep their extra fields. Removes a 3-way format-drift risk. | 3 files | ~18 | low |
 | E5 | event_sim reimplements live-pipeline logic (the §5.7 flagged next slice): `find_element_at`:857 vs event.cpp hit-test, radio-group DFS (908–937) ≡ `uncheck_radio_group` (event.cpp:5443), `sim_extract_text`:946 ≡ state_store text extraction. Promote the event.cpp statics to a header and call them. Sim's hit-test is *deliberately* z-unaware — share without changing live behavior. | event_sim.cpp, event.cpp | ~75 | med |
-| E6 | Caret/selection snapshot accessors overlap (caret_get_render_snapshot ⊇ visual_snapshot etc.); delegate narrow accessors to the widest one. | state_store.cpp:6871–7010, 7483–7660 | ~35 | low (broad callers) |
+| ✅ E6 | Caret/selection snapshot accessors overlap (caret_get_render_snapshot ⊇ visual_snapshot etc.); delegate narrow accessors to the widest one. | state_store.cpp:6871–7010, 7483–7660 | ~35 | low (broad callers) |
 
 ### Shell / misc / tooling — est. ~470–630 safe, + large decision items
 
 | ID | Finding | Where | Save | Risk |
 |---|---|---|---|---|
-| M1 | nth-of-type selector-builder block copy-pasted ×4 (sibling-count loop + snprintf). One `build_element_selector()`. Output is consumed by layout JSON snapshots — must stay byte-identical. | view_pool.cpp:~2000, 2160, 2432, 3120 | ~115 | low-med |
-| M2 | JSON field-emit boilerplate across the ~2,200-line view-tree dumper: every field is a 3-line indent/key/comma sequence; `#null` tag-name workaround repeats (~28 lines). `json_field()` + `resolve_tag_name()` helpers. | view_pool.cpp:1246–3459 | ~150–250 | low |
-| M3 | 15 identical `clear_X_prop` one-liners + 10 trivial `free_X_prop` wrappers behind the `VIEW_PROP_TEARDOWN[]` table — store a member offset in the table row, keep the 4 non-trivial entries custom. Covered by memtrack/poison. | view_pool.cpp:160–486 | ~100 | med |
-| M4 | `load_{text,markdown,wiki,latex,xml}_doc` share a ~30-line parse prologue (url→read→type-str→input_from_source→free) + a repeated katex/math CSS-load tail. Two helpers. Preserve mem_free ownership exactly. | cmd_layout.cpp:3870–4941 | ~115 | med |
-| M5 | Trivial deletions: `radiant.cpp` (27-line legacy standalone main, excluded from build, superseded by lambda/main.cpp). | radiant/radiant.cpp | ~27 | very low |
-| M6 | *(source-hygiene only — file not compiled)* webdriver_server endpoint boilerplate: ~20 handlers × ~8-line session/element lookup. Only worth doing if the server is kept (see D2). | webdriver/webdriver_server.cpp | ~150 | low |
+| ✅ M1 | nth-of-type selector-builder block copy-pasted ×4 (sibling-count loop + snprintf). One `build_element_selector()`. Output is consumed by layout JSON snapshots — must stay byte-identical. | view_pool.cpp:~2000, 2160, 2432, 3120 | ~115 | low-med |
+| ✅ M2 | JSON field-emit boilerplate across the ~2,200-line view-tree dumper: every field is a 3-line indent/key/comma sequence; `#null` tag-name workaround repeats (~28 lines). `json_field()` + `resolve_tag_name()` helpers. | view_pool.cpp:1246–3459 | ~150–250 | low |
+| ✅ M3 | 15 identical `clear_X_prop` one-liners + 10 trivial `free_X_prop` wrappers behind the `VIEW_PROP_TEARDOWN[]` table — store a member offset in the table row, keep the 4 non-trivial entries custom. Covered by memtrack/poison. | view_pool.cpp:160–486 | ~100 | med |
+| ✅ M4 | `load_{text,markdown,wiki,latex,xml}_doc` share a ~30-line parse prologue (url→read→type-str→input_from_source→free) + a repeated katex/math CSS-load tail. Two helpers. Preserve mem_free ownership exactly. | cmd_layout.cpp:3870–4941 | ~115 | med |
+| ✅ M5 | Trivial deletions: `radiant.cpp` (27-line legacy standalone main, excluded from build, superseded by lambda/main.cpp). | radiant/radiant.cpp | ~27 | very low |
+| ✅ M6 | *(source-hygiene only — file not compiled)* webdriver_server endpoint boilerplate: ~20 handlers × ~8-line session/element lookup. Only worth doing if the server is kept (see D2). | webdriver/webdriver_server.cpp | ~150 | low |
 
 ### D. Decision-needed items (owner call, not scheduled)
 
@@ -159,7 +161,7 @@ make build && make test-radiant-baseline                                    # mu
 <phase-specific suites>
 ```
 
-### Phase 0 — Harness + pure deletions (~230 LOC, ~1 day, near-zero risk)
+### ✅ Phase 0 — Harness + pure deletions (~230 LOC, ~1 day, near-zero risk)
 - Commit `utils/verify_loc_reduction.sh`; record `./utils/count_loc.sh` baseline.
 - Delete: `radiant.cpp` (M5, 27), `calculate_initial_grid_extent` + call (L1, 40), `#if 0` block resolve_css_style.cpp:6065 (46), 5 no-op CSS cases (C5, 75), plus close ledger §5.5 as won't-fix (doc-only).
 - Files: `radiant/radiant.cpp`, `radiant/grid_enhanced_adapter.hpp`, `radiant/resolve_css_style.cpp`.
@@ -169,7 +171,7 @@ make build && make test-radiant-baseline                                    # mu
 
 Focused verification passed: `make build` and `make layout suite=baseline` (`4325/4325`, 7 skipped). The latest build-config residue cleanup additionally passed JSON validation (`python3 -m json.tool build_lambda_config.json`), `git diff --check`, `make check-int-cast`, `make build`, and `make layout suite=baseline` (`4325/4325`, 7 skipped). The latest lint-residue cleanup also passed `git diff --check`, stale-reference search, `make check-int-cast`, and `make layout suite=baseline` (`4325/4325`, 7 skipped). The stricter whole phase gate is still **not fully green**: `make test-radiant-baseline` exits nonzero on broader existing failures (puppertino 2, UI automation 3, render visual 4), and `make lint` exits nonzero on existing tree-wide lint findings outside the Phase 0 files. Do not start Phase 1 until those global gates are either fixed or explicitly re-baselined.
 
-### Phase 1 — CSS mechanical helpers (~510 LOC, low risk)
+### ✅ Phase 1 — CSS mechanical helpers (~510 LOC, low risk)
 - C1 `ensure_bound`/`ensure_border`/`ensure_blk` (~250) — mirror resolve_htm_style's accepted pattern.
 - C2 4-side border width/style/color resolvers (~235).
 - C4 css_animation name→id delegation (~28).
@@ -178,7 +180,7 @@ Focused verification passed: `make build` and `make layout suite=baseline` (`432
 
 **2026-07-13 status:** implemented as file-top statics in `resolve_css_style.cpp` plus `css_animation.cpp` delegation to `css_property_id_from_name()`. The leftover C4 wrapper has also been removed so the animation parser now calls the shared property-name API directly. C6's narrow enum-name logging cleanup is also implemented: 30 repeated `info ? info->name : "unknown"` fallbacks now call one helper while preserving log text. Verified after the slice with `make build` and `make layout suite=baseline` (`4325/4325`, 7 skipped); the CSS file LOC gate still passes at `-516` versus `HEAD` after the C6 helper, and the latest C4 wrapper deletion passes at `-5` over `css_animation.cpp` with `git diff --check`, `make check-int-cast`, `make build`, and clean `make layout suite=baseline` (`4325/4325`, 7 skipped).
 
-### Phase 2 — CSS box-side unification (~200 LOC, low-med risk)
+### ✅ Phase 2 — CSS box-side unification (~200 LOC, low-med risk)
 - C3 margin/padding/inset side + logical fan-out over one `resolve_box_side()`; extract `css_value_axis_type()`.
 - ⚠ This one is *not* byte-neutral by construction: it deliberately fixes the TOP-vs-LEFT calc/isnan drift. Run layout baseline before/after and review any diffs as bug-fixes, not regressions. Preserve the hard-wired LTR/horizontal-tb mapping.
 - Files: `resolve_css_style.cpp`.
@@ -186,7 +188,7 @@ Focused verification passed: `make build` and `make layout suite=baseline` (`432
 
 **2026-07-13 status:** implemented for margin, padding, inset, and physical `top/right/bottom/left`; logical inset mapping remains hard-wired to LTR/horizontal-tb. The NaN inset invariant is centralized so raw percentages remain re-resolvable and non-percentage NaN behaves as `auto`. Verified with `make build`, `make layout suite=baseline` (`4325/4325`, 7 skipped), and LOC gate over Phase 0-2 files: `-626` total versus `HEAD`.
 
-### Phase 3 — Dumpers and loaders (~480–600 LOC, low-med risk)
+### ✅ Phase 3 — Dumpers and loaders (~480–600 LOC, low-med risk)
 - M2 view_pool JSON field helpers (~150–250), M1 selector builder ×4→1 (~115), M4 cmd_layout `load_*_doc` prologue + CSS-bundle helpers (~115).
 - All output-facing: layout JSON snapshots must be **byte-identical** (the snapshot suite is the oracle).
 - Files: `view_pool.cpp`, `cmd_layout.cpp`.
@@ -196,7 +198,7 @@ Focused verification passed: `make build` and `make layout suite=baseline` (`432
 
 Follow-up M4 loader cascade cleanup: text, Markdown, Wiki, LaTeX, XML, Lambda-script, load-time HTML cascade, and runtime subtree recascade paths now share one non-empty stylesheet application helper while preserving each loader's matcher lifetime, timing/log scaffolding, and stylesheet ownership. This passed `git diff --check`, `make check-int-cast`, `make build`, and a clean `make layout suite=baseline` (`4325/4325`, 7 skipped).
 
-### Phase 4 — Event/state/paint scaffolds (~270–330 LOC, low-med risk)
+### ✅ Phase 4 — Event/state/paint scaffolds (~270–330 LOC, low-med risk)
 - E1 state-transition loggers 9→2 helpers (~90), E2 dispatch scaffold RAII (~65), E3 SM transition epilogue + hover≡active merge (~40), E4 shared editing-surface writer (~18).
 - P1 form-control prologue (~60), P2+P3 background clip/tile + color-string (~80 combined).
 - Files: `state_store.cpp`, `event.cpp`, `state_machine.cpp`, `editing_dispatch.cpp`, `event_state_log.*`, `render_form.cpp`, `render_background.cpp`, `render_svg.cpp`, `paint_ir.cpp`.
@@ -210,7 +212,7 @@ Follow-up P1 form-focus cleanup: text input, checkbox, radio, and button painter
 
 Follow-up P2/P3 inset-shadow clip cleanup: inset box-shadow rendering now reuses the existing rectangular background path helper for full-rect fill and clip paths, preserving the previous clip/fill/free order. This passed `git diff --check`, `make check-int-cast`, `make build`, and a clean `make layout suite=baseline` (`4325/4325`, 7 skipped).
 
-### Phase 5 — Layout targeted unification (~440 LOC, med risk)
+### Phase 5 — Layout targeted unification (~440 LOC, med risk; partially complete)
 - L2 table border getters 5→1 (~80), L3 baseline walkers 3→1 (~300), L4 flex justify onto `compute_space_distribution` (~60).
 - Files: `layout_table.cpp`, `layout_flex.cpp`, `layout_alignment.*`, `grid_baseline.hpp`.
 - Tests: radiant baseline + full layout baseline (flex 494 / grid 344 / table 703 fixtures); L3 diffs reviewed case-by-case — baseline math is subtle.
@@ -219,7 +221,7 @@ Follow-up P2/P3 inset-shadow clip cleanup: inset box-shadow rendering now reuses
 
 Verification passed after each Phase 5 slice with `make build` and `make layout suite=baseline` (`4325/4325`, 7 skipped). LOC gate over the Phase 5 layout files passed at `-73` versus `HEAD`; the flex baseline cleanup separately passes at `-23` over `layout_flex.cpp`, the latest flex absolute/fixed predicate cleanup brings the flex file set to `-105` over `layout_flex.cpp` plus `layout_flex_measurement.cpp`, and the latest L4 alignment API cleanup passes at `-27` over `layout_alignment.*`, `layout_flex.cpp`, and `grid_positioning.cpp`. The latest flex line-baseline metrics cleanup passed `git diff --check`, `make check-int-cast`, `make build`, and `make layout suite=baseline` (`4325/4325`, 7 skipped).
 
-### Phase 6 — Descriptor tables (~200–320 LOC, med risk)
+### Phase 6 — Descriptor tables (~200–320 LOC, med risk; partially complete)
 - P4 `DL_OP_LIST` descriptor driving storage serialize/deserialize/free + retained dup/free + bounds (**not** the replay-core merge) (~80–140).
 - P5 paint-op descriptor table folding validate/bounds scaffolding and bringing `render_pdf.cpp`'s two switches into the table (~120–180).
 - Files: `display_list.h`, `display_list_storage.cpp`, `retained_display_list.cpp`, `display_list_bounds.cpp`, `paint_ir.h/cpp`, `render_pdf.cpp`.
@@ -269,7 +271,7 @@ Follow-up P5 PDF effect-stack descriptor cleanup: PDF PaintIR lowering now handl
 
 Follow-up P5 PDF clip-stack descriptor cleanup: PDF PaintIR lowering now handles clip push/pop through PaintIR clip-stack descriptor flags before the payload switch, preserving clip capability checks, command-transform resolution, skipped-depth behavior, and graphics-state restore policy. This passed `git diff --check`, `make check-int-cast`, `make build`, and a clean `make layout suite=baseline` (`4325/4325`, 7 skipped).
 
-### Phase 7 — Structural (open-ended; start only after 0–6 hold)
+### Phase 7 — Structural (open-ended; in progress)
 Ordered slices, each independently gated:
 1. L6a grid `repeat()` expansion: one implementation shared by grid_placement.hpp and both intrinsic_sizing call sites (self-contained, duplicated 3×).
 2. E5 event_sim onto shared hit-test/radio/text helpers (~75).
