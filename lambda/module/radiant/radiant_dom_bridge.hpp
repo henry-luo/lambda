@@ -72,6 +72,7 @@ RADIANT_C_API Item fn_radiant_attr(Item node_item, Item name_item);
 RADIANT_C_API Item fn_radiant_set_attr(Item node_item, Item name_item, Item value_item);
 RADIANT_C_API Item fn_radiant_free(Item node_item);
 RADIANT_C_API Item fn_radiant_poc_attr(Item path_item);
+RADIANT_C_API Item fn_radiant_register_layout(Item name_item, Item fn_item);
 
 RADIANT_C_API const JubeModuleDef* radiant_jube_module(void);
 RADIANT_C_API void radiant_jube_register_static(void);
