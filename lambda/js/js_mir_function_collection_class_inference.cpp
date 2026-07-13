@@ -1,8 +1,8 @@
 #include "js_mir_internal.hpp"
 
 static bool jm_function_inside_class_syntax(JsFunctionNode* fn) {
-    if (!fn || ts_node_is_null(fn->base.node)) return false;
-    TSNode node = ts_node_parent(fn->base.node);
+    if (!fn || ts_node_is_null(fn->node)) return false;
+    TSNode node = ts_node_parent(fn->node);
     while (!ts_node_is_null(node)) {
         const char* node_type = ts_node_type(node);
         if (node_type &&
@@ -321,7 +321,7 @@ void jm_make_fn_name(char* buf, int bufsize, JsFunctionNode* fn, JsMirTranspiler
         strbuf_append_int(sb, mt->label_counter++);
     }
     strbuf_append_char(sb, '_');
-    strbuf_append_int(sb, ts_node_start_byte(fn->base.node));
+    strbuf_append_int(sb, ts_node_start_byte(fn->node));
     snprintf(buf, bufsize, "%s", sb->str);
     strbuf_free(sb);
 }
@@ -701,7 +701,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             ce->method_count = 0;
             ce->constructor = NULL;
             {
-                const char* class_node_type = ts_node_type(cls->base.node);
+                const char* class_node_type = ts_node_type(cls->node);
                 ce->is_declaration = class_node_type && strcmp(class_node_type, "class_declaration") == 0;
             }
             ce->inner_module_var_index = -1;
@@ -766,9 +766,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                 } else if (m->node_type == JS_AST_NODE_METHOD_DEFINITION) {
                     JsMethodDefinitionNode* md = (JsMethodDefinitionNode*)m;
                     if (md->computed && md->key) jm_collect_functions(mt, md->key);
-                    if (md->value && (md->value->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-                                      md->value->node_type == JS_AST_NODE_FUNCTION_DECLARATION)) {
-                        JsFunctionNode* fn = (JsFunctionNode*)md->value;
+                    if (md->body) {
+                        JsFunctionNode* fn = (JsFunctionNode*)md;
                         // Track inner functions before recursion
                         int method_children_start = mt->func_count;
                         // Recurse into parameters first — default values may contain function expressions
@@ -2169,7 +2168,7 @@ void jm_infer_param_types(JsFuncCollected* fc) {
                         TypeId tid = ts_predefined_name_to_type_id(NULL, 0);  // default
                         // resolve from the predefined_type or type_expr
                         TsTypeNode* tex = tsp->ts_type->type_expr;
-                        if (tex->base.node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                        if (tex->node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
                             TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)tex;
                             tid = pt->predefined_id;
                         } else {
@@ -2472,7 +2471,7 @@ void jm_infer_return_type(JsFuncCollected* fc) {
     // Phase 3.4: check for explicit TS return type annotation
     if (fn->ts_return_type) {
         TsTypeAnnotationNode* ann = fn->ts_return_type;
-        if (ann->type_expr && ann->type_expr->base.node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
+        if (ann->type_expr && ann->type_expr->node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
             TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)ann->type_expr;
             fc->return_type = pt->predefined_id;
             log_debug("js-mir P3.4: annotation-based return type for %s: %s",

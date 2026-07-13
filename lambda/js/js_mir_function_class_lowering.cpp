@@ -338,7 +338,7 @@ static bool jm_capture_is_nfe_binding(JsMirTranspiler* mt, JsFuncCollected* fc, 
     while (idx >= 0 && idx < mt->func_count) {
         JsFuncCollected* cur = &mt->func_entries[idx];
         JsFunctionNode* fn = cur->node;
-        if (fn && fn->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION && fn->name) {
+        if (fn && fn->node_type == JS_AST_NODE_FUNCTION_EXPRESSION && fn->name) {
             char self_name[128];
             snprintf(self_name, sizeof(self_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
             if (strcmp(name, self_name) == 0) return true;
@@ -2705,7 +2705,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 if (param_node->node_type == (int)TS_AST_NODE_PARAMETER && mt->tp) {
                     TsParameterNode* tsp = (TsParameterNode*)param_node;
                     if (tsp->ts_type && tsp->ts_type->type_expr &&
-                        tsp->ts_type->type_expr->base.node_type != (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                        tsp->ts_type->type_expr->node_type != (int)TS_AST_NODE_PREDEFINED_TYPE) {
                         Type* resolved = ts_resolve_type((TsTranspiler*)mt->tp, tsp->ts_type->type_expr);
                         if (resolved && resolved->type_id == LMD_TYPE_MAP) {
                             JsMirVarEntry* pvar = jm_find_var(mt, vname);

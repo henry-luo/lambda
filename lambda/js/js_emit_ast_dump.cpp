@@ -370,8 +370,11 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
         }
         case JS_AST_NODE_METHOD_DEFINITION: {
             JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)node;
+            dump_string_field("name", method->name);
             emit_js_dump_field(source, "key", method->key, indent + 1);
-            emit_js_dump_field(source, "value", method->value, indent + 1);
+            emit_js_dump_list(source, "params", method->params, indent + 1);
+            emit_js_dump_field(source, "return_type", (JsAstNode*)method->ts_return_type, indent + 1);
+            emit_js_dump_field(source, "body", method->body, indent + 1);
             break;
         }
         case JS_AST_NODE_FIELD_DEFINITION: {

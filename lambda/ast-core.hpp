@@ -10,6 +10,7 @@ typedef struct AstNode AstNode;
 typedef struct AstImportNode AstImportNode;
 typedef struct NameEntry NameEntry;
 typedef struct NameScope NameScope;
+typedef struct TsTypeAnnotationNode TsTypeAnnotationNode;
 
 typedef enum AstNodeType : uint16_t {
     AST_NODE_NULL = 0,
@@ -39,6 +40,8 @@ typedef enum AstNodeType : uint16_t {
     AST_NODE_LIST = 68,
     AST_NODE_BLOCK = 69,
     AST_NODE_EXPR_STMT = 70,
+    AST_NODE_PROPERTY = 71,
+    AST_NODE_CONDITIONAL_EXPR = 72,
 
     // L2/L3 declarations, statements, patterns, and control flow
     AST_NODE_PARAM = 150,
@@ -57,15 +60,31 @@ typedef enum AstNodeType : uint16_t {
     AST_NODE_EXPORT = 163,
     AST_NODE_YIELD = 164,
     AST_NODE_AWAIT = 165,
+    AST_NODE_ASSIGN_PATTERN = 166,
+    AST_NODE_ARRAY_PATTERN = 167,
+    AST_NODE_MAP_PATTERN = 168,
+    AST_NODE_REST_ELEMENT = 169,
+    AST_NODE_REST_PROPERTY = 170,
+    AST_NODE_VARIABLE_DECLARATOR = 171,
+    AST_NODE_DO_WHILE_STAM = 172,
+    AST_NODE_FOR_OF_STAM = 173,
+    AST_NODE_FOR_IN_STAM = 174,
+    AST_NODE_TRY_STAM = 175,
+    AST_NODE_CATCH_CLAUSE = 176,
 
     // L4 callable forms
     AST_NODE_FUNC = 300,
     AST_NODE_FUNC_EXPR = 301,
     AST_NODE_PROC = 302,
+    AST_NODE_ARROW_FUNC = 303,
+    AST_NODE_METHOD = 304,
 
     // L5/L6 type/module/class forms that are not yet structurally unified.
     AST_NODE_CLASS = 350,
     AST_NODE_FIELD = 351,
+    AST_NODE_CLASS_EXPR = 352,
+    AST_NODE_IMPORT_SPECIFIER = 400,
+    AST_NODE_EXPORT_SPECIFIER = 401,
 
     // Lambda-specific range
     AST_NODE_PIPE = 500,
@@ -167,6 +186,8 @@ typedef enum Operator {
     OPERATOR_ZERO_MORE,
     OPERATOR_REPEAT,
 
+    OPERATOR_ASSIGN,
+
     // JavaScript-only operator superset, dormant for Lambda until JS adopts Operator.
     OPERATOR_JS_STRICT_EQ,
     OPERATOR_JS_STRICT_NE,
@@ -183,7 +204,6 @@ typedef enum Operator {
     OPERATOR_JS_DELETE,
     OPERATOR_JS_INCREMENT,
     OPERATOR_JS_DECREMENT,
-    OPERATOR_JS_ASSIGN,
     OPERATOR_JS_ADD_ASSIGN,
     OPERATOR_JS_SUB_ASSIGN,
     OPERATOR_JS_MUL_ASSIGN,
@@ -202,6 +222,14 @@ typedef enum Operator {
     OPERATOR_JS_AND_ASSIGN,
     OPERATOR_JS_OR_ASSIGN,
 } Operator;
+
+typedef enum AstLiteralType {
+    AST_LITERAL_NUMBER,
+    AST_LITERAL_STRING,
+    AST_LITERAL_BOOLEAN,
+    AST_LITERAL_NULL,
+    AST_LITERAL_UNDEFINED,
+} AstLiteralType;
 
 typedef enum ScopeKind {
     SCOPE_KIND_GLOBAL,
@@ -243,6 +271,379 @@ struct AstNode {
     AstNode* next;
     TSNode node;
 };
+
+typedef struct AstFieldNode : AstNode {
+    AstNode *object;
+    union {
+        AstNode *field;
+        AstNode *property;
+    };
+    bool computed;
+    bool optional;
+} AstFieldNode;
+
+typedef struct AstCallNode : AstNode {
+    union {
+        AstNode *function;
+        AstNode *callee;
+    };
+    union {
+        AstNode *argument;
+        AstNode *arguments;
+    };
+    bool pipe_inject;
+    bool propagate;
+    bool can_raise;
+    bool optional;
+} AstCallNode;
+
+typedef struct AstPrimaryNode : AstNode {
+    AstNode *expr;
+} AstPrimaryNode;
+
+typedef struct AstLiteralNode : AstPrimaryNode {
+    AstLiteralType literal_type;
+    bool has_decimal;
+    bool is_bigint;
+    union {
+        double number_value;
+        String* string_value;
+        bool boolean_value;
+    } value;
+    String* bigint_str;
+} AstLiteralNode;
+
+typedef AstNode AstTypeNode;
+
+typedef struct AstUnaryNode : AstNode {
+    AstNode *operand;
+    StrView op_str;
+    Operator op;
+    bool prefix;
+} AstUnaryNode;
+
+typedef struct AstBinaryNode : AstNode {
+    AstNode *left, *right;
+    StrView op_str;
+    Operator op;
+} AstBinaryNode;
+
+typedef AstBinaryNode AstPipeNode;
+
+// for AST_NODE_ASSIGN, AST_NODE_KEY_EXPR, AST_NODE_PARAM
+typedef struct AstNamedNode : AstNode {
+    String* name;
+    AstNode *as;
+    String* error_name;
+    NameEntry* entry;
+} AstNamedNode;
+
+typedef struct AstIdentNode : AstNode {
+    String* name;
+    NameEntry *entry;
+} AstIdentNode;
+
+typedef struct AstLetNode : AstNode {
+    AstNode *declare;
+} AstLetNode;
+
+typedef struct AstIfNode : AstNode {
+    union {
+        AstNode *cond;
+        AstNode *test;
+    };
+    union {
+        AstNode *then;
+        AstNode *consequent;
+    };
+    union {
+        AstNode *otherwise;
+        AstNode *alternate;
+    };
+} AstIfNode;
+
+typedef struct AstMatchArm : AstNode {
+    union {
+        AstNode *pattern;
+        AstNode *test;
+    };
+    union {
+        AstNode *body;
+        AstNode *consequent;
+    };
+} AstMatchArm;
+
+typedef struct AstMatchNode : AstNode {
+    union {
+        AstNode *scrutinee;
+        AstNode *discriminant;
+    };
+    union {
+        AstMatchArm *first_arm;
+        AstNode *cases;
+    };
+    int arm_count;
+} AstMatchNode;
+
+typedef struct AstWhileNode : AstNode {
+    union {
+        AstNode *cond;
+        AstNode *test;
+    };
+    AstNode *body;
+    NameScope *vars;
+} AstWhileNode;
+
+typedef AstWhileNode AstDoWhileNode;
+
+typedef struct AstForStmtNode : AstNode {
+    AstNode* init;
+    AstNode* test;
+    AstNode* update;
+    AstNode* body;
+} AstForStmtNode;
+
+typedef struct AstBreakContinueNode : AstNode {
+    const char* label;
+    int label_len;
+} AstBreakContinueNode;
+
+typedef struct AstReturnNode : AstNode {
+    union {
+        AstNode *value;
+        AstNode *argument;
+    };
+} AstReturnNode;
+
+typedef struct AstRaiseNode : AstNode {
+    union {
+        AstNode *value;
+        AstNode *argument;
+    };
+} AstRaiseNode;
+
+typedef struct AstArrayNode : AstNode {
+    union {
+        AstNode *item;
+        AstNode *elements;
+        AstNode *expressions;
+    };
+    int length;
+} AstArrayNode;
+
+typedef struct AstMapNode : AstNode {
+    union {
+        AstNode *item;
+        AstNode *properties;
+    };
+} AstMapNode;
+
+typedef struct AstPropertyNode : AstNode {
+    AstNode* key;
+    AstNode* value;
+    bool computed;
+    bool method;
+    bool is_getter;
+    bool is_setter;
+    bool shorthand;
+} AstPropertyNode;
+
+typedef struct AstAssignNode : AstNode {
+    Operator op;
+    AstNode *left;
+    AstNode *right;
+    bool lhs_is_parenthesized;
+} AstAssignNode;
+
+// for AST_NODE_ASSIGN with decomposition (let a, b = expr / let a, b at expr)
+typedef struct AstDecomposeNode : AstNode {
+    String** names;
+    int name_count;
+    AstNode *as;
+    bool is_named;
+} AstDecomposeNode;
+
+// assignment statement (procedural only)
+typedef struct AstAssignStamNode : AstAssignNode {
+    String* target;
+    AstNode *target_node;
+    AstNode *value;
+    struct NameEntry* target_entry;
+} AstAssignStamNode;
+
+// compound assignment statement: arr[i] = val or obj.field = val (procedural only)
+typedef struct AstCompoundAssignNode : AstAssignNode {
+    AstNode *object;
+    AstNode *key;
+    AstNode *value;
+} AstCompoundAssignNode;
+
+typedef struct AstBlockNode : AstNode {
+    AstNode* statements;
+} AstBlockNode;
+
+typedef struct AstExprStmtNode : AstNode {
+    AstNode* expression;
+} AstExprStmtNode;
+
+typedef struct AstVarDeclNode : AstNode {
+    AstNode* declarations;
+    int kind;
+    bool is_using;
+    bool is_await_using;
+} AstVarDeclNode;
+
+typedef struct AstDeclaratorNode : AstNode {
+    AstNode* id;
+    AstNode* init;
+    TsTypeAnnotationNode* ts_type;
+} AstDeclaratorNode;
+
+typedef struct AstSpreadNode : AstNode {
+    AstNode* argument;
+} AstSpreadNode;
+
+typedef struct AstForOfNode : AstNode {
+    AstNode* left;
+    AstNode* init;
+    AstNode* right;
+    AstNode* body;
+    int kind;
+    bool is_await;
+} AstForOfNode;
+
+typedef struct AstTryNode : AstNode {
+    AstNode* block;
+    AstNode* handler;
+    AstNode* finalizer;
+} AstTryNode;
+
+typedef struct AstCatchNode : AstNode {
+    AstNode* param;
+    AstNode* body;
+} AstCatchNode;
+
+// Forward declare for capture list
+struct CaptureInfo;
+
+// aligned with AstNamedNode on name
+typedef struct AstFuncNode : AstNode {
+    String* name;
+    union {
+        AstNamedNode *param;
+        AstNode *params;
+    };
+    AstNode *body;
+    NameScope *vars;
+    struct CaptureInfo* captures;
+    bool is_arrow;
+    bool is_async;
+    bool is_generator;
+    bool has_use_strict_directive;
+    int lexical_for_head_capture_count;
+    char lexical_for_head_capture_names[8][64];
+    TsTypeAnnotationNode* ts_return_type;
+} AstFuncNode;
+
+typedef struct AstMethodNode : AstFuncNode {
+    AstNode* key;
+    enum {
+        JS_METHOD_METHOD,
+        JS_METHOD_CONSTRUCTOR,
+        JS_METHOD_GET,
+        JS_METHOD_SET
+    } kind;
+    bool computed;
+    bool static_method;
+} AstMethodNode;
+
+typedef struct CaptureInfo {
+    String* name;
+    NameEntry* entry;
+    bool is_mutable;
+    struct CaptureInfo* next;
+} CaptureInfo;
+
+// root of the AST
+typedef struct AstScript : AstNode {
+    union {
+        AstNode *child;
+        AstNode *body;
+    };
+    NameScope *global_vars;
+    bool has_use_strict_directive;
+} AstScript;
+
+typedef struct AstClassNode : AstNode {
+    String* name;
+    AstNode* superclass;
+    AstNode* body;
+} AstClassNode;
+
+typedef struct AstClassFieldNode : AstNode {
+    AstNode* key;
+    AstNode* value;
+    bool is_static;
+    bool is_private;
+    bool computed;
+} AstClassFieldNode;
+
+// Object (no content): type Point { x: float, y: float; fn magnitude() => ... }
+// Element (with content): type Article { title: string\n string, element }
+typedef struct AstObjectTypeNode : AstNamedNode {
+    AstNode* item;
+    AstNode* base_type;
+    AstNode* content;
+    AstNode* methods;
+    AstNode* constraints;
+    bool is_public;
+    int local_type_index;
+} AstObjectTypeNode;
+
+// Object literal node: {TypeName key: value, ...}
+typedef struct AstObjectLiteralNode : AstMapNode {
+    String* type_name;
+} AstObjectLiteralNode;
+
+typedef struct AstYieldNode : AstNode {
+    AstNode* argument;
+    bool delegate;
+} AstYieldNode;
+
+typedef struct AstAwaitNode : AstNode {
+    AstNode* argument;
+} AstAwaitNode;
+
+typedef struct AstImportNode : AstNode {
+    String* source;
+    AstNode* specifiers;
+    String* default_name;
+    String* namespace_name;
+    String* alias;
+    StrView module;
+    Script* script;
+    bool is_relative;
+    bool is_cross_lang;
+} AstImportNode;
+
+typedef AstImportNode AstImportDeclNode;
+
+typedef struct AstImportSpecifierNode : AstNode {
+    String* local_name;
+    String* remote_name;
+} AstImportSpecifierNode;
+
+typedef struct AstExportDeclNode : AstNode {
+    AstNode* declaration;
+    AstNode* specifiers;
+    String* source;
+    bool is_default;
+} AstExportDeclNode;
+
+typedef struct AstExportSpecifierNode : AstNode {
+    String* local_name;
+    String* export_name;
+} AstExportSpecifierNode;
 
 typedef struct FnAnalysis {
     void* captures;

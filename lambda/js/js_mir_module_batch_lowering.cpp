@@ -773,7 +773,7 @@ static MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntr
     if (!mt || !ce || !ce->name) return 0;
     JsIdentifierNode tmp_id;
     memset(&tmp_id, 0, sizeof(tmp_id));
-    tmp_id.base.node_type = JS_AST_NODE_IDENTIFIER;
+    tmp_id.node_type = JS_AST_NODE_IDENTIFIER;
     tmp_id.name = ce->name;
     return jm_transpile_box_item(mt, (JsAstNode*)&tmp_id);
 }
@@ -971,7 +971,7 @@ static JsFuncCollected* jm_find_function_ctor_fc(JsMirTranspiler* mt,
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];
         if (!fc->node || fc->is_class_method || fc->is_reassigned) continue;
-        if (fc->node->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        if (fc->node->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
         if (jm_func_ctor_name_matches(fc, name, name_len)) return fc;
     }
     return NULL;
@@ -1152,7 +1152,7 @@ static void jm_compose_function_ctor_shapes(JsMirTranspiler* mt) {
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];
         if (!fc->node || fc->is_class_method || fc->is_reassigned) continue;
-        if (fc->node->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        if (fc->node->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
         if (!jm_compose_function_ctor_shape(mt, fc, 0)) {
             fc->func_ctor_shape_compose_failed = true;
         }
@@ -1491,7 +1491,7 @@ static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode*
         JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)node;
         if (method->computed &&
             jm_find_enclosing_lexical_key_for_target(method->key, target, name, out_key)) return true;
-        return jm_find_enclosing_lexical_key_for_target(method->value, target, name, out_key);
+        return jm_find_enclosing_lexical_key_for_target(method->body, target, name, out_key);
     }
     case JS_AST_NODE_TRY_STATEMENT: {
         JsTryNode* try_node = (JsTryNode*)node;
@@ -2076,7 +2076,7 @@ void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int name_len,
     // Resolve the value through box_item (handles native-typed variables)
     JsIdentifierNode temp_id;
     memset(&temp_id, 0, sizeof(temp_id));
-    temp_id.base.node_type = JS_AST_NODE_IDENTIFIER;
+    temp_id.node_type = JS_AST_NODE_IDENTIFIER;
     temp_id.name = name_pool_create_len(mt->tp->name_pool, name, name_len);
 
     MIR_reg_t val = jm_transpile_box_item(mt, (JsAstNode*)&temp_id);
@@ -2096,7 +2096,7 @@ void jm_emit_module_export_aliased(JsMirTranspiler* mt,
                                           const char* export_name, int export_len) {
     JsIdentifierNode temp_id;
     memset(&temp_id, 0, sizeof(temp_id));
-    temp_id.base.node_type = JS_AST_NODE_IDENTIFIER;
+    temp_id.node_type = JS_AST_NODE_IDENTIFIER;
     temp_id.name = name_pool_create_len(mt->tp->name_pool, local_name, local_len);
 
     MIR_reg_t val = jm_transpile_box_item(mt, (JsAstNode*)&temp_id);
@@ -4080,8 +4080,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (fi == fj) continue;
                 JsFunctionNode* fn_b = mt->func_entries[fj].node;
                 if (!fn_b || !fn_b->name) continue;
-                if (fn_b->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
-                if (fn_a->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) break;
+                if (fn_b->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+                if (fn_a->node_type != JS_AST_NODE_FUNCTION_DECLARATION) break;
                 if (mt->func_entries[fi].parent_index != mt->func_entries[fj].parent_index) continue;
                 if (fn_a->name->len != fn_b->name->len) continue;
                 if (memcmp(fn_a->name->chars, fn_b->name->chars, fn_a->name->len) != 0) continue;
@@ -4844,7 +4844,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         }
 
                         bool cap_is_parent_nfe = false;
-                        if (parent->node && parent->node->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION &&
+                        if (parent->node && parent->node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION &&
                             parent->node->name) {
                             char parent_self_name[128];
                             snprintf(parent_self_name, sizeof(parent_self_name), "_js_%.*s",
@@ -4943,7 +4943,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         (int)child->node->name->len, child->node->name->chars);
                 }
 
-                bool is_child_nfe = (child->node && child->node->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION);
+                bool is_child_nfe = (child->node && child->node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION);
                 bool has_nfe_self_capture = false;
                 for (int k = 0; k < child->capture_count; k++) {
                     const char* cname = child->captures[k].name;
@@ -4984,7 +4984,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 (int)child->node->name->len, child->node->name->chars);
                         }
 
-                        bool is_child_nfe2 = (child->node && child->node->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION);
+                        bool is_child_nfe2 = (child->node && child->node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION);
                         for (int k = 0; k < child->capture_count; k++) {
                             const char* cname = child->captures[k].name;
                             const char* slot_key = jm_capture_scope_env_slot_key(parent_fc, child, &child->captures[k]);
@@ -5016,7 +5016,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     snprintf(csn, sizeof(csn), "_js_%.*s",
                         (int)child->node->name->len, child->node->name->chars);
                     // Only true NFEs (not function declarations) get extra slots
-                    if (child->node->base.node_type != JS_AST_NODE_FUNCTION_EXPRESSION) continue;
+                    if (child->node->node_type != JS_AST_NODE_FUNCTION_EXPRESSION) continue;
                     bool assigned_nfe_slot = false;
                     for (int k = 0; k < child->capture_count; k++) {
                         if (strcmp(child->captures[k].name, csn) == 0 &&
@@ -5056,7 +5056,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 (int)child->node->name->len, child->node->name->chars);
                         }
 
-                        bool is_child_nfe_remap = (child->node && child->node->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION);
+                        bool is_child_nfe_remap = (child->node && child->node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION);
                         for (int k = 0; k < child->capture_count; k++) {
                             // Skip true NFE self-captures — already assigned dedicated slots
                             if (child_self_remap[0] &&
@@ -6357,7 +6357,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // Temporarily wrap program body as a block for prescan
         JsBlockNode blk_wrapper;
         memset(&blk_wrapper, 0, sizeof(blk_wrapper));
-        blk_wrapper.base.node_type = JS_AST_NODE_BLOCK_STATEMENT;
+        blk_wrapper.node_type = JS_AST_NODE_BLOCK_STATEMENT;
         blk_wrapper.statements = program->body;
         jm_prescan_float_widening(mt, (JsAstNode*)&blk_wrapper);
     }
@@ -6877,7 +6877,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 // Link prototype to parent's actual .prototype for identity correctness
                                 JsIdentifierNode tmp_id2;
                                 memset(&tmp_id2, 0, sizeof(tmp_id2));
-                                tmp_id2.base.node_type = JS_AST_NODE_IDENTIFIER;
+                                tmp_id2.node_type = JS_AST_NODE_IDENTIFIER;
                                 tmp_id2.name = sc->name;
                                 MIR_reg_t super_val = jm_transpile_box_item(mt, (JsAstNode*)&tmp_id2);
                                 MIR_reg_t sp_key = jm_box_string_literal(mt, "prototype", 9);
@@ -6911,7 +6911,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                         // Use the actual NativeError.prototype singleton
                                         JsIdentifierNode tmp_sid2;
                                         memset(&tmp_sid2, 0, sizeof(tmp_sid2));
-                                        tmp_sid2.base.node_type = JS_AST_NODE_IDENTIFIER;
+                                        tmp_sid2.node_type = JS_AST_NODE_IDENTIFIER;
                                         tmp_sid2.name = super_id->name;
                                         MIR_reg_t super_ctor2 = jm_transpile_box_item(mt, (JsAstNode*)&tmp_sid2);
                                         MIR_reg_t sp_key2 = jm_box_string_literal(mt, "prototype", 9);

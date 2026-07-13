@@ -62,61 +62,52 @@ typedef enum TsAstNodeType {
 // ============================================================================
 
 // base for all TS type nodes
-typedef struct TsTypeNode {
-    JsAstNode base;
+typedef struct TsTypeNode : JsAstNode {
     Type* resolved_type;    // filled during type resolution pass; NULL before
 } TsTypeNode;
 
 // : SomeType  (attached to variable_declarator, parameter, function return, etc.)
-typedef struct TsTypeAnnotationNode {
-    TsTypeNode base;
+typedef struct TsTypeAnnotationNode : TsTypeNode {
     TsTypeNode* type_expr;  // the type expression subtree
 } TsTypeAnnotationNode;
 
 // string, number, boolean, any, void, never, unknown, object, symbol, bigint, null, undefined
-typedef struct TsPredefinedTypeNode {
-    TsTypeNode base;
+typedef struct TsPredefinedTypeNode : TsTypeNode {
     TypeId predefined_id;   // resolved directly: number->FLOAT, string->STRING, etc.
 } TsPredefinedTypeNode;
 
 // Foo, Array<T>, MyInterface
-typedef struct TsTypeReferenceNode {
-    TsTypeNode base;
+typedef struct TsTypeReferenceNode : TsTypeNode {
     String* name;           // type name
     TsTypeNode** type_args; // generic arguments (nullable)
     int type_arg_count;
 } TsTypeReferenceNode;
 
 // A | B
-typedef struct TsUnionTypeNode {
-    TsTypeNode base;
+typedef struct TsUnionTypeNode : TsTypeNode {
     TsTypeNode** types;     // all union members
     int type_count;
 } TsUnionTypeNode;
 
 // A & B
-typedef struct TsIntersectionTypeNode {
-    TsTypeNode base;
+typedef struct TsIntersectionTypeNode : TsTypeNode {
     TsTypeNode** types;
     int type_count;
 } TsIntersectionTypeNode;
 
 // T[]
-typedef struct TsArrayTypeNode {
-    TsTypeNode base;
+typedef struct TsArrayTypeNode : TsTypeNode {
     TsTypeNode* element_type;
 } TsArrayTypeNode;
 
 // [A, B, C]
-typedef struct TsTupleTypeNode {
-    TsTypeNode base;
+typedef struct TsTupleTypeNode : TsTypeNode {
     TsTypeNode** element_types;
     int element_count;
 } TsTupleTypeNode;
 
 // (x: T, y: U) => R
-typedef struct TsFunctionTypeNode {
-    TsTypeNode base;
+typedef struct TsFunctionTypeNode : TsTypeNode {
     TsTypeNode** param_types;
     String** param_names;
     int param_count;
@@ -124,8 +115,7 @@ typedef struct TsFunctionTypeNode {
 } TsFunctionTypeNode;
 
 // { x: T; y: U; z?: V }
-typedef struct TsObjectTypeNode {
-    TsTypeNode base;
+typedef struct TsObjectTypeNode : TsTypeNode {
     TsTypeNode** member_types;
     String** member_names;
     bool* member_optional;  // per-member optional flag
@@ -134,8 +124,7 @@ typedef struct TsObjectTypeNode {
 } TsObjectTypeNode;
 
 // T extends U ? X : Y
-typedef struct TsConditionalTypeNode {
-    TsTypeNode base;
+typedef struct TsConditionalTypeNode : TsTypeNode {
     TsTypeNode* check_type;
     TsTypeNode* extends_type;
     TsTypeNode* true_type;
@@ -143,8 +132,7 @@ typedef struct TsConditionalTypeNode {
 } TsConditionalTypeNode;
 
 // literal type: "hello", 42, true
-typedef struct TsLiteralTypeNode {
-    TsTypeNode base;
+typedef struct TsLiteralTypeNode : TsTypeNode {
     JsLiteralType literal_type;
     union {
         double number_value;
@@ -154,22 +142,19 @@ typedef struct TsLiteralTypeNode {
 } TsLiteralTypeNode;
 
 // (T) — parenthesized
-typedef struct TsParenthesizedTypeNode {
-    TsTypeNode base;
+typedef struct TsParenthesizedTypeNode : TsTypeNode {
     TsTypeNode* inner;
 } TsParenthesizedTypeNode;
 
 // --- type parameter ---
-typedef struct TsTypeParamNode {
-    TsTypeNode base;
+typedef struct TsTypeParamNode : TsTypeNode {
     String* name;
     TsTypeNode* constraint;    // extends X (nullable)
     TsTypeNode* default_type;  // = Y (nullable)
 } TsTypeParamNode;
 
 // --- interface Foo { x: T; ... } ---
-typedef struct TsInterfaceNode {
-    JsAstNode base;
+typedef struct TsInterfaceNode : JsAstNode {
     String* name;
     TsTypeParamNode** type_params;
     int type_param_count;
@@ -180,8 +165,7 @@ typedef struct TsInterfaceNode {
 } TsInterfaceNode;
 
 // --- type Foo = ... ---
-typedef struct TsTypeAliasNode {
-    JsAstNode base;
+typedef struct TsTypeAliasNode : JsAstNode {
     String* name;
     TsTypeParamNode** type_params;
     int type_param_count;
@@ -190,8 +174,7 @@ typedef struct TsTypeAliasNode {
 } TsTypeAliasNode;
 
 // --- enum Direction { Up = 0, Down } ---
-typedef struct TsEnumDeclarationNode {
-    JsAstNode base;
+typedef struct TsEnumDeclarationNode : JsAstNode {
     bool is_const;
     String* name;
     JsAstNode** members;
@@ -199,37 +182,32 @@ typedef struct TsEnumDeclarationNode {
     Type* resolved_type;   // -> TypeMap representing the enum shape
 } TsEnumDeclarationNode;
 
-typedef struct TsEnumMemberNode {
-    JsAstNode base;
+typedef struct TsEnumMemberNode : JsAstNode {
     String* name;
     JsAstNode* initializer;
     int auto_value;
 } TsEnumMemberNode;
 
 // --- namespace Foo { ... } ---
-typedef struct TsNamespaceDeclarationNode {
-    JsAstNode base;
+typedef struct TsNamespaceDeclarationNode : JsAstNode {
     String* name;
     JsAstNode** body;
     int body_count;
 } TsNamespaceDeclarationNode;
 
 // --- @decorator ---
-typedef struct TsDecoratorNode {
-    JsAstNode base;
+typedef struct TsDecoratorNode : JsAstNode {
     JsAstNode* expression;
 } TsDecoratorNode;
 
 // --- expr as T / expr satisfies T ---
-typedef struct TsTypeExprNode {
-    JsAstNode base;
+typedef struct TsTypeExprNode : JsAstNode {
     JsAstNode* inner;        // the expression
     TsTypeNode* target_type; // the asserted/checked type
 } TsTypeExprNode;
 
 // --- expr! (non-null assertion) ---
-typedef struct TsNonNullNode {
-    JsAstNode base;
+typedef struct TsNonNullNode : JsAstNode {
     JsAstNode* inner;
 } TsNonNullNode;
 
@@ -237,8 +215,7 @@ typedef struct TsNonNullNode {
 // TsVariableDeclaratorNode: the ts_type field is now in JsVariableDeclaratorNode base
 typedef JsVariableDeclaratorNode TsVariableDeclaratorNode;
 
-typedef struct TsParameterNode {
-    JsAstNode base;
+typedef struct TsParameterNode : JsAstNode {
     JsAstNode* pattern;            // parameter name/pattern
     TsTypeAnnotationNode* ts_type; // type annotation (nullable)
     JsAstNode* default_value;      // default value (nullable)
@@ -247,8 +224,7 @@ typedef struct TsParameterNode {
     bool optional;                 // true for optional_parameter (y?: T)
 } TsParameterNode;
 
-typedef struct TsFunctionNode {
-    JsFunctionNode base;
+typedef struct TsFunctionNode : JsFunctionNode {
     TsTypeAnnotationNode* return_type;    // return type annotation (nullable)
     TsTypeParamNode** type_params;        // generic type parameters (nullable)
     int type_param_count;

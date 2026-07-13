@@ -11,7 +11,7 @@ int jm_name_cmp(const void* a, const void* b, void* udata) {
 
 static bool jm_analysis_function_decl_is_direct_binding(JsFunctionNode* fn) {
     if (!fn) return false;
-    TSNode fn_node = fn->base.node;
+    TSNode fn_node = fn->node;
     if (ts_node_is_null(fn_node)) return false;
     TSNode parent = ts_node_parent(fn_node);
     if (ts_node_is_null(parent)) return false;
@@ -1768,8 +1768,8 @@ void jm_collect_param_default_refs(JsAstNode* params, struct hashmap* refs) {
 }
 
 static bool jm_analysis_function_is_method_syntax(JsFunctionNode* fn) {
-    if (!fn || ts_node_is_null(fn->base.node)) return false;
-    TSNode parent = ts_node_parent(fn->base.node);
+    if (!fn || ts_node_is_null(fn->node)) return false;
+    TSNode parent = ts_node_parent(fn->node);
     if (ts_node_is_null(parent)) return false;
     const char* parent_type = ts_node_type(parent);
     if (!parent_type) return false;
@@ -1883,8 +1883,8 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     // Keeping top-level functions capture-free preserves tail-call optimization.
     // Exception: function EXPRESSIONS always need self-capture for NFE name binding,
     // since their name is not in the module var table even when top-level.
-    bool is_func_expr = fn->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION;
-    bool is_block_func_decl = fn->base.node_type == JS_AST_NODE_FUNCTION_DECLARATION &&
+    bool is_func_expr = fn->node_type == JS_AST_NODE_FUNCTION_EXPRESSION;
+    bool is_block_func_decl = fn->node_type == JS_AST_NODE_FUNCTION_DECLARATION &&
         !jm_analysis_function_decl_is_direct_binding(fn);
     if (has_self_ref && self_name[0] && (fc->parent_index >= 0 || is_func_expr || is_block_func_decl)) {
         jm_ensure_captures_capacity(fc);

@@ -573,7 +573,7 @@ void jm_emit_set_class_assignment_name(JsMirTranspiler* mt, JsAssignmentNode* as
 // Helper: emit js_set_function_source call to store original source text for toString
 void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFunctionNode* fn_node) {
     if (!fn_node || !mt->tp || !mt->tp->source) return;
-    TSNode node = fn_node->base.node;
+    TSNode node = fn_node->node;
     if (ts_node_is_null(node)) return;
     uint32_t start = ts_node_start_byte(node);
     uint32_t end = ts_node_end_byte(node);
@@ -653,7 +653,7 @@ void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFuncti
 // Avoids the slow validateNativeFunctionSource fallback in test262 harness.
 void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNode* cls_node) {
     if (!cls_node || !mt->tp || !mt->tp->source) return;
-    TSNode node = cls_node->base.node;
+    TSNode node = cls_node->node;
     if (ts_node_is_null(node)) return;
     uint32_t start = ts_node_start_byte(node);
     uint32_t end = ts_node_end_byte(node);
