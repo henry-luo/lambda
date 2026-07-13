@@ -2,7 +2,6 @@
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
 #include "layout_positioned.hpp"
-#include "layout_counters.hpp"
 #include "layout_table.hpp"
 #include "form_control.hpp"
 #include "render.hpp"

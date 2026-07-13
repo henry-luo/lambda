@@ -4,7 +4,6 @@
 
 #include "layout_alignment.hpp"
 #include "layout.hpp"
-#include "layout_box.hpp"
 #include "view.hpp"
 #include "../lib/font/font.h"
 #include "../lib/tagged.hpp"
