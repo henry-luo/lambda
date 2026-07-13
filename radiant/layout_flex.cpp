@@ -3,7 +3,6 @@
 #include "view.hpp"
 #include "layout_flex_measurement.hpp"
 #include "form_control.hpp"
-#include "available_space.hpp"
 #include "intrinsic_sizing.hpp"
 #include "layout_alignment.hpp"
 #include "layout_axis.hpp"

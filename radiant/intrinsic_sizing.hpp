@@ -11,7 +11,6 @@
 #pragma once
 #include "layout.hpp"
 #include "view.hpp"
-#include "available_space.hpp"
 
 // ============================================================================
 // Text Intrinsic Width Result

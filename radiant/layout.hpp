@@ -10,19 +10,346 @@
 // Run `make check-int-cast` to verify compliance.
 // ============================================================================
 
-#include "layout_guards.h"
 #include "view.hpp"
-#include "available_space.hpp"
-#include "layout_mode.hpp"
-#include "layout_cache.hpp"
 #include "layout_counters.hpp"
 #include "layout_debug.hpp"
 #include "layout_box.hpp"
 #include "layout_containing_block.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
+#include "../lib/arraylist.h"
 #include "../lib/scratch_arena.h"
+#include <cstdint>
 #include <math.h>
+
+// ============================================================================
+// Layout Safety Guards
+// ============================================================================
+
+// maximum DOM nesting depth. guards call-stack overflow in layout_flow_node()
+// and layout_abs_block() — both use the same lycon->depth counter.
+#ifdef NDEBUG
+constexpr int MAX_LAYOUT_DEPTH = 300;
+#else
+constexpr int MAX_LAYOUT_DEPTH = 100;
+#endif
+
+constexpr int MAX_LAYOUT_NODES = 50000;
+constexpr int MAX_FLEX_DEPTH = 16;
+constexpr int MAX_GRID_DEPTH = 4;
+constexpr int MAX_IFRAME_DEPTH = 3;
+
+// ============================================================================
+// Available Space Type System
+// ============================================================================
+
+enum AvailableSizeType {
+    AVAILABLE_SIZE_DEFINITE,
+    AVAILABLE_SIZE_INDEFINITE,
+    AVAILABLE_SIZE_MIN_CONTENT,
+    AVAILABLE_SIZE_MAX_CONTENT
+};
+
+struct AvailableSize {
+    AvailableSizeType type;
+    float value;
+
+    static AvailableSize make_definite(float px) {
+        AvailableSize s;
+        s.type = AVAILABLE_SIZE_DEFINITE;
+        s.value = px;
+        return s;
+    }
+
+    static AvailableSize make_indefinite() {
+        AvailableSize s;
+        s.type = AVAILABLE_SIZE_INDEFINITE;
+        s.value = 0;
+        return s;
+    }
+
+    static AvailableSize make_min_content() {
+        AvailableSize s;
+        s.type = AVAILABLE_SIZE_MIN_CONTENT;
+        s.value = 0;
+        return s;
+    }
+
+    static AvailableSize make_max_content() {
+        AvailableSize s;
+        s.type = AVAILABLE_SIZE_MAX_CONTENT;
+        s.value = 0;
+        return s;
+    }
+
+    bool is_definite() const { return type == AVAILABLE_SIZE_DEFINITE; }
+    bool is_indefinite() const { return type == AVAILABLE_SIZE_INDEFINITE; }
+    bool is_min_content() const { return type == AVAILABLE_SIZE_MIN_CONTENT; }
+    bool is_max_content() const { return type == AVAILABLE_SIZE_MAX_CONTENT; }
+
+    bool is_intrinsic() const {
+        return is_min_content() || is_max_content();
+    }
+
+    float to_px_or_zero() const {
+        return is_definite() ? value : 0;
+    }
+
+    float resolve(float fallback_for_indefinite) const {
+        if (is_definite()) return value;
+        if (is_indefinite()) return fallback_for_indefinite;
+        return 0;
+    }
+};
+
+struct AvailableSpace {
+    AvailableSize width;
+    AvailableSize height;
+
+    static AvailableSpace make_definite(float w, float h) {
+        AvailableSpace s;
+        s.width = AvailableSize::make_definite(w);
+        s.height = AvailableSize::make_definite(h);
+        return s;
+    }
+
+    static AvailableSpace make_indefinite() {
+        AvailableSpace s;
+        s.width = AvailableSize::make_indefinite();
+        s.height = AvailableSize::make_indefinite();
+        return s;
+    }
+
+    static AvailableSpace make_min_content() {
+        AvailableSpace s;
+        s.width = AvailableSize::make_min_content();
+        s.height = AvailableSize::make_indefinite();
+        return s;
+    }
+
+    static AvailableSpace make_max_content() {
+        AvailableSpace s;
+        s.width = AvailableSize::make_max_content();
+        s.height = AvailableSize::make_indefinite();
+        return s;
+    }
+
+    static AvailableSpace make_width_definite(float w) {
+        AvailableSpace s;
+        s.width = AvailableSize::make_definite(w);
+        s.height = AvailableSize::make_indefinite();
+        return s;
+    }
+
+    bool is_intrinsic_sizing() const {
+        return width.is_intrinsic() || height.is_intrinsic();
+    }
+
+    bool is_width_min_content() const {
+        return width.is_min_content();
+    }
+
+    bool is_width_max_content() const {
+        return width.is_max_content();
+    }
+};
+
+inline float compute_shrink_to_fit_width(float min_content, float max_content, AvailableSize available) {
+    if (available.is_indefinite() || available.is_max_content()) {
+        return max_content;
+    }
+    if (available.is_min_content()) {
+        return min_content;
+    }
+    float avail = available.value;
+    if (avail < min_content) return min_content;
+    if (avail > max_content) return max_content;
+    return avail;
+}
+
+namespace radiant {
+
+enum class RunMode : uint8_t {
+    ComputeSize = 0,
+    PerformLayout = 1,
+    PerformHiddenLayout = 2
+};
+
+enum class SizingMode : uint8_t {
+    InherentSize = 0,
+    ContentSize = 1
+};
+
+} // namespace radiant
+
+extern int64_t g_layout_cache_hits;
+extern int64_t g_layout_cache_misses;
+extern int64_t g_layout_cache_stores;
+
+namespace radiant {
+
+#define LAYOUT_CACHE_SIZE 9
+
+struct KnownDimensions {
+    float width;
+    float height;
+    bool has_width;
+    bool has_height;
+};
+
+inline KnownDimensions known_dimensions_none() {
+    return {0.0f, 0.0f, false, false};
+}
+
+struct SizeF {
+    float width;
+    float height;
+};
+
+inline SizeF size_f(float w, float h) {
+    return {w, h};
+}
+
+inline SizeF size_f_zero() {
+    return {0.0f, 0.0f};
+}
+
+struct CacheEntry {
+    KnownDimensions known_dimensions;
+    AvailableSpace available_space;
+    SizeF computed_size;
+    bool valid;
+};
+
+struct LayoutCache {
+    CacheEntry final_layout;
+    CacheEntry measure_entries[LAYOUT_CACHE_SIZE];
+    bool is_empty;
+};
+
+inline void layout_cache_init(LayoutCache* cache) {
+    cache->final_layout.valid = false;
+    for (int i = 0; i < LAYOUT_CACHE_SIZE; i++) {
+        cache->measure_entries[i].valid = false;
+    }
+    cache->is_empty = true;
+}
+
+inline void layout_cache_clear(LayoutCache* cache) {
+    layout_cache_init(cache);
+}
+
+inline int layout_cache_compute_slot(
+    KnownDimensions known_dimensions,
+    AvailableSpace available_space
+) {
+    bool has_width = known_dimensions.has_width;
+    bool has_height = known_dimensions.has_height;
+
+    if (has_width && has_height) return 0;
+    if (has_width) {
+        return available_space.height.is_min_content() ? 2 : 1;
+    }
+    if (has_height) {
+        return available_space.width.is_min_content() ? 4 : 3;
+    }
+
+    bool width_is_min = available_space.width.is_min_content();
+    bool height_is_min = available_space.height.is_min_content();
+
+    if (!width_is_min && !height_is_min) return 5;
+    if (!width_is_min && height_is_min) return 6;
+    if (width_is_min && !height_is_min) return 7;
+    return 8;
+}
+
+inline bool layout_cache_constraints_match(
+    CacheEntry* entry,
+    KnownDimensions known,
+    AvailableSpace available,
+    float tolerance = 0.1f
+) {
+    if (!entry->valid) return false;
+
+    if (entry->known_dimensions.has_width != known.has_width) return false;
+    if (entry->known_dimensions.has_height != known.has_height) return false;
+
+    if (known.has_width) {
+        float diff = entry->known_dimensions.width - known.width;
+        if (diff < -tolerance || diff > tolerance) return false;
+    }
+    if (known.has_height) {
+        float diff = entry->known_dimensions.height - known.height;
+        if (diff < -tolerance || diff > tolerance) return false;
+    }
+
+    if (entry->available_space.width.type != available.width.type) return false;
+    if (entry->available_space.height.type != available.height.type) return false;
+
+    if (available.width.is_definite()) {
+        float diff = entry->available_space.width.value - available.width.value;
+        if (diff < -tolerance || diff > tolerance) return false;
+    }
+    if (available.height.is_definite()) {
+        float diff = entry->available_space.height.value - available.height.value;
+        if (diff < -tolerance || diff > tolerance) return false;
+    }
+
+    return true;
+}
+
+inline bool layout_cache_get(
+    LayoutCache* cache,
+    KnownDimensions known_dimensions,
+    AvailableSpace available_space,
+    RunMode mode,
+    SizeF* out_size
+) {
+    if (cache->is_empty) return false;
+
+    if (mode == RunMode::PerformLayout) {
+        if (layout_cache_constraints_match(&cache->final_layout, known_dimensions, available_space)) {
+            *out_size = cache->final_layout.computed_size;
+            return true;
+        }
+        return false;
+    }
+
+    int slot = layout_cache_compute_slot(known_dimensions, available_space);
+    CacheEntry* entry = &cache->measure_entries[slot];
+
+    if (layout_cache_constraints_match(entry, known_dimensions, available_space)) {
+        *out_size = entry->computed_size;
+        return true;
+    }
+
+    return false;
+}
+
+inline void layout_cache_store(
+    LayoutCache* cache,
+    KnownDimensions known_dimensions,
+    AvailableSpace available_space,
+    RunMode mode,
+    SizeF result
+) {
+    cache->is_empty = false;
+
+    CacheEntry* entry;
+    if (mode == RunMode::PerformLayout) {
+        entry = &cache->final_layout;
+    } else {
+        int slot = layout_cache_compute_slot(known_dimensions, available_space);
+        entry = &cache->measure_entries[slot];
+    }
+
+    entry->known_dimensions = known_dimensions;
+    entry->available_space = available_space;
+    entry->computed_size = result;
+    entry->valid = true;
+}
+
+} // namespace radiant
 
 typedef struct StyleContext {
     struct StyleElement* parent;
@@ -428,6 +755,56 @@ inline bool layout_context_is_hidden(LayoutContext* lycon) {
 inline bool layout_context_use_content_size(LayoutContext* lycon) {
     return lycon->sizing_mode == radiant::SizingMode::ContentSize;
 }
+
+namespace radiant {
+
+struct LayoutRunModeScope {
+    ::LayoutContext* lycon;
+    RunMode saved_run_mode;
+
+    LayoutRunModeScope(::LayoutContext* l, RunMode mode);
+    ~LayoutRunModeScope();
+
+    LayoutRunModeScope(const LayoutRunModeScope&) = delete;
+    LayoutRunModeScope& operator=(const LayoutRunModeScope&) = delete;
+};
+
+struct LayoutMeasureScope {
+    ::LayoutContext* lycon;
+    BlockContext saved_block;
+    Linebox saved_line;
+    FontBox saved_font;
+    ::DomNode* saved_elmt;
+    RunMode saved_run_mode;
+    SizingMode saved_sizing_mode;
+    AvailableSpace saved_available_space;
+    ArrayList* saved_views;
+
+    LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_elmt);
+    ~LayoutMeasureScope();
+
+    LayoutMeasureScope(const LayoutMeasureScope&) = delete;
+    LayoutMeasureScope& operator=(const LayoutMeasureScope&) = delete;
+};
+
+KnownDimensions layout_known_dimensions_from_block(::ViewBlock* block);
+KnownDimensions layout_known_dimensions_from_context(::LayoutContext* lycon);
+
+bool layout_pass_cache_get(::LayoutContext* lycon, ::DomElement* element,
+    KnownDimensions known_dimensions, SizeF* out_size, const char* label);
+
+void layout_pass_cache_store(::LayoutContext* lycon, ::DomElement* element,
+    KnownDimensions known_dimensions, SizeF result, const char* label);
+
+bool layout_pass_cache_get_for_space(::LayoutContext* lycon, ::DomElement* element,
+    KnownDimensions known_dimensions, AvailableSpace available_space,
+    SizeF* out_size, const char* label);
+
+void layout_pass_cache_store_for_space(::LayoutContext* lycon, ::DomElement* element,
+    KnownDimensions known_dimensions, AvailableSpace available_space,
+    SizeF result, const char* label);
+
+} // namespace radiant
 
 // ============================================================================
 // BlockContext API - Unified Block Formatting Context Functions

@@ -1,6 +1,5 @@
 #include "layout.hpp"
 #include "layout_positioned.hpp"
-#include "available_space.hpp"
 #include "intrinsic_sizing.hpp"
 #include "layout_measure.hpp"
 #include "layout_box.hpp"
