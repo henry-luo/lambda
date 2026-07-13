@@ -1,6 +1,6 @@
 # Radiant Custom Layout - Lambda/Houdini Proposal
 
-**Status:** in progress; MVP hook, Lambda registration, map-backed Velmt snapshots, parent sizing, BFC behavior, and positive custom `z` stacking are implemented, while full Velmt/VMap host handles remain future work.
+**Status:** in progress; MVP hook, Lambda registration, host-backed Velmt handles, parent sizing, BFC behavior, child prelayout constraints, and positive custom `z` stacking are implemented. Stale-handle tests, broader document-generation checks, result caching, and graph-layout porting remain future work.
 **Primary goal:** add a small, engine-supported custom layout surface for Lambda, enough to port Radiant graph layout out of C+ and into Lambda.
 **Secondary goal:** keep the shape compatible with a future LambdaJS-facing API, without making JS/reflow the first implementation path.
 
@@ -178,7 +178,7 @@ Velmt handles should be scoped:
 
 If a stale Velmt is used, the API should return an error value and log a distinct prefix such as `VELMT_STALE_HANDLE`.
 
-Current MVP note: the first implementation uses map-backed Velmt snapshots built per callback invocation. This avoids stale native pointer exposure while the full VMap/host-object Velmt design is deferred. The snapshot already exposes `tag`, `id`, `attrs`, `style`, bounded `children`, descendant `text`, box metrics, and edge metrics. A future Velmt host object should preserve the same public shape while adding document/layout generation checks.
+Current implementation note: Velmt is exposed to Lambda as a host-backed VMap handle with an immutable C-side layout snapshot. Handles are scoped to the active custom layout callback and result parse; after that pass, property reads return `null` rather than exposing stale native state. The public shape exposes `index`, `tag`, `id`, `attrs`, `style`, bounded `children`, descendant `text`, box metrics, and edge metrics. Map-shaped values remain accepted by the helper functions for unit tests and backward-compatible smoke tests.
 
 ## 6. Custom layout API
 
@@ -392,7 +392,24 @@ layout_flow_node
 8. compute the parent size from CSS explicit sizes or the placed-child containing box
 9. set container width/height/baseline
 
-### 8.2 Child prelayout constraints
+### 8.2 Current implemented call flow
+
+The current implementation uses the same conceptual flow, with a few concrete bridge details:
+
+1. `layout_block` lays out normal in-flow children before invoking custom layout, so each child already has a resolved border-box size from the existing block/inline/flex/grid/table machinery.
+2. `layout_custom_apply` collects eligible child views into internal C `Velmt` snapshots. These snapshots are not the public Lambda value; they are the native payload used to preserve the child pointer, child index, normalized border box, and edge metrics for this pass.
+3. Each top-level child snapshot normalizes the input box to border-box top-left `(0, 0)` with its resolved `width` and `height`. Nested `children` reads preserve each nested child view's existing local geometry.
+4. Before calling Lambda, the Radiant module starts a pass id and builds host-backed Velmt VMaps for `parent` and `children`. Each host object owns an immutable copy of the C snapshot and records the active pass id.
+5. The registered `radiant.register_layout(name, fn)` callback is invoked as `fn(parent, children, ctx)`. The callback can use direct property access such as `child.index`, `child.width`, and `child.style`, or the compatibility helpers such as `radiant.velmt_width(child)`.
+6. The callback returns placements. A placement may identify its child either by the Velmt handle in `child` or by an explicit `index`, depending on the result shape accepted by the parser.
+7. While the pass id is still active, Radiant parses the result and maps placements back to the collected child indices. This keeps returned Velmt handles usable for result parsing without allowing them to escape as live layout objects.
+8. Radiant validates duplicate and missing placements, applies `x` and `y` to each child view as border-box top-left coordinates, applies optional positive custom `z`, and clears stale custom `z` overlays when no `z` is returned.
+9. Radiant computes the custom container size from explicit CSS size when present, otherwise from the containing box of placed children. Negative placements remain negative and contribute to overflow rather than being normalized away.
+10. The active Velmt pass id is restored after callback/result parsing. Any retained Velmt handle from that callback becomes stale for later Lambda code.
+
+This means the public Lambda-facing Velmt API is already host-backed, but the engine still keeps an internal C snapshot struct because layout placement needs a fast, stable representation of already-laid-out child views.
+
+### 8.3 Child prelayout constraints
 
 This is the main issue to define carefully.
 
@@ -417,7 +434,7 @@ For the MVP, custom layout should document a simple invariant:
 
 If an algorithm needs different child wrapping, it must express that through ordinary CSS on the child before prelayout, for example a node `max-width`.
 
-### 8.3 CSS box semantics
+### 8.4 CSS box semantics
 
 Define all placement coordinates as child border-box top-left positions in the custom container's content box. This follows Radiant's existing view geometry convention: `x` and `y` on a child view identify its border-box top-left relative to the parent layout coordinate space.
 
@@ -427,7 +444,7 @@ Open details:
 - Whether custom layout containers allow margin collapse. Recommendation: no; establish a formatting context like flex/grid.
 - How absolutely positioned children are handled. Recommendation: exclude them from custom layout's child array and lay them out through the normal abs-position path.
 
-### 8.4 Purity and re-entry
+### 8.5 Purity and re-entry
 
 The custom layout callback is specified as a pure Lambda `fn`, not a `pn`.
 
@@ -451,7 +468,7 @@ The API must treat repeated execution as normal.
 
 Implementation note: because runtime `Function` values currently do not reliably expose whether they originated from `fn` or `pn`, the first implementation should defer a hard registration-time `fn`/`pn` check. Add that check after first-class function values carry stable metadata. The important MVP invariant is that the host surface available during layout remains side-effect-free.
 
-### 8.5 Caching
+### 8.6 Caching
 
 Custom layout needs three separate caches. They should not be collapsed into one concept.
 
@@ -489,7 +506,7 @@ This is similar in spirit to Radiant's retained page-script runtime and inline e
 
 The first implementation can use conservative invalidation for layout results. Correctness beats cleverness. Runtime/function caching, however, is not optional; it is part of the minimum viable performance story.
 
-### 8.6 Invocation fast path
+### 8.7 Invocation fast path
 
 The hot path should look like:
 
@@ -603,11 +620,11 @@ A closer Houdini-compatible API can be evaluated later, but it should not pull i
 
 ### Phase 1: Velmt design and host representation
 
-- define Velmt handle type - partial: map-backed snapshots exist
-- define lifetime/generation checks
-- expose `tag`, `id`, `attr`, `style`, `children`, `text` - initial helper API exists
+- define Velmt handle type - implemented as host-backed immutable snapshots; map-shaped values remain accepted by helper functions for tests/compatibility
+- define lifetime/generation checks - implemented for layout callback scope via pass-scoped host invalidation; broader document-generation checks remain future work
+- expose `tag`, `id`, `attrs`, `style`, `children`, `text` - implemented through direct Velmt properties plus helper functions
 - expose explicit default fallback helpers for `attr`/`style` - implemented as `_or` helpers
-- expose `width`, `height`, `box`, `margin`, `border`, `padding` - initial helper API exists
+- expose `width`, `height`, `box`, `margin`, `border`, `padding` - implemented through direct Velmt properties plus helper functions
 - add C+ tests for stale handle behavior
 - keep mutation and child measurement out of scope
 
@@ -626,7 +643,7 @@ A closer Houdini-compatible API can be evaluated later, but it should not pull i
 - defer hard `fn`/`pn` runtime validation until first-class function values expose stable procedure metadata
 - add retained custom-layout runtime cache - partial: callback `Item`s are rooted and reused
 - add JIT compiled layout `fn` cache - partial: registered function handles are retained
-- build scoped Velmt arrays for laid-out children - implemented with map snapshots
+- build scoped Velmt arrays for laid-out children - implemented with host-backed immutable snapshots
 - invoke the callback from `layout_custom_content` - implemented
 - validate returned placements - implemented
 - write child `x, y` back to the view tree - implemented
