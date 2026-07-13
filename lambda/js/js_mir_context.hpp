@@ -79,23 +79,7 @@ struct JsModuleConstEntry {
     const char* live_binding_specifier; // resolved module path, NamePool-owned
 };
 
-// Evidence counters for parameter type inference.
-struct JsParamEvidence {
-    int int_evidence;
-    int float_evidence;
-    int string_evidence;
-    bool used_as_container;  // param used as object in arr[i] expression
-    bool compared_with_non_numeric;  // param compared with undefined/null/bool via ===
-    bool param_reassigned;  // param is target of plain assignment; call-site type may differ
-};
-
 struct P4bCtorEvidence {
-    int int_count;
-    int float_count;
-    int other_count;
-};
-
-struct P6NarrowEvidence {
     int int_count;
     int float_count;
     int other_count;
@@ -149,28 +133,16 @@ struct JsLoopLabels {
     int label_name_len;           // v11: length of label name
 };
 
-// Capture entry for closure analysis
-struct JsCaptureEntry {
-    char name[128];      // variable name (with _js_ prefix)
-    char scope_env_key[128]; // binding identity for shared env slots; name when not needed
-    int scope_env_slot;  // slot in parent's scope env (-1 if not remapped)
-    int grandparent_slot; // v29: for transitive captures in mixed scope envs, read from
-                          // grandparent env (stored in parent env slot 0). -1 if not transitive.
-    bool is_let_const;   // v29 TDZ: true if captured variable is let/const (needs TDZ check)
-    bool is_const;       // true if captured variable is const (assignment throws)
-    bool is_nfe_binding; // named function expression self-binding
-    bool force_env_capture; // true when a lexical loop head shadows a module var
-};
-
 // Function entry for pre-pass collection
 struct JsFuncCollected {
     JsFunctionNode* node;
     char name[128];
     MIR_item_t func_item;   // set after creation (boxed version)
     // Capture info
-    JsCaptureEntry* captures;     // dynamically allocated capture array
+    FnCapture* captures;          // dynamically allocated capture array
     int captures_capacity;        // allocated size
     int capture_count;
+    FnAnalysis analysis;
     int parent_index;       // index of parent function in func_entries (-1 = top level)
     // Scope env: shared closure environment for all child closures
     bool has_scope_env;              // true if this func allocates a scope env
@@ -243,12 +215,13 @@ static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_coun
 static void __attribute__((unused)) jm_ensure_captures_capacity(JsFuncCollected* fc) {
     if (fc->capture_count >= fc->captures_capacity) {
         int new_cap = fc->captures_capacity == 0 ? 16 : fc->captures_capacity * 2;
-        JsCaptureEntry* new_arr = (JsCaptureEntry*)mem_calloc(new_cap, sizeof(JsCaptureEntry), MEM_CAT_JS_RUNTIME);
+        FnCapture* new_arr = (FnCapture*)mem_calloc(new_cap, sizeof(FnCapture), MEM_CAT_JS_RUNTIME);
         if (fc->captures && fc->capture_count > 0) {
-            memcpy(new_arr, fc->captures, fc->capture_count * sizeof(JsCaptureEntry));
+            memcpy(new_arr, fc->captures, fc->capture_count * sizeof(FnCapture));
         }
         mem_free(fc->captures);
         fc->captures = new_arr;
+        fc->analysis.captures = fc->captures;
         fc->captures_capacity = new_cap;
     }
 }

@@ -216,14 +216,24 @@ static void js_identifier_counters_write_line(int fd, const char* line) {
 
 // Scope management functions
 
+static ScopeKind js_scope_type_to_scope_kind(JsScopeType scope_type) {
+    switch (scope_type) {
+    case JS_SCOPE_GLOBAL: return SCOPE_KIND_GLOBAL;
+    case JS_SCOPE_MODULE: return SCOPE_KIND_MODULE;
+    case JS_SCOPE_FUNCTION: return SCOPE_KIND_FUNCTION;
+    case JS_SCOPE_BLOCK:
+    default:
+        return SCOPE_KIND_BLOCK;
+    }
+}
+
 JsScope* js_scope_create(JsTranspiler* tp, JsScopeType scope_type, JsScope* parent) {
     JsScope* scope = (JsScope*)pool_alloc(tp->ast_pool, sizeof(JsScope));
     memset(scope, 0, sizeof(JsScope));
 
-    scope->scope_type = scope_type;
+    scope->kind = js_scope_type_to_scope_kind(scope_type);
     scope->parent = parent;
-    scope->strict_mode = parent ? parent->strict_mode : tp->strict_mode;
-    scope->function = NULL;
+    scope->strict = parent ? parent->strict : tp->strict_mode;
     scope->first = NULL;
     scope->last = NULL;
 
@@ -233,14 +243,14 @@ JsScope* js_scope_create(JsTranspiler* tp, JsScopeType scope_type, JsScope* pare
 void js_scope_push(JsTranspiler* tp, JsScope* scope) {
     scope->parent = tp->current_scope;
     tp->current_scope = scope;
-    log_debug("Pushed JavaScript scope type: %d", scope->scope_type);
+    log_debug("Pushed JavaScript scope type: %d", scope->kind);
 }
 
 void js_scope_pop(JsTranspiler* tp) {
     if (tp->current_scope) {
         JsScope* old_scope = tp->current_scope;
         tp->current_scope = old_scope->parent;
-        log_debug("Popped JavaScript scope type: %d", old_scope->scope_type);
+        log_debug("Popped JavaScript scope type: %d", old_scope->kind);
     }
 }
 
@@ -286,13 +296,13 @@ NameEntry* js_scope_lookup_current(JsTranspiler* tp, String* name) {
     return NULL;
 }
 
-void js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVarKind kind) {
+NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVarKind kind) {
     JsScope* target_scope = tp->current_scope;
 
     // var declarations are function-scoped, let/const are block-scoped
     if (kind == JS_VAR_VAR) {
         // Find the nearest function scope or global scope
-        while (target_scope && target_scope->scope_type == JS_SCOPE_BLOCK) {
+        while (target_scope && target_scope->kind == SCOPE_KIND_BLOCK) {
             target_scope = target_scope->parent;
         }
     }
@@ -302,21 +312,34 @@ void js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVarKind 
     }
 
     // Check for redeclaration in strict mode or with let/const
-    if (target_scope->strict_mode || kind != JS_VAR_VAR) {
-        NameEntry* existing = js_scope_lookup_current(tp, name);
+    if (target_scope->strict || kind != JS_VAR_VAR) {
+        NameEntry* existing = NULL;
+        NameEntry* scan = target_scope->first;
+        while (scan) {
+            if (scan->name->len == name->len &&
+                memcmp(scan->name->chars, name->chars, name->len) == 0) {
+                existing = scan;
+                break;
+            }
+            scan = scan->next;
+        }
         if (existing) {
             log_error("Identifier '%.*s' has already been declared",
                      (int)name->len, name->chars);
-            return;
+            return existing;
         }
     }
 
     // Create new name entry
     NameEntry* entry = (NameEntry*)pool_alloc(tp->ast_pool, sizeof(NameEntry));
+    memset(entry, 0, sizeof(NameEntry));
     entry->name = name;
     entry->node = (AstNode*)node;
-    entry->next = NULL;
-    entry->import = NULL;
+    entry->scope = target_scope;
+    entry->is_mutable = (kind != JS_VAR_CONST);
+    entry->is_const = (kind == JS_VAR_CONST);
+    entry->is_lexical = (kind != JS_VAR_VAR);
+    entry->tdz_active = entry->is_lexical;
 
     // Add to scope
     if (!target_scope->first) {
@@ -327,7 +350,8 @@ void js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVarKind 
     target_scope->last = entry;
 
     log_debug("Defined JavaScript variable '%.*s' in scope type %d",
-             (int)name->len, name->chars, target_scope->scope_type);
+             (int)name->len, name->chars, target_scope->kind);
+    return entry;
 }
 
 // Error handling functions

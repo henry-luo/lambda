@@ -3895,6 +3895,7 @@
                             "gtest",
                             "gtest_main"
                         ],
+                        "parallel": false,
                         "icon": "📦"
                     },
                     {

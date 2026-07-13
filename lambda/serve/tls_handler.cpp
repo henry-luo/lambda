@@ -35,6 +35,64 @@
 static int tls_uv_send(void *ctx, const unsigned char *buf, size_t len);
 static int tls_uv_recv(void *ctx, unsigned char *buf, size_t len);
 
+static int tls_cipher_name_to_id(const char* name, int len) {
+    if (!name || len <= 0) return 0;
+    char buf[128];
+    if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+    int start = 0;
+    while (start < len && (name[start] == ' ' || name[start] == '\t')) start++;
+    int end = len;
+    while (end > start && (name[end - 1] == ' ' || name[end - 1] == '\t')) end--;
+    int out_len = end - start;
+    if (out_len <= 0) return 0;
+    memcpy(buf, name + start, (size_t)out_len);
+    buf[out_len] = '\0';
+
+    int id = mbedtls_ssl_get_ciphersuite_id(buf);
+    if (id != 0) return id;
+
+    char iana[128];
+    int pos = 0;
+    for (int i = 0; i < out_len && pos < (int)sizeof(iana) - 1; i++) {
+        char c = buf[i];
+        iana[pos++] = c == '_' ? '-' : c;
+    }
+    iana[pos] = '\0';
+    id = mbedtls_ssl_get_ciphersuite_id(iana);
+    if (id != 0) return id;
+
+    if (strncmp(buf, "ECDHE-ECDSA-AES256-GCM-SHA384", 30) == 0) {
+        return MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384;
+    }
+    if (strncmp(buf, "ECDHE-RSA-AES256-GCM-SHA384", 28) == 0) {
+        return MBEDTLS_TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384;
+    }
+    return 0;
+}
+
+static void tls_apply_cipher_list(TlsContext* ctx, const char* cipher_list) {
+    if (!ctx || !ctx->ssl_config || !cipher_list || cipher_list[0] == '\0') return;
+    int count = 0;
+    const char* token = cipher_list;
+    for (const char* p = cipher_list; ; p++) {
+        if (*p == ':' || *p == ',' || *p == ' ' || *p == '\0') {
+            int len = (int)(p - token);
+            int id = tls_cipher_name_to_id(token, len);
+            if (id != 0 && count < (int)(sizeof(ctx->ciphersuites) / sizeof(ctx->ciphersuites[0])) - 1) {
+                ctx->ciphersuites[count++] = id;
+            }
+            if (*p == '\0') break;
+            token = p + 1;
+        }
+    }
+    if (count > 0) {
+        // Node clients expect `ciphers` to constrain the handshake; leaving the
+        // dormant config field unused makes getCipher() report unrelated suites.
+        ctx->ciphersuites[count] = 0;
+        mbedtls_ssl_conf_ciphersuites(ctx->ssl_config, ctx->ciphersuites);
+    }
+}
+
 typedef struct TlsUvWriteReq {
     uv_write_t req;
     char* data;
@@ -124,8 +182,18 @@ TlsContext* tls_context_create(const TlsConfig *config) {
     // set RNG
     mbedtls_ssl_conf_rng(ctx->ssl_config, mbedtls_ctr_drbg_random, ctx->ctr_drbg);
 
+    if (config && config->cipher_list) {
+        tls_apply_cipher_list(ctx, config->cipher_list);
+    }
+
     // set minimum TLS version
     mbedtls_ssl_conf_min_tls_version(ctx->ssl_config, MBEDTLS_SSL_VERSION_TLS1_2);
+    if (config && config->cipher_list) {
+        // Node/OpenSSL cipher names in this layer currently map to TLS 1.2
+        // suites; without the matching max version mbedTLS can fail before
+        // considering the constrained suite list.
+        mbedtls_ssl_conf_max_tls_version(ctx->ssl_config, MBEDTLS_SSL_VERSION_TLS1_2);
+    }
 
     // load certificates if provided
     if (config && config->cert_file && config->key_file) {
@@ -168,6 +236,16 @@ void tls_context_destroy(TlsContext *ctx) {
     if (ctx->own_key) {
         mbedtls_pk_free(ctx->own_key);
         serve_free(ctx->own_key);
+    }
+    for (int i = 0; i < ctx->extra_cert_count; i++) {
+        if (ctx->extra_certs[i]) {
+            mbedtls_x509_crt_free(ctx->extra_certs[i]);
+            serve_free(ctx->extra_certs[i]);
+        }
+        if (ctx->extra_keys[i]) {
+            mbedtls_pk_free(ctx->extra_keys[i]);
+            serve_free(ctx->extra_keys[i]);
+        }
     }
     if (ctx->ca_chain) {
         mbedtls_x509_crt_free(ctx->ca_chain);
@@ -213,10 +291,12 @@ static const char* tls_input_log_label(const char *input) {
     return tls_input_is_inline_pem(input) ? "<inline PEM>" : input;
 }
 
-int tls_load_certificates(TlsContext *ctx, const char *cert_file, const char *key_file) {
+static int tls_load_cert_pair_into(TlsContext *ctx, mbedtls_x509_crt *cert,
+                                   mbedtls_pk_context *key,
+                                   const char *cert_file, const char *key_file) {
     if (!ctx || !cert_file || !key_file) return -1;
 
-    int ret = tls_parse_cert_input(ctx->own_cert, cert_file);
+    int ret = tls_parse_cert_input(cert, cert_file);
     if (ret != 0) {
         char errbuf[128];
         mbedtls_strerror(ret, errbuf, sizeof(errbuf));
@@ -224,7 +304,7 @@ int tls_load_certificates(TlsContext *ctx, const char *cert_file, const char *ke
         return -1;
     }
 
-    ret = tls_parse_key_input(ctx->own_key, key_file, ctx->ctr_drbg);
+    ret = tls_parse_key_input(key, key_file, ctx->ctr_drbg);
     if (ret != 0) {
         char errbuf[128];
         mbedtls_strerror(ret, errbuf, sizeof(errbuf));
@@ -232,7 +312,7 @@ int tls_load_certificates(TlsContext *ctx, const char *cert_file, const char *ke
         return -1;
     }
 
-    ret = mbedtls_ssl_conf_own_cert(ctx->ssl_config, ctx->own_cert, ctx->own_key);
+    ret = mbedtls_ssl_conf_own_cert(ctx->ssl_config, cert, key);
     if (ret != 0) {
         char errbuf[128];
         mbedtls_strerror(ret, errbuf, sizeof(errbuf));
@@ -242,6 +322,43 @@ int tls_load_certificates(TlsContext *ctx, const char *cert_file, const char *ke
 
     log_info("tls loaded certificate: %s, key: %s",
              tls_input_log_label(cert_file), tls_input_log_label(key_file));
+    return 0;
+}
+
+int tls_load_certificates(TlsContext *ctx, const char *cert_file, const char *key_file) {
+    if (!ctx) return -1;
+    return tls_load_cert_pair_into(ctx, ctx->own_cert, ctx->own_key, cert_file, key_file);
+}
+
+int tls_add_certificates(TlsContext *ctx, const char *cert_file, const char *key_file) {
+    if (!ctx || !cert_file || !key_file) return -1;
+    if (ctx->extra_cert_count >= (int)(sizeof(ctx->extra_certs) / sizeof(ctx->extra_certs[0]))) {
+        log_error("tls cannot load more certificate identities");
+        return -1;
+    }
+
+    mbedtls_x509_crt* cert = (mbedtls_x509_crt*)serve_calloc(1, sizeof(mbedtls_x509_crt));
+    mbedtls_pk_context* key = (mbedtls_pk_context*)serve_calloc(1, sizeof(mbedtls_pk_context));
+    if (!cert || !key) {
+        if (cert) serve_free(cert);
+        if (key) serve_free(key);
+        return -1;
+    }
+    mbedtls_x509_crt_init(cert);
+    mbedtls_pk_init(key);
+
+    // Multiple TLS identities are appended to mbedTLS's config so SNI/cipher
+    // selection can choose RSA or ECDSA instead of silently keeping only one.
+    if (tls_load_cert_pair_into(ctx, cert, key, cert_file, key_file) != 0) {
+        mbedtls_x509_crt_free(cert);
+        mbedtls_pk_free(key);
+        serve_free(cert);
+        serve_free(key);
+        return -1;
+    }
+    int index = ctx->extra_cert_count++;
+    ctx->extra_certs[index] = cert;
+    ctx->extra_keys[index] = key;
     return 0;
 }
 

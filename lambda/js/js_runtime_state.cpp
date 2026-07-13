@@ -839,9 +839,21 @@ static Item js_stack_frame_string(StackFrame* frame) {
 
 static StackFrame* js_capture_native_stack_frames(void) {
     if (!context || !context->debug_info) return NULL;
+    Item error_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Error", 5))});
+    int frame_limit = 10;
+    if (get_type_id(error_ctor) == LMD_TYPE_FUNC) {
+        Item limit = js_property_get(error_ctor, (Item){.item = s2it(heap_create_name("stackTraceLimit", 15))});
+        TypeId limit_type = get_type_id(limit);
+        if (limit_type == LMD_TYPE_INT || limit_type == LMD_TYPE_INT64 || limit_type == LMD_TYPE_FLOAT) {
+            double dlimit = it2d(limit);
+            if (dlimit <= 0 || dlimit != dlimit) return NULL;
+            frame_limit = (int)dlimit;
+            if (frame_limit > 200) frame_limit = 200;
+        }
+    }
     // LambdaJS stack traces reuse Lambda's zero-normal-overhead frame walk:
     // capture only while constructing an Error stack, never on successful calls.
-    return err_capture_stack_trace(context->debug_info, 64);
+    return err_capture_stack_trace(context->debug_info, frame_limit);
 }
 
 static Item js_error_native_stack_string(Item error_name, Item message, Item stack_start_fn) {

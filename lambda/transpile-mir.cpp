@@ -2136,7 +2136,7 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                 if (fn_node->captures) {
                     // Closure: allocate and populate env
                     int cap_count = 0;
-                    CaptureInfo* cap = fn_node->captures;
+                    FnCapture* cap = fn_node->captures;
                     while (cap) { cap_count++; cap = cap->next; }
 
                     MIR_reg_t env_reg = emit_call_2(mt, "heap_calloc", MIR_T_P,
@@ -2147,7 +2147,7 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                     cap = fn_node->captures;
                     while (cap) {
                         char cap_name[128];
-                        snprintf(cap_name, sizeof(cap_name), "%.*s", (int)cap->name->len, cap->name->chars);
+                        snprintf(cap_name, sizeof(cap_name), "%s", cap->name);
 
                         MIR_reg_t cap_val = 0;
                         MirVarEntry* cvar = find_var(mt, cap_name);
@@ -10751,7 +10751,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             if (fn_node->captures) {
                 // Closure: allocate and populate env, then create closure object
                 int cap_count = 0;
-                CaptureInfo* cap = fn_node->captures;
+                FnCapture* cap = fn_node->captures;
                 while (cap) { cap_count++; cap = cap->next; }
 
                 // Allocate env: heap_calloc(cap_count * 8, 0)
@@ -10764,7 +10764,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 cap = fn_node->captures;
                 while (cap) {
                     char cap_name[128];
-                    snprintf(cap_name, sizeof(cap_name), "%.*s", (int)cap->name->len, cap->name->chars);
+                    snprintf(cap_name, sizeof(cap_name), "%s", cap->name);
 
                     // Look up the captured variable value
                     MIR_reg_t cap_val = 0;
@@ -10933,15 +10933,6 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
 #define INFER_FLOAT_CONTEXT 16  // function body contains float literals (guards NUMERIC_USE→INT)
 #define INFER_ARITH_USE   32  // param used in arithmetic (+,-,*,/,%,**), not just comparisons
 
-#define MAX_ALIASES 8
-
-struct InferCtx {
-    int evidence;
-    int name_count;
-    char names[MAX_ALIASES][64];   // param name + alias names
-    int  name_lens[MAX_ALIASES];
-};
-
 // Get the AST-declared type_id for a node, handling common cases
 static TypeId node_type_id(AstNode* node) {
     if (!node || !node->type) return LMD_TYPE_ANY;
@@ -10949,7 +10940,7 @@ static TypeId node_type_id(AstNode* node) {
 }
 
 // Check if a node is a reference to ANY tracked name (param or alias)
-static bool is_tracked_ref(AstNode* node, InferCtx* ctx) {
+static bool is_tracked_ref(AstNode* node, FnParamEvidence* ctx) {
     if (!node) return false;
     if (node->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)node;
@@ -10968,8 +10959,8 @@ static bool is_tracked_ref(AstNode* node, InferCtx* ctx) {
 }
 
 // Add alias name to tracking context
-static void add_alias(InferCtx* ctx, const char* name, int name_len) {
-    if (ctx->name_count >= MAX_ALIASES || name_len >= 64) return;
+static void add_alias(FnParamEvidence* ctx, const char* name, int name_len) {
+    if (ctx->name_count >= FN_PARAM_MAX_ALIASES || name_len >= 64) return;
     // Check if already tracked
     for (int i = 0; i < ctx->name_count; i++) {
         if (ctx->name_lens[i] == name_len &&
@@ -10995,7 +10986,7 @@ static int classify_other_type(TypeId tid) {
 }
 
 // First pass: find aliases (var x = <tracked>) and register them
-static void find_aliases(AstNode* node, InferCtx* ctx) {
+static void find_aliases(AstNode* node, FnParamEvidence* ctx) {
     while (node) {
         switch (node->node_type) {
         case AST_NODE_CONTENT: {
@@ -11036,7 +11027,7 @@ static void find_aliases(AstNode* node, InferCtx* ctx) {
 }
 
 // Recursively walk AST to gather type evidence for tracked names
-static void gather_evidence(AstNode* node, InferCtx* ctx) {
+static void gather_evidence(AstNode* node, FnParamEvidence* ctx) {
     while (node) {
         switch (node->node_type) {
         case AST_NODE_BINARY: {
@@ -11189,7 +11180,7 @@ static void gather_evidence(AstNode* node, InferCtx* ctx) {
 // Returns LMD_TYPE_INT, LMD_TYPE_FLOAT, or LMD_TYPE_ANY if ambiguous.
 // is_proc: true for pn (procedural) functions — enables weaker numeric inference.
 static TypeId infer_param_type(AstNode* body, const char* pname, int pname_len, bool is_proc) {
-    InferCtx ctx;
+    FnParamEvidence ctx;
     memset(&ctx, 0, sizeof(ctx));
     // Seed with the parameter name
     memcpy(ctx.names[0], pname, pname_len);
@@ -11234,8 +11225,8 @@ static TypeId infer_param_type(AstNode* body, const char* pname, int pname_len, 
 // in a single body walk instead of walking once per parameter.
 // ============================================================================
 
-// Multi-context alias finding: walks body once checking all InferCtx contexts
-static void find_aliases_multi(AstNode* node, InferCtx* ctxs, int ctx_count) {
+// Multi-context alias finding: walks body once checking all FnParamEvidence contexts
+static void find_aliases_multi(AstNode* node, FnParamEvidence* ctxs, int ctx_count) {
     while (node) {
         switch (node->node_type) {
         case AST_NODE_CONTENT: {
@@ -11279,8 +11270,8 @@ static void find_aliases_multi(AstNode* node, InferCtx* ctxs, int ctx_count) {
     }
 }
 
-// Multi-context evidence gathering: walks body once checking all InferCtx contexts
-static void gather_evidence_multi(AstNode* node, InferCtx* ctxs, int ctx_count) {
+// Multi-context evidence gathering: walks body once checking all FnParamEvidence contexts
+static void gather_evidence_multi(AstNode* node, FnParamEvidence* ctxs, int ctx_count) {
     while (node) {
         switch (node->node_type) {
         case AST_NODE_BINARY: {
@@ -11426,7 +11417,7 @@ static void gather_evidence_multi(AstNode* node, InferCtx* ctxs, int ctx_count) 
 }
 
 // Resolve evidence flags to a TypeId (same logic as infer_param_type)
-static TypeId resolve_inferred_type(InferCtx* ctx, bool is_proc) {
+static TypeId resolve_inferred_type(FnParamEvidence* ctx, bool is_proc) {
     if (ctx->evidence & INFER_STOP) return LMD_TYPE_ANY;
     if ((ctx->evidence & INFER_INT) && !(ctx->evidence & INFER_FLOAT)) return LMD_TYPE_INT;
     if (ctx->evidence & INFER_FLOAT) return LMD_TYPE_FLOAT;
@@ -11447,8 +11438,8 @@ static void infer_param_types_batched(AstFuncNode* fn_node, bool is_proc,
     TypeFunc* ft = (fn_as->type && fn_as->type->type_id == LMD_TYPE_FUNC)
         ? (TypeFunc*)fn_as->type : nullptr;
 
-    // Collect InferCtx for each untyped param
-    InferCtx ctxs[16];
+    // Collect FnParamEvidence for each untyped param
+    FnParamEvidence ctxs[16];
     int ctx_indices[16];  // maps ctx index → param index
     int ctx_count = 0;
 
@@ -11468,8 +11459,8 @@ static void infer_param_types_batched(AstFuncNode* fn_node, bool is_proc,
             continue;
         }
 
-        InferCtx* ctx = &ctxs[ctx_count];
-        memset(ctx, 0, sizeof(InferCtx));
+        FnParamEvidence* ctx = &ctxs[ctx_count];
+        memset(ctx, 0, sizeof(FnParamEvidence));
         int len = (int)p->name->len;
         if (len >= 64) len = 63;
         memcpy(ctx->names[0], p->name->chars, len);
@@ -11953,10 +11944,10 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         // Load captured variables from env into local scope
         // env is a flat array of Items (8 bytes each)
         int cap_index = 0;
-        CaptureInfo* cap = fn_node->captures;
+        FnCapture* cap = fn_node->captures;
         while (cap) {
             char cap_name[128];
-            snprintf(cap_name, sizeof(cap_name), "%.*s", (int)cap->name->len, cap->name->chars);
+            snprintf(cap_name, sizeof(cap_name), "%s", cap->name);
 
             // Load: captured_val = *(env_ptr + cap_index * 8)
             MIR_reg_t cap_val = new_reg(mt, "cap", MIR_T_I64);

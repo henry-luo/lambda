@@ -125,14 +125,18 @@ static Item get_listeners_array(Item emitter, Item event_name) {
 
 static int64_t get_default_max_listeners(void) {
     Item val = js_property_get(events_namespace, make_string_item("defaultMaxListeners"));
-    if (get_type_id(val) == LMD_TYPE_INT) return it2i(val);
+    TypeId type = get_type_id(val);
+    // JS assignments store listener limits as numbers, so accept all numeric Items here.
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || is_float_type_id(type)) return (int64_t)it2d(val);
     return 10;
 }
 
 static int64_t get_emitter_max_listeners(Item emitter) {
     ensure_keys();
     Item val = js_property_get(emitter, max_listeners_key);
-    if (get_type_id(val) == LMD_TYPE_INT) return it2i(val);
+    TypeId type = get_type_id(val);
+    // setMaxListeners receives JS numbers even when the value is an integer literal.
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || is_float_type_id(type)) return (int64_t)it2d(val);
     return get_default_max_listeners();
 }
 

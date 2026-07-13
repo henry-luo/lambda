@@ -43,6 +43,7 @@ extern "C" Item js_domain_get_current(void);
 extern "C" Item js_domain_set_current(Item domain);
 extern "C" void js_domain_restore(Item previous);
 extern "C" Item js_domain_capture_stack(void);
+extern "C" Item js_domain_capture_async_stack(void);
 extern "C" Item js_domain_set_stack(Item stack);
 extern "C" void js_domain_restore_stack(Item previous);
 extern "C" Context* _lambda_rt;
@@ -99,7 +100,7 @@ static void next_tick_push(Item cb) {
     next_tick_ring[next_tick_tail] = cb;
     next_tick_resource_ring[next_tick_tail] = js_async_hooks_get_current_resource();
     next_tick_als_ring[next_tick_tail] = js_als_capture_context();
-    next_tick_domain_ring[next_tick_tail] = js_domain_capture_stack();
+    next_tick_domain_ring[next_tick_tail] = js_domain_capture_async_stack();
     next_tick_tail = (next_tick_tail + 1) % MICROTASK_CAPACITY;
     next_tick_count++;
 }
@@ -127,7 +128,7 @@ static void microtask_push(Item cb) {
     microtask_ring[microtask_tail] = cb;
     microtask_resource_ring[microtask_tail] = js_async_hooks_get_current_resource();
     microtask_als_ring[microtask_tail] = js_als_capture_context();
-    microtask_domain_ring[microtask_tail] = js_domain_capture_stack();
+    microtask_domain_ring[microtask_tail] = js_domain_capture_async_stack();
     microtask_tail = (microtask_tail + 1) % MICROTASK_CAPACITY;
     microtask_count++;
 }
@@ -366,7 +367,7 @@ static void timer_capture_runtime(JsTimerHandle* th, const char* resource_name, 
     if (!th) return;
     th->async_resource = js_async_hooks_create_resource(resource_name, resource_len);
     th->als_context = js_als_capture_context();
-    th->domain = js_domain_capture_stack();
+    th->domain = js_domain_capture_async_stack();
     if (context) {
         th->runtime_heap = context->heap;
         th->runtime_nursery = context->nursery;

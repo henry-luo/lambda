@@ -25,7 +25,7 @@ void transpile_return(Transpiler* tp, AstReturnNode *return_node);
 void transpile_raise(Transpiler* tp, AstRaiseNode *raise_node);
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol);
 Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
-void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env);
+void transpile_box_capture(Transpiler* tp, FnCapture* cap, bool from_outer_env);
 void transpile_query_expr(Transpiler* tp, AstQueryNode *query_node);
 void infer_proc_param_types_from_callsites(Transpiler* tp, AstScript* script);
 void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_global);
@@ -460,12 +460,12 @@ void define_closure_env(Transpiler* tp, AstFuncNode *fn_node) {
     strbuf_append_str(tp->code_buf, " {\n");
 
     // add each captured variable to the struct
-    CaptureInfo* cap = fn_node->captures;
+    FnCapture* cap = fn_node->captures;
     while (cap) {
         strbuf_append_str(tp->code_buf, "  ");
         // use Item type for captured values (immutable capture by value)
         strbuf_append_str(tp->code_buf, "Item ");
-        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+        strbuf_append_str_n(tp->code_buf, cap->lambda_name->chars, cap->lambda_name->len);
         strbuf_append_str(tp->code_buf, ";\n");
         cap = cap->next;
     }
@@ -476,12 +476,12 @@ void define_closure_env(Transpiler* tp, AstFuncNode *fn_node) {
 }
 
 // check if an identifier is a captured variable in the current closure
-CaptureInfo* find_capture(AstFuncNode* closure, String* name) {
+FnCapture* find_capture(AstFuncNode* closure, String* name) {
     if (!closure || !closure->captures) return nullptr;
-    CaptureInfo* cap = closure->captures;
+    FnCapture* cap = closure->captures;
     while (cap) {
-        if (cap->name->len == name->len &&
-            strncmp(cap->name->chars, name->chars, name->len) == 0) {
+        if (cap->lambda_name->len == name->len &&
+            strncmp(cap->lambda_name->chars, name->chars, name->len) == 0) {
             return cap;
         }
         cap = cap->next;
@@ -714,7 +714,7 @@ bool is_captured_var_ref(Transpiler* tp, AstNode* item) {
         if (!pri->expr) return false;
         if (pri->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident_node = (AstIdentNode*)pri->expr;
-            CaptureInfo* cap = find_capture(tp->current_closure, ident_node->name);
+            FnCapture* cap = find_capture(tp->current_closure, ident_node->name);
             return cap != nullptr;
         }
         item = pri->expr;
@@ -731,11 +731,11 @@ bool emit_captured_var_item(Transpiler* tp, AstNode* item) {
         if (!pri->expr) return false;
         if (pri->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident_node = (AstIdentNode*)pri->expr;
-            CaptureInfo* cap = find_capture(tp->current_closure, ident_node->name);
+            FnCapture* cap = find_capture(tp->current_closure, ident_node->name);
             if (cap) {
                 // emit cenv->varname directly (this is already an Item)
                 strbuf_append_str(tp->code_buf, "cenv->");
-                strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+                strbuf_append_str_n(tp->code_buf, cap->lambda_name->chars, cap->lambda_name->len);
                 return true;
             }
             return false;
@@ -984,11 +984,11 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             if (ident->entry && ident->entry->type_widened) {
                 // check if this is a captured variable in the current closure
                 if (tp->current_closure) {
-                    CaptureInfo* cap = find_capture(tp->current_closure, ident->name);
+                    FnCapture* cap = find_capture(tp->current_closure, ident->name);
                     if (cap) {
                         // captured widened var — read from env (already Item)
                         strbuf_append_str(tp->code_buf, "cenv->");
-                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+                        strbuf_append_str_n(tp->code_buf, cap->lambda_name->chars, cap->lambda_name->len);
                         return;
                     }
                 }
@@ -1193,7 +1193,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
 
             // check if this is a captured variable in the current closure
             if (tp->current_closure) {
-                CaptureInfo* cap = find_capture(tp->current_closure, ident_node->name);
+                FnCapture* cap = find_capture(tp->current_closure, ident_node->name);
                 if (cap) {
                     // access captured variable via env
                     // env stores Items, so we may need to unbox depending on usage
@@ -1202,12 +1202,12 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                     if (info && info->unbox_fn) {
                         strbuf_append_str(tp->code_buf, info->unbox_fn);
                         strbuf_append_str(tp->code_buf, "(cenv->");
-                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+                        strbuf_append_str_n(tp->code_buf, cap->lambda_name->chars, cap->lambda_name->len);
                         strbuf_append_char(tp->code_buf, ')');
                     } else {
                         // for Item or container types, return directly
                         strbuf_append_str(tp->code_buf, "cenv->");
-                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+                        strbuf_append_str_n(tp->code_buf, cap->lambda_name->chars, cap->lambda_name->len);
                     }
                     return;
                 }
@@ -1257,17 +1257,17 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
 
                         // populate captured variables and count them
                         int cap_count = 0;
-                        CaptureInfo* cap = fn_node->captures;
+                        FnCapture* cap = fn_node->captures;
                         while (cap) {
                             cap_count++;
                             strbuf_append_str(tp->code_buf, "  closure_env->");
-                            strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+                            strbuf_append_str_n(tp->code_buf, cap->lambda_name->chars, cap->lambda_name->len);
                             strbuf_append_str(tp->code_buf, " = ");
 
                             // box the captured variable
                             bool from_outer = false;
                             if (tp->current_closure) {
-                                CaptureInfo* outer_cap = find_capture(tp->current_closure, cap->name);
+                                FnCapture* outer_cap = find_capture(tp->current_closure, cap->lambda_name);
                                 from_outer = (outer_cap != nullptr);
                             }
                             transpile_box_capture(tp, cap, from_outer);
@@ -4499,7 +4499,7 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
     // check if the target is a captured variable in the current closure
     // if so, write to the env struct instead of a local variable
     if (tp->current_closure) {
-        CaptureInfo* cap = find_capture(tp->current_closure, assign_node->target);
+        FnCapture* cap = find_capture(tp->current_closure, assign_node->target);
         if (cap) {
             // captured variable: emit cenv->varname = boxed_value
             // env stores Item, so value must be boxed
@@ -7105,21 +7105,21 @@ void define_func_boxed(Transpiler* tp, AstFuncNode *fn_node) {
     strbuf_append_str(tp->code_buf, ";\n}\n");
 }
 
-void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env) {
+void transpile_box_capture(Transpiler* tp, FnCapture* cap, bool from_outer_env) {
     Type* type = cap->entry && cap->entry->node ? cap->entry->node->type : nullptr;
     TypeId type_id = type ? type->type_id : LMD_TYPE_ANY;
 
     if (from_outer_env) {
         // already boxed in outer env, just copy
         strbuf_append_str(tp->code_buf, "cenv->");
-        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+        strbuf_append_str_n(tp->code_buf, cap->lambda_name->chars, cap->lambda_name->len);
         return;
     }
 
     // if the variable was widened to Item, it's already boxed — emit directly
     if (cap->entry && cap->entry->type_widened) {
         strbuf_append_char(tp->code_buf, '_');
-        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+        strbuf_append_str_n(tp->code_buf, cap->lambda_name->chars, cap->lambda_name->len);
         return;
     }
 
@@ -7155,10 +7155,10 @@ void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env
     default:
         // for container types (List*, Map*, etc.) and Item, cast to Item
         strbuf_append_str(tp->code_buf, "(Item)_");
-        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+        strbuf_append_str_n(tp->code_buf, cap->lambda_name->chars, cap->lambda_name->len);
         return;
     }
-    strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+    strbuf_append_str_n(tp->code_buf, cap->lambda_name->chars, cap->lambda_name->len);
     strbuf_append_char(tp->code_buf, ')');
 }
 
@@ -7184,18 +7184,18 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
 
         // populate captured variables and count them
         int cap_count = 0;
-        CaptureInfo* cap = fn_node->captures;
+        FnCapture* cap = fn_node->captures;
         while (cap) {
             cap_count++;
             strbuf_append_str(tp->code_buf, "  closure_env->");
-            strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+            strbuf_append_str_n(tp->code_buf, cap->lambda_name->chars, cap->lambda_name->len);
             strbuf_append_str(tp->code_buf, " = ");
 
             // box the captured variable to Item
             // the captured variable may be in our own closure env if we're a nested closure
             bool from_outer = false;
             if (tp->current_closure) {
-                CaptureInfo* outer_cap = find_capture(tp->current_closure, cap->name);
+                FnCapture* outer_cap = find_capture(tp->current_closure, cap->lambda_name);
                 from_outer = (outer_cap != nullptr);
             }
             transpile_box_capture(tp, cap, from_outer);

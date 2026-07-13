@@ -12880,17 +12880,31 @@ extern "C" Item js_super_apply_native(Item callee, Item this_val, Item args_arra
     return js_super_call_native(callee, this_val, args, argc);
 }
 
+static int js_call_stack_limit = 4096;
+
+extern "C" void js_set_call_stack_limit(int64_t limit) {
+    if (limit <= 0) {
+        js_call_stack_limit = 4096;
+        return;
+    }
+    if (limit < 64) limit = 64;
+    if (limit > 65536) limit = 65536;
+    js_call_stack_limit = (int)limit;
+}
+
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_CALL_FUNCTION);
     static int js_call_depth = 0;
     struct JsCallDepthGuard {
         int* depth;
         bool ok;
-        JsCallDepthGuard(int* depth_ptr) : depth(depth_ptr), ok(++(*depth_ptr) <= 4096) {}
+        JsCallDepthGuard(int* depth_ptr, int depth_limit)
+            : depth(depth_ptr), ok(++(*depth_ptr) <= depth_limit) {}
         ~JsCallDepthGuard() { --(*depth); }
-    } call_depth_guard(&js_call_depth);
+    } call_depth_guard(&js_call_depth, js_call_stack_limit);
     if (!call_depth_guard.ok) {
-        // unbounded JS recursion must throw inside the active call so assert.throws can catch it.
+        // Node-compatible stack flags must trip the JS guard before discarded async
+        // recursion builds thousands of unhandled rejected promises.
         js_throw_range_error("Maximum call stack size exceeded");
         return ItemNull;
     }
@@ -29623,7 +29637,9 @@ struct JsPromise {
     int  then_count;
 };
 
-#define JS_MAX_PROMISES 1024
+// No-await async recursion allocates a promise before the body runs; keep this
+// above js_call_function's depth guard so stack overflow wins over table exhaustion.
+#define JS_MAX_PROMISES 8192
 static JsPromise js_promises[JS_MAX_PROMISES];
 static int js_promise_count = 0;
 static int64_t js_promise_unhandled_epoch = 0;
@@ -29634,6 +29650,7 @@ static Item js_domain_current = {0};
 static Item js_domain_namespace = {0};
 static Item js_domain_stack[64];
 static int js_domain_stack_count = 0;
+static int js_domain_error_handler_depth = 0;
 
 extern "C" Item js_get_process_object_value(void);
 extern "C" Item js_async_hooks_get_current_resource(void);
@@ -29669,6 +29686,20 @@ static void js_domain_sync_visible_state(void) {
 
 extern "C" Item js_domain_capture_stack(void) {
     Item stack = js_array_new(0);
+    for (int i = 0; i < js_domain_stack_count; i++) {
+        js_array_push(stack, js_domain_stack[i]);
+    }
+    return stack;
+}
+
+extern "C" Item js_domain_capture_async_stack(void) {
+    Item stack = js_array_new(0);
+    // Async work queued from a domain error handler inherits the active parent
+    // domain only; the synchronous handler still sees the full trimmed stack.
+    if (js_domain_error_handler_depth > 0) {
+        if (js_domain_stack_count > 0) js_array_push(stack, js_domain_stack[js_domain_stack_count - 1]);
+        return stack;
+    }
     for (int i = 0; i < js_domain_stack_count; i++) {
         js_array_push(stack, js_domain_stack[i]);
     }
@@ -29747,8 +29778,15 @@ static bool js_domain_emit_error_at(Item domain, Item error, int parent_count) {
     if (parent_count > js_domain_stack_count) parent_count = js_domain_stack_count;
     js_domain_stack_count = parent_count;
     js_domain_sync_visible_state();
+    if (parent_count == 0) {
+        // Node exposes null, not undefined, only during a root domain error handler.
+        js_property_set(js_get_process_object_value(),
+            (Item){.item = s2it(heap_create_name("domain", 6))}, ItemNull);
+    }
 
+    js_domain_error_handler_depth++;
     js_call_function(on_error, domain, &error, 1);
+    js_domain_error_handler_depth--;
     if (js_check_exception()) {
         Item thrown = js_clear_exception();
         if (parent_count > 0) {

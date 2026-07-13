@@ -1781,6 +1781,8 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
                          struct hashmap* ancestor_func_locals) {
     JsFunctionNode* fn = fc->node;
     fc->capture_count = 0;
+    fc->analysis.captures = fc->captures;
+    fc->analysis.capture_count = 0;
 
     // Collect parameter names (handles simple ids, default params, and destructuring)
     struct hashmap* params = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
@@ -1949,6 +1951,11 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
 
     // v18q: Check if function uses 'arguments' keyword
     fc->uses_arguments = !fn->is_arrow && jm_name_set_has(refs, "_js_arguments");
+    fc->analysis.captures = fc->captures;
+    fc->analysis.capture_count = fc->capture_count;
+    if (fn) {
+        fn->analysis = &fc->analysis;
+    }
 
     hashmap_free(params);
     hashmap_free(locals);

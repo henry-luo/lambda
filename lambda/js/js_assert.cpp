@@ -4010,7 +4010,12 @@ static Item js_assert_enumerable_own_keys(Item object) {
             }
         }
     }
-    Item keys = js_object_keys(object);
+    // Typed-array index keys are represented by contiguous element storage; partial
+    // equality compares that storage before named properties to avoid materializing
+    // every numeric index for large arrays.
+    Item keys = js_is_typed_array(object)
+        ? js_typed_array_enumerable_custom_keys(object)
+        : js_object_keys(object);
     if (get_type_id(keys) == LMD_TYPE_ARRAY) {
         int64_t key_count = js_array_length(keys);
         for (int64_t i = 0; i < key_count; i++) {

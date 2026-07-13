@@ -1838,7 +1838,7 @@ static bool jm_expr_has_bigint_literal(JsAstNode* node) {
 }
 
 void jm_infer_walk(JsAstNode* node, const char param_names[][128],
-                          JsParamEvidence* evidence, int param_count,
+                          FnParamEvidence* evidence, int param_count,
                           const char* self_name) {
     if (!node) return;
 
@@ -2219,7 +2219,7 @@ void jm_infer_param_types(JsFuncCollected* fc) {
     }
 
     // Accumulate evidence
-    JsParamEvidence evidence[16] = {};
+    FnParamEvidence evidence[16] = {};
     jm_infer_walk(fn->body, param_names, evidence, pc,
                   self_name[0] ? self_name : NULL);
 
@@ -2268,7 +2268,7 @@ void jm_infer_param_types(JsFuncCollected* fc) {
             }
         }
         if (alias_count > 0) {
-            JsParamEvidence alias_evidence[16] = {};
+            FnParamEvidence alias_evidence[16] = {};
             jm_infer_walk(fn->body, alias_names, alias_evidence, alias_count,
                           self_name[0] ? self_name : NULL);
             // Merge alias evidence back to original params
