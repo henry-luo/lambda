@@ -1,10 +1,7 @@
 #pragma once
+// internal implementation header — do not include outside radiant/
 
-#include "display_list.h"
-#include "display_list_replay.hpp"
-#include "paint_ir.h"
-#include "rdt_vector.hpp"
-#include "tile_pool.h"
+#include "render.hpp"
 #include "view.hpp"
 #include "../lib/arena.h"
 #include "../lib/mem_factory.h"

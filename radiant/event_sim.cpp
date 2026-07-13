@@ -11,8 +11,6 @@
 #include "editing.hpp"
 #include "form_control.hpp"
 #include "render.hpp"
-#include "render_export_support.hpp"
-#include "render_img.hpp"
 #include "text_control.hpp"
 #include "text_edit.hpp"
 #include "view.hpp"

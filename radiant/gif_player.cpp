@@ -1,4 +1,4 @@
-#include "gif_player.h"
+#include "render.hpp"
 #include "view.hpp"
 #include "state_store.hpp"
 #include "../lib/log.h"

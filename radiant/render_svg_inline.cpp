@@ -5,14 +5,7 @@
  * transforms. No ThorVG scene tree is constructed for the inline path.
  */
 
-#include "render_svg_inline.hpp"
 #include "render.hpp"
-#include "display_list_replay.hpp"
-#include "render_geometry.hpp"
-#include "render_glyph.hpp"
-#include "render_paint_gateway.hpp"
-#include "render_painter.hpp"
-#include "tile_pool.h"
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/tagged.hpp"

@@ -48,7 +48,7 @@
 #include "../../radiant/editing_target_range.hpp"
 #include "../../radiant/clipboard.hpp"
 #include "../../radiant/handler.hpp"
-#include "../../radiant/render_export_support.hpp"
+#include "../../radiant/render.hpp"
 #include "../input/html5/html5_parser.h"
 
 extern "C" void heap_unregister_gc_root(uint64_t* slot);

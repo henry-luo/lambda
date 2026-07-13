@@ -1,4 +1,4 @@
-#include "display_list_replay_glyph.hpp"
+#include "render.hpp"
 #include "glyph_sampling.hpp"
 
 void dl_replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* glyph) {

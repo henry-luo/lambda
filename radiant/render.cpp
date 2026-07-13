@@ -1,9 +1,4 @@
 #include "render.hpp"
-#include "render_profiler.hpp"
-#include "render_media.hpp"
-#include "render_svg_inline.hpp"
-#include "render_clip.hpp"
-#include "render_overlay.hpp"
 #include "scroller.hpp"
 #include "layout.hpp"
 

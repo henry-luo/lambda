@@ -1,5 +1,3 @@
-#include "render_clip.hpp"
-#include "render_path.hpp"
 #include "render.hpp"
 
 #include "../lambda/input/css/dom_element.hpp"

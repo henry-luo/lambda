@@ -1,8 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "../radiant/display_list.h"
-#include "../radiant/display_list_storage.hpp"
-#include "../radiant/retained_display_list.hpp"
+#include "../radiant/render.hpp"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 

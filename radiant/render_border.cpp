@@ -1,7 +1,4 @@
-#include "render_border.hpp"
-#include "render_path.hpp"
-#include "render_painter.hpp"
-#include "render_state.hpp"
+#include "render.hpp"
 #include "../lib/log.h"
 #include "../lib/lambda_alloca.h"
 #include <math.h>

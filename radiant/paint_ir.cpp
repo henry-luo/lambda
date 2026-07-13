@@ -6,7 +6,7 @@
 // recording those dl_* calls directly.
 // ==========================================================================
 
-#include "paint_ir.h"
+#include "render.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/mem_grow.hpp"

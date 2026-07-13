@@ -1,5 +1,4 @@
-#include "render_glyph.hpp"
-#include "render_painter.hpp"
+#include "render.hpp"
 
 void draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y) {
     if (!rdcon || !bitmap || rdcon->color.a == 0) return;

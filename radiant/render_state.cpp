@@ -1,4 +1,3 @@
-#include "render_state.hpp"
 #include "render.hpp"
 #include "transform.hpp"
 #include "../lib/log.h"

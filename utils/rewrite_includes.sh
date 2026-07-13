@@ -28,19 +28,30 @@ esac
 
 target_for_file() {
     local file="$1"
-    case "$file" in
-        radiant/*) printf '%s\n' "$target_radiant" ;;
-        *)
-            local dir="${file%/*}"
-            local prefix=""
-            local depth=1
-            local i=0
-            if [ "$dir" != "$file" ]; then
-                depth=$(awk -F/ '{print NF}' <<EOF
+    local dir="${file%/*}"
+    local prefix=""
+    local depth=1
+    local i=0
+    if [ "$dir" != "$file" ]; then
+        depth=$(awk -F/ '{print NF}' <<EOF
 $dir
 EOF
 )
-            fi
+    fi
+    case "$file" in
+        radiant/*/*)
+            depth=$(awk -F/ '{print NF - 1}' <<EOF
+$dir
+EOF
+)
+            while [ "$i" -lt "$depth" ]; do
+                prefix="${prefix}../"
+                i=$((i + 1))
+            done
+            printf '%s%s\n' "$prefix" "$target_radiant"
+            ;;
+        radiant/*) printf '%s\n' "$target_radiant" ;;
+        *)
             while [ "$i" -lt "$depth" ]; do
                 prefix="${prefix}../"
                 i=$((i + 1))
@@ -62,6 +73,7 @@ old_variants() {
     while [ "$depth" -le 5 ]; do
         prefix="${prefix}../"
         printf '%sradiant/%s\n' "$prefix" "$old"
+        printf '%s%s\n' "$prefix" "$old"
         depth=$((depth + 1))
     done
 }

@@ -1,5 +1,4 @@
-#include "../radiant/rdt_vector.hpp"
-#include "../radiant/display_list_bounds.hpp"
+#include "../radiant/render.hpp"
 #include "../radiant/state_store.hpp"
 #include <string.h>
 

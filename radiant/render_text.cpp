@@ -1,9 +1,4 @@
-#include "render_text.hpp"
-#include "render_glyph.hpp"
-#include "render_background.hpp"
-#include "render_border.hpp"
-#include "render_painter.hpp"
-#include "render_profiler.hpp"
+#include "render.hpp"
 #include "layout_text.hpp"
 #include "layout.hpp"
 

@@ -4,14 +4,7 @@
 // Phase 2 of the multi-threaded rendering proposal.
 // ==========================================================================
 
-#include "tile_pool.h"
-#include "display_list_bounds.hpp"
-#include "display_list_replay_backdrop.hpp"
-#include "display_list_replay_effects.hpp"
-#include "display_list_replay_glyph.hpp"
-#include "display_list_replay_raster.hpp"
-#include "display_list_replay_shadow.hpp"
-#include "display_list_replay_vector.hpp"
+#include "render.hpp"
 #include "../lib/log.h"
 #include "../lib/mem_factory.h"
 #include "../lib/mem.h"

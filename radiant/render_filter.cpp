@@ -4,8 +4,7 @@
 #undef Rect
 #endif
 
-#include "render_filter.hpp"
-#include "render_background.hpp"
+#include "render.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/math_utils.h"

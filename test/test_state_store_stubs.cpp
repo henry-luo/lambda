@@ -6,7 +6,7 @@
 #include "../lambda/template_registry.h"
 #include "../radiant/clipboard.hpp"
 #include "../radiant/editing.hpp"
-#include "../radiant/rdt_vector.hpp"
+#include "../radiant/render.hpp"
 #include "../radiant/source_pos_bridge.hpp"
 #include "../radiant/state_machine.hpp"
 #include "../radiant/state_schema.hpp"

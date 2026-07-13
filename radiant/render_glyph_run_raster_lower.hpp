@@ -1,6 +1,7 @@
 #pragma once
+// internal implementation header — do not include outside radiant/
 
-#include "paint_ir.h"
+#include "render.hpp"
 #include "view.hpp"
 #include "../lib/str.h"
 #include <math.h>

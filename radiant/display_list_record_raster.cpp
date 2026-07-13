@@ -1,7 +1,6 @@
-#include "display_list.h"
+#include "render.hpp"
 
-#include "display_list_storage.hpp"
-#include "display_list_bounds.hpp"
+#include "render.hpp"
 
 // ---------------------------------------------------------------------------
 // Recording: direct-pixel and external-layer operations

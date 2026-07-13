@@ -6,11 +6,9 @@
 // Controls overlay (play/pause, seek bar, time, volume) is drawn on top.
 // Vector graphics rendered via RdtVector (ThorVG), text via font.h glyph system.
 
-#include "display_list.h"
+#include "render.hpp"
 #include "rdt_video.h"
-#include "rdt_vector.hpp"
-#include "render_raster.hpp"
-#include "render_video.hpp"
+#include "render.hpp"
 #include "state_store.hpp"
 #include "view.hpp"
 #include "../lib/font/font.h"

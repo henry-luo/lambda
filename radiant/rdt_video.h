@@ -8,10 +8,16 @@
 // macOS:  AVFoundation manages decode + playback internally.
 // Windows: Media Foundation decode thread + WASAPI playback thread.
 // Linux:  FFmpeg decode thread + PulseAudio/ALSA playback thread.
+//
+// Internal exception: platform media backends include OS frameworks that define
+// a global Rect, so this narrow ABI must not pull in render.hpp/view.hpp.
 
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+
+#ifndef RADIANT_RDT_VIDEO_API
+#define RADIANT_RDT_VIDEO_API
 
 #ifdef __cplusplus
 extern "C" {
@@ -103,3 +109,5 @@ int             rdt_video_get_frame(RdtVideo* video, RdtVideoFrame* frame);
 #ifdef __cplusplus
 }
 #endif
+
+#endif // RADIANT_RDT_VIDEO_API

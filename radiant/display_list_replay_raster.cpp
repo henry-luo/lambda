@@ -1,7 +1,6 @@
-#include "display_list_replay_raster.hpp"
+#include "render.hpp"
 
-#include "display_list_storage.hpp"
-#include "render_raster.hpp"
+#include "render.hpp"
 #include "../lib/log.h"
 
 static Bound dl_replay_offset_clip_to_surface(const Bound* clip, ImageSurface* surface,

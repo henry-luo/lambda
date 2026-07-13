@@ -1,6 +1,6 @@
-#include "display_list_replay_shadow.hpp"
+#include "render.hpp"
 
-#include "display_list_surface_region.hpp"
+#include "render.hpp"
 #include <string.h>
 
 void dl_replay_shadow_clip_init(DisplayReplayShadowClip* clip) {

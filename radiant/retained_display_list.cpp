@@ -1,7 +1,6 @@
-#include "retained_display_list.hpp"
+#include "render.hpp"
 
-#include "display_list_bounds.hpp"
-#include "display_list_storage.hpp"
+#include "render.hpp"
 #include "../lib/hashmap.h"
 #include "../lib/mem_factory.h"
 #include "../lib/hashmap_helpers.h"

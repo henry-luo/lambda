@@ -1,4 +1,3 @@
-#include "render_vector_path.hpp"
 #include "render.hpp"
 
 #include "../lib/log.h"
