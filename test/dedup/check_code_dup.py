@@ -235,6 +235,15 @@ def print_report(blocks, excluded_counts, modules, file_exclusion_count):
         print("  %s: %d" % (rule_id, excluded_counts[rule_id]))
 
 
+def build_lizard_command(lizard, file_exclusions, selected_modules):
+    # Without an explicit language, Lizard scans vendored scripts and corrupts the C/C++ baseline.
+    command = [lizard, "-Eduplicate", "-l", "cpp"]
+    for pattern in file_exclusions:
+        command.extend(("-x", pattern))
+    command.extend(selected_modules)
+    return command
+
+
 def main():
     args = parse_args()
     selected_modules = tuple(module for module in MODULES if not args.modules or module in args.modules)
@@ -254,10 +263,7 @@ def main():
         print("lizard is not installed or not available on PATH", file=sys.stderr)
         return 2
 
-    command = [lizard, "-Eduplicate"]
-    for pattern in file_exclusions:
-        command.extend(("-x", pattern))
-    command.extend(selected_modules)
+    command = build_lizard_command(lizard, file_exclusions, selected_modules)
     result = subprocess.run(
         command,
         cwd=root,

@@ -14,13 +14,16 @@
 #define DL_VALIDATE_ELEMENT_STACK_LIMIT 1024
 
 static const DisplayOpDescriptor DISPLAY_OP_DESCRIPTORS[] = {
-#define DL_OP_DESCRIPTOR(name, flags) { name, flags },
+#define DL_OP_DESCRIPTOR(name, flags, owned_kind, owned_offset) \
+    { name, flags, owned_kind, owned_offset },
     DISPLAY_OP_LIST(DL_OP_DESCRIPTOR)
 #undef DL_OP_DESCRIPTOR
 };
+static_assert(sizeof(DISPLAY_OP_DESCRIPTORS) / sizeof(DISPLAY_OP_DESCRIPTORS[0]) == DL_OP_COUNT,
+              "DisplayOp descriptor table must match DISPLAY_OP_LIST");
 
 const DisplayOpDescriptor* dl_op_descriptor(DisplayOp op) {
-    if (op < DL_FILL_RECT || op > DL_END_ELEMENT) return nullptr;
+    if (op < DL_FILL_RECT || op >= DL_OP_COUNT) return nullptr;
     return &DISPLAY_OP_DESCRIPTORS[(int)op];
 }
 
@@ -122,37 +125,18 @@ void dl_init(DisplayList* dl, Arena* backing_arena) {
     mem_scratch_init(NULL, &dl->arena, backing_arena, MEM_ROLE_RENDER, "display_list.scratch");
 }
 
-static void dl_free_owned_path(RdtPath** path) {
-    if (path && *path) { rdt_path_free(*path); *path = nullptr; }
-}
-
-static void dl_free_owned_picture(RdtPicture** picture) {
-    if (picture && *picture) { rdt_picture_free(*picture); *picture = nullptr; }
-}
-
 void dl_item_free_owned_payload(DisplayItem* item) {
     if (!item) return;
-    switch (item->op) {
-        case DL_FILL_PATH:
-            dl_free_owned_path(&item->fill_path.path);
-            break;
-        case DL_STROKE_PATH:
-            dl_free_owned_path(&item->stroke_path.path);
-            break;
-        case DL_FILL_LINEAR_GRADIENT:
-            dl_free_owned_path(&item->fill_linear_gradient.path);
-            break;
-        case DL_FILL_RADIAL_GRADIENT:
-            dl_free_owned_path(&item->fill_radial_gradient.path);
-            break;
-        case DL_DRAW_PICTURE:
-            dl_free_owned_picture(&item->draw_picture.picture);
-            break;
-        case DL_PUSH_CLIP:
-            dl_free_owned_path(&item->push_clip.path);
-            break;
-        default:
-            break;
+    const DisplayOpDescriptor* descriptor = dl_op_descriptor(item->op);
+    if (!descriptor || descriptor->owned_payload_kind == DL_OWNED_PAYLOAD_NONE) return;
+    // Ownership kind and offset live in the op row so new owned payloads cannot omit cleanup.
+    void* field = (char*)item + descriptor->owned_payload_offset;
+    if (descriptor->owned_payload_kind == DL_OWNED_PAYLOAD_PATH) {
+        RdtPath** path = (RdtPath**)field;
+        if (*path) { rdt_path_free(*path); *path = nullptr; }
+    } else if (descriptor->owned_payload_kind == DL_OWNED_PAYLOAD_PICTURE) {
+        RdtPicture** picture = (RdtPicture**)field;
+        if (*picture) { rdt_picture_free(*picture); *picture = nullptr; }
     }
 }
 
@@ -267,7 +251,7 @@ bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
     for (int i = 0; i < dl->count; i++) {
         const DisplayItem* item = &dl->items[i];
         auto fail = [&](const char* message) -> bool { return fail_at(i, message); };
-        if (item->op < DL_FILL_RECT || item->op > DL_END_ELEMENT) {
+        if (item->op < DL_FILL_RECT || item->op >= DL_OP_COUNT) {
             return fail("unknown display op");
         }
 

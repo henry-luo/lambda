@@ -51,6 +51,28 @@ static void test_set_zero_bound_state_item(DisplayItem* item, DisplayOp op) {
     item->bounds[3] = 0.0f;
 }
 
+TEST_F(DisplayListTest, DescriptorCoversOpsAndOwnsPayloadCleanup) {
+    for (int op = DL_FILL_RECT; op < DL_OP_COUNT; op++) {
+        const DisplayOpDescriptor* descriptor = dl_op_descriptor((DisplayOp)op);
+        ASSERT_NE(descriptor, nullptr);
+        EXPECT_EQ(descriptor->op, op);
+        EXPECT_EQ(descriptor->owned_payload_kind != DL_OWNED_PAYLOAD_NONE,
+                  dl_op_has_flags((DisplayOp)op, DL_OP_FLAG_OWNED_PAYLOAD));
+    }
+
+    DisplayItem path_item = {};
+    path_item.op = DL_FILL_PATH;
+    path_item.fill_path.path = (RdtPath*)1;
+    dl_item_free_owned_payload(&path_item);
+    EXPECT_EQ(path_item.fill_path.path, nullptr);
+
+    DisplayItem picture_item = {};
+    picture_item.op = DL_DRAW_PICTURE;
+    picture_item.draw_picture.picture = (RdtPicture*)1;
+    dl_item_free_owned_payload(&picture_item);
+    EXPECT_EQ(picture_item.draw_picture.picture, nullptr);
+}
+
 TEST_F(DisplayListTest, BoundsIntersectorPreservesReplayStateCommands) {
     DisplayItem* clip = dl_alloc_item(&dl);
     ASSERT_NE(clip, nullptr);
