@@ -1869,6 +1869,13 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
     (void)font;
 }
 
+static void pdf_cb_render_svg_subscene(void* vctx, const PaintSvgSubscene* subscene) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    if (!ctx || !subscene) return;
+    paint_svg_subscene(pdf_active_paint_list(ctx), subscene);
+    pdf_lower_paint_list(ctx);
+}
+
 static void pdf_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     if (!ctx || !block || !block->multicol) return;
@@ -2040,6 +2047,7 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
     b.render_text      = pdf_cb_render_text;
     b.render_image     = pdf_cb_render_image;
     b.render_inline_svg = pdf_cb_render_inline_svg;
+    b.render_svg_subscene = pdf_cb_render_svg_subscene;
     b.begin_block_children  = NULL;
     b.end_block_children    = NULL;
     b.begin_inline_children = NULL;

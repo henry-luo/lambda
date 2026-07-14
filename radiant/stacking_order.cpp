@@ -1,5 +1,7 @@
 #include "render.hpp"
 #include "layout.hpp"
+#include "layout_custom.hpp"
+#include "../lib/mem.h"
 #include "../lib/tagged.hpp"
 extern "C" {
 #include "../lib/log.h"
@@ -105,4 +107,71 @@ void radiant_stack_sort_in_paint_order(ArrayList* views) {
         }
         views->data[j + 1] = key;
     }
+}
+
+static bool radiant_stack_entry_after(const RadiantStackPaintEntry* left,
+                                      const RadiantStackPaintEntry* right) {
+    if (left->z != right->z) return left->z > right->z;
+    if (left->is_generated_layer != right->is_generated_layer) {
+        return !left->is_generated_layer;
+    }
+    return left->order > right->order;
+}
+
+RadiantStackPaintList radiant_stack_collect_custom_layout_paint(ViewBlock* block) {
+    RadiantStackPaintList list = {};
+    if (!block || !block->custom_layout_paint) return list;
+
+    CustomLayoutPaintState* paint =
+        (CustomLayoutPaintState*)block->custom_layout_paint;
+    int child_count = 0;
+    for (View* child = block->first_child; child; child = child->next()) {
+        if (child->view_type != RDT_VIEW_NONE &&
+            !radiant_stack_is_out_of_flow_positioned(child)) {
+            child_count++;
+        }
+    }
+    int total = child_count + paint->layer_count;
+    if (total <= 0) return list;
+    list.entries = (RadiantStackPaintEntry*)mem_calloc(
+        (size_t)total, sizeof(RadiantStackPaintEntry), MEM_CAT_RENDER);
+    if (!list.entries) return list;
+
+    for (int i = 0; i < paint->layer_count; i++) {
+        RadiantStackPaintEntry* entry = &list.entries[list.count++];
+        entry->layer = &paint->layers[i];
+        entry->z = paint->layers[i].z;
+        entry->order = paint->layers[i].order;
+        entry->is_generated_layer = true;
+    }
+    int child_order = 0;
+    for (View* child = block->first_child; child; child = child->next()) {
+        if (child->view_type == RDT_VIEW_NONE ||
+            radiant_stack_is_out_of_flow_positioned(child)) {
+            continue;
+        }
+        RadiantStackPaintEntry* entry = &list.entries[list.count++];
+        entry->view = child;
+        entry->z = radiant_stack_view_z_index(child);
+        entry->order = child_order++;
+        entry->is_generated_layer = false;
+    }
+
+    for (int i = 1; i < list.count; i++) {
+        RadiantStackPaintEntry key = list.entries[i];
+        int j = i - 1;
+        while (j >= 0 && radiant_stack_entry_after(&list.entries[j], &key)) {
+            list.entries[j + 1] = list.entries[j];
+            j--;
+        }
+        list.entries[j + 1] = key;
+    }
+    return list;
+}
+
+void radiant_stack_free_custom_layout_paint(RadiantStackPaintList* list) {
+    if (!list) return;
+    if (list->entries) mem_free(list->entries);
+    list->entries = nullptr;
+    list->count = 0;
 }

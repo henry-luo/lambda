@@ -66,6 +66,7 @@ fn normalize_edge(edge, nodes, index, directed) {
     else "";
   if (has_id(nodes, from_id) and has_id(nodes, to_id)) {
     {
+      id: if (edge.id != null) string(edge.id) else "e" ++ string(index),
       from: from_id,
       to: to_id,
       label: if (edge.label != null) string(edge.label) else null,
@@ -77,6 +78,7 @@ fn normalize_edge(edge, nodes, index, directed) {
         else if (edge["arrow-end"] != null) edge["arrow-end"]
         else directed,
       style: if (edge.style != null) string(edge.style) else "solid",
+      z: if (edge.z != null) int(edge.z) else -1,
       index: index
     }
   } else null
@@ -264,6 +266,51 @@ fn position_nodes(layers, opts) {
   }
 }
 
+fn oriented_node(node, direction) {
+  let tx = if (direction == "LR") node.y
+    else if (direction == "RL") 0.0 - node.y
+    else node.x;
+  let ty = if (direction == "LR" or direction == "RL") node.x
+    else if (direction == "BT") 0.0 - node.y
+    else node.y;
+  {
+    id: node.id,
+    label: node.label,
+    shape: node.shape,
+    width: node.width,
+    height: node.height,
+    index: node.index,
+    rank: node.rank,
+    order: node.order,
+    x: tx,
+    y: ty
+  }
+}
+
+fn normalize_oriented_nodes(nodes) {
+  if (len(nodes) == 0) { [] }
+  else {
+    let min_x = min([for (node in nodes) node.x - node.width / 2.0]);
+    let min_y = min([for (node in nodes) node.y - node.height / 2.0]);
+    [for (node in nodes) {
+      id: node.id,
+      label: node.label,
+      shape: node.shape,
+      width: node.width,
+      height: node.height,
+      index: node.index,
+      rank: node.rank,
+      order: node.order,
+      x: node.x - min_x,
+      y: node.y - min_y
+    }]
+  }
+}
+
+fn orient_nodes(nodes, direction) {
+  normalize_oriented_nodes([for (node in nodes) oriented_node(node, direction)])
+}
+
 fn find_node(nodes, id) => first_or([for (node in nodes where node.id == id) node], null)
 
 fn clip_rect(cx, cy, tx, ty, half_w, half_h) {
@@ -316,6 +363,7 @@ fn route_edge(edge, nodes, opts) {
       to_node.width / 2.0, to_node.height / 2.0);
     let vertical_first = not (opts.direction == "LR" or opts.direction == "RL");
     {
+      id: edge.id,
       from: edge.from,
       to: edge.to,
       points: orthogonal_points([start, finish], vertical_first),
@@ -323,6 +371,8 @@ fn route_edge(edge, nodes, opts) {
       arrow_start: edge.arrow_start,
       arrow_end: edge.arrow_end,
       style: edge.style,
+      z: edge.z,
+      index: edge.index,
       is_bezier: opts.use_splines
     }
   }
@@ -344,7 +394,8 @@ pub fn layout(input, opts = null) {
   let ranked = assign_ranks(graph.nodes, graph.edges);
   let layers0 = create_layers(ranked);
   let layers = reduce_crossings(layers0, graph.edges, graph.options.max_iterations);
-  let nodes = position_nodes(layers, graph.options);
+  let canonical_nodes = position_nodes(layers, graph.options);
+  let nodes = orient_nodes(canonical_nodes, graph.options.direction);
   let edges = [for (edge in graph.edges,
     let path = route_edge(edge, nodes, graph.options)
     where path != null) path];

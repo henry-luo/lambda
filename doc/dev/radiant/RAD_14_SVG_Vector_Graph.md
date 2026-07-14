@@ -1,8 +1,8 @@
 # Radiant — SVG, Vector Graphics & Diagram Layout
 
-> **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers three cohesive sub-areas that share one paint pipeline: the `RdtVector` immediate-mode vector API and its dual ThorVG / CoreGraphics backends selected at compile time; the inline-SVG renderer that walks a *Radiant-parsed* SVG element tree and records it into that API (plus the easily-confused opposite-direction view-tree→SVG-text serializer); and the Dagre-*inspired* graph/diagram auto-layout that emits a Lambda SVG element which re-enters the SVG renderer.
+> **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers three cohesive sub-areas that share one paint pipeline: the `RdtVector` immediate-mode vector API and its dual ThorVG / CoreGraphics backends selected at compile time; the inline-SVG renderer that walks a *Radiant-parsed* SVG element tree and records it into that API (plus the easily-confused opposite-direction view-tree→SVG-text serializer); and Lambda graph layout whose routed edges enter Radiant as generated SVG paint layers.
 >
-> **Primary sources:** `radiant/rdt_vector.hpp` (the immediate-mode `rdt_*` API that bans direct `tvg_*`), `radiant/rdt_vector_tvg.cpp` (ThorVG backend), `radiant/rdt_vector_cg.mm` (CoreGraphics backend), `radiant/render_svg_inline.cpp` / `.hpp` (inline-SVG renderer, 5633 lines), `radiant/render_svg.cpp` (view-tree→SVG-text output, opposite direction), `radiant/render_vector_path.cpp`, `radiant/render_path.cpp`, `radiant/layout_graph.cpp` / `.hpp`, `radiant/graph_dagre.cpp`, `radiant/graph_edge_utils.cpp` / `.hpp`, `radiant/graph_layout_types.hpp`, `radiant/graph_theme.cpp` / `.hpp`, `radiant/graph_to_svg.cpp` / `.hpp`.
+> **Primary sources:** `radiant/rdt_vector.hpp`, `radiant/rdt_vector_tvg.cpp`, `radiant/rdt_vector_cg.mm`, `radiant/render_svg_inline.cpp`, `radiant/render_svg.cpp`, `radiant/render_vector_path.cpp`, `radiant/render_path.cpp`, `lambda/package/graph/layout.ls`, `lambda/package/graph/dagre.ls`, `lambda/package/graph/transform.ls`, and `radiant/graph_bridge.cpp`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -15,7 +15,7 @@ Three sub-areas share this surface and are documented in turn:
 
 1. **The `RdtVector` abstraction** (§2–§3) — the API plus two interchangeable backends and a capability table that lets callers degrade gracefully.
 2. **SVG** (§4–§5) — the inline-SVG renderer (SVG *input*) and, separately, the view-tree→SVG-text serializer (SVG *output*); these run in opposite directions and are easy to confuse.
-3. **Graph / diagram layout** (§6–§8) — a Dagre-inspired hierarchical layout that produces a Lambda SVG element and round-trips through the SVG renderer.
+3. **Graph / diagram layout** (§6–§8) — a Dagre-inspired Lambda layout over measured rich HTML nodes, with routed links lowered through generated SVG subscenes.
 
 The recording substrate they share — PaintIR and the DisplayList — is owned by [RAD_12 — Paint IR & Display List](RAD_12_Paint_IR_Display_List.md); the render walk that drives it is [RAD_13 — Render Walk & Painters](RAD_13_Render_Walk_Painters.md). This doc describes the seams into those, not their internals.
 
@@ -101,17 +101,15 @@ The `gaussian_blur` capability flag (§2.2) describes the **vector backend's nat
 
 ---
 
-## 6. Graph / diagram layout — data model
+## 6. Graph / diagram layout — semantic HTML and Velmt
 
 <img alt="Inline SVG in, SVG out, and graph to SVG data flows" src="diagram/rad14_svg_dataflows.svg" width="720">
 
-The graph sub-area turns a parsed `.mmd`/`.d2`/`.dot` diagram into a laid-out SVG element. Its data model lives in `graph_layout_types.hpp`, split into public result types and internal algorithm types, all allocated in session-domain arenas (`lam::ArrayOwnedList<T, lam::LayoutSessionDomain>`, `graph_layout_types.hpp:18-36`).
+The C syntax parsers produce a Lambda `<graph>` element. `graph.transform.to_html()` normalizes it to a semantic `<graph data-radiant-layout="lambda-graph">` containing measured `<node>` children and zero-size `<edge>` metadata children. Nodes may contain arbitrary block, inline, flex, grid, text, image, or whole-SVG content.
 
-The public results are `NodePosition` (id, center x/y, width/height, rank, order — `:97`), `EdgePath` (from/to ids, an owned `PersistentPoint2DList`, `is_bezier`, `directed`, arrow flags, style — `:106`), `SubgraphPosition` (`:118`), and the top-level `GraphLayout` (owned position lists plus width/height/spacing/algorithm/direction — `:127`). Inputs are `GraphLayoutOptions` (algorithm, direction, `node_sep`, `rank_sep`, `edge_sep`, `use_splines`, `max_iterations` — `:146`) and `SvgGeneratorOptions` (padding, default colors, font, and an optional `DiagramTheme*` — `:157`).
+Radiant first lays out every direct child with its normal layout engine. The retained Lambda callback receives ephemeral Velmt handles containing each child's border-box dimensions and attributes. `graph.layout.from_velmts()` builds the canonical map model, calls `graph.layout.compute()`, and returns border-box top-left placements plus routed edge geometry. The callback is pure; registration is the explicit orchestration step.
 
-The internal algorithm types are `LayoutNode` (id/label/shape/dims plus computed x,y/rank/order and borrowed in/out edge ref-lists — `:171`), `LayoutEdge` (from/to nodes, `is_back_edge`, arrow flags, owned `path_points` — `:195`), `LayoutLayer` (rank + node refs — `:216`), `LayoutSubgraph` (member node ids, nested subgraph refs, bbox, padding/label_height — `:222`), and `LayoutGraph` (owned node/edge/layer/subgraph lists plus min/max bounds — `:242`).
-
-Extraction is in `layout_graph.cpp`: `build_layout_graph` (`layout_graph.cpp:264`) allocates the arena and recursively extracts the parsed `Element` tree via `extract_nodes_recursive`/`extract_edges_recursive`/`extract_subgraphs_recursive` (`:97,121,219`). The public entry `layout_graph` (`layout_graph.cpp:463`) auto-selects an algorithm and delegates through `layout_graph_with_options` (`:478`), which builds the graph, runs the algorithm, post-processes edges, and finally converts to the public result via `extract_graph_layout` (`:335`). `create_default_layout_options` (`:11`) seeds dagre, TB direction, `node_sep=60`, `rank_sep=80`, `use_splines=false`, `max_iterations=100`.
+The resulting document retains its Lambda runtime, heap, JIT code, callback, and generated layer roots. Callback lookup is scoped by the parent document's retained heap plus layout name, so simultaneous documents cannot overwrite one another's `lambda-graph` registration.
 
 ---
 
@@ -119,34 +117,24 @@ Extraction is in `layout_graph.cpp`: `build_layout_graph` (`layout_graph.cpp:264
 
 <img alt="Dagre-inspired five phase graph layout" src="diagram/rad14_dagre_phases.svg" width="720">
 
-`layout_graph_dagre` (`graph_dagre.cpp:545`) runs a five-phase hierarchical layout. It is **Dagre-inspired, not a faithful port of the JS Dagre library** — this is the single most important accuracy point in this section, and it is verifiable by the *absence* of the JS-Dagre machinery.
+`lambda/package/graph/dagre.ls` is **Dagre-inspired, not a faithful port of the JS Dagre library**. It normalizes nodes and edges, assigns longest-path ranks, creates layers, performs a barycenter ordering sweep, assigns centered coordinates, transforms those coordinates for TB/BT/LR/RL, clips endpoints to node rectangles, and emits orthogonal paths.
 
-1. **Back-edge marking.** `detect_back_edges_dfs` (`graph_dagre.cpp:18`) runs a WHITE/GRAY/BLACK DFS and marks edges that revisit a GRAY (on-stack) node as `is_back_edge` — it *marks* cycles rather than removing an acyclic component (`detect_and_mark_back_edges`, `:62`).
-2. **Rank assignment.** `dagre_assign_ranks` (`graph_dagre.cpp:128`) uses **longest-path DFS** (`compute_rank_dfs`, `:90`) ignoring back edges — *not* network-simplex or tight-tree ranking.
-3. **Layer creation.** `dagre_create_layers` (`graph_dagre.cpp:178`) buckets nodes by rank and assigns per-layer `order`.
-4. **Crossing reduction.** `dagre_reduce_crossings` (`graph_dagre.cpp:281`) is the **barycenter heuristic** (`compute_barycenter`, `:218`; `count_crossings_between_layers`, `:236`) with up/down sweeps capped by `opts->max_iterations` — *not* Brandes–Köpf ordering.
-5. **Coordinate assignment.** `dagre_assign_coordinates` (`graph_dagre.cpp:406`) is a **simple grid**: y from rank × `rank_sep`, x from order within the centered layer, then a shift so min = (0,0). Edge routing `dagre_route_edges` (`:505`) emits straight lines (or splines when `use_splines`) with endpoints clipped to node rectangles (`clip_to_node_boundary`, `:483`).
-
-What is **absent** (grep-confirmed zero hits, matching the digest): network-simplex ranking, **dummy/virtual nodes** for multi-rank edges, `normalize`/`denormalize` steps, Brandes–Köpf x-coordinate assignment, and **any subgraph/cluster-nesting logic inside the algorithm** — subgraphs are only extracted and post-hoc bounding-boxed in `layout_graph.cpp`, never used as layout constraints. The consequence is that long edges are routed straight over grid coordinates and may overlap intervening nodes. Document this as "Dagre-inspired," never "Dagre port."
-
-Edge post-processing is separate, in `graph_edge_utils.cpp`: `snap_to_orthogonal` (`graph_edge_utils.cpp:11`) turns diagonals into L-bends, `remove_collinear_points` (`:67`) prunes redundant points, and shape-boundary endpoint clipping handles non-rectangular nodes — `clip_to_diamond_boundary`/`clip_to_circle_boundary`/`clip_to_ellipse_boundary`/`clip_to_stadium_boundary`/`clip_to_hexagon_boundary` (`:112,131,149,176,214`), selected by `shape_needs_special_clipping` (`:271`). `post_process_edges` (`:342`) clips, orthogonalizes, then re-clips (because orthogonalization changes segment directions).
+Network-simplex ranking, dummy nodes for long edges, Brandes-Kopf coordinate assignment, shape-specific clipping, parallel-edge separation, self-loop routing, clusters, and edge-label placement are not yet implemented. Long or cyclic graphs can therefore produce weaker ordering and routes than Graphviz or JS Dagre.
 
 ---
 
-## 8. Graph → SVG, and the round-trip back into the renderer
+## 8. Generated SVG paint and CLI flow
 
-`graph_to_svg_with_options` (`graph_to_svg.cpp:577`) builds a **Lambda SVG `Element` tree via `MarkBuilder`** (`:586`) — the same data model as parsed SVG, so the output feeds straight back into the inline-SVG renderer or a formatter. It emits, back-to-front, an arrow-marker def, an optional themed background rect, an edges group, a subgraphs group (rounded rect + header band), and a nodes group (shape + label), then wraps them in a translated main group. Node shapes are dispatched by `render_node_shape` (`:141`) across box/circle/ellipse/diamond/hexagon/triangle/stadium/cylinder/etc.; edges by `render_edge_path` (`:466`) with `render_arrowhead` (`:434`) and `create_arrow_marker` (`:558`). Themed color getters (`graph_to_svg.cpp:46-88`) resolve from `SvgGeneratorOptions.theme` and fall back to defaults when it is null. `graph_to_svg` (`:781`) is the default-options wrapper; `create_default_svg_options`/`create_themed_svg_options` (`:14,28`) build the options.
+`graph.transform.paint` converts routed edge points into immutable `<svg>` elements returned as custom-layout `paint_layers`. Radiant roots those elements for the document lifetime and merges generated layers with normal node child views using one stable signed-z sequence. SVG, PDF, and raster backends consume the same sequence; hit testing consumes it in reverse while skipping generated layers, which are initially non-interactive.
 
-Colors come from `graph_theme.cpp/.hpp`. `DiagramTheme` (`graph_theme.hpp:31`) is a two-color foundation (`bg`/`fg`) plus nine derived colors computed by blending at documented ratios (`ThemeMixRatios`, `graph_theme.hpp:60-70`: text 100%, line 30%, arrow 50%, node_fill 3%, node_stroke 20%, group_header 5%, surface 8% of fg over bg). About fifteen predefined themes are registered (tokyo-night, nord, dracula, catppuccin-mocha, one-dark, github-dark/light, solarized-light, catppuccin-latte, zinc-dark/light; `THEME_DEFAULT` aliases zinc-dark), resolved by `get_theme_by_name` (`graph_theme.cpp:412`) and mixable via `mix_colors`/`parse_hex_color`/`format_hex_color`.
-
-The full round-trip is driven from `main.cpp`: a `.mmd`/`.d2`/`.dot`/`.gv` input is detected (`main.cpp:3079`), parsed by `parse_graph_mermaid`/`parse_graph_d2`/`parse_graph_dot` (`:3111-3119`), laid out by `layout_graph` (`:3130`), converted by `graph_to_svg[_with_options]` (`:3140,3144`), and the resulting SVG element is set as the input root (`:3153`) so it is either serialized with `format_xml` (`:3160`) or re-rendered through the SVG renderer — the same element model everywhere.
+`radiant/graph_bridge.cpp` builds a small Lambda document that imports the transform package, parses the source with the appropriate graph flavor, installs `lambda-graph`, and returns `to_html()`. `render`, `view`, `layout`, and the generic document loader all use this bridge. Final SVG/PDF/PNG/JPEG output is produced by normal Radiant rendering; there is no direct C graph-to-SVG path.
 
 ---
 
 ## 9. Known Issues & Future Improvements
 
 1. **`render_svg_inline.cpp` is a 5633-line monolith.** It mixes SVG parsing, CSS style resolution, path/arc geometry, gradients/patterns, filters, clips/masks, and text glyph rendering in one file. *Improvement:* split along the natural seams — path parsing, filters/masks, gradients/patterns, and text — into separate TUs sharing `SvgInlineRenderContext`.
-2. **Graph layout is Dagre-inspired, not a faithful port** (`graph_dagre.cpp`). No network-simplex ranking, no dummy/virtual nodes for multi-rank edges, no `normalize`/`denormalize`, no Brandes–Köpf x-assignment, and no subgraph/cluster nesting inside the algorithm (grep-confirmed zero hits; subgraphs are only extracted/positioned in `layout_graph.cpp`). Long edges routed straight over grid coordinates can overlap intervening nodes. *Improvement:* introduce dummy nodes for long edges before crossing reduction to enable proper spline routing.
+2. **Graph layout is Dagre-inspired, not a faithful port** (`lambda/package/graph/dagre.ls`). It still lacks network-simplex ranking, dummy nodes, Brandes-Kopf x-assignment, clusters, parallel-edge separation, and self-loop routing. *Improvement:* normalize long edges through dummy ranks before repeated crossing-reduction sweeps.
 3. **Backend caps parity gaps** (`rdt_vector_tvg.cpp:774` vs `rdt_vector_cg.mm:273`). Both leave `opacity_group`, `blend_modes`, `color_matrix_filters`, and `native_text_runs` = false, so those effects silently no-op or fall back to raster (§5.2). The ThorVG native `gaussian_blur` cap is `__APPLE__`-only (`rdt_vector_tvg.cpp:787-791`) — the CSS-filter blur path degrades on Linux/Windows ThorVG builds (but inline-SVG `<feGaussianBlur>` does not; see §5.4).
 4. **Fixed clip-stack depth in the ThorVG backend.** `RDT_MAX_CLIP_DEPTH` is hard-coded to 8 (`rdt_vector_tvg.cpp:1461`); overflow is logged and the clip dropped (`:1476`). Deeply nested SVG clip paths beyond depth 8 silently lose clipping.
 5. **Two directions named "SVG" are easy to confuse.** `render_svg_inline.cpp` is SVG *input* (element tree → pixels); `render_svg.cpp` is SVG *output* (view tree → SVG text). They share only the `PaintSvgSubscene` builder. *Improvement:* rename `render_svg.cpp` to something like `render_svg_output.cpp` to make the direction unmistakable.
@@ -165,12 +153,10 @@ The full round-trip is driven from `main.cpp`: a `.mmd`/`.d2`/`.dot`/`.gv` input
 | `radiant/render_svg_inline.cpp` / `.hpp` | Inline-SVG renderer: `render_svg_element` dispatch, per-tag handlers, path/arc/transform parsing, gradients/patterns/filters/clips/masks, dual-path text, record/replay into `RdtVector`. |
 | `radiant/render_svg.cpp` / `.hpp` | Opposite direction: view-tree → SVG-text serializer (`render_view_tree_to_svg`, `svg_make_backend`) with raster fallback for inexpressible effects. |
 | `radiant/render_path.cpp`, `radiant/render_vector_path.cpp` | Rounded-rect/clip path construction and CSS `VectorPathProp` rendering through `rdt_*`. |
-| `radiant/layout_graph.cpp` / `.hpp` | Extract a `LayoutGraph` from a parsed graph `Element` and produce the public `GraphLayout`. |
-| `radiant/graph_dagre.cpp` | The Dagre-inspired five-phase hierarchical layout (back-edge marking, longest-path ranking, layering, barycenter crossing reduction, grid coordinates, edge routing). |
-| `radiant/graph_edge_utils.cpp` / `.hpp` | Edge orthogonal snapping, collinear pruning, and shape-boundary endpoint clipping. |
-| `radiant/graph_layout_types.hpp` | Public and internal graph data structures over session-domain owned lists. |
-| `radiant/graph_theme.cpp` / `.hpp` | `DiagramTheme`, mix ratios, ~15 predefined themes, color parsing/mixing. |
-| `radiant/graph_to_svg.cpp` / `.hpp` | Emit a Lambda SVG `Element` (via `MarkBuilder`) from the layout so output re-enters the SVG renderer. |
+| `lambda/package/graph/layout.ls`, `dagre.ls` | Pure canonical graph geometry, ranking, coordinates, and edge routing. |
+| `lambda/package/graph/transform.ls`, `transform/*` | Semantic HTML, custom-layout installation, themes, and generated SVG edge layers. |
+| `radiant/graph_bridge.cpp` | Shared graph-file to Lambda-document bridge for render, view, layout, and generic loading. |
+| `radiant/stacking_order.cpp` | Stable signed-z merge of generated layers and measured node views. |
 
 ## Appendix B — Related documents
 

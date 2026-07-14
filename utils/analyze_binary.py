@@ -223,7 +223,6 @@ RADIANT_FILE_MODULES = {
     "layout_flex_measurement": "Radiant: CSS layout",
     "layout_flex_multipass": "Radiant: CSS layout",
     "layout_form":           "Radiant: CSS layout",
-    "layout_graph":          "Radiant: CSS layout",
     "layout_grid":           "Radiant: CSS layout",
     "layout_grid_multipass": "Radiant: CSS layout",
     "layout_inline":         "Radiant: CSS layout",
@@ -264,9 +263,6 @@ RADIANT_FILE_MODULES = {
     "scroller":              "GUI/window/events",
     "state_store":           "GUI/window/events",
     "ui_context":            "GUI/window/events",
-    # graph utilities
-    "graph_theme":           "Graph utilities",
-    "graph_to_svg":          "Graph utilities",
     # CLI/commands
     "cmd_layout":            "CLI/commands",
 }

@@ -1669,6 +1669,7 @@ void render_outline_deferred(RenderContext* rdcon, ViewBlock* view);
 void render_children(RenderContext* rdcon, View* view);
 void render_raster_positioned_children(RenderContext* rdcon, ViewBlock* block);
 void render_raster_positive_z_descendants(RenderContext* rdcon, View* view);
+bool render_raster_custom_layout_children(RenderContext* rdcon, ViewBlock* block);
 void render_raster_view_tree(RenderContext* rdcon, ViewTree* view_tree);
 RenderElementMarkerScope render_element_marker_begin(RenderContext* rdcon, ViewBlock* block);
 void render_element_marker_end(RenderContext* rdcon, RenderElementMarkerScope* scope);
@@ -1708,6 +1709,20 @@ typedef struct IRect {
 
 typedef struct RenderBackend RenderBackend;
 typedef struct PaintEffectGroup PaintEffectGroup;
+typedef struct CustomLayoutPaintLayer CustomLayoutPaintLayer;
+
+typedef struct RadiantStackPaintEntry {
+    View* view;
+    CustomLayoutPaintLayer* layer;
+    int z;
+    int order;
+    bool is_generated_layer;
+} RadiantStackPaintEntry;
+
+typedef struct RadiantStackPaintList {
+    RadiantStackPaintEntry* entries;
+    int count;
+} RadiantStackPaintList;
 
 struct RenderBackend {
     void* ctx;   // backend-specific context (SvgRenderContext*, PdfRenderContext*, etc.)
@@ -1739,6 +1754,7 @@ struct RenderBackend {
     // Called for HTM_TAG_SVG blocks. If NULL, skipped.
     void (*render_inline_svg)(void* ctx, ViewBlock* block, float abs_x, float abs_y,
                               FontBox* font, Color color);
+    void (*render_svg_subscene)(void* ctx, const PaintSvgSubscene* subscene);
 
     // ── Children group wrappers ────────────────────────────────────────
     // Emits container markup around a block's children (e.g. <g class="block"> in SVG).
@@ -1789,6 +1805,10 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
 void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* first_child);
 void render_walk_positioned_children(RenderBackend* backend, RenderWalkState* state, ViewBlock* block);
 void render_walk_positive_z_descendants(RenderBackend* backend, RenderWalkState* state, View* first_child);
+void render_walk_view_one(RenderBackend* backend, RenderWalkState* state, View* view);
+
+RadiantStackPaintList radiant_stack_collect_custom_layout_paint(ViewBlock* block);
+void radiant_stack_free_custom_layout_paint(RadiantStackPaintList* list);
 
 // ===== render_geometry.hpp =====
 Rect render_geometry_adjust_box_rect(Rect rect, CssEnum box, float scale,
@@ -3408,6 +3428,11 @@ int render_html_to_output_target(const char* html_file, const char* output_file,
                                  float scale, float pixel_ratio,
                                  int jpeg_quality);
 
+// Graph syntax files enter Radiant through an in-memory Lambda transform document.
+const char* graph_bridge_flavor_for_path(const char* graph_file);
+char* build_graph_to_html_bridge_script(const char* graph_file, const char* theme_name,
+                                        const char* log_prefix);
+
 // ===== render_overlay.hpp =====
 struct RenderContext;
 
@@ -3605,6 +3630,8 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
  * @param view ViewBlock for the SVG element
  */
 void render_inline_svg(RenderContext* rdcon, ViewBlock* view);
+void render_custom_svg_subscene(RenderContext* rdcon, Element* svg_element,
+                                float viewport_width, float viewport_height);
 
 // ===== render_text.hpp =====
 void render_text_view(RenderContext* rdcon, ViewText* text_view);

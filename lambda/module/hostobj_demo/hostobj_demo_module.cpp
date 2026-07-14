@@ -247,6 +247,7 @@ static const JubeModuleDef s_hostobj_demo_module = {
     s_hostobj_demo_interface,
     s_hostobj_demo_bindings,
     (int32_t)(sizeof(s_hostobj_demo_bindings) / sizeof(s_hostobj_demo_bindings[0])),
+    NULL,
 };
 
 extern "C" void hostobj_demo_jube_register_static(void) {

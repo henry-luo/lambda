@@ -5189,8 +5189,11 @@ static void svg_subscene_serialize_element(StrBuf* out, Element* root,
                     continue;
                 }
 
-                TypeId ftype = field->type->type_id;
                 Item attr_item = map_shape_field_to_item(e->data, field);
+                // Computed Lambda SVG attributes often infer as `any`; serialize
+                // the runtime value type or dynamic d/stroke/id values disappear.
+                TypeId ftype = field->type->type_id;
+                if (ftype == LMD_TYPE_ANY) ftype = get_type_id(attr_item);
 
                 if (ftype == LMD_TYPE_STRING) {
                     String* str = attr_item.get_safe_string();
@@ -5201,12 +5204,14 @@ static void svg_subscene_serialize_element(StrBuf* out, Element* root,
                         svg_subscene_escape_attr(out, str->chars, str->len);
                         strbuf_append_char(out, '"');
                     }
-                } else if (ftype == LMD_TYPE_INT) {
+                } else if (ftype == LMD_TYPE_INT || ftype == LMD_TYPE_INT64 ||
+                           ftype == LMD_TYPE_UINT64) {
                     int64_t val = it2i(attr_item);
                     strbuf_append_char(out, ' ');
                     strbuf_append_str_n(out, field->name->str, field->name->length);
                     strbuf_append_format(out, "=\"%" PRId64 "\"", val);
-                } else if (ftype == LMD_TYPE_FLOAT) {
+                } else if (ftype == LMD_TYPE_FLOAT || ftype == LMD_TYPE_FLOAT64 ||
+                           ftype == LMD_TYPE_NUM_SIZED) {
                     double val = it2d(attr_item);
                     strbuf_append_char(out, ' ');
                     strbuf_append_str_n(out, field->name->str, field->name->length);
@@ -5586,4 +5591,32 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     }
 
     log_debug("[SVG] render_inline_svg: rendered to buffer");
+}
+
+void render_custom_svg_subscene(RenderContext* rdcon, Element* svg_element,
+                                float viewport_width, float viewport_height) {
+    if (!rdcon || !svg_element || viewport_width <= 0.0f || viewport_height <= 0.0f ||
+        !rdcon->dl || !rdcon->paint_list) {
+        return;
+    }
+    float scale = rdcon->scale > 0.0f ? rdcon->scale : 1.0f;
+    RdtMatrix base_transform = {
+        scale, 0.0f, rdcon->block.x,
+        0.0f, scale, rdcon->block.y,
+        0.0f, 0.0f, 1.0f
+    };
+    if (rdcon->has_transform) {
+        base_transform = rdt_matrix_multiply(&rdcon->transform, &base_transform);
+    }
+    FontContext* font_ctx = rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr;
+    Pool* pool = (rdcon->ui_context && rdcon->ui_context->document)
+        ? rdcon->ui_context->document->pool : nullptr;
+    Color current_color = rdcon->color;
+    RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
+    g_svg_active_rdcon = rdcon;
+    render_svg_to_display_list(svg_element, viewport_width, viewport_height,
+                               pool, scale, font_ctx, &base_transform, rdcon->dl,
+                               &current_color, nullptr, nullptr, 1.0f, false,
+                               nullptr, true, -1.0f, rdcon->paint_list);
+    g_svg_active_rdcon = saved_svg_rdcon;
 }

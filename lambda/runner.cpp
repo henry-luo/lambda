@@ -15,6 +15,7 @@
 #include "lambda-error.h"
 #include "lambda-stack.h"
 #include "module_registry.h"
+#include "jube/jube_registry.h"
 #include "js/js_runtime.h"
 #include "js/js_event_loop.h"
 #include "input/css/css_style.hpp"
@@ -1781,6 +1782,10 @@ void runtime_cleanup(Runtime* runtime) {
             free_document((DomDocument*)runtime->dom_doc);
             runtime->dom_doc = NULL;
         }
+
+        // Jube modules may cache heap-owned callbacks across repeated page
+        // interactions; release those roots before this heap disappears.
+        jube_notify_heap_cleanup(runtime->heap);
 
         print_heap_entries();
         check_memory_leak();

@@ -431,6 +431,10 @@ struct JubeModuleDef {
     const char* interface_decl;            // Lambda-type-syntax module interface
     const JubeTypeBinding* type_bindings;  // one per declared type
     int32_t type_binding_count;
+
+    // Optional cleanup for values rooted in one Lambda heap. Called while the
+    // heap is active, immediately before that runtime destroys it.
+    void (*heap_cleanup)(void* heap);
 };
 
 // Size of the frozen v1 layout: everything before the DOM3 additive tail.

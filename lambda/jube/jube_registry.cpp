@@ -748,6 +748,20 @@ const JubeModuleDef* jube_find_static_module(const char* name) {
     return jube_static_modules[index].module;
 }
 
+void jube_notify_heap_cleanup(void* heap) {
+    if (!heap) return;
+    size_t field_end = offsetof(JubeModuleDef, heap_cleanup) +
+        sizeof(((JubeModuleDef*)0)->heap_cleanup);
+    for (int i = 0; i < jube_static_modules_count; i++) {
+        const JubeModuleDef* module = jube_static_modules[i].module;
+        if (!module || !jube_static_modules[i].initialized ||
+            !jube_module_has_field(module, field_end) || !module->heap_cleanup) {
+            continue;
+        }
+        module->heap_cleanup(heap);
+    }
+}
+
 const JubeTypeDef* jube_find_type_by_host_type(const void* host_type) {
     if (!host_type) return NULL;
     for (int i = 0; i < jube_static_modules_count; i++) {

@@ -1,0 +1,9 @@
+{
+  tag: 'graph',
+  class: "lambda-graph lambda-graph-theme-nord",
+  theme: "nord",
+  direction: "TB",
+  counts: [5, 5],
+  first_node: ["A", "Start"],
+  first_edge: ["A", "B", "true", "true"]
+}

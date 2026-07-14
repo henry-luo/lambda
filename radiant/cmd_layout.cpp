@@ -3677,6 +3677,30 @@ static DomDocument* load_pdf_bridge_doc(Url* pdf_url, int viewport_width,
     return doc;
 }
 
+static DomDocument* load_graph_bridge_doc(Url* graph_url, int viewport_width,
+                                          int viewport_height, Pool* pool) {
+    if (!graph_url) return nullptr;
+    char* graph_path = url_to_local_path(graph_url);
+    const char* graph_source = graph_path ? graph_path : url_get_href(graph_url);
+    if (!graph_source || !graph_source[0]) {
+        log_error("[load_html_doc] GRAPH_BRIDGE_PATH: failed to resolve input path");
+        if (graph_path) mem_free(graph_path);
+        return nullptr;
+    }
+
+    char* bridge_source = build_graph_to_html_bridge_script(graph_source, nullptr, "load_html_doc");
+    if (!bridge_source) {
+        if (graph_path) mem_free(graph_path);
+        return nullptr;
+    }
+
+    DomDocument* doc = load_lambda_script_source_doc(graph_url, bridge_source,
+                                                     viewport_width, viewport_height, pool);
+    mem_free(bridge_source);
+    if (graph_path) mem_free(graph_path);
+    return doc;
+}
+
 static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int viewport_width, int viewport_height, float pixel_ratio) {
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
@@ -3702,6 +3726,10 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
         // Load Lambda script: evaluate script → wrap result → layout
         log_info("[load_html_doc] Detected Lambda script file, using script evaluation pipeline");
         doc = load_lambda_script_doc(full_url, viewport_width, viewport_height, pool);
+    } else if (ext && (strcmp(ext, ".mmd") == 0 || strcmp(ext, ".d2") == 0 ||
+                       strcmp(ext, ".dot") == 0 || strcmp(ext, ".gv") == 0)) {
+        log_info("[load_html_doc] Detected graph file, using Lambda graph package pipeline");
+        doc = load_graph_bridge_doc(full_url, viewport_width, viewport_height, pool);
     } else if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
         // Load LaTeX document via LaTeX→HTML pipeline
         log_info("[load_html_doc] Detected LaTeX file, using LaTeX→HTML pipeline");
@@ -6384,6 +6412,8 @@ static bool layout_single_file(
         strcmp(ext, ".latex") == 0 || strcmp(ext, ".md") == 0 ||
         strcmp(ext, ".markdown") == 0 || strcmp(ext, ".xml") == 0 ||
         strcmp(ext, ".wiki") == 0 || strcmp(ext, ".pdf") == 0 ||
+        strcmp(ext, ".mmd") == 0 || strcmp(ext, ".d2") == 0 ||
+        strcmp(ext, ".dot") == 0 || strcmp(ext, ".gv") == 0 ||
         strcmp(ext, ".svg") == 0 || strcmp(ext, ".png") == 0 ||
         strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0 ||
         strcmp(ext, ".gif") == 0
@@ -6427,6 +6457,10 @@ static bool layout_single_file(
     if (ext && strcmp(ext, ".ls") == 0) {
         log_info("[Layout] Detected Lambda script file, using script evaluation pipeline");
         doc = load_lambda_script_doc(input_url, viewport_width, viewport_height, pool);
+    } else if (ext && (strcmp(ext, ".mmd") == 0 || strcmp(ext, ".d2") == 0 ||
+                       strcmp(ext, ".dot") == 0 || strcmp(ext, ".gv") == 0)) {
+        log_info("[Layout] Detected graph file, using Lambda graph package pipeline");
+        doc = load_graph_bridge_doc(input_url, viewport_width, viewport_height, pool);
     } else if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
         // Load LaTeX document via LaTeX→HTML pipeline
         log_info("[Layout] Detected LaTeX file, using LaTeX→HTML pipeline");

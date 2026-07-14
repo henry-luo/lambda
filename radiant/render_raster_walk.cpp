@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "layout_custom.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
@@ -188,6 +189,28 @@ void render_raster_positive_z_descendants(RenderContext* rdcon, View* view) {
     RenderWalkState walk_state;
     render_raster_walk_state_init(&walk_state, rdcon);
     render_walk_positive_z_descendants(&backend, &walk_state, view);
+}
+
+bool render_raster_custom_layout_children(RenderContext* rdcon, ViewBlock* block) {
+    if (!rdcon || !block || !block->custom_layout_paint) return false;
+    RadiantStackPaintList paint = radiant_stack_collect_custom_layout_paint(block);
+    RenderBackend backend;
+    render_raster_backend_init(&backend, rdcon);
+    RenderWalkState walk_state;
+    render_raster_walk_state_init(&walk_state, rdcon);
+    for (int i = 0; i < paint.count; i++) {
+        RadiantStackPaintEntry* entry = &paint.entries[i];
+        if (entry->is_generated_layer) {
+            if (entry->layer && entry->layer->content) {
+                render_custom_svg_subscene(rdcon, entry->layer->content,
+                                           block->width, block->height);
+            }
+        } else {
+            render_walk_view_one(&backend, &walk_state, entry->view);
+        }
+    }
+    radiant_stack_free_custom_layout_paint(&paint);
+    return true;
 }
 
 void render_children(RenderContext* rdcon, View* view) {

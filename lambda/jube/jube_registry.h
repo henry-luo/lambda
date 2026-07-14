@@ -12,6 +12,7 @@ void jube_register_builtin_modules(void);
 int jube_static_module_count(void);
 const JubeModuleDef* jube_static_module_at(int index);
 const JubeModuleDef* jube_find_static_module(const char* name);
+void jube_notify_heap_cleanup(void* heap);
 const JubeTypeDef* jube_find_type_by_host_type(const void* host_type);
 
 // DOM3: shared per-type prototype object (lazy, GC-rooted) for types with a

@@ -25,10 +25,6 @@ ALLOW_LIST = {
     "render_glyph_run_raster_lower.hpp",
     "state_store_internal.hpp",
     "event_sim.hpp",
-    "graph_layout_types.hpp",
-    "graph_theme.hpp",
-    "graph_to_svg.hpp",
-    "layout_graph.hpp",
 }
 
 SOURCE_EXTS = (".c", ".cpp", ".mm")

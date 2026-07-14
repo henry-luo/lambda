@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "view.hpp"
+#include "layout_custom.hpp"
 #include "webview.h"
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -30,6 +31,8 @@ typedef struct RenderWalkBlockDriver {
     RenderWalkState* state;
     RenderWalkBlockPhase phase;
 } RenderWalkBlockDriver;
+
+static void render_walk_view(RenderBackend* backend, RenderWalkState* state, View* view);
 
 static float render_walk_css_opacity(const InlineProp* in_line) {
     if (!in_line) return 1.0f;
@@ -185,17 +188,46 @@ static double render_walk_block_paint_children(void* ctx, ViewBlock* block, void
 
     RenderBackend* backend = driver->backend;
     RenderWalkState* state = driver->state;
-    if (block->first_child) {
+    if (block->first_child || block->custom_layout_paint) {
         if (backend->begin_block_children) {
             backend->begin_block_children(backend->ctx, block);
         }
 
-        render_walk_children(backend, state, block->first_child);
+        if (block->custom_layout_paint) {
+            RadiantStackPaintList paint = radiant_stack_collect_custom_layout_paint(block);
+            for (int i = 0; i < paint.count; i++) {
+                RadiantStackPaintEntry* entry = &paint.entries[i];
+                if (!entry->is_generated_layer) {
+                    render_walk_view(backend, state, entry->view);
+                    continue;
+                }
+                if (!backend->render_svg_subscene || !entry->layer ||
+                    !entry->layer->content) {
+                    continue;
+                }
+                RdtMatrix transform = rdt_matrix_translate(state->x, state->y);
+                Bound clip = {state->x, state->y,
+                              state->x + block->width, state->y + block->height};
+                PaintSvgSubscene subscene = {};
+                render_svg_build_subscene(
+                    &subscene, entry->layer->content, block->width, block->height,
+                    block->doc ? block->doc->pool : nullptr, 1.0f,
+                    state->ui_context ? state->ui_context->font_ctx : nullptr,
+                    &transform, &clip, &state->color, nullptr, nullptr, 1.0f,
+                    false, nullptr, true, -1.0f);
+                backend->render_svg_subscene(backend->ctx, &subscene);
+            }
+            radiant_stack_free_custom_layout_paint(&paint);
+        } else {
+            render_walk_children(backend, state, block->first_child);
+        }
 
         if (block->position) {
             render_walk_positioned_children(backend, state, block);
         }
-        render_walk_positive_z_descendants(backend, state, block->first_child);
+        if (!block->custom_layout_paint) {
+            render_walk_positive_z_descendants(backend, state, block->first_child);
+        }
 
         if (backend->end_block_children) {
             backend->end_block_children(backend->ctx, block);
@@ -342,6 +374,10 @@ static void render_walk_view(RenderBackend* backend, RenderWalkState* state, Vie
         default:
             break;
     }
+}
+
+void render_walk_view_one(RenderBackend* backend, RenderWalkState* state, View* view) {
+    render_walk_view(backend, state, view);
 }
 
 void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* view) {
