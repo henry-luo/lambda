@@ -277,6 +277,16 @@ static void apply_html_uniform_border_style(LayoutContext* lycon, ViewBlock* blo
     apply_html_uniform_border_base(lycon, block, width, style, true);
 }
 
+static void apply_html_button_box_defaults(LayoutContext* lycon, ViewBlock* block) {
+    ensure_html_boundary_prop(lycon, block);
+    block->bound->padding.top = block->bound->padding.bottom = FormDefaults::BUTTON_PADDING_V;
+    block->bound->padding.left = block->bound->padding.right = FormDefaults::BUTTON_PADDING_H;
+    block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
+        block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
+    apply_html_uniform_border_style(
+        lycon, block, FormDefaults::BUTTON_BORDER, CSS_VALUE_OUTSET);
+}
+
 static void apply_html_width_px(LayoutContext* lycon, ViewBlock* block, float width) {
     BlockProp* blk = ensure_html_block_prop(lycon, block);
     lycon->block.given_width = width;
@@ -999,21 +1009,15 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     }
     case HTM_TAG_IFRAME: {
-        ensure_html_boundary_prop(lycon, block);
-        if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
         // HTML spec §15.5.14: iframe { border: 2px inset; }
-        block->bound->border->width.top = block->bound->border->width.right =
-            block->bound->border->width.bottom = block->bound->border->width.left = 2;
-        block->bound->border->width.top_specificity = block->bound->border->width.left_specificity =
-            block->bound->border->width.right_specificity = block->bound->border->width.bottom_specificity = -1;
-        block->bound->border->top_style = block->bound->border->bottom_style = CSS_VALUE_INSET;
-        block->bound->border->left_style = block->bound->border->right_style = CSS_VALUE_INSET;
-        block->bound->border->top_color.r = block->bound->border->top_color.g =
-            block->bound->border->top_color.b = 128; block->bound->border->top_color.a = 255;
-        block->bound->border->left_color = block->bound->border->top_color;
-        block->bound->border->bottom_color.r = block->bound->border->bottom_color.g =
-            block->bound->border->bottom_color.b = 192; block->bound->border->bottom_color.a = 255;
-        block->bound->border->right_color = block->bound->border->bottom_color;
+        BorderProp* iframe_border = apply_html_uniform_border_base(
+            lycon, block, 2.0f, CSS_VALUE_INSET, true);
+        iframe_border->top_color.r = iframe_border->top_color.g =
+            iframe_border->top_color.b = 128; iframe_border->top_color.a = 255;
+        iframe_border->left_color = iframe_border->top_color;
+        iframe_border->bottom_color.r = iframe_border->bottom_color.g =
+            iframe_border->bottom_color.b = 192; iframe_border->bottom_color.a = 255;
+        iframe_border->right_color = iframe_border->bottom_color;
         const char* frameborder_attr = elmt->get_attribute("frameborder");
         if (frameborder_attr) {
             size_t frameborder_len = strlen(frameborder_attr);
@@ -1150,29 +1154,20 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 lycon, elmt, block, 300.0f, 150.0f, true, true);
         }
         break;
-    case HTM_TAG_HR:
-        ensure_html_boundary_prop(lycon, block);
-        if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+    case HTM_TAG_HR: {
         // hr default: 1px border on all sides (creates 2px height from border-top + border-bottom)
         // This matches browser UA stylesheet behavior (CSS logical pixels)
-        block->bound->border->width.top = block->bound->border->width.bottom = 1;
-        block->bound->border->width.left = block->bound->border->width.right = 1;
-        block->bound->border->width.top_specificity = block->bound->border->width.left_specificity =
-            block->bound->border->width.right_specificity = block->bound->border->width.bottom_specificity = -1;
-        // Default border style: inset (typical browser default for hr)
-        block->bound->border->top_style = block->bound->border->bottom_style = CSS_VALUE_INSET;
-        block->bound->border->left_style = block->bound->border->right_style = CSS_VALUE_INSET;
+        BorderProp* hr_border = apply_html_uniform_border_base(
+            lycon, block, 1.0f, CSS_VALUE_INSET, true);
         // Default border colors for inset style: darker gray on top/left, lighter on bottom/right
         // Top/left: dark gray for 3D inset effect
-        block->bound->border->top_color.r = 128; block->bound->border->top_color.g = 128;
-        block->bound->border->top_color.b = 128; block->bound->border->top_color.a = 255;
-        block->bound->border->left_color.r = 128; block->bound->border->left_color.g = 128;
-        block->bound->border->left_color.b = 128; block->bound->border->left_color.a = 255;
+        hr_border->top_color.r = 128; hr_border->top_color.g = 128;
+        hr_border->top_color.b = 128; hr_border->top_color.a = 255;
+        hr_border->left_color = hr_border->top_color;
         // Bottom/right: lighter for 3D inset effect
-        block->bound->border->bottom_color.r = 192; block->bound->border->bottom_color.g = 192;
-        block->bound->border->bottom_color.b = 192; block->bound->border->bottom_color.a = 255;
-        block->bound->border->right_color.r = 192; block->bound->border->right_color.g = 192;
-        block->bound->border->right_color.b = 192; block->bound->border->right_color.a = 255;
+        hr_border->bottom_color.r = 192; hr_border->bottom_color.g = 192;
+        hr_border->bottom_color.b = 192; hr_border->bottom_color.a = 255;
+        hr_border->right_color = hr_border->bottom_color;
         // 8px margin top/bottom, auto left/right for horizontal centering (browser default)
         block->bound->margin.top = block->bound->margin.bottom = 8;  // CSS logical pixels
         block->bound->margin.left = block->bound->margin.right = 0;
@@ -1207,6 +1202,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             }
         }
         break;
+    }
     case HTM_TAG_B:
         apply_html_span_bold(lycon, span);
         break;
@@ -1569,13 +1565,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
         // Chrome UA: font-size 13.3333px, font-family Arial for form controls
         apply_html_form_control_font(lycon, block);
-        ensure_html_boundary_prop(lycon, block);
-        block->bound->padding.top = block->bound->padding.bottom = FormDefaults::BUTTON_PADDING_V;
-        block->bound->padding.left = block->bound->padding.right = FormDefaults::BUTTON_PADDING_H;
-        block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
-            block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
-        // Default border: 2px outset (Chrome UA stylesheet) — same as <input type=button/submit>
-        apply_html_uniform_border_style(lycon, block, FormDefaults::BUTTON_BORDER, CSS_VALUE_OUTSET);
+        apply_html_button_box_defaults(lycon, block);
         break;
     }
     case HTM_TAG_INPUT: {
@@ -1651,13 +1641,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
             // Button intrinsic size depends on value text - computed in layout
             // Default padding: 1px 6px (Chrome UA stylesheet)
-        ensure_html_boundary_prop(lycon, block);
-            block->bound->padding.top = block->bound->padding.bottom = FormDefaults::BUTTON_PADDING_V;
-            block->bound->padding.left = block->bound->padding.right = FormDefaults::BUTTON_PADDING_H;
-            block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
-                block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
-            // Default border: 2px outset (Chrome UA stylesheet)
-            apply_html_uniform_border_style(lycon, block, FormDefaults::BUTTON_BORDER, CSS_VALUE_OUTSET);
+            apply_html_button_box_defaults(lycon, block);
             break;
         case FORM_CONTROL_IMAGE:
             block->display.outer = CSS_VALUE_INLINE_BLOCK;

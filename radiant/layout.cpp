@@ -1443,14 +1443,9 @@ static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* e
     return true;
 }
 
-// apply vertical alignment to a view
-void view_vertical_align(LayoutContext* lycon, View* view) {
-    // CSS 2.1 §10.8.1: The line box height is determined by baseline-aligned content
-    // (max_ascender + max_descender) AND top/bottom-aligned content.
-    float baseline_line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
-    float max_tb = max(lycon->line.max_top_bottom_height,
-        max(lycon->line.max_top_height, lycon->line.max_bottom_height));
-    float line_height = max(baseline_line_height, max_tb);
+float line_baseline_position(LayoutContext* lycon, float* out_line_height) {
+    float line_height = max(lycon->block.line_height,
+                            lycon->line.max_ascender + lycon->line.max_descender);
     // CSS 2.1 §10.8.1: The strut is an invisible zero-width inline box with the
     // block element's font and line-height. Its half-leading-adjusted ascender
     // defines the minimum baseline position for the line. When only a smaller
@@ -1464,7 +1459,37 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 (lycon->block.line_height - strut_content_height) / 2.0f;
         }
     }
-    float baseline_pos = max(lycon->line.max_ascender, strut_baseline);
+    if (out_line_height) *out_line_height = line_height;
+    return max(lycon->line.max_ascender, strut_baseline);
+}
+
+static float inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
+                               float ascender, float descender,
+                               float baseline_pos, float border_top, float padding_top) {
+    float span_line_height = span->content_height;
+    float half_leading = (span_line_height - ascender - descender) / 2.0f;
+    float item_baseline = ascender + half_leading;
+    CssEnum align = span->in_line && span->in_line->vertical_align
+        ? span->in_line->vertical_align : lycon->line.vertical_align;
+    float align_offset = span->in_line && span->in_line->vertical_align
+        ? span->in_line->vertical_align_offset : lycon->line.vertical_align_offset;
+    float line_height = max(lycon->block.line_height,
+                            lycon->line.max_ascender + lycon->line.max_descender);
+    float vertical_offset = calculate_vertical_align_offset(
+        lycon, align, span_line_height, line_height, baseline_pos,
+        item_baseline, align_offset);
+    return lycon->block.advance_y + vertical_offset + half_leading - border_top - padding_top;
+}
+
+// apply vertical alignment to a view
+void view_vertical_align(LayoutContext* lycon, View* view) {
+    // CSS 2.1 §10.8.1: The line box height is determined by baseline-aligned content
+    // (max_ascender + max_descender) AND top/bottom-aligned content.
+    float baseline_line_height = 0.0f;
+    float baseline_pos = line_baseline_position(lycon, &baseline_line_height);
+    float max_tb = max(lycon->line.max_top_bottom_height,
+        max(lycon->line.max_top_height, lycon->line.max_bottom_height));
+    float line_height = max(baseline_line_height, max_tb);
     float replaced_baseline_pos = baseline_pos;
     if (lycon->line.has_replaced_content &&
         lycon->line.max_css_baseline_ascender > replaced_baseline_pos) {
@@ -1653,19 +1678,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             if (materialized_empty_inline) {
                 // CSS 2.1 §10.8.1: an empty inline still has its own font box
                 // within the line-height half-leading area.
-                float span_lh = span->content_height;
-                float hhea_content = span_asc + span_desc;
-                float half_leading = (span_lh - hhea_content) / 2.0f;
-                float item_baseline = span_asc + half_leading;
-                CssEnum align = (span->in_line && span->in_line->vertical_align) ?
-                    span->in_line->vertical_align : lycon->line.vertical_align;
-                float valign_offset = (span->in_line && span->in_line->vertical_align) ?
-                    span->in_line->vertical_align_offset : lycon->line.vertical_align_offset;
-                float inline_line_height = max(lycon->block.line_height,
-                    lycon->line.max_ascender + lycon->line.max_descender);
-                float vertical_offset = calculate_vertical_align_offset(lycon, align,
-                    span_lh, inline_line_height, baseline_pos, item_baseline, valign_offset);
-                span->y = lycon->block.advance_y + vertical_offset + half_leading - bt - pt;
+                span->y = inline_font_box_y(
+                    lycon, span, span_asc, span_desc, baseline_pos, bt, pt);
             } else if (use_anonymous_table_cell_fragment) {
                 // CSS 2.1 §17.2.1: an improper inline child of a row group is
                 // wrapped in anonymous table-row/table-cell boxes. Browser DOMRects
@@ -1687,26 +1701,13 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 // own box is positioned from its font metrics. Descendant inline
                 // boxes and atomic children may protrude outside it, but they do
                 // not enlarge the ancestor inline box's DOMRect.
-                float span_lh = span->content_height;
-                float hhea_content = span_asc + span_desc;
-                float half_leading = (span_lh - hhea_content) / 2.0f;
-                float item_baseline = span_asc + half_leading;
-
-                CssEnum align = (span->in_line && span->in_line->vertical_align) ?
-                    span->in_line->vertical_align : lycon->line.vertical_align;
-                float valign_offset = (span->in_line && span->in_line->vertical_align) ?
-                    span->in_line->vertical_align_offset : lycon->line.vertical_align_offset;
-                float line_height = max(lycon->block.line_height,
-                    lycon->line.max_ascender + lycon->line.max_descender);
-                float vertical_offset = calculate_vertical_align_offset(lycon, align,
-                    span_lh, line_height, baseline_pos, item_baseline, valign_offset);
-
                 // Position the content area top: inline_box_top + half_leading
                 // The baseline is at inline_box_top + item_baseline
                 // Content area top = baseline - ascender_for_content_area
                 // For matching browser: content_area_top ≈ inline_box_top + half_leading
                 // Since cell_height may differ from hhea, adjust by centering difference
-                span->y = lycon->block.advance_y + vertical_offset + half_leading - bt - pt;
+                span->y = inline_font_box_y(
+                    lycon, span, span_asc, span_desc, baseline_pos, bt, pt);
                 span->height = expected_height;
                 log_debug("inline box font-box placement: y=%.1f, h=%.1f, area=%.1f",
                          span->y, span->height, content_area);

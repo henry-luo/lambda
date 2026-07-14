@@ -816,21 +816,6 @@ static float flex_measure_text_child_vertical_extra(LayoutContext* lycon,
            flex_measure_vertical_border_sum(lycon, elem);
 }
 
-static float flex_measure_direct_text_children_max_width(LayoutContext* lycon,
-                                                         DomElement* elem,
-                                                         CssEnum text_transform = CSS_VALUE_NONE) {
-    float max_text_width = 0.0f;
-    for (DomNode* tc = elem ? elem->first_child : nullptr; tc; tc = tc->next_sibling) {
-        DomText* dt = tc->as_text();
-        if (dt && dt->text && dt->length > 0) {
-            TextIntrinsicWidths tw =
-                measure_text_intrinsic_widths(lycon, dt->text, dt->length, text_transform);
-            if (tw.max_content > max_text_width) max_text_width = tw.max_content;
-        }
-    }
-    return max_text_width;
-}
-
 static float flex_measure_select_max_option_text_width(LayoutContext* lycon,
                                                        ViewElement* elem) {
     float max_text_width = 0.0f;
@@ -849,7 +834,8 @@ static float flex_measure_select_max_option_text_width(LayoutContext* lycon,
     }
     for (DomElement* option = dom_select_next_option(elem, nullptr); option;
          option = dom_select_next_option(elem, option)) {
-        float option_width = flex_measure_direct_text_children_max_width(lycon, option);
+        float option_width = measure_direct_text_children_intrinsic_width(
+            lycon, option, false, CSS_VALUE_NONE);
         DomElement* parent = option->parent ? option->parent->as_element() : nullptr;
         if (parent && parent->tag() == HTM_TAG_OPTGROUP) {
             option_width += FormDefaults::OPTGROUP_OPTION_INDENT;
@@ -1564,8 +1550,8 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                 if (elem->font && elem->font->font_size > 0 && lycon->ui_context) {
                     setup_font(lycon->ui_context, &lycon->font, elem->font);
                 }
-                float max_text_width =
-                    flex_measure_direct_text_children_max_width(lycon, elem, btn_text_transform);
+                float max_text_width = measure_direct_text_children_intrinsic_width(
+                    lycon, elem, false, btn_text_transform);
                 lycon->font = saved_font;  // restore parent font
                 if (max_text_width > 0) {
                     // Store intrinsic size in form property for flex-basis calculation

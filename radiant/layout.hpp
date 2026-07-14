@@ -192,6 +192,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    CssEnum white_space = CSS_VALUE_NORMAL,
                                                    CssEnum overflow_wrap = CSS_VALUE_NORMAL,
                                                    CssEnum word_break = CSS_VALUE_NORMAL);
+float measure_direct_text_children_intrinsic_width(LayoutContext* lycon,
+                                                   DomElement* element,
+                                                   bool use_min_content,
+                                                   CssEnum text_transform);
 
 CssEnum get_element_text_transform(DomElement* element);
 CssEnum get_element_font_variant(DomElement* element);
@@ -2431,6 +2435,7 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
 bool layout_zero_sized_atomic_in_vertical_lr(ViewBlock* block);
 float layout_unresolved_html_cell_horizontal_box_extra(DomElement* cell);
 void view_vertical_align(LayoutContext* lycon, View* view);
+float line_baseline_position(LayoutContext* lycon, float* out_line_height);
 
 // Structure for OS/2 sTypo metrics (shared across layout modules)
 struct TypoMetrics {

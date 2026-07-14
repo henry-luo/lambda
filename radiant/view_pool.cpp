@@ -272,7 +272,7 @@ static void release_pseudo_content_prop_entry(DomElement* elem, ViewTree*) {
     release_pseudo_content_prop(elem);
 }
 
-static void release_embed_prop(DomElement* elem) {
+void release_dom_owned_embed_images(DomElement* elem) {
     if (!elem || !elem->embed) {
         return;
     }
@@ -287,6 +287,11 @@ static void release_embed_prop(DomElement* elem) {
         image_surface_destroy(elem->embed->poster);
         elem->embed->poster = nullptr;
     }
+}
+
+static void release_embed_prop(DomElement* elem) {
+    if (!elem || !elem->embed) return;
+    release_dom_owned_embed_images(elem);
     release_media_prop(elem->embed);
     release_embedded_document(elem);
     release_grid_prop(elem->embed->grid);

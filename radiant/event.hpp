@@ -1461,6 +1461,7 @@ uint32_t tc_utf8_to_utf16_offset(const char* s, uint32_t byte_len, uint32_t u8);
 // Initialize current_value from HTML default (input's value attr / textarea
 // children) and collapse selection at end-of-text per HTML §4.10.6.
 void tc_ensure_init(DomElement* elem);
+void tc_refresh_placeholder_shown(DomElement* elem, FormControlProp* form);
 
 // Set the live value. Selection collapses to the new end. Also updates the
 // legacy form->value pointer used by render_form.cpp.
@@ -4075,6 +4076,10 @@ typedef struct EventContext {
  */
 int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     TextRect* rect, int mouse_x, int mouse_y);
+
+void view_to_absolute_position(View* view, float rel_x, float rel_y,
+    float iframe_offset_x, float iframe_offset_y,
+    float* out_abs_x, float* out_abs_y);
 
 /**
  * Calculate visual position (x, y, height) from byte offset within a text rect

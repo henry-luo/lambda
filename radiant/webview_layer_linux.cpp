@@ -124,61 +124,7 @@ static void on_layer_script_message(WebKitUserContentManager* manager,
 
 static void on_layer_lambda_scheme(WebKitURISchemeRequest* request, gpointer user_data) {
     (void)user_data;
-    const char* path = webkit_uri_scheme_request_get_path(request);
-    if (!path) path = "/";
-    const char* rel = (path[0] == '/') ? path + 1 : path;
-
-    char cwd[4096];
-    if (!getcwd(cwd, sizeof(cwd))) {
-        GError* err = g_error_new(G_FILE_ERROR, G_FILE_ERROR_NOENT, "failed to get CWD");
-        webkit_uri_scheme_request_finish_error(request, err);
-        g_error_free(err);
-        return;
-    }
-
-    char full_path[8192];
-    snprintf(full_path, sizeof(full_path), "%s/%s", cwd, rel);
-
-    char* resolved = realpath(full_path, nullptr);
-    if (!resolved) {
-        GError* err = g_error_new(G_FILE_ERROR, G_FILE_ERROR_NOENT,
-                                  "file not found: %s", full_path);
-        webkit_uri_scheme_request_finish_error(request, err);
-        g_error_free(err);
-        return;
-    }
-
-    char* cwd_resolved = realpath(cwd, nullptr);
-    if (!cwd_resolved || strncmp(resolved, cwd_resolved, strlen(cwd_resolved)) != 0) {
-        log_error("webview_layer_linux lambda://: path traversal blocked: %s", resolved);
-        if (cwd_resolved) g_free(cwd_resolved);
-        g_free(resolved);
-        GError* err = g_error_new(G_FILE_ERROR, G_FILE_ERROR_ACCES, "path traversal blocked");
-        webkit_uri_scheme_request_finish_error(request, err);
-        g_error_free(err);
-        return;
-    }
-    g_free(cwd_resolved);
-
-    GError* file_err = nullptr;
-    GMappedFile* mapped = g_mapped_file_new(resolved, FALSE, &file_err);
-    g_free(resolved);
-
-    if (!mapped) {
-        webkit_uri_scheme_request_finish_error(request, file_err);
-        g_error_free(file_err);
-        return;
-    }
-
-    gsize data_len = g_mapped_file_get_length(mapped);
-    const char* data = g_mapped_file_get_contents(mapped);
-    GInputStream* stream = g_memory_input_stream_new_from_data(
-        g_memdup2(data, data_len), data_len, g_free);
-    g_mapped_file_unref(mapped);
-
-    webkit_uri_scheme_request_finish(request, stream, (gint64)data_len,
-                                     webview_linux_mime_for_path(full_path));
-    g_object_unref(stream);
+    webview_linux_finish_lambda_scheme_request(request, "webview_layer_linux lambda://");
 }
 
 // ---------------------------------------------------------------------------

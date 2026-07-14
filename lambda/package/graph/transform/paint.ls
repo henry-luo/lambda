@@ -20,28 +20,46 @@ fn dash_array(style) {
 
 fn marker_id(edge, end_name) => "lambda-graph-arrow-" ++ string(edge.index) ++ "-" ++ end_name
 
-fn arrow_marker(id, color) {
-  <marker id: id, markerWidth: 8, markerHeight: 8,
-      refX: 7, refY: 4, orient: "auto-start-reverse", markerUnits: "strokeWidth";
+fn marker_shape(marker_type, color) {
+  if (marker_type == "circle") {
+    <circle cx: 4, cy: 4, r: 3, fill: color>
+  }
+  else if (marker_type == "cross") {
+    <path d: "M 1 1 L 7 7 M 7 1 L 1 7", fill: "none", stroke: color,
+        'stroke-width': 1.5>
+  }
+  else {
     <path d: "M 0 0 L 8 4 L 0 8 z", fill: color>
+  }
+}
+
+fn edge_marker(id, marker_type, color) {
+  let ref_x = if (marker_type == "normal") 7 else 4;
+  <marker id: id, markerWidth: 8, markerHeight: 8,
+      refX: ref_x, refY: 4, orient: "auto-start-reverse", markerUnits: "strokeWidth",
+      'data-marker-type': marker_type;
+    marker_shape(marker_type, color)
   >
 }
 
 fn edge_defs(edge, color) {
   [<defs;
-    arrow_marker(marker_id(edge, "start"), color)
-    arrow_marker(marker_id(edge, "end"), color)
+    edge_marker(marker_id(edge, "start"), edge.marker_start, color)
+    edge_marker(marker_id(edge, "end"), edge.marker_end, color)
   >]
 }
 
 fn edge_path(edge, color, stroke_width) {
-  let marker_start = if (edge.arrow_start == true)
+  let marker_start = if (edge.marker_start != "none")
     "url(#" ++ marker_id(edge, "start") ++ ")" else null;
-  let marker_end = if (edge.arrow_end == true)
+  let marker_end = if (edge.marker_end != "none")
     "url(#" ++ marker_id(edge, "end") ++ ")" else null;
   <path d: path_data(edge.points), fill: "none", stroke: color,
       'stroke-width': stroke_width, 'stroke-dasharray': dash_array(edge.style),
-      'marker-start': marker_start, 'marker-end': marker_end>
+      'marker-start': marker_start, 'marker-end': marker_end,
+      'data-graph-role': "edge", 'data-edge-id': edge.id,
+      'data-from': edge.from, 'data-to': edge.to,
+      'data-marker-start': edge.marker_start, 'data-marker-end': edge.marker_end>
 }
 
 fn edge_svg(edge, width, height, opts) {

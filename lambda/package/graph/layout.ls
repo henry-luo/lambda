@@ -60,6 +60,11 @@ fn semantic_edges(children) {
     directed: attr_or(child, "data-directed", "true") != "false",
     arrow_start: attr_or(child, "data-arrow-start", "false") == "true",
     arrow_end: attr_or(child, "data-arrow-end", attr_or(child, "data-directed", "true")) == "true",
+    marker_start: string(attr_or(child, "data-marker-start",
+      if (attr_or(child, "data-arrow-start", "false") == "true") "normal" else "none")),
+    marker_end: string(attr_or(child, "data-marker-end",
+      if (attr_or(child, "data-arrow-end", attr_or(child, "data-directed", "true")) == "true")
+        "normal" else "none")),
     style: string(attr_or(child, "data-style", "solid")),
     min_length: int(attr_or(child, "data-min-length", 1)),
     z: child_z(child, -1),

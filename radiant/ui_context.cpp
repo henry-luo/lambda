@@ -227,17 +227,7 @@ static void destroy_dom_owned_embed_images(DomNode* node) {
         child = child->next_sibling;
     }
 
-    if (!elem->embed) return;
-    // Cached data URI SVGs have no URL, so ownership must come from the cache
-    // marker rather than URL presence to avoid freeing a borrowed cache surface.
-    if (elem->embed->img && !elem->embed->img->url && !elem->embed->img->cache_owned) {
-        image_surface_destroy(elem->embed->img);
-        elem->embed->img = nullptr;
-    }
-    if (elem->embed->poster && !elem->embed->poster->url && !elem->embed->poster->cache_owned) {
-        image_surface_destroy(elem->embed->poster);
-        elem->embed->poster = nullptr;
-    }
+    release_dom_owned_embed_images(elem);
 }
 
 void free_document(DomDocument* doc) {

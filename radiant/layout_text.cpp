@@ -1485,18 +1485,8 @@ static void align_forced_break_rect_to_line_baseline(LayoutContext* lycon) {
             : br_view->height;
     }
 
-    float baseline_line_height = max(lycon->block.line_height,
-        lycon->line.max_ascender + lycon->line.max_descender);
-    float strut_baseline = lycon->block.init_ascender + lycon->block.lead_y;
-    if (!lycon->block.line_height_is_normal) {
-        float strut_content_height = lycon->block.init_ascender + lycon->block.init_descender;
-        if (strut_content_height > 0.0f) {
-            strut_baseline = lycon->block.init_ascender +
-                (lycon->block.line_height - strut_content_height) / 2.0f;
-        }
-    }
-
-    float baseline_pos = max(lycon->line.max_ascender, strut_baseline);
+    float baseline_line_height = 0.0f;
+    float baseline_pos = line_baseline_position(lycon, &baseline_line_height);
     if (lycon->line.max_bottom_height > baseline_line_height) {
         baseline_pos += lycon->line.max_bottom_height - baseline_line_height;
     }

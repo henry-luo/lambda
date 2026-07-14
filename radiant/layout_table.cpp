@@ -1087,6 +1087,8 @@ static bool table_cell_is_baseline_aligned(ViewTableCell* tcell) {
 // This must be called after all cells in the row are laid out but before
 // the final row height is determined.
 // Returns the extra height added to the row from baseline alignment.
+static void shift_table_cell_vertical_align_child(View* child, float y_adjustment);
+
 static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* trow, float* row_height) {
     // Step 1: Check if any cells have baseline alignment
     bool has_baseline_cells = false;
@@ -1129,14 +1131,7 @@ static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* tr
 
                 // Shift all children down
                 for_each_table_cell_vertical_align_child(lam::view_require_element(tcell), [&](View* child) {
-                    child->y += shift;
-                    // Also update TextRect positions for ViewText nodes
-                    if (child->view_type == RDT_VIEW_TEXT) {
-                        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
-                        for (TextRect* rect = text->rect; rect; rect = rect->next) {
-                            rect->y += shift;
-                        }
-                    }
+                    shift_table_cell_vertical_align_child(child, shift);
                 });
 
                 // The cell now needs more height to accommodate the shifted content
