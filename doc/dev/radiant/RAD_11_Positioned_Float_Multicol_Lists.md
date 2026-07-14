@@ -2,7 +2,7 @@
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the "other" layout modes that hang off the block/BFC driver: CSS positioning (relative, sticky, absolute, fixed) and its containing-block resolution; floats and `clear`; the generic absolute-child driver shared by block, flex and grid; the deliberately simplified post-flow multi-column fragmentation; and the coupled list-marker + counter engine (including list-style-type numeral formatting). These modes all read and mutate the same in-place view tree described in [RAD_01](RAD_01_View_and_DOM_Model.md) and share the `BlockContext`/float machinery of [RAD_03](RAD_03_Layout_Driver_Block_BFC.md).
 >
-> **Primary sources:** `radiant/layout_positioned.{cpp,hpp}` (relative/sticky/absolute/fixed, `calculate_absolute_position`, `layout_abs_block`, float placement, `clear`), `radiant/layout_abs_children.{cpp,hpp}` (the shared abs-child driver), `radiant/layout_multicol.{cpp,hpp}` (fragmentation/balancing), `radiant/layout_list.{cpp,hpp}` + `radiant/render_list.cpp` (markers), `radiant/layout_counters.{cpp,hpp}` (counter engine + numeral formatting), plus `FloatBox`/`BlockContext` in `radiant/layout.hpp` and `block_context_add_float` in `radiant/block_context.cpp`.
+> **Primary sources:** `radiant/layout.hpp` (all declarations and shared layout state), `radiant/layout_positioned.cpp` (relative/sticky/absolute/fixed positioning and floats), `radiant/layout_abs_children.cpp` (the shared abs-child driver), `radiant/layout_multicol.cpp` (fragmentation/balancing), `radiant/layout_list.cpp` + `radiant/render_list.cpp` (markers), `radiant/layout_counters.cpp` (counter engine + numeral formatting), and `radiant/block_context.cpp` (float-list management).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -37,7 +37,7 @@ Two deferred-correction passes handle ordering hazards. `re_resolve_abs_children
 
 ### 2.4 The shared abs-children driver
 
-`layout_absolute_children_in_context` (`layout_abs_children.cpp:67`) is a single generic loop that block, flex, and grid all reuse to lay out their abs/fixed children. Callers pass an `AbsStaticContext` (`layout_abs_children.hpp:34`) carrying `kind` (`ABS_STATIC_BLOCK`/`FLEX`/`GRID`), the containing block, flex/grid container handles, and two callbacks: `prepare_child` (seed the static position for this mode) and `after_child` (post-placement fixup). The driver iterates children, skips non-abs elements (`layout_view_is_abs_or_fixed`), seeds `given_width/height` from the child's `BlockProp`, invokes `prepare_child`, delegates to `layout_abs_block`, invokes `after_child`, then applies `aspect-ratio` (`layout_apply_abs_child_aspect_ratio` at `:47`). Flex wires it up at `layout_flex_multipass.cpp:389`–`:396`, grid at `layout_grid_multipass.cpp:1559`–`:1566`. This is exactly the design rationale flagged in [RAD_04](RAD_04_Box_Model_Containing_Blocks.md): unify static-position handling instead of duplicating it in three modes.
+`layout_absolute_children_in_context` (`layout_abs_children.cpp:67`) is a single generic loop that block, flex, and grid all reuse to lay out their abs/fixed children. Callers pass an `AbsStaticContext` (`layout.hpp`) carrying `kind` (`ABS_STATIC_BLOCK`/`FLEX`/`GRID`), the containing block, flex/grid container handles, and two callbacks: `prepare_child` (seed the static position for this mode) and `after_child` (post-placement fixup). The driver iterates children, skips non-abs elements (`layout_view_is_abs_or_fixed`), seeds `given_width/height` from the child's `BlockProp`, invokes `prepare_child`, delegates to `layout_abs_block`, invokes `after_child`, then applies `aspect-ratio` (`layout_apply_abs_child_aspect_ratio` at `:47`). Flex wires it up at `layout_flex_multipass.cpp:389`–`:396`, grid at `layout_grid_multipass.cpp:1559`–`:1566`. This is exactly the design rationale flagged in [RAD_04](RAD_04_Box_Model_Containing_Blocks.md): unify static-position handling instead of duplicating it in three modes.
 
 ---
 
@@ -91,7 +91,7 @@ Rendering is in `render_list.cpp` (detailed in [RAD_13 — Render Walk & Painter
 
 ## 6. Counters
 
-The counter engine (`layout_counters.cpp`, header `layout_counters.hpp:20`+) models CSS 2.1 §12.4 scoping. A `CounterContext` (`:34`) holds an arena, a `current_scope`, and a `scope_stack` (`lam::ArrayList<CounterScope*>`). Each `CounterScope` (`:28`) is a `HashMap` of name → `CounterValue` plus a `parent` link; a `CounterValue` (`:20`) carries `value`, `propagated`, and `created_by_reset` bits. `counter_push_scope`/`counter_pop_scope` (`:62`/`:81`) manage the stack; the root scope is never popped.
+The counter engine (`layout_counters.cpp`, header `layout.hpp`+) models CSS 2.1 §12.4 scoping. A `CounterContext` (`:34`) holds an arena, a `current_scope`, and a `scope_stack` (`lam::ArrayList<CounterScope*>`). Each `CounterScope` (`:28`) is a `HashMap` of name → `CounterValue` plus a `parent` link; a `CounterValue` (`:20`) carries `value`, `propagated`, and `created_by_reset` bits. `counter_push_scope`/`counter_pop_scope` (`:62`/`:81`) manage the stack; the root scope is never popped.
 
 The subtle piece is `counter_pop_scope_propagate` (`:107`). Because CSS counter scope extends to *subsequent siblings* (§12.4.1), leaving an element must leak certain counters up to the parent scope. The `propagate_resets` flag distinguishes regular elements (reset counters propagate so siblings see them) from pseudo-elements (reset counters stay scoped). It carefully refuses to overwrite a parent's own reset counter or an inherited/propagated one, and scans ancestor scopes to detect nested scopes (`:127`–`:187`). `counter_reset`/`counter_increment`/`counter_set` (`:313`/`:360`/`:406`) parse a "name value name value …" spec via `parse_counter_spec` (`:213`) and mutate the scope chain; `counter_set` and `counter_increment` search the chain, while `counter_reset` creates in the current scope and removes a superseded propagated sibling counter (`:333`). Lookups are `counter_get_value` (`:451`, walk to root) and `counter_get_all_values` (`:469`, collect the whole chain for `counters()`).
 
@@ -114,12 +114,12 @@ Numeral formatting is `counter_format_value` (`:716`), dispatching by `list-styl
 
 | File | Responsibility (this doc) |
 |---|---|
-| `radiant/layout_positioned.{cpp,hpp}` | Relative/sticky offsetting, containing-block resolution, `calculate_absolute_position`, `layout_abs_block`, float placement (`layout_float_element`), `adjust_line_for_floats`, `clear`, deferred abspos fixups. |
-| `radiant/layout_abs_children.{cpp,hpp}` | Generic abs-child driver `layout_absolute_children_in_context` + `AbsStaticContext`/`AbsChildLayoutState`, shared by block/flex/grid. |
-| `radiant/layout_multicol.{cpp,hpp}` | `calculate_multicol_dimensions`, `layout_multicol_content`, `ColumnGroup`/`ColumnFragment`/`FragmentedFlowCursor`, balance search, spanner + inline + OOF fragmentation. |
-| `radiant/layout_list.{cpp,hpp}` | `setup_list_container_counters`, reversed-counter init, `process_list_item`, `create_marker_element` (synthetic `::marker` + `MarkerProp`). |
+| `radiant/layout.hpp` / `layout_positioned.cpp` | Relative/sticky offsetting, containing-block resolution, absolute layout, float placement, clear, and deferred fixups. |
+| `radiant/layout.hpp` / `layout_abs_children.cpp` | Generic abs-child driver and its shared block/flex/grid state. |
+| `radiant/layout.hpp` / `layout_multicol.cpp` | Multicol dimensions, fragmentation cursors, balancing, spanners, inline flow, and out-of-flow fragmentation. |
+| `radiant/layout.hpp` / `layout_list.cpp` | List counters, list-item processing, and synthetic `::marker` creation. |
 | `radiant/render_list.cpp` | Synthetic `::marker` rendering (`render_marker_view`) and list/list-item traversal state. |
-| `radiant/layout_counters.{cpp,hpp}` | Counter scope stack, reset/increment/set, `counter()`/`counters()`, numeral formatting (roman/latin/greek/armenian/georgian). |
+| `radiant/layout.hpp` / `layout_counters.cpp` | Counter scope stack, reset/increment/set, `counter()`/`counters()`, and numeral formatting. |
 | `radiant/layout.hpp` | `FloatBox`, `FloatAvailableSpace`, and the float lists + BFC fields on `BlockContext`. |
 | `radiant/block_context.cpp` | `block_context_add_float` (FloatBox construction + BFC coordinate conversion). |
 

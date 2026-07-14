@@ -2,7 +2,7 @@
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the interaction *input* half of Radiant: the single funnel `handle_event()` that takes platform input, hit-tests it against the layout view tree, builds a root→target view stack, and fires DOM-style events out to three consumers at once — native default actions, the Lambda/JS handler bridge, and the editing controllers. It covers the `RdtEvent` union and `EventContext` record, the hit-test recursion, mouse/keyboard/IME/scroll/context-menu input, the deterministic `event_sim` replay harness that drives the *same* funnel, and the event-state JSONL log. Timing and animation (the render loop, frame clock, `@keyframes`) are a separate concern documented in [RAD_16 — Animation & Frame Scheduling](RAD_16_Animation_Frame_Scheduling.md).
 >
-> **Primary sources:** `radiant/event.hpp` (the `EventType` enum, `RdtEvent` union, key/mod codes, `MouseState`), `radiant/handler.hpp` (`EventContext`), `radiant/event.cpp` (`handle_event`, `target_block_view`, `build_view_stack`, `fire_events`, `dispatch_lambda_handler`), `radiant/event_sim.{cpp,hpp}` (JSON-driven replay/test harness), `radiant/event_state_log.{cpp,hpp}` (JSONL log + `JsonWriter`), `radiant/context_menu.{hpp,cpp}`, `radiant/scroller.{hpp,cpp}`, `radiant/ime_mac.mm`, `radiant/ime_win.cpp`.
+> **Primary sources:** `radiant/event.hpp` (event, input-context, logging, context-menu, and scrolling declarations), `radiant/event.cpp` (`handle_event`, targeting, and dispatch), `radiant/event_sim.{cpp,hpp}` (JSON-driven replay/test harness), `radiant/event_state_log.cpp` (JSONL log + `JsonWriter`), `radiant/context_menu.cpp`, `radiant/scroller.cpp`, `radiant/ime_mac.mm`, and `radiant/ime_win.cpp`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -29,12 +29,12 @@ The design rationale is fidelity: because the test harness exercises the identic
 
 ### 2.2 `EventContext` — the per-event working record
 
-`struct EventContext` (`handler.hpp:11`) is threaded through the entire dispatch and accumulates both the resolved target and the effects to apply afterward. Its fields group into:
+`struct EventContext` (`event.hpp`) is threaded through the entire dispatch and accumulates both the resolved target and the effects to apply afterward. Its fields group into:
 
 - **Input + resolved target**: the `RdtEvent event` copy, the hit `target` `View*`, the `target_text_rect` and `target_text_offset` (with a `_valid` flag) for text-leaf hits, and the `offset_x`/`offset_y` of the pointer within the target.
 - **Style context** carried down the hit-test recursion: `BlockBlot block` (the accumulated coordinate origin) and the current `FontBox font`.
 - **Effects output** applied by the caller after dispatch: `new_cursor` (a `CssEnum`), `new_url`/`new_target` (link navigation), and `need_repaint`.
-- **`default_prevented`** (`handler.hpp:32`) — the JS `preventDefault()` signal. The bridge sets it when a scripted listener calls `event.preventDefault()`, and native default-action sites (link nav, checkbox toggle, radio select, video play/pause) check it before running their default. This is the unification seam between the JS handler world and Radiant's native behaviors.
+- **`default_prevented`** (`event.hpp`) — the JS `preventDefault()` signal. The bridge sets it when a scripted listener calls `event.preventDefault()`, and native default-action sites (link nav, checkbox toggle, radio select, video play/pause) check it before running their default. This is the unification seam between the JS handler world and Radiant's native behaviors.
 - **Editing / clipboard plumbing**: `paste_text`, a `caret_pos_override` (so the cut default action can report the selection start before it collapses the live selection), and an `editing_target_ranges` snapshot so `InputEvent.getTargetRanges()` uses pre-mutation ranges.
 - **Iframe bridging**: `iframe_container` and `target_document`, set when the hit target lands inside an embedded iframe document so events can propagate back across the boundary ([§3](#3-hit-testing-the-view-tree)).
 
@@ -88,7 +88,7 @@ The three `RDT_EVENT_COMPOSITION_*` events (`event.cpp:9367`) carry native IME p
 
 Scrolling is handled in `scroller.cpp`. `scrollpane_target` (`scroller.cpp:255`) hit-tests the scrollbar track/thumb; `scrollpane_scroll` (`scroller.cpp:214`) applies wheel deltas; `scrollpane_drag` (`scroller.cpp:340`) converts a thumb drag delta into a scroll position. Crucially, scroll position is **not** stored on the view — every write goes through `scroll_state_set_position_for_view` into the StateStore ([RAD_17](RAD_17_Interaction_State.md)), so scroll survives relayout and participates in incremental reconcile. `RDT_EVENT_SCROLL` in `handle_event` (`event.cpp:8168`) hit-tests to find the scrollable block and calls `scrollpane_scroll` through `fire_block_event`.
 
-The native context menu (`context_menu.hpp`) is a fixed 5-item popup — Cut/Copy/Paste/Delete/Select-All (`CtxMenuItem`, `context_menu.hpp:19`) — opened by right-click on a text control via `context_menu_open` (`context_menu.hpp:30`). Per-item enablement (`context_menu_item_enabled`) enforces the rules that Cut/Copy/Delete need a non-empty selection and Paste needs clipboard text. Command execution is indirected through a `ContextMenuEditHooks` callback table (`context_menu.hpp:54`) so the menu stays decoupled from the editing controller. `context_menu_contains` keeps clicks inside the popup from routing to the view underneath.
+The native context menu (`event.hpp`) is a fixed 5-item popup — Cut/Copy/Paste/Delete/Select-All (`CtxMenuItem`, `event.hpp`) — opened by right-click on a text control via `context_menu_open` (`event.hpp`). Per-item enablement (`context_menu_item_enabled`) enforces the rules that Cut/Copy/Delete need a non-empty selection and Paste needs clipboard text. Command execution is indirected through a `ContextMenuEditHooks` callback table (`event.hpp`) so the menu stays decoupled from the editing controller. `context_menu_contains` keeps clicks inside the popup from routing to the view underneath.
 
 ---
 
@@ -112,9 +112,9 @@ The native context menu (`context_menu.hpp`) is a fixed 5-item popup — Cut/Cop
 
 ## 9. Event/state JSONL logging
 
-`event_state_log.{cpp,hpp}` is a structured JSON-Lines log of input events, FSM transitions, and end-of-cascade state snapshots, kept **separate** from the human-readable `log.txt`. It is disabled by default and opened only when `--event-log` calls `event_state_log_open` (`event_state_log.hpp:93`), writing one file per document at `./temp/events_${pid}_${doc}.jsonl` so iframes and multi-session runs do not interleave.
+`event_state_log.cpp`, with declarations in `event.hpp`, implements a structured JSON-Lines log of input events, FSM transitions, and end-of-cascade state snapshots, kept **separate** from the human-readable `log.txt`. It is disabled by default and opened only when `--event-log` calls `event_state_log_open`, writing one file per document at `./temp/events_${pid}_${doc}.jsonl` so iframes and multi-session runs do not interleave.
 
-The writer is a fixed-buffer, alloc-free `JsonWriter` (`event_state_log.hpp:42`) that builds one JSON object per line into a caller-provided buffer (`jw_obj_begin`/`jw_key`/`jw_str`/…/`jw_finish`), so it is safe in release builds. A **cascade** is the unit of work triggered by one external cause — `event_state_log_begin_cascade` tags each with `"input"`, `"webdriver"`, `"event_sim"`, `"navigation"`, etc. Inside `handle_event`, every cascade opens with `event_log_raw_input` and `event_log_hit_target` and closes with editing/history/mutation/selection/clipboard/composition snapshots (emitters `event_log_*` at `event.cpp:126`–`457`). This log is what the `assert_event_log`/`assert_editing_event` sim assertions read back and what `event_sim_load_replay_log` consumes for deterministic replay.
+The writer is a fixed-buffer, alloc-free `JsonWriter` (`event.hpp`) that builds one JSON object per line into a caller-provided buffer (`jw_obj_begin`/`jw_key`/`jw_str`/…/`jw_finish`), so it is safe in release builds. A **cascade** is the unit of work triggered by one external cause — `event_state_log_begin_cascade` tags each with `"input"`, `"webdriver"`, `"event_sim"`, `"navigation"`, etc. Inside `handle_event`, every cascade opens with `event_log_raw_input` and `event_log_hit_target` and closes with editing/history/mutation/selection/clipboard/composition snapshots (emitters `event_log_*` at `event.cpp:126`–`457`). This log is what the `assert_event_log`/`assert_editing_event` sim assertions read back and what `event_sim_load_replay_log` consumes for deterministic replay.
 
 ---
 
@@ -135,14 +135,14 @@ The writer is a fixed-buffer, alloc-free `JsonWriter` (`event_state_log.hpp:42`)
 | File | Responsibility (this doc) |
 |---|---|
 | `radiant/event.hpp` | `EventType` enum, `RdtEvent` union + payload structs, `RDT_KEY_*`/`RDT_MOD_*`, `MouseState`. |
-| `radiant/handler.hpp` | `EventContext` — the per-event working record (target, effects, `default_prevented`, editing/iframe plumbing). |
+| `radiant/event.hpp` | `EventContext` — the per-event working record (target, effects, `default_prevented`, editing/iframe plumbing). |
 | `radiant/event.cpp` | `handle_event` funnel, `target_block_view`/`target_html_doc` hit-test, `build_view_stack`, `fire_events`, `dispatch_lambda_handler`, per-EventType handling, IME bridge, event-log emitters. |
-| `radiant/scroller.{hpp,cpp}` | Scrollbar hit-test/drag/wheel; scroll position written to the StateStore, not the view. |
-| `radiant/context_menu.{hpp,cpp}` | Fixed 5-item text-control context menu and its `ContextMenuEditHooks` callback table. |
+| `radiant/event.hpp` / `scroller.cpp` | Scrollbar hit-test/drag/wheel; scroll position written to the StateStore, not the view. |
+| `radiant/event.hpp` / `context_menu.cpp` | Fixed 5-item text-control context menu and its `ContextMenuEditHooks` callback table. |
 | `radiant/ime_mac.mm` | macOS `NSTextInputClient` shim → shared composition bridge. |
 | `radiant/ime_win.cpp` | Windows `WM_IME_*` interception + candidate-window positioning → shared composition bridge. |
 | `radiant/event_sim.{cpp,hpp}` | JSON-driven / JSONL-replay test harness: `process_sim_event`, selector resolution, action set, `assert_*` vocabulary, schema fuzzing. |
-| `radiant/event_state_log.{cpp,hpp}` | Alloc-free `JsonWriter` + per-document `./temp/events_*.jsonl` cascade log. |
+| `radiant/event.hpp` / `event_state_log.cpp` | Alloc-free `JsonWriter` + per-document `./temp/events_*.jsonl` cascade log. |
 
 ## Appendix B — Related documents
 

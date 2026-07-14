@@ -7,6 +7,8 @@
 
 **Goal:** collapse radiant's **140 headers** (105 of them 1:1 per-`.cpp` mirrors) into **5 coherent global headers** plus a short justified-exception list, so that each domain has exactly one place to look for existing structs and functions — the glossary/API-doc/design-space role of DD4.
 
+**Implementation status (2026-07-14): H0-H6 complete.** Radiant now has 19 headers against the permanent 24-header cap. The five coherent headers own their planned domains; retained grid implementation headers are marked internal; absorbed-header references have been migrated across `doc/dev/radiant/RAD_*.md`; and both `AGENTS.md` and `CLAUDE.md` point contributors at the coherent surfaces. Final verification: `make build` passed, `make test-radiant-baseline` passed all 6,221 required tests, `make lint ARGS='--rule ^no-new-per-file-header$'` passed at 19/24 headers, and `make check-radiant-dup` reported 0 remaining filtered duplicate blocks. The final `count_loc.sh` snapshot records 162 Radiant C/C++ files and 186,975 lines.
+
 ---
 
 ## 1. Target state

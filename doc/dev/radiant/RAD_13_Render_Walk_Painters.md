@@ -2,14 +2,14 @@
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how a laid-out view tree becomes output. One shared tree walk (`render_walk.cpp`) traverses the tree exactly once and dispatches every drawing decision through a `RenderBackend` vtable; each output target (raster window/PNG/JPEG, PDF, SVG) supplies its own callback set. It describes the walker (z-order, effect groups, transforms), the raster record→lower→replay pipeline, the per-feature painters (`render_bound` and its background/border/shadow/text/image/clip/effect/filter/composite kin), the PDF backend, capability gating, output targets, and the profiler. The *IR machinery itself* — PaintIR shape, the DisplayList, record/replay internals — is [RAD_12](RAD_12_Paint_IR_Display_List.md)'s job; this doc is the walk, the painters, and the export seams.
 >
-> **Primary sources:** `radiant/render_backend.h` (the `RenderBackend` vtable + `RenderWalkState`), `radiant/render_walk.cpp` (the shared walker), `radiant/render_raster_walk.cpp` (raster backend + dispatcher), `radiant/render.hpp`/`render.cpp` (`RenderContext`, iframe embed), `radiant/render_block.cpp` (`render_bound`, block paint pipeline), the per-feature painters (`render_background.cpp`, `render_border.cpp`, `render_text.cpp`, `render_img.cpp`, `render_clip.cpp`, `render_effects.cpp`, `render_filter.cpp`, `render_composite.cpp`, `render_paint_boundary.cpp`, `render_raster.cpp`), `radiant/render_output.cpp` (targets, tiled/strip/selective/retained), `radiant/render_pdf.cpp` (`PdfRenderContext`), `radiant/render_backend_caps.{hpp,cpp}`, `radiant/render_profiler.{hpp,cpp}`, `radiant/render_painter.hpp` / `render_paint_gateway.hpp` (the `rc_*` seam).
+> **Primary sources:** `radiant/render.hpp` (the `RenderBackend` vtable, `RenderWalkState`, `RenderContext`, backend capabilities, profiling, and the `rc_*` seam), `radiant/render_walk.cpp` (the shared walker), `radiant/render_raster_walk.cpp` (raster backend + dispatcher), `radiant/render.cpp` (iframe embed), `radiant/render_block.cpp` (block paint pipeline), the per-feature painter `.cpp` files, `radiant/render_output.cpp` (targets, tiled/strip/selective/retained), `radiant/render_pdf.cpp` (`PdfRenderContext`), `radiant/render_backend_caps.cpp`, `radiant/render_profiler.cpp`, and `radiant/render_painter.cpp`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
 
 ## 1. Purpose and the two pipelines
 
-Radiant renders the *same* view tree that layout tagged in place ([RAD_01](RAD_01_View_and_DOM_Model.md)) into three structurally different outputs, but it refuses to duplicate the tree walk for each. The walk lives once in `render_walk.cpp`; the divergence is pushed into a vtable of function pointers, `struct RenderBackend` (`render_backend.h:23`). Every backend receives the walker's per-node position/font/color and decides how to draw.
+Radiant renders the *same* view tree that layout tagged in place ([RAD_01](RAD_01_View_and_DOM_Model.md)) into three structurally different outputs, but it refuses to duplicate the tree walk for each. The walk lives once in `render_walk.cpp`; the divergence is pushed into a vtable of function pointers, `struct RenderBackend` (`render.hpp`). Every backend receives the walker's per-node position/font/color and decides how to draw.
 
 There are two lowering strategies behind that one walk:
 
@@ -26,13 +26,13 @@ The load-bearing seam is therefore: **the DisplayList is the raster-only interme
 
 ### 2.1 The vtable
 
-`struct RenderBackend` (`render_backend.h:23`) carries a `void* ctx` (the backend's own context — `RenderContext*` for raster, `PdfRenderContext*` for PDF) plus two tiers of callbacks. The **full-node overrides** `render_block`/`render_inline` (`render_backend.h:29-32`) let a backend take over an entire node; when null, the walker recurses through the generic path. The **per-feature callbacks** are the finer-grained ones the generic walker calls itself: `render_bound`, `render_text`, `render_image`, `render_inline_svg`, `render_marker`, `render_column_rules`, the `begin/end_block_children` and `begin/end_inline_children` container wrappers, the `begin/end_effect_group` and `begin/end_transform` stacking wrappers, and `on_font_change` (`render_backend.h:37-85`). All coordinates passed to callbacks are CSS logical pixels; HiDPI scaling is a raster-side concern applied later.
+`struct RenderBackend` (`render.hpp`) carries a `void* ctx` (the backend's own context — `RenderContext*` for raster, `PdfRenderContext*` for PDF) plus two tiers of callbacks. The **full-node overrides** `render_block`/`render_inline` (`render.hpp`) let a backend take over an entire node; when null, the walker recurses through the generic path. The **per-feature callbacks** are the finer-grained ones the generic walker calls itself: `render_bound`, `render_text`, `render_image`, `render_inline_svg`, `render_marker`, `render_column_rules`, the `begin/end_block_children` and `begin/end_inline_children` container wrappers, the `begin/end_effect_group` and `begin/end_transform` stacking wrappers, and `on_font_change` (`render.hpp`). All coordinates passed to callbacks are CSS logical pixels; HiDPI scaling is a raster-side concern applied later.
 
-The walker carries `struct RenderWalkState` (`render_backend.h:89`): the accumulated absolute `x,y`, the inherited `FontBox font` and `Color color`, and the `UiContext*`. This is the walk's cursor — position is accumulated as `state->x += block->x` on entry and restored on exit (`render_walk.cpp:138`, `:247`).
+The walker carries `struct RenderWalkState` (`render.hpp`): the accumulated absolute `x,y`, the inherited `FontBox font` and `Color color`, and the `UiContext*`. This is the walk's cursor — position is accumulated as `state->x += block->x` on entry and restored on exit (`render_walk.cpp:138`, `:247`).
 
 ### 2.2 Block traversal — four phases
 
-`render_walk_block` (`render_walk.cpp:253`) drives a block through `render_paint_block_run` (declared `render_paint_block.hpp:18`) with a four-callback `RenderPaintBlockOps` structure — `begin`, `paint_self`, `paint_children`, `finish`. This phase decomposition is shared verbatim by the raster path ([§4](#4-render_bound-and-the-block-paint-pipeline)), which is precisely why both the vector and raster paths agree on ordering.
+`render_walk_block` (`render_walk.cpp:253`) drives a block through `render_paint_block_run` (declared `render.hpp`) with a four-callback `RenderPaintBlockOps` structure — `begin`, `paint_self`, `paint_children`, `finish`. This phase decomposition is shared verbatim by the raster path ([§4](#4-render_bound-and-the-block-paint-pipeline)), which is precisely why both the vector and raster paths agree on ordering.
 
 - `render_walk_block_begin` (`render_walk.cpp:118`) saves the parent cursor, calls `setup_font` and `on_font_change` if the block sets a font, advances the cursor, then opens a transform group (if `block->transform->functions` and the backend supports `begin_transform`/`end_transform`) and an effect group.
 - `render_walk_block_paint_self` (`render_walk.cpp:159`) calls `backend->render_bound` if the block has a `bound`, applies the block's own text color, and dispatches SVG/image/webview-layer self-content. Inline SVG sets `stop_after_self` so children are not re-walked.
@@ -63,7 +63,7 @@ The shared helper uses growable `ArrayList` buffers and preserves source order f
 
 ## 3. The raster backend and dispatcher
 
-The raster path is a `RenderBackend` whose full-node overrides are wired in `render_raster_backend_init` (`render_raster_walk.cpp:160`): `render_block`, `render_inline`, `render_text`, `render_marker`. It intentionally leaves `render_bound`/`render_image`/effect/transform callbacks null because the raster overrides do that work themselves inside the richer `RenderContext` machinery (scrollbars, HiDPI, dirty tracking) rather than through the generic walker — the header calls this a staged migration (`render_backend.h:11`).
+The raster path is a `RenderBackend` whose full-node overrides are wired in `render_raster_backend_init` (`render_raster_walk.cpp:160`): `render_block`, `render_inline`, `render_text`, `render_marker`. It intentionally leaves `render_bound`/`render_image`/effect/transform callbacks null because the raster overrides do that work themselves inside the richer `RenderContext` machinery (scrollbars, HiDPI, dirty tracking) rather than through the generic walker — the header calls this a staged migration (`render.hpp`).
 
 `render_raster_view_tree` (`render_raster_walk.cpp:216`) enters at the `<html>` root and calls `render_children`, which builds a raster backend + `RenderWalkState` seeded from the `RenderContext` (`render_raster_walk.cpp:170`) and hands off to the shared `render_walk_children`. So even the raster path flows through the one walker.
 
@@ -97,14 +97,14 @@ The raster block paint itself is decomposed into the same four phases as the wal
 - **Shadows** (`render_background.cpp`): outer `render_box_shadow` `:1226` and inset `render_box_shadow_inset` `:1401`, both blurring through the filter path ([§6](#6-filters-effects-and-composite)).
 - **Text** (`render_text.cpp`): `render_text_view` `:75` lays glyphs, loading each through `font_load_glyph` and emitting via `rc_draw_glyph`; inline background/border fragments are painted here per line. Glyph rasterization and font handling proper are [RAD_06](RAD_06_Inline_and_Text_Layout.md)/[RAD_07](RAD_07_Fonts.md).
 - **Image** (`render_img.cpp`): `render_image_view` handles `object-fit`/scaling and blits decoded pixels; this file also owns `save_surface_to_png` `:50` and `save_surface_to_jpeg` `:106`, the raster export encoders.
-- **Clip** (`render_clip.cpp`): `RenderClipScope` (`render_clip.hpp:11`) is an RAII-style scope; `render_clip_push_css_scope` / `_push_rect_scope` / `_push_overflow_scope` push a `ClipShape` onto the `RenderContext::clip_shapes[]` stack (bounded by `RDT_MAX_CLIP_SHAPES`, `render_clip.cpp:402`) and `render_clip_pop_scope` pops it.
-- **Effect group** (`render_effects.cpp`): `render_effect_group_begin`/`_finish` (`render_effects.hpp:29`) snapshot backdrop pixels for opacity, `mix-blend-mode`, and filter/backdrop-filter, then composite on finish.
+- **Clip** (`render_clip.cpp`): `RenderClipScope` (`render.hpp`) is an RAII-style scope; `render_clip_push_css_scope` / `_push_rect_scope` / `_push_overflow_scope` push a `ClipShape` onto the `RenderContext::clip_shapes[]` stack (bounded by `RDT_MAX_CLIP_SHAPES`, `render_clip.cpp:402`) and `render_clip_pop_scope` pops it.
+- **Effect group** (`render_effects.cpp`): `render_effect_group_begin`/`_finish` (`render.hpp`) snapshot backdrop pixels for opacity, `mix-blend-mode`, and filter/backdrop-filter, then composite on finish.
 
 ---
 
 ## 5. The `rc_*` paint-IR seam
 
-Every raster painter draws indirectly. The `rc_*` wrappers (`render_painter.hpp:14-78`, impl `render_painter.cpp`) — `rc_fill_rect`, `rc_fill_rounded_rect`, `rc_fill_path`, `rc_stroke_path`, `rc_fill_linear_gradient` / `_radial_gradient`, `rc_draw_image`, `rc_draw_glyph`, `rc_draw_picture`, `rc_push_clip` / `rc_pop_clip`, `rc_outer_shadow`, `rc_box_blur_region` / `_inset`, `rc_apply_filter`, `rc_composite_opacity`, `rc_apply_blend_mode`, `rc_video_placeholder`, `rc_webview_layer_placeholder` — each delegate to a `paint_record_*` inline (`render_paint_gateway.hpp`). Each `paint_record_*` records the primitive into the `PaintList` (semantic IR) through a `PaintBuilder` and then **immediately** `paint_ir_lower_raster_fragment` lowers that one fragment into the `DisplayList` and clears the list (`render_paint_gateway.hpp:17-20`). The comment on `RenderContext::paint_list` (`render.hpp:34-37`) fixes the contract: the lowering is byte-identical to the legacy direct `dl_*` calls, so the raster path genuinely flows through the semantic IR one fragment at a time. If either target is missing, `paint_record_missing` logs an error rather than silently dropping (`render_paint_gateway.hpp:22`). The IR/DisplayList structures and the lowering rules are [RAD_12](RAD_12_Paint_IR_Display_List.md).
+Every raster painter draws indirectly. The `rc_*` wrappers (`render.hpp`, impl `render_painter.cpp`) — `rc_fill_rect`, `rc_fill_rounded_rect`, `rc_fill_path`, `rc_stroke_path`, `rc_fill_linear_gradient` / `_radial_gradient`, `rc_draw_image`, `rc_draw_glyph`, `rc_draw_picture`, `rc_push_clip` / `rc_pop_clip`, `rc_outer_shadow`, `rc_box_blur_region` / `_inset`, `rc_apply_filter`, `rc_composite_opacity`, `rc_apply_blend_mode`, `rc_video_placeholder`, `rc_webview_layer_placeholder` — each delegate to a `paint_record_*` inline (`render.hpp`). Each `paint_record_*` records the primitive into the `PaintList` (semantic IR) through a `PaintBuilder` and then **immediately** `paint_ir_lower_raster_fragment` lowers that one fragment into the `DisplayList` and clears the list (`render.hpp`). The comment on `RenderContext::paint_list` (`render.hpp:34-37`) fixes the contract: the lowering is byte-identical to the legacy direct `dl_*` calls, so the raster path genuinely flows through the semantic IR one fragment at a time. If either target is missing, `paint_record_missing` logs an error rather than silently dropping (`render.hpp`). The IR/DisplayList structures and the lowering rules are [RAD_12](RAD_12_Paint_IR_Display_List.md).
 
 ---
 
@@ -144,13 +144,13 @@ Each PDF callback (`pdf_cb_render_bound` `:1709`, `pdf_cb_render_text` `:1820`, 
 
 ### 8.1 Capability gating
 
-Two capability structures decide native-vs-fallback. **Runtime** `RenderBackendCaps` (`== RdtVectorCaps`, `render_backend_caps.hpp:6`), queried via `render_backend_get_caps` (`render_backend_caps.cpp:5`), reports what the *live* vector rasterizer can do (vector_paths, gradients, nested_clips, gaussian_blur, color_matrix_filters, native_text_runs, tile_offsets…). `render_backend_supports_filter_chain` (`render_backend_caps.cpp:17`) walks a `FilterProp` chain against those caps and always rejects `DROP_SHADOW`/`URL`. **Static** `RenderExportTargetCaps` (`render_backend_caps.hpp:13`) is a compile-time feature matrix for SVG vs PDF; both mark `blend_modes`/`filters`/`shadows` as false (`:49-51`, `:67-69`), which is what deterministically forces the PDF/SVG lowering into raster fallback rather than dropping the effect.
+Two capability structures decide native-vs-fallback. **Runtime** `RenderBackendCaps` (`== RdtVectorCaps`, `render.hpp`), queried via `render_backend_get_caps` (`render_backend_caps.cpp:5`), reports what the *live* vector rasterizer can do (vector_paths, gradients, nested_clips, gaussian_blur, color_matrix_filters, native_text_runs, tile_offsets…). `render_backend_supports_filter_chain` (`render_backend_caps.cpp:17`) walks a `FilterProp` chain against those caps and always rejects `DROP_SHADOW`/`URL`. **Static** `RenderExportTargetCaps` (`render.hpp`) is a compile-time feature matrix for SVG vs PDF; both mark `blend_modes`/`filters`/`shadows` as false (`:49-51`, `:67-69`), which is what deterministically forces the PDF/SVG lowering into raster fallback rather than dropping the effect.
 
 ---
 
 ## 9. Profiling and path traces
 
-`RenderProfiler` (`render_profiler.hpp:30`) accumulates per-zone counters/timers keyed by `RenderProfileZone` (`render_profiler.hpp:9`) — glyph load/draw, setup-font, bound, text, image, SVG, filter, clip, opacity, blend, block, inline, dispatch, block-self, children, overflow-clip, font-metrics. The painters bracket their work with `render_profiler_add_sample`/`_add_time`. At the end of a raster render, `render_output_render_raster_target` emits a `RenderProfilerEvent` and a `RenderPathTrace` (`render_profiler.hpp:66`) — a one-shot record of which path ran (target, replay mode, selective/tiled flags, DisplayList item count, backend caps snapshot, retained-cache stats). File-level PDF/SVG exports emit a `file_export` path trace with no DisplayList (`render_output.cpp:518-530`). These traces are the primary way to confirm, after the fact, that (say) a page took the tiled or selective path.
+`RenderProfiler` (`render.hpp`) accumulates per-zone counters/timers keyed by `RenderProfileZone` (`render.hpp`) — glyph load/draw, setup-font, bound, text, image, SVG, filter, clip, opacity, blend, block, inline, dispatch, block-self, children, overflow-clip, font-metrics. The painters bracket their work with `render_profiler_add_sample`/`_add_time`. At the end of a raster render, `render_output_render_raster_target` emits a `RenderProfilerEvent` and a `RenderPathTrace` (`render.hpp`) — a one-shot record of which path ran (target, replay mode, selective/tiled flags, DisplayList item count, backend caps snapshot, retained-cache stats). File-level PDF/SVG exports emit a `file_export` path trace with no DisplayList (`render_output.cpp:518-530`). These traces are the primary way to confirm, after the fact, that (say) a page took the tiled or selective path.
 
 ---
 
@@ -160,7 +160,7 @@ Two capability structures decide native-vs-fallback. **Runtime** `RenderBackendC
 2. **PDF success paths emit `log_error` noise.** Multiple non-error PDF outcomes log at error level — e.g. "fallback effect group rendered as passthrough content" (`render_pdf.cpp:1033`) and the raster-fallback effect-group notice (`:598`) fire on the *success* path where a fallback is the intended behavior. This makes real PDF errors hard to spot. *Improvement:* demote intended fallbacks to `log_debug`.
 3. **Duplicated body-background propagation.** `render_output_canvas_background` (`render_output.cpp:205`) and the iframe branch of `render_embed_doc` (`render.cpp:122-156`) reimplement the same `<html>`-then-`<body>` background walk. *Improvement:* extract one shared helper.
 4. **File sprawl (~50 `render_*` files, ~26.8k LOC).** Painter logic, low-level pixel ops, and IO decode are interleaved; the largest are `render_svg_inline.cpp` (5633), `render_pdf.cpp` (2384), `render_background.cpp` (2107), `render_svg.cpp` (1978). No TODO/FIXME/HACK markers exist — the debt is structural (sprawl + duplication), not annotated.
-5. **The raster path is only partway onto the shared abstraction.** The header comments admit it: `render_backend.h:11` describes richer raster block state being "migrated in staged slices," and `render.hpp:15-37` labels the PaintIR routing "Phase C." The raster backend deliberately leaves `render_bound`/effect/transform callbacks null and does that work inside `RenderContext` instead of the generic walker, so the two paths are not yet fully unified.
+5. **The raster path is only partway onto the shared abstraction.** The header comments admit it: `render.hpp` describes richer raster block state being "migrated in staged slices," and `render.hpp:15-37` labels the PaintIR routing "Phase C." The raster backend deliberately leaves `render_bound`/effect/transform callbacks null and does that work inside `RenderContext` instead of the generic walker, so the two paths are not yet fully unified.
 6. **PDF/SVG re-do layout headlessly.** `render_html_to_pdf` (`render_pdf.cpp:2262`) reloads and re-lays-out the HTML rather than reusing an existing view tree, and cannot be driven from the in-memory `render_output_render_view_tree_to_target` (`render_output.cpp:497`). Two parallel entry conventions (`render_html_to_*` vs `render_output_*`) coexist. *Improvement:* allow vector export off a pre-laid view tree.
 7. **Effect-group need vs. capability is decided in two places.** The walker's `render_walk_block_effect_group` (`render_walk.cpp:67`) decides an effect group is *needed*; the backend caps decide it is *supported*. A backend that opens a group it cannot honor relies on flatten/fallback correctness elsewhere — there is no single assertion tying the two together.
 
@@ -170,13 +170,13 @@ Two capability structures decide native-vs-fallback. **Runtime** `RenderBackendC
 
 | File | Responsibility (this doc) |
 |---|---|
-| `radiant/render_backend.h` | The `RenderBackend` vtable and `RenderWalkState`; shared-walker API. |
+| `radiant/render.hpp` | The `RenderBackend` vtable and `RenderWalkState`; shared-walker API. |
 | `radiant/render_walk.cpp` | The single tree walk: block/inline phases, effect-group decision, z-order, transform wrappers. |
-| `radiant/stacking_order.{hpp,cpp}` | Shared positioned/positive-z collection and stable paint-order sorting consumed by render and hit-testing. |
+| `radiant/render.hpp` / `stacking_order.cpp` | Shared positioned/positive-z collection and stable paint-order sorting consumed by render and hit-testing. |
 | `radiant/render_raster_walk.cpp` | Raster backend wiring + `render_raster_dispatch_block` feature router + `render_children`. |
 | `radiant/render.hpp` / `render.cpp` | `RenderContext` god-struct; `render_inline_view`; iframe `render_embed_doc`. |
 | `radiant/render_block.cpp` | `render_bound` orchestrator, `render_outline_deferred`, the four-phase raster block pipeline, skip/dirty/retained gating. |
-| `radiant/render_paint_block.hpp` | `RenderPaintBlockOps` — the shared four-phase block driver used by walker and raster. |
+| `radiant/render.hpp` | `RenderPaintBlockOps` — the shared four-phase block driver used by walker and raster. |
 | `radiant/render_background.cpp` | `render_background`, `render_box_shadow`, `render_box_shadow_inset`. |
 | `radiant/render_border.cpp` | `render_border`, `render_outline`. |
 | `radiant/render_paint_boundary.cpp` | Builds boundary/gradient PaintIR primitives. |
@@ -186,11 +186,11 @@ Two capability structures decide native-vs-fallback. **Runtime** `RenderBackendC
 | `radiant/render_effects.cpp` | `render_effect_group_begin`/`_finish` — opacity/blend/filter isolation. |
 | `radiant/render_filter.cpp` | CSS filters; Apple vImage blur vs software box blur. |
 | `radiant/render_composite.cpp` | `mix-blend-mode` math and backdrop compositors. |
-| `radiant/render_painter.hpp` / `render_paint_gateway.hpp` | The `rc_*` gateway → PaintIR → DisplayList lowering seam. |
+| `radiant/render.hpp` / `render_painter.cpp` | The `rc_*` gateway → PaintIR → DisplayList lowering seam. |
 | `radiant/render_output.cpp` | Output-target dispatch; raster record→replay; tiled/strip PNG; selective repaint; retained capture. |
 | `radiant/render_pdf.cpp` | `PdfRenderContext`, `pdf_cb_*` callbacks, PaintIR→HPDF lowering, raster fallbacks. |
-| `radiant/render_backend_caps.{hpp,cpp}` | Runtime `RenderBackendCaps` vs static `RenderExportTargetCaps`; filter-chain support. |
-| `radiant/render_profiler.{hpp,cpp}` | Per-zone counters, `RenderPathTrace`. |
+| `radiant/render.hpp` / `render_backend_caps.cpp` | Runtime `RenderBackendCaps` vs static `RenderExportTargetCaps`; filter-chain support. |
+| `radiant/render.hpp` / `render_profiler.cpp` | Per-zone counters, `RenderPathTrace`. |
 | `radiant/surface.cpp` | `ImageSurface` ABGR8888 buffer, lazy decode, tile offsets. |
 
 ## Appendix B — Related documents

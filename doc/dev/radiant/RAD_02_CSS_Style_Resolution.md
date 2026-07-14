@@ -2,7 +2,7 @@
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the *used/computed value* step of CSS: how the already-parsed, already-cascaded style for an element is turned into concrete floats, colors, and enums stored directly on the view node's property structs. It draws the seam between Radiant and the CSS engine in `lambda/input/css/` (which owns parsing, specificity, and the cascade), describes the two-pass font-first resolution and the ~248-case property switch, the value resolvers for lengths/colors/`var()`, the imperative UA-default and HTML-presentational-attribute pass, and the memory-safety helpers that keep shorthand expansion sound.
 >
-> **Primary sources:** `radiant/resolve_css_style.cpp` (the property resolver — the largest file in the repo at ~13.9k lines), `radiant/resolve_htm_style.cpp` (UA defaults + legacy HTML attributes), `radiant/css_temp_decl.hpp` (shorthand scratch declarations), `radiant/css_animation.cpp` (animation-longhand consumption), `radiant/retained_fields.hpp` (owned-pointer retention), the computed-style prop structs in `radiant/view.hpp` (`FontProp`/`InlineProp`/`BoundaryProp`/`BlockProp`/`PositionProp`/`FlexProp`), and the seam types in `lambda/input/css/css_style_node.hpp` / `css_style.hpp`. Caller order lives in `radiant/layout.cpp`.
+> **Primary sources:** `radiant/resolve_css_style.cpp` (the property resolver — the largest file in the repo at ~13.9k lines), `radiant/resolve_htm_style.cpp` (UA defaults + legacy HTML attributes), `radiant/view.hpp` (shorthand scratch declarations), `radiant/css_animation.cpp` (animation-longhand consumption), `radiant/render.hpp` (owned-pointer retention), the computed-style prop structs in `radiant/view.hpp` (`FontProp`/`InlineProp`/`BoundaryProp`/`BlockProp`/`PositionProp`/`FlexProp`), and the seam types in `lambda/input/css/css_style_node.hpp` / `css_style.hpp`. Caller order lives in `radiant/layout.cpp`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -51,7 +51,7 @@ There is no monolithic "computed style" object. Computed values *are* the lazily
 
 Two structural conventions recur. First, **`has_*` presence flags**: many props (e.g. `InlineProp::has_color`, `has_svg_fill` at `view.hpp:571`,`579`) are paired with a boolean the case must set so consumers can distinguish "explicitly set" from "zero-valued default". Second, **per-side specificity companions**: `Spacing` (`view.hpp:587`) carries `top/right/bottom/left` alongside `top_specificity`…`left_specificity` (`view.hpp:589`). `resolve_spacing_prop` (`resolve_css_style.cpp:3045`) writes both, and UA defaults use specificity `-1` so any real author rule wins the per-side tie-break. This is the sub-value reconciliation `get_cascade_priority` exists to feed.
 
-Owned pointer fields (font family, background image, marker text, image source path/data) are never assigned raw. `retained_fields.hpp` wraps `lam::PersistentFieldRef<T, PoolDomain>` in `radiant_retain_*`/`radiant_clear_*` inline helpers (`retained_fields.hpp:6`,`21`,`31`,`36`) so ownership is tracked correctly across the pool/GC domain swap that a relayout performs ([RAD_01 §6](RAD_01_View_and_DOM_Model.md#6-incremental-relayout)).
+Owned pointer fields (font family, background image, marker text, image source path/data) are never assigned raw. `render.hpp` wraps `lam::PersistentFieldRef<T, PoolDomain>` in `radiant_retain_*`/`radiant_clear_*` inline helpers (`render.hpp`,`21`,`31`,`36`) so ownership is tracked correctly across the pool/GC domain swap that a relayout performs ([RAD_01 §6](RAD_01_View_and_DOM_Model.md#6-incremental-relayout)).
 
 ---
 
@@ -86,7 +86,7 @@ The switch cases delegate the actual unit/color/`var()` work to a small set of p
 
 ### 4.3 Shorthand expansion and `CssTempDecl`
 
-Many shorthands (~18 of them) expand by copying the parsed `CssDeclaration`, rewriting `property_id`, and re-pointing `value` at a synthesized longhand component before calling `resolve_css_property`. Doing that by hand with a stack-local `CssValue` list is a stack-use-after-scope hazard: the scratch list can outlive or under-live the resolve call. `css_temp_decl.hpp` fixes this structurally. `lam::CssTempDecl` (`css_temp_decl.hpp:36`) copies the base declaration and routes one component; `lam::CssTempListDecl<N>` (`css_temp_decl.hpp:60`) owns both the scratch `CssValue` list and its backing pointer array with compile-time capacity `N`, so they are guaranteed to outlive the `resolve()` call (`css_temp_decl.hpp:90`). The contract (documented against `vibe/Memory_Safety_Template4.md`) is that `resolve_css_property` may *read* `decl->value` during the call but must never *retain* a pointer from a resolve-only declaration; persistent values go through the `PersistentField`/`retained_fields.hpp` path instead.
+Many shorthands (~18 of them) expand by copying the parsed `CssDeclaration`, rewriting `property_id`, and re-pointing `value` at a synthesized longhand component before calling `resolve_css_property`. Doing that by hand with a stack-local `CssValue` list is a stack-use-after-scope hazard: the scratch list can outlive or under-live the resolve call. `view.hpp` fixes this structurally. `lam::CssTempDecl` (`view.hpp`) copies the base declaration and routes one component; `lam::CssTempListDecl<N>` (`view.hpp`) owns both the scratch `CssValue` list and its backing pointer array with compile-time capacity `N`, so they are guaranteed to outlive the `resolve()` call (`view.hpp`). The contract (documented against `vibe/Memory_Safety_Template4.md`) is that `resolve_css_property` may *read* `decl->value` during the call but must never *retain* a pointer from a resolve-only declaration; persistent values go through the `PersistentField`/`render.hpp` path instead.
 
 ---
 
@@ -123,8 +123,8 @@ The same pass maps legacy presentational HTML attributes onto computed style: `b
 |---|---|
 | `radiant/resolve_css_style.cpp` | Author-CSS resolution: `resolve_css_styles` two-pass driver, the ~248-case `resolve_css_property` switch, value resolvers (`resolve_length_value`/`resolve_color_value`/`resolve_var_function`), `get_cascade_priority`, spacing/shorthand helpers. |
 | `radiant/resolve_htm_style.cpp` | UA defaults and legacy HTML presentational attributes: `apply_element_default_style`, table-attr helpers, `parse_html_color`, `resolve_dir_auto`. |
-| `radiant/css_temp_decl.hpp` | `lam::CssTempDecl` / `CssTempListDecl<N>` resolve-only scratch declarations for safe shorthand expansion. |
-| `radiant/retained_fields.hpp` | `radiant_retain_*`/`radiant_clear_*` owned-pointer setters wrapping `PersistentFieldRef` for font family / bg image / marker text / image source. |
+| `radiant/view.hpp` | `lam::CssTempDecl` / `CssTempListDecl<N>` resolve-only scratch declarations for safe shorthand expansion. |
+| `radiant/render.hpp` | `radiant_retain_*`/`radiant_clear_*` owned-pointer setters wrapping `PersistentFieldRef` for font family / bg image / marker text / image source. |
 | `radiant/css_animation.cpp` | `css_animation_resolve` reading `animation-*` longhands from the same StyleTree. |
 | `radiant/view.hpp` | The computed-style prop structs (`FontProp`/`InlineProp`/`BoundaryProp`/`BlockProp`/`PositionProp`/`FlexProp`), `has_*` flags, `Spacing` per-side `*_specificity`. |
 | `radiant/layout.cpp` | Caller order: `apply_element_default_style` → `resolve_css_styles` → display re-resolve → `css_animation_resolve`. |

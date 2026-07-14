@@ -1,4 +1,5 @@
 #pragma once
+// internal implementation header - only radiant/ and dedicated white-box tests may include it
 
 /**
  * Grid Enhanced Adapter

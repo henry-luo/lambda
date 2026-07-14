@@ -66,7 +66,7 @@ Each iteration, in order:
 
 ### 4.1 Data model
 
-`struct AnimationInstance` (`view.hpp`) is an intrusive doubly-linked node carrying an `AnimationType` (`ANIM_CSS_ANIMATION`, `ANIM_CSS_TRANSITION`, `ANIM_GIF`, `ANIM_LOTTIE` — `view.hpp`), a `void* target` and `void* state` (type-specific), the timing block (`start_time`/`duration`/`delay`/`iteration_count`/`current_iteration`), `direction`/`fill_mode`/`play_state`, an embedded `TimingFunction timing`, the `tick`/`on_finish` callbacks, and `bounds[4]` (absolute x/y/w/h in CSS px) used purely for dirty tracking. `struct AnimationScheduler` (`view.hpp`) is a `first`/`last`/`count` list plus `current_time`, the `has_active_animations` flag the loop gates on, and the `Pool*` all instances are allocated from. It lives at `DocState::animation_scheduler` (`state_store.hpp:445`).
+`struct AnimationInstance` (`view.hpp`) is an intrusive doubly-linked node carrying an `AnimationType` (`ANIM_CSS_ANIMATION`, `ANIM_CSS_TRANSITION`, `ANIM_GIF`, `ANIM_LOTTIE` — `view.hpp`), a `void* target` and `void* state` (type-specific), the timing block (`start_time`/`duration`/`delay`/`iteration_count`/`current_iteration`), `direction`/`fill_mode`/`play_state`, an embedded `TimingFunction timing`, the `tick`/`on_finish` callbacks, and `bounds[4]` (absolute x/y/w/h in CSS px) used purely for dirty tracking. `struct AnimationScheduler` (`view.hpp`) is a `first`/`last`/`count` list plus `current_time`, the `has_active_animations` flag the loop gates on, and the `Pool*` all instances are allocated from. It lives at `DocState::animation_scheduler` (`event.hpp`).
 
 ### 4.2 Timing functions
 
