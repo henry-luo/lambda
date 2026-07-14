@@ -699,7 +699,7 @@ silently discarded or accepted as a different diagram family.
 ### 18.3 Mark Graph IR contract
 
 The Stage 2 IR extends the base schema in
-`vibe/mark_graph_notation_schema.md`. Its stable top-level elements are:
+`vibe/Mark_Graph_Schema.md`. Its stable top-level elements are:
 
 - `<graph>` for identity, flavor, graph kind, direction, defaults, and options;
 - `<meta>` for title, accessibility, provenance, and source information;
