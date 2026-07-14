@@ -373,6 +373,9 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         run.color = ctx->color;
         run.text = text_content;
         run.text_len = (int)strlen(text_content); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
+        // effect fallback retains commands until rasterization, so its paint list
+        // must own text that immediate SVG lowering would otherwise consume.
+        run.owns_text = ctx->effect_fallback.active;
         run.font_family = ctx->font.font_handle
             ? font_handle_get_family_name(ctx->font.font_handle)
             : "Arial";
@@ -385,7 +388,7 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         paint_glyph_run(svg_active_paint_list(ctx), &run);
         svg_lower_paint_list(ctx);
 
-        mem_free(text_content);
+        if (!run.owns_text) mem_free(text_content);
         text_rect = text_rect->next;
         if (text_rect) { goto NEXT_RECT; }
         return;
@@ -1188,11 +1191,49 @@ static void svg_cb_render_svg_subscene(void* vctx, const PaintSvgSubscene* subsc
     svg_lower_paint_list(ctx);
 }
 
+static const char* SVG_GRAPH_SEMANTIC_ATTRS[] = {
+    "data-graph-role", "data-node-id", "data-edge-id", "data-cluster-id",
+    "data-parent-cluster-id", "data-subgraph-id", "data-shape",
+    "data-label",
+    "data-direction", "data-marker-start", "data-marker-end",
+    "data-route", "data-route-kind", "data-from", "data-to"
+};
+
+static void svg_append_graph_semantic_attrs(SvgRenderContext* ctx,
+                                            ViewBlock* block) {
+    if (!ctx || !block) return;
+    const char* role = dom_element_get_attribute(block, "data-graph-role");
+    if (!role || !role[0]) return;
+
+    for (size_t i = 0; i < sizeof(SVG_GRAPH_SEMANTIC_ATTRS) /
+                                  sizeof(SVG_GRAPH_SEMANTIC_ATTRS[0]); i++) {
+        const char* name = SVG_GRAPH_SEMANTIC_ATTRS[i];
+        const char* value = dom_element_get_attribute(block, name);
+        if (!value) continue;
+        strbuf_append_char(ctx->svg_content, ' ');
+        strbuf_append_str(ctx->svg_content, name);
+        strbuf_append_str(ctx->svg_content, "=\"");
+        escape_append(ctx->svg_content, value, strlen(value), ESCAPE_RULES_HTML_ATTR,
+                      ESCAPE_RULES_HTML_ATTR_COUNT, ESCAPE_CTRL_NONE);
+        strbuf_append_char(ctx->svg_content, '\"');
+    }
+
+    float abs_x = 0.0f;
+    float abs_y = 0.0f;
+    view_to_absolute_position(static_cast<View*>(block), block->x, block->y,
+                              0.0f, 0.0f, &abs_x, &abs_y);
+    strbuf_append_format(ctx->svg_content,
+        " data-x=\"%.3f\" data-y=\"%.3f\" data-width=\"%.3f\" data-height=\"%.3f\"",
+        abs_x, abs_y, block->width, block->height);
+}
+
 static void svg_cb_begin_block_children(void* vctx, ViewBlock* block) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     svg_indent(ctx);
-    strbuf_append_format(ctx->svg_content, "<g class=\"block\" data-element=\"%s\">\n",
+    strbuf_append_format(ctx->svg_content, "<g class=\"block\" data-element=\"%s\"",
                          block->node_name());
+    svg_append_graph_semantic_attrs(ctx, block);
+    strbuf_append_str(ctx->svg_content, ">\n");
     ctx->indent_level++;
 }
 

@@ -9442,21 +9442,423 @@ static int js_resolve_ta_type_from_ctor(Item ctor) {
     if (get_type_id(ctor) != LMD_TYPE_FUNC) return -1;
     JsFunction* fn = (JsFunction*)ctor.function;
     if (!fn->name) return -1;
-    const char* n = fn->name->chars;
-    int nl = (int)fn->name->len;
-    if      (nl == 9  && strncmp(n, "Int8Array", 9) == 0)           return JS_TYPED_INT8;
-    else if (nl == 10 && strncmp(n, "Uint8Array", 10) == 0)         return JS_TYPED_UINT8;
-    else if (nl == 17 && strncmp(n, "Uint8ClampedArray", 17) == 0)  return JS_TYPED_UINT8_CLAMPED;
-    else if (nl == 10 && strncmp(n, "Int16Array", 10) == 0)         return JS_TYPED_INT16;
-    else if (nl == 11 && strncmp(n, "Uint16Array", 11) == 0)        return JS_TYPED_UINT16;
-    else if (nl == 10 && strncmp(n, "Int32Array", 10) == 0)         return JS_TYPED_INT32;
-    else if (nl == 11 && strncmp(n, "Uint32Array", 11) == 0)        return JS_TYPED_UINT32;
-    else if (nl == 12 && strncmp(n, "Float16Array", 12) == 0)       return JS_TYPED_FLOAT16;
-    else if (nl == 12 && strncmp(n, "Float32Array", 12) == 0)       return JS_TYPED_FLOAT32;
-    else if (nl == 12 && strncmp(n, "Float64Array", 12) == 0)       return JS_TYPED_FLOAT64;
-    else if (nl == 13 && strncmp(n, "BigInt64Array", 13) == 0)      return JS_TYPED_BIGINT64;
-    else if (nl == 14 && strncmp(n, "BigUint64Array", 14) == 0)     return JS_TYPED_BIGUINT64;
-    return -1;
+    return js_builtin_typed_array_type(fn->name->chars, (int)fn->name->len);
+}
+
+static Item js_dispatch_array_builtin(int builtin_id, Item this_val, Item* args, int arg_count) {
+        // Map builtin_id to method name and delegate to js_map_method
+        const JsBuiltinMethodSpec* catalog_spec = js_builtin_catalog_find_id(builtin_id);
+        if (!catalog_spec) return ItemNull;
+        const char* name = catalog_spec->name;
+        Item method_name = {.item = s2it(heap_create_name(name, strlen(name)))};
+        // v18c: Throw TypeError if this is null/undefined (ES spec §22.1.3)
+        TypeId this_type = get_type_id(this_val);
+        if (this_val.item == ITEM_JS_UNDEFINED || this_val.item == ITEM_NULL ||
+            this_type == LMD_TYPE_NULL) {
+            Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
+            char msg[128];
+            snprintf(msg, sizeof(msg), "Cannot read properties of %s (reading '%s')",
+                this_val.item == ITEM_JS_UNDEFINED ? "undefined" : "null", name);
+            Item msg_item = (Item){.item = s2it(heap_create_name(msg, strlen(msg)))};
+            Item error = js_new_error_with_name(type_name, msg_item);
+            js_throw_value(error);
+            return ItemNull;
+        }
+        // ES2023 §23.1.3.34 step 1: toSorted must check IsCallable(comparefn) BEFORE any other step
+        if (builtin_id == JS_BUILTIN_ARR_TO_SORTED && arg_count >= 1 &&
+            args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_FUNC) {
+            return js_throw_type_error("comparefn is not a function");
+        }
+        // ES §23.1.3.27 step 1: Array.prototype.sort must check IsCallable(comparefn)
+        // BEFORE accessing this.length (so a poisoned `length` getter on an
+        // array-like object isn't observed first).
+        if (builtin_id == JS_BUILTIN_ARR_SORT && arg_count >= 1 &&
+            args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_FUNC) {
+            return js_throw_type_error("comparefn is not a function");
+        }
+        // Route to js_array_method for actual arrays, js_map_method for maps/typed arrays.
+        // Do NOT call js_map_method for plain MAPs — it would recurse through
+        // the property access fallback which finds the builtin again.
+        if (this_type == LMD_TYPE_ARRAY) {
+            js_array_method_real_this = this_val;
+            Item result = js_array_method(this_val, method_name, args, arg_count);
+            js_array_method_real_this = (Item){0};
+            return result;
+        }
+        // ES spec §23.1.3.30: Array.prototype.toString
+        // 1. Let array be ToObject(this)  2. Let func = Get(array, "join")
+        // 3. If IsCallable(func), return Call(func, array)
+        // 4. Otherwise, return Object.prototype.toString(array)
+        if (builtin_id == JS_BUILTIN_ARR_TO_STRING) {
+            Item wrapped = js_to_object(this_val);
+            // Check for own "join" property or explicit prototype chain join
+            // (don't use js_property_get which has generic builtin fallback for all MAPs)
+            Item join_fn = ItemNull;
+            Item join_key = (Item){.item = s2it(heap_create_name("join", 4))};
+            if (js_is_proxy(wrapped)) {
+                join_fn = js_property_get(wrapped, join_key);
+                if (js_exception_pending) return ItemNull;
+            }
+            if (get_type_id(wrapped) == LMD_TYPE_MAP) {
+                bool own_join = false;
+                if (!js_is_proxy(wrapped)) {
+                    join_fn = js_map_get_fast(wrapped.map, "join", 4, &own_join);
+                }
+                if ((!own_join || js_is_deleted_sentinel(join_fn)) && !js_is_proxy(wrapped)) {
+                    join_fn = js_prototype_lookup(wrapped, join_key);
+                }
+            }
+            if (join_fn.item != ItemNull.item && get_type_id(join_fn) == LMD_TYPE_FUNC) {
+                return js_call_function(join_fn, wrapped, args, arg_count);
+            }
+            // No join method — fall back to Object.prototype.toString
+            return js_dispatch_builtin(JS_BUILTIN_OBJ_TO_STRING, wrapped, args, arg_count);
+        }
+        // For MAP objects (typed arrays, data views), delegate to js_map_method
+        // which handles them. For plain Maps, convert to array-like and delegate.
+        if (this_type == LMD_TYPE_MAP) {
+            if (js_is_typed_array(this_val) || js_is_dataview(this_val)) {
+                return js_map_method(this_val, method_name, args, arg_count);
+            }
+            // concat needs the original receiver for ArraySpeciesCreate and
+            // IsConcatSpreadable. This includes proxies over arrays, where the
+            // species constructor lookup must go through the proxy target.
+            if (builtin_id == JS_BUILTIN_ARR_CONCAT) {
+                js_array_method_real_this = this_val;
+                Item result = js_array_method(this_val, method_name, args, arg_count);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_FILL) {
+                return js_array_generic_fill(this_val, args, arg_count);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_COPY_WITHIN) {
+                return js_array_generic_copy_within(this_val, args, arg_count);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_REVERSE) {
+                return js_array_generic_reverse(this_val);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_SORT) {
+                return js_array_generic_sort(this_val, args, arg_count);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_PUSH) {
+                return js_array_generic_push(this_val, args, arg_count);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_POP) {
+                return js_array_generic_pop(this_val);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_SHIFT) {
+                return js_array_generic_shift(this_val);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_UNSHIFT) {
+                return js_array_generic_unshift(this_val, args, arg_count);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_INCLUDES) {
+                return js_array_generic_includes(this_val, args, arg_count);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_INDEX_OF) {
+                return js_array_generic_index_of(this_val, args, arg_count, false);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_LAST_INDEX_OF) {
+                return js_array_generic_index_of(this_val, args, arg_count, true);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_FOR_EACH) {
+                return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_FOR_EACH);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_MAP) {
+                return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_MAP);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_FILTER) {
+                return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_FILTER);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_SOME) {
+                return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_SOME);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_EVERY) {
+                return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_EVERY);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_REDUCE) {
+                return js_array_generic_reduce(this_val, args, arg_count, false);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_REDUCE_RIGHT) {
+                return js_array_generic_reduce(this_val, args, arg_count, true);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_SLICE) {
+                Item result = js_array_generic_slice(this_val, args, arg_count);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_FLAT) {
+                return js_array_generic_flat(this_val, args, arg_count);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_FLAT_MAP) {
+                return js_array_generic_flat_map(this_val, args, arg_count);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_TO_REVERSED) {
+                return js_array_generic_to_reversed(this_val);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_TO_SORTED) {
+                return js_array_generic_to_sorted(this_val, args, arg_count);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_TO_SPLICED) {
+                return js_array_generic_to_spliced(this_val, args, arg_count);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_WITH) {
+                return js_array_generic_with(this_val, args, arg_count);
+            }
+            js_array_method_real_this = this_val;
+            // ES §23.1.3 ArraySpeciesCreate(O, count) → ArrayCreate validates count ≤ 2^32-1.
+            // For slice/map/filter on array-like, validate length up-front to throw RangeError
+            // before js_array_like_to_array silently truncates at 100000.
+            if (builtin_id == JS_BUILTIN_ARR_MAP || builtin_id == JS_BUILTIN_ARR_FILTER) {
+                Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                Item len_val = js_property_get(this_val, len_key);
+                if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
+                Item len_num = js_to_number(len_val);
+                if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
+                double dlen = 0;
+                TypeId ltid = get_type_id(len_num);
+                if (ltid == LMD_TYPE_INT || ltid == LMD_TYPE_INT64) dlen = (double)it2i(len_num);
+                else if (ltid == LMD_TYPE_FLOAT) dlen = len_num.get_double();
+                if (dlen > 4294967295.0) {  // > 2^32 - 1
+                    js_array_method_real_this = (Item){0};
+                    return js_throw_range_error("Invalid array length");
+                }
+            }
+            if (builtin_id == JS_BUILTIN_ARR_SPLICE) {
+                Item result = js_array_generic_splice(this_val, args, arg_count);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_FIND_LAST ||
+                builtin_id == JS_BUILTIN_ARR_FIND_LAST_INDEX) {
+                Item result = js_array_generic_find_last(
+                    this_val, args, arg_count, builtin_id == JS_BUILTIN_ARR_FIND_LAST_INDEX);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            Item temp_arr = js_array_like_to_array(this_val);
+            if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
+            // J39-7: in-place mutating methods (fill/copyWithin/sort/reverse) must
+            // write the temp_arr contents back to the original receiver and return
+            // the original receiver (per ES spec — these methods return O).
+            bool is_writeback = (builtin_id == JS_BUILTIN_ARR_FILL ||
+                                 builtin_id == JS_BUILTIN_ARR_COPY_WITHIN ||
+                                 builtin_id == JS_BUILTIN_ARR_SORT ||
+                                 builtin_id == JS_BUILTIN_ARR_REVERSE);
+            Item result = js_array_method(temp_arr, method_name, args, arg_count);
+            js_array_method_real_this = (Item){0};
+            if (js_check_exception()) return ItemNull;
+            if (is_writeback && get_type_id(temp_arr) == LMD_TYPE_ARRAY) {
+                Array* a = temp_arr.array;
+                int64_t copy_len = a ? a->length : 0;
+                for (int64_t i = 0; i < copy_len; i++) {
+                    char buf[32];
+                    int blen = snprintf(buf, sizeof(buf), "%lld", (long long)i);
+                    Item idx_key = (Item){.item = s2it(heap_create_name(buf, blen))};
+                    js_property_set(this_val, idx_key, a->items[i]);
+                    if (js_check_exception()) return ItemNull;
+                }
+                return this_val;
+            }
+            return result;
+        }
+        // String, Number, Boolean, etc. — ToObject then convert to array-like
+        // Strings: wrap to String object but use raw string for array-like conversion
+        // (wrapper objects don't support indexed character access yet)
+        {
+            // J39-7: mutating methods on a primitive String receiver throw TypeError —
+            // String has non-writable "length" so Set(O, "length", n, true) fails per spec.
+            // (Boolean/Number wrappers tolerate empty-no-op cases — don't throw eagerly.)
+            bool is_mutating = (builtin_id == JS_BUILTIN_ARR_PUSH ||
+                                builtin_id == JS_BUILTIN_ARR_POP ||
+                                builtin_id == JS_BUILTIN_ARR_SHIFT ||
+                                builtin_id == JS_BUILTIN_ARR_UNSHIFT ||
+                                builtin_id == JS_BUILTIN_ARR_SPLICE ||
+                                builtin_id == JS_BUILTIN_ARR_REVERSE ||
+                                builtin_id == JS_BUILTIN_ARR_FILL ||
+                                builtin_id == JS_BUILTIN_ARR_COPY_WITHIN);
+            if (is_mutating && this_type == LMD_TYPE_STRING) {
+                return js_throw_type_error("Cannot assign to read only property of primitive value");
+            }
+            if (this_type == LMD_TYPE_FUNC) {
+                if (builtin_id == JS_BUILTIN_ARR_PUSH)
+                    return js_array_generic_push(this_val, args, arg_count);
+                if (builtin_id == JS_BUILTIN_ARR_POP)
+                    return js_array_generic_pop(this_val);
+                if (builtin_id == JS_BUILTIN_ARR_SHIFT)
+                    return js_array_generic_shift(this_val);
+                if (builtin_id == JS_BUILTIN_ARR_UNSHIFT)
+                    return js_array_generic_unshift(this_val, args, arg_count);
+                if (builtin_id == JS_BUILTIN_ARR_FOR_EACH)
+                    return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_FOR_EACH);
+                if (builtin_id == JS_BUILTIN_ARR_MAP)
+                    return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_MAP);
+                if (builtin_id == JS_BUILTIN_ARR_FILTER)
+                    return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_FILTER);
+                if (builtin_id == JS_BUILTIN_ARR_SOME)
+                    return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_SOME);
+                if (builtin_id == JS_BUILTIN_ARR_EVERY)
+                    return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_EVERY);
+                if (builtin_id == JS_BUILTIN_ARR_REDUCE)
+                    return js_array_generic_reduce(this_val, args, arg_count, false);
+                if (builtin_id == JS_BUILTIN_ARR_REDUCE_RIGHT)
+                    return js_array_generic_reduce(this_val, args, arg_count, true);
+                if (builtin_id == JS_BUILTIN_ARR_FLAT)
+                    return js_array_generic_flat(this_val, args, arg_count);
+                if (builtin_id == JS_BUILTIN_ARR_FLAT_MAP)
+                    return js_array_generic_flat_map(this_val, args, arg_count);
+                if (builtin_id == JS_BUILTIN_ARR_TO_REVERSED)
+                    return js_array_generic_to_reversed(this_val);
+                if (builtin_id == JS_BUILTIN_ARR_TO_SORTED)
+                    return js_array_generic_to_sorted(this_val, args, arg_count);
+                if (builtin_id == JS_BUILTIN_ARR_TO_SPLICED)
+                    return js_array_generic_to_spliced(this_val, args, arg_count);
+                if (builtin_id == JS_BUILTIN_ARR_WITH)
+                    return js_array_generic_with(this_val, args, arg_count);
+            }
+            Item wrapped = js_to_object(this_val);
+            js_array_method_real_this = wrapped;
+            if (builtin_id == JS_BUILTIN_ARR_SORT) {
+                Item result = js_array_generic_sort(wrapped, args, arg_count);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_CONCAT) {
+                Item result = js_array_method(wrapped, method_name, args, arg_count);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            // For strings, use the raw primitive for array-like conversion
+            // since js_property_get on strings supports indexed char access
+            Item source = (this_type == LMD_TYPE_STRING) ? this_val : wrapped;
+            if (builtin_id == JS_BUILTIN_ARR_INCLUDES) {
+                Item result = js_array_generic_includes(source, args, arg_count);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_FOR_EACH) {
+                Item result = js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_FOR_EACH);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_MAP) {
+                Item result = js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_MAP);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_FILTER) {
+                Item result = js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_FILTER);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_SOME) {
+                Item result = js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_SOME);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_EVERY) {
+                Item result = js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_EVERY);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_REDUCE) {
+                Item result = js_array_generic_reduce_with_object(source, wrapped, args, arg_count, false);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_REDUCE_RIGHT) {
+                Item result = js_array_generic_reduce_with_object(source, wrapped, args, arg_count, true);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_FLAT) {
+                Item result = js_array_generic_flat(source, args, arg_count);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_FLAT_MAP) {
+                Item result = js_array_generic_flat_map(source, args, arg_count);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_TO_REVERSED) {
+                Item result = js_array_generic_to_reversed(source);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_TO_SORTED) {
+                Item result = js_array_generic_to_sorted(source, args, arg_count);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_TO_SPLICED) {
+                Item result = js_array_generic_to_spliced(source, args, arg_count);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_WITH) {
+                Item result = js_array_generic_with(source, args, arg_count);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
+            Item temp_arr = js_array_like_to_array(source);
+            if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
+            Item result = js_array_method(temp_arr, method_name, args, arg_count);
+            js_array_method_real_this = (Item){0};
+            if (js_check_exception()) return ItemNull;
+            // J39-7: in-place mutating methods (fill/copyWithin/sort/reverse) must
+            // return the wrapped receiver per ES spec — these methods return O.
+            // For Boolean/Number wrappers length is 0 so no writeback is needed.
+            if (is_mutating && (builtin_id == JS_BUILTIN_ARR_FILL ||
+                                builtin_id == JS_BUILTIN_ARR_COPY_WITHIN ||
+                                builtin_id == JS_BUILTIN_ARR_SORT ||
+                                builtin_id == JS_BUILTIN_ARR_REVERSE)) {
+                return wrapped;
+            }
+            return result;
+        }
+
+}
+
+static Item js_dispatch_string_builtin(int builtin_id, Item this_val, Item* args, int arg_count) {
+        const JsBuiltinMethodSpec* catalog_spec = js_builtin_catalog_find_id(builtin_id);
+        if (!catalog_spec) return ItemNull;
+        const char* name = catalog_spec->name;
+        Item method_name = {.item = s2it(heap_create_name(name, strlen(name)))};
+        // v18c: Throw TypeError if this is null/undefined (ES spec §21.1.3)
+        {
+            TypeId st = get_type_id(this_val);
+            if (this_val.item == ITEM_JS_UNDEFINED || this_val.item == ITEM_NULL ||
+                st == LMD_TYPE_NULL) {
+                Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
+                Item msg = (Item){.item = s2it(heap_create_name("Cannot read properties of null or undefined"))};
+                Item error = js_new_error_with_name(type_name, msg);
+                js_throw_value(error);
+                return ItemNull;
+            }
+        }
+        // String.prototype.toString/valueOf: throw TypeError if not a string
+        if (builtin_id == JS_BUILTIN_STR_TO_STRING || builtin_id == JS_BUILTIN_STR_VALUE_OF) {
+            TypeId st = get_type_id(this_val);
+            if (st != LMD_TYPE_STRING) {
+                // allow String wrapper objects (typed JsClass tag)
+                if (js_class_id(this_val) != JS_CLASS_STRING) {
+                    return js_throw_type_error("String.prototype method called on incompatible receiver");
+                }
+            }
+        }
+        return js_string_method(this_val, method_name, args, arg_count);
+
+}
+
+static Item js_dispatch_math_builtin(int builtin_id, Item* args, int arg_count) {
+    const JsBuiltinMethodSpec* spec = js_builtin_catalog_find_id(builtin_id);
+    if (!spec) return ItemNull;
+    Item method_name = {
+        .item = s2it(heap_create_name(spec->name, spec->len))
+    };
+    return js_math_method(method_name, args, arg_count);
 }
 
 // Dispatch a built-in method call by builtin_id
@@ -9466,6 +9868,18 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     Item arg0 = arg_count > 0 && args ? args[0] : undef;
     Item arg1 = arg_count > 1 && args ? args[1] : undef;
     Item arg2 = arg_count > 2 && args ? args[2] : undef;
+
+    // Catalog groups keep shared receiver adaptation out of the exceptional-case switch.
+    switch (js_builtin_dispatch_group(builtin_id)) {
+    case JS_BUILTIN_DISPATCH_ARRAY:
+        return js_dispatch_array_builtin(builtin_id, this_val, args, arg_count);
+    case JS_BUILTIN_DISPATCH_STRING:
+        return js_dispatch_string_builtin(builtin_id, this_val, args, arg_count);
+    case JS_BUILTIN_DISPATCH_MATH:
+        return js_dispatch_math_builtin(builtin_id, args, arg_count);
+    default:
+        break;
+    }
 
     switch (builtin_id) {
     // Object.prototype methods
@@ -9914,460 +10328,6 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return make_js_undefined();
     }
 
-    // Array.prototype methods - delegate to js_map_method which handles arrays
-    case JS_BUILTIN_ARR_PUSH:
-    case JS_BUILTIN_ARR_POP:
-    case JS_BUILTIN_ARR_SHIFT:
-    case JS_BUILTIN_ARR_UNSHIFT:
-    case JS_BUILTIN_ARR_JOIN:
-    case JS_BUILTIN_ARR_SLICE:
-    case JS_BUILTIN_ARR_SPLICE:
-    case JS_BUILTIN_ARR_INDEX_OF:
-    case JS_BUILTIN_ARR_INCLUDES:
-    case JS_BUILTIN_ARR_MAP:
-    case JS_BUILTIN_ARR_FILTER:
-    case JS_BUILTIN_ARR_REDUCE:
-    case JS_BUILTIN_ARR_FOR_EACH:
-    case JS_BUILTIN_ARR_FIND:
-    case JS_BUILTIN_ARR_FIND_INDEX:
-    case JS_BUILTIN_ARR_SOME:
-    case JS_BUILTIN_ARR_EVERY:
-    case JS_BUILTIN_ARR_SORT:
-    case JS_BUILTIN_ARR_REVERSE:
-    case JS_BUILTIN_ARR_CONCAT:
-    case JS_BUILTIN_ARR_FLAT:
-    case JS_BUILTIN_ARR_FLAT_MAP:
-    case JS_BUILTIN_ARR_FILL:
-    case JS_BUILTIN_ARR_COPY_WITHIN:
-    case JS_BUILTIN_ARR_TO_STRING:
-    case JS_BUILTIN_ARR_KEYS:
-    case JS_BUILTIN_ARR_VALUES:
-    case JS_BUILTIN_ARR_ENTRIES:
-    case JS_BUILTIN_ARR_AT:
-    case JS_BUILTIN_ARR_ITEM:
-    case JS_BUILTIN_ARR_LAST_INDEX_OF:
-    case JS_BUILTIN_ARR_REDUCE_RIGHT:
-    case JS_BUILTIN_ARR_FIND_LAST:
-    case JS_BUILTIN_ARR_FIND_LAST_INDEX:
-    case JS_BUILTIN_ARR_TO_SORTED:
-    case JS_BUILTIN_ARR_TO_REVERSED:
-    case JS_BUILTIN_ARR_TO_SPLICED:
-    case JS_BUILTIN_ARR_WITH:
-    case JS_BUILTIN_ARR_TO_LOCALE_STRING: {
-        // Map builtin_id to method name and delegate to js_map_method
-        static const char* arr_method_names[] = {
-            [JS_BUILTIN_ARR_PUSH - JS_BUILTIN_ARR_PUSH] = "push",
-            [JS_BUILTIN_ARR_POP - JS_BUILTIN_ARR_PUSH] = "pop",
-            [JS_BUILTIN_ARR_SHIFT - JS_BUILTIN_ARR_PUSH] = "shift",
-            [JS_BUILTIN_ARR_UNSHIFT - JS_BUILTIN_ARR_PUSH] = "unshift",
-            [JS_BUILTIN_ARR_JOIN - JS_BUILTIN_ARR_PUSH] = "join",
-            [JS_BUILTIN_ARR_SLICE - JS_BUILTIN_ARR_PUSH] = "slice",
-            [JS_BUILTIN_ARR_SPLICE - JS_BUILTIN_ARR_PUSH] = "splice",
-            [JS_BUILTIN_ARR_INDEX_OF - JS_BUILTIN_ARR_PUSH] = "indexOf",
-            [JS_BUILTIN_ARR_INCLUDES - JS_BUILTIN_ARR_PUSH] = "includes",
-            [JS_BUILTIN_ARR_MAP - JS_BUILTIN_ARR_PUSH] = "map",
-            [JS_BUILTIN_ARR_FILTER - JS_BUILTIN_ARR_PUSH] = "filter",
-            [JS_BUILTIN_ARR_REDUCE - JS_BUILTIN_ARR_PUSH] = "reduce",
-            [JS_BUILTIN_ARR_FOR_EACH - JS_BUILTIN_ARR_PUSH] = "forEach",
-            [JS_BUILTIN_ARR_FIND - JS_BUILTIN_ARR_PUSH] = "find",
-            [JS_BUILTIN_ARR_FIND_INDEX - JS_BUILTIN_ARR_PUSH] = "findIndex",
-            [JS_BUILTIN_ARR_SOME - JS_BUILTIN_ARR_PUSH] = "some",
-            [JS_BUILTIN_ARR_EVERY - JS_BUILTIN_ARR_PUSH] = "every",
-            [JS_BUILTIN_ARR_SORT - JS_BUILTIN_ARR_PUSH] = "sort",
-            [JS_BUILTIN_ARR_REVERSE - JS_BUILTIN_ARR_PUSH] = "reverse",
-            [JS_BUILTIN_ARR_CONCAT - JS_BUILTIN_ARR_PUSH] = "concat",
-            [JS_BUILTIN_ARR_FLAT - JS_BUILTIN_ARR_PUSH] = "flat",
-            [JS_BUILTIN_ARR_FLAT_MAP - JS_BUILTIN_ARR_PUSH] = "flatMap",
-            [JS_BUILTIN_ARR_FILL - JS_BUILTIN_ARR_PUSH] = "fill",
-            [JS_BUILTIN_ARR_COPY_WITHIN - JS_BUILTIN_ARR_PUSH] = "copyWithin",
-            [JS_BUILTIN_ARR_TO_STRING - JS_BUILTIN_ARR_PUSH] = "toString",
-            [JS_BUILTIN_ARR_KEYS - JS_BUILTIN_ARR_PUSH] = "keys",
-            [JS_BUILTIN_ARR_VALUES - JS_BUILTIN_ARR_PUSH] = "values",
-            [JS_BUILTIN_ARR_ENTRIES - JS_BUILTIN_ARR_PUSH] = "entries",
-            [JS_BUILTIN_ARR_AT - JS_BUILTIN_ARR_PUSH] = "at",
-            [JS_BUILTIN_ARR_ITEM - JS_BUILTIN_ARR_PUSH] = "item",
-            [JS_BUILTIN_ARR_LAST_INDEX_OF - JS_BUILTIN_ARR_PUSH] = "lastIndexOf",
-            [JS_BUILTIN_ARR_REDUCE_RIGHT - JS_BUILTIN_ARR_PUSH] = "reduceRight",
-            [JS_BUILTIN_ARR_FIND_LAST - JS_BUILTIN_ARR_PUSH] = "findLast",
-            [JS_BUILTIN_ARR_FIND_LAST_INDEX - JS_BUILTIN_ARR_PUSH] = "findLastIndex",
-            [JS_BUILTIN_ARR_TO_SORTED - JS_BUILTIN_ARR_PUSH] = "toSorted",
-            [JS_BUILTIN_ARR_TO_REVERSED - JS_BUILTIN_ARR_PUSH] = "toReversed",
-            [JS_BUILTIN_ARR_TO_SPLICED - JS_BUILTIN_ARR_PUSH] = "toSpliced",
-            [JS_BUILTIN_ARR_WITH - JS_BUILTIN_ARR_PUSH] = "with",
-            [JS_BUILTIN_ARR_TO_LOCALE_STRING - JS_BUILTIN_ARR_PUSH] = "toLocaleString",
-        };
-        int idx = builtin_id - JS_BUILTIN_ARR_PUSH;
-        const char* name = arr_method_names[idx];
-        Item method_name = {.item = s2it(heap_create_name(name, strlen(name)))};
-        // v18c: Throw TypeError if this is null/undefined (ES spec §22.1.3)
-        TypeId this_type = get_type_id(this_val);
-        if (this_val.item == ITEM_JS_UNDEFINED || this_val.item == ITEM_NULL ||
-            this_type == LMD_TYPE_NULL) {
-            Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-            char msg[128];
-            snprintf(msg, sizeof(msg), "Cannot read properties of %s (reading '%s')",
-                this_val.item == ITEM_JS_UNDEFINED ? "undefined" : "null", name);
-            Item msg_item = (Item){.item = s2it(heap_create_name(msg, strlen(msg)))};
-            Item error = js_new_error_with_name(type_name, msg_item);
-            js_throw_value(error);
-            return ItemNull;
-        }
-        // ES2023 §23.1.3.34 step 1: toSorted must check IsCallable(comparefn) BEFORE any other step
-        if (builtin_id == JS_BUILTIN_ARR_TO_SORTED && arg_count >= 1 &&
-            args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_FUNC) {
-            return js_throw_type_error("comparefn is not a function");
-        }
-        // ES §23.1.3.27 step 1: Array.prototype.sort must check IsCallable(comparefn)
-        // BEFORE accessing this.length (so a poisoned `length` getter on an
-        // array-like object isn't observed first).
-        if (builtin_id == JS_BUILTIN_ARR_SORT && arg_count >= 1 &&
-            args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_FUNC) {
-            return js_throw_type_error("comparefn is not a function");
-        }
-        // Route to js_array_method for actual arrays, js_map_method for maps/typed arrays.
-        // Do NOT call js_map_method for plain MAPs — it would recurse through
-        // the property access fallback which finds the builtin again.
-        if (this_type == LMD_TYPE_ARRAY) {
-            js_array_method_real_this = this_val;
-            Item result = js_array_method(this_val, method_name, args, arg_count);
-            js_array_method_real_this = (Item){0};
-            return result;
-        }
-        // ES spec §23.1.3.30: Array.prototype.toString
-        // 1. Let array be ToObject(this)  2. Let func = Get(array, "join")
-        // 3. If IsCallable(func), return Call(func, array)
-        // 4. Otherwise, return Object.prototype.toString(array)
-        if (builtin_id == JS_BUILTIN_ARR_TO_STRING) {
-            Item wrapped = js_to_object(this_val);
-            // Check for own "join" property or explicit prototype chain join
-            // (don't use js_property_get which has generic builtin fallback for all MAPs)
-            Item join_fn = ItemNull;
-            Item join_key = (Item){.item = s2it(heap_create_name("join", 4))};
-            if (js_is_proxy(wrapped)) {
-                join_fn = js_property_get(wrapped, join_key);
-                if (js_exception_pending) return ItemNull;
-            }
-            if (get_type_id(wrapped) == LMD_TYPE_MAP) {
-                bool own_join = false;
-                if (!js_is_proxy(wrapped)) {
-                    join_fn = js_map_get_fast(wrapped.map, "join", 4, &own_join);
-                }
-                if ((!own_join || js_is_deleted_sentinel(join_fn)) && !js_is_proxy(wrapped)) {
-                    join_fn = js_prototype_lookup(wrapped, join_key);
-                }
-            }
-            if (join_fn.item != ItemNull.item && get_type_id(join_fn) == LMD_TYPE_FUNC) {
-                return js_call_function(join_fn, wrapped, args, arg_count);
-            }
-            // No join method — fall back to Object.prototype.toString
-            return js_dispatch_builtin(JS_BUILTIN_OBJ_TO_STRING, wrapped, args, arg_count);
-        }
-        // For MAP objects (typed arrays, data views), delegate to js_map_method
-        // which handles them. For plain Maps, convert to array-like and delegate.
-        if (this_type == LMD_TYPE_MAP) {
-            if (js_is_typed_array(this_val) || js_is_dataview(this_val)) {
-                return js_map_method(this_val, method_name, args, arg_count);
-            }
-            // concat needs the original receiver for ArraySpeciesCreate and
-            // IsConcatSpreadable. This includes proxies over arrays, where the
-            // species constructor lookup must go through the proxy target.
-            if (builtin_id == JS_BUILTIN_ARR_CONCAT) {
-                js_array_method_real_this = this_val;
-                Item result = js_array_method(this_val, method_name, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_FILL) {
-                return js_array_generic_fill(this_val, args, arg_count);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_COPY_WITHIN) {
-                return js_array_generic_copy_within(this_val, args, arg_count);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_REVERSE) {
-                return js_array_generic_reverse(this_val);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_SORT) {
-                return js_array_generic_sort(this_val, args, arg_count);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_PUSH) {
-                return js_array_generic_push(this_val, args, arg_count);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_POP) {
-                return js_array_generic_pop(this_val);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_SHIFT) {
-                return js_array_generic_shift(this_val);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_UNSHIFT) {
-                return js_array_generic_unshift(this_val, args, arg_count);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_INCLUDES) {
-                return js_array_generic_includes(this_val, args, arg_count);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_INDEX_OF) {
-                return js_array_generic_index_of(this_val, args, arg_count, false);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_LAST_INDEX_OF) {
-                return js_array_generic_index_of(this_val, args, arg_count, true);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_FOR_EACH) {
-                return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_FOR_EACH);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_MAP) {
-                return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_MAP);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_FILTER) {
-                return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_FILTER);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_SOME) {
-                return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_SOME);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_EVERY) {
-                return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_EVERY);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_REDUCE) {
-                return js_array_generic_reduce(this_val, args, arg_count, false);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_REDUCE_RIGHT) {
-                return js_array_generic_reduce(this_val, args, arg_count, true);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_SLICE) {
-                Item result = js_array_generic_slice(this_val, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_FLAT) {
-                return js_array_generic_flat(this_val, args, arg_count);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_FLAT_MAP) {
-                return js_array_generic_flat_map(this_val, args, arg_count);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_TO_REVERSED) {
-                return js_array_generic_to_reversed(this_val);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_TO_SORTED) {
-                return js_array_generic_to_sorted(this_val, args, arg_count);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_TO_SPLICED) {
-                return js_array_generic_to_spliced(this_val, args, arg_count);
-            }
-            if (builtin_id == JS_BUILTIN_ARR_WITH) {
-                return js_array_generic_with(this_val, args, arg_count);
-            }
-            js_array_method_real_this = this_val;
-            // ES §23.1.3 ArraySpeciesCreate(O, count) → ArrayCreate validates count ≤ 2^32-1.
-            // For slice/map/filter on array-like, validate length up-front to throw RangeError
-            // before js_array_like_to_array silently truncates at 100000.
-            if (builtin_id == JS_BUILTIN_ARR_MAP || builtin_id == JS_BUILTIN_ARR_FILTER) {
-                Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
-                Item len_val = js_property_get(this_val, len_key);
-                if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
-                Item len_num = js_to_number(len_val);
-                if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
-                double dlen = 0;
-                TypeId ltid = get_type_id(len_num);
-                if (ltid == LMD_TYPE_INT || ltid == LMD_TYPE_INT64) dlen = (double)it2i(len_num);
-                else if (ltid == LMD_TYPE_FLOAT) dlen = len_num.get_double();
-                if (dlen > 4294967295.0) {  // > 2^32 - 1
-                    js_array_method_real_this = (Item){0};
-                    return js_throw_range_error("Invalid array length");
-                }
-            }
-            if (builtin_id == JS_BUILTIN_ARR_SPLICE) {
-                Item result = js_array_generic_splice(this_val, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_FIND_LAST ||
-                builtin_id == JS_BUILTIN_ARR_FIND_LAST_INDEX) {
-                Item result = js_array_generic_find_last(
-                    this_val, args, arg_count, builtin_id == JS_BUILTIN_ARR_FIND_LAST_INDEX);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            Item temp_arr = js_array_like_to_array(this_val);
-            if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
-            // J39-7: in-place mutating methods (fill/copyWithin/sort/reverse) must
-            // write the temp_arr contents back to the original receiver and return
-            // the original receiver (per ES spec — these methods return O).
-            bool is_writeback = (builtin_id == JS_BUILTIN_ARR_FILL ||
-                                 builtin_id == JS_BUILTIN_ARR_COPY_WITHIN ||
-                                 builtin_id == JS_BUILTIN_ARR_SORT ||
-                                 builtin_id == JS_BUILTIN_ARR_REVERSE);
-            Item result = js_array_method(temp_arr, method_name, args, arg_count);
-            js_array_method_real_this = (Item){0};
-            if (js_check_exception()) return ItemNull;
-            if (is_writeback && get_type_id(temp_arr) == LMD_TYPE_ARRAY) {
-                Array* a = temp_arr.array;
-                int64_t copy_len = a ? a->length : 0;
-                for (int64_t i = 0; i < copy_len; i++) {
-                    char buf[32];
-                    int blen = snprintf(buf, sizeof(buf), "%lld", (long long)i);
-                    Item idx_key = (Item){.item = s2it(heap_create_name(buf, blen))};
-                    js_property_set(this_val, idx_key, a->items[i]);
-                    if (js_check_exception()) return ItemNull;
-                }
-                return this_val;
-            }
-            return result;
-        }
-        // String, Number, Boolean, etc. — ToObject then convert to array-like
-        // Strings: wrap to String object but use raw string for array-like conversion
-        // (wrapper objects don't support indexed character access yet)
-        {
-            // J39-7: mutating methods on a primitive String receiver throw TypeError —
-            // String has non-writable "length" so Set(O, "length", n, true) fails per spec.
-            // (Boolean/Number wrappers tolerate empty-no-op cases — don't throw eagerly.)
-            bool is_mutating = (builtin_id == JS_BUILTIN_ARR_PUSH ||
-                                builtin_id == JS_BUILTIN_ARR_POP ||
-                                builtin_id == JS_BUILTIN_ARR_SHIFT ||
-                                builtin_id == JS_BUILTIN_ARR_UNSHIFT ||
-                                builtin_id == JS_BUILTIN_ARR_SPLICE ||
-                                builtin_id == JS_BUILTIN_ARR_REVERSE ||
-                                builtin_id == JS_BUILTIN_ARR_FILL ||
-                                builtin_id == JS_BUILTIN_ARR_COPY_WITHIN);
-            if (is_mutating && this_type == LMD_TYPE_STRING) {
-                return js_throw_type_error("Cannot assign to read only property of primitive value");
-            }
-            if (this_type == LMD_TYPE_FUNC) {
-                if (builtin_id == JS_BUILTIN_ARR_PUSH)
-                    return js_array_generic_push(this_val, args, arg_count);
-                if (builtin_id == JS_BUILTIN_ARR_POP)
-                    return js_array_generic_pop(this_val);
-                if (builtin_id == JS_BUILTIN_ARR_SHIFT)
-                    return js_array_generic_shift(this_val);
-                if (builtin_id == JS_BUILTIN_ARR_UNSHIFT)
-                    return js_array_generic_unshift(this_val, args, arg_count);
-                if (builtin_id == JS_BUILTIN_ARR_FOR_EACH)
-                    return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_FOR_EACH);
-                if (builtin_id == JS_BUILTIN_ARR_MAP)
-                    return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_MAP);
-                if (builtin_id == JS_BUILTIN_ARR_FILTER)
-                    return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_FILTER);
-                if (builtin_id == JS_BUILTIN_ARR_SOME)
-                    return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_SOME);
-                if (builtin_id == JS_BUILTIN_ARR_EVERY)
-                    return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_EVERY);
-                if (builtin_id == JS_BUILTIN_ARR_REDUCE)
-                    return js_array_generic_reduce(this_val, args, arg_count, false);
-                if (builtin_id == JS_BUILTIN_ARR_REDUCE_RIGHT)
-                    return js_array_generic_reduce(this_val, args, arg_count, true);
-                if (builtin_id == JS_BUILTIN_ARR_FLAT)
-                    return js_array_generic_flat(this_val, args, arg_count);
-                if (builtin_id == JS_BUILTIN_ARR_FLAT_MAP)
-                    return js_array_generic_flat_map(this_val, args, arg_count);
-                if (builtin_id == JS_BUILTIN_ARR_TO_REVERSED)
-                    return js_array_generic_to_reversed(this_val);
-                if (builtin_id == JS_BUILTIN_ARR_TO_SORTED)
-                    return js_array_generic_to_sorted(this_val, args, arg_count);
-                if (builtin_id == JS_BUILTIN_ARR_TO_SPLICED)
-                    return js_array_generic_to_spliced(this_val, args, arg_count);
-                if (builtin_id == JS_BUILTIN_ARR_WITH)
-                    return js_array_generic_with(this_val, args, arg_count);
-            }
-            Item wrapped = js_to_object(this_val);
-            js_array_method_real_this = wrapped;
-            if (builtin_id == JS_BUILTIN_ARR_SORT) {
-                Item result = js_array_generic_sort(wrapped, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_CONCAT) {
-                Item result = js_array_method(wrapped, method_name, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            // For strings, use the raw primitive for array-like conversion
-            // since js_property_get on strings supports indexed char access
-            Item source = (this_type == LMD_TYPE_STRING) ? this_val : wrapped;
-            if (builtin_id == JS_BUILTIN_ARR_INCLUDES) {
-                Item result = js_array_generic_includes(source, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_FOR_EACH) {
-                Item result = js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_FOR_EACH);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_MAP) {
-                Item result = js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_MAP);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_FILTER) {
-                Item result = js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_FILTER);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_SOME) {
-                Item result = js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_SOME);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_EVERY) {
-                Item result = js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_EVERY);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_REDUCE) {
-                Item result = js_array_generic_reduce_with_object(source, wrapped, args, arg_count, false);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_REDUCE_RIGHT) {
-                Item result = js_array_generic_reduce_with_object(source, wrapped, args, arg_count, true);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_FLAT) {
-                Item result = js_array_generic_flat(source, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_FLAT_MAP) {
-                Item result = js_array_generic_flat_map(source, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_TO_REVERSED) {
-                Item result = js_array_generic_to_reversed(source);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_TO_SORTED) {
-                Item result = js_array_generic_to_sorted(source, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_TO_SPLICED) {
-                Item result = js_array_generic_to_spliced(source, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_WITH) {
-                Item result = js_array_generic_with(source, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            Item temp_arr = js_array_like_to_array(source);
-            if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
-            Item result = js_array_method(temp_arr, method_name, args, arg_count);
-            js_array_method_real_this = (Item){0};
-            if (js_check_exception()) return ItemNull;
-            // J39-7: in-place mutating methods (fill/copyWithin/sort/reverse) must
-            // return the wrapped receiver per ES spec — these methods return O.
-            // For Boolean/Number wrappers length is 0 so no writeback is needed.
-            if (is_mutating && (builtin_id == JS_BUILTIN_ARR_FILL ||
-                                builtin_id == JS_BUILTIN_ARR_COPY_WITHIN ||
-                                builtin_id == JS_BUILTIN_ARR_SORT ||
-                                builtin_id == JS_BUILTIN_ARR_REVERSE)) {
-                return wrapped;
-            }
-            return result;
-        }
-    }
-
     // Function.prototype methods
     case JS_BUILTIN_FUNC_CALL: {
         // fn.call(thisArg, ...args) → js_call_function(fn=this_val, thisArg=arg0, rest)
@@ -10482,133 +10442,6 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     }
     case JS_BUILTIN_FUNC_THROW_TYPE_ERROR:
         return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
-
-    // String.prototype methods - delegate to js_string_method
-    case JS_BUILTIN_STR_CHAR_AT:
-    case JS_BUILTIN_STR_CHAR_CODE_AT:
-    case JS_BUILTIN_STR_INDEX_OF:
-    case JS_BUILTIN_STR_INCLUDES:
-    case JS_BUILTIN_STR_SLICE:
-    case JS_BUILTIN_STR_SUBSTRING:
-    case JS_BUILTIN_STR_TO_LOWER_CASE:
-    case JS_BUILTIN_STR_TO_UPPER_CASE:
-    case JS_BUILTIN_STR_TRIM:
-    case JS_BUILTIN_STR_SPLIT:
-    case JS_BUILTIN_STR_REPLACE:
-    case JS_BUILTIN_STR_MATCH:
-    case JS_BUILTIN_STR_SEARCH:
-    case JS_BUILTIN_STR_STARTS_WITH:
-    case JS_BUILTIN_STR_ENDS_WITH:
-    case JS_BUILTIN_STR_REPEAT:
-    case JS_BUILTIN_STR_PAD_START:
-    case JS_BUILTIN_STR_PAD_END:
-    case JS_BUILTIN_STR_TO_STRING:
-    case JS_BUILTIN_STR_VALUE_OF:
-    case JS_BUILTIN_STR_TRIM_START:
-    case JS_BUILTIN_STR_TRIM_END:
-    case JS_BUILTIN_STR_CODE_POINT_AT:
-    case JS_BUILTIN_STR_NORMALIZE:
-    case JS_BUILTIN_STR_CONCAT:
-    case JS_BUILTIN_STR_AT:
-    case JS_BUILTIN_STR_LAST_INDEX_OF:
-    case JS_BUILTIN_STR_LOCALE_COMPARE:
-    case JS_BUILTIN_STR_REPLACE_ALL:
-    case JS_BUILTIN_STR_MATCH_ALL:
-    case JS_BUILTIN_STR_IS_WELL_FORMED:
-    case JS_BUILTIN_STR_TO_WELL_FORMED:
-    case JS_BUILTIN_STR_ANCHOR:
-    case JS_BUILTIN_STR_BIG:
-    case JS_BUILTIN_STR_BLINK:
-    case JS_BUILTIN_STR_BOLD:
-    case JS_BUILTIN_STR_FIXED:
-    case JS_BUILTIN_STR_FONTCOLOR:
-    case JS_BUILTIN_STR_FONTSIZE:
-    case JS_BUILTIN_STR_ITALICS:
-    case JS_BUILTIN_STR_LINK:
-    case JS_BUILTIN_STR_SMALL:
-    case JS_BUILTIN_STR_STRIKE:
-    case JS_BUILTIN_STR_SUB:
-    case JS_BUILTIN_STR_SUP:
-    case JS_BUILTIN_STR_SUBSTR:
-    case JS_BUILTIN_STR_TO_LOCALE_LOWER_CASE:
-    case JS_BUILTIN_STR_TO_LOCALE_UPPER_CASE: {
-        static const char* str_method_names[] = {
-            [JS_BUILTIN_STR_CHAR_AT - JS_BUILTIN_STR_CHAR_AT] = "charAt",
-            [JS_BUILTIN_STR_CHAR_CODE_AT - JS_BUILTIN_STR_CHAR_AT] = "charCodeAt",
-            [JS_BUILTIN_STR_INDEX_OF - JS_BUILTIN_STR_CHAR_AT] = "indexOf",
-            [JS_BUILTIN_STR_INCLUDES - JS_BUILTIN_STR_CHAR_AT] = "includes",
-            [JS_BUILTIN_STR_SLICE - JS_BUILTIN_STR_CHAR_AT] = "slice",
-            [JS_BUILTIN_STR_SUBSTRING - JS_BUILTIN_STR_CHAR_AT] = "substring",
-            [JS_BUILTIN_STR_TO_LOWER_CASE - JS_BUILTIN_STR_CHAR_AT] = "toLowerCase",
-            [JS_BUILTIN_STR_TO_UPPER_CASE - JS_BUILTIN_STR_CHAR_AT] = "toUpperCase",
-            [JS_BUILTIN_STR_TRIM - JS_BUILTIN_STR_CHAR_AT] = "trim",
-            [JS_BUILTIN_STR_SPLIT - JS_BUILTIN_STR_CHAR_AT] = "split",
-            [JS_BUILTIN_STR_REPLACE - JS_BUILTIN_STR_CHAR_AT] = "replace",
-            [JS_BUILTIN_STR_MATCH - JS_BUILTIN_STR_CHAR_AT] = "match",
-            [JS_BUILTIN_STR_SEARCH - JS_BUILTIN_STR_CHAR_AT] = "search",
-            [JS_BUILTIN_STR_STARTS_WITH - JS_BUILTIN_STR_CHAR_AT] = "startsWith",
-            [JS_BUILTIN_STR_ENDS_WITH - JS_BUILTIN_STR_CHAR_AT] = "endsWith",
-            [JS_BUILTIN_STR_REPEAT - JS_BUILTIN_STR_CHAR_AT] = "repeat",
-            [JS_BUILTIN_STR_PAD_START - JS_BUILTIN_STR_CHAR_AT] = "padStart",
-            [JS_BUILTIN_STR_PAD_END - JS_BUILTIN_STR_CHAR_AT] = "padEnd",
-            [JS_BUILTIN_STR_TO_STRING - JS_BUILTIN_STR_CHAR_AT] = "toString",
-            [JS_BUILTIN_STR_VALUE_OF - JS_BUILTIN_STR_CHAR_AT] = "valueOf",
-            [JS_BUILTIN_STR_TRIM_START - JS_BUILTIN_STR_CHAR_AT] = "trimStart",
-            [JS_BUILTIN_STR_TRIM_END - JS_BUILTIN_STR_CHAR_AT] = "trimEnd",
-            [JS_BUILTIN_STR_CODE_POINT_AT - JS_BUILTIN_STR_CHAR_AT] = "codePointAt",
-            [JS_BUILTIN_STR_NORMALIZE - JS_BUILTIN_STR_CHAR_AT] = "normalize",
-            [JS_BUILTIN_STR_CONCAT - JS_BUILTIN_STR_CHAR_AT] = "concat",
-            [JS_BUILTIN_STR_AT - JS_BUILTIN_STR_CHAR_AT] = "at",
-            [JS_BUILTIN_STR_LAST_INDEX_OF - JS_BUILTIN_STR_CHAR_AT] = "lastIndexOf",
-            [JS_BUILTIN_STR_LOCALE_COMPARE - JS_BUILTIN_STR_CHAR_AT] = "localeCompare",
-            [JS_BUILTIN_STR_REPLACE_ALL - JS_BUILTIN_STR_CHAR_AT] = "replaceAll",
-            [JS_BUILTIN_STR_MATCH_ALL - JS_BUILTIN_STR_CHAR_AT] = "matchAll",
-            [JS_BUILTIN_STR_IS_WELL_FORMED - JS_BUILTIN_STR_CHAR_AT] = "isWellFormed",
-            [JS_BUILTIN_STR_TO_WELL_FORMED - JS_BUILTIN_STR_CHAR_AT] = "toWellFormed",
-            [JS_BUILTIN_STR_ANCHOR - JS_BUILTIN_STR_CHAR_AT] = "anchor",
-            [JS_BUILTIN_STR_BIG - JS_BUILTIN_STR_CHAR_AT] = "big",
-            [JS_BUILTIN_STR_BLINK - JS_BUILTIN_STR_CHAR_AT] = "blink",
-            [JS_BUILTIN_STR_BOLD - JS_BUILTIN_STR_CHAR_AT] = "bold",
-            [JS_BUILTIN_STR_FIXED - JS_BUILTIN_STR_CHAR_AT] = "fixed",
-            [JS_BUILTIN_STR_FONTCOLOR - JS_BUILTIN_STR_CHAR_AT] = "fontcolor",
-            [JS_BUILTIN_STR_FONTSIZE - JS_BUILTIN_STR_CHAR_AT] = "fontsize",
-            [JS_BUILTIN_STR_ITALICS - JS_BUILTIN_STR_CHAR_AT] = "italics",
-            [JS_BUILTIN_STR_LINK - JS_BUILTIN_STR_CHAR_AT] = "link",
-            [JS_BUILTIN_STR_SMALL - JS_BUILTIN_STR_CHAR_AT] = "small",
-            [JS_BUILTIN_STR_STRIKE - JS_BUILTIN_STR_CHAR_AT] = "strike",
-            [JS_BUILTIN_STR_SUB - JS_BUILTIN_STR_CHAR_AT] = "sub",
-            [JS_BUILTIN_STR_SUP - JS_BUILTIN_STR_CHAR_AT] = "sup",
-            [JS_BUILTIN_STR_SUBSTR - JS_BUILTIN_STR_CHAR_AT] = "substr",
-            [JS_BUILTIN_STR_TO_LOCALE_LOWER_CASE - JS_BUILTIN_STR_CHAR_AT] = "toLocaleLowerCase",
-            [JS_BUILTIN_STR_TO_LOCALE_UPPER_CASE - JS_BUILTIN_STR_CHAR_AT] = "toLocaleUpperCase",
-        };
-        int idx = builtin_id - JS_BUILTIN_STR_CHAR_AT;
-        const char* name = str_method_names[idx];
-        Item method_name = {.item = s2it(heap_create_name(name, strlen(name)))};
-        // v18c: Throw TypeError if this is null/undefined (ES spec §21.1.3)
-        {
-            TypeId st = get_type_id(this_val);
-            if (this_val.item == ITEM_JS_UNDEFINED || this_val.item == ITEM_NULL ||
-                st == LMD_TYPE_NULL) {
-                Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-                Item msg = (Item){.item = s2it(heap_create_name("Cannot read properties of null or undefined"))};
-                Item error = js_new_error_with_name(type_name, msg);
-                js_throw_value(error);
-                return ItemNull;
-            }
-        }
-        // String.prototype.toString/valueOf: throw TypeError if not a string
-        if (builtin_id == JS_BUILTIN_STR_TO_STRING || builtin_id == JS_BUILTIN_STR_VALUE_OF) {
-            TypeId st = get_type_id(this_val);
-            if (st != LMD_TYPE_STRING) {
-                // allow String wrapper objects (typed JsClass tag)
-                if (js_class_id(this_val) != JS_CLASS_STRING) {
-                    return js_throw_type_error("String.prototype method called on incompatible receiver");
-                }
-            }
-        }
-        return js_string_method(this_val, method_name, args, arg_count);
-    }
 
     // v18k: Object static methods — accessible as first-class function values
     // v18l: ES5 requires TypeError for non-object arguments on most Object static methods
@@ -10977,23 +10810,11 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_262_CREATE_REALM: {
         Item realm = js_new_object();
         Item global = js_new_object();
-        static const struct { const char* name; int len; } ctor_names[] = {
-            {"Object", 6}, {"Array", 5}, {"Function", 8},
-            {"String", 6}, {"Number", 6}, {"Boolean", 7}, {"Symbol", 6}, {"BigInt", 6},
-            {"Error", 5}, {"TypeError", 9}, {"RangeError", 10},
-            {"ReferenceError", 14}, {"SyntaxError", 11}, {"URIError", 8},
-            {"EvalError", 9}, {"AggregateError", 14}, {"RegExp", 6},
-            {"Date", 4}, {"Promise", 7}, {"Map", 3}, {"Set", 3},
-            {"WeakMap", 7}, {"WeakSet", 7}, {"WeakRef", 7}, {"FinalizationRegistry", 20},
-            {"ArrayBuffer", 11}, {"SharedArrayBuffer", 17}, {"DataView", 8},
-            {"Int8Array", 9}, {"Uint8Array", 10}, {"Uint8ClampedArray", 17},
-            {"Int16Array", 10}, {"Uint16Array", 11}, {"Int32Array", 10},
-            {"Uint32Array", 11}, {"Float16Array", 12}, {"Float32Array", 12}, {"Float64Array", 12},
-            {"BigInt64Array", 13}, {"BigUint64Array", 14}, {"Proxy", 5},
-            {NULL, 0}
-        };
-        for (int i = 0; ctor_names[i].name; i++) {
-            Item name_item = (Item){.item = s2it(heap_create_name(ctor_names[i].name, ctor_names[i].len))};
+        for (int i = 0; i < js_builtin_global_count(); i++) {
+            const JsBuiltinGlobalSpec* spec = js_builtin_global_at(i);
+            if (!spec || spec->kind != JS_BUILTIN_GLOBAL_CONSTRUCTOR ||
+                !(spec->flags & JS_BUILTIN_GLOBAL_REALM_INSTALL)) continue;
+            Item name_item = (Item){.item = s2it(heap_create_name(spec->name, spec->len))};
             Item ctor = js_get_constructor(name_item);
             if (get_type_id(ctor) == LMD_TYPE_FUNC) js_property_set(global, name_item, ctor);
         }
@@ -11272,15 +11093,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_NUM_TO_FIXED:
     case JS_BUILTIN_NUM_TO_PRECISION:
     case JS_BUILTIN_NUM_TO_EXPONENTIAL: {
-        static const char* num_method_names[] = {
-            [JS_BUILTIN_NUM_TO_STRING - JS_BUILTIN_NUM_TO_STRING] = "toString",
-            [JS_BUILTIN_NUM_VALUE_OF - JS_BUILTIN_NUM_TO_STRING] = "valueOf",
-            [JS_BUILTIN_NUM_TO_FIXED - JS_BUILTIN_NUM_TO_STRING] = "toFixed",
-            [JS_BUILTIN_NUM_TO_PRECISION - JS_BUILTIN_NUM_TO_STRING] = "toPrecision",
-            [JS_BUILTIN_NUM_TO_EXPONENTIAL - JS_BUILTIN_NUM_TO_STRING] = "toExponential",
-        };
-        int nidx = builtin_id - JS_BUILTIN_NUM_TO_STRING;
-        const char* mname = num_method_names[nidx];
+        const JsBuiltinMethodSpec* catalog_spec = js_builtin_catalog_find_id(builtin_id);
+        if (!catalog_spec) return ItemNull;
+        const char* mname = catalog_spec->name;
         Item method_name = {.item = s2it(heap_create_name(mname, strlen(mname)))};
         if (get_type_id(this_val) == LMD_TYPE_MAP &&
             js_ordinary_own_status(this_val, mname, (int)strlen(mname)) == JS_HAS_DELETED) {
@@ -11421,55 +11236,6 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         Item arr = js_array_new(arg_count);
         for (int i = 0; i < arg_count; i++) arr.array->items[i] = args[i];
         return js_string_fromCharCode_array(arr);
-    }
-
-    // Math methods called as first-class function values
-    case JS_BUILTIN_MATH_ABS:
-    case JS_BUILTIN_MATH_FLOOR:
-    case JS_BUILTIN_MATH_CEIL:
-    case JS_BUILTIN_MATH_ROUND:
-    case JS_BUILTIN_MATH_SQRT:
-    case JS_BUILTIN_MATH_POW:
-    case JS_BUILTIN_MATH_MIN:
-    case JS_BUILTIN_MATH_MAX:
-    case JS_BUILTIN_MATH_LOG:
-    case JS_BUILTIN_MATH_LOG10:
-    case JS_BUILTIN_MATH_LOG2:
-    case JS_BUILTIN_MATH_EXP:
-    case JS_BUILTIN_MATH_SIN:
-    case JS_BUILTIN_MATH_COS:
-    case JS_BUILTIN_MATH_TAN:
-    case JS_BUILTIN_MATH_SIGN:
-    case JS_BUILTIN_MATH_TRUNC:
-    case JS_BUILTIN_MATH_RANDOM:
-    case JS_BUILTIN_MATH_ASIN:
-    case JS_BUILTIN_MATH_ACOS:
-    case JS_BUILTIN_MATH_ATAN:
-    case JS_BUILTIN_MATH_ATAN2:
-    case JS_BUILTIN_MATH_CBR:
-    case JS_BUILTIN_MATH_HYPOT:
-    case JS_BUILTIN_MATH_CLZ32:
-    case JS_BUILTIN_MATH_FROUND:
-    case JS_BUILTIN_MATH_IMUL:
-    case JS_BUILTIN_MATH_SINH:
-    case JS_BUILTIN_MATH_COSH:
-    case JS_BUILTIN_MATH_TANH:
-    case JS_BUILTIN_MATH_ASINH:
-    case JS_BUILTIN_MATH_ACOSH:
-    case JS_BUILTIN_MATH_ATANH:
-    case JS_BUILTIN_MATH_EXPM1:
-    case JS_BUILTIN_MATH_LOG1P: {
-        static const char* math_names[] = {
-            "abs", "floor", "ceil", "round", "sqrt", "pow", "min", "max",
-            "log", "log10", "log2", "exp", "sin", "cos", "tan", "sign",
-            "trunc", "random", "asin", "acos", "atan", "atan2", "cbrt",
-            "hypot", "clz32", "fround", "imul", "sinh", "cosh", "tanh",
-            "asinh", "acosh", "atanh", "expm1", "log1p"
-        };
-        int idx = builtin_id - JS_BUILTIN_MATH_ABS;
-        const char* mname = math_names[idx];
-        Item method_name = {.item = s2it(heap_create_name(mname, strlen(mname)))};
-        return js_math_method(method_name, args, arg_count);
     }
 
     case JS_BUILTIN_JSON_PARSE: {
@@ -26393,7 +26159,7 @@ static Item js_get_math_object() {
             js_mark_non_configurable(js_math_object, key);
         }
         // Populate Math methods as function properties for dynamic access (Math[m]).
-        js_install_builtin_method_specs(js_math_object, JS_MATH_METHOD_SPECS);
+        js_install_builtin_method_specs(js_math_object, JS_BUILTIN_OWNER_MATH_METHOD);
     }
     return js_math_object;
 }
@@ -26427,7 +26193,7 @@ extern "C" Item js_get_json_object_value() {
         js_mark_non_writable(js_json_object, tag_k);
         js_mark_non_enumerable(js_json_object, tag_k);
         // v28: add parse and stringify as callable function properties
-        js_install_builtin_method_specs(js_json_object, JS_JSON_METHOD_SPECS);
+        js_install_builtin_method_specs(js_json_object, JS_BUILTIN_OWNER_JSON_METHOD);
     }
     return js_json_object;
 }
@@ -26452,7 +26218,7 @@ extern "C" Item js_get_css_object_value() {
         m->map_kind = MAP_KIND_CSS_NAMESPACE;
     }
 
-    js_install_builtin_method_specs(js_css_namespace_object, JS_CSS_METHOD_SPECS);
+    js_install_builtin_method_specs(js_css_namespace_object, JS_BUILTIN_OWNER_CSS_METHOD);
 
     // toStringTag
     Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
@@ -26853,7 +26619,7 @@ extern "C" Item js_get_reflect_object_value() {
         js_mark_non_enumerable(js_reflect_object, tag_k);
 
         // Populate Reflect methods as function objects
-        js_install_builtin_method_specs(js_reflect_object, JS_REFLECT_METHOD_SPECS);
+        js_install_builtin_method_specs(js_reflect_object, JS_BUILTIN_OWNER_REFLECT_METHOD);
     }
     return js_reflect_object;
 }
@@ -26872,7 +26638,7 @@ extern "C" Item js_get_atomics_object_value() {
         js_mark_non_writable(js_atomics_object, tag_k);
         js_mark_non_enumerable(js_atomics_object, tag_k);
 
-        js_install_builtin_method_specs(js_atomics_object, JS_ATOMICS_METHOD_SPECS);
+        js_install_builtin_method_specs(js_atomics_object, JS_BUILTIN_OWNER_ATOMICS_METHOD);
     }
     return js_atomics_object;
 }
@@ -27236,7 +27002,8 @@ extern "C" Item js_math_property(Item prop_name) {
 
     // Math methods as first-class function values.
     {
-        Item method = js_lookup_builtin_method_spec(JS_MATH_METHOD_SPECS, prop->chars, (int)prop->len);
+        Item method = js_lookup_builtin_method_spec(
+            JS_BUILTIN_OWNER_MATH_METHOD, prop->chars, (int)prop->len);
         if (method.item != ItemNull.item) return method;
     }
 
@@ -29650,7 +29417,6 @@ static Item js_domain_current = {0};
 static Item js_domain_namespace = {0};
 static Item js_domain_stack[64];
 static int js_domain_stack_count = 0;
-static int js_domain_error_handler_depth = 0;
 
 extern "C" Item js_get_process_object_value(void);
 extern "C" Item js_async_hooks_get_current_resource(void);
@@ -29693,17 +29459,9 @@ extern "C" Item js_domain_capture_stack(void) {
 }
 
 extern "C" Item js_domain_capture_async_stack(void) {
-    Item stack = js_array_new(0);
-    // Async work queued from a domain error handler inherits the active parent
-    // domain only; the synchronous handler still sees the full trimmed stack.
-    if (js_domain_error_handler_depth > 0) {
-        if (js_domain_stack_count > 0) js_array_push(stack, js_domain_stack[js_domain_stack_count - 1]);
-        return stack;
-    }
-    for (int i = 0; i < js_domain_stack_count; i++) {
-        js_array_push(stack, js_domain_stack[i]);
-    }
-    return stack;
+    // Error dispatch already trims the emitting domain; async callbacks must
+    // inherit every remaining parent rather than only the active parent.
+    return js_domain_capture_stack();
 }
 
 static void js_domain_apply_stack(Item stack) {
@@ -29777,16 +29535,11 @@ static bool js_domain_emit_error_at(Item domain, Item error, int parent_count) {
     if (parent_count < 0) parent_count = 0;
     if (parent_count > js_domain_stack_count) parent_count = js_domain_stack_count;
     js_domain_stack_count = parent_count;
+    // An empty domain stack exposes process.domain as undefined; overriding it
+    // with null here broke root error handlers and their inherited async context.
     js_domain_sync_visible_state();
-    if (parent_count == 0) {
-        // Node exposes null, not undefined, only during a root domain error handler.
-        js_property_set(js_get_process_object_value(),
-            (Item){.item = s2it(heap_create_name("domain", 6))}, ItemNull);
-    }
 
-    js_domain_error_handler_depth++;
     js_call_function(on_error, domain, &error, 1);
-    js_domain_error_handler_depth--;
     if (js_check_exception()) {
         Item thrown = js_clear_exception();
         if (parent_count > 0) {

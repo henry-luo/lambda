@@ -1126,8 +1126,6 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
         if (ncpus < 1) ncpus = 1;
         if (ncpus > 8) ncpus = 8;
 
-        int pre_start = runtime->scripts->length;  // track scripts added by precompile
-
         for (int level = 0; level <= max_depth; level++) {
             // collect modules at this depth
             int batch_count = 0;
@@ -1198,24 +1196,9 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
 
         log_info("parallel import: pre-compilation complete");
 
-        // Reverse the precompiled scripts in the runtime list.
-        // run_script_mir() calls init functions in REVERSE list order, expecting the
-        // deepest transitive imports at the end (as produced by sequential depth-first loading).
-        // Precompile adds them in topological order (leaves first), so we reverse.
-        int pre_end = runtime->scripts->length;
-        for (int i = pre_start, j = pre_end - 1; i < j; i++, j--) {
-            Script* left = (Script*)runtime->scripts->data[i];
-            Script* right = (Script*)runtime->scripts->data[j];
-            if ((left && left->cache_retain) || (right && right->cache_retain)) {
-                log_error("mir cache index: refusing to renumber retained precompiled module");
-                break;
-            }
-            void* tmp = runtime->scripts->data[i];
-            runtime->scripts->data[i] = runtime->scripts->data[j];
-            runtime->scripts->data[j] = tmp;
-            if (runtime->scripts->data[i]) ((Script*)runtime->scripts->data[i])->index = i;
-            if (runtime->scripts->data[j]) ((Script*)runtime->scripts->data[j])->index = j;
-        }
+        // compiled MIR imports embed module indexes, so post-compile
+        // renumbering corrupts their mN symbol references. Import-cone traversal
+        // now supplies dependency order without mutating these stable indexes.
     }
 
     // cleanup graph

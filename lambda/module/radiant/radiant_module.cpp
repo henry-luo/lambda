@@ -874,6 +874,40 @@ static DomElement* radiant_dom_element_from_item(Item node_item, const char* fun
     return node->as_element();
 }
 
+static DomDocument* radiant_load_html_source(const char* html_source, int viewport_width,
+                                             int viewport_height, const char* func_name) {
+    if (!html_source || !html_source[0]) {
+        log_error("JUBE_RADIANT_%s: missing HTML source", func_name);
+        return nullptr;
+    }
+
+    Url* source_url = get_current_dir();
+    Pool* doc_pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "radiant.render.document");
+    if (!source_url || !doc_pool) {
+        log_error("JUBE_RADIANT_%s: failed to create in-memory document inputs", func_name);
+        if (source_url) url_destroy(source_url);
+        if (doc_pool) pool_destroy(doc_pool);
+        return nullptr;
+    }
+
+    DomDocument* doc = load_lambda_html_doc(source_url, NULL, viewport_width,
+                                            viewport_height, doc_pool, html_source,
+                                            false, false);
+    if (!doc) {
+        log_error("JUBE_RADIANT_%s: failed to parse in-memory HTML", func_name);
+        url_destroy(source_url);
+        pool_destroy(doc_pool);
+        return nullptr;
+    }
+
+    if (!doc->root) {
+        log_error("JUBE_RADIANT_%s: in-memory document has no root element", func_name);
+        free_document(doc);
+        return nullptr;
+    }
+    return doc;
+}
+
 static DomDocument* radiant_load_html_document(const char* path, const char* func_name) {
     if (!path || !path[0]) {
         log_error("JUBE_RADIANT_%s: missing HTML path", func_name);
@@ -892,20 +926,41 @@ static DomDocument* radiant_load_html_document(const char* path, const char* fun
         return nullptr;
     }
 
-    DomDocument* doc = load_lambda_html_doc(html_url, NULL, 800, 600, doc_pool, nullptr, false, false);
+    DomDocument* doc = load_lambda_html_doc(html_url, NULL, 800, 600, doc_pool,
+                                            nullptr, false, false);
     if (!doc) {
         log_error("JUBE_RADIANT_%s: failed to load HTML document '%s'", func_name, path);
         url_destroy(html_url);
         pool_destroy(doc_pool);
         return nullptr;
     }
-
     if (!doc->root) {
         log_error("JUBE_RADIANT_%s: document '%s' has no root element", func_name, path);
         free_document(doc);
         return nullptr;
     }
     return doc;
+}
+
+static bool radiant_layout_document(DomDocument* doc, UiContext* uicon,
+                                    int viewport_width, int viewport_height,
+                                    const char* func_name) {
+    if (!doc || !uicon) return false;
+    memset(uicon, 0, sizeof(*uicon));
+    if (ui_context_init(uicon, true) != 0) {
+        log_error("JUBE_RADIANT_%s: failed to initialize headless UI context", func_name);
+        return false;
+    }
+
+    ui_context_create_surface(uicon, viewport_width, viewport_height);
+    uicon->window_width = viewport_width;
+    uicon->window_height = viewport_height;
+    uicon->document = doc;
+    process_document_font_faces(uicon, doc);
+    // custom layout callbacks run only during an explicit layout pass; geometry
+    // reads cannot substitute for this lifecycle boundary.
+    layout_html_doc(uicon, doc, false);
+    return doc->view_tree && doc->view_tree->root;
 }
 
 RADIANT_C_API Item fn_radiant_load(Item path_item) {
@@ -968,22 +1023,50 @@ RADIANT_C_API Item fn_radiant_layout(Item node_item) {
         return radiant_bool_item(false);
     }
 
-    UiContext uicon;
-    memset(&uicon, 0, sizeof(uicon));
-    if (ui_context_init(&uicon, true) != 0) {
-        log_error("JUBE_RADIANT_LAYOUT: failed to initialize headless UI context");
-        return radiant_bool_item(false);
-    }
-
     int viewport_width = doc->viewport_width > 0 ? doc->viewport_width : 800;
     int viewport_height = doc->viewport_height > 0 ? doc->viewport_height : 600;
-    ui_context_create_surface(&uicon, viewport_width, viewport_height);
-    // custom layout callbacks need an explicit layout pass; DOM geometry reads
-    // alone do not force Radiant to produce fresh view boxes.
-    layout_html_doc(&uicon, doc, false);
-    bool ok = doc->view_tree && doc->view_tree->root;
-    ui_context_cleanup(&uicon);
+    UiContext uicon;
+    bool ok = radiant_layout_document(doc, &uicon, viewport_width, viewport_height, "LAYOUT");
+    // radiant.layout() borrows the document; radiant.free() remains its owner.
+    if (uicon.document) {
+        uicon.document = nullptr;
+        ui_context_cleanup(&uicon);
+    }
     return radiant_bool_item(ok);
+}
+
+RADIANT_C_API Item fn_radiant_render_svg(Item html_item, Item width_item, Item height_item) {
+    const char* html_source = fn_to_cstr(html_item);
+    int viewport_width = 0;
+    int viewport_height = 0;
+    if (!radiant_item_to_int(width_item, &viewport_width) ||
+        !radiant_item_to_int(height_item, &viewport_height) ||
+        viewport_width <= 0 || viewport_height <= 0) {
+        log_error("JUBE_RADIANT_RENDER_SVG: expected positive viewport dimensions, types=%d/%d values=%llu/%llu",
+                  (int)get_type_id(width_item), (int)get_type_id(height_item),
+                  (unsigned long long)width_item.item,
+                  (unsigned long long)height_item.item);
+        return ItemNull;
+    }
+
+    DomDocument* doc = radiant_load_html_source(html_source, viewport_width,
+                                                viewport_height, "RENDER_SVG");
+    if (!doc) return ItemNull;
+
+    UiContext uicon;
+    if (!radiant_layout_document(doc, &uicon, viewport_width, viewport_height, "RENDER_SVG")) {
+        if (uicon.document) ui_context_cleanup(&uicon);
+        else free_document(doc);
+        return ItemNull;
+    }
+
+    char* svg = render_view_tree_to_svg(&uicon, doc->view_tree->root,
+                                        viewport_width, viewport_height, doc->state);
+    Item result = radiant_string_item(svg);
+    if (svg) mem_free(svg);
+    // the render API owns the transient document through the UI context.
+    ui_context_cleanup(&uicon);
+    return result;
 }
 
 RADIANT_C_API Item fn_radiant_box(Item node_item) {
@@ -1284,6 +1367,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_free(Item node)", (fn_ptr)fn_radiant_free},
     {"layout", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_layout, JUBE_FN_NONE,
      "Item fn_radiant_layout(Item node)", (fn_ptr)fn_radiant_layout},
+    {"render_svg", "fn(html: string, width: int, height: int) -> string|null", (fn_ptr)fn_radiant_render_svg, JUBE_FN_NONE,
+     "Item fn_radiant_render_svg(Item html, Item width, Item height)", (fn_ptr)fn_radiant_render_svg},
     {"box", "fn(node: dom_node) -> map|null", (fn_ptr)fn_radiant_box, JUBE_FN_NONE,
      "Item fn_radiant_box(Item node)", (fn_ptr)fn_radiant_box},
     {"poc_attr", "fn(path: string) -> string", (fn_ptr)fn_radiant_poc_attr, JUBE_FN_NONE,

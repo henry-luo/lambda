@@ -113,8 +113,9 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
     rdt_vector_destroy(&vec);
 
     scratch_release(&scratch);
-    dl_clear(&dl);
-    // The temporary arena is pool-backed here; destroying the pool releases its arena chunks once.
+    // effect rasterization is one-shot; dl_clear() retains the heap-grown item
+    // buffer and leaked it when the backing arena was destroyed immediately after.
+    dl_destroy(&dl);
     mem_pool_destroy(temp_pool);
 
     out->surface = surface;

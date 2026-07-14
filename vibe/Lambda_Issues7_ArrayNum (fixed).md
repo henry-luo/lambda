@@ -33,8 +33,23 @@ The three gaps below are what remains.
 
 ## 38. P4h loop hoisting: typed-array data pointer goes stale after in-loop `resize()`
 
-**Severity: MEDIUM (latent use-after-free; narrow trigger)** — status: OPEN,
-already self-acknowledged in a code comment.
+**Severity: MEDIUM (latent use-after-free; narrow trigger)** — status: FIXED
+(2026-07-14).
+
+**Implemented fix:** `jm_scan_subscript_arrays` now treats every call/new
+expression in a loop as an invalidation point for all arrays considered by the
+P4h metadata hoist. Arrays found before the call are marked unsafe immediately;
+arrays found later inherit the scan-wide call flag. This is deliberately
+conservative because an arbitrary call can resize, transfer, or detach a
+backing buffer, including through an alias or callback. Such loops use the
+existing non-hoisted access path, which reloads the live pointer and length.
+
+Regression coverage:
+- `test/js/regression_js_arraynum_loop_resize_hoist.js` covers both `for` and
+  `while`, growing a two-byte length-tracking `Uint8Array` backing buffer to
+  1 MiB inside the loop before accessing newly valid indices.
+- `JavaScriptRegression.ArrayNumLoopResizeInvalidatesHoist` passes in
+  `test/test_js_gtest.exe`; `make build` and `make build-test` also pass.
 
 The P4h optimization snapshots a typed array's data pointer and length into
 registers *before* `while`/`for` loops
@@ -152,7 +167,7 @@ Lambda `[1.0, 2.0, 3.0]` ArrayNum surfaces in JS as (or like) a Float64Array.
 
 | # | Issue | Severity | Kind |
 |---|-------|----------|------|
-| 38 | P4h hoisted data ptr/len stale after in-loop buffer resize | MEDIUM | latent UAF in JIT fast path |
+| 38 | P4h hoisted data ptr/len stale after in-loop buffer resize | MEDIUM — **FIXED 2026-07-14** | latent UAF in JIT fast path |
 | 39 | Raw fallback duplicates element switch; view mismatch → silent `0.0` | LOW | maintenance / silent-failure hazard |
 | 40 | Lambda ArrayNum items not indexable from JS (one-way unification) | LOW→MEDIUM | interop design gap |
 
