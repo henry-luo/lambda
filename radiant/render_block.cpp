@@ -520,7 +520,7 @@ static RenderBlockChildrenPhase render_block_begin_children_phase(RenderContext*
     RenderBlockChildrenPhase phase = {};
     phase.start_time = std::chrono::high_resolution_clock::now();
     View* view = block ? block->first_child : nullptr;
-    phase.has_children = view != nullptr;
+    phase.has_children = view != nullptr || (block && block->custom_layout_paint);
     if (!phase.has_children) {
         log_debug("view has no child");
         return phase;
@@ -540,12 +540,17 @@ static void render_block_walk_children_phase(RenderContext* rdcon, ViewBlock* bl
                                              RenderBlockChildrenPhase* phase) {
     if (!rdcon || !block || !phase || !phase->has_children) return;
 
-    render_children(rdcon, block->first_child);
+    bool custom_painted = render_raster_custom_layout_children(rdcon, block);
+    if (!custom_painted) {
+        render_children(rdcon, block->first_child);
+    }
     if (block->position) {
         log_debug("render absolute/fixed positioned children");
         render_raster_positioned_children(rdcon, block);
     }
-    render_raster_positive_z_descendants(rdcon, block->first_child);
+    if (!custom_painted) {
+        render_raster_positive_z_descendants(rdcon, block->first_child);
+    }
 }
 
 static double render_block_finish_children_phase(RenderContext* rdcon, ViewBlock* block,

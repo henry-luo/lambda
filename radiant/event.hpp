@@ -3008,6 +3008,13 @@ void form_control_get_selection(DocState* state, View* view,
                                 uint32_t* out_start, uint32_t* out_end, uint8_t* out_direction);
 
 /**
+ * Observe selection offsets without lazily initializing the control.
+ * State-machine inspection uses this so debug validation stays side-effect free.
+ */
+void form_control_peek_selection(DocState* state, View* view,
+                                 uint32_t* out_start, uint32_t* out_end, uint8_t* out_direction);
+
+/**
  * Set the text selection offsets for a text control.
  * Start/end are UTF-16 code units; direction is 0=none, 1=forward, 2=backward.
  * This is the only supported writer path for selection mutations.

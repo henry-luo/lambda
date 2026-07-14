@@ -42,17 +42,10 @@
 // System info for sys.* paths
 #include "sysinfo.h"
 
-// Graph layout includes
-#include "../radiant/layout_graph.hpp"
-#include "../radiant/graph_to_svg.hpp"
-#include "../radiant/graph_theme.hpp"
-#include "../radiant/event.hpp"
-#include "../radiant/view.hpp"
-#include "../radiant/render.hpp"
+#include "../radiant/radiant.hpp"
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
 #include "input/css/css_style.hpp"   // css_property_system_init
 #include "input/css/css_engine.hpp"  // CssEngine for CSS extraction
-#include "input/input-graph.h"
 #include "js/js_event_loop.h"        // v14: event loop drain
 #include "js/js_runtime.h"           // v16: js_check_exception for exit code
 #include "js/js_dom.h"               // JS DOM document/session bridge
@@ -3096,123 +3089,24 @@ int main(int argc, char *argv[]) {
         log_debug("Rendering input '%s' to output '%s' with viewport %dx%d, scale=%.2f, pixel_ratio=%.2f",
                   html_file, output_file, viewport_width, viewport_height, render_scale, pixel_ratio);
 
-        // Handle graph inputs - convert to SVG first, then render if needed
+        char* render_package_temp_input = nullptr;
         if (is_graph_input) {
-            log_info("Detected graph input format");
-
-            // Read graph file
-            char* graph_content = read_text_file(html_file);
-            if (!graph_content) {
-                printf("Error: Failed to read graph file '%s'\n", html_file);
+            char* graph_bridge_source = build_graph_to_html_bridge_script(
+                html_file, theme_name, "render");
+            render_package_temp_input = file_temp_path("render_graph_bridge", ".ls");
+            if (!graph_bridge_source || !render_package_temp_input) {
+                printf("Error: Failed to prepare graph render bridge for '%s'\n", html_file);
+                if (graph_bridge_source) mem_free(graph_bridge_source);
+                if (render_package_temp_input) mem_free(render_package_temp_input);
                 return lambda_main_finish(1);
             }
-
-            // Create input using InputManager directly (no URL needed for graph parsing)
-            Input* input = InputManager::create_input(nullptr);
-            if (!input) {
-                printf("Error: Failed to create input for graph parsing\n");
-                mem_free(graph_content);
-                return lambda_main_finish(1);
-            }
-            log_debug("Created input for graph parsing, parsing content...");
-
-            // Parse graph content
-            if (strcmp(input_ext, ".mmd") == 0) {
-                log_debug("Parsing Mermaid graph");
-                parse_graph_mermaid(input, graph_content);
-            } else if (strcmp(input_ext, ".d2") == 0) {
-                log_debug("Parsing D2 graph");
-                parse_graph_d2(input, graph_content);
-            } else if (strcmp(input_ext, ".dot") == 0 || strcmp(input_ext, ".gv") == 0) {
-                log_debug("Parsing DOT graph");
-                parse_graph_dot(input, graph_content);
-            }
-            mem_free(graph_content);
-            log_debug("Graph parsed, checking result...");
-
-            if (get_type_id(input->root) != LMD_TYPE_ELEMENT) {
-                printf("Error: Failed to parse graph file '%s'\n", html_file);
-                return lambda_main_finish(1);
-            }
-
-            // Layout graph using Dagre
-            GraphLayout* layout = layout_graph(input->root.element);
-            if (!layout) {
-                printf("Error: Failed to compute graph layout\n");
-                return lambda_main_finish(1);
-            }
-
-            // Generate SVG from layout with optional theme
-            Item svg_item;
-            if (theme_name) {
-                SvgGeneratorOptions* opts = create_themed_svg_options(theme_name);
-                svg_item = graph_to_svg_with_options(input->root.element, layout, opts, input);
-                mem_free(opts);
-                log_info("Using theme '%s' for graph rendering", theme_name);
-            } else {
-                svg_item = graph_to_svg(input->root.element, layout, input);
-            }
-            if (get_type_id(svg_item) != LMD_TYPE_ELEMENT) {
-                printf("Error: Failed to generate SVG from graph\n");
-                free_graph_layout(layout);
-                return lambda_main_finish(1);
-            }
-
-            // Update input root to SVG
-            input->root = svg_item;
-
-            // Determine output format
-            const char* output_ext = file_path_ext(output_file);
-            if (output_ext && strcmp(output_ext, ".svg") == 0) {
-                // Direct SVG output using format_xml (SVG is XML)
-                log_info("Writing SVG output to '%s'", output_file);
-                String* svg_str = format_xml(input->pool, input->root);
-                if (svg_str) {
-                    write_text_file(output_file, svg_str->chars);
-                    printf("Graph rendered successfully to '%s'\n", output_file);
-                } else {
-                    printf("Error: Failed to format SVG output\n");
-                }
-                free_graph_layout(layout);
-                return lambda_main_finish(svg_str ? 0 : 1);
-            } else {
-                // For other formats (PDF, PNG), save SVG temp file and render it
-                const char* temp_svg = "./temp/lambda_graph_temp.svg";
-                String* svg_str = format_xml(input->pool, input->root);
-                if (!svg_str) {
-                    printf("Error: Failed to format SVG output\n");
-                    free_graph_layout(layout);
-                    return lambda_main_finish(1);
-                }
-                write_text_file(temp_svg, svg_str->chars);
-
-                int exit_code = 0;
-                if (output_ext && (strcmp(output_ext, ".pdf") == 0 ||
-                                   strcmp(output_ext, ".png") == 0 ||
-                                   strcmp(output_ext, ".jpg") == 0 ||
-                                   strcmp(output_ext, ".jpeg") == 0)) {
-                    exit_code = render_html_to_output_target(temp_svg, output_file,
-                        0, 0, render_scale, pixel_ratio, 85);
-                }
-                else {
-                    printf("Error: Unsupported output format for graph rendering: %s\n", output_ext);
-                    exit_code = 1;
-                }
-
-                // Clean up temp file
-                file_delete(temp_svg);
-
-                if (exit_code == 0) {
-                    printf("Graph rendered successfully to '%s'\n", output_file);
-                }
-
-                free_graph_layout(layout);
-                return lambda_main_finish(exit_code);
-            }
+            write_text_file(render_package_temp_input, graph_bridge_source);
+            mem_free(graph_bridge_source);
+            html_file = render_package_temp_input;
+            log_info("GRAPH_RENDER_BRIDGE: rendering '%s' through Lambda graph transform", html_file);
         }
 
         const char* output_ext = file_path_ext(output_file);
-        char* render_pdf_temp_input = nullptr;
         if (input_ext && strcmp(input_ext, ".pdf") == 0) {
             if (output_ext && strcmp(output_ext, ".pdf") == 0) {
                 FileCopyOptions copy_opts = { true, false };
@@ -3235,8 +3129,8 @@ int main(int argc, char *argv[]) {
                 mem_free(render_pdf_bridge);
                 return lambda_main_finish(1);
             }
-            render_pdf_temp_input = render_pdf_bridge;
-            html_file = render_pdf_temp_input;
+            render_package_temp_input = render_pdf_bridge;
+            html_file = render_package_temp_input;
         }
 
         // Determine output format based on file extension
@@ -3245,9 +3139,9 @@ int main(int argc, char *argv[]) {
 
         if (ext && strcmp(ext, ".dvi") == 0) {
             printf("Error: DVI output is no longer supported. Use .svg, .pdf, .png, or .jpg instead.\n");
-            if (render_pdf_temp_input) {
-                file_delete(render_pdf_temp_input);
-                mem_free(render_pdf_temp_input);
+            if (render_package_temp_input) {
+                file_delete(render_package_temp_input);
+                mem_free(render_package_temp_input);
             }
             return lambda_main_finish(1);
         } else if (ext && (strcmp(ext, ".pdf") == 0 ||
@@ -3262,16 +3156,16 @@ int main(int argc, char *argv[]) {
         else {
             printf("Error: Unsupported output format. Use .svg, .pdf, .png, .jpg, or .jpeg extension\n");
             printf("Supported formats: .svg (SVG), .pdf (PDF), .png (PNG), .jpg/.jpeg (JPEG)\n");
-            if (render_pdf_temp_input) {
-                file_delete(render_pdf_temp_input);
-                mem_free(render_pdf_temp_input);
+            if (render_package_temp_input) {
+                file_delete(render_package_temp_input);
+                mem_free(render_package_temp_input);
             }
             return lambda_main_finish(1);
         }
 
-        if (render_pdf_temp_input) {
-            file_delete(render_pdf_temp_input);
-            mem_free(render_pdf_temp_input);
+        if (render_package_temp_input) {
+            file_delete(render_package_temp_input);
+            mem_free(render_package_temp_input);
         }
 
         log_debug("render completed with result: %d", exit_code);
@@ -3527,79 +3421,17 @@ int main(int argc, char *argv[]) {
                                       strcmp(ext, ".gv") == 0);
 
         if (is_graph_file) {
-            log_info("Detected graph file, converting to SVG for viewing");
-
-            // Read graph file
-            char* graph_content = read_text_file(filename);
-            if (!graph_content) {
-                printf("Error: Failed to read graph file '%s'\n", filename);
+            char* graph_bridge_source = build_graph_to_html_bridge_script(filename, nullptr, "view");
+            if (!graph_bridge_source) {
+                printf("Error: Failed to prepare graph view bridge for '%s'\n", filename);
                 return lambda_main_finish(1);
             }
 
-            // Create input for graph parsing
-            Input* input = InputManager::create_input(nullptr);
-            if (!input) {
-                printf("Error: Failed to create input for graph parsing\n");
-                mem_free(graph_content);
-                return lambda_main_finish(1);
-            }
-
-            // Parse graph content based on format
-            if (strcmp(ext, ".mmd") == 0) {
-                log_debug("Parsing Mermaid graph");
-                parse_graph_mermaid(input, graph_content);
-            } else if (strcmp(ext, ".d2") == 0) {
-                log_debug("Parsing D2 graph");
-                parse_graph_d2(input, graph_content);
-            } else if (strcmp(ext, ".dot") == 0 || strcmp(ext, ".gv") == 0) {
-                log_debug("Parsing DOT graph");
-                parse_graph_dot(input, graph_content);
-            }
-            mem_free(graph_content);
-
-            if (get_type_id(input->root) != LMD_TYPE_ELEMENT) {
-                printf("Error: Failed to parse graph file '%s'\n", filename);
-                return lambda_main_finish(1);
-            }
-
-            // Layout graph using Dagre
-            GraphLayout* layout = layout_graph(input->root.element);
-            if (!layout) {
-                printf("Error: Failed to compute graph layout\n");
-                return lambda_main_finish(1);
-            }
-
-            // Generate SVG from layout
-            Item svg_item = graph_to_svg(input->root.element, layout, input);
-            if (get_type_id(svg_item) != LMD_TYPE_ELEMENT) {
-                printf("Error: Failed to generate SVG from graph\n");
-                free_graph_layout(layout);
-                return lambda_main_finish(1);
-            }
-
-            // Format SVG and write to temp file
-            String* svg_str = format_xml(input->pool, svg_item);
-            if (!svg_str) {
-                printf("Error: Failed to format SVG output\n");
-                free_graph_layout(layout);
-                return lambda_main_finish(1);
-            }
-
-            const char* temp_svg = "./temp/lambda_graph_view.svg";
-            write_text_file(temp_svg, svg_str->chars);
-#ifndef NDEBUG
-            write_text_file("./temp/lambda_graph_debug.svg", svg_str->chars);  // debug copy
-#endif
-            free_graph_layout(layout);
-
-            // View the temp SVG file
-            log_info("Opening graph SVG in viewer: %s", temp_svg);
-            exit_code = view_doc_in_window_with_events(temp_svg, event_file, headless,
-                                                       font_dirs, font_dir_count, event_log,
-                                                       state_dump);
-
-            // Clean up temp file after viewing
-            file_delete(temp_svg);
+            log_info("GRAPH_VIEW_BRIDGE: viewing '%s' through Lambda graph transform", filename);
+            exit_code = view_lambda_script_source_in_window_with_events(
+                filename, graph_bridge_source, event_file, headless,
+                font_dirs, font_dir_count, event_log, state_dump);
+            mem_free(graph_bridge_source);
 
             log_info("view command completed with result: %d", exit_code);
             return lambda_main_finish(exit_code);

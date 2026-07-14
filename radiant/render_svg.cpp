@@ -1181,6 +1181,13 @@ static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
     ctx->color = color;
 }
 
+static void svg_cb_render_svg_subscene(void* vctx, const PaintSvgSubscene* subscene) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    if (!ctx || !subscene) return;
+    paint_svg_subscene(svg_active_paint_list(ctx), subscene);
+    svg_lower_paint_list(ctx);
+}
+
 static void svg_cb_begin_block_children(void* vctx, ViewBlock* block) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     svg_indent(ctx);
@@ -1391,6 +1398,7 @@ static RenderBackend svg_make_backend(SvgRenderContext* ctx) {
     b.render_text           = svg_cb_render_text;
     b.render_image          = svg_cb_render_image;
     b.render_inline_svg     = svg_cb_render_inline_svg;
+    b.render_svg_subscene   = svg_cb_render_svg_subscene;
     b.begin_block_children  = svg_cb_begin_block_children;
     b.end_block_children    = svg_cb_end_block_children;
     b.begin_inline_children = svg_cb_begin_inline_children;

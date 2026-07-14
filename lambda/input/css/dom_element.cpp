@@ -179,6 +179,17 @@ void dom_document_destroy(DomDocument* document) {
         document->pending_navigation_url = nullptr;
     }
 
+    // Runtime-backed extension values must release their GC roots while the
+    // document's retained Lambda runtime is still alive.
+    DomDocumentResource* resource = document->resources;
+    while (resource) {
+        DomDocumentResource* next = resource->next;
+        if (resource->destroy) resource->destroy(resource->data);
+        mem_free(resource);
+        resource = next;
+    }
+    document->resources = nullptr;
+
     if (document->lambda_runtime) {
         if (g_runtime_cleanup_hook) g_runtime_cleanup_hook(document->lambda_runtime);
         mem_free(document->lambda_runtime);
@@ -198,6 +209,19 @@ void dom_document_destroy(DomDocument* document) {
     // Note: Input* is not owned by document, don't free it
     mem_free(document);
     log_debug("dom_document_destroy: destroyed document and arena");
+}
+
+bool dom_document_add_resource(DomDocument* document, void* data,
+                               DomDocumentResourceDestroyFn destroy) {
+    if (!document || !data || !destroy) return false;
+    DomDocumentResource* resource = (DomDocumentResource*)mem_calloc(
+        1, sizeof(DomDocumentResource), MEM_CAT_LAYOUT);
+    if (!resource) return false;
+    resource->data = data;
+    resource->destroy = destroy;
+    resource->next = document->resources;
+    document->resources = resource;
+    return true;
 }
 
 // ============================================================================

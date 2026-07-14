@@ -12,8 +12,6 @@
 
 // Forward declarations (avoid including heavy radiant headers)
 struct CounterContext;
-struct GraphLayout;
-struct SvgGeneratorOptions;
 struct DomDocument;
 struct DomElement;
 
@@ -55,35 +53,6 @@ int counters_format(CounterContext* ctx, const char* name, const char* separator
     (void)ctx; (void)name; (void)separator; (void)style;
     if (buffer && buffer_size > 0) buffer[0] = '\0';
     return 0;
-}
-
-// --- Graph Layout Stubs (extern "C" - matches layout_graph.hpp) ---
-
-extern "C" GraphLayout* layout_graph(Element* graph_element) {
-    (void)graph_element;
-    return nullptr;
-}
-
-extern "C" void free_graph_layout(GraphLayout* layout) {
-    (void)layout;
-}
-
-// --- Graph SVG Stubs (C++ linkage - matches graph_to_svg.hpp, returns Item) ---
-
-Item graph_to_svg(Element* graph_element, GraphLayout* layout, Input* input) {
-    (void)graph_element; (void)layout; (void)input;
-    return ItemNull;
-}
-
-Item graph_to_svg_with_options(Element* graph_element, GraphLayout* layout,
-                               SvgGeneratorOptions* options, Input* input) {
-    (void)graph_element; (void)layout; (void)options; (void)input;
-    return ItemNull;
-}
-
-SvgGeneratorOptions* create_themed_svg_options(const char* theme_name) {
-    (void)theme_name;
-    return nullptr;
 }
 
 // --- Radiant Layout/Render Stubs (C++ linkage - matches main.cpp declarations) ---

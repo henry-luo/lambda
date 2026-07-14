@@ -285,6 +285,61 @@ TEST_F(CustomLayoutTest, PlacementZFeedsSharedStackingOrder) {
     arraylist_free(positive);
 }
 
+TEST_F(CustomLayoutTest, GeneratedPaintAndChildrenShareSignedStackingOrder) {
+    ViewBlock parent;
+    ViewBlock first;
+    ViewBlock second;
+    ViewBlock third;
+    init_parent(&parent, 0.0f, 0.0f);
+    init_block(&first, "section", 10.0f, 10.0f);
+    init_block(&second, "section", 10.0f, 10.0f);
+    init_block(&third, "section", 10.0f, 10.0f);
+    ASSERT_TRUE(parent.append_child(&first));
+    ASSERT_TRUE(parent.append_child(&second));
+    ASSERT_TRUE(parent.append_child(&third));
+
+    ASSERT_TRUE(custom_layout_register("unit-generated-z-order", custom_layout_test_z_order));
+    ASSERT_TRUE(layout_custom_apply(&lycon, &parent, "unit-generated-z-order"));
+
+    CustomLayoutPaintLayer layers[3] = {};
+    layers[0].z = 0;
+    layers[0].order = 0;
+    layers[1].z = 3;
+    layers[1].order = 1;
+    layers[2].z = -1;
+    layers[2].order = 2;
+    CustomLayoutPaintState paint = {layers, 3};
+    parent.custom_layout_paint = &paint;
+
+    RadiantStackPaintList list = radiant_stack_collect_custom_layout_paint(&parent);
+    ASSERT_EQ(list.count, 6);
+    ASSERT_NE(list.entries, nullptr);
+
+    EXPECT_TRUE(list.entries[0].is_generated_layer);
+    EXPECT_EQ(list.entries[0].layer, &layers[2]);
+    EXPECT_EQ(list.entries[0].z, -1);
+
+    // Generated paint at equal z is below the child, matching CSS paint order.
+    EXPECT_TRUE(list.entries[1].is_generated_layer);
+    EXPECT_EQ(list.entries[1].layer, &layers[0]);
+    EXPECT_FALSE(list.entries[2].is_generated_layer);
+    EXPECT_EQ(list.entries[2].view, &second);
+    EXPECT_EQ(list.entries[2].z, 0);
+
+    EXPECT_FALSE(list.entries[3].is_generated_layer);
+    EXPECT_EQ(list.entries[3].view, &third);
+    EXPECT_EQ(list.entries[3].z, 2);
+    EXPECT_TRUE(list.entries[4].is_generated_layer);
+    EXPECT_EQ(list.entries[4].layer, &layers[1]);
+    EXPECT_EQ(list.entries[4].z, 3);
+    EXPECT_FALSE(list.entries[5].is_generated_layer);
+    EXPECT_EQ(list.entries[5].view, &first);
+    EXPECT_EQ(list.entries[5].z, 5);
+
+    radiant_stack_free_custom_layout_paint(&list);
+    parent.custom_layout_paint = nullptr;
+}
+
 TEST_F(CustomLayoutTest, MissingPlacementZClearsPreviousCustomStackingOverlay) {
     ViewBlock parent;
     ViewBlock first;

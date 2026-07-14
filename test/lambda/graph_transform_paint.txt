@@ -1,0 +1,7 @@
+{
+  count: 1,
+  z: -2,
+  edge_id: "ab",
+  svg: ['svg', 80, 110, "0 0 80 110"],
+  path: ['path', "M 40 40 L 40 70", "url(#lambda-graph-arrow-0)"]
+}

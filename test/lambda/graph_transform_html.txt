@@ -1,0 +1,36 @@
+{
+  tag: 'graph',
+  class: "lambda-graph lambda-graph-theme-light",
+  layout: "lambda-graph",
+  direction: "LR",
+  spacing: ["42", "64"],
+  children: [{
+      tag: 'node',
+      id: "a",
+      from: null,
+      to: null,
+      directed: null,
+      shape: "box",
+      z: "0",
+      content: ["Alpha"]
+    }, {
+      tag: 'node',
+      id: "b",
+      from: null,
+      to: null,
+      directed: null,
+      shape: "round",
+      z: "2",
+      content: [<strong
+          "Rich">, " content"]
+    }, {
+      tag: 'edge',
+      id: null,
+      from: "a",
+      to: "b",
+      directed: "true",
+      shape: null,
+      z: "-1",
+      content: []
+    }]
+}

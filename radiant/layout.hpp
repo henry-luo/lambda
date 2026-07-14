@@ -1073,6 +1073,17 @@ typedef struct CustomLayoutPlacement {
     bool has_z;
 } CustomLayoutPlacement;
 
+typedef struct CustomLayoutPaintLayer {
+    Element* content;
+    int z;
+    int order;
+} CustomLayoutPaintLayer;
+
+typedef struct CustomLayoutPaintState {
+    CustomLayoutPaintLayer* layers;
+    int layer_count;
+} CustomLayoutPaintState;
+
 typedef struct CustomLayoutResult {
     CustomLayoutPlacement* placements;
     int placement_count;

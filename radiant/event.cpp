@@ -787,6 +787,19 @@ static void target_positioned_children(EventContext* evcon, ViewBlock* block) {
     arraylist_free(views);
 }
 
+static void target_custom_layout_children(EventContext* evcon, ViewBlock* block) {
+    if (!evcon || !block || !block->custom_layout_paint) return;
+    RadiantStackPaintList paint = radiant_stack_collect_custom_layout_paint(block);
+    // Generated SVG layers are non-interactive, but their position in this
+    // sequence determines which authored child is visually topmost.
+    for (int i = paint.count - 1; i >= 0 && !evcon->target; i--) {
+        if (!paint.entries[i].is_generated_layer && paint.entries[i].view) {
+            target_stacking_view(evcon, paint.entries[i].view);
+        }
+    }
+    radiant_stack_free_custom_layout_paint(&paint);
+}
+
 void target_children(EventContext* evcon, View* view) {
     do {
         if (view->is_block()) {
@@ -1069,12 +1082,21 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         setup_font(evcon->ui_context, &evcon->font, block->font);
     }
 
-    // Positioned content paints above the block's embedded self-content; walking
-    // it first prevents iframe/webview hit targets from stealing covered clicks.
-    target_positive_z_descendants(evcon, block->first_child);
-    if (evcon->target) goto RETURN;
-    target_positioned_children(evcon, block);
-    if (evcon->target) goto RETURN;
+    // Positioned content paints after a custom layout's local signed-z sequence.
+    // Hit testing must consume those same layers in exact reverse paint order.
+    if (block->custom_layout_paint) {
+        target_positioned_children(evcon, block);
+        if (evcon->target) goto RETURN;
+        target_custom_layout_children(evcon, block);
+        if (evcon->target) goto RETURN;
+    } else {
+        // Positioned content paints above the block's embedded self-content; walking
+        // it first prevents iframe/webview hit targets from stealing covered clicks.
+        target_positive_z_descendants(evcon, block->first_child);
+        if (evcon->target) goto RETURN;
+        target_positioned_children(evcon, block);
+        if (evcon->target) goto RETURN;
+    }
 
     // Layer-mode webview: Radiant owns events but forwards them to the offscreen web view.
     // Set target to the webview block and inject the mouse event.
@@ -1133,7 +1155,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     }
 
     // target static positioned children
-    view = block->first_child;
+    view = block->custom_layout_paint ? nullptr : block->first_child;
     if (view) {
         target_children(evcon, view);
         bool rich_host_margin_hit_allowed = event_inside_block(evcon, block);

@@ -141,6 +141,9 @@ struct DomDocument {
     // Reactive UI: retained Lambda runtime for event handler execution
     Runtime* lambda_runtime;     // Retained runtime (heap, JIT context) for reactive UI sessions
 
+    // Native extensions retain runtime-backed values through document resources.
+    struct DomDocumentResource* resources;
+
     // Reactive UI: cached CSS for rebuild_lambda_doc optimization
     struct CssStylesheet** cached_inline_sheets;  // Parsed inline <style> stylesheets (cached)
     int cached_inline_sheet_count;                // Number of cached inline stylesheets
@@ -215,7 +218,7 @@ struct DomDocument {
                     viewport_width(0), viewport_height(0),
                     body_transform_scale(1.0f),
                     resource_manager(nullptr), load_start_time(0.0), fully_loaded(true),
-                    lambda_runtime(nullptr),
+                    lambda_runtime(nullptr), resources(nullptr),
                     cached_inline_sheets(nullptr), cached_inline_sheet_count(0),
                     cached_css_engine(nullptr),
                     js_doc_node(nullptr),
@@ -242,6 +245,17 @@ struct DomDocument {
                     pending_scroll_into_view_target(nullptr),
                     js_ready_state("complete") {}
 };
+
+typedef void (*DomDocumentResourceDestroyFn)(void* data);
+
+typedef struct DomDocumentResource {
+    void* data;
+    DomDocumentResourceDestroyFn destroy;
+    DomDocumentResource* next;
+} DomDocumentResource;
+
+bool dom_document_add_resource(DomDocument* document, void* data,
+                               DomDocumentResourceDestroyFn destroy);
 
 typedef struct {
     CssEnum outer;
@@ -432,6 +446,8 @@ struct DomElement : DomNode {
     PseudoContentProp* pseudo;
     // vector path for PDF/SVG curve rendering
     VectorPathProp* vpath;
+    // retained generated paint owned by a custom layout callback
+    void* custom_layout_paint;
     // Layout cache for avoiding redundant layout computations (Taffy-inspired)
     // Stores up to 9 measurement results + 1 final layout result
     radiant::LayoutCache* layout_cache;
@@ -473,7 +489,7 @@ struct DomElement : DomNode {
         transform(nullptr), transition_state(nullptr),
         filter(nullptr), backdrop_filter(nullptr), multicol(nullptr),
         layout_fragments(nullptr), layout_fragment_count(0), pseudo(nullptr),
-        vpath(nullptr), layout_cache(nullptr),
+        vpath(nullptr), custom_layout_paint(nullptr), layout_cache(nullptr),
         cached_min_content_width(0), cached_max_content_width(0),
         has_cached_intrinsic_widths(false), measuring_intrinsic_width(false) {}
 };

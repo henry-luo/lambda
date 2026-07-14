@@ -1,5 +1,6 @@
 #include "../../jube/jube_registry.h"
 #include "../../input/css/dom_element.hpp"
+#include "../../transpiler.hpp"
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
 #include "../../../radiant/layout.hpp"
@@ -9,6 +10,7 @@
 #include "../../../lib/mem_context.h"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/mempool.h"
+#include "../../../lib/gc/gc_heap.h"
 #include "../../../lib/url.h"
 #include <limits.h>
 #include <string.h>
@@ -42,6 +44,8 @@ RADIANT_C_API int radiant_dom_document_host_own_property_names(Item object, Item
 RADIANT_C_API Item radiant_dom_document_host_prototype(Item object);
 
 const JubeHostAPI* radiant_host_api = nullptr;
+extern __thread EvalContext* context;
+extern __thread Context* input_context;
 
 extern "C" Item vmap_new(void);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
@@ -59,6 +63,7 @@ Item vmap_get_by_item(VMap* vm, Item key);
 
 typedef struct RadiantCustomLayoutEntry {
     char name[RADIANT_CUSTOM_LAYOUT_NAME_CAP];
+    Heap* owner_heap;
     Item fn;
     bool rooted;
 } RadiantCustomLayoutEntry;
@@ -69,6 +74,13 @@ typedef struct RadiantVelmtHost {
     int depth;
     Velmt velmt;
 } RadiantVelmtHost;
+
+typedef struct RadiantCustomPaintResource {
+    CustomLayoutPaintState paint;
+    Item* roots;
+    int root_count;
+    Heap* owner_heap;
+} RadiantCustomPaintResource;
 
 static RadiantCustomLayoutEntry g_radiant_custom_layouts[RADIANT_CUSTOM_LAYOUT_MAX_REGISTRY];
 static int g_radiant_custom_layout_count = 0;
@@ -169,6 +181,129 @@ static Item radiant_obj_get_alias(Item obj, const char* primary_key, const char*
         value = radiant_obj_get(obj, alias_key);
     }
     return radiant_item_is_missing(value) ? ItemNull : value;
+}
+
+static bool radiant_item_to_int(Item item, int* out);
+static Heap* radiant_custom_layout_heap(const CustomLayoutContext* layout_context);
+
+static void radiant_custom_paint_clear(RadiantCustomPaintResource* resource) {
+    if (!resource) return;
+    if (resource->roots && resource->owner_heap && resource->owner_heap->gc) {
+        for (int i = 0; i < resource->root_count; i++) {
+            // Document teardown may run outside the callback's thread-local
+            // EvalContext, so roots must be removed from their actual owner.
+            gc_unregister_root(resource->owner_heap->gc, &resource->roots[i].item);
+        }
+    }
+    if (resource->roots) mem_free(resource->roots);
+    if (resource->paint.layers) mem_free(resource->paint.layers);
+    resource->roots = nullptr;
+    resource->root_count = 0;
+    resource->paint.layers = nullptr;
+    resource->paint.layer_count = 0;
+}
+
+static void radiant_custom_paint_destroy(void* data) {
+    RadiantCustomPaintResource* resource = (RadiantCustomPaintResource*)data;
+    if (!resource) return;
+    radiant_custom_paint_clear(resource);
+    mem_free(resource);
+}
+
+static RadiantCustomPaintResource* radiant_custom_paint_resource(
+    const CustomLayoutContext* context) {
+    if (!context || !context->parent || !context->parent->doc) return nullptr;
+    if (context->parent->custom_layout_paint) {
+        CustomLayoutPaintState* paint =
+            (CustomLayoutPaintState*)context->parent->custom_layout_paint;
+        return (RadiantCustomPaintResource*)paint;
+    }
+
+    RadiantCustomPaintResource* resource = (RadiantCustomPaintResource*)mem_calloc(
+        1, sizeof(RadiantCustomPaintResource), MEM_CAT_LAYOUT);
+    if (!resource) return nullptr;
+    resource->owner_heap = radiant_custom_layout_heap(context);
+    if (!resource->owner_heap) {
+        mem_free(resource);
+        return nullptr;
+    }
+    if (!dom_document_add_resource(context->parent->doc, resource,
+                                   radiant_custom_paint_destroy)) {
+        mem_free(resource);
+        return nullptr;
+    }
+    context->parent->custom_layout_paint = &resource->paint;
+    return resource;
+}
+
+static bool radiant_custom_layout_parse_paint_layers(const CustomLayoutContext* context,
+                                                     Item result_item) {
+    Item layers_item = radiant_obj_get(result_item, "paint_layers");
+    if (radiant_item_is_missing(layers_item)) {
+        if (context && context->parent && context->parent->custom_layout_paint) {
+            // A later reflow may stop returning generated paint; clear the prior
+            // result so stale subscenes cannot survive merely because the field is absent.
+            radiant_custom_paint_clear((RadiantCustomPaintResource*)
+                context->parent->custom_layout_paint);
+        }
+        return true;
+    }
+    if (get_type_id(layers_item) != LMD_TYPE_ARRAY || !layers_item.array) {
+        log_error("CUSTOM_LAYOUT_LAMBDA_PAINT: result.paint_layers must be an array");
+        return false;
+    }
+
+    int layer_count = (int)layers_item.array->length; // INT_CAST_OK: Lambda array length is bounded by native allocation limits below.
+    Item* roots = nullptr;
+    CustomLayoutPaintLayer* layers = nullptr;
+    if (layer_count > 0) {
+        roots = (Item*)mem_calloc((size_t)layer_count, sizeof(Item), MEM_CAT_LAYOUT);
+        layers = (CustomLayoutPaintLayer*)mem_calloc(
+            (size_t)layer_count, sizeof(CustomLayoutPaintLayer), MEM_CAT_LAYOUT);
+        if (!roots || !layers) {
+            if (roots) mem_free(roots);
+            if (layers) mem_free(layers);
+            log_error("CUSTOM_LAYOUT_LAMBDA_PAINT: failed to allocate %d retained layers",
+                      layer_count);
+            return false;
+        }
+    }
+
+    for (int i = 0; i < layer_count; i++) {
+        Item layer_item = layers_item.array->items[i];
+        Item content = radiant_obj_get(layer_item, "content");
+        if (get_type_id(content) != LMD_TYPE_ELEMENT || !content.element) {
+            log_error("CUSTOM_LAYOUT_LAMBDA_PAINT: layer %d content must be an element", i);
+            if (roots) mem_free(roots);
+            if (layers) mem_free(layers);
+            return false;
+        }
+        int z = 0;
+        radiant_item_to_int(radiant_obj_get(layer_item, "z"), &z);
+        roots[i] = content;
+        layers[i].content = content.element;
+        layers[i].z = z;
+        layers[i].order = i;
+    }
+
+    RadiantCustomPaintResource* resource = radiant_custom_paint_resource(context);
+    if (!resource) {
+        if (roots) mem_free(roots);
+        if (layers) mem_free(layers);
+        log_error("CUSTOM_LAYOUT_LAMBDA_PAINT: failed to attach document resource");
+        return false;
+    }
+    // Reflow replaces the complete generated layer set; retaining old roots
+    // would keep stale SVG trees alive across every interaction.
+    radiant_custom_paint_clear(resource);
+    for (int i = 0; i < layer_count; i++) {
+        gc_register_root(resource->owner_heap->gc, &roots[i].item);
+    }
+    resource->roots = roots;
+    resource->root_count = layer_count;
+    resource->paint.layers = layers;
+    resource->paint.layer_count = layer_count;
+    return true;
 }
 
 static bool radiant_item_to_float(Item item, float* out) {
@@ -545,14 +680,33 @@ static Item radiant_layout_context_item(const CustomLayoutContext* context) {
     return obj;
 }
 
-static RadiantCustomLayoutEntry* radiant_custom_layout_entry(const char* name) {
+static Heap* radiant_custom_layout_heap(const CustomLayoutContext* layout_context) {
+    Runtime* runtime = (layout_context && layout_context->parent && layout_context->parent->doc)
+        ? layout_context->parent->doc->lambda_runtime : nullptr;
+    if (runtime && runtime->heap) return runtime->heap;
+    return ::context ? ::context->heap : nullptr;
+}
+
+static RadiantCustomLayoutEntry* radiant_custom_layout_entry(const char* name, Heap* owner_heap) {
     if (!name || name[0] == '\0') return nullptr;
     for (int i = 0; i < g_radiant_custom_layout_count; i++) {
-        if (strcmp(g_radiant_custom_layouts[i].name, name) == 0) {
+        if (g_radiant_custom_layouts[i].owner_heap == owner_heap &&
+            strcmp(g_radiant_custom_layouts[i].name, name) == 0) {
             return &g_radiant_custom_layouts[i];
         }
     }
     return nullptr;
+}
+
+static RadiantCustomLayoutEntry* radiant_custom_layout_free_entry(void) {
+    for (int i = 0; i < g_radiant_custom_layout_count; i++) {
+        if (!g_radiant_custom_layouts[i].owner_heap &&
+            !g_radiant_custom_layouts[i].rooted) {
+            return &g_radiant_custom_layouts[i];
+        }
+    }
+    if (g_radiant_custom_layout_count >= RADIANT_CUSTOM_LAYOUT_MAX_REGISTRY) return nullptr;
+    return &g_radiant_custom_layouts[g_radiant_custom_layout_count++];
 }
 
 static bool radiant_custom_layout_parse_result(const CustomLayoutContext* context,
@@ -623,16 +777,20 @@ static bool radiant_custom_layout_parse_result(const CustomLayoutContext* contex
             }
         }
     }
+    if (ok && !radiant_custom_layout_parse_paint_layers(context, result_item)) {
+        ok = false;
+    }
     return ok;
 }
 
 static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* context,
                                                   CustomLayoutResult* result) {
     if (!radiant_host_api || !radiant_host_api->script || !context || !result) return false;
-    RadiantCustomLayoutEntry* entry = radiant_custom_layout_entry(context->layout_name);
+    Heap* owner_heap = radiant_custom_layout_heap(context);
+    RadiantCustomLayoutEntry* entry = radiant_custom_layout_entry(context->layout_name, owner_heap);
     if (!entry || get_type_id(entry->fn) != LMD_TYPE_FUNC) {
-        log_error("CUSTOM_LAYOUT_LAMBDA_MISSING_FN: layout='%s'",
-                  context && context->layout_name ? context->layout_name : "(null)");
+        log_error("CUSTOM_LAYOUT_LAMBDA_MISSING_FN: layout='%s' heap=%p",
+                  context && context->layout_name ? context->layout_name : "(null)", owner_heap);
         return false;
     }
 
@@ -640,6 +798,30 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
     uint64_t pass_id = g_radiant_velmt_next_pass_id++;
     if (g_radiant_velmt_next_pass_id == 0) g_radiant_velmt_next_pass_id = 1;
     g_radiant_velmt_active_pass_id = pass_id;
+
+    EvalContext callback_context = {};
+    EvalContext* saved_context = ::context;
+    Context* saved_input_context = input_context;
+    Runtime* runtime = (context->parent && context->parent->doc)
+        ? context->parent->doc->lambda_runtime : nullptr;
+    if (runtime && runtime->heap) {
+        // Script-document layout runs after its stack-local Runner is gone;
+        // every Velmt and callback allocation must use the retained runtime.
+        callback_context.heap = runtime->heap;
+        callback_context.nursery = runtime->nursery;
+        callback_context.name_pool = runtime->name_pool;
+        callback_context.pool = runtime->reuse_pool
+            ? runtime->reuse_pool : runtime->heap->pool;
+        callback_context.type_info = type_info;
+        if (runtime->ui_mode && runtime->result_arena) {
+            callback_context.ui_mode = true;
+            callback_context.arena = runtime->result_arena;
+            input_context = (Context*)&callback_context;
+        } else {
+            input_context = nullptr;
+        }
+        ::context = &callback_context;
+    }
 
     Item args[3];
     args[0] = radiant_layout_parent_item(context);
@@ -650,11 +832,15 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
     Item result_item = radiant_lambda_fn_call3(entry->fn.function, args[0], args[1], args[2]);
     if (get_type_id(result_item) == LMD_TYPE_ERROR) {
         g_radiant_velmt_active_pass_id = previous_pass_id;
+        ::context = saved_context;
+        input_context = saved_input_context;
         log_error("CUSTOM_LAYOUT_LAMBDA_EXCEPTION: layout='%s'", context->layout_name);
         return false;
     }
     bool ok = radiant_custom_layout_parse_result(context, result_item, result);
     g_radiant_velmt_active_pass_id = previous_pass_id;
+    ::context = saved_context;
+    input_context = saved_input_context;
     return ok;
 }
 
@@ -835,9 +1021,16 @@ RADIANT_C_API Item fn_radiant_register_layout(Item name_item, Item fn_item) {
         return radiant_bool_item(false);
     }
 
-    RadiantCustomLayoutEntry* entry = radiant_custom_layout_entry(name);
+    Heap* owner_heap = ::context ? ::context->heap : nullptr;
+    if (!owner_heap) {
+        log_error("JUBE_RADIANT_REGISTER_LAYOUT: no active Lambda heap for '%s'", name);
+        return radiant_bool_item(false);
+    }
+
+    RadiantCustomLayoutEntry* entry = radiant_custom_layout_entry(name, owner_heap);
     if (!entry) {
-        if (g_radiant_custom_layout_count >= RADIANT_CUSTOM_LAYOUT_MAX_REGISTRY) {
+        entry = radiant_custom_layout_free_entry();
+        if (!entry) {
             log_error("JUBE_RADIANT_REGISTER_LAYOUT: registry full for '%s'", name);
             return radiant_bool_item(false);
         }
@@ -846,15 +1039,14 @@ RADIANT_C_API Item fn_radiant_register_layout(Item name_item, Item fn_item) {
             log_error("JUBE_RADIANT_REGISTER_LAYOUT: layout name too long '%s'", name);
             return radiant_bool_item(false);
         }
-        entry = &g_radiant_custom_layouts[g_radiant_custom_layout_count];
         memset(entry, 0, sizeof(*entry));
         // registered layout names outlive the Lambda string argument; keep a
         // registry-owned key for callbacks triggered by later layout passes.
         memcpy(entry->name, name, name_len + 1);
+        entry->owner_heap = owner_heap;
         entry->fn = ItemNull;
         radiant_host_api->gc->register_root(&entry->fn.item);
         entry->rooted = true;
-        g_radiant_custom_layout_count++;
     }
 
     entry->fn = fn_item;
@@ -862,7 +1054,8 @@ RADIANT_C_API Item fn_radiant_register_layout(Item name_item, Item fn_item) {
         log_error("JUBE_RADIANT_REGISTER_LAYOUT: native registry failed for '%s'", entry->name);
         return radiant_bool_item(false);
     }
-    log_info("JUBE_RADIANT_REGISTER_LAYOUT: registered custom layout '%s'", entry->name);
+    log_info("JUBE_RADIANT_REGISTER_LAYOUT: registered custom layout '%s' heap=%p",
+             entry->name, entry->owner_heap);
     return radiant_bool_item(true);
 }
 
@@ -966,6 +1159,27 @@ static void radiant_module_shutdown(void) {
     }
     g_radiant_custom_layout_count = 0;
     radiant_host_api = nullptr;
+}
+
+static void radiant_custom_layout_heap_cleanup(void* heap_ptr) {
+    Heap* heap = (Heap*)heap_ptr;
+    if (!heap) return;
+    for (int i = 0; i < g_radiant_custom_layout_count; i++) {
+        RadiantCustomLayoutEntry* entry = &g_radiant_custom_layouts[i];
+        if (entry->owner_heap != heap) continue;
+        if (entry->rooted && heap->gc) {
+            // Registry slots are process-stable, but callback values are only
+            // valid for the runtime heap that JIT-compiled their functions.
+            gc_unregister_root(heap->gc, &entry->fn.item);
+        }
+        memset(entry, 0, sizeof(*entry));
+    }
+    while (g_radiant_custom_layout_count > 0) {
+        RadiantCustomLayoutEntry* tail =
+            &g_radiant_custom_layouts[g_radiant_custom_layout_count - 1];
+        if (tail->owner_heap || tail->rooted) break;
+        g_radiant_custom_layout_count--;
+    }
 }
 
 extern const JubeHostObjectOps radiant_dom_node_host_ops;
@@ -1132,6 +1346,7 @@ static const JubeModuleDef radiant_module = {
     radiant_dom_type_bindings,
     10,  // DOM3 Phase 4e: document/foreign_document are binding-hook driven
     NULL,
+    radiant_custom_layout_heap_cleanup,
 };
 
 RADIANT_C_API const JubeModuleDef* radiant_jube_module(void) {
