@@ -1,6 +1,7 @@
 // Pure graph data to semantic HTML element transformation.
 
 import theme_defaults: .theme
+import graph_content: .content
 import model: lambda.package.graph.model
 import graph_style: lambda.package.graph.style
 
@@ -44,7 +45,9 @@ fn node_style(node, style_declarations, palette) {
   "display:inline-block;box-sizing:border-box;padding:10px 14px;" ++
     "border:1px solid " ++ palette.node_border ++ ";border-radius:" ++ radius ++ ";" ++
     "background:" ++ palette.node_background ++ ";color:" ++ palette.node_text ++
-    ";white-space:nowrap;" ++ graph_style.node_css(parsed)
+    ";white-space:" ++
+    (if (graph_content.is_rich(string(source_attr(node, "label-format", "text")))) "normal" else "nowrap") ++
+    ";" ++ graph_style.node_css(parsed)
 }
 
 fn node_content(node, id) {
@@ -54,7 +57,9 @@ fn node_content(node, id) {
   else if (node.content is array) { [for (child in node.content) child] }
   else if (node.content is list) { [for (child in node.content) child] }
   else if (node.content != null) { [node.content] }
-  else if (node.label != null) { [node.label] }
+  else if (node.label != null) {
+    graph_content.lower(node.label, string(source_attr(node, "label-format", "text")))
+  }
   else { [id] }
 }
 
@@ -64,6 +69,7 @@ fn html_node(node, index, group, assigned_classes, style_declarations, palette) 
   <node class: node_class(node, assigned_classes), 'data-node-id': id,
       'data-subgraph-id': group,
       'data-shape': source_attr(node, "shape", "box"),
+      'data-label-format': source_attr(node, "label-format", "text"),
       'data-style-declarations': style_declarations,
       'data-z': string(source_attr(node, "z", 0)),
       style: node_style(node, style_declarations, palette);
@@ -98,6 +104,7 @@ fn html_edge(edge, index, group, graph_directed, style_declarations) {
       'data-to': string(source_attr(edge, "to", source_attr(edge, "to_id", ""))),
       'data-subgraph-id': group,
       'data-label': source_attr(edge, "label", null),
+      'data-label-format': source_attr(edge, "label-format", "text"),
       'data-directed': directed,
       'data-arrow-start': bool_text(marker_start != "none", false),
       'data-arrow-end': bool_text(marker_end != "none", false),
@@ -111,15 +118,18 @@ fn html_edge(edge, index, group, graph_directed, style_declarations) {
 
 fn html_edge_label(edge, index, group, palette) {
   let label = source_attr(edge, "label", null);
+  let label_format = string(source_attr(edge, "label-format", "text"));
   if (label == null or label == "") null
   else {
     <'edge-label' class: "graph-edge-label",
         'data-edge-id': string(source_attr(edge, "id", "e" ++ string(index))),
-        'data-subgraph-id': group, 'data-z': string(source_attr(edge, "label-z", 0)),
+        'data-subgraph-id': group, 'data-label-format': label_format,
+        'data-z': string(source_attr(edge, "label-z", 0)),
         style: "display:inline-block;box-sizing:border-box;padding:2px 5px;" ++
           "background:" ++ palette.graph_background ++ ";color:" ++ palette.node_text ++
-          ";white-space:nowrap;pointer-events:none;";
-      label
+          ";white-space:" ++ (if (graph_content.is_rich(label_format)) "normal" else "nowrap") ++
+          ";pointer-events:none;";
+      for (child in graph_content.lower(label, label_format)) child
     >
   }
 }

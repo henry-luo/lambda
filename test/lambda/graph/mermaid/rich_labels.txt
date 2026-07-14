@@ -1,0 +1,27 @@
+{
+  source: {
+    nodes: [["A", "The **API** _service_", "markdown"], ["B", "<b>Safe</b><br><code>HTML</code><script>drop</script>", "html"]],
+    edges: [["A", "B", "<strong>calls</strong><script>drop</script>", "html"]]
+  },
+  measured: [{
+      tag: 'node',
+      id: "A",
+      format: "markdown",
+      content: ["The ", <strong
+          "API">, " ", <em
+          "service">]
+    }, {
+      tag: 'node',
+      id: "B",
+      format: "html",
+      content: [<strong
+          "Safe">, <br>, <code
+          "HTML">]
+    }, {
+      tag: 'edge-label',
+      id: "e0",
+      format: "html",
+      content: [<strong
+          "calls">]
+    }]
+}
