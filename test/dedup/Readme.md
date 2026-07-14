@@ -1,8 +1,8 @@
 # Duplicate-code checks
 
-`check_code_dup.py` runs Lizard's duplicate-code detector, removes reviewed
-false positives described in `exclude.json`, and prints the remaining duplicate
-blocks. Run it from the repository root.
+`check_code_dup.py` runs Lizard's duplicate-code detector in C/C++ mode, removes
+reviewed false positives described in `exclude.json`, and prints the remaining
+duplicate blocks. Run it from the repository root.
 
 ## Prerequisites
 
