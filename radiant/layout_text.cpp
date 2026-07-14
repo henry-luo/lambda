@@ -1353,6 +1353,14 @@ static void propagate_text_trim(ViewText* text_view, float trim_amount) {
     }
 }
 
+static void reset_line_parent_font(LayoutContext* lycon) {
+    lycon->line.parent_font_ascender = lycon->block.init_ascender;
+    lycon->line.parent_font_descender = lycon->block.init_descender;
+    lycon->line.parent_font_size = lycon->font.style ? lycon->font.style->font_size
+        : (lycon->block.init_ascender + lycon->block.init_descender);
+    lycon->line.parent_font_handle = lycon->font.font_handle;
+}
+
 void line_reset(LayoutContext* lycon) {
     log_debug("initialize new line");
     lycon->line.max_ascender = lycon->line.max_descender = 0;
@@ -1389,13 +1397,8 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.has_non_c1_text = false;
     lycon->line.c1_control_line_height = 0;
     lycon->line.trailing_letter_spacing = 0;
-    // CSS 2.1 §10.8.1: Initialize parent font metrics from block's init values.
-    // These are the correct "parent" for top-level inline content.
-    // span_vertical_align will override with actual parent span font when recursing.
-    lycon->line.parent_font_ascender = lycon->block.init_ascender;
-    lycon->line.parent_font_descender = lycon->block.init_descender;
-    lycon->line.parent_font_size = lycon->font.style ? lycon->font.style->font_size : (lycon->block.init_ascender + lycon->block.init_descender);
-    lycon->line.parent_font_handle = lycon->font.font_handle;
+    // CSS 2.1 §10.8.1: top-level inline content inherits the block strut metrics.
+    reset_line_parent_font(lycon);
     lycon->line.last_text_rect = NULL;
     lycon->line.last_text_view = NULL;
     lycon->line.trailing_space_width = 0;
@@ -1482,18 +1485,8 @@ static void align_forced_break_rect_to_line_baseline(LayoutContext* lycon) {
             : br_view->height;
     }
 
-    float baseline_line_height = max(lycon->block.line_height,
-        lycon->line.max_ascender + lycon->line.max_descender);
-    float strut_baseline = lycon->block.init_ascender + lycon->block.lead_y;
-    if (!lycon->block.line_height_is_normal) {
-        float strut_content_height = lycon->block.init_ascender + lycon->block.init_descender;
-        if (strut_content_height > 0.0f) {
-            strut_baseline = lycon->block.init_ascender +
-                (lycon->block.line_height - strut_content_height) / 2.0f;
-        }
-    }
-
-    float baseline_pos = max(lycon->line.max_ascender, strut_baseline);
+    float baseline_line_height = 0.0f;
+    float baseline_pos = line_baseline_position(lycon, &baseline_line_height);
     if (lycon->line.max_bottom_height > baseline_line_height) {
         baseline_pos += lycon->line.max_bottom_height - baseline_line_height;
     }
@@ -1858,11 +1851,7 @@ void line_break(LayoutContext* lycon) {
             lycon->font = lycon->line.line_start_font;
             // Reset parent font metrics to block-level for the vertical alignment pass.
             // span_vertical_align will update these per-span as it recurses.
-            lycon->line.parent_font_ascender = lycon->block.init_ascender;
-            lycon->line.parent_font_descender = lycon->block.init_descender;
-            lycon->line.parent_font_size = lycon->font.style ? lycon->font.style->font_size
-                : (lycon->block.init_ascender + lycon->block.init_descender);
-            lycon->line.parent_font_handle = lycon->font.font_handle;
+            reset_line_parent_font(lycon);
             NEXT_VIEW:
             View * vw = view;
             do {
@@ -2406,6 +2395,15 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view) {
 
 static float initial_letter_sink_size(DomNode* text_node);
 
+static void include_text_rect_bounds(ViewText* text, const TextRect* rect) {
+    float right = max(text->x + text->width, rect->x + rect->width);
+    float bottom = max(text->y + text->height, rect->y + rect->height);
+    text->x = min(text->x, rect->x);
+    text->y = min(text->y, rect->y);
+    text->width = right - text->x;
+    text->height = bottom - text->y;
+}
+
 void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_length, float text_width) {
     if (text_length <= 0) {
         log_error("output_text: text_length=%d, skipping (node=%s)", text_length, text->node_name());
@@ -2538,12 +2536,7 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
         text->width = rect->width;
         text->height = rect->height;
     } else {  // following rects after first rect
-        float right = max(text->x + text->width, rect->x + rect->width);
-        float bottom = max(text->y + text->height, rect->y + rect->height);
-        text->x = min(text->x, rect->x);
-        text->y = min(text->y, rect->y);
-        text->width = right - text->x;
-        text->height = bottom - text->y;
+        include_text_rect_bounds(text, rect);
     }
 }
 
@@ -2556,12 +2549,7 @@ void adjust_text_bounds(ViewText* text) {
     text->height = rect->height;
     rect = rect->next;
     while (rect) {
-        float right = max(text->x + text->width, rect->x + rect->width);
-        float bottom = max(text->y + text->height, rect->y + rect->height);
-        text->x = min(text->x, rect->x);
-        text->y = min(text->y, rect->y);
-        text->width = right - text->x;
-        text->height = bottom - text->y;
+        include_text_rect_bounds(text, rect);
         rect = rect->next;
     }
 }

@@ -328,7 +328,7 @@
         {
           "file": "radiant/render_form.cpp",
           "start": "static void render_radio(",
-          "end": "static const char* form_button_label_text("
+          "end": "static void render_button("
         },
         {
           "file": "radiant/render_form.cpp",
@@ -349,6 +349,722 @@
           "file": "radiant/render_form.cpp",
           "start": "static void render_range(",
           "end": "void render_form_control("
+        }
+      ]
+    },
+    {
+      "id": "independent_css_value_list_walkers",
+      "modules": ["radiant"],
+      "reason": "Lizard reports the common indexed CssValue-list loop prologue while these walkers independently resolve borders, transforms, fonts, filters, backgrounds, and list styles; callback abstraction would add indirection without sharing their bodies.",
+      "regions": [
+        {
+          "file": "radiant/intrinsic_sizing.cpp",
+          "start": "static float intrinsic_border_width_from_shorthand_value(",
+          "end": "static float intrinsic_border_width_from_spacing_value("
+        },
+        {
+          "file": "radiant/intrinsic_sizing.cpp",
+          "start": "static float intrinsic_pseudo_border_side_shorthand(",
+          "end": "static void intrinsic_pseudo_horizontal_border_widths("
+        },
+        {
+          "file": "radiant/cmd_layout.cpp",
+          "start": "float extract_transform_scale(",
+          "end": "void extract_body_transform_scale("
+        },
+        {
+          "file": "radiant/layout_block.cpp",
+          "start": "static bool css_image_set_candidate_from_value(",
+          "end": "static bool css_content_replacement_image("
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "const char* css_select_font_family(",
+          "end": "const char* css_select_font_shorthand_family("
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "static bool resolve_contain_intrinsic_length(",
+          "end": "static bool parse_object_position_component("
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "static bool css_background_layer_has_plain_color(",
+          "end": "static bool css_value_is_background_position_candidate("
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "static bool apply_border_radius_shorthand(",
+          "end": "static bool apply_corner_radius_value("
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "static bool apply_corner_radius_value(",
+          "end": "static bool css_var_stack_contains("
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "void set_multi_value(",
+          "end": "static void apply_border_side_shorthand("
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "case CSS_PROPERTY_FONT_FAMILY: {",
+          "end": "case CSS_PROPERTY_LINE_HEIGHT: {"
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "case CSS_PROPERTY_BACKDROP_FILTER: {",
+          "end": "case CSS_PROPERTY_COLUMN_COUNT: {"
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "case CSS_PROPERTY_LIST_STYLE: {",
+          "end": "case CSS_PROPERTY_COUNTER_RESET: {"
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "case CSS_PROPERTY_BACKGROUND: {",
+          "end": "case CSS_PROPERTY_GRID_GAP:"
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "case CSS_PROPERTY_TEXT_DECORATION: {",
+          "end": "case CSS_PROPERTY_TEXT_DECORATION_LINE:"
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "case CSS_PROPERTY_BORDER_STYLE: {",
+          "end": "case CSS_PROPERTY_BORDER_COLOR: {"
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "case CSS_PROPERTY_BORDER_COLOR: {",
+          "end": "case CSS_PROPERTY_BORDER_RADIUS: {"
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "case CSS_PROPERTY_FLEX_FLOW: {",
+          "end": "case CSS_PROPERTY_FLEX: {"
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "case CSS_PROPERTY_FLEX: {",
+          "end": "case CSS_PROPERTY_ANIMATION: {"
+        }
+      ]
+    },
+    {
+      "id": "parallel_paint_api_declarations",
+      "modules": ["radiant"],
+      "reason": "Display-list, paint-list, record-target, and render-context tiers intentionally expose matching outer-shadow signatures; declarations cannot share executable implementation and a macro would obscure the public APIs.",
+      "regions": [
+        {
+          "file": "radiant/render.hpp",
+          "start": "void dl_outer_shadow(",
+          "end": "void dl_webview_layer_placeholder("
+        },
+        {
+          "file": "radiant/render.hpp",
+          "start": "void paint_outer_shadow(",
+          "end": "void paint_blit_surface_scaled("
+        },
+        {
+          "file": "radiant/render.hpp",
+          "start": "static inline void paint_record_outer_shadow(",
+          "end": "static inline void paint_record_fill_surface_rect("
+        },
+        {
+          "file": "radiant/render.hpp",
+          "start": "void rc_outer_shadow(",
+          "end": "// Feature-facing painter helpers"
+        }
+      ]
+    },
+    {
+      "id": "independent_flex_text_br_traversals",
+      "modules": ["radiant"],
+      "reason": "Bounds collection, coordinate shifting, and BR normalization are separate mutations that share only the direct-child traversal and type guards; callback scaffolding would increase code and hide each pass's invariant.",
+      "regions": [
+        {
+          "file": "radiant/layout_flex_multipass.cpp",
+          "start": "static bool flex_direct_text_br_bounds(",
+          "end": "static void flex_shift_direct_text_br_run("
+        },
+        {
+          "file": "radiant/layout_flex_multipass.cpp",
+          "start": "static void flex_shift_direct_text_br_run(",
+          "end": "static void flex_normalize_direct_br_boxes("
+        },
+        {
+          "file": "radiant/layout_flex_multipass.cpp",
+          "start": "static void flex_normalize_direct_br_boxes(",
+          "end": "static float flex_border_box_height_constraint("
+        }
+      ]
+    },
+    {
+      "id": "grid_track_sizing_debug_snapshots",
+      "modules": ["radiant"],
+      "reason": "These loops are diagnostic snapshots taken after distinct CSS Grid track-sizing phases; only the index-and-log scaffolding matches, while each snapshot observes a different algorithm state.",
+      "allow_within_region": true,
+      "regions": [
+        {
+          "file": "radiant/grid_enhanced_adapter.hpp",
+          "start": "inline void run_enhanced_track_sizing(",
+          "end": "} // namespace grid_adapter"
+        }
+      ]
+    },
+    {
+      "id": "declarative_webview_mime_rows",
+      "modules": ["radiant"],
+      "reason": "The extension-to-MIME table is declarative data written as early-return rows; Lizard ignores the string literals that distinguish each mapping, so extracting the matched rows would only obscure the inventory.",
+      "allow_within_region": true,
+      "regions": [
+        {
+          "file": "radiant/webview_handle_mac.h",
+          "start": "static inline NSString* webview_mac_mime_for_path(",
+          "end": "struct WebViewHandle"
+        }
+      ]
+    },
+    {
+      "id": "raster_walk_callback_prologues",
+      "modules": ["radiant"],
+      "reason": "Render-tree callbacks must conform to one fixed signature and cast the opaque context; the matched prologues precede distinct inline, text, and marker rendering and profiling operations.",
+      "allow_within_region": true,
+      "regions": [
+        {
+          "file": "radiant/render_raster_walk.cpp",
+          "start": "static void render_raster_walk_inline(",
+          "end": "static void render_raster_walk_positioned_block("
+        }
+      ]
+    },
+    {
+      "id": "native_webview_backend_adapters",
+      "modules": ["radiant"],
+      "reason": "Child/layer and macOS/Linux WebKit adapters implement fixed native callback APIs in mutually exclusive backends; the matched guards and signatures surround backend-specific Objective-C, GLib, and JavaScript dispatch code.",
+      "regions": [
+        {
+          "file": "radiant/webview_layer_mac.mm",
+          "start": "@interface LayerWebViewDelegate",
+          "end": "@implementation LayerMessageHandler"
+        },
+        {
+          "file": "radiant/webview_child_mac.mm",
+          "start": "@interface LambdaWebViewDelegate",
+          "end": "@implementation LambdaSchemeHandler"
+        },
+        {
+          "file": "radiant/webview_layer_mac.mm",
+          "start": "void webview_layer_platform_eval_js(",
+          "end": "void webview_layer_platform_resize("
+        },
+        {
+          "file": "radiant/webview_child_mac.mm",
+          "start": "void webview_platform_eval_js(",
+          "end": "void webview_platform_set_bounds("
+        },
+        {
+          "file": "radiant/webview_layer_mac.mm",
+          "start": "bool webview_layer_platform_snapshot(",
+          "end": "void webview_layer_platform_inject_key("
+        },
+        {
+          "file": "radiant/webview_layer_linux.cpp",
+          "start": "bool webview_layer_platform_snapshot(",
+          "end": "void webview_layer_platform_inject_key("
+        }
+      ]
+    },
+    {
+      "id": "independent_vector_export_lifecycles",
+      "modules": ["radiant"],
+      "reason": "SVG and PDF exports own different backend contexts and resources; Lizard matches their required paint-boundary setup and capability-trace bookkeeping, but cleanup and output objects are backend-specific.",
+      "regions": [
+        {
+          "file": "radiant/render_svg.cpp",
+          "start": "char* render_view_tree_to_svg(",
+          "end": "bool save_svg_to_file("
+        },
+        {
+          "file": "radiant/render_pdf.cpp",
+          "start": "static HPDF_Doc render_view_tree_to_pdf(",
+          "end": "static bool save_pdf_to_file("
+        }
+      ]
+    },
+    {
+      "id": "short_text_content_predicate_guards",
+      "modules": ["radiant"],
+      "reason": "Lizard matches only the common DomNode text-kind guard and text-data load; each predicate then enforces a different whitespace, suppression, or table-content policy.",
+      "regions": [
+        {
+          "file": "radiant/intrinsic_sizing.cpp",
+          "start": "static bool text_node_is_ascii_whitespace(",
+          "end": "static bool intrinsic_white_space_preserves_space_advance("
+        },
+        {
+          "file": "radiant/intrinsic_sizing.cpp",
+          "start": "static bool text_node_has_intrinsic_table_content(",
+          "end": "static DomNode* previous_non_whitespace_sibling("
+        },
+        {
+          "file": "radiant/layout.hpp",
+          "start": "static inline bool layout_suppress_ignorable_container_text(",
+          "end": "static inline bool layout_text_node_has_content("
+        },
+        {
+          "file": "radiant/layout.hpp",
+          "start": "static inline bool layout_text_node_has_content(",
+          "end": "static inline bool layout_display_is_none("
+        }
+      ]
+    },
+    {
+      "id": "independent_recursive_css_value_predicates",
+      "modules": ["radiant"],
+      "reason": "These recursive predicates walk the same CssValue list shape but answer independent questions about relative widths, nonzero lengths, replacement images, image-set syntax, and URL presence.",
+      "regions": [
+        {
+          "file": "radiant/layout_table.cpp",
+          "start": "static bool table_width_value_is_relative(",
+          "end": "static bool table_direct_float_overlaps_y("
+        },
+        {
+          "file": "radiant/layout_block.cpp",
+          "start": "static bool css_content_replacement_image(",
+          "end": "static bool block_has_auto_content_image_set("
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "static bool css_content_value_has_image_url(",
+          "end": "DisplayValue resolve_display_value("
+        }
+      ]
+    },
+    {
+      "id": "state_map_iterator_prologues",
+      "modules": ["radiant"],
+      "reason": "Custom HashMap iteration requires the same iterator and item initialization; the matched functions clear flags, synchronize target paths, prune orphan entries, or query an id and share no mutation body.",
+      "regions": [
+        {
+          "file": "radiant/state_store.cpp",
+          "start": "static uint32_t view_state_clear_interaction_flag(",
+          "end": "static uint32_t state_map_delete_entries_for_name("
+        },
+        {
+          "file": "radiant/state_store.cpp",
+          "start": "static uint32_t view_state_sync_interaction_flag_path(",
+          "end": "static uint32_t doc_state_prune_stale_transient_owners("
+        },
+        {
+          "file": "radiant/state_store.cpp",
+          "start": "uint32_t view_state_prune_orphans(",
+          "end": "static uint32_t state_map_prune_orphans("
+        },
+        {
+          "file": "radiant/event_sim.cpp",
+          "start": "static bool event_sim_view_state_id_present(",
+          "end": "static void event_sim_snapshot_state_store("
+        }
+      ]
+    },
+    {
+      "id": "form_state_accessor_prologues",
+      "modules": ["radiant"],
+      "reason": "Form-state getters intentionally begin with the canonical ViewState lookup before selecting different stored fields and DOM fallbacks; a type-erased field accessor would add code and weaken type clarity.",
+      "allow_within_region": true,
+      "regions": [
+        {
+          "file": "radiant/state_store.cpp",
+          "start": "int form_control_get_selected_index(",
+          "end": "void state_remove("
+        }
+      ]
+    },
+    {
+      "id": "text_boundary_scanner_prologues",
+      "modules": ["radiant"],
+      "reason": "Text boundary APIs share the required clamping call before scanning for different word, line, previous-word, and next-word boundaries; the scan directions and stopping rules are distinct.",
+      "allow_within_region": true,
+      "regions": [
+        {
+          "file": "radiant/text_edit.cpp",
+          "start": "uint32_t te_word_end(",
+          "end": "bool te_replace_byte_range("
+        }
+      ]
+    },
+    {
+      "id": "vertical_navigation_search_phases",
+      "modules": ["radiant"],
+      "reason": "Caret vertical navigation performs separate current-view, neighboring-view, and same-line collection passes; Lizard reports their repeated candidate flags and text-rect loops while each phase searches a different scope.",
+      "allow_within_region": true,
+      "regions": [
+        {
+          "file": "radiant/state_store.cpp",
+          "start": "static View* find_view_at_different_y(",
+          "end": "void state_store_caret_move_line("
+        }
+      ]
+    },
+    {
+      "id": "svg_transform_parser_branches",
+      "modules": ["radiant"],
+      "reason": "SVG transform grammar branches necessarily share delimiter seeking and angle parsing, but produce different matrix components for rotate, skewX, and skewY.",
+      "allow_within_region": true,
+      "regions": [
+        {
+          "file": "radiant/render_svg_inline.cpp",
+          "start": "static bool parse_svg_transform(const char* transform_str, float matrix[6]) {",
+          "end": "static RdtMatrix compose_element_transform("
+        }
+      ]
+    },
+    {
+      "id": "svg_text_child_walk_phases",
+      "modules": ["radiant"],
+      "reason": "Direct-text discovery and segmented SVG text rendering both walk Element items, but one returns a trimmed string while the other lays out and paints mixed text/tspan content.",
+      "regions": [
+        {
+          "file": "radiant/render_svg_inline.cpp",
+          "start": "static const char* get_direct_text_content(",
+          "end": "static void collect_svg_style_rules("
+        },
+        {
+          "file": "radiant/render_svg_inline.cpp",
+          "start": "static void render_svg_text(SvgInlineRenderContext* ctx, Element* elem) {",
+          "end": "static bool svg_raster_dimensions("
+        }
+      ]
+    },
+    {
+      "id": "svg_glyph_measure_and_draw_passes",
+      "modules": ["radiant"],
+      "reason": "Radiant SVG text must decode the same UTF-8 run once to measure natural width and again to load drawable glyph bitmaps; the pass bodies consume the decoded glyph differently.",
+      "allow_within_region": true,
+      "regions": [
+        {
+          "file": "radiant/render_svg_inline.cpp",
+          "start": "static bool render_svg_text_with_radiant_glyphs(",
+          "end": "static void render_svg_text(SvgInlineRenderContext* ctx, Element* elem) {"
+        }
+      ]
+    },
+    {
+      "id": "parallel_image_draw_api_signatures",
+      "modules": ["radiant"],
+      "reason": "Vector, display-list, paint-list, record-target, render-context, and PDF tiers expose the same image geometry contract; declarations and backend entry signatures cannot share executable code.",
+      "regions": [
+        {
+          "file": "radiant/render_pdf.cpp",
+          "start": "static bool pdf_draw_abgr_image_impl(",
+          "end": "static bool pdf_draw_abgr_image("
+        },
+        {
+          "file": "radiant/rdt_vector_tvg.cpp",
+          "start": "void rdt_draw_image(",
+          "end": "void rdt_picture_draw("
+        },
+        {
+          "file": "radiant/rdt_vector_cg.mm",
+          "start": "void rdt_draw_image(",
+          "end": "void rdt_picture_draw("
+        },
+        {
+          "file": "radiant/render.hpp",
+          "start": "void rdt_draw_image(",
+          "end": "typedef struct RdtPicture"
+        },
+        {
+          "file": "radiant/render.hpp",
+          "start": "void dl_draw_image(",
+          "end": "// Record a glyph draw command."
+        },
+        {
+          "file": "radiant/render.hpp",
+          "start": "void paint_draw_image(",
+          "end": "void paint_draw_image_resource("
+        },
+        {
+          "file": "radiant/render.hpp",
+          "start": "static inline void paint_record_draw_image(",
+          "end": "static inline void paint_record_draw_glyph("
+        },
+        {
+          "file": "radiant/render.hpp",
+          "start": "void rc_draw_image(",
+          "end": "void rc_draw_glyph("
+        }
+      ]
+    },
+    {
+      "id": "editable_boundary_rect_scan_prologues",
+      "modules": ["radiant"],
+      "reason": "The general editable-boundary scorer and the text-edge scorer inspect the same TextRect geometry, but apply different vertical penalties, tie-breaking, and boundary policies; sharing only the scan prologue would add indirection without sharing the algorithms.",
+      "regions": [
+        {
+          "file": "radiant/dom_range_resolver.cpp",
+          "start": "static void find_editable_boundary_hit(",
+          "end": "static void find_text_edge_boundary_hit("
+        },
+        {
+          "file": "radiant/dom_range_resolver.cpp",
+          "start": "static void find_text_edge_boundary_hit(",
+          "end": "static bool is_non_caret_container_element("
+        }
+      ]
+    },
+    {
+      "id": "independent_intrinsic_dom_traversals",
+      "modules": ["radiant"],
+      "reason": "Lizard normalizes the first element-filtering statements of independent table-height, anonymous-row, caption, grid-width, flex-height, and select-option traversals; their bodies aggregate different dimensions and CSS structures.",
+      "regions": [
+        {
+          "file": "radiant/intrinsic_sizing.cpp",
+          "start": "static float intrinsic_table_structure_height(",
+          "end": "static bool intrinsic_text_ends_with_whitespace("
+        },
+        {
+          "file": "radiant/intrinsic_sizing.cpp",
+          "start": "// Helper: iterate rows in table (handles direct rows and row groups)",
+          "end": "// Pass 1: determine column count"
+        },
+        {
+          "file": "radiant/intrinsic_sizing.cpp",
+          "start": "// Sum per-column widths to get table intrinsic widths",
+          "end": "// Add table's own padding and border"
+        },
+        {
+          "file": "radiant/intrinsic_sizing.cpp",
+          "start": "// Check if this is a grid container.",
+          "end": "is_flex_container = intrinsic_element_display_matches("
+        },
+        {
+          "file": "radiant/intrinsic_sizing.cpp",
+          "start": "} else if (is_flex_row && is_flex_wrap && width > 0) {",
+          "end": "// Calculate children's heights (original logic for non-grid or single-column)"
+        },
+        {
+          "file": "radiant/layout_form.cpp",
+          "start": "static void calc_select_size(",
+          "end": "void layout_form_control("
+        }
+      ]
+    },
+    {
+      "id": "outer_shadow_parameter_contracts",
+      "modules": ["radiant"],
+      "reason": "The outer-shadow builder, compositor, retained-image producer, and public declaration intentionally share a long geometry parameter contract; Lizard reports their signatures, not duplicated executable bodies.",
+      "regions": [
+        {
+          "file": "radiant/render_background.cpp",
+          "start": "static bool build_outer_shadow_image(",
+          "end": "void render_outer_shadow_blur_composite("
+        },
+        {
+          "file": "radiant/render_background.cpp",
+          "start": "void render_outer_shadow_blur_composite(",
+          "end": "static uint32_t* render_outer_shadow_blur_image("
+        },
+        {
+          "file": "radiant/render_background.cpp",
+          "start": "static uint32_t* render_outer_shadow_blur_image(",
+          "end": "void render_box_shadow("
+        },
+        {
+          "file": "radiant/render.hpp",
+          "start": "void render_outer_shadow_blur_composite(",
+          "end": "// ===== render_border.hpp ====="
+        }
+      ]
+    },
+    {
+      "id": "root_child_layout_traversals",
+      "modules": ["radiant"],
+      "reason": "Root self-collapsing-margin validation and float-only extent collection recurse over the same children, but one is a boolean eligibility proof while the other accumulates float geometry and in-flow state.",
+      "regions": [
+        {
+          "file": "radiant/layout.cpp",
+          "start": "static bool root_child_margins_are_self_collapsing(",
+          "end": "static float root_child_float_only_extent("
+        },
+        {
+          "file": "radiant/layout.cpp",
+          "start": "static float root_child_float_only_extent(",
+          "end": "void layout_html_root("
+        }
+      ]
+    },
+    {
+      "id": "independent_lambda_element_tree_walkers",
+      "modules": ["radiant"],
+      "reason": "Viewport, refresh, base URL, external-resource, linked-style, inline-style, and document-order walkers recurse over Lambda Element children but have independent result, stopping, ownership, and ordering semantics.",
+      "regions": [
+        {
+          "file": "radiant/cmd_layout.cpp",
+          "start": "void extract_viewport_meta(",
+          "end": "static char* find_refresh_url_in_content("
+        },
+        {
+          "file": "radiant/cmd_layout.cpp",
+          "start": "static char* find_meta_refresh_url(",
+          "end": "const char* extract_base_href("
+        },
+        {
+          "file": "radiant/cmd_layout.cpp",
+          "start": "const char* extract_base_href(",
+          "end": "float extract_transform_scale("
+        },
+        {
+          "file": "radiant/cmd_layout.cpp",
+          "start": "static void collect_external_resource_urls(",
+          "end": "static void prefetch_document_subresources("
+        },
+        {
+          "file": "radiant/cmd_layout.cpp",
+          "start": " * Recursively collect <link rel=\"stylesheet\"> references from HTML",
+          "end": "static void parse_inline_style_children("
+        },
+        {
+          "file": "radiant/cmd_layout.cpp",
+          "start": "static void collect_inline_styles_impl(",
+          "end": "    collect_inline_styles_impl(elem, engine, base_path, pool,"
+        },
+        {
+          "file": "radiant/cmd_layout.cpp",
+          "start": "static void collect_stylesheets_in_document_order(",
+          "end": "void collect_inline_styles_from_dom("
+        }
+      ]
+    },
+    {
+      "id": "parallel_document_loader_phase_scaffolding",
+      "modules": ["radiant"],
+      "reason": "Markdown and wiki loaders use the same timed DOM/CSS phases after format-specific parsing; the owned initialization and teardown behavior is already shared, while abstracting the remaining phase labels and stylesheet choices would obscure each loader.",
+      "regions": [
+        {
+          "file": "radiant/cmd_layout.cpp",
+          "start": "DomDocument* load_markdown_doc(",
+          "end": "DomDocument* load_wiki_doc("
+        },
+        {
+          "file": "radiant/cmd_layout.cpp",
+          "start": "DomDocument* load_wiki_doc(",
+          "end": "DomDocument* load_latex_doc("
+        }
+      ]
+    },
+    {
+      "id": "independent_dom_path_encodings",
+      "modules": ["radiant"],
+      "reason": "State dumps encode absolute child indexes and omit non-elements, while event logs encode same-tag sibling indexes; their shared bounded ancestor-buffer loop cannot be reused without conflating externally visible path formats.",
+      "regions": [
+        {
+          "file": "radiant/state_store.cpp",
+          "start": "static void state_dump_node_ref(",
+          "end": "static bool state_dump_float_changed("
+        },
+        {
+          "file": "radiant/event_state_log.cpp",
+          "start": "static void build_node_path(",
+          "end": "static void build_stable_id("
+        }
+      ]
+    },
+    {
+      "id": "independent_block_inline_edge_predicates",
+      "modules": ["radiant"],
+      "reason": "The before/after and any/content predicates scan inline/block edges with different stopping and visibility rules; Lizard reports only their identical child-loop setup.",
+      "regions": [
+        {
+          "file": "radiant/layout_block.cpp",
+          "start": "static bool has_any_inline_before_first_block(",
+          "end": "static bool has_any_inline_after_last_block("
+        },
+        {
+          "file": "radiant/layout_block.cpp",
+          "start": "static bool has_any_inline_after_last_block(",
+          "end": "static bool has_inline_content_before_first_block("
+        },
+        {
+          "file": "radiant/layout_block.cpp",
+          "start": "static bool has_inline_content_before_first_block(",
+          "end": "static bool has_inline_content_after_last_block("
+        },
+        {
+          "file": "radiant/layout_block.cpp",
+          "start": "static bool has_inline_content_after_last_block(",
+          "end": "static ViewBlock* find_line_clamped_descendant_in_view("
+        }
+      ]
+    },
+    {
+      "id": "independent_dom_ancestor_searches",
+      "modules": ["radiant"],
+      "reason": "User-select-all, triple-click table-cell, and nested contenteditable-false searches share a safety-bounded ancestor loop but stop on unrelated CSS, table, and editing-host invariants.",
+      "regions": [
+        {
+          "file": "radiant/dom_range.cpp",
+          "start": "static DomElement* nearest_user_select_all_element(",
+          "end": "static bool first_user_select_all_boundary("
+        },
+        {
+          "file": "radiant/dom_range.cpp",
+          "start": "static DomElement* nearest_triple_click_cell(",
+          "end": "bool dom_selection_triple_click_range_for_node("
+        },
+        {
+          "file": "radiant/dom_range.cpp",
+          "start": "static DomElement* nested_false_island_root(",
+          "end": "static DomText* editing_host_line_edge_text("
+        }
+      ]
+    },
+    {
+      "id": "independent_event_phase_prologues",
+      "modules": ["radiant"],
+      "reason": "Incremental and retained-full reconciliation log the same timing dimensions with different outcomes, while mouse-button and scroll cases share hit targeting before dispatching different native and WebView events.",
+      "regions": [
+        {
+          "file": "radiant/event.cpp",
+          "start": "static bool post_html_handler_incremental_rebuild(",
+          "end": "static DomElement* radiant_view_to_dom_element("
+        },
+        {
+          "file": "radiant/event.cpp",
+          "start": "static void post_html_handler_rebuild(",
+          "end": "static DomElement* radiant_view_to_dom_element(View* v) {"
+        },
+        {
+          "file": "radiant/event.cpp",
+          "start": "case RDT_EVENT_MOUSE_DOWN:   case RDT_EVENT_MOUSE_UP: {",
+          "end": "case RDT_EVENT_SCROLL: {"
+        },
+        {
+          "file": "radiant/event.cpp",
+          "start": "case RDT_EVENT_SCROLL: {",
+          "end": "case RDT_EVENT_KEY_DOWN: {"
+        }
+      ]
+    },
+    {
+      "id": "independent_modern_color_model_walkers",
+      "modules": ["radiant"],
+      "reason": "Modern rgb() and hsl() both walk a space-separated CssValue list, but RGB resolves byte components and dynamic alpha while HSL resolves angle/percentage channels before color-space conversion.",
+      "regions": [
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "// rgb() and rgba() functions",
+          "end": "// hsl() and hsla() functions"
+        },
+        {
+          "file": "radiant/resolve_css_style.cpp",
+          "start": "// hsl() and hsla() functions",
+          "end": "static Color get_current_color("
         }
       ]
     }

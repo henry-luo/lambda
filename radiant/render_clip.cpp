@@ -95,6 +95,18 @@ static float render_clip_parse_len(const char*& s, float ref) {
     return val;
 }
 
+static void render_clip_parse_center(const char*& s, float elem_w, float elem_h,
+                                     float abs_x, float abs_y, float* cx, float* cy) {
+    *cx = abs_x + elem_w * 0.5f;
+    *cy = abs_y + elem_h * 0.5f;
+    while (*s == ' ') s++;
+    if (strncmp(s, "at", 2) != 0) return;
+
+    s += 2;
+    *cx = abs_x + render_clip_parse_len(s, elem_w);
+    *cy = abs_y + render_clip_parse_len(s, elem_h);
+}
+
 static bool render_clip_parse_polygon_len(const char*& s, float ref, float* out_value) {
     while (*s == ' ' || *s == ',') s++;
     const char* start = s;
@@ -312,13 +324,8 @@ static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, const char*
         const char* s = value + 7;
         float ref = fmin(elem_w, elem_h);
         float r = render_clip_parse_len(s, ref);
-        float cx = abs_x + elem_w * 0.5f, cy = abs_y + elem_h * 0.5f;
-        while (*s == ' ') s++;
-        if (strncmp(s, "at", 2) == 0) {
-            s += 2;
-            cx = abs_x + render_clip_parse_len(s, elem_w);
-            cy = abs_y + render_clip_parse_len(s, elem_h);
-        }
+        float cx, cy;
+        render_clip_parse_center(s, elem_w, elem_h, abs_x, abs_y, &cx, &cy);
         ClipShape* cs = (ClipShape*)scratch_calloc(scratch, sizeof(ClipShape));
         cs->type = CLIP_SHAPE_CIRCLE;
         cs->circle = {cx, cy, r};
@@ -329,13 +336,8 @@ static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, const char*
         const char* s = value + 8;
         float rx = render_clip_parse_len(s, elem_w);
         float ry = render_clip_parse_len(s, elem_h);
-        float cx = abs_x + elem_w * 0.5f, cy = abs_y + elem_h * 0.5f;
-        while (*s == ' ') s++;
-        if (strncmp(s, "at", 2) == 0) {
-            s += 2;
-            cx = abs_x + render_clip_parse_len(s, elem_w);
-            cy = abs_y + render_clip_parse_len(s, elem_h);
-        }
+        float cx, cy;
+        render_clip_parse_center(s, elem_w, elem_h, abs_x, abs_y, &cx, &cy);
         ClipShape* cs = (ClipShape*)scratch_calloc(scratch, sizeof(ClipShape));
         cs->type = CLIP_SHAPE_ELLIPSE;
         cs->ellipse = {cx, cy, rx, ry};

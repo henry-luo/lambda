@@ -816,21 +816,6 @@ static float flex_measure_text_child_vertical_extra(LayoutContext* lycon,
            flex_measure_vertical_border_sum(lycon, elem);
 }
 
-static float flex_measure_direct_text_children_max_width(LayoutContext* lycon,
-                                                         DomElement* elem,
-                                                         CssEnum text_transform = CSS_VALUE_NONE) {
-    float max_text_width = 0.0f;
-    for (DomNode* tc = elem ? elem->first_child : nullptr; tc; tc = tc->next_sibling) {
-        DomText* dt = tc->as_text();
-        if (dt && dt->text && dt->length > 0) {
-            TextIntrinsicWidths tw =
-                measure_text_intrinsic_widths(lycon, dt->text, dt->length, text_transform);
-            if (tw.max_content > max_text_width) max_text_width = tw.max_content;
-        }
-    }
-    return max_text_width;
-}
-
 static float flex_measure_select_max_option_text_width(LayoutContext* lycon,
                                                        ViewElement* elem) {
     float max_text_width = 0.0f;
@@ -849,7 +834,8 @@ static float flex_measure_select_max_option_text_width(LayoutContext* lycon,
     }
     for (DomElement* option = dom_select_next_option(elem, nullptr); option;
          option = dom_select_next_option(elem, option)) {
-        float option_width = flex_measure_direct_text_children_max_width(lycon, option);
+        float option_width = measure_direct_text_children_intrinsic_width(
+            lycon, option, false, CSS_VALUE_NONE);
         DomElement* parent = option->parent ? option->parent->as_element() : nullptr;
         if (parent && parent->tag() == HTM_TAG_OPTGROUP) {
             option_width += FormDefaults::OPTGROUP_OPTION_INDENT;
@@ -1564,8 +1550,8 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                 if (elem->font && elem->font->font_size > 0 && lycon->ui_context) {
                     setup_font(lycon->ui_context, &lycon->font, elem->font);
                 }
-                float max_text_width =
-                    flex_measure_direct_text_children_max_width(lycon, elem, btn_text_transform);
+                float max_text_width = measure_direct_text_children_intrinsic_width(
+                    lycon, elem, false, btn_text_transform);
                 lycon->font = saved_font;  // restore parent font
                 if (max_text_width > 0) {
                     // Store intrinsic size in form property for flex-basis calculation
@@ -1849,6 +1835,27 @@ void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
 // ============================================================================
 
 // Calculate intrinsic sizes for a flex item
+static bool flex_measure_pseudo_content(LayoutContext* lycon, DomElement* item,
+                                        int pseudo_element, const char* label,
+                                        float* width, float* height) {
+    const char* content = dom_element_get_pseudo_element_content(item, pseudo_element);
+    if (!content || !*content) return false;
+
+    FontBox saved = lycon->font;
+    if (item->font) setup_font(lycon->ui_context, &lycon->font, item->font);
+    TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, content, strlen(content));
+    float line_height = lycon->font.style && lycon->font.style->font_size > 0
+        ? lycon->font.style->font_size : 16.0f;
+    if (lycon->font.font_handle) line_height = calc_normal_line_height(lycon->font.font_handle);
+
+    *width += widths.max_content;
+    if (line_height > *height) *height = line_height;
+    log_debug("calculate_item_intrinsic_sizes: %s content='%s' -> width=%.1f, height=%.1f",
+              label, content, widths.max_content, line_height);
+    lycon->font = saved;
+    return true;
+}
+
 void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout) {
     if (!item) {
         log_debug("calculate_item_intrinsic_sizes: invalid item");
@@ -2002,63 +2009,15 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 // Get content of pseudo-elements and measure using parent's font
                 // For FontAwesome icons, the icon font-family is inherited from parent
                 if (has_before) {
-                    const char* before_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_BEFORE);
-                    if (before_content && *before_content) {
-                        // Set up font for measurement using parent element's font
-                        FontBox saved = lycon->font;
-                        if (item->font) {
-                            setup_font(lycon->ui_context, &lycon->font, item->font);
-                        }
-
-                        // Measure the pseudo-element content
-                        size_t content_len = strlen(before_content);
-                        TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, before_content, content_len);
-
-                        pseudo_width += widths.max_content;
-                        float line_height = (lycon->font.style && lycon->font.style->font_size > 0) ?
-                                            lycon->font.style->font_size : 16.0f;
-                        if (lycon->font.font_handle) {
-                            line_height = calc_normal_line_height(lycon->font.font_handle);
-                        }
-                        if (line_height > pseudo_height) {
-                            pseudo_height = line_height;
-                        }
-
-                        log_debug("calculate_item_intrinsic_sizes: ::before content='%s' -> width=%.1f, height=%.1f",
-                                  before_content, widths.max_content, line_height);
-
-                        lycon->font = saved;
-                        has_pseudo_content = true;
-                    }
+                    has_pseudo_content |= flex_measure_pseudo_content(
+                        lycon, elem, PSEUDO_ELEMENT_BEFORE, "::before",
+                        &pseudo_width, &pseudo_height);
                 }
 
                 if (has_after) {
-                    const char* after_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_AFTER);
-                    if (after_content && *after_content) {
-                        FontBox saved = lycon->font;
-                        if (item->font) {
-                            setup_font(lycon->ui_context, &lycon->font, item->font);
-                        }
-
-                        size_t content_len = strlen(after_content);
-                        TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, after_content, content_len);
-
-                        pseudo_width += widths.max_content;
-                        float line_height = (lycon->font.style && lycon->font.style->font_size > 0) ?
-                                            lycon->font.style->font_size : 16.0f;
-                        if (lycon->font.font_handle) {
-                            line_height = calc_normal_line_height(lycon->font.font_handle);
-                        }
-                        if (line_height > pseudo_height) {
-                            pseudo_height = line_height;
-                        }
-
-                        log_debug("calculate_item_intrinsic_sizes: ::after content='%s' -> width=%.1f, height=%.1f",
-                                  after_content, widths.max_content, line_height);
-
-                        lycon->font = saved;
-                        has_pseudo_content = true;
-                    }
+                    has_pseudo_content |= flex_measure_pseudo_content(
+                        lycon, elem, PSEUDO_ELEMENT_AFTER, "::after",
+                        &pseudo_width, &pseudo_height);
                 }
             }
         }

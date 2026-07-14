@@ -83,18 +83,26 @@ void raster_fill_rect(RasterPaintContext* ctx, Rect* rect, uint32_t color) {
     }
 }
 
-static uint32_t raster_bilinear_interpolate_wrap(ImageSurface* src, float src_x, float src_y) {
-    int w = (src->decoded_width > 0) ? src->decoded_width : src->width;
-    int h = (src->decoded_height > 0) ? src->decoded_height : src->height;
+static uint32_t raster_bilinear_interpolate_impl(ImageSurface* src, float src_x,
+                                                 float src_y, bool wrap) {
+    int src_w = (src->decoded_width > 0) ? src->decoded_width : src->width;
+    int src_h = (src->decoded_height > 0) ? src->decoded_height : src->height;
     int x1 = (int)floorf(src_x);
     int y1 = (int)floorf(src_y);
     int x2 = x1 + 1;
     int y2 = y1 + 1;
 
-    x1 = ((x1 % w) + w) % w;
-    y1 = ((y1 % h) + h) % h;
-    x2 = ((x2 % w) + w) % w;
-    y2 = ((y2 % h) + h) % h;
+    if (wrap) {
+        x1 = ((x1 % src_w) + src_w) % src_w;
+        y1 = ((y1 % src_h) + src_h) % src_h;
+        x2 = ((x2 % src_w) + src_w) % src_w;
+        y2 = ((y2 % src_h) + src_h) % src_h;
+    } else {
+        x1 = std::max(0, std::min(x1, src_w - 1));
+        y1 = std::max(0, std::min(y1, src_h - 1));
+        x2 = std::max(0, std::min(x2, src_w - 1));
+        y2 = std::max(0, std::min(y2, src_h - 1));
+    }
 
     float fx = src_x - floorf(src_x);
     float fy = src_y - floorf(src_y);
@@ -117,38 +125,12 @@ static uint32_t raster_bilinear_interpolate_wrap(ImageSurface* src, float src_x,
     return r | (g << 8) | (b << 16) | (a << 24);
 }
 
+static uint32_t raster_bilinear_interpolate_wrap(ImageSurface* src, float src_x, float src_y) {
+    return raster_bilinear_interpolate_impl(src, src_x, src_y, true);
+}
+
 static uint32_t raster_bilinear_interpolate(ImageSurface* src, float src_x, float src_y) {
-    int src_w = (src->decoded_width > 0) ? src->decoded_width : src->width;
-    int src_h = (src->decoded_height > 0) ? src->decoded_height : src->height;
-    int x1 = (int)floorf(src_x);
-    int y1 = (int)floorf(src_y);
-    int x2 = x1 + 1;
-    int y2 = y1 + 1;
-
-    x1 = std::max(0, std::min(x1, src_w - 1));
-    y1 = std::max(0, std::min(y1, src_h - 1));
-    x2 = std::max(0, std::min(x2, src_w - 1));
-    y2 = std::max(0, std::min(y2, src_h - 1));
-
-    float fx = src_x - floorf(src_x);
-    float fy = src_y - floorf(src_y);
-
-    uint32_t* p11 = (uint32_t*)((uint8_t*)src->pixels + y1 * src->pitch + x1 * 4);
-    uint32_t* p21 = (uint32_t*)((uint8_t*)src->pixels + y1 * src->pitch + x2 * 4);
-    uint32_t* p12 = (uint32_t*)((uint8_t*)src->pixels + y2 * src->pitch + x1 * 4);
-    uint32_t* p22 = (uint32_t*)((uint8_t*)src->pixels + y2 * src->pitch + x2 * 4);
-
-    uint8_t r11 = *p11 & 0xFF, g11 = (*p11 >> 8) & 0xFF, b11 = (*p11 >> 16) & 0xFF, a11 = (*p11 >> 24) & 0xFF;
-    uint8_t r21 = *p21 & 0xFF, g21 = (*p21 >> 8) & 0xFF, b21 = (*p21 >> 16) & 0xFF, a21 = (*p21 >> 24) & 0xFF;
-    uint8_t r12 = *p12 & 0xFF, g12 = (*p12 >> 8) & 0xFF, b12 = (*p12 >> 16) & 0xFF, a12 = (*p12 >> 24) & 0xFF;
-    uint8_t r22 = *p22 & 0xFF, g22 = (*p22 >> 8) & 0xFF, b22 = (*p22 >> 16) & 0xFF, a22 = (*p22 >> 24) & 0xFF;
-
-    uint8_t r = (uint8_t)(r11 * (1 - fx) * (1 - fy) + r21 * fx * (1 - fy) + r12 * (1 - fx) * fy + r22 * fx * fy);
-    uint8_t g = (uint8_t)(g11 * (1 - fx) * (1 - fy) + g21 * fx * (1 - fy) + g12 * (1 - fx) * fy + g22 * fx * fy);
-    uint8_t b = (uint8_t)(b11 * (1 - fx) * (1 - fy) + b21 * fx * (1 - fy) + b12 * (1 - fx) * fy + b22 * fx * fy);
-    uint8_t a = (uint8_t)(a11 * (1 - fx) * (1 - fy) + a21 * fx * (1 - fy) + a12 * (1 - fx) * fy + a22 * fx * fy);
-
-    return r | (g << 8) | (b << 16) | (a << 24);
+    return raster_bilinear_interpolate_impl(src, src_x, src_y, false);
 }
 
 static uint32_t raster_area_average(ImageSurface* src, float x0, float y0, float x1, float y1) {

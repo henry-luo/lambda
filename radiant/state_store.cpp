@@ -3928,14 +3928,18 @@ static void state_assert_after_mutation(DocState* state, const char* context) {
     radiant_state_assert_valid(state, context);
 }
 
+static const StateEntry* state_entry_get(DocState* state, void* node,
+                                         const char* name, StateEntry* query) {
+    query->key.node = node;
+    query->key.name = intern_state_name(name);
+    return (const StateEntry*)hashmap_get(state->state_map, query);
+}
+
 void state_set(DocState* state, void* node, const char* name, Item value) {
     if (!state || !node || !name) return;
 
-    const char* interned = intern_state_name(name);
-    StateEntry query = { .key = { node, interned } };
-
-    // Check for existing entry
-    const StateEntry* existing = (const StateEntry*)hashmap_get(state->state_map, &query);
+    StateEntry query = {};
+    const StateEntry* existing = state_entry_get(state, node, name, &query);
 
     if (existing) {
         // Update existing entry
@@ -3956,7 +3960,7 @@ void state_set(DocState* state, void* node, const char* name, Item value) {
     } else {
         // Create new entry
         StateEntry entry = {
-            .key = { node, interned },
+            .key = query.key,
             .value = value,
             .last_modified = state->version,
             .on_change = NULL,
@@ -4991,10 +4995,8 @@ int form_control_get_hover_index(DocState* state, View* view) {
 void state_remove(DocState* state, void* node, const char* name) {
     if (!state || !node || !name) return;
 
-    const char* interned = intern_state_name(name);
-    StateEntry query = { .key = { node, interned } };
-
-    const StateEntry* existing = (const StateEntry*)hashmap_get(state->state_map, &query);
+    StateEntry query = {};
+    const StateEntry* existing = state_entry_get(state, node, name, &query);
     if (existing) {
         // Fire callback with null new value
         if (existing->on_change) {
@@ -5119,10 +5121,8 @@ void state_on_change(DocState* state, void* node, const char* name,
     StateChangeCallback callback, void* udata) {
     if (!state || !node || !name) return;
 
-    const char* interned = intern_state_name(name);
-    StateEntry query = { .key = { node, interned } };
-
-    const StateEntry* existing = (const StateEntry*)hashmap_get(state->state_map, &query);
+    StateEntry query = {};
+    const StateEntry* existing = state_entry_get(state, node, name, &query);
     if (existing) {
         // Update callback on existing entry
         StateEntry updated = *existing;
@@ -5132,7 +5132,7 @@ void state_on_change(DocState* state, void* node, const char* name,
     } else {
         // Create entry with callback but null value
         StateEntry entry = {
-            .key = { node, interned },
+            .key = query.key,
             .value = ItemNull,
             .last_modified = 0,
             .on_change = callback,
@@ -7255,6 +7255,17 @@ void state_store_selection_select_all(DocState* state) {
     log_debug("selection_select_all");
 }
 
+static void state_store_finish_selection_change(DocState* state, const char* operation) {
+    if (state->selection) state->selection->is_selecting = false;
+    state->selection_layout_dirty = true;
+    state->needs_repaint = true;
+    selection_log_transition(state, operation,
+        state->selection ? state->selection->anchor_view : NULL,
+        state->selection ? state->selection->anchor_offset : 0,
+        state->selection ? state->selection->focus_view : NULL,
+        state->selection ? state->selection->focus_offset : 0);
+}
+
 void state_store_selection_collapse_to_edge(DocState* state, bool to_start) {
     if (!state) return;
 
@@ -7295,17 +7306,8 @@ void state_store_selection_collapse_to_edge(DocState* state, bool to_start) {
         log_debug("selection_collapse: rejected: %s", exc ? exc : "?");
         return;
     }
-    if (state->selection) {
-        state->selection->is_selecting = false;
-    }
-
-    state->selection_layout_dirty = true;
-    state->needs_repaint = true;
-    selection_log_transition(state, to_start ? "collapse_to_start" : "collapse_to_end",
-        state->selection ? state->selection->anchor_view : NULL,
-        state->selection ? state->selection->anchor_offset : 0,
-        state->selection ? state->selection->focus_view : NULL,
-        state->selection ? state->selection->focus_offset : 0);
+    state_store_finish_selection_change(
+        state, to_start ? "collapse_to_start" : "collapse_to_end");
 
     log_debug("selection_collapse: to_start=%d", to_start);
 }
@@ -7353,21 +7355,13 @@ void state_store_selection_clear(DocState* state) {
         state_store_set_selection(state, NULL, NULL, &exc);
     }
     state_store_refresh_caret_projection(state);
-    if (state->selection) {
-        state->selection->is_selecting = false;
-    }
+    if (state->selection) state->selection->is_selecting = false;
     state->editing.pointer_selecting = false;
     state->editing.drag_anchor_view = NULL;
     state->editing.drag_anchor_offset = 0;
     state->editing.drag_mode = EDITING_DRAG_CHAR;
 
-    state->selection_layout_dirty = true;
-    state->needs_repaint = true;
-    selection_log_transition(state, "clear_selection",
-        state->selection ? state->selection->anchor_view : NULL,
-        state->selection ? state->selection->anchor_offset : 0,
-        state->selection ? state->selection->focus_view : NULL,
-        state->selection ? state->selection->focus_offset : 0);
+    state_store_finish_selection_change(state, "clear_selection");
     log_debug("selection_clear");
 }
 
@@ -8037,22 +8031,28 @@ static char* arena_copy_cstr(Arena* arena, const char* text) {
     return result;
 }
 
+static void append_view_text_rects(StrBuf* sb, ViewText* text, bool escape_html) {
+    const char* text_data = (const char*)text->text_data();
+    if (!text_data) return;
+
+    for (TextRect* rect = text->rect; rect; rect = rect->next) {
+        if (rect->length <= 0) continue;
+        const char* content = text_data + rect->start_index;
+        if (escape_html) {
+            escape_append(sb, content, (size_t)rect->length,
+                ESCAPE_RULES_HTML_TEXT, ESCAPE_RULES_HTML_TEXT_COUNT, ESCAPE_CTRL_NONE);
+        } else {
+            strbuf_append_str_n(sb, content, rect->length);
+        }
+    }
+}
+
 static void extract_text_recursive(View* view, StrBuf* sb) {
     if (!view) return;
 
     if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text = lam::view_require_text(view);
-        const char* text_data = (const char*)text->text_data();
-        if (text_data) {
-            // Extract text from all TextRects
-            TextRect* rect = text->rect;
-            while (rect) {
-                if (rect->length > 0) {
-                    strbuf_append_str_n(sb, text_data + rect->start_index, rect->length);
-                }
-                rect = rect->next;
-            }
-        }
+        append_view_text_rects(sb, text, false);
     }
 
     // Recurse into children
@@ -8251,17 +8251,7 @@ static void extract_html_recursive(View* view, StrBuf* sb) {
 
     if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text = lam::view_require_text(view);
-        const char* text_data = (const char*)text->text_data();
-        if (text_data) {
-            TextRect* rect = text->rect;
-            while (rect) {
-                if (rect->length > 0) {
-                    const char* p = text_data + rect->start_index;
-                    append_html_escaped(sb, p, (size_t)rect->length);
-                }
-                rect = rect->next;
-            }
-        }
+        append_view_text_rects(sb, text, true);
     } else if (view->is_element()) {
         ViewElement* element = lam::view_require_element(view);
 

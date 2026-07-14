@@ -68,45 +68,40 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
         log_debug("[MARKER RENDER] list-style-image failed to load, falling back to marker_type");
     }
 
+    const FontMetrics* marker_metrics = rdcon->font.font_handle
+        ? font_get_metrics(rdcon->font.font_handle) : NULL;
+    float marker_font_size = marker_metrics
+        ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
+    float marker_cx = x + width - marker_font_size;
+    float marker_cy = y + marker->height / 2.0f;
+
     switch (marker_type) {
         case CSS_VALUE_DISC: {
-            const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
-            float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
-            float cx = x + width - font_size;
-            float cy = y + marker->height / 2.0f;
             float radius = bullet_size / 2.0f;
 
             RdtPath* p = rdt_path_new();
-            rdt_path_add_circle(p, cx, cy, radius, radius);
+            rdt_path_add_circle(p, marker_cx, marker_cy, radius, radius);
             rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, NULL);
             rdt_path_free(p);
-            log_debug("[MARKER RENDER] Drew disc at (%.1f, %.1f) r=%.1f", cx, cy, radius);
+            log_debug("[MARKER RENDER] Drew disc at (%.1f, %.1f) r=%.1f", marker_cx, marker_cy, radius);
             break;
         }
 
         case CSS_VALUE_CIRCLE: {
-            const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
-            float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
-            float cx = x + width - font_size;
-            float cy = y + marker->height / 2.0f;
             float radius = bullet_size / 2.0f;
             float stroke_width = 1.0f;
 
             RdtPath* p = rdt_path_new();
-            rdt_path_add_circle(p, cx, cy, radius - stroke_width/2, radius - stroke_width/2);
+            rdt_path_add_circle(p, marker_cx, marker_cy, radius - stroke_width/2, radius - stroke_width/2);
             rc_stroke_path(rdcon, p, color, stroke_width, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
             rdt_path_free(p);
-            log_debug("[MARKER RENDER] Drew circle outline at (%.1f, %.1f) r=%.1f", cx, cy, radius);
+            log_debug("[MARKER RENDER] Drew circle outline at (%.1f, %.1f) r=%.1f", marker_cx, marker_cy, radius);
             break;
         }
 
         case CSS_VALUE_SQUARE: {
-            const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
-            float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
-            float cx = x + width - font_size;
-            float cy = y + marker->height / 2.0f;
-            float sx = cx - bullet_size / 2.0f;
-            float sy = cy - bullet_size / 2.0f;
+            float sx = marker_cx - bullet_size / 2.0f;
+            float sy = marker_cy - bullet_size / 2.0f;
 
             rc_fill_rect(rdcon, sx, sy, bullet_size, bullet_size, color);
             log_debug("[MARKER RENDER] Drew square at (%.1f, %.1f) size=%.1f", sx, sy, bullet_size);
@@ -114,38 +109,30 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
         }
 
         case CSS_VALUE_DISCLOSURE_CLOSED: {
-            const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
-            float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
             float tri_size = bullet_size * 1.6f;
-            float cx = x + width - font_size;
-            float cy = y + marker->height / 2.0f;
 
             RdtPath* p = rdt_path_new();
-            rdt_path_move_to(p, cx, cy - tri_size / 2.0f);
-            rdt_path_line_to(p, cx + tri_size, cy);
-            rdt_path_line_to(p, cx, cy + tri_size / 2.0f);
+            rdt_path_move_to(p, marker_cx, marker_cy - tri_size / 2.0f);
+            rdt_path_line_to(p, marker_cx + tri_size, marker_cy);
+            rdt_path_line_to(p, marker_cx, marker_cy + tri_size / 2.0f);
             rdt_path_close(p);
             rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, NULL);
             rdt_path_free(p);
-            log_debug("[MARKER RENDER] Drew disclosure-closed triangle at (%.1f, %.1f)", cx, cy);
+            log_debug("[MARKER RENDER] Drew disclosure-closed triangle at (%.1f, %.1f)", marker_cx, marker_cy);
             break;
         }
 
         case CSS_VALUE_DISCLOSURE_OPEN: {
-            const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
-            float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
             float tri_size = bullet_size * 1.6f;
-            float cx = x + width - font_size;
-            float cy = y + marker->height / 2.0f;
 
             RdtPath* p = rdt_path_new();
-            rdt_path_move_to(p, cx - tri_size / 2.0f, cy - tri_size / 2.0f);
-            rdt_path_line_to(p, cx + tri_size / 2.0f, cy - tri_size / 2.0f);
-            rdt_path_line_to(p, cx, cy + tri_size / 2.0f);
+            rdt_path_move_to(p, marker_cx - tri_size / 2.0f, marker_cy - tri_size / 2.0f);
+            rdt_path_line_to(p, marker_cx + tri_size / 2.0f, marker_cy - tri_size / 2.0f);
+            rdt_path_line_to(p, marker_cx, marker_cy + tri_size / 2.0f);
             rdt_path_close(p);
             rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, NULL);
             rdt_path_free(p);
-            log_debug("[MARKER RENDER] Drew disclosure-open triangle at (%.1f, %.1f)", cx, cy);
+            log_debug("[MARKER RENDER] Drew disclosure-open triangle at (%.1f, %.1f)", marker_cx, marker_cy);
             break;
         }
 

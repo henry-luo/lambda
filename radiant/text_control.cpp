@@ -224,11 +224,7 @@ void tc_ensure_init(DomElement* elem) {
         f->value = f->current_value;
     }
     // F4: seed :placeholder-shown after initial value load.
-    {
-        bool show = (f->current_value_len == 0) && f->placeholder && f->placeholder[0];
-        state_set_bool(f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr),
-            elem, STATE_PLACEHOLDER, show);
-    }
+    tc_refresh_placeholder_shown(elem, f);
 
     // F5: seed :valid / :invalid / :required / :read-only on first init so
     // CSS selectors match before any user interaction.
@@ -240,7 +236,7 @@ void tc_ensure_init(DomElement* elem) {
 
 // F4 (Radiant_Design_Form_Input.md §3.8): refresh :placeholder-shown bit.
 // Set when the control is empty AND a placeholder is configured.
-static void tc_refresh_placeholder_shown(DomElement* elem, FormControlProp* f) {
+void tc_refresh_placeholder_shown(DomElement* elem, FormControlProp* f) {
     if (!elem || !f) return;
     bool show = (f->current_value_len == 0) && f->placeholder && f->placeholder[0];
     state_set_bool(f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr),

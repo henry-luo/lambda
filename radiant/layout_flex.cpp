@@ -2284,6 +2284,28 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
 }
 
 // Calculate flex basis for an item
+static void flex_ensure_explicit_image_loaded(ViewElement* item,
+                                              FlexContainerLayout* flex_layout,
+                                              float main_size, float cross_size,
+                                              const char* axis_name) {
+    if (item->tag() != HTM_TAG_IMG || !flex_layout || !flex_layout->lycon) return;
+    const char* src = item->get_attribute("src");
+    if (!src || (item->embed && item->embed->img)) return;
+
+    if (!item->embed) item->embed = (EmbedProp*)alloc_prop(flex_layout->lycon, sizeof(EmbedProp));
+    item->embed->img = load_image(flex_layout->lycon->ui_context, src);
+    if (item->embed->img && item->embed->img->format == IMAGE_FORMAT_SVG) {
+        item->embed->img->max_render_width = (int)main_size; // INT_CAST_OK: image API expects int.
+        if (cross_size >= 0) {
+            item->embed->img->max_render_width = max(
+                item->embed->img->max_render_width,
+                (int)cross_size); // INT_CAST_OK: image API expects an integer render bound.
+        }
+    }
+    log_debug("%s calculate_flex_basis: loaded image for IMG with explicit %s: %s",
+              item->source_loc(), axis_name, src);
+}
+
 float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) {
     bool is_horizontal = is_main_axis_horizontal(flex_layout);
 
@@ -2386,27 +2408,9 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
         log_debug("%s calculate_flex_basis - using explicit width: %f", item->source_loc(), item->blk->given_width);
         item->fi->has_explicit_width = 1;
 
-        // CRITICAL FIX: For IMG elements with explicit dimensions, still load the image for rendering
-        // Even though we have explicit size, we need the image data to display it
-        uintptr_t elmt_name = item->tag();
-        if (elmt_name == HTM_TAG_IMG && flex_layout && flex_layout->lycon) {
-            const char* src_value = item->get_attribute("src");
-            if (src_value && (!item->embed || !item->embed->img)) {
-                if (!item->embed) {
-                    item->embed = (EmbedProp*)alloc_prop(flex_layout->lycon, sizeof(EmbedProp));
-                }
-                item->embed->img = load_image(flex_layout->lycon->ui_context, src_value);
-                // For SVG images, set max_render_width so render_svg knows the target size
-                if (item->embed->img && item->embed->img->format == IMAGE_FORMAT_SVG) {
-                    item->embed->img->max_render_width = (int)item->blk->given_width; // INT_CAST_OK: image API expects int
-                    if (item->blk->given_height >= 0) {
-                        item->embed->img->max_render_width = max(item->embed->img->max_render_width,
-                                                                  (int)item->blk->given_height); // INT_CAST_OK: intentional
-                    }
-                }
-                log_debug("%s calculate_flex_basis: loaded image for IMG with explicit width: %s", item->source_loc(), src_value);
-            }
-        }
+        // Explicit sizing bypasses intrinsic measurement, but image loading is still required for paint.
+        flex_ensure_explicit_image_loaded(item, flex_layout,
+            item->blk->given_width, item->blk->given_height, "width");
 
         // For content-box, given_width is content width - need to add padding/border for flex basis
         float basis = layout_css_size_to_border_box(
@@ -2420,26 +2424,8 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
         log_debug("%s calculate_flex_basis - using explicit height: %f", item->source_loc(), item->blk->given_height);
         item->fi->has_explicit_height = 1;
 
-        // CRITICAL FIX: For IMG elements with explicit dimensions, still load the image for rendering
-        uintptr_t elmt_name = item->tag();
-        if (elmt_name == HTM_TAG_IMG && flex_layout && flex_layout->lycon) {
-            const char* src_value = item->get_attribute("src");
-            if (src_value && (!item->embed || !item->embed->img)) {
-                if (!item->embed) {
-                    item->embed = (EmbedProp*)alloc_prop(flex_layout->lycon, sizeof(EmbedProp));
-                }
-                item->embed->img = load_image(flex_layout->lycon->ui_context, src_value);
-                // For SVG images, set max_render_width so render_svg knows the target size
-                if (item->embed->img && item->embed->img->format == IMAGE_FORMAT_SVG) {
-                    item->embed->img->max_render_width = (int)item->blk->given_height; // INT_CAST_OK: image API expects int
-                    if (item->blk->given_width >= 0) {
-                        item->embed->img->max_render_width = max(item->embed->img->max_render_width,
-                                                                  (int)item->blk->given_width); // INT_CAST_OK: intentional
-                    }
-                }
-                log_debug("%s calculate_flex_basis: loaded image for IMG with explicit height: %s", item->source_loc(), src_value);
-            }
-        }
+        flex_ensure_explicit_image_loaded(item, flex_layout,
+            item->blk->given_height, item->blk->given_width, "height");
 
         // For content-box, given_height is content height - need to add padding/border for flex basis
         float basis = layout_css_size_to_border_box(

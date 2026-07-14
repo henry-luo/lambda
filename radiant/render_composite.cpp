@@ -116,14 +116,19 @@ bool render_composite_copy_backdrop(ImageSurface* surface, uint32_t* backdrop,
     return true;
 }
 
+static uint32_t* render_composite_target(ImageSurface* surface, const uint32_t* backdrop,
+                                         int width, int height, int* pitch) {
+    if (!surface || !surface->pixels || !backdrop || width <= 0 || height <= 0) return nullptr;
+    *pitch = surface->pitch / 4;
+    return (uint32_t*)surface->pixels;
+}
+
 void render_composite_apply_blend(ImageSurface* surface, const uint32_t* backdrop,
                                   int x0, int y0, int width, int height,
                                   CssEnum blend_mode) {
-    if (!surface || !surface->pixels || !backdrop || width <= 0 || height <= 0) {
-        return;
-    }
-    uint32_t* pixels = (uint32_t*)surface->pixels;
-    int pitch = surface->pitch / 4;
+    int pitch;
+    uint32_t* pixels = render_composite_target(surface, backdrop, width, height, &pitch);
+    if (!pixels) return;
     for (int row = 0; row < height; row++) {
         for (int col = 0; col < width; col++) {
             uint32_t source = pixels[(y0 + row) * pitch + (x0 + col)];
@@ -136,11 +141,9 @@ void render_composite_apply_blend(ImageSurface* surface, const uint32_t* backdro
 
 void render_composite_source_over_premul(ImageSurface* surface, const uint32_t* backdrop,
                                          int x0, int y0, int width, int height) {
-    if (!surface || !surface->pixels || !backdrop || width <= 0 || height <= 0) {
-        return;
-    }
-    uint32_t* pixels = (uint32_t*)surface->pixels;
-    int pitch = surface->pitch / 4;
+    int pitch;
+    uint32_t* pixels = render_composite_target(surface, backdrop, width, height, &pitch);
+    if (!pixels) return;
     for (int row = 0; row < height; row++) {
         for (int col = 0; col < width; col++) {
             uint32_t src = pixels[(y0 + row) * pitch + (x0 + col)];

@@ -1757,7 +1757,7 @@ static bool css_url_has_scheme(const char* url) {
     return false;
 }
 
-static char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl, const char* url) {
+char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl, const char* url) {
     if (!lycon || !url) return nullptr;
 
     size_t url_len = strlen(url);
@@ -1783,6 +1783,42 @@ static char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration
     if (!copy) return nullptr;
     str_copy(copy, url_len + 1, url, url_len);
     return copy;
+}
+
+static bool css_line_decoration_style(CssEnum keyword) {
+    return keyword == CSS_VALUE_SOLID || keyword == CSS_VALUE_DOTTED ||
+        keyword == CSS_VALUE_DASHED || keyword == CSS_VALUE_DOUBLE ||
+        keyword == CSS_VALUE_GROOVE || keyword == CSS_VALUE_RIDGE ||
+        keyword == CSS_VALUE_INSET || keyword == CSS_VALUE_OUTSET ||
+        keyword == CSS_VALUE_NONE;
+}
+
+static void resolve_css_line_decoration_component(LayoutContext* lycon,
+                                                  CssPropertyId prop_id,
+                                                  const CssValue* value,
+                                                  float* width,
+                                                  CssEnum* style,
+                                                  Color* color) {
+    if (!value || !width || !style || !color) return;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = value->data.keyword;
+        if (css_line_decoration_style(keyword)) {
+            *style = keyword;
+        // width keywords must be classified before named colors in every line-decoration shorthand.
+        } else if (keyword == CSS_VALUE_THIN || keyword == CSS_VALUE_MEDIUM ||
+                   keyword == CSS_VALUE_THICK) {
+            *width = keyword == CSS_VALUE_THIN ? 1.0f :
+                (keyword == CSS_VALUE_MEDIUM ? 3.0f : 5.0f);
+        } else {
+            *color = color_name_to_rgb(keyword);
+        }
+    } else if (value->type == CSS_VALUE_TYPE_LENGTH ||
+               value->type == CSS_VALUE_TYPE_NUMBER) {
+        *width = resolve_length_value(lycon, prop_id, value);
+    } else if (value->type == CSS_VALUE_TYPE_COLOR ||
+               value->type == CSS_VALUE_TYPE_FUNCTION) {
+        *color = resolve_color_value(lycon, value);
+    }
 }
 
 static bool parse_border_radius_component(LayoutContext* lycon, int prop_id, const CssValue* value,
@@ -1969,6 +2005,15 @@ static bool css_var_stack_contains(const char** var_stack, int stack_count, cons
     return false;
 }
 
+static const char* css_var_function_name(const CssFunction* func) {
+    if (!func || !func->args || func->arg_count < 1 || !func->args[0]) return nullptr;
+    CssValue* first_arg = func->args[0];
+    if (first_arg->type == CSS_VALUE_TYPE_CUSTOM) {
+        return first_arg->data.custom_property.name;
+    }
+    return first_arg->type == CSS_VALUE_TYPE_STRING ? first_arg->data.string : nullptr;
+}
+
 static const CssValue* resolve_var_function_inner(LayoutContext* lycon, const CssValue* value,
                                                   const char** var_stack, int stack_count) {
     if (!value || value->type != CSS_VALUE_TYPE_FUNCTION) {
@@ -1985,16 +2030,7 @@ static const CssValue* resolve_var_function_inner(LayoutContext* lycon, const Cs
             : nullptr;
     };
 
-    // Extract variable name
-    const char* var_name = nullptr;
-    if (func->args && func->arg_count >= 1 && func->args[0]) {
-        CssValue* first_arg = func->args[0];
-        if (first_arg->type == CSS_VALUE_TYPE_CUSTOM && first_arg->data.custom_property.name) {
-            var_name = first_arg->data.custom_property.name;
-        } else if (first_arg->type == CSS_VALUE_TYPE_STRING && first_arg->data.string) {
-            var_name = first_arg->data.string;
-        }
-    }
+    const char* var_name = css_var_function_name(func);
 
     if (!var_name) {
         return resolve_fallback();
@@ -2044,6 +2080,10 @@ static double resolve_color_component(const CssValue* v, bool is_alpha = false) 
     default:
         return 0.0;
     }
+}
+
+static uint8_t css_color_byte(double value) {
+    return (uint8_t)(value < 0.0 ? 0.0 : (value > 255.0 ? 255.0 : value));
 }
 
 // CSS Color Level 4 §4.2.4: Convert HSL to RGB
@@ -2178,10 +2218,10 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
                 }
 
                 // Clamp to valid range
-                result.r = (uint8_t)(r < 0 ? 0 : (r > 255 ? 255 : r));
-                result.g = (uint8_t)(g < 0 ? 0 : (g > 255 ? 255 : g));
-                result.b = (uint8_t)(b < 0 ? 0 : (b > 255 ? 255 : b));
-                result.a = (uint8_t)(a < 0 ? 0 : (a > 255 ? 255 : a));
+                result.r = css_color_byte(r);
+                result.g = css_color_byte(g);
+                result.b = css_color_byte(b);
+                result.a = css_color_byte(a);
 
                 log_debug("[CSS] resolve_color_value: rgb modern syntax -> (%d, %d, %d, %d)", result.r, result.g, result.b, result.a);
             }
@@ -2192,9 +2232,9 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
                 double b = resolve_color_component(func->args[2]);
 
                 // Clamp to valid range
-                result.r = (uint8_t)(r < 0 ? 0 : (r > 255 ? 255 : r));
-                result.g = (uint8_t)(g < 0 ? 0 : (g > 255 ? 255 : g));
-                result.b = (uint8_t)(b < 0 ? 0 : (b > 255 ? 255 : b));
+                result.r = css_color_byte(r);
+                result.g = css_color_byte(g);
+                result.b = css_color_byte(b);
 
                 // Check for alpha value
                 if (func->arg_count >= 4) {
@@ -2204,7 +2244,7 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
                         // Number format: 0 to 1
                         a = a * 255.0;
                     }
-                    result.a = (uint8_t)(a < 0 ? 0 : (a > 255 ? 255 : a));
+                    result.a = css_color_byte(a);
                 }
 
                 log_debug("[CSS] resolve_color_value: rgb legacy syntax -> (%d, %d, %d, %d)", result.r, result.g, result.b, result.a);
@@ -3702,19 +3742,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             result = NAN;
         } else if (strcmp(func->name, "var") == 0) {
             // var(--custom-property-name) or var(--custom-property-name, fallback)
-            const char* var_name = nullptr;
-
-            // Safety checks for arguments
-            if (func->args && func->arg_count >= 1 && func->args[0]) {
-                CssValue* first_arg = func->args[0];
-
-                // Extract variable name based on argument type
-                if (first_arg->type == CSS_VALUE_TYPE_CUSTOM && first_arg->data.custom_property.name) {
-                    var_name = first_arg->data.custom_property.name;
-                } else if (first_arg->type == CSS_VALUE_TYPE_STRING && first_arg->data.string) {
-                    var_name = first_arg->data.string;
-                }
-            }
+            const char* var_name = css_var_function_name(func);
 
             if (var_name) {
                 // Look up the variable value
@@ -5608,6 +5636,39 @@ static void css_set_flex_item_values(DomElement* span, bool is_form,
     span->fi->flex_shrink = shrink;
     span->fi->flex_basis = basis;
     span->fi->flex_basis_is_percent = basis_is_percent;
+}
+
+static void css_apply_list_style_keyword(LayoutContext* lycon, ViewSpan* span,
+                                         CssEnum keyword, bool list_member) {
+    const CssEnumInfo* info = css_enum_info(keyword);
+    if (info && info->name &&
+        (strcmp(info->name, "inside") == 0 || strcmp(info->name, "outside") == 0)) {
+        span->blk->list_style_position = keyword;
+        log_debug("[CSS] list-style: expanded to list-style-position=%s", info->name);
+        return;
+    }
+    if (keyword >= CSS_VALUE_DISC && keyword <= 0x0190) {
+        span->blk->list_style_type = keyword;
+        log_debug("[CSS] list-style: expanded to list-style-type=%s", css_enum_name_or_unknown(info));
+        return;
+    }
+    if (keyword != CSS_VALUE_NONE) {
+        if (!list_member) log_debug("[CSS] list-style: keyword 0x%04X not recognized", keyword);
+        return;
+    }
+
+    bool type_already_set = list_member && span->blk->list_style_type != 0 &&
+        span->blk->list_style_type != CSS_VALUE_NONE;
+    if (!type_already_set) {
+        span->blk->list_style_type = CSS_VALUE_NONE;
+    }
+    if (!list_member || type_already_set) {
+        span->blk->list_style_image = (char*)alloc_prop(lycon, 5);
+        str_copy(span->blk->list_style_image, 5, "none", 4);
+    }
+    log_debug(type_already_set
+        ? "[CSS] list-style: 'none' applied to list-style-image (type already set)"
+        : "[CSS] list-style: set list-style-type=none");
 }
 
 void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
@@ -8042,27 +8103,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_LIST) {
                 for (int i = 0; i < value->data.list.count; i++) {
                     const CssValue* v = value->data.list.values[i];
-                    if (!v) continue;
-                    if (v->type == CSS_VALUE_TYPE_KEYWORD) {
-                        CssEnum kw = v->data.keyword;
-                        if (kw == CSS_VALUE_SOLID || kw == CSS_VALUE_DOTTED || kw == CSS_VALUE_DASHED ||
-                            kw == CSS_VALUE_DOUBLE || kw == CSS_VALUE_GROOVE || kw == CSS_VALUE_RIDGE ||
-                            kw == CSS_VALUE_INSET || kw == CSS_VALUE_OUTSET || kw == CSS_VALUE_NONE) {
-                            block->multicol->rule_style = kw;
-                        } else if (kw == CSS_VALUE_THIN) {
-                            block->multicol->rule_width = 1.0f;
-                        } else if (kw == CSS_VALUE_MEDIUM) {
-                            block->multicol->rule_width = 3.0f;
-                        } else if (kw == CSS_VALUE_THICK) {
-                            block->multicol->rule_width = 5.0f;
-                        } else {
-                            block->multicol->rule_color = color_name_to_rgb(kw);
-                        }
-                    } else if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_NUMBER) {
-                        block->multicol->rule_width = resolve_length_value(lycon, prop_id, v);
-                    } else if (v->type == CSS_VALUE_TYPE_COLOR || v->type == CSS_VALUE_TYPE_FUNCTION) {
-                        block->multicol->rule_color = resolve_color_value(lycon, v);
-                    }
+                    resolve_css_line_decoration_component(
+                        lycon, prop_id, v, &block->multicol->rule_width,
+                        &block->multicol->rule_style, &block->multicol->rule_color);
                 }
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
                 block->multicol->rule_style = CSS_VALUE_NONE;
@@ -10622,35 +10665,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 CssEnum keyword = value->data.keyword;
                 const CssEnumInfo* info = css_enum_info(keyword);
                 log_debug("[CSS] list-style keyword: %s (0x%04X)", css_enum_name_or_unknown(info), keyword);
-
-                // Check if it's a list-style-position value (inside or outside)
-                // Use string comparison since these are hash-based enums
-                bool is_position = false;
-                if (info && info->name) {
-                    if (strcmp(info->name, "inside") == 0 || strcmp(info->name, "outside") == 0) {
-                        span->blk->list_style_position = keyword;
-                        log_debug("[CSS] list-style: expanded to list-style-position=%s", info->name);
-                        is_position = true;
-                    }
-                }
-
-                // Check if it's a list-style-type value (disc, circle, square, decimal, etc.)
-                // These are in the 0x017D-0x0190 range approximately
-                if (!is_position && keyword >= CSS_VALUE_DISC && keyword <= 0x0190) {
-                    span->blk->list_style_type = keyword;
-                    log_debug("[CSS] list-style: expanded to list-style-type=%s", css_enum_name_or_unknown(info));
-                }
-                // Check if it's none (could be list-style-type: none or list-style-image: none)
-                else if (!is_position && keyword == CSS_VALUE_NONE) {
-                    span->blk->list_style_type = CSS_VALUE_NONE;
-                    span->blk->list_style_image = (char*)alloc_prop(lycon, 5);
-                    str_copy(span->blk->list_style_image, 5, "none", 4);
-                    log_debug("[CSS] list-style: expanded to list-style-type=none, list-style-image=none");
-                }
-                // Otherwise might be other keyword
-                else if (!is_position) {
-                    log_debug("[CSS] list-style: keyword 0x%04X not recognized", keyword);
-                }
+                css_apply_list_style_keyword(lycon, span, keyword, false);
             }
             // Handle string value for list-style-type (CSS Lists 3 §4.1)
             else if (value->type == CSS_VALUE_TYPE_STRING && value->data.string) {
@@ -10711,38 +10726,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
                     if (item->type == CSS_VALUE_TYPE_KEYWORD) {
                         CssEnum keyword = item->data.keyword;
-                        const CssEnumInfo* info = css_enum_info(keyword);
-
-                        // Check if it's a position keyword
-                        bool is_position = false;
-                        if (info && info->name) {
-                            if (strcmp(info->name, "inside") == 0 || strcmp(info->name, "outside") == 0) {
-                                span->blk->list_style_position = keyword;
-                                log_debug("[CSS] list-style: expanded to list-style-position=%s", info->name);
-                                is_position = true;
-                            }
-                        }
-
-                        // Check if it's a list-style-type keyword
-                        if (!is_position && keyword >= CSS_VALUE_DISC && keyword <= 0x0190) {
-                            span->blk->list_style_type = keyword;
-                            log_debug("[CSS] list-style: expanded to list-style-type=%s", css_enum_name_or_unknown(info));
-                        }
-                        else if (!is_position && keyword == CSS_VALUE_NONE) {
-                            // CSS 2.1 §12.5: 'none' in the shorthand is ambiguous.
-                            // If list-style-type was already explicitly set by a prior
-                            // value in this shorthand, 'none' applies to list-style-image.
-                            // Otherwise it applies to list-style-type (and image gets none too).
-                            if (span->blk->list_style_type != 0 && span->blk->list_style_type != CSS_VALUE_NONE) {
-                                // Type already set — apply none to image only
-                                span->blk->list_style_image = (char*)alloc_prop(lycon, 5);
-                                str_copy(span->blk->list_style_image, 5, "none", 4);
-                                log_debug("[CSS] list-style: 'none' applied to list-style-image (type already set)");
-                            } else {
-                                span->blk->list_style_type = CSS_VALUE_NONE;
-                                log_debug("[CSS] list-style: set list-style-type=none");
-                            }
-                        }
+                        css_apply_list_style_keyword(lycon, span, keyword, true);
                     }
                     else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
                         // Handle "inside"/"outside" that might be parsed as custom
@@ -11428,23 +11412,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
                         log_debug("[CSS Conic] arg %d type=%d", i, arg->type);
 
-                        if (arg->type == CSS_VALUE_TYPE_COLOR) {
+                        if (arg->type == CSS_VALUE_TYPE_COLOR ||
+                            arg->type == CSS_VALUE_TYPE_FUNCTION ||
+                            arg->type == CSS_VALUE_TYPE_KEYWORD) {
                             cg->stops[stop_idx].color = resolve_color_value(lycon, arg);
                             cg->stops[stop_idx].position = -1;
                             log_debug("[CSS Conic] stop %d: color #%02x%02x%02x", stop_idx,
-                                cg->stops[stop_idx].color.r, cg->stops[stop_idx].color.g, cg->stops[stop_idx].color.b);
-                            stop_idx++;
-                        } else if (arg->type == CSS_VALUE_TYPE_FUNCTION) {
-                            cg->stops[stop_idx].color = resolve_color_value(lycon, arg);
-                            cg->stops[stop_idx].position = -1;
-                            log_debug("[CSS Conic] stop %d (func): color #%02x%02x%02x", stop_idx,
-                                cg->stops[stop_idx].color.r, cg->stops[stop_idx].color.g, cg->stops[stop_idx].color.b);
-                            stop_idx++;
-                        } else if (arg->type == CSS_VALUE_TYPE_KEYWORD) {
-                            Color c = resolve_color_value(lycon, arg);
-                            cg->stops[stop_idx].color = c;
-                            cg->stops[stop_idx].position = -1;
-                            log_debug("[CSS Conic] stop %d (kw): color #%02x%02x%02x", stop_idx,
                                 cg->stops[stop_idx].color.r, cg->stops[stop_idx].color.g, cg->stops[stop_idx].color.b);
                             stop_idx++;
                         } else if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count >= 1) {
@@ -11720,21 +11693,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_LIST) {
                 for (int i = 0; i < value->data.list.count; i++) {
                     const CssValue* v = value->data.list.values[i];
-                    if (!v) continue;
-                    if (v->type == CSS_VALUE_TYPE_KEYWORD) {
-                        CssEnum kw = v->data.keyword;
-                        if (kw == CSS_VALUE_SOLID || kw == CSS_VALUE_DOTTED || kw == CSS_VALUE_DASHED ||
-                            kw == CSS_VALUE_DOUBLE || kw == CSS_VALUE_GROOVE || kw == CSS_VALUE_RIDGE ||
-                            kw == CSS_VALUE_INSET || kw == CSS_VALUE_OUTSET || kw == CSS_VALUE_NONE) {
-                            span->bound->outline->style = kw;
-                        } else {
-                            span->bound->outline->color = color_name_to_rgb(kw);
-                        }
-                    } else if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_NUMBER) {
-                        span->bound->outline->width = resolve_length_value(lycon, prop_id, v);
-                    } else if (v->type == CSS_VALUE_TYPE_COLOR || v->type == CSS_VALUE_TYPE_FUNCTION) {
-                        span->bound->outline->color = resolve_color_value(lycon, v);
-                    }
+                    resolve_css_line_decoration_component(
+                        lycon, prop_id, v, &span->bound->outline->width,
+                        &span->bound->outline->style, &span->bound->outline->color);
                 }
             } else if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
                 span->bound->outline->width = resolve_length_value(lycon, prop_id, value);

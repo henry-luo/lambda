@@ -1087,6 +1087,8 @@ static bool table_cell_is_baseline_aligned(ViewTableCell* tcell) {
 // This must be called after all cells in the row are laid out but before
 // the final row height is determined.
 // Returns the extra height added to the row from baseline alignment.
+static void shift_table_cell_vertical_align_child(View* child, float y_adjustment);
+
 static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* trow, float* row_height) {
     // Step 1: Check if any cells have baseline alignment
     bool has_baseline_cells = false;
@@ -1129,14 +1131,7 @@ static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* tr
 
                 // Shift all children down
                 for_each_table_cell_vertical_align_child(lam::view_require_element(tcell), [&](View* child) {
-                    child->y += shift;
-                    // Also update TextRect positions for ViewText nodes
-                    if (child->view_type == RDT_VIEW_TEXT) {
-                        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
-                        for (TextRect* rect = text->rect; rect; rect = rect->next) {
-                            rect->y += shift;
-                        }
-                    }
+                    shift_table_cell_vertical_align_child(child, shift);
                 });
 
                 // The cell now needs more height to accommodate the shifted content
@@ -2942,6 +2937,31 @@ static ViewTableCell* find_cell_at(ViewTable* table, int target_row, int target_
     });
 }
 
+static void apply_collapsed_border_pair(LayoutContext* lycon, ViewTable* table,
+                                        TableMetadata* meta, CollapsedBorderList& candidates,
+                                        int row, int col, bool horizontal) {
+    if (candidates.size() == 0) return;
+
+    CollapsedBorder winner = *candidates[0];
+    for (size_t i = 1; i < candidates.size(); i++) {
+        winner = select_winning_border(winner, *candidates[i]);
+    }
+
+    if (horizontal ? row > 0 : col > 0) {
+        ViewTableCell* previous = find_cell_at(
+            table, horizontal ? row - 1 : row, horizontal ? col : col - 1);
+        if (previous) {
+            apply_collapsed_border_to_cell(lycon, previous, winner, horizontal ? 2 : 1);
+        }
+    }
+    if (horizontal ? row < meta->row_count : col < meta->column_count) {
+        ViewTableCell* next = find_cell_at(table, row, col);
+        if (next) {
+            apply_collapsed_border_to_cell(lycon, next, winner, horizontal ? 0 : 3);
+        }
+    }
+}
+
 static bool is_out_of_flow_table_cell_slot(View* view) {
     ViewElement* elem = lam::view_as_element(view);
     if (!elem || elem->view_type == RDT_VIEW_TABLE_CELL) return false;
@@ -3063,30 +3083,7 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 }
             }
 
-            // Select winner from all candidates
-            if (candidates.size() > 0) {
-                lam::BorrowedPtr<CollapsedBorder, lam::LayoutSessionDomain> winner = candidates[0];
-                for (size_t i = 1; i < candidates.size(); i++) {
-                    lam::BorrowedPtr<CollapsedBorder, lam::LayoutSessionDomain> candidate = candidates[i];
-                    CollapsedBorder result = select_winning_border(*winner, *candidate);
-                    *winner = result;
-                }
-
-                // Apply winner to affected cells
-
-                if (row > 0) {
-                    ViewTableCell* cell_above = find_cell_at(table, row - 1, col);
-                    if (cell_above) {
-                        apply_collapsed_border_to_cell(lycon, cell_above, *winner, 2);
-                    }
-                }
-                if (row < meta->row_count) {
-                    ViewTableCell* cell_below = find_cell_at(table, row, col);
-                    if (cell_below) {
-                        apply_collapsed_border_to_cell(lycon, cell_below, *winner, 0);
-                    }
-                }
-            }
+            apply_collapsed_border_pair(lycon, table, meta, candidates, row, col, true);
 
         }
     }
@@ -3197,30 +3194,7 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 }
             }
 
-            // Select winner from all candidates
-            if (candidates.size() > 0) {
-                lam::BorrowedPtr<CollapsedBorder, lam::LayoutSessionDomain> winner = candidates[0];
-                for (size_t i = 1; i < candidates.size(); i++) {
-                    lam::BorrowedPtr<CollapsedBorder, lam::LayoutSessionDomain> candidate = candidates[i];
-                    CollapsedBorder result = select_winning_border(*winner, *candidate);
-                    *winner = result;
-                }
-
-                // Apply winner to affected cells
-
-                if (col > 0) {
-                    ViewTableCell* cell_left = find_cell_at(table, row, col - 1);
-                    if (cell_left) {
-                        apply_collapsed_border_to_cell(lycon, cell_left, *winner, 1);
-                    }
-                }
-                if (col < meta->column_count) {
-                    ViewTableCell* cell_right = find_cell_at(table, row, col);
-                    if (cell_right) {
-                        apply_collapsed_border_to_cell(lycon, cell_right, *winner, 3);
-                    }
-                }
-            }
+            apply_collapsed_border_pair(lycon, table, meta, candidates, row, col, false);
 
         }
     }
@@ -6568,80 +6542,6 @@ static bool element_text_starts_with_whitespace(DomNode* element) {
     return false;
 }
 
-static bool table_style_has_horizontal_padding_decl(StyleTree* style) {
-    if (!style) return false;
-    return style_tree_get_declaration(style, CSS_PROPERTY_PADDING) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_LEFT) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_RIGHT) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_INLINE) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_INLINE_START) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_INLINE_END);
-}
-
-static bool table_style_has_horizontal_border_decl(StyleTree* style) {
-    if (!style) return false;
-    return style_tree_get_declaration(style, CSS_PROPERTY_BORDER) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_WIDTH) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_STYLE) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_LEFT) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_LEFT_WIDTH) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT_WIDTH) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_LEFT_STYLE) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT_STYLE) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_INLINE) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_INLINE_START) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_INLINE_END);
-}
-
-static DomElement* table_find_html_table_ancestor(DomElement* element) {
-    for (DomNode* node = element ? element->parent : nullptr; node; node = node->parent) {
-        if (!node->is_element()) continue;
-        DomElement* ancestor = node->as_element();
-        if (ancestor->tag() == HTM_TAG_TABLE) return ancestor;
-    }
-    return nullptr;
-}
-
-static float table_unresolved_html_cell_horizontal_box_extra(DomElement* cell) {
-    if (!cell || cell->bound) return 0.0f;
-    uintptr_t tag = cell->tag();
-    if (tag != HTM_TAG_TD && tag != HTM_TAG_TH) return 0.0f;
-
-    DomElement* table = table_find_html_table_ancestor(cell);
-    if (!table) return 0.0f;
-
-    float extra = 0.0f;
-    StyleTree* style = cell->specified_style;
-
-    // WHATWG table presentational hints give td/th 1px default padding, with
-    // table[cellpadding] overriding that value. During anonymous table wrapping,
-    // the child td/th can be measured before its BoundaryProp exists, so mirror
-    // that non-mutating horizontal contribution here.
-    if (!table_style_has_horizontal_padding_decl(style)) {
-        float cell_padding = 1.0f;
-        const char* cellpadding_attr = table->get_attribute("cellpadding");
-        if (cellpadding_attr) {
-            cell_padding = (float)str_to_double_default(
-                cellpadding_attr, strlen(cellpadding_attr), 0.0);
-            if (cell_padding < 0.0f) cell_padding = 0.0f;
-        }
-        extra += cell_padding * 2.0f;
-    }
-
-    // WHATWG table[border] td/th presentational hint resolves to 1px cell
-    // borders; CSS border declarations on the cell override the hint.
-    if (!table_style_has_horizontal_border_decl(style)) {
-        const char* border_attr = table->get_attribute("border");
-        if (border_attr) {
-            float border = (float)str_to_double_default(border_attr, strlen(border_attr), 0.0);
-            if (border > 0.0f) extra += 2.0f;
-        }
-    }
-
-    return extra;
-}
-
 static float table_intrinsic_child_horizontal_margin(LayoutContext* lycon,
                                                     DomElement* child_elem,
                                                     bool include_shorthand) {
@@ -6899,7 +6799,7 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
             IntrinsicSizes child_sizes = layout_measure_intrinsic_widths(lycon, child_elem, "table cell child");
             float child_max = child_sizes.max_content;
             float child_min = child_sizes.min_content;
-            float child_unresolved_box_extra = table_unresolved_html_cell_horizontal_box_extra(child_elem);
+            float child_unresolved_box_extra = layout_unresolved_html_cell_horizontal_box_extra(child_elem);
             if (child_unresolved_box_extra > 0.0f) {
                 child_max += child_unresolved_box_extra;
                 child_min += child_unresolved_box_extra;

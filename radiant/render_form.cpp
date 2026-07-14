@@ -936,18 +936,6 @@ static void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp
     log_debug("[FORM] render_radio at (%.1f, %.1f) checked=%d", x, y, checked ? 1 : 0);
 }
 
-static const char* form_button_label_text(ViewBlock* block, FormControlProp* form) {
-    const char* text = form ? form->value : nullptr;
-    if ((!text || !*text) && block) {
-        text = block->get_attribute("value");
-    }
-    if ((!text || !*text) && form && form->input_type) {
-        if (strcmp(form->input_type, "submit") == 0) return "Submit";
-        if (strcmp(form->input_type, "reset") == 0) return "Reset";
-    }
-    return text;
-}
-
 /**
  * Render a button control.
  * If the button has CSS-styled background (from author stylesheet),
@@ -1161,16 +1149,14 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
     int selected_index = form_control_get_selected_index(state, static_cast<View*>(select));
     int hover_index = form_control_get_hover_index(state, static_cast<View*>(select));
 
-    // Calculate dropdown position relative to the select element
-    // Walk up parent chain to get absolute position, then apply scale
-    float abs_x = select->x;
-    float abs_y = select->y + select->height;  // Below the select
+    float abs_x = 0.0f, abs_y = 0.0f;
+    view_to_absolute_position(static_cast<View*>(select), select->x,
+                              select->y + select->height,
+                              0.0f, 0.0f, &abs_x, &abs_y);
     View* parent = select->parent;
     while (parent) {
         if (parent->is_block()) {
             ViewBlock* pblock = lam::view_require_block(parent);
-            abs_x += pblock->x;
-            abs_y += pblock->y;
             // Account for scroll in parent containers
             if (pblock->scroller && pblock->scroller->pane) {
                 DocState* scroll_state = pblock->doc ? pblock->doc->state : NULL;

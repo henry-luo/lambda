@@ -92,6 +92,17 @@ static void filter_sepia(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     *b = clamp_byte((int)(bf + amount * (sb - bf) + 0.5f));
 }
 
+static void filter_apply_rgb_matrix(uint8_t* r, uint8_t* g, uint8_t* b,
+                                    const float matrix[3][3]) {
+    float rf = *r / 255.0f, gf = *g / 255.0f, bf = *b / 255.0f;
+    float new_r = matrix[0][0] * rf + matrix[0][1] * gf + matrix[0][2] * bf;
+    float new_g = matrix[1][0] * rf + matrix[1][1] * gf + matrix[1][2] * bf;
+    float new_b = matrix[2][0] * rf + matrix[2][1] * gf + matrix[2][2] * bf;
+    *r = clamp_byte((int)(new_r * 255.0f + 0.5f));
+    *g = clamp_byte((int)(new_g * 255.0f + 0.5f));
+    *b = clamp_byte((int)(new_b * 255.0f + 0.5f));
+}
+
 /**
  * hue-rotate(angle)
  * Rotates hue by the specified angle (in radians).
@@ -104,8 +115,6 @@ static void filter_hue_rotate(uint8_t* r, uint8_t* g, uint8_t* b, float angle) {
 
     float cos_a = cosf(angle);
     float sin_a = sinf(angle);
-
-    float rf = *r / 255.0f, gf = *g / 255.0f, bf = *b / 255.0f;
 
     // Hue rotation matrix (from CSS Filter Effects spec)
     // This rotates colors around the gray axis (1,1,1) in RGB space
@@ -121,13 +130,7 @@ static void filter_hue_rotate(uint8_t* r, uint8_t* g, uint8_t* b, float angle) {
          0.072f + 0.928f * cos_a + 0.072f * sin_a}
     };
 
-    float new_r = mat[0][0] * rf + mat[0][1] * gf + mat[0][2] * bf;
-    float new_g = mat[1][0] * rf + mat[1][1] * gf + mat[1][2] * bf;
-    float new_b = mat[2][0] * rf + mat[2][1] * gf + mat[2][2] * bf;
-
-    *r = clamp_byte((int)(new_r * 255.0f + 0.5f));
-    *g = clamp_byte((int)(new_g * 255.0f + 0.5f));
-    *b = clamp_byte((int)(new_b * 255.0f + 0.5f));
+    filter_apply_rgb_matrix(r, g, b, mat);
 }
 
 /**
@@ -152,8 +155,6 @@ static void filter_saturate(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     if (amount < 0) amount = 0;
     if (amount == 1) return;
 
-    float rf = *r / 255.0f, gf = *g / 255.0f, bf = *b / 255.0f;
-
     // Saturation matrix (from CSS Filter Effects spec)
     float s = amount;
     float mat[3][3] = {
@@ -162,13 +163,7 @@ static void filter_saturate(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
         {0.213f - 0.213f * s, 0.715f - 0.715f * s, 0.072f + 0.928f * s}
     };
 
-    float new_r = mat[0][0] * rf + mat[0][1] * gf + mat[0][2] * bf;
-    float new_g = mat[1][0] * rf + mat[1][1] * gf + mat[1][2] * bf;
-    float new_b = mat[2][0] * rf + mat[2][1] * gf + mat[2][2] * bf;
-
-    *r = clamp_byte((int)(new_r * 255.0f + 0.5f));
-    *g = clamp_byte((int)(new_g * 255.0f + 0.5f));
-    *b = clamp_byte((int)(new_b * 255.0f + 0.5f));
+    filter_apply_rgb_matrix(r, g, b, mat);
 }
 
 /**
@@ -178,6 +173,25 @@ static void filter_saturate(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
 static void filter_opacity(uint8_t* a, float amount) {
     amount = clamp_unit(amount);
     *a = clamp_byte((int)(*a * amount + 0.5f));
+}
+
+typedef struct FilterPixelRegion {
+    int left;
+    int top;
+    int right;
+    int bottom;
+} FilterPixelRegion;
+
+static bool render_filter_pixel_region(ImageSurface* surface, Rect* rect, Bound* clip,
+                                       FilterPixelRegion* region) {
+    if (!surface || !rect || !clip || !region) return false;
+    region->left = std::max(0, (int)fmaxf(rect->x, clip->left));
+    region->top = std::max(0, (int)fmaxf(rect->y, clip->top));
+    region->right = std::min((int)surface->width,
+        (int)fminf(rect->x + rect->width, clip->right));
+    region->bottom = std::min((int)surface->height,
+        (int)fminf(rect->y + rect->height, clip->bottom));
+    return region->left < region->right && region->top < region->bottom;
 }
 
 static bool render_filter_apply_native_backend(const RenderBackendCaps* caps,
@@ -210,19 +224,14 @@ static bool render_filter_apply_native_backend(const RenderBackendCaps* caps,
         return false;
     }
 
-    int left = (int)fmaxf(rect->x, clip->left);
-    int top = (int)fmaxf(rect->y, clip->top);
-    int right = (int)fminf(rect->x + rect->width, clip->right);
-    int bottom = (int)fminf(rect->y + rect->height, clip->bottom);
-
-    if (left < 0) left = 0;
-    if (top < 0) top = 0;
-    if (right > surface->width) right = surface->width;
-    if (bottom > surface->height) bottom = surface->height;
-
-    if (left >= right || top >= bottom) {
+    FilterPixelRegion region;
+    if (!render_filter_pixel_region(surface, rect, clip, &region)) {
         return true;
     }
+    int left = region.left;
+    int top = region.top;
+    int right = region.right;
+    int bottom = region.bottom;
 
     uint32_t* pixels = (uint32_t*)surface->pixels;
     int pitch = surface->pitch / (int)sizeof(uint32_t);
@@ -342,22 +351,15 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
         return;
     }
 
-    // Calculate the region to process (intersection of rect and clip)
-    int left = (int)fmaxf(rect->x, clip->left);
-    int top = (int)fmaxf(rect->y, clip->top);
-    int right = (int)fminf(rect->x + rect->width, clip->right);
-    int bottom = (int)fminf(rect->y + rect->height, clip->bottom);
-
-    // Clamp to surface bounds
-    left = std::max(0, left);
-    top = std::max(0, top);
-    right = std::min((int)surface->width, right);
-    bottom = std::min((int)surface->height, bottom);
-
-    if (left >= right || top >= bottom) {
+    FilterPixelRegion region;
+    if (!render_filter_pixel_region(surface, rect, clip, &region)) {
         log_debug("[FILTER] Region outside clip bounds, skipping");
         return;
     }
+    int left = region.left;
+    int top = region.top;
+    int right = region.right;
+    int bottom = region.bottom;
 
     log_debug("[FILTER] Applying filters to region (%d,%d)-(%d,%d)", left, top, right, bottom);
 

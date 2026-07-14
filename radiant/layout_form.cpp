@@ -38,6 +38,15 @@ static bool apply_fixed_input_intrinsic_size(FormControlProp* form, float pixel_
     return false;
 }
 
+static void zero_form_child_box(DomElement* elem) {
+    elem->x = 0.0f;
+    elem->y = 0.0f;
+    elem->width = 0.0f;
+    elem->height = 0.0f;
+    elem->content_width = 0.0f;
+    elem->content_height = 0.0f;
+}
+
 static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, FontProp* font) {
     float pr = lycon->ui_context->pixel_ratio;
 
@@ -224,7 +233,7 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
     }
 }
 
-static const char* form_button_label_text(ViewBlock* block, FormControlProp* form) {
+const char* form_button_label_text(ViewBlock* block, FormControlProp* form) {
     const char* text = form ? form->value : nullptr;
     if ((!text || !*text) && block) {
         text = block->get_attribute("value");
@@ -299,15 +308,9 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         uintptr_t ctag = child_elem->tag();
 
         if (ctag == HTM_TAG_OPTION) {
-            // Get text from DomText children of option
-            for (DomNode* tc = child_elem->first_child; tc; tc = tc->next_sibling) {
-                DomText* dt = tc->as_text();
-                if (dt && dt->text && dt->length > 0) {
-                    TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
-                    float w = use_min_content ? tw.min_content : tw.max_content;
-                    if (w > max_text_width) max_text_width = w;
-                }
-            }
+            float width = measure_direct_text_children_intrinsic_width(
+                lycon, child_elem, use_min_content, CSS_VALUE_NONE);
+            if (width > max_text_width) max_text_width = width;
         } else if (ctag == HTM_TAG_OPTGROUP) {
             // Measure optgroup label — shown as a header row in the dropdown (no indent)
             const char* label_attr = child_elem->get_attribute("label");
@@ -322,15 +325,8 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
             // Check options inside optgroup — they are indented in the dropdown on macOS Chrome
             for (DomNode* gc = child_elem->first_child; gc; gc = gc->next_sibling) {
                 if (gc->is_element() && gc->as_element()->tag() == HTM_TAG_OPTION) {
-                    float opt_text_width = 0;
-                    for (DomNode* tc = gc->as_element()->first_child; tc; tc = tc->next_sibling) {
-                        DomText* dt = tc->as_text();
-                        if (dt && dt->text && dt->length > 0) {
-                            TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
-                            float w = use_min_content ? tw.min_content : tw.max_content;
-                            if (w > opt_text_width) opt_text_width = w;
-                        }
-                    }
+                    float opt_text_width = measure_direct_text_children_intrinsic_width(
+                        lycon, gc->as_element(), use_min_content, CSS_VALUE_NONE);
                     // Apply indent; blank options in an optgroup still occupy at least OPTGROUP_OPTION_MIN_WIDTH
                     float effective = opt_text_width + FormDefaults::OPTGROUP_OPTION_INDENT;
                     if (effective < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH)
@@ -617,9 +613,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                     celem->content_height = row_height;
                     current_y += row_height;
                 } else {
-                    celem->x = 0;  celem->y = 0;
-                    celem->width = 0;  celem->height = 0;
-                    celem->content_width = 0;  celem->content_height = 0;
+                    zero_form_child_box(celem);
                 }
             } else if (ctag == HTM_TAG_HR) {
                 celem->view_type = RDT_VIEW_BLOCK;
@@ -633,15 +627,11 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                     celem->content_width = option_width;
                     celem->content_height = 0;
                 } else {
-                    celem->x = 0;  celem->y = 0;
-                    celem->width = 0;  celem->height = 0;
-                    celem->content_width = 0;  celem->content_height = 0;
+                    zero_form_child_box(celem);
                 }
             } else if (ctag == HTM_TAG_OPTGROUP) {
                 celem->view_type = RDT_VIEW_BLOCK;
-                celem->x = 0;  celem->y = 0;
-                celem->width = 0;  celem->height = 0;
-                celem->content_width = 0;  celem->content_height = 0;
+                zero_form_child_box(celem);
                 // Recurse into optgroup children
                 for (DomNode* gc = celem->first_child; gc; gc = gc->next_sibling) {
                     if (!gc->is_element()) continue;
@@ -658,15 +648,11 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                             gcelem->content_height = row_height;
                             current_y += row_height;
                         } else {
-                            gcelem->x = 0;  gcelem->y = 0;
-                            gcelem->width = 0;  gcelem->height = 0;
-                            gcelem->content_width = 0;  gcelem->content_height = 0;
+                            zero_form_child_box(gcelem);
                         }
                     } else if (gctag == HTM_TAG_OPTGROUP) {
                         gcelem->view_type = RDT_VIEW_BLOCK;
-                        gcelem->x = 0;  gcelem->y = 0;
-                        gcelem->width = 0;  gcelem->height = 0;
-                        gcelem->content_width = 0;  gcelem->content_height = 0;
+                        zero_form_child_box(gcelem);
                     }
                 }
             }
@@ -679,9 +665,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                 if (ctag == HTM_TAG_OPTION || ctag == HTM_TAG_OPTGROUP) {
                     DomElement* celem = child->as_element();
                     celem->view_type = RDT_VIEW_BLOCK;
-                    celem->x = 0;  celem->y = 0;
-                    celem->width = 0;  celem->height = 0;
-                    celem->content_width = 0;  celem->content_height = 0;
+                    zero_form_child_box(celem);
                 }
             }
         }

@@ -3529,6 +3529,16 @@ static void event_sim_fuzz_schema(EventSimContext* ctx, UiContext* uicon, SimEve
     }
 }
 
+static View* resolve_assert_element(EventSimContext* ctx, UiContext* uicon,
+                                    SimEvent* ev, const char* assertion_name) {
+    View* elem = resolve_target_element(ev, uicon->document);
+    if (elem && elem->is_element()) return elem;
+
+    log_error("event_sim: %s - target element not found", assertion_name);
+    ctx->fail_count++;
+    return nullptr;
+}
+
 // Process a single simulated event
 static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, GLFWwindow* window) {
     switch (ev->type) {
@@ -4284,13 +4294,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
 
         case SIM_EVENT_ASSERT_PREEDIT: {
-            DomDocument* doc = uicon->document;
-            View* elem = resolve_target_element(ev, doc);
-            if (!elem || !elem->is_element()) {
-                log_error("event_sim: assert_preedit - target element not found");
-                ctx->fail_count++;
-                break;
-            }
+            View* elem = resolve_assert_element(ctx, uicon, ev, "assert_preedit");
+            if (!elem) break;
             DomElement* dom_elem = lam::dom_require_element(elem);
             if (!tc_is_text_control(dom_elem)) {
                 log_error("event_sim: assert_preedit - target is not a text control");
@@ -4321,13 +4326,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_ASSERT_PASSWORD_REVEAL: {
-            DomDocument* doc = uicon->document;
-            View* elem = resolve_target_element(ev, doc);
-            if (!elem || !elem->is_element()) {
-                log_error("event_sim: assert_password_reveal - target element not found");
-                ctx->fail_count++;
-                break;
-            }
+            View* elem = resolve_assert_element(ctx, uicon, ev, "assert_password_reveal");
+            if (!elem) break;
             DomElement* dom_elem = lam::dom_require_element(elem);
             if (!tc_is_text_control(dom_elem) || !dom_elem->form) {
                 log_error("event_sim: assert_password_reveal - target is not a text control");
@@ -4426,13 +4426,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_ASSERT_VALUE: {
-            DomDocument* doc = uicon->document;
-            View* elem = resolve_target_element(ev, doc);
-            if (!elem || !elem->is_element()) {
-                log_error("event_sim: assert_value - target element not found");
-                ctx->fail_count++;
-                break;
-            }
+            View* elem = resolve_assert_element(ctx, uicon, ev, "assert_value");
+            if (!elem) break;
             DomElement* dom_elem = lam::dom_require_element(elem);
             // Prefer live edit buffer (FormControlProp::current_value) when
             // present — the "value" attribute only carries the initial default
@@ -4518,12 +4513,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
         case SIM_EVENT_ASSERT_CHECKED: {
             DomDocument* doc = uicon->document;
-            View* elem = resolve_target_element(ev, doc);
-            if (!elem || !elem->is_element()) {
-                log_error("event_sim: assert_checked - target element not found");
-                ctx->fail_count++;
-                break;
-            }
+            View* elem = resolve_assert_element(ctx, uicon, ev, "assert_checked");
+            if (!elem) break;
             DocState* state = doc ? (DocState*)doc->state : nullptr;
             bool is_checked = form_control_get_checked(state, elem);
             if (is_checked != ev->expected_checked) {
@@ -4540,12 +4531,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
         case SIM_EVENT_ASSERT_STATE: {
             DomDocument* doc = uicon->document;
-            View* elem = resolve_target_element(ev, doc);
-            if (!elem || !elem->is_element()) {
-                log_error("event_sim: assert_state - target element not found");
-                ctx->fail_count++;
-                break;
-            }
+            View* elem = resolve_assert_element(ctx, uicon, ev, "assert_state");
+            if (!elem) break;
             if (!ev->state_name) {
                 log_error("event_sim: assert_state - missing 'state' field");
                 ctx->fail_count++;

@@ -401,6 +401,17 @@ void reflow_html_doc(DomDocument* doc) {
     }
 }
 
+static void window_save_document_scroll(BrowsingSession* session, DomDocument* doc) {
+    ViewBlock* root = doc && doc->view_tree
+        ? lam::view_require_block(doc->view_tree->root) : nullptr;
+    if (!root || !root->scroller || !root->scroller->pane) return;
+
+    float scroll_y = 0.0f;
+    scroll_state_get_position_for_view(doc->state, static_cast<View*>(root),
+        root->scroller->pane, NULL, &scroll_y, NULL, NULL);
+    session_save_scroll_position(session, scroll_y);
+}
+
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, GLFW_TRUE);
@@ -416,24 +427,11 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
             DomDocument* new_doc = nullptr;
             if (key == GLFW_KEY_LEFT && session_can_go_back(session)) {
                 log_info("browse_nav: keyboard back");
-                // save scroll before leaving
-                ViewBlock* root = ui_context.document->view_tree ? lam::view_require_block(ui_context.document->view_tree->root) : nullptr;
-                if (root && root->scroller && root->scroller->pane) {
-                    float scroll_y = 0.0f;
-                    scroll_state_get_position_for_view(ui_context.document->state, static_cast<View*>(root),
-                        root->scroller->pane, NULL, &scroll_y, NULL, NULL);
-                    session_save_scroll_position(session, scroll_y);
-                }
+                window_save_document_scroll(session, ui_context.document);
                 new_doc = session_go_back(session, &ui_context, css_vw, css_vh);
             } else if (key == GLFW_KEY_RIGHT && session_can_go_forward(session)) {
                 log_info("browse_nav: keyboard forward");
-                ViewBlock* root = ui_context.document->view_tree ? lam::view_require_block(ui_context.document->view_tree->root) : nullptr;
-                if (root && root->scroller && root->scroller->pane) {
-                    float scroll_y = 0.0f;
-                    scroll_state_get_position_for_view(ui_context.document->state, static_cast<View*>(root),
-                        root->scroller->pane, NULL, &scroll_y, NULL, NULL);
-                    session_save_scroll_position(session, scroll_y);
-                }
+                window_save_document_scroll(session, ui_context.document);
                 new_doc = session_go_forward(session, &ui_context, css_vw, css_vh);
             }
             if (new_doc) {
@@ -888,6 +886,41 @@ int run_layout(const char* html_file) {
     return 0;
 }
 
+static int window_finish_event_sim(EventSimContext* sim_ctx) {
+    if (!sim_ctx) return 0;
+    int fail_count = sim_ctx->fail_count;
+    if (sim_ctx->original_document) {
+        ui_context.document = (DomDocument*)sim_ctx->original_document;
+        sim_ctx->frame_stack_depth = 0;
+    }
+    event_sim_free(sim_ctx);
+    return fail_count;
+}
+
+static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
+                                        EnhancedFileCache* file_cache,
+                                        bool log_memory) {
+    view_cleanup_js_batch_state();
+    if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
+    if (ui_context.browsing_session) {
+        session_destroy(ui_context.browsing_session);
+        ui_context.browsing_session = nullptr;
+    }
+    if (thread_pool) thread_pool_destroy(thread_pool);
+    if (file_cache) enhanced_cache_destroy(file_cache);
+    network_downloader_cleanup_shared();
+    view_close_event_log();
+    view_close_state_dump();
+    js_dom_set_ui_context(nullptr);
+    // ui_context is stack-backed; JS must drop the host loop reference before teardown.
+    js_dom_set_host_driven_loop(false);
+    ui_context_cleanup(&ui_context);
+    view_cleanup_input_manager();
+    lambda_uv_cleanup();
+    if (log_memory) log_mem_stage("after-cleanup");
+    log_cleanup();
+}
+
 // Unified document viewer supporting multiple formats (HTML, Markdown, XML, RST, etc.)
 // event_file: optional JSON file with simulated events for automated testing
 // headless: if true, run without creating a window (for CI/automated testing)
@@ -1217,36 +1250,9 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
                 current_time += wait_ms / 1000.0;
             }
         }
-        int sim_fail_count = 0;
-        if (sim_ctx) {
-            sim_fail_count = sim_ctx->fail_count;
-            if (sim_ctx->original_document) {
-                ui_context.document = (DomDocument*)sim_ctx->original_document;
-                sim_ctx->frame_stack_depth = 0;
-            }
-            event_sim_free(sim_ctx);
-        }
+        int sim_fail_count = window_finish_event_sim(sim_ctx);
         log_info("End of headless document viewer");
-        view_cleanup_js_batch_state();
-        // Cleanup network resources before ui_context
-        if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
-        // Cleanup browsing session
-        if (ui_context.browsing_session) {
-            session_destroy(ui_context.browsing_session);
-            ui_context.browsing_session = nullptr;
-        }
-        if (thread_pool) thread_pool_destroy(thread_pool);
-        if (file_cache) enhanced_cache_destroy(file_cache);
-        network_downloader_cleanup_shared();
-        view_close_event_log();
-        view_close_state_dump();
-        js_dom_set_ui_context(nullptr);
-        js_dom_set_host_driven_loop(false);  // ui_context is a stack local; drop the JS-DOM reference before teardown
-        ui_context_cleanup(&ui_context);
-        view_cleanup_input_manager();
-        lambda_uv_cleanup();
-        log_mem_stage("after-cleanup");
-        log_cleanup();
+        window_cleanup_view_runtime(thread_pool, file_cache, true);
         return sim_fail_count > 0 ? 1 : 0;
     }
 
@@ -1397,36 +1403,10 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     radiant_frame_clock_shutdown(&frame_clock);
 
     // Get simulation results before cleanup
-    int sim_fail_count = 0;
-    if (sim_ctx) {
-        sim_fail_count = sim_ctx->fail_count;
-        if (sim_ctx->original_document) {
-            ui_context.document = (DomDocument*)sim_ctx->original_document;
-            sim_ctx->frame_stack_depth = 0;
-        }
-        event_sim_free(sim_ctx);
-    }
+    int sim_fail_count = window_finish_event_sim(sim_ctx);
 
     log_info("End of document viewer");
-    view_cleanup_js_batch_state();
-    // Cleanup network resources before ui_context
-    if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
-    // Cleanup browsing session
-    if (ui_context.browsing_session) {
-        session_destroy(ui_context.browsing_session);
-        ui_context.browsing_session = nullptr;
-    }
-    if (thread_pool) thread_pool_destroy(thread_pool);
-    if (file_cache) enhanced_cache_destroy(file_cache);
-    network_downloader_cleanup_shared();
-    view_close_event_log();
-    view_close_state_dump();
-    js_dom_set_ui_context(nullptr);
-    js_dom_set_host_driven_loop(false);  // ui_context is a stack local; drop the JS-DOM reference before teardown
-    ui_context_cleanup(&ui_context);
-    view_cleanup_input_manager();
-    lambda_uv_cleanup();
-    log_cleanup();
+    window_cleanup_view_runtime(thread_pool, file_cache, false);
 
     // Return non-zero if simulation had failures
     return sim_fail_count > 0 ? 1 : 0;

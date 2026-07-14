@@ -302,6 +302,21 @@ static bool boundary_copy_gradient_stops(GradientStop* src, int src_count,
     return true;
 }
 
+static bool boundary_prepare_gradient(ViewBlock* view, float x, float y,
+                                      GradientStop* source_stops, int source_count,
+                                      RdtGradientStop* stops, int stop_capacity,
+                                      RdtPath** path, int* stop_count) {
+    if (view->width <= 0.0f || view->height <= 0.0f ||
+        !boundary_copy_gradient_stops(source_stops, source_count,
+                                      stops, stop_capacity, stop_count)) {
+        return false;
+    }
+    *path = rdt_path_new();
+    if (!*path) return false;
+    rdt_path_add_rect(*path, x, y, view->width, view->height, 0.0f, 0.0f);
+    return true;
+}
+
 bool render_paint_boundary_build_linear_gradient(ViewBlock* view, float x, float y,
                                                  RdtGradientStop* stops,
                                                  int stop_capacity,
@@ -310,17 +325,11 @@ bool render_paint_boundary_build_linear_gradient(ViewBlock* view, float x, float
     BackgroundProp* bg = view->bound->background;
     LinearGradient* gradient = bg->linear_gradient;
     if (bg->gradient_type != GRADIENT_LINEAR || !gradient) return false;
-    if (view->width <= 0.0f || view->height <= 0.0f) return false;
 
     int stop_count = 0;
-    if (!boundary_copy_gradient_stops(gradient->stops, gradient->stop_count,
-                                      stops, stop_capacity, &stop_count)) {
-        return false;
-    }
-
-    RdtPath* path = rdt_path_new();
-    if (!path) return false;
-    rdt_path_add_rect(path, x, y, view->width, view->height, 0.0f, 0.0f);
+    RdtPath* path;
+    if (!boundary_prepare_gradient(view, x, y, gradient->stops, gradient->stop_count,
+                                   stops, stop_capacity, &path, &stop_count)) return false;
 
     float angle_rad = gradient->angle * (float)M_PI / 180.0f;
     float dx = sinf(angle_rad);
@@ -353,17 +362,11 @@ bool render_paint_boundary_build_radial_gradient(ViewBlock* view, float x, float
     BackgroundProp* bg = view->bound->background;
     RadialGradient* gradient = bg->radial_gradient;
     if (bg->gradient_type != GRADIENT_RADIAL || !gradient) return false;
-    if (view->width <= 0.0f || view->height <= 0.0f) return false;
 
     int stop_count = 0;
-    if (!boundary_copy_gradient_stops(gradient->stops, gradient->stop_count,
-                                      stops, stop_capacity, &stop_count)) {
-        return false;
-    }
-
-    RdtPath* path = rdt_path_new();
-    if (!path) return false;
-    rdt_path_add_rect(path, x, y, view->width, view->height, 0.0f, 0.0f);
+    RdtPath* path;
+    if (!boundary_prepare_gradient(view, x, y, gradient->stops, gradient->stop_count,
+                                   stops, stop_capacity, &path, &stop_count)) return false;
 
     out->path = path;
     out->cx = x + (gradient->cx_set ? gradient->cx * view->width : view->width * 0.5f);

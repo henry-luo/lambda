@@ -93,6 +93,20 @@ void log_font_fallback_triggered(const char* requested, const char* fallback) {
     }
 }
 
+static FontFaceDescriptor* font_face_descriptor_from_css(CssFontFaceDescriptor* css_desc) {
+    FontFaceDescriptor* descriptor = (FontFaceDescriptor*)mem_calloc(
+        1, sizeof(FontFaceDescriptor), MEM_CAT_LAYOUT);
+    if (!descriptor) return nullptr;
+    descriptor->family_name = css_desc->family_name
+        ? mem_strdup(css_desc->family_name, MEM_CAT_LAYOUT) : nullptr;
+    descriptor->src_local_path = css_desc->src_url
+        ? mem_strdup(css_desc->src_url, MEM_CAT_LAYOUT) : nullptr;
+    descriptor->font_style = css_desc->font_style;
+    descriptor->font_weight = css_desc->font_weight;
+    descriptor->font_display = css_desc->font_display;
+    return descriptor;
+}
+
 // CSS @font-face parsing integration - uses css_font_face.hpp module
 void parse_font_face_rule(LayoutContext* lycon, void* rule) {
     if (!lycon || !rule) {
@@ -141,13 +155,8 @@ void parse_font_face_rule(LayoutContext* lycon, void* rule) {
     }
 
     // Convert to FontFaceDescriptor and register
-    FontFaceDescriptor* descriptor = (FontFaceDescriptor*)mem_calloc(1, sizeof(FontFaceDescriptor), MEM_CAT_LAYOUT);
+    FontFaceDescriptor* descriptor = font_face_descriptor_from_css(css_desc);
     if (descriptor) {
-        descriptor->family_name = css_desc->family_name ? mem_strdup(css_desc->family_name, MEM_CAT_LAYOUT) : nullptr;
-        descriptor->src_local_path = css_desc->src_url ? mem_strdup(css_desc->src_url, MEM_CAT_LAYOUT) : nullptr;
-        descriptor->font_style = css_desc->font_style;
-        descriptor->font_weight = css_desc->font_weight;
-        descriptor->font_display = css_desc->font_display;
         descriptor->is_loaded = false;
 
         register_font_face(lycon->ui_context, descriptor);
@@ -218,13 +227,8 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
         }
 
         // Convert to FontFaceDescriptor and register
-        FontFaceDescriptor* descriptor = (FontFaceDescriptor*)mem_calloc(1, sizeof(FontFaceDescriptor), MEM_CAT_LAYOUT);
+        FontFaceDescriptor* descriptor = font_face_descriptor_from_css(css_desc);
         if (descriptor) {
-            descriptor->family_name = css_desc->family_name ? mem_strdup(css_desc->family_name, MEM_CAT_LAYOUT) : nullptr;
-            descriptor->src_local_path = css_desc->src_url ? mem_strdup(css_desc->src_url, MEM_CAT_LAYOUT) : nullptr;
-            descriptor->font_style = css_desc->font_style;
-            descriptor->font_weight = css_desc->font_weight;
-            descriptor->font_display = css_desc->font_display;
             descriptor->is_loaded = false;
 
             // Copy src_urls array for multi-format fallback

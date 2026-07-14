@@ -1656,6 +1656,28 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
         }
         return path_data;
     };
+    auto emit_gradient = [&](RdtPath* path, const RdtGradientStop* stops,
+                             int stop_count, RdtFillRule rule,
+                             bool has_transform, const RdtMatrix* transform,
+                             bool has_gradient_transform, const RdtMatrix* gradient_transform,
+                             const char* element_name, const char* id_prefix,
+                             const char* coord_attrs, PaintOp op, int gradient_id) -> bool {
+        if (!paint_svg_caps_allow_gradient(caps, has_transform || has_gradient_transform) ||
+            !stops || stop_count <= 0) {
+            note_unsupported(op);
+            return false;
+        }
+        StrBuf* path_data = path_data_or_note(path, op);
+        if (!path_data) return false;
+        paint_svg_append_gradient_scene(
+            out, indent_level, gradient_id, element_name, id_prefix, coord_attrs,
+            paint_optional_transform(has_gradient_transform, gradient_transform),
+            stops, stop_count, path_data->str, rule,
+            paint_optional_transform(has_transform, transform));
+        strbuf_free(path_data);
+        active_stats->emitted_count++;
+        return true;
+    };
 
     for (int i = 0; i < pl->count; i++) {
         const PaintCmd* cmd = &pl->cmds[i];
@@ -1749,52 +1771,28 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
         }
         case PAINT_FILL_LINEAR_GRADIENT: {
             const PaintFillLinearGradient* p = &cmd->fill_linear_gradient;
-            if (!paint_svg_caps_allow_gradient(caps, p->has_transform || p->has_gradient_transform) ||
-                !p->stops || p->stop_count <= 0) {
-                note_unsupported(cmd->op);
-                break;
-            }
-
-            StrBuf* path_data = path_data_or_note(p->path, cmd->op);
-            if (!path_data) break;
-
-            int gradient_id = resource_id_base + i;
             char coord_attrs[128];
             snprintf(coord_attrs, sizeof(coord_attrs),
                      "x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\"",
                      p->x1, p->y1, p->x2, p->y2);
-            paint_svg_append_gradient_scene(
-                out, indent_level, gradient_id, "linearGradient", "linear", coord_attrs,
-                paint_optional_transform(p->has_gradient_transform, &p->gradient_transform),
-                p->stops, p->stop_count, path_data->str, p->rule,
-                paint_optional_transform(p->has_transform, &p->transform));
-            strbuf_free(path_data);
-            active_stats->emitted_count++;
+            emit_gradient(p->path, p->stops, p->stop_count, p->rule,
+                          p->has_transform, &p->transform,
+                          p->has_gradient_transform, &p->gradient_transform,
+                          "linearGradient", "linear", coord_attrs,
+                          cmd->op, resource_id_base + i);
             break;
         }
         case PAINT_FILL_RADIAL_GRADIENT: {
             const PaintFillRadialGradient* p = &cmd->fill_radial_gradient;
-            if (!paint_svg_caps_allow_gradient(caps, p->has_transform || p->has_gradient_transform) ||
-                !p->stops || p->stop_count <= 0) {
-                note_unsupported(cmd->op);
-                break;
-            }
-
-            StrBuf* path_data = path_data_or_note(p->path, cmd->op);
-            if (!path_data) break;
-
-            int gradient_id = resource_id_base + i;
             char coord_attrs[128];
             snprintf(coord_attrs, sizeof(coord_attrs),
                      "cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\"",
                      p->cx, p->cy, p->r);
-            paint_svg_append_gradient_scene(
-                out, indent_level, gradient_id, "radialGradient", "radial", coord_attrs,
-                paint_optional_transform(p->has_gradient_transform, &p->gradient_transform),
-                p->stops, p->stop_count, path_data->str, p->rule,
-                paint_optional_transform(p->has_transform, &p->transform));
-            strbuf_free(path_data);
-            active_stats->emitted_count++;
+            emit_gradient(p->path, p->stops, p->stop_count, p->rule,
+                          p->has_transform, &p->transform,
+                          p->has_gradient_transform, &p->gradient_transform,
+                          "radialGradient", "radial", coord_attrs,
+                          cmd->op, resource_id_base + i);
             break;
         }
         case PAINT_DRAW_IMAGE_RESOURCE: {

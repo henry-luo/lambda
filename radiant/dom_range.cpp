@@ -3319,29 +3319,6 @@ static bool boundary_between_inclusive(DomBoundary b,
     return ge_start && le_end;
 }
 
-// Coarse UAX #9 first-strong direction for visual edge collapse. This mirrors
-// the form-control geometry heuristic, but works on DOM Range text.
-static int cp_bidi_strong_direction(uint32_t cp) {
-    if (cp == 0x200E) return -1;                // LRM
-    if (cp == 0x200F || cp == 0x061C) return 1; // RLM / ALM
-    if (cp >= 0x0590 && cp <= 0x08FF) return 1;
-    if (cp >= 0xFB50 && cp <= 0xFDFF) return 1;
-    if (cp >= 0xFE70 && cp <= 0xFEFF) return 1;
-
-    if ((cp >= 0x0041 && cp <= 0x005A) ||
-        (cp >= 0x0061 && cp <= 0x007A)) return -1;
-    if (cp >= 0x00C0 && cp <= 0x02AF) return -1;
-    if (cp >= 0x0370 && cp <= 0x052F) return -1;
-    if (cp >= 0x0900 && cp <= 0x0DFF) return -1;
-    if (cp >= 0x0E01 && cp <= 0x0E5B) return -1;
-    if (cp >= 0x0E81 && cp <= 0x0EDF) return -1;
-    if (cp >= 0x10A0 && cp <= 0x11FF) return -1;
-    if (cp >= 0x3040 && cp <= 0x30FF) return -1;
-    if (cp >= 0x4E00 && cp <= 0x9FFF) return -1;
-    if (cp >= 0xAC00 && cp <= 0xD7AF) return -1;
-    return 0;
-}
-
 static int range_first_strong_direction(DomRange* r) {
     if (!r || !r->start.node || !r->end.node) return 0;
     DomElement* host = editing_host_of(r->start.node);
@@ -3353,7 +3330,7 @@ static int range_first_strong_direction(DomRange* r) {
         if (dom_boundary_compare(&before, &r->end) != DOM_BOUNDARY_BEFORE) {
             return 0;
         }
-        int strong = cp_bidi_strong_direction(cp.cp);
+        int strong = bidi_strong_class(cp.cp);
         if (strong != 0) return strong;
         DomBoundary after = boundary_after_codepoint(cp);
         if (same_boundary(after, scan)) return 0;
