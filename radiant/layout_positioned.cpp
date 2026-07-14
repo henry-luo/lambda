@@ -2056,26 +2056,27 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
         bfc = parent_ctx;
     }
 
-    // Get the IMMEDIATE PARENT's content area offset (border + padding)
+    // Get the containing block's content area offset (border + padding)
     ViewElement* parent_view = block->parent_view();
     float content_offset_x = 0;
 #ifndef NDEBUG
     float content_offset_y = 0;
 #endif
-    if (parent_view && parent_view->is_block()) {
-        ViewBlock* parent_block = lam::view_require_block(parent_view);
-        if (parent_block->bound) {
-            if (parent_block->bound->border) {
-                content_offset_x += parent_block->bound->border->width.left;
+    // Floats inside inline wrappers still use the nearest block ancestor as
+    // their containing block; otherwise the wrapper drops border/padding and
+    // makes same-line floats appear too wide to fit.
+    ViewBlock* containing_block = layout_nearest_block_ancestor(parent_view);
+    if (containing_block && containing_block->bound) {
+        if (containing_block->bound->border) {
+            content_offset_x += containing_block->bound->border->width.left;
 #ifndef NDEBUG
-                content_offset_y += parent_block->bound->border->width.top;
-#endif
-            }
-            content_offset_x += parent_block->bound->padding.left;
-#ifndef NDEBUG
-            content_offset_y += parent_block->bound->padding.top;
+            content_offset_y += containing_block->bound->border->width.top;
 #endif
         }
+        content_offset_x += containing_block->bound->padding.left;
+#ifndef NDEBUG
+        content_offset_y += containing_block->bound->padding.top;
+#endif
     }
     log_debug("[FLOAT_LAYOUT] Float parent: %s, content_offset=(%.1f, %.1f)",
               parent_view ? parent_view->node_name() : "null", content_offset_x, content_offset_y);

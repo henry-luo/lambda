@@ -1019,6 +1019,23 @@ static bool css_font_face_descriptor_is_available(FontFaceDescriptor* desc) {
     return css_font_face_source_is_available(desc->src_local_path);
 }
 
+static bool css_font_context_family_has_available_source(FontContext* font_ctx,
+                                                         const char* family) {
+    if (!font_ctx || !family) return false;
+    const FontFaceDesc* faces[16];
+    int count = font_face_list(font_ctx, family, faces, 16);
+    for (int i = 0; i < count; i++) {
+        const FontFaceDesc* face = faces[i];
+        if (!face || !face->sources || face->source_count <= 0) continue;
+        for (int s = 0; s < face->source_count; s++) {
+            if (css_font_face_source_is_available(face->sources[s].path)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool css_font_family_is_available(LayoutContext* lycon, const char* family,
                                   bool require_loadable_face_source) {
     if (!family) return false;
@@ -1049,6 +1066,15 @@ bool css_font_family_is_available(LayoutContext* lycon, const char* family,
         }
     }
     if (lycon && lycon->ui_context && lycon->ui_context->font_ctx) {
+        if (font_face_family_registered(lycon->ui_context->font_ctx, family)) {
+            // Async webfonts are registered in FontContext before layout; treating
+            // only installed database faces as available drops them to generic fallback.
+            // When selecting a concrete family for immediate layout, an unloadable
+            // @font-face must not stop the CSS fallback list at a dead source, but
+            // downloaded cache files registered by the network loader are usable.
+            return !require_loadable_face_source ||
+                css_font_context_family_has_available_source(lycon->ui_context->font_ctx, family);
+        }
         return font_family_exists(lycon->ui_context->font_ctx, family);
     }
     return false;
@@ -4865,6 +4891,16 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         }
     }
 
+    {
+        ViewSpan* span = lam::view_require_element(lycon->view);
+        if (span && span->font && span->font->font_size > 0.0f) {
+            // Non-font properties resolve em/ex/ch against the element's computed font;
+            // UA/default font sizes may be present even when this style tree has no font declarations.
+            lycon->font.style = span->font;
+            lycon->font.current_font_size = span->font->font_size;
+        }
+    }
+
     // Pre-resolve 'color' before the second pass so that currentColor references
     // (e.g. border-color: currentColor on <a>.p-btn) see the cascaded color of
     // the current element instead of falling back to a parent or UA default.
@@ -6220,52 +6256,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 log_debug("[CSS] Set font-family from KEYWORD: '%s'", span->font->family);
             }
             else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-                // List of font families (e.g., "Charter, Linux Libertine, Times New Roman, serif")
-                // Try each font in order until we find one that's available
-                for (int i = 0; i < value->data.list.count; i++) {
-                    CssValue* item = value->data.list.values[i];
-                    if (!item) continue;
-                    const char* family = NULL;
-                    log_debug("[CSS] Font family list item[%zu] type: %d", i, item->type);
-                    if (item->type == CSS_VALUE_TYPE_STRING && item->data.string) {
-                        family = item->data.string;
-                        log_debug("[CSS] Font family STRING value: '%s'", family);
-                    } else if (item->type == CSS_VALUE_TYPE_KEYWORD) {
-                        // Check if it's a generic font family keyword
-                        const CssEnumInfo* info = css_enum_info(item->data.keyword);
-                        family = info ? info->name : NULL;
-                        log_debug("[CSS] Font family KEYWORD value: '%s'", family ? family : "(null)");
-                    } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
-                        // Custom font family name (e.g., "Arial", "Helvetica")
-                        family = item->data.custom_property.name;
-                        log_debug("[CSS] Font family CUSTOM value: '%s'", family);
-                    }
-                    if (family) {
-                        // Check if this font is available
-                        if (css_font_family_is_available(lycon, family, true)) {
-                            radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)family));
-                            log_debug("[CSS] Font family from list[%zu]: %s (available)", i, family);
-                            break;
-                        } else {
-                            log_debug("[CSS] Font family '%s' not available, trying next", family);
-                        }
-                    }
-                }
-                // If no font was found, use the last one (usually a generic family)
-                if (!span->font->family && value->data.list.count > 0) {
-                    CssValue* last = value->data.list.values[value->data.list.count - 1];
-                    if (last) {
-                        if (last->type == CSS_VALUE_TYPE_STRING) {
-                            radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)last->data.string));
-                        } else if (last->type == CSS_VALUE_TYPE_KEYWORD) {
-                            const CssEnumInfo* info = css_enum_info(last->data.keyword);
-                            if (info) radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)info->name));
-                            else radiant_clear_font_family(span->font);
-                        } else if (last->type == CSS_VALUE_TYPE_CUSTOM) {
-                            radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)last->data.custom_property.name));
-                        }
-                        log_debug("[CSS] Using last font in list as fallback: %s", span->font->family);
-                    }
+                const char* family = css_select_font_family(lycon, value, true);
+                if (family) {
+                    radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)family));
+                    log_debug("[CSS] Set font-family from LIST: '%s'", span->font->family);
                 }
             }
             break;

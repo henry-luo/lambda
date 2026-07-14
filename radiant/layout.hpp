@@ -2499,6 +2499,7 @@ int apply_text_transform_full(uint32_t codepoint, CssEnum text_transform,
  * @return CSS text-transform value or CSS_VALUE_NONE
  */
 CssEnum get_text_transform_from_block(BlockProp* blk);
+CssEnum get_text_transform_from_node(DomNode* node);
 
 // ============================================================================
 // CJK Justification Utilities (CSS Text 3 §7.3)

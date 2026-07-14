@@ -42,6 +42,46 @@ static bool is_supported_web_font_source(const char* url, const char* format) {
            (len >= 4 && strncasecmp(clean_end - 4, ".ttc", 4) == 0);
 }
 
+static bool is_http_resource_url(const char* url) {
+    return url && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
+}
+
+static CssFontFaceDescriptor* clone_font_face_for_resource(const CssFontFaceDescriptor* source) {
+    if (!source) return NULL;
+
+    CssFontFaceDescriptor* clone = (CssFontFaceDescriptor*)mem_calloc(
+        1, sizeof(CssFontFaceDescriptor), MEM_CAT_NETWORK);
+    if (!clone) return NULL;
+
+    clone->family_name = source->family_name
+        ? mem_strdup(source->family_name, MEM_CAT_NETWORK) : NULL;
+    clone->font_style = source->font_style;
+    clone->font_weight = source->font_weight;
+    clone->font_display = source->font_display;
+    return clone;
+}
+
+static void font_resource_complete_callback(NetworkResource* res, void* user_data) {
+    CssFontFaceDescriptor* font_face = (CssFontFaceDescriptor*)user_data;
+    // Downloaded font files must be registered against their @font-face
+    // descriptor before reflow; otherwise layout uses only generic fallback metrics.
+    process_font_resource(res, font_face);
+    css_font_face_descriptor_free(font_face);
+    res->user_data = NULL;
+    res->on_complete = NULL;
+}
+
+static void attach_font_resource_callback(NetworkResource* res,
+                                          const CssFontFaceDescriptor* face) {
+    if (!res || res->type != RESOURCE_FONT) return;
+    if (res->on_complete || res->user_data) return;
+
+    CssFontFaceDescriptor* clone = clone_font_face_for_resource(face);
+    if (!clone) return;
+    res->on_complete = font_resource_complete_callback;
+    res->user_data = clone;
+}
+
 // Helper: resolve a potentially relative URL against the document's base URL.
 // Returns a heap-allocated absolute URL string (caller must free with mem_free).
 // If resolution fails, returns a copy of the input.
@@ -152,13 +192,14 @@ static void discover_link_callback(DomElement* link, void* user_data) {
         // Resolve relative URL against document base
         char* abs_url = resolve_url(href, doc);
 
-        // Queue for download with HIGH priority (CSS blocks rendering).
-        // Main-thread processing is handled by resource_manager_flush_layout_updates().
-        resource_manager_load(doc->resource_manager,
-                              abs_url,
-                              RESOURCE_CSS,
-                              PRIORITY_HIGH,
-                              link);
+        if (is_http_resource_url(abs_url)) {
+            // Local stylesheets are already loaded synchronously by the document parser.
+            resource_manager_load(doc->resource_manager,
+                                  abs_url,
+                                  RESOURCE_CSS,
+                                  PRIORITY_HIGH,
+                                  link);
+        }
         mem_free(abs_url);
     }
     else if (strcmp(rel, "preload") == 0) {
@@ -185,7 +226,9 @@ static void discover_link_callback(DomElement* link, void* user_data) {
         }
 
         log_debug("network: discovered preload: %s (as=%s)", href, as_type);
-        resource_manager_load(doc->resource_manager, abs_url, rtype, prio, link);
+        if (is_http_resource_url(abs_url)) {
+            resource_manager_load(doc->resource_manager, abs_url, rtype, prio, link);
+        }
         mem_free(abs_url);
     }
 }
@@ -212,13 +255,13 @@ static void discover_img_callback(DomElement* img, void* user_data) {
     // Resolve relative URL against document base
     char* abs_url = resolve_url(src, doc);
 
-    // Queue for download with NORMAL priority. Main-thread processing is
-    // handled by resource_manager_flush_layout_updates().
-    resource_manager_load(doc->resource_manager,
-                          abs_url,
-                          RESOURCE_IMAGE,
-                          PRIORITY_NORMAL,
-                          img);
+    if (is_http_resource_url(abs_url)) {
+        resource_manager_load(doc->resource_manager,
+                              abs_url,
+                              RESOURCE_IMAGE,
+                              PRIORITY_NORMAL,
+                              img);
+    }
     mem_free(abs_url);
 }
 
@@ -247,13 +290,13 @@ static void discover_use_callback(DomElement* use, void* user_data) {
     // Resolve relative URL against document base
     char* abs_url = resolve_url(href, doc);
 
-    // Queue for download with NORMAL priority. Main-thread processing is
-    // handled by resource_manager_flush_layout_updates().
-    resource_manager_load(doc->resource_manager,
-                          abs_url,
-                          RESOURCE_SVG,
-                          PRIORITY_NORMAL,
-                          use);
+    if (is_http_resource_url(abs_url)) {
+        resource_manager_load(doc->resource_manager,
+                              abs_url,
+                              RESOURCE_SVG,
+                              PRIORITY_NORMAL,
+                              use);
+    }
     mem_free(abs_url);
 }
 
@@ -272,8 +315,81 @@ static void discover_script_callback(DomElement* script, void* user_data) {
     char* abs_url = resolve_url(src, doc);
     log_debug("network: discovered <script src>: %s (priority=%d)", abs_url, priority);
 
-    resource_manager_load(doc->resource_manager, abs_url, RESOURCE_SCRIPT, priority, script);
+    if (is_http_resource_url(abs_url)) {
+        resource_manager_load(doc->resource_manager, abs_url, RESOURCE_SCRIPT, priority, script);
+    }
     mem_free(abs_url);
+}
+
+static void discover_document_font_resources(DomDocument* doc) {
+    if (!doc || !doc->resource_manager ||
+        !doc->stylesheets || doc->stylesheet_count <= 0) {
+        return;
+    }
+
+    for (int s = 0; s < doc->stylesheet_count; s++) {
+        if (!doc->stylesheets[s]) continue;
+        int face_count = 0;
+        CssStylesheet* sheet = doc->stylesheets[s];
+        Pool* face_pool = doc->pool ? doc->pool : sheet->pool;
+        bool free_faces = (face_pool == NULL);
+        const char* font_base_url = sheet->origin_url ? sheet->origin_url : NULL;
+        CssFontFaceDescriptor** faces = css_extract_font_faces(
+            sheet, font_base_url, face_pool, &face_count);
+        for (int f = 0; f < face_count; f++) {
+            if (!faces[f]) continue;
+            // Try each src URL in order — queue the first HTTP URL found.
+            for (int u = 0; u < faces[f]->src_count; u++) {
+                const char* font_url = faces[f]->src_urls[u].url;
+                if (!font_url) continue;
+                if (!is_supported_web_font_source(font_url, faces[f]->src_urls[u].format)) {
+                    log_debug("network: skipping unsupported @font-face source: %s (format: %s)",
+                              font_url, faces[f]->src_urls[u].format ? faces[f]->src_urls[u].format : "?");
+                    continue;
+                }
+                char* abs_url = resolve_font_resource_url(font_url, font_base_url, doc);
+                if (abs_url && url_is_absolute_url(abs_url) && is_http_resource_url(abs_url)) {
+                    log_debug("network: discovered @font-face url: %s (family: %s)",
+                              abs_url, faces[f]->family_name ? faces[f]->family_name : "?");
+                    NetworkResource* res = resource_manager_load(
+                        doc->resource_manager, abs_url, RESOURCE_FONT, PRIORITY_HIGH, NULL);
+                    attach_font_resource_callback(res, faces[f]);
+                    mem_free(abs_url);
+                    break;  // only queue first viable URL per @font-face
+                }
+                mem_free(abs_url);
+            }
+            // Also try the fallback src_url field.
+            if (faces[f]->src_url && faces[f]->src_count == 0) {
+                char* abs_url = resolve_font_resource_url(faces[f]->src_url, font_base_url, doc);
+                if (abs_url && url_is_absolute_url(abs_url) && is_http_resource_url(abs_url)) {
+                    log_debug("network: discovered @font-face src_url: %s", abs_url);
+                    NetworkResource* res = resource_manager_load(
+                        doc->resource_manager, abs_url, RESOURCE_FONT, PRIORITY_HIGH, NULL);
+                    attach_font_resource_callback(res, faces[f]);
+                }
+                mem_free(abs_url);
+            }
+        }
+        if (free_faces && faces) {
+            // css_extract_font_faces() heap-allocates when no pool is
+            // available; async discovery owns those transient descriptors.
+            for (int f = 0; f < face_count; f++) {
+                css_font_face_descriptor_free(faces[f]);
+            }
+            mem_free(faces);
+        }
+    }
+}
+
+void radiant_discover_document_font_resources(DomDocument* doc) {
+    if (!doc || !doc->resource_manager) {
+        log_debug("network: font discovery called on document without network support");
+        return;
+    }
+
+    discover_document_font_resources(doc);
+    resource_manager_flush_layout_updates(doc->resource_manager);
 }
 
 // Discover and queue all network resources in a document
@@ -306,62 +422,7 @@ void radiant_discover_document_resources(DomDocument* doc) {
     // Note: srcset parsing is simplified — only uses first URL, ignores descriptors
     // Full srcset handling would need viewport/DPR-aware selection
 
-    // Discover @font-face url() in stylesheets
-    if (doc->stylesheets && doc->stylesheet_count > 0) {
-        for (int s = 0; s < doc->stylesheet_count; s++) {
-            if (!doc->stylesheets[s]) continue;
-            int face_count = 0;
-            CssStylesheet* sheet = doc->stylesheets[s];
-            Pool* face_pool = doc->pool ? doc->pool : sheet->pool;
-            bool free_faces = (face_pool == NULL);
-            const char* font_base_url = sheet->origin_url ? sheet->origin_url : NULL;
-            CssFontFaceDescriptor** faces = css_extract_font_faces(
-                sheet, font_base_url, face_pool, &face_count);
-            for (int f = 0; f < face_count; f++) {
-                if (!faces[f]) continue;
-                // Try each src URL in order — queue the first HTTP URL found
-                for (int u = 0; u < faces[f]->src_count; u++) {
-                    const char* font_url = faces[f]->src_urls[u].url;
-                    if (!font_url) continue;
-                    if (!is_supported_web_font_source(font_url, faces[f]->src_urls[u].format)) {
-                        log_debug("network: skipping unsupported @font-face source: %s (format: %s)",
-                                  font_url, faces[f]->src_urls[u].format ? faces[f]->src_urls[u].format : "?");
-                        continue;
-                    }
-                    char* abs_url = resolve_font_resource_url(font_url, font_base_url, doc);
-                    if (abs_url && url_is_absolute_url(abs_url) &&
-                        (strncmp(abs_url, "http://", 7) == 0 || strncmp(abs_url, "https://", 8) == 0)) {
-                        log_debug("network: discovered @font-face url: %s (family: %s)",
-                                  abs_url, faces[f]->family_name ? faces[f]->family_name : "?");
-                        resource_manager_load(doc->resource_manager,
-                                              abs_url, RESOURCE_FONT, PRIORITY_HIGH, NULL);
-                        mem_free(abs_url);
-                        break;  // only queue first viable URL per @font-face
-                    }
-                    mem_free(abs_url);
-                }
-                // Also try the fallback src_url field
-                if (faces[f]->src_url && faces[f]->src_count == 0) {
-                    char* abs_url = resolve_font_resource_url(faces[f]->src_url, font_base_url, doc);
-                    if (abs_url && url_is_absolute_url(abs_url) &&
-                        (strncmp(abs_url, "http://", 7) == 0 || strncmp(abs_url, "https://", 8) == 0)) {
-                        log_debug("network: discovered @font-face src_url: %s", abs_url);
-                        resource_manager_load(doc->resource_manager,
-                                              abs_url, RESOURCE_FONT, PRIORITY_HIGH, NULL);
-                    }
-                    mem_free(abs_url);
-                }
-            }
-            if (free_faces && faces) {
-                // css_extract_font_faces() heap-allocates when no pool is
-                // available; async discovery owns those transient descriptors.
-                for (int f = 0; f < face_count; f++) {
-                    css_font_face_descriptor_free(faces[f]);
-                }
-                mem_free(faces);
-            }
-        }
-    }
+    discover_document_font_resources(doc);
 
     // Process cache hits immediately on the main thread so first layout can
     // see cached CSS/images even when no async wait loop runs.

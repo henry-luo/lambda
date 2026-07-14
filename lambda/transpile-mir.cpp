@@ -6494,6 +6494,179 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
     return result;
 }
 
+typedef enum MirIndexStorageKind {
+    MIR_INDEX_STORAGE_ARRAY_NUM,
+    MIR_INDEX_STORAGE_ARRAY_FLOAT,
+    MIR_INDEX_STORAGE_BOXED_ITEMS,
+} MirIndexStorageKind;
+
+typedef enum MirIndexResultKind {
+    MIR_INDEX_RESULT_NATIVE_INT,
+    MIR_INDEX_RESULT_NATIVE_FLOAT,
+    MIR_INDEX_RESULT_BOXED_INT,
+    MIR_INDEX_RESULT_NATIVE_BOOL,
+} MirIndexResultKind;
+
+typedef enum MirIndexGuardKind {
+    MIR_INDEX_GUARD_NONE,
+    MIR_INDEX_GUARD_CONTAINER_TYPE,
+    MIR_INDEX_GUARD_BOXED_TYPE,
+} MirIndexGuardKind;
+
+typedef enum MirIndexOobKind {
+    MIR_INDEX_OOB_ITEM_NULL,
+    MIR_INDEX_OOB_FLOAT_ZERO,
+} MirIndexOobKind;
+
+typedef enum MirIndexSlowKind {
+    MIR_INDEX_SLOW_NONE,
+    MIR_INDEX_SLOW_ITEM_AT,
+    MIR_INDEX_SLOW_FN_INDEX,
+} MirIndexSlowKind;
+
+typedef struct MirIndexLoadPolicy {
+    MirIndexStorageKind storage_kind;
+    MIR_type_t element_type;
+    int element_width;
+    MirIndexResultKind result_kind;
+    MirIndexGuardKind guard_kind;
+    TypeId expected_type;
+    MirIndexOobKind oob_kind;
+    MirIndexSlowKind slow_kind;
+} MirIndexLoadPolicy;
+
+static void emit_index_result_move(MirTranspiler* mt, MIR_reg_t result,
+        MIR_reg_t loaded, MirIndexResultKind result_kind, bool loaded_is_boxed) {
+    switch (result_kind) {
+    case MIR_INDEX_RESULT_NATIVE_INT:
+        if (loaded_is_boxed) loaded = emit_unbox(mt, loaded, LMD_TYPE_INT);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, loaded)));
+        break;
+    case MIR_INDEX_RESULT_NATIVE_FLOAT:
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+            MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, loaded)));
+        break;
+    case MIR_INDEX_RESULT_BOXED_INT:
+        if (loaded_is_boxed) {
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, loaded)));
+        } else {
+            MIR_reg_t masked = new_reg(mt, "idx_mask", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                MIR_new_reg_op(mt->ctx, masked), MIR_new_reg_op(mt->ctx, loaded),
+                MIR_new_int_op(mt->ctx, (int64_t)0x00FFFFFFFFFFFFFFLL)));
+            uint64_t int_tag = (uint64_t)LMD_TYPE_INT << 56;
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR,
+                MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx, (int64_t)int_tag),
+                MIR_new_reg_op(mt->ctx, masked)));
+        }
+        break;
+    case MIR_INDEX_RESULT_NATIVE_BOOL:
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
+            MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, loaded),
+            MIR_new_int_op(mt->ctx, 1)));
+        break;
+    }
+}
+
+// Typed index paths share this layout, but their guards, representations, and
+// fallbacks differ after mutation; keep those semantics explicit in the policy.
+static MIR_reg_t emit_checked_index_load(MirTranspiler* mt, MIR_reg_t arr_ptr,
+        MIR_reg_t boxed_obj, MIR_reg_t idx_native, MirIndexLoadPolicy policy) {
+    MIR_type_t result_type = policy.result_kind == MIR_INDEX_RESULT_NATIVE_FLOAT
+        ? MIR_T_D : MIR_T_I64;
+    MIR_reg_t result = new_reg(mt, "idx_result", result_type);
+    MIR_label_t l_fast = new_label(mt);
+    MIR_label_t l_slow = new_label(mt);
+    MIR_label_t l_oob = new_label(mt);
+    MIR_label_t l_end = new_label(mt);
+
+    if (policy.guard_kind != MIR_INDEX_GUARD_NONE) {
+        MIR_reg_t runtime_type = new_reg(mt, "idx_type", MIR_T_I64);
+        if (policy.guard_kind == MIR_INDEX_GUARD_CONTAINER_TYPE) {
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, runtime_type),
+                MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, arr_ptr, 0, 1)));
+        } else {
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_RSH,
+                MIR_new_reg_op(mt->ctx, runtime_type), MIR_new_reg_op(mt->ctx, boxed_obj),
+                MIR_new_int_op(mt->ctx, 56)));
+        }
+        MIR_reg_t type_matches = new_reg(mt, "idx_type_ok", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+            MIR_new_reg_op(mt->ctx, type_matches), MIR_new_reg_op(mt->ctx, runtime_type),
+            MIR_new_int_op(mt->ctx, policy.expected_type)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_fast),
+            MIR_new_reg_op(mt->ctx, type_matches)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_slow)));
+        emit_label(mt, l_fast);
+    }
+
+    MIR_reg_t arr_len = new_reg(mt, "idx_len", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
+    MIR_reg_t negative = new_reg(mt, "idx_negative", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, negative),
+        MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+        MIR_new_reg_op(mt->ctx, negative)));
+    MIR_reg_t past_end = new_reg(mt, "idx_past_end", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, past_end),
+        MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+        MIR_new_reg_op(mt->ctx, past_end)));
+
+    const char* items_name = policy.storage_kind == MIR_INDEX_STORAGE_ARRAY_FLOAT
+        ? "float_items" : (policy.storage_kind == MIR_INDEX_STORAGE_BOXED_ITEMS
+            ? "boxed_items" : "int_items");
+    MIR_reg_t items_ptr = new_reg(mt, items_name, MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
+    MIR_reg_t byte_offset = new_reg(mt, "idx_byte_offset", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MUL, MIR_new_reg_op(mt->ctx, byte_offset),
+        MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, policy.element_width)));
+    MIR_reg_t element_addr = new_reg(mt, "idx_element", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, element_addr),
+        MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_offset)));
+    MIR_reg_t loaded = new_reg(mt, "idx_loaded", policy.element_type);
+    MIR_insn_code_t load_code = policy.element_type == MIR_T_D ? MIR_DMOV : MIR_MOV;
+    emit_insn(mt, MIR_new_insn(mt->ctx, load_code, MIR_new_reg_op(mt->ctx, loaded),
+        MIR_new_mem_op(mt->ctx, policy.element_type, 0, element_addr, 0, 1)));
+    emit_index_result_move(mt, result, loaded, policy.result_kind, false);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+    emit_label(mt, l_oob);
+    if (policy.oob_kind == MIR_INDEX_OOB_FLOAT_ZERO) {
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_double_op(mt->ctx, 0.0)));
+    } else {
+        uint64_t null_value = (uint64_t)LMD_TYPE_NULL << 56;
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_int_op(mt->ctx, (int64_t)null_value)));
+    }
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+    if (policy.guard_kind != MIR_INDEX_GUARD_NONE) {
+        emit_label(mt, l_slow);
+        MIR_reg_t slow_result;
+        if (policy.slow_kind == MIR_INDEX_SLOW_FN_INDEX) {
+            MIR_reg_t boxed_idx = emit_box_int(mt, idx_native);
+            slow_result = emit_call_2(mt, "fn_index", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+        } else {
+            slow_result = emit_call_2(mt, "item_at", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+        }
+        emit_index_result_move(mt, result, slow_result, policy.result_kind, true);
+    }
+
+    emit_label(mt, l_end);
+    return result;
+}
+
 static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     mt->last_index_object = field_node->object;
     // Multi-dim path: arr[i, j, k] — when there's more than one index, dispatch
@@ -6634,59 +6807,12 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
         }
         MIR_reg_t obj_item = transpile_expr(mt, field_node->object);  // tagged container Item
         MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);       // strip tag → raw ArrayNum*
-
-        // Bounds check
-        MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
-
-        MIR_label_t l_ok = new_label(mt);
-        MIR_label_t l_oob = new_label(mt);
-        MIR_label_t l_end = new_label(mt);
-        MIR_reg_t result = new_reg(mt, "aidx", MIR_T_I64);
-
-        MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
-            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-            MIR_new_reg_op(mt->ctx, neg_check)));
-
-        MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
-            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-            MIR_new_reg_op(mt->ctx, ge_check)));
-
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
-
-        // OOB: return ItemNull (suppressed in output)
-        emit_label(mt, l_oob);
-        {
-            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-        }
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-        // In bounds: load items[idx]
-        emit_label(mt, l_ok);
-        MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
-
-        MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
-            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 3)));
-
-        MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
-            MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
-
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, elem_addr, 0, 1)));
-
-        emit_label(mt, l_end);
-        return result;  // NATIVE INT (not boxed)
+        MirIndexLoadPolicy policy = {
+            MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_I64, 8,
+            MIR_INDEX_RESULT_NATIVE_INT, MIR_INDEX_GUARD_NONE, LMD_TYPE_ARRAY_NUM,
+            MIR_INDEX_OOB_ITEM_NULL, MIR_INDEX_SLOW_NONE,
+        };
+        return emit_checked_index_load(mt, arr_ptr, 0, idx_native, policy);
     }
 
     // ======================================================================
@@ -6708,57 +6834,12 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
         }
         MIR_reg_t obj_item = transpile_expr(mt, field_node->object);  // tagged container Item
         MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);       // strip tag → raw ArrayFloat*
-
-        // Bounds check
-        MIR_reg_t arr_len = new_reg(mt, "aflen", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
-
-        MIR_label_t l_ok = new_label(mt);
-        MIR_label_t l_oob = new_label(mt);
-        MIR_label_t l_end = new_label(mt);
-        MIR_reg_t result = new_reg(mt, "afidx", MIR_T_D);
-
-        MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
-            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-            MIR_new_reg_op(mt->ctx, neg_check)));
-
-        MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
-            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-            MIR_new_reg_op(mt->ctx, ge_check)));
-
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
-
-        // OOB: return 0.0 (safe default for float arrays)
-        emit_label(mt, l_oob);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_double_op(mt->ctx, 0.0)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-        // In bounds: load items[idx] as double
-        emit_label(mt, l_ok);
-        MIR_reg_t items_ptr = new_reg(mt, "fitms", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
-
-        MIR_reg_t byte_off = new_reg(mt, "fboff", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
-            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 3)));
-
-        MIR_reg_t elem_addr = new_reg(mt, "feadr", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
-            MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
-
-        // Load as double (MIR_T_D) — ArrayFloat stores raw doubles
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_mem_op(mt->ctx, MIR_T_D, 0, elem_addr, 0, 1)));
-
-        emit_label(mt, l_end);
-        return result;  // NATIVE FLOAT (double, not boxed)
+        MirIndexLoadPolicy policy = {
+            MIR_INDEX_STORAGE_ARRAY_FLOAT, MIR_T_D, 8,
+            MIR_INDEX_RESULT_NATIVE_FLOAT, MIR_INDEX_GUARD_NONE, LMD_TYPE_ARRAY_NUM,
+            MIR_INDEX_OOB_FLOAT_ZERO, MIR_INDEX_SLOW_NONE,
+        };
+        return emit_checked_index_load(mt, arr_ptr, 0, idx_native, policy);
     }
 
     // ======================================================================
@@ -6817,208 +6898,30 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
             MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
 
-            // Read Container.type_id (uint8_t at offset 0) for runtime check
-            MIR_reg_t rt_tid = new_reg(mt, "rttid", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_tid),
-                MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, arr_ptr, 0, 1)));
+            MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
+            MirIndexLoadPolicy policy = {
+                MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_I64, 8,
+                safe_native_int ? MIR_INDEX_RESULT_NATIVE_INT : MIR_INDEX_RESULT_BOXED_INT,
+                MIR_INDEX_GUARD_CONTAINER_TYPE, LMD_TYPE_ARRAY_NUM,
+                MIR_INDEX_OOB_ITEM_NULL, MIR_INDEX_SLOW_ITEM_AT,
+            };
+            return emit_checked_index_load(mt, arr_ptr, boxed_obj, idx_native, policy);
 
-            MIR_reg_t is_aint = new_reg(mt, "isai", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_aint),
-                MIR_new_reg_op(mt->ctx, rt_tid), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_NUM)));
-
-            MIR_label_t l_fast = new_label(mt);
-            MIR_label_t l_slow = new_label(mt);
-            MIR_label_t l_end = new_label(mt);
-            MIR_label_t l_oob = new_label(mt);
-            MIR_reg_t result = new_reg(mt, "aidx", MIR_T_I64);
-
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_fast),
-                MIR_new_reg_op(mt->ctx, is_aint)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_slow)));
-
-            // == ArrayInt at runtime: inline items[idx] ==
-            emit_label(mt, l_fast);
-            {
-                MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
-
-                MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
-                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                    MIR_new_reg_op(mt->ctx, neg_check)));
-
-                MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
-                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                    MIR_new_reg_op(mt->ctx, ge_check)));
-
-                MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
-
-                MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
-                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 3)));
-
-                MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
-                    MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
-
-                MIR_reg_t raw_val = new_reg(mt, "rval", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw_val),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, elem_addr, 0, 1)));
-
-                if (safe_native_int) {
-                    // NATIVE return: raw int64 directly
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                        MIR_new_reg_op(mt->ctx, raw_val)));
-                } else {
-                    // BOXED return: mask lower 56 bits + tag as INT Item
-                    MIR_reg_t masked = new_reg(mt, "mskv", MIR_T_I64);
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
-                        MIR_new_reg_op(mt->ctx, raw_val),
-                        MIR_new_int_op(mt->ctx, (int64_t)0x00FFFFFFFFFFFFFFLL)));
-                    uint64_t INT_TAG = (uint64_t)LMD_TYPE_INT << 56;
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
-                        MIR_new_int_op(mt->ctx, (int64_t)INT_TAG), MIR_new_reg_op(mt->ctx, masked)));
-                }
-            }
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-            // OOB: always return ItemNull (suppressed in output).
-            // Even for safe_native_int, the transpile_box_item null check
-            // will detect ITEM_NULL and preserve it instead of re-boxing as INT 0.
-            emit_label(mt, l_oob);
-            {
-                uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                    MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-            }
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-            // Not ArrayInt at runtime → item_at fallback
-            emit_label(mt, l_slow);
-            {
-                MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
-                MIR_reg_t slow_item = emit_call_2(mt, "item_at", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
-                if (safe_native_int) {
-                    MIR_reg_t slow_native = emit_unbox(mt, slow_item, LMD_TYPE_INT);
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                        MIR_new_reg_op(mt->ctx, slow_native)));
-                } else {
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                        MIR_new_reg_op(mt->ctx, slow_item)));
-                }
-            }
-
-            emit_label(mt, l_end);
-            return result;  // NATIVE INT if safe_native_int, else BOXED Item
         } else if (nested_bool) {
             // ==============================================================
-            // P4-3.1: Bool array — inline read with native bool result
-            // Generic Array stores boxed Item elements (Item*). For bool arrays
-            // from fill(n, true/false), each element is a tagged bool Item.
-            // Runtime type check: Container.type_id must be LMD_TYPE_ARRAY
-            // (fn_array_set keeps it as generic Array for bool values).
-            // Returns NATIVE BOOL (0/1), enabling native AND/OR/NOT paths.
-            // ==============================================================
+            // P4-3.1: Bool arrays store boxed Items, so the common load keeps
+            // the generic-array guard and extracts the native low-bit result.
             MIR_reg_t idx_native = transpile_expr(mt, field_node->field);
             MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
             MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
+            MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
+            MirIndexLoadPolicy policy = {
+                MIR_INDEX_STORAGE_BOXED_ITEMS, MIR_T_I64, 8,
+                MIR_INDEX_RESULT_NATIVE_BOOL, MIR_INDEX_GUARD_CONTAINER_TYPE, LMD_TYPE_ARRAY,
+                MIR_INDEX_OOB_ITEM_NULL, MIR_INDEX_SLOW_ITEM_AT,
+            };
+            return emit_checked_index_load(mt, arr_ptr, boxed_obj, idx_native, policy);
 
-            // Runtime type check: Container.type_id == LMD_TYPE_ARRAY
-            MIR_reg_t rt_tid = new_reg(mt, "rttid", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_tid),
-                MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, arr_ptr, 0, 1)));
-
-            MIR_reg_t is_arr = new_reg(mt, "isarr", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_arr),
-                MIR_new_reg_op(mt->ctx, rt_tid), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY)));
-
-            MIR_label_t l_fast = new_label(mt);
-            MIR_label_t l_slow = new_label(mt);
-            MIR_label_t l_end = new_label(mt);
-            MIR_label_t l_oob = new_label(mt);
-            MIR_reg_t result = new_reg(mt, "bidx", MIR_T_I64);
-
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_fast),
-                MIR_new_reg_op(mt->ctx, is_arr)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_slow)));
-
-            // == Generic Array inline read ==
-            emit_label(mt, l_fast);
-            {
-                // Load length at offset 16
-                MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
-
-                // Bounds check
-                MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
-                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                    MIR_new_reg_op(mt->ctx, neg_check)));
-
-                MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
-                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                    MIR_new_reg_op(mt->ctx, ge_check)));
-
-                // Load items pointer at offset 8
-                MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
-
-                // items[idx] — each Item is 8 bytes
-                MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
-                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 3)));
-
-                MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
-                    MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
-
-                MIR_reg_t raw_val = new_reg(mt, "rval", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw_val),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, elem_addr, 0, 1)));
-
-                // Extract native bool: low bit of boxed bool Item
-                // Bool Item: (LMD_TYPE_BOOL << 56) | value, value is 0 or 1
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, result),
-                    MIR_new_reg_op(mt->ctx, raw_val), MIR_new_int_op(mt->ctx, 1)));
-            }
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-            // OOB: return ItemNull (suppressed in output)
-            emit_label(mt, l_oob);
-            {
-                uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                    MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-            }
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-            // Slow path: item_at → unbox bool
-            emit_label(mt, l_slow);
-            {
-                MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
-                MIR_reg_t slow_item = emit_call_2(mt, "item_at", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
-                // Unbox: extract low bit from boxed bool Item
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, result),
-                    MIR_new_reg_op(mt->ctx, slow_item), MIR_new_int_op(mt->ctx, 1)));
-            }
-
-            emit_label(mt, l_end);
-            return result;  // NATIVE BOOL
         } else {
             // Generic ARRAY — use item_at(boxed_obj, native_idx) to skip index dispatch
             MIR_reg_t idx_native = transpile_expr(mt, field_node->field);
@@ -7027,72 +6930,6 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
         }
-    }
-
-    // ======================================================================
-    // FAST PATH 1c: ARRAY_NUM (int elem) + ANY index — unbox index then inline read
-    // Object is known ArrayNum with int elements (from fill() narrowing), index type unknown.
-    // Unbox the field with it2i() to get native int, then inline items[idx].
-    // Returns NATIVE INT (AST type for ARRAY_NUM[*] is always INT).
-    // ======================================================================
-    if (obj_tid == LMD_TYPE_ARRAY_NUM &&
-        is_integer_type_id(obj_elem_type) &&
-        idx_tid == LMD_TYPE_ANY) {
-        MIR_reg_t boxed_field = transpile_box_item(mt, field_node->field);
-        MIR_reg_t idx_native = emit_unbox(mt, boxed_field, LMD_TYPE_INT);  // it2i
-        MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
-        MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
-
-        MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
-
-        MIR_label_t l_ok = new_label(mt);
-        MIR_label_t l_oob = new_label(mt);
-        MIR_label_t l_end = new_label(mt);
-        MIR_reg_t result = new_reg(mt, "aidx", MIR_T_I64);
-
-        MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
-            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-            MIR_new_reg_op(mt->ctx, neg_check)));
-
-        MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
-            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-            MIR_new_reg_op(mt->ctx, ge_check)));
-
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
-
-        // OOB: return ItemNull (suppressed in output)
-        emit_label(mt, l_oob);
-        {
-            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-        }
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-        emit_label(mt, l_ok);
-        MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
-
-        MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
-            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 3)));
-
-        MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
-            MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
-
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, elem_addr, 0, 1)));
-
-        emit_label(mt, l_end);
-        return result;  // NATIVE INT
     }
 
     // ======================================================================
@@ -7150,194 +6987,29 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
             MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
 
-            // Read Container.type_id for runtime check
-            MIR_reg_t rt_tid = new_reg(mt, "rttid", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_tid),
-                MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, arr_ptr, 0, 1)));
+            MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
+            MirIndexLoadPolicy policy = {
+                MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_I64, 8,
+                safe_native_int ? MIR_INDEX_RESULT_NATIVE_INT : MIR_INDEX_RESULT_BOXED_INT,
+                MIR_INDEX_GUARD_CONTAINER_TYPE, LMD_TYPE_ARRAY_NUM,
+                MIR_INDEX_OOB_ITEM_NULL, MIR_INDEX_SLOW_ITEM_AT,
+            };
+            return emit_checked_index_load(mt, arr_ptr, boxed_obj, idx_native, policy);
 
-            MIR_reg_t is_aint = new_reg(mt, "isai", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_aint),
-                MIR_new_reg_op(mt->ctx, rt_tid), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_NUM)));
-
-            MIR_label_t l_fast = new_label(mt);
-            MIR_label_t l_slow = new_label(mt);
-            MIR_label_t l_end = new_label(mt);
-            MIR_label_t l_oob = new_label(mt);
-            MIR_reg_t result = new_reg(mt, "aidx", MIR_T_I64);
-
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_fast),
-                MIR_new_reg_op(mt->ctx, is_aint)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_slow)));
-
-            // ArrayInt at runtime: inline items[idx]
-            emit_label(mt, l_fast);
-            {
-                MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
-
-                MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
-                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                    MIR_new_reg_op(mt->ctx, neg_check)));
-
-                MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
-                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                    MIR_new_reg_op(mt->ctx, ge_check)));
-
-                MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
-
-                MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
-                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 3)));
-
-                MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
-                    MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
-
-                MIR_reg_t raw_val = new_reg(mt, "rval", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw_val),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, elem_addr, 0, 1)));
-
-                if (safe_native_int) {
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                        MIR_new_reg_op(mt->ctx, raw_val)));
-                } else {
-                    MIR_reg_t masked = new_reg(mt, "mskv", MIR_T_I64);
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
-                        MIR_new_reg_op(mt->ctx, raw_val),
-                        MIR_new_int_op(mt->ctx, (int64_t)0x00FFFFFFFFFFFFFFLL)));
-                    uint64_t INT_TAG = (uint64_t)LMD_TYPE_INT << 56;
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
-                        MIR_new_int_op(mt->ctx, (int64_t)INT_TAG), MIR_new_reg_op(mt->ctx, masked)));
-                }
-            }
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-            // OOB: always return ItemNull (suppressed in output)
-            emit_label(mt, l_oob);
-            {
-                uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                    MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-            }
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-            // Not ArrayInt → item_at fallback
-            emit_label(mt, l_slow);
-            {
-                MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
-                MIR_reg_t slow_item = emit_call_2(mt, "item_at", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
-                if (safe_native_int) {
-                    MIR_reg_t slow_native = emit_unbox(mt, slow_item, LMD_TYPE_INT);
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                        MIR_new_reg_op(mt->ctx, slow_native)));
-                } else {
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                        MIR_new_reg_op(mt->ctx, slow_item)));
-                }
-            }
-
-            emit_label(mt, l_end);
-            return result;  // NATIVE INT if safe_native_int, else BOXED Item
         } else if (nested_bool) {
             // ==============================================================
-            // P4-3.1: Bool array + ANY index — inline read, native bool
-            // Unbox index (already done above), inline Array items[idx],
-            // extract native bool. Runtime type check for safety.
-            // ==============================================================
+            // P4-3.1: ANY indexes are unboxed above; preserve the same boxed
+            // storage, runtime guard, native-bool, and ItemNull policies.
             MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
             MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
+            MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
+            MirIndexLoadPolicy policy = {
+                MIR_INDEX_STORAGE_BOXED_ITEMS, MIR_T_I64, 8,
+                MIR_INDEX_RESULT_NATIVE_BOOL, MIR_INDEX_GUARD_CONTAINER_TYPE, LMD_TYPE_ARRAY,
+                MIR_INDEX_OOB_ITEM_NULL, MIR_INDEX_SLOW_ITEM_AT,
+            };
+            return emit_checked_index_load(mt, arr_ptr, boxed_obj, idx_native, policy);
 
-            // Runtime type check: Container.type_id == LMD_TYPE_ARRAY
-            MIR_reg_t rt_tid = new_reg(mt, "rttid", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_tid),
-                MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, arr_ptr, 0, 1)));
-
-            MIR_reg_t is_arr = new_reg(mt, "isarr", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_arr),
-                MIR_new_reg_op(mt->ctx, rt_tid), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY)));
-
-            MIR_label_t l_fast = new_label(mt);
-            MIR_label_t l_slow = new_label(mt);
-            MIR_label_t l_end = new_label(mt);
-            MIR_label_t l_oob = new_label(mt);
-            MIR_reg_t result = new_reg(mt, "bidx", MIR_T_I64);
-
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_fast),
-                MIR_new_reg_op(mt->ctx, is_arr)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_slow)));
-
-            // == Generic Array inline read ==
-            emit_label(mt, l_fast);
-            {
-                MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
-
-                MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
-                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                    MIR_new_reg_op(mt->ctx, neg_check)));
-
-                MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
-                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                    MIR_new_reg_op(mt->ctx, ge_check)));
-
-                MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
-
-                MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
-                    MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 3)));
-
-                MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
-                    MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
-
-                MIR_reg_t raw_val = new_reg(mt, "rval", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw_val),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, elem_addr, 0, 1)));
-
-                // Extract native bool: low bit of boxed bool Item
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, result),
-                    MIR_new_reg_op(mt->ctx, raw_val), MIR_new_int_op(mt->ctx, 1)));
-            }
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-            // OOB: return ItemNull (suppressed in output)
-            emit_label(mt, l_oob);
-            {
-                uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                    MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-            }
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-            // Slow path: item_at → unbox bool
-            emit_label(mt, l_slow);
-            {
-                MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
-                MIR_reg_t slow_item = emit_call_2(mt, "item_at", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, result),
-                    MIR_new_reg_op(mt->ctx, slow_item), MIR_new_int_op(mt->ctx, 1)));
-            }
-
-            emit_label(mt, l_end);
-            return result;  // NATIVE BOOL
         } else {
             // Generic ARRAY, ANY index — item_at(boxed_obj, it2i(field))
             MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
@@ -7356,93 +7028,14 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
         MIR_reg_t idx_native = transpile_expr(mt, field_node->field);
         MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
 
-        MIR_reg_t obj_tag = new_reg(mt, "otag", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, obj_tag),
-            MIR_new_reg_op(mt->ctx, boxed_obj), MIR_new_int_op(mt->ctx, 56)));
-
-        MIR_reg_t is_aint = new_reg(mt, "isai", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_aint),
-            MIR_new_reg_op(mt->ctx, obj_tag), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_NUM)));
-
-        MIR_label_t l_fast = new_label(mt);
-        MIR_label_t l_slow = new_label(mt);
-        MIR_label_t l_end = new_label(mt);
-        MIR_label_t l_oob = new_label(mt);
-
-        MIR_reg_t result = new_reg(mt, "idx_r", MIR_T_I64);
-
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_fast),
-            MIR_new_reg_op(mt->ctx, is_aint)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_slow)));
-
-        // == ArrayInt inline ==
-        emit_label(mt, l_fast);
         MIR_reg_t arr_ptr = emit_unbox_container(mt, boxed_obj);
+        MirIndexLoadPolicy policy = {
+            MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_I64, 8,
+            MIR_INDEX_RESULT_BOXED_INT, MIR_INDEX_GUARD_BOXED_TYPE, LMD_TYPE_ARRAY_NUM,
+            MIR_INDEX_OOB_ITEM_NULL, MIR_INDEX_SLOW_FN_INDEX,
+        };
+        return emit_checked_index_load(mt, arr_ptr, boxed_obj, idx_native, policy);
 
-        MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
-
-        MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
-            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-            MIR_new_reg_op(mt->ctx, neg_check)));
-
-        MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
-            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-            MIR_new_reg_op(mt->ctx, ge_check)));
-
-        MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
-
-        MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
-            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 3)));
-
-        MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
-            MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
-
-        MIR_reg_t raw_val = new_reg(mt, "rval", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw_val),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, elem_addr, 0, 1)));
-
-        // Tag as INT Item for boxed result
-        MIR_reg_t masked = new_reg(mt, "mskv", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
-            MIR_new_reg_op(mt->ctx, raw_val),
-            MIR_new_int_op(mt->ctx, (int64_t)0x00FFFFFFFFFFFFFFLL)));
-        uint64_t INT_TAG = (uint64_t)LMD_TYPE_INT << 56;
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_int_op(mt->ctx, (int64_t)INT_TAG), MIR_new_reg_op(mt->ctx, masked)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-        // OOB → return null Item
-        emit_label(mt, l_oob);
-        {
-            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-        }
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-        // Slow path: unknown objects may be VMap/map keys, not sequences.
-        emit_label(mt, l_slow);
-        {
-            MIR_reg_t boxed_idx = emit_box_int(mt, idx_native);
-            MIR_reg_t slow_result = emit_call_2(mt, "fn_index", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                MIR_new_reg_op(mt->ctx, slow_result)));
-        }
-
-        emit_label(mt, l_end);
-        return result;
     }
 
     // ======================================================================

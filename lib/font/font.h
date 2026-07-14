@@ -352,6 +352,7 @@ typedef struct FontFaceDesc {
 // the descriptor is copied into the font module's pool/arena.
 // returns true on success.
 bool font_face_register(FontContext* ctx, const FontFaceDesc* desc);
+bool font_face_family_registered(FontContext* ctx, const char* family);
 
 // find the best-matching registered font face for a given style.
 // returns NULL if no registered face matches. does NOT load the font;

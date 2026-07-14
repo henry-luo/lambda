@@ -3678,7 +3678,7 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     }
 
     if (!ctor_fc->ctor_shape_cache_ptr) {
-        ctor_fc->ctor_shape_cache_ptr = (void**)mem_calloc(1, sizeof(void*), MEM_CAT_JS_RUNTIME);
+        ctor_fc->ctor_shape_cache_ptr = jm_alloc_shape_cache_slot(mt);
     }
 
     // the early return above guarantees ctor_fc has shaped properties here,

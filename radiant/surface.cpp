@@ -1,5 +1,6 @@
 #include "view.hpp"
 #include "render.hpp"
+#include "resource_resolver.hpp"
 #include "render.hpp"
 #include "event.hpp"
 #include "render.hpp"
@@ -703,6 +704,18 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             log_error("Invalid local URL: %s", img_url);
             url_destroy(abs_url);
             return NULL;
+        }
+        if (!file_exists(file_path)) {
+            char shared_path[4096];
+            const char* doc_href = uicon->document ? url_get_href(uicon->document->url) : nullptr;
+            if (radiant_resolve_shared_data_resource_path(img_url, doc_href,
+                                                          shared_path, sizeof(shared_path))) {
+                char* shared_copy = mem_strdup(shared_path, MEM_CAT_RENDER);
+                if (shared_copy) {
+                    mem_free(file_path);
+                    file_path = shared_copy;
+                }
+            }
         }
         if (img_url[0] == '/' && img_url[1] != '/' && !file_exists(file_path)) {
             // Local WPT runs emulate an HTTP server; URL-absolute resources are

@@ -369,3 +369,89 @@ static inline void em_call_void_with_args(MirEmitter* em,
     em_emit_insn(em, mir_new_call_with_args(em->ctx, ie->proto, ie->import,
         0, nargs, arg_ops));
 }
+
+static inline MIR_reg_t em_call_0(MirEmitter* em, const char* fn_name,
+                                  MIR_type_t ret_type, bool include_signature) {
+    return em_call_with_args(em, fn_name, ret_type, 0, NULL, NULL, include_signature);
+}
+
+static inline MIR_reg_t em_call_1(MirEmitter* em, const char* fn_name,
+                                  MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
+                                  bool include_signature) {
+    MIR_type_t types[1] = {a1t};
+    MIR_op_t ops[1] = {a1};
+    return em_call_with_args(em, fn_name, ret_type, 1, types, ops, include_signature);
+}
+
+static inline MIR_reg_t em_call_2(MirEmitter* em, const char* fn_name,
+                                  MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
+                                  MIR_type_t a2t, MIR_op_t a2, bool include_signature) {
+    MIR_type_t types[2] = {a1t, a2t};
+    MIR_op_t ops[2] = {a1, a2};
+    return em_call_with_args(em, fn_name, ret_type, 2, types, ops, include_signature);
+}
+
+static inline MIR_reg_t em_call_3(MirEmitter* em, const char* fn_name,
+                                  MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
+                                  MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
+                                  bool include_signature) {
+    MIR_type_t types[3] = {a1t, a2t, a3t};
+    MIR_op_t ops[3] = {a1, a2, a3};
+    return em_call_with_args(em, fn_name, ret_type, 3, types, ops, include_signature);
+}
+
+static inline MIR_reg_t em_call_4(MirEmitter* em, const char* fn_name,
+                                  MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
+                                  MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
+                                  MIR_type_t a4t, MIR_op_t a4, bool include_signature) {
+    MIR_type_t types[4] = {a1t, a2t, a3t, a4t};
+    MIR_op_t ops[4] = {a1, a2, a3, a4};
+    return em_call_with_args(em, fn_name, ret_type, 4, types, ops, include_signature);
+}
+
+static inline MIR_reg_t em_call_5(MirEmitter* em, const char* fn_name,
+                                  MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
+                                  MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
+                                  MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5,
+                                  bool include_signature) {
+    MIR_type_t types[5] = {a1t, a2t, a3t, a4t, a5t};
+    MIR_op_t ops[5] = {a1, a2, a3, a4, a5};
+    return em_call_with_args(em, fn_name, ret_type, 5, types, ops, include_signature);
+}
+
+static inline void em_call_void_0(MirEmitter* em, const char* fn_name,
+                                  bool include_signature) {
+    em_call_void_with_args(em, fn_name, 0, NULL, NULL, include_signature);
+}
+
+static inline void em_call_void_1(MirEmitter* em, const char* fn_name,
+                                  MIR_type_t a1t, MIR_op_t a1, bool include_signature) {
+    MIR_type_t types[1] = {a1t};
+    MIR_op_t ops[1] = {a1};
+    em_call_void_with_args(em, fn_name, 1, types, ops, include_signature);
+}
+
+static inline void em_call_void_2(MirEmitter* em, const char* fn_name,
+                                  MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
+                                  bool include_signature) {
+    MIR_type_t types[2] = {a1t, a2t};
+    MIR_op_t ops[2] = {a1, a2};
+    em_call_void_with_args(em, fn_name, 2, types, ops, include_signature);
+}
+
+static inline void em_call_void_3(MirEmitter* em, const char* fn_name,
+                                  MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
+                                  MIR_type_t a3t, MIR_op_t a3, bool include_signature) {
+    MIR_type_t types[3] = {a1t, a2t, a3t};
+    MIR_op_t ops[3] = {a1, a2, a3};
+    em_call_void_with_args(em, fn_name, 3, types, ops, include_signature);
+}
+
+static inline void em_call_void_4(MirEmitter* em, const char* fn_name,
+                                  MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
+                                  MIR_type_t a3t, MIR_op_t a3, MIR_type_t a4t, MIR_op_t a4,
+                                  bool include_signature) {
+    MIR_type_t types[4] = {a1t, a2t, a3t, a4t};
+    MIR_op_t ops[4] = {a1, a2, a3, a4};
+    em_call_void_with_args(em, fn_name, 4, types, ops, include_signature);
+}

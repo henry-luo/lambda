@@ -76,10 +76,15 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_event_loop.h"
+#include "../lambda/network/enhanced_file_cache.h"
+#include "../lambda/network/network_downloader.h"
+#include "../lambda/network/network_integration.h"
+#include "../lambda/network/network_resource_manager.h"
 #include "../lambda/mark_builder.hpp"
 #include "../radiant/view.hpp"
 #include "render.hpp"
 #include "../radiant/layout.hpp"
+#include "resource_resolver.hpp"
 #include "view.hpp"
 #include "render.hpp"
 #include "event.hpp"
@@ -112,6 +117,8 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
 void collect_inline_styles_to_list(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
                                    CssStylesheet*** stylesheets, int* count, int depth = 0, bool recurse = true);
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
+static EnhancedFileCache* layout_prepare_network_resources(UiContext* ui_context,
+                                                           DomDocument* doc);
 static const int MAX_CSS_TREE_DEPTH = 512;
 
 // Current document charset for CSS fallback encoding (set before collect_linked_stylesheets)
@@ -1547,6 +1554,14 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
             } else {
                 strncpy(css_path, href, sizeof(css_path) - 1);
                 css_path[sizeof(css_path) - 1] = '\0';
+            }
+
+            if (!is_http_css && access(css_path, R_OK) != 0) {
+                char shared_path[1024];
+                if (radiant_resolve_shared_data_resource_path(href, base_path,
+                                                              shared_path, sizeof(shared_path))) {
+                    str_copy(css_path, sizeof(css_path), shared_path, strlen(shared_path));
+                }
             }
 
             log_debug("[CSS] Loading stylesheet from: %s", css_path);
@@ -6605,6 +6620,7 @@ static bool layout_single_file(
 
     // Process @font-face rules from stored stylesheets
     process_document_font_faces(ui_context, doc);
+    EnhancedFileCache* layout_file_cache = layout_prepare_network_resources(ui_context, doc);
 
     // Perform layout computation
     if (doc->view_tree && doc->view_tree->root) {
@@ -6698,6 +6714,9 @@ static bool layout_single_file(
     }
 
     if (doc) {
+        if (doc->resource_manager) {
+            radiant_cleanup_network_support(doc);
+        }
         // Clean up retained JS state (MIR context, event registry, runtime heap)
         // before destroying the document that owns the pointers.
         script_runner_cleanup_js_state(doc);
@@ -6738,6 +6757,11 @@ static bool layout_single_file(
         InputManager::detach_url(input_url);
         url_destroy(input_url);
         input_url = nullptr;
+    }
+
+    if (layout_file_cache) {
+        enhanced_cache_destroy(layout_file_cache);
+        layout_file_cache = nullptr;
     }
 
     pool_destroy(pool);
@@ -6860,6 +6884,84 @@ static char* generate_output_path(const char* input_file, const char* output_dir
     }
 
     return output_path;
+}
+
+static int layout_resource_wait_timeout_ms() {
+    const char* env = getenv("RADIANT_LAYOUT_RESOURCE_TIMEOUT_MS");
+    if (env && env[0]) {
+        char* end = nullptr;
+        long parsed = strtol(env, &end, 10);
+        if (end != env && parsed >= 0) {
+            if (parsed > 5000) return 5000;
+            return (int)parsed; // INT_CAST_OK: bounded millisecond timeout.
+        }
+    }
+    return 1000;
+}
+
+static bool layout_doc_has_remote_font_face(DomDocument* doc) {
+    if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) return false;
+
+    for (int s = 0; s < doc->stylesheet_count; s++) {
+        CssStylesheet* sheet = doc->stylesheets[s];
+        if (!sheet || !sheet->rules) continue;
+        for (size_t r = 0; r < sheet->rule_count; r++) {
+            CssRule* rule = sheet->rules[r];
+            if (!rule || rule->type != CSS_RULE_FONT_FACE) continue;
+            const char* content = rule->data.generic_rule.content;
+            if (content && (strstr(content, "http://") || strstr(content, "https://"))) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static EnhancedFileCache* layout_prepare_network_resources(UiContext* ui_context,
+                                                           DomDocument* doc) {
+    if (!ui_context || !doc) return nullptr;
+    if (!layout_doc_has_remote_font_face(doc)) return nullptr;
+
+    // The resource manager changes image/media loading to async mode, so the
+    // layout CLI only enables it for documents that need remote webfont metrics.
+    network_downloader_init_shared();
+    EnhancedFileCache* file_cache = enhanced_cache_create("./temp/cache",
+        100 * 1024 * 1024, 10000);
+    if (!file_cache) {
+        log_warn("[Layout] Network cache unavailable; proceeding without async resources");
+        return nullptr;
+    }
+
+    if (radiant_init_network_support(doc, NULL, file_cache) != 0) {
+        log_warn("[Layout] Network support unavailable; proceeding without async resources");
+        enhanced_cache_destroy(file_cache);
+        return nullptr;
+    }
+
+    resource_manager_set_ui_context(doc->resource_manager, ui_context);
+    radiant_discover_document_font_resources(doc);
+
+    int waited_ms = 0;
+    const int poll_ms = 10;
+    int timeout_ms = layout_resource_wait_timeout_ms();
+    while (timeout_ms > 0 && waited_ms < timeout_ms &&
+           !resource_manager_is_fully_loaded(doc->resource_manager)) {
+        resource_manager_flush_layout_updates(doc->resource_manager);
+#ifndef _WIN32
+        usleep((useconds_t)poll_ms * 1000);
+#endif
+        waited_ms += poll_ms;
+    }
+    resource_manager_flush_layout_updates(doc->resource_manager);
+
+    int total_resources = 0;
+    int completed_resources = 0;
+    int failed_resources = 0;
+    resource_manager_get_stats(doc->resource_manager, &total_resources,
+                               &completed_resources, &failed_resources);
+    log_info("[Layout] Network resources total=%d completed=%d failed=%d waited=%dms",
+             total_resources, completed_resources, failed_resources, waited_ms);
+    return file_cache;
 }
 
 /**

@@ -204,10 +204,8 @@ static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_coun
             mem_free(func_entries[i].captures);
             func_entries[i].captures = NULL;
         }
-        if (func_entries[i].ctor_shape_cache_ptr) {
-            mem_free(func_entries[i].ctor_shape_cache_ptr);
-            func_entries[i].ctor_shape_cache_ptr = NULL;
-        }
+        // shape cache slots are pool-owned because generated MIR embeds their addresses.
+        func_entries[i].ctor_shape_cache_ptr = NULL;
     }
 }
 
@@ -461,6 +459,13 @@ struct JsMirTranspiler {
     bool module_scope_env_active;             // true if module_fc has been initialised and scope_env is live
 };
 
+static inline void** jm_alloc_shape_cache_slot(JsMirTranspiler* mt) {
+    if (!mt || !mt->tp || !mt->tp->ast_pool) return NULL;
+    // compiled MIR embeds this slot address; ast_pool is retained with any
+    // MIR context whose generated code can outlive the current compile pass.
+    return (void**)pool_calloc(mt->tp->ast_pool, sizeof(void*));
+}
+
 static inline void jm_sync_emitter_from_compat(JsMirTranspiler* mt) {
     mt->em.ctx = mt->ctx;
     mt->em.func_item = mt->current_func_item;
@@ -507,10 +512,8 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         }
     }
     for (int i = 0; i < mt->class_count && i < JS_MIR_MAX_COLLECTED_CLASSES; i++) {
-        if (mt->class_entries[i].shape_cache_ptr) {
-            mem_free(mt->class_entries[i].shape_cache_ptr);
-            mt->class_entries[i].shape_cache_ptr = NULL;
-        }
+        // shape cache slots are pool-owned because generated MIR embeds their addresses.
+        mt->class_entries[i].shape_cache_ptr = NULL;
     }
     jm_free_scope_env_names(mt->func_entries, mt->func_count);
     if (mt->module_fc.scope_env_names) {
