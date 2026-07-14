@@ -24,6 +24,15 @@
       content: [<strong
           "Rich">, " content"]
     }, {
+      tag: 'edge-label',
+      id: null,
+      from: null,
+      to: null,
+      directed: null,
+      shape: null,
+      z: "0",
+      content: ["A to B"]
+    }, {
       tag: 'edge',
       id: null,
       from: "a",

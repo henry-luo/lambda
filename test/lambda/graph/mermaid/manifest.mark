@@ -1,0 +1,34 @@
+<mermaid-suite version: 1;
+  <case id: 'implicit-endpoints', source: 'implicit_endpoints.mmd';
+    <expect direction: 'LR', nodes: 2, edges: 1>
+    <node id: 'A', label: 'A', shape: 'box'>
+    <node id: 'B', label: 'B', shape: 'box'>
+    <edge from: 'A', to: 'B', arrow-end: 'true'>
+  >
+  <case id: 'direction-rl', source: 'direction_rl.mmd';
+    <expect direction: 'RL', nodes: 2, edges: 1>
+  >
+  <case id: 'direction-bt', source: 'direction_bt.mmd';
+    <expect direction: 'BT', nodes: 2, edges: 1>
+  >
+  <case id: 'shapes-and-labels', source: 'shapes_and_labels.mmd';
+    <expect direction: 'TB', nodes: 3, edges: 2>
+    <node id: 'A', label: 'Start', shape: 'rounded'>
+    <node id: 'B', label: 'Valid?', shape: 'diamond'>
+    <node id: 'C', label: 'Done', shape: 'doublecircle'>
+    <edge from: 'A', to: 'B', label: 'check', arrow-end: 'true'>
+  >
+  <case id: 'nested-subgraph', source: 'nested_subgraph.mmd';
+    <expect direction: 'TB', nodes: 3, edges: 2, subgraphs: 1>
+    <subgraph id: 'backend', label: 'Backend', direction: 'LR'>
+    <node id: 'db', label: 'Database', shape: 'cylinder'>
+  >
+  <case id: 'class-metadata', source: 'class_metadata.mmd';
+    <expect direction: 'TB', nodes: 2, edges: 1, style-rules: 1, class-assignments: 1>
+    <class-assignment targets: 'A,B', class: 'warning'>
+    <style-rule class: 'warning', declarations: 'fill:#fff4cc,stroke:#8a6500'>
+  >
+  <case id: 'chart-routing', source: 'chart_routing.mmd';
+    <expect kind: 'sequence', status: 'unsupported', nodes: 0, edges: 0>
+  >
+>

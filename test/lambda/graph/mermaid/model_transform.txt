@@ -1,0 +1,8 @@
+{
+  direction: "TB",
+  source_counts: [3, 2, 1],
+  html_counts: [3, 2],
+  node_groups: [["start", null], ["api", null], ["db", "backend"]],
+  edge_groups: [["start", "api", null], ["api", "db", "backend"]],
+  styled_classes: ["graph-node warning", "graph-node warning"]
+}

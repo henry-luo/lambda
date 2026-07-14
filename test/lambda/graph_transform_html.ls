@@ -8,7 +8,7 @@ let result = transform.to_html({
     {id: "b", content: [rich, " content"], shape: "round", z: 2}
   ],
   edges: [
-    {id: "ab", from: "a", to: "b"}
+    {id: "ab", from: "a", to: "b", label: "A to B"}
   ]
 }, {direction: "LR", node_sep: 42, rank_sep: 64})
 
@@ -27,6 +27,7 @@ let result = transform.to_html({
     shape: child['data-shape'],
     z: child['data-z'],
     content: if (name(child) == 'node' and len(child) > 0)
-      [for (j in 0 to (len(child) - 1)) child[j]] else []
+      [for (j in 0 to (len(child) - 1)) child[j]]
+      else if (name(child) == 'edge-label' and len(child) > 0) [child[0]] else []
   }]
 }

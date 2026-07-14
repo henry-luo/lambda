@@ -6,7 +6,7 @@ let result = graph_layout.compute({
     {id: "a", width: 80, height: 40},
     {id: "b", width: 80, height: 40}
   ],
-  edges: [{id: "ab", from: "a", to: "b", directed: true, z: -2}]
+  edges: [{id: "ab", from: "a", to: "b", directed: true, arrow_start: true, z: -2}]
 }, {rank_sep: 70})
 let layers = paint.layers(result)
 let layer = layers[0]
@@ -18,5 +18,5 @@ let path = svg[len(svg) - 1]
   z: layer.z,
   edge_id: layer.edge_id,
   svg: [name(svg), svg.width, svg.height, svg.viewBox],
-  path: [name(path), path.d, path['marker-end']]
+  path: [name(path), path.d, path['marker-start'], path['marker-end']]
 }

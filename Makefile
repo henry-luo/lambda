@@ -1650,6 +1650,17 @@ test-input: build
 	@echo "Running input processing test suite..."
 	@node test/test_run.js --target=input --raw
 
+build-graph-mermaid-test:
+	@echo "Building Mermaid graph semantic runner..."
+	@mkdir -p build/premake
+	@$(MAKE) generate-premake
+	@PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	@PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native test_graph_mermaid_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+
+test-graph-mermaid: build-graph-mermaid-test
+	@echo "Running Mermaid graph semantic corpus..."
+	@./test/test_graph_mermaid_gtest.exe
+
 test-validator: build
 	@echo "Running validator test suite..."
 	@node test/test_run.js --target=validator --raw

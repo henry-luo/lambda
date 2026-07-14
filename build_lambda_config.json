@@ -3132,6 +3132,20 @@
                         "icon": "📊"
                     },
                     {
+                        "source": "test_graph_mermaid_gtest.cpp",
+                        "name": "Mermaid Graph Semantic Corpus",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_graph_mermaid_gtest.exe",
+                        "icon": "📈"
+                    },
+                    {
                         "source": "parser/test_parser_robustness_gtest.cpp",
                         "name": "Parser Safety and Error Handling Tests",
                         "dependencies": [
