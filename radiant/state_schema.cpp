@@ -722,7 +722,8 @@ static int sm_derive_text_state(DocState* state, View* target) {
     uint32_t start = 0;
     uint32_t end = 0;
     uint32_t len = 0;
-    form_control_get_selection(state, target, &start, &end, NULL);
+    // transition observation must not lazy-initialize controls only in debug builds.
+    form_control_peek_selection(state, target, &start, &end, NULL);
     if (start != end) return TEXT_SELECTION;
     const char* value = form_control_get_value(state, target, &len);
     return value && len > 0 ? TEXT_VALUE : TEXT_EMPTY;

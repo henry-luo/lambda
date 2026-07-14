@@ -4475,8 +4475,8 @@ void form_control_set_value(DocState* state, View* view, const char* value, uint
     form_state_mark_dirty(state);
 }
 
-void form_control_get_selection(DocState* state, View* view,
-                                uint32_t* out_start, uint32_t* out_end, uint8_t* out_direction) {
+void form_control_peek_selection(DocState* state, View* view,
+                                 uint32_t* out_start, uint32_t* out_end, uint8_t* out_direction) {
     if (out_start) *out_start = 0;
     if (out_end) *out_end = 0;
     if (out_direction) *out_direction = 0;
@@ -4484,7 +4484,6 @@ void form_control_get_selection(DocState* state, View* view,
     if (view && view->is_element()) {
         DomElement* elem = lam::dom_require_element(view);
         if (elem && tc_is_text_control(elem)) {
-            tc_ensure_init(elem);
             FormControlProp* form = elem->form;
             if (!form) return;
             if (state && state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
@@ -4516,6 +4515,15 @@ void form_control_get_selection(DocState* state, View* view,
     if (out_start) *out_start = form->selection_start;
     if (out_end) *out_end = form->selection_end;
     if (out_direction) *out_direction = form->selection_direction;
+}
+
+void form_control_get_selection(DocState* state, View* view,
+                                uint32_t* out_start, uint32_t* out_end, uint8_t* out_direction) {
+    if (view && view->is_element()) {
+        DomElement* elem = lam::dom_require_element(view);
+        if (elem && tc_is_text_control(elem)) tc_ensure_init(elem);
+    }
+    form_control_peek_selection(state, view, out_start, out_end, out_direction);
 }
 
 void form_control_set_selection(DocState* state, View* view,
