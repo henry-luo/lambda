@@ -6,7 +6,6 @@
     "viewport": { "width": 900, "height": 1000 },
     "events": [
         {"type": "log", "message": "=== Webview Form Test Start ==="},
-        {"type": "wait", "ms": 1500},
 
         {"type": "log", "message": "--- Assert webview element exists and is visible ---"},
         {"type": "assert_count", "target": {"selector": "webview"}, "count": 1},

@@ -4,12 +4,9 @@
   "viewport": {"width": 760, "height": 420},
   "events": [
     {"type": "log", "message": "=== editing_paired_mouse_selection_mixed ==="},
-    {"type": "wait", "ms": 150},
     {"type": "dblclick", "target": {"selector": "#nav-embedded-input", "offset_x": 48, "offset_y": 10}},
-    {"type": "wait", "ms": 80},
     {"type": "assert_editing_selection", "target": {"selector": "#nav-embedded-input"}, "start": 4, "end": 7},
     {"type": "dblclick", "target": {"text": "Alpha"}},
-    {"type": "wait", "ms": 80},
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
     {"type": "assert_editing_selection", "target": {"selector": "#surface"}, "start": 5, "end": 10}
   ]

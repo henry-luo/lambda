@@ -4,34 +4,27 @@
   "viewport": {"width": 600, "height": 600},
   "events": [
     {"type": "log", "message": "=== form_input_undo_redo ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "click", "target": {"selector": "#name"}},
-    {"type": "wait", "ms": 80},
     {"type": "assert_focus", "target": {"selector": "#name"}},
 
     {"type": "type", "target": {"selector": "#name"}, "text": "abc"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "abc"},
     {"type": "assert_caret", "char_offset": 3},
 
     {"type": "key_combo", "key": "z", "mods_str": "super"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "ab"},
     {"type": "assert_caret", "char_offset": 2},
 
     {"type": "key_combo", "key": "z", "mods_str": "super"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "a"},
     {"type": "assert_caret", "char_offset": 1},
 
     {"type": "key_combo", "key": "z", "mods_str": "super+shift"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "ab"},
     {"type": "assert_caret", "char_offset": 2},
 
     {"type": "key_combo", "key": "y", "mods_str": "ctrl"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "abc"},
     {"type": "assert_caret", "char_offset": 3},
 

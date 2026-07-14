@@ -4,7 +4,6 @@
   "description": "Covers inline return false default prevention, dynamic setAttribute('onclick', ...), and removeAttribute('onclick').",
   "events": [
     {"type": "log", "message": "=== js_event_handler_dynamic_phase4 ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "assert_checked", "target": {"selector": "#inline-cancel"}, "checked": false},
     {"type": "click", "target": {"selector": "#inline-cancel"}},

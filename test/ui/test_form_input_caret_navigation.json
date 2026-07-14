@@ -4,37 +4,29 @@
   "viewport": {"width": 600, "height": 600},
   "events": [
     {"type": "log", "message": "=== form_input_caret_navigation ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "click", "target": {"selector": "#name"}},
     {"type": "wait", "ms": 80},
     {"type": "type", "target": {"selector": "#name"}, "text": "abc"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "abc"},
     {"type": "assert_caret", "char_offset": 3},
 
     {"type": "key_press", "key": "Home"},
-    {"type": "wait", "ms": 60},
     {"type": "assert_caret", "char_offset": 0},
 
     {"type": "key_press", "key": "Right"},
-    {"type": "wait", "ms": 60},
     {"type": "assert_caret", "char_offset": 1},
 
     {"type": "key_press", "key": "End"},
-    {"type": "wait", "ms": 60},
     {"type": "assert_caret", "char_offset": 3},
 
     {"type": "key_press", "key": "Left"},
-    {"type": "wait", "ms": 60},
     {"type": "assert_caret", "char_offset": 2},
 
     {"type": "key_press", "key": "Up"},
-    {"type": "wait", "ms": 60},
     {"type": "assert_caret", "char_offset": 0},
 
     {"type": "key_press", "key": "Down"},
-    {"type": "wait", "ms": 60},
     {"type": "assert_caret", "char_offset": 3},
     {"type": "assert_state_dump", "reference": "test/ui/state/test_form_input_caret_navigation_final.mark"}
   ]

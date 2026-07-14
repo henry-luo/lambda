@@ -4,12 +4,10 @@
   "viewport": {"width": 640, "height": 380},
   "events": [
     {"type": "log", "message": "=== editing_paired_ime_textarea ==="},
-    {"type": "wait", "ms": 150},
     {"type": "click", "target": {"selector": "#surface"}},
     {"type": "ime_compose", "phase": "begin"},
     {"type": "ime_compose", "phase": "update", "preedit": "pre", "caret": 3},
     {"type": "ime_compose", "phase": "commit", "commit": "done"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#composition-log"}, "contains": "compositionstart:|compositionupdate:pre|beforeinput:insertCompositionText:pre:1|input:insertCompositionText:pre:1|compositionend:done|beforeinput:insertFromComposition:done:0|input:insertFromComposition:done:0"},
     {"type": "assert_event_log", "contains": "\"type\":\"editing.composition\"", "min": 2}
   ]

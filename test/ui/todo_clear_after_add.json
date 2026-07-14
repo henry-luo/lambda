@@ -10,12 +10,10 @@
     {"type": "type", "target": {"selector": ".new-item-input"}, "text": "New task"},
     {"type": "wait", "ms": 200},
     {"type": "key_press", "key": "Return"},
-    {"type": "wait", "ms": 300},
     {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 9},
 
     {"type": "log", "message": "--- Click clear completed ---"},
     {"type": "click", "target": {"selector": ".clear-done-btn"}},
-    {"type": "wait", "ms": 300},
     {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 8},
     {"type": "log", "message": "--- Done ---"}
   ]

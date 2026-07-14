@@ -5,19 +5,16 @@
   "description": "Regression: after scrolling, a subsequent mouse move must not reset viewport scroll to top.",
   "events": [
     {"type": "log", "message": "=== Scroll persistence after mouse move ==="},
-    {"type": "wait", "ms": 120},
 
     {"type": "log", "message": "Step 1: verify initial viewport at top"},
     {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 2},
 
     {"type": "log", "message": "Step 2: scroll to y=400"},
     {"type": "scroll_to", "x": 0, "y": 400},
-    {"type": "wait", "ms": 80},
     {"type": "assert_scroll", "x": 0, "y": 400, "tolerance": 5},
 
     {"type": "log", "message": "Step 3: move mouse; scroll should stay at y=400"},
     {"type": "mouse_move", "x": 220, "y": 120},
-    {"type": "wait", "ms": 80},
     {"type": "assert_scroll", "x": 0, "y": 400, "tolerance": 5},
 
     {"type": "log", "message": "=== Scroll persistence scenario complete ==="}

@@ -4,13 +4,11 @@
   "viewport": {"width": 760, "height": 360},
   "events": [
     {"type": "log", "message": "=== editing_paired_mixed ==="},
-    {"type": "wait", "ms": 150},
 
     {"type": "log", "message": "Same cancellable typing gesture on rich host"},
     {"type": "click", "target": {"text": "Alpha"}},
     {"type": "wait", "ms": 60},
     {"type": "type", "target": {"selector": "#surface"}, "text": "X"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#surface"}, "contains": "Alpha words"},
     {"type": "assert_text", "target": {"selector": "#blocked-log"}, "contains": "blocked:insertText|X|"},
     {"type": "assert_text", "target": {"selector": "#input-log"}, "equals": "input:none"},
@@ -19,7 +17,6 @@
     {"type": "mouse_down", "target": {"selector": "#embedded-input", "offset_x": 1, "offset_y": 12}, "button": 0},
     {"type": "wait", "ms": 20},
     {"type": "mouse_move", "target": {"selector": "#surface", "offset_x": 560, "offset_y": 20}},
-    {"type": "wait", "ms": 40},
     {"type": "assert_form_selection", "target": {"selector": "#embedded-input"}, "start": 0, "end": 5},
     {"type": "mouse_up", "target": {"selector": "#surface", "offset_x": 560, "offset_y": 20}, "button": 0},
     {"type": "wait", "ms": 60},
@@ -28,10 +25,8 @@
     {"type": "mouse_down", "target": {"text": "Alpha"}, "button": 0},
     {"type": "wait", "ms": 20},
     {"type": "mouse_move", "target": {"selector": "#embedded-input", "offset_x": 60, "offset_y": 12}},
-    {"type": "wait", "ms": 20},
     {"type": "assert_form_selection", "target": {"selector": "#embedded-input"}, "start": 5, "end": 5},
     {"type": "mouse_move", "target": {"text": "Omega"}},
-    {"type": "wait", "ms": 40},
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
     {"type": "assert_form_selection", "target": {"selector": "#embedded-input"}, "start": 5, "end": 5},
     {"type": "mouse_up", "target": {"text": "Omega"}, "button": 0}

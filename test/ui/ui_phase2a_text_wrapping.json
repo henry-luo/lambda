@@ -4,7 +4,6 @@
   "events": [
     {"type": "log", "message": "=== Phase 2a: assert_visible + assert_text + click caret on baseline_502 ==="},
     {"type": "log", "message": "Coord note: .narrow-container at (0,0) 180x156, padding=15px, font=16px Arial"},
-    {"type": "wait", "ms": 300},
 
     {"type": "assert_visible", "target": {"selector": ".narrow-container"}, "visible": true},
     {"type": "assert_text",    "target": {"selector": ".narrow-container"}, "contains": "long sentence"},

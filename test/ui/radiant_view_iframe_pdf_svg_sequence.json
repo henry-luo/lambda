@@ -4,10 +4,8 @@
   "events": [
     { "type": "assert_rect", "target": { "selector": "iframe[name=\"main_frame\"]" }, "width": 1186, "height": 602, "tolerance": 4 },
     { "type": "click", "target": { "selector": "a[href=\"../input/raw_commands_test.pdf\"]" } },
-    { "type": "wait", "ms": 150 },
     { "type": "assert_rect", "target": { "selector": "iframe[name=\"main_frame\"]" }, "width": 1186, "height": 602, "tolerance": 4 },
     { "type": "click", "target": { "selector": "a[href=\"../layout/data/res/tiger.svg\"]" } },
-    { "type": "wait", "ms": 150 },
     { "type": "assert_rect", "target": { "selector": "iframe[name=\"main_frame\"]" }, "width": 1186, "height": 602, "tolerance": 4 }
   ]
 }

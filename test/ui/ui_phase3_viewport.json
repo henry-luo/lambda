@@ -4,7 +4,6 @@
   "html": "test/ui/test_form_controls.html",
   "events": [
     {"type": "log", "message": "=== Phase 3: Viewport Config Test (800x600) ==="},
-    {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "--- Basic checkbox check with custom viewport ---"},
     {"type": "check", "target": {"selector": "input#cb-terms"}, "checked": true},

@@ -3,7 +3,6 @@
   "html": "test/ui/test_phase5a_geometry.html",
   "events": [
     {"type": "log", "message": "=== Phase 5a: Geometry and style assertions ==="},
-    {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "--- assert_rect: header position and size ---"},
     {"type": "assert_rect", "target": {"selector": "#header"},

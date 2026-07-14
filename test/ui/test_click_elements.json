@@ -4,11 +4,9 @@
   "description": "Click on buttons and links by CSS selector and verify caret state",
   "events": [
     {"type": "log", "message": "=== Click elements test ==="},
-    {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "Step 1: Click primary button by selector"},
     {"type": "click", "target": {"selector": "#btn-primary"}},
-    {"type": "wait", "ms": 100},
 
     {"type": "log", "message": "Step 2: Verify button text content"},
     {"type": "assert_text", "target": {"selector": "#btn-primary"}, "equals": "Primary Action"},
@@ -19,7 +17,6 @@
 
     {"type": "log", "message": "Step 4: Click secondary button"},
     {"type": "click", "target": {"selector": "#btn-secondary"}},
-    {"type": "wait", "ms": 100},
 
     {"type": "log", "message": "Step 5: Verify section content"},
     {"type": "assert_text", "target": {"selector": "#section1 h2"}, "equals": "Section 1"},

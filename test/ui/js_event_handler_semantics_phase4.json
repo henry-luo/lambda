@@ -4,7 +4,6 @@
   "description": "Covers legacy inline event/global event, dynamic onclick property handler, this binding, currentTarget, and defaultPrevented propagation.",
   "events": [
     {"type": "log", "message": "=== js_event_handler_semantics_phase4 ==="},
-    {"type": "wait", "ms": 200},
     {"type": "click", "target": {"selector": "#inline"}},
     {"type": "assert_text", "target": {"selector": "#log"}, "equals": "inline-this-inline|inline-event-click-inline", "assert_timeout": 1000},
     {"type": "click", "target": {"selector": "#prop"}},

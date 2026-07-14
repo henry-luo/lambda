@@ -4,24 +4,20 @@
   "viewport": {"width": 200, "height": 200},
   "events": [
     {"type": "log", "message": "=== css_transition_hover ==="},
-    {"type": "wait", "ms": 100},
 
     {"type": "log", "message": "before hover: box is solid red"},
     {"type": "assert_pixel", "x": 50, "y": 50, "min_r": 250, "max_r": 255, "min_g": 0, "max_g": 5, "min_b": 0, "max_b": 5},
 
     {"type": "log", "message": "hover the box and flush pending reflow (assert_state resolves a selector)"},
     {"type": "mouse_move", "target": {"selector": "#box"}},
-    {"type": "wait", "ms": 20},
     {"type": "assert_state", "target": {"selector": "#box"}, "state": ":hover", "value": true},
 
     {"type": "log", "message": "advance ~50% into the 0.3s linear transition -> purple blend"},
     {"type": "advance_time", "ms": 150},
-    {"type": "wait", "ms": 20},
     {"type": "assert_pixel", "x": 50, "y": 50, "min_r": 90, "max_r": 165, "min_g": 0, "max_g": 5, "min_b": 90, "max_b": 165},
 
     {"type": "log", "message": "advance past the end -> solid blue"},
     {"type": "advance_time", "ms": 250},
-    {"type": "wait", "ms": 20},
     {"type": "assert_pixel", "x": 50, "y": 50, "min_r": 0, "max_r": 5, "min_g": 0, "max_g": 5, "min_b": 250, "max_b": 255}
   ]
 }

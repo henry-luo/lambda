@@ -4,14 +4,12 @@
   "viewport": {"width": 628, "height": 460},
   "events": [
     {"type": "log", "message": "=== form_textarea_scrolled_hit_test ==="},
-    {"type": "wait", "ms": 200},
     {"type": "set_editing_value", "target": {"selector": ".focus-textarea"}, "text": "asdf\nasdf"},
     {"type": "scroll_to", "target": {"selector": ".focus-textarea"}},
     {"type": "wait", "ms": 80},
 
     {"type": "mouse_down", "x": 58, "y": 45, "button": "left"},
     {"type": "mouse_up", "x": 58, "y": 45, "button": "left"},
-    {"type": "wait", "ms": 80},
 
     {"type": "assert_form_selection", "target": {"selector": ".focus-textarea"}, "start": 5, "end": 5},
     {"type": "assert_state_dump", "reference": "test/ui/state/test_form_textarea_scrolled_hit_test_final.mark"}

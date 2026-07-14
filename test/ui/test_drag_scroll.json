@@ -3,7 +3,6 @@
   "html": "test/ui/test_drag_scroll.html",
   "events": [
     {"type": "log", "message": "=== Phase 3: Drag Scroll Test ==="},
-    {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "--- Verify initial scroll at top ---"},
     {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 5},
@@ -19,7 +18,6 @@
     {"type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": -10},
     {"type": "wait", "ms": 200},
     {"type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": -10},
-    {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "--- Verify scroll position changed ---"},
     {"type": "assert_scroll", "y": 1000, "tolerance": 600},

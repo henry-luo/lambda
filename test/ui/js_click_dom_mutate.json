@@ -4,7 +4,6 @@
   "description": "Tests onclick handlers that add/remove DOM elements. Verifies appendChild creates new elements and removeChild removes them, with correct relayout.",
   "events": [
     {"type": "log", "message": "=== js_click_dom_mutate: DOM structure mutation ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "Step 1: Verify container is initially empty"},
     {"type": "assert_count", "target": {"selector": "#container .item"}, "count": 0},

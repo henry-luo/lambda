@@ -4,16 +4,13 @@
   "viewport": {"width": 640, "height": 360},
   "events": [
     {"type": "log", "message": "=== editing_paired_clipboard_input ==="},
-    {"type": "wait", "ms": 150},
     {"type": "click", "target": {"selector": "#surface"}},
     {"type": "paste_text", "target": {"selector": "#surface"}, "text": "clip"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#input-log"}, "equals": "input:insertFromPaste|clip|clip"},
     {"type": "assert_text", "target": {"selector": "#transfer-log"}, "equals": "transfer:dt:none"},
     {"type": "tripleclick", "target": {"selector": "#surface"}},
     {"type": "wait", "ms": 80},
     {"type": "key_combo", "key": "c", "mods_str": "super"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_clipboard", "equals": "clip"}
   ]
 }

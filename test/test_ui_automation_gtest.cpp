@@ -73,6 +73,9 @@ struct UiTestInfo {
     std::string json_path;   // e.g. "test/ui/test_click_text.json"
     std::string test_name;   // e.g. "test_click_text"
     bool skip_headless;      // requires native GUI window (e.g. WKWebView tests)
+    int estimated_wait_ms;   // explicit event waits, used only for launch scheduling
+    int explicit_wait_count;
+    int wait_before_assert_count;
 
     friend std::ostream& operator<<(std::ostream& os, const UiTestInfo& info) {
         return os << info.test_name;
@@ -89,47 +92,124 @@ static bool file_exists(const std::string& path) {
     return false;
 }
 
+static char* read_json_text(const std::string& json_path, size_t limit) {
+    FILE* file = fopen(json_path.c_str(), "rb");
+    if (!file) return nullptr;
+
+    size_t capacity = limit;
+    if (capacity == 0) {
+        if (fseek(file, 0, SEEK_END) != 0) {
+            fclose(file);
+            return nullptr;
+        }
+        long file_size = ftell(file);
+        if (file_size < 0 || fseek(file, 0, SEEK_SET) != 0) {
+            fclose(file);
+            return nullptr;
+        }
+        capacity = (size_t)file_size;
+    }
+
+    char* text = (char*)malloc(capacity + 1);
+    if (!text) {
+        fclose(file);
+        return nullptr;
+    }
+    size_t length = fread(text, 1, capacity, file);
+    fclose(file);
+    text[length] = '\0';
+    return text;
+}
+
 // Extract the top-level "html" field from a JSON event file.
 // Reads only the first 2KB (the field must appear before the events array).
 // Returns empty string if not found.
 static std::string extract_html_from_json(const std::string& json_path) {
-    FILE* f = fopen(json_path.c_str(), "r");
-    if (!f) return "";
-    char buf[2048];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-    buf[n] = '\0';
-    const char* key = strstr(buf, "\"html\"");
-    if (!key) return "";
-    key += 6;
-    while (*key == ' ' || *key == '\t' || *key == '\n' || *key == '\r') key++;
-    if (*key != ':') return "";
-    key++;
-    while (*key == ' ' || *key == '\t' || *key == '\n' || *key == '\r') key++;
-    if (*key != '"') return "";
-    key++;
+    char* json = read_json_text(json_path, 2048);
     std::string result;
-    while (*key && *key != '"') result += *key++;
+    const char* key = json ? strstr(json, "\"html\"") : nullptr;
+    if (key) {
+        key += 6;
+        while (*key == ' ' || *key == '\t' || *key == '\n' || *key == '\r') key++;
+        if (*key == ':') key++;
+        else key = nullptr;
+    }
+    if (key) {
+        while (*key == ' ' || *key == '\t' || *key == '\n' || *key == '\r') key++;
+        if (*key == '"') key++;
+        else key = nullptr;
+    }
+    if (key) while (*key && *key != '"') result += *key++;
+    free(json);
     return result;
 }
 
 // Check if a JSON event file has "skip_headless": true.
 // These tests require a native GUI window (e.g. WKWebView) and cannot run headless.
 static bool extract_skip_headless_from_json(const std::string& json_path) {
-    FILE* f = fopen(json_path.c_str(), "r");
-    if (!f) return false;
-    char buf[2048];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-    buf[n] = '\0';
-    const char* key = strstr(buf, "\"skip_headless\"");
-    if (!key) return false;
-    key += 15;
-    while (*key == ' ' || *key == '\t' || *key == '\n' || *key == '\r') key++;
-    if (*key != ':') return false;
-    key++;
-    while (*key == ' ' || *key == '\t' || *key == '\n' || *key == '\r') key++;
-    return strncmp(key, "true", 4) == 0;
+    char* json = read_json_text(json_path, 2048);
+    const char* key = json ? strstr(json, "\"skip_headless\"") : nullptr;
+    bool skip_headless = false;
+    if (key) {
+        key += 15;
+        while (*key == ' ' || *key == '\t' || *key == '\n' || *key == '\r') key++;
+        if (*key == ':') {
+            key++;
+            while (*key == ' ' || *key == '\t' || *key == '\n' || *key == '\r') key++;
+            skip_headless = strncmp(key, "true", 4) == 0;
+        }
+    }
+    free(json);
+    return skip_headless;
+}
+
+typedef struct UiWaitStats {
+    int total_ms;
+    int count;
+    int before_assert_count;
+} UiWaitStats;
+
+static UiWaitStats analyze_explicit_waits_from_json(const std::string& json_path) {
+    UiWaitStats stats = {0};
+    char* json = read_json_text(json_path, 0);
+    if (!json) return stats;
+
+    bool wait_pending = false;
+    const char* cursor = json;
+    while ((cursor = strstr(cursor, "\"type\"")) != nullptr) {
+        const char* next_type = strstr(cursor + 6, "\"type\"");
+        const char* colon = strchr(cursor + 6, ':');
+        const char* value = colon ? strchr(colon + 1, '"') : nullptr;
+        if (!value || (next_type && value >= next_type)) {
+            cursor = next_type ? next_type : cursor + 6;
+            continue;
+        }
+
+        const char* value_end = strchr(value + 1, '"');
+        size_t type_length = value_end ? (size_t)(value_end - value - 1) : 0;
+        bool is_wait = type_length == 4 && strncmp(value + 1, "wait", 4) == 0;
+        bool is_log = type_length == 3 && strncmp(value + 1, "log", 3) == 0;
+        bool is_assertion = type_length > 7 && strncmp(value + 1, "assert_", 7) == 0;
+
+        if (is_wait) {
+            stats.count++;
+            const char* ms_key = strstr(value + 6, "\"ms\"");
+            if (ms_key && (!next_type || ms_key < next_type)) {
+                const char* ms_colon = strchr(ms_key + 4, ':');
+                if (ms_colon && (!next_type || ms_colon < next_type)) {
+                    long wait_ms = strtol(ms_colon + 1, nullptr, 10);
+                    if (wait_ms > 0) stats.total_ms += (int)wait_ms;
+                }
+            }
+            wait_pending = true;
+        } else if (!is_log) {
+            if (wait_pending && is_assertion) stats.before_assert_count++;
+            wait_pending = false;
+        }
+        cursor = next_type ? next_type : cursor + 6;
+    }
+    free(json);
+    return stats;
 }
 
 // Discover all *.json files in test/ui/.
@@ -163,6 +243,10 @@ static std::vector<UiTestInfo> discover_ui_tests() {
         info.json_path = json_path;
         info.test_name = base;
         info.skip_headless = extract_skip_headless_from_json(json_path);
+        UiWaitStats wait_stats = analyze_explicit_waits_from_json(json_path);
+        info.estimated_wait_ms = wait_stats.total_ms;
+        info.explicit_wait_count = wait_stats.count;
+        info.wait_before_assert_count = wait_stats.before_assert_count;
         tests.push_back(info);
     } while (FindNextFileA(h, &fd));
     FindClose(h);
@@ -192,6 +276,10 @@ static std::vector<UiTestInfo> discover_ui_tests() {
         info.json_path = json_path;
         info.test_name = base;
         info.skip_headless = extract_skip_headless_from_json(json_path);
+        UiWaitStats wait_stats = analyze_explicit_waits_from_json(json_path);
+        info.estimated_wait_ms = wait_stats.total_ms;
+        info.explicit_wait_count = wait_stats.count;
+        info.wait_before_assert_count = wait_stats.before_assert_count;
         tests.push_back(info);
     }
     closedir(dir);
@@ -327,6 +415,17 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
 // ============================================================================
 
 static std::vector<UiTestResult> g_ui_results;
+
+static int compare_ui_indices_by_estimated_wait(const void* left, const void* right) {
+    size_t left_index = *(const size_t*)left;
+    size_t right_index = *(const size_t*)right;
+    int left_wait = g_ui_tests[left_index].estimated_wait_ms;
+    int right_wait = g_ui_tests[right_index].estimated_wait_ms;
+    if (left_wait < right_wait) return 1;
+    if (left_wait > right_wait) return -1;
+    return strcmp(g_ui_tests[left_index].test_name.c_str(),
+                  g_ui_tests[right_index].test_name.c_str());
+}
 
 static void run_ui_tests_parallel(const std::vector<size_t>& indices, int jobs) {
     size_t n = g_ui_tests.size();
@@ -511,12 +610,37 @@ int main(int argc, char** argv) {
                 selected_indices.push_back(idx);
             }
         }
+        // Explicit-wait scenarios sorted late alphabetically were dominating the
+        // worker tail; longest-estimated-first minimizes idle workers at shutdown.
+        if (selected_indices.size() > 1) {
+            qsort(selected_indices.data(), selected_indices.size(), sizeof(size_t),
+                  compare_ui_indices_by_estimated_wait);
+        }
+
+        int selected_wait_count = 0;
+        int selected_wait_ms = 0;
+        int selected_wait_before_assert = 0;
+        for (size_t idx : selected_indices) {
+            selected_wait_count += g_ui_tests[idx].explicit_wait_count;
+            selected_wait_ms += g_ui_tests[idx].estimated_wait_ms;
+            selected_wait_before_assert += g_ui_tests[idx].wait_before_assert_count;
+        }
+        // A fixed sleep before an auto-waiting assertion is always redundant and
+        // otherwise lets conservative delays silently accumulate in the baseline.
+        if (selected_wait_before_assert > 0) {
+            std::cerr << "ERROR: selected UI fixtures contain "
+                      << selected_wait_before_assert
+                      << " explicit wait(s) before assertions\n";
+            return 2;
+        }
 
         std::cout << "Found " << g_ui_tests.size() << " UI test(s), selected "
                   << selected_indices.size() << " for pre-run with "
                   << jobs << " parallel job(s)";
         if (gtest_filter != "*") std::cout << " using filter: " << gtest_filter;
         std::cout << ":\n";
+        std::cout << "Runnable explicit JSON waits: " << selected_wait_count
+                  << " events, " << selected_wait_ms << " ms aggregate\n";
         for (size_t idx : selected_indices) {
             std::cout << "  • " << g_ui_tests[idx].test_name << "\n";
         }

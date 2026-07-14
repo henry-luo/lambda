@@ -4,19 +4,15 @@
   "viewport": {"width": 760, "height": 380},
   "events": [
     {"type": "log", "message": "=== editing_paired_keyboard_mixed ==="},
-    {"type": "wait", "ms": 150},
     {"type": "click", "target": {"selector": "#embedded-input"}},
     {"type": "wait", "ms": 60},
     {"type": "key_press", "key": "Home"},
-    {"type": "wait", "ms": 60},
     {"type": "assert_form_selection", "target": {"selector": "#embedded-input"}, "start": 0, "end": 0},
     {"type": "key_press", "key": "Right", "mods_str": "shift"},
-    {"type": "wait", "ms": 60},
     {"type": "assert_form_selection", "target": {"selector": "#embedded-input"}, "start": 0, "end": 1},
     {"type": "click", "target": {"text": "Alpha"}},
     {"type": "wait", "ms": 60},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
     {"type": "assert_form_selection", "target": {"selector": "#embedded-input"}, "start": 0, "end": 5}
   ]

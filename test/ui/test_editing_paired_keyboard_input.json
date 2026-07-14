@@ -4,17 +4,14 @@
   "viewport": {"width": 640, "height": 360},
   "events": [
     {"type": "log", "message": "=== editing_paired_keyboard_input ==="},
-    {"type": "wait", "ms": 150},
     {"type": "click", "target": {"selector": "#surface"}},
     {"type": "paste_text", "target": {"selector": "#surface"}, "text": "abc"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#input-log"}, "equals": "input:insertFromPaste|abc|abc"},
     {"type": "click", "target": {"selector": "#surface"}},
     {"type": "wait", "ms": 60},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "wait", "ms": 80},
     {"type": "type", "target": {"selector": "#surface"}, "text": "Z"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#input-log"}, "equals": "input:insertText|Z|Z"}
   ]
 }

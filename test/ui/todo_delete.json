@@ -4,7 +4,6 @@
   "viewport": {"width": 600, "height": 800},
   "events": [
     {"type": "log", "message": "=== Todo Delete & Clear Test ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "Step 1: Verify initial item count (3+3+2=8)"},
     {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 8},
@@ -17,7 +16,6 @@
 
     {"type": "log", "message": "Step 4: Click delete button on first item"},
     {"type": "click", "target": {"selector": ".todo-item .delete-btn"}},
-    {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "Step 5: Verify item count decreased (8-1=7)"},
     {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 7},
@@ -30,7 +28,6 @@
 
     {"type": "log", "message": "Step 8: Click clear completed button on Work list"},
     {"type": "click", "target": {"selector": ".clear-done-btn"}},
-    {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "Step 9: Verify completed items were cleared (7-1=6)"},
     {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 6},

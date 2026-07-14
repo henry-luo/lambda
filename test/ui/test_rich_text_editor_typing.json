@@ -5,7 +5,6 @@
   "viewport": {"width": 820, "height": 560},
   "events": [
     {"type": "log", "message": "=== rich_text_editor_typing ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "assert_text", "target": {"selector": "#source-path"}, "contains": "test/input/simple.md"},
     {"type": "assert_count", "target": {"selector": "#toolbar button"}, "count": 4},
@@ -14,7 +13,6 @@
     {"type": "click", "target": {"selector": "#editor"}},
     {"type": "assert_focus", "target": {"selector": "#editor"}},
     {"type": "type", "target": {"selector": "#editor"}, "text": " Typed text appears."},
-    {"type": "wait", "ms": 80},
     {"type": "assert_value", "target": {"selector": "#editor"}, "contains": "Typed text appears."},
 
     {"type": "log", "message": "=== rich_text_editor_typing complete ==="}

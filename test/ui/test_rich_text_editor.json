@@ -5,7 +5,6 @@
   "viewport": {"width": 820, "height": 620},
   "events": [
     {"type": "log", "message": "=== rich_text_editor ==="},
-    {"type": "wait", "ms": 250},
 
     {"type": "log", "message": "Verify markdown fixture opened into editor"},
     {"type": "assert_text", "target": {"selector": "#source-path"}, "contains": "test/input/simple.md"},
@@ -19,7 +18,6 @@
     {"type": "click", "target": {"selector": "#editor"}},
     {"type": "assert_focus", "target": {"selector": "#editor"}},
     {"type": "type", "target": {"selector": "#editor"}, "text": " Keyboard typed text."},
-    {"type": "wait", "ms": 100},
     {"type": "assert_value", "target": {"selector": "#editor"}, "contains": "Keyboard typed text."},
     {"type": "key_press", "key": "Left", "mods_str": "shift"},
     {"type": "key_press", "key": "Left", "mods_str": "shift"},

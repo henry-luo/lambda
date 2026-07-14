@@ -4,7 +4,6 @@
   "description": "Tests onclick handler that toggles className. Verifies class attribute changes on click, and that multiple clicks toggle back and forth.",
   "events": [
     {"type": "log", "message": "=== js_click_classname: className toggle ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "Step 1: Verify initial state — #box has class 'inactive'"},
     {"type": "assert_attribute", "target": {"selector": "#box"}, "attribute": "class", "equals": "inactive"},

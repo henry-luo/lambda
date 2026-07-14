@@ -5,7 +5,6 @@
     {"type": "log", "message": "=== Phase 3a: drag text selection on baseline_809_text_align ==="},
     {"type": "log", "message": "Coord note: .left container (10,10) 344x62; inner <p> at (32,32) 300x18"},
     {"type": "log", "message": "Drag from ~x=40,y=41 (start of 'This text') to ~x=230,y=41 (past 'is left')"},
-    {"type": "wait", "ms": 300},
 
     {"type": "assert_visible", "target": {"selector": ".left"}, "visible": true},
 

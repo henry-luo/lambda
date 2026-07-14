@@ -4,7 +4,6 @@
   "description": "Tests the new Phase 2 assertion types: assert_value (form field values), assert_checked (checkbox/radio state), and assert_state (pseudo-state queries like :hover, :active, :focus, :checked).",
   "events": [
     {"type": "log", "message": "=== Phase 2c: Form assertion tests ==="},
-    {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "--- A. assert_value: verify initial input values ---"},
     {"type": "assert_value", "target": {"selector": "input#email"}, "equals": "user@test.com"},
@@ -25,13 +24,11 @@
 
     {"type": "log", "message": "--- D. Click checkbox to toggle, then re-assert ---"},
     {"type": "click", "target": {"selector": "input#newsletter"}},
-    {"type": "wait", "ms": 100},
     {"type": "assert_checked", "target": {"selector": "input#newsletter"}, "checked": true},
     {"type": "assert_state", "target": {"selector": "input#newsletter"}, "state": ":checked", "value": true},
 
     {"type": "log", "message": "--- E. Click radio-b to switch, verify both states ---"},
     {"type": "click", "target": {"selector": "input#radio-b"}},
-    {"type": "wait", "ms": 100},
     {"type": "assert_checked", "target": {"selector": "input#radio-b"}, "checked": true},
     {"type": "assert_checked", "target": {"selector": "input#radio-a"}, "checked": false},
 
