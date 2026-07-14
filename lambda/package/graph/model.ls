@@ -1,20 +1,20 @@
 // Recursive queries over the canonical Mark Graph IR.
 
-fn element_children(value) {
+pub fn element_children(value) {
   if (value is element and len(value) > 0) {
     [for (i in 0 to (len(value) - 1), let child = value[i]
       where child is element) child]
   } else []
 }
 
-fn tag(value) => if (value is element) string(name(value)) else ""
+pub fn tag(value) => if (value is element) string(name(value)) else ""
 
 fn first_direct_child(value, wanted_tag) {
   let matches = [for (child in element_children(value) where tag(child) == wanted_tag) child];
   if (len(matches) > 0) matches[0] else null
 }
 
-fn child_items(value) {
+pub fn child_items(value) {
   if (value is element and len(value) > 0) {
     [for (i in 0 to (len(value) - 1)) value[i]]
   } else []
@@ -67,12 +67,34 @@ pub fn node_entries(graph) => nested_entries(graph, "node", null, "g")
 
 pub fn edge_entries(graph) => nested_entries(graph, "edge", null, "g")
 
+fn nested_subgraph_entries(container, parent_group, prefix) {
+  [for (i, child in element_children(container),
+    entry in if (tag(child) == "subgraph") {
+      let id = group_id(child, prefix ++ string(i));
+      [
+        {value: child, group: id, parent: parent_group},
+        *nested_subgraph_entries(child, id, prefix ++ string(i) ++ ".")
+      ]
+    } else []) entry]
+}
+
+pub fn subgraph_entries(graph) => nested_subgraph_entries(graph, null, "g")
+
+pub fn ports(node) => [for (child in element_children(node) where tag(child) == "port") child]
+
+pub fn port_entries(graph) => [
+  for (entry in node_entries(graph), port in ports(entry.value)) {
+    value: port,
+    node: string(entry.value.id),
+    group: entry.group
+  }
+]
+
 pub fn nodes(graph) => [for (entry in node_entries(graph)) entry.value]
 
 pub fn edges(graph) => [for (entry in edge_entries(graph)) entry.value]
 
-pub fn subgraphs(graph) => [for (child in element_children(graph),
-  group in if (tag(child) == "subgraph") [child, *subgraphs(child)] else []) group]
+pub fn subgraphs(graph) => [for (entry in subgraph_entries(graph)) entry.value]
 
 pub fn style_rules(graph) => metadata_entries(graph, "style-rule")
 

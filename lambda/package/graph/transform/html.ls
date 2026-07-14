@@ -52,17 +52,50 @@ fn node_class(node, assigned_classes) {
   if (len(classes) > 0) "graph-node " ++ join(classes, " ") else "graph-node"
 }
 
+fn shape_css(shape, palette) {
+  if (shape == "circle" or shape == "ellipse") "border-radius:50%;"
+  else if (shape == "doublecircle")
+    "border-radius:50%;box-shadow:inset 0 0 0 3px " ++ palette.node_background ++
+      ",inset 0 0 0 4px " ++ palette.node_border ++ ";"
+  else if (shape == "stadium" or shape == "round" or shape == "rounded")
+    "border-radius:999px;"
+  else if (shape == "cylinder") "border-radius:50% / 12px;"
+  else if (shape == "diamond") "clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);"
+  else if (shape == "hexagon")
+    "clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%);"
+  else if (shape == "trapezoid")
+    "clip-path:polygon(20% 0,80% 0,100% 100%,0 100%);"
+  else if (shape == "trapezoid-alt")
+    "clip-path:polygon(0 0,100% 0,80% 100%,20% 100%);"
+  else if (shape == "asymmetric")
+    "clip-path:polygon(0 0,85% 0,100% 50%,85% 100%,0 100%,15% 50%);"
+  else if (shape == "subroutine")
+    "box-shadow:inset 4px 0 0 -3px " ++ palette.node_border ++
+      ",inset -4px 0 0 -3px " ++ palette.node_border ++ ";"
+  else "border-radius:4px;"
+}
+
 fn node_style(node, style_declarations, palette) {
   let source = if (node.style != null) string(node.style) else "";
   let parsed = graph_style.parse(source ++ ";" ++ style_declarations);
   let shape = string(source_attr(node, "shape", "box"));
-  let radius = if (shape == "round" or shape == "rounded" or shape == "stadium") "999px" else "4px";
   "display:inline-block;box-sizing:border-box;padding:10px 14px;" ++
-    "border:1px solid " ++ palette.node_border ++ ";border-radius:" ++ radius ++ ";" ++
+    "border:1px solid " ++ palette.node_border ++ ";" ++ shape_css(shape, palette) ++
     "background:" ++ palette.node_background ++ ";color:" ++ palette.node_text ++
     ";white-space:" ++
     (if (graph_content.is_rich(label_format(node))) "normal" else "nowrap") ++
     ";" ++ graph_style.node_css(parsed)
+}
+
+fn html_port(entry, index) {
+  let port = entry.value;
+  <port 'data-node-id': entry.node,
+      'data-subgraph-id': entry.group,
+      'data-port-id': string(source_attr(port, "id", "p" ++ string(index))),
+      'data-port-side': string(source_attr(port, "side", "auto")),
+      'data-port-offset': string(source_attr(port, "offset", 0.5)),
+      'data-z': string(source_attr(port, "z", 0)),
+      style: "display:block;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;">
 }
 
 fn node_content(node, id) {
@@ -116,6 +149,8 @@ fn html_edge(edge, index, group, graph_directed, style_declarations) {
   <edge 'data-edge-id': string(source_attr(edge, "id", "e" ++ string(index))),
       'data-from': string(source_attr(edge, "from", source_attr(edge, "from_id", ""))),
       'data-to': string(source_attr(edge, "to", source_attr(edge, "to_id", ""))),
+      'data-from-port': source_attr(edge, "from-port", source_attr(edge, "from_port", null)),
+      'data-to-port': source_attr(edge, "to-port", source_attr(edge, "to_port", null)),
       'data-subgraph-id': group,
       'data-label': label_source(edge),
       'data-label-format': label_format(edge),
@@ -128,6 +163,41 @@ fn html_edge(edge, index, group, graph_directed, style_declarations) {
       'data-min-length': string(source_attr(edge, "min-length", source_attr(edge, "min_length", 1))),
       'data-z': string(source_attr(edge, "z", -1)),
       style: "display:block;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;">
+}
+
+fn html_cluster(entry, index, palette) {
+  let group = entry.value;
+  <cluster 'data-cluster-id': entry.group,
+      'data-parent-cluster-id': entry.parent,
+      'data-cluster-padding': string(source_attr(group, "padding", 16)),
+      'data-cluster-label-gap': string(source_attr(group, "label-gap", 8)),
+      'data-cluster-fill': string(source_attr(group, "fill", "none")),
+      'data-cluster-stroke': string(source_attr(group, "stroke", palette.node_border)),
+      'data-cluster-stroke-width': string(source_attr(group, "stroke-width", 1)),
+      'data-cluster-radius': string(source_attr(group, "radius", 6)),
+      'data-z': string(source_attr(group, "z", -2)),
+      style: "display:block;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;">
+}
+
+fn html_cluster_label(entry, index, palette) {
+  let group = entry.value;
+  let label = label_source(group, entry.group);
+  let format = label_format(group);
+  let content = canonical_content(group);
+  if (label == null or label == "") null
+  else {
+    <'cluster-label' class: "graph-cluster-label",
+        'data-cluster-id': entry.group,
+        'data-parent-cluster-id': entry.parent,
+        'data-label-format': format,
+        'data-z': string(source_attr(group, "label-z", 0)),
+        style: "display:inline-block;box-sizing:border-box;padding:2px 5px;" ++
+          "background:" ++ palette.graph_background ++ ";color:" ++ palette.node_text ++
+          ";white-space:" ++ (if (graph_content.is_rich(format)) "normal" else "nowrap") ++
+          ";pointer-events:none;";
+      for (child in if (content != null) content else graph_content.lower(label, format)) child
+    >
+  }
 }
 
 fn html_edge_label(edge, index, group, palette) {
@@ -159,6 +229,8 @@ pub fn to_html(graph, opts = null) {
     else [for (node in source_children(graph, "node")) {value: node, group: null}];
   let edge_entries = if (graph is element) model.edge_entries(graph)
     else [for (edge in source_children(graph, "edge")) {value: edge, group: null}];
+  let subgraph_entries = if (graph is element) model.subgraph_entries(graph) else [];
+  let port_entries = if (graph is element) model.port_entries(graph) else [];
   let direction = string(opt(opts, "direction",
     if (graph is element) model.direction(graph)
     else source_attr(graph, "direction", source_attr(graph, "rank-dir", "TB"))));
@@ -172,10 +244,15 @@ pub fn to_html(graph, opts = null) {
   let description = if (graph is element) model.description(graph)
     else source_attr(graph, "description", null);
   let children = [
+    for (i, entry in subgraph_entries) html_cluster(entry, i, palette),
+    for (i, entry in subgraph_entries,
+      let label = html_cluster_label(entry, i, palette)
+      where label != null) label,
     for (i, entry in node_entries) html_node(entry.value, i, entry.group,
       if (graph is element) model.classes_for(graph, node_id(entry.value, i)) else [],
       if (graph is element) model.node_style_declarations_for(
         graph, node_id(entry.value, i)) else "", palette),
+    for (i, entry in port_entries) html_port(entry, i),
     for (i, entry in edge_entries,
       let label = html_edge_label(entry.value, i, entry.group, palette)
       where label != null) label,

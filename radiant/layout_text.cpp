@@ -24,6 +24,66 @@ extern int64_t g_text_layout_count;
 // CSS text-transform Helpers
 // ============================================================================
 
+struct SimpleCaseMapping { uint32_t from; uint32_t to; };
+
+static int simple_case_cmp(const void* record, const void* key, void* udata) {
+    (void)udata;
+    uint32_t rfrom = ((const SimpleCaseMapping*)record)->from;
+    uint32_t qfrom = *(const uint32_t*)key;
+    return (rfrom > qfrom) - (rfrom < qfrom);
+}
+
+static uint32_t lookup_simple_case(const SimpleCaseMapping* table,
+    int count, uint32_t codepoint) {
+    int idx = binsearch_records(table, count, sizeof(SimpleCaseMapping),
+                                 &codepoint, simple_case_cmp, nullptr);
+    return idx >= 0 ? table[idx].to : 0;
+}
+
+// Local utf8proc builds can lag Unicode simple case data; CSS text-transform
+// still has to measure and render these Latin Extended-C pairs as cased glyphs.
+static const SimpleCaseMapping g_uppercase_simple[] = {
+    {0x023F, 0x2C7E},  // ȿ → Ȿ
+    {0x0240, 0x2C7F},  // ɀ → Ɀ
+    {0x0250, 0x2C6F},  // ɐ → Ɐ
+    {0x0251, 0x2C6D},  // ɑ → Ɑ
+    {0x0252, 0x2C70},  // ɒ → Ɒ
+    {0x026B, 0x2C62},  // ɫ → Ɫ
+    {0x0271, 0x2C6E},  // ɱ → Ɱ
+    {0x027D, 0x2C64},  // ɽ → Ɽ
+    {0x1D7D, 0x2C63},  // ᵽ → Ᵽ
+    {0x2C61, 0x2C60},  // ⱡ → Ⱡ
+    {0x2C65, 0x023A},  // ⱥ → Ⱥ
+    {0x2C66, 0x023E},  // ⱦ → Ⱦ
+    {0x2C68, 0x2C67},  // ⱨ → Ⱨ
+    {0x2C6A, 0x2C69},  // ⱪ → Ⱪ
+    {0x2C6C, 0x2C6B},  // ⱬ → Ⱬ
+    {0x2C73, 0x2C72},  // ⱳ → Ⱳ
+    {0x2C76, 0x2C75},  // ⱶ → Ⱶ
+};
+static const int g_uppercase_simple_count = 17;
+
+static const SimpleCaseMapping g_lowercase_simple[] = {
+    {0x023A, 0x2C65},  // Ⱥ → ⱥ
+    {0x023E, 0x2C66},  // Ⱦ → ⱦ
+    {0x2C60, 0x2C61},  // Ⱡ → ⱡ
+    {0x2C62, 0x026B},  // Ɫ → ɫ
+    {0x2C63, 0x1D7D},  // Ᵽ → ᵽ
+    {0x2C64, 0x027D},  // Ɽ → ɽ
+    {0x2C67, 0x2C68},  // Ⱨ → ⱨ
+    {0x2C69, 0x2C6A},  // Ⱪ → ⱪ
+    {0x2C6B, 0x2C6C},  // Ⱬ → ⱬ
+    {0x2C6D, 0x0251},  // Ɑ → ɑ
+    {0x2C6E, 0x0271},  // Ɱ → ɱ
+    {0x2C6F, 0x0250},  // Ɐ → ɐ
+    {0x2C70, 0x0252},  // Ɒ → ɒ
+    {0x2C72, 0x2C73},  // Ⱳ → ⱳ
+    {0x2C75, 0x2C76},  // Ⱶ → ⱶ
+    {0x2C7E, 0x023F},  // Ȿ → ȿ
+    {0x2C7F, 0x0240},  // Ɀ → ɀ
+};
+static const int g_lowercase_simple_count = 17;
+
 /**
  * Apply CSS font-variant: small-caps transformation.
  * Converts lowercase characters to uppercase. The actual size reduction
@@ -31,6 +91,9 @@ extern int64_t g_text_layout_count;
  * Uses utf8proc for proper Unicode case conversion.
  */
 static inline uint32_t apply_small_caps(uint32_t codepoint) {
+    uint32_t mapped = lookup_simple_case(
+        g_uppercase_simple, g_uppercase_simple_count, codepoint);
+    if (mapped != 0) return mapped;
     if (codepoint < 128) {
         return std::toupper(codepoint);
     } else {
@@ -207,6 +270,12 @@ int apply_text_transform_full(uint32_t codepoint, CssEnum text_transform,
             for (int i = 0; i < m->len; i++) out[i] = m->to[i];
             return m->len;
         }
+        uint32_t mapped = lookup_simple_case(
+            g_uppercase_simple, g_uppercase_simple_count, codepoint);
+        if (mapped != 0) {
+            out[0] = mapped;
+            return 1;
+        }
         // simple 1-to-1 mapping
         if (codepoint < 128) {
             out[0] = std::toupper(codepoint);
@@ -220,6 +289,12 @@ int apply_text_transform_full(uint32_t codepoint, CssEnum text_transform,
         if (m) {
             for (int i = 0; i < m->len; i++) out[i] = m->to[i];
             return m->len;
+        }
+        uint32_t mapped = lookup_simple_case(
+            g_lowercase_simple, g_lowercase_simple_count, codepoint);
+        if (mapped != 0) {
+            out[0] = mapped;
+            return 1;
         }
         if (codepoint < 128) {
             out[0] = std::tolower(codepoint);
@@ -339,6 +414,33 @@ CssEnum get_text_transform_from_block(BlockProp* blk) {
     return CSS_VALUE_NONE;
 }
 
+CssEnum get_text_transform_from_node(DomNode* node) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
+            if (elem->specified_style) {
+                CssDeclaration* decl = style_tree_get_declaration(
+                    elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
+                if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                    CssEnum value = decl->value->data.keyword;
+                    if (value == CSS_VALUE_INHERIT || value == CSS_VALUE__UNDEF) {
+                        node = node->parent;
+                        continue;
+                    }
+                    // Computed BlockProp uses CSS_VALUE_NONE for both unset and
+                    // explicit none; the specified declaration preserves the cascade stop.
+                    return value;
+                }
+            }
+
+            CssEnum transform = get_text_transform_from_block(elem->blk);
+            if (transform != CSS_VALUE_NONE) return transform;
+        }
+        node = node->parent;
+    }
+    return CSS_VALUE_NONE;
+}
+
 /**
  * Count justification opportunities in a UTF-8 text segment.
  * CSS Text 3 §7.3: For auto justification, distribute extra space at:
@@ -377,26 +479,6 @@ int count_justify_opportunities(const char* str, int len) {
     }
 
     return count;
-}
-
-/**
- * Get text-transform property from the layout context.
- * Checks block property for the current element or parent elements.
- */
-static inline CssEnum get_text_transform(LayoutContext* lycon) {
-    // Check parent chain for text-transform property (it's inherited)
-    DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
-            CssEnum transform = get_text_transform_from_block(elem->blk);
-            if (transform != CSS_VALUE_NONE) {
-                return transform;
-            }
-        }
-        node = node->parent;
-    }
-    return CSS_VALUE_NONE;
 }
 
 static inline CssEnum get_text_spacing_trim(LayoutContext* lycon, DomNode* text_node) {
@@ -2221,7 +2303,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
     unsigned char* str = (unsigned char*)text;
     unsigned char* text_end = str + strlen(text);
     float text_width = 0.0f;
-    CssEnum text_transform = get_text_transform(lycon);
+    CssEnum text_transform = get_text_transform_from_node(text_node);
     bool trim_cjk_spacing = should_apply_text_spacing_trim(lycon, text_node);
     bool is_word_start = true;  // First character is always word start
     bool has_break_opportunity = false;  // track if hyphen/break found before overflow
@@ -2746,7 +2828,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                        || word_break == CSS_VALUE_BREAK_WORD);
 
     // Get text-transform property
-    CssEnum text_transform = get_text_transform(lycon);
+    CssEnum text_transform = get_text_transform_from_node(text_node);
     bool trim_cjk_spacing = should_apply_text_spacing_trim(lycon, text_node);
     bool is_word_start = true;  // Track word boundaries for capitalize
     int layout_text_iterations = 0;  // guard against infinite goto loops

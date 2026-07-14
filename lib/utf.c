@@ -238,6 +238,37 @@ bool utf_is_hangul(uint32_t cp) {
            (cp >= 0xD7B0 && cp <= 0xD7FF);     /* Hangul Jamo Extended-B */
 }
 
+int utf_bidi_strong_class(uint32_t cp) {
+    /* Keep bidi classification in the Unicode module so DOM-only users do
+     * not acquire a link dependency on the HTML style resolver. */
+    if (cp == 0x200E) return -1; /* LRM */
+    if (cp == 0x200F) return 1;  /* RLM */
+    if (cp == 0x061C) return 1;  /* ALM */
+    if (cp >= 0x0590 && cp <= 0x05FF) return 1;
+    if (cp >= 0x0600 && cp <= 0x07BF) return 1;
+    if (cp >= 0x0860 && cp <= 0x089F) return 1;
+    if (cp >= 0xFB50 && cp <= 0xFDFF) return 1;
+    if (cp >= 0xFE70 && cp <= 0xFEFF) return 1;
+    if (cp >= 0x07C0 && cp <= 0x07FF) return 1;
+    if (cp >= 0x0700 && cp <= 0x074F) return 1;
+    if (cp >= 0x0800 && cp <= 0x085F) return 1;
+
+    if ((cp >= 0x0041 && cp <= 0x005A) ||
+        (cp >= 0x0061 && cp <= 0x007A)) return -1;
+    if (cp >= 0x00C0 && cp <= 0x02AF) return -1;
+    if (cp >= 0x0370 && cp <= 0x03FF) return -1;
+    if (cp >= 0x0400 && cp <= 0x052F) return -1;
+    if (cp >= 0x4E00 && cp <= 0x9FFF) return -1;
+    if (cp >= 0xAC00 && cp <= 0xD7AF) return -1;
+    if (cp >= 0x3040 && cp <= 0x30FF) return -1;
+    if (cp >= 0x0E01 && cp <= 0x0E5B) return -1;
+    if (cp >= 0x0E81 && cp <= 0x0EDF) return -1;
+    if (cp >= 0x10A0 && cp <= 0x10FF) return -1;
+    if (cp >= 0x1100 && cp <= 0x11FF) return -1;
+    if (cp >= 0x0900 && cp <= 0x0DFF) return -1;
+    return 0;
+}
+
 bool utf_is_emoji_for_zwj(uint32_t cp) {
     return (cp >= 0x1F000 && cp <= 0x1FFFF) || /* SMP emoji blocks */
            (cp >= 0x2600 && cp <= 0x27BF) ||   /* Misc Symbols and Dingbats */

@@ -38,6 +38,13 @@ int radiant_init_network_support(DomDocument* doc,
 void radiant_discover_document_resources(DomDocument* doc);
 
 /**
+ * Discover and queue only remote @font-face resources in a document.
+ * Local layout already loads CSS/images/scripts synchronously, but webfont files
+ * need async cache registration before text measurement.
+ */
+void radiant_discover_document_font_resources(DomDocument* doc);
+
+/**
  * Check if document is fully loaded (all network resources completed).
  * 
  * @param doc Document to check

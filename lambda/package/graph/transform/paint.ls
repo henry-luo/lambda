@@ -79,10 +79,30 @@ fn edge_svg(edge, width, height, opts) {
   >
 }
 
+fn cluster_svg(cluster, width, height) {
+  <svg xmlns: "http://www.w3.org/2000/svg", width: width, height: height,
+      viewBox: "0 0 " ++ string(width) ++ " " ++ string(height),
+      style: "overflow:visible;pointer-events:none;";
+    <rect x: cluster.x, y: cluster.y, width: cluster.width, height: cluster.height,
+        rx: cluster.radius, ry: cluster.radius,
+        fill: cluster.fill, stroke: cluster.stroke,
+        'stroke-width': cluster.stroke_width,
+        'data-graph-role': "cluster", 'data-cluster-id': cluster.id,
+        'data-parent-cluster-id': cluster.parent>
+  >
+}
+
 pub fn layers(result, opts = null) {
-  [for (edge in result.edges where len(edge.points) > 1) {
-    z: if (edge.z != null) int(edge.z) else -1,
-    content: edge_svg(edge, result.width, result.height, opts),
-    edge_id: edge.id
-  }]
+  [
+    for (cluster in if (result.clusters != null) result.clusters else []) {
+      z: if (cluster.z != null) int(cluster.z) else -2,
+      content: cluster_svg(cluster, result.width, result.height),
+      cluster_id: cluster.id
+    },
+    for (edge in result.edges where len(edge.points) > 1) {
+      z: if (edge.z != null) int(edge.z) else -1,
+      content: edge_svg(edge, result.width, result.height, opts),
+      edge_id: edge.id
+    }
+  ]
 }

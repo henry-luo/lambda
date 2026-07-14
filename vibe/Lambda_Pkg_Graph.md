@@ -3,11 +3,12 @@
 **Status:** Stage 1 is implemented for the initial rich-node release. The package
 split, semantic HTML transform, Velmt callback, generated SVG paint, signed
 stacking, runtime-scoped registration, CLI bridges, and C graph ABI removal are
-complete. Stage 2 is in progress: the first common Mark IR contract, recursive
-model queries, Mermaid flowchart normalization fixes, measured edge labels,
-shape-aware and parallel-edge routing, safe style cascade, and semantic corpus
-runner are implemented. Section 18.12 records the current boundary and
-remaining work.
+complete. Stage 2 is in progress: the first common Mark IR contract, declarative
+schema validation, recursive model queries, Mermaid flowchart normalization
+fixes, measured edge and cluster labels, visual recursive clusters, named
+ports, compound and parallel-edge routing, broader shape clipping, safe style
+cascade, and the semantic corpus runner are implemented. Section 18.12 records
+the current boundary and remaining work.
 
 ## 1. Summary
 
@@ -62,9 +63,9 @@ path now enters the Lambda HTML transform and normal Radiant renderer.
   or request child measurement or relayout.
 - The graph package does not replace the Mermaid, D2, or DOT parsers. Their C
   parsers may continue producing Lambda `<graph>` data elements.
-- The first version does not need full Graphviz/Dagre parity. Advanced spline
-  routing, compound graphs, ports, and rich edge labels can be added in later
-  phases.
+- Full Graphviz/Dagre parity is not required. Spline routing, obstacle
+  avoidance, cluster-aware ranking, and collision-aware label placement remain
+  later work.
 - SVG primitives do not become individually measured CSS layout children.
 
 ## 4. Module Structure
@@ -699,7 +700,7 @@ silently discarded or accepted as a different diagram family.
 ### 18.3 Mark Graph IR contract
 
 The Stage 2 IR extends the base schema in
-`vibe/mark_graph_notation_schema.md`. Its stable top-level elements are:
+`vibe/Mark_Graph_Schema.md`. Its stable top-level elements are:
 
 - `<graph>` for identity, flavor, graph kind, direction, defaults, and options;
 - `<meta>` for title, accessibility, provenance, and source information;
@@ -714,9 +715,13 @@ Node labels, edge labels, and subgraph labels are content elements rather than
 opaque serialized attributes when they contain formatting:
 
 ```mark
+<node id:"client";
+  <port id:"request" side:"east" offset:0.5>
+>
 <node id:"api" shape:"rounded" source-start:42 source-end:71;
   <label format:"markdown"; "The **API** service">
   <content; <strong; "API"> " service">
+  <port id:"request" side:"west" offset:0.5>
 >
 ```
 
@@ -729,7 +734,7 @@ Edges use explicit endpoint and marker semantics:
 
 ```mark
 <edge id:"request" from:"client" to:"api"
-      from-port:"right" to-port:"left"
+      from-port:"request" to-port:"request"
       arrow-tail:"none" arrow-head:"normal"
       line-style:"dashed" stroke-width:2
       constraint:true min-length:2;
@@ -762,6 +767,7 @@ lambda/package/graph/
   graph.ls                     compatibility facade
   model.ls                     Mark Graph IR queries and constructors
   normalize.ls                 validation and canonicalization
+  schema.ls                    declarative element, attribute, and child contract
   diagnostics.ls               structured graph diagnostics
   style.ls                     graph style cascade and safe properties
   layout.ls                    public measured-layout adapter
@@ -818,15 +824,16 @@ Each feature is recorded as `baseline`, `extended`, `unsupported`, or
 ### 18.6 Semantic HTML and render metadata
 
 `transform.to_html()` continues to produce measured HTML rather than eager SVG.
-Stage 2 adds recursive group representation and measured edge-label children.
-Zero-size `<edge>` metadata remains available to the callback, while visual edge
-labels are separate measured children associated by edge id.
+Stage 2 adds recursive cluster metadata, named ports, and separately measured
+edge and cluster label children. Zero-size `<edge>`, `<cluster>`, and `<port>`
+metadata remains available to the callback, while visual labels are measured
+children associated by stable identities.
 
 Final SVG output should preserve renderer-neutral identity metadata:
 
 ```html
 <g data-graph-role="node" data-node-id="api">...</g>
-<g data-graph-role="subgraph" data-subgraph-id="backend">...</g>
+<rect data-graph-role="cluster" data-cluster-id="backend">...</rect>
 <path data-graph-role="edge" data-edge-id="request"
       data-from="client" data-to="api">...</path>
 <g data-graph-role="edge-label" data-edge-id="request">...</g>
@@ -1139,6 +1146,11 @@ The initial Stage 2 tranche is implemented as follows:
   attributes, materializes one `<label>` source element and one measured
   `<content>` element for labeled values, wraps authored rich node children in
   `<content>`, and returns an already-canonical recursive tree unchanged;
+- `graph/schema.ls` defines the Graph IR element hierarchy, known attribute
+  types and enums, required identities and endpoints, and canonical
+  `<label>/<content>` cardinality. Normalization validates the authored tree
+  before rebuilding it, so malformed canonical children cannot be silently
+  collapsed;
 - canonical `<label>` and `<content>` children are authoritative. Legacy
   `label` and `label-format` attributes remain as compatibility/provenance
   attributes, but model and transform consumers prefer the canonical children;
@@ -1152,8 +1164,26 @@ The initial Stage 2 tranche is implemented as follows:
   `sup`, and `br`), strips authored attributes and unknown wrappers, and removes
   script, style, and template subtrees;
 - the Velmt adapter places measured edge labels at routed anchors, paints start
-  and end endpoint markers, clips rectangle, ellipse/circle, and diamond endpoints,
-  routes self-loops, and includes route extents in graph bounds;
+  and end endpoint markers, clips rectangle, ellipse/circle, diamond, hexagon,
+  trapezoid, inverse-trapezoid, and asymmetric endpoints, routes self-loops,
+  and includes route extents in graph bounds;
+- canonical nodes may contain scoped `<port>` children with a side and
+  normalized offset; normalization diagnoses duplicate node-local port ids and
+  unresolved edge port references, while semantic HTML emits zero-size port
+  metadata for the Velmt callback;
+- `transform.to_html()` emits zero-size recursive cluster metadata and
+  separately measured `<cluster-label>` children. The layout callback computes
+  nested containing boxes from measured member nodes and child clusters,
+  reserves the label band, and returns full-viewport SVG cluster paint layers
+  with independent signed `z` values;
+- compound routes cross each exclusive source and target cluster boundary in
+  containment order. Named ports are retained for ordinary, parallel,
+  compound, and self-loop routes, and parallel compound edges receive
+  deterministic sibling-local lanes;
+- semantic node HTML now renders the legacy Mermaid rounded, stadium,
+  cylinder, subroutine, hexagon, trapezoid, inverse-trapezoid, and asymmetric
+  families in addition to rectangle, ellipse/circle, diamond, and
+  double-circle shapes;
 - repeated edges with the same ordered endpoints receive deterministic,
   sibling-local lanes separated by `edge_sep`; semantic HTML carries this
   option as `data-edge-sep`, and route-bound normalization shifts nodes and
@@ -1184,24 +1214,24 @@ measured edge-label placement, bidirectional markers,
 shape clipping, self-loop bounds, parallel-edge separation and label anchors,
 safe style rejection and precedence, and styled edge paint propagation. They
 also cover recursive canonical rebuilding, arbitrary-attribute retention,
-authored block content, canonical HTML consumption, and normalization
-idempotency.
+authored block content, canonical HTML consumption, normalization idempotency,
+recursive visual clusters, measured cluster labels, named ports, compound and
+parallel boundary routes, broader shape roles, cluster paint metadata, and
+port-reference diagnostics, plus schema type, enum, child-placement,
+cardinality, and required-attribute diagnostics.
 
 The following Stage 2 work remains open:
 
-- a distinct Mermaid source AST, declaration-list provenance for merged values,
-  and full schema-driven Graph IR validation; the current boundary validates
-  semantic invariants and retains first-declaration spans but does not yet
-  separate parsing from normalization;
-- ports, interaction metadata, edge-ID property/class statements, the remaining
-  Mermaid style properties beyond the initial safe
-  paint allowlist, and rendering semantics for general shapes beyond the
-  currently canonicalized rectangle, rounded, cylinder, diamond, circle, and
-  double-circle families;
-- visual recursive subgraph boxes and measured subgraph labels rather than only
-  preserved membership metadata;
-- compound/cluster crossing routes, ports, parallel-edge handling across
-  compound boundaries, and collision-aware route-label placement;
+- a distinct Mermaid source AST and declaration-list provenance for merged
+  values; the current boundary performs declarative Graph IR validation and
+  retains first-declaration spans but does not yet separate parsing from
+  normalization;
+- interaction metadata, edge-ID property/class statements, the remaining
+  Mermaid style properties beyond the initial safe paint allowlist, and
+  rendering semantics for general shape names beyond the implemented legacy
+  and polygon families;
+- cluster-aware ranking/ordering, obstacle avoidance between independently
+  placed clusters and nonmembers, and collision-aware route-label placement;
 - renderer-neutral graph-role metadata in final SVG, Graph Scene Mark adapters,
   tolerant geometry comparison, and in-process Radiant render stages in the
   native runner;
