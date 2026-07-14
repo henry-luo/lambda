@@ -39,9 +39,9 @@ fn node_spec() => {
     attr("shape", "text"),
     attr("width", "number"), attr("height", "number"), attr("fill", "text"),
     attr("stroke", "text"), attr("stroke-width", "number"),
-    attr("opacity", "number"), attr("class", "text")
+    attr("opacity", "number"), attr("class", "text"), attr("z", "integerish")
   ],
-  children: ["label", "content"],
+  children: ["label", "content", "port"],
   open_children: true, scalar_children: true
 }
 
@@ -55,11 +55,13 @@ fn edge_spec() => {
       "Graph edge requires a 'to' endpoint"),
     attr("label", "text"),
     attr("label-format", "text", false, ["text", "markdown", "html"]),
+    attr("from-port", "text"), attr("to-port", "text"),
     attr("directed", "boolish"), attr("arrow-head", "text"),
     attr("arrow-tail", "text"), attr("min-length", "integerish"),
     attr("weight", "number"), attr("constraint", "boolish"),
     attr("stroke", "text"), attr("stroke-width", "number"),
-    attr("stroke-dasharray", "text"), attr("opacity", "number")
+    attr("stroke-dasharray", "text"), attr("opacity", "number"),
+    attr("z", "integerish"), attr("label-z", "integerish")
   ],
   children: ["label", "content"],
   open_children: true, scalar_children: false
@@ -73,7 +75,10 @@ fn subgraph_spec() => {
     attr("label", "text"),
     attr("label-format", "text", false, ["text", "markdown", "html"]),
     attr("direction", "text"), attr("rank", "text"), attr("class", "text"),
-    attr("fill", "text"), attr("stroke", "text"), attr("stroke-width", "number")
+    attr("fill", "text"), attr("stroke", "text"), attr("stroke-width", "number"),
+    attr("padding", "number"), attr("label-gap", "number"),
+    attr("radius", "number"), attr("z", "integerish"),
+    attr("label-z", "integerish")
   ],
   children: ["label", "content", "node", "edge", "subgraph", "style-rule",
     "class-assignment", "style-assignment", "diagnostics", "diagnostic"],
@@ -84,6 +89,19 @@ fn label_spec() => {
   attrs: [*common_attrs(), attr("format", "text", false, ["text", "markdown", "html"])],
   children: [],
   open_children: true, scalar_children: true
+}
+
+fn port_spec() => {
+  attrs: [
+    *common_attrs(),
+    attr("id", "text", true, null, "graph.port.missing-id",
+      "Graph port requires a stable id"),
+    attr("side", "text", false, ["auto", "north", "east", "south", "west",
+      "top", "right", "bottom", "left"]),
+    attr("offset", "number"), attr("z", "integerish")
+  ],
+  children: [],
+  open_children: false, scalar_children: false
 }
 
 fn metadata_spec(value_tag) {
@@ -117,6 +135,7 @@ fn spec_for(value_tag) {
   else if (value_tag == "edge") edge_spec()
   else if (value_tag == "subgraph") subgraph_spec()
   else if (value_tag == "label") label_spec()
+  else if (value_tag == "port") port_spec()
   else if (value_tag == "content" or value_tag == "meta" or value_tag == "defs" or
       value_tag == "constraints") {
     {attrs: common_attrs(), children: [], open_children: true, scalar_children: true}

@@ -67,12 +67,34 @@ pub fn node_entries(graph) => nested_entries(graph, "node", null, "g")
 
 pub fn edge_entries(graph) => nested_entries(graph, "edge", null, "g")
 
+fn nested_subgraph_entries(container, parent_group, prefix) {
+  [for (i, child in element_children(container),
+    entry in if (tag(child) == "subgraph") {
+      let id = group_id(child, prefix ++ string(i));
+      [
+        {value: child, group: id, parent: parent_group},
+        *nested_subgraph_entries(child, id, prefix ++ string(i) ++ ".")
+      ]
+    } else []) entry]
+}
+
+pub fn subgraph_entries(graph) => nested_subgraph_entries(graph, null, "g")
+
+pub fn ports(node) => [for (child in element_children(node) where tag(child) == "port") child]
+
+pub fn port_entries(graph) => [
+  for (entry in node_entries(graph), port in ports(entry.value)) {
+    value: port,
+    node: string(entry.value.id),
+    group: entry.group
+  }
+]
+
 pub fn nodes(graph) => [for (entry in node_entries(graph)) entry.value]
 
 pub fn edges(graph) => [for (entry in edge_entries(graph)) entry.value]
 
-pub fn subgraphs(graph) => [for (child in element_children(graph),
-  group in if (tag(child) == "subgraph") [child, *subgraphs(child)] else []) group]
+pub fn subgraphs(graph) => [for (entry in subgraph_entries(graph)) entry.value]
 
 pub fn style_rules(graph) => metadata_entries(graph, "style-rule")
 

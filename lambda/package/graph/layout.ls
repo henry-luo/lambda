@@ -60,6 +60,8 @@ fn semantic_edges(children) {
     id: string(attr_or(child, "data-edge-id", "e" ++ string(i))),
     from: string(attr_or(child, "data-from", "")),
     to: string(attr_or(child, "data-to", "")),
+    from_port: attr_or(child, "data-from-port", null),
+    to_port: attr_or(child, "data-to-port", null),
     directed: attr_or(child, "data-directed", "true") != "false",
     arrow_start: attr_or(child, "data-arrow-start", "false") == "true",
     arrow_end: attr_or(child, "data-arrow-end", attr_or(child, "data-directed", "true")) == "true",
@@ -78,6 +80,53 @@ fn semantic_edges(children) {
     child_index: child_index(child, i)
   }]
 }
+
+fn semantic_ports(children) => [
+  for (i, child in children where child_tag(child) == "port") {
+    node_id: string(attr_or(child, "data-node-id", "")),
+    id: string(attr_or(child, "data-port-id", "p" ++ string(i))),
+    side: string(attr_or(child, "data-port-side", "auto")),
+    offset: float(attr_or(child, "data-port-offset", 0.5)),
+    z: child_z(child, 0),
+    child_index: child_index(child, i)
+  }
+]
+
+fn semantic_cluster_labels(children) => [
+  for (i, child in children where child_tag(child) == "cluster-label") {
+    cluster_id: string(attr_or(child, "data-cluster-id", "")),
+    width: child_width(child),
+    height: child_height(child),
+    z: child_z(child, 0),
+    child_index: child_index(child, i)
+  }
+]
+
+fn cluster_label(labels, cluster_id) {
+  let matches = [for (label in labels where label.cluster_id == cluster_id) label];
+  if (len(matches) > 0) matches[0] else null
+}
+
+fn semantic_clusters(children, labels) => [
+  for (i, child in children, let id = string(attr_or(child, "data-cluster-id", "")),
+    let label = cluster_label(labels, id)
+    where child_tag(child) == "cluster" and id != "") {
+    id: id,
+    parent: attr_or(child, "data-parent-cluster-id", null),
+    padding: float(attr_or(child, "data-cluster-padding", 16.0)),
+    label_gap: float(attr_or(child, "data-cluster-label-gap", 8.0)),
+    label_width: if (label != null) label.width else 0.0,
+    label_height: if (label != null) label.height else 0.0,
+    fill: string(attr_or(child, "data-cluster-fill", "none")),
+    stroke: string(attr_or(child, "data-cluster-stroke", "#8a949e")),
+    stroke_width: float(attr_or(child, "data-cluster-stroke-width", 1.0)),
+    radius: float(attr_or(child, "data-cluster-radius", 6.0)),
+    z: child_z(child, -2),
+    child_index: child_index(child, i)
+  }
+]
+
+fn ports_for(ports, node_id) => [for (port in ports where port.node_id == node_id) port]
 
 fn semantic_edge_labels(children) {
   [for (i, child in children where child_tag(child) == "edge-label") {
@@ -142,6 +191,21 @@ fn label_placement(label, edges) {
   }
 }
 
+fn cluster_label_placement(label, clusters) {
+  let matches = [for (cluster in clusters where cluster.id == label.cluster_id) cluster];
+  if (len(matches) == 0) {
+    {index: label.child_index, x: 0.0, y: 0.0, z: label.z}
+  } else {
+    let cluster = matches[0];
+    {
+      index: label.child_index,
+      x: cluster.label_x,
+      y: cluster.label_y,
+      z: label.z
+    }
+  }
+}
+
 fn graph_option(parent, opts, key, attr_key, fallback) {
   if (opts != null and opts[key] != null) opts[key]
   else attr_or(parent, attr_key, fallback)
@@ -158,6 +222,9 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
   let nodes = semantic_nodes(children);
   let metadata_edges = semantic_edges(children);
   let edge_labels = semantic_edge_labels(children);
+  let ports = semantic_ports(children);
+  let cluster_labels = semantic_cluster_labels(children);
+  let clusters = semantic_clusters(children, cluster_labels);
   let edges = if (opts != null and opts.edges != null) opts.edges else metadata_edges;
   let node_sep = float(graph_option(parent, opts, "node_sep", "data-node-sep", 60.0));
   let rank_sep = float(graph_option(parent, opts, "rank_sep", "data-rank-sep", 80.0));
@@ -170,9 +237,12 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
       width: child_width(entry.child),
       height: child_height(entry.child),
       shape: string(attr_or(entry.child, "data-shape", "box")),
+      group: attr_or(entry.child, "data-subgraph-id", null),
+      ports: ports_for(ports, child_id(entry.child, entry.order)),
       z: child_z(entry.child, 0)
     }],
     edges: edges,
+    clusters: clusters,
     direction: direction,
     node_sep: node_sep,
     rank_sep: rank_sep,
@@ -184,6 +254,7 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
     height: result.height,
     nodes: result.nodes,
     edges: result.edges,
+    clusters: result.clusters,
     layers: result.layers,
     placements: [
       for (place in result.placements) {
@@ -198,7 +269,20 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
         y: 0.0,
         z: edge.z
       },
-      for (label in edge_labels) label_placement(label, result.edges)
+      for (cluster in clusters) {
+        index: cluster.child_index,
+        x: 0.0,
+        y: 0.0,
+        z: cluster.z
+      },
+      for (port in ports) {
+        index: port.child_index,
+        x: 0.0,
+        y: 0.0,
+        z: port.z
+      },
+      for (label in edge_labels) label_placement(label, result.edges),
+      for (label in cluster_labels) cluster_label_placement(label, result.clusters)
     ],
     algorithm: result.algorithm,
     direction: result.direction

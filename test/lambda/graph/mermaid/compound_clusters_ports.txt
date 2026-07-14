@@ -1,0 +1,16 @@
+{
+  canonical_valid: true,
+  html_counts: [2, 2, 3, 3, 1],
+  html_ports: [["a", "out", "east"], ["b", "out", "right"], ["c", "in", "west"]],
+  html_shape: true,
+  cluster_containment: true,
+  measured_labels: true,
+  named_ports: true,
+  compound_routes: true,
+  parallel_ports: true,
+  loop_ports: true,
+  velmt_flow: true,
+  port_defaults: true,
+  shapes: ["hexagon", "trapezoid", "trapezoid-alt", "asymmetric"],
+  paint: true
+}

@@ -69,18 +69,6 @@ Reference:
 | id | string | Unique identifier |
 | directed | bool | `true` for digraphs |
 | layout | string | Layout engine or algorithm |
-| rankdir | string | Direction for hierarchical layouts |
-| background | color | Background color |
-| font | string | Default font |
-| theme | string | “light” or “dark” |
-| margin, padding | number | Space around the graph |
-| scale | number | Global zoom scaling |
-### 2.1 `<graph>`
-| Attribute | Type | Description |
-|------------|------|-------------|
-| id | string | Unique identifier |
-| directed | bool | `true` for digraphs |
-| layout | string | Layout engine or algorithm |
 | rank-dir | string | Direction for hierarchical layouts |
 | background | color | Background color |
 | font-family | string | Default font |
@@ -89,7 +77,11 @@ Reference:
 | scale | number | Global zoom scaling |
 | width, height | number | Fixed graph dimensions |
 
-### 2.2 `<node>` (Direct children of `<graph>`)
+### 2.2 `<node>`
+
+Nodes may be direct children of `<graph>` or recursively contained by a
+`<subgraph>`.
+
 | Attribute                 | Type          | Description                        |
 | ------------------------- | ------------- | ---------------------------------- |
 | id                        | string        | Unique node identifier             |
@@ -107,10 +99,14 @@ Reference:
 | font-family, font-size, color | string/number | Text styling (CSS-aligned)         |
 | opacity                   | float         | Transparency                       |
 
+A node may contain scoped `<port>` children in addition to its canonical
+`<label>/<content>` pair.
+
 ### 2.3 `<edge>` (Direct children of `<graph>`)
 | Attribute                 | Type          | Description                  |
 | ------------------------- | ------------- | ---------------------------- |
 | from, to                  | node id       | Endpoints                    |
+| from-port, to-port        | port id       | Optional ports scoped to the endpoint nodes |
 | label                     | string        | Legacy input shorthand for `<label>` |
 | style                     | ref/string    | Reference to style in `<defs>` |
 | stroke-dasharray          | string        | Line pattern: `solid`, `dashed`, etc. |
@@ -134,8 +130,34 @@ Reference:
 | rank | string | “same”, “min”, “max” |
 | color, fill, stroke | color | Cluster border styling |
 | style | string | `dashed`, `rounded`, etc. |
+| padding | number | Space around member nodes and nested clusters |
+| label-gap | number | Gap between the measured label band and content |
+| radius | number | Visual cluster corner radius |
+| z | integer | Signed cluster paint order |
 
-### 2.5 Canonical `<label>` and `<content>`
+### 2.5 `<port>`
+
+```mark
+<node id:"api";
+  <port id:"request" side:"west" offset:0.5>
+  <port id:"response" side:"east" offset:0.25>
+  "API"
+>
+```
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| id | string | Stable identity, unique within the containing node |
+| side | enum | `auto`, `north`, `east`, `south`, `west`, or the CSS aliases `top`, `right`, `bottom`, `left` |
+| offset | number | Position along the selected border-box side, clamped to `[0, 1]` |
+| z | integer | Signed metadata stacking value |
+
+An edge names ports with `from-port` and `to-port`. Normalization reports a
+duplicate port identity within one node or a reference that does not resolve on
+the corresponding endpoint node. Port coordinates use the node border box;
+`x` and `y` remain border-box top-left coordinates in Radiant placements.
+
+### 2.6 Canonical `<label>` and `<content>`
 
 Normalization rebuilds every labeled node, edge, and subgraph with separate
 source and measured-content children:
@@ -166,7 +188,7 @@ placement, and the cardinality of canonical `<label>/<content>` pairs. Unknown
 attributes remain available for source provenance and future extensions, while
 unknown structural children produce diagnostics.
 
-### 2.6 `<style>` and `<defs>`
+### 2.7 `<style>` and `<defs>`
 Used for global and reusable style definitions.
 
 ```mark
@@ -181,7 +203,7 @@ Used for global and reusable style definitions.
 </defs>
 ```
 
-### 2.7 `<meta>`
+### 2.8 `<meta>`
 Metadata for authorship, versioning, provenance, etc.
 
 ```mark

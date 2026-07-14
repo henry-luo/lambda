@@ -11,6 +11,16 @@ fn noncanonical_children(value) => [
       (model.tag(child) != "label" and model.tag(child) != "content")) child
 ]
 
+fn node_content_children(value) => [
+  for (child in noncanonical_children(value)
+    where not (child is element and model.tag(child) == "port")) child
+]
+
+fn node_ports(value) => [
+  for (child in model.child_items(value)
+    where child is element and model.tag(child) == "port") child
+]
+
 fn direct_tag_count(value, wanted_tag) => len([
   for (child in model.child_items(value)
     where child is element and model.tag(child) == wanted_tag) child
@@ -28,7 +38,8 @@ fn is_canonical_child(child) {
   else {
     let child_tag = model.tag(child);
     if (child_tag == "node") {
-      has_canonical_label_content(child, true) and len(noncanonical_children(child)) == 0
+      has_canonical_label_content(child, true) and
+        len(noncanonical_children(child)) == len(node_ports(child))
     }
     else if (child_tag == "edge") { has_canonical_label_content(child, false) }
     else if (child_tag == "subgraph") {
@@ -49,9 +60,10 @@ fn canonical_label(value, fallback = null) {
   else { <label format: format; source> }
 }
 
-fn canonical_content(value, label, preserve_other_children) {
+fn canonical_content(value, label, preserve_other_children, authored_children = null) {
   let existing = model.content_element(value);
   let authored = if (existing != null) model.content_items(value)
+    else if (authored_children != null) authored_children
     else if (preserve_other_children) noncanonical_children(value)
     else [];
   let lowered = if (len(authored) > 0) authored
@@ -71,10 +83,11 @@ fn canonical_node(node) {
   let attrs = map(node);
   let fallback = if (node.id != null and node.id != "") string(node.id) else null;
   let label = canonical_label(node, fallback);
-  let content = canonical_content(node, label, true);
+  let content = canonical_content(node, label, true, node_content_children(node));
   <node *:attrs;
     if (label != null) { label }
     if (content != null) { content }
+    for (port in node_ports(node)) port
   >
 }
 
@@ -174,6 +187,36 @@ fn endpoint_diagnostics(edges, node_ids) => [
     "edge[" ++ string(i) ++ "]." ++ endpoint.role, edge)
 ]
 
+fn duplicate_port_diagnostics(entries) => [
+  for (i, entry in entries, let id = item_id(entry.value),
+    let earlier = [for (j, other in entries
+      where j < i and other.node == entry.node and item_id(other.value) == id) other]
+    where id != "" and len(earlier) > 0) diagnostic.for_value(
+    "graph.port.duplicate-id", "error",
+    "Duplicate port id '" ++ id ++ "' on graph node '" ++ entry.node ++ "'",
+    "node:" ++ entry.node ++ ".port:" ++ id, entry.value)
+]
+
+fn has_port(entries, node_id, port_id) => len([
+  for (entry in entries
+    where entry.node == node_id and item_id(entry.value) == port_id) entry
+]) > 0
+
+fn edge_port_diagnostics(edges, entries) => [
+  for (i, edge in edges, reference in [
+      {role: "from-port", node: if (edge.from != null) string(edge.from) else "",
+        id: if (edge["from-port"] != null) string(edge["from-port"]) else ""},
+      {role: "to-port", node: if (edge.to != null) string(edge.to) else "",
+        id: if (edge["to-port"] != null) string(edge["to-port"]) else ""}
+    ]
+    where reference.id != "" and not has_port(entries, reference.node, reference.id))
+    diagnostic.for_value(
+      "graph.edge.unresolved-port", "error",
+      "Graph edge " ++ reference.role ++ " '" ++ reference.id ++
+        "' does not resolve on node '" ++ reference.node ++ "'",
+      "edge[" ++ string(i) ++ "]." ++ reference.role, edge)
+]
+
 fn direction_diagnostics(graph) {
   let direction = model.direction(graph);
   if (contains(["TB", "BT", "LR", "RL"], direction)) { [] }
@@ -189,6 +232,7 @@ fn graph_diagnostics(graph) {
   let nodes = model.nodes(graph);
   let edges = model.edges(graph);
   let subgraphs = model.subgraphs(graph);
+  let ports = model.port_entries(graph);
   let node_ids = sort([for (node in nodes, let id = item_id(node) where id != "") id]);
   [
     *parser_diagnostics(graph),
@@ -196,8 +240,10 @@ fn graph_diagnostics(graph) {
     *duplicate_id_diagnostics(nodes, "node"),
     *duplicate_id_diagnostics(subgraphs, "subgraph"),
     *duplicate_id_diagnostics(edges, "edge"),
+    *duplicate_port_diagnostics(ports),
     *edge_identity_diagnostics(edges),
-    *endpoint_diagnostics(edges, node_ids)
+    *endpoint_diagnostics(edges, node_ids),
+    *edge_port_diagnostics(edges, ports)
   ]
 }
 

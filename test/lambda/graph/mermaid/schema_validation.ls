@@ -5,8 +5,9 @@ let valid = <graph direction: "LR", directed: true;
     <node id: "A", width: 120;
       <label format: "markdown"; "**A**">
       <content; <strong; "A">>
+      <port id: "io", side: "east", offset: 0.5>
     >
-    <edge id: "inside", from: "A", to: "A">
+    <edge id: "inside", from: "A", to: "A", 'from-port': "io", 'to-port': "io">
   >
 >
 
@@ -17,8 +18,10 @@ let invalid = <graph direction: "TB", directed: 7;
     <content; "A">
     <content; "duplicate">
     <edge id: "misplaced", from: "A", to: "A">
+    <port id: "dup", side: "east">
+    <port id: "dup", side: "west">
   >
-  <edge id: "missing-to", from: "A">
+  <edge id: "missing-to", from: "A", 'from-port': "missing">
   <subgraph>
   <unknown>
   <node id: "">
