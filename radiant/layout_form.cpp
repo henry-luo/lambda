@@ -38,6 +38,15 @@ static bool apply_fixed_input_intrinsic_size(FormControlProp* form, float pixel_
     return false;
 }
 
+static void zero_form_child_box(DomElement* elem) {
+    elem->x = 0.0f;
+    elem->y = 0.0f;
+    elem->width = 0.0f;
+    elem->height = 0.0f;
+    elem->content_width = 0.0f;
+    elem->content_height = 0.0f;
+}
+
 static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, FontProp* font) {
     float pr = lycon->ui_context->pixel_ratio;
 
@@ -224,7 +233,7 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
     }
 }
 
-static const char* form_button_label_text(ViewBlock* block, FormControlProp* form) {
+const char* form_button_label_text(ViewBlock* block, FormControlProp* form) {
     const char* text = form ? form->value : nullptr;
     if ((!text || !*text) && block) {
         text = block->get_attribute("value");
@@ -617,9 +626,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                     celem->content_height = row_height;
                     current_y += row_height;
                 } else {
-                    celem->x = 0;  celem->y = 0;
-                    celem->width = 0;  celem->height = 0;
-                    celem->content_width = 0;  celem->content_height = 0;
+                    zero_form_child_box(celem);
                 }
             } else if (ctag == HTM_TAG_HR) {
                 celem->view_type = RDT_VIEW_BLOCK;
@@ -633,15 +640,11 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                     celem->content_width = option_width;
                     celem->content_height = 0;
                 } else {
-                    celem->x = 0;  celem->y = 0;
-                    celem->width = 0;  celem->height = 0;
-                    celem->content_width = 0;  celem->content_height = 0;
+                    zero_form_child_box(celem);
                 }
             } else if (ctag == HTM_TAG_OPTGROUP) {
                 celem->view_type = RDT_VIEW_BLOCK;
-                celem->x = 0;  celem->y = 0;
-                celem->width = 0;  celem->height = 0;
-                celem->content_width = 0;  celem->content_height = 0;
+                zero_form_child_box(celem);
                 // Recurse into optgroup children
                 for (DomNode* gc = celem->first_child; gc; gc = gc->next_sibling) {
                     if (!gc->is_element()) continue;
@@ -658,15 +661,11 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                             gcelem->content_height = row_height;
                             current_y += row_height;
                         } else {
-                            gcelem->x = 0;  gcelem->y = 0;
-                            gcelem->width = 0;  gcelem->height = 0;
-                            gcelem->content_width = 0;  gcelem->content_height = 0;
+                            zero_form_child_box(gcelem);
                         }
                     } else if (gctag == HTM_TAG_OPTGROUP) {
                         gcelem->view_type = RDT_VIEW_BLOCK;
-                        gcelem->x = 0;  gcelem->y = 0;
-                        gcelem->width = 0;  gcelem->height = 0;
-                        gcelem->content_width = 0;  gcelem->content_height = 0;
+                        zero_form_child_box(gcelem);
                     }
                 }
             }
@@ -679,9 +678,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                 if (ctag == HTM_TAG_OPTION || ctag == HTM_TAG_OPTGROUP) {
                     DomElement* celem = child->as_element();
                     celem->view_type = RDT_VIEW_BLOCK;
-                    celem->x = 0;  celem->y = 0;
-                    celem->width = 0;  celem->height = 0;
-                    celem->content_width = 0;  celem->content_height = 0;
+                    zero_form_child_box(celem);
                 }
             }
         }

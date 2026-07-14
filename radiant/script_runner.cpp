@@ -1541,6 +1541,15 @@ static const char* script_task_filename(JsScriptTask* task, char* scratch, size_
     return scratch;
 }
 
+static void script_eval_context_init(Runtime* runtime, EvalContext* eval_context) {
+    eval_context->heap = runtime->heap;
+    eval_context->nursery = runtime->nursery;
+    eval_context->name_pool = runtime->name_pool;
+    if (!runtime->type_list) runtime->type_list = arraylist_new(64);
+    eval_context->type_list = runtime->type_list;
+    eval_context->pool = runtime->heap ? runtime->heap->pool : nullptr;
+}
+
 static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* preamble,
                                             const char* source, size_t source_len,
                                             const char* filename, bool refresh_snapshot) {
@@ -1551,14 +1560,7 @@ static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* p
     }
 
     EvalContext task_context = {};
-    task_context.heap = runtime->heap;
-    task_context.nursery = runtime->nursery;
-    task_context.name_pool = runtime->name_pool;
-    if (!runtime->type_list) {
-        runtime->type_list = arraylist_new(64);
-    }
-    task_context.type_list = runtime->type_list;
-    task_context.pool = runtime->heap ? runtime->heap->pool : nullptr;
+    script_eval_context_init(runtime, &task_context);
 
     EvalContext* saved_context = context;
     context = &task_context;
@@ -1582,14 +1584,7 @@ static Item execute_js_module_source(Runtime* runtime, const char* source, size_
     (void)source_len;
 
     EvalContext task_context = {};
-    task_context.heap = runtime->heap;
-    task_context.nursery = runtime->nursery;
-    task_context.name_pool = runtime->name_pool;
-    if (!runtime->type_list) {
-        runtime->type_list = arraylist_new(64);
-    }
-    task_context.type_list = runtime->type_list;
-    task_context.pool = runtime->heap ? runtime->heap->pool : nullptr;
+    script_eval_context_init(runtime, &task_context);
 
     EvalContext* saved_context = context;
     context = &task_context;

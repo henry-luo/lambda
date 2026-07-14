@@ -18,6 +18,31 @@ static bool render_trace_enabled(void) {
     return enabled != 0;
 }
 
+typedef void (*RenderRasterBlockFn)(RenderContext*, ViewBlock*);
+
+static void render_raster_profile_block(RenderContext* rdcon, ViewBlock* block,
+                                        RenderRasterBlockFn render,
+                                        RenderProfileZone category) {
+    auto start = std::chrono::high_resolution_clock::now();
+    render(rdcon, block);
+    auto end = std::chrono::high_resolution_clock::now();
+    render_profiler_add_sample(rdcon->profiler, category,
+        std::chrono::duration<double, std::milli>(end - start).count());
+}
+
+static void render_raster_retained_media(RenderContext* rdcon, ViewBlock* block,
+                                         RenderRasterBlockFn render_content) {
+    if (render_block_dirty_misses(rdcon, block) ||
+        render_block_try_retained_fragment(rdcon, block)) return;
+
+    RenderElementMarkerScope marker_scope = render_element_marker_begin(rdcon, block);
+    rdcon->element_marker_suppression_depth++;
+    render_block_view(rdcon, block);
+    rdcon->element_marker_suppression_depth--;
+    render_content(rdcon, block);
+    render_element_marker_end(rdcon, &marker_scope);
+}
+
 static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
                                          bool skip_positioned_in_normal_flow) {
     if (!rdcon || !block) return;
@@ -44,45 +69,19 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
     else if (block->tag_id == HTM_TAG_SVG) {
         if (block->bound) { render_bound(rdcon, block); }
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_inline_svg for inline SVG");
-        auto ts1 = std::chrono::high_resolution_clock::now();
-        render_inline_svg(rdcon, block);
-        auto ts2 = std::chrono::high_resolution_clock::now();
-        render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_SVG,
-            std::chrono::duration<double, std::milli>(ts2 - ts1).count());
+        render_raster_profile_block(rdcon, block, render_inline_svg, RENDER_PROFILE_SVG);
     }
     else if (block->embed && block->embed->img) {
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_image_view");
-        auto ti1 = std::chrono::high_resolution_clock::now();
-        render_image_view(rdcon, block);
-        auto ti2 = std::chrono::high_resolution_clock::now();
-        render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_IMAGE,
-            std::chrono::duration<double, std::milli>(ti2 - ti1).count());
+        render_raster_profile_block(rdcon, block, render_image_view, RENDER_PROFILE_IMAGE);
     }
     else if (block->embed && block->embed->video) {
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_video_content for <video>");
-        if (!render_block_dirty_misses(rdcon, block)) {
-            if (!render_block_try_retained_fragment(rdcon, block)) {
-                RenderElementMarkerScope marker_scope = render_element_marker_begin(rdcon, block);
-                rdcon->element_marker_suppression_depth++;
-                render_block_view(rdcon, block);
-                rdcon->element_marker_suppression_depth--;
-                render_video_content(rdcon, block);
-                render_element_marker_end(rdcon, &marker_scope);
-            }
-        }
+        render_raster_retained_media(rdcon, block, render_video_content);
     }
     else if (render_media_is_webview_layer(block)) {
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_webview_layer_content");
-        if (!render_block_dirty_misses(rdcon, block)) {
-            if (!render_block_try_retained_fragment(rdcon, block)) {
-                RenderElementMarkerScope marker_scope = render_element_marker_begin(rdcon, block);
-                rdcon->element_marker_suppression_depth++;
-                render_block_view(rdcon, block);
-                rdcon->element_marker_suppression_depth--;
-                render_webview_layer_content(rdcon, block);
-                render_element_marker_end(rdcon, &marker_scope);
-            }
-        }
+        render_raster_retained_media(rdcon, block, render_webview_layer_content);
     }
     else if (block->embed && block->embed->doc) {
         render_embed_doc(rdcon, block);

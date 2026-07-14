@@ -1566,6 +1566,26 @@ static void print_text_rect_bounds_json(ViewText* text, StrBuf* buf, int indent,
     print_bounds_json(text, buf, indent, rect);
 }
 
+static void append_text_object_header(StrBuf* buf, int indent) {
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "{\n");
+    append_json_string_field(buf, indent + 2, "type", "text", true);
+    append_json_string_field(buf, indent + 2, "tag", "text", true);
+    append_json_string_field(buf, indent + 2, "selector", "text", true);
+    append_json_key(buf, indent + 2, "content");
+}
+
+static void append_text_rect_layout(ViewText* text, StrBuf* buf, int indent,
+                                    TextRect* rect, TextRect* previous_rect) {
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"layout\": {\n");
+    print_text_rect_bounds_json(text, buf, indent, rect, previous_rect);
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "}\n");
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "}");
+}
+
 static void print_text_rects_json(ViewText* text, StrBuf* buf, int indent,
                                   bool include_text_info) {
     TextRect* rect = text->rect;
@@ -1581,16 +1601,7 @@ static void print_text_rects_json(ViewText* text, StrBuf* buf, int indent,
         if (!first_emitted) strbuf_append_str(buf, ",\n");
         first_emitted = false;
 
-        strbuf_append_char_n(buf, ' ', indent);
-        strbuf_append_str(buf, "{\n");
-        strbuf_append_char_n(buf, ' ', indent + 2);
-        strbuf_append_str(buf, "\"type\": \"text\",\n");
-        strbuf_append_char_n(buf, ' ', indent + 2);
-        strbuf_append_str(buf, "\"tag\": \"text\",\n");
-        strbuf_append_char_n(buf, ' ', indent + 2);
-        strbuf_append_str(buf, "\"selector\": \"text\",\n");
-        strbuf_append_char_n(buf, ' ', indent + 2);
-        strbuf_append_str(buf, "\"content\": ");
+        append_text_object_header(buf, indent);
 
         if (text_data && rect->length > 0) {
             char content[2048];
@@ -1618,13 +1629,7 @@ static void print_text_rects_json(ViewText* text, StrBuf* buf, int indent,
             strbuf_append_str(buf, "},\n");
         }
 
-        strbuf_append_char_n(buf, ' ', indent + 2);
-        strbuf_append_str(buf, "\"layout\": {\n");
-        print_text_rect_bounds_json(text, buf, indent, rect, previous_emitted_rect);
-        strbuf_append_char_n(buf, ' ', indent + 2);
-        strbuf_append_str(buf, "}\n");
-        strbuf_append_char_n(buf, ' ', indent);
-        strbuf_append_str(buf, "}");
+        append_text_rect_layout(text, buf, indent, rect, previous_emitted_rect);
 
         previous_emitted_rect = rect;
         rect = rect->next;
@@ -1722,20 +1727,7 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
     }
 
     // Output combined text node
-    strbuf_append_char_n(buf, ' ', indent);
-    strbuf_append_str(buf, "{\n");
-
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"type\": \"text\",\n");
-
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"tag\": \"text\",\n");
-
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"selector\": \"text\",\n");
-
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"content\": ");
+    append_text_object_header(buf, indent);
     append_json_string(buf, combined_content);
     strbuf_append_str(buf, ",\n");
 
@@ -1829,6 +1821,18 @@ static const char* non_rendered_table_marker_display(DomElement* elem) {
 
 static void append_element_selector_json(DomElement* elem, StrBuf* buf, const char* tag_name);
 
+static void append_element_classes_json(DomElement* elem, StrBuf* buf, int indent) {
+    const char* class_attr = elem->get_attribute("class");
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "\"classes\": [");
+    if (class_attr) {
+        strbuf_append_char(buf, '\"');
+        strbuf_append_str_n(buf, class_attr, strlen(class_attr));
+        strbuf_append_char(buf, '\"');
+    }
+    strbuf_append_str(buf, "],\n");
+}
+
 static void print_non_rendered_table_marker_json(View* view, StrBuf* buf, int indent) {
     DomElement* elem = lam::dom_require_element(view);
     const char* tag_name = elem->node_name() ? elem->node_name() : "unknown";
@@ -1846,19 +1850,9 @@ static void print_non_rendered_table_marker_json(View* view, StrBuf* buf, int in
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"selector\": ");
-    const char* class_attr = elem->get_attribute("class");
     append_element_selector_json(elem, buf, tag_name);
     strbuf_append_str(buf, ",\n");
-
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"classes\": [");
-    if (class_attr) {
-        size_t class_len = strlen(class_attr);
-        strbuf_append_char(buf, '\"');
-        strbuf_append_str_n(buf, class_attr, class_len);
-        strbuf_append_char(buf, '\"');
-    }
-    strbuf_append_str(buf, "],\n");
+    append_element_classes_json(elem, buf, indent + 2);
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
@@ -2232,22 +2226,9 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
 
     // ENHANCEMENT: Add CSS class information if available
     append_json_key(buf, indent + 2, "selector");
-    const char* class_attr = block->get_attribute("class");
     append_element_selector_json(block, buf, tag_name);
     strbuf_append_str(buf, ",\n");
-
-    // Add classes array (for test compatibility)
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"classes\": [");
-    if (class_attr) {
-        size_t class_len = strlen(class_attr);
-        // Output class names as array
-        // For now, assume single class (TODO: split on whitespace for multiple classes)
-        strbuf_append_char(buf, '\"');
-        strbuf_append_str_n(buf, class_attr, class_len);
-        strbuf_append_char(buf, '\"');
-    }
-    strbuf_append_str(buf, "],\n");
+    append_element_classes_json(block, buf, indent + 2);
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
@@ -2715,13 +2696,7 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     TextRect* previous_emitted_rect = NULL;
 
     NEXT_RECT:
-    strbuf_append_char_n(buf, ' ', indent);
-    strbuf_append_str(buf, "{\n");
-
-    append_json_string_field(buf, indent + 2, "type", "text", true);
-    append_json_string_field(buf, indent + 2, "tag", "text", true);
-    append_json_string_field(buf, indent + 2, "selector", "text", true);
-    append_json_key(buf, indent + 2, "content");
+    append_text_object_header(buf, indent);
 
     unsigned char* text_data = text->text_data();
     if (text_data && rect->length > 0) {
@@ -2743,15 +2718,7 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
 
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"layout\": {\n");
-    print_text_rect_bounds_json(text, buf, indent, rect, previous_emitted_rect);
-
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "}\n");
-
-    strbuf_append_char_n(buf, ' ', indent);
-    strbuf_append_str(buf, "}");
+    append_text_rect_layout(text, buf, indent, rect, previous_emitted_rect);
 
     previous_emitted_rect = rect;
     rect = rect->next;

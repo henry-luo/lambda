@@ -6,6 +6,7 @@
 #include "../lib/mem_factory.h"
 #include "radiant.hpp"
 #include "../lib/tagged.hpp"
+#include "../lib/str.h"
 
 #include <chrono>
 
@@ -1131,6 +1132,83 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
     }
 }
 
+bool layout_zero_sized_atomic_in_vertical_lr(ViewBlock* block) {
+    bool has_inline_margins = block->bound &&
+        (block->bound->margin.top != 0.0f ||
+         block->bound->margin.right != 0.0f ||
+         block->bound->margin.bottom != 0.0f ||
+         block->bound->margin.left != 0.0f);
+    if (block->width != 0.0f || block->height != 0.0f || has_inline_margins) return false;
+
+    for (DomNode* node = block->parent; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        ViewBlock* ancestor = lam::view_as_block(static_cast<View*>(node->as_element()));
+        if (!ancestor || !ancestor->embed || !ancestor->embed->flex) continue;
+        WritingMode mode = ancestor->embed->flex->writing_mode;
+        if (mode == WM_VERTICAL_LR) return true;
+        if (mode == WM_VERTICAL_RL || mode == WM_HORIZONTAL_TB) return false;
+    }
+    return false;
+}
+
+static bool layout_style_has_horizontal_padding_decl(StyleTree* style) {
+    if (!style) return false;
+    return style_tree_get_declaration(style, CSS_PROPERTY_PADDING) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_LEFT) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_RIGHT) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_INLINE) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_INLINE_START) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_INLINE_END);
+}
+
+static bool layout_style_has_horizontal_border_decl(StyleTree* style) {
+    if (!style) return false;
+    return style_tree_get_declaration(style, CSS_PROPERTY_BORDER) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_WIDTH) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_STYLE) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_LEFT) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_LEFT_WIDTH) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT_WIDTH) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_LEFT_STYLE) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT_STYLE) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_INLINE) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_INLINE_START) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_INLINE_END);
+}
+
+float layout_unresolved_html_cell_horizontal_box_extra(DomElement* cell) {
+    if (!cell || cell->bound) return 0.0f;
+    uintptr_t tag = cell->tag();
+    if (tag != HTM_TAG_TD && tag != HTM_TAG_TH) return 0.0f;
+
+    DomElement* table = nullptr;
+    for (DomNode* node = cell->parent; node; node = node->parent) {
+        if (node->is_element() && node->as_element()->tag() == HTM_TAG_TABLE) {
+            table = node->as_element();
+            break;
+        }
+    }
+    if (!table) return 0.0f;
+
+    float extra = 0.0f;
+    StyleTree* style = cell->specified_style;
+    if (!layout_style_has_horizontal_padding_decl(style)) {
+        float cell_padding = 1.0f;
+        const char* attr = table->get_attribute("cellpadding");
+        if (attr) {
+            cell_padding = (float)str_to_double_default(attr, strlen(attr), 0.0);
+            if (cell_padding < 0.0f) cell_padding = 0.0f;
+        }
+        extra += cell_padding * 2.0f;
+    }
+    if (!layout_style_has_horizontal_border_decl(style)) {
+        const char* attr = table->get_attribute("border");
+        if (attr && str_to_double_default(attr, strlen(attr), 0.0) > 0.0) extra += 2.0f;
+    }
+    return extra;
+}
+
 void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     FontBox pa_font = lycon->font;  CssEnum pa_line_align = lycon->line.vertical_align;
     float pa_valign_offset = lycon->line.vertical_align_offset;
@@ -1497,32 +1575,10 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
             line_height, align_baseline_pos, item_baseline, valign_offset);
         block->y = lycon->block.advance_y + max(vertical_offset, 0) + (block->bound ? block->bound->margin.top : 0);
-        bool has_inline_margins = block->bound &&
-            (block->bound->margin.top != 0.0f ||
-             block->bound->margin.right != 0.0f ||
-             block->bound->margin.bottom != 0.0f ||
-             block->bound->margin.left != 0.0f);
-        bool zero_sized_atomic = block->width == 0.0f && block->height == 0.0f &&
-            !has_inline_margins;
-        if (zero_sized_atomic) {
-            bool vertical_lr_inline_context = false;
-            for (DomNode* wm_node = block->parent; wm_node; wm_node = wm_node->parent) {
-                if (!wm_node->is_element()) continue;
-                ViewBlock* wm_block = lam::view_as_block(static_cast<View*>(wm_node->as_element()));
-                if (!wm_block || !wm_block->embed || !wm_block->embed->flex) continue;
-                WritingMode wm = wm_block->embed->flex->writing_mode;
-                if (wm == WM_VERTICAL_LR) {
-                    vertical_lr_inline_context = true;
-                }
-                if (wm == WM_VERTICAL_LR || wm == WM_VERTICAL_RL || wm == WM_HORIZONTAL_TB) {
-                    break;
-                }
-            }
-            if (vertical_lr_inline_context) {
-                // The second vertical-align pass must preserve the vertical-lr
-                // inline-start static position chosen during inline-block placement.
-                block->y = lycon->block.advance_y;
-            }
+        if (layout_zero_sized_atomic_in_vertical_lr(block)) {
+            // The second vertical-align pass must preserve the vertical-lr
+            // inline-start static position chosen during inline-block placement.
+            block->y = lycon->block.advance_y;
         }
         // CSS 2.1 §9.4.3: Apply relative positioning to inline-blocks after vertical
         // alignment has set the final y position. This is deferred from layout_block()

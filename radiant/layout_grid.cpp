@@ -923,6 +923,36 @@ void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout) {
     }
 }
 
+static GridTrackSize** expand_repeat_track_entries(GridTrackList* tracks, int repeat_index,
+                                                   GridTrackSize* repeat, int repeat_count,
+                                                   int new_track_count, int* repeat_start,
+                                                   int* repeat_end) {
+    GridTrackSize** expanded = (GridTrackSize**)mem_calloc(
+        new_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
+    if (!expanded) return nullptr;
+
+    int dest = 0;
+    for (int i = 0; i < repeat_index; i++) {
+        if (!append_cloned_grid_track(expanded, &dest, tracks->tracks[i])) goto fail;
+    }
+    *repeat_start = dest;
+    for (int i = 0; i < repeat_count; i++) {
+        for (int j = 0; j < repeat->repeat_track_count; j++) {
+            if (!append_cloned_grid_track(expanded, &dest, repeat->repeat_tracks[j])) goto fail;
+        }
+    }
+    *repeat_end = dest;
+    for (int i = repeat_index + 1; i < tracks->track_count; i++) {
+        if (!append_cloned_grid_track(expanded, &dest, tracks->tracks[i])) goto fail;
+    }
+    return expanded;
+
+fail:
+    destroy_grid_track_entries(expanded, dest);
+    mem_free(expanded);
+    return nullptr;
+}
+
 // Expand auto-fill/auto-fit repeat() tracks based on available space
 void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
     if (!grid_layout) return;
@@ -999,38 +1029,10 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             long long total_tracks = (long long)cols->track_count - 1 + expanded;
             if (total_tracks <= 0 || total_tracks != (long long)(int)total_tracks) return;
             int new_track_count = (int)total_tracks;
-            GridTrackSize** new_tracks = (GridTrackSize**)mem_calloc(new_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
+            int auto_fit_start, auto_fit_end;
+            GridTrackSize** new_tracks = expand_repeat_track_entries(
+                cols, i, ts, repeat_count, new_track_count, &auto_fit_start, &auto_fit_end);
             if (!new_tracks) return;
-
-            int dest = 0;
-            // Copy tracks before the repeat
-            for (int j = 0; j < i; j++) {
-                if (!append_cloned_grid_track(new_tracks, &dest, cols->tracks[j])) {
-                    destroy_grid_track_entries(new_tracks, dest);
-                    mem_free(new_tracks);
-                    return;
-                }
-            }
-            // Expand repeat tracks (mark auto-fit indices)
-            int auto_fit_start = dest;
-            for (int r = 0; r < repeat_count; r++) {
-                for (int t = 0; t < ts->repeat_track_count; t++) {
-                    if (!append_cloned_grid_track(new_tracks, &dest, ts->repeat_tracks[t])) {
-                        destroy_grid_track_entries(new_tracks, dest);
-                        mem_free(new_tracks);
-                        return;
-                    }
-                }
-            }
-            int auto_fit_end = dest;
-            // Copy tracks after the repeat
-            for (int j = i + 1; j < cols->track_count; j++) {
-                if (!append_cloned_grid_track(new_tracks, &dest, cols->tracks[j])) {
-                    destroy_grid_track_entries(new_tracks, dest);
-                    mem_free(new_tracks);
-                    return;
-                }
-            }
 
             // Record auto-fit column indices for post-placement collapsing
             if (is_auto_fit && new_track_count <= 64) {
@@ -1121,35 +1123,11 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             long long total_tracks_r = (long long)rows->track_count - 1 + expanded_r;
             if (total_tracks_r <= 0 || total_tracks_r != (long long)(int)total_tracks_r) return;
             int new_track_count = (int)total_tracks_r;
-            GridTrackSize** new_tracks = (GridTrackSize**)mem_calloc(new_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
+            int auto_fit_row_start, auto_fit_row_end;
+            GridTrackSize** new_tracks = expand_repeat_track_entries(
+                rows, i, ts, repeat_count, new_track_count,
+                &auto_fit_row_start, &auto_fit_row_end);
             if (!new_tracks) return;
-
-            int dest = 0;
-            for (int j = 0; j < i; j++) {
-                if (!append_cloned_grid_track(new_tracks, &dest, rows->tracks[j])) {
-                    destroy_grid_track_entries(new_tracks, dest);
-                    mem_free(new_tracks);
-                    return;
-                }
-            }
-            int auto_fit_row_start = dest;
-            for (int r = 0; r < repeat_count; r++) {
-                for (int t = 0; t < ts->repeat_track_count; t++) {
-                    if (!append_cloned_grid_track(new_tracks, &dest, ts->repeat_tracks[t])) {
-                        destroy_grid_track_entries(new_tracks, dest);
-                        mem_free(new_tracks);
-                        return;
-                    }
-                }
-            }
-            int auto_fit_row_end = dest;
-            for (int j = i + 1; j < rows->track_count; j++) {
-                if (!append_cloned_grid_track(new_tracks, &dest, rows->tracks[j])) {
-                    destroy_grid_track_entries(new_tracks, dest);
-                    mem_free(new_tracks);
-                    return;
-                }
-            }
 
             // Record auto-fit row indices for post-placement collapsing
             if (is_auto_fit_row && new_track_count <= 64) {

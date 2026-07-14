@@ -33,6 +33,18 @@ static bool line_has_prior_flow_content(const Linebox* line) {
          line->has_non_c1_text);
 }
 
+static FloatAvailableSpace layout_block_float_space_at_current_y(ViewBlock* block,
+                                                                 BlockContext* bfc) {
+    float y_in_bfc = block->y;
+    ViewElement* parent = block->parent_view();
+    while (parent && bfc->establishing_element && parent != bfc->establishing_element) {
+        y_in_bfc += parent->y;
+        parent = parent->parent_view();
+    }
+    float query_height = block->height > 0.0f ? block->height : 16.0f;
+    return block_context_space_at_y(bfc, y_in_bfc, query_height);
+}
+
 static const char* stabilize_custom_layout_name(const char* name, char* storage, size_t storage_size) {
     if (!name || !storage || storage_size == 0) return nullptr;
     size_t i = 0;
@@ -1000,6 +1012,38 @@ static void adjust_abs_descendants_y(ViewElement* parent, float delta) {
     }
 }
 
+static View* previous_collapsible_sibling(ViewBlock* block) {
+    View* previous = block ? block->prev_placed_view() : nullptr;
+    while (previous && previous->is_block()) {
+        ViewBlock* previous_block = lam::view_require_block(previous);
+        if ((previous_block->position && element_has_float(previous_block)) ||
+            layout_block_is_out_of_flow_positioned(previous_block)) {
+            previous = previous->prev_placed_view();
+            continue;
+        }
+        break;
+    }
+    return previous;
+}
+
+static void shift_descendant_float_boxes(BlockContext* bfc, ViewBlock* ancestor, float delta) {
+    if (!bfc || !ancestor || delta == 0.0f) return;
+    for (int pass = 0; pass < 2; pass++) {
+        FloatBox* floating = pass == 0 ? bfc->left_floats : bfc->right_floats;
+        for (; floating; floating = floating->next) {
+            if (!floating->element) continue;
+            for (DomNode* node = static_cast<DomNode*>(floating->element->parent);
+                 node; node = node->parent) {
+                if (node != static_cast<DomNode*>(ancestor)) continue;
+                floating->margin_box_top += delta;
+                floating->margin_box_bottom += delta;
+                floating->y += delta;
+                break;
+            }
+        }
+    }
+}
+
 // DEBUG: Global for tracking table height between calls
 // WORKAROUND: Table height gets corrupted between layout_block_content return and caller
 static bool radiant_verify_incremental_layout_enabled() {
@@ -1621,6 +1665,58 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
 // End of ::first-letter Pseudo-element Support
 // ============================================================================
 
+static View* margin_collapse_last_in_flow_child(ViewBlock* block) {
+    View* last = nullptr;
+    for (View* child = static_cast<View*>(block->first_child); child;
+         child = static_cast<View*>(child->next_sibling)) {
+        if (child->view_type && child->is_block()) {
+            ViewBlock* candidate = lam::view_require_block(child);
+            bool out_of_flow = candidate->view_type == RDT_VIEW_INLINE_BLOCK ||
+                layout_block_is_out_of_flow_positioned(candidate) ||
+                (candidate->position && element_has_float(candidate));
+            if (!out_of_flow) last = child;
+        } else if (child->view_type) {
+            last = child;
+        }
+    }
+    return last;
+}
+
+static View* margin_collapse_effective_last_child(View* child) {
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* block = lam::view_require_block(child);
+            float margin_bottom = block->bound ? block->bound->margin.bottom : 0.0f;
+            bool has_chain = block->bound && has_margin_chain(block->bound);
+            if (margin_bottom == 0.0f && !has_chain && is_block_self_collapsing(block)) {
+                child = child->prev_placed_view();
+                continue;
+            }
+            break;
+        }
+        if (child->height > 0.0f) break;
+        child = child->prev_placed_view();
+    }
+    return child;
+}
+
+static bool margin_collapse_has_separating_content_after(View* child) {
+    for (View* sibling = child ? static_cast<View*>(child->next_sibling) : nullptr;
+         sibling; sibling = static_cast<View*>(sibling->next_sibling)) {
+        if (!sibling->view_type) continue;
+        if (!sibling->is_block()) {
+            if (sibling->height > 0.0f) return true;
+            continue;
+        }
+        ViewBlock* block = lam::view_require_block(sibling);
+        if (block->view_type == RDT_VIEW_INLINE_BLOCK) return true;
+        bool out_of_flow = layout_block_is_out_of_flow_positioned(block) ||
+            (block->position && element_has_float(block));
+        if (!out_of_flow && block->height > 0.0f) return true;
+    }
+    return false;
+}
+
 // CSS 2.1 §10.6.3 + §8.3.1 + erratum q313: Compute the amount of bottom margin
 // that must be excluded from auto height BEFORE min/max-height constraints.
 //
@@ -1664,47 +1760,14 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
     if (!block->first_child) return 0;
 
     // Find last in-flow child (skip abspos, floats, inline-blocks)
-    View* last_in_flow = nullptr;
-    View* child = static_cast<View*>(block->first_child);
-    while (child) {
-        if (child->view_type && child->is_block()) {
-            ViewBlock* vb = lam::view_require_block(child);
-            bool is_inline_block = (vb->view_type == RDT_VIEW_INLINE_BLOCK);
-            bool is_out_of_flow = is_inline_block ||
-                layout_block_is_out_of_flow_positioned(vb) ||
-                (vb->position && element_has_float(vb));
-            if (!is_out_of_flow) last_in_flow = child;
-        } else if (child->view_type) {
-            last_in_flow = child;
-        }
-        child = static_cast<View*>(child->next_sibling);
-    }
+    View* last_in_flow = margin_collapse_last_in_flow_child(block);
 
     // Skip self-collapsing blocks with zero margin at the end.
     // CSS 2.1 §9.2.1.1: Inline content between/after block children is wrapped
     // in anonymous blocks. If the inline content has zero height (no text, no
     // replaced elements, no inline elements with substance), the implicit
     // anonymous block is self-collapsing and doesn't prevent margin collapse.
-    View* effective_last = last_in_flow;
-    while (effective_last) {
-        if (effective_last->is_block()) {
-            ViewBlock* vb = lam::view_require_block(effective_last);
-            float mb = vb->bound ? vb->bound->margin.bottom : 0;
-            bool has_chain = vb->bound && has_margin_chain(vb->bound);
-            if (mb == 0 && !has_chain && is_block_self_collapsing(vb)) {
-                effective_last = effective_last->prev_placed_view();
-                continue;
-            }
-            break;
-        } else {
-            // Inline/text with zero height = empty anonymous block wrapper
-            if (effective_last->height <= 0) {
-                effective_last = effective_last->prev_placed_view();
-                continue;
-            }
-            break;
-        }
-    }
+    View* effective_last = margin_collapse_effective_last_child(last_in_flow);
 
     if (!effective_last || !effective_last->is_block()) return 0;
     ViewBlock* last = lam::view_require_block(effective_last);
@@ -1714,25 +1777,7 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
 
     // Check for in-flow content after the last block child
     // (content that separates the child's margin from the parent's margin)
-    View* sibling = static_cast<View*>(effective_last->next_sibling);
-    while (sibling) {
-        if (sibling->view_type) {
-            if (sibling->is_block()) {
-                ViewBlock* sb = lam::view_require_block(sibling);
-                bool is_truly_out_of_flow =
-                    layout_block_is_out_of_flow_positioned(sb) ||
-                    (sb->position && element_has_float(sb));
-                bool is_inline_level = (sb->view_type == RDT_VIEW_INLINE_BLOCK);
-                if (is_inline_level) return 0;  // content separates margins
-                if (!is_truly_out_of_flow && sb->height > 0) return 0;
-            } else {
-                // CSS 2.1 §9.2.1.1: Zero-height inline/text = empty anonymous
-                // block wrapper; doesn't separate margins
-                if (sibling->height > 0) return 0;
-            }
-        }
-        sibling = static_cast<View*>(sibling->next_sibling);
-    }
+    if (margin_collapse_has_separating_content_after(effective_last)) return 0.0f;
 
     // CSS 2.1 §8.3.1: If the last child's margin chain includes a self-collapsing
     // element with clearance, that margin must NOT collapse with the parent's
@@ -2900,6 +2945,14 @@ static float compute_in_flow_child_margin_box_width(ViewBlock* parent) {
     return max_right;
 }
 
+static void set_block_scroller_clip(ViewBlock* block) {
+    block->scroller->has_clip = true;
+    block->scroller->clip.left = 0.0f;
+    block->scroller->clip.top = 0.0f;
+    block->scroller->clip.right = block->width;
+    block->scroller->clip.bottom = block->height;
+}
+
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display) {
     // finalize the block size
     float flow_width, flow_height;
@@ -3122,9 +3175,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         if (block->scroller->has_hz_scroll ||
             block->scroller->overflow_x == CSS_VALUE_CLIP ||
             block->scroller->overflow_x == CSS_VALUE_HIDDEN) {
-            block->scroller->has_clip = true;
-            block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
-            block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
+            set_block_scroller_clip(block);
         }
     }
 
@@ -3155,9 +3206,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             if (block->scroller->has_vt_scroll ||
                 block->scroller->overflow_y == CSS_VALUE_CLIP ||
                 block->scroller->overflow_y == CSS_VALUE_HIDDEN) {
-                block->scroller->has_clip = true;
-                block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
-                block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
+                set_block_scroller_clip(block);
             }
         }
     }
@@ -3266,10 +3315,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     // Update scroller clip if height changed and scroller has clipping enabled
     // This ensures the clip region is correct after auto-height is calculated
     if (block->scroller && block->scroller->has_clip) {
-        block->scroller->clip.left = 0;
-        block->scroller->clip.top = 0;
-        block->scroller->clip.right = block->width;
-        block->scroller->clip.bottom = block->height;
+        set_block_scroller_clip(block);
     }
     // Also enable clipping when overflow is hidden/clip, even without actual overflow
     // This is needed for border-radius clipping to work correctly
@@ -3278,11 +3324,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             block->scroller->overflow_x == CSS_VALUE_CLIP ||
             block->scroller->overflow_y == CSS_VALUE_HIDDEN ||
             block->scroller->overflow_y == CSS_VALUE_CLIP) {
-            block->scroller->has_clip = true;
-            block->scroller->clip.left = 0;
-            block->scroller->clip.top = 0;
-            block->scroller->clip.right = block->width;
-            block->scroller->clip.bottom = block->height;
+            set_block_scroller_clip(block);
             log_debug("%s finalize: enabling clip for overflow:hidden, wd:%f, hg:%f", block->source_loc(), block->width, block->height);
         }
     }
@@ -5132,6 +5174,19 @@ static float find_line_y_for_width_with_floats(BlockContext* bfc, BlockContext* 
     return y_bfc - block_ctx->bfc_offset_y;
 }
 
+static float push_inline_block_below_floats(LayoutContext* lycon, BlockContext* bfc,
+                                            float required_width, float query_height) {
+    float new_y = find_line_y_for_width_with_floats(
+        bfc, &lycon->block, &lycon->line, required_width,
+        lycon->block.advance_y, query_height);
+    if (new_y > lycon->block.advance_y) {
+        lycon->block.advance_y = new_y;
+        line_reset(lycon);
+        update_line_for_bfc_floats(lycon, query_height);
+    }
+    return lycon->line.has_float_intrusion ? lycon->line.effective_left : lycon->line.left;
+}
+
 __attribute__((noinline))
 void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line) {
     layout_block_content_count++;
@@ -6251,16 +6306,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     ? block_context_find_bfc(lycon->block.parent)
                     : block_context_find_bfc(&lycon->block);
                 if (clear_bfc) {
-                    float new_y_in_bfc = block->y;
-                    ViewElement* pv = block->parent_view();
-                    while (pv && clear_bfc->establishing_element && pv != clear_bfc->establishing_element) {
-                        new_y_in_bfc += pv->y;
-                        ViewElement* ppv = pv->parent_view();
-                        if (!ppv) break;
-                        pv = ppv;
-                    }
-                    float query_height = block->height > 0 ? block->height : 16.0f;
-                    FloatAvailableSpace space = block_context_space_at_y(clear_bfc, new_y_in_bfc, query_height);
+                    FloatAvailableSpace space = layout_block_float_space_at_current_y(block, clear_bfc);
                     if (!space.has_left_float && !space.has_right_float) {
                         // No floats at the new y position — remove the offset
                         block->x -= bfc_float_offset_x;
@@ -6414,17 +6460,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 }
             } else {
                 // Sibling: hypothetical with sibling margin collapse
-                View* prev_view = block->prev_placed_view();
-                while (prev_view && prev_view->is_block()) {
-                    ViewBlock* vb = lam::view_require_block(prev_view);
-                    if (vb->position && element_has_float(vb)) {
-                        prev_view = prev_view->prev_placed_view(); continue;
-                    }
-                    if (layout_block_is_out_of_flow_positioned(vb)) {
-                        prev_view = prev_view->prev_placed_view(); continue;
-                    }
-                    break;
-                }
+                View* prev_view = previous_collapsible_sibling(block);
                 if (prev_view && prev_view->is_block() && prev_view->view_type != RDT_VIEW_INLINE_BLOCK
                     && lam::view_require_block(prev_view)->bound) {
                     ViewBlock* prev_block = lam::view_require_block(prev_view);
@@ -6478,17 +6514,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                         ? block_context_find_bfc(lycon->block.parent)
                         : block_context_find_bfc(&lycon->block);
                     if (clear_bfc) {
-                        // Compute BFC y coordinate at the new position
-                        float new_y_in_bfc = block->y;
-                        ViewElement* pv = block->parent_view();
-                        while (pv && clear_bfc->establishing_element && pv != clear_bfc->establishing_element) {
-                            new_y_in_bfc += pv->y;
-                            ViewElement* ppv = pv->parent_view();
-                            if (!ppv) break;
-                            pv = ppv;
-                        }
-                        float query_height = block->height > 0 ? block->height : 16.0f;
-                        FloatAvailableSpace space = block_context_space_at_y(clear_bfc, new_y_in_bfc, query_height);
+                        FloatAvailableSpace space = layout_block_float_space_at_current_y(block, clear_bfc);
                         float new_offset_x = 0;
                         if (space.has_left_float) {
                             float x_in_bfc = block->x - bfc_float_offset_x;  // original x in BFC coords
@@ -6513,16 +6539,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // recalculate width reduction — floats may no longer intrude at the new Y.
     // Only when the width reduction was actually applied to the block width.
     if (bfc_width_was_reduced && pa_block->saved_clear_y >= 0 && parent_bfc) {
-        float new_y_in_bfc = block->y;
-        ViewElement* pv = block->parent_view();
-        while (pv && parent_bfc->establishing_element && pv != parent_bfc->establishing_element) {
-            new_y_in_bfc += pv->y;
-            ViewElement* ppv = pv->parent_view();
-            if (!ppv) break;
-            pv = ppv;
-        }
-        float query_height = block->height > 0 ? block->height : 16.0f;
-        FloatAvailableSpace space = block_context_space_at_y(parent_bfc, new_y_in_bfc, query_height);
+        FloatAvailableSpace space = layout_block_float_space_at_current_y(block, parent_bfc);
         float new_reduction = 0;
         if (space.has_left_float || space.has_right_float) {
             float fi_left = space.has_left_float ? space.left : 0;
@@ -6794,26 +6811,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // CSS 2.2 Section 8.3.1: An empty block allows margins to collapse "through" it when:
         // - It has zero height
         // - It has no borders, padding, or line boxes
-        View* last_in_flow = nullptr;
-        View* child = static_cast<View*>(block->first_child);
-        while (child) {
-            if (child->view_type && child->is_block()) {
-                ViewBlock* vb = lam::view_require_block(child);
-                // CSS 2.1 Section 8.3.1: Only block-level boxes participate in margin collapsing
-                // Inline-blocks are inline-level boxes in inline formatting context - they don't collapse
-                bool is_inline_block = (vb->view_type == RDT_VIEW_INLINE_BLOCK);
-                bool is_out_of_flow = is_inline_block ||
-                    layout_block_is_out_of_flow_positioned(vb) ||
-                    (vb->position && element_has_float(vb));
-                if (!is_out_of_flow) {
-                    last_in_flow = child;
-                }
-            } else if (child->view_type) {
-                // Non-block placed children (like inline elements) count as in-flow
-                last_in_flow = child;
-            }
-            child = static_cast<View*>(child->next_sibling);
-        }
+        View* last_in_flow = margin_collapse_last_in_flow_child(block);
 
         // Skip empty zero-height blocks at the end - margins collapse "through" them
         // Find the effective last child whose margin-bottom should collapse with parent
@@ -6821,28 +6819,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // (no height, no border/padding, no line boxes in self or descendants)
         // CSS 2.1 §9.2.1.1: Zero-height inline content is wrapped in implicit
         // self-collapsing anonymous blocks that also don't prevent collapse.
-        View* effective_last = last_in_flow;
-        while (effective_last) {
-            if (effective_last->is_block()) {
-                ViewBlock* vb = lam::view_require_block(effective_last);
-                float margin_bottom = vb->bound ? vb->bound->margin.bottom : 0;
-                bool has_chain_mb = vb->bound && has_margin_chain(vb->bound);
-                if (margin_bottom == 0 && !has_chain_mb && is_block_self_collapsing(vb)) {
-                    log_debug("%s skipping self-collapsing block for bottom margin collapsing", block->source_loc());
-                    View* prev = effective_last->prev_placed_view();
-                    effective_last = prev;
-                    continue;
-                }
-                break;
-            } else {
-                // Inline/text with zero height = empty anonymous block wrapper
-                if (effective_last->height <= 0) {
-                    effective_last = effective_last->prev_placed_view();
-                    continue;
-                }
-                break;
-            }
-        }
+        View* effective_last = margin_collapse_effective_last_child(last_in_flow);
 
         if (effective_last && effective_last->is_block() && lam::view_require_block(effective_last)->bound) {
             ViewBlock* last_child_block = lam::view_require_block(effective_last);
@@ -6861,41 +6838,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 // parent's margin, and they should NOT collapse.
                 // Note: Empty zero-height blocks (like containers for only floats) don't count as
                 // "separating content" - margins can collapse through them.
-                bool has_content_after = false;
-                View* sibling = static_cast<View*>(effective_last->next_sibling);
-                while (sibling) {
-                    if (sibling->view_type) {
-                        // Any placed view after effective_last means content separates the margins
-                        // Except for absolutely/fixed positioned elements and floats which are out of flow
-                        if (sibling->is_block()) {
-                            ViewBlock* sb = lam::view_require_block(sibling);
-                            bool is_truly_out_of_flow =
-                                layout_block_is_out_of_flow_positioned(sb) ||
-                                (sb->position && element_has_float(sb));
-                            // Inline-blocks ARE inline-level content that separates margins
-                            bool is_inline_level = (sb->view_type == RDT_VIEW_INLINE_BLOCK);
-                            if (is_inline_level) {
-                                has_content_after = true;
-                                break;
-                            }
-                            // Regular blocks with zero height don't separate margins (CSS 8.3.1)
-                            // Margins can collapse "through" empty blocks
-                            if (!is_truly_out_of_flow && sb->height > 0) {
-                                has_content_after = true;
-                                break;
-                            }
-                        } else {
-                            // Non-block content (text, inline elements)
-                            // CSS 2.1 §9.2.1.1: Zero-height inline content is
-                            // wrapped in implicit self-collapsing anonymous blocks
-                            if (sibling->height > 0) {
-                                has_content_after = true;
-                                break;
-                            }
-                        }
-                    }
-                    sibling = static_cast<View*>(sibling->next_sibling);
-                }
+                bool has_content_after = margin_collapse_has_separating_content_after(effective_last);
 
                 if (has_content_after) {
                     log_debug("%s NOT collapsing bottom margin - content exists after last block child", block->source_loc());
@@ -7043,28 +6986,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 // CSS 2.1 §8.3.1: Floats inside this block were positioned in
                 // the parent BFC using the old block.y. Update their BFC coordinates
                 // to reflect the new position after margin unification.
-                if (delta != 0) {
-                    BlockContext* bfc = block_context_find_bfc(&lycon->block);
-                    if (bfc) {
-                        for (int pass = 0; pass < 2; pass++) {
-                            FloatBox* fb = (pass == 0) ? bfc->left_floats : bfc->right_floats;
-                            for (; fb; fb = fb->next) {
-                                if (!fb->element) continue;
-                                // check if this float is a descendant of the current block
-                                DomNode* ancestor = static_cast<DomNode*>(fb->element->parent);
-                                while (ancestor) {
-                                    if (ancestor == static_cast<DomNode*>(block)) {
-                                        fb->margin_box_top += delta;
-                                        fb->margin_box_bottom += delta;
-                                        fb->y += delta;
-                                        break;
-                                    }
-                                    ancestor = ancestor->parent;
-                                }
-                            }
-                        }
-                    }
-                }
+                shift_descendant_float_boxes(
+                    block_context_find_bfc(&lycon->block), block, delta);
                 log_debug("%s unified margin chain: all children self-collapsing, mt %f -> %f, y adjusted by %f", block->source_loc(),
                     old_mt, new_mt, delta);
             }
@@ -7612,16 +7535,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         effective_left + margin_box_width > effective_right) {
                         BlockContext* bfc = block_context_find_bfc(&lycon->block);
                         if (bfc) {
-                            float local_new_y = find_line_y_for_width_with_floats(
-                                bfc, &lycon->block, &lycon->line, margin_box_width,
-                                lycon->block.advance_y, inline_block_height);
-                            if (local_new_y > lycon->block.advance_y) {
-                                lycon->block.advance_y = local_new_y;
-                                line_reset(lycon);
-                                update_line_for_bfc_floats(lycon, inline_block_height);
-                            }
-                            effective_left = lycon->line.has_float_intrusion ?
-                                lycon->line.effective_left : lycon->line.left;
+                            effective_left = push_inline_block_below_floats(
+                                lycon, bfc, margin_box_width, inline_block_height);
                         }
                     }
                     block->x = effective_left;
@@ -7669,16 +7584,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // push below the float to find room
                     BlockContext* bfc = block_context_find_bfc(&lycon->block);
                     if (bfc) {
-                        float local_new_y = find_line_y_for_width_with_floats(
-                            bfc, &lycon->block, &lycon->line, margin_box_width,
-                            lycon->block.advance_y, inline_block_height);
-                        if (local_new_y > lycon->block.advance_y) {
-                            lycon->block.advance_y = local_new_y;
-                            line_reset(lycon);
-                            update_line_for_bfc_floats(lycon, inline_block_height);
-                        }
-                        effective_left = lycon->line.has_float_intrusion ?
-                            lycon->line.effective_left : lycon->line.left;
+                        effective_left = push_inline_block_below_floats(
+                            lycon, bfc, margin_box_width, inline_block_height);
                     }
                     block->x = effective_left;
                 } else if (lycon->line.has_float_intrusion &&
@@ -7801,36 +7708,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // After the max_ascender update above, offset should already be >= 0
                 // for baseline-relative alignment.
                 block->y = lycon->block.advance_y + max(offset, 0.0f);  // block->bound->margin.top will be added below
-                bool has_inline_margins = block->bound &&
-                    (block->bound->margin.top != 0.0f ||
-                     block->bound->margin.right != 0.0f ||
-                     block->bound->margin.bottom != 0.0f ||
-                     block->bound->margin.left != 0.0f);
-                bool zero_sized_atomic = block->width == 0.0f && block->height == 0.0f &&
-                    !has_inline_margins;
-                if (zero_sized_atomic) {
-                    bool vertical_lr_inline_context = false;
-                    for (DomNode* wm_node = block->parent; wm_node; wm_node = wm_node->parent) {
-                        if (!wm_node->is_element()) continue;
-                        ViewBlock* wm_block = lam::view_as_block(static_cast<View*>(wm_node->as_element()));
-                        if (!wm_block || !wm_block->embed || !wm_block->embed->flex) continue;
-                        WritingMode wm = wm_block->embed->flex->writing_mode;
-                        if (wm == WM_VERTICAL_LR) {
-                            vertical_lr_inline_context = true;
-                        }
-                        if (wm == WM_VERTICAL_LR || wm == WM_VERTICAL_RL || wm == WM_HORIZONTAL_TB) {
-                            break;
-                        }
-                    }
-                    if (vertical_lr_inline_context) {
-                        float line_cross_size = lycon->block.line_height > 0.0f
-                            ? lycon->block.line_height
-                            : lycon->block.init_ascender + lycon->block.init_descender;
-                        // In vertical-lr inline flow, a zero-size atomic inline still exposes
-                        // its static position at inline-start and centered in the line box.
-                        block->x = lycon->line.left + line_cross_size / 2.0f;
-                        block->y = lycon->block.advance_y;
-                    }
+                if (layout_zero_sized_atomic_in_vertical_lr(block)) {
+                    float line_cross_size = lycon->block.line_height > 0.0f
+                        ? lycon->block.line_height
+                        : lycon->block.init_ascender + lycon->block.init_descender;
+                    // In vertical-lr inline flow, a zero-size atomic inline still exposes
+                    // its static position at inline-start and centered in the line box.
+                    block->x = lycon->line.left + line_cross_size / 2.0f;
+                    block->y = lycon->block.advance_y;
                 }
                 log_debug("%s valigned-inline-block: offset %f, line %f, block %f, adv: %f, y: %f, va:%d", elmt->source_loc(),
                     offset, line_height, block->height, lycon->block.advance_y, block->y, valign);
@@ -8404,17 +8289,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     if (!has_clearance) {
                         // Normal sibling margin collapsing
                         float collapse = 0;
-                        View* prev_view = block->prev_placed_view();
+                        View* prev_view = previous_collapsible_sibling(block);
                         while (prev_view && prev_view->is_block()) {
                             ViewBlock* vb = lam::view_require_block(prev_view);
-                            if (vb->position && element_has_float(vb)) {
-                                prev_view = prev_view->prev_placed_view();
-                                continue;
-                            }
-                            if (layout_block_is_out_of_flow_positioned(vb)) {
-                                prev_view = prev_view->prev_placed_view();
-                                continue;
-                            }
                             // CSS 2.1 §8.3.1: Skip zero-height blocks with no bound
                             // (self-collapsing with zero margins). Margins on either
                             // side are still adjacent through such elements.
@@ -8462,25 +8339,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             // CSS 2.1 §10.6.7: Float boxes in the parent BFC were
                             // positioned using the old block->y. Update their BFC
                             // coordinates to reflect the margin collapse shift.
-                            BlockContext* bfc = block_context_find_bfc(&lycon->block);
-                            if (bfc) {
-                                for (int pass = 0; pass < 2; pass++) {
-                                    FloatBox* fb = (pass == 0) ? bfc->left_floats : bfc->right_floats;
-                                    for (; fb; fb = fb->next) {
-                                        if (!fb->element) continue;
-                                        DomNode* ancestor = static_cast<DomNode*>(fb->element->parent);
-                                        while (ancestor) {
-                                            if (ancestor == static_cast<DomNode*>(block)) {
-                                                fb->margin_box_top -= collapse;
-                                                fb->margin_box_bottom -= collapse;
-                                                fb->y -= collapse;
-                                                break;
-                                            }
-                                            ancestor = ancestor->parent;
-                                        }
-                                    }
-                                }
-                            }
+                            shift_descendant_float_boxes(
+                                block_context_find_bfc(&lycon->block), block, -collapse);
                             log_debug("%s collapsed margin between sibling blocks: %f, block->y now: %f", elmt->source_loc(), collapse, block->y);
                         }
                     } else {

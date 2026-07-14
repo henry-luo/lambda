@@ -172,6 +172,31 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
 // scale: User-specified zoom factor (default 1.0)
 // pixel_ratio: Device pixel ratio for HiDPI (default 1.0, use 2.0 for Retina displays)
 // Final output size is (viewport_width * scale * pixel_ratio) x (viewport_height * scale * pixel_ratio)
+static bool render_png_resolve_auto_size(DomDocument* doc, float total_scale,
+                                         bool auto_width, bool auto_height,
+                                         int* output_width, int* output_height,
+                                         int* content_max_x, int* content_max_y) {
+    if ((!auto_width && !auto_height) || !doc || !doc->view_tree || !doc->view_tree->root) {
+        return false;
+    }
+
+    calculate_content_bounds(doc->view_tree->root, content_max_x, content_max_y);
+    *content_max_x += 50;
+    *content_max_y += 50;
+    if (auto_width) *output_width = (int)(*content_max_x * total_scale);
+    if (auto_height) *output_height = (int)(*content_max_y * total_scale);
+
+    View* root_view = doc->view_tree->root;
+    if (root_view->view_type == RDT_VIEW_BLOCK) {
+        ViewBlock* root_block = lam::view_require_block(root_view);
+        if (root_block->scroller && root_block->scroller->has_clip) {
+            if (auto_width) root_block->scroller->clip.right = (float)*content_max_x;
+            if (auto_height) root_block->scroller->clip.bottom = (float)*content_max_y;
+        }
+    }
+    return true;
+}
+
 int render_html_to_png(const char* html_file, const char* png_file, int viewport_width, int viewport_height, float scale, float pixel_ratio) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
@@ -276,30 +301,11 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 
     bool rendered = false;  // set to true when tiled path handles rendering
 
-    if ((auto_width || auto_height) && doc->view_tree && doc->view_tree->root) {
-        int content_max_x = 0, content_max_y = 0;
-        calculate_content_bounds(doc->view_tree->root, &content_max_x, &content_max_y);
-        // Add padding to ensure nothing is cut off
-        content_max_x += 50;
-        content_max_y += 50;
-        // Apply total_scale to content bounds
-        if (auto_width) output_width = (int)(content_max_x * total_scale);
-        if (auto_height) output_height = (int)(content_max_y * total_scale);
+    int content_max_x = 0, content_max_y = 0;
+    if (render_png_resolve_auto_size(doc, total_scale, auto_width, auto_height,
+            &output_width, &output_height, &content_max_x, &content_max_y)) {
         log_info("Auto-sized output dimensions: %dx%d (content bounds with 50px padding, scale=%.2f, pixel_ratio=%.2f)",
                  output_width, output_height, scale, pixel_ratio);
-
-        // Extend root element's overflow clip to match the auto-sized content area.
-        // Without this, the root html element's overflow-y:auto clips rendering at
-        // the original viewport height, hiding everything below it in the static output.
-        // This must happen for both tiled and normal paths.
-        View* root_view = doc->view_tree->root;
-        if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
-            ViewBlock* root_block = lam::view_require_block(root_view);
-            if (root_block->scroller && root_block->scroller->has_clip) {
-                if (auto_width)  root_block->scroller->clip.right  = (float)content_max_x;
-                if (auto_height) root_block->scroller->clip.bottom = (float)content_max_y;
-            }
-        }
 
         if ((int64_t)output_width * output_height > PNG_TILE_THRESHOLD) {
             // Large page: render in tiles to avoid allocating a single huge surface
@@ -600,23 +606,9 @@ static bool render_batch_single(
 
     bool auto_width = (viewport_width == 0);
     bool auto_height = (viewport_height == 0);
-    if ((auto_width || auto_height) && doc->view_tree && doc->view_tree->root) {
-        int content_max_x = 0, content_max_y = 0;
-        calculate_content_bounds(doc->view_tree->root, &content_max_x, &content_max_y);
-        content_max_x += 50;
-        content_max_y += 50;
-        if (auto_width) output_width = (int)(content_max_x * total_scale);
-        if (auto_height) output_height = (int)(content_max_y * total_scale);
-
-        View* root_view = doc->view_tree->root;
-        if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
-            ViewBlock* root_block = lam::view_require_block(root_view);
-            if (root_block->scroller && root_block->scroller->has_clip) {
-                if (auto_width)  root_block->scroller->clip.right  = (float)content_max_x;
-                if (auto_height) root_block->scroller->clip.bottom = (float)content_max_y;
-            }
-        }
-
+    int content_max_x = 0, content_max_y = 0;
+    if (render_png_resolve_auto_size(doc, total_scale, auto_width, auto_height,
+            &output_width, &output_height, &content_max_x, &content_max_y)) {
         if ((int64_t)output_width * output_height > PNG_TILE_THRESHOLD) {
             render_html_doc_tiled(ui_context, doc->view_tree, png_file,
                 output_width, output_height);

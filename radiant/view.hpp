@@ -26,6 +26,7 @@ struct DirtyTracker;
 
 DomElement* dom_select_next_option(DomElement* select, DomElement* previous);
 const char* dom_option_text(DomElement* option);
+int bidi_strong_class(uint32_t codepoint);
 
 typedef enum AnimationType {
     ANIM_CSS_ANIMATION = 0,

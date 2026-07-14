@@ -666,7 +666,7 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
 
 // HTML5 §14.3.4 / Unicode UAX #9: Detect first strong directional character.
 // Returns 1 for RTL (R/AL), -1 for LTR (L), 0 for neutral/not found.
-static int bidi_strong_class(uint32_t cp) {
+int bidi_strong_class(uint32_t cp) {
     // L (Left-to-Right): Latin, CJK, LRM
     if (cp == 0x200E) return -1; // LRM
     // R (Right-to-Left): Hebrew, RLM

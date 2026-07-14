@@ -718,18 +718,25 @@ static DomElement* target_range_direct_text_block(DomBoundary caret,
     return block;
 }
 
+static DomElement* target_range_previous_block(DomBoundary caret,
+                                               EditingTargetRange* out,
+                                               DomElement** current_block,
+                                               DomText** text) {
+    DomElement* current = target_range_direct_text_block(caret, out, true, text);
+    if (!current) return nullptr;
+    if (current_block) *current_block = current;
+
+    DomNode* current_node = static_cast<DomNode*>(current);
+    DomNode* prev_node = current_node->prev_sibling;
+    return prev_node && prev_node->is_element() ? prev_node->as_element() : nullptr;
+}
+
 static bool target_range_backspace_trailing_br_block_join(
         DomBoundary caret,
         EditingTargetRange* out) {
-    DomText* text = nullptr;
-    DomElement* current_block = target_range_direct_text_block(
-        caret, out, true, &text);
-    if (!current_block) return false;
-
-    DomNode* current_node = static_cast<DomNode*>(current_block);
-    DomNode* prev_node = current_node->prev_sibling;
-    if (!prev_node || !prev_node->is_element()) return false;
-    DomElement* prev_block = prev_node->as_element();
+    DomText* text;
+    DomElement* prev_block = target_range_previous_block(
+        caret, out, nullptr, &text);
     if (!prev_block || !target_range_is_join_block_tag(prev_block->tag()) ||
         !prev_block->first_child || !prev_block->first_child->is_text()) {
         return false;
@@ -757,15 +764,10 @@ static bool target_range_backspace_trailing_br_block_join(
 static bool target_range_backspace_empty_br_block_join(
         DomBoundary caret,
         EditingTargetRange* out) {
-    DomText* text = nullptr;
-    DomElement* current_block = target_range_direct_text_block(
-        caret, out, true, &text);
-    if (!current_block) return false;
-
-    DomNode* current_node = static_cast<DomNode*>(current_block);
-    DomNode* prev_node = current_node->prev_sibling;
-    if (!prev_node || !prev_node->is_element()) return false;
-    DomElement* prev_block = prev_node->as_element();
+    DomText* text;
+    DomElement* current_block;
+    DomElement* prev_block = target_range_previous_block(
+        caret, out, &current_block, &text);
     if (!prev_block || !target_range_is_join_block_tag(prev_block->tag()) ||
         !target_range_join_block_pair_allowed(prev_block, current_block) ||
         !target_range_filler_br_block(prev_block)) {

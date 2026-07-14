@@ -53,6 +53,17 @@ static bool editing_geometry_range_intersects_text_control_descendant(
     return false;
 }
 
+static void editing_geometry_block_scroll(ViewBlock* block, float* scroll_x,
+                                          float* scroll_y) {
+    *scroll_x = 0.0f;
+    *scroll_y = 0.0f;
+    if (!block || !block->scroller || !block->scroller->pane) return;
+
+    DocState* state = block->doc ? block->doc->state : NULL;
+    scroll_state_get_position_for_view(state, static_cast<View*>(block),
+        block->scroller->pane, scroll_x, scroll_y, NULL, NULL);
+}
+
 static void editing_geometry_viewport_xy(View* view, float* out_x, float* out_y) {
     float x = 0.0f, y = 0.0f;
     View* origin = view;
@@ -63,11 +74,8 @@ static void editing_geometry_viewport_xy(View* view, float* out_x, float* out_y)
         if (p != origin && p->is_block()) {
             ViewBlock* block = lam::view_require_block(p);
             if (block->scroller && block->scroller->pane) {
-                float scroll_x = 0.0f;
-                float scroll_y = 0.0f;
-                DocState* state = block->doc ? block->doc->state : NULL;
-                scroll_state_get_position_for_view(state, static_cast<View*>(block),
-                    block->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
+                float scroll_x, scroll_y;
+                editing_geometry_block_scroll(block, &scroll_x, &scroll_y);
                 x -= scroll_x;
                 y -= scroll_y;
             }
@@ -95,13 +103,8 @@ static bool editing_geometry_find_document_offset(View* view,
         if (block->embed && block->embed->doc) {
             DomDocument* embed_doc = block->embed->doc;
             if (embed_doc == target_doc) {
-                float scroll_x = 0.0f;
-                float scroll_y = 0.0f;
-                if (block->scroller && block->scroller->pane) {
-                    DocState* state = block->doc ? block->doc->state : NULL;
-                    scroll_state_get_position_for_view(state, static_cast<View*>(block),
-                        block->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
-                }
+                float scroll_x, scroll_y;
+                editing_geometry_block_scroll(block, &scroll_x, &scroll_y);
                 if (out_x) *out_x = here_x - scroll_x;
                 if (out_y) *out_y = here_y - scroll_y;
                 return true;
@@ -160,12 +163,8 @@ static void editing_geometry_text_block_abs_xy(ViewText* text, float* out_x, flo
                 y += p->y;
                 ViewBlock* block = lam::view_require_block(p);
                 if (block->scroller && block->scroller->pane) {
-                    float scroll_x = 0.0f;
-                    float scroll_y = 0.0f;
-                    DocState* state = block->doc ? block->doc->state : NULL;
-                    scroll_state_get_position_for_view(state,
-                        static_cast<View*>(block), block->scroller->pane,
-                        &scroll_x, &scroll_y, NULL, NULL);
+                    float scroll_x, scroll_y;
+                    editing_geometry_block_scroll(block, &scroll_x, &scroll_y);
                     x -= scroll_x;
                     y -= scroll_y;
                 }
@@ -206,29 +205,6 @@ static bool editing_geometry_text_metrics(UiContext* uicon, ViewBlock* block,
     return true;
 }
 
-// HTML dir=auto / UAX #9 first-strong direction for form-control geometry.
-// Returns 1 for RTL, -1 for LTR, 0 for neutral/not found.
-static int editing_geometry_bidi_strong_class(uint32_t cp) {
-    if (cp == 0x200E) return -1; // LRM
-    if (cp == 0x200F || cp == 0x061C) return 1; // RLM / ALM
-    if (cp >= 0x0590 && cp <= 0x08FF) return 1;
-    if (cp >= 0xFB50 && cp <= 0xFDFF) return 1;
-    if (cp >= 0xFE70 && cp <= 0xFEFF) return 1;
-
-    if ((cp >= 0x0041 && cp <= 0x005A) ||
-        (cp >= 0x0061 && cp <= 0x007A)) return -1;
-    if (cp >= 0x00C0 && cp <= 0x02AF) return -1;
-    if (cp >= 0x0370 && cp <= 0x052F) return -1;
-    if (cp >= 0x0900 && cp <= 0x0DFF) return -1;
-    if (cp >= 0x0E01 && cp <= 0x0E5B) return -1;
-    if (cp >= 0x0E81 && cp <= 0x0EDF) return -1;
-    if (cp >= 0x10A0 && cp <= 0x11FF) return -1;
-    if (cp >= 0x3040 && cp <= 0x30FF) return -1;
-    if (cp >= 0x4E00 && cp <= 0x9FFF) return -1;
-    if (cp >= 0xAC00 && cp <= 0xD7AF) return -1;
-    return 0;
-}
-
 static int editing_geometry_first_strong_direction(const char* text,
                                                    uint32_t len) {
     if (!text || len == 0) return 0;
@@ -241,7 +217,7 @@ static int editing_geometry_first_strong_direction(const char* text,
             p++;
             continue;
         }
-        int cls = editing_geometry_bidi_strong_class(cp);
+        int cls = bidi_strong_class(cp);
         if (cls != 0) return cls;
         p += bytes;
     }
@@ -264,6 +240,28 @@ static bool editing_geometry_text_control_line_is_rtl(DomElement* elem,
         }
     }
     return block && block->blk && block->blk->direction == CSS_VALUE_RTL;
+}
+
+typedef struct EditingTextControlMetrics {
+    float border;
+    float padding;
+    float content_width;
+    float font_size;
+} EditingTextControlMetrics;
+
+static EditingTextControlMetrics editing_geometry_text_control_metrics(
+        DomElement* elem, ViewBlock* block) {
+    EditingTextControlMetrics metrics;
+    metrics.border = (block->bound && block->bound->border)
+        ? block->bound->border->width.left : 1.0f;
+    metrics.padding = block->bound ? block->bound->padding.left
+        : (elem->form->control_type == FORM_CONTROL_TEXTAREA
+            ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
+    metrics.content_width = block->width - 2.0f * (metrics.border + metrics.padding);
+    if (metrics.content_width < 0.0f) metrics.content_width = 0.0f;
+    metrics.font_size = block->font ? block->font->font_size
+        : (elem->form->control_type == FORM_CONTROL_TEXTAREA ? 13.333f : 16.0f);
+    return metrics;
 }
 
 static uint32_t editing_geometry_line_offset_for_x(UiContext* uicon,
@@ -467,13 +465,10 @@ bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
     abs_x += doc_x;
     abs_y += doc_y;
 
-    float border = (block->bound && block->bound->border)
-        ? block->bound->border->width.left : 1.0f;
-    float padding = block->bound ? block->bound->padding.left :
-        (elem->form->control_type == FORM_CONTROL_TEXTAREA
-            ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
-    float content_w = block->width - 2.0f * (border + padding);
-    if (content_w < 0.0f) content_w = 0.0f;
+    EditingTextControlMetrics metrics = editing_geometry_text_control_metrics(elem, block);
+    float border = metrics.border;
+    float padding = metrics.padding;
+    float content_w = metrics.content_width;
     float rel_x = vx - abs_x - border - padding + elem->form->scroll_x;
     if (rel_x < 0.0f) rel_x = 0.0f;
 
@@ -694,14 +689,11 @@ bool editing_geometry_text_control_caret_rect(UiContext* uicon,
     uint32_t value_len = elem->form->current_value_len;
     if (offset > value_len) offset = value_len;
 
-    float border = (block->bound && block->bound->border)
-        ? block->bound->border->width.left : 1.0f;
-    float padding = block->bound ? block->bound->padding.left :
-        (elem->form->control_type == FORM_CONTROL_TEXTAREA
-            ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
+    EditingTextControlMetrics metrics = editing_geometry_text_control_metrics(elem, block);
+    float border = metrics.border;
+    float padding = metrics.padding;
     float content_x = block->x + border + padding;
-    float content_w = block->width - 2.0f * (border + padding);
-    if (content_w < 0.0f) content_w = 0.0f;
+    float content_w = metrics.content_width;
 
     float text_width = 0.0f;
     uint32_t line_start = 0;
@@ -721,8 +713,7 @@ bool editing_geometry_text_control_caret_rect(UiContext* uicon,
         editing_geometry_text_metrics(uicon, block, value, offset, &text_width);
     }
 
-    float font_size = block->font ? block->font->font_size :
-        (elem->form->control_type == FORM_CONTROL_TEXTAREA ? 13.333f : 16.0f);
+    float font_size = metrics.font_size;
     float line_height = elem->form->control_type == FORM_CONTROL_TEXTAREA
         ? font_size * 1.4f : font_size;
     float line_y = 0.0f;
@@ -770,17 +761,13 @@ bool editing_geometry_text_control_for_each_selection_rect(UiContext* uicon,
     }
     if (start_offset == end_offset) return true;
 
-    float border = (block->bound && block->bound->border)
-        ? block->bound->border->width.left : 1.0f;
-    float padding = block->bound ? block->bound->padding.left :
-        (elem->form->control_type == FORM_CONTROL_TEXTAREA
-            ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
+    EditingTextControlMetrics metrics = editing_geometry_text_control_metrics(elem, block);
+    float border = metrics.border;
+    float padding = metrics.padding;
     float content_x = block->x + border + padding;
     float content_y = block->y + border + padding;
-    float content_w = block->width - 2.0f * (border + padding);
-    if (content_w < 0.0f) content_w = 0.0f;
-    float font_size = block->font ? block->font->font_size :
-        (elem->form->control_type == FORM_CONTROL_TEXTAREA ? 13.333f : 16.0f);
+    float content_w = metrics.content_width;
+    float font_size = metrics.font_size;
 
     if (elem->form->control_type != FORM_CONTROL_TEXTAREA) {
         float start_w = 0.0f;

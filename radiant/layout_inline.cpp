@@ -50,6 +50,48 @@ static inline bool is_out_of_flow_child(View* child) {
     return layout_view_is_out_of_flow(child);
 }
 
+typedef struct InlineOutOfFlowKind {
+    bool floated;
+    bool positioned;
+} InlineOutOfFlowKind;
+
+static InlineOutOfFlowKind inline_out_of_flow_kind(DomElement* elem) {
+    InlineOutOfFlowKind kind = {};
+    if (!elem) return kind;
+    kind.floated = layout_position_is_floated(elem->position);
+    kind.positioned = layout_position_is_abs_fixed(elem->position);
+    if (kind.floated || kind.positioned || !elem->specified_style ||
+        !elem->specified_style->tree) return kind;
+
+    AvlNode* float_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_FLOAT);
+    if (float_node) {
+        StyleNode* style = (StyleNode*)float_node->declaration;
+        const CssValue* value = style && style->winning_decl ? style->winning_decl->value : nullptr;
+        kind.floated = value && value->type == CSS_VALUE_TYPE_KEYWORD &&
+            (value->data.keyword == CSS_VALUE_LEFT || value->data.keyword == CSS_VALUE_RIGHT);
+    }
+    AvlNode* position_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_POSITION);
+    if (position_node) {
+        StyleNode* style = (StyleNode*)position_node->declaration;
+        const CssValue* value = style && style->winning_decl ? style->winning_decl->value : nullptr;
+        kind.positioned = value && value->type == CSS_VALUE_TYPE_KEYWORD &&
+            (value->data.keyword == CSS_VALUE_ABSOLUTE || value->data.keyword == CSS_VALUE_FIXED);
+    }
+    return kind;
+}
+
+static bool inline_has_axis_edge_decoration(ViewSpan* span, bool rtl, bool start_edge) {
+    if (!span || !span->bound) return false;
+    // Logical start is right only in RTL; logical end is right only in LTR.
+    bool use_right = start_edge == rtl;
+    float border = 0.0f;
+    if (span->bound->border) {
+        border = use_right ? span->bound->border->width.right : span->bound->border->width.left;
+    }
+    float padding = use_right ? span->bound->padding.right : span->bound->padding.left;
+    return border > 0.0f || padding > 0.0f;
+}
+
 static bool span_has_direct_visible_text(ViewSpan* span) {
     for (View* child = span ? span->first_child : nullptr; child; child = child->next()) {
         if (child->view_type == RDT_VIEW_TEXT && child->width > 0.0f && child->height > 0.0f) {
@@ -799,34 +841,9 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         bool child_is_abspos = false;
         if (child->is_element()) {
             DomElement* ce = layout_inline_as_element(child);
-            if (layout_position_is_floated(ce->position)) {
-                child_is_float = true;
-            } else if (layout_position_is_abs_fixed(ce->position)) {
-                child_is_abspos = true;
-            } else if (ce->specified_style && ce->specified_style->tree) {
-                AvlNode* fn = avl_tree_search(ce->specified_style->tree, CSS_PROPERTY_FLOAT);
-                if (fn) {
-                    StyleNode* sn = (StyleNode*)fn->declaration;
-                    if (sn && sn->winning_decl && sn->winning_decl->value &&
-                        sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-                        (sn->winning_decl->value->data.keyword == CSS_VALUE_LEFT ||
-                         sn->winning_decl->value->data.keyword == CSS_VALUE_RIGHT)) {
-                        child_is_float = true;
-                    }
-                }
-                if (!child_is_float) {
-                    AvlNode* pn = avl_tree_search(ce->specified_style->tree, CSS_PROPERTY_POSITION);
-                    if (pn) {
-                        StyleNode* sn = (StyleNode*)pn->declaration;
-                        if (sn && sn->winning_decl && sn->winning_decl->value &&
-                            sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-                            (sn->winning_decl->value->data.keyword == CSS_VALUE_ABSOLUTE ||
-                             sn->winning_decl->value->data.keyword == CSS_VALUE_FIXED)) {
-                            child_is_abspos = true;
-                        }
-                    }
-                }
-            }
+            InlineOutOfFlowKind kind = inline_out_of_flow_kind(ce);
+            child_is_float = kind.floated;
+            child_is_abspos = kind.positioned;
         }
         bool is_block_or_table_internal = child->is_element() && !child_is_float && !child_is_abspos &&
             (child_display.outer == CSS_VALUE_BLOCK ||
@@ -843,14 +860,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             // of one line-height even though there's no other inline content.
             if (!had_block_child && (!in_inline_sequence || lycon->line.is_line_start) && span->bound) {
                 bool is_rtl = lycon->block.direction == CSS_VALUE_RTL;
-                float start_border = 0, start_padding = 0;
-                if (span->bound->border) {
-                    start_border = is_rtl ? span->bound->border->width.right
-                                          : span->bound->border->width.left;
-                }
-                start_padding = is_rtl ? (span->bound->padding.right > 0 ? span->bound->padding.right : 0)
-                                       : (span->bound->padding.left > 0 ? span->bound->padding.left : 0);
-                if (start_border > 0 || start_padding > 0) {
+                if (inline_has_axis_edge_decoration(span, is_rtl, true)) {
                     float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 18.0f;
                     lycon->block.advance_y += line_height;
                     log_debug("%s block-in-inline: leading anonymous block strut: advance_y += %.1f (inline-start decoration)", inline_elem->source_loc(),
@@ -1049,18 +1059,8 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         !has_following_inline_content(inline_elem)) {
         // The last content was a block child, or trailing inline content was whitespace-only.
         // Check if the span has inline-end decoration that would keep the line box open.
-        bool has_inline_end_decoration = false;
-        if (span->bound) {
-            bool is_rtl = lycon->block.direction == CSS_VALUE_RTL;
-            float end_border = 0, end_padding = 0;
-            if (span->bound->border) {
-                end_border = is_rtl ? span->bound->border->width.left
-                                    : span->bound->border->width.right;
-            }
-            end_padding = is_rtl ? (span->bound->padding.left > 0 ? span->bound->padding.left : 0)
-                                 : (span->bound->padding.right > 0 ? span->bound->padding.right : 0);
-            has_inline_end_decoration = (end_border > 0 || end_padding > 0);
-        }
+        bool has_inline_end_decoration = inline_has_axis_edge_decoration(
+            span, lycon->block.direction == CSS_VALUE_RTL, false);
         if (has_inline_end_decoration) {
             float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 18.0f;
             lycon->block.advance_y += line_height;
@@ -1427,37 +1427,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // elements are out of flow and should not trigger block-in-inline
                 // splitting, even though their display is blockified per §9.7.
                 DomElement* child_elem = layout_inline_as_element(scan);
-                bool child_is_out_of_flow = false;
-                if (child_elem->position) {
-                    if (layout_position_is_abs_fixed(child_elem->position)) {
-                        child_is_out_of_flow = true;
-                    }
-                    if (layout_position_is_floated(child_elem->position)) {
-                        child_is_out_of_flow = true;
-                    }
-                }
-                if (!child_is_out_of_flow && child_elem->specified_style && child_elem->specified_style->tree) {
-                    AvlNode* pos_node = avl_tree_search(child_elem->specified_style->tree, CSS_PROPERTY_POSITION);
-                    if (pos_node) {
-                        StyleNode* sn = (StyleNode*)pos_node->declaration;
-                        if (sn && sn->winning_decl && sn->winning_decl->value &&
-                            sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-                            (sn->winning_decl->value->data.keyword == CSS_VALUE_ABSOLUTE ||
-                             sn->winning_decl->value->data.keyword == CSS_VALUE_FIXED)) {
-                            child_is_out_of_flow = true;
-                        }
-                    }
-                    AvlNode* float_node = avl_tree_search(child_elem->specified_style->tree, CSS_PROPERTY_FLOAT);
-                    if (float_node) {
-                        StyleNode* sn = (StyleNode*)float_node->declaration;
-                        if (sn && sn->winning_decl && sn->winning_decl->value &&
-                            sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-                            (sn->winning_decl->value->data.keyword == CSS_VALUE_LEFT ||
-                             sn->winning_decl->value->data.keyword == CSS_VALUE_RIGHT)) {
-                            child_is_out_of_flow = true;
-                        }
-                    }
-                }
+                InlineOutOfFlowKind kind = inline_out_of_flow_kind(child_elem);
+                bool child_is_out_of_flow = kind.floated || kind.positioned;
                 if (!child_is_out_of_flow) {
                     has_block_children = true;
                 }
@@ -1519,18 +1490,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // the leading strut creates a line box before the first block child.
         // The span's bbox should extend up to include this strut area.
         {
-            bool has_inline_start = false;
-            if (span->bound) {
-                bool is_rtl = lycon->block.direction == CSS_VALUE_RTL;
-                float start_border = 0, start_padding = 0;
-                if (span->bound->border) {
-                    start_border = is_rtl ? span->bound->border->width.right
-                                          : span->bound->border->width.left;
-                }
-                start_padding = is_rtl ? (span->bound->padding.right > 0 ? span->bound->padding.right : 0)
-                                       : (span->bound->padding.left > 0 ? span->bound->padding.left : 0);
-                has_inline_start = (start_border > 0 || start_padding > 0);
-            }
+            bool has_inline_start = inline_has_axis_edge_decoration(
+                span, lycon->block.direction == CSS_VALUE_RTL, true);
             if (has_inline_start) {
                 float border_top = 0, pad_top = 0;
                 if (span->bound) {
@@ -1558,18 +1519,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // position, avoiding reliance on advance_y which may or may not include
         // the trailing strut advance (depending on nesting context).
         {
-            bool has_inline_end = false;
-            if (span->bound) {
-                bool is_rtl = lycon->block.direction == CSS_VALUE_RTL;
-                float end_border = 0, end_padding = 0;
-                if (span->bound->border) {
-                    end_border = is_rtl ? span->bound->border->width.left
-                                        : span->bound->border->width.right;
-                }
-                end_padding = is_rtl ? (span->bound->padding.left > 0 ? span->bound->padding.left : 0)
-                                     : (span->bound->padding.right > 0 ? span->bound->padding.right : 0);
-                has_inline_end = (end_border > 0 || end_padding > 0);
-            }
+            bool has_inline_end = inline_has_axis_edge_decoration(
+                span, lycon->block.direction == CSS_VALUE_RTL, false);
             if (has_inline_end) {
                 // Find the bottom of the last block child within this span.
                 // The trailing anonymous block starts at that position.
@@ -1716,84 +1667,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     float saved_trailing = 0;
     View* last_child_for_trim = nullptr;
     if (lycon->line.trailing_space_width > 0) {
-        // Check if there's more inline content after this span on the same line
-        bool has_following_inline = false;
-        DomNode* sib = span->next_sibling;
-        while (sib) {
-            if (sib->is_element()) {
-                DomElement* elem = layout_inline_as_element(sib);
-                DisplayValue dv = resolve_display_value(elem);
-                if (dv.outer == CSS_VALUE_INLINE) {
-                    has_following_inline = true;
-                }
-                break;  // any element determines the answer
-            } else if (sib->is_text()) {
-                DomText* tn = layout_inline_as_text(sib);
-                if (tn && tn->text && tn->length > 0) {
-                    // Check if it's all whitespace
-                    bool all_ws = true;
-                    for (size_t i = 0; i < tn->length; i++) {
-                        char c = tn->text[i];
-                        if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
-                            all_ws = false;
-                            break;
-                        }
-                    }
-                    if (!all_ws) {
-                        has_following_inline = true;
-                        break;
-                    }
-                }
-            }
-            sib = sib->next_sibling;
-        }
-
-        // CSS 2.1 §16.6.1: If no following inline content at this level, walk up
-        // the inline parent chain. The trailing whitespace should only be trimmed
-        // if the entire inline ancestor chain ends the line — not just the current
-        // inline element. A nested inline at end-of-parent still has trailing space
-        // visible if the parent inline has more content following.
-        if (!has_following_inline) {
-            DomNode* ancestor = span->parent;
-            while (ancestor && !has_following_inline) {
-                if (!ancestor->is_element()) break;
-                DomElement* anc_elem = layout_inline_as_element(ancestor);
-                if (!anc_elem) break;
-                // Stop at block-level or non-inline-flow ancestors
-                if (anc_elem->view_type >= RDT_VIEW_INLINE_BLOCK) break;
-                if (anc_elem->view_type != RDT_VIEW_INLINE) break;
-                // Check ancestor's following siblings for inline content
-                DomNode* anc_sib = ancestor->next_sibling;
-                while (anc_sib) {
-                    if (anc_sib->is_element()) {
-                        DomElement* se = layout_inline_as_element(anc_sib);
-                        DisplayValue sdv = resolve_display_value(se);
-                        if (sdv.outer == CSS_VALUE_INLINE) {
-                            has_following_inline = true;
-                        }
-                        break;
-                    } else if (anc_sib->is_text()) {
-                        DomText* tn = layout_inline_as_text(anc_sib);
-                        if (tn && tn->text && tn->length > 0) {
-                            bool all_ws = true;
-                            for (size_t i = 0; i < tn->length; i++) {
-                                char c = tn->text[i];
-                                if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
-                                    all_ws = false;
-                                    break;
-                                }
-                            }
-                            if (!all_ws) {
-                                has_following_inline = true;
-                                break;
-                            }
-                        }
-                    }
-                    anc_sib = anc_sib->next_sibling;
-                }
-                ancestor = ancestor->parent;
-            }
-        }
+        bool has_following_inline = has_following_inline_content(span);
 
         if (!has_following_inline) {
             // Span is last inline content on this line — trim trailing whitespace

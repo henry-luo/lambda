@@ -265,76 +265,6 @@ static bool css_has_horizontal_box_decl(StyleTree* style) {
            style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT_WIDTH);
 }
 
-static bool intrinsic_style_has_horizontal_padding_decl(StyleTree* style) {
-    if (!style) return false;
-    return style_tree_get_declaration(style, CSS_PROPERTY_PADDING) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_LEFT) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_RIGHT) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_INLINE) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_INLINE_START) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_INLINE_END);
-}
-
-static bool intrinsic_style_has_horizontal_border_decl(StyleTree* style) {
-    if (!style) return false;
-    return style_tree_get_declaration(style, CSS_PROPERTY_BORDER) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_WIDTH) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_STYLE) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_LEFT) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_LEFT_WIDTH) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT_WIDTH) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_LEFT_STYLE) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT_STYLE) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_INLINE) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_INLINE_START) ||
-           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_INLINE_END);
-}
-
-static DomElement* intrinsic_find_html_table_ancestor(DomElement* element) {
-    for (DomNode* node = element ? element->parent : nullptr; node; node = node->parent) {
-        if (!node->is_element()) continue;
-        DomElement* ancestor = node->as_element();
-        if (ancestor->tag() == HTM_TAG_TABLE) return ancestor;
-    }
-    return nullptr;
-}
-
-static float intrinsic_unresolved_html_cell_horizontal_box_extra(DomElement* cell) {
-    if (!cell || cell->bound) return 0.0f;
-    uintptr_t tag = cell->tag();
-    if (tag != HTM_TAG_TD && tag != HTM_TAG_TH) return 0.0f;
-
-    DomElement* table = intrinsic_find_html_table_ancestor(cell);
-    if (!table) return 0.0f;
-
-    float extra = 0.0f;
-    StyleTree* style = cell->specified_style;
-
-    // HTML table presentational hints apply to real td/th cells even when CSS
-    // anonymous table wrappers sit between the cell and its nearest HTML table.
-    if (!intrinsic_style_has_horizontal_padding_decl(style)) {
-        float cell_padding = 1.0f;
-        const char* cellpadding_attr = table->get_attribute("cellpadding");
-        if (cellpadding_attr) {
-            cell_padding = (float)str_to_double_default(
-                cellpadding_attr, strlen(cellpadding_attr), 0.0);
-            if (cell_padding < 0.0f) cell_padding = 0.0f;
-        }
-        extra += cell_padding * 2.0f;
-    }
-
-    if (!intrinsic_style_has_horizontal_border_decl(style)) {
-        const char* border_attr = table->get_attribute("border");
-        if (border_attr) {
-            float border = (float)str_to_double_default(border_attr, strlen(border_attr), 0.0);
-            if (border > 0.0f) extra += 2.0f;
-        }
-    }
-
-    return extra;
-}
-
 static float intrinsic_border_width_from_shorthand_value(LayoutContext* lycon, CssPropertyId property,
                                                          const CssValue* value) {
     if (!value) return 0.0f;
@@ -1893,6 +1823,13 @@ static bool intrinsic_element_is_float(DomElement* element) {
     return float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT;
 }
 
+static float intrinsic_parent_definite_height(LayoutContext* lycon) {
+    BlockContext* parent = lycon ? lycon->block.parent : nullptr;
+    if (!parent) return -1.0f;
+    if (parent->content_height > 0.0f) return parent->content_height;
+    return parent->given_height > 0.0f ? parent->given_height : -1.0f;
+}
+
 static bool intrinsic_element_is_abs_or_fixed(DomElement* element) {
     if (!element) return false;
     if (layout_position_is_abs_fixed(element->position)) {
@@ -2634,12 +2571,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 height_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = (float)height_decl->value->data.percentage.value;
                 // Check if parent has definite height
-                float parent_height = -1;
-                if (lycon->block.parent && lycon->block.parent->content_height > 0) {
-                    parent_height = lycon->block.parent->content_height;
-                } else if (lycon->block.parent && lycon->block.parent->given_height > 0) {
-                    parent_height = lycon->block.parent->given_height;
-                }
+                float parent_height = intrinsic_parent_definite_height(lycon);
                 if (parent_height > 0) {
                     height = parent_height * percentage / 100.0f;
                     log_debug("  -> percentage height resolved: %.1f%% of %.1f = %.1f",
@@ -3017,6 +2949,16 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 return 1;
             };
 
+            auto classify_table_cell = [&get_cell_colspan](DomElement* cell_elem,
+                                                            bool* out_is_cell) -> int {
+                ViewBlock* cell_view = lam::unsafe_view_block_element_storage(cell_elem);
+                DisplayValue display = resolve_display_value((void*)cell_elem);
+                bool is_cell = !intrinsic_element_is_float(cell_elem) &&
+                    display.inner == CSS_VALUE_TABLE_CELL;
+                if (out_is_cell) *out_is_cell = is_cell;
+                return is_cell ? get_cell_colspan(cell_elem, cell_view) : 1;
+            };
+
             enum IntrinsicAnonymousRowContext {
                 INTRINSIC_ANON_ROW_NONE,
                 INTRINSIC_ANON_ROW_TABLE,
@@ -3173,7 +3115,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
 
                     IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, item_elem);
-                    float extra = intrinsic_unresolved_html_cell_horizontal_box_extra(item_elem);
+                    float extra = layout_unresolved_html_cell_horizontal_box_extra(item_elem);
                     child_sizes.min_content += extra;
                     child_sizes.max_content += extra;
                     bool item_is_inline_level = is_inline_level_element(item_elem);
@@ -3222,7 +3164,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             };
 
             // Helper: count columns in a row (accounting for colspan)
-            auto count_cells = [&get_cell_colspan, &should_skip_anonymous_row_child](
+            auto count_cells = [&classify_table_cell, &should_skip_anonymous_row_child](
                     DomElement* row_elem, IntrinsicAnonymousRowContext anon_context) -> int {
                 int n = 0;
                 bool in_non_cell_run = false;
@@ -3250,12 +3192,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         non_cell_run_last_content_was_text = false;
                         continue;
                     }
-                    ViewBlock* cell_view = lam::unsafe_view_block_element_storage(cell_elem);
-                    DisplayValue cell_display = resolve_display_value((void*)cell_elem);
-                    bool is_cell = !intrinsic_element_is_float(cell_elem) &&
-                        (cell_display.inner == CSS_VALUE_TABLE_CELL);
+                    bool is_cell = false;
+                    int span = classify_table_cell(cell_elem, &is_cell);
                     if (is_cell) {
-                        n += get_cell_colspan(cell_elem, cell_view);
+                        n += span;
                         in_non_cell_run = false;
                         non_cell_run_last_content_was_text = false;
                     } else if (!in_non_cell_run) {
@@ -3375,11 +3315,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         non_cell_run_last_content_was_text = false;
                         continue;
                     }
-                    ViewBlock* cell_view = lam::unsafe_view_block_element_storage(cell_elem);
-                    DisplayValue cell_display = resolve_display_value((void*)cell_elem);
-                    bool is_cell = !intrinsic_element_is_float(cell_elem) &&
-                        (cell_display.inner == CSS_VALUE_TABLE_CELL);
-                    int span = is_cell ? get_cell_colspan(cell_elem, cell_view) : 1;
+                    bool is_cell = false;
+                    int span = classify_table_cell(cell_elem, &is_cell);
                     if (!is_cell && in_non_cell_run) continue;
                     if (col + span > num_columns) break;
                     in_non_cell_run = !is_cell;
@@ -3389,7 +3326,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             ? measure_element_intrinsic_widths(lycon, cell_elem)
                             : measure_anonymous_cell_run(cell, anon_context);
                         float extra = is_cell ?
-                            intrinsic_unresolved_html_cell_horizontal_box_extra(cell_elem) : 0.0f;
+                            layout_unresolved_html_cell_horizontal_box_extra(cell_elem) : 0.0f;
                         float cmin = is_cell
                             ? ceilf(cell_sizes.min_content + extra)
                             : cell_sizes.min_content;
@@ -3417,18 +3354,15 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         in_non_cell_run = false;
                         continue;
                     }
-                    ViewBlock* cell_view = lam::unsafe_view_block_element_storage(cell_elem);
-                    DisplayValue cell_display = resolve_display_value((void*)cell_elem);
-                    bool is_cell = !intrinsic_element_is_float(cell_elem) &&
-                        (cell_display.inner == CSS_VALUE_TABLE_CELL);
-                    int span = is_cell ? get_cell_colspan(cell_elem, cell_view) : 1;
+                    bool is_cell = false;
+                    int span = classify_table_cell(cell_elem, &is_cell);
                     if (!is_cell && in_non_cell_run) continue;
                     if (col + span > num_columns) break;
                     in_non_cell_run = !is_cell;
                     if (span > 1) {
                         IntrinsicSizes cell_sizes = measure_element_intrinsic_widths(lycon, cell_elem);
                         float extra = is_cell ?
-                            intrinsic_unresolved_html_cell_horizontal_box_extra(cell_elem) : 0.0f;
+                            layout_unresolved_html_cell_horizontal_box_extra(cell_elem) : 0.0f;
                         float cmin = ceilf(cell_sizes.min_content + extra);
                         float cmax = ceilf(cell_sizes.max_content + extra);
 
@@ -3842,12 +3776,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             } else if (height_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 // Check if parent has definite height for percentage resolution
                 float percentage = (float)height_decl->value->data.percentage.value;
-                float parent_height = -1;
-                if (lycon->block.parent && lycon->block.parent->content_height > 0) {
-                    parent_height = lycon->block.parent->content_height;
-                } else if (lycon->block.parent && lycon->block.parent->given_height > 0) {
-                    parent_height = lycon->block.parent->given_height;
-                }
+                float parent_height = intrinsic_parent_definite_height(lycon);
                 log_debug("  -> percentage height: %.1f%%, parent_height=%.1f",
                           percentage, parent_height);
                 if (parent_height > 0) {

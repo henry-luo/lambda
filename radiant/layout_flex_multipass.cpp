@@ -205,6 +205,17 @@ static float flex_apply_border_box_height_constraints(ViewBlock* block, float bo
     return layout_floor_border_box_height(block, constrained);
 }
 
+static float flex_content_border_box_height(ViewBlock* block) {
+    float height = block->content_height;
+    if (!block->bound) return height;
+
+    height += block->bound->padding.top + block->bound->padding.bottom;
+    if (block->bound->border) {
+        height += block->bound->border->width.top + block->bound->border->width.bottom;
+    }
+    return height;
+}
+
 static float flex_in_flow_content_bottom(ViewElement* elem) {
     if (!elem) return 0.0f;
 
@@ -1374,17 +1385,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         // Per CSS Sizing Level 4 §7, aspect-ratio fixes box dimensions; content overflows but doesn't resize the box
         bool has_aspect_ratio = (flex_item->fi && flex_item->fi->aspect_ratio > 0.0f);
         if (!has_explicit_height && !is_replaced && !has_aspect_ratio && flex_item->content_height > 0) {
-            // Calculate total height including padding and border
-            float padding_top = 0, padding_bottom = 0, border_top = 0, border_bottom = 0;
-            if (flex_item->bound) {
-                padding_top = flex_item->bound->padding.top;
-                padding_bottom = flex_item->bound->padding.bottom;
-                if (flex_item->bound->border) {
-                    border_top = flex_item->bound->border->width.top;
-                    border_bottom = flex_item->bound->border->width.bottom;
-                }
-            }
-            float total_height = flex_item->content_height + padding_top + padding_bottom + border_top + border_bottom;
+            float total_height = flex_content_border_box_height(flex_item);
 
             // If content height is larger than flex-determined height, update
             if (total_height > flex_item->height) {
@@ -1426,16 +1427,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         }
         if (!has_explicit_height && !is_replaced && !has_aspect_ratio && !is_inner_flex_or_grid &&
             !skip_for_stretch && flex_item->content_height > 0) {
-            float padding_top = 0, padding_bottom = 0, border_top = 0, border_bottom = 0;
-            if (flex_item->bound) {
-                padding_top = flex_item->bound->padding.top;
-                padding_bottom = flex_item->bound->padding.bottom;
-                if (flex_item->bound->border) {
-                    border_top = flex_item->bound->border->width.top;
-                    border_bottom = flex_item->bound->border->width.bottom;
-                }
-            }
-            float total_height = flex_item->content_height + padding_top + padding_bottom + border_top + border_bottom;
+            float total_height = flex_content_border_box_height(flex_item);
             // Post-content row-flex sizing can refine estimates, but it must not
             // shrink below the item's resolved CSS min-height/max-height constraints.
             total_height = flex_apply_border_box_height_constraints(flex_item, total_height);

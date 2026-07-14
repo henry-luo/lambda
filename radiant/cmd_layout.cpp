@@ -5571,6 +5571,22 @@ static View* resolve_lambda_focus_restore(DomDocument* doc,
     return elem ? static_cast<View*>(elem) : nullptr;
 }
 
+static View* restore_lambda_focus(DomDocument* doc, DocState* state, bool had_focus,
+                                  const LambdaFocusRestore* restore) {
+    if (!had_focus || !state || !doc || !doc->view_tree || !doc->view_tree->root) return nullptr;
+    View* focused = resolve_lambda_focus_restore(doc, restore);
+    if (!focused && restore->fallback_tag) {
+        focused = find_matching_input(
+            doc->view_tree->root, restore->fallback_tag, restore->fallback_class);
+    }
+    if (focused) {
+        focus_set(state, focused, false);
+    } else if (focus_has_current(state)) {
+        focus_clear(state);
+    }
+    return focused;
+}
+
 void rebuild_lambda_doc(UiContext* uicon) {
     if (!uicon || !uicon->document) {
         log_error("rebuild_lambda_doc: no document");
@@ -5663,24 +5679,12 @@ void rebuild_lambda_doc(UiContext* uicon) {
     auto t_layout = high_resolution_clock::now();
 
     // Restore focus to matching element in new view tree
-    if (had_focus && state && doc->view_tree && doc->view_tree->root) {
-        View* new_focused = resolve_lambda_focus_restore(doc, &focus_restore);
-        if (!new_focused && focus_restore.fallback_tag) {
-            new_focused = find_matching_input(
-                doc->view_tree->root,
-                focus_restore.fallback_tag,
-                focus_restore.fallback_class);
-        }
-        if (new_focused) {
-            focus_set(state, new_focused, false);
-            log_debug("rebuild_lambda_doc: restored focus to new view %p (tag=%s class=%s)",
-                     new_focused,
-                     focus_restore.fallback_tag ? focus_restore.fallback_tag : "",
-                     focus_restore.fallback_class ? focus_restore.fallback_class : "");
-        } else if (focus_has_current(state)) {
-            // old focused element was removed; clear stale pointer so autofocus can fire
-            focus_clear(state);
-        }
+    View* restored_focus = restore_lambda_focus(doc, state, had_focus, &focus_restore);
+    if (restored_focus) {
+        log_debug("rebuild_lambda_doc: restored focus to new view %p (tag=%s class=%s)",
+                  restored_focus,
+                  focus_restore.fallback_tag ? focus_restore.fallback_tag : "",
+                  focus_restore.fallback_class ? focus_restore.fallback_class : "");
     }
 
     // autofocus — if no focus was restored, scan the new tree for an autofocus input
@@ -5907,21 +5911,8 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     }
 
     // Restore focus
-    if (had_focus && state && doc->view_tree && doc->view_tree->root) {
-        View* new_focused = resolve_lambda_focus_restore(doc, &focus_restore);
-        if (!new_focused && focus_restore.fallback_tag) {
-            new_focused = find_matching_input(
-                doc->view_tree->root,
-                focus_restore.fallback_tag,
-                focus_restore.fallback_class);
-        }
-        if (new_focused) {
-            focus_set(state, new_focused, false);
-            log_debug("rebuild_lambda_doc_incremental: restored focus");
-        } else if (focus_has_current(state)) {
-            // old focused element was removed; clear stale pointer so autofocus can fire
-            focus_clear(state);
-        }
+    if (restore_lambda_focus(doc, state, had_focus, &focus_restore)) {
+        log_debug("rebuild_lambda_doc_incremental: restored focus");
     }
 
     // Phase 20: autofocus — if no focus was restored and new subtree contains an input,
@@ -6139,6 +6130,19 @@ struct LayoutPhaseTiming {
 
 static double js_phase_us_to_ms(long us) {
     return (double)us / 1000.0;
+}
+
+static void layout_phase_timing_set_js(LayoutPhaseTiming* timing,
+                                       const JsMirPhaseTiming* js) {
+    if (!timing || !js) return;
+    timing->js_parse_ms = js_phase_us_to_ms(js->parse_us);
+    timing->js_ast_ms = js_phase_us_to_ms(js->ast_us);
+    timing->js_transpile_ms = js_phase_us_to_ms(js->early_us + js->imports_us + js->mir_us);
+    timing->js_link_ms = js_phase_us_to_ms(js->link_us);
+    timing->js_exec_ms = js_phase_us_to_ms(js->execute_us);
+    timing->js_cleanup_ms = js_phase_us_to_ms(js->cleanup_us);
+    timing->js_total_ms = js_phase_us_to_ms(js->total_us);
+    timing->js_preamble_ms = js_phase_us_to_ms(js->preamble_us);
 }
 
 static void write_layout_phase_timing(FILE* timing_file, const char* input_file,
@@ -6364,15 +6368,7 @@ static bool layout_single_file(
         LayoutPhaseTiming timing = {};
         timing.total_ms = std::chrono::duration<double, std::milli>(load_end - total_start).count();
         timing.load_ms = std::chrono::duration<double, std::milli>(load_end - load_start).count();
-        timing.js_parse_ms = js_phase_us_to_ms(document_js_timing.parse_us);
-        timing.js_ast_ms = js_phase_us_to_ms(document_js_timing.ast_us);
-        timing.js_transpile_ms = js_phase_us_to_ms(
-            document_js_timing.early_us + document_js_timing.imports_us + document_js_timing.mir_us);
-        timing.js_link_ms = js_phase_us_to_ms(document_js_timing.link_us);
-        timing.js_exec_ms = js_phase_us_to_ms(document_js_timing.execute_us);
-        timing.js_cleanup_ms = js_phase_us_to_ms(document_js_timing.cleanup_us);
-        timing.js_total_ms = js_phase_us_to_ms(document_js_timing.total_us);
-        timing.js_preamble_ms = js_phase_us_to_ms(document_js_timing.preamble_us);
+        layout_phase_timing_set_js(&timing, &document_js_timing);
         timing.document_parse_ms = timing.load_ms - timing.js_total_ms;
         if (timing.document_parse_ms < 0.0) timing.document_parse_ms = 0.0;
         write_layout_phase_timing(timing_file, input_file, false, &timing);
@@ -6490,15 +6486,7 @@ static bool layout_single_file(
         LayoutPhaseTiming timing = {};
         timing.total_ms = std::chrono::duration<double, std::milli>(total_end - total_start).count();
         timing.load_ms = std::chrono::duration<double, std::milli>(load_end - load_start).count();
-        timing.js_parse_ms = js_phase_us_to_ms(document_js_timing.parse_us);
-        timing.js_ast_ms = js_phase_us_to_ms(document_js_timing.ast_us);
-        timing.js_transpile_ms = js_phase_us_to_ms(
-            document_js_timing.early_us + document_js_timing.imports_us + document_js_timing.mir_us);
-        timing.js_link_ms = js_phase_us_to_ms(document_js_timing.link_us);
-        timing.js_exec_ms = js_phase_us_to_ms(document_js_timing.execute_us);
-        timing.js_cleanup_ms = js_phase_us_to_ms(document_js_timing.cleanup_us);
-        timing.js_total_ms = js_phase_us_to_ms(document_js_timing.total_us);
-        timing.js_preamble_ms = js_phase_us_to_ms(document_js_timing.preamble_us);
+        layout_phase_timing_set_js(&timing, &document_js_timing);
         timing.document_parse_ms = timing.load_ms - timing.js_total_ms;
         if (timing.document_parse_ms < 0.0) timing.document_parse_ms = 0.0;
         timing.layout_ms = layout_phase_ran

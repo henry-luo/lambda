@@ -155,20 +155,9 @@ public:
         LineSpan primary_span,
         LineSpan secondary_span
     ) {
-        // Convert to row/column spans based on axis
-        LineSpan row_span, col_span;
-        if (primary_axis == AbsoluteAxis::Horizontal) {
-            col_span = primary_span;
-            row_span = secondary_span;
-        } else {
-            row_span = primary_span;
-            col_span = secondary_span;
-        }
-
-        // Convert OriginZero coordinates to track indices
         int16_t col_start, col_end, row_start, row_end;
-        columns_.oz_line_range_to_track_range(col_span, col_start, col_end);
-        rows_.oz_line_range_to_track_range(row_span, row_start, row_end);
+        resolve_line_area(primary_axis, primary_span, secondary_span,
+                          row_start, row_end, col_start, col_end);
 
         // Expand if necessary
         if (!is_area_in_range(AbsoluteAxis::Horizontal, col_start, col_end, row_start, row_end)) {
@@ -190,27 +179,16 @@ public:
         LineSpan secondary_span,
         CellOccupancyState state
     ) {
-        // Convert to row/column spans based on axis
-        LineSpan row_span, col_span;
-        if (primary_axis == AbsoluteAxis::Horizontal) {
-            col_span = primary_span;
-            row_span = secondary_span;
-        } else {
-            row_span = primary_span;
-            col_span = secondary_span;
-        }
-
-        // Convert OriginZero coordinates to track indices
         int16_t col_start, col_end, row_start, row_end;
-        columns_.oz_line_range_to_track_range(col_span, col_start, col_end);
-        rows_.oz_line_range_to_track_range(row_span, row_start, row_end);
+        resolve_line_area(primary_axis, primary_span, secondary_span,
+                          row_start, row_end, col_start, col_end);
 
         // Check if we need to expand the grid
         if (!is_area_in_range(AbsoluteAxis::Horizontal, col_start, col_end, row_start, row_end)) {
             expand_to_fit_range(row_start, row_end, col_start, col_end);
             // Re-calculate indices after expansion
-            columns_.oz_line_range_to_track_range(col_span, col_start, col_end);
-            rows_.oz_line_range_to_track_range(row_span, row_start, row_end);
+            resolve_line_area(primary_axis, primary_span, secondary_span,
+                              row_start, row_end, col_start, col_end);
         }
 
         // Mark cells
@@ -323,6 +301,18 @@ public:
     }
 
 private:
+    void resolve_line_area(AbsoluteAxis primary_axis,
+                           LineSpan primary_span, LineSpan secondary_span,
+                           int16_t& row_start, int16_t& row_end,
+                           int16_t& col_start, int16_t& col_end) const {
+        LineSpan row_span = primary_axis == AbsoluteAxis::Horizontal
+            ? secondary_span : primary_span;
+        LineSpan col_span = primary_axis == AbsoluteAxis::Horizontal
+            ? primary_span : secondary_span;
+        columns_.oz_line_range_to_track_range(col_span, col_start, col_end);
+        rows_.oz_line_range_to_track_range(row_span, row_start, row_end);
+    }
+
     /**
      * Expand the grid to fit the specified range (in track indices)
      * Grid can expand in all 4 directions

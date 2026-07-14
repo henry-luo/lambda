@@ -936,18 +936,6 @@ static void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp
     log_debug("[FORM] render_radio at (%.1f, %.1f) checked=%d", x, y, checked ? 1 : 0);
 }
 
-static const char* form_button_label_text(ViewBlock* block, FormControlProp* form) {
-    const char* text = form ? form->value : nullptr;
-    if ((!text || !*text) && block) {
-        text = block->get_attribute("value");
-    }
-    if ((!text || !*text) && form && form->input_type) {
-        if (strcmp(form->input_type, "submit") == 0) return "Submit";
-        if (strcmp(form->input_type, "reset") == 0) return "Reset";
-    }
-    return text;
-}
-
 /**
  * Render a button control.
  * If the button has CSS-styled background (from author stylesheet),

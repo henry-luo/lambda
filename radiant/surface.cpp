@@ -1050,6 +1050,17 @@ static bool image_decode_trace_enabled(void) {
     return trace && trace[0] != '\0';
 }
 
+static void image_surface_install_decoded_pixels(ImageSurface* img,
+                                                 unsigned char* pixels,
+                                                 int width, int height) {
+    if (img->pixels) mem_free(img->pixels);
+    img->pixels = pixels;
+    img->decoded_width = width;
+    img->decoded_height = height;
+    img->pitch = width * 4;
+    image_surface_bump_generation(img);
+}
+
 void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h) {
     if (!img) return;
 
@@ -1063,15 +1074,8 @@ void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h)
         int width, height, channels;
         unsigned char* data = image_load_scaled(img->source_path, target_w, target_h, &width, &height, &channels);
         if (data) {
-            if (img->pixels) {
-                mem_free(img->pixels);
-            }
-            img->pixels = data;
             // record actual decoded buffer dims; intrinsic width/height stay unchanged for layout.
-            img->decoded_width = width;
-            img->decoded_height = height;
-            img->pitch = width * 4;
-            image_surface_bump_generation(img);
+            image_surface_install_decoded_pixels(img, data, width, height);
             // Release builds strip debug logs; keep this opt-in trace for
             // cache-promotion tests without raising normal image decodes to note.
             if (image_decode_trace_enabled()) {
@@ -1093,14 +1097,7 @@ void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h)
         unsigned char* data = image_load_from_memory_scaled(img->source_data, img->source_data_len,
                                                             target_w, target_h, &width, &height, &channels);
         if (data) {
-            if (img->pixels) {
-                mem_free(img->pixels);
-            }
-            img->pixels = data;
-            img->decoded_width = width;
-            img->decoded_height = height;
-            img->pitch = width * 4;
-            image_surface_bump_generation(img);
+            image_surface_install_decoded_pixels(img, data, width, height);
             // Release builds strip debug logs; keep this opt-in trace for
             // cache-promotion tests without raising normal image decodes to note.
             if (image_decode_trace_enabled()) {
