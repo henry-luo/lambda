@@ -156,6 +156,159 @@
           "end": "#undef SM_RULE_TO"
         }
       ]
+    },
+    {
+      "id": "flex_resolution_phase_loops",
+      "modules": ["radiant"],
+      "reason": "CSS Flexbox 9.7 requires sequential passes over one line's items; Lizard reports the identical loop guards while the pass bodies compute unrelated freeze, distribution, violation, and finalization state.",
+      "allow_within_region": true,
+      "regions": [
+        {
+          "file": "radiant/layout_flex.cpp",
+          "start": "static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* line) {",
+          "end": "static float flex_line_outer_main_size("
+        }
+      ]
+    },
+    {
+      "id": "independent_flex_line_reductions",
+      "modules": ["radiant"],
+      "reason": "These functions independently reduce or position flex-line items; Lizard normalizes their short collection-loop prologues but sharing the unrelated bodies would require callback scaffolding and increase code size.",
+      "regions": [
+        {
+          "file": "radiant/layout_flex.cpp",
+          "start": "float find_max_baseline(",
+          "end": "void reposition_baseline_items("
+        },
+        {
+          "file": "radiant/layout_flex.cpp",
+          "start": "void reposition_baseline_items(",
+          "end": "bool is_main_axis_horizontal("
+        },
+        {
+          "file": "radiant/layout_flex.cpp",
+          "start": "static int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int item_count) {",
+          "end": "typedef struct FlexLengthScratch"
+        },
+        {
+          "file": "radiant/layout_flex.cpp",
+          "start": "static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* line) {",
+          "end": "static float flex_line_outer_main_size("
+        },
+        {
+          "file": "radiant/layout_flex.cpp",
+          "start": "static float flex_line_outer_main_size(",
+          "end": "static int flex_line_auto_margin_count("
+        },
+        {
+          "file": "radiant/layout_flex.cpp",
+          "start": "static int flex_line_auto_margin_count(",
+          "end": "static int flex_physical_justify_value("
+        },
+        {
+          "file": "radiant/layout_flex.cpp",
+          "start": "void align_items_main_axis(",
+          "end": "void align_items_cross_axis("
+        }
+      ]
+    },
+    {
+      "id": "vector_backend_api_adapters",
+      "modules": ["radiant"],
+      "reason": "CoreGraphics and ThorVG are mutually exclusive implementations of the same C API; these narrow wrappers necessarily repeat target projection and batch guards while dispatching to different backend state.",
+      "regions": [
+        {
+          "file": "radiant/rdt_vector_tvg.cpp",
+          "start": "void rdt_vector_set_tile_offset_y(",
+          "end": "// Path construction"
+        },
+        {
+          "file": "radiant/rdt_vector_cg.mm",
+          "start": "void rdt_vector_set_tile_offset_y(",
+          "end": "// Path construction"
+        }
+      ]
+    },
+    {
+      "id": "vector_backend_gradient_entry_points",
+      "modules": ["radiant"],
+      "reason": "The linear and radial gradient API wrappers share only required argument validation and backend acquisition; their common gradient setup is already extracted and their draw calls are backend-specific.",
+      "regions": [
+        {
+          "file": "radiant/rdt_vector_tvg.cpp",
+          "start": "void rdt_fill_linear_gradient(",
+          "end": "void rdt_fill_radial_gradient("
+        },
+        {
+          "file": "radiant/rdt_vector_cg.mm",
+          "start": "void rdt_fill_linear_gradient(",
+          "end": "void rdt_fill_radial_gradient("
+        },
+        {
+          "file": "radiant/rdt_vector_cg.mm",
+          "start": "void rdt_fill_radial_gradient(",
+          "end": "// Clipping"
+        }
+      ]
+    },
+    {
+      "id": "vector_backend_picture_size_adapters",
+      "modules": ["radiant"],
+      "reason": "Picture size getters and setters are required backend-local API definitions over private RdtPicture layouts; promoting them would expose backend implementation structs.",
+      "regions": [
+        {
+          "file": "radiant/rdt_vector_tvg.cpp",
+          "start": "void rdt_picture_get_size(",
+          "end": "// Internal helper: render a SVG_DOM picture"
+        },
+        {
+          "file": "radiant/rdt_vector_cg.mm",
+          "start": "void rdt_picture_get_size(",
+          "end": "RdtPicture* rdt_picture_dup("
+        }
+      ]
+    },
+    {
+      "id": "form_control_box_destructuring",
+      "modules": ["radiant"],
+      "reason": "Independent form painters unpack the same FormControlBox coordinates into readable local aliases; Lizard reports these prologues although each subsequent checkbox, radio, text, select, button, or range drawing body is distinct.",
+      "regions": [
+        {
+          "file": "radiant/render_form.cpp",
+          "start": "static void render_text_input(",
+          "end": "static void render_checkbox("
+        },
+        {
+          "file": "radiant/render_form.cpp",
+          "start": "static void render_checkbox(",
+          "end": "static void render_radio("
+        },
+        {
+          "file": "radiant/render_form.cpp",
+          "start": "static void render_radio(",
+          "end": "static const char* form_button_label_text("
+        },
+        {
+          "file": "radiant/render_form.cpp",
+          "start": "static void render_button(",
+          "end": "static const char* get_option_text_at_index("
+        },
+        {
+          "file": "radiant/render_form.cpp",
+          "start": "static void render_select(",
+          "end": "void render_select_dropdown("
+        },
+        {
+          "file": "radiant/render_form.cpp",
+          "start": "static void render_textarea(",
+          "end": "static void render_range("
+        },
+        {
+          "file": "radiant/render_form.cpp",
+          "start": "static void render_range(",
+          "end": "void render_form_control("
+        }
+      ]
     }
   ]
 }

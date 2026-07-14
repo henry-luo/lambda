@@ -491,6 +491,46 @@ inline void sort_contributions_for_intrinsic_sizing(
         compare_grid_item_contribution_for_intrinsic_sizing);
 }
 
+inline void distribute_max_content_minimum(
+    TrackArray& tracks,
+    const GridItemContribution& contribution,
+    size_t end,
+    float gap
+) {
+    IndexArray eligible_tracks;
+    for (size_t i = contribution.track_start; i < end; ++i) {
+        auto& track = tracks[i];
+        if (track.min_track_sizing_function.type != SizingFunctionType::MaxContent ||
+            track.max_track_sizing_function.type == SizingFunctionType::MinContent) {
+            continue;
+        }
+        bool is_truly_flexible = track.is_flexible() &&
+            track.max_track_sizing_function.flex_factor() > 0;
+        if (!is_truly_flexible) eligible_tracks.push_back(i);
+    }
+
+    if (!eligible_tracks.empty()) {
+        float current_size = spanned_tracks_size(
+            tracks, contribution.track_start, contribution.track_span, gap);
+        float extra_space = contribution.max_content_contribution - current_size;
+        log_debug("grid max-content minimum: track=%zu span=%zu max=%.1f current=%.1f extra=%.1f",
+                  contribution.track_start, contribution.track_span,
+                  contribution.max_content_contribution, current_size, extra_space);
+        if (extra_space > 0) {
+            float per_track = extra_space / eligible_tracks.size();
+            for (size_t index : eligible_tracks) {
+                tracks[index].base_size += per_track;
+            }
+        }
+    }
+
+    for (size_t i = contribution.track_start; i < end; ++i) {
+        if (tracks[i].growth_limit < tracks[i].base_size) {
+            tracks[i].growth_limit = tracks[i].base_size;
+        }
+    }
+}
+
 /**
  * Process items sorted by span count (ascending), with flex/non-flex separation.
  * Items with smaller spans are processed first per CSS Grid spec §11.5.
@@ -725,107 +765,12 @@ inline void resolve_intrinsic_track_sizes(
             }
 
             // --- Part (B): Step 2.3 max-content minimums for MaxContent MIN tracks ---
-            {
-                bool has_mc_min = false;
-                for (size_t i = contrib.track_start; i < end; ++i) {
-                    auto min_type = tracks[i].min_track_sizing_function.type;
-                    auto max_type = tracks[i].max_track_sizing_function.type;
-                    if (min_type == SizingFunctionType::MaxContent &&
-                        max_type != SizingFunctionType::MinContent) {
-                        has_mc_min = true;
-                        break;
-                    }
-                }
-                if (has_mc_min) {
-                    float current_size = spanned_tracks_size(tracks, contrib.track_start, contrib.track_span, gap);
-                    float extra_space = contrib.max_content_contribution - current_size;
-                    if (extra_space > 0) {
-                        // Distribute to MaxContent MIN tracks only
-                        IndexArray mc_min_tracks;
-                        for (size_t i = contrib.track_start; i < end; ++i) {
-                            auto& track = tracks[i];
-                            if (track.min_track_sizing_function.type != SizingFunctionType::MaxContent) continue;
-                            auto max_type = track.max_track_sizing_function.type;
-                            if (max_type == SizingFunctionType::MinContent) continue;
-                            bool is_truly_flex = track.is_flexible() &&
-                                                track.max_track_sizing_function.flex_factor() > 0;
-                            if (is_truly_flex) continue;
-                            mc_min_tracks.push_back(i);
-                        }
-                        if (!mc_min_tracks.empty()) {
-                            float remaining = extra_space;
-                            float per_track = remaining / mc_min_tracks.size();
-                            for (size_t idx : mc_min_tracks) {
-                                tracks[idx].base_size += per_track;
-                            }
-                        }
-                    }
-                }
-
-                // Ensure growth_limit >= base_size invariant
-                for (size_t i = contrib.track_start; i < end; ++i) {
-                    if (tracks[i].growth_limit < tracks[i].base_size) {
-                        tracks[i].growth_limit = tracks[i].base_size;
-                    }
-                }
-            }
+            distribute_max_content_minimum(tracks, contrib, end, gap);
 
         } else {
             // For non-scroll containers: §11.5 step 2.3 — distribute max_content
             // to tracks with a max-content MIN sizing function.
-            bool has_eligible_track = false;
-            for (size_t i = contrib.track_start; i < end; ++i) {
-                auto min_type = tracks[i].min_track_sizing_function.type;
-                auto max_type = tracks[i].max_track_sizing_function.type;
-                // Must have max-content MIN AND an eligible MAX type for distribution
-                // (MinContent MAX is excluded from max-content distribution per §11.5.1)
-                if (min_type == SizingFunctionType::MaxContent &&
-                    max_type != SizingFunctionType::MinContent) {
-                    has_eligible_track = true;
-                    break;
-                }
-            }
-            if (!has_eligible_track) continue;
-
-            float current_size = spanned_tracks_size(tracks, contrib.track_start, contrib.track_span, gap);
-            float extra_space = contrib.max_content_contribution - current_size;
-            log_debug("grid phase2b step2.3: track=%zu span=%zu max_content=%.1f current=%.1f extra=%.1f",
-                     contrib.track_start, contrib.track_span,
-                     contrib.max_content_contribution, current_size, extra_space);
-            if (extra_space <= 0) continue;
-
-            // Distribute to max-content MIN tracks, excluding those with MinContent MAX.
-            // Uses tiered distribution: MaxContent MAX tracks first, then other eligible MAX.
-            IndexArray mc_min_tracks;
-            for (size_t i = contrib.track_start; i < end; ++i) {
-                auto& track = tracks[i];
-                if (track.min_track_sizing_function.type != SizingFunctionType::MaxContent) continue;
-                // Apply max_type_filter: exclude MinContent MAX, include MaxContent/Auto/FC/Percent
-                auto max_type = track.max_track_sizing_function.type;
-                if (max_type == SizingFunctionType::MinContent) continue;
-                bool is_truly_flex = track.is_flexible() &&
-                                    track.max_track_sizing_function.flex_factor() > 0;
-                if (is_truly_flex) continue;
-                mc_min_tracks.push_back(i);
-            }
-            if (mc_min_tracks.empty()) continue;
-
-            // Distribute to max-content MIN tracks without growth_limit cap.
-            // Per CSS §11.5: tracks with max-content MIN are uncapped during Phase 2
-            // since base_size must reach the item's max-content contribution.
-            float remaining = extra_space;
-            float per_track = remaining / mc_min_tracks.size();
-            for (size_t idx : mc_min_tracks) {
-                tracks[idx].base_size += per_track;
-            }
-
-            // Ensure growth_limit >= base_size invariant
-            for (size_t i = contrib.track_start; i < end; ++i) {
-                if (tracks[i].growth_limit < tracks[i].base_size) {
-                    tracks[i].growth_limit = tracks[i].base_size;
-                }
-            }
-
+            distribute_max_content_minimum(tracks, contrib, end, gap);
         }
     }
 

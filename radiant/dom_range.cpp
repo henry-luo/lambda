@@ -408,36 +408,33 @@ bool dom_range_set_end(DomRange* r, DomNode* node, uint32_t offset, const char**
     return true;
 }
 
-bool dom_range_set_start_before(DomRange* r, DomNode* node, const char** out_exception) {
+typedef bool (*SetRangeBoundary)(DomRange*, DomNode*, uint32_t, const char**);
+
+static bool dom_range_set_relative(DomRange* r, DomNode* node,
+                                   const char** out_exception,
+                                   SetRangeBoundary setter, bool after) {
     if (!r || !node || !node->parent) {
         set_exception(out_exception, "InvalidNodeTypeError");
         return false;
     }
-    return dom_range_set_start(r, node->parent, dom_node_child_index(node), out_exception);
+    uint32_t offset = dom_node_child_index(node) + (after ? 1 : 0);
+    return setter(r, node->parent, offset, out_exception);
+}
+
+bool dom_range_set_start_before(DomRange* r, DomNode* node, const char** out_exception) {
+    return dom_range_set_relative(r, node, out_exception, dom_range_set_start, false);
 }
 
 bool dom_range_set_start_after(DomRange* r, DomNode* node, const char** out_exception) {
-    if (!r || !node || !node->parent) {
-        set_exception(out_exception, "InvalidNodeTypeError");
-        return false;
-    }
-    return dom_range_set_start(r, node->parent, dom_node_child_index(node) + 1, out_exception);
+    return dom_range_set_relative(r, node, out_exception, dom_range_set_start, true);
 }
 
 bool dom_range_set_end_before(DomRange* r, DomNode* node, const char** out_exception) {
-    if (!r || !node || !node->parent) {
-        set_exception(out_exception, "InvalidNodeTypeError");
-        return false;
-    }
-    return dom_range_set_end(r, node->parent, dom_node_child_index(node), out_exception);
+    return dom_range_set_relative(r, node, out_exception, dom_range_set_end, false);
 }
 
 bool dom_range_set_end_after(DomRange* r, DomNode* node, const char** out_exception) {
-    if (!r || !node || !node->parent) {
-        set_exception(out_exception, "InvalidNodeTypeError");
-        return false;
-    }
-    return dom_range_set_end(r, node->parent, dom_node_child_index(node) + 1, out_exception);
+    return dom_range_set_relative(r, node, out_exception, dom_range_set_end, true);
 }
 
 void dom_range_collapse(DomRange* r, bool to_start) {
@@ -1827,13 +1824,12 @@ static DomText* prev_text_before(DomNode* n) {
 
 // Find the leftmost text descendant inside `n` (or `n` itself if it is text),
 // or NULL if no text descendant exists.
-static DomText* leftmost_text_in(DomNode* n) {
+static DomText* edge_text_in(DomNode* n, bool last) {
     while (n) {
         if (n->is_text()) return n->as_text();
         if (n->is_element()) {
-            DomNode* fc = n->as_element()->first_child;
-            if (!fc) return nullptr;
-            n = fc;
+            n = last ? n->as_element()->last_child : n->as_element()->first_child;
+            if (!n) return nullptr;
             continue;
         }
         return nullptr;
@@ -1841,19 +1837,13 @@ static DomText* leftmost_text_in(DomNode* n) {
     return nullptr;
 }
 
+static DomText* leftmost_text_in(DomNode* n) {
+    return edge_text_in(n, false);
+}
+
 // Find the rightmost text descendant inside `n` (or `n` itself if it is text).
 static DomText* rightmost_text_in(DomNode* n) {
-    while (n) {
-        if (n->is_text()) return n->as_text();
-        if (n->is_element()) {
-            DomNode* lc = n->as_element()->last_child;
-            if (!lc) return nullptr;
-            n = lc;
-            continue;
-        }
-        return nullptr;
-    }
-    return nullptr;
+    return edge_text_in(n, true);
 }
 
 // Case-insensitive ASCII tag name comparison (HTML tag names are stored
@@ -3104,7 +3094,7 @@ static DomNode* atomic_caret_stop_before_boundary(DomBoundary b,
     return nullptr;
 }
 
-static DomText* first_modify_text_in(DomNode* n, DomElement* host) {
+static DomText* modify_text_edge_in(DomNode* n, DomElement* host, bool last) {
     if (!n) return nullptr;
     if (node_is_false_island_for_host(n, host)) return nullptr;
     if (n->is_text()) {
@@ -3112,26 +3102,20 @@ static DomText* first_modify_text_in(DomNode* n, DomElement* host) {
         return text_is_selectable_for_modify(t, host) ? t : nullptr;
     }
     if (!n->is_element()) return nullptr;
-    for (DomNode* c = n->as_element()->first_child; c; c = c->next_sibling) {
-        DomText* t = first_modify_text_in(c, host);
+    for (DomNode* c = last ? n->as_element()->last_child : n->as_element()->first_child;
+         c; c = last ? c->prev_sibling : c->next_sibling) {
+        DomText* t = modify_text_edge_in(c, host, last);
         if (t) return t;
     }
     return nullptr;
 }
 
+static DomText* first_modify_text_in(DomNode* n, DomElement* host) {
+    return modify_text_edge_in(n, host, false);
+}
+
 static DomText* last_modify_text_in(DomNode* n, DomElement* host) {
-    if (!n) return nullptr;
-    if (node_is_false_island_for_host(n, host)) return nullptr;
-    if (n->is_text()) {
-        DomText* t = n->as_text();
-        return text_is_selectable_for_modify(t, host) ? t : nullptr;
-    }
-    if (!n->is_element()) return nullptr;
-    for (DomNode* c = n->as_element()->last_child; c; c = c->prev_sibling) {
-        DomText* t = last_modify_text_in(c, host);
-        if (t) return t;
-    }
-    return nullptr;
+    return modify_text_edge_in(n, host, true);
 }
 
 static DomText* next_modify_text_after(DomNode* n, DomElement* host) {
@@ -3489,6 +3473,21 @@ static DomBoundary move_one_visible_char_forward(DomBoundary b, DomElement* host
     return last;
 }
 
+static DomBoundary scan_collapsible_space_backward(ModifyCodepoint prev,
+                                                   DomElement* host) {
+    DomBoundary result = boundary_before_codepoint(prev);
+    DomBoundary scan = result;
+    for (int safety = 0; safety < 100000; safety++) {
+        prev = prev_modify_codepoint(scan, host);
+        if (!prev.found || !codepoint_is_collapsible_space(prev)) return result;
+        DomBoundary before = boundary_before_codepoint(prev);
+        if (same_boundary(before, scan)) return result;
+        result = before;
+        scan = before;
+    }
+    return result;
+}
+
 static DomBoundary move_one_visible_char_backward(DomBoundary b, DomElement* host) {
     DomNode* atomic = atomic_caret_stop_before_boundary(b, host);
     if (atomic) return boundary_before_node(atomic);
@@ -3503,17 +3502,7 @@ static DomBoundary move_one_visible_char_backward(DomBoundary b, DomElement* hos
     }
     if (!codepoint_is_collapsible_space(prev)) return boundary_before_codepoint(prev);
 
-    DomBoundary result = boundary_before_codepoint(prev);
-    DomBoundary scan = result;
-    for (int safety = 0; safety < 100000; safety++) {
-        prev = prev_modify_codepoint(scan, host);
-        if (!prev.found || !codepoint_is_collapsible_space(prev)) return result;
-        DomBoundary before = boundary_before_codepoint(prev);
-        if (before.node == scan.node && before.offset == scan.offset) return result;
-        result = before;
-        scan = before;
-    }
-    return result;
+    return scan_collapsible_space_backward(prev, host);
 }
 
 static DomBoundary move_one_visible_char(DomBoundary b, int dir) {
@@ -3613,17 +3602,7 @@ static DomBoundary extend_one_visible_char_backward(DomBoundary b, DomElement* h
         return boundary_before_codepoint(prev);
     }
 
-    DomBoundary result = boundary_before_codepoint(prev);
-    DomBoundary scan = result;
-    for (int safety = 0; safety < 100000; safety++) {
-        prev = prev_modify_codepoint(scan, host);
-        if (!prev.found || !codepoint_is_collapsible_space(prev)) return result;
-        DomBoundary before = boundary_before_codepoint(prev);
-        if (before.node == scan.node && before.offset == scan.offset) return result;
-        result = before;
-        scan = before;
-    }
-    return result;
+    return scan_collapsible_space_backward(prev, host);
 }
 
 static DomBoundary extend_one_visible_char(DomBoundary b, int dir) {
@@ -4259,18 +4238,6 @@ DomBoundary dom_boundary_move(DomBoundary b, DomModGranularity gran, int32_t cou
     return b;
 }
 
-static int strieq(const char* a, const char* b) {
-    if (!a || !b) return 0;
-    while (*a && *b) {
-        char ca = *a, cb = *b;
-        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
-        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
-        if (ca != cb) return 0;
-        a++; b++;
-    }
-    return *a == 0 && *b == 0;
-}
-
 bool dom_selection_modify(DomSelection* s, const char* alter,
                           const char* direction, const char* granularity,
                           const char** out_exception) {
@@ -4280,14 +4247,14 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
 
     // Parse alter
     bool extend = false;
-    if (!alter || strieq(alter, "move")) extend = false;
-    else if (strieq(alter, "extend"))    extend = true;
+    if (!alter || tag_ieq(alter, "move")) extend = false;
+    else if (tag_ieq(alter, "extend"))    extend = true;
     else { if (out_exception) *out_exception = "SyntaxError"; return false; }
 
     // Parse direction
     int dir = 0;
-    if (!direction || strieq(direction, "forward") || strieq(direction, "right")) dir = +1;
-    else if (strieq(direction, "backward") || strieq(direction, "left"))           dir = -1;
+    if (!direction || tag_ieq(direction, "forward") || tag_ieq(direction, "right")) dir = +1;
+    else if (tag_ieq(direction, "backward") || tag_ieq(direction, "left"))           dir = -1;
     else { if (out_exception) *out_exception = "SyntaxError"; return false; }
 
     // Parse granularity
@@ -4297,18 +4264,18 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
     bool line_boundary_like = false;
     bool paragraph_like = false;     // "paragraph" — jump past current block
     bool paragraph_boundary = false; // "paragraphboundary" — go to start/end of current block
-    if (!granularity || strieq(granularity, "character")) gran = DOM_MOD_CHARACTER;
-    else if (strieq(granularity, "word"))                  gran = DOM_MOD_WORD;
-    else if (strieq(granularity, "documentboundary"))      gran = DOM_MOD_DOCUMENT;
-    else if (strieq(granularity, "paragraph")) {
+    if (!granularity || tag_ieq(granularity, "character")) gran = DOM_MOD_CHARACTER;
+    else if (tag_ieq(granularity, "word"))                  gran = DOM_MOD_WORD;
+    else if (tag_ieq(granularity, "documentboundary"))      gran = DOM_MOD_DOCUMENT;
+    else if (tag_ieq(granularity, "paragraph")) {
         paragraph_like = true;
         gran = DOM_MOD_CHARACTER;
     }
-    else if (strieq(granularity, "paragraphboundary")) {
+    else if (tag_ieq(granularity, "paragraphboundary")) {
         paragraph_boundary = true;
         gran = DOM_MOD_CHARACTER;
     }
-    else if (strieq(granularity, "line")) {
+    else if (tag_ieq(granularity, "line")) {
         // Without a real layout-aware iterator we approximate line/paragraph
         // motion by stepping to the previous/next text node in document order
         // and clamping the offset to that text node's length. This is enough
@@ -4317,12 +4284,12 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
         line_like = true;
         gran = DOM_MOD_CHARACTER;  // unused when line_like is true
     }
-    else if (strieq(granularity, "sentence")) {
+    else if (tag_ieq(granularity, "sentence")) {
         sentence_like = true;
         gran = DOM_MOD_CHARACTER;
     }
-    else if (strieq(granularity, "lineboundary") ||
-             strieq(granularity, "sentenceboundary")) {
+    else if (tag_ieq(granularity, "lineboundary") ||
+             tag_ieq(granularity, "sentenceboundary")) {
         line_boundary_like = true;
         gran = DOM_MOD_CHARACTER;  // unused when line_boundary_like is true
     }
@@ -4335,8 +4302,8 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
     bool word_like = gran == DOM_MOD_WORD && !line_like &&
         !sentence_like && !line_boundary_like && !paragraph_like &&
         !paragraph_boundary;
-    bool left = direction && strieq(direction, "left");
-    bool right = direction && strieq(direction, "right");
+    bool left = direction && tag_ieq(direction, "left");
+    bool right = direction && tag_ieq(direction, "right");
     int actual_dir = dir;
     if (!extend && !dom_range_collapsed(r) && (left || right) &&
             gran == DOM_MOD_CHARACTER && !line_like && !sentence_like &&
@@ -4383,8 +4350,8 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
             new_focus = focus;
         }
     } else if (line_boundary_like) {
-        bool left = direction && strieq(direction, "left");
-        bool right = direction && strieq(direction, "right");
+        bool left = direction && tag_ieq(direction, "left");
+        bool right = direction && tag_ieq(direction, "right");
         int edge_dir = dir;
         if (left || right) {
             bool rtl = effective_dir_is_rtl(focus.node);

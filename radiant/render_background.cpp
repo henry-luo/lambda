@@ -774,15 +774,18 @@ void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, in
     scratch_free(sa, temp);
 }
 
-void premultiply_surface_region(ImageSurface* surface, int rx, int ry, int rw, int rh) {
+static bool clip_surface_region(ImageSurface* surface, int* rx, int* ry, int* rw, int* rh) {
+    if (*rx < 0) { *rw += *rx; *rx = 0; }
+    if (*ry < 0) { *rh += *ry; *ry = 0; }
+    if (*rx + *rw > surface->width) *rw = surface->width - *rx;
+    if (*ry + *rh > surface->height) *rh = surface->height - *ry;
+    return *rw > 0 && *rh > 0;
+}
+
+static void transform_surface_region(ImageSurface* surface, int rx, int ry, int rw, int rh,
+                                     const Color* tint) {
     if (!surface || !surface->pixels || rw <= 0 || rh <= 0) return;
-
-    if (rx < 0) { rw += rx; rx = 0; }
-    if (ry < 0) { rh += ry; ry = 0; }
-    if (rx + rw > surface->width) rw = surface->width - rx;
-    if (ry + rh > surface->height) rh = surface->height - ry;
-    if (rw <= 0 || rh <= 0) return;
-
+    if (!clip_surface_region(surface, &rx, &ry, &rw, &rh)) return;
     uint32_t* pixels = (uint32_t*)surface->pixels;
     int stride = surface->pitch / 4;
     for (int row = 0; row < rh; row++) {
@@ -794,10 +797,10 @@ void premultiply_surface_region(ImageSurface* surface, int rx, int ry, int rw, i
                 dst[col] = 0;
                 continue;
             }
-            if (a == 255) continue;
-            uint32_t r = p & 0xFF;
-            uint32_t g = (p >> 8) & 0xFF;
-            uint32_t b = (p >> 16) & 0xFF;
+            if (!tint && a == 255) continue;
+            uint32_t r = tint ? tint->r : p & 0xFF;
+            uint32_t g = tint ? tint->g : (p >> 8) & 0xFF;
+            uint32_t b = tint ? tint->b : (p >> 16) & 0xFF;
             r = (r * a + 127u) / 255u;
             g = (g * a + 127u) / 255u;
             b = (b * a + 127u) / 255u;
@@ -806,33 +809,13 @@ void premultiply_surface_region(ImageSurface* surface, int rx, int ry, int rw, i
     }
 }
 
+void premultiply_surface_region(ImageSurface* surface, int rx, int ry, int rw, int rh) {
+    transform_surface_region(surface, rx, ry, rw, rh, nullptr);
+}
+
 void tint_premultiplied_surface_region(ImageSurface* surface, int rx, int ry, int rw, int rh,
                                        Color color) {
-    if (!surface || !surface->pixels || rw <= 0 || rh <= 0) return;
-
-    if (rx < 0) { rw += rx; rx = 0; }
-    if (ry < 0) { rh += ry; ry = 0; }
-    if (rx + rw > surface->width) rw = surface->width - rx;
-    if (ry + rh > surface->height) rh = surface->height - ry;
-    if (rw <= 0 || rh <= 0) return;
-
-    uint32_t* pixels = (uint32_t*)surface->pixels;
-    int stride = surface->pitch / 4;
-    for (int row = 0; row < rh; row++) {
-        uint32_t* dst = pixels + (ry + row) * stride + rx;
-        for (int col = 0; col < rw; col++) {
-            uint32_t p = dst[col];
-            uint32_t a = (p >> 24) & 0xFF;
-            if (a == 0) {
-                dst[col] = 0;
-                continue;
-            }
-            uint32_t r = ((uint32_t)color.r * a + 127u) / 255u;
-            uint32_t g = ((uint32_t)color.g * a + 127u) / 255u;
-            uint32_t b = ((uint32_t)color.b * a + 127u) / 255u;
-            dst[col] = (a << 24) | (b << 16) | (g << 8) | r;
-        }
-    }
+    transform_surface_region(surface, rx, ry, rw, rh, &color);
 }
 
 /**
@@ -1012,18 +995,24 @@ static void rasterise_rounded_rect_into_buffer(
  * sibling element pixels remain untouched except for the legitimate shadow
  * tint that they receive via composite.
  */
-void render_outer_shadow_blur_composite(
+typedef struct OuterShadowImage {
+    uint32_t* pixels;
+    int x;
+    int y;
+    int width;
+    int height;
+} OuterShadowImage;
+
+// Both retained-image and immediate-composite shadows must rasterize and blur
+// the same isolated source, or their edge falloff diverges.
+static bool build_outer_shadow_image(
     ScratchArena* sa, ImageSurface* surface,
     float shadow_x, float shadow_y, float shadow_w, float shadow_h,
     float sr_tl, float sr_tr, float sr_br, float sr_bl,
-    Color shadow_color, float blur_radius,
-    int exclude_type, const float* exclude_params,
-    int clip_type, const float* clip_params)
+    Color shadow_color, float blur_radius, OuterShadowImage* image)
 {
-    if (!surface || !surface->pixels) return;
-    if (shadow_color.a == 0) return;
+    if (!surface || shadow_color.a == 0) return false;
 
-    // compute blur region (shadow rect + blur extent), clamped to surface
     float pad = blur_radius < 0 ? 0 : blur_radius;
     int br_x0 = (int)floorf(shadow_x - pad);
     int br_y0 = (int)floorf(shadow_y - pad);
@@ -1035,27 +1024,23 @@ void render_outer_shadow_blur_composite(
     if (br_y1 > surface->height) br_y1 = surface->height;
     int br_w = br_x1 - br_x0;
     int br_h = br_y1 - br_y0;
-    if (br_w <= 0 || br_h <= 0) return;
+    if (br_w <= 0 || br_h <= 0) return false;
 
-    // allocate temp ARGB buffer (cleared to transparent)
     size_t buf_n = (size_t)br_w * br_h;
     uint32_t* shadow_buf = (uint32_t*)scratch_alloc(sa, buf_n * sizeof(uint32_t));
-    if (!shadow_buf) return;
+    if (!shadow_buf) return false;
     memset(shadow_buf, 0, buf_n * sizeof(uint32_t));
 
-    // premultiplied shadow pixel value (ABGR layout, R in low byte)
     uint32_t sa_b = shadow_color.a;
     uint32_t sr_b = ((uint32_t)shadow_color.r * sa_b + 127) / 255;
     uint32_t sg_b = ((uint32_t)shadow_color.g * sa_b + 127) / 255;
     uint32_t sb_b = ((uint32_t)shadow_color.b * sa_b + 127) / 255;
     uint32_t shadow_px = (sa_b << 24) | (sb_b << 16) | (sg_b << 8) | sr_b;
 
-    // rasterise shadow rounded rect into temp buffer
     rasterise_rounded_rect_into_buffer(shadow_buf, br_w, br_h, br_x0, br_y0,
                                         shadow_x, shadow_y, shadow_w, shadow_h,
                                         sr_tl, sr_tr, sr_br, sr_bl, shadow_px);
 
-    // box-blur the temp buffer in-place (sub-pixel blur is a no-op per CSS)
     if (blur_radius >= 1.0f) {
         ImageSurface tmp = {};
         tmp.pixels = (void*)shadow_buf;
@@ -1064,6 +1049,31 @@ void render_outer_shadow_blur_composite(
         tmp.pitch = br_w * 4;
         box_blur_region(sa, &tmp, 0, 0, br_w, br_h, blur_radius);
     }
+
+    image->pixels = shadow_buf;
+    image->x = br_x0;
+    image->y = br_y0;
+    image->width = br_w;
+    image->height = br_h;
+    return true;
+}
+
+void render_outer_shadow_blur_composite(
+    ScratchArena* sa, ImageSurface* surface,
+    float shadow_x, float shadow_y, float shadow_w, float shadow_h,
+    float sr_tl, float sr_tr, float sr_br, float sr_bl,
+    Color shadow_color, float blur_radius,
+    int exclude_type, const float* exclude_params,
+    int clip_type, const float* clip_params)
+{
+    if (!surface || !surface->pixels || shadow_color.a == 0) return;
+    OuterShadowImage image = {};
+    if (!build_outer_shadow_image(sa, surface,
+            shadow_x, shadow_y, shadow_w, shadow_h,
+            sr_tl, sr_tr, sr_br, sr_bl, shadow_color, blur_radius, &image)) return;
+    uint32_t* shadow_buf = image.pixels;
+    int br_x0 = image.x, br_y0 = image.y;
+    int br_w = image.width, br_h = image.height;
 
     // build clip / exclude shapes for the composite pass
     bool has_exclude = (exclude_type != 0);
@@ -1141,42 +1151,13 @@ static uint32_t* render_outer_shadow_blur_image(
     if (out_h) *out_h = 0;
     if (!sa || !surface || shadow_color.a == 0) return nullptr;
 
-    float pad = blur_radius < 0 ? 0 : blur_radius;
-    int br_x0 = (int)floorf(shadow_x - pad);
-    int br_y0 = (int)floorf(shadow_y - pad);
-    int br_x1 = (int)ceilf(shadow_x + shadow_w + pad);
-    int br_y1 = (int)ceilf(shadow_y + shadow_h + pad);
-    if (br_x0 < 0) br_x0 = 0;
-    if (br_y0 < 0) br_y0 = 0;
-    if (br_x1 > surface->width) br_x1 = surface->width;
-    if (br_y1 > surface->height) br_y1 = surface->height;
-    int br_w = br_x1 - br_x0;
-    int br_h = br_y1 - br_y0;
-    if (br_w <= 0 || br_h <= 0) return nullptr;
-
-    size_t buf_n = (size_t)br_w * br_h;
-    uint32_t* shadow_buf = (uint32_t*)scratch_alloc(sa, buf_n * sizeof(uint32_t));
-    if (!shadow_buf) return nullptr;
-    memset(shadow_buf, 0, buf_n * sizeof(uint32_t));
-
-    uint32_t sa_b = shadow_color.a;
-    uint32_t sr_b = ((uint32_t)shadow_color.r * sa_b + 127) / 255;
-    uint32_t sg_b = ((uint32_t)shadow_color.g * sa_b + 127) / 255;
-    uint32_t sb_b = ((uint32_t)shadow_color.b * sa_b + 127) / 255;
-    uint32_t shadow_px = (sa_b << 24) | (sb_b << 16) | (sg_b << 8) | sr_b;
-
-    rasterise_rounded_rect_into_buffer(shadow_buf, br_w, br_h, br_x0, br_y0,
-                                        shadow_x, shadow_y, shadow_w, shadow_h,
-                                        sr_tl, sr_tr, sr_br, sr_bl, shadow_px);
-
-    if (blur_radius >= 1.0f) {
-        ImageSurface tmp = {};
-        tmp.pixels = (void*)shadow_buf;
-        tmp.width = br_w;
-        tmp.height = br_h;
-        tmp.pitch = br_w * 4;
-        box_blur_region(sa, &tmp, 0, 0, br_w, br_h, blur_radius);
-    }
+    OuterShadowImage image = {};
+    if (!build_outer_shadow_image(sa, surface,
+            shadow_x, shadow_y, shadow_w, shadow_h,
+            sr_tl, sr_tr, sr_br, sr_bl, shadow_color, blur_radius, &image)) return nullptr;
+    uint32_t* shadow_buf = image.pixels;
+    int br_x0 = image.x, br_y0 = image.y;
+    int br_w = image.width, br_h = image.height;
 
     bool has_exclude = (exclude_type != 0);
     ClipShape exclude_cs = has_exclude

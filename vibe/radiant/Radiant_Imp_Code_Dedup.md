@@ -161,7 +161,7 @@ Order is deliberately **leaf-first**: render (self-contained consumer, worst shr
 ### H6 — Lock-in
 - Flip `no-new-per-file-header` to **error**; add header-count ratchet (≤ 24) to `make lint` (tightens further when the graph family migrates to Lambda script).
 - Update `doc/dev/radiant/RAD_*.md` references and `CLAUDE.md`/`AGENTS.md` Key Entry Points table (both files, per convention).
-- Retro: compile-time trend, final `count_loc.sh`, Lizard re-scan (the dedup baseline in `utils/lint/dup_baseline.txt` should tick down from the removed duplicate decls).
+- Retro: compile-time trend, final `count_loc.sh`, and `make check-radiant-dup` re-scan (the filtered duplicate count should tick down from the removed duplicate declarations).
 
 Estimated effort: H0 ≤1d; H1 2–3d (pilot overhead); H2/H3 2d each; H4 1–2d; H5 1–2d; H6 ½d. Each phase is one PR.
 
@@ -177,6 +177,11 @@ Estimated effort: H0 ≤1d; H1 2–3d (pilot overhead); H2/H3 2d each; H4 1–2d
 ---
 
 ## 7. Tooling
+
+### 7.0 Filtered Lizard duplicate scan
+`test/dedup/check_code_dup.py` is the canonical duplicate-code report. It runs Lizard, passes generated-file exclusions directly to Lizard, filters reviewed false-positive blocks through marker-based rules in `test/dedup/exclude.json`, and reports only the remaining blocks. Every exclusion records its affected modules and why sharing the detected shape would be incorrect or less maintainable. See [`test/dedup/Readme.md`](../../test/dedup/Readme.md) for CLI usage and exclusion maintenance.
+
+Use `make check-radiant-dup` for this plan's Radiant measurement. `make check-lambda-dup` scans Lambda, while `make check-code-dup` scans `lib/`, `lambda/`, and `radiant/`; direct script invocation also accepts any combination of those module names. The report is not yet a failing threshold gate, so ratchet decisions compare its filtered `Remaining duplicate blocks` count.
 
 ### 7.1 Structural lint rule — `no-new-per-file-header`
 In `utils/lint/rules/structural`: flag any *new* `radiant/foo.{h,hpp}` whose basename matches a sibling `radiant/foo.{c,cpp,mm}`, and any `radiant/*.{h,hpp}` not on the allow-list (5 globals + §3.3 exceptions). Warn during H1–H5, error from H6.
@@ -194,7 +199,7 @@ One-liner ritual: concatenate the phase's headers, then check for duplicate `#de
 
 ### 7.4 Ratchets (permanent, from H6)
 - Header count in `radiant/` ≤ 24 (`make lint`).
-- The DD1 Lizard dup-ratchet continues unchanged; this plan should only ever move it down.
+- The DD1 Lizard dup-ratchet, measured by `make check-radiant-dup`, continues unchanged; this plan should only ever move it down.
 
 ---
 

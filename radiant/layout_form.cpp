@@ -14,6 +14,30 @@
  * Returns CONTENT-AREA dimensions (without border/padding).
  * The layout code adds actual CSS-resolved border/padding on top.
  */
+struct FixedInputIntrinsicSize {
+    const char* type;
+    float width;
+    float height;
+};
+
+static bool apply_fixed_input_intrinsic_size(FormControlProp* form, float pixel_ratio) {
+    static const FixedInputIntrinsicSize sizes[] = {
+        {"date", 119.0f, 17.0f},
+        {"time", 96.0f, 17.0f},
+        {"month", 149.0f, 17.0f},
+        {"week", 141.0f, 17.0f},
+        {"color", 44.0f, 23.0f},
+    };
+    for (const FixedInputIntrinsicSize& size : sizes) {
+        if (strcmp(form->input_type, size.type) == 0) {
+            form->intrinsic_width = size.width * pixel_ratio;
+            form->intrinsic_height = size.height * pixel_ratio;
+            return true;
+        }
+    }
+    return false;
+}
+
 static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, FontProp* font) {
     float pr = lycon->ui_context->pixel_ratio;
 
@@ -21,18 +45,6 @@ static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, Fo
     // These are content-area widths (border-box minus 6px border+padding).
     // Chrome renders these at specific widths based on their picker format.
     if (form->input_type) {
-        if (strcmp(form->input_type, "date") == 0) {
-            // Chrome: ~125px border-box (shows MM/DD/YYYY)
-            form->intrinsic_width = 119.0f * pr;
-            form->intrinsic_height = 17.0f * pr;
-            return;
-        }
-        if (strcmp(form->input_type, "time") == 0) {
-            // Chrome: ~102px border-box (shows HH:MM AM/PM)
-            form->intrinsic_width = 96.0f * pr;
-            form->intrinsic_height = 17.0f * pr;
-            return;
-        }
         if (strcmp(form->input_type, "datetime-local") == 0) {
             // Chrome: ~211px border-box for HH:MM format, ~271px with seconds/ms
             // Width depends on the HTML value content attribute (not JS-set value).
@@ -51,24 +63,7 @@ static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, Fo
             form->intrinsic_height = 17.0f * pr;
             return;
         }
-        if (strcmp(form->input_type, "month") == 0) {
-            // Chrome: ~155px border-box (shows MMMM YYYY)
-            form->intrinsic_width = 149.0f * pr;
-            form->intrinsic_height = 17.0f * pr;
-            return;
-        }
-        if (strcmp(form->input_type, "week") == 0) {
-            // Chrome: ~147px border-box (shows Week ##, YYYY)
-            form->intrinsic_width = 141.0f * pr;
-            form->intrinsic_height = 17.0f * pr;
-            return;
-        }
-        if (strcmp(form->input_type, "color") == 0) {
-            // Chrome: ~53px border-box (small color swatch)
-            form->intrinsic_width = 44.0f * pr;
-            form->intrinsic_height = 23.0f * pr;
-            return;
-        }
+        if (apply_fixed_input_intrinsic_size(form, pr)) return;
     }
 
     int size = form->size > 0 ? form->size : FormDefaults::TEXT_SIZE_CHARS;

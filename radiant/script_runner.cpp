@@ -811,8 +811,8 @@ static bool script_task_timing_enabled() {
 static const size_t JS_EXTERNAL_SCRIPT_BUDGET_BYTES = 16u * 1024u * 1024u;
 static const size_t JS_TOTAL_SCRIPT_BUDGET_BYTES = 128u * 1024u * 1024u;
 
-static size_t script_prelayout_defer_limit_bytes() {
-    const char* env = getenv("RADIANT_JS_PRELAYOUT_DEFER_BYTES");
+static size_t script_byte_limit_from_env(const char* name, size_t fallback) {
+    const char* env = getenv(name);
     if (env && env[0]) {
         char* end = nullptr;
         long parsed = strtol(env, &end, 10);
@@ -821,37 +821,26 @@ static size_t script_prelayout_defer_limit_bytes() {
             return (size_t)parsed;
         }
     }
-    return JS_EXTERNAL_SCRIPT_BUDGET_BYTES;
+    return fallback;
+}
+
+static size_t script_prelayout_defer_limit_bytes() {
+    return script_byte_limit_from_env(
+        "RADIANT_JS_PRELAYOUT_DEFER_BYTES", JS_EXTERNAL_SCRIPT_BUDGET_BYTES);
 }
 
 static size_t script_external_compile_limit_bytes() {
-    const char* env = getenv("RADIANT_JS_EXTERNAL_SCRIPT_BYTES");
-    if (env && env[0]) {
-        char* end = nullptr;
-        long parsed = strtol(env, &end, 10);
-        if (end != env) {
-            if (parsed <= 0) return (size_t)-1;
-            return (size_t)parsed;
-        }
-    }
     // browsers do not enforce small source-byte caps; this guard only protects
     // Radiant from pathological fixture input while allowing real libraries.
-    return JS_EXTERNAL_SCRIPT_BUDGET_BYTES;
+    return script_byte_limit_from_env(
+        "RADIANT_JS_EXTERNAL_SCRIPT_BYTES", JS_EXTERNAL_SCRIPT_BUDGET_BYTES);
 }
 
 static size_t script_total_compile_limit_bytes() {
-    const char* env = getenv("RADIANT_JS_TOTAL_SCRIPT_BYTES");
-    if (env && env[0]) {
-        char* end = nullptr;
-        long parsed = strtol(env, &end, 10);
-        if (end != env) {
-            if (parsed <= 0) return (size_t)-1;
-            return (size_t)parsed;
-        }
-    }
     // page script graphs can include many files, so total budget must be much
     // larger than the per-file guard to stay browser-compatible.
-    return JS_TOTAL_SCRIPT_BUDGET_BYTES;
+    return script_byte_limit_from_env(
+        "RADIANT_JS_TOTAL_SCRIPT_BYTES", JS_TOTAL_SCRIPT_BUDGET_BYTES);
 }
 
 #ifndef NDEBUG

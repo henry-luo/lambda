@@ -4342,6 +4342,48 @@ static void wrap_run_in_cells(LayoutContext* lycon, ArrayList* run, DomElement* 
     }
 }
 
+static void place_anonymous_table_child(DomElement* parent, DomElement* child,
+                                        DomNode* before) {
+    if (before) {
+        insert_node_before(parent, static_cast<DomNode*>(child), before);
+    } else {
+        append_child_to_element(parent, child);
+    }
+}
+
+static void flush_anonymous_cell_run(LayoutContext* lycon, DomElement* parent,
+                                     ArrayList* run, DomNode* before,
+                                     bool create_row_group) {
+    if (!run || run->length == 0) return;
+
+    DomElement* row_parent = parent;
+    DomElement* row_group = nullptr;
+    if (create_row_group) {
+        row_group = create_anonymous_table_element(
+            lycon, parent, CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
+        row_parent = row_group;
+    }
+    DomElement* row = create_anonymous_table_element(
+        lycon, row_parent, CSS_VALUE_TABLE_ROW, "::anon-tr");
+    if (row_group) append_child_to_element(row_group, row);
+    wrap_run_in_cells(lycon, run, row);
+    place_anonymous_table_child(parent, row_group ? row_group : row, before);
+    arraylist_clear(run);
+}
+
+static void flush_anonymous_row_run(LayoutContext* lycon, DomElement* table,
+                                    ArrayList* run, DomNode* before) {
+    if (!run || run->length == 0) return;
+
+    DomElement* row_group = create_anonymous_table_element(
+        lycon, table, CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
+    for (int i = 0; i < run->length; i++) {
+        reparent_node(static_cast<DomNode*>(run->data[i]), row_group);
+    }
+    place_anonymous_table_child(table, row_group, before);
+    arraylist_clear(run);
+}
+
 /*
  * CSS 2.1 Section 17.2.1: Anonymous table objects
  * 3. If a child of a table/inline-table is not a proper table child (row-group, row, column, caption),
@@ -4413,39 +4455,14 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
             if (current_cell_run->length > 0) {
                 log_debug("%s [ANON-TABLE] Flushing cell run of %d items before row group", table->source_loc(),
                          current_cell_run->length);
-
-                // Create anonymous tbody + tr for consecutive cells
-                DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
-                    CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
-                DomElement* anon_tr = create_anonymous_table_element(lycon, anon_tbody,
-                    CSS_VALUE_TABLE_ROW, "::anon-tr");
-                append_child_to_element(anon_tbody, anon_tr);
-
-                // Move cells/nodes to anonymous tr (wrapping consecutive non-cells in single cell)
-                wrap_run_in_cells(lycon, current_cell_run, anon_tr);
-
-                // Insert at the position of the first cell
-                insert_node_before(table, static_cast<DomNode*>(anon_tbody), child);
-                arraylist_clear(current_cell_run);
+                flush_anonymous_cell_run(
+                    lycon, table, current_cell_run, child, true);
             }
 
             if (current_row_run->length > 0) {
                 log_debug("%s [ANON-TABLE] Flushing row run of %d rows before row group", table->source_loc(),
                          current_row_run->length);
-
-                // Create anonymous tbody for consecutive rows
-                DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
-                    CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
-
-                // Move rows to anonymous tbody
-                for (int i = 0; i < current_row_run->length; i++) {
-                    DomNode* row_node = static_cast<DomNode*>(current_row_run->data[i]);
-                    reparent_node(row_node, anon_tbody);
-                }
-
-                // Insert at the position of the first row
-                insert_node_before(table, static_cast<DomNode*>(anon_tbody), child);
-                arraylist_clear(current_row_run);
+                flush_anonymous_row_run(lycon, table, current_row_run, child);
             }
 
             i++;
@@ -4458,17 +4475,8 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                 // Flush cells first - they get their own tbody+tr
                 log_debug("%s [ANON-TABLE] Flushing cell run of %d items before row", table->source_loc(),
                          current_cell_run->length);
-
-                DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
-                    CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
-                DomElement* anon_tr = create_anonymous_table_element(lycon, anon_tbody,
-                    CSS_VALUE_TABLE_ROW, "::anon-tr");
-                append_child_to_element(anon_tbody, anon_tr);
-
-                wrap_run_in_cells(lycon, current_cell_run, anon_tr);
-
-                insert_node_before(table, static_cast<DomNode*>(anon_tbody), child);
-                arraylist_clear(current_cell_run);
+                flush_anonymous_cell_run(
+                    lycon, table, current_cell_run, child, true);
             }
 
             arraylist_append(current_row_run, child);
@@ -4482,17 +4490,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                 // Flush rows first
                 log_debug("%s [ANON-TABLE] Flushing row run of %d rows before cell", table->source_loc(),
                          current_row_run->length);
-
-                DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
-                    CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
-
-                for (int j = 0; j < current_row_run->length; j++) {
-                    DomNode* row_node = static_cast<DomNode*>(current_row_run->data[j]);
-                    reparent_node(row_node, anon_tbody);
-                }
-
-                insert_node_before(table, static_cast<DomNode*>(anon_tbody), child);
-                arraylist_clear(current_row_run);
+                flush_anonymous_row_run(lycon, table, current_row_run, child);
             }
 
             arraylist_append(current_cell_run, child);
@@ -4515,30 +4513,13 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
     // Flush any remaining runs
     if (current_cell_run->length > 0) {
         log_debug("%s [ANON-TABLE] Flushing final cell run of %d items", table->source_loc(), current_cell_run->length);
-
-        DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
-            CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
-        DomElement* anon_tr = create_anonymous_table_element(lycon, anon_tbody,
-            CSS_VALUE_TABLE_ROW, "::anon-tr");
-        append_child_to_element(anon_tbody, anon_tr);
-
-        wrap_run_in_cells(lycon, current_cell_run, anon_tr);
-
-        append_child_to_element(table, anon_tbody);
+        flush_anonymous_cell_run(
+            lycon, table, current_cell_run, nullptr, true);
     }
 
     if (current_row_run->length > 0) {
         log_debug("%s [ANON-TABLE] Flushing final row run of %d rows", table->source_loc(), current_row_run->length);
-
-        DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
-            CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
-
-        for (int i = 0; i < current_row_run->length; i++) {
-            DomNode* row_node = static_cast<DomNode*>(current_row_run->data[i]);
-            reparent_node(row_node, anon_tbody);
-        }
-
-        append_child_to_element(table, anon_tbody);
+        flush_anonymous_row_run(lycon, table, current_row_run, nullptr);
     }
 
     // Free ArrayLists from Phase 1
@@ -4596,14 +4577,8 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                 if (cell_run->length > 0) {
                     log_debug("%s [ANON-TABLE] Wrapping %d items in row group in anonymous row", table->source_loc(),
                              cell_run->length);
-
-                    DomElement* anon_tr = create_anonymous_table_element(lycon, row_group,
-                        CSS_VALUE_TABLE_ROW, "::anon-tr");
-
-                    wrap_run_in_cells(lycon, cell_run, anon_tr);
-
-                    insert_node_before(row_group, static_cast<DomNode*>(anon_tr), gchild);
-                    arraylist_clear(cell_run);
+                    flush_anonymous_cell_run(
+                        lycon, row_group, cell_run, gchild, false);
                 }
                 continue;
             }
@@ -4621,13 +4596,8 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
         if (cell_run->length > 0) {
             log_debug("%s [ANON-TABLE] Wrapping final %d items in row group in anonymous row", table->source_loc(),
                      cell_run->length);
-
-            DomElement* anon_tr = create_anonymous_table_element(lycon, row_group,
-                CSS_VALUE_TABLE_ROW, "::anon-tr");
-
-            wrap_run_in_cells(lycon, cell_run, anon_tr);
-
-            append_child_to_element(row_group, anon_tr);
+            flush_anonymous_cell_run(
+                lycon, row_group, cell_run, nullptr, false);
         }
 
         // Free ArrayLists from this group

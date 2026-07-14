@@ -638,6 +638,29 @@ static bool inherit_inset_side(LayoutContext* lycon, PositionProp* position, Css
     return true;
 }
 
+typedef struct ResolvedInsetValue {
+    float value;
+    float percent;
+    bool has_value;
+} ResolvedInsetValue;
+
+static ResolvedInsetValue resolve_inset_value(LayoutContext* lycon,
+                                              CssPropertyId prop_id,
+                                              const CssValue* value) {
+    ResolvedInsetValue resolved = {
+        resolve_length_value(lycon, prop_id, value), NAN, true
+    };
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        resolved.percent = value->data.percentage.value;
+        if (isnan(resolved.value)) resolved.value = 0.0f;
+    } else if (isnan(resolved.value)) {
+        // Raw percentages remain resolvable later; other NaN offsets mean auto.
+        resolved.value = 0.0f;
+        resolved.has_value = false;
+    }
+    return resolved;
+}
+
 static void resolve_inset_side(LayoutContext* lycon, ViewSpan* span, CssBoxSide side,
                                CssPropertyId prop_id, const CssValue* value,
                                bool inherit_from_parent) {
@@ -653,19 +676,9 @@ static void resolve_inset_side(LayoutContext* lycon, ViewSpan* span, CssBoxSide 
         }
     }
 
-    float inset_value = resolve_length_value(lycon, prop_id, value);
-    float inset_percent = NAN;
-    bool has_value = true;
-    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        inset_percent = value->data.percentage.value;
-        if (isnan(inset_value)) inset_value = 0;
-    } else if (isnan(inset_value)) {
-        // calc()/percentage insets can be NaN on indefinite containing blocks;
-        // raw percentages stay resolvable later, but other NaN offsets are auto.
-        inset_value = 0;
-        has_value = false;
-    }
-    set_inset_side_value(position, side, inset_value, inset_percent, has_value);
+    ResolvedInsetValue resolved = resolve_inset_value(lycon, prop_id, value);
+    set_inset_side_value(position, side, resolved.value,
+                         resolved.percent, resolved.has_value);
 }
 
 static void resolve_inset_pair(LayoutContext* lycon, ViewSpan* span, CssBoxSide first_side,
@@ -678,18 +691,11 @@ static void resolve_inset_pair(LayoutContext* lycon, ViewSpan* span, CssBoxSide 
         return;
     }
 
-    float inset_value = resolve_length_value(lycon, prop_id, value);
-    float inset_percent = NAN;
-    bool has_value = true;
-    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        inset_percent = value->data.percentage.value;
-        if (isnan(inset_value)) inset_value = 0;
-    } else if (isnan(inset_value)) {
-        inset_value = 0;
-        has_value = false;
-    }
-    set_inset_side_value(position, first_side, inset_value, inset_percent, has_value);
-    set_inset_side_value(position, second_side, inset_value, inset_percent, has_value);
+    ResolvedInsetValue resolved = resolve_inset_value(lycon, prop_id, value);
+    set_inset_side_value(position, first_side, resolved.value,
+                         resolved.percent, resolved.has_value);
+    set_inset_side_value(position, second_side, resolved.value,
+                         resolved.percent, resolved.has_value);
 }
 
 static void resolve_inset_shorthand(LayoutContext* lycon, ViewSpan* span, const CssValue* value) {
@@ -1802,34 +1808,18 @@ static bool expand_border_radius_values(LayoutContext* lycon, int prop_id, CssVa
         }
     }
 
-    switch (count) {
-        case 1:
-            out_radius[0] = parsed[0]; out_percent[0] = parsed_percent[0];
-            out_radius[1] = parsed[0]; out_percent[1] = parsed_percent[0];
-            out_radius[2] = parsed[0]; out_percent[2] = parsed_percent[0];
-            out_radius[3] = parsed[0]; out_percent[3] = parsed_percent[0];
-            return true;
-        case 2:
-            out_radius[0] = parsed[0]; out_percent[0] = parsed_percent[0];
-            out_radius[1] = parsed[1]; out_percent[1] = parsed_percent[1];
-            out_radius[2] = parsed[0]; out_percent[2] = parsed_percent[0];
-            out_radius[3] = parsed[1]; out_percent[3] = parsed_percent[1];
-            return true;
-        case 3:
-            out_radius[0] = parsed[0]; out_percent[0] = parsed_percent[0];
-            out_radius[1] = parsed[1]; out_percent[1] = parsed_percent[1];
-            out_radius[2] = parsed[2]; out_percent[2] = parsed_percent[2];
-            out_radius[3] = parsed[1]; out_percent[3] = parsed_percent[1];
-            return true;
-        case 4:
-            out_radius[0] = parsed[0]; out_percent[0] = parsed_percent[0];
-            out_radius[1] = parsed[1]; out_percent[1] = parsed_percent[1];
-            out_radius[2] = parsed[2]; out_percent[2] = parsed_percent[2];
-            out_radius[3] = parsed[3]; out_percent[3] = parsed_percent[3];
-            return true;
-        default:
-            return false;
+    static const uint8_t expansion[4][4] = {
+        {0, 0, 0, 0},
+        {0, 1, 0, 1},
+        {0, 1, 2, 1},
+        {0, 1, 2, 3},
+    };
+    for (int corner = 0; corner < 4; corner++) {
+        uint8_t source = expansion[count - 1][corner];
+        out_radius[corner] = parsed[source];
+        out_percent[corner] = parsed_percent[source];
     }
+    return true;
 }
 
 static void set_corner_radius_values(Corner* radius, int corner_index,
@@ -3369,6 +3359,17 @@ static float evaluate_calc_expression(LayoutContext* lycon, uintptr_t raw_prop,
     return result_sum;
 }
 
+static bool evaluate_simple_calc_operator(const char* op_name, float left,
+                                          float right, float* result) {
+    if (!op_name || !result) return false;
+    if (strcmp(op_name, "+") == 0) *result = left + right;
+    else if (strcmp(op_name, "-") == 0) *result = left - right;
+    else if (strcmp(op_name, "*") == 0) *result = left * right;
+    else if (strcmp(op_name, "/") == 0) *result = right != 0.0f ? left / right : 0.0f;
+    else return false;
+    return true;
+}
+
 /**
  * Resolve length/percentage value to pixels using Lambda CSS value structures
  *
@@ -3656,15 +3657,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
 
                         log_debug("calc: %.2f %s %.2f", left, op_name, right);
 
-                        if (strcmp(op_name, "+") == 0) {
-                            result = left + right;
-                        } else if (strcmp(op_name, "-") == 0) {
-                            result = left - right;
-                        } else if (strcmp(op_name, "*") == 0) {
-                            result = left * right;
-                        } else if (strcmp(op_name, "/") == 0) {
-                            result = right != 0 ? left / right : 0;
-                        } else {
+                        if (!evaluate_simple_calc_operator(op_name, left, right, &result)) {
                             log_warn("calc: unknown operator '%s'", op_name);
                             result = NAN;
                         }
@@ -3677,15 +3670,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
 
                         log_debug("calc (custom op): %.2f %s %.2f", left, op_name, right);
 
-                        if (strcmp(op_name, "+") == 0) {
-                            result = left + right;
-                        } else if (strcmp(op_name, "-") == 0) {
-                            result = left - right;
-                        } else if (strcmp(op_name, "*") == 0) {
-                            result = left * right;
-                        } else if (strcmp(op_name, "/") == 0) {
-                            result = right != 0 ? left / right : 0;
-                        } else {
+                        if (!evaluate_simple_calc_operator(op_name, left, right, &result)) {
                             log_warn("calc: unknown operator '%s'", op_name);
                             result = NAN;
                         }
@@ -3827,42 +3812,43 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     return result;
 }
 
-// Helper function to resolve margin value with inherit support
-// Returns the resolved margin value in pixels
-// If value is 'inherit', looks up parent element's computed margin value
-static float resolve_margin_with_inherit(LayoutContext* lycon, CssPropertyId prop_id, const CssValue* value) {
-    // Check for inherit keyword
-    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
-        // Look up parent element's computed margin value
-        DomElement* current = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
-        if (current && current->parent && current->parent->is_element()) {
-            DomElement* parent = lam::dom_require<DOM_NODE_ELEMENT>(current->parent);
-            // Check if parent has bound property
-            if (parent->bound) {
-                switch (prop_id) {
-                    case CSS_PROPERTY_MARGIN_TOP:
-                        log_debug("[CSS] margin-top: inheriting %.2f from parent", parent->bound->margin.top);
-                        return parent->bound->margin.top;
-                    case CSS_PROPERTY_MARGIN_RIGHT:
-                        log_debug("[CSS] margin-right: inheriting %.2f from parent", parent->bound->margin.right);
-                        return parent->bound->margin.right;
-                    case CSS_PROPERTY_MARGIN_BOTTOM:
-                        log_debug("[CSS] margin-bottom: inheriting %.2f from parent", parent->bound->margin.bottom);
-                        return parent->bound->margin.bottom;
-                    case CSS_PROPERTY_MARGIN_LEFT:
-                        log_debug("[CSS] margin-left: inheriting %.2f from parent", parent->bound->margin.left);
-                        return parent->bound->margin.left;
-                    default:
-                        break;
-                }
-            }
-        }
-        // No parent or parent has no margin, use 0
-        log_debug("[CSS] inherit: no parent margin found, using 0");
-        return 0.0f;
+static float* inherited_spacing_slot(BoundaryProp* bound, CssPropertyId prop_id) {
+    if (!bound) return nullptr;
+    switch (prop_id) {
+        case CSS_PROPERTY_MARGIN_TOP: return &bound->margin.top;
+        case CSS_PROPERTY_MARGIN_RIGHT: return &bound->margin.right;
+        case CSS_PROPERTY_MARGIN_BOTTOM: return &bound->margin.bottom;
+        case CSS_PROPERTY_MARGIN_LEFT: return &bound->margin.left;
+        case CSS_PROPERTY_PADDING_TOP: return &bound->padding.top;
+        case CSS_PROPERTY_PADDING_RIGHT: return &bound->padding.right;
+        case CSS_PROPERTY_PADDING_BOTTOM: return &bound->padding.bottom;
+        case CSS_PROPERTY_PADDING_LEFT: return &bound->padding.left;
+        default: return nullptr;
     }
-    // Not inherit, resolve normally
-    return resolve_length_value(lycon, prop_id, value);
+}
+
+static float resolve_spacing_with_inherit(LayoutContext* lycon,
+                                          CssPropertyId prop_id,
+                                          const CssValue* value) {
+    if (value->type != CSS_VALUE_TYPE_KEYWORD || value->data.keyword != CSS_VALUE_INHERIT) {
+        return resolve_length_value(lycon, prop_id, value);
+    }
+    DomElement* current = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
+    DomElement* parent = current ? dom_parent_element(current) : nullptr;
+    float* inherited = parent ? inherited_spacing_slot(parent->bound, prop_id) : nullptr;
+    if (inherited) {
+        log_debug("[CSS] %s: inheriting %.2f from parent",
+                  css_property_name_from_id(prop_id), *inherited);
+        return *inherited;
+    }
+    log_debug("[CSS] %s: no parent value, using zero",
+              css_property_name_from_id(prop_id));
+    return 0.0f;
+}
+
+static float resolve_margin_with_inherit(LayoutContext* lycon, CssPropertyId prop_id,
+                                         const CssValue* value) {
+    return resolve_spacing_with_inherit(lycon, prop_id, value);
 }
 
 static bool copy_border_side_inherit(LayoutContext* lycon, ViewSpan* span, CssBoxSide side,
@@ -3882,42 +3868,9 @@ static bool copy_border_side_inherit(LayoutContext* lycon, ViewSpan* span, CssBo
     return true;
 }
 
-// Helper function to resolve padding value with inherit support
-// Returns the resolved padding value in pixels
-// If value is 'inherit', looks up parent element's computed padding value
-static float resolve_padding_with_inherit(LayoutContext* lycon, CssPropertyId prop_id, const CssValue* value) {
-    // Check for inherit keyword
-    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
-        // Look up parent element's computed padding value
-        DomElement* current = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
-        if (current && current->parent && current->parent->is_element()) {
-            DomElement* parent = lam::dom_require<DOM_NODE_ELEMENT>(current->parent);
-            // Check if parent has bound property
-            if (parent->bound) {
-                switch (prop_id) {
-                    case CSS_PROPERTY_PADDING_TOP:
-                        log_debug("[CSS] padding-top: inheriting %.2f from parent", parent->bound->padding.top);
-                        return parent->bound->padding.top;
-                    case CSS_PROPERTY_PADDING_RIGHT:
-                        log_debug("[CSS] padding-right: inheriting %.2f from parent", parent->bound->padding.right);
-                        return parent->bound->padding.right;
-                    case CSS_PROPERTY_PADDING_BOTTOM:
-                        log_debug("[CSS] padding-bottom: inheriting %.2f from parent", parent->bound->padding.bottom);
-                        return parent->bound->padding.bottom;
-                    case CSS_PROPERTY_PADDING_LEFT:
-                        log_debug("[CSS] padding-left: inheriting %.2f from parent", parent->bound->padding.left);
-                        return parent->bound->padding.left;
-                    default:
-                        break;
-                }
-            }
-        }
-        // No parent or parent has no padding, use 0
-        log_debug("[CSS] padding inherit: no parent padding found, using 0");
-        return 0.0f;
-    }
-    // Not inherit, resolve normally
-    return resolve_length_value(lycon, prop_id, value);
+static float resolve_padding_with_inherit(LayoutContext* lycon, CssPropertyId prop_id,
+                                          const CssValue* value) {
+    return resolve_spacing_with_inherit(lycon, prop_id, value);
 }
 
 static CssEnum resolve_box_sizing_inherit(LayoutContext* lycon) {
@@ -4480,6 +4433,73 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
     }
 
     log_debug("[CSS] Parsed %d tracks total", track_list->track_count);
+}
+
+static void apply_grid_template_track_value(const CssValue* value,
+                                            GridTrackList** track_list_ptr,
+                                            const char* property_name) {
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+        log_debug("[CSS] %s: none", property_name);
+        if (*track_list_ptr) {
+            destroy_grid_track_list(*track_list_ptr);
+            *track_list_ptr = NULL;
+        }
+        return;
+    }
+
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        parse_grid_track_list(value, track_list_ptr);
+        log_debug("[CSS] %s: %d tracks parsed", property_name,
+                  *track_list_ptr ? (*track_list_ptr)->track_count : 0);
+        return;
+    }
+
+    if (value->type != CSS_VALUE_TYPE_KEYWORD &&
+        value->type != CSS_VALUE_TYPE_FUNCTION &&
+        value->type != CSS_VALUE_TYPE_LENGTH &&
+        value->type != CSS_VALUE_TYPE_PERCENTAGE) {
+        return;
+    }
+
+    GridTrackSize* track_size = parse_css_value_to_track_size(value);
+    if (!track_size) return;
+
+    bool expand_repeat = track_size->type == GRID_TRACK_SIZE_REPEAT &&
+        !track_size->is_auto_fill && !track_size->is_auto_fit &&
+        track_size->repeat_count > 0;
+    if (expand_repeat) {
+        int total = track_size->repeat_count * track_size->repeat_track_count;
+        log_debug("[CSS] %s: expanding fixed repeat(%d, ...) -> %d tracks",
+                  property_name, track_size->repeat_count, total);
+        *track_list_ptr = replace_grid_track_list(track_list_ptr, total);
+        if (!*track_list_ptr) {
+            destroy_grid_track_size(track_size);
+            return;
+        }
+        for (int repeat = 0; repeat < track_size->repeat_count; repeat++) {
+            for (int track = 0; track < track_size->repeat_track_count; track++) {
+                GridTrackSize* clone = clone_grid_track_size(track_size->repeat_tracks[track]);
+                if (clone) {
+                    (*track_list_ptr)->tracks[(*track_list_ptr)->track_count++] = clone;
+                }
+            }
+        }
+        destroy_grid_track_size(track_size);
+    } else {
+        *track_list_ptr = replace_grid_track_list(track_list_ptr, 1);
+        if (!*track_list_ptr) {
+            destroy_grid_track_size(track_size);
+            return;
+        }
+        (*track_list_ptr)->tracks[0] = track_size;
+        (*track_list_ptr)->track_count = 1;
+        if (track_size->type == GRID_TRACK_SIZE_REPEAT) {
+            (*track_list_ptr)->is_repeat = true;
+        }
+    }
+
+    log_debug("[CSS] %s: parsed value -> %d tracks", property_name,
+              (*track_list_ptr)->track_count);
 }
 
 // ============================================================================
@@ -5523,6 +5543,76 @@ static void apply_border_side_shorthand(LayoutContext* lycon, ViewSpan* span, Cs
         *color = get_current_color(lycon);
         *color_specificity = specificity;
     }
+}
+
+static void apply_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
+                                       CssPropertyId prop_id, const CssValue* value) {
+    BlockProp* props = ensure_span_block(lycon, block);
+    DomElement* parent = (lycon->elmt && lycon->elmt->parent)
+        ? lycon->elmt->parent->as_element() : nullptr;
+    ViewBlock* parent_block = lam::view_as_block(parent);
+    BlockProp* parent_props = parent_block ? parent_block->blk : nullptr;
+    float* constraint = nullptr;
+    float* percentage = nullptr;
+    float parent_constraint = 0.0f;
+    bool is_maximum = false;
+
+    switch (prop_id) {
+        case CSS_PROPERTY_MIN_WIDTH:
+            constraint = &props->given_min_width;
+            percentage = &props->given_min_width_percent;
+            if (parent_props) parent_constraint = parent_props->given_min_width;
+            break;
+        case CSS_PROPERTY_MAX_WIDTH:
+            constraint = &props->given_max_width;
+            percentage = &props->given_max_width_percent;
+            if (parent_props) parent_constraint = parent_props->given_max_width;
+            is_maximum = true;
+            break;
+        case CSS_PROPERTY_MIN_HEIGHT:
+            constraint = &props->given_min_height;
+            percentage = &props->given_min_height_percent;
+            if (parent_props) parent_constraint = parent_props->given_min_height;
+            break;
+        case CSS_PROPERTY_MAX_HEIGHT:
+            constraint = &props->given_max_height;
+            percentage = &props->given_max_height_percent;
+            if (parent_props) parent_constraint = parent_props->given_max_height;
+            is_maximum = true;
+            break;
+        default:
+            return;
+    }
+
+    const char* property_name = css_property_name_from_id(prop_id);
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+        if (parent_props) {
+            *constraint = parent_constraint;
+            log_debug("[CSS] %s: inherit %.2f from parent", property_name, *constraint);
+        } else if (is_maximum) {
+            *constraint = -1.0f;
+            log_debug("[CSS] %s: inherit without parent, treating as none", property_name);
+        }
+        return;
+    }
+    if (is_maximum && value->type == CSS_VALUE_TYPE_KEYWORD &&
+        value->data.keyword == CSS_VALUE_NONE) {
+        *constraint = -1.0f;
+        log_debug("[CSS] %s: none (unconstrained)", property_name);
+        return;
+    }
+    if (prop_id == CSS_PROPERTY_MAX_WIDTH &&
+        value->type == CSS_VALUE_TYPE_PERCENTAGE && lycon->block.parent &&
+        lycon->block.parent->content_width <= 0.0f) {
+        *constraint = -1.0f;
+        log_debug("[CSS] max-width: percentage on zero-width parent, treating as none");
+    } else {
+        float resolved = resolve_length_value(lycon, prop_id, value);
+        *constraint = isnan(resolved) ? (is_maximum ? -1.0f : 0.0f) : resolved;
+        log_debug("[CSS] %s: %.2f px", property_name, *constraint);
+    }
+    *percentage = value->type == CSS_VALUE_TYPE_PERCENTAGE
+        ? value->data.percentage.value : NAN;
 }
 
 void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
@@ -6631,154 +6721,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
-        case CSS_PROPERTY_MIN_WIDTH: {
-            log_debug("[CSS] Processing min-width property");
-            if (!block) break;
-            ensure_span_block(lycon, block);
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
-                DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
-                ViewBlock* parent_block = lam::view_as_block(parent);
-                if (parent_block && parent_block->blk) {
-                    block->blk->given_min_width = parent_block->blk->given_min_width;
-                    log_debug("[CSS] Min-width: inherit %.2f from parent", block->blk->given_min_width);
-                }
-                break;
-            }
-            float resolved = resolve_length_value(lycon, CSS_PROPERTY_MIN_WIDTH, value);
-            // If resolve_length_value returns NAN (unresolvable), treat as 0 (no minimum)
-            if (isnan(resolved)) {
-                block->blk->given_min_width = 0;
-                log_debug("[CSS] Min-width: unresolvable value (e.g. calc), treating as 0");
-            } else {
-                block->blk->given_min_width = resolved;
-                log_debug("[CSS] Min-width: %.2f px", block->blk->given_min_width);
-            }
-            // Store raw percentage for flex item re-resolution
-            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                block->blk->given_min_width_percent = value->data.percentage.value;
-            } else {
-                block->blk->given_min_width_percent = NAN;
-            }
-            break;
-        }
-
-        case CSS_PROPERTY_MAX_WIDTH: {
-            log_debug("[CSS] Processing max-width property");
-            if (!block) break;
-            ensure_span_block(lycon, block);
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
-                DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
-                ViewBlock* parent_block = lam::view_as_block(parent);
-                if (parent_block && parent_block->blk) {
-                    block->blk->given_max_width = parent_block->blk->given_max_width;
-                    log_debug("[CSS] Max-width: inherit %.2f from parent", block->blk->given_max_width);
-                } else {
-                    block->blk->given_max_width = -1;
-                }
-                break;
-            }
-            // CSS 2.1 Section 10.4: max-width 'none' means no constraint
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-                block->blk->given_max_width = -1;  // 'none' = unconstrained
-                log_debug("[CSS] Max-width: none (unconstrained)");
-                break;
-            }
-            // CSS 2.2 Section 10.4: max-width percentage resolves against containing block width
-            // If parent has 0 or auto width, percentage max-width should be treated as 'none'
-            // because the containing block's width depends on this element's width
-            if (value->type == CSS_VALUE_TYPE_PERCENTAGE && lycon->block.parent &&
-                lycon->block.parent->content_width <= 0) {
-                block->blk->given_max_width = -1;  // -1 means 'none' (unconstrained)
-                log_debug("[CSS] Max-width: percentage on 0-width parent, treating as 'none'");
-            } else {
-                float resolved = resolve_length_value(lycon, CSS_PROPERTY_MAX_WIDTH, value);
-                // If resolve_length_value returns NAN (unresolvable), treat as 'none' (-1)
-                if (isnan(resolved)) {
-                    block->blk->given_max_width = -1;
-                    log_debug("[CSS] Max-width: unresolvable value (e.g. calc), treating as 'none'");
-                } else {
-                    block->blk->given_max_width = resolved;
-                    log_debug("[CSS] Max-width: %.2f px", block->blk->given_max_width);
-                }
-            }
-            // Store raw percentage for flex item re-resolution
-            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                block->blk->given_max_width_percent = value->data.percentage.value;
-            } else {
-                block->blk->given_max_width_percent = NAN;
-            }
-            break;
-        }
-
-        case CSS_PROPERTY_MIN_HEIGHT: {
-            log_debug("[CSS] Processing min-height property");
-            if (!block) break;
-            ensure_span_block(lycon, block);
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
-                DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
-                ViewBlock* parent_block = lam::view_as_block(parent);
-                if (parent_block && parent_block->blk) {
-                    block->blk->given_min_height = parent_block->blk->given_min_height;
-                    log_debug("[CSS] Min-height: inherit %.2f from parent", block->blk->given_min_height);
-                }
-                break;
-            }
-            float resolved = resolve_length_value(lycon, CSS_PROPERTY_MIN_HEIGHT, value);
-            // If resolve_length_value returns NAN (unresolvable), treat as 0 (no minimum)
-            if (isnan(resolved)) {
-                block->blk->given_min_height = 0;
-                log_debug("[CSS] Min-height: unresolvable value (e.g. calc), treating as 0");
-            } else {
-                block->blk->given_min_height = resolved;
-                log_debug("[CSS] Min-height: %.2f px", block->blk->given_min_height);
-            }
-            // Store raw percentage for flex item re-resolution
-            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                block->blk->given_min_height_percent = value->data.percentage.value;
-            } else {
-                block->blk->given_min_height_percent = NAN;
-            }
-            break;
-        }
-
+        case CSS_PROPERTY_MIN_WIDTH:
+        case CSS_PROPERTY_MAX_WIDTH:
+        case CSS_PROPERTY_MIN_HEIGHT:
         case CSS_PROPERTY_MAX_HEIGHT: {
-            log_debug("[CSS] Processing max-height property");
-            if (!block) break;
-            ensure_span_block(lycon, block);
-            // Handle 'inherit' keyword: look up parent's computed max-height
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
-                DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
-                ViewBlock* parent_block = lam::view_as_block(parent);
-                if (parent_block && parent_block->blk) {
-                    block->blk->given_max_height = parent_block->blk->given_max_height;
-                    log_debug("[CSS] Max-height: inherit %.2f from parent", block->blk->given_max_height);
-                } else {
-                    block->blk->given_max_height = -1;  // none
-                    log_debug("[CSS] Max-height: inherit but no parent value, treating as 'none'");
-                }
-                break;
-            }
-            // CSS 2.1 Section 10.7: max-height 'none' means no constraint
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-                block->blk->given_max_height = -1;  // 'none' = unconstrained
-                log_debug("[CSS] Max-height: none (unconstrained)");
-                break;
-            }
-            float resolved = resolve_length_value(lycon, CSS_PROPERTY_MAX_HEIGHT, value);
-            // If resolve_length_value returns NAN (unresolvable), treat as 'none' (-1)
-            if (isnan(resolved)) {
-                block->blk->given_max_height = -1;
-                log_debug("[CSS] Max-height: unresolvable value (e.g. calc), treating as 'none'");
-            } else {
-                block->blk->given_max_height = resolved;
-                log_debug("[CSS] Max-height: %.2f px", block->blk->given_max_height);
-            }
-            // Store raw percentage for flex item re-resolution
-            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                block->blk->given_max_height_percent = value->data.percentage.value;
-            } else {
-                block->blk->given_max_height_percent = NAN;
-            }
+            if (block) apply_dimension_constraint(lycon, block, prop_id, value);
             break;
         }
 
@@ -9207,61 +9154,25 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         // ===== GROUP 8: Overflow Properties =====
 
-        case CSS_PROPERTY_OVERFLOW: {
-            log_debug("[CSS] Processing overflow property (sets both x and y)");
-            if (!block) break;
-            if (!block->scroller) {
-                block->scroller = alloc_scroll_prop(lycon);
-            }
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum overflow_value = value->data.keyword;
-                if (overflow_value > 0) {
-                    block->scroller->overflow_x = overflow_value;
-                    block->scroller->overflow_y = overflow_value;
-                    log_debug("[CSS] Overflow: %s -> 0x%04X (both x and y)", css_enum_info(value->data.keyword)->name, overflow_value);
-
-                    // Note: has_clip and clip bounds are set during layout in layout_block.cpp and scroller.cpp
-                    // when the actual block dimensions are known
-                }
-            }
-            break;
-        }
-
-        case CSS_PROPERTY_OVERFLOW_X: {
-            log_debug("[CSS] Processing overflow-x property");
-            if (!block) break;
-            if (!block->scroller) {
-                block->scroller = alloc_scroll_prop(lycon);
-            }
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum overflow_value = value->data.keyword;
-                if (overflow_value > 0) {
-                    block->scroller->overflow_x = overflow_value;
-                    log_debug("[CSS] Overflow-x: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, overflow_value);
-
-                    // Note: has_clip is set during layout when dimensions are known
-                }
-            }
-            break;
-        }
-
+        case CSS_PROPERTY_OVERFLOW:
+        case CSS_PROPERTY_OVERFLOW_X:
         case CSS_PROPERTY_OVERFLOW_Y: {
-            log_debug("[CSS] Processing overflow-y property");
             if (!block) break;
             if (!block->scroller) {
                 block->scroller = alloc_scroll_prop(lycon);
             }
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword > 0) {
                 CssEnum overflow_value = value->data.keyword;
-                if (overflow_value > 0) {
-                    block->scroller->overflow_y = overflow_value;
-                    log_debug("[CSS] Overflow-y: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, overflow_value);
-
-                    // Note: has_clip is set during layout when dimensions are known
+                if (prop_id != CSS_PROPERTY_OVERFLOW_Y) {
+                    block->scroller->overflow_x = overflow_value;
                 }
+                if (prop_id != CSS_PROPERTY_OVERFLOW_X) {
+                    block->scroller->overflow_y = overflow_value;
+                }
+                log_debug("[CSS] %s: %s -> 0x%04X",
+                          css_property_name_from_id(prop_id),
+                          css_enum_name_or_unknown(css_enum_info(overflow_value)),
+                          overflow_value);
             }
             break;
         }
@@ -9859,213 +9770,23 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         // Grid Template Properties
-        case CSS_PROPERTY_GRID_TEMPLATE_COLUMNS: {
-            log_debug("[CSS] Processing grid-template-columns property, view_type=%d, block=%p",
-                      lycon->view->view_type, (void*)block);
-            if (!block) {
-                log_debug("[CSS] grid-template-columns: Cannot apply to non-block element");
-                break;
-            }
-
-            alloc_grid_prop(lycon, block);
-            GridProp* grid = block->embed->grid;
-            log_debug("[CSS] grid-template-columns: value_type=%d, grid=%p", value->type, (void*)grid);
-
-            // Handle "none" keyword
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-                log_debug("[CSS] grid-template-columns: none");
-                if (grid->grid_template_columns) {
-                    destroy_grid_track_list(grid->grid_template_columns);
-                    grid->grid_template_columns = NULL;
-                }
-                break;
-            }
-
-            // Handle single keyword track sizes (min-content, max-content, auto)
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                log_debug("[CSS] grid-template-columns: handling single KEYWORD value");
-                GridTrackSize* ts = parse_css_value_to_track_size(value);
-                if (ts) {
-                    grid->grid_template_columns = replace_grid_track_list(&grid->grid_template_columns, 1);
-                    if (!grid->grid_template_columns) {
-                        destroy_grid_track_size(ts);
-                        break;
-                    }
-                    grid->grid_template_columns->tracks[0] = ts;
-                    grid->grid_template_columns->track_count = 1;
-                    log_debug("[CSS] grid-template-columns: parsed single keyword track");
-                }
-                break;
-            }
-
-            // Parse list of track sizes using helper function
-            if (value->type == CSS_VALUE_TYPE_LIST) {
-                log_debug("[CSS] grid-template-columns: using parse_grid_track_list helper (LIST)");
-                parse_grid_track_list(value, &grid->grid_template_columns);
-                log_debug("[CSS] grid-template-columns: %d tracks parsed",
-                          grid->grid_template_columns ? grid->grid_template_columns->track_count : 0);
-            }
-            // Handle single function value (e.g., repeat(...))
-            else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
-                log_debug("[CSS] grid-template-columns: handling single FUNCTION value");
-                GridTrackSize* ts = parse_css_value_to_track_size(value);
-                if (ts) {
-                    // For fixed-count repeat(), expand immediately
-                    if (ts->type == GRID_TRACK_SIZE_REPEAT && !ts->is_auto_fill && !ts->is_auto_fit && ts->repeat_count > 0) {
-                        int total = ts->repeat_count * ts->repeat_track_count;
-                        log_debug("[CSS] grid-template-columns: expanding fixed repeat(%d, ...) -> %d tracks",
-                                  ts->repeat_count, total);
-                        grid->grid_template_columns = replace_grid_track_list(&grid->grid_template_columns, total);
-                        if (!grid->grid_template_columns) {
-                            destroy_grid_track_size(ts);
-                            break;
-                        }
-                        for (int r = 0; r < ts->repeat_count; r++) {
-                            for (int t = 0; t < ts->repeat_track_count; t++) {
-                                GridTrackSize* repeated_track = clone_grid_track_size(ts->repeat_tracks[t]);
-                                if (repeated_track) {
-                                    grid->grid_template_columns->tracks[grid->grid_template_columns->track_count++] = repeated_track;
-                                }
-                            }
-                        }
-                        destroy_grid_track_size(ts);
-                    } else {
-                        // auto-fill/auto-fit or other function - store as single track for layout-time expansion
-                        grid->grid_template_columns = replace_grid_track_list(&grid->grid_template_columns, 1);
-                        if (!grid->grid_template_columns) {
-                            destroy_grid_track_size(ts);
-                            break;
-                        }
-                        grid->grid_template_columns->tracks[0] = ts;
-                        grid->grid_template_columns->track_count = 1;
-                        if (ts->type == GRID_TRACK_SIZE_REPEAT) {
-                            grid->grid_template_columns->is_repeat = true;
-                        }
-                    }
-                    log_debug("[CSS] grid-template-columns: parsed FUNCTION -> %d tracks",
-                              grid->grid_template_columns->track_count);
-                }
-            }
-            // Handle single length/percentage value (e.g., 100px)
-            else if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                log_debug("[CSS] grid-template-columns: handling single LENGTH/PERCENTAGE value");
-                GridTrackSize* ts = parse_css_value_to_track_size(value);
-                if (ts) {
-                    grid->grid_template_columns = replace_grid_track_list(&grid->grid_template_columns, 1);
-                    if (!grid->grid_template_columns) {
-                        destroy_grid_track_size(ts);
-                        break;
-                    }
-                    grid->grid_template_columns->tracks[0] = ts;
-                    grid->grid_template_columns->track_count = 1;
-                    log_debug("[CSS] grid-template-columns: parsed single track -> %d tracks",
-                              grid->grid_template_columns->track_count);
-                }
-            }
-            break;
-        }
-
+        case CSS_PROPERTY_GRID_TEMPLATE_COLUMNS:
         case CSS_PROPERTY_GRID_TEMPLATE_ROWS: {
-            log_debug("[CSS] Processing grid-template-rows property");
+            bool columns = prop_id == CSS_PROPERTY_GRID_TEMPLATE_COLUMNS;
+            const char* property_name = columns ?
+                "grid-template-columns" : "grid-template-rows";
+            log_debug("[CSS] Processing %s property, view_type=%d, block=%p",
+                      property_name, lycon->view->view_type, (void*)block);
             if (!block) {
-                log_debug("[CSS] grid-template-rows: Cannot apply to non-block element");
+                log_debug("[CSS] %s: Cannot apply to non-block element", property_name);
                 break;
             }
 
             alloc_grid_prop(lycon, block);
             GridProp* grid = block->embed->grid;
-
-            // Handle "none" keyword
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-                log_debug("[CSS] grid-template-rows: none");
-                if (grid->grid_template_rows) {
-                    destroy_grid_track_list(grid->grid_template_rows);
-                    grid->grid_template_rows = NULL;
-                }
-                break;
-            }
-
-            // Handle single keyword track sizes (min-content, max-content, auto)
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                log_debug("[CSS] grid-template-rows: handling single KEYWORD value");
-                GridTrackSize* ts = parse_css_value_to_track_size(value);
-                if (ts) {
-                    grid->grid_template_rows = replace_grid_track_list(&grid->grid_template_rows, 1);
-                    if (!grid->grid_template_rows) {
-                        destroy_grid_track_size(ts);
-                        break;
-                    }
-                    grid->grid_template_rows->tracks[0] = ts;
-                    grid->grid_template_rows->track_count = 1;
-                    log_debug("[CSS] grid-template-rows: parsed single keyword track");
-                }
-                break;
-            }
-
-            // Parse list of track sizes using helper function
-            if (value->type == CSS_VALUE_TYPE_LIST) {
-                log_debug("[CSS] grid-template-rows: using parse_grid_track_list helper");
-                parse_grid_track_list(value, &grid->grid_template_rows);
-                log_debug("[CSS] grid-template-rows: %d tracks parsed",
-                          grid->grid_template_rows ? grid->grid_template_rows->track_count : 0);
-            }
-            // Handle single length/percentage value (e.g., 40px)
-            else if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                log_debug("[CSS] grid-template-rows: handling single LENGTH/PERCENTAGE value");
-                GridTrackSize* ts = parse_css_value_to_track_size(value);
-                if (ts) {
-                    grid->grid_template_rows = replace_grid_track_list(&grid->grid_template_rows, 1);
-                    if (!grid->grid_template_rows) {
-                        destroy_grid_track_size(ts);
-                        break;
-                    }
-                    grid->grid_template_rows->tracks[0] = ts;
-                    grid->grid_template_rows->track_count = 1;
-                    log_debug("[CSS] grid-template-rows: parsed single track -> %d tracks",
-                              grid->grid_template_rows->track_count);
-                }
-            }
-            // Handle single function value (e.g., repeat(...))
-            else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
-                log_debug("[CSS] grid-template-rows: handling single FUNCTION value");
-                GridTrackSize* ts = parse_css_value_to_track_size(value);
-                if (ts) {
-                    // For fixed-count repeat(), expand immediately
-                    if (ts->type == GRID_TRACK_SIZE_REPEAT && !ts->is_auto_fill && !ts->is_auto_fit && ts->repeat_count > 0) {
-                        int total = ts->repeat_count * ts->repeat_track_count;
-                        log_debug("[CSS] grid-template-rows: expanding fixed repeat(%d, ...) -> %d tracks",
-                                  ts->repeat_count, total);
-                        grid->grid_template_rows = replace_grid_track_list(&grid->grid_template_rows, total);
-                        if (!grid->grid_template_rows) {
-                            destroy_grid_track_size(ts);
-                            break;
-                        }
-                        for (int r = 0; r < ts->repeat_count; r++) {
-                            for (int t = 0; t < ts->repeat_track_count; t++) {
-                                GridTrackSize* repeated_track = clone_grid_track_size(ts->repeat_tracks[t]);
-                                if (repeated_track) {
-                                    grid->grid_template_rows->tracks[grid->grid_template_rows->track_count++] = repeated_track;
-                                }
-                            }
-                        }
-                        destroy_grid_track_size(ts);
-                    } else {
-                        // auto-fill/auto-fit or other function
-                        grid->grid_template_rows = replace_grid_track_list(&grid->grid_template_rows, 1);
-                        if (!grid->grid_template_rows) {
-                            destroy_grid_track_size(ts);
-                            break;
-                        }
-                        grid->grid_template_rows->tracks[0] = ts;
-                        grid->grid_template_rows->track_count = 1;
-                        if (ts->type == GRID_TRACK_SIZE_REPEAT) {
-                            grid->grid_template_rows->is_repeat = true;
-                        }
-                    }
-                    log_debug("[CSS] grid-template-rows: parsed FUNCTION -> %d tracks",
-                              grid->grid_template_rows->track_count);
-                }
-            }
+            GridTrackList** track_list_ptr = columns ?
+                &grid->grid_template_columns : &grid->grid_template_rows;
+            apply_grid_template_track_value(value, track_list_ptr, property_name);
             break;
         }
 
