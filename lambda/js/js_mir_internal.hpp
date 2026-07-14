@@ -34,6 +34,7 @@ extern JsModuleConstEntry* g_eval_preamble_entries;
 extern int g_eval_preamble_entry_count;
 extern int g_eval_preamble_var_count;
 extern bool g_jm_preamble_mode;
+extern bool g_jm_preamble_compile_only;
 extern JsPreambleState* g_jm_preamble_out;
 extern const JsPreambleState* g_jm_preamble_in;
 extern Runtime* js_source_runtime;
@@ -202,6 +203,7 @@ void jm_arguments_writeback_param(JsMirTranspiler* mt, int param_index, MIR_reg_
 MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val);
 MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg);
 MIR_reg_t jm_box_string(JsMirTranspiler* mt, MIR_reg_t ptr_reg);
+NamePool* jm_compiled_name_pool(JsMirTranspiler* mt);
 MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int len);
 void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
     MIR_reg_t obj, MIR_reg_t key, MIR_reg_t fn_item,
@@ -457,10 +459,14 @@ Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const
                                    JsPreambleState* out_state);
 Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                       const char* filename, JsPreambleState* out_state);
+Item compile_js_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
+                                 const char* filename, JsPreambleState* out_state);
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                         const JsPreambleState* preamble);
 Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                            const char* filename, const JsPreambleState* preamble);
+Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
+                             JsPreambleState* out_state);
 void preamble_state_destroy(JsPreambleState* state);
 Item load_js_module(Runtime* runtime, const char* js_path);
 bool js_is_cjs_file(const char* path);

@@ -431,6 +431,7 @@ struct JubeModuleDef {
     const char* interface_decl;            // Lambda-type-syntax module interface
     const JubeTypeBinding* type_bindings;  // one per declared type
     int32_t type_binding_count;
+    void (*runtime_reset)(void);            // drop JS heap-backed module caches
 };
 
 // Size of the frozen v1 layout: everything before the DOM3 additive tail.

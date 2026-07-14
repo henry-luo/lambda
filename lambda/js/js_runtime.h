@@ -633,6 +633,7 @@ void js_register_global_var_module_bindings_bulk(const Item* keys, const int* in
 void js_batch_reset(void);
 int js_get_module_var_count(void);
 void js_batch_reset_to(int checkpoint_var_count);
+void js_prepare_compiled_preamble_vars(int declaration_count);
 extern int js_batch_execution_mode;
 void js_dom_batch_reset(void);
 void js_globals_batch_reset(void);
@@ -691,10 +692,14 @@ typedef struct JsMirPhaseTiming {
     long execute_us;
     long cleanup_us;
     long total_us;
+    long preamble_us;
 } JsMirPhaseTiming;
 
 void js_mir_reset_last_phase_timing(void);
 void js_mir_get_last_phase_timing(JsMirPhaseTiming* out);
+void js_mir_begin_document_phase_timing(void);
+void js_mir_accumulate_last_phase_timing(bool is_preamble);
+void js_mir_end_document_phase_timing(JsMirPhaseTiming* out);
 
 // Shared ECMAScript IdentifierName policy backed by the generated Unicode
 // ID_Start / ID_Continue range tables used by RegExp property support.

@@ -138,19 +138,26 @@ struct JsPreambleState {
                                 // and map shape entries reference strings from name_pool
     void* tp_name_pool;         // transpiler's name_pool (allocated from ast_pool)
     char* source_buffer;        // source bytes kept alive for retained AST/source ranges
+    void* entry_func;           // compiled js_main, reusable with a fresh EvalContext
     int module_var_count;       // number of harness module vars
     JsModuleConstEntry* entries;// snapshot of harness module_consts
     int entry_count;
+    bool owns_compiled_state;   // clones share the immutable MIR context and pools
 };
 Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                    JsPreambleState* out_state);
 Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                       const char* filename, JsPreambleState* out_state);
+Item compile_js_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
+                                 const char* filename, JsPreambleState* out_state);
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                         const JsPreambleState* preamble);
 Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                            const char* filename, const JsPreambleState* preamble);
 bool preamble_state_update_from_eval_snapshot(JsPreambleState* state);
+bool clone_js_preamble_state(const JsPreambleState* source, JsPreambleState* out_state);
+Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
+                             JsPreambleState* out_state);
 void preamble_state_destroy(JsPreambleState* state);
 
 // Clean up all deferred MIR contexts (call at batch end or after heap_destroy on crash)

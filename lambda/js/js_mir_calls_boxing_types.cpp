@@ -454,12 +454,20 @@ MIR_reg_t jm_box_string(JsMirTranspiler* mt, MIR_reg_t ptr_reg) {
 
 // Create a boxed string Item from a C string literal
 // Calls heap_create_name(chars) -> String*, then boxes with s2it
+NamePool* jm_compiled_name_pool(JsMirTranspiler* mt) {
+    if (!mt || !mt->tp) return NULL;
+    // Compile-only preamble constants execute in later heaps, so their raw
+    // pointers must live beside the retained MIR/AST state, not the setup heap.
+    if (g_jm_preamble_compile_only && mt->tp->name_pool) return mt->tp->name_pool;
+    return (context && context->name_pool) ? context->name_pool : mt->tp->name_pool;
+}
+
 MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int len) {
     // Intern the string at transpile time (handles embedded NUL bytes correctly).
     // The boxed Item is baked into JIT code as a raw String* constant. That code
     // can run after compilation from nested functions, timers, event handlers, or
     // the synthetic WPT onload path, so the literal must outlive the transpiler.
-    NamePool* np = (context && context->name_pool) ? context->name_pool : mt->tp->name_pool;
+    NamePool* np = jm_compiled_name_pool(mt);
     String* interned = name_pool_create_len(np, str, len);
     // Box directly: the interned String* is already a valid heap pointer
     // Use s2it(interned) as a compile-time constant Item value

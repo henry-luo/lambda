@@ -742,6 +742,17 @@ const JubeModuleDef* jube_static_module_at(int index) {
     return jube_static_modules[index].module;
 }
 
+void jube_modules_runtime_reset(void) {
+    size_t end = offsetof(JubeModuleDef, runtime_reset) +
+        sizeof(((JubeModuleDef*)NULL)->runtime_reset);
+    for (int i = 0; i < jube_static_modules_count; i++) {
+        const JubeModuleDef* module = jube_static_modules[i].module;
+        if (jube_module_has_field(module, end) && module->runtime_reset) {
+            module->runtime_reset();
+        }
+    }
+}
+
 const JubeModuleDef* jube_find_static_module(const char* name) {
     int index = jube_find_static_module_index(name);
     if (index < 0) return NULL;

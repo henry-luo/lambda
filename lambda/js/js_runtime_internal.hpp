@@ -596,6 +596,7 @@ void js_decimal_number_egress_warning_reset();
 void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_heap_bound);
 void js_reset_math_object();
 void js_reset_json_object();
+extern "C" void js_reset_intl_object();
 void js_reset_console_object();
 void js_reset_reflect_object();
 void js_reset_atomics_object();
