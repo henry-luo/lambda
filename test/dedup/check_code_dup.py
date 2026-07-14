@@ -7,11 +7,14 @@ import re
 import shutil
 import subprocess
 import sys
+from collections import defaultdict
+from itertools import combinations
 from pathlib import Path
 
 
 MODULES = ("lib", "lambda", "radiant")
 LOCATION_RE = re.compile(r"^(.+):(\d+) ~ (\d+)$")
+RATCHET_FIELDS = ("family_count", "union_duplicate_lines")
 
 
 class ConfigError(Exception):
@@ -27,6 +30,11 @@ def parse_args():
         nargs="*",
         metavar="MODULE",
         help="modules to scan (default: lib lambda radiant)",
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="print every remaining Lizard duplicate location after the summary",
     )
     args = parser.parse_args()
     unknown = sorted(set(args.modules) - set(MODULES))
@@ -51,6 +59,31 @@ def load_config(path):
         if not isinstance(config.get(section), list):
             raise ConfigError("%s must contain a %s list" % (path, section))
     return config
+
+
+def load_baselines(path):
+    try:
+        with path.open(encoding="utf-8") as handle:
+            config = json.load(handle)
+    except (OSError, json.JSONDecodeError) as error:
+        raise ConfigError("cannot read %s: %s" % (path, error)) from error
+
+    if config.get("version") != 1 or not isinstance(config.get("baselines"), dict):
+        raise ConfigError("%s must have version 1 and a baselines object" % path)
+    valid_names = {
+        "+".join(selection)
+        for selection_size in range(1, len(MODULES) + 1)
+        for selection in combinations(MODULES, selection_size)
+    }
+    for name, baseline in config["baselines"].items():
+        if not isinstance(name, str) or not isinstance(baseline, dict):
+            raise ConfigError("%s contains an invalid baseline entry" % path)
+        if name not in valid_names:
+            raise ConfigError("%s contains an invalid module selection: %s" % (path, name))
+        for field in RATCHET_FIELDS:
+            if type(baseline.get(field)) is not int or baseline[field] < 0:
+                raise ConfigError("baseline %s must contain a non-negative %s" % (name, field))
+    return config["baselines"]
 
 
 def validate_rule(rule, section, selected_modules):
@@ -188,6 +221,127 @@ def parse_duplicate_blocks(output):
     return blocks
 
 
+def block_file_set(block):
+    return tuple(sorted({location["file"] for location in block}))
+
+
+def merge_intervals(intervals):
+    merged = []
+    for start, end in sorted(intervals):
+        if not merged or start > merged[-1][1] + 1:
+            merged.append([start, end])
+        else:
+            merged[-1][1] = max(merged[-1][1], end)
+    return [(start, end) for start, end in merged]
+
+
+def cluster_duplicate_families(blocks):
+    """Merge overlapping Lizard windows without crossing file-set boundaries."""
+    parents = list(range(len(blocks)))
+
+    def find(index):
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    def union(first, second):
+        first_root = find(first)
+        second_root = find(second)
+        if first_root != second_root:
+            parents[second_root] = first_root
+
+    blocks_by_file_set = defaultdict(list)
+    for block_index, block in enumerate(blocks):
+        blocks_by_file_set[block_file_set(block)].append(block_index)
+
+    for file_set, block_indexes in blocks_by_file_set.items():
+        for file_name in file_set:
+            intervals = []
+            for block_index in block_indexes:
+                intervals.extend(
+                    (location["start"], location["end"], block_index)
+                    for location in blocks[block_index]
+                    if location["file"] == file_name
+                )
+            active = []
+            for start, end, block_index in sorted(intervals):
+                active = [entry for entry in active if entry[0] >= start]
+                # An overlap in any participating file connects two windows from
+                # the same file set into one review family.
+                for other_index in {entry[1] for entry in active}:
+                    union(block_index, other_index)
+                active.append((end, block_index))
+
+    family_blocks = defaultdict(list)
+    for block_index, block in enumerate(blocks):
+        family_blocks[find(block_index)].append(block)
+
+    families = []
+    for grouped_blocks in family_blocks.values():
+        intervals_by_file = defaultdict(list)
+        for block in grouped_blocks:
+            for location in block:
+                intervals_by_file[location["file"]].append(
+                    (location["start"], location["end"])
+                )
+        merged_by_file = {
+            file_name: merge_intervals(intervals)
+            for file_name, intervals in intervals_by_file.items()
+        }
+        families.append({
+            "files": tuple(sorted(merged_by_file)),
+            "intervals": merged_by_file,
+            "blocks": grouped_blocks,
+        })
+
+    return sorted(
+        families,
+        key=lambda family: (
+            family["files"],
+            min(
+                (start, end)
+                for intervals in family["intervals"].values()
+                for start, end in intervals
+            ),
+        ),
+    )
+
+
+def duplicate_metrics(raw_block_count, blocks, families):
+    intervals_by_file = defaultdict(list)
+    family_counts_by_file = defaultdict(int)
+    pair_counts = defaultdict(int)
+
+    for block in blocks:
+        for location in block:
+            intervals_by_file[location["file"]].append(
+                (location["start"], location["end"])
+            )
+    for family in families:
+        for file_name in family["files"]:
+            family_counts_by_file[file_name] += 1
+        for pair in combinations(family["files"], 2):
+            pair_counts[pair] += 1
+
+    union_lines_by_file = {
+        file_name: sum(end - start + 1 for start, end in merge_intervals(intervals))
+        for file_name, intervals in intervals_by_file.items()
+    }
+    same_file_count = sum(len(family["files"]) == 1 for family in families)
+    return {
+        "raw_block_count": raw_block_count,
+        "remaining_block_count": len(blocks),
+        "family_count": len(families),
+        "same_file_family_count": same_file_count,
+        "cross_file_family_count": len(families) - same_file_count,
+        "union_duplicate_lines": sum(union_lines_by_file.values()),
+        "union_lines_by_file": union_lines_by_file,
+        "family_counts_by_file": dict(family_counts_by_file),
+        "pair_counts": dict(pair_counts),
+    }
+
+
 def exclusion_for_block(block, rules):
     for rule in rules:
         matched_regions = set()
@@ -210,29 +364,110 @@ def exclusion_for_block(block, rules):
     return None
 
 
-def print_report(blocks, excluded_counts, modules, file_exclusion_count):
+def ratchet_failures(metrics, baseline):
+    return [
+        "%s grew from %d to %d" % (field, baseline[field], metrics[field])
+        for field in RATCHET_FIELDS
+        if metrics[field] > baseline[field]
+    ]
+
+
+def print_full_locations(blocks):
+    print()
+    print("Full duplicate locations")
+    print("------------------------")
+    if not blocks:
+        print("No duplicate blocks remain after exclusions.")
+        return
+    for block in blocks:
+        print("Duplicate block:")
+        print("--------------------------")
+        for location in block:
+            print(location["text"])
+        print("^^^^^^^^^^^^^^^^^^^^^^^^^^")
+
+
+def print_report(metrics, blocks, excluded_counts, modules, file_exclusion_count,
+                 baseline, full):
     print("Filtered Lizard duplicate report")
     print("Modules: %s" % ", ".join(modules))
     print()
-    if blocks:
-        for block in blocks:
-            print("Duplicate block:")
-            print("--------------------------")
-            for location in block:
-                print(location["text"])
-            print("^^^^^^^^^^^^^^^^^^^^^^^^^^")
-    else:
-        print("No duplicate blocks remain after exclusions.")
-
-    excluded_total = sum(excluded_counts.values())
-    print()
     print("Summary")
     print("-------")
-    print("Remaining duplicate blocks: %d" % len(blocks))
-    print("Excluded known false-positive blocks: %d" % excluded_total)
+    print("Raw Lizard duplicate blocks: %d" % metrics["raw_block_count"])
+    print("Remaining duplicate blocks: %d" % metrics["remaining_block_count"])
+    print("First-party clone families: %d" % metrics["family_count"])
+    print("Same-file clone families: %d" % metrics["same_file_family_count"])
+    print("Cross-file clone families: %d" % metrics["cross_file_family_count"])
+    print("Union duplicate lines: %d" % metrics["union_duplicate_lines"])
+    print("Excluded known false-positive blocks: %d" % sum(excluded_counts.values()))
     print("File exclusion rules passed to Lizard: %d" % file_exclusion_count)
+
+    print()
+    print("Top files by union duplicate lines")
+    print("----------------------------------")
+    top_files = sorted(
+        metrics["union_lines_by_file"],
+        key=lambda file_name: (
+            -metrics["union_lines_by_file"][file_name],
+            file_name,
+        ),
+    )[:10]
+    if not top_files:
+        print("  none")
+    for file_name in top_files:
+        print(
+            "  %6d lines | %4d families | %s"
+            % (
+                metrics["union_lines_by_file"][file_name],
+                metrics["family_counts_by_file"][file_name],
+                file_name,
+            )
+        )
+
+    print()
+    print("Top cross-file pairs by clone families")
+    print("---------------------------------------")
+    top_pairs = sorted(
+        metrics["pair_counts"],
+        key=lambda pair: (-metrics["pair_counts"][pair], pair),
+    )[:10]
+    if not top_pairs:
+        print("  none")
+    for first, second in top_pairs:
+        print(
+            "  %4d families | %s <> %s"
+            % (metrics["pair_counts"][(first, second)], first, second)
+        )
+
+    print()
+    print("Reviewed block exclusions")
+    print("--------------------------")
+    if not excluded_counts:
+        print("  none")
     for rule_id in sorted(excluded_counts):
-        print("  %s: %d" % (rule_id, excluded_counts[rule_id]))
+        print("  %6d blocks | %s" % (excluded_counts[rule_id], rule_id))
+
+    print()
+    if baseline is None:
+        print("Ratchet: not configured for this module selection")
+    else:
+        failures = ratchet_failures(metrics, baseline)
+        if failures:
+            print("Ratchet: FAIL")
+            for failure in failures:
+                print("  %s" % failure)
+        else:
+            print(
+                "Ratchet: PASS (families %d <= %d; union lines %d <= %d)"
+                % (
+                    metrics["family_count"], baseline["family_count"],
+                    metrics["union_duplicate_lines"], baseline["union_duplicate_lines"],
+                )
+            )
+
+    if full:
+        print_full_locations(blocks)
 
 
 def build_lizard_command(lizard, file_exclusions, selected_modules):
@@ -249,9 +484,11 @@ def main():
     selected_modules = tuple(module for module in MODULES if not args.modules or module in args.modules)
     root = Path(__file__).resolve().parents[2]
     config_path = Path(__file__).with_name("exclude.json")
+    baseline_path = Path(__file__).with_name("baseline.json")
 
     try:
         config = load_config(config_path)
+        baselines = load_baselines(baseline_path)
         file_exclusions = active_file_exclusions(config, selected_modules)
         block_exclusions = active_block_exclusions(config, selected_modules, root)
     except ConfigError as error:
@@ -287,8 +524,19 @@ def main():
         else:
             excluded_counts[rule["id"]] = excluded_counts.get(rule["id"], 0) + 1
 
-    print_report(remaining, excluded_counts, selected_modules, len(file_exclusions))
-    return 0
+    families = cluster_duplicate_families(remaining)
+    metrics = duplicate_metrics(len(blocks), remaining, families)
+    baseline = baselines.get("+".join(selected_modules))
+    print_report(
+        metrics,
+        remaining,
+        excluded_counts,
+        selected_modules,
+        len(file_exclusions),
+        baseline,
+        args.full,
+    )
+    return 1 if baseline is not None and ratchet_failures(metrics, baseline) else 0
 
 
 if __name__ == "__main__":
