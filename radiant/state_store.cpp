@@ -3620,35 +3620,67 @@ static void form_state_mark_dirty(DocState* state) {
     state_assert_after_mutation(state, "form_view_state_mutation");
 }
 
-static void view_state_set_hovered_internal(DocState* state, View* view, bool hovered,
-                                            bool assert_after_mutation) {
+enum ViewStateFlagKind {
+    VIEW_STATE_FLAG_HOVERED,
+    VIEW_STATE_FLAG_ACTIVE,
+    VIEW_STATE_FLAG_FOCUSED,
+};
+
+static bool view_state_flag_value(const ViewState* state, ViewStateFlagKind flag) {
+    switch (flag) {
+        case VIEW_STATE_FLAG_HOVERED: return state->flags.hovered != 0;
+        case VIEW_STATE_FLAG_ACTIVE: return state->flags.active != 0;
+        case VIEW_STATE_FLAG_FOCUSED: return state->flags.focused != 0;
+    }
+    return false;
+}
+
+static void view_state_assign_flag(ViewState* state, ViewStateFlagKind flag, bool value) {
+    switch (flag) {
+        case VIEW_STATE_FLAG_HOVERED: state->flags.hovered = value ? 1 : 0; break;
+        case VIEW_STATE_FLAG_ACTIVE: state->flags.active = value ? 1 : 0; break;
+        case VIEW_STATE_FLAG_FOCUSED: state->flags.focused = value ? 1 : 0; break;
+    }
+}
+
+static void view_state_set_flag_internal(DocState* state, View* view, ViewStateFlagKind flag,
+                                         bool value, const char* transition_name,
+                                         const char* assertion_name, bool assert_after_mutation) {
     ViewState* view_state = view_state_get(state, view);
-    if (!view_state && !hovered) return;
+    if (!view_state && !value) return;
     if (!view_state) view_state = view_state_get_or_create(state, view, VIEW_STATE_BASE);
     if (!view_state) return;
-    bool old_value = view_state->flags.hovered != 0;
+
+    bool old_value = view_state_flag_value(view_state, flag);
     bool changed = false;
     uint32_t view_id = view_state_resolve_id(view);
     if (view_id != 0 && state && state->view_state_map) {
+        // A logical interaction flag is mirrored across every state kind for one view id.
         for (int kind_int = VIEW_STATE_BASE; kind_int <= VIEW_STATE_CUSTOM; kind_int++) {
             ViewStateKind kind = (ViewStateKind)kind_int;
             ViewStateEntry query = { .view_id = view_id, .kind = kind, .state = NULL };
             const ViewStateEntry* found = (const ViewStateEntry*)hashmap_get(state->view_state_map, &query);
-            if (!found || !found->state) continue;
-            if ((found->state->flags.hovered != 0) == hovered) continue;
-            found->state->flags.hovered = hovered ? 1 : 0;
+            if (!found || !found->state || view_state_flag_value(found->state, flag) == value) continue;
+            view_state_assign_flag(found->state, flag, value);
             changed = true;
         }
-    } else if ((view_state->flags.hovered != 0) != hovered) {
-        view_state->flags.hovered = hovered ? 1 : 0;
+    } else if (old_value != value) {
+        view_state_assign_flag(view_state, flag, value);
         changed = true;
     }
     if (!changed) return;
-    view_state_log_bool_transition(state, view, "hover", old_value, hovered);
+
+    view_state_log_bool_transition(state, view, transition_name, old_value, value);
     state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
-    if (assert_after_mutation) state_assert_after_mutation(state, "view_state_set_hovered");
+    if (assert_after_mutation) state_assert_after_mutation(state, assertion_name);
+}
+
+static void view_state_set_hovered_internal(DocState* state, View* view, bool hovered,
+                                            bool assert_after_mutation) {
+    view_state_set_flag_internal(state, view, VIEW_STATE_FLAG_HOVERED, hovered, "hover",
+        "view_state_set_hovered", assert_after_mutation);
 }
 
 void view_state_set_hovered(DocState* state, View* view, bool hovered) {
@@ -3664,63 +3696,13 @@ void view_state_set_active(DocState* state, View* view, bool active) {
 
 static void view_state_set_active_internal(DocState* state, View* view, bool active,
                                            bool assert_after_mutation) {
-    ViewState* view_state = view_state_get(state, view);
-    if (!view_state && !active) return;
-    if (!view_state) view_state = view_state_get_or_create(state, view, VIEW_STATE_BASE);
-    if (!view_state) return;
-    bool old_value = view_state->flags.active != 0;
-    bool changed = false;
-    uint32_t view_id = view_state_resolve_id(view);
-    if (view_id != 0 && state && state->view_state_map) {
-        for (int kind_int = VIEW_STATE_BASE; kind_int <= VIEW_STATE_CUSTOM; kind_int++) {
-            ViewStateKind kind = (ViewStateKind)kind_int;
-            ViewStateEntry query = { .view_id = view_id, .kind = kind, .state = NULL };
-            const ViewStateEntry* found = (const ViewStateEntry*)hashmap_get(state->view_state_map, &query);
-            if (!found || !found->state) continue;
-            if ((found->state->flags.active != 0) == active) continue;
-            found->state->flags.active = active ? 1 : 0;
-            changed = true;
-        }
-    } else if ((view_state->flags.active != 0) != active) {
-        view_state->flags.active = active ? 1 : 0;
-        changed = true;
-    }
-    if (!changed) return;
-    view_state_log_bool_transition(state, view, "active", old_value, active);
-    state->is_dirty = true;
-    state->needs_repaint = true;
-    state->version++;
-    if (assert_after_mutation) state_assert_after_mutation(state, "view_state_set_active");
+    view_state_set_flag_internal(state, view, VIEW_STATE_FLAG_ACTIVE, active, "active",
+        "view_state_set_active", assert_after_mutation);
 }
 
 void view_state_set_focused(DocState* state, View* view, bool focused) {
-    ViewState* view_state = view_state_get(state, view);
-    if (!view_state && !focused) return;
-    if (!view_state) view_state = view_state_get_or_create(state, view, VIEW_STATE_BASE);
-    if (!view_state) return;
-    bool old_value = view_state->flags.focused != 0;
-    bool changed = false;
-    uint32_t view_id = view_state_resolve_id(view);
-    if (view_id != 0 && state && state->view_state_map) {
-        for (int kind_int = VIEW_STATE_BASE; kind_int <= VIEW_STATE_CUSTOM; kind_int++) {
-            ViewStateKind kind = (ViewStateKind)kind_int;
-            ViewStateEntry query = { .view_id = view_id, .kind = kind, .state = NULL };
-            const ViewStateEntry* found = (const ViewStateEntry*)hashmap_get(state->view_state_map, &query);
-            if (!found || !found->state) continue;
-            if ((found->state->flags.focused != 0) == focused) continue;
-            found->state->flags.focused = focused ? 1 : 0;
-            changed = true;
-        }
-    } else if ((view_state->flags.focused != 0) != focused) {
-        view_state->flags.focused = focused ? 1 : 0;
-        changed = true;
-    }
-    if (!changed) return;
-    view_state_log_bool_transition(state, view, "focus", old_value, focused);
-    state->is_dirty = true;
-    state->needs_repaint = true;
-    state->version++;
-    state_assert_after_mutation(state, "view_state_set_focused");
+    view_state_set_flag_internal(state, view, VIEW_STATE_FLAG_FOCUSED, focused, "focus",
+        "view_state_set_focused", true);
 }
 
 void doc_state_set_hover_target(DocState* state, View* target) {

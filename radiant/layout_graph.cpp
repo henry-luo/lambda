@@ -92,13 +92,9 @@ static lam::SessionPtr<LayoutNode> extract_single_node(ElementReader& child_read
 
 // Recursively extract nodes from element and its subgraphs
 static void extract_nodes_recursive(ElementReader& reader, LayoutGraph* lg) {
-    ElementReader::ChildIterator children = reader.children();
-    ItemReader child_item;
-
-    while (children.next(&child_item)) {
-        if (!child_item.isElement()) continue;
-
-        ElementReader child_reader = child_item.asElement();
+    ElementReader::ElementChildIterator children = reader.childElements();
+    ElementReader child_reader;
+    while (children.next(&child_reader)) {
         const char* tag = child_reader.tagName();
         if (!tag) continue;
 
@@ -116,13 +112,9 @@ static void extract_nodes_recursive(ElementReader& reader, LayoutGraph* lg) {
 
 // Recursively extract edges from element and its subgraphs
 static void extract_edges_recursive(ElementReader& reader, LayoutGraph* lg) {
-    ElementReader::ChildIterator children = reader.children();
-    ItemReader child_item;
-
-    while (children.next(&child_item)) {
-        if (!child_item.isElement()) continue;
-
-        ElementReader child_reader = child_item.asElement();
+    ElementReader::ElementChildIterator children = reader.childElements();
+    ElementReader child_reader;
+    while (children.next(&child_reader)) {
         const char* tag = child_reader.tagName();
         if (!tag) continue;
 
@@ -190,13 +182,9 @@ static void collect_node_ids_recursive(ElementReader& reader, GraphNodeIdList* n
 
 // Collect node IDs recursively from element and nested subgraphs
 static void collect_node_ids_recursive(ElementReader& reader, GraphNodeIdList* node_ids) {
-    ElementReader::ChildIterator children = reader.children();
-    ItemReader child_item;
-
-    while (children.next(&child_item)) {
-        if (!child_item.isElement()) continue;
-
-        ElementReader child_reader = child_item.asElement();
+    ElementReader::ElementChildIterator children = reader.childElements();
+    ElementReader child_reader;
+    while (children.next(&child_reader)) {
         const char* tag = child_reader.tagName();
         if (!tag) continue;
 
@@ -214,13 +202,9 @@ static void collect_node_ids_recursive(ElementReader& reader, GraphNodeIdList* n
 
 // Recursively extract subgraphs (collects all subgraphs at all levels)
 static void extract_subgraphs_recursive(ElementReader& reader, LayoutGraph* lg) {
-    ElementReader::ChildIterator children = reader.children();
-    ItemReader child_item;
-
-    while (children.next(&child_item)) {
-        if (!child_item.isElement()) continue;
-
-        ElementReader child_reader = child_item.asElement();
+    ElementReader::ElementChildIterator children = reader.childElements();
+    ElementReader child_reader;
+    while (children.next(&child_reader)) {
         const char* tag = child_reader.tagName();
         if (!tag || strcmp(tag, "subgraph") != 0) continue;
 

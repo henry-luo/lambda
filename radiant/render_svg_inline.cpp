@@ -1980,9 +1980,19 @@ static void arc_to_beziers(RdtPath* path, float x1, float y1,
     }
 }
 
+typedef struct SvgPathEndInfo {
+    float x;
+    float y;
+    float tangent_x;
+    float tangent_y;
+    bool has_tangent;
+} SvgPathEndInfo;
+
 // Parse SVG path 'd' attribute into an RdtPath. Returns new path (caller must free).
-static RdtPath* parse_svg_path_d(const char* d) {
+static RdtPath* parse_svg_path_d(const char* d, SvgPathEndInfo* end_info = nullptr,
+                                 bool allow_move_only = false) {
     if (!d || !*d) return nullptr;
+    if (end_info) memset(end_info, 0, sizeof(SvgPathEndInfo));
 
     RdtPath* path = rdt_path_new();
 
@@ -2036,6 +2046,7 @@ static RdtPath* parse_svg_path_d(const char* d) {
                 last_ctrl_y = cur_y;
                 // subsequent coords are implicit lineto
                 while (peek_number(p)) {
+                    float prev_x = cur_x, prev_y = cur_y;
                     x = parse_number(&p);
                     y = parse_number(&p);
                     if (relative) { x += cur_x; y += cur_y; }
@@ -2046,11 +2057,17 @@ static RdtPath* parse_svg_path_d(const char* d) {
                         any_draw = true;
                     }
                     cur_x = x; cur_y = y;
+                    if (end_info) {
+                        end_info->tangent_x = cur_x - prev_x;
+                        end_info->tangent_y = cur_y - prev_y;
+                        end_info->has_tangent = !svg_same_point(cur_x, cur_y, prev_x, prev_y);
+                    }
                 }
                 break;
             }
             case 'L': {  // lineto
                 while (peek_number(p)) {
+                    float prev_x = cur_x, prev_y = cur_y;
                     float x = parse_number(&p);
                     float y = parse_number(&p);
                     if (relative) { x += cur_x; y += cur_y; }
@@ -2061,6 +2078,11 @@ static RdtPath* parse_svg_path_d(const char* d) {
                         any_draw = true;
                     }
                     cur_x = x; cur_y = y;
+                    if (end_info) {
+                        end_info->tangent_x = cur_x - prev_x;
+                        end_info->tangent_y = cur_y - prev_y;
+                        end_info->has_tangent = !svg_same_point(cur_x, cur_y, prev_x, prev_y);
+                    }
                 }
                 last_ctrl_x = cur_x;
                 last_ctrl_y = cur_y;
@@ -2068,6 +2090,7 @@ static RdtPath* parse_svg_path_d(const char* d) {
             }
             case 'H': {  // horizontal lineto
                 while (peek_number(p)) {
+                    float previous_x = cur_x;
                     float x = parse_number(&p);
                     if (relative) { x += cur_x; }
                     if (!svg_same_point(cur_x, cur_y, x, cur_y)) {
@@ -2077,6 +2100,11 @@ static RdtPath* parse_svg_path_d(const char* d) {
                         any_draw = true;
                     }
                     cur_x = x;
+                    if (end_info) {
+                        end_info->tangent_x = cur_x - previous_x;
+                        end_info->tangent_y = 0.0f;
+                        end_info->has_tangent = fabsf(end_info->tangent_x) > 0.0001f;
+                    }
                 }
                 last_ctrl_x = cur_x;
                 last_ctrl_y = cur_y;
@@ -2084,6 +2112,7 @@ static RdtPath* parse_svg_path_d(const char* d) {
             }
             case 'V': {  // vertical lineto
                 while (peek_number(p)) {
+                    float previous_y = cur_y;
                     float y = parse_number(&p);
                     if (relative) { y += cur_y; }
                     if (!svg_same_point(cur_x, cur_y, cur_x, y)) {
@@ -2093,6 +2122,11 @@ static RdtPath* parse_svg_path_d(const char* d) {
                         any_draw = true;
                     }
                     cur_y = y;
+                    if (end_info) {
+                        end_info->tangent_x = 0.0f;
+                        end_info->tangent_y = cur_y - previous_y;
+                        end_info->has_tangent = fabsf(end_info->tangent_y) > 0.0001f;
+                    }
                 }
                 last_ctrl_x = cur_x;
                 last_ctrl_y = cur_y;
@@ -2122,6 +2156,11 @@ static RdtPath* parse_svg_path_d(const char* d) {
                     }
                     last_ctrl_x = x2; last_ctrl_y = y2;
                     cur_x = x; cur_y = y;
+                    if (end_info) {
+                        end_info->tangent_x = cur_x - x2;
+                        end_info->tangent_y = cur_y - y2;
+                        end_info->has_tangent = !svg_same_point(cur_x, cur_y, x2, y2);
+                    }
                 }
                 break;
             }
@@ -2149,6 +2188,11 @@ static RdtPath* parse_svg_path_d(const char* d) {
                     }
                     last_ctrl_x = x2; last_ctrl_y = y2;
                     cur_x = x; cur_y = y;
+                    if (end_info) {
+                        end_info->tangent_x = cur_x - x2;
+                        end_info->tangent_y = cur_y - y2;
+                        end_info->has_tangent = !svg_same_point(cur_x, cur_y, x2, y2);
+                    }
                 }
                 break;
             }
@@ -2178,6 +2222,11 @@ static RdtPath* parse_svg_path_d(const char* d) {
                     }
                     last_ctrl_x = qx; last_ctrl_y = qy;
                     cur_x = x; cur_y = y;
+                    if (end_info) {
+                        end_info->tangent_x = cur_x - qx;
+                        end_info->tangent_y = cur_y - qy;
+                        end_info->has_tangent = !svg_same_point(cur_x, cur_y, qx, qy);
+                    }
                 }
                 break;
             }
@@ -2205,11 +2254,17 @@ static RdtPath* parse_svg_path_d(const char* d) {
                     }
                     last_ctrl_x = qx; last_ctrl_y = qy;
                     cur_x = x; cur_y = y;
+                    if (end_info) {
+                        end_info->tangent_x = cur_x - qx;
+                        end_info->tangent_y = cur_y - qy;
+                        end_info->has_tangent = !svg_same_point(cur_x, cur_y, qx, qy);
+                    }
                 }
                 break;
             }
             case 'A': {  // arc
                 while (peek_number(p)) {
+                    float previous_x = cur_x, previous_y = cur_y;
                     float rx = parse_number(&p);
                     float ry = parse_number(&p);
                     float rotation = parse_number(&p);
@@ -2226,12 +2281,18 @@ static RdtPath* parse_svg_path_d(const char* d) {
                         any_draw = true;
                     }
                     cur_x = x; cur_y = y;
+                    if (end_info) {
+                        end_info->tangent_x = cur_x - previous_x;
+                        end_info->tangent_y = cur_y - previous_y;
+                        end_info->has_tangent = !svg_same_point(cur_x, cur_y, previous_x, previous_y);
+                    }
                 }
                 last_ctrl_x = cur_x;
                 last_ctrl_y = cur_y;
                 break;
             }
             case 'Z': {  // closepath
+                float previous_x = cur_x, previous_y = cur_y;
                 if (subpath_has_draw) {
                     svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
                     rdt_path_close(path);
@@ -2240,6 +2301,11 @@ static RdtPath* parse_svg_path_d(const char* d) {
                 cur_y = start_y;
                 last_ctrl_x = cur_x;
                 last_ctrl_y = cur_y;
+                if (end_info) {
+                    end_info->tangent_x = cur_x - previous_x;
+                    end_info->tangent_y = cur_y - previous_y;
+                    end_info->has_tangent = !svg_same_point(cur_x, cur_y, previous_x, previous_y);
+                }
                 break;
             }
             default:
@@ -2249,7 +2315,11 @@ static RdtPath* parse_svg_path_d(const char* d) {
         }
     }
 
-    if (!any_draw) {
+    if (end_info) {
+        end_info->x = cur_x;
+        end_info->y = cur_y;
+    }
+    if (!any_draw && !allow_move_only) {
         rdt_path_free(path);
         return nullptr;
     }
@@ -2257,196 +2327,11 @@ static RdtPath* parse_svg_path_d(const char* d) {
     return path;
 }
 
-typedef struct SvgPathEndInfo {
-    float x;
-    float y;
-    float tangent_x;
-    float tangent_y;
-    bool has_tangent;
-} SvgPathEndInfo;
-
 static bool svg_parse_path_end_info(const char* d, SvgPathEndInfo* info) {
     if (!d || !*d || !info) return false;
-    memset(info, 0, sizeof(SvgPathEndInfo));
-
-    float cur_x = 0.0f, cur_y = 0.0f;
-    float start_x = 0.0f, start_y = 0.0f;
-    float last_ctrl_x = 0.0f, last_ctrl_y = 0.0f;
-    char last_cmd = 0;
-    const char* p = d;
-
-    while (*p) {
-        skip_wsp_comma(&p);
-        if (!*p) break;
-
-        char cmd = *p;
-        bool is_cmd = isalpha((unsigned char)cmd);
-        if (is_cmd) {
-            p++;
-            last_cmd = cmd;
-        } else {
-            if (!last_cmd || !peek_number(p)) return false;
-            cmd = last_cmd;
-            if (cmd == 'M') cmd = 'L';
-            if (cmd == 'm') cmd = 'l';
-        }
-
-        bool relative = islower((unsigned char)cmd);
-        cmd = (char)toupper((unsigned char)cmd);
-
-        switch (cmd) {
-            case 'M': {
-                float x = parse_number(&p);
-                float y = parse_number(&p);
-                if (relative) { x += cur_x; y += cur_y; }
-                cur_x = start_x = x;
-                cur_y = start_y = y;
-                while (peek_number(p)) {
-                    float px = cur_x, py = cur_y;
-                    x = parse_number(&p);
-                    y = parse_number(&p);
-                    if (relative) { x += cur_x; y += cur_y; }
-                    cur_x = x; cur_y = y;
-                    info->tangent_x = cur_x - px;
-                    info->tangent_y = cur_y - py;
-                    info->has_tangent = !svg_same_point(cur_x, cur_y, px, py);
-                }
-                last_ctrl_x = cur_x; last_ctrl_y = cur_y;
-                break;
-            }
-            case 'L': {
-                while (peek_number(p)) {
-                    float px = cur_x, py = cur_y;
-                    float x = parse_number(&p);
-                    float y = parse_number(&p);
-                    if (relative) { x += cur_x; y += cur_y; }
-                    cur_x = x; cur_y = y;
-                    info->tangent_x = cur_x - px;
-                    info->tangent_y = cur_y - py;
-                    info->has_tangent = !svg_same_point(cur_x, cur_y, px, py);
-                }
-                last_ctrl_x = cur_x; last_ctrl_y = cur_y;
-                break;
-            }
-            case 'H': {
-                while (peek_number(p)) {
-                    float px = cur_x;
-                    float x = parse_number(&p);
-                    if (relative) x += cur_x;
-                    cur_x = x;
-                    info->tangent_x = cur_x - px;
-                    info->tangent_y = 0.0f;
-                    info->has_tangent = fabsf(info->tangent_x) > 0.0001f;
-                }
-                last_ctrl_x = cur_x; last_ctrl_y = cur_y;
-                break;
-            }
-            case 'V': {
-                while (peek_number(p)) {
-                    float py = cur_y;
-                    float y = parse_number(&p);
-                    if (relative) y += cur_y;
-                    cur_y = y;
-                    info->tangent_x = 0.0f;
-                    info->tangent_y = cur_y - py;
-                    info->has_tangent = fabsf(info->tangent_y) > 0.0001f;
-                }
-                last_ctrl_x = cur_x; last_ctrl_y = cur_y;
-                break;
-            }
-            case 'C': {
-                while (peek_number(p)) {
-                    parse_number(&p); parse_number(&p);
-                    float x2 = parse_number(&p);
-                    float y2 = parse_number(&p);
-                    float x = parse_number(&p);
-                    float y = parse_number(&p);
-                    if (relative) { x2 += cur_x; y2 += cur_y; x += cur_x; y += cur_y; }
-                    cur_x = x; cur_y = y;
-                    info->tangent_x = cur_x - x2;
-                    info->tangent_y = cur_y - y2;
-                    info->has_tangent = !svg_same_point(cur_x, cur_y, x2, y2);
-                    last_ctrl_x = x2; last_ctrl_y = y2;
-                }
-                break;
-            }
-            case 'S': {
-                while (peek_number(p)) {
-                    float x2 = parse_number(&p);
-                    float y2 = parse_number(&p);
-                    float x = parse_number(&p);
-                    float y = parse_number(&p);
-                    if (relative) { x2 += cur_x; y2 += cur_y; x += cur_x; y += cur_y; }
-                    cur_x = x; cur_y = y;
-                    info->tangent_x = cur_x - x2;
-                    info->tangent_y = cur_y - y2;
-                    info->has_tangent = !svg_same_point(cur_x, cur_y, x2, y2);
-                    last_ctrl_x = x2; last_ctrl_y = y2;
-                }
-                break;
-            }
-            case 'Q': {
-                while (peek_number(p)) {
-                    float qx = parse_number(&p);
-                    float qy = parse_number(&p);
-                    float x = parse_number(&p);
-                    float y = parse_number(&p);
-                    if (relative) { qx += cur_x; qy += cur_y; x += cur_x; y += cur_y; }
-                    cur_x = x; cur_y = y;
-                    info->tangent_x = cur_x - qx;
-                    info->tangent_y = cur_y - qy;
-                    info->has_tangent = !svg_same_point(cur_x, cur_y, qx, qy);
-                    last_ctrl_x = qx; last_ctrl_y = qy;
-                }
-                break;
-            }
-            case 'T': {
-                while (peek_number(p)) {
-                    float qx = 2.0f * cur_x - last_ctrl_x;
-                    float qy = 2.0f * cur_y - last_ctrl_y;
-                    float x = parse_number(&p);
-                    float y = parse_number(&p);
-                    if (relative) { x += cur_x; y += cur_y; }
-                    cur_x = x; cur_y = y;
-                    info->tangent_x = cur_x - qx;
-                    info->tangent_y = cur_y - qy;
-                    info->has_tangent = !svg_same_point(cur_x, cur_y, qx, qy);
-                    last_ctrl_x = qx; last_ctrl_y = qy;
-                }
-                break;
-            }
-            case 'A': {
-                while (peek_number(p)) {
-                    parse_number(&p); parse_number(&p); parse_number(&p);
-                    parse_flag(&p); parse_flag(&p);
-                    float px = cur_x, py = cur_y;
-                    float x = parse_number(&p);
-                    float y = parse_number(&p);
-                    if (relative) { x += cur_x; y += cur_y; }
-                    cur_x = x; cur_y = y;
-                    info->tangent_x = cur_x - px;
-                    info->tangent_y = cur_y - py;
-                    info->has_tangent = !svg_same_point(cur_x, cur_y, px, py);
-                }
-                last_ctrl_x = cur_x; last_ctrl_y = cur_y;
-                break;
-            }
-            case 'Z': {
-                float px = cur_x, py = cur_y;
-                cur_x = start_x; cur_y = start_y;
-                info->tangent_x = cur_x - px;
-                info->tangent_y = cur_y - py;
-                info->has_tangent = !svg_same_point(cur_x, cur_y, px, py);
-                last_ctrl_x = cur_x; last_ctrl_y = cur_y;
-                break;
-            }
-            default:
-                return false;
-        }
-    }
-
-    info->x = cur_x;
-    info->y = cur_y;
+    RdtPath* parsed = parse_svg_path_d(d, info, true);
+    if (!parsed) return false;
+    rdt_path_free(parsed);
     return true;
 }
 

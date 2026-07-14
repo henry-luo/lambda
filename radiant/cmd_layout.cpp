@@ -975,6 +975,11 @@ void extract_body_transform_scale(DomElement* root, DomDocument* doc) {
  * Resolve @import rules within a stylesheet: load and parse imported CSS files,
  * add them to the stylesheet list. This handles CSS like @import url('font-awesome.css');
  */
+static CssStylesheet* parse_and_collect_stylesheet(
+    CssEngine* engine, const char* css, const char* source_path,
+    const char* import_base, Pool* pool, CssStylesheet*** stylesheets,
+    int* count, int import_depth);
+
 static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* stylesheet_path,
                                         CssEngine* engine, Pool* pool,
                                         CssStylesheet*** stylesheets, int* count, int depth) {
@@ -1092,22 +1097,32 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
         str_copy(css_pool_copy, css_len + 1, css_content, css_len);
         mem_free(css_content);
 
-        CssStylesheet* imported = css_parse_stylesheet(engine, css_pool_copy, import_path);
-        annotate_css_stylesheet_source_file(imported, import_path);
+        CssStylesheet* imported = parse_and_collect_stylesheet(
+            engine, css_pool_copy, import_path, import_path, pool,
+            stylesheets, count, depth + 1);
         if (imported && imported->rule_count > 0) {
             log_debug("[CSS @import] Parsed imported stylesheet '%s': %zu rules", import_path, imported->rule_count);
-
-            *stylesheets = (CssStylesheet**)pool_realloc(pool, *stylesheets,
-                                                          (*count + 1) * sizeof(CssStylesheet*));
-            (*stylesheets)[*count] = imported;
-            (*count)++;
-
-            // Recursively resolve @imports within the imported stylesheet
-            resolve_stylesheet_imports(imported, import_path, engine, pool, stylesheets, count, depth + 1);
         } else {
             log_warn("[CSS @import] Failed to parse imported stylesheet: %s", import_path);
         }
     }
+}
+
+static CssStylesheet* parse_and_collect_stylesheet(
+    CssEngine* engine, const char* css, const char* source_path,
+    const char* import_base, Pool* pool, CssStylesheet*** stylesheets,
+    int* count, int import_depth) {
+    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, source_path);
+    annotate_css_stylesheet_source_file(stylesheet, source_path);
+    if (!stylesheet || stylesheet->rule_count == 0) return stylesheet;
+
+    *stylesheets = (CssStylesheet**)pool_realloc(
+        pool, *stylesheets, (*count + 1) * sizeof(CssStylesheet*));
+    (*stylesheets)[*count] = stylesheet;
+    (*count)++;
+    resolve_stylesheet_imports(stylesheet, import_base, engine, pool,
+                               stylesheets, count, import_depth);
+    return stylesheet;
 }
 
 static size_t css_utf16_encoded_at_charset_prelude_len(const char* data, size_t len) {
@@ -1248,6 +1263,19 @@ const char* detect_css_encoding(const char* data, size_t len, const char* docume
  * Returns newly allocated sanitized content, or nullptr if no changes needed.
  * Caller must free with mem_free().
  */
+static size_t css_utf8_sequence_length(const char* data, size_t len, size_t offset) {
+    unsigned char c = (unsigned char)data[offset];
+    if (c == 0x00) return 0;
+    if (c < 0x80) return 1;
+    if (c < 0xC0) return 0;
+    size_t sequence_len = c < 0xE0 ? 2 : c < 0xF0 ? 3 : c < 0xF8 ? 4 : 0;
+    if (sequence_len == 0 || offset + sequence_len > len) return 0;
+    for (size_t i = 1; i < sequence_len; i++) {
+        if (((unsigned char)data[offset + i] & 0xC0) != 0x80) return 0;
+    }
+    return sequence_len;
+}
+
 static char* sanitize_utf8_css(const char* data, size_t len) {
     if (!data || len == 0) return nullptr;
 
@@ -1255,54 +1283,14 @@ static char* sanitize_utf8_css(const char* data, size_t len) {
     bool needs_sanitize = false;
     size_t out_size = 0;
     for (size_t i = 0; i < len; ) {
-        unsigned char c = (unsigned char)data[i];
-        if (c == 0x00) {
-            // CSS §3.3: replace U+0000 NULL with U+FFFD
+        size_t sequence_len = css_utf8_sequence_length(data, len, i);
+        if (sequence_len == 0) {
             needs_sanitize = true;
             out_size += 3;
             i++;
-        } else if (c < 0x80) {
-            out_size++;
-            i++;
-        } else if (c < 0xC0) {
-            // unexpected continuation byte
-            needs_sanitize = true;
-            out_size += 3; // U+FFFD = EF BF BD
-            i++;
-        } else if (c < 0xE0) {
-            if (i + 1 < len && ((unsigned char)data[i+1] & 0xC0) == 0x80) {
-                out_size += 2;
-                i += 2;
-            } else {
-                needs_sanitize = true;
-                out_size += 3;
-                i++;
-            }
-        } else if (c < 0xF0) {
-            if (i + 2 < len && ((unsigned char)data[i+1] & 0xC0) == 0x80 &&
-                ((unsigned char)data[i+2] & 0xC0) == 0x80) {
-                out_size += 3;
-                i += 3;
-            } else {
-                needs_sanitize = true;
-                out_size += 3;
-                i++;
-            }
-        } else if (c < 0xF8) {
-            if (i + 3 < len && ((unsigned char)data[i+1] & 0xC0) == 0x80 &&
-                ((unsigned char)data[i+2] & 0xC0) == 0x80 &&
-                ((unsigned char)data[i+3] & 0xC0) == 0x80) {
-                out_size += 4;
-                i += 4;
-            } else {
-                needs_sanitize = true;
-                out_size += 3;
-                i++;
-            }
         } else {
-            needs_sanitize = true;
-            out_size += 3;
-            i++;
+            out_size += sequence_len;
+            i += sequence_len;
         }
     }
 
@@ -1313,42 +1301,14 @@ static char* sanitize_utf8_css(const char* data, size_t len) {
     if (!out) return nullptr;
     size_t o = 0;
     for (size_t i = 0; i < len; ) {
-        unsigned char c = (unsigned char)data[i];
-        if (c == 0x00) {
+        size_t sequence_len = css_utf8_sequence_length(data, len, i);
+        if (sequence_len == 0) {
             out[o++] = (char)0xEF; out[o++] = (char)0xBF; out[o++] = (char)0xBD;
             i++;
-        } else if (c < 0x80) {
-            out[o++] = data[i++];
-        } else if (c < 0xC0) {
-            out[o++] = (char)0xEF; out[o++] = (char)0xBF; out[o++] = (char)0xBD;
-            i++;
-        } else if (c < 0xE0) {
-            if (i + 1 < len && ((unsigned char)data[i+1] & 0xC0) == 0x80) {
-                out[o++] = data[i++]; out[o++] = data[i++];
-            } else {
-                out[o++] = (char)0xEF; out[o++] = (char)0xBF; out[o++] = (char)0xBD;
-                i++;
-            }
-        } else if (c < 0xF0) {
-            if (i + 2 < len && ((unsigned char)data[i+1] & 0xC0) == 0x80 &&
-                ((unsigned char)data[i+2] & 0xC0) == 0x80) {
-                out[o++] = data[i++]; out[o++] = data[i++]; out[o++] = data[i++];
-            } else {
-                out[o++] = (char)0xEF; out[o++] = (char)0xBF; out[o++] = (char)0xBD;
-                i++;
-            }
-        } else if (c < 0xF8) {
-            if (i + 3 < len && ((unsigned char)data[i+1] & 0xC0) == 0x80 &&
-                ((unsigned char)data[i+2] & 0xC0) == 0x80 &&
-                ((unsigned char)data[i+3] & 0xC0) == 0x80) {
-                out[o++] = data[i++]; out[o++] = data[i++]; out[o++] = data[i++]; out[o++] = data[i++];
-            } else {
-                out[o++] = (char)0xEF; out[o++] = (char)0xBF; out[o++] = (char)0xBD;
-                i++;
-            }
         } else {
-            out[o++] = (char)0xEF; out[o++] = (char)0xBF; out[o++] = (char)0xBD;
-            i++;
+            memcpy(out + o, data + i, sequence_len);
+            o += sequence_len;
+            i += sequence_len;
         }
     }
     out[o] = '\0';
@@ -1700,19 +1660,11 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                     str_copy(css_pool_copy, css_len + 1, css_data, css_len);
                     mem_free(css_content);
 
-                    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css_pool_copy, css_path);
-                    annotate_css_stylesheet_source_file(stylesheet, css_path);
+                    CssStylesheet* stylesheet = parse_and_collect_stylesheet(
+                        engine, css_pool_copy, css_path, css_path, pool,
+                        stylesheets, count, 0);
                     if (stylesheet && stylesheet->rule_count > 0) {
                         log_debug("[CSS] Parsed linked stylesheet '%s': %zu rules", css_path, stylesheet->rule_count);
-
-                        // Add to list
-                        *stylesheets = (CssStylesheet**)pool_realloc(pool, *stylesheets,
-                                                                      (*count + 1) * sizeof(CssStylesheet*));
-                        (*stylesheets)[*count] = stylesheet;
-                        (*count)++;
-
-                        // Resolve @import rules within this stylesheet
-                        resolve_stylesheet_imports(stylesheet, css_path, engine, pool, stylesheets, count, 0);
                     } else {
                         log_warn("[CSS] Failed to parse stylesheet or empty: %s", css_path);
                     }
@@ -1775,22 +1727,11 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, const char*
                     // log_debug("[CSS CONTENT] After whitespace: %.200s", content);
 
                     // Parse the inline CSS
-                    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css_text->chars, "<inline-style>");
-                    annotate_css_stylesheet_source_file(stylesheet, "<inline-style>");
+                    CssStylesheet* stylesheet = parse_and_collect_stylesheet(
+                        engine, css_text->chars, "<inline-style>", base_path,
+                        pool, stylesheets, count, 0);
                     if (stylesheet && stylesheet->rule_count > 0) {
                         log_debug("[CSS] Parsed inline <style>: %zu rules", stylesheet->rule_count);
-
-                        // Add to list
-                        *stylesheets = (CssStylesheet**)pool_realloc(pool, *stylesheets,
-                                                                      (*count + 1) * sizeof(CssStylesheet*));
-                        (*stylesheets)[*count] = stylesheet;
-                        (*count)++;
-
-                        // Inline stylesheets resolve @import relative to the
-                        // document URL. Imported sheets keep their own origin_url
-                        // so nested @font-face src URLs resolve relative to the
-                        // imported CSS file.
-                        resolve_stylesheet_imports(stylesheet, base_path, engine, pool, stylesheets, count, 0);
                     }
                 }
             }
@@ -1876,15 +1817,11 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, const c
                     if (child->node_type == DOM_NODE_TEXT) {
                         DomText* text_node = lam::dom_require_text(child);
                         if (text_node->text && text_node->length > 0) {
-                            CssStylesheet* stylesheet = css_parse_stylesheet(engine, text_node->text, "<inline-style>");
-                            annotate_css_stylesheet_source_file(stylesheet, "<inline-style>");
+                            CssStylesheet* stylesheet = parse_and_collect_stylesheet(
+                                engine, text_node->text, "<inline-style>", base_path,
+                                pool, stylesheets, count, 0);
                             if (stylesheet && stylesheet->rule_count > 0) {
                                 log_debug("[CSS] Re-scan: parsed <style> from DOM: %zu rules", stylesheet->rule_count);
-                                *stylesheets = (CssStylesheet**)pool_realloc(pool, *stylesheets,
-                                                                              (*count + 1) * sizeof(CssStylesheet*));
-                                (*stylesheets)[*count] = stylesheet;
-                                (*count)++;
-                                resolve_stylesheet_imports(stylesheet, base_path, engine, pool, stylesheets, count, 0);
                             }
                         }
                     }

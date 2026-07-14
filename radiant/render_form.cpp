@@ -430,6 +430,30 @@ static bool password_reveal_covers(uint32_t cp_start,
         cp_start >= reveal_start && cp_end <= reveal_end;
 }
 
+// All password projections must skip malformed bytes identically or caret and
+// display offsets diverge from the rendered mask.
+static bool password_next_utf8_span(const unsigned char** cursor,
+                                    const unsigned char* end,
+                                    const unsigned char* start,
+                                    uint32_t* cp_start,
+                                    uint32_t* cp_end,
+                                    int* bytes) {
+    while (*cursor < end) {
+        *cp_start = (uint32_t)(*cursor - start);
+        uint32_t codepoint;
+        *bytes = str_utf8_decode((const char*)*cursor,
+            (size_t)(end - *cursor), &codepoint);
+        if (*bytes <= 0) {
+            (*cursor)++;
+            continue;
+        }
+        *cp_end = *cp_start + (uint32_t)*bytes;
+        *cursor += *bytes;
+        return true;
+    }
+    return false;
+}
+
 static char* build_password_display(const char* src,
                                     int src_len,
                                     uint32_t reveal_start,
@@ -438,36 +462,27 @@ static char* build_password_display(const char* src,
     uint32_t display_len = 0;
     const unsigned char* p = (const unsigned char*)src;
     const unsigned char* p_end = p + src_len;
-    while (p < p_end) {
-        uint32_t cp_start = (uint32_t)(p - (const unsigned char*)src);
-        uint32_t codepoint;
-        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-        if (bytes <= 0) { p++; continue; }
-        uint32_t cp_end = cp_start + (uint32_t)bytes;
+    const unsigned char* src_start = p;
+    uint32_t cp_start, cp_end;
+    int bytes;
+    while (password_next_utf8_span(&p, p_end, src_start, &cp_start, &cp_end, &bytes)) {
         display_len += password_reveal_covers(cp_start, cp_end,
             reveal_start, reveal_end) ? (uint32_t)bytes : 3;
-        p += bytes;
     }
     char* out = (char*)mem_alloc((size_t)display_len + 1, MEM_CAT_RENDER);
     if (!out) return nullptr;
 
     p = (const unsigned char*)src;
     uint32_t out_i = 0;
-    while (p < p_end) {
-        uint32_t cp_start = (uint32_t)(p - (const unsigned char*)src);
-        uint32_t codepoint;
-        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-        if (bytes <= 0) { p++; continue; }
-        uint32_t cp_end = cp_start + (uint32_t)bytes;
+    while (password_next_utf8_span(&p, p_end, src_start, &cp_start, &cp_end, &bytes)) {
         if (password_reveal_covers(cp_start, cp_end, reveal_start, reveal_end)) {
-            memcpy(out + out_i, p, (size_t)bytes);
+            memcpy(out + out_i, src_start + cp_start, (size_t)bytes);
             out_i += (uint32_t)bytes;
         } else {
             out[out_i++] = (char)0xE2;
             out[out_i++] = (char)0x97;
             out[out_i++] = (char)0x8F;
         }
-        p += bytes;
     }
     out[out_i] = '\0';
     return out;
@@ -488,18 +503,14 @@ static int password_display_byte_offset(const char* src,
     const unsigned char* p = (const unsigned char*)src;
     const unsigned char* p_end = (const unsigned char*)src + src_byte_off;
     const unsigned char* src_start = (const unsigned char*)src;
-    while (p < p_end) {
-        uint32_t cp_start = (uint32_t)(p - src_start);
-        uint32_t codepoint;
-        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-        if (bytes <= 0) { p++; continue; }
-        uint32_t cp_end = cp_start + (uint32_t)bytes;
+    uint32_t cp_start, cp_end;
+    int bytes;
+    while (password_next_utf8_span(&p, p_end, src_start, &cp_start, &cp_end, &bytes)) {
         if (password_reveal_covers(cp_start, cp_end, reveal_start, reveal_end)) {
             display += bytes;
         } else {
             display += 3;
         }
-        p += bytes;
     }
     return display;
 }

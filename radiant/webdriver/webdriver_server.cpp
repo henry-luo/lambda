@@ -137,6 +137,52 @@ static const char* wd_extract_json_string(const char* json, const char* key, cha
     return buf;
 }
 
+static bool wd_request_locator(HttpRequest* req, HttpResponse* resp,
+                               LocatorStrategy* out_strategy,
+                               char* value_buf, size_t value_buf_size) {
+    const char* body = http_request_body(req);
+    if (!body) {
+        wd_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
+        return false;
+    }
+
+    char using_buf[64];
+    const char* using_strategy = wd_extract_json_string(
+        body, "using", using_buf, sizeof(using_buf));
+    if (!wd_extract_json_string(body, "value", value_buf, value_buf_size)) {
+        wd_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing 'value' in request");
+        return false;
+    }
+    *out_strategy = webdriver_parse_strategy(using_strategy);
+    return true;
+}
+
+typedef WebDriverError (*WebDriverElementCommand)(WebDriverSession*, View*);
+typedef bool (*WebDriverElementPredicate)(WebDriverSession*, View*);
+
+static void wd_handle_element_command(HttpRequest* req, HttpResponse* resp, void* user_data,
+                                      WebDriverElementCommand command,
+                                      const char* failure_message) {
+    WebDriverSession* session = NULL;
+    View* element = NULL;
+    if (!wd_request_session_element(req, resp, user_data, &session, &element)) return;
+
+    WebDriverError error = command(session, element);
+    if (error != WD_SUCCESS) {
+        wd_send_error(resp, error, failure_message);
+        return;
+    }
+    wd_send_success(resp, "null");
+}
+
+static void wd_handle_element_predicate(HttpRequest* req, HttpResponse* resp, void* user_data,
+                                        WebDriverElementPredicate predicate) {
+    WebDriverSession* session = NULL;
+    View* element = NULL;
+    if (!wd_request_session_element(req, resp, user_data, &session, &element)) return;
+    wd_send_success(resp, predicate(session, element) ? "true" : "false");
+}
+
 // ============================================================================
 // WebDriver JSON Middleware
 // ============================================================================
@@ -284,21 +330,9 @@ static void handle_find_element(HttpRequest* req, HttpResponse* resp, void* user
     WebDriverSession* session = wd_request_session(req, resp, user_data);
     if (!session) return;
 
-    const char* body = http_request_body(req);
-    if (!body) {
-        wd_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
-        return;
-    }
-
-    char using_buf[64], value_buf[256];
-    const char* using_strategy = wd_extract_json_string(body, "using", using_buf, sizeof(using_buf));
-    const char* value = wd_extract_json_string(body, "value", value_buf, sizeof(value_buf));
-    if (!value) {
-        wd_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing 'value' in request");
-        return;
-    }
-
-    LocatorStrategy strategy = webdriver_parse_strategy(using_strategy);
+    char value[256];
+    LocatorStrategy strategy;
+    if (!wd_request_locator(req, resp, &strategy, value, sizeof(value))) return;
     View* element = webdriver_find_element(session, strategy, value, NULL);
     if (!element) {
         wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
@@ -319,21 +353,9 @@ static void handle_find_elements(HttpRequest* req, HttpResponse* resp, void* use
     WebDriverSession* session = wd_request_session(req, resp, user_data);
     if (!session) return;
 
-    const char* body = http_request_body(req);
-    if (!body) {
-        wd_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
-        return;
-    }
-
-    char using_buf[64], value_buf[256];
-    const char* using_strategy = wd_extract_json_string(body, "using", using_buf, sizeof(using_buf));
-    const char* value = wd_extract_json_string(body, "value", value_buf, sizeof(value_buf));
-    if (!value) {
-        wd_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing 'value' in request");
-        return;
-    }
-
-    LocatorStrategy strategy = webdriver_parse_strategy(using_strategy);
+    char value[256];
+    LocatorStrategy strategy;
+    if (!wd_request_locator(req, resp, &strategy, value, sizeof(value))) return;
     ArrayList* results = arraylist_new(16);
     int count = webdriver_find_elements(session, strategy, value, NULL, results);
 
@@ -369,31 +391,13 @@ static void handle_get_active_element(HttpRequest* req, HttpResponse* resp, void
 }
 
 static void handle_element_click(HttpRequest* req, HttpResponse* resp, void* user_data) {
-    WebDriverSession* session = NULL;
-    View* element = NULL;
-    if (!wd_request_session_element(req, resp, user_data, &session, &element)) return;
-
-    WebDriverError err = webdriver_element_click(session, element);
-    if (err != WD_SUCCESS) {
-        wd_send_error(resp, err, "Click failed");
-        return;
-    }
-
-    wd_send_success(resp, "null");
+    wd_handle_element_command(
+        req, resp, user_data, webdriver_element_click, "Click failed");
 }
 
 static void handle_element_clear(HttpRequest* req, HttpResponse* resp, void* user_data) {
-    WebDriverSession* session = NULL;
-    View* element = NULL;
-    if (!wd_request_session_element(req, resp, user_data, &session, &element)) return;
-
-    WebDriverError err = webdriver_element_clear(session, element);
-    if (err != WD_SUCCESS) {
-        wd_send_error(resp, err, "Clear failed");
-        return;
-    }
-
-    wd_send_success(resp, "null");
+    wd_handle_element_command(
+        req, resp, user_data, webdriver_element_clear, "Clear failed");
 }
 
 static void handle_element_send_keys(HttpRequest* req, HttpResponse* resp, void* user_data) {
@@ -455,30 +459,15 @@ static void handle_element_rect(HttpRequest* req, HttpResponse* resp, void* user
 }
 
 static void handle_element_enabled(HttpRequest* req, HttpResponse* resp, void* user_data) {
-    WebDriverSession* session = NULL;
-    View* element = NULL;
-    if (!wd_request_session_element(req, resp, user_data, &session, &element)) return;
-
-    bool enabled = webdriver_element_is_enabled(session, element);
-    wd_send_success(resp, enabled ? "true" : "false");
+    wd_handle_element_predicate(req, resp, user_data, webdriver_element_is_enabled);
 }
 
 static void handle_element_selected(HttpRequest* req, HttpResponse* resp, void* user_data) {
-    WebDriverSession* session = NULL;
-    View* element = NULL;
-    if (!wd_request_session_element(req, resp, user_data, &session, &element)) return;
-
-    bool selected = webdriver_element_is_selected(session, element);
-    wd_send_success(resp, selected ? "true" : "false");
+    wd_handle_element_predicate(req, resp, user_data, webdriver_element_is_selected);
 }
 
 static void handle_element_displayed(HttpRequest* req, HttpResponse* resp, void* user_data) {
-    WebDriverSession* session = NULL;
-    View* element = NULL;
-    if (!wd_request_session_element(req, resp, user_data, &session, &element)) return;
-
-    bool displayed = webdriver_element_is_displayed(session, element);
-    wd_send_success(resp, displayed ? "true" : "false");
+    wd_handle_element_predicate(req, resp, user_data, webdriver_element_is_displayed);
 }
 
 static void handle_screenshot(HttpRequest* req, HttpResponse* resp, void* user_data) {

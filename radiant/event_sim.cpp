@@ -1020,6 +1020,25 @@ static void parse_target(MapReader& reader, SimEvent* ev) {
     }
 }
 
+static void parse_pointer_fields(MapReader& reader, SimEvent* ev) {
+    ev->x = reader.get("x").asInt32();
+    ev->y = reader.get("y").asInt32();
+    ev->button = reader.get("button").asInt32();
+    ev->mods = reader.get("mods").asInt32();
+    const char* mods = reader.get("mods_str").cstring();
+    if (mods) ev->mods = parse_mods_string(mods);
+    parse_target(reader, ev);
+}
+
+static void parse_assertion_strings(MapReader& reader, SimEvent* ev,
+                                    bool with_target) {
+    const char* equals = reader.get("equals").cstring();
+    if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
+    const char* contains = reader.get("contains").cstring();
+    if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+    if (with_target) parse_target(reader, ev);
+}
+
 // Parse a single event from MapReader
 static SimEvent* parse_sim_event(MapReader& reader) {
     SimEvent* ev = (SimEvent*)mem_calloc(1, sizeof(SimEvent), MEM_CAT_LAYOUT);
@@ -1040,27 +1059,15 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
     else if (strcmp(type_str, "mouse_move") == 0) {
         ev->type = SIM_EVENT_MOUSE_MOVE;
-        ev->x = reader.get("x").asInt32();
-        ev->y = reader.get("y").asInt32();
-        parse_target(reader, ev);
+        parse_pointer_fields(reader, ev);
     }
     else if (strcmp(type_str, "mouse_down") == 0) {
         ev->type = SIM_EVENT_MOUSE_DOWN;
-        ev->x = reader.get("x").asInt32();
-        ev->y = reader.get("y").asInt32();
-        ev->button = reader.get("button").asInt32();
-        ev->mods = reader.get("mods").asInt32();
-        const char* mods_str = reader.get("mods_str").cstring();
-        if (mods_str) ev->mods = parse_mods_string(mods_str);
-        parse_target(reader, ev);
+        parse_pointer_fields(reader, ev);
     }
     else if (strcmp(type_str, "mouse_up") == 0) {
         ev->type = SIM_EVENT_MOUSE_UP;
-        ev->x = reader.get("x").asInt32();
-        ev->y = reader.get("y").asInt32();
-        ev->button = reader.get("button").asInt32();
-        ev->mods = reader.get("mods").asInt32();
-        parse_target(reader, ev);
+        parse_pointer_fields(reader, ev);
     }
     else if (strcmp(type_str, "mouse_drag") == 0) {
         ev->type = SIM_EVENT_MOUSE_DRAG;
@@ -1256,11 +1263,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
     else if (strcmp(type_str, "assert_preedit") == 0) {
         ev->type = SIM_EVENT_ASSERT_PREEDIT;
-        const char* equals = reader.get("equals").cstring();
-        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
-        const char* contains = reader.get("contains").cstring();
-        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
-        parse_target(reader, ev);
+        parse_assertion_strings(reader, ev, true);
     }
     else if (strcmp(type_str, "assert_password_reveal") == 0) {
         ev->type = SIM_EVENT_ASSERT_PASSWORD_REVEAL;
@@ -1275,30 +1278,18 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
     else if (strcmp(type_str, "click") == 0) {
         ev->type = SIM_EVENT_CLICK;
-        ev->x = reader.get("x").asInt32();
-        ev->y = reader.get("y").asInt32();
-        ev->button = reader.get("button").asInt32();
-        ev->mods = reader.get("mods").asInt32();
-        const char* mods_str = reader.get("mods_str").cstring();
-        if (mods_str) ev->mods = parse_mods_string(mods_str);
-        parse_target(reader, ev);
+        parse_pointer_fields(reader, ev);
     }
     else if (strcmp(type_str, "dblclick") == 0) {
         ev->type = SIM_EVENT_DBLCLICK;
-        ev->x = reader.get("x").asInt32();
-        ev->y = reader.get("y").asInt32();
-        ev->button = reader.get("button").asInt32();
-        parse_target(reader, ev);
+        parse_pointer_fields(reader, ev);
     }
     else if (strcmp(type_str, "tripleclick") == 0) {
         // F2 (Radiant_Design_Form_Input.md §4.1): three rapid clicks at the
         // same location. Reuses SIM_EVENT_DBLCLICK plumbing with click_count=3.
         ev->type = SIM_EVENT_DBLCLICK;
-        ev->x = reader.get("x").asInt32();
-        ev->y = reader.get("y").asInt32();
-        ev->button = reader.get("button").asInt32();
+        parse_pointer_fields(reader, ev);
         ev->click_count = 3;
-        parse_target(reader, ev);
     }
     else if (strcmp(type_str, "type") == 0) {
         ev->type = SIM_EVENT_TYPE;
@@ -1352,10 +1343,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
     else if (strcmp(type_str, "assert_clipboard") == 0) {
         ev->type = SIM_EVENT_ASSERT_CLIPBOARD;
-        const char* equals = reader.get("equals").cstring();
-        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
-        const char* contains = reader.get("contains").cstring();
-        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+        parse_assertion_strings(reader, ev, false);
         const char* mime = reader.get("mime").cstring();
         if (mime) ev->clipboard_mime = mem_strdup(mime, MEM_CAT_LAYOUT);
     }
@@ -1404,27 +1392,15 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
     else if (strcmp(type_str, "assert_text") == 0) {
         ev->type = SIM_EVENT_ASSERT_TEXT;
-        const char* contains = reader.get("contains").cstring();
-        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
-        const char* equals = reader.get("equals").cstring();
-        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
-        parse_target(reader, ev);
+        parse_assertion_strings(reader, ev, true);
     }
     else if (strcmp(type_str, "assert_value") == 0) {
         ev->type = SIM_EVENT_ASSERT_VALUE;
-        const char* equals = reader.get("equals").cstring();
-        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
-        const char* contains = reader.get("contains").cstring();
-        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
-        parse_target(reader, ev);
+        parse_assertion_strings(reader, ev, true);
     }
     else if (strcmp(type_str, "assert_editing_value") == 0) {
         ev->type = SIM_EVENT_ASSERT_EDITING_VALUE;
-        const char* equals = reader.get("equals").cstring();
-        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
-        const char* contains = reader.get("contains").cstring();
-        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
-        parse_target(reader, ev);
+        parse_assertion_strings(reader, ev, true);
     }
     else if (strcmp(type_str, "assert_checked") == 0) {
         ev->type = SIM_EVENT_ASSERT_CHECKED;
@@ -1491,10 +1467,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         parse_target(reader, ev);
         const char* prop = reader.get("property").cstring();
         if (prop) ev->style_property = mem_strdup(prop, MEM_CAT_LAYOUT);
-        const char* equals = reader.get("equals").cstring();
-        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
-        const char* contains = reader.get("contains").cstring();
-        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+        parse_assertion_strings(reader, ev, false);
         ev->style_animated = reader.get("animated").asBool();
         if (ev->style_animated) {
             ItemReader tol = reader.get("tolerance");

@@ -109,6 +109,14 @@ static inline uint32_t clamp_off(uint32_t off, uint32_t len) {
     return off > len ? len : off;
 }
 
+static bool te_prepare_scan(const char* buf, uint32_t buf_len, uint32_t byte_off,
+                            uint32_t* out_offset) {
+    *out_offset = 0;
+    if (!buf || buf_len == 0) return false;
+    *out_offset = clamp_off(byte_off, buf_len);
+    return true;
+}
+
 } // namespace
 
 // ---------- word boundary ----------------------------------------------
@@ -128,8 +136,7 @@ bool te_password_reveal_clear(DomElement* elem) {
 }
 
 uint32_t te_word_start(const char* buf, uint32_t buf_len, uint32_t byte_off) {
-    if (!buf || buf_len == 0) return 0;
-    byte_off = clamp_off(byte_off, buf_len);
+    if (!te_prepare_scan(buf, buf_len, byte_off, &byte_off)) return 0;
 
     // If the position itself is on (or past) a separator, snap left to the
     // first preceding word byte. If none exists, return byte_off unchanged
@@ -157,9 +164,8 @@ uint32_t te_word_start(const char* buf, uint32_t buf_len, uint32_t byte_off) {
 }
 
 uint32_t te_word_end(const char* buf, uint32_t buf_len, uint32_t byte_off) {
-    if (!buf || buf_len == 0) return 0;
-    byte_off = clamp_off(byte_off, buf_len);
-    uint32_t i = byte_off;
+    uint32_t i;
+    if (!te_prepare_scan(buf, buf_len, byte_off, &i)) return 0;
     // If byte_off is on a separator, don't extend.
     if (i < buf_len && !te_is_word_byte((unsigned char)buf[i])) {
         // But if there's a word byte immediately to the left (i.e. caret
@@ -177,17 +183,15 @@ uint32_t te_word_end(const char* buf, uint32_t buf_len, uint32_t byte_off) {
 // ---------- line boundary ----------------------------------------------
 
 uint32_t te_line_start(const char* buf, uint32_t buf_len, uint32_t byte_off) {
-    if (!buf || buf_len == 0) return 0;
-    byte_off = clamp_off(byte_off, buf_len);
-    uint32_t i = byte_off;
+    uint32_t i;
+    if (!te_prepare_scan(buf, buf_len, byte_off, &i)) return 0;
     while (i > 0 && buf[i - 1] != '\n') i--;
     return i;
 }
 
 uint32_t te_line_end(const char* buf, uint32_t buf_len, uint32_t byte_off) {
-    if (!buf || buf_len == 0) return 0;
-    byte_off = clamp_off(byte_off, buf_len);
-    uint32_t i = byte_off;
+    uint32_t i;
+    if (!te_prepare_scan(buf, buf_len, byte_off, &i)) return 0;
     while (i < buf_len && buf[i] != '\n') i++;
     return i;
 }
@@ -208,33 +212,33 @@ bool te_apply_byte_range(DocState* state, void* target,
     return true;
 }
 
+typedef uint32_t (*TextBoundaryFn)(const char*, uint32_t, uint32_t);
+
+static bool te_select_boundaries_at(DomElement* elem, DocState* state, void* target,
+                                    uint32_t byte_off, TextBoundaryFn start_fn,
+                                    TextBoundaryFn end_fn, bool require_nonempty) {
+    if (!elem || !state || !target || !tc_is_text_control(elem)) return false;
+    FormControlProp* form = elem->form;
+    uint32_t length = 0;
+    const char* buffer = tc_buffer(form, &length);
+    if (!buffer || (require_nonempty && length == 0)) return false;
+
+    uint32_t start = start_fn(buffer, length, byte_off);
+    uint32_t end = end_fn(buffer, length, byte_off);
+    if (require_nonempty && start == end) return false;
+    return te_apply_byte_range(state, target, start, end);
+}
+
 bool te_select_word_at(DomElement* elem, DocState* state,
                        void* target, uint32_t byte_off) {
-    if (!elem || !state || !target) return false;
-    if (!tc_is_text_control(elem)) return false;
-    FormControlProp* f = elem->form;
-    uint32_t blen = 0;
-    const char* buf = tc_buffer(f, &blen);
-    if (!buf || blen == 0) return false;
-
-    uint32_t s = te_word_start(buf, blen, byte_off);
-    uint32_t e = te_word_end  (buf, blen, byte_off);
-    if (s == e) return false;  // no word at position
-    return te_apply_byte_range(state, target, s, e);
+    return te_select_boundaries_at(
+        elem, state, target, byte_off, te_word_start, te_word_end, true);
 }
 
 bool te_select_line_at(DomElement* elem, DocState* state,
                        void* target, uint32_t byte_off) {
-    if (!elem || !state || !target) return false;
-    if (!tc_is_text_control(elem)) return false;
-    FormControlProp* f = elem->form;
-    uint32_t blen = 0;
-    const char* buf = tc_buffer(f, &blen);
-    if (!buf) return false;
-
-    uint32_t s = te_line_start(buf, blen, byte_off);
-    uint32_t e = te_line_end  (buf, blen, byte_off);
-    return te_apply_byte_range(state, target, s, e);
+    return te_select_boundaries_at(
+        elem, state, target, byte_off, te_line_start, te_line_end, false);
 }
 
 bool te_select_all(DomElement* elem, DocState* state, void* target) {
@@ -249,9 +253,8 @@ bool te_select_all(DomElement* elem, DocState* state, void* target) {
 // ---------- F3: word-granularity navigation ----------------------------
 
 uint32_t te_prev_word_byte(const char* buf, uint32_t buf_len, uint32_t byte_off) {
-    if (!buf || buf_len == 0) return 0;
-    byte_off = clamp_off(byte_off, buf_len);
-    uint32_t i = byte_off;
+    uint32_t i;
+    if (!te_prepare_scan(buf, buf_len, byte_off, &i)) return 0;
     // Skip separators directly to the left.
     while (i > 0 && !te_is_word_byte((unsigned char)buf[i - 1])) i--;
     // Skip the contiguous run of word bytes.
@@ -260,9 +263,8 @@ uint32_t te_prev_word_byte(const char* buf, uint32_t buf_len, uint32_t byte_off)
 }
 
 uint32_t te_next_word_byte(const char* buf, uint32_t buf_len, uint32_t byte_off) {
-    if (!buf || buf_len == 0) return 0;
-    byte_off = clamp_off(byte_off, buf_len);
-    uint32_t i = byte_off;
+    uint32_t i;
+    if (!te_prepare_scan(buf, buf_len, byte_off, &i)) return 0;
     // Skip separators directly to the right.
     while (i < buf_len && !te_is_word_byte((unsigned char)buf[i])) i++;
     // Skip the contiguous run of word bytes.
@@ -480,6 +482,18 @@ void te_history_push(DomElement* elem) {
                                      h->count, h->cursor);
 }
 
+static bool te_history_apply_current(DomElement* elem, EditHistory* history) {
+    uint16_t index = (uint16_t)((history->head + history->cap - 1 - history->cursor) % history->cap);
+    EditHistoryEntry* entry = &history->ring[index];
+    if (!entry->snapshot) return false;
+
+    tc_history_guard_enter();
+    tc_set_value(elem, entry->snapshot, entry->length);
+    tc_history_guard_exit();
+    tc_set_selection_range(elem, entry->sel_start_u16, entry->sel_end_u16, entry->sel_dir);
+    return true;
+}
+
 bool te_history_undo(DomElement* elem) {
     if (!elem || !tc_is_text_control(elem)) return false;
     FormControlProp* f = elem->form;
@@ -491,15 +505,7 @@ bool te_history_undo(DomElement* elem) {
     // one before it.
     if ((uint16_t)(h->cursor + 1) >= h->count) return false;
     h->cursor++;
-    uint16_t idx = (uint16_t)((h->head + h->cap - 1 - h->cursor) % h->cap);
-    EditHistoryEntry* e = &h->ring[idx];
-    if (!e->snapshot) return false;
-
-    tc_history_guard_enter();
-    tc_set_value(elem, e->snapshot, e->length);
-    tc_history_guard_exit();
-    tc_set_selection_range(elem, e->sel_start_u16, e->sel_end_u16, e->sel_dir);
-    return true;
+    return te_history_apply_current(elem, h);
 }
 
 bool te_history_redo(DomElement* elem) {
@@ -510,15 +516,7 @@ bool te_history_redo(DomElement* elem) {
 
     if (h->cursor == 0) return false;
     h->cursor--;
-    uint16_t idx = (uint16_t)((h->head + h->cap - 1 - h->cursor) % h->cap);
-    EditHistoryEntry* e = &h->ring[idx];
-    if (!e->snapshot) return false;
-
-    tc_history_guard_enter();
-    tc_set_value(elem, e->snapshot, e->length);
-    tc_history_guard_exit();
-    tc_set_selection_range(elem, e->sel_start_u16, e->sel_end_u16, e->sel_dir);
-    return true;
+    return te_history_apply_current(elem, h);
 }
 
 // ---------- F5: events + constraint validation -------------------------

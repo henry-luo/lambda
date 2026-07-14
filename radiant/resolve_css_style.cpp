@@ -361,6 +361,16 @@ static CssEnum* border_side_style(BorderProp* border, CssBoxSide side) {
     return &border->top_style;
 }
 
+static int64_t* border_side_style_specificity(BorderProp* border, CssBoxSide side) {
+    switch (side) {
+        case CSS_BOX_SIDE_TOP: return &border->top_style_specificity;
+        case CSS_BOX_SIDE_RIGHT: return &border->right_style_specificity;
+        case CSS_BOX_SIDE_BOTTOM: return &border->bottom_style_specificity;
+        case CSS_BOX_SIDE_LEFT: return &border->left_style_specificity;
+    }
+    return &border->top_style_specificity;
+}
+
 static Color* border_side_color(BorderProp* border, CssBoxSide side) {
     switch (side) {
         case CSS_BOX_SIDE_TOP: return &border->top_color;
@@ -379,6 +389,16 @@ static int64_t* border_side_color_specificity(BorderProp* border, CssBoxSide sid
         case CSS_BOX_SIDE_LEFT: return &border->left_color_specificity;
     }
     return &border->top_color_specificity;
+}
+
+static CssPropertyId border_side_width_property(CssBoxSide side) {
+    switch (side) {
+        case CSS_BOX_SIDE_TOP: return CSS_PROPERTY_BORDER_TOP_WIDTH;
+        case CSS_BOX_SIDE_RIGHT: return CSS_PROPERTY_BORDER_RIGHT_WIDTH;
+        case CSS_BOX_SIDE_BOTTOM: return CSS_PROPERTY_BORDER_BOTTOM_WIDTH;
+        case CSS_BOX_SIDE_LEFT: return CSS_PROPERTY_BORDER_LEFT_WIDTH;
+    }
+    return CSS_PROPERTY_BORDER_TOP_WIDTH;
 }
 
 static BorderProp* parent_border_prop(LayoutContext* lycon) {
@@ -3845,53 +3865,20 @@ static float resolve_margin_with_inherit(LayoutContext* lycon, CssPropertyId pro
     return resolve_length_value(lycon, prop_id, value);
 }
 
-// Helper function to copy border side values from parent to child for inherit
-// side: 0=top, 1=right, 2=bottom, 3=left
-static bool copy_border_side_inherit(LayoutContext* lycon, ViewSpan* span, int side, int64_t specificity) {
-    DomElement* current = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
-    if (!current || !current->parent || !current->parent->is_element()) return false;
-    DomElement* parent = lam::dom_require<DOM_NODE_ELEMENT>(current->parent);
-    if (!parent->bound || !parent->bound->border) return false;
+static bool copy_border_side_inherit(LayoutContext* lycon, ViewSpan* span, CssBoxSide side,
+                                     int64_t specificity) {
+    BorderProp* parent = parent_border_prop(lycon);
+    if (!parent) return false;
 
-    BorderProp* pb = parent->bound->border;
-    switch (side) {
-        case 0: // top
-            span->bound->border->width.top = pb->width.top;
-            span->bound->border->width.top_specificity = specificity;
-            span->bound->border->top_style = pb->top_style;
-            span->bound->border->top_style_specificity = specificity;
-            span->bound->border->top_color = pb->top_color;
-            span->bound->border->top_color_specificity = specificity;
-            log_debug("[CSS] border-top: inherit - width=%.2f", pb->width.top);
-            break;
-        case 1: // right
-            span->bound->border->width.right = pb->width.right;
-            span->bound->border->width.right_specificity = specificity;
-            span->bound->border->right_style = pb->right_style;
-            span->bound->border->right_style_specificity = specificity;
-            span->bound->border->right_color = pb->right_color;
-            span->bound->border->right_color_specificity = specificity;
-            log_debug("[CSS] border-right: inherit - width=%.2f", pb->width.right);
-            break;
-        case 2: // bottom
-            span->bound->border->width.bottom = pb->width.bottom;
-            span->bound->border->width.bottom_specificity = specificity;
-            span->bound->border->bottom_style = pb->bottom_style;
-            span->bound->border->bottom_style_specificity = specificity;
-            span->bound->border->bottom_color = pb->bottom_color;
-            span->bound->border->bottom_color_specificity = specificity;
-            log_debug("[CSS] border-bottom: inherit - width=%.2f", pb->width.bottom);
-            break;
-        case 3: // left
-            span->bound->border->width.left = pb->width.left;
-            span->bound->border->width.left_specificity = specificity;
-            span->bound->border->left_style = pb->left_style;
-            span->bound->border->left_style_specificity = specificity;
-            span->bound->border->left_color = pb->left_color;
-            span->bound->border->left_color_specificity = specificity;
-            log_debug("[CSS] border-left: inherit - width=%.2f", pb->width.left);
-            break;
-    }
+    BorderProp* border = ensure_span_border(lycon, span);
+    *border_side_width(border, side) = *border_side_width(parent, side);
+    *border_side_width_specificity(border, side) = specificity;
+    *border_side_style(border, side) = *border_side_style(parent, side);
+    *border_side_style_specificity(border, side) = specificity;
+    *border_side_color(border, side) = *border_side_color(parent, side);
+    *border_side_color_specificity(border, side) = specificity;
+    log_debug("[CSS] border-%s: inherit - width=%.2f", css_box_side_name(side),
+        *border_side_width(parent, side));
     return true;
 }
 
@@ -5492,6 +5479,49 @@ void set_multi_value(MultiValue* mv, const CssValue* value) {
             CssValue* item = value->data.list.values[i];
             set_multi_value(mv, item);
         }
+    }
+}
+
+static void apply_border_side_shorthand(LayoutContext* lycon, ViewSpan* span, CssBoxSide side,
+                                        const CssValue* value, int64_t specificity) {
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+        copy_border_side_inherit(lycon, span, side, specificity);
+        return;
+    }
+
+    BorderProp* border = ensure_span_border(lycon, span);
+    float* width = border_side_width(border, side);
+    int64_t* width_specificity = border_side_width_specificity(border, side);
+    CssEnum* style = border_side_style(border, side);
+    int64_t* style_specificity = border_side_style_specificity(border, side);
+    Color* color = border_side_color(border, side);
+    int64_t* color_specificity = border_side_color_specificity(border, side);
+    MultiValue parts = {0};
+    set_multi_value(&parts, value);
+
+    // Physical and logical aliases must share cascade and none/hidden width semantics.
+    bool style_applied = parts.style && specificity >= *style_specificity;
+    bool hidden_style = false;
+    if (style_applied) {
+        *style = parts.style->data.keyword;
+        *style_specificity = specificity;
+        hidden_style = *style == CSS_VALUE_NONE || *style == CSS_VALUE_HIDDEN;
+        if (specificity >= *width_specificity && (hidden_style || !parts.length)) {
+            *width = hidden_style ? 0.0f : 3.0f;
+            *width_specificity = specificity;
+        }
+    }
+    if (parts.length && !hidden_style && specificity >= *width_specificity) {
+        *width = resolve_length_value(lycon, border_side_width_property(side), parts.length);
+        *width_specificity = specificity;
+    }
+    if (parts.color && specificity >= *color_specificity) {
+        *color = resolve_color_value(lycon, parts.color);
+        *color_specificity = specificity;
+    } else if (style_applied && *style != CSS_VALUE_NONE && *style != CSS_VALUE_HIDDEN &&
+               specificity >= *color_specificity) {
+        *color = get_current_color(lycon);
+        *color_specificity = specificity;
     }
 }
 
@@ -8665,178 +8695,22 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_BORDER_TOP: {
             log_debug("[CSS] Processing border-top shorthand property");
-            ensure_span_border(lycon, span);
-            // Handle inherit keyword
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
-                copy_border_side_inherit(lycon, span, 0, specificity);
-                break;
-            }
-            MultiValue border = {0};
-            set_multi_value( &border, value);
-            if (border.style && specificity >= span->bound->border->top_style_specificity) {
-                span->bound->border->top_style = border.style->data.keyword;
-                span->bound->border->top_style_specificity = specificity;
-                // CSS spec: when style is set (and visible) but width is not, default to 'medium' (3px)
-                // none/hidden styles mean no border, so no default width
-                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
-                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
-                    specificity >= span->bound->border->width.top_specificity) {
-                    span->bound->border->width.top = 3.0f;  // medium
-                    span->bound->border->width.top_specificity = specificity;
-                }
-            }
-            if (border.length && specificity >= span->bound->border->width.top_specificity) {
-                span->bound->border->width.top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_TOP_WIDTH, border.length);
-                span->bound->border->width.top_specificity = specificity;
-            }
-            if (border.color && specificity >= span->bound->border->top_color_specificity) {
-                span->bound->border->top_color = resolve_color_value(lycon, border.color);
-                span->bound->border->top_color_specificity = specificity;
-            } else if (border.style && border.style->data.keyword != CSS_VALUE_NONE &&
-                       border.style->data.keyword != CSS_VALUE_HIDDEN &&
-                       specificity >= span->bound->border->top_color_specificity) {
-                span->bound->border->top_color = get_current_color(lycon);
-                span->bound->border->top_color_specificity = specificity;
-            }
-            // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
-            if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
-                border.style->data.keyword == CSS_VALUE_HIDDEN) &&
-                specificity >= span->bound->border->width.top_specificity) {
-                span->bound->border->width.top = 0;
-                span->bound->border->width.top_specificity = specificity;
-            }
+            apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_TOP, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_RIGHT: {
             log_debug("[CSS] Processing border-right shorthand property");
-            ensure_span_border(lycon, span);
-            // Handle inherit keyword
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
-                copy_border_side_inherit(lycon, span, 1, specificity);
-                break;
-            }
-            MultiValue border = {0};
-            set_multi_value( &border, value);
-            if (border.style && specificity >= span->bound->border->right_style_specificity) {
-                span->bound->border->right_style = border.style->data.keyword;
-                span->bound->border->right_style_specificity = specificity;
-                // CSS spec: when style is set (and visible) but width is not, default to 'medium' (3px)
-                // none/hidden styles mean no border, so no default width
-                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
-                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
-                    specificity >= span->bound->border->width.right_specificity) {
-                    span->bound->border->width.right = 3.0f;  // medium
-                    span->bound->border->width.right_specificity = specificity;
-                }
-            }
-            if (border.length && specificity >= span->bound->border->width.right_specificity) {
-                span->bound->border->width.right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, border.length);
-                span->bound->border->width.right_specificity = specificity;
-            }
-            if (border.color && specificity >= span->bound->border->right_color_specificity) {
-                span->bound->border->right_color = resolve_color_value(lycon, border.color);
-                span->bound->border->right_color_specificity = specificity;
-            } else if (border.style && border.style->data.keyword != CSS_VALUE_NONE &&
-                       border.style->data.keyword != CSS_VALUE_HIDDEN &&
-                       specificity >= span->bound->border->right_color_specificity) {
-                span->bound->border->right_color = get_current_color(lycon);
-                span->bound->border->right_color_specificity = specificity;
-            }
-            // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
-            if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
-                border.style->data.keyword == CSS_VALUE_HIDDEN) &&
-                specificity >= span->bound->border->width.right_specificity) {
-                span->bound->border->width.right = 0;
-                span->bound->border->width.right_specificity = specificity;
-            }
+            apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_RIGHT, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_BOTTOM: {
             log_debug("[CSS] Processing border-bottom shorthand property");
-            ensure_span_border(lycon, span);
-            // Handle inherit keyword
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
-                copy_border_side_inherit(lycon, span, 2, specificity);
-                break;
-            }
-            MultiValue border = {0};
-            set_multi_value( &border, value);
-            if (border.style && specificity >= span->bound->border->bottom_style_specificity) {
-                span->bound->border->bottom_style = border.style->data.keyword;
-                span->bound->border->bottom_style_specificity = specificity;
-                // CSS spec: when style is set (and visible) but width is not, default to 'medium' (3px)
-                // none/hidden styles mean no border, so no default width
-                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
-                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
-                    specificity >= span->bound->border->width.bottom_specificity) {
-                    span->bound->border->width.bottom = 3.0f;  // medium
-                    span->bound->border->width.bottom_specificity = specificity;
-                }
-            }
-            if (border.length && specificity >= span->bound->border->width.bottom_specificity) {
-                span->bound->border->width.bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, border.length);
-                span->bound->border->width.bottom_specificity = specificity;
-            }
-            if (border.color && specificity >= span->bound->border->bottom_color_specificity) {
-                span->bound->border->bottom_color = resolve_color_value(lycon, border.color);
-                span->bound->border->bottom_color_specificity = specificity;
-            } else if (border.style && border.style->data.keyword != CSS_VALUE_NONE &&
-                       border.style->data.keyword != CSS_VALUE_HIDDEN &&
-                       specificity >= span->bound->border->bottom_color_specificity) {
-                span->bound->border->bottom_color = get_current_color(lycon);
-                span->bound->border->bottom_color_specificity = specificity;
-            }
-            // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
-            if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
-                border.style->data.keyword == CSS_VALUE_HIDDEN) &&
-                specificity >= span->bound->border->width.bottom_specificity) {
-                span->bound->border->width.bottom = 0;
-                span->bound->border->width.bottom_specificity = specificity;
-            }
+            apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_BOTTOM, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_LEFT: {
             log_debug("[CSS] Processing border-left shorthand property");
-            ensure_span_border(lycon, span);
-            // Handle inherit keyword
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
-                copy_border_side_inherit(lycon, span, 3, specificity);
-                break;
-            }
-            MultiValue border = {0};
-            set_multi_value( &border, value);
-            if (border.style && specificity >= span->bound->border->left_style_specificity) {
-                span->bound->border->left_style = border.style->data.keyword;
-                span->bound->border->left_style_specificity = specificity;
-                // CSS spec: when style is set (and visible) but width is not, default to 'medium' (3px)
-                // none/hidden styles mean no border, so no default width
-                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
-                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
-                    specificity >= span->bound->border->width.left_specificity) {
-                    span->bound->border->width.left = 3.0f;  // medium
-                    span->bound->border->width.left_specificity = specificity;
-                }
-            }
-            if (border.length && specificity >= span->bound->border->width.left_specificity) {
-                span->bound->border->width.left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, border.length);
-                span->bound->border->width.left_specificity = specificity;
-            }
-            if (border.color && specificity >= span->bound->border->left_color_specificity) {
-                span->bound->border->left_color = resolve_color_value(lycon, border.color);
-                span->bound->border->left_color_specificity = specificity;
-            } else if (border.style && border.style->data.keyword != CSS_VALUE_NONE &&
-                       border.style->data.keyword != CSS_VALUE_HIDDEN &&
-                       specificity >= span->bound->border->left_color_specificity) {
-                span->bound->border->left_color = get_current_color(lycon);
-                span->bound->border->left_color_specificity = specificity;
-            }
-            // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
-            if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
-                border.style->data.keyword == CSS_VALUE_HIDDEN) &&
-                specificity >= span->bound->border->width.left_specificity) {
-                span->bound->border->width.left = 0;
-                span->bound->border->width.left_specificity = specificity;
-            }
+            apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_LEFT, value, specificity);
             break;
         }
 
@@ -8844,128 +8718,34 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         //   inline axis = left/right, block axis = top/bottom
         case CSS_PROPERTY_BORDER_INLINE: {
             log_debug("[CSS] Processing border-inline shorthand (maps to border-left + border-right)");
-            ensure_span_border(lycon, span);
-            MultiValue border = {0};
-            set_multi_value(&border, value);
-            for (int side = 1; side <= 3; side += 2) {  // sides 1=right, 3=left
-                float* width_p   = side == 1 ? &span->bound->border->width.right  : &span->bound->border->width.left;
-                int64_t* ws_p   = side == 1 ? &span->bound->border->width.right_specificity : &span->bound->border->width.left_specificity;
-                CssEnum* style_p  = side == 1 ? &span->bound->border->right_style : &span->bound->border->left_style;
-                int64_t* ss_p   = side == 1 ? &span->bound->border->right_style_specificity : &span->bound->border->left_style_specificity;
-                Color* color_p   = side == 1 ? &span->bound->border->right_color : &span->bound->border->left_color;
-                int64_t* cs_p   = side == 1 ? &span->bound->border->right_color_specificity : &span->bound->border->left_color_specificity;
-                CssPropertyId width_prop = side == 1 ? CSS_PROPERTY_BORDER_RIGHT_WIDTH : CSS_PROPERTY_BORDER_LEFT_WIDTH;
-                if (border.style) {
-                    *style_p = border.style->data.keyword;  *ss_p = specificity;
-                    if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
-                        border.style->data.keyword != CSS_VALUE_HIDDEN && specificity >= *ws_p) {
-                        *width_p = 3.0f;  *ws_p = specificity;
-                    }
-                }
-                if (border.length) { *width_p = resolve_length_value(lycon, width_prop, border.length);  *ws_p = specificity; }
-                if (border.color)  { *color_p = resolve_color_value(lycon, border.color);  *cs_p = specificity; }
-            }
+            apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_RIGHT, value, specificity);
+            apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_LEFT, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_INLINE_START: {
             log_debug("[CSS] Processing border-inline-start (maps to border-left)");
-            ensure_span_border(lycon, span);
-            MultiValue border = {0};
-            set_multi_value(&border, value);
-            if (border.style) {
-                span->bound->border->left_style = border.style->data.keyword;
-                span->bound->border->left_style_specificity = specificity;
-                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
-                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
-                    specificity >= span->bound->border->width.left_specificity) {
-                    span->bound->border->width.left = 3.0f;
-                    span->bound->border->width.left_specificity = specificity;
-                }
-            }
-            if (border.length) { span->bound->border->width.left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, border.length); span->bound->border->width.left_specificity = specificity; }
-            if (border.color)  { span->bound->border->left_color = resolve_color_value(lycon, border.color); span->bound->border->left_color_specificity = specificity; }
+            apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_LEFT, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_INLINE_END: {
             log_debug("[CSS] Processing border-inline-end (maps to border-right)");
-            ensure_span_border(lycon, span);
-            MultiValue border = {0};
-            set_multi_value(&border, value);
-            if (border.style) {
-                span->bound->border->right_style = border.style->data.keyword;
-                span->bound->border->right_style_specificity = specificity;
-                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
-                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
-                    specificity >= span->bound->border->width.right_specificity) {
-                    span->bound->border->width.right = 3.0f;
-                    span->bound->border->width.right_specificity = specificity;
-                }
-            }
-            if (border.length) { span->bound->border->width.right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, border.length); span->bound->border->width.right_specificity = specificity; }
-            if (border.color)  { span->bound->border->right_color = resolve_color_value(lycon, border.color); span->bound->border->right_color_specificity = specificity; }
+            apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_RIGHT, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_BLOCK: {
             log_debug("[CSS] Processing border-block shorthand (maps to border-top + border-bottom)");
-            ensure_span_border(lycon, span);
-            MultiValue border = {0};
-            set_multi_value(&border, value);
-            for (int side = 0; side <= 2; side += 2) {  // sides 0=top, 2=bottom
-                float* width_p   = side == 0 ? &span->bound->border->width.top    : &span->bound->border->width.bottom;
-                int64_t* ws_p   = side == 0 ? &span->bound->border->width.top_specificity : &span->bound->border->width.bottom_specificity;
-                CssEnum* style_p  = side == 0 ? &span->bound->border->top_style   : &span->bound->border->bottom_style;
-                int64_t* ss_p   = side == 0 ? &span->bound->border->top_style_specificity : &span->bound->border->bottom_style_specificity;
-                Color* color_p   = side == 0 ? &span->bound->border->top_color    : &span->bound->border->bottom_color;
-                int64_t* cs_p   = side == 0 ? &span->bound->border->top_color_specificity : &span->bound->border->bottom_color_specificity;
-                CssPropertyId width_prop = side == 0 ? CSS_PROPERTY_BORDER_TOP_WIDTH : CSS_PROPERTY_BORDER_BOTTOM_WIDTH;
-                if (border.style) {
-                    *style_p = border.style->data.keyword;  *ss_p = specificity;
-                    if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
-                        border.style->data.keyword != CSS_VALUE_HIDDEN && specificity >= *ws_p) {
-                        *width_p = 3.0f;  *ws_p = specificity;
-                    }
-                }
-                if (border.length) { *width_p = resolve_length_value(lycon, width_prop, border.length);  *ws_p = specificity; }
-                if (border.color)  { *color_p = resolve_color_value(lycon, border.color);  *cs_p = specificity; }
-            }
+            apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_TOP, value, specificity);
+            apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_BOTTOM, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_BLOCK_START: {
             log_debug("[CSS] Processing border-block-start (maps to border-top)");
-            ensure_span_border(lycon, span);
-            MultiValue border = {0};
-            set_multi_value(&border, value);
-            if (border.style) {
-                span->bound->border->top_style = border.style->data.keyword;
-                span->bound->border->top_style_specificity = specificity;
-                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
-                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
-                    specificity >= span->bound->border->width.top_specificity) {
-                    span->bound->border->width.top = 3.0f;
-                    span->bound->border->width.top_specificity = specificity;
-                }
-            }
-            if (border.length) { span->bound->border->width.top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_TOP_WIDTH, border.length); span->bound->border->width.top_specificity = specificity; }
-            if (border.color)  { span->bound->border->top_color = resolve_color_value(lycon, border.color); span->bound->border->top_color_specificity = specificity; }
+            apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_TOP, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_BLOCK_END: {
             log_debug("[CSS] Processing border-block-end (maps to border-bottom)");
-            ensure_span_border(lycon, span);
-            MultiValue border = {0};
-            set_multi_value(&border, value);
-            if (border.style) {
-                span->bound->border->bottom_style = border.style->data.keyword;
-                span->bound->border->bottom_style_specificity = specificity;
-                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
-                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
-                    specificity >= span->bound->border->width.bottom_specificity) {
-                    span->bound->border->width.bottom = 3.0f;
-                    span->bound->border->width.bottom_specificity = specificity;
-                }
-            }
-            if (border.length) { span->bound->border->width.bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, border.length); span->bound->border->width.bottom_specificity = specificity; }
-            if (border.color)  { span->bound->border->bottom_color = resolve_color_value(lycon, border.color); span->bound->border->bottom_color_specificity = specificity; }
+            apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_BOTTOM, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_BLOCK_END_COLOR: {
