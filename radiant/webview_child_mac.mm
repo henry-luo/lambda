@@ -98,22 +98,7 @@ extern "C" {
         return;
     }
 
-    // determine MIME type from extension
-    NSString* ext = [full_path pathExtension].lowercaseString;
-    NSString* mime = @"application/octet-stream";
-    if ([ext isEqualToString:@"html"] || [ext isEqualToString:@"htm"])  mime = @"text/html";
-    else if ([ext isEqualToString:@"css"])   mime = @"text/css";
-    else if ([ext isEqualToString:@"js"])    mime = @"application/javascript";
-    else if ([ext isEqualToString:@"json"])  mime = @"application/json";
-    else if ([ext isEqualToString:@"png"])   mime = @"image/png";
-    else if ([ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"]) mime = @"image/jpeg";
-    else if ([ext isEqualToString:@"gif"])   mime = @"image/gif";
-    else if ([ext isEqualToString:@"svg"])   mime = @"image/svg+xml";
-    else if ([ext isEqualToString:@"webp"])  mime = @"image/webp";
-    else if ([ext isEqualToString:@"woff"])  mime = @"font/woff";
-    else if ([ext isEqualToString:@"woff2"]) mime = @"font/woff2";
-    else if ([ext isEqualToString:@"ttf"])   mime = @"font/ttf";
-    else if ([ext isEqualToString:@"otf"])   mime = @"font/otf";
+    NSString* mime = webview_mac_mime_for_path(full_path);
 
     NSURLResponse* response = [[NSURLResponse alloc] initWithURL:url
                                                         MIMEType:mime

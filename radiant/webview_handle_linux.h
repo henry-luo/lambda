@@ -11,6 +11,25 @@
 
 #include <webkit2/webkit2.h>
 #include <gtk/gtk.h>
+#include "../lib/file.h"
+
+static inline const char* webview_linux_mime_for_path(const char* path) {
+    if (!path) return "application/octet-stream";
+    if (file_path_has_ext_ci(path, "html") || file_path_has_ext_ci(path, "htm")) return "text/html";
+    if (file_path_has_ext_ci(path, "css")) return "text/css";
+    if (file_path_has_ext_ci(path, "js")) return "application/javascript";
+    if (file_path_has_ext_ci(path, "json")) return "application/json";
+    if (file_path_has_ext_ci(path, "png")) return "image/png";
+    if (file_path_has_ext_ci(path, "jpg") || file_path_has_ext_ci(path, "jpeg")) return "image/jpeg";
+    if (file_path_has_ext_ci(path, "gif")) return "image/gif";
+    if (file_path_has_ext_ci(path, "svg")) return "image/svg+xml";
+    if (file_path_has_ext_ci(path, "webp")) return "image/webp";
+    if (file_path_has_ext_ci(path, "woff")) return "font/woff";
+    if (file_path_has_ext_ci(path, "woff2")) return "font/woff2";
+    if (file_path_has_ext_ci(path, "ttf")) return "font/ttf";
+    if (file_path_has_ext_ci(path, "otf")) return "font/otf";
+    return "application/octet-stream";
+}
 
 struct WebViewHandle {
     WebKitWebView* wk_view;     // the WebKitWebView instance

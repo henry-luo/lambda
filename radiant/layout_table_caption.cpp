@@ -52,24 +52,7 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
         setup_font(lycon->ui_context, &lycon->font, cap->font);
     }
     setup_line_height(lycon, cap);
-    if (lycon->font.font_handle) {
-        if (lycon->block.line_height_is_normal) {
-            font_get_normal_lh_split(lycon->font.font_handle, &lycon->block.init_ascender, &lycon->block.init_descender);
-        } else {
-            TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
-            if (typo.valid && typo.use_typo_metrics) {
-                lycon->block.init_ascender = typo.ascender;
-                lycon->block.init_descender = typo.descender;
-            } else {
-                const FontMetrics* fm = font_get_metrics(lycon->font.font_handle);
-                if (fm) {
-                    lycon->block.init_ascender = fm->hhea_ascender;
-                    lycon->block.init_descender = -(fm->hhea_descender);
-                }
-            }
-        }
-    }
-    lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
+    layout_setup_block_font_metrics(lycon);
 
     if (cap->blk) {
         if (!isnan(cap->blk->text_indent_percent)) {

@@ -121,17 +121,7 @@ extern "C" {
         return;
     }
 
-    // MIME type from extension
-    NSString* ext = [full_path pathExtension].lowercaseString;
-    NSString* mime = @"application/octet-stream";
-    if ([ext isEqualToString:@"html"] || [ext isEqualToString:@"htm"])  mime = @"text/html";
-    else if ([ext isEqualToString:@"css"])   mime = @"text/css";
-    else if ([ext isEqualToString:@"js"])    mime = @"application/javascript";
-    else if ([ext isEqualToString:@"json"])  mime = @"application/json";
-    else if ([ext isEqualToString:@"png"])   mime = @"image/png";
-    else if ([ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"]) mime = @"image/jpeg";
-    else if ([ext isEqualToString:@"gif"])   mime = @"image/gif";
-    else if ([ext isEqualToString:@"svg"])   mime = @"image/svg+xml";
+    NSString* mime = webview_mac_mime_for_path(full_path);
 
     NSURLResponse* response = [[NSURLResponse alloc] initWithURL:url
                                                         MIMEType:mime

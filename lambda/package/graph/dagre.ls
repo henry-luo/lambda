@@ -78,6 +78,8 @@ fn normalize_edge(edge, nodes, index, directed) {
         else if (edge["arrow-end"] != null) edge["arrow-end"]
         else directed,
       style: if (edge.style != null) string(edge.style) else "solid",
+      min_length: max([1, int(if (edge.min_length != null) edge.min_length
+        else if (edge["min-length"] != null) edge["min-length"] else 1)]),
       z: if (edge.z != null) int(edge.z) else -1,
       index: index
     }
@@ -116,7 +118,8 @@ fn rank_of(id, edges, stack) {
   else {
     let preds = incoming_edges(edges, id);
     if (len(preds) == 0) 0
-    else max([for (edge in preds) rank_of(edge.from, edges, [*stack, id]) + 1])
+    else max([for (edge in preds)
+      rank_of(edge.from, edges, [*stack, id]) + edge.min_length])
   }
 }
 
@@ -325,6 +328,33 @@ fn clip_rect(cx, cy, tx, ty, half_w, half_h) {
   }
 }
 
+fn clip_ellipse(cx, cy, tx, ty, radius_x, radius_y) {
+  let dx = tx - cx;
+  let dy = ty - cy;
+  let distance = math.sqrt((dx * dx) / (radius_x * radius_x) +
+    (dy * dy) / (radius_y * radius_y));
+  if (distance < 0.001) { {x: cx, y: cy} }
+  else { {x: cx + dx / distance, y: cy + dy / distance} }
+}
+
+fn clip_diamond(cx, cy, tx, ty, half_w, half_h) {
+  let dx = tx - cx;
+  let dy = ty - cy;
+  let distance = abs(dx) / half_w + abs(dy) / half_h;
+  if (distance < 0.001) { {x: cx, y: cy} }
+  else { {x: cx + dx / distance, y: cy + dy / distance} }
+}
+
+fn clip_node(node, target_x, target_y) {
+  let half_w = node.width / 2.0;
+  let half_h = node.height / 2.0;
+  if (node.shape == "circle" or node.shape == "doublecircle" or node.shape == "ellipse")
+    clip_ellipse(node.x, node.y, target_x, target_y, half_w, half_h)
+  else if (node.shape == "diamond")
+    clip_diamond(node.x, node.y, target_x, target_y, half_w, half_h)
+  else clip_rect(node.x, node.y, target_x, target_y, half_w, half_h)
+}
+
 fn remove_collinear(points) {
   if (len(points) < 3) points
   else {
@@ -352,25 +382,39 @@ fn orthogonal_points(points, vertical_first) {
   }
 }
 
+fn self_loop_points(node, edge_sep, edge_index) {
+  let half_w = node.width / 2.0;
+  let half_h = node.height / 2.0;
+  let spread = max([10.0, half_h / 2.0]);
+  let loop_gap = max([20.0, edge_sep * float(edge_index + 2)]);
+  [
+    {x: node.x + half_w, y: node.y - spread},
+    {x: node.x + half_w + loop_gap, y: node.y - spread},
+    {x: node.x + half_w + loop_gap, y: node.y + spread},
+    {x: node.x + half_w, y: node.y + spread}
+  ]
+}
+
 fn route_edge(edge, nodes, opts) {
   let from_node = find_node(nodes, edge.from);
   let to_node = find_node(nodes, edge.to);
   if (from_node == null or to_node == null) null
   else {
-    let start = clip_rect(from_node.x, from_node.y, to_node.x, to_node.y,
-      from_node.width / 2.0, from_node.height / 2.0);
-    let finish = clip_rect(to_node.x, to_node.y, from_node.x, from_node.y,
-      to_node.width / 2.0, to_node.height / 2.0);
+    let start = clip_node(from_node, to_node.x, to_node.y);
+    let finish = clip_node(to_node, from_node.x, from_node.y);
     let vertical_first = not (opts.direction == "LR" or opts.direction == "RL");
     {
       id: edge.id,
       from: edge.from,
       to: edge.to,
-      points: orthogonal_points([start, finish], vertical_first),
+      points: if (edge.from == edge.to)
+        self_loop_points(from_node, opts.edge_sep, edge.index)
+        else orthogonal_points([start, finish], vertical_first),
       directed: edge.directed,
       arrow_start: edge.arrow_start,
       arrow_end: edge.arrow_end,
       style: edge.style,
+      min_length: edge.min_length,
       z: edge.z,
       index: edge.index,
       is_bezier: opts.use_splines
@@ -378,13 +422,16 @@ fn route_edge(edge, nodes, opts) {
   }
 }
 
-fn graph_bounds(nodes) {
+fn graph_bounds(nodes, edges) {
   if (len(nodes) == 0) { {width: 0.0, height: 0.0} }
   else {
     let min_x = min([for (node in nodes) node.x - node.width / 2.0]);
     let min_y = min([for (node in nodes) node.y - node.height / 2.0]);
-    let max_x = max([for (node in nodes) node.x + node.width / 2.0]);
-    let max_y = max([for (node in nodes) node.y + node.height / 2.0]);
+    let edge_points = [for (edge in edges, point in edge.points) point];
+    let max_x = max([for (node in nodes) node.x + node.width / 2.0,
+      for (point in edge_points) point.x]);
+    let max_y = max([for (node in nodes) node.y + node.height / 2.0,
+      for (point in edge_points) point.y]);
     {width: max_x - min_x, height: max_y - min_y}
   }
 }
@@ -399,7 +446,7 @@ pub fn layout(input, opts = null) {
   let edges = [for (edge in graph.edges,
     let path = route_edge(edge, nodes, graph.options)
     where path != null) path];
-  let bounds = graph_bounds(nodes);
+  let bounds = graph_bounds(nodes, edges);
   {
     width: bounds.width,
     height: bounds.height,

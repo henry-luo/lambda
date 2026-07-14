@@ -753,6 +753,27 @@ static bool multicol_inline_line_metrics(
     float line_advance = -1.0f;
     float fallback_height = 0.0f;
     bool forced_break_pending = false;
+    auto include_line_item = [&](float item_y, float height, bool forces_break) {
+        if (fallback_height <= 0.0f && height > 0.0f) fallback_height = height;
+        if (item_count == 0) {
+            current_line_y = item_y;
+            line_count = 1;
+        } else {
+            float adjacent_delta = fabsf(item_y - previous_item_y);
+            if (adjacent_delta > 1.0f &&
+                (line_advance < 0.0f || adjacent_delta < line_advance)) {
+                line_advance = adjacent_delta;
+            }
+            if (forced_break_pending || fabsf(item_y - current_line_y) > 1.0f) {
+                line_count++;
+                current_line_y = item_y;
+                forced_break_pending = false;
+            }
+        }
+        forced_break_pending = forces_break;
+        previous_item_y = item_y;
+        item_count++;
+    };
 
     View* descendant = child->first_placed_child();
     while (descendant) {
@@ -765,52 +786,11 @@ static bool multicol_inline_line_metrics(
                     continue;
                 }
 
-                float item_y = rect->y - child->y;
-                if (fallback_height <= 0.0f && rect->height > 0.0f) {
-                    fallback_height = rect->height;
-                }
-                if (item_count == 0) {
-                    current_line_y = item_y;
-                    line_count = 1;
-                } else {
-                    float adjacent_delta = fabsf(item_y - previous_item_y);
-                    if (adjacent_delta > 1.0f &&
-                        (line_advance < 0.0f || adjacent_delta < line_advance)) {
-                        line_advance = adjacent_delta;
-                    }
-                    if (forced_break_pending || fabsf(item_y - current_line_y) > 1.0f) {
-                        line_count++;
-                        current_line_y = item_y;
-                        forced_break_pending = false;
-                    }
-                }
-                previous_item_y = item_y;
-                item_count++;
+                include_line_item(rect->y - child->y, rect->height, false);
                 rect = rect->next;
             }
         } else if (descendant->view_type == RDT_VIEW_BR) {
-            float item_y = descendant->y - child->y;
-            if (fallback_height <= 0.0f && descendant->height > 0.0f) {
-                fallback_height = descendant->height;
-            }
-            if (item_count == 0) {
-                current_line_y = item_y;
-                line_count = 1;
-            } else {
-                float adjacent_delta = fabsf(item_y - previous_item_y);
-                if (adjacent_delta > 1.0f &&
-                    (line_advance < 0.0f || adjacent_delta < line_advance)) {
-                    line_advance = adjacent_delta;
-                }
-                if (forced_break_pending || fabsf(item_y - current_line_y) > 1.0f) {
-                    line_count++;
-                    current_line_y = item_y;
-                    forced_break_pending = false;
-                }
-            }
-            forced_break_pending = true;
-            previous_item_y = item_y;
-            item_count++;
+            include_line_item(descendant->y - child->y, descendant->height, true);
         }
         descendant = descendant->next();
     }

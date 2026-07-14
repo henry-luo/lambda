@@ -25,6 +25,12 @@ bool get_combine_text_nodes() {
     return g_combine_text_nodes;
 }
 
+static const char* flex_enum_name(CssEnum value, const char* fallback) {
+    if (value == CSS_VALUE_SPACE_EVENLY) return "space-evenly";
+    const CssEnumInfo* info = css_enum_info(value);
+    return info && info->name ? (const char*)info->name : fallback;
+}
+
 // Helper function to get view type name for JSON
 const char* View::view_name() {
     switch (this->view_type) {
@@ -906,39 +912,18 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
         strbuf_append_format(buf, "wrap:%s ", wrap_str);
 
         // justify-content (handle custom value CSS_VALUE_SPACE_EVENLY = 0x0199)
-        const char* justify_str = "flex-start";
-        if (block->embed->flex->justify == CSS_VALUE_SPACE_EVENLY) {
-            justify_str = "space-evenly";
-        } else {
-            const CssEnumInfo* justify_value = css_enum_info((CssEnum)block->embed->flex->justify);
-            if (justify_value && justify_value->name) {
-                justify_str = (const char*)justify_value->name;
-            }
-        }
+        const char* justify_str = flex_enum_name(
+            (CssEnum)block->embed->flex->justify, "flex-start");
         strbuf_append_format(buf, "justify:%s ", justify_str);
 
         // align-items (handle custom value for space-evenly)
-        const char* align_items_str = "stretch";
-        if (block->embed->flex->align_items == CSS_VALUE_SPACE_EVENLY) {
-            align_items_str = "space-evenly";
-        } else {
-            const CssEnumInfo* align_items_value = css_enum_info((CssEnum)block->embed->flex->align_items);
-            if (align_items_value && align_items_value->name) {
-                align_items_str = (const char*)align_items_value->name;
-            }
-        }
+        const char* align_items_str = flex_enum_name(
+            (CssEnum)block->embed->flex->align_items, "stretch");
         strbuf_append_format(buf, "align-items:%s ", align_items_str);
 
         // align-content (handle custom value for space-evenly)
-        const char* align_content_str = "stretch";
-        if (block->embed->flex->align_content == CSS_VALUE_SPACE_EVENLY) {
-            align_content_str = "space-evenly";
-        } else {
-            const CssEnumInfo* align_content_value = css_enum_info((CssEnum)block->embed->flex->align_content);
-            if (align_content_value && align_content_value->name) {
-                align_content_str = (const char*)align_content_value->name;
-            }
-        }
+        const char* align_content_str = flex_enum_name(
+            (CssEnum)block->embed->flex->align_content, "stretch");
         strbuf_append_format(buf, "align-content:%s ", align_content_str);
 
         strbuf_append_format(buf, "row-gap:%.0f column-gap:%.0f",
@@ -2404,41 +2389,20 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
 
         // justify-content (handle custom value CSS_VALUE_SPACE_EVENLY = 0x0199)
         strbuf_append_char_n(buf, ' ', indent + 6);
-        const char* justify_str = "flex-start";
-        if (block->embed->flex->justify == CSS_VALUE_SPACE_EVENLY) {
-            justify_str = "space-evenly";
-        } else {
-            const CssEnumInfo* justify_value = css_enum_info((CssEnum)block->embed->flex->justify);
-            if (justify_value && justify_value->name) {
-                justify_str = (const char*)justify_value->name;
-            }
-        }
+        const char* justify_str = flex_enum_name(
+            (CssEnum)block->embed->flex->justify, "flex-start");
         strbuf_append_format(buf, "\"justify\": \"%s\",\n", justify_str);
 
         // align-items (handle custom value for space-evenly)
         strbuf_append_char_n(buf, ' ', indent + 6);
-        const char* align_items_str = "stretch";
-        if (block->embed->flex->align_items == CSS_VALUE_SPACE_EVENLY) {
-            align_items_str = "space-evenly";
-        } else {
-            const CssEnumInfo* align_items_value = css_enum_info((CssEnum)block->embed->flex->align_items);
-            if (align_items_value && align_items_value->name) {
-                align_items_str = (const char*)align_items_value->name;
-            }
-        }
+        const char* align_items_str = flex_enum_name(
+            (CssEnum)block->embed->flex->align_items, "stretch");
         strbuf_append_format(buf, "\"align_items\": \"%s\",\n", align_items_str);
 
         // align-content (handle custom value for space-evenly)
         strbuf_append_char_n(buf, ' ', indent + 6);
-        const char* align_content_str = "stretch";
-        if (block->embed->flex->align_content == CSS_VALUE_SPACE_EVENLY) {
-            align_content_str = "space-evenly";
-        } else {
-            const CssEnumInfo* align_content_value = css_enum_info((CssEnum)block->embed->flex->align_content);
-            if (align_content_value && align_content_value->name) {
-                align_content_str = (const char*)align_content_value->name;
-            }
-        }
+        const char* align_content_str = flex_enum_name(
+            (CssEnum)block->embed->flex->align_content, "stretch");
         strbuf_append_format(buf, "\"align_content\": \"%s\",\n", align_content_str);
 
         strbuf_append_char_n(buf, ' ', indent + 6);

@@ -2460,6 +2460,7 @@
                             "radiant/retained_display_list.cpp",
                             "radiant/state_store.cpp",
                             "radiant/symbol_resolver.cpp",
+                            "radiant/view_select.cpp",
                             "test/test_state_store_stubs.cpp",
                             "lib/test_utils.c",
                             "lib/test_utils_pool.c"
@@ -3061,6 +3062,7 @@
                             "lambda/input/css/selector_matcher.cpp",
                             "radiant/symbol_resolver.cpp",
                             "radiant/layout_counters.cpp",
+                            "radiant/text_encoding.cpp",
                             "radiant/dom_range.cpp",
                             "radiant/dom_range_resolver.cpp",
                             "radiant/editing_host.cpp",
@@ -3089,6 +3091,7 @@
                             "lambda/render_map.cpp",
                             "radiant/symbol_resolver.cpp",
                             "radiant/layout_counters.cpp",
+                            "radiant/text_encoding.cpp",
                             "radiant/dom_range.cpp",
                             "radiant/dom_range_resolver.cpp",
                             "radiant/source_pos_bridge.cpp",
@@ -3130,6 +3133,20 @@
                         ],
                         "binary": "test_graph_parser_gtest.exe",
                         "icon": "📊"
+                    },
+                    {
+                        "source": "test_graph_mermaid_gtest.cpp",
+                        "name": "Mermaid Graph Semantic Corpus",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_graph_mermaid_gtest.exe",
+                        "icon": "📈"
                     },
                     {
                         "source": "parser/test_parser_robustness_gtest.cpp",

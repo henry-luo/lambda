@@ -1274,6 +1274,17 @@ static bool resolve_nonnegative_css_length(LayoutContext* lycon, uintptr_t prope
     return false;
 }
 
+static void css_distribute_missing_gradient_positions(GradientStop* stops,
+                                                      int stop_count) {
+    if (!stops || stop_count <= 0) return;
+    for (int i = 0; i < stop_count; i++) {
+        if (stops[i].position >= 0.0f) continue;
+        // A single parsed stop has no interval denominator and starts at zero.
+        stops[i].position = stop_count > 1
+            ? (float)i / (float)(stop_count - 1) : 0.0f;
+    }
+}
+
 static bool resolve_linear_gradient_value(LayoutContext* lycon, const CssValue* value,
                                           LinearGradient** out_gradient) {
     if (out_gradient) *out_gradient = nullptr;
@@ -1388,13 +1399,7 @@ static bool resolve_linear_gradient_value(LayoutContext* lycon, const CssValue* 
     if (lg->stop_count < 2) return false;
 
     if (!lg->stops_in_px) {
-        for (int i = 0; i < lg->stop_count; i++) {
-            if (lg->stops[i].position < 0.0f) {
-                lg->stops[i].position = lg->stop_count > 1
-                    ? (float)i / (float)(lg->stop_count - 1)
-                    : 0.0f;
-            }
-        }
+        css_distribute_missing_gradient_positions(lg->stops, lg->stop_count);
     }
 
     for (int i = 0; i < lg->stop_count; i++) {
@@ -1974,6 +1979,11 @@ static const CssValue* resolve_var_function_inner(LayoutContext* lycon, const Cs
     if (!func || !func->name || strcmp(func->name, "var") != 0) {
         return value;  // Not a var() function, return as-is
     }
+    auto resolve_fallback = [&]() -> const CssValue* {
+        return func->arg_count >= 2 && func->args[1]
+            ? resolve_var_function_inner(lycon, func->args[1], var_stack, stack_count)
+            : nullptr;
+    };
 
     // Extract variable name
     const char* var_name = nullptr;
@@ -1987,20 +1997,13 @@ static const CssValue* resolve_var_function_inner(LayoutContext* lycon, const Cs
     }
 
     if (!var_name) {
-        // No variable name found, try fallback
-        if (func->arg_count >= 2 && func->args[1]) {
-            return resolve_var_function_inner(lycon, func->args[1], var_stack, stack_count);
-        }
-        return nullptr;  // No value found
+        return resolve_fallback();
     }
 
     // Custom properties can legally form cycles on real pages; a cycle makes
     // the substituted value invalid, but Radiant must not recurse forever.
     if (stack_count >= 32 || css_var_stack_contains(var_stack, stack_count, var_name)) {
-        if (func->arg_count >= 2 && func->args[1]) {
-            return resolve_var_function_inner(lycon, func->args[1], var_stack, stack_count);
-        }
-        return nullptr;
+        return resolve_fallback();
     }
 
     // Look up the variable
@@ -2012,18 +2015,10 @@ static const CssValue* resolve_var_function_inner(LayoutContext* lycon, const Cs
         next_stack[stack_count] = var_name;
         const CssValue* resolved = resolve_var_function_inner(lycon, var_value, next_stack, stack_count + 1);
         if (resolved) return resolved;
-        if (func->arg_count >= 2 && func->args[1]) {
-            return resolve_var_function_inner(lycon, func->args[1], var_stack, stack_count);
-        }
-        return nullptr;
+        return resolve_fallback();
     }
 
-    // Variable not found, try fallback
-    if (func->arg_count >= 2 && func->args[1]) {
-        return resolve_var_function_inner(lycon, func->args[1], var_stack, stack_count);
-    }
-
-    return nullptr;  // No value found
+    return resolve_fallback();
 }
 
 // Helper: resolve var() function to get the actual CSS value
@@ -2582,44 +2577,6 @@ int64_t get_cascade_priority(const CssDeclaration* decl) {
     return priority;
 }
 
-// Helper: Check if element has float:left or float:right
-// Returns CSS_VALUE_LEFT, CSS_VALUE_RIGHT, or CSS_VALUE_NONE
-static CssEnum get_float_value_from_style(DomElement* elem) {
-    if (!elem || !elem->specified_style || !elem->specified_style->tree) {
-        return CSS_VALUE_NONE;
-    }
-    AvlNode* float_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_FLOAT);
-    if (float_node) {
-        StyleNode* style_node = (StyleNode*)float_node->declaration;
-        if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
-            CssValue* val = style_node->winning_decl->value;
-            if (val->type == CSS_VALUE_TYPE_KEYWORD) {
-                return val->data.keyword;
-            }
-        }
-    }
-    return CSS_VALUE_NONE;
-}
-
-// CSS 2.1 §9.7: Check position property from specified style
-// Returns the position keyword (absolute, fixed, relative, static) or CSS_VALUE_NONE
-static CssEnum get_position_value_from_style(DomElement* elem) {
-    if (!elem || !elem->specified_style || !elem->specified_style->tree) {
-        return CSS_VALUE_NONE;
-    }
-    AvlNode* pos_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_POSITION);
-    if (pos_node) {
-        StyleNode* style_node = (StyleNode*)pos_node->declaration;
-        if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
-            CssValue* val = style_node->winning_decl->value;
-            if (val->type == CSS_VALUE_TYPE_KEYWORD) {
-                return val->data.keyword;
-            }
-        }
-    }
-    return CSS_VALUE_NONE;
-}
-
 // CSS 2.1 §9.7: Apply blockification for floated or absolutely positioned elements
 // Converts internal table display values to 'block'
 DisplayValue blockify_display(DisplayValue display) {
@@ -2680,9 +2637,11 @@ DisplayValue resolve_display_value(void* child) {
         log_debug("[CSS] resolve_display_value for node=%p, tag_name=%s", node, node->source_loc());
 
         // CSS 2.1 §9.7: Check for float and position - floated or absolutely positioned elements get blockified
-        CssEnum float_value = get_float_value_from_style(dom_elem);
+        CssEnum float_value = layout_specified_keyword(
+            dom_elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
         bool is_floated = (float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT);
-        CssEnum position_value = get_position_value_from_style(dom_elem);
+        CssEnum position_value = layout_specified_keyword(
+            dom_elem, CSS_PROPERTY_POSITION, CSS_VALUE_NONE);
         bool is_abspos = (position_value == CSS_VALUE_ABSOLUTE || position_value == CSS_VALUE_FIXED);
         // CSS Flexbox §4 / CSS Grid §6: Children of flex/grid containers have their
         // display blockified. E.g. <tr> inside a display:flex <table> becomes block.
@@ -5615,6 +5574,42 @@ static void apply_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
         ? value->data.percentage.value : NAN;
 }
 
+static void css_resolve_keyword_pair(const CssValue* value, CssEnum initial,
+                                     CssEnum* first, CssEnum* second) {
+    *first = initial;
+    *second = initial;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        *first = value->data.keyword;
+        *second = value->data.keyword;
+        return;
+    }
+    if (value->type != CSS_VALUE_TYPE_LIST || value->data.list.count < 1) return;
+    CssValue* first_value = value->data.list.values[0];
+    if (first_value && first_value->type == CSS_VALUE_TYPE_KEYWORD) {
+        *first = first_value->data.keyword;
+    }
+    CssValue* second_value = value->data.list.count >= 2
+        ? value->data.list.values[1] : nullptr;
+    *second = second_value && second_value->type == CSS_VALUE_TYPE_KEYWORD
+        ? second_value->data.keyword : *first;
+}
+
+static void css_set_flex_item_values(DomElement* span, bool is_form,
+                                     float grow, float shrink, float basis,
+                                     bool basis_is_percent) {
+    if (is_form) {
+        span->form->flex_grow = grow;
+        span->form->flex_shrink = shrink;
+        span->form->flex_basis = basis;
+        span->form->flex_basis_is_percent = basis_is_percent;
+        return;
+    }
+    span->fi->flex_grow = grow;
+    span->fi->flex_shrink = shrink;
+    span->fi->flex_basis = basis;
+    span->fi->flex_basis_is_percent = basis_is_percent;
+}
+
 void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
 #ifdef RADIANT_TRACE_CSS_PROPERTIES
     // Property-level tracing is opt-in; cascade runs for every matched
@@ -7527,12 +7522,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] transform: scaleY(%g)", tf->params.scale.y);
                 }
-                else if (str_ieq_const(func->name, strlen(func->name), "rotate")) {
-                    tf->type = TRANSFORM_ROTATE;
-                    if (func->arg_count >= 1 && func->args[0]) {
-                        tf->params.angle = resolve_transform_angle(func->args[0]);
-                    }
-                    log_debug("[CSS] transform: rotate(%g rad)", tf->params.angle);
+                else if (str_ieq_const(func->name, strlen(func->name), "rotate") ||
+                         str_ieq_const(func->name, strlen(func->name), "skewX") ||
+                         str_ieq_const(func->name, strlen(func->name), "skewY") ||
+                         str_ieq_const(func->name, strlen(func->name), "rotateX") ||
+                         str_ieq_const(func->name, strlen(func->name), "rotateY") ||
+                         str_ieq_const(func->name, strlen(func->name), "rotateZ")) {
+                    if (str_ieq_const(func->name, strlen(func->name), "rotate")) tf->type = TRANSFORM_ROTATE;
+                    else if (str_ieq_const(func->name, strlen(func->name), "skewX")) tf->type = TRANSFORM_SKEWX;
+                    else if (str_ieq_const(func->name, strlen(func->name), "skewY")) tf->type = TRANSFORM_SKEWY;
+                    else if (str_ieq_const(func->name, strlen(func->name), "rotateX")) tf->type = TRANSFORM_ROTATEX;
+                    else if (str_ieq_const(func->name, strlen(func->name), "rotateY")) tf->type = TRANSFORM_ROTATEY;
+                    else tf->type = TRANSFORM_ROTATEZ;
+                    if (func->arg_count >= 1 && func->args[0]) tf->params.angle = resolve_transform_angle(func->args[0]);
+                    log_debug("[CSS] transform: %s(%g rad)", func->name, tf->params.angle);
                 }
                 else if (str_ieq_const(func->name, strlen(func->name), "skew")) {
                     tf->type = TRANSFORM_SKEW;
@@ -7543,20 +7546,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         tf->params.skew.y = resolve_transform_angle(func->args[1]);
                     }
                     log_debug("[CSS] transform: skew(%g, %g rad)", tf->params.skew.x, tf->params.skew.y);
-                }
-                else if (str_ieq_const(func->name, strlen(func->name), "skewX")) {
-                    tf->type = TRANSFORM_SKEWX;
-                    if (func->arg_count >= 1 && func->args[0]) {
-                        tf->params.angle = resolve_transform_angle(func->args[0]);
-                    }
-                    log_debug("[CSS] transform: skewX(%g rad)", tf->params.angle);
-                }
-                else if (str_ieq_const(func->name, strlen(func->name), "skewY")) {
-                    tf->type = TRANSFORM_SKEWY;
-                    if (func->arg_count >= 1 && func->args[0]) {
-                        tf->params.angle = resolve_transform_angle(func->args[0]);
-                    }
-                    log_debug("[CSS] transform: skewY(%g rad)", tf->params.angle);
                 }
                 else if (str_ieq_const(func->name, strlen(func->name), "matrix")) {
                     tf->type = TRANSFORM_MATRIX;
@@ -7600,27 +7589,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         tf->params.translate3d.z = resolve_length_value(lycon, prop_id, func->args[0]);
                     }
                     log_debug("[CSS] transform: translateZ(%g)", tf->params.translate3d.z);
-                }
-                else if (str_ieq_const(func->name, strlen(func->name), "rotateX")) {
-                    tf->type = TRANSFORM_ROTATEX;
-                    if (func->arg_count >= 1 && func->args[0]) {
-                        tf->params.angle = resolve_transform_angle(func->args[0]);
-                    }
-                    log_debug("[CSS] transform: rotateX(%g rad)", tf->params.angle);
-                }
-                else if (str_ieq_const(func->name, strlen(func->name), "rotateY")) {
-                    tf->type = TRANSFORM_ROTATEY;
-                    if (func->arg_count >= 1 && func->args[0]) {
-                        tf->params.angle = resolve_transform_angle(func->args[0]);
-                    }
-                    log_debug("[CSS] transform: rotateY(%g rad)", tf->params.angle);
-                }
-                else if (str_ieq_const(func->name, strlen(func->name), "rotateZ")) {
-                    tf->type = TRANSFORM_ROTATEZ;
-                    if (func->arg_count >= 1 && func->args[0]) {
-                        tf->params.angle = resolve_transform_angle(func->args[0]);
-                    }
-                    log_debug("[CSS] transform: rotateZ(%g rad)", tf->params.angle);
                 }
                 else if (str_ieq_const(func->name, strlen(func->name), "perspective")) {
                     tf->type = TRANSFORM_PERSPECTIVE;
@@ -8473,90 +8441,42 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // Parse values from the list or single value
             float border_width = -1.0f;  CssEnum border_style = CSS_VALUE__UNDEF;  Color border_color = {0};
             bool border_color_set = false;  // distinguish "transparent" (c==0) from "unspecified"
+            auto parse_border_component = [&](const CssValue* component) {
+                if (component->type == CSS_VALUE_TYPE_LENGTH || component->type == CSS_VALUE_TYPE_NUMBER) {
+                    border_width = resolve_length_value(lycon, prop_id, component);
+                } else if (component->type == CSS_VALUE_TYPE_KEYWORD) {
+                    CssEnum keyword = component->data.keyword;
+                    if (keyword == CSS_VALUE_THIN) border_width = 1.0f;
+                    else if (keyword == CSS_VALUE_MEDIUM) border_width = 3.0f;
+                    else if (keyword == CSS_VALUE_THICK) border_width = 5.0f;
+                    else if (keyword == CSS_VALUE_SOLID || keyword == CSS_VALUE_DASHED ||
+                             keyword == CSS_VALUE_DOTTED || keyword == CSS_VALUE_DOUBLE ||
+                             keyword == CSS_VALUE_GROOVE || keyword == CSS_VALUE_RIDGE ||
+                             keyword == CSS_VALUE_INSET || keyword == CSS_VALUE_OUTSET ||
+                             keyword == CSS_VALUE_NONE || keyword == CSS_VALUE_HIDDEN) {
+                        border_style = keyword;
+                    } else {
+                        border_color = resolve_color_value(lycon, component);
+                        border_color_set = true;
+                    }
+                } else if (component->type == CSS_VALUE_TYPE_COLOR ||
+                           component->type == CSS_VALUE_TYPE_FUNCTION) {
+                    border_color = resolve_color_value(lycon, component);
+                    border_color_set = true;
+                }
+            };
             if (value->type == CSS_VALUE_TYPE_LIST) {
                 // Multiple values
                 log_debug("[CSS] Border shorthand has multiple values: %d", value->data.list.count);
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
                 for (size_t i = 0; i < count; i++) {
-                    CssValue* val = values[i];
-                    if (val->type == CSS_VALUE_TYPE_LENGTH || val->type == CSS_VALUE_TYPE_NUMBER) {
-                        // Width - convert to pixels (NUMBER handles unitless 0)
-                        border_width = resolve_length_value(lycon, prop_id, val);
-                    }
-                    else if (val->type == CSS_VALUE_TYPE_KEYWORD) {
-                        // Could be width keyword, style, or color
-                        CssEnum keyword = val->data.keyword;
-                        if (keyword == CSS_VALUE_THIN) {
-                            border_width = 1.0f;
-                        } else if (keyword == CSS_VALUE_MEDIUM) {
-                            border_width = 3.0f;
-                        } else if (keyword == CSS_VALUE_THICK) {
-                            border_width = 5.0f;
-                        } else if (keyword == CSS_VALUE_SOLID || keyword == CSS_VALUE_DASHED ||
-                                   keyword == CSS_VALUE_DOTTED || keyword == CSS_VALUE_DOUBLE ||
-                                   keyword == CSS_VALUE_GROOVE || keyword == CSS_VALUE_RIDGE ||
-                                   keyword == CSS_VALUE_INSET || keyword == CSS_VALUE_OUTSET ||
-                                   keyword == CSS_VALUE_NONE || keyword == CSS_VALUE_HIDDEN) {
-                            // Style keyword
-                            border_style = keyword;
-                        } else {
-                            // color keywords include currentColor, which resolves against
-                            // the cascaded color on the same element.
-                            border_color = resolve_color_value(lycon, val);
-                            border_color_set = true;
-                        }
-                    }
-                    else if (val->type == CSS_VALUE_TYPE_COLOR) {
-                        // Color
-                        log_debug("[CSS] Border color value type: %d", val->data.color.type);
-                        border_color = resolve_color_value(lycon, val);
-                        border_color_set = true;
-                    }
-                    else if (val->type == CSS_VALUE_TYPE_FUNCTION) {
-                        // Color function like rgb(), rgba(), hsl(), hsla()
-                        log_debug("[CSS] Border color from function");
-                        border_color = resolve_color_value(lycon, val);
-                        border_color_set = true;
-                    }
-                    else {
-                        log_debug("[CSS] Unrecognized border shorthand value type: %d", val->type);
-                    }
+                    parse_border_component(values[i]);
                 }
             } else {
                 // Single value
                 log_debug("[CSS] Border shorthand has single value of type: %d", value->type);
-                if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
-                    // Width - convert to pixels (NUMBER handles unitless 0)
-                    border_width = resolve_length_value(lycon, prop_id, value);
-                } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                    CssEnum keyword = value->data.keyword;
-                    if (keyword == CSS_VALUE_THIN) {
-                        border_width = 1.0f;
-                    } else if (keyword == CSS_VALUE_MEDIUM) {
-                        border_width = 3.0f;
-                    } else if (keyword == CSS_VALUE_THICK) {
-                        border_width = 5.0f;
-                    } else if (keyword == CSS_VALUE_SOLID || keyword == CSS_VALUE_DASHED ||
-                               keyword == CSS_VALUE_DOTTED || keyword == CSS_VALUE_DOUBLE ||
-                               keyword == CSS_VALUE_GROOVE || keyword == CSS_VALUE_RIDGE ||
-                               keyword == CSS_VALUE_INSET || keyword == CSS_VALUE_OUTSET ||
-                               keyword == CSS_VALUE_NONE || keyword == CSS_VALUE_HIDDEN) {
-                        border_style = keyword;
-                    } else {
-                        // color keywords include currentColor, which resolves against
-                        // the cascaded color on the same element.
-                        border_color = resolve_color_value(lycon, value);
-                        border_color_set = true;
-                    }
-                } else if (value->type == CSS_VALUE_TYPE_COLOR) {
-                    border_color = resolve_color_value(lycon, value);
-                    border_color_set = true;
-                } else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
-                    // Color function like rgb(), rgba(), hsl(), hsla()
-                    border_color = resolve_color_value(lycon, value);
-                    border_color_set = true;
-                }
+                parse_border_component(value);
             }
 
             // Apply to all 4 sides
@@ -10117,23 +10037,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             CssEnum align_val = CSS_VALUE_STRETCH;
             CssEnum justify_val = CSS_VALUE_STRETCH;
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // Single value applies to both
-                align_val = value->data.keyword;
-                justify_val = value->data.keyword;
-            } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 1) {
-                // First value is align-items
-                if (value->data.list.values[0]->type == CSS_VALUE_TYPE_KEYWORD) {
-                    align_val = value->data.list.values[0]->data.keyword;
-                }
-                // Second value (if present) is justify-items
-                if (value->data.list.count >= 2 && value->data.list.values[1]->type == CSS_VALUE_TYPE_KEYWORD) {
-                    justify_val = value->data.list.values[1]->data.keyword;
-                } else {
-                    justify_val = align_val;  // If no second value, same as first
-                }
-            }
+            css_resolve_keyword_pair(value, CSS_VALUE_STRETCH,
+                                     &align_val, &justify_val);
 
             // Apply to grid
             block->embed->grid->align_items = align_val;
@@ -10154,23 +10059,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             CssEnum align_val = CSS_VALUE_AUTO;
             CssEnum justify_val = CSS_VALUE_AUTO;
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // Single value applies to both
-                align_val = value->data.keyword;
-                justify_val = value->data.keyword;
-            } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 1) {
-                // First value is align-self
-                if (value->data.list.values[0]->type == CSS_VALUE_TYPE_KEYWORD) {
-                    align_val = value->data.list.values[0]->data.keyword;
-                }
-                // Second value (if present) is justify-self
-                if (value->data.list.count >= 2 && value->data.list.values[1]->type == CSS_VALUE_TYPE_KEYWORD) {
-                    justify_val = value->data.list.values[1]->data.keyword;
-                } else {
-                    justify_val = align_val;  // If no second value, same as first
-                }
-            }
+            css_resolve_keyword_pair(value, CSS_VALUE_AUTO,
+                                     &align_val, &justify_val);
 
             // Set align-self based on item type
             if (span->item_prop_type == DomElement::ITEM_PROP_GRID) {
@@ -10407,17 +10297,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     log_debug("[CSS] flex: initial -> grow=0 shrink=1 basis=auto");
                 }
 
-                if (is_form) {
-                    span->form->flex_grow = flex_grow;
-                    span->form->flex_shrink = flex_shrink;
-                    span->form->flex_basis = flex_basis;
-                    span->form->flex_basis_is_percent = flex_basis_is_percent;
-                } else {
-                    span->fi->flex_grow = flex_grow;
-                    span->fi->flex_shrink = flex_shrink;
-                    span->fi->flex_basis = flex_basis;
-                    span->fi->flex_basis_is_percent = flex_basis_is_percent;
-                }
+                css_set_flex_item_values(span, is_form, flex_grow, flex_shrink,
+                                         flex_basis, flex_basis_is_percent);
                 break;
             }
 
@@ -10483,17 +10364,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     log_debug("[CSS] flex: <grow> -> grow=%.2f shrink=1 basis=0", flex_grow);
                 }
 
-                if (is_form) {
-                    span->form->flex_grow = flex_grow;
-                    span->form->flex_shrink = flex_shrink;
-                    span->form->flex_basis = flex_basis;
-                    span->form->flex_basis_is_percent = flex_basis_is_percent;
-                } else {
-                    span->fi->flex_grow = flex_grow;
-                    span->fi->flex_shrink = flex_shrink;
-                    span->fi->flex_basis = flex_basis;
-                    span->fi->flex_basis_is_percent = flex_basis_is_percent;
-                }
+                css_set_flex_item_values(span, is_form, flex_grow, flex_shrink,
+                                         flex_basis, flex_basis_is_percent);
 
                 log_debug("[CSS] flex shorthand resolved: grow=%.2f shrink=%.2f basis=%.2f%s",
                          flex_grow, flex_shrink, flex_basis,
@@ -10505,17 +10377,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 flex_shrink = 1.0f;
                 flex_basis = 0;  // 0px when single unitless number
 
-                if (is_form) {
-                    span->form->flex_grow = flex_grow;
-                    span->form->flex_shrink = flex_shrink;
-                    span->form->flex_basis = flex_basis;
-                    span->form->flex_basis_is_percent = false;
-                } else {
-                    span->fi->flex_grow = flex_grow;
-                    span->fi->flex_shrink = flex_shrink;
-                    span->fi->flex_basis = flex_basis;
-                    span->fi->flex_basis_is_percent = false;
-                }
+                css_set_flex_item_values(span, is_form, flex_grow, flex_shrink,
+                                         flex_basis, false);
                 log_debug("[CSS] flex: %.2f -> grow=%.2f shrink=1 basis=0", flex_grow, flex_grow);
             }
             break;
@@ -11297,202 +11160,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 log_debug("[Lambda CSS Shorthand] Processing background function: %s", func_name);
                 if (strcmp(func_name, "linear-gradient") == 0 ||
                     strcmp(func_name, "repeating-linear-gradient") == 0) {
-                    // Parse linear-gradient(angle, color1, color2, ...)
-                    ensure_span_background(lycon, span);
-                    span->bound->background->gradient_type = GRADIENT_LINEAR;
-
-                    // Allocate LinearGradient
-                    LinearGradient* lg = (LinearGradient*)alloc_prop(lycon, sizeof(LinearGradient));
-                    span->bound->background->linear_gradient = lg;
-                    lg->is_repeating = (strcmp(func_name, "repeating-linear-gradient") == 0);
-
-                    // Parse arguments
-                    CssFunction* func = value->data.function;
-                    int arg_idx = 0;
-                    float angle = 180.0f;  // default: to bottom
-
-                    // Check if first arg is angle or direction
-                    if (func->arg_count > 0 && func->args[0]) {
-                        CssValue* first_arg = func->args[0];
-                        log_debug("[CSS Gradient] first_arg type=%d (ANGLE=%d, KEYWORD=%d, NUMBER=%d)",
-                            first_arg->type, CSS_VALUE_TYPE_ANGLE, CSS_VALUE_TYPE_KEYWORD, CSS_VALUE_TYPE_NUMBER);
-                        if (first_arg->type == CSS_VALUE_TYPE_ANGLE) {
-                            angle = first_arg->data.length.value;
-                            arg_idx = 1;
-                            log_debug("[CSS Gradient] angle: %.1f deg", angle);
-                        } else if (first_arg->type == CSS_VALUE_TYPE_NUMBER) {
-                            // Sometimes angles come as numbers with implicit deg unit
-                            angle = first_arg->data.number.value;
-                            arg_idx = 1;
-                            log_debug("[CSS Gradient] angle from number: %.1f deg", angle);
-                        } else if (first_arg->type == CSS_VALUE_TYPE_LENGTH) {
-                            // Angle might be stored as length with deg unit
-                            angle = first_arg->data.length.value;
-                            arg_idx = 1;
-                            log_debug("[CSS Gradient] angle from length: %.1f deg", angle);
-                        } else if (first_arg->type == CSS_VALUE_TYPE_KEYWORD) {
-                            // Single keyword direction (e.g., bare "right" without "to")
-                            CssEnum kw = first_arg->data.keyword;
-                            if (kw == CSS_VALUE_TOP)         angle = 0.0f;
-                            else if (kw == CSS_VALUE_RIGHT)  angle = 90.0f;
-                            else if (kw == CSS_VALUE_BOTTOM) angle = 180.0f;
-                            else if (kw == CSS_VALUE_LEFT)   angle = 270.0f;
-                            arg_idx = 1;
-                            log_debug("[CSS Gradient] direction keyword: angle=%.1f", angle);
-                        } else if (first_arg->type == CSS_VALUE_TYPE_LIST) {
-                            // "to <side-or-corner>" parsed as list: [to, top/right/bottom/left, ...]
-                            bool has_top = false, has_bottom = false;
-                            bool has_left = false, has_right = false;
-                            for (int li = 0; li < first_arg->data.list.count; li++) {
-                                CssValue* lv = first_arg->data.list.values[li];
-                                if (!lv) continue;
-                                if (lv->type == CSS_VALUE_TYPE_KEYWORD) {
-                                    CssEnum kw = lv->data.keyword;
-                                    if (kw == CSS_VALUE_TOP)         has_top = true;
-                                    else if (kw == CSS_VALUE_BOTTOM) has_bottom = true;
-                                    else if (kw == CSS_VALUE_LEFT)   has_left = true;
-                                    else if (kw == CSS_VALUE_RIGHT)  has_right = true;
-                                }
-                            }
-                            if (has_top && has_right)        angle = 45.0f;
-                            else if (has_top && has_left)    angle = 315.0f;
-                            else if (has_bottom && has_right) angle = 135.0f;
-                            else if (has_bottom && has_left) angle = 225.0f;
-                            else if (has_top)                angle = 0.0f;
-                            else if (has_right)              angle = 90.0f;
-                            else if (has_bottom)             angle = 180.0f;
-                            else if (has_left)               angle = 270.0f;
-                            arg_idx = 1;
-                            log_debug("[CSS Gradient] direction list: angle=%.1f", angle);
-                        }
+                    LinearGradient* gradient = nullptr;
+                    if (resolve_linear_gradient_value(lycon, value, &gradient)) {
+                        ensure_span_background(lycon, span);
+                        span->bound->background->gradient_type = GRADIENT_LINEAR;
+                        span->bound->background->linear_gradient = gradient;
+                        log_debug("[Lambda CSS Shorthand] Parsed linear-gradient with %d stops, angle=%.1f",
+                            gradient->stop_count, gradient->angle);
                     }
-                    lg->angle = angle;
-
-                    // Count color stops
-                    int color_count = func->arg_count - arg_idx;
-                    int max_stop_count = color_count > 0 ? color_count * 2 : 2;
-                    lg->stop_count = max_stop_count;
-                    lg->stops = (GradientStop*)alloc_prop(lycon, sizeof(GradientStop) * lg->stop_count);
-
-                    // Parse color stops
-                    int stop_idx = 0;
-                    for (int i = arg_idx; i < func->arg_count && stop_idx < lg->stop_count; i++) {
-                        CssValue* arg = func->args[i];
-                        if (!arg) continue;
-
-                        log_debug("[CSS Gradient] arg %d type=%d", i, arg->type);
-
-                        if (arg->type == CSS_VALUE_TYPE_COLOR) {
-                            // Simple color without position
-                            lg->stops[stop_idx].color = resolve_color_value(lycon, arg);
-                            lg->stops[stop_idx].position = -1;  // auto position
-                            log_debug("[CSS Gradient] stop %d: color #%02x%02x%02x", stop_idx,
-                                lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g, lg->stops[stop_idx].color.b);
-                            stop_idx++;
-                        } else if (arg->type == CSS_VALUE_TYPE_FUNCTION) {
-                            // Color function like rgb(), rgba(), hsl(), etc.
-                            lg->stops[stop_idx].color = resolve_color_value(lycon, arg);
-                            lg->stops[stop_idx].position = -1;
-                            log_debug("[CSS Gradient] stop %d (func): color #%02x%02x%02x", stop_idx,
-                                lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g, lg->stops[stop_idx].color.b);
-                            stop_idx++;
-                        } else if (arg->type == CSS_VALUE_TYPE_KEYWORD) {
-                            // Color keyword like red, blue, transparent
-                            lg->stops[stop_idx].color = resolve_color_value(lycon, arg);
-                            lg->stops[stop_idx].position = -1;
-                            log_debug("[CSS Gradient] stop %d (kw): color #%02x%02x%02x", stop_idx,
-                                lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g, lg->stops[stop_idx].color.b);
-                            stop_idx++;
-                        } else if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count >= 1) {
-                            // Color stop with optional one or two positions:
-                            // [color, position] or [color, position, position].
-                            CssValue** items = arg->data.list.values;
-                            CssValue* color_val = items[0];
-                            if (color_val && (color_val->type == CSS_VALUE_TYPE_COLOR ||
-                                              color_val->type == CSS_VALUE_TYPE_FUNCTION ||
-                                              color_val->type == CSS_VALUE_TYPE_KEYWORD)) {
-                                lg->stops[stop_idx].color = resolve_color_value(lycon, color_val);
-                                lg->stops[stop_idx].position = -1;  // default auto
-
-                                // Parse first position if present
-                                if (arg->data.list.count >= 2 && items[1]) {
-                                    CssValue* pos_val = items[1];
-                                    if (pos_val->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                                        lg->stops[stop_idx].position = pos_val->data.percentage.value / 100.0f;
-                                    } else if (pos_val->type == CSS_VALUE_TYPE_NUMBER) {
-                                        lg->stops[stop_idx].position = pos_val->data.number.value / 100.0f;
-                                    } else if (pos_val->type == CSS_VALUE_TYPE_LENGTH) {
-                                        lg->stops[stop_idx].position = pos_val->data.length.value;
-                                        lg->stops_in_px = true;
-                                    }
-                                }
-
-                                log_debug("[CSS Gradient] stop %d: color #%02x%02x%02x pos=%.2f", stop_idx,
-                                    lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g,
-                                    lg->stops[stop_idx].color.b, lg->stops[stop_idx].position);
-                                stop_idx++;
-
-                                // CSS Images allows a color stop to specify two
-                                // positions, e.g. `red 0 50%`. That is equivalent
-                                // to two adjacent stops with the same color and
-                                // creates a hard edge when the next stop starts at
-                                // the same position.
-                                if (arg->data.list.count >= 3 && items[2] && stop_idx < lg->stop_count) {
-                                    CssValue* pos_val = items[2];
-                                    lg->stops[stop_idx].color = resolve_color_value(lycon, color_val);
-                                    lg->stops[stop_idx].position = -1;
-                                    if (pos_val->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                                        lg->stops[stop_idx].position = pos_val->data.percentage.value / 100.0f;
-                                    } else if (pos_val->type == CSS_VALUE_TYPE_NUMBER) {
-                                        lg->stops[stop_idx].position = pos_val->data.number.value / 100.0f;
-                                    } else if (pos_val->type == CSS_VALUE_TYPE_LENGTH) {
-                                        lg->stops[stop_idx].position = pos_val->data.length.value;
-                                        lg->stops_in_px = true;
-                                    }
-                                    log_debug("[CSS Gradient] stop %d (second pos): color #%02x%02x%02x pos=%.2f", stop_idx,
-                                        lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g,
-                                        lg->stops[stop_idx].color.b, lg->stops[stop_idx].position);
-                                    stop_idx++;
-                                }
-                            }
-                        }
-                    }
-                    lg->stop_count = stop_idx;
-
-                    // Auto-distribute positions if not specified
-                    if (lg->stop_count > 0 && !lg->stops_in_px) {
-                        for (int i = 0; i < lg->stop_count; i++) {
-                            if (lg->stops[i].position < 0) {
-                                lg->stops[i].position = (float)i / (float)(lg->stop_count - 1);
-                            }
-                        }
-                    }
-
-                    // CSS Color Level 4: fix transparent stops for correct interpolation.
-                    // 'transparent' parses as rgba(0,0,0,0). Gradient interpolation in
-                    // premultiplied alpha space makes this correct, but deviceRGB may
-                    // not premultiply. Inherit the RGB from the nearest opaque neighbor
-                    // so the gradient fades through the correct hue.
-                    for (int i = 0; i < lg->stop_count; i++) {
-                        GradientStop* s = &lg->stops[i];
-                        if (s->color.a == 0 && s->color.r == 0 && s->color.g == 0 && s->color.b == 0) {
-                            // find nearest non-transparent neighbor
-                            GradientStop* neighbor = nullptr;
-                            if (i > 0 && lg->stops[i - 1].color.a > 0) {
-                                neighbor = &lg->stops[i - 1];
-                            } else if (i + 1 < lg->stop_count && lg->stops[i + 1].color.a > 0) {
-                                neighbor = &lg->stops[i + 1];
-                            }
-                            if (neighbor) {
-                                s->color.r = neighbor->color.r;
-                                s->color.g = neighbor->color.g;
-                                s->color.b = neighbor->color.b;
-                            }
-                        }
-                    }
-
-                    log_debug("[Lambda CSS Shorthand] Parsed linear-gradient with %d stops, angle=%.1f",
-                        lg->stop_count, lg->angle);
                     return;
                 }
                 // Handle radial-gradient
@@ -11633,13 +11308,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     rg->stop_count = stop_idx;
 
                     // Auto-distribute positions
-                    if (rg->stop_count > 0) {
-                        for (int i = 0; i < rg->stop_count; i++) {
-                            if (rg->stops[i].position < 0) {
-                                rg->stops[i].position = (float)i / (float)(rg->stop_count - 1);
-                            }
-                        }
-                    }
+                    css_distribute_missing_gradient_positions(
+                        rg->stops, rg->stop_count);
 
                     // CSS Color Level 4: fix transparent stops (same as linear gradient)
                     for (int i = 0; i < rg->stop_count; i++) {
@@ -11801,13 +11471,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     cg->stop_count = stop_idx;
 
                     // Auto-distribute positions (for conic, positions are angles 0-1 mapping to 0-360deg)
-                    if (cg->stop_count > 0) {
-                        for (int i = 0; i < cg->stop_count; i++) {
-                            if (cg->stops[i].position < 0) {
-                                cg->stops[i].position = (float)i / (float)(cg->stop_count - 1);
-                            }
-                        }
-                    }
+                    css_distribute_missing_gradient_positions(
+                        cg->stops, cg->stop_count);
 
                     log_debug("[Lambda CSS Shorthand] Parsed conic-gradient with %d stops, from=%.1fdeg, center=(%.2f,%.2f)",
                         cg->stop_count, cg->from_angle, cg->cx, cg->cy);

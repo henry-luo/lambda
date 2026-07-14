@@ -1371,6 +1371,18 @@ static char* resolve_http_href(const char* href, const char* base_path) {
     return out;
 }
 
+static void append_external_resource_url(char* url, char*** out_urls,
+                                         int* out_count, int* out_capacity) {
+    if (!url || !out_urls || !out_count || !out_capacity) return;
+    if (*out_count >= *out_capacity) {
+        int new_capacity = *out_capacity > 0 ? *out_capacity * 2 : 16;
+        *out_urls = (char**)mem_realloc(
+            *out_urls, new_capacity * sizeof(char*), MEM_CAT_TEMP);
+        *out_capacity = new_capacity;
+    }
+    (*out_urls)[(*out_count)++] = url;
+}
+
 /**
  * Recursively collect HTTP(S) URLs from <link rel="stylesheet" href="...">
  * and <script src="..."> elements. Appends absolute URL strings (mem_alloc'd)
@@ -1388,27 +1400,13 @@ static void collect_external_resource_urls(Element* elem, const char* base_path,
         const char* href = extract_element_attribute(elem, "href", nullptr);
         if (rel && href && str_ieq_const(rel, strlen(rel), "stylesheet")) {
             char* abs = resolve_http_href(href, base_path);
-            if (abs) {
-                if (*out_count >= *out_capacity) {
-                    int new_cap = (*out_capacity > 0) ? (*out_capacity * 2) : 16;
-                    *out_urls = (char**)mem_realloc(*out_urls, new_cap * sizeof(char*), MEM_CAT_TEMP);
-                    *out_capacity = new_cap;
-                }
-                (*out_urls)[(*out_count)++] = abs;
-            }
+            append_external_resource_url(abs, out_urls, out_count, out_capacity);
         }
     } else if (str_ieq_const(type->name.str, strlen(type->name.str), "script")) {
         const char* src = extract_element_attribute(elem, "src", nullptr);
         if (src) {
             char* abs = resolve_http_href(src, base_path);
-            if (abs) {
-                if (*out_count >= *out_capacity) {
-                    int new_cap = (*out_capacity > 0) ? (*out_capacity * 2) : 16;
-                    *out_urls = (char**)mem_realloc(*out_urls, new_cap * sizeof(char*), MEM_CAT_TEMP);
-                    *out_capacity = new_cap;
-                }
-                (*out_urls)[(*out_count)++] = abs;
-            }
+            append_external_resource_url(abs, out_urls, out_count, out_capacity);
         }
     }
 
@@ -1690,13 +1688,47 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
     }
 }
 
+static void parse_inline_style_children(Element* elem, CssEngine* engine,
+                                        const char* base_path, Pool* pool,
+                                        CssStylesheet*** stylesheets, int* count) {
+    bool collect_to_list = stylesheets && count;
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child_item = elem->items[i];
+        int type_id = get_type_id(child_item);
+        if (collect_to_list) {
+            log_debug("[CSS] <style> child[%lld] type_id=%d", i, type_id);
+        }
+        if (type_id != LMD_TYPE_STRING) continue;
+
+        String* css_text = (String*)child_item.string_ptr;
+        if (!css_text || css_text->len <= 0) continue;
+        CssStylesheet* stylesheet = nullptr;
+        if (collect_to_list) {
+            log_debug("[CSS] Found STRING child: ptr=%p, len=%d",
+                      (void*)css_text, css_text->len);
+            stylesheet = parse_and_collect_stylesheet(
+                engine, css_text->chars, "<inline-style>", base_path,
+                pool, stylesheets, count, 0);
+        } else {
+            log_debug("[CSS] Found <style> element with %d bytes of CSS", css_text->len);
+            stylesheet = css_parse_stylesheet(engine, css_text->chars, "<inline-style>");
+            annotate_css_stylesheet_source_file(stylesheet, "<inline-style>");
+        }
+        if (stylesheet && stylesheet->rule_count > 0) {
+            log_debug("[CSS] Parsed inline <style>: %zu rules", stylesheet->rule_count);
+        }
+    }
+}
+
 /**
  * Recursively collect <style> inline CSS from HTML
  * Parses and returns list of stylesheets
  */
-void collect_inline_styles_to_list(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
-                                   CssStylesheet*** stylesheets, int* count, int depth, bool recurse) {
-    if (!elem || !engine || !pool || !stylesheets || !count) return;
+static void collect_inline_styles_impl(Element* elem, CssEngine* engine,
+                                       const char* base_path, Pool* pool,
+                                       CssStylesheet*** stylesheets, int* count,
+                                       int depth, bool recurse) {
+    if (!elem || !engine || !pool || (stylesheets && !count) || (!stylesheets && count)) return;
     if (depth > MAX_CSS_TREE_DEPTH) return;
 
     TypeElmt* type = (TypeElmt*)elem->type;
@@ -1709,33 +1741,8 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, const char*
         if (media && !css_evaluate_media_query(engine, media)) {
             log_debug("[CSS] Skipping <style> element - media '%s' does not match screen", media);
         } else {
-        // Extract text content from style element
-        for (int64_t i = 0; i < elem->length; i++) {
-            Item child_item = elem->items[i];
-            int type_id = get_type_id(child_item);
-            log_debug("[CSS] <style> child[%lld] type_id=%d", i, type_id);
-
-            if (type_id == LMD_TYPE_STRING) {
-                String* css_text = (String*)child_item.string_ptr;
-                log_debug("[CSS] Found STRING child: ptr=%p, len=%d", (void*)css_text, css_text ? css_text->len : -1);
-                if (css_text && css_text->len > 0) {
-                    // Log first non-whitespace content
-                    const char* content = css_text->chars;
-                    while (*content && (*content == ' ' || *content == '\n' || *content == '\t' || *content == '\r')) {
-                        content++;
-                    }
-                    // log_debug("[CSS CONTENT] After whitespace: %.200s", content);
-
-                    // Parse the inline CSS
-                    CssStylesheet* stylesheet = parse_and_collect_stylesheet(
-                        engine, css_text->chars, "<inline-style>", base_path,
-                        pool, stylesheets, count, 0);
-                    if (stylesheet && stylesheet->rule_count > 0) {
-                        log_debug("[CSS] Parsed inline <style>: %zu rules", stylesheet->rule_count);
-                    }
-                }
-            }
-        }
+        parse_inline_style_children(
+            elem, engine, base_path, pool, stylesheets, count);
         } // end media check else
     }
 
@@ -1744,11 +1751,17 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, const char*
         for (int64_t i = 0; i < elem->length; i++) {
             Item child_item = elem->items[i];
             if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                collect_inline_styles_to_list(child_item.element, engine, base_path, pool,
-                                              stylesheets, count, depth + 1, true);
+                collect_inline_styles_impl(child_item.element, engine, base_path, pool,
+                                           stylesheets, count, depth + 1, true);
             }
         }
     }
+}
+
+void collect_inline_styles_to_list(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
+                                   CssStylesheet*** stylesheets, int* count, int depth, bool recurse) {
+    collect_inline_styles_impl(elem, engine, base_path, pool,
+                               stylesheets, count, depth, recurse);
 }
 
 static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engine,
@@ -1891,48 +1904,8 @@ static bool dom_js_mutation_requires_inline_stylesheet_rescan(DomDocument* doc) 
  * Parses and adds to engine's stylesheet list
  */
 void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool, int depth = 0) {
-    if (!elem || !engine || !pool) return;
-    if (depth > MAX_CSS_TREE_DEPTH) return;
-
-    TypeElmt* type = (TypeElmt*)elem->type;
-    if (!type) return;
-
-    // Check if this is a <style> element
-    if (str_ieq_const(type->name.str, strlen(type->name.str), "style")) {
-        // Check media attribute - skip styles that don't apply to screen
-        const char* media = extract_element_attribute(elem, "media", nullptr);
-        if (media && !css_evaluate_media_query(engine, media)) {
-            log_debug("[CSS] Skipping <style> element - media '%s' does not match screen", media);
-        } else {
-        // Extract text content from style element
-        // Text content should be in the element's children
-        for (int64_t i = 0; i < elem->length; i++) {
-            Item child_item = elem->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* css_text = (String*)child_item.string_ptr;
-                if (css_text && css_text->len > 0) {
-                    log_debug("[CSS] Found <style> element with %d bytes of CSS", css_text->len);
-
-                    // Parse the inline CSS
-                    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css_text->chars, "<inline-style>");
-                    annotate_css_stylesheet_source_file(stylesheet, "<inline-style>");
-                    if (stylesheet) {
-                        log_debug("[CSS] Parsed inline <style>: %zu rules", stylesheet->rule_count);
-                        // Note: stylesheet is already added to engine's internal list
-                    }
-                }
-            }
-        }
-        } // end media check else
-    }
-
-    // Recursively process children
-    for (int64_t i = 0; i < elem->length; i++) {
-        Item child_item = elem->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            collect_inline_styles(child_item.element, engine, pool, depth + 1);
-        }
-    }
+    collect_inline_styles_impl(elem, engine, nullptr, pool,
+                               nullptr, nullptr, depth, true);
 }
 
 /**
@@ -5564,19 +5537,19 @@ static bool build_focus_path_from_template_root(DomElement* root,
     return true;
 }
 
-static void capture_lambda_focus_restore(DocState* state,
+static bool capture_lambda_focus_restore(DocState* state,
                                          LambdaFocusRestore* out) {
-    if (!out) return;
+    if (!out) return false;
     memset(out, 0, sizeof(*out));
-    if (!state || !focus_has_current(state)) return;
+    if (!state || !focus_has_current(state)) return false;
 
     View* focused = focus_get(state);
-    if (!focused || !focused->is_element()) return;
+    if (!focused || !focused->is_element()) return false;
     DomElement* focused_elem = lam::dom_require_element(focused);
     if (focused_elem->item_prop_type != DomElement::ITEM_PROP_FORM ||
         !focused_elem->form ||
         focused_elem->form->control_type != FORM_CONTROL_TEXT) {
-        return;
+        return true;
     }
     out->fallback_tag = focused_elem->tag_name;
     if (focused_elem->class_count > 0 && focused_elem->class_names) {
@@ -5594,11 +5567,28 @@ static void capture_lambda_focus_restore(DocState* state,
                     out->lookup = lookup;
                     out->valid = build_focus_path_from_template_root(
                         elem, focused_elem, out);
-                    return;
+                    return true;
                 }
             }
         }
         node = node->parent;
+    }
+    return true;
+}
+
+static void set_layout_dirty_subtree(DomNode* root, bool dirty) {
+    if (!root) return;
+    DomNode* stack[256];
+    int top = 0;
+    stack[top++] = root;
+    while (top > 0) {
+        DomNode* node = stack[--top];
+        node->layout_dirty = dirty;
+        if (!node->is_element()) continue;
+        for (DomNode* child = lam::dom_require_element(node)->first_child;
+             child && top < 255; child = child->next_sibling) {
+            stack[top++] = child;
+        }
     }
 }
 
@@ -5665,14 +5655,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     // Save focus info before rebuild so we can restore it on the new tree
     DocState* state = (DocState*)doc->state;
     LambdaFocusRestore focus_restore;
-    capture_lambda_focus_restore(state, &focus_restore);
-    bool had_focus = false;
-    if (state && focus_has_current(state)) {
-        View* focused = focus_get(state);
-        if (focused->is_element()) {
-            had_focus = true;
-        }
-    }
+    bool had_focus = capture_lambda_focus_restore(state, &focus_restore);
 
     // ensure CSS property system is initialized
     css_property_system_init(doc->pool);
@@ -5868,58 +5851,13 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     // --- Incremental path ---
     log_debug("rebuild_lambda_doc_incremental: patching %d subtree(s)", result_count);
 
-    // Phase 16: Helper to mark a subtree as layout_dirty (stack-based, handles arbitrary depth)
-    auto mark_dirty_subtree = [](DomNode* root) {
-        if (!root) return;
-        DomNode* stack[256];
-        int top = 0;
-        stack[top++] = root;
-        while (top > 0) {
-            DomNode* n = stack[--top];
-            n->layout_dirty = true;
-            if (n->is_element()) {
-                DomNode* c = lam::dom_require_element(n)->first_child;
-                while (c && top < 255) {
-                    stack[top++] = c;
-                    c = c->next_sibling;
-                }
-            }
-        }
-    };
-
-    // Phase 16: Helper to clear layout_dirty on all nodes
-    auto clear_dirty_subtree = [](DomNode* root) {
-        if (!root) return;
-        DomNode* stack[256];
-        int top = 0;
-        stack[top++] = root;
-        while (top > 0) {
-            DomNode* n = stack[--top];
-            n->layout_dirty = false;
-            if (n->is_element()) {
-                DomNode* c = lam::dom_require_element(n)->first_child;
-                while (c && top < 255) {
-                    stack[top++] = c;
-                    c = c->next_sibling;
-                }
-            }
-        }
-    };
-
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
     // Save focus info
     DocState* state = (DocState*)doc->state;
     LambdaFocusRestore focus_restore;
-    capture_lambda_focus_restore(state, &focus_restore);
-    bool had_focus = false;
-    if (state && focus_has_current(state)) {
-        View* focused = focus_get(state);
-        if (focused->is_element()) {
-            had_focus = true;
-        }
-    }
+    bool had_focus = capture_lambda_focus_restore(state, &focus_restore);
 
     // ensure CSS property system is initialized
     css_property_system_init(doc->pool);
@@ -5967,7 +5905,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         if (i < 16) new_doms[i] = new_dom;
 
         // Phase 16: Mark new subtree as layout_dirty
-        mark_dirty_subtree(static_cast<DomNode*>(new_dom));
+        set_layout_dirty_subtree(static_cast<DomNode*>(new_dom), true);
 
         // Phase 15: Invalidate ancestor styles only (new subtree nodes already have styles_resolved=false)
         // Phase 16: Mark ancestors as layout_dirty for incremental layout
@@ -6006,7 +5944,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         doc->skip_style_reset = false;
         doc->incremental_layout = false;
         // Phase 16: Clear layout_dirty flags for next pass
-        if (doc->root) clear_dirty_subtree(static_cast<DomNode*>(doc->root));
+        if (doc->root) set_layout_dirty_subtree(static_cast<DomNode*>(doc->root), false);
     } else {
         layout_html_doc(uicon, doc, false);
     }

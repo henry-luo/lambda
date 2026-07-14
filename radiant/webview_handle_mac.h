@@ -13,6 +13,24 @@
 
 @class LambdaSchemeHandler;
 
+static inline NSString* webview_mac_mime_for_path(NSString* path) {
+    NSString* ext = path.pathExtension.lowercaseString;
+    if ([ext isEqualToString:@"html"] || [ext isEqualToString:@"htm"]) return @"text/html";
+    if ([ext isEqualToString:@"css"]) return @"text/css";
+    if ([ext isEqualToString:@"js"]) return @"application/javascript";
+    if ([ext isEqualToString:@"json"]) return @"application/json";
+    if ([ext isEqualToString:@"png"]) return @"image/png";
+    if ([ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"]) return @"image/jpeg";
+    if ([ext isEqualToString:@"gif"]) return @"image/gif";
+    if ([ext isEqualToString:@"svg"]) return @"image/svg+xml";
+    if ([ext isEqualToString:@"webp"]) return @"image/webp";
+    if ([ext isEqualToString:@"woff"]) return @"font/woff";
+    if ([ext isEqualToString:@"woff2"]) return @"font/woff2";
+    if ([ext isEqualToString:@"ttf"]) return @"font/ttf";
+    if ([ext isEqualToString:@"otf"]) return @"font/otf";
+    return @"application/octet-stream";
+}
+
 struct WebViewHandle {
     WKWebView* wk_view;        // the native web view
     int mode;                   // 0 = child window, 1 = layer (matches WebViewMode enum)

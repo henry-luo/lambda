@@ -898,6 +898,32 @@ static inline bool has_margin_chain(BoundaryProp* bound) {
     return bound && (bound->margin_chain_positive != 0 || bound->margin_chain_negative != 0);
 }
 
+static void get_self_margin_chain(ViewBlock* block, float margin_top,
+                                  float* positive, float* negative) {
+    if (has_margin_chain(block->bound)) {
+        *positive = max(block->bound->margin_chain_positive, max(margin_top, 0.0f));
+        *negative = min(block->bound->margin_chain_negative, min(margin_top, 0.0f));
+    } else {
+        *positive = max(max(margin_top, 0.0f), max(block->bound->margin.bottom, 0.0f));
+        *negative = min(min(margin_top, 0.0f), min(block->bound->margin.bottom, 0.0f));
+    }
+}
+
+static void shift_margin_collapse_floats(FloatBox* floats, ViewElement* parent,
+                                         ViewElement* child, float delta,
+                                         const char* source_loc) {
+    for (FloatBox* box = floats; box; box = box->next) {
+        if (box->element && view_is_descendant_of(lam::view_require_element(box->element), parent) &&
+            !view_is_descendant_of(lam::view_require_element(box->element), child)) {
+            box->margin_box_top += delta;
+            box->margin_box_bottom += delta;
+            box->y += delta;
+            log_debug("%s margin collapse float update: float %s shifted by %.1f",
+                source_loc, box->element->node_name(), delta);
+        }
+    }
+}
+
 static inline bool is_root_element_block(ViewBlock* block) {
     return block && block->tag_id == HTM_TAG_HTML;
 }
@@ -908,10 +934,7 @@ static inline bool is_root_element_block(ViewBlock* block) {
 // Chromium's HasMarginBlockStartQuirk / quirky container behavior.
 // A margin is quirky when: (1) element is in the quirky list, AND
 // (2) margin-top still has UA specificity (not overridden by author CSS).
-static inline bool has_quirky_margin_top(ViewBlock* block) {
-    if (!block || !block->bound || block->bound->margin.top_specificity >= 0)
-        return false;
-    uintptr_t tag = block->tag_id;
+static inline bool is_quirky_margin_tag(uintptr_t tag) {
     return tag == HTM_TAG_P || tag == HTM_TAG_H1 || tag == HTM_TAG_H2 ||
            tag == HTM_TAG_H3 || tag == HTM_TAG_H4 || tag == HTM_TAG_H5 ||
            tag == HTM_TAG_H6 || tag == HTM_TAG_UL || tag == HTM_TAG_OL ||
@@ -920,17 +943,14 @@ static inline bool has_quirky_margin_top(ViewBlock* block) {
            tag == HTM_TAG_FIELDSET || tag == HTM_TAG_MENU || tag == HTM_TAG_DIR;
 }
 
-// Same check for block-end (bottom) margin.
+static inline bool has_quirky_margin_top(ViewBlock* block) {
+    return block && block->bound && block->bound->margin.top_specificity < 0 &&
+        is_quirky_margin_tag(block->tag_id);
+}
+
 static inline bool has_quirky_margin_bottom(ViewBlock* block) {
-    if (!block || !block->bound || block->bound->margin.bottom_specificity >= 0)
-        return false;
-    uintptr_t tag = block->tag_id;
-    return tag == HTM_TAG_P || tag == HTM_TAG_H1 || tag == HTM_TAG_H2 ||
-           tag == HTM_TAG_H3 || tag == HTM_TAG_H4 || tag == HTM_TAG_H5 ||
-           tag == HTM_TAG_H6 || tag == HTM_TAG_UL || tag == HTM_TAG_OL ||
-           tag == HTM_TAG_BLOCKQUOTE || tag == HTM_TAG_PRE ||
-           tag == HTM_TAG_DL || tag == HTM_TAG_FIGURE || tag == HTM_TAG_HR ||
-           tag == HTM_TAG_FIELDSET || tag == HTM_TAG_MENU || tag == HTM_TAG_DIR;
+    return block && block->bound && block->bound->margin.bottom_specificity < 0 &&
+        is_quirky_margin_tag(block->tag_id);
 }
 
 // Check if a block is a "quirky container" — in quirks mode, body and table cells
@@ -3350,6 +3370,27 @@ static void layout_empty_flex_or_grid(LayoutContext* lycon, ViewBlock* block,
     finalize_block_flow(lycon, block, block->display.outer);
 }
 
+static void layout_table_block_content(LayoutContext* lycon, ViewBlock* block,
+                                       bool empty) {
+    auto start = high_resolution_clock::now();
+    float margin_containing_width = lycon->block.content_width;
+    layout_table_content(lycon, block, block->display);
+    g_table_layout_time += duration<double, std::milli>(high_resolution_clock::now() - start).count();
+
+    update_multipass_advance_y(lycon, block);
+    finalize_block_flow(lycon, block, block->display.outer);
+    if (!block->blk || block->blk->given_width < 0) {
+        float shrink_width = block->content_width +
+            (block->bound && block->bound->border ? block->bound->border->width.right : 0.0f);
+        block->width = empty ? adjust_min_max_width(block, shrink_width)
+                             : layout_floor_min_width(block, shrink_width);
+        resolve_table_auto_margins_after_shrink(block, margin_containing_width,
+            block->position && element_has_float(block));
+        log_debug("%s %sTABLE shrink-to-fit: block->width=%.1f (content_width=%.1f)",
+            block->source_loc(), empty ? "EMPTY " : "", block->width, block->content_width);
+    }
+}
+
 static Url* clone_document_url_for_iframe(LayoutContext* lycon) {
     DomDocument* parent_doc = lycon && lycon->ui_context ?
         lycon->ui_context->document : nullptr;
@@ -3804,26 +3845,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
  */
 static CssEnum get_element_float_value(DomElement* elem) {
     if (!elem) return CSS_VALUE_NONE;
-
-    // First check if position is already resolved
     if (elem->position) {
         return elem->position->float_prop;
     }
-
-    // Check float property from CSS style tree
-    if (elem->specified_style && elem->specified_style->tree) {
-        AvlNode* float_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_FLOAT);
-        if (float_node) {
-            StyleNode* style_node = (StyleNode*)float_node->declaration;
-            if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
-                CssValue* val = style_node->winning_decl->value;
-                if (val->type == CSS_VALUE_TYPE_KEYWORD) {
-                    return val->data.keyword;
-                }
-            }
-        }
-    }
-    return CSS_VALUE_NONE;
+    return layout_specified_keyword(elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
 }
 
 /**
@@ -4437,38 +4462,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 return;
             }
             else if (block->display.inner == CSS_VALUE_TABLE) {
-                auto t_table_start = high_resolution_clock::now();
-                float table_margin_containing_width = lycon->block.content_width;
                 log_debug("%s TABLE LAYOUT TRIGGERED! outer=%d, inner=%d, element=%s", block->source_loc(),
                     block->display.outer, block->display.inner, block->node_name());
-                layout_table_content(lycon, block, block->display);
-                g_table_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_table_start).count();
-
-                update_multipass_advance_y(lycon, block);
-                finalize_block_flow(lycon, block, block->display.outer);
-
-                // CSS 2.1 §17.5.2: Tables shrink-to-fit their content (unlike block elements
-                // which stretch to container width). For auto-width tables, update block->width
-                // from the actual table width computed by table_auto_layout.
-                // Pre-layout initialization sets block->width = container_width, which is wrong
-                // for auto-width tables narrower than their container (e.g., empty tables).
-                // finalize_block_flow already computed flow_width from lycon->block.max_width
-                // (which includes pad.left + border.left) + pad.right + border.right.
-                // Just use that flow_width (= content_width + border.right) here.
-                if (!block->blk || block->blk->given_width < 0) {
-                    // flow_width = max_width + padding.right + border.right (per finalize_block_flow)
-                    float shrink_width = block->content_width +
-                        (block->bound && block->bound->border ? block->bound->border->width.right : 0);
-                    // CSS Tables 3: table layout already handles max-width during column
-                    // distribution (respecting min-content floor). Only apply min-width here.
-                    shrink_width = layout_floor_min_width(block, shrink_width);
-                    block->width = shrink_width;
-                    resolve_table_auto_margins_after_shrink(
-                        block, table_margin_containing_width, block->position && element_has_float(block));
-                    log_debug("%s TABLE shrink-to-fit: block->width=%.1f (content_width=%.1f)", block->source_loc(),
-                              block->width, block->content_width);
-                }
-
+                layout_table_block_content(lycon, block, false);
                 return;
             }
             else {
@@ -4486,28 +4482,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 return;
             }
             else if (block->display.inner == CSS_VALUE_TABLE) {
-                auto t_table_start = high_resolution_clock::now();
-                float table_margin_containing_width = lycon->block.content_width;
-                layout_table_content(lycon, block, block->display);
-                g_table_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_table_start).count();
-
-                update_multipass_advance_y(lycon, block);
-                finalize_block_flow(lycon, block, block->display.outer);
-
-                // Shrink-to-fit: auto-width tables use their content width, not container width
-                // lycon->block.max_width (= table->width from table_auto_layout) already includes
-                // border.left + padding.left. finalize_block_flow adds padding.right + border.right
-                // to get content_width and flow_width. Use flow_width here.
-                if (!block->blk || block->blk->given_width < 0) {
-                    float shrink_width = block->content_width +
-                        (block->bound && block->bound->border ? block->bound->border->width.right : 0);
-                    block->width = adjust_min_max_width(block, shrink_width);
-                    resolve_table_auto_margins_after_shrink(
-                        block, table_margin_containing_width, block->position && element_has_float(block));
-                    log_debug("%s EMPTY TABLE shrink-to-fit: block->width=%.1f (content_width=%.1f)", block->source_loc(),
-                              block->width, block->content_width);
-                }
-
+                layout_table_block_content(lycon, block, true);
                 return;
             }
         }
@@ -7244,19 +7219,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         DomElement* elem = elmt->as_element();
         if (elem->position && elem->position->float_prop != CSS_VALUE_NONE) {
             is_float = true;
-        } else if (elem->specified_style && elem->specified_style->tree) {
-            // Check float property from CSS style tree
-            AvlNode* float_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_FLOAT);
-            if (float_node) {
-                StyleNode* style_node = (StyleNode*)float_node->declaration;
-                if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
-                    CssValue* val = style_node->winning_decl->value;
-                    if (val->type == CSS_VALUE_TYPE_KEYWORD &&
-                        (val->data.keyword == CSS_VALUE_LEFT || val->data.keyword == CSS_VALUE_RIGHT)) {
-                        is_float = true;
-                    }
-                }
-            }
+        } else {
+            CssEnum value = layout_specified_keyword(
+                elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
+            is_float = value == CSS_VALUE_LEFT || value == CSS_VALUE_RIGHT;
         }
     }
 
@@ -7277,14 +7243,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             was_inline_level = (elem->display.outer == CSS_VALUE_INLINE ||
                                 elem->display.outer == CSS_VALUE_INLINE_BLOCK);
         } else if (elem->specified_style && elem->specified_style->tree) {
-            AvlNode* disp_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_DISPLAY);
-            if (disp_node) {
-                StyleNode* sn = (StyleNode*)disp_node->declaration;
-                if (sn && sn->winning_decl && sn->winning_decl->value &&
-                    sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                    CssEnum kw = sn->winning_decl->value->data.keyword;
-                    was_inline_level = (kw == CSS_VALUE_INLINE || kw == CSS_VALUE_INLINE_BLOCK);
-                }
+            CssEnum display_keyword = layout_specified_keyword(
+                elem, CSS_PROPERTY_DISPLAY);
+            if (display_keyword) {
+                was_inline_level = display_keyword == CSS_VALUE_INLINE ||
+                    display_keyword == CSS_VALUE_INLINE_BLOCK;
             } else {
                 // No explicit display in style — use tag default.
                 // Inline tags (span, a, em, etc.) and inline-block tags (input,
@@ -7310,16 +7273,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
         if (elem->position) {
             is_abspos = layout_position_is_abs_fixed(elem->position);
-        } else if (elem->specified_style && elem->specified_style->tree) {
-            AvlNode* pos_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_POSITION);
-            if (pos_node) {
-                StyleNode* sn = (StyleNode*)pos_node->declaration;
-                if (sn && sn->winning_decl && sn->winning_decl->value &&
-                    sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                    CssEnum kw = sn->winning_decl->value->data.keyword;
-                    is_abspos = (kw == CSS_VALUE_ABSOLUTE || kw == CSS_VALUE_FIXED);
-                }
-            }
+        } else {
+            CssEnum position = layout_specified_keyword(
+                elem, CSS_PROPERTY_POSITION, CSS_VALUE_STATIC);
+            is_abspos = position == CSS_VALUE_ABSOLUTE ||
+                position == CSS_VALUE_FIXED;
         }
         if (was_inline_level && is_abspos) {
             is_blockified_inline_abspos = true;
@@ -8380,26 +8338,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                     BlockContext* float_bfc = block_context_find_bfc(&lycon->block);
                                     if (float_bfc) {
                                         ViewElement* child_view = lam::view_require_element(block);
-                                        for (FloatBox* fb = float_bfc->left_floats; fb; fb = fb->next) {
-                                            if (fb->element && view_is_descendant_of(lam::view_require_element(fb->element), parent)
-                                                && !view_is_descendant_of(lam::view_require_element(fb->element), child_view)) {
-                                                fb->margin_box_top += y_delta;
-                                                fb->margin_box_bottom += y_delta;
-                                                fb->y += y_delta;
-                                                log_debug("%s margin collapse float update: float %s shifted by %.1f",
-                                                          block->source_loc(), fb->element->node_name(), y_delta);
-                                            }
-                                        }
-                                        for (FloatBox* fb = float_bfc->right_floats; fb; fb = fb->next) {
-                                            if (fb->element && view_is_descendant_of(lam::view_require_element(fb->element), parent)
-                                                && !view_is_descendant_of(lam::view_require_element(fb->element), child_view)) {
-                                                fb->margin_box_top += y_delta;
-                                                fb->margin_box_bottom += y_delta;
-                                                fb->y += y_delta;
-                                                log_debug("%s margin collapse float update: float %s shifted by %.1f",
-                                                          block->source_loc(), fb->element->node_name(), y_delta);
-                                            }
-                                        }
+                                        shift_margin_collapse_floats(float_bfc->left_floats, parent,
+                                            child_view, y_delta, block->source_loc());
+                                        shift_margin_collapse_floats(float_bfc->right_floats, parent,
+                                            child_view, y_delta, block->source_loc());
                                     }
                                 }
 
@@ -8614,14 +8556,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             }
                             // Current block's chain: own margins + any chain from children
                             float cur_pos, cur_neg;
-                            if (has_margin_chain(block->bound)) {
-                                // Block already has chain (from children's parent-child collapse)
-                                cur_pos = max(block->bound->margin_chain_positive, max(original_margin_top, 0.f));
-                                cur_neg = min(block->bound->margin_chain_negative, min(original_margin_top, 0.f));
-                            } else {
-                                cur_pos = max(max(original_margin_top, 0.f), max(block->bound->margin.bottom, 0.f));
-                                cur_neg = min(min(original_margin_top, 0.f), min(block->bound->margin.bottom, 0.f));
-                            }
+                            get_self_margin_chain(block, original_margin_top, &cur_pos, &cur_neg);
 
                             bool use_chain = (prev_neg < 0 || cur_neg < 0 ||
                                               has_margin_chain(block->bound) ||
@@ -8668,13 +8603,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                 prev_pos = 0; prev_neg = 0;
                             }
                             float cur_pos, cur_neg;
-                            if (has_margin_chain(block->bound)) {
-                                cur_pos = max(block->bound->margin_chain_positive, max(original_margin_top, 0.f));
-                                cur_neg = min(block->bound->margin_chain_negative, min(original_margin_top, 0.f));
-                            } else {
-                                cur_pos = max(max(original_margin_top, 0.f), max(block->bound->margin.bottom, 0.f));
-                                cur_neg = min(min(original_margin_top, 0.f), min(block->bound->margin.bottom, 0.f));
-                            }
+                            get_self_margin_chain(block, original_margin_top, &cur_pos, &cur_neg);
                             float combined_pos = max(prev_pos, cur_pos);
                             float combined_neg = min(prev_neg, cur_neg);
                             set_margin_chain(block->bound, combined_pos, combined_neg);

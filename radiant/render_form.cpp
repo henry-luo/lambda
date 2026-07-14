@@ -1020,50 +1020,9 @@ static const char* get_option_text_at_index(ViewBlock* select, int index) {
     if (!select || index < 0) return nullptr;
 
     int current_idx = 0;
-    DomNode* child = select->first_child;
-    while (child) {
-        if (child->is_element()) {
-            DomElement* child_elem = lam::dom_require_element(child);
-            if (child_elem->tag() == HTM_TAG_OPTION) {
-                if (current_idx == index) {
-                    // Find first text node child
-                    DomNode* text_child = child_elem->first_child;
-                    while (text_child) {
-                        if (text_child->is_text()) {
-                            DomText* text = lam::dom_require_text(text_child);
-                            return text->text;
-                        }
-                        text_child = text_child->next_sibling;
-                    }
-                    return nullptr;
-                }
-                current_idx++;
-            } else if (child_elem->tag() == HTM_TAG_OPTGROUP) {
-                // Check options inside optgroup
-                DomNode* opt_child = child_elem->first_child;
-                while (opt_child) {
-                    if (opt_child->is_element()) {
-                        DomElement* opt_elem = lam::dom_require_element(opt_child);
-                        if (opt_elem->tag() == HTM_TAG_OPTION) {
-                            if (current_idx == index) {
-                                DomNode* text_child = opt_elem->first_child;
-                                while (text_child) {
-                                    if (text_child->is_text()) {
-                                        DomText* text = lam::dom_require_text(text_child);
-                                        return text->text;
-                                    }
-                                    text_child = text_child->next_sibling;
-                                }
-                                return nullptr;
-                            }
-                            current_idx++;
-                        }
-                    }
-                    opt_child = opt_child->next_sibling;
-                }
-            }
-        }
-        child = child->next_sibling;
+    for (DomElement* option = dom_select_next_option(select, nullptr); option;
+         option = dom_select_next_option(select, option), current_idx++) {
+        if (current_idx == index) return dom_option_text(option);
     }
     return nullptr;
 }

@@ -117,23 +117,6 @@ static void on_script_message(WebKitUserContentManager* manager,
 // lambda:// custom URI scheme handler — serves local files from CWD
 // ---------------------------------------------------------------------------
 
-static const char* mime_for_ext(const char* path) {
-    if (!path) return "application/octet-stream";
-    if      (file_path_has_ext_ci(path, "html") || file_path_has_ext_ci(path, "htm")) return "text/html";
-    else if (file_path_has_ext_ci(path, "css")) return "text/css";
-    else if (file_path_has_ext_ci(path, "js")) return "application/javascript";
-    else if (file_path_has_ext_ci(path, "json")) return "application/json";
-    else if (file_path_has_ext_ci(path, "png")) return "image/png";
-    else if (file_path_has_ext_ci(path, "jpg") || file_path_has_ext_ci(path, "jpeg")) return "image/jpeg";
-    else if (file_path_has_ext_ci(path, "gif")) return "image/gif";
-    else if (file_path_has_ext_ci(path, "svg")) return "image/svg+xml";
-    else if (file_path_has_ext_ci(path, "webp")) return "image/webp";
-    else if (file_path_has_ext_ci(path, "woff")) return "font/woff";
-    else if (file_path_has_ext_ci(path, "woff2")) return "font/woff2";
-    else if (file_path_has_ext_ci(path, "ttf")) return "font/ttf";
-    return "application/octet-stream";
-}
-
 static void on_lambda_scheme_request(WebKitURISchemeRequest* request, gpointer user_data) {
     (void)user_data;
     const char* uri = webkit_uri_scheme_request_get_uri(request);
@@ -197,7 +180,7 @@ static void on_lambda_scheme_request(WebKitURISchemeRequest* request, gpointer u
         g_memdup2(data, data_len), data_len, g_free);
     g_mapped_file_unref(mapped);
 
-    const char* mime = mime_for_ext(full_path);
+    const char* mime = webview_linux_mime_for_path(full_path);
     webkit_uri_scheme_request_finish(request, stream, (gint64)data_len, mime);
     g_object_unref(stream);
 
