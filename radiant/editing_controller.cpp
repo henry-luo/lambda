@@ -256,28 +256,28 @@ static bool editing_controller_velocity_for_rect(float pointer_x,
     return vx != 0.0f || vy != 0.0f;
 }
 
-static float editing_controller_text_control_content_width(ViewBlock* block,
-                                                           DomElement* elem) {
+static float editing_controller_text_control_content_extent(ViewBlock* block,
+                                                            DomElement* elem,
+                                                            bool horizontal) {
     if (!block || !elem || !elem->form) return 0.0f;
     bool is_textarea = elem->form->control_type == FORM_CONTROL_TEXTAREA;
     float border = (block->bound && block->bound->border)
         ? block->bound->border->width.left : 1.0f;
     float padding = block->bound ? block->bound->padding.left :
         (is_textarea ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
-    float width = block->width - 2.0f * (border + padding);
-    return width > 0.0f ? width : 0.0f;
+    float extent = (horizontal ? block->width : block->height) -
+        2.0f * (border + padding);
+    return extent > 0.0f ? extent : 0.0f;
+}
+
+static float editing_controller_text_control_content_width(ViewBlock* block,
+                                                           DomElement* elem) {
+    return editing_controller_text_control_content_extent(block, elem, true);
 }
 
 static float editing_controller_text_control_content_height(ViewBlock* block,
                                                             DomElement* elem) {
-    if (!block || !elem || !elem->form) return 0.0f;
-    bool is_textarea = elem->form->control_type == FORM_CONTROL_TEXTAREA;
-    float border = (block->bound && block->bound->border)
-        ? block->bound->border->width.left : 1.0f;
-    float padding = block->bound ? block->bound->padding.left :
-        (is_textarea ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
-    float height = block->height - 2.0f * (border + padding);
-    return height > 0.0f ? height : 0.0f;
+    return editing_controller_text_control_content_extent(block, elem, false);
 }
 
 static float editing_controller_text_control_max_line_width(UiContext* uicon,
@@ -731,6 +731,25 @@ static void editing_controller_extend_to_moved_caret(
                                           operation);
 }
 
+static void editing_controller_move_to_boundary(
+        EventContext* evcon, DocState* state, View* caret_view,
+        int* caret_offset, const EditingControllerHooks* hooks,
+        bool extend, int boundary, const char* extend_operation,
+        const char* move_operation) {
+    if (extend) {
+        selection_begin_non_pointer_extend(state, caret_view, *caret_offset);
+        state_store_caret_move_to_boundary(state, boundary);
+        editing_controller_extend_to_moved_caret(
+            evcon, state, caret_view, caret_offset, hooks, extend_operation);
+        selection_finish_active_gesture(state);
+        return;
+    }
+    state_store_selection_clear(state);
+    state_store_caret_move_to_boundary(state, boundary);
+    editing_controller_selection_snapshot(
+        evcon, state, hooks, caret_view, move_operation);
+}
+
 bool editing_controller_handle_rich_navigation(EventContext* evcon,
                                                DocState* state,
                                                const KeyEvent* key_event,
@@ -835,41 +854,19 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
             break;
 
         case RDT_KEY_HOME:
-            if (shift) {
-                selection_begin_non_pointer_extend(state, caret_view, caret_offset);
-                state_store_caret_move_to_boundary(state, cmd ? 2 : 0);
-                editing_controller_extend_to_moved_caret(evcon, state, caret_view,
-                                                         &caret_offset, hooks,
-                                                         cmd ? "extendDocumentStart"
-                                                             : "extendLineStart");
-                selection_finish_active_gesture(state);
-            } else {
-                state_store_selection_clear(state);
-                state_store_caret_move_to_boundary(state, cmd ? 2 : 0);
-                editing_controller_selection_snapshot(evcon, state, hooks,
-                                                      caret_view,
-                                                      cmd ? "moveDocumentStart"
-                                                          : "moveLineStart");
-            }
+            editing_controller_move_to_boundary(
+                evcon, state, caret_view, &caret_offset, hooks, shift,
+                cmd ? 2 : 0,
+                cmd ? "extendDocumentStart" : "extendLineStart",
+                cmd ? "moveDocumentStart" : "moveLineStart");
             break;
 
         case RDT_KEY_END:
-            if (shift) {
-                selection_begin_non_pointer_extend(state, caret_view, caret_offset);
-                state_store_caret_move_to_boundary(state, cmd ? 3 : 1);
-                editing_controller_extend_to_moved_caret(evcon, state, caret_view,
-                                                         &caret_offset, hooks,
-                                                         cmd ? "extendDocumentEnd"
-                                                             : "extendLineEnd");
-                selection_finish_active_gesture(state);
-            } else {
-                state_store_selection_clear(state);
-                state_store_caret_move_to_boundary(state, cmd ? 3 : 1);
-                editing_controller_selection_snapshot(evcon, state, hooks,
-                                                      caret_view,
-                                                      cmd ? "moveDocumentEnd"
-                                                          : "moveLineEnd");
-            }
+            editing_controller_move_to_boundary(
+                evcon, state, caret_view, &caret_offset, hooks, shift,
+                cmd ? 3 : 1,
+                cmd ? "extendDocumentEnd" : "extendLineEnd",
+                cmd ? "moveDocumentEnd" : "moveLineEnd");
             break;
 
         default:

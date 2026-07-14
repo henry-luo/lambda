@@ -87,6 +87,13 @@ void target_text_view(EventContext* evcon, ViewText* text);
 void update_scroller(ViewBlock* block, float content_width, float content_height);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 
+static WebViewHandle* focused_layer_webview_handle(View* focused) {
+    if (!focused || !focused->is_element()) return nullptr;
+    ViewBlock* block = lam::view_require_block(focused);
+    WebViewProp* webview = block->embed ? block->embed->webview : nullptr;
+    return webview && webview->mode == WEBVIEW_MODE_LAYER ? webview->handle : nullptr;
+}
+
 static const char* rdt_event_type_name(EventType type) {
     switch (type) {
     case RDT_EVENT_NIL: return "nil";
@@ -212,6 +219,22 @@ static void event_log_editing_surface(JsonWriter* w,
     jw_obj_end(w);
 }
 
+static bool event_log_begin_editing_record(DocState* state,
+                                           const EditingSurface* surface,
+                                           const char* type,
+                                           JsonWriter* writer,
+                                           char* buffer, size_t buffer_size,
+                                           bool* redacted) {
+    if (!state || !event_state_log_enabled(state->active_event_log)) return false;
+    *redacted = event_log_editing_redact(surface);
+    event_state_log_begin_record(state->active_event_log, writer,
+                                 buffer, buffer_size, type,
+                                 state->active_cascade_id);
+    jw_key(writer, "data");
+    jw_obj_begin(writer);
+    return true;
+}
+
 static void event_log_editing_history_named(DocState* state,
                                             const EditingSurface* surface,
                                             const char* input_type_name,
@@ -219,15 +242,11 @@ static void event_log_editing_history_named(DocState* state,
                                             uint32_t depth, // UNUSED_DEPTH_OK: undo-stack depth logged as a JSON field.
                                             uint32_t cursor,
                                             bool did_restore) {
-    if (!state || !event_state_log_enabled(state->active_event_log)) return;
-
-    bool redacted = event_log_editing_redact(surface);
+    bool redacted = false;
     char buf[4096];
     JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "editing.history", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
+    if (!event_log_begin_editing_record(state, surface, "editing.history",
+                                        &w, buf, sizeof(buf), &redacted)) return;
         jw_kv_str(&w, "action", action ? action : "restore");
         event_log_editing_surface(&w, surface);
         jw_kv_str(&w, "input_type", input_type_name ? input_type_name : "");
@@ -284,15 +303,11 @@ static void event_log_editing_mutation(DocState* state,
                                        uint32_t new_len,
                                        uint32_t selection_start,
                                        uint32_t selection_end) {
-    if (!state || !event_state_log_enabled(state->active_event_log)) return;
-
-    bool redacted = event_log_editing_redact(surface);
+    bool redacted = false;
     char buf[4096];
     JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "editing.mutation", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
+    if (!event_log_begin_editing_record(state, surface, "editing.mutation",
+                                        &w, buf, sizeof(buf), &redacted)) return;
         jw_kv_str(&w, "operation", operation ? operation : "replace");
         event_log_editing_surface(&w, surface);
         jw_kv_str(&w, "input_type",
@@ -312,15 +327,11 @@ static void event_log_editing_selection(DocState* state,
                                         const char* operation,
                                         uint32_t anchor,
                                         uint32_t focus) {
-    if (!state || !event_state_log_enabled(state->active_event_log)) return;
-
-    bool redacted = event_log_editing_redact(surface);
+    bool redacted = false;
     char buf[4096];
     JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "editing.selection", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
+    if (!event_log_begin_editing_record(state, surface, "editing.selection",
+                                        &w, buf, sizeof(buf), &redacted)) return;
         jw_kv_str(&w, "operation", operation ? operation : "select");
         event_log_editing_surface(&w, surface);
         jw_kv_str(&w, "input_type",
@@ -337,15 +348,11 @@ static void event_log_editing_clipboard(DocState* state,
                                         const char* operation,
                                         uint32_t text_len,
                                         uint32_t html_len) {
-    if (!state || !event_state_log_enabled(state->active_event_log)) return;
-
-    bool redacted = event_log_editing_redact(surface);
+    bool redacted = false;
     char buf[2048];
     JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "editing.clipboard", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
+    if (!event_log_begin_editing_record(state, surface, "editing.clipboard",
+                                        &w, buf, sizeof(buf), &redacted)) return;
         jw_kv_str(&w, "operation", operation ? operation : "");
         event_log_editing_surface(&w, surface);
         jw_kv_uint(&w, "text_len", redacted ? 0 : text_len);
@@ -389,15 +396,11 @@ static void event_log_editing_composition(DocState* state,
                                           uint32_t preedit_len,
                                           uint32_t commit_len,
                                           uint32_t caret) {
-    if (!state || !event_state_log_enabled(state->active_event_log)) return;
-
-    bool redacted = event_log_editing_redact(surface);
+    bool redacted = false;
     char buf[4096];
     JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "editing.composition", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
+    if (!event_log_begin_editing_record(state, surface, "editing.composition",
+                                        &w, buf, sizeof(buf), &redacted)) return;
         jw_kv_str(&w, "phase", phase ? phase : "");
         event_log_editing_surface(&w, surface);
         jw_kv_str(&w, "input_type",
@@ -1348,6 +1351,15 @@ void fire_events(EventContext* evcon, ArrayList* target_list) {
 // Lambda Template Event Dispatch
 // ============================================================================
 
+static TemplateEntry* template_registry_find(const char* template_ref) {
+    if (!g_template_registry || !template_ref) return NULL;
+    for (TemplateEntry* entry = g_template_registry->first;
+         entry; entry = entry->next) {
+        if (entry->template_ref == template_ref) return entry;
+    }
+    return NULL;
+}
+
 /**
  * Convert a key code to a human-readable key name string.
  * Returns a static string (no allocation needed).
@@ -1881,13 +1893,7 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
 
                     // found a different template — check for matching handler
                     if (found_self) {
-                        TemplateEntry* tmpl = NULL;
-                        for (TemplateEntry* e = g_template_registry->first; e; e = e->next) {
-                            if (e->template_ref == lookup.template_ref) {
-                                tmpl = e;
-                                break;
-                            }
-                        }
+                        TemplateEntry* tmpl = template_registry_find(lookup.template_ref);
 
                         if (tmpl && tmpl->handlers) {
                             for (TemplateHandlerEntry* h = tmpl->handlers; h; h = h->next) {
@@ -1983,13 +1989,7 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                     log_debug("dispatch_lambda_handler: reverse lookup hit at depth=%d, tmpl_ref=%s",
                              depth, lookup.template_ref ? lookup.template_ref : "(null)");
                     // find the TemplateEntry by template_ref
-                    TemplateEntry* tmpl = NULL;
-                    for (TemplateEntry* e = g_template_registry->first; e; e = e->next) {
-                        if (e->template_ref == lookup.template_ref) {
-                            tmpl = e;
-                            break;
-                        }
-                    }
+                    TemplateEntry* tmpl = template_registry_find(lookup.template_ref);
 
                     if (tmpl && tmpl->handlers) {
                         // find handler for this event name
@@ -3000,6 +3000,23 @@ static bool dispatch_form_selection_range(EventContext* evcon, DomElement* elem,
     return true;
 }
 
+static void dispatch_form_select_word(EventContext* evcon, DomElement* elem,
+                                      DocState* state, View* target,
+                                      int byte_offset) {
+    FormControlProp* form = elem ? elem->form : nullptr;
+    const char* value = form ? form->current_value : nullptr;
+    uint32_t value_len = form ? form->current_value_len : 0;
+    if (!value || value_len == 0) return;
+
+    uint32_t click_offset = byte_offset < 0 ? 0 : (uint32_t)byte_offset;
+    uint32_t start = te_word_start(value, value_len, click_offset);
+    uint32_t end = te_word_end(value, value_len, click_offset);
+    if (start != end) {
+        dispatch_form_selection_range(
+            evcon, elem, state, target, start, end, "selectWord");
+    }
+}
+
 static bool dispatch_form_history_restore_selection(DomElement* elem,
                                                     DocState* state,
                                                     View* target,
@@ -3943,31 +3960,15 @@ static void dom_js_mutation_reset_records(DomDocument* doc) {
     doc->js_mutation_record_overflow = 0;
 }
 
-// Release builds strip some logging callsites, so this diagnostic helper can be
-// referenced only in debug builds even though the reconcile logic keeps it nearby.
-[[maybe_unused]] static bool dom_js_mutation_kind_seen(DomDocument* doc, DomJsMutationKind kind) {
-    if (!doc) return false;
-    uint32_t slot = (uint32_t)kind;
-    if (slot >= 31) slot = 0;
-    return (doc->js_mutation_kind_mask & (1u << slot)) != 0;
-}
-
 static void dom_js_mutation_log_records(DomDocument* doc) {
 #ifndef NDEBUG
     if (!doc) return;
 
-    log_info("html handler mutations: count=%d records=%d overflow=%d kinds=[insert:%d remove:%d text:%d attr:%d style:%d style_repaint:%d tree:%d unknown:%d]",
+    log_info("html handler mutations: count=%d records=%d overflow=%d kind_mask=0x%08x",
              doc->js_mutation_count,
              doc->js_mutation_record_count,
              doc->js_mutation_record_overflow,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_CHILD_INSERT) ? 1 : 0,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_CHILD_REMOVE) ? 1 : 0,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_TEXT) ? 1 : 0,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_ATTRIBUTE) ? 1 : 0,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_STYLE) ? 1 : 0,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_STYLE_REPAINT) ? 1 : 0,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_TREE_REPLACE) ? 1 : 0,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_UNKNOWN) ? 1 : 0);
+             doc->js_mutation_kind_mask);
 
     int limit = doc->js_mutation_record_count < 8 ? doc->js_mutation_record_count : 8;
     for (int i = 0; i < limit; i++) {
@@ -4003,7 +4004,7 @@ static void dom_js_record_reconcile(DomDocument* doc,
     // Keep the reconcile decision self-contained in logs: mutation details are
     // otherwise separated from the layout/state-retention decision.
     log_info("dom mutation reconcile: mode=%s reason=%s recascade=%s layout=%s state=%s pruned=%d "
-             "mutations=%d records=%d overflow=%d kinds=[insert:%d remove:%d text:%d attr:%d style:%d style_repaint:%d tree:%d unknown:%d]",
+             "mutations=%d records=%d overflow=%d kind_mask=0x%08x",
              dom_reconcile_mode_name(mode),
              doc->last_dom_reconcile_reason,
              recascade_scope ? recascade_scope : "unknown",
@@ -4013,14 +4014,7 @@ static void dom_js_record_reconcile(DomDocument* doc,
              mutations,
              records,
              overflow,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_CHILD_INSERT) ? 1 : 0,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_CHILD_REMOVE) ? 1 : 0,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_TEXT) ? 1 : 0,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_ATTRIBUTE) ? 1 : 0,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_STYLE) ? 1 : 0,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_STYLE_REPAINT) ? 1 : 0,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_TREE_REPLACE) ? 1 : 0,
-             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_UNKNOWN) ? 1 : 0);
+             doc->js_mutation_kind_mask);
 
     DocState* state = (DocState*)doc->state;
     if (!state || !event_state_log_enabled(state->active_event_log)) return;
@@ -5524,23 +5518,23 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
 /**
  * Check if an element is a checkbox input
  */
-static bool is_checkbox(View* view) {
+static bool is_input_type(View* view, const char* expected_type) {
     if (!view || !view->is_element()) return false;
     ViewElement* elem = lam::view_require_element(view);
     if (elem->tag() != HTM_TAG_INPUT) return false;
     const char* type = elem->get_attribute("type");
-    return type && strcmp(type, "checkbox") == 0;
+    return type && strcmp(type, expected_type) == 0;
+}
+
+static bool is_checkbox(View* view) {
+    return is_input_type(view, "checkbox");
 }
 
 /**
  * Check if an element is a radio button input
  */
 static bool is_radio(View* view) {
-    if (!view || !view->is_element()) return false;
-    ViewElement* elem = lam::view_require_element(view);
-    if (elem->tag() != HTM_TAG_INPUT) return false;
-    const char* type = elem->get_attribute("type");
-    return type && strcmp(type, "radio") == 0;
+    return is_input_type(view, "radio");
 }
 
 void radiant_uncheck_radio_group(View* root, const char* name, View* exclude,
@@ -5865,17 +5859,24 @@ static bool handle_select_click(EventContext* evcon, View* target) {
     return true;
 }
 
+static ViewBlock* event_open_dropdown_select(EventContext* evcon,
+                                             DocState** out_state) {
+    DocState* state = event_context_target_state(evcon);
+    if (out_state) *out_state = state;
+    if (!state || !state->open_dropdown) return nullptr;
+    ViewBlock* select = lam::view_require_block(state->open_dropdown);
+    return select->form ? select : nullptr;
+}
+
 /**
  * Handle click on a dropdown option
  * @param mouse_y Mouse Y position in physical pixels
  * @return true if an option was selected
  */
 static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, float mouse_y) {
-    DocState* state = event_context_target_state(evcon);
-    if (!state || !state->open_dropdown) return false;
-
-    ViewBlock* select = lam::view_require_block(state->open_dropdown);
-    if (!select->form) return false;
+    DocState* state = nullptr;
+    ViewBlock* select = event_open_dropdown_select(evcon, &state);
+    if (!select) return false;
 
     float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
 
@@ -5917,11 +5918,9 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
  * Handle mouse move to update hover state in dropdown
  */
 static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mouse_y) {
-    DocState* state = event_context_target_state(evcon);
-    if (!state || !state->open_dropdown) return;
-
-    ViewBlock* select = lam::view_require_block(state->open_dropdown);
-    if (!select->form) return;
+    DocState* state = nullptr;
+    ViewBlock* select = event_open_dropdown_select(evcon, &state);
+    if (!select) return;
 
     float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
 
@@ -5949,11 +5948,9 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
  * Handle keyboard navigation in dropdown
  */
 static bool handle_dropdown_key(EventContext* evcon, int key) {
-    DocState* state = event_context_target_state(evcon);
-    if (!state || !state->open_dropdown) return false;
-
-    ViewBlock* select = lam::view_require_block(state->open_dropdown);
-    if (!select->form) return false;
+    DocState* state = nullptr;
+    ViewBlock* select = event_open_dropdown_select(evcon, &state);
+    if (!select) return false;
 
     int hover = form_control_get_hover_index(state, static_cast<View*>(select));
     int count = select->form->option_count;
@@ -5990,11 +5987,9 @@ static bool handle_dropdown_key(EventContext* evcon, int key) {
  * Close dropdown if clicking outside
  */
 static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float mouse_y) {
-    DocState* state = event_context_target_state(evcon);
-    if (!state || !state->open_dropdown) return;
-
-    ViewBlock* select = lam::view_require_block(state->open_dropdown);
-    if (!select->form) return;
+    DocState* state = nullptr;
+    ViewBlock* select = event_open_dropdown_select(evcon, &state);
+    if (!select) return;
 
     float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
 
@@ -7658,19 +7653,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (event->mouse_button.clicks >= 3) {
                         dispatch_form_select_all(&evcon, target_elem, state, evcon.target);
                     } else if (event->mouse_button.clicks == 2) {
-                        const char* select_value = target_elem->form
-                            ? target_elem->form->current_value : nullptr;
-                        uint32_t select_len = target_elem->form
-                            ? target_elem->form->current_value_len : 0;
-                        if (select_value && select_len > 0) {
-                            uint32_t click_off = char_offset < 0 ? 0 : (uint32_t)char_offset;
-                            uint32_t start = te_word_start(select_value, select_len, click_off);
-                            uint32_t end = te_word_end(select_value, select_len, click_off);
-                            if (start != end) {
-                                dispatch_form_selection_range(&evcon, target_elem, state,
-                                    evcon.target, start, end, "selectWord");
-                            }
-                        }
+                        dispatch_form_select_word(
+                            &evcon, target_elem, state, evcon.target, char_offset);
                     }
                     evcon.need_repaint = true;
 
@@ -7708,19 +7692,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         dispatch_form_selection_range(&evcon, target_elem, state,
                             evcon.target, start, end, "selectLine");
                     } else if (event->mouse_button.clicks == 2) {
-                        const char* select_value = target_elem->form
-                            ? target_elem->form->current_value : nullptr;
-                        uint32_t select_len = target_elem->form
-                            ? target_elem->form->current_value_len : 0;
-                        if (select_value && select_len > 0) {
-                            uint32_t click_off = char_offset < 0 ? 0 : (uint32_t)char_offset;
-                            uint32_t start = te_word_start(select_value, select_len, click_off);
-                            uint32_t end = te_word_end(select_value, select_len, click_off);
-                            if (start != end) {
-                                dispatch_form_selection_range(&evcon, target_elem, state,
-                                    evcon.target, start, end, "selectWord");
-                            }
-                        }
+                        dispatch_form_select_word(
+                            &evcon, target_elem, state, evcon.target, char_offset);
                     }
                     evcon.need_repaint = true;
 
@@ -8427,16 +8400,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         // Forward key events to layer-mode webview if it has focus
-        if (focused && focused->is_element()) {
-            ViewBlock* fblock = lam::view_require_block(focused);
-            if (fblock->embed && fblock->embed->webview &&
-                fblock->embed->webview->mode == WEBVIEW_MODE_LAYER &&
-                fblock->embed->webview->handle) {
-                int key_type = (event->type == RDT_EVENT_KEY_DOWN) ? 0 : 1;
-                webview_layer_platform_inject_key(fblock->embed->webview->handle,
-                    key_type, key_event->key, key_event->mods);
-                break;
-            }
+        WebViewHandle* focused_webview = focused_layer_webview_handle(focused);
+        if (focused_webview) {
+            int key_type = (event->type == RDT_EVENT_KEY_DOWN) ? 0 : 1;
+            webview_layer_platform_inject_key(
+                focused_webview, key_type, key_event->key, key_event->mods);
+            break;
         }
 
         // Tab is a keydown-only interaction in browsers — no beforeinput is
@@ -9297,15 +9266,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (state) {
                 View* focused = focus_get(state);
                 event_log_focused_target(cascade_log, cascade_id, focused);
-                if (focused && focused->is_element()) {
-                    ViewBlock* fblock = lam::view_require_block(focused);
-                    if (fblock->embed && fblock->embed->webview &&
-                        fblock->embed->webview->mode == WEBVIEW_MODE_LAYER &&
-                        fblock->embed->webview->handle) {
-                        webview_layer_platform_inject_key(fblock->embed->webview->handle,
-                            1, event->key.key, event->key.mods);
-                        break;
-                    }
+                WebViewHandle* focused_webview = focused_layer_webview_handle(focused);
+                if (focused_webview) {
+                    webview_layer_platform_inject_key(
+                        focused_webview, 1, event->key.key, event->key.mods);
+                    break;
                 }
                 if (focused) {
                     radiant_dispatch_keyboard_event(&evcon, focused,
@@ -9339,15 +9304,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("Text input: codepoint=U+%04X, focused=%p", text_event->codepoint, focused);
 
         // Forward text input to layer-mode webview if focused
-        if (focused && focused->is_element()) {
-            ViewBlock* fblock = lam::view_require_block(focused);
-            if (fblock->embed && fblock->embed->webview &&
-                fblock->embed->webview->mode == WEBVIEW_MODE_LAYER &&
-                fblock->embed->webview->handle) {
-                webview_layer_platform_inject_text(fblock->embed->webview->handle,
-                    text_event->codepoint);
-                break;
-            }
+        WebViewHandle* focused_webview = focused_layer_webview_handle(focused);
+        if (focused_webview) {
+            webview_layer_platform_inject_text(focused_webview, text_event->codepoint);
+            break;
         }
 
         // capture selection state before dispatch for correct caret adjustment

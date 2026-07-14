@@ -139,37 +139,16 @@ static bool caret_kind_to_sm_event(CaretTransitionKind kind, SmEvent* out_event)
 
 static bool selection_kind_to_sm_event(SelectionTransitionKind kind, SmEvent* out_event) {
     if (!out_event) return false;
-    switch (kind) {
-        case SELECTION_TRANSITION_START_POINTER_SELECTION:
-            *out_event = SM_EV_START_POINTER_SELECTION;
-            return true;
-        case SELECTION_TRANSITION_END_POINTER_SELECTION:
-            *out_event = SM_EV_END_POINTER_SELECTION;
-            return true;
-        case SELECTION_TRANSITION_EXTEND_TO_BOUNDARY:
-            *out_event = SM_EV_EXTEND_TO_BOUNDARY;
-            return true;
-        case SELECTION_TRANSITION_EXTEND_TO_VIEW:
-            *out_event = SM_EV_EXTEND_TO_VIEW;
-            return true;
-        case SELECTION_TRANSITION_SET_BASE_AND_EXTENT:
-            *out_event = SM_EV_SET_BASE_AND_EXTENT;
-            return true;
-        case SELECTION_TRANSITION_SELECT_ALL:
-            *out_event = SM_EV_SELECT_ALL;
-            return true;
-        case SELECTION_TRANSITION_COLLAPSE_TO_START:
-            *out_event = SM_EV_COLLAPSE_TO_START;
-            return true;
-        case SELECTION_TRANSITION_COLLAPSE_TO_END:
-            *out_event = SM_EV_COLLAPSE_TO_END;
-            return true;
-        case SELECTION_TRANSITION_CLEAR_SELECTION:
-            *out_event = SM_EV_CLEAR_SELECTION;
-            return true;
-        default:
-            return false;
-    }
+    static const SmEvent events[] = {
+        SM_EV_START_POINTER_SELECTION, SM_EV_END_POINTER_SELECTION,
+        SM_EV_EXTEND_TO_BOUNDARY, SM_EV_EXTEND_TO_VIEW,
+        SM_EV_SET_BASE_AND_EXTENT, SM_EV_SELECT_ALL,
+        SM_EV_COLLAPSE_TO_START, SM_EV_COLLAPSE_TO_END, SM_EV_CLEAR_SELECTION,
+    };
+    if (kind < SELECTION_TRANSITION_START_POINTER_SELECTION ||
+        kind > SELECTION_TRANSITION_CLEAR_SELECTION) return false;
+    *out_event = events[kind];
+    return true;
 }
 
 bool caret_transition(DocState* state,
@@ -299,28 +278,14 @@ bool active_transition(DocState* state,
 
 static bool drag_kind_to_sm_event(DragTransitionKind kind, SmEvent* out_event) {
     if (!out_event) return false;
-    switch (kind) {
-        case DRAG_TRANSITION_SET_STATE:
-            *out_event = SM_EV_DRAG_SET_STATE;
-            return true;
-        case DRAG_TRANSITION_BEGIN_DROP:
-            *out_event = SM_EV_DRAG_BEGIN_DROP;
-            return true;
-        case DRAG_TRANSITION_UPDATE_DROP_MOTION:
-            *out_event = SM_EV_DRAG_UPDATE_MOTION;
-            return true;
-        case DRAG_TRANSITION_SET_DROP_ACTIVE:
-            *out_event = SM_EV_DRAG_SET_DROP_ACTIVE;
-            return true;
-        case DRAG_TRANSITION_SET_DROP_TARGET:
-            *out_event = SM_EV_DRAG_SET_DROP_TARGET;
-            return true;
-        case DRAG_TRANSITION_CLEAR_DROP:
-            *out_event = SM_EV_DRAG_CLEAR_DROP;
-            return true;
-        default:
-            return false;
-    }
+    static const SmEvent events[] = {
+        SM_EV_DRAG_SET_STATE, SM_EV_DRAG_BEGIN_DROP,
+        SM_EV_DRAG_UPDATE_MOTION, SM_EV_DRAG_SET_DROP_ACTIVE,
+        SM_EV_DRAG_SET_DROP_TARGET, SM_EV_DRAG_CLEAR_DROP,
+    };
+    if (kind < DRAG_TRANSITION_SET_STATE || kind > DRAG_TRANSITION_CLEAR_DROP) return false;
+    *out_event = events[kind];
+    return true;
 }
 
 static View* drag_transition_target(DragTransitionKind kind, DragTransitionArgs* args) {

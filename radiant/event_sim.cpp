@@ -536,6 +536,27 @@ static const char* serialize_css_enum(CssEnum value) {
     return info ? info->name : "unknown";
 }
 
+static bool serialize_spacing_side(const char* property,
+                                   const char* const names[4],
+                                   const Spacing* spacing,
+                                   StrBuf* buf) {
+    for (int side = 0; side < 4; side++) {
+        if (strcmp(property, names[side]) != 0) continue;
+        float value = 0;
+        if (spacing) {
+            const float values[] = {
+                spacing->top, spacing->right, spacing->bottom, spacing->left
+            };
+            value = values[side];
+        }
+        char tmp[64];
+        snprintf(tmp, sizeof(tmp), "%.4gpx", value);
+        strbuf_append_str(buf, tmp);
+        return true;
+    }
+    return false;
+}
+
 // Get computed style value for a CSS property on an element
 // Returns true if property was found, writes serialized value to buf
 static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
@@ -676,67 +697,24 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
         }
         return true;
     }
-    // margin-top/right/bottom/left
-    if (strcmp(property, "margin-top") == 0) {
-        if (elem->bound) { snprintf(tmp, sizeof(tmp), "%.4gpx", elem->bound->margin.top); strbuf_append_str(buf, tmp); }
-        else strbuf_append_str(buf, "0px");
-        return true;
-    }
-    if (strcmp(property, "margin-right") == 0) {
-        if (elem->bound) { snprintf(tmp, sizeof(tmp), "%.4gpx", elem->bound->margin.right); strbuf_append_str(buf, tmp); }
-        else strbuf_append_str(buf, "0px");
-        return true;
-    }
-    if (strcmp(property, "margin-bottom") == 0) {
-        if (elem->bound) { snprintf(tmp, sizeof(tmp), "%.4gpx", elem->bound->margin.bottom); strbuf_append_str(buf, tmp); }
-        else strbuf_append_str(buf, "0px");
-        return true;
-    }
-    if (strcmp(property, "margin-left") == 0) {
-        if (elem->bound) { snprintf(tmp, sizeof(tmp), "%.4gpx", elem->bound->margin.left); strbuf_append_str(buf, tmp); }
-        else strbuf_append_str(buf, "0px");
-        return true;
-    }
-    // padding-top/right/bottom/left
-    if (strcmp(property, "padding-top") == 0) {
-        if (elem->bound) { snprintf(tmp, sizeof(tmp), "%.4gpx", elem->bound->padding.top); strbuf_append_str(buf, tmp); }
-        else strbuf_append_str(buf, "0px");
-        return true;
-    }
-    if (strcmp(property, "padding-right") == 0) {
-        if (elem->bound) { snprintf(tmp, sizeof(tmp), "%.4gpx", elem->bound->padding.right); strbuf_append_str(buf, tmp); }
-        else strbuf_append_str(buf, "0px");
-        return true;
-    }
-    if (strcmp(property, "padding-bottom") == 0) {
-        if (elem->bound) { snprintf(tmp, sizeof(tmp), "%.4gpx", elem->bound->padding.bottom); strbuf_append_str(buf, tmp); }
-        else strbuf_append_str(buf, "0px");
-        return true;
-    }
-    if (strcmp(property, "padding-left") == 0) {
-        if (elem->bound) { snprintf(tmp, sizeof(tmp), "%.4gpx", elem->bound->padding.left); strbuf_append_str(buf, tmp); }
-        else strbuf_append_str(buf, "0px");
-        return true;
-    }
-    // border-*-width
-    if (strcmp(property, "border-top-width") == 0) {
-        if (elem->bound && elem->bound->border) { snprintf(tmp, sizeof(tmp), "%.4gpx", elem->bound->border->width.top); strbuf_append_str(buf, tmp); }
-        else strbuf_append_str(buf, "0px");
-        return true;
-    }
-    if (strcmp(property, "border-right-width") == 0) {
-        if (elem->bound && elem->bound->border) { snprintf(tmp, sizeof(tmp), "%.4gpx", elem->bound->border->width.right); strbuf_append_str(buf, tmp); }
-        else strbuf_append_str(buf, "0px");
-        return true;
-    }
-    if (strcmp(property, "border-bottom-width") == 0) {
-        if (elem->bound && elem->bound->border) { snprintf(tmp, sizeof(tmp), "%.4gpx", elem->bound->border->width.bottom); strbuf_append_str(buf, tmp); }
-        else strbuf_append_str(buf, "0px");
-        return true;
-    }
-    if (strcmp(property, "border-left-width") == 0) {
-        if (elem->bound && elem->bound->border) { snprintf(tmp, sizeof(tmp), "%.4gpx", elem->bound->border->width.left); strbuf_append_str(buf, tmp); }
-        else strbuf_append_str(buf, "0px");
+    static const char* margin_names[] = {
+        "margin-top", "margin-right", "margin-bottom", "margin-left"
+    };
+    static const char* padding_names[] = {
+        "padding-top", "padding-right", "padding-bottom", "padding-left"
+    };
+    static const char* border_width_names[] = {
+        "border-top-width", "border-right-width",
+        "border-bottom-width", "border-left-width"
+    };
+    if (serialize_spacing_side(property, margin_names,
+                               elem->bound ? &elem->bound->margin : nullptr, buf) ||
+        serialize_spacing_side(property, padding_names,
+                               elem->bound ? &elem->bound->padding : nullptr, buf) ||
+        serialize_spacing_side(property, border_width_names,
+                               elem->bound && elem->bound->border
+                                   ? &elem->bound->border->width : nullptr,
+                               buf)) {
         return true;
     }
     // border-*-color
@@ -1027,6 +1005,32 @@ static void parse_target(MapReader& reader, SimEvent* ev) {
     }
 }
 
+static void parse_to_target(MapReader& reader, SimEvent* ev,
+                            bool with_text_range) {
+    ItemReader item = reader.get("to_target");
+    if (!item.isMap()) return;
+    MapReader target = item.asMap();
+    const char* selector = target.get("selector").cstring();
+    if (selector) ev->to_target_selector = mem_strdup(selector, MEM_CAT_LAYOUT);
+    const char* text = target.get("text").cstring();
+    if (text) ev->to_target_text = mem_strdup(text, MEM_CAT_LAYOUT);
+    if (with_text_range) {
+        ev->drag_target_start = target.get("start").asInt32();
+        ev->drag_target_end = target.has("end")
+            ? target.get("end").asInt32() : ev->drag_target_start;
+    }
+}
+
+static void parse_assert_count(MapReader& reader, SimEvent* ev) {
+    ev->assert_count_expected = -1;
+    ev->assert_count_min = -1;
+    ev->assert_count_max = -1;
+    if (reader.has("count")) ev->assert_count_expected = reader.get("count").asInt32();
+    if (reader.has("equals")) ev->assert_count_expected = reader.get("equals").asInt32();
+    if (reader.has("min")) ev->assert_count_min = reader.get("min").asInt32();
+    if (reader.has("max")) ev->assert_count_max = reader.get("max").asInt32();
+}
+
 static void parse_pointer_fields(MapReader& reader, SimEvent* ev) {
     ev->x = reader.get("x").asInt32();
     ev->y = reader.get("y").asInt32();
@@ -1092,28 +1096,12 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             ev->drag_dy = reader.get("dy").asInt32();
         }
         parse_target(reader, ev);
-        // Parse to_target for destination selector/text
-        ItemReader to_target_item = reader.get("to_target");
-        if (to_target_item.isMap()) {
-            MapReader to_map = to_target_item.asMap();
-            const char* sel = to_map.get("selector").cstring();
-            if (sel) ev->to_target_selector = mem_strdup(sel, MEM_CAT_LAYOUT);
-            const char* txt = to_map.get("text").cstring();
-            if (txt) ev->to_target_text = mem_strdup(txt, MEM_CAT_LAYOUT);
-        }
+        parse_to_target(reader, ev, false);
     }
     else if (strcmp(type_str, "drag_and_drop") == 0) {
         ev->type = SIM_EVENT_DRAG_AND_DROP;
         parse_target(reader, ev);
-        // Parse to_target for drop destination
-        ItemReader to_target_item = reader.get("to_target");
-        if (to_target_item.isMap()) {
-            MapReader to_map = to_target_item.asMap();
-            const char* sel = to_map.get("selector").cstring();
-            if (sel) ev->to_target_selector = mem_strdup(sel, MEM_CAT_LAYOUT);
-            const char* txt = to_map.get("text").cstring();
-            if (txt) ev->to_target_text = mem_strdup(txt, MEM_CAT_LAYOUT);
-        }
+        parse_to_target(reader, ev, false);
         int steps = reader.get("steps").asInt32();
         ev->drag_steps = steps > 0 ? steps : 5;
         if (!ev->target_selector && !ev->target_text) {
@@ -1144,18 +1132,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->drag_source_end = reader.has("source_end")
             ? reader.get("source_end").asInt32()
             : ev->drag_source_end;
-        ItemReader to_target_item = reader.get("to_target");
-        if (to_target_item.isMap()) {
-            MapReader to_map = to_target_item.asMap();
-            const char* sel = to_map.get("selector").cstring();
-            if (sel) ev->to_target_selector = mem_strdup(sel, MEM_CAT_LAYOUT);
-            const char* txt = to_map.get("text").cstring();
-            if (txt) ev->to_target_text = mem_strdup(txt, MEM_CAT_LAYOUT);
-            ev->drag_target_start = to_map.get("start").asInt32();
-            ev->drag_target_end = to_map.has("end")
-                ? to_map.get("end").asInt32()
-                : ev->drag_target_start;
-        }
+        parse_to_target(reader, ev, true);
         ev->drag_target_start = reader.has("target_start")
             ? reader.get("target_start").asInt32()
             : ev->drag_target_start;
@@ -1548,13 +1525,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     else if (strcmp(type_str, "assert_count") == 0) {
         ev->type = SIM_EVENT_ASSERT_COUNT;
         parse_target(reader, ev);
-        ev->assert_count_expected = -1;
-        ev->assert_count_min = -1;
-        ev->assert_count_max = -1;
-        if (reader.has("count")) ev->assert_count_expected = reader.get("count").asInt32();
-        if (reader.has("equals")) ev->assert_count_expected = reader.get("equals").asInt32();
-        if (reader.has("min")) ev->assert_count_min = reader.get("min").asInt32();
-        if (reader.has("max")) ev->assert_count_max = reader.get("max").asInt32();
+        parse_assert_count(reader, ev);
         if (!ev->target_selector) {
             log_error("event_sim: assert_count requires 'target' CSS selector");
             mem_free(ev);
@@ -1707,13 +1678,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->type = SIM_EVENT_ASSERT_EVENT_LOG;
         const char* contains = reader.get("contains").cstring();
         if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
-        ev->assert_count_expected = -1;
-        ev->assert_count_min = -1;
-        ev->assert_count_max = -1;
-        if (reader.has("count")) ev->assert_count_expected = reader.get("count").asInt32();
-        if (reader.has("equals")) ev->assert_count_expected = reader.get("equals").asInt32();
-        if (reader.has("min")) ev->assert_count_min = reader.get("min").asInt32();
-        if (reader.has("max")) ev->assert_count_max = reader.get("max").asInt32();
+        parse_assert_count(reader, ev);
         if (!ev->assert_contains) {
             log_error("event_sim: assert_event_log requires 'contains'");
             mem_free(ev);
@@ -1780,13 +1745,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             ev->has_expected_redacted = true;
             ev->expected_redacted = reader.get("redacted").asBool();
         }
-        ev->assert_count_expected = -1;
-        ev->assert_count_min = -1;
-        ev->assert_count_max = -1;
-        if (reader.has("count")) ev->assert_count_expected = reader.get("count").asInt32();
-        if (reader.has("equals")) ev->assert_count_expected = reader.get("equals").asInt32();
-        if (reader.has("min")) ev->assert_count_min = reader.get("min").asInt32();
-        if (reader.has("max")) ev->assert_count_max = reader.get("max").asInt32();
+        parse_assert_count(reader, ev);
         if (!ev->editing_event_type) {
             log_error("event_sim: assert_editing_event requires 'event'");
             mem_free(ev);
@@ -4010,71 +3969,15 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // Find matching option by value or label
             int match_index = -1;
             int idx = 0;
-            DomNode* child = select->first_child;
-            while (child) {
-                if (child->is_element()) {
-                    DomElement* child_elem = lam::dom_require_element(child);
-                    if (child_elem->tag() == HTM_TAG_OPTION) {
-                        if (ev->option_value) {
-                            const char* val = dom_element_get_attribute(child_elem, "value");
-                            if (val && strcmp(val, ev->option_value) == 0) {
-                                match_index = idx;
-                                break;
-                            }
-                        }
-                        if (ev->option_label) {
-                            // Match by visible text content
-                            DomNode* text_child = child_elem->first_child;
-                            while (text_child) {
-                                if (text_child->is_text()) {
-                                    DomText* text = lam::dom_require_text(text_child);
-                                    if (text->text && strcmp(text->text, ev->option_label) == 0) {
-                                        match_index = idx;
-                                        break;
-                                    }
-                                }
-                                text_child = text_child->next_sibling;
-                            }
-                            if (match_index >= 0) break;
-                        }
-                        idx++;
-                    } else if (child_elem->tag() == HTM_TAG_OPTGROUP) {
-                        // Search options inside optgroup
-                        DomNode* opt_child = child_elem->first_child;
-                        while (opt_child) {
-                            if (opt_child->is_element()) {
-                                DomElement* opt_elem = lam::dom_require_element(opt_child);
-                                if (opt_elem->tag() == HTM_TAG_OPTION) {
-                                    if (ev->option_value) {
-                                        const char* val = dom_element_get_attribute(opt_elem, "value");
-                                        if (val && strcmp(val, ev->option_value) == 0) {
-                                            match_index = idx;
-                                            break;
-                                        }
-                                    }
-                                    if (ev->option_label) {
-                                        DomNode* text_child = opt_elem->first_child;
-                                        while (text_child) {
-                                            if (text_child->is_text()) {
-                                                DomText* text = lam::dom_require_text(text_child);
-                                                if (text->text && strcmp(text->text, ev->option_label) == 0) {
-                                                    match_index = idx;
-                                                    break;
-                                                }
-                                            }
-                                            text_child = text_child->next_sibling;
-                                        }
-                                        if (match_index >= 0) break;
-                                    }
-                                    idx++;
-                                }
-                            }
-                            opt_child = opt_child->next_sibling;
-                        }
-                        if (match_index >= 0) break;
-                    }
+            for (DomElement* option = dom_select_next_option(select, nullptr); option;
+                 option = dom_select_next_option(select, option), idx++) {
+                const char* value_attr = dom_element_get_attribute(option, "value");
+                const char* label = dom_option_text(option);
+                if ((ev->option_value && value_attr && strcmp(value_attr, ev->option_value) == 0) ||
+                    (ev->option_label && label && strcmp(label, ev->option_label) == 0)) {
+                    match_index = idx;
+                    break;
                 }
-                child = child->next_sibling;
             }
             if (match_index < 0) {
                 log_error("event_sim: select_option - no matching option found (value='%s', label='%s')",

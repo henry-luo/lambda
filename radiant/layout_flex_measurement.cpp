@@ -262,55 +262,6 @@ static float get_explicit_css_width(LayoutContext* lycon, ViewElement* elem) {
     return get_explicit_css_length(lycon, elem, CSS_PROPERTY_WIDTH);
 }
 
-static float resolve_flex_line_height_for_owner(LayoutContext* lycon, const CssValue* value,
-                                                DomElement* owner, DomElement* target) {
-    if (!lycon || !value) return 0;
-
-    float target_font_size = lycon->font.current_font_size;
-    if (target && target->font && target->font->font_size > 0) {
-        target_font_size = target->font->font_size;
-    }
-
-    if (value->type == CSS_VALUE_TYPE_NUMBER) {
-        return value->data.number.value * target_font_size;
-    }
-
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        if (value->data.keyword == CSS_VALUE_NORMAL && lycon->font.font_handle) {
-            return calc_normal_line_height(lycon->font.font_handle);
-        }
-        return 0;
-    }
-
-    float resolved_percentage = 0.0f;
-    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        float owner_font_size = target_font_size;
-        if (owner && owner->font && owner->font->font_size > 0) {
-            owner_font_size = owner->font->font_size;
-        }
-        return layout_resolve_percentage_value(value, owner_font_size, &resolved_percentage)
-            ? resolved_percentage : 0.0f;
-    }
-
-    if (value->type == CSS_VALUE_TYPE_LENGTH) {
-        CssUnit unit = value->data.length.unit;
-        if (unit == CSS_UNIT_EM || unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
-            float owner_font_size = target_font_size;
-            if (owner && owner->font && owner->font->font_size > 0) {
-                owner_font_size = owner->font->font_size;
-            }
-            float multiplier = (float)value->data.length.value;
-            if (unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
-                multiplier *= 0.5f;
-            }
-            return multiplier * owner_font_size;
-        }
-        return resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
-    }
-
-    return resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
-}
-
 static bool flex_element_has_declared_line_height(DomElement* elem) {
     if (!elem || !elem->specified_style) return false;
     return style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_LINE_HEIGHT) != nullptr ||
@@ -319,6 +270,8 @@ static bool flex_element_has_declared_line_height(DomElement* elem) {
 
 static float resolve_flex_inherited_line_height(LayoutContext* lycon, DomElement* target) {
     if (!lycon || !target) return 0;
+    float target_font_size = target->font && target->font->font_size > 0.0f
+        ? target->font->font_size : lycon->font.current_font_size;
 
     for (DomElement* elem = target; elem; ) {
         bool has_declared_lh = flex_element_has_declared_line_height(elem);
@@ -326,7 +279,8 @@ static float resolve_flex_inherited_line_height(LayoutContext* lycon, DomElement
         if (has_declared_lh && view && view->blk && view->blk->line_height) {
             const CssValue* lh = view->blk->line_height;
             if (!(lh->type == CSS_VALUE_TYPE_KEYWORD && lh->data.keyword == CSS_VALUE_INHERIT)) {
-                return resolve_flex_line_height_for_owner(lycon, lh, elem, target);
+                return layout_resolve_line_height_value(
+                    lycon, lh, elem, target_font_size);
             }
         }
 
@@ -336,7 +290,8 @@ static float resolve_flex_inherited_line_height(LayoutContext* lycon, DomElement
             if (decl && decl->value &&
                 !(decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
                   decl->value->data.keyword == CSS_VALUE_INHERIT)) {
-                return resolve_flex_line_height_for_owner(lycon, decl->value, elem, target);
+                return layout_resolve_line_height_value(
+                    lycon, decl->value, elem, target_font_size);
             }
         }
 
@@ -879,15 +834,10 @@ static float flex_measure_direct_text_children_max_width(LayoutContext* lycon,
 static float flex_measure_select_max_option_text_width(LayoutContext* lycon,
                                                        ViewElement* elem) {
     float max_text_width = 0.0f;
-    for (DomNode* opt = elem ? elem->first_child : nullptr; opt; opt = opt->next_sibling) {
-        if (!opt->is_element()) continue;
-        DomElement* oe = opt->as_element();
-        uintptr_t otag = oe->tag();
-        if (otag == HTM_TAG_OPTION) {
-            float option_width = flex_measure_direct_text_children_max_width(lycon, oe);
-            if (option_width > max_text_width) max_text_width = option_width;
-        } else if (otag == HTM_TAG_OPTGROUP) {
-            const char* lbl = oe->get_attribute("label");
+    for (DomNode* child = elem ? elem->first_child : nullptr; child; child = child->next_sibling) {
+        DomElement* group = child->as_element();
+        if (group && group->tag() == HTM_TAG_OPTGROUP) {
+            const char* lbl = group->get_attribute("label");
             if (lbl) {
                 size_t ll = strlen(lbl);
                 if (ll > 0) {
@@ -895,17 +845,19 @@ static float flex_measure_select_max_option_text_width(LayoutContext* lycon,
                     if (tw.max_content > max_text_width) max_text_width = tw.max_content;
                 }
             }
-            for (DomNode* gc = oe->first_child; gc; gc = gc->next_sibling) {
-                if (!gc->is_element() || gc->as_element()->tag() != HTM_TAG_OPTION) continue;
-                float opt_text_width =
-                    flex_measure_direct_text_children_max_width(lycon, gc->as_element());
-                float effective = opt_text_width + FormDefaults::OPTGROUP_OPTION_INDENT;
-                if (effective < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH) {
-                    effective = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
-                }
-                if (effective > max_text_width) max_text_width = effective;
+        }
+    }
+    for (DomElement* option = dom_select_next_option(elem, nullptr); option;
+         option = dom_select_next_option(elem, option)) {
+        float option_width = flex_measure_direct_text_children_max_width(lycon, option);
+        DomElement* parent = option->parent ? option->parent->as_element() : nullptr;
+        if (parent && parent->tag() == HTM_TAG_OPTGROUP) {
+            option_width += FormDefaults::OPTGROUP_OPTION_INDENT;
+            if (option_width < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH) {
+                option_width = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
             }
         }
+        if (option_width > max_text_width) max_text_width = option_width;
     }
     return max_text_width;
 }

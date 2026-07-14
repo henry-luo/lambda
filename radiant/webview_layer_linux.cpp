@@ -122,23 +122,6 @@ static void on_layer_script_message(WebKitUserContentManager* manager,
 // lambda:// URI scheme handler (same logic as child backend)
 // ---------------------------------------------------------------------------
 
-static const char* layer_mime_for_ext(const char* path) {
-    const char* dot = strrchr(path, '.');
-    if (!dot) return "application/octet-stream";
-    dot++;
-    if      (strcasecmp(dot, "html") == 0 || strcasecmp(dot, "htm") == 0) return "text/html";
-    else if (strcasecmp(dot, "css")  == 0) return "text/css";
-    else if (strcasecmp(dot, "js")   == 0) return "application/javascript";
-    else if (strcasecmp(dot, "json") == 0) return "application/json";
-    else if (strcasecmp(dot, "png")  == 0) return "image/png";
-    else if (strcasecmp(dot, "jpg")  == 0 || strcasecmp(dot, "jpeg") == 0) return "image/jpeg";
-    else if (strcasecmp(dot, "gif")  == 0) return "image/gif";
-    else if (strcasecmp(dot, "svg")  == 0) return "image/svg+xml";
-    else if (strcasecmp(dot, "woff") == 0) return "font/woff";
-    else if (strcasecmp(dot, "woff2")== 0) return "font/woff2";
-    return "application/octet-stream";
-}
-
 static void on_layer_lambda_scheme(WebKitURISchemeRequest* request, gpointer user_data) {
     (void)user_data;
     const char* path = webkit_uri_scheme_request_get_path(request);
@@ -194,7 +177,7 @@ static void on_layer_lambda_scheme(WebKitURISchemeRequest* request, gpointer use
     g_mapped_file_unref(mapped);
 
     webkit_uri_scheme_request_finish(request, stream, (gint64)data_len,
-                                     layer_mime_for_ext(full_path));
+                                     webview_linux_mime_for_path(full_path));
     g_object_unref(stream);
 }
 

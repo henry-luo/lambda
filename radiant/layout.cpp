@@ -689,6 +689,85 @@ float calc_normal_line_height(FontHandle* handle) {
     return font_calc_normal_line_height(handle);
 }
 
+CssEnum layout_specified_keyword(DomElement* element, CssPropertyId property,
+                                 CssEnum fallback) {
+    if (!element || !element->specified_style) return fallback;
+    CssDeclaration* declaration =
+        style_tree_get_declaration(element->specified_style, property);
+    if (!declaration || !declaration->value ||
+        declaration->value->type != CSS_VALUE_TYPE_KEYWORD) {
+        return fallback;
+    }
+    return declaration->value->data.keyword;
+}
+
+float layout_resolve_line_height_value(LayoutContext* lycon, const CssValue* value,
+                                       DomElement* owner, float target_font_size) {
+    if (!lycon || !value) return 0.0f;
+    if (target_font_size <= 0.0f) target_font_size = 16.0f;
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        return value->data.number.value * target_font_size;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        return value->data.keyword == CSS_VALUE_NORMAL && lycon->font.font_handle
+            ? calc_normal_line_height(lycon->font.font_handle) : 0.0f;
+    }
+
+    float owner_font_size = owner && owner->font && owner->font->font_size > 0.0f
+        ? owner->font->font_size : target_font_size;
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        float resolved = 0.0f;
+        return layout_resolve_percentage_value(value, owner_font_size, &resolved)
+            ? resolved : 0.0f;
+    }
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        CssUnit unit = value->data.length.unit;
+        if (unit == CSS_UNIT_EM || unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
+            float multiplier = (float)value->data.length.value;
+            if (unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) multiplier *= 0.5f;
+            return multiplier * owner_font_size;
+        }
+    }
+    return resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
+}
+
+float layout_measure_space_advance(LayoutContext* lycon, FontHandle* handle,
+                                   FontProp* style) {
+    if (!style) return 0.0f;
+    if (!handle) handle = style->font_handle;
+    if (handle) {
+        FontStyleDesc desc = font_style_desc_from_prop(style);
+        LoadedGlyph* glyph = font_load_glyph(handle, &desc, (uint32_t)' ', false);
+        if (glyph && glyph->advance_x > 0.0f) {
+            float pixel_ratio = lycon->ui_context && lycon->ui_context->pixel_ratio > 0.0f
+                ? lycon->ui_context->pixel_ratio : 1.0f;
+            return glyph->advance_x / pixel_ratio;
+        }
+    }
+    return style->space_width;
+}
+
+size_t layout_normalize_collapsible_whitespace(const char* text, size_t length,
+                                               char* buffer, size_t buffer_size) {
+    if (!text || !buffer || buffer_size == 0) return 0;
+    size_t out_pos = 0;
+    bool in_whitespace = true;
+    for (size_t i = 0; i < length && out_pos + 1 < buffer_size; i++) {
+        unsigned char ch = (unsigned char)text[i];
+        bool whitespace = ch == ' ' || ch == '\t' || ch == '\n' ||
+                          ch == '\r' || ch == '\f';
+        if (whitespace) {
+            if (!in_whitespace) buffer[out_pos++] = ' ';
+        } else {
+            buffer[out_pos++] = (char)ch;
+        }
+        in_whitespace = whitespace;
+    }
+    if (out_pos > 0 && buffer[out_pos - 1] == ' ') out_pos--;
+    buffer[out_pos] = '\0';
+    return out_pos;
+}
+
 CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
     // Inherit line height from parent
     INHERIT:
@@ -815,6 +894,28 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
             lycon->block.line_height_is_normal = false;
         }
     }
+}
+
+void layout_setup_block_font_metrics(LayoutContext* lycon) {
+    if (!lycon || !lycon->font.font_handle) return;
+    if (lycon->block.line_height_is_normal) {
+        font_get_normal_lh_split(lycon->font.font_handle,
+            &lycon->block.init_ascender, &lycon->block.init_descender);
+    } else {
+        TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
+        if (typo.valid && typo.use_typo_metrics) {
+            lycon->block.init_ascender = typo.ascender;
+            lycon->block.init_descender = typo.descender;
+        } else {
+            const FontMetrics* metrics = font_get_metrics(lycon->font.font_handle);
+            if (metrics) {
+                lycon->block.init_ascender = metrics->hhea_ascender;
+                lycon->block.init_descender = -metrics->hhea_descender;
+            }
+        }
+    }
+    lycon->block.lead_y = max(0.0f, (lycon->block.line_height -
+        (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f);
 }
 
 // DomNode style resolution function
@@ -2171,18 +2272,9 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         // First check if position is already resolved
         if (elem->position) {
             float_value = elem->position->float_prop;
-        } else if (elem->specified_style && elem->specified_style->tree) {
-            // Check float property from CSS style tree
-            AvlNode* float_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_FLOAT);
-            if (float_node) {
-                StyleNode* style_node = (StyleNode*)float_node->declaration;
-                if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
-                    CssValue* val = style_node->winning_decl->value;
-                    if (val->type == CSS_VALUE_TYPE_KEYWORD) {
-                        float_value = val->data.keyword;
-                    }
-                }
-            }
+        } else {
+            float_value = layout_specified_keyword(
+                elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
         }
 
         if (float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT) {
@@ -2209,17 +2301,9 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         CssEnum position_value = CSS_VALUE_STATIC;
         if (elem->position) {
             position_value = elem->position->position;
-        } else if (elem->specified_style && elem->specified_style->tree) {
-            AvlNode* pos_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_POSITION);
-            if (pos_node) {
-                StyleNode* style_node = (StyleNode*)pos_node->declaration;
-                if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
-                    CssValue* val = style_node->winning_decl->value;
-                    if (val->type == CSS_VALUE_TYPE_KEYWORD) {
-                        position_value = val->data.keyword;
-                    }
-                }
-            }
+        } else {
+            position_value = layout_specified_keyword(
+                elem, CSS_PROPERTY_POSITION, CSS_VALUE_STATIC);
         }
 
         if (position_value == CSS_VALUE_ABSOLUTE || position_value == CSS_VALUE_FIXED) {

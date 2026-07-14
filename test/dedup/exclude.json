@@ -174,6 +174,7 @@
       "id": "independent_flex_line_reductions",
       "modules": ["radiant"],
       "reason": "These functions independently reduce or position flex-line items; Lizard normalizes their short collection-loop prologues but sharing the unrelated bodies would require callback scaffolding and increase code size.",
+      "allow_within_region": true,
       "regions": [
         {
           "file": "radiant/layout_flex.cpp",
@@ -209,6 +210,47 @@
           "file": "radiant/layout_flex.cpp",
           "start": "void align_items_main_axis(",
           "end": "void align_items_cross_axis("
+        },
+        {
+          "file": "radiant/layout_flex.cpp",
+          "start": "void layout_flex_container(",
+          "end": "static void sort_flex_items_by_order("
+        },
+        {
+          "file": "radiant/layout_flex.cpp",
+          "start": "return baseline_extent > metrics->max_non_baseline_cross ?",
+          "end": "static bool flex_baseline_child_is_positioned("
+        },
+        {
+          "file": "radiant/layout_flex.cpp",
+          "start": "// CSS Flexbox §9.4: Determine hypothetical cross size of each item",
+          "end": "// CSS Flexbox §9.4: Determine container cross size from line cross sizes"
+        }
+      ]
+    },
+    {
+      "id": "independent_grid_baseline_passes",
+      "modules": ["radiant"],
+      "reason": "Grid baseline alignment requires distinct collect, resize, reposition, shift, and restore passes over the item array; Lizard reports only their identical loop and item-validation prologues, while each pass mutates different state.",
+      "allow_within_region": true,
+      "regions": [
+        {
+          "file": "radiant/grid_positioning.cpp",
+          "start": "void align_grid_items(",
+          "end": "void align_grid_item("
+        }
+      ]
+    },
+    {
+      "id": "webdriver_route_guard_prologues",
+      "modules": ["radiant"],
+      "reason": "WebDriver routes must remain separate HTTP callbacks, and their repeated lines are only calls to the already-shared session or session-element validation helpers before unrelated command bodies.",
+      "allow_within_region": true,
+      "regions": [
+        {
+          "file": "radiant/webdriver/webdriver_server.cpp",
+          "start": "static void wd_handle_element_command(",
+          "end": "WebDriverServer* webdriver_server_create("
         }
       ]
     },
@@ -219,12 +261,12 @@
       "regions": [
         {
           "file": "radiant/rdt_vector_tvg.cpp",
-          "start": "void rdt_vector_set_tile_offset_y(",
+          "start": "void rdt_vector_set_target(",
           "end": "// Path construction"
         },
         {
           "file": "radiant/rdt_vector_cg.mm",
-          "start": "void rdt_vector_set_tile_offset_y(",
+          "start": "void rdt_vector_set_target(",
           "end": "// Path construction"
         }
       ]
@@ -236,12 +278,12 @@
       "regions": [
         {
           "file": "radiant/rdt_vector_tvg.cpp",
-          "start": "void rdt_fill_linear_gradient(",
+          "start": "static uint64_t tvg_gradient_hash(",
           "end": "void rdt_fill_radial_gradient("
         },
         {
           "file": "radiant/rdt_vector_cg.mm",
-          "start": "void rdt_fill_linear_gradient(",
+          "start": "static CGGradientRef cg_begin_gradient_fill(",
           "end": "void rdt_fill_radial_gradient("
         },
         {

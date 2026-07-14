@@ -175,6 +175,8 @@ static void offset_children_recursive(ViewElement* elem, float offset_x, float o
     }
 }
 
+static TextDirection get_static_position_direction(ViewElement* parent);
+
 void layout_relative_position_offset(ViewBlock* block, float* offset_x_out, float* offset_y_out) {
     float offset_x = 0.0f;
     float offset_y = 0.0f;
@@ -185,32 +187,8 @@ void layout_relative_position_offset(ViewBlock* block, float* offset_x_out, floa
         return;
     }
 
-    // Get parent's text direction to determine horizontal offset precedence
-    // The CSS 'direction' property determines which value wins when both left and right are specified
-    TextDirection parent_direction = TD_LTR;  // default to LTR
     ViewElement* parent = block->parent_view();
-    if (parent && parent->is_element()) {
-        DomElement* parent_elem = lam::dom_require<DOM_NODE_ELEMENT>(parent);
-        // Use the computed direction from BlockProp if available (set during CSS resolution)
-        if (parent_elem->blk && parent_elem->blk->direction == CSS_VALUE_RTL) {
-            parent_direction = TD_RTL;
-            log_debug("Parent has direction: rtl (from BlockProp)");
-        } else if (parent_elem->specified_style) {
-            // Fall back to querying specified_style for elements without BlockProp
-            CssValue* direction_value = (CssValue*)style_tree_get_computed_value(
-                parent_elem->specified_style,
-                CSS_PROPERTY_DIRECTION,
-                parent_elem->parent && parent_elem->parent->is_element() ?
-                    lam::dom_require<DOM_NODE_ELEMENT>(parent_elem->parent)->specified_style : NULL
-            );
-
-            if (direction_value && direction_value->type == CSS_VALUE_TYPE_KEYWORD &&
-                direction_value->data.keyword == CSS_VALUE_RTL) {
-                parent_direction = TD_RTL;
-                log_debug("Parent has direction: rtl (from specified_style)");
-            }
-        }
-    }
+    TextDirection parent_direction = get_static_position_direction(parent);
 
     // Get containing block dimensions for percentage resolution
     // CSS Position 3 §3.4: percentage top/bottom resolve against containing block height,
@@ -637,12 +615,12 @@ static TextDirection get_static_position_direction(ViewElement* parent) {
         if (parent_elem->blk && parent_elem->blk->direction == CSS_VALUE_RTL) {
             static_direction = TD_RTL;
         } else if (parent_elem->specified_style) {
-            CssValue* dir_val = (CssValue*)style_tree_get_computed_value(
+            CssValue* direction = (CssValue*)style_tree_get_computed_value(
                 parent_elem->specified_style, CSS_PROPERTY_DIRECTION,
                 parent_elem->parent && parent_elem->parent->is_element() ?
                     lam::dom_require<DOM_NODE_ELEMENT>(parent_elem->parent)->specified_style : NULL);
-            if (dir_val && dir_val->type == CSS_VALUE_TYPE_KEYWORD &&
-                dir_val->data.keyword == CSS_VALUE_RTL) {
+            if (direction && direction->type == CSS_VALUE_TYPE_KEYWORD &&
+                direction->data.keyword == CSS_VALUE_RTL) {
                 static_direction = TD_RTL;
             }
         }
@@ -682,6 +660,25 @@ static float calculate_static_line_x(BlockContext* pa_block, Linebox* pa_line,
     }
 
     return line_x;
+}
+
+static float containing_block_padding_width(ViewBlock* cb, float* border_left_out) {
+    float border_left = (cb->bound && cb->bound->border) ? cb->bound->border->width.left : 0.0f;
+    float border_right = (cb->bound && cb->bound->border) ? cb->bound->border->width.right : 0.0f;
+    if (border_left_out) *border_left_out = border_left;
+    return cb->width - border_left - border_right;
+}
+
+static void recalculate_right_positioned_x(ViewBlock* block, ViewBlock* cb,
+                                           const char* reason) {
+    float border_left = 0.0f;
+    float padding_width = containing_block_padding_width(cb, &border_left);
+    float margin_right = block->bound ? block->bound->margin.right : 0.0f;
+    block->x = border_left + padding_width - block->position->right -
+        margin_right - block->width;
+    // Position offsets stay float through logging; an integer format here corrupts varargs.
+    log_debug("right-positioned X recalculated: reason=%s x=%.1f padding=%.1f right=%.1f width=%.1f",
+              reason, block->x, padding_width, block->position->right, block->width);
 }
 
 // calculate absolute position based on containing block and offset properties
@@ -1327,13 +1324,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             // (shrink-to-fit or 0 for auto), but the IMG sizing code may have changed
             // the dimensions via aspect ratio. Re-derive x/y from the new block size.
             if (block->position->has_right && !block->position->has_left) {
-                float cb_border_left = (cb->bound && cb->bound->border) ? cb->bound->border->width.left : 0;
-                float cb_border_right = (cb->bound && cb->bound->border) ? cb->bound->border->width.right : 0;
-                float cb_padding_width = cb->width - cb_border_left - cb_border_right;
-                float margin_right = (block->bound) ? block->bound->margin.right : 0;
-                block->x = cb_border_left + cb_padding_width - block->position->right - margin_right - block->width;
-                log_debug("[ABS IMG] right-positioned X recalc: x=%.1f (cb_pad_w=%.1f, right=%.1f, width=%.1f)",
-                          block->x, cb_padding_width, block->position->right, block->width);
+                recalculate_right_positioned_x(block, cb, "replaced-size");
             }
             if (block->position->has_bottom && !block->position->has_top) {
                 float cb_border_top = (cb->bound && cb->bound->border) ? cb->bound->border->width.top : 0;
@@ -1383,9 +1374,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                 bool has_auto_ml = block->bound->margin.left_type == CSS_VALUE_AUTO;
                 bool has_auto_mr = block->bound->margin.right_type == CSS_VALUE_AUTO;
                 if (has_auto_ml || has_auto_mr) {
-                    float cb_border_left = (cb->bound && cb->bound->border) ? cb->bound->border->width.left : 0;
-                    float cb_border_right = (cb->bound && cb->bound->border) ? cb->bound->border->width.right : 0;
-                    float cb_pad_width = cb->width - cb_border_left - cb_border_right;
+                    float cb_border_left = 0.0f;
+                    float cb_pad_width = containing_block_padding_width(cb, &cb_border_left);
                     float h_bp = layout_box_metrics(block).pad_border_h;
                     float used_width = block->width + h_bp;
                     float remaining = cb_pad_width - block->position->left - block->position->right - used_width;
@@ -1476,22 +1466,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 
     // CSS 2.1 §10.3.7: Detect direction of the static-position containing block.
     // The direction determines whether the static position is for 'left' (LTR) or 'right' (RTL).
-    TextDirection static_direction = TD_LTR;
-    if (parent && parent->is_element()) {
-        DomElement* parent_elem = lam::dom_require<DOM_NODE_ELEMENT>(parent);
-        if (parent_elem->blk && parent_elem->blk->direction == CSS_VALUE_RTL) {
-            static_direction = TD_RTL;
-        } else if (parent_elem->specified_style) {
-            CssValue* dir_val = (CssValue*)style_tree_get_computed_value(
-                parent_elem->specified_style, CSS_PROPERTY_DIRECTION,
-                parent_elem->parent && parent_elem->parent->is_element() ?
-                    lam::dom_require<DOM_NODE_ELEMENT>(parent_elem->parent)->specified_style : NULL);
-            if (dir_val && dir_val->type == CSS_VALUE_TYPE_KEYWORD &&
-                dir_val->data.keyword == CSS_VALUE_RTL) {
-                static_direction = TD_RTL;
-            }
-        }
-    }
+    TextDirection static_direction = get_static_position_direction(parent);
     log_debug("[STATIC POS] static-position direction: %s", static_direction == TD_RTL ? "RTL" : "LTR");
 
     if (!block->position->has_top && !block->position->has_bottom) {
@@ -1519,45 +1494,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             DomElement* elem = elmt->as_element();
             was_inline = was_specified_inline(elem);
         }
-        float line_x = was_inline ? pa_line->advance_x : pa_line->left;
-
-        // CSS 2.1 §10.3.7: For inline-level elements at line start, the static
-        // position must account for float avoidance and text-align. The hypothetical
-        // inline box would be placed in the available space after floats, aligned
-        // according to text-align.
-        if (was_inline && line_x <= pa_line->left + 0.01f) {
-            BlockContext* bfc = block_context_find_bfc(pa_block);
-            if (bfc) {
-                float static_y_bfc = pa_block->advance_y + pa_block->bfc_offset_y;
-                float lh = pa_block->line_height > 0 ? pa_block->line_height : 16.0f;
-                FloatAvailableSpace space = block_context_space_at_y(bfc, static_y_bfc, lh);
-
-                // Convert from BFC coordinates to local coordinates
-                float avail_left = space.left - pa_block->bfc_offset_x;
-                float avail_right = space.right - pa_block->bfc_offset_x;
-
-                // Clamp to content area
-                avail_left = fmax(avail_left, pa_line->left);
-                avail_right = fmin(avail_right, pa_line->right);
-
-                // Apply text-align to determine position within available space
-                CssEnum ta = pa_block->text_align;
-                if (ta == CSS_VALUE_CENTER) {
-                    line_x = (avail_left + avail_right) / 2.0f;
-                } else if ((ta == CSS_VALUE_RIGHT && static_direction == TD_LTR) ||
-                           (ta == CSS_VALUE_LEFT && static_direction == TD_RTL) ||
-                           (ta == CSS_VALUE_END)) {
-                    // End-side alignment: right for LTR, left for RTL
-                    line_x = (static_direction == TD_LTR) ? avail_right : avail_left;
-                } else {
-                    // Start-side alignment (left, start, justify, default):
-                    // left for LTR, right for RTL
-                    line_x = (static_direction == TD_LTR) ? avail_left : avail_right;
-                }
-                log_debug("[STATIC POS] Float+align adjusted line_x=%.1f (avail=[%.1f,%.1f], text-align=%d)",
-                          line_x, avail_left, avail_right, (int)ta);
-            }
-        }
+        float line_x = calculate_static_line_x(
+            pa_block, pa_line, static_direction, was_inline);
 
         if (static_direction == TD_RTL) {
             float static_x = parent_to_cb_offset_x + line_x;
@@ -1866,13 +1804,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // not the final shrink-to-fit width.
     if (block->position->has_right && !block->position->has_left &&
         !(lycon->block.given_width >= 0 || (block->position->has_left && block->position->has_right))) {
-        float cb_border_left = (cb->bound && cb->bound->border) ? cb->bound->border->width.left : 0;
-        float cb_border_right = (cb->bound && cb->bound->border) ? cb->bound->border->width.right : 0;
-        float cb_padding_width = cb->width - cb_border_left - cb_border_right;
-        float margin_right = (block->bound) ? block->bound->margin.right : 0;
-        block->x = cb_border_left + cb_padding_width - block->position->right - margin_right - block->width;
-        log_debug("[ABS POS] right-positioned shrink-to-fit X recalc: x=%.1f (cb_pad_w=%.1f, right=%d, width=%.1f)",
-                  block->x, cb_padding_width, block->position->right, block->width);
+        recalculate_right_positioned_x(block, cb, "shrink-to-fit");
     }
 
     // Height is auto-sized when no explicit height AND neither top+bottom constraints

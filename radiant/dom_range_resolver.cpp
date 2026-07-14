@@ -843,7 +843,7 @@ static bool boundary_before_or_after_node(DomNode* node, bool after,
     return true;
 }
 
-static DomText* first_nonempty_text_descendant(DomNode* node) {
+static DomText* nonempty_text_descendant(DomNode* node, bool last) {
     if (!node) return NULL;
     if (node->is_text()) {
         DomText* text = lam::dom_require_text(node);
@@ -851,26 +851,27 @@ static DomText* first_nonempty_text_descendant(DomNode* node) {
     }
     if (!node->is_element()) return NULL;
     DomElement* elem = lam::dom_require_element(node);
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        DomText* found = first_nonempty_text_descendant(child);
+    for (DomNode* child = last ? elem->last_child : elem->first_child;
+         child; child = last ? child->prev_sibling : child->next_sibling) {
+        DomText* found = nonempty_text_descendant(child, last);
         if (found) return found;
     }
     return NULL;
 }
 
-static DomText* last_nonempty_text_descendant(DomNode* node) {
-    if (!node) return NULL;
-    if (node->is_text()) {
-        DomText* text = lam::dom_require_text(node);
-        return text && dom_text_utf16_length(text) > 0 ? text : NULL;
+static void record_node_boundary_hit(View* node, bool after, float score,
+                                     EditableBoundaryHit* hit) {
+    DomBoundary boundary = { NULL, 0 };
+    if (!boundary_before_or_after_node(static_cast<DomNode*>(node),
+                                       after, &boundary)) {
+        return;
     }
-    if (!node->is_element()) return NULL;
-    DomElement* elem = lam::dom_require_element(node);
-    for (DomNode* child = elem->last_child; child; child = child->prev_sibling) {
-        DomText* found = last_nonempty_text_descendant(child);
-        if (found) return found;
-    }
-    return NULL;
+    hit->text = NULL;
+    hit->rect = NULL;
+    hit->boundary = boundary;
+    hit->has_boundary = true;
+    hit->local_x = 0.0f;
+    hit->score = score;
 }
 
 static void maybe_record_atomic_boundary_hit(View* node, float vx, float vy,
@@ -909,17 +910,7 @@ static void maybe_record_atomic_boundary_hit(View* node, float vx, float vy,
         return;
     }
 
-    DomBoundary boundary = { NULL, 0 };
-    if (!boundary_before_or_after_node(static_cast<DomNode*>(node),
-            after, &boundary)) {
-        return;
-    }
-    hit->text = NULL;
-    hit->rect = NULL;
-    hit->boundary = boundary;
-    hit->has_boundary = true;
-    hit->local_x = 0.0f;
-    hit->score = score;
+    record_node_boundary_hit(node, after, score, hit);
 }
 
 static void maybe_record_table_interior_text_edge_hit(View* node, float vx,
@@ -941,9 +932,8 @@ static void maybe_record_table_interior_text_edge_hit(View* node, float vx,
     }
 
     bool trailing = vx >= box_x + box_w * 0.5f;
-    DomText* text = trailing
-        ? last_nonempty_text_descendant(static_cast<DomNode*>(node))
-        : first_nonempty_text_descendant(static_cast<DomNode*>(node));
+    DomText* text = nonempty_text_descendant(static_cast<DomNode*>(node),
+                                             trailing);
     if (!text) return;
 
     float edge_distance = trailing ? box_right - vx : vx - box_x;
@@ -990,17 +980,12 @@ static void maybe_record_table_edge_boundary_hit(View* node, float vx, float vy,
         return;
     }
 
-    DomBoundary boundary = { NULL, 0 };
-    if (!boundary_before_or_after_node(static_cast<DomNode*>(node),
-            after, &boundary)) {
-        return;
-    }
-    hit->text = NULL;
-    hit->rect = NULL;
-    hit->boundary = boundary;
-    hit->has_boundary = true;
-    hit->local_x = 0.0f;
-    hit->score = score;
+    record_node_boundary_hit(node, after, score, hit);
+}
+
+static DomText* editable_boundary_text(View* node, bool inside_editable) {
+    return node && inside_editable && node->is_text()
+        ? lam::dom_require_text(node) : NULL;
 }
 
 static void find_editable_boundary_hit(View* node, float vx, float vy,
@@ -1009,9 +994,8 @@ static void find_editable_boundary_hit(View* node, float vx, float vy,
                                        EditableBoundaryHit* hit) {
     if (!node || !hit) return;
 
-    if (node->is_text()) {
-        if (!inside_editable) return;
-        DomText* text = lam::dom_require_text(node);
+    DomText* text = editable_boundary_text(node, inside_editable);
+    if (text) {
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
             if (rect->height <= 0) continue;
             float rect_x = abs_x + rect->x;
@@ -1108,9 +1092,8 @@ static void find_text_edge_boundary_hit(View* node, float vx, float vy,
                                         EditableBoundaryHit* hit) {
     if (!node || !hit) return;
 
-    if (node->is_text()) {
-        if (!inside_editable) return;
-        DomText* text = lam::dom_require_text(node);
+    DomText* text = editable_boundary_text(node, inside_editable);
+    if (text) {
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
             if (rect->height <= 0.0f) continue;
             float rect_x = abs_x + rect->x;

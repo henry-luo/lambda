@@ -460,6 +460,25 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
 // Keyframe Registry
 // ============================================================================
 
+static void keyframe_registry_scan(KeyframeRegistry* registry,
+                                   CssStylesheet** sheets, int count,
+                                   Pool* pool) {
+    for (int si = 0; si < count; si++) {
+        CssStylesheet* sheet = sheets[si];
+        if (!sheet || sheet->disabled) continue;
+        for (size_t ri = 0; ri < sheet->rule_count; ri++) {
+            CssRule* rule = sheet->rules[ri];
+            if (!rule || rule->type != CSS_RULE_KEYFRAMES ||
+                !rule->data.generic_rule.content) continue;
+            CssKeyframes* keyframes = parse_keyframes_content(
+                rule->data.generic_rule.content, pool);
+            if (!keyframes || !lam::pool_grow_array(pool, &registry->entries,
+                    &registry->capacity, registry->count + 1, 16)) continue;
+            registry->entries[registry->count++] = keyframes;
+        }
+    }
+}
+
 KeyframeRegistry* keyframe_registry_create(DomDocument* doc, Pool* pool) {
     if (!doc || !pool) return NULL;
 
@@ -473,50 +492,9 @@ KeyframeRegistry* keyframe_registry_create(DomDocument* doc, Pool* pool) {
     registry->entries = nullptr;
     registry->count = 0;
 
-    // scan all stylesheets for @keyframes rules
-    for (int si = 0; si < doc->stylesheet_count; si++) {
-        CssStylesheet* sheet = doc->stylesheets[si];
-        if (!sheet || sheet->disabled) continue;
-
-        for (size_t ri = 0; ri < sheet->rule_count; ri++) {
-            CssRule* rule = sheet->rules[ri];
-            if (!rule || rule->type != CSS_RULE_KEYFRAMES) continue;
-
-            const char* content = rule->data.generic_rule.content;
-            if (!content) continue;
-
-            CssKeyframes* kf = parse_keyframes_content(content, pool);
-            if (kf) {
-                // keyframe registries are pool-owned; failed growth leaves the previous table intact
-                if (!lam::pool_grow_array(pool, &registry->entries, &registry->capacity,
-                                          registry->count + 1, 16)) continue;
-                registry->entries[registry->count++] = kf;
-                log_debug("css-anim: registered @keyframes '%s' (%d stops)", kf->name, kf->stop_count);
-            }
-        }
-    }
-
-    // also scan cached inline stylesheets
-    for (int si = 0; si < doc->cached_inline_sheet_count; si++) {
-        CssStylesheet* sheet = doc->cached_inline_sheets[si];
-        if (!sheet || sheet->disabled) continue;
-
-        for (size_t ri = 0; ri < sheet->rule_count; ri++) {
-            CssRule* rule = sheet->rules[ri];
-            if (!rule || rule->type != CSS_RULE_KEYFRAMES) continue;
-
-            const char* content = rule->data.generic_rule.content;
-            if (!content) continue;
-
-            CssKeyframes* kf = parse_keyframes_content(content, pool);
-            if (kf) {
-                // keyframe registries are pool-owned; failed growth leaves the previous table intact
-                if (!lam::pool_grow_array(pool, &registry->entries, &registry->capacity,
-                                          registry->count + 1, 16)) continue;
-                registry->entries[registry->count++] = kf;
-            }
-        }
-    }
+    keyframe_registry_scan(registry, doc->stylesheets, doc->stylesheet_count, pool);
+    keyframe_registry_scan(registry, doc->cached_inline_sheets,
+                           doc->cached_inline_sheet_count, pool);
 
     log_debug("css-anim: keyframe registry created with %d @keyframes rules", registry->count);
     return registry;
@@ -573,6 +551,19 @@ static CssAnimatedProp* find_prop_in_stop(CssKeyframeStop* stop, CssPropertyId i
         }
     }
     return NULL;
+}
+
+static void animation_update_layout_bounds(AnimationInstance* animation, View* target) {
+    float x = target->x;
+    float y = target->y;
+    for (ViewElement* parent = target->parent_view(); parent; parent = parent->parent_view()) {
+        x += parent->x;
+        y += parent->y;
+    }
+    animation->bounds[0] = x;
+    animation->bounds[1] = y;
+    animation->bounds[2] = target->width;
+    animation->bounds[3] = target->height;
 }
 
 // Interpolate a single transform function pair
@@ -791,13 +782,7 @@ void css_animation_tick(AnimationInstance* anim, float t) {
     // zero at creation time because css_animation_create runs before layout)
     // use absolute coordinates (walk parent chain) for correct dirty-region marking
     View* span = static_cast<View*>(anim->target);
-    float abs_x = span->x, abs_y = span->y;
-    ViewElement* p = span->parent_view();
-    while (p) { abs_x += p->x; abs_y += p->y; p = p->parent_view(); }
-    anim->bounds[0] = abs_x;
-    anim->bounds[1] = abs_y;
-    anim->bounds[2] = span->width;
-    anim->bounds[3] = span->height;
+    animation_update_layout_bounds(anim, span);
 
     // offset bounds by transform displacement so dirty region covers the
     // element's actual visual position (not expanded to include both static
@@ -876,13 +861,7 @@ AnimationInstance* css_animation_create(AnimationScheduler* scheduler,
 
     // set bounds from element's layout (absolute coordinates for dirty-region marking)
     View* span = static_cast<View*>(element);
-    float abs_x = span->x, abs_y = span->y;
-    ViewElement* pe = span->parent_view();
-    while (pe) { abs_x += pe->x; abs_y += pe->y; pe = pe->parent_view(); }
-    inst->bounds[0] = abs_x;
-    inst->bounds[1] = abs_y;
-    inst->bounds[2] = span->width;
-    inst->bounds[3] = span->height;
+    animation_update_layout_bounds(inst, span);
 
     animation_scheduler_add(scheduler, inst);
 
@@ -1218,13 +1197,7 @@ void css_transition_tick(AnimationInstance* anim, float t) {
 
     // update bounds from element's current absolute layout position for dirty-region marking
     View* span = static_cast<View*>(anim->target);
-    float abs_x = span->x, abs_y = span->y;
-    ViewElement* p = span->parent_view();
-    while (p) { abs_x += p->x; abs_y += p->y; p = p->parent_view(); }
-    anim->bounds[0] = abs_x;
-    anim->bounds[1] = abs_y;
-    anim->bounds[2] = span->width;
-    anim->bounds[3] = span->height;
+    animation_update_layout_bounds(anim, span);
 }
 
 // Locate (or lazily append) the track for a property in the element's persistent state.
@@ -1335,6 +1308,18 @@ static bool css_transition_read_time(const CssValue* v, float* out_seconds) {
 // Resolve the element's transition-* declarations (longhands + `transition`
 // shorthand) into a CssTransitionProp. `prop_buf` backs the property list.
 // Returns true if a usable transition config with duration > 0 was found.
+static const CssValue* css_transition_longhand_value(StyleTree* style_tree,
+                                                     CssPropertyId property) {
+    AvlNode* node = avl_tree_search(style_tree->tree, property);
+    StyleNode* style = node ? (StyleNode*)node->declaration : NULL;
+    CssDeclaration* declaration = style ? style->winning_decl : NULL;
+    const CssValue* value = declaration ? declaration->value : NULL;
+    if (value && value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+        value = value->data.list.values[0];
+    }
+    return value;
+}
+
 static bool css_transition_resolve_config(StyleTree* style_tree, Pool* pool,
                                           CssTransitionProp* tp,
                                           CssPropertyId* prop_buf, int prop_cap) {
@@ -1349,34 +1334,24 @@ static bool css_transition_resolve_config(StyleTree* style_tree, Pool* pool,
     bool all_props = false;
 
     // --- longhands ---
-    AvlNode* dur_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_TRANSITION_DURATION);
-    if (dur_node) {
-        StyleNode* sn = (StyleNode*)dur_node->declaration;
-        CssDeclaration* d = sn ? sn->winning_decl : NULL;
-        // transition-duration may be a comma list; use the first value (single-timing slice).
-        const CssValue* v = d ? d->value : NULL;
-        if (v && (v->type == CSS_VALUE_TYPE_LIST) && v->data.list.count > 0) v = v->data.list.values[0];
+    const CssValue* duration_value = css_transition_longhand_value(
+        style_tree, CSS_PROPERTY_TRANSITION_DURATION);
+    if (duration_value) {
         float secs;
-        if (v && css_transition_read_time(v, &secs)) { tp->duration = secs; saw_duration = true; }
+        if (css_transition_read_time(duration_value, &secs)) { tp->duration = secs; saw_duration = true; }
     }
 
-    AvlNode* delay_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_TRANSITION_DELAY);
-    if (delay_node) {
-        StyleNode* sn = (StyleNode*)delay_node->declaration;
-        CssDeclaration* d = sn ? sn->winning_decl : NULL;
-        const CssValue* v = d ? d->value : NULL;
-        if (v && (v->type == CSS_VALUE_TYPE_LIST) && v->data.list.count > 0) v = v->data.list.values[0];
+    const CssValue* delay_value = css_transition_longhand_value(
+        style_tree, CSS_PROPERTY_TRANSITION_DELAY);
+    if (delay_value) {
         float secs;
-        if (v && css_transition_read_time(v, &secs)) tp->delay = secs;
+        if (css_transition_read_time(delay_value, &secs)) tp->delay = secs;
     }
 
-    AvlNode* tf_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_TRANSITION_TIMING_FUNCTION);
-    if (tf_node) {
-        StyleNode* sn = (StyleNode*)tf_node->declaration;
-        CssDeclaration* d = sn ? sn->winning_decl : NULL;
-        const CssValue* v = d ? d->value : NULL;
-        if (v && (v->type == CSS_VALUE_TYPE_LIST) && v->data.list.count > 0) v = v->data.list.values[0];
-        if (v) parse_timing_function_value(v, &tp->timing);
+    const CssValue* timing_value = css_transition_longhand_value(
+        style_tree, CSS_PROPERTY_TRANSITION_TIMING_FUNCTION);
+    if (timing_value) {
+        parse_timing_function_value(timing_value, &tp->timing);
     }
 
     bool longhand_prop_present = false;
@@ -1538,12 +1513,7 @@ static void css_transition_start(AnimationScheduler* scheduler, DomElement* elem
     inst->tick = css_transition_tick;
     inst->on_finish = css_transition_finish;
 
-    View* span = static_cast<View*>(element);
-    float abs_x = span->x, abs_y = span->y;
-    ViewElement* pe = span->parent_view();
-    while (pe) { abs_x += pe->x; abs_y += pe->y; pe = pe->parent_view(); }
-    inst->bounds[0] = abs_x; inst->bounds[1] = abs_y;
-    inst->bounds[2] = span->width; inst->bounds[3] = span->height;
+    animation_update_layout_bounds(inst, static_cast<View*>(element));
 
     animation_scheduler_add(scheduler, inst);
 
