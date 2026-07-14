@@ -22,7 +22,7 @@
 #include <cstdint>
 #include <math.h>
 
-#include "grid_types.hpp"
+#include "layout.hpp"
 #include "../lib/log.h"
 
 // Undefine min/max macros if defined (commonly from windows.h or view.hpp)

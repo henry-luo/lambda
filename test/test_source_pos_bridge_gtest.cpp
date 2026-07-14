@@ -18,8 +18,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/mark_builder.hpp"
 #include "../lambda/input/input.hpp"
-#include "../radiant/dom_range.hpp"
-#include "../radiant/source_pos_bridge.hpp"
+#include "../radiant/event.hpp"
 
 // ---------------------------------------------------------------------------
 // Bridge stubs (see test_dom_range_gtest.cpp). dom_range.cpp links against

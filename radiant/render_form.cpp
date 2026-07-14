@@ -1,9 +1,7 @@
 #include "render.hpp"
 #include "layout.hpp"
-#include "form_control.hpp"
-#include "state_store.hpp"
-#include "text_control.hpp"
-#include "editing_geometry.hpp"
+#include "view.hpp"
+#include "event.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/memtrack.h"
 #include "../lib/font/font.h"
@@ -259,6 +257,30 @@ static bool form_control_has_focus(const FormControlBox* box, ViewBlock* block) 
     return box && box->state && focus_get(box->state) == static_cast<View*>(block);
 }
 
+static void paint_default_text_control_box(RenderContext* rdcon, ViewBlock* block,
+                                           const FormControlBox* box) {
+    if (!rdcon || !block || !box) return;
+
+    // Author backgrounds and borders are painted by render_block_view; the
+    // fallback chrome only fills the content area so it does not cover them.
+    if (!box->has_css_background) {
+        Color bg = make_color(255, 255, 255);
+        float bx = box->x, by = box->y, bw = box->w, bh = box->h;
+        if (box->has_css_border && block->bound && block->bound->border) {
+            float bl = block->bound->border->width.left * box->s;
+            float br = block->bound->border->width.right * box->s;
+            float bt = block->bound->border->width.top * box->s;
+            float bb = block->bound->border->width.bottom * box->s;
+            bx += bl; by += bt;
+            bw -= bl + br; bh -= bt + bb;
+        }
+        fill_rect(rdcon, bx, by, bw, bh, bg);
+    }
+    if (box->use_default_border) {
+        draw_3d_border(rdcon, box->x, box->y, box->w, box->h, true, 1 * box->s);
+    }
+}
+
 /**
  * Render a simple string at the given position using the specified font.
  * @param rdcon Render context
@@ -268,6 +290,67 @@ static bool form_control_has_focus(const FormControlBox* box, ViewBlock* block) 
  * @param font Font properties to use
  * @param color Text color
  */
+struct FormGlyphRun {
+    const unsigned char* cursor;
+    const unsigned char* end;
+    FontHandle* font_handle;
+    FontStyleDesc style;
+    bool render_bitmap;
+};
+
+struct FormGlyphStep {
+    const unsigned char* start;
+    LoadedGlyph* glyph;
+};
+
+static float form_render_pixel_ratio(RenderContext* rdcon) {
+    return (rdcon && rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
+        ? rdcon->ui_context->pixel_ratio : 1.0f;
+}
+
+static void form_glyph_run_init(FormGlyphRun* run, FontHandle* font_handle,
+                                FontProp* font, const char* text,
+                                size_t byte_len, bool render_bitmap) {
+    if (!run) return;
+    run->cursor = (const unsigned char*)text;
+    run->end = run->cursor ? run->cursor + byte_len : NULL;
+    run->font_handle = font_handle;
+    run->style = font_style_desc_from_prop(font);
+    run->render_bitmap = render_bitmap;
+}
+
+static bool form_glyph_run_next(FormGlyphRun* run, FormGlyphStep* step) {
+    if (!run || !step || !run->cursor || !run->end || !run->font_handle) return false;
+    while (run->cursor < run->end) {
+        const unsigned char* glyph_start = run->cursor;
+        uint32_t codepoint;
+        int bytes = str_utf8_decode((const char*)run->cursor,
+                                    (size_t)(run->end - run->cursor),
+                                    &codepoint);
+        if (bytes <= 0) { run->cursor++; continue; }
+        run->cursor += bytes;
+        step->start = glyph_start;
+        step->glyph = font_load_glyph(run->font_handle, &run->style,
+                                      codepoint, run->render_bitmap);
+        return true;
+    }
+    return false;
+}
+
+static float form_measure_glyph_width(FontHandle* font_handle, FontProp* font,
+                                      float pixel_ratio, const char* text,
+                                      size_t byte_len) {
+    if (!text || byte_len == 0 || !font_handle || !font) return 0.0f;
+    FormGlyphRun run;
+    form_glyph_run_init(&run, font_handle, font, text, byte_len, false);
+    FormGlyphStep step;
+    float text_width = 0.0f;
+    while (form_glyph_run_next(&run, &step)) {
+        if (step.glyph) text_width += step.glyph->advance_x / pixel_ratio;
+    }
+    return text_width;
+}
+
 void render_simple_string(RenderContext* rdcon, const char* text, float x, float y,
                           FontProp* font, Color color) {
     if (!text || !*text || !font || !rdcon->ui_context) return;
@@ -288,32 +371,23 @@ void render_simple_string(RenderContext* rdcon, const char* text, float x, float
     const FontMetrics* _fm = font_get_metrics(fbox.font_handle);
     float ascender = _fm ? (_fm->hhea_ascender * rdcon->ui_context->pixel_ratio) : 12.0f;
 
-    // Render each character
-    const unsigned char* p = (const unsigned char*)text;
-    const unsigned char* p_end = p + strlen(text);
+    FormGlyphRun run;
+    form_glyph_run_init(&run, fbox.font_handle, font, text, strlen(text), true);
+    FormGlyphStep step;
     float pen_x = x;
-
-    while (p < p_end) {
-        uint32_t codepoint;
-        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-        if (bytes <= 0) { p++; continue; }
-        p += bytes;
-
-        // Load glyph
-        FontStyleDesc _sd = font_style_desc_from_prop(font);
-        LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &_sd, codepoint, true);
-        if (!glyph) {
+    while (form_glyph_run_next(&run, &step)) {
+        if (!step.glyph) {
             pen_x += font->font_size * 0.5f;  // fallback advance
             continue;
         }
 
         // Draw the glyph
-        draw_glyph(rdcon, &glyph->bitmap,
-                   lroundf(pen_x + glyph->bitmap.bearing_x),
-                   lroundf(y + ascender - glyph->bitmap.bearing_y));
+        draw_glyph(rdcon, &step.glyph->bitmap,
+                   lroundf(pen_x + step.glyph->bitmap.bearing_x),
+                   lroundf(y + ascender - step.glyph->bitmap.bearing_y));
 
         // Advance pen position
-        pen_x += glyph->advance_x;
+        pen_x += step.glyph->advance_x;
     }
 
     // Restore color
@@ -332,21 +406,9 @@ static float measure_input_text_width(RenderContext* rdcon, FontProp* font,
     FontBox fbox = {0};
     setup_font(rdcon->ui_context, &fbox, font);
     if (!fbox.font_handle) return 0.0f;
-    float pixel_ratio = (rdcon->ui_context->pixel_ratio > 0)
-        ? rdcon->ui_context->pixel_ratio : 1.0f;
-    FontStyleDesc sd = font_style_desc_from_prop(font);
-    const unsigned char* p = (const unsigned char*)text;
-    const unsigned char* p_end = p + byte_count;
-    float tw = 0.0f;
-    while (p < p_end) {
-        uint32_t codepoint;
-        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-        if (bytes <= 0) { p++; continue; }
-        p += bytes;
-        LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
-        if (glyph) tw += glyph->advance_x / pixel_ratio;
-    }
-    return tw;
+    return form_measure_glyph_width(fbox.font_handle, font,
+                                    form_render_pixel_ratio(rdcon),
+                                    text, (size_t)byte_count);
 }
 
 /**
@@ -368,6 +430,30 @@ static bool password_reveal_covers(uint32_t cp_start,
         cp_start >= reveal_start && cp_end <= reveal_end;
 }
 
+// All password projections must skip malformed bytes identically or caret and
+// display offsets diverge from the rendered mask.
+static bool password_next_utf8_span(const unsigned char** cursor,
+                                    const unsigned char* end,
+                                    const unsigned char* start,
+                                    uint32_t* cp_start,
+                                    uint32_t* cp_end,
+                                    int* bytes) {
+    while (*cursor < end) {
+        *cp_start = (uint32_t)(*cursor - start);
+        uint32_t codepoint;
+        *bytes = str_utf8_decode((const char*)*cursor,
+            (size_t)(end - *cursor), &codepoint);
+        if (*bytes <= 0) {
+            (*cursor)++;
+            continue;
+        }
+        *cp_end = *cp_start + (uint32_t)*bytes;
+        *cursor += *bytes;
+        return true;
+    }
+    return false;
+}
+
 static char* build_password_display(const char* src,
                                     int src_len,
                                     uint32_t reveal_start,
@@ -376,36 +462,27 @@ static char* build_password_display(const char* src,
     uint32_t display_len = 0;
     const unsigned char* p = (const unsigned char*)src;
     const unsigned char* p_end = p + src_len;
-    while (p < p_end) {
-        uint32_t cp_start = (uint32_t)(p - (const unsigned char*)src);
-        uint32_t codepoint;
-        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-        if (bytes <= 0) { p++; continue; }
-        uint32_t cp_end = cp_start + (uint32_t)bytes;
+    const unsigned char* src_start = p;
+    uint32_t cp_start, cp_end;
+    int bytes;
+    while (password_next_utf8_span(&p, p_end, src_start, &cp_start, &cp_end, &bytes)) {
         display_len += password_reveal_covers(cp_start, cp_end,
             reveal_start, reveal_end) ? (uint32_t)bytes : 3;
-        p += bytes;
     }
     char* out = (char*)mem_alloc((size_t)display_len + 1, MEM_CAT_RENDER);
     if (!out) return nullptr;
 
     p = (const unsigned char*)src;
     uint32_t out_i = 0;
-    while (p < p_end) {
-        uint32_t cp_start = (uint32_t)(p - (const unsigned char*)src);
-        uint32_t codepoint;
-        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-        if (bytes <= 0) { p++; continue; }
-        uint32_t cp_end = cp_start + (uint32_t)bytes;
+    while (password_next_utf8_span(&p, p_end, src_start, &cp_start, &cp_end, &bytes)) {
         if (password_reveal_covers(cp_start, cp_end, reveal_start, reveal_end)) {
-            memcpy(out + out_i, p, (size_t)bytes);
+            memcpy(out + out_i, src_start + cp_start, (size_t)bytes);
             out_i += (uint32_t)bytes;
         } else {
             out[out_i++] = (char)0xE2;
             out[out_i++] = (char)0x97;
             out[out_i++] = (char)0x8F;
         }
-        p += bytes;
     }
     out[out_i] = '\0';
     return out;
@@ -426,18 +503,14 @@ static int password_display_byte_offset(const char* src,
     const unsigned char* p = (const unsigned char*)src;
     const unsigned char* p_end = (const unsigned char*)src + src_byte_off;
     const unsigned char* src_start = (const unsigned char*)src;
-    while (p < p_end) {
-        uint32_t cp_start = (uint32_t)(p - src_start);
-        uint32_t codepoint;
-        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-        if (bytes <= 0) { p++; continue; }
-        uint32_t cp_end = cp_start + (uint32_t)bytes;
+    uint32_t cp_start, cp_end;
+    int bytes;
+    while (password_next_utf8_span(&p, p_end, src_start, &cp_start, &cp_end, &bytes)) {
         if (password_reveal_covers(cp_start, cp_end, reveal_start, reveal_end)) {
             display += bytes;
         } else {
             display += 3;
         }
-        p += bytes;
     }
     return display;
 }
@@ -459,6 +532,20 @@ static uint32_t utf8_byte_offset_for_codepoints(const char* text, uint32_t len,
     }
     return i > len ? len : i;
 }
+
+struct TextControlDisplayText {
+    const char* value_text;
+    uint32_t value_len;
+    const char* text;
+    uint32_t selection_start;
+    uint32_t selection_end;
+    uint32_t preedit_start;
+    uint32_t preedit_end;
+    uint32_t preedit_caret_byte;
+    char* preedit_display;
+    bool has_preedit;
+    bool is_placeholder;
+};
 
 static char* build_preedit_display_text(FormControlProp* form,
                                         const char* value,
@@ -496,6 +583,37 @@ static char* build_preedit_display_text(FormControlProp* form,
     return display;
 }
 
+static void resolve_text_control_display_text(FormControlProp* form,
+                                              DocState* state,
+                                              View* view,
+                                              bool placeholder_requires_text,
+                                              TextControlDisplayText* out) {
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    const char* value_text = (form && form->value) ? form->value : "";
+    out->value_text = value_text;
+    out->value_len = (uint32_t)strlen(value_text);
+    out->text = value_text;
+
+    form_control_get_selection(state, view, &out->selection_start,
+                               &out->selection_end, NULL);
+    out->has_preedit = form && form->preedit_utf8 && form->preedit_len > 0;
+    if (out->has_preedit) {
+        out->preedit_display = build_preedit_display_text(form, value_text,
+            out->value_len, out->selection_start, out->selection_end,
+            &out->preedit_start, &out->preedit_end,
+            &out->preedit_caret_byte);
+        if (out->preedit_display) out->text = out->preedit_display;
+    } else if (!out->text || !*out->text) {
+        bool can_use_placeholder = !placeholder_requires_text ||
+            (form && form->placeholder && *form->placeholder);
+        if (can_use_placeholder) {
+            out->text = form ? form->placeholder : nullptr;
+            out->is_placeholder = true;
+        }
+    }
+}
+
 /**
  * Render a text input control (text, password, email, etc.)
  */
@@ -506,64 +624,29 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
     float y = fc.y;
     float w = fc.w;
     float h = fc.h;
-
-    // Background (white) - only when CSS doesn't specify a background.
-    // When the author sets background-color (or background image), render_block_view
-    // has already painted it, so do not overdraw with white here.
-    // Also: clip the white fill to the inside of any CSS border, otherwise the
-    // fill stomps the border (which render_bound painted just before us).
-    bool has_css_background = fc.has_css_background;
     bool has_css_border = fc.has_css_border;
     bool use_default_border = fc.use_default_border;
-    if (!has_css_background) {
-        Color bg = make_color(255, 255, 255);
-        float bx = x, by = y, bw_w = w, bh_h = h;
-        if (has_css_border) {
-            float bl = block->bound->border->width.left * s;
-            float br = block->bound->border->width.right * s;
-            float bt = block->bound->border->width.top * s;
-            float bb = block->bound->border->width.bottom * s;
-            bx += bl; by += bt;
-            bw_w -= bl + br; bh_h -= bt + bb;
-        }
-        fill_rect(rdcon, bx, by, bw_w, bh_h, bg);
-    }
 
-    // 3D inset border (text inputs have inset appearance) - only when the author
-    // didn't specify a border. If a border is set in CSS, render_block_view has
-    // already drawn it (and respects border-color/border-radius); avoid stomping
-    // it with the default 3D chrome.
-    if (use_default_border) {
-        draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
-    }
+    paint_default_text_control_box(rdcon, block, &fc);
 
     // Source value vs displayed value. F4: for password fields we substitute
     // every codepoint with U+25CF so the existing measurement and rendering
     // paths can treat it uniformly. The unmasked `src_text` is still used
     // for caret-byte→codepoint mapping.
-    const char* value_text = form->value ? form->value : "";
-    uint32_t value_len = (uint32_t)strlen(value_text);
     DocState* state = fc.state;
     bool focused_here = form_control_has_focus(&fc, block);
-    uint32_t selection_start = 0, selection_end = 0;
-    form_control_get_selection(state, static_cast<View*>(block), &selection_start, &selection_end, NULL);
-    uint32_t preedit_start = 0;
-    uint32_t preedit_end = 0;
-    uint32_t preedit_caret_byte = 0;
-    char* preedit_display = nullptr;
-    bool has_preedit = form->preedit_utf8 && form->preedit_len > 0;
-    const char* src_text = value_text;
-    bool is_placeholder = false;
-    if (has_preedit) {
-        preedit_display = build_preedit_display_text(form, value_text, value_len,
-                                                     selection_start, selection_end,
-                                                     &preedit_start, &preedit_end,
-                                                     &preedit_caret_byte);
-        if (preedit_display) src_text = preedit_display;
-    } else if (!src_text || !*src_text) {
-        src_text = form->placeholder;
-        is_placeholder = true;
-    }
+    TextControlDisplayText display;
+    resolve_text_control_display_text(form, state, static_cast<View*>(block),
+                                      false, &display);
+    const char* src_text = display.text;
+    uint32_t selection_start = display.selection_start;
+    uint32_t selection_end = display.selection_end;
+    uint32_t preedit_start = display.preedit_start;
+    uint32_t preedit_end = display.preedit_end;
+    uint32_t preedit_caret_byte = display.preedit_caret_byte;
+    char* preedit_display = display.preedit_display;
+    bool has_preedit = display.has_preedit;
+    bool is_placeholder = display.is_placeholder;
     bool is_password = !has_preedit && !is_placeholder && src_text
         && form->input_type && strcmp(form->input_type, "password") == 0;
     uint32_t password_reveal_start = 0;
@@ -911,25 +994,9 @@ static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlPro
         }
 
         // Measure text width for horizontal centering
-        FontBox fbox = {0};
-        setup_font(rdcon->ui_context, &fbox, block->font);
-        float text_width = 0;
-        if (fbox.font_handle) {
-            float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
-                ? rdcon->ui_context->pixel_ratio : 1.0f;
-            const unsigned char* p = (const unsigned char*)label_text;
-            const unsigned char* p_end = p + strlen(label_text);
-            while (p < p_end) {
-                uint32_t codepoint;
-                int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-                if (bytes <= 0) { p++; continue; }
-                p += bytes;
-                FontStyleDesc sd = font_style_desc_from_prop(block->font);
-                LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
-                if (glyph) text_width += glyph->advance_x / pixel_ratio;
-            }
-            text_width *= s;
-        }
+        float text_width = measure_input_text_width(
+            rdcon, block->font, label_text,
+            (int)strlen(label_text)) * s; // INT_CAST_OK: form text measurement API uses byte-count ints.
 
         float font_size_scaled = block->font->font_size * s;
         float text_x = x + (w - text_width) / 2;
@@ -1247,19 +1314,8 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
 static float measure_text_width(FontHandle* font_handle, FontProp* font, float pixel_ratio,
                                 const char* text, int byte_len) {
     if (!text || byte_len <= 0 || !font_handle) return 0;
-    const unsigned char* p = (const unsigned char*)text;
-    const unsigned char* p_end = p + byte_len;
-    float tw = 0;
-    while (p < p_end) {
-        uint32_t codepoint;
-        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-        if (bytes <= 0) { p++; continue; }
-        p += bytes;
-        FontStyleDesc sd = font_style_desc_from_prop(font);
-        LoadedGlyph* glyph = font_load_glyph(font_handle, &sd, codepoint, false);
-        if (glyph) tw += glyph->advance_x / pixel_ratio;
-    }
-    return tw;
+    return form_measure_glyph_width(font_handle, font, pixel_ratio,
+                                    text, (size_t)byte_len);
 }
 
 /**
@@ -1311,56 +1367,26 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
     float y = fc.y;
     float w = fc.w;
     float h = fc.h;
-
-    // Background and border are painted by render_bound when the author set them
-    // (respecting border-radius / border-color). Only fall back to the default
-    // white background + 3D inset border when the author didn't.
-    bool has_css_background = fc.has_css_background;
     bool has_css_border = fc.has_css_border;
     bool use_default_border = fc.use_default_border;
-    if (!has_css_background) {
-        Color bg = make_color(255, 255, 255);
-        float bx = x, by = y, bw_w = w, bh_h = h;
-        if (has_css_border) {
-            float bl = block->bound->border->width.left * s;
-            float br = block->bound->border->width.right * s;
-            float bt = block->bound->border->width.top * s;
-            float bb = block->bound->border->width.bottom * s;
-            bx += bl; by += bt;
-            bw_w -= bl + br; bh_h -= bt + bb;
-        }
-        fill_rect(rdcon, bx, by, bw_w, bh_h, bg);
-    }
-    if (use_default_border) {
-        draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
-    }
+
+    paint_default_text_control_box(rdcon, block, &fc);
 
     // Determine text content or placeholder. Only enter placeholder mode
     // when an actual placeholder string is present — otherwise an empty
     // textarea would be flagged as a placeholder and the caret-render
     // path (guarded by !is_placeholder) would skip drawing the caret.
-    const char* value_text = form->value ? form->value : "";
-    uint32_t value_len = (uint32_t)strlen(value_text);
     DocState* state = fc.state;
-    uint32_t selection_start = 0, selection_end = 0;
-    form_control_get_selection(state, static_cast<View*>(block), &selection_start, &selection_end, NULL);
-    uint32_t preedit_start = 0;
-    uint32_t preedit_end = 0;
-    uint32_t preedit_caret_byte = 0;
-    char* preedit_display = nullptr;
-    bool has_preedit = form->preedit_utf8 && form->preedit_len > 0;
-    const char* text = value_text;
-    bool is_placeholder = false;
-    if (has_preedit) {
-        preedit_display = build_preedit_display_text(form, value_text, value_len,
-                                                     selection_start, selection_end,
-                                                     &preedit_start, &preedit_end,
-                                                     &preedit_caret_byte);
-        if (preedit_display) text = preedit_display;
-    } else if ((!text || !*text) && form->placeholder && *form->placeholder) {
-        text = form->placeholder;
-        is_placeholder = true;
-    }
+    TextControlDisplayText display;
+    resolve_text_control_display_text(form, state, static_cast<View*>(block),
+                                      true, &display);
+    const char* text = display.text;
+    uint32_t preedit_start = display.preedit_start;
+    uint32_t preedit_end = display.preedit_end;
+    uint32_t preedit_caret_byte = display.preedit_caret_byte;
+    char* preedit_display = display.preedit_display;
+    bool has_preedit = display.has_preedit;
+    bool is_placeholder = display.is_placeholder;
     FontProp* render_font = form_render_font(block, form, is_placeholder);
 
     // Compute internal metrics
@@ -1434,21 +1460,16 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
                 // find end of this logical line
                 const char* line_end = line_start;
                 while (*line_end && *line_end != '\n') line_end++;
-                int line_byte_len = (int)(line_end - line_start);
+                size_t line_byte_len = (size_t)(line_end - line_start);
 
                 // render this line's characters
                 float pen_x = content_x - scroll_x_px;
-                const unsigned char* p = (const unsigned char*)line_start;
-                const unsigned char* p_end = p + line_byte_len;
-                while (p < p_end) {
-                    const unsigned char* glyph_start = p;
-                    uint32_t codepoint;
-                    int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-                    if (bytes <= 0) { p++; continue; }
-                    p += bytes;
-
-                    FontStyleDesc sd = font_style_desc_from_prop(render_font);
-                    LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, true);
+                FormGlyphRun glyph_run;
+                form_glyph_run_init(&glyph_run, fbox.font_handle, render_font,
+                                    line_start, line_byte_len, true);
+                FormGlyphStep glyph_step;
+                while (form_glyph_run_next(&glyph_run, &glyph_step)) {
+                    LoadedGlyph* glyph = glyph_step.glyph;
                     if (!glyph) {
                         pen_x += font_size_scaled * 0.5f;
                         continue;
@@ -1463,7 +1484,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
 
                     if (pen_y + line_height >= y && pen_x + glyph->advance_x >= content_x &&
                         pen_x <= content_x + content_w) {
-                        ptrdiff_t glyph_byte_off = glyph_start - (const unsigned char*)text;
+                        ptrdiff_t glyph_byte_off = glyph_step.start - (const unsigned char*)text;
                         bool selected_glyph = has_active_selection &&
                             glyph_byte_off >= active_sel_start &&
                             glyph_byte_off < active_sel_end;

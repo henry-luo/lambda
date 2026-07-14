@@ -1,4 +1,4 @@
-#include "animation.h"
+#include "view.hpp"
 #include "../lib/log.h"
 #include <math.h>
 

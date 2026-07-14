@@ -4,7 +4,6 @@
   "description": "Covers the default tasks-postdom scheduler: normal classics run first, defer scripts preserve order before DOMContentLoaded, ready async scripts run after DOMContentLoaded and before window load.",
   "events": [
     {"type": "log", "message": "=== js_postdom_defer_async_phase4 ==="},
-    {"type": "wait", "ms": 200},
     {
       "type": "assert_text",
       "target": {"selector": "#result"},

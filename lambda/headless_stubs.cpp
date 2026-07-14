@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <cstddef>
 #include <cstdint>
-#include "../radiant/symbol_resolver.h"
+#include "../radiant/view.hpp"
 #include "../lambda/lambda-data.hpp"
 
 // Forward declarations (avoid including heavy radiant headers)

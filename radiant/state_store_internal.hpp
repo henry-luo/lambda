@@ -1,6 +1,6 @@
 #pragma once
 
-#include "state_store.hpp"
+#include "event.hpp"
 
 /**
  * Caret projection state for editable elements.

@@ -17,7 +17,7 @@
 
 // IMPORTANT: Include grid.hpp first, then undef macros, then include enhanced headers
 // This is necessary because grid.hpp includes view.hpp which defines min/max macros
-#include "grid.hpp"
+#include "layout.hpp"
 
 // Undefine min/max macros before including enhanced grid headers
 #ifdef min
@@ -27,7 +27,6 @@
 #undef max
 #endif
 
-#include "grid_types.hpp"
 #include "grid_track.hpp"
 #include "grid_occupancy.hpp"
 #include "grid_placement.hpp"

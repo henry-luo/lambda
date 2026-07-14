@@ -1,10 +1,7 @@
 #include "view.hpp"
 #include "render.hpp"
-#include "scroller.hpp"
-#include "animation.h"
-#include "webview.h"
-#include "state_store.hpp"
-#include "form_control.hpp"
+#include "event.hpp"
+#include "radiant.hpp"
 #include <locale.h>
 #include <stdlib.h>
 
@@ -16,7 +13,6 @@
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/dom_element.hpp"  // For dom_document_destroy
 #include "../lambda/js/js_event_loop.h"
-#include "../radiant/script_runner.h"  // For script_runner_cleanup_js_state
 
 void fontface_cleanup(UiContext* uicon);
 char* load_font_path(FontContext *font_ctx, const char* font_name);

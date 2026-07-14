@@ -3,7 +3,6 @@
   "html": "test/ui/test_phase5a_geometry.html",
   "events": [
     {"type": "log", "message": "=== Phase 5c: assert_element_at ==="},
-    {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "--- Hit test header area ---"},
     {"type": "assert_element_at", "x": 600, "y": 30,

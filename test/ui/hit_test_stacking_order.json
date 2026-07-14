@@ -4,7 +4,6 @@
   "description": "Clicks the overlap of two positioned layers. The higher z-index element should receive the event even though both boxes contain the point.",
   "events": [
     {"type": "log", "message": "=== hit_test_stacking_order ==="},
-    {"type": "wait", "ms": 200},
     {"type": "click", "x": 110, "y": 100},
     {"type": "assert_text", "target": {"selector": "#status"}, "equals": "high", "assert_timeout": 500}
   ]

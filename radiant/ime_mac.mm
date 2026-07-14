@@ -27,7 +27,9 @@
 #include <string.h>
 
 #include "../lib/log.h"
+#define RADIANT_EVENT_CORE_ONLY
 #include "event.hpp"
+#undef RADIANT_EVENT_CORE_ONLY
 
 // Opaque types provided elsewhere. We never deref any of them in this
 // file; everything is passed by pointer.

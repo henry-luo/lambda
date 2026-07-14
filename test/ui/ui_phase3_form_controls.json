@@ -3,7 +3,6 @@
   "html": "test/ui/test_form_controls.html",
   "events": [
     {"type": "log", "message": "=== Phase 3: Form Controls Test ==="},
-    {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "--- Checkbox: check unchecked -> checked ---"},
     {"type": "assert_checked", "target": {"selector": "input#cb-terms"}, "checked": false},

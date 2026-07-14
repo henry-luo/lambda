@@ -4,17 +4,9 @@
 
 #include "event_sim.hpp"
 #include "event.hpp"
-#include "event_state_log.hpp"
-#include "state_store.hpp"
-#include "state_machine.hpp"
-#include "dom_range.hpp"
-#include "editing.hpp"
-#include "form_control.hpp"
-#include "render.hpp"
-#include "text_control.hpp"
-#include "text_edit.hpp"
 #include "view.hpp"
-#include "webview.h"
+#include "render.hpp"
+#include "radiant.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
@@ -29,8 +21,6 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_value.hpp"
 #include "../lib/image.h"
-#include "animation.h"
-#include "clipboard.hpp"
 #include <GLFW/glfw3.h>
 #include <cstdlib>
 #include <cstring>
@@ -97,6 +87,13 @@ extern "C" void js_window_dialog_push_response(const char* value);
 void parse_json(Input* input, const char* json_string);
 
 static bool g_replay_assert_state = false;
+
+static bool sim_event_is_assertion(SimEventType type) {
+    // Clipboard assertion predates the contiguous assertion enum block; keep it
+    // in the common retry/schema path instead of requiring fixed waits around it.
+    return type == SIM_EVENT_ASSERT_CLIPBOARD ||
+           (type >= SIM_EVENT_ASSERT_CARET && type <= SIM_EVENT_ASSERT_SNAPSHOT);
+}
 
 typedef struct EventSimStateStoreSnapshot {
     char* name;
@@ -1030,6 +1027,25 @@ static void parse_target(MapReader& reader, SimEvent* ev) {
     }
 }
 
+static void parse_pointer_fields(MapReader& reader, SimEvent* ev) {
+    ev->x = reader.get("x").asInt32();
+    ev->y = reader.get("y").asInt32();
+    ev->button = reader.get("button").asInt32();
+    ev->mods = reader.get("mods").asInt32();
+    const char* mods = reader.get("mods_str").cstring();
+    if (mods) ev->mods = parse_mods_string(mods);
+    parse_target(reader, ev);
+}
+
+static void parse_assertion_strings(MapReader& reader, SimEvent* ev,
+                                    bool with_target) {
+    const char* equals = reader.get("equals").cstring();
+    if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
+    const char* contains = reader.get("contains").cstring();
+    if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+    if (with_target) parse_target(reader, ev);
+}
+
 // Parse a single event from MapReader
 static SimEvent* parse_sim_event(MapReader& reader) {
     SimEvent* ev = (SimEvent*)mem_calloc(1, sizeof(SimEvent), MEM_CAT_LAYOUT);
@@ -1050,27 +1066,15 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
     else if (strcmp(type_str, "mouse_move") == 0) {
         ev->type = SIM_EVENT_MOUSE_MOVE;
-        ev->x = reader.get("x").asInt32();
-        ev->y = reader.get("y").asInt32();
-        parse_target(reader, ev);
+        parse_pointer_fields(reader, ev);
     }
     else if (strcmp(type_str, "mouse_down") == 0) {
         ev->type = SIM_EVENT_MOUSE_DOWN;
-        ev->x = reader.get("x").asInt32();
-        ev->y = reader.get("y").asInt32();
-        ev->button = reader.get("button").asInt32();
-        ev->mods = reader.get("mods").asInt32();
-        const char* mods_str = reader.get("mods_str").cstring();
-        if (mods_str) ev->mods = parse_mods_string(mods_str);
-        parse_target(reader, ev);
+        parse_pointer_fields(reader, ev);
     }
     else if (strcmp(type_str, "mouse_up") == 0) {
         ev->type = SIM_EVENT_MOUSE_UP;
-        ev->x = reader.get("x").asInt32();
-        ev->y = reader.get("y").asInt32();
-        ev->button = reader.get("button").asInt32();
-        ev->mods = reader.get("mods").asInt32();
-        parse_target(reader, ev);
+        parse_pointer_fields(reader, ev);
     }
     else if (strcmp(type_str, "mouse_drag") == 0) {
         ev->type = SIM_EVENT_MOUSE_DRAG;
@@ -1266,11 +1270,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
     else if (strcmp(type_str, "assert_preedit") == 0) {
         ev->type = SIM_EVENT_ASSERT_PREEDIT;
-        const char* equals = reader.get("equals").cstring();
-        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
-        const char* contains = reader.get("contains").cstring();
-        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
-        parse_target(reader, ev);
+        parse_assertion_strings(reader, ev, true);
     }
     else if (strcmp(type_str, "assert_password_reveal") == 0) {
         ev->type = SIM_EVENT_ASSERT_PASSWORD_REVEAL;
@@ -1285,30 +1285,18 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
     else if (strcmp(type_str, "click") == 0) {
         ev->type = SIM_EVENT_CLICK;
-        ev->x = reader.get("x").asInt32();
-        ev->y = reader.get("y").asInt32();
-        ev->button = reader.get("button").asInt32();
-        ev->mods = reader.get("mods").asInt32();
-        const char* mods_str = reader.get("mods_str").cstring();
-        if (mods_str) ev->mods = parse_mods_string(mods_str);
-        parse_target(reader, ev);
+        parse_pointer_fields(reader, ev);
     }
     else if (strcmp(type_str, "dblclick") == 0) {
         ev->type = SIM_EVENT_DBLCLICK;
-        ev->x = reader.get("x").asInt32();
-        ev->y = reader.get("y").asInt32();
-        ev->button = reader.get("button").asInt32();
-        parse_target(reader, ev);
+        parse_pointer_fields(reader, ev);
     }
     else if (strcmp(type_str, "tripleclick") == 0) {
         // F2 (Radiant_Design_Form_Input.md §4.1): three rapid clicks at the
         // same location. Reuses SIM_EVENT_DBLCLICK plumbing with click_count=3.
         ev->type = SIM_EVENT_DBLCLICK;
-        ev->x = reader.get("x").asInt32();
-        ev->y = reader.get("y").asInt32();
-        ev->button = reader.get("button").asInt32();
+        parse_pointer_fields(reader, ev);
         ev->click_count = 3;
-        parse_target(reader, ev);
     }
     else if (strcmp(type_str, "type") == 0) {
         ev->type = SIM_EVENT_TYPE;
@@ -1362,10 +1350,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
     else if (strcmp(type_str, "assert_clipboard") == 0) {
         ev->type = SIM_EVENT_ASSERT_CLIPBOARD;
-        const char* equals = reader.get("equals").cstring();
-        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
-        const char* contains = reader.get("contains").cstring();
-        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+        parse_assertion_strings(reader, ev, false);
         const char* mime = reader.get("mime").cstring();
         if (mime) ev->clipboard_mime = mem_strdup(mime, MEM_CAT_LAYOUT);
     }
@@ -1414,27 +1399,15 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
     else if (strcmp(type_str, "assert_text") == 0) {
         ev->type = SIM_EVENT_ASSERT_TEXT;
-        const char* contains = reader.get("contains").cstring();
-        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
-        const char* equals = reader.get("equals").cstring();
-        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
-        parse_target(reader, ev);
+        parse_assertion_strings(reader, ev, true);
     }
     else if (strcmp(type_str, "assert_value") == 0) {
         ev->type = SIM_EVENT_ASSERT_VALUE;
-        const char* equals = reader.get("equals").cstring();
-        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
-        const char* contains = reader.get("contains").cstring();
-        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
-        parse_target(reader, ev);
+        parse_assertion_strings(reader, ev, true);
     }
     else if (strcmp(type_str, "assert_editing_value") == 0) {
         ev->type = SIM_EVENT_ASSERT_EDITING_VALUE;
-        const char* equals = reader.get("equals").cstring();
-        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
-        const char* contains = reader.get("contains").cstring();
-        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
-        parse_target(reader, ev);
+        parse_assertion_strings(reader, ev, true);
     }
     else if (strcmp(type_str, "assert_checked") == 0) {
         ev->type = SIM_EVENT_ASSERT_CHECKED;
@@ -1501,10 +1474,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         parse_target(reader, ev);
         const char* prop = reader.get("property").cstring();
         if (prop) ev->style_property = mem_strdup(prop, MEM_CAT_LAYOUT);
-        const char* equals = reader.get("equals").cstring();
-        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
-        const char* contains = reader.get("contains").cstring();
-        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+        parse_assertion_strings(reader, ev, false);
         ev->style_animated = reader.get("animated").asBool();
         if (ev->style_animated) {
             ItemReader tol = reader.get("tolerance");
@@ -1943,10 +1913,12 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         return NULL;
     }
 
-    // Parse optional auto-waiting fields for assertion events
-    if ((ev->type >= SIM_EVENT_ASSERT_CARET && ev->type <= SIM_EVENT_ASSERT_SNAPSHOT)) {
-        ev->assert_timeout = reader.get("timeout").asInt32();
-        ev->assert_interval = reader.get("interval").asInt32();
+    // Parse optional auto-waiting fields for assertion events. The fixtures use
+    // assertion-specific names; accepting unrelated "timeout" fields here made
+    // their intended bounds silently ineffective.
+    if (sim_event_is_assertion(ev->type)) {
+        ev->assert_timeout = reader.get("assert_timeout").asInt32();
+        ev->assert_interval = reader.get("assert_interval").asInt32();
         if (ev->assert_interval <= 0) ev->assert_interval = 100; // default 100ms
     }
 
@@ -5692,52 +5664,72 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
     }
 }
 
-// Auto-waiting wrapper: retries assertion events until they pass or timeout expires
-static void process_sim_event_with_retry(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, GLFWwindow* window) {
+// Auto-waiting wrapper: attempt an assertion once per host-loop turn. Blocking
+// here used to prevent JS timers and microtasks from running between attempts,
+// forcing fixtures to add fixed sleeps before otherwise auto-waiting assertions.
+static bool process_sim_event_with_retry(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, GLFWwindow* window) {
     // Non-assertion events execute directly
-    if (ev->type < SIM_EVENT_ASSERT_CARET || ev->type > SIM_EVENT_ASSERT_SNAPSHOT) {
+    if (!sim_event_is_assertion(ev->type)) {
         process_sim_event(ctx, ev, uicon, window);
-        return;
+        return true;
     }
 
     // Determine effective timeout
     int timeout = ev->assert_timeout > 0 ? ev->assert_timeout : ctx->default_timeout;
     if (timeout <= 0) {
         process_sim_event(ctx, ev, uicon, window);
-        return;
+        return true;
     }
 
     int interval = ev->assert_interval > 0 ? ev->assert_interval : 100;
-    int elapsed = 0;
-
-    while (true) {
-        int saved_pass = ctx->pass_count;
-        int saved_fail = ctx->fail_count;
-
-        process_sim_event(ctx, ev, uicon, window);
-
-        // Passed if pass_count increased without fail_count increasing
-        if (ctx->pass_count > saved_pass && ctx->fail_count == saved_fail) {
-            return;
-        }
-
-        // Timeout expired — keep the failure
-        if (elapsed >= timeout) {
-            return;
-        }
-
-        // Restore counts and retry after sleeping
-        ctx->pass_count = saved_pass;
-        ctx->fail_count = saved_fail;
-
-        struct timespec ts;
-        ts.tv_sec = interval / 1000;
-        ts.tv_nsec = (interval % 1000) * 1000000L;
-        nanosleep(&ts, NULL);
-        elapsed += interval;
-
-        log_info("event_sim: auto-wait retry after %dms (timeout=%dms)", elapsed, timeout);
+    double now = get_monotonic_time();
+    if (ctx->assertion_retry_pending && now < ctx->assertion_retry_time) {
+        return false;
     }
+
+    if (!ctx->assertion_retry_pending) {
+        ctx->assertion_saved_pass_count = ctx->pass_count;
+        ctx->assertion_saved_fail_count = ctx->fail_count;
+        ctx->assertion_retry_deadline = now + ((double)timeout / 1000.0);
+    }
+
+    process_sim_event(ctx, ev, uicon, window);
+    now = get_monotonic_time();
+
+    // Passed if pass_count increased without fail_count increasing.
+    if (ctx->pass_count > ctx->assertion_saved_pass_count &&
+        ctx->fail_count == ctx->assertion_saved_fail_count) {
+        ctx->assertion_retry_pending = false;
+        return true;
+    }
+
+    // Keep only the terminal failure; intermediate attempts are observational.
+    if (now >= ctx->assertion_retry_deadline) {
+        ctx->assertion_retry_pending = false;
+        return true;
+    }
+
+    ctx->pass_count = ctx->assertion_saved_pass_count;
+    ctx->fail_count = ctx->assertion_saved_fail_count;
+    ctx->assertion_retry_pending = true;
+    ctx->assertion_retry_time = now + ((double)interval / 1000.0);
+    return false;
+}
+
+bool event_sim_assertion_retry_pending(EventSimContext* ctx) {
+    return ctx && ctx->assertion_retry_pending;
+}
+
+int event_sim_assertion_retry_wait_ms(EventSimContext* ctx) {
+    if (!ctx || !ctx->assertion_retry_pending) return 0;
+    double remaining_ms = (ctx->assertion_retry_time - get_monotonic_time()) * 1000.0;
+    if (remaining_ms <= 0.0) return 0;
+    int wait_ms = (int)remaining_ms; // INT_CAST_OK: bounded retry delay in milliseconds.
+    return wait_ms > 0 ? wait_ms : 1;
+}
+
+void event_sim_wake_assertion_retry(EventSimContext* ctx) {
+    if (ctx && ctx->assertion_retry_pending) ctx->assertion_retry_time = 0.0;
 }
 
 static void replay_emit_mismatch(EventSimContext* ctx, UiContext* uicon,
@@ -5846,7 +5838,9 @@ bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, GLFWwindow* window,
 
     // Process current event (with auto-wait retry for assertions)
     SimEvent* ev = (SimEvent*)ctx->events->data[ctx->current_index];
-    process_sim_event_with_retry(ctx, ev, uicon, window);
+    if (!process_sim_event_with_retry(ctx, ev, uicon, window)) {
+        return true;
+    }
     if (ctx->replay_assert_state && ev->type == SIM_EVENT_REPLAY_INPUT) {
         event_sim_assert_schema(ctx, uicon, "replay_input");
     }

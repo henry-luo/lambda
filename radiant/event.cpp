@@ -1,27 +1,8 @@
-#include "handler.hpp"
+#include "event.hpp"
 #include "render.hpp"
-#include "state_store.hpp"
-#include "animation.h"
-#include "state_machine.hpp"
-#include "state_schema.hpp"
-#include "scroller.hpp"
-#include "form_control.hpp"
-#include "text_control.hpp"
-#include "text_edit.hpp"
-#include "context_menu.hpp"
-#include "clipboard.hpp"
-#include "browsing_session.h"
+#include "view.hpp"
+#include "radiant.hpp"
 #include "rdt_video.h"
-#include "webview.h"
-#include "dom_range_resolver.hpp"
-#include "editing_host.hpp"
-#include "editing.hpp"
-#include "editing_controller.hpp"
-#include "editing_dispatch.hpp"
-#include "editing_geometry.hpp"
-#include "editing_intent.hpp"
-#include "editing_target_range.hpp"
-#include "render.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/font/font.h"
@@ -37,8 +18,6 @@
 #include "../lambda/render_map.h"
 #include "../lambda/lambda.h"         // Context (input_context)
 #include "../lambda/lambda-data.hpp"  // EvalContext
-#include "source_pos_bridge.hpp"      // SourcePos / selection bridge for editor handlers
-#include "dom_range.hpp"              // DomSelection / DomBoundary
 #include "../lambda/transpiler.hpp"   // Runtime (heap, nursery, name_pool)
 #include "../lambda/mark_builder.hpp" // MarkBuilder for event object construction
 #include "../lambda/js/js_dom.h"      // js_dom_set_document for HTML event handlers
@@ -2208,6 +2187,14 @@ static bool dispatch_editing_copy_selection(DocState* state,
     return copy_current_selection_to_clipboard(state, prefix);
 }
 
+static EditingDispatchHooks dispatch_editing_hooks() {
+    EditingDispatchHooks hooks = {};
+    hooks.dispatch_input_event = dispatch_editing_input_event;
+    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
+    hooks.copy_selection = dispatch_editing_copy_selection;
+    return hooks;
+}
+
 static void rich_select_all_sync_descendant_text_controls(DocState* state,
                                                           DomNode* node) {
     if (!state || !node || !node->is_element()) return;
@@ -2237,11 +2224,7 @@ static bool dispatch_rich_consumer_transaction_operation(EventContext* evcon,
     if (!editing_surface_from_target(target, &surface)) return false;
     if (!editing_surface_is_rich(&surface)) return false;
 
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
+    EditingDispatchHooks hooks = dispatch_editing_hooks();
     DocState* state = event_context_target_state(evcon);
     event_log_editing_clipboard_intent(state, &surface, intent, nullptr);
 
@@ -2292,11 +2275,7 @@ static bool dispatch_rich_transaction_defaultable(EventContext* evcon,
     if (!editing_surface_from_target(target, &surface)) return false;
     if (!editing_surface_is_rich(&surface)) return false;
 
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
+    EditingDispatchHooks hooks = dispatch_editing_hooks();
 
     DocState* state = event_context_target_state(evcon);
     event_log_editing_clipboard_intent(state, &surface, intent, nullptr);
@@ -2463,11 +2442,7 @@ static bool dispatch_rich_select_all_transaction(EventContext* evcon,
         return false;
     }
 
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
+    EditingDispatchHooks hooks = dispatch_editing_hooks();
 
     EditingTransaction tx;
     memset(&tx, 0, sizeof(tx));
@@ -2502,11 +2477,7 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
     intent.type = input_type;
     intent.data = repl ? repl : "";
 
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
+    EditingDispatchHooks hooks = dispatch_editing_hooks();
 
     uint32_t saved_selection_start = 0;
     uint32_t saved_selection_end = 0;
@@ -2779,16 +2750,18 @@ static int form_control_live_value_len_int(DomElement* elem) {
     return (int)value_len; // INT_CAST_OK: text-control byte offsets use StateStore int APIs.
 }
 
+static bool dispatch_form_editing_surface(EventContext* evcon, DomElement* elem,
+                                          DocState* state, View* target,
+                                          EditingSurface* surface) {
+    return evcon && elem && state && target && tc_is_text_control(elem) &&
+        editing_surface_from_target(target, surface) &&
+        editing_surface_is_text_control(surface);
+}
+
 static bool dispatch_form_select_all(EventContext* evcon, DomElement* elem,
                                      DocState* state, View* target) {
-    if (!evcon || !elem || !state || !target) return false;
-    if (!tc_is_text_control(elem)) return false;
-
     EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface) ||
-        !editing_surface_is_text_control(&surface)) {
-        return false;
-    }
+    if (!dispatch_form_editing_surface(evcon, elem, state, target, &surface)) return false;
 
     InputIntent intent;
     memset(&intent, 0, sizeof(intent));
@@ -2817,14 +2790,8 @@ static bool dispatch_form_caret_collapse(EventContext* evcon, DomElement* elem,
                                          DocState* state, View* target,
                                          uint32_t offset,
                                          const char* operation) {
-    if (!evcon || !elem || !state || !target) return false;
-    if (!tc_is_text_control(elem)) return false;
-
     EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface) ||
-        !editing_surface_is_text_control(&surface)) {
-        return false;
-    }
+    if (!dispatch_form_editing_surface(evcon, elem, state, target, &surface)) return false;
 
     uint32_t value_len = 0;
     form_control_live_value(elem, &value_len);
@@ -2838,18 +2805,121 @@ static bool dispatch_form_caret_collapse(EventContext* evcon, DomElement* elem,
     return true;
 }
 
+static void dispatch_form_keyboard_paste(EventContext* evcon, DocState* state,
+                                         View* focused, bool log_inserted) {
+    const char* clip = clipboard_get_text();
+    if (clip && *clip) {
+        evcon->paste_text = clip;
+        dispatch_lambda_handler(evcon, focused, "paste");
+        evcon->paste_text = nullptr;
+        focused = focus_get(state);
+        if (focused && focused->is_element()) {
+            DomElement* elem = lam::dom_require_element(focused);
+            if (tc_is_text_control(elem)) {
+                uint32_t inserted = dispatch_form_text_paste(
+                    evcon, elem, state, focused, clip, (uint32_t)strlen(clip));
+                if (log_inserted) {
+                    log_debug("Textarea paste: %u bytes inserted", inserted);
+                }
+            }
+        }
+    }
+    evcon->need_repaint = true;
+}
+
+static void dispatch_form_modified_delete(EventContext* evcon, DomElement* elem,
+                                          DocState* state, View* target,
+                                          const char* value, int value_len,
+                                          int caret, bool backward,
+                                          bool line_backward) {
+    uint32_t start = (uint32_t)caret;
+    uint32_t end = start;
+    InputIntentType intent = INPUT_INTENT_DELETE_WORD_FORWARD;
+    if (backward) {
+        start = line_backward
+            ? te_line_start(value, (uint32_t)value_len, (uint32_t)caret)
+            : te_prev_word_byte(value, (uint32_t)value_len, (uint32_t)caret);
+        intent = line_backward ? INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD
+                               : INPUT_INTENT_DELETE_WORD_BACKWARD;
+    } else {
+        end = te_next_word_byte(value, (uint32_t)value_len, (uint32_t)caret);
+    }
+    if (end > start) {
+        dispatch_form_text_replace(evcon, elem, state, target, start, end,
+                                   nullptr, 0, intent);
+    }
+    evcon->need_repaint = true;
+}
+
+static void dispatch_form_delete_key(EventContext* evcon, DomElement* elem,
+                                     DocState* state, View* target,
+                                     const char* value, int value_len, int caret,
+                                     bool backward, bool had_lambda_keydown,
+                                     bool had_keydown_selection,
+                                     int keydown_sel_start,
+                                     int keydown_sel_end,
+                                     bool had_keydown_caret,
+                                     int keydown_caret_offset,
+                                     bool collapse_lambda_selection) {
+    bool editable = !form_control_is_readonly(state, static_cast<View*>(elem)) &&
+        !form_control_is_disabled(state, static_cast<View*>(elem));
+    if (backward && had_lambda_keydown) {
+        int base = had_keydown_caret ? keydown_caret_offset : caret;
+        const char* operation = "lambdaDeleteBackward";
+        if (collapse_lambda_selection && had_keydown_selection) {
+            base = keydown_sel_start;
+            operation = "lambdaDeleteSelection";
+        }
+        if (base < 0) base = 0;
+        if (base > value_len) base = value_len;
+        if ((collapse_lambda_selection && had_keydown_selection) ||
+            (base > 0 && value)) {
+            int new_len = form_control_live_value_len_int(elem);
+            uint32_t collapse = (uint32_t)(base <= new_len ? base : new_len);
+            dispatch_form_caret_collapse(evcon, elem, state, target,
+                                         collapse, operation);
+        }
+    } else if (!had_lambda_keydown && editable) {
+        uint32_t start = 0;
+        uint32_t end = 0;
+        if (had_keydown_selection) {
+            start = (uint32_t)keydown_sel_start;
+            end = (uint32_t)keydown_sel_end;
+        } else if (backward && caret > 0 && value) {
+            int previous = caret - 1;
+            while (previous > 0 &&
+                   ((unsigned char)value[previous] & 0xC0) == 0x80) {
+                previous--;
+            }
+            start = (uint32_t)previous;
+            end = (uint32_t)caret;
+        } else if (!backward && value && caret < value_len) {
+            int next = caret + 1;
+            while (next < value_len &&
+                   ((unsigned char)value[next] & 0xC0) == 0x80) {
+                next++;
+            }
+            start = (uint32_t)caret;
+            end = (uint32_t)next;
+        } else {
+            start = end = backward ? 0 : (uint32_t)caret;
+        }
+        if (end > start) {
+            dispatch_form_text_replace(
+                evcon, elem, state, target, start, end, nullptr, 0,
+                backward ? INPUT_INTENT_DELETE_CONTENT_BACKWARD
+                         : INPUT_INTENT_DELETE_CONTENT_FORWARD);
+        }
+    }
+    evcon->need_repaint = true;
+}
+
 static bool dispatch_form_selection_extend(EventContext* evcon, DomElement* elem,
                                            DocState* state, View* target,
                                            int anchor_offset, int focus_offset,
                                            const char* operation) {
-    if (!evcon || !elem || !state || !target) return false;
-    if (!tc_is_text_control(elem)) return false;
-
     EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface) ||
-        !editing_surface_is_text_control(&surface)) {
-        return false;
-    }
+    if (!dispatch_form_editing_surface(evcon, elem, state, target, &surface)) return false;
 
     int value_len = form_control_live_value_len_int(elem);
     if (anchor_offset < 0) anchor_offset = 0;
@@ -2886,14 +2956,8 @@ static bool dispatch_form_selection_start(EventContext* evcon, DomElement* elem,
                                           DocState* state, View* target,
                                           uint32_t offset,
                                           const char* operation) {
-    if (!evcon || !elem || !state || !target) return false;
-    if (!tc_is_text_control(elem)) return false;
-
     EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface) ||
-        !editing_surface_is_text_control(&surface)) {
-        return false;
-    }
+    if (!dispatch_form_editing_surface(evcon, elem, state, target, &surface)) return false;
 
     tc_ensure_init(elem);
     uint32_t value_len = elem->form ? elem->form->current_value_len : 0;
@@ -2915,14 +2979,8 @@ static bool dispatch_form_selection_range(EventContext* evcon, DomElement* elem,
                                           DocState* state, View* target,
                                           uint32_t start, uint32_t end,
                                           const char* operation) {
-    if (!evcon || !elem || !state || !target) return false;
-    if (!tc_is_text_control(elem)) return false;
-
     EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface) ||
-        !editing_surface_is_text_control(&surface)) {
-        return false;
-    }
+    if (!dispatch_form_editing_surface(evcon, elem, state, target, &surface)) return false;
 
     tc_ensure_init(elem);
     uint32_t value_len = elem->form ? elem->form->current_value_len : 0;
@@ -3007,11 +3065,7 @@ static bool dispatch_form_history(EventContext* evcon, DomElement* elem,
     intent.type = input_type;
     intent.data = "";
 
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
+    EditingDispatchHooks hooks = dispatch_editing_hooks();
 
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_TEXT,
                                SM_EV_FORM_HISTORY, target);
@@ -3086,11 +3140,7 @@ static bool dispatch_editing_history_for_controller(EventContext* evcon,
             return false;
         }
 
-        EditingDispatchHooks hooks;
-        hooks.dispatch_input_event = dispatch_editing_input_event;
-        hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-        hooks.copy_selection = dispatch_editing_copy_selection;
-        hooks.user = nullptr;
+        EditingDispatchHooks hooks = dispatch_editing_hooks();
 
         EditingTransaction tx;
         memset(&tx, 0, sizeof(tx));
@@ -3514,11 +3564,7 @@ extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
     evcon.ui_context = uicon;
     evcon.target = event_target;
 
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
+    EditingDispatchHooks hooks = dispatch_editing_hooks();
 
     radiant_dispatch_composition_event(&evcon, event_target,
                                        "compositionupdate",
@@ -3569,11 +3615,7 @@ extern "C" bool radiant_dispatch_form_text_ime_cancel(UiContext* uicon,
     evcon.ui_context = uicon;
     evcon.target = event_target;
 
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
+    EditingDispatchHooks hooks = dispatch_editing_hooks();
 
     radiant_dispatch_composition_event(&evcon, event_target,
                                        "compositionend", "");
@@ -3641,11 +3683,7 @@ extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
                                    start, end, committed, len,
                                    INPUT_INTENT_INSERT_FROM_COMPOSITION);
     } else {
-        EditingDispatchHooks hooks;
-        hooks.dispatch_input_event = dispatch_editing_input_event;
-        hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-        hooks.copy_selection = dispatch_editing_copy_selection;
-        hooks.user = nullptr;
+        EditingDispatchHooks hooks = dispatch_editing_hooks();
 
         bool prevented = false;
         if (intent.type == INPUT_INTENT_DELETE_COMPOSITION_TEXT && surface_ptr) {
@@ -6347,6 +6385,48 @@ void view_to_absolute_position(View* view, float rel_x, float rel_y,
     *out_abs_y = abs_y;
 }
 
+struct EventTextRun {
+    unsigned char* end;
+    int visible_end_offset;
+    float pdf_width;
+    bool pdf_copy_space;
+    bool is_pdf;
+};
+
+static EventTextRun event_text_run(ViewText* text, TextRect* rect) {
+    EventTextRun run = {0};
+    run.is_pdf = pdf_text_run_metrics(text, &run.pdf_width, &run.pdf_copy_space);
+    run.visible_end_offset = pdf_visible_end_offset(text, rect, run.pdf_copy_space);
+    int end_offset = run.is_pdf
+        ? run.visible_end_offset : rect->start_index + max(rect->length, 0);
+    run.end = text->text_data() + end_offset;
+    return run;
+}
+
+static bool event_text_glyph_advance(FontBox* font, unsigned char* p, unsigned char* end,
+                                     bool* has_space, int* out_bytes, float* out_advance) {
+    *out_bytes = 1;
+    *out_advance = 0.0f;
+    if (is_space(*p)) {
+        if (*has_space) return false;
+        *has_space = true;
+        *out_advance = font->style->space_width;
+        return true;
+    }
+
+    *has_space = false;
+    uint32_t codepoint;
+    *out_bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
+    if (*out_bytes <= 0) {
+        *out_bytes = 1;
+        codepoint = *p;
+    }
+    GlyphInfo glyph = font_get_glyph(font->font_handle, codepoint);
+    if (glyph.id == 0) return false;
+    *out_advance = glyph.advance_x;
+    return true;
+}
+
 /**
  * Calculate character offset from mouse click position within a text rect
  * Returns the byte offset closest to the click position, aligned to UTF-8 character boundaries
@@ -6357,11 +6437,8 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     float x = evcon->block.x + rect->x;
 
     unsigned char* p = str + rect->start_index;
-    float pdf_width = 0.0f;
-    bool pdf_copy_space = false;
-    bool is_pdf_text_run = pdf_text_run_metrics(text, &pdf_width, &pdf_copy_space);
-    int visible_end_offset = pdf_visible_end_offset(text, rect, pdf_copy_space);
-    unsigned char* end = str + (is_pdf_text_run ? visible_end_offset : rect->start_index + max(rect->length, 0));
+    EventTextRun run = event_text_run(text, rect);
+    unsigned char* end = run.end;
     int byte_offset = rect->start_index;  // track byte offset for return value
 
     float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0)
@@ -6373,13 +6450,13 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
 
     bool has_space = false;
 
-    if (is_pdf_text_run && pdf_width > 0.0f) {
-        float visible_width = pdf_text_run_visible_natural_width(evcon, rect, pdf_copy_space);
+    if (run.is_pdf && run.pdf_width > 0.0f) {
+        float visible_width = pdf_text_run_visible_natural_width(evcon, rect, run.pdf_copy_space);
         if (visible_width > 0.0f) {
             float local_pdf_x = (float)mouse_x - x;
             if (local_pdf_x <= 0.0f) return rect->start_index;
-            if (local_pdf_x >= pdf_width) return visible_end_offset;
-            mouse_x = (int)(x + (local_pdf_x * visible_width / pdf_width)); // INT_CAST_OK: event mouse coordinate API is integer-based
+            if (local_pdf_x >= run.pdf_width) return run.visible_end_offset;
+            mouse_x = (int)(x + (local_pdf_x * visible_width / run.pdf_width)); // INT_CAST_OK: event mouse coordinate API is integer-based
         }
     }
 
@@ -6472,11 +6549,8 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
     float y = rect->y;
 
     unsigned char* p = str + rect->start_index;
-    float pdf_width = 0.0f;
-    bool pdf_copy_space = false;
-    bool is_pdf_text_run = pdf_text_run_metrics(text, &pdf_width, &pdf_copy_space);
-    int visible_end_offset = pdf_visible_end_offset(text, rect, pdf_copy_space);
-    unsigned char* end = str + (is_pdf_text_run ? visible_end_offset : rect->start_index + max(rect->length, 0));
+    EventTextRun run = event_text_run(text, rect);
+    unsigned char* end = run.end;
     int byte_offset = rect->start_index;  // track byte offset
     float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0)
         ? evcon->ui_context->pixel_ratio : 1.0f;
@@ -6489,53 +6563,21 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
 
     while (p < end && byte_offset < target_offset) {
         float wd = 0;
-        int bytes = 1;  // number of bytes for current character
-
-        if (is_space(*p)) {
-            if (has_space) {
-                p++;
-                byte_offset++;
-                continue;
-            }
-            has_space = true;
-            wd = evcon->font.style->space_width;
-            bytes = 1;
-        } else {
-            has_space = false;
-            // Decode UTF-8 codepoint to handle multi-byte characters
-            uint32_t codepoint;
-            bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
-            if (bytes <= 0) {
-                // Invalid UTF-8 sequence, skip single byte
-                bytes = 1;
-                codepoint = *p;
-            }
-            GlyphInfo ginfo = font_get_glyph(evcon->font.font_handle, codepoint);
-            if (ginfo.id == 0) {
-                p += bytes;
-                byte_offset += bytes;
-                continue;
-            }
-            wd = ginfo.advance_x;
-
-            // Debug: log per-character advance for first 15 chars
-            if (byte_offset - rect->start_index < 30) {
-                log_debug("[CALC-POS] byte_offset=%d codepoint=U+%04X x=%.1f wd=%.1f",
-                    byte_offset, codepoint,
-                    x, wd);
-            }
-        }
+        int bytes;
+        bool has_advance = event_text_glyph_advance(
+            &evcon->font, p, end, &has_space, &bytes, &wd);
+        if (!has_advance) { p += bytes; byte_offset += bytes; continue; }
         x += wd;
         p += bytes;
         byte_offset += bytes;
     }
-    if (is_pdf_text_run && pdf_width > 0.0f) {
-        float visible_width = pdf_text_run_visible_natural_width(evcon, rect, pdf_copy_space);
+    if (run.is_pdf && run.pdf_width > 0.0f) {
+        float visible_width = pdf_text_run_visible_natural_width(evcon, rect, run.pdf_copy_space);
         if (visible_width > 0.0f) {
-            if (target_offset >= visible_end_offset) {
-                x = rect->x + pdf_width;
+            if (target_offset >= run.visible_end_offset) {
+                x = rect->x + run.pdf_width;
             } else {
-                x = rect->x + (x - rect->x) * pdf_width / visible_width;
+                x = rect->x + (x - rect->x) * run.pdf_width / visible_width;
             }
         }
     }
@@ -6558,13 +6600,10 @@ static float event_glyph_x_resolver(UiContext* uicon, ViewText* text,
     if (!text || !rect) return rect ? rect->x : 0.0f;
     if (byte_offset <= rect->start_index) return rect->x;
     if (rect->length <= 0) return rect->x;
-    float pdf_width = 0.0f;
-    bool pdf_copy_space = false;
-    bool is_pdf_text_run = pdf_text_run_metrics(text, &pdf_width, &pdf_copy_space);
-    int visible_end_offset = pdf_visible_end_offset(text, rect, pdf_copy_space);
-    int rect_end_offset = is_pdf_text_run ? visible_end_offset : rect->start_index + rect->length;
+    EventTextRun run = event_text_run(text, rect);
+    int rect_end_offset = run.is_pdf ? run.visible_end_offset : rect->start_index + rect->length;
     if (byte_offset >= rect_end_offset) {
-        return rect->x + (is_pdf_text_run ? pdf_width : rect->width);
+        return rect->x + (run.is_pdf ? run.pdf_width : rect->width);
     }
 
     // Mirror calculate_position_from_char_offset, but build a temporary
@@ -6583,31 +6622,21 @@ static float event_glyph_x_resolver(UiContext* uicon, ViewText* text,
 
     while (p < end && byte_off < byte_offset) {
         float wd = 0;
-        int bytes = 1;
-        if (is_space(*p)) {
-            if (has_space) { p++; byte_off++; continue; }
-            has_space = true;
-            wd = fbox.style->space_width;
-        } else {
-            has_space = false;
-            uint32_t codepoint;
-            bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
-            if (bytes <= 0) { bytes = 1; codepoint = *p; }
-            GlyphInfo ginfo = font_get_glyph(fbox.font_handle, codepoint);
-            if (ginfo.id == 0) { p += bytes; byte_off += bytes; continue; }
-            wd = ginfo.advance_x;
-        }
+        int bytes;
+        bool has_advance = event_text_glyph_advance(
+            &fbox, p, end, &has_space, &bytes, &wd);
+        if (!has_advance) { p += bytes; byte_off += bytes; continue; }
         x += wd;
         p += bytes;
         byte_off += bytes;
     }
-    if (is_pdf_text_run && pdf_width > 0.0f) {
-        float visible_width = pdf_text_run_visible_natural_width(&fbox, rect, pdf_copy_space);
+    if (run.is_pdf && run.pdf_width > 0.0f) {
+        float visible_width = pdf_text_run_visible_natural_width(&fbox, rect, run.pdf_copy_space);
         if (visible_width > 0.0f) {
-            if (byte_offset >= visible_end_offset) {
-                return rect->x + pdf_width;
+            if (byte_offset >= run.visible_end_offset) {
+                return rect->x + run.pdf_width;
             }
-            return rect->x + (x - rect->x) * pdf_width / visible_width;
+            return rect->x + (x - rect->x) * run.pdf_width / visible_width;
         }
     }
     return x;
@@ -6629,14 +6658,11 @@ static int event_byte_offset_for_x_resolver(UiContext* uicon, ViewText* text,
     if (!text || !rect) return rect ? rect->start_index : 0;
     if (rect->length <= 0) return rect->start_index;
     if (target_local_x <= rect->x) return rect->start_index;
-    float pdf_width = 0.0f;
-    bool pdf_copy_space = false;
-    bool is_pdf_text_run = pdf_text_run_metrics(text, &pdf_width, &pdf_copy_space);
-    int visible_end_offset = pdf_visible_end_offset(text, rect, pdf_copy_space);
+    EventTextRun run = event_text_run(text, rect);
     float target_x = target_local_x;
 
-    if (is_pdf_text_run && pdf_width > 0.0f) {
-        if (target_x >= rect->x + pdf_width) return visible_end_offset;
+    if (run.is_pdf && run.pdf_width > 0.0f) {
+        if (target_x >= rect->x + run.pdf_width) return run.visible_end_offset;
     } else if (target_x >= rect->x + rect->width) {
         return rect->start_index + rect->length;
     }
@@ -6648,41 +6674,31 @@ static int event_byte_offset_for_x_resolver(UiContext* uicon, ViewText* text,
 
     unsigned char* str = text->text_data();
     unsigned char* p = str + rect->start_index;
-    unsigned char* end = str + (is_pdf_text_run ? visible_end_offset : rect->start_index + rect->length);
+    unsigned char* end = run.end;
     int byte_off = rect->start_index;
     float x = rect->x;
     bool has_space = false;
 
-    if (is_pdf_text_run && pdf_width > 0.0f) {
-        float visible_width = pdf_text_run_visible_natural_width(&fbox, rect, pdf_copy_space);
+    if (run.is_pdf && run.pdf_width > 0.0f) {
+        float visible_width = pdf_text_run_visible_natural_width(&fbox, rect, run.pdf_copy_space);
         if (visible_width > 0.0f) {
-            target_x = rect->x + (target_x - rect->x) * visible_width / pdf_width;
+            target_x = rect->x + (target_x - rect->x) * visible_width / run.pdf_width;
         }
     }
 
     while (p < end) {
         float wd = 0;
-        int bytes = 1;
-        if (is_space(*p)) {
-            if (has_space) { p++; byte_off++; continue; }
-            has_space = true;
-            wd = fbox.style->space_width;
-        } else {
-            has_space = false;
-            uint32_t codepoint;
-            bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
-            if (bytes <= 0) { bytes = 1; codepoint = *p; }
-            GlyphInfo ginfo = font_get_glyph(fbox.font_handle, codepoint);
-            if (ginfo.id == 0) { p += bytes; byte_off += bytes; continue; }
-            wd = ginfo.advance_x;
-        }
+        int bytes;
+        bool has_advance = event_text_glyph_advance(
+            &fbox, p, end, &has_space, &bytes, &wd);
+        if (!has_advance) { p += bytes; byte_off += bytes; continue; }
         // Caret goes BEFORE this glyph if target_local_x is left of the midpoint.
         if (target_x < x + wd / 2.0f) return byte_off;
         x += wd;
         p += bytes;
         byte_off += bytes;
     }
-    return is_pdf_text_run ? visible_end_offset : rect->start_index + rect->length;
+    return run.is_pdf ? run.visible_end_offset : rect->start_index + rect->length;
 }
 
 __attribute__((constructor))
@@ -8759,21 +8775,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // beforeinput/input and pushes an undo entry. Caret is
                 // positioned by te_replace_byte_range.
                 if (cmd && key_event->key == RDT_KEY_V) {
-                    const char* clip = clipboard_get_text();
-                    if (clip && *clip) {
-                        evcon.paste_text = clip;
-                        dispatch_lambda_handler(&evcon, focused, "paste");
-                        evcon.paste_text = nullptr;
-                        focused = focus_get(state);
-                        if (focused && focused->is_element()) {
-                            DomElement* fe = lam::dom_require_element(focused);
-                            if (tc_is_text_control(fe)) {
-                                dispatch_form_text_paste(&evcon, fe, state, focused,
-                                                         clip, (uint32_t)strlen(clip));
-                            }
-                        }
-                    }
-                    evcon.need_repaint = true;
+                    dispatch_form_keyboard_paste(&evcon, state, focused, false);
                     break;
                 }
 
@@ -8857,31 +8859,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // F3: Alt+Backspace → delete previous word.
                 //     Cmd+Backspace → delete to start of value.
                 if ((alt || cmd) && key_event->key == RDT_KEY_BACKSPACE) {
-                    uint32_t new_off = cmd
-                        ? 0
-                        : te_prev_word_byte(value, (uint32_t)value_len,
-                                            (uint32_t)cur);
-                    if (new_off < (uint32_t)cur) {
-                        dispatch_form_text_replace(&evcon, focus_elem, state, focused,
-                                                   new_off, (uint32_t)cur,
-                                                   nullptr, 0,
-                                                   cmd ? INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD
-                                                       : INPUT_INTENT_DELETE_WORD_BACKWARD);
-                    }
-                    evcon.need_repaint = true;
+                    dispatch_form_modified_delete(&evcon, focus_elem, state, focused,
+                        value, value_len, cur, true, cmd);
                     break;
                 }
                 // F3: Alt+Delete → delete next word.
                 if (alt && key_event->key == RDT_KEY_DELETE) {
-                    uint32_t new_end = te_next_word_byte(
-                        value, (uint32_t)value_len, (uint32_t)cur);
-                    if (new_end > (uint32_t)cur) {
-                        dispatch_form_text_replace(&evcon, focus_elem, state, focused,
-                                                   (uint32_t)cur, new_end,
-                                                   nullptr, 0,
-                                                   INPUT_INTENT_DELETE_WORD_FORWARD);
-                    }
-                    evcon.need_repaint = true;
+                    dispatch_form_modified_delete(&evcon, focus_elem, state, focused,
+                        value, value_len, cur, false, false);
                     break;
                 }
 
@@ -8941,66 +8926,18 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_BACKSPACE) {
-                    bool editable = !form_control_is_readonly(state, static_cast<View*>(focus_elem)) &&
-                        !form_control_is_disabled(state, static_cast<View*>(focus_elem));
-                    if (had_lambda_keydown) {
-                        // Lambda handler already deleted before the caret; clamp to the post-delete offset.
-                        int base_off = had_keydown_caret ? keydown_caret_offset : cur;
-                        if (base_off < 0) base_off = 0;
-                        if (base_off > value_len) base_off = value_len;
-                        if (base_off > 0 && value) {
-                            int new_len = form_control_live_value_len_int(focus_elem);
-                            uint32_t collapse_off = (uint32_t)(base_off <= new_len ? base_off : new_len);
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, collapse_off, "lambdaDeleteBackward");
-                        }
-                    } else if (editable) {
-                        // Plain HTML input: perform the delete ourselves.
-                        uint32_t a, b;
-                        if (had_keydown_selection) {
-                            a = (uint32_t)keydown_sel_start;
-                            b = (uint32_t)keydown_sel_end_capture;
-                        } else if (cur > 0 && value) {
-                            int prev = cur - 1;
-                            while (prev > 0 && ((unsigned char)value[prev] & 0xC0) == 0x80)
-                                prev--;
-                            a = (uint32_t)prev;
-                            b = (uint32_t)cur;
-                        } else {
-                            a = b = 0;
-                        }
-                        if (b > a) {
-                            dispatch_form_text_replace(&evcon, focus_elem, state, focused,
-                                                       a, b, nullptr, 0,
-                                                       INPUT_INTENT_DELETE_CONTENT_BACKWARD);
-                        }
-                    }
-                    evcon.need_repaint = true;
+                    dispatch_form_delete_key(&evcon, focus_elem, state, focused,
+                        value, value_len, cur, true, had_lambda_keydown,
+                        had_keydown_selection, keydown_sel_start,
+                        keydown_sel_end_capture, had_keydown_caret,
+                        keydown_caret_offset, false);
                     break;
                 } else if (key_event->key == RDT_KEY_DELETE) {
-                    bool editable = !form_control_is_readonly(state, static_cast<View*>(focus_elem)) &&
-                        !form_control_is_disabled(state, static_cast<View*>(focus_elem));
-                    if (!had_lambda_keydown && editable) {
-                        uint32_t a, b;
-                        if (had_keydown_selection) {
-                            a = (uint32_t)keydown_sel_start;
-                            b = (uint32_t)keydown_sel_end_capture;
-                        } else if (value && cur < value_len) {
-                            int next = cur + 1;
-                            while (next < value_len && ((unsigned char)value[next] & 0xC0) == 0x80)
-                                next++;
-                            a = (uint32_t)cur;
-                            b = (uint32_t)next;
-                        } else {
-                            a = b = (uint32_t)cur;
-                        }
-                        if (b > a) {
-                            dispatch_form_text_replace(&evcon, focus_elem, state, focused,
-                                                       a, b, nullptr, 0,
-                                                       INPUT_INTENT_DELETE_CONTENT_FORWARD);
-                        }
-                    }
-                    evcon.need_repaint = true;
+                    dispatch_form_delete_key(&evcon, focus_elem, state, focused,
+                        value, value_len, cur, false, had_lambda_keydown,
+                        had_keydown_selection, keydown_sel_start,
+                        keydown_sel_end_capture, had_keydown_caret,
+                        keydown_caret_offset, false);
                     break;
                 }
             }
@@ -9091,24 +9028,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // maxlength clamping happen in one place; caret + undo are
                 // handled by te_replace_byte_range.
                 if (cmd && key_event->key == RDT_KEY_V) {
-                    const char* clip = clipboard_get_text();
-                    if (clip && *clip) {
-                        evcon.paste_text = clip;
-                        dispatch_lambda_handler(&evcon, focused, "paste");
-                        evcon.paste_text = nullptr;
-                        focused = focus_get(state);
-                        if (focused && focused->is_element()) {
-                            DomElement* fe = lam::dom_require_element(focused);
-                            if (tc_is_text_control(fe)) {
-                                uint32_t inserted = dispatch_form_text_paste(
-                                    &evcon, fe, state, focused,
-                                    clip, (uint32_t)strlen(clip));
-                                log_debug("Textarea paste: %u bytes inserted",
-                                          inserted);
-                            }
-                        }
-                    }
-                    evcon.need_repaint = true;
+                    dispatch_form_keyboard_paste(&evcon, state, focused, true);
                     break;
                 }
 
@@ -9174,37 +9094,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // F3: Alt+Backspace → delete previous word.
                 //     Cmd+Backspace → delete to start of current line.
                 if ((alt || cmd) && key_event->key == RDT_KEY_BACKSPACE) {
-                    uint32_t new_off;
-                    if (cmd) {
-                        // Line start = first byte after previous '\n', or 0.
-                        new_off = te_line_start(value, (uint32_t)value_len,
-                                                (uint32_t)cur);
-                    } else {
-                        new_off = te_prev_word_byte(value, (uint32_t)value_len,
-                                                    (uint32_t)cur);
-                    }
-                    if (new_off < (uint32_t)cur) {
-                        dispatch_form_text_replace(&evcon, focus_elem, state, focused,
-                                                   new_off, (uint32_t)cur,
-                                                   nullptr, 0,
-                                                   cmd ? INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD
-                                                       : INPUT_INTENT_DELETE_WORD_BACKWARD);
-                    }
-                    evcon.need_repaint = true;
+                    dispatch_form_modified_delete(&evcon, focus_elem, state, focused,
+                        value, value_len, cur, true, cmd);
                     break;
                 }
 
                 // F3: Alt+Delete → delete next word.
                 if (alt && key_event->key == RDT_KEY_DELETE) {
-                    uint32_t new_end = te_next_word_byte(
-                        value, (uint32_t)value_len, (uint32_t)cur);
-                    if (new_end > (uint32_t)cur) {
-                        dispatch_form_text_replace(&evcon, focus_elem, state, focused,
-                                                   (uint32_t)cur, new_end,
-                                                   nullptr, 0,
-                                                   INPUT_INTENT_DELETE_WORD_FORWARD);
-                    }
-                    evcon.need_repaint = true;
+                    dispatch_form_modified_delete(&evcon, focus_elem, state, focused,
+                        value, value_len, cur, false, false);
                     break;
                 }
 
@@ -9339,72 +9237,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_BACKSPACE) {
-                    bool editable = !form_control_is_readonly(state, static_cast<View*>(focus_elem)) &&
-                        !form_control_is_disabled(state, static_cast<View*>(focus_elem));
-                    if (had_lambda_keydown) {
-                        // Lambda handler already processed the delete; adjust caret
-                        if (had_keydown_selection) {
-                            // selection was deleted: caret goes to selection start
-                            int new_len = form_control_live_value_len_int(focus_elem);
-                            uint32_t collapse_off = (uint32_t)(keydown_sel_start <= new_len
-                                ? keydown_sel_start : new_len);
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, collapse_off, "lambdaDeleteSelection");
-                        } else if ((had_keydown_caret ? keydown_caret_offset : cur) > 0 && value) {
-                            // single char delete: collapse at the post-delete offset
-                            int base_off = had_keydown_caret ? keydown_caret_offset : cur;
-                            if (base_off < 0) base_off = 0;
-                            if (base_off > value_len) base_off = value_len;
-                            int new_len = form_control_live_value_len_int(focus_elem);
-                            uint32_t collapse_off = (uint32_t)(base_off <= new_len ? base_off : new_len);
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, collapse_off, "lambdaDeleteBackward");
-                        }
-                    } else if (editable) {
-                        uint32_t a, b;
-                        if (had_keydown_selection) {
-                            a = (uint32_t)keydown_sel_start;
-                            b = (uint32_t)keydown_sel_end_capture;
-                        } else if (cur > 0 && value) {
-                            int prev = cur - 1;
-                            while (prev > 0 && ((unsigned char)value[prev] & 0xC0) == 0x80)
-                                prev--;
-                            a = (uint32_t)prev;
-                            b = (uint32_t)cur;
-                        } else {
-                            a = b = 0;
-                        }
-                        if (b > a) {
-                            dispatch_form_text_replace(&evcon, focus_elem, state, focused,
-                                                       a, b, nullptr, 0,
-                                                       INPUT_INTENT_DELETE_CONTENT_BACKWARD);
-                        }
-                    }
-                    evcon.need_repaint = true;
+                    dispatch_form_delete_key(&evcon, focus_elem, state, focused,
+                        value, value_len, cur, true, had_lambda_keydown,
+                        had_keydown_selection, keydown_sel_start,
+                        keydown_sel_end_capture, had_keydown_caret,
+                        keydown_caret_offset, true);
                 } else if (key_event->key == RDT_KEY_DELETE) {
-                    bool editable = !form_control_is_readonly(state, static_cast<View*>(focus_elem)) &&
-                        !form_control_is_disabled(state, static_cast<View*>(focus_elem));
-                    if (!had_lambda_keydown && editable) {
-                        uint32_t a, b;
-                        if (had_keydown_selection) {
-                            a = (uint32_t)keydown_sel_start;
-                            b = (uint32_t)keydown_sel_end_capture;
-                        } else if (value && cur < value_len) {
-                            int next = cur + 1;
-                            while (next < value_len && ((unsigned char)value[next] & 0xC0) == 0x80)
-                                next++;
-                            a = (uint32_t)cur;
-                            b = (uint32_t)next;
-                        } else {
-                            a = b = (uint32_t)cur;
-                        }
-                        if (b > a) {
-                            dispatch_form_text_replace(&evcon, focus_elem, state, focused,
-                                                       a, b, nullptr, 0,
-                                                       INPUT_INTENT_DELETE_CONTENT_FORWARD);
-                        }
-                    }
-                    evcon.need_repaint = true;
+                    dispatch_form_delete_key(&evcon, focus_elem, state, focused,
+                        value, value_len, cur, false, had_lambda_keydown,
+                        had_keydown_selection, keydown_sel_start,
+                        keydown_sel_end_capture, had_keydown_caret,
+                        keydown_caret_offset, true);
                 } else if (key_event->key == RDT_KEY_ENTER) {
                     bool editable = !form_control_is_readonly(state, static_cast<View*>(focus_elem)) &&
                         !form_control_is_disabled(state, static_cast<View*>(focus_elem));

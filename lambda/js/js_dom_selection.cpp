@@ -33,11 +33,9 @@
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 
-#include "../../radiant/dom_range.hpp"
-#include "../../radiant/dom_range_resolver.hpp"
-#include "../../radiant/state_store.hpp"
-#include "../../radiant/form_control.hpp"
-#include "../../radiant/text_control.hpp"
+#include "../../radiant/event.hpp"
+#include "../../radiant/view.hpp"
+#include "../../radiant/event.hpp"
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>

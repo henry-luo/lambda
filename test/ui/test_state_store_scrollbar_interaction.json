@@ -3,7 +3,6 @@
   "html": "test/ui/test_state_store_scrollbar_interaction.html",
   "events": [
     {"type": "log", "message": "=== StateStore scrollbar interaction ==="},
-    {"type": "wait", "ms": 100},
 
     {"type": "mouse_move", "target": {"selector": "#pane", "offset_x": 216, "offset_y": 20}},
     {"type": "assert_state_store", "target": {"selector": "#pane"}, "view_state": true, "kind": "scroll", "weak_ref": true,

@@ -1,11 +1,8 @@
 /* Radiant declarative state-transition schema — transition API families. */
 
-#include "state_schema.hpp"
+#include "event.hpp"
 #include "state_store_internal.hpp"
-#include "dom_range.hpp"
-#include "editing_host.hpp"
-#include "form_control.hpp"
-#include "text_control.hpp"
+#include "view.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/log.h"
 #include "../lib/tagged.hpp"

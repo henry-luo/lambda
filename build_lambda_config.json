@@ -290,6 +290,26 @@
     ],
     "targets": [
         {
+            "name": "lambda-process",
+            "description": "Shared direct process launcher and its base runtime support",
+            "lang": "c17",
+            "source_files": [
+                "lib/shell.c",
+                "lib/memtrack.c",
+                "lib/hashmap.c",
+                "lib/arraylist.c",
+                "lib/arena.c",
+                "lib/mempool.c",
+                "lib/log.c",
+                "lib/str.c",
+                "lib/utf.c"
+            ],
+            "libraries": [
+                "rpmalloc",
+                "pthread"
+            ]
+        },
+        {
             "name": "lambda-input-full",
             "description": "Complete input parsing, formatting and validation with all dependencies",
             "lang": "c++17",
@@ -2189,7 +2209,7 @@
                         "source": "lib/test_shell_gtest.cpp",
                         "name": "Shell Module Tests",
                         "dependencies": [
-                            "lambda-input-full"
+                            "lambda-process"
                         ],
                         "libraries": [
                             "gtest",
@@ -2326,6 +2346,7 @@
                         "additional_sources": [
                             "radiant/display_list_bounds.cpp",
                             "radiant/display_list_storage.cpp",
+                            "radiant/view_clip.cpp",
                             "radiant/retained_display_list.cpp",
                             "test/test_retained_display_list_stubs.cpp"
                         ],
@@ -2346,6 +2367,7 @@
                         "additional_sources": [
                             "radiant/display_list_bounds.cpp",
                             "radiant/display_list_storage.cpp",
+                            "radiant/view_clip.cpp",
                             "radiant/display_list_record_vector.cpp",
                             "radiant/display_list_record_effects.cpp",
                             "radiant/display_list_record_raster.cpp",
@@ -2429,6 +2451,7 @@
                             "radiant/animation.cpp",
                             "radiant/display_list_bounds.cpp",
                             "radiant/display_list_storage.cpp",
+                            "radiant/view_clip.cpp",
                             "radiant/dom_range.cpp",
                             "radiant/dom_range_resolver.cpp",
                             "radiant/editing_host.cpp",
@@ -2549,7 +2572,9 @@
                         "source": "test/wpt/test_wpt_css_syntax_gtest.cpp",
                         "name": "WPT CSS Syntax Tests",
                         "category": "extended",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-process"
+                        ],
                         "binary": "test_wpt_css_syntax_gtest.exe",
                         "libraries": [
                             "gtest"
@@ -3774,7 +3799,9 @@
                     {
                         "source": "test/test_lambda_gtest.cpp",
                         "name": "Lambda Runtime Tests",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-process"
+                        ],
                         "binary": "test_lambda_gtest.exe",
                         "libraries": [
                             "gtest",
@@ -3817,7 +3844,9 @@
                     {
                         "source": "test/test_lambda_repl_gtest.cpp",
                         "name": "Lambda REPL Interface Tests",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-process"
+                        ],
                         "binary": "test_lambda_repl_gtest.exe",
                         "libraries": [
                             "gtest",
@@ -3828,7 +3857,9 @@
                     {
                         "source": "test/test_lambda_proc_gtest.cpp",
                         "name": "Lambda Procedural Tests",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-process"
+                        ],
                         "binary": "test_lambda_proc_gtest.exe",
                         "libraries": [
                             "gtest",
@@ -3839,7 +3870,9 @@
                     {
                         "source": "test/test_js_gtest.cpp",
                         "name": "JavaScript Transpiler Tests",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-process"
+                        ],
                         "binary": "test_js_gtest.exe",
                         "libraries": [
                             "gtest",
@@ -3864,7 +3897,9 @@
                     {
                         "source": "test/test_js_coerce_gtest.cpp",
                         "name": "JS Coercion Kernel Tests",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-process"
+                        ],
                         "binary": "test_js_coerce_gtest.exe",
                         "libraries": [
                             "gtest",
@@ -3889,7 +3924,9 @@
                     {
                         "source": "test/test_node_prelim_gtest.cpp",
                         "name": "Node.js Preliminary Tests",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-process"
+                        ],
                         "binary": "test_node_prelim_gtest.exe",
                         "libraries": [
                             "gtest",
@@ -3901,7 +3938,9 @@
                     {
                         "source": "test/test_lambda_std_gtest.cpp",
                         "name": "Lambda Structured Tests",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-process"
+                        ],
                         "binary": "test_lambda_std_gtest.exe",
                         "libraries": [
                             "gtest"
@@ -3912,7 +3951,9 @@
                     {
                         "source": "test/test_ts_gtest.cpp",
                         "name": "TypeScript Transpiler Tests",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-process"
+                        ],
                         "binary": "test_ts_gtest.exe",
                         "libraries": [
                             "gtest"
@@ -4021,7 +4062,9 @@
                     {
                         "source": "test/test_ui_automation_gtest.cpp",
                         "name": "UI Automation Tests",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-process"
+                        ],
                         "binary": "test_ui_automation_gtest.exe",
                         "libraries": [
                             "gtest",
@@ -4033,7 +4076,9 @@
                     {
                         "source": "test/test_page_load_gtest.cpp",
                         "name": "Page Load Tests",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-process"
+                        ],
                         "binary": "test_page_load_gtest.exe",
                         "libraries": [
                             "gtest",
@@ -4045,7 +4090,9 @@
                     {
                         "source": "test/test_radiant_view_gtest.cpp",
                         "name": "Radiant View Tests",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-process"
+                        ],
                         "binary": "test_radiant_view_gtest.exe",
                         "libraries": [
                             "gtest",
@@ -4069,7 +4116,9 @@
                     {
                         "source": "test/test_layout_fuzzy_gtest.cpp",
                         "name": "Layout Fuzzy Tests",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-process"
+                        ],
                         "binary": "test_layout_fuzzy_gtest.exe",
                         "libraries": [
                             "gtest",

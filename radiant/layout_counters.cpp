@@ -1,4 +1,4 @@
-#include "layout_counters.hpp"
+#include "layout.hpp"
 #include "../lib/arena.h"
 #include "../lib/hashmap.h"
 #include "../lib/hashmap_helpers.h"
@@ -310,20 +310,45 @@ static void parse_counter_spec(const char* spec,
 // Counter Operations
 // ============================================================================
 
+static CounterValue* counter_find(CounterScope* scope, CounterValue* search_key) {
+    while (scope) {
+        CounterValue* counter = (CounterValue*)hashmap_get(scope->counters, search_key);
+        if (counter) return counter;
+        scope = scope->parent;
+    }
+    return nullptr;
+}
+
+static void counter_create(CounterScope* scope, char* name, int value,
+                           bool created_by_reset) {
+    CounterValue counter = {name, value, false, created_by_reset};
+    hashmap_set(scope->counters, &counter);
+}
+
+struct ParsedCounterSpec {
+    char** names;
+    int* values;
+    int count;
+};
+
+static ParsedCounterSpec counter_parse(CounterContext* ctx, const char* spec,
+                                       int default_value = 0) {
+    ParsedCounterSpec parsed = {nullptr, nullptr, 0};
+    parse_counter_spec(spec, &parsed.names, &parsed.values, &parsed.count,
+                       ctx->arena, default_value);
+    return parsed;
+}
+
 void counter_reset(CounterContext* ctx, const char* counter_spec) {
     if (!ctx || !ctx->current_scope || !counter_spec) return;
 
     log_debug("[Counters] counter-reset: %s", counter_spec);
 
-    char** names = nullptr;
-    int* values = nullptr;
-    int count = 0;
+    ParsedCounterSpec parsed = counter_parse(ctx, counter_spec);
 
-    parse_counter_spec(counter_spec, &names, &values, &count, ctx->arena);
-
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < parsed.count; i++) {
         // Create or update counter in current scope
-        CounterValue search_key = {names[i], 0, false, false};
+        CounterValue search_key = {parsed.names[i], 0, false, false};
         CounterValue* existing = (CounterValue*)hashmap_get(ctx->current_scope->counters, &search_key);
 
         if (!existing) {
@@ -336,23 +361,17 @@ void counter_reset(CounterContext* ctx, const char* counter_spec) {
                 if (parent_cv && parent_cv->propagated) {
                     hashmap_delete(ctx->current_scope->parent->counters, &search_key);
                     log_debug("[Counters]   Removed propagated '%s' from parent (sibling replacement)",
-                              names[i]);
+                              parsed.names[i]);
                 }
             }
 
             // Create new counter
-            CounterValue new_counter;
-            new_counter.name = names[i];
-            new_counter.value = values[i];
-            new_counter.propagated = false;
-            new_counter.created_by_reset = true;
-
-            hashmap_set(ctx->current_scope->counters, &new_counter);
-            log_debug("[Counters]   Reset '%s' = %d (new)", names[i], values[i]);
+            counter_create(ctx->current_scope, parsed.names[i], parsed.values[i], true);
+            log_debug("[Counters]   Reset '%s' = %d (new)", parsed.names[i], parsed.values[i]);
         } else {
             // Update existing counter value
-            existing->value = values[i];
-            log_debug("[Counters]   Reset '%s' = %d (existing)", names[i], values[i]);
+            existing->value = parsed.values[i];
+            log_debug("[Counters]   Reset '%s' = %d (existing)", parsed.names[i], parsed.values[i]);
         }
     }
 }
@@ -362,90 +381,55 @@ void counter_increment(CounterContext* ctx, const char* counter_spec) {
 
     log_debug("[Counters] counter-increment: %s", counter_spec);
 
-    char** names = nullptr;
-    int* values = nullptr;
-    int count = 0;
+    ParsedCounterSpec parsed = counter_parse(ctx, counter_spec, 1);
 
-    parse_counter_spec(counter_spec, &names, &values, &count, ctx->arena, 1);
+    log_debug("[Counters] counter-increment parsed: count=%d", parsed.count);
 
-    log_debug("[Counters] counter-increment parsed: count=%d", count);
+    for (int i = 0; i < parsed.count; i++) {
+        log_debug("[Counters]   Processing counter[%d]: name=%s, value=%d", i, parsed.names[i], parsed.values[i]);
 
-    for (int i = 0; i < count; i++) {
-        log_debug("[Counters]   Processing counter[%d]: name=%s, value=%d", i, names[i], values[i]);
-
-        int increment = values[i];
+        int increment = parsed.values[i];
 
         // Search for counter in current and parent scopes
-        CounterValue search_key = {names[i], 0, false, false};
-        CounterValue* cv = nullptr;
-        CounterScope* scope = ctx->current_scope;
-
-        while (scope && !cv) {
-            cv = (CounterValue*)hashmap_get(scope->counters, &search_key);
-            if (cv) break;
-            scope = scope->parent;
-        }
+        CounterValue search_key = {parsed.names[i], 0, false, false};
+        CounterValue* cv = counter_find(ctx->current_scope, &search_key);
 
         if (!cv) {
             // Counter doesn't exist - create it in current scope with value 0 + increment
-            CounterValue new_counter;
-            new_counter.name = names[i];
-            new_counter.value = increment;
-            new_counter.propagated = false;
-            new_counter.created_by_reset = false;
-
-            hashmap_set(ctx->current_scope->counters, &new_counter);
-            log_debug("[Counters]   Increment '%s' by %d = %d (new)", names[i], increment, increment);
+            counter_create(ctx->current_scope, parsed.names[i], increment, false);
+            log_debug("[Counters]   Increment '%s' by %d = %d (new)", parsed.names[i], increment, increment);
         } else {
             cv->value += increment;
-            log_debug("[Counters]   Increment '%s' by %d = %d", names[i], increment, cv->value);
+            log_debug("[Counters]   Increment '%s' by %d = %d", parsed.names[i], increment, cv->value);
+        }
+    }
+}
+
+static void counter_set_parsed(CounterContext* ctx, ParsedCounterSpec parsed) {
+    for (int i = 0; i < parsed.count; i++) {
+        // CSS Lists 3 §5.2: counter-set sets the value of the innermost counter
+        // of the given name. If no counter of the given name exists on the element,
+        // a new counter is created with the specified value.
+        // Unlike counter-reset, this does NOT create a new scope.
+        CounterValue search_key = {parsed.names[i], 0, false, false};
+        CounterValue* cv = counter_find(ctx->current_scope, &search_key);
+
+        if (cv) {
+            // set existing counter to specified value
+            cv->value = parsed.values[i];
+            log_debug("[Counters]   Set '%s' = %d (existing)", parsed.names[i], parsed.values[i]);
+        } else {
+            // create new counter in current scope with specified value
+            counter_create(ctx->current_scope, parsed.names[i], parsed.values[i], false);
+            log_debug("[Counters]   Set '%s' = %d (new)", parsed.names[i], parsed.values[i]);
         }
     }
 }
 
 void counter_set(CounterContext* ctx, const char* counter_spec) {
     if (!ctx || !ctx->current_scope || !counter_spec) return;
-
     log_debug("[Counters] counter-set: %s", counter_spec);
-
-    char** names = nullptr;
-    int* values = nullptr;
-    int count = 0;
-
-    parse_counter_spec(counter_spec, &names, &values, &count, ctx->arena);
-
-    for (int i = 0; i < count; i++) {
-        // CSS Lists 3 §5.2: counter-set sets the value of the innermost counter
-        // of the given name. If no counter of the given name exists on the element,
-        // a new counter is created with the specified value.
-        // Unlike counter-reset, this does NOT create a new scope.
-        CounterValue search_key = {names[i], 0, false, false};
-        CounterValue* cv = nullptr;
-        CounterScope* scope = ctx->current_scope;
-
-        // search scope chain for existing counter
-        while (scope && !cv) {
-            cv = (CounterValue*)hashmap_get(scope->counters, &search_key);
-            if (cv) break;
-            scope = scope->parent;
-        }
-
-        if (cv) {
-            // set existing counter to specified value
-            cv->value = values[i];
-            log_debug("[Counters]   Set '%s' = %d (existing)", names[i], values[i]);
-        } else {
-            // create new counter in current scope with specified value
-            CounterValue new_counter;
-            new_counter.name = names[i];
-            new_counter.value = values[i];
-            new_counter.propagated = false;
-            new_counter.created_by_reset = false;
-
-            hashmap_set(ctx->current_scope->counters, &new_counter);
-            log_debug("[Counters]   Set '%s' = %d (new)", names[i], values[i]);
-        }
-    }
+    counter_set_parsed(ctx, counter_parse(ctx, counter_spec));
 }
 
 int counter_get_value(CounterContext* ctx, const char* name) {

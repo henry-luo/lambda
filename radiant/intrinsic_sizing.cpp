@@ -5,18 +5,10 @@
  * Table, flex, and grid layouts should ALL use these functions.
  */
 
-#include "intrinsic_sizing.hpp"
-#include "layout_text.hpp"
-#include "layout_flex.hpp"  // For FlexDirection enum
-#include "grid.hpp"         // For GridTrackList
-#include "form_control.hpp" // For FormDefaults
 #include "layout.hpp"
-#include "layout_measure.hpp"
-#include "layout_table.hpp"
-#include "layout_box.hpp"
+#include "view.hpp" // For FormDefaults
 #include "rdt_video.h"
 #include "render.hpp"
-#include "font_face.h"
 #include "../lib/font/font.h"
 #include "../lib/utf.h"
 #include "../lib/str.h"
@@ -278,147 +270,6 @@ static float intrinsic_resolve_font_size_value(LayoutContext* lycon, const CssVa
     }
 
     return -1.0f;
-}
-
-// ============================================================================
-// Helper: Read border width from CSS specified style
-// ============================================================================
-static const char* css_font_family_name_from_value(const CssValue* value) {
-    if (!value) return NULL;
-    if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
-    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
-        return value->data.custom_property.name;
-    }
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        const CssEnumInfo* info = css_enum_info(value->data.keyword);
-        return info ? info->name : NULL;
-    }
-    return NULL;
-}
-
-static bool css_font_family_available_for_intrinsic(LayoutContext* lycon, const char* family) {
-    if (!family) return false;
-    size_t flen = strlen(family);
-    if (str_ieq(family, flen, "serif", 5) ||
-        str_ieq(family, flen, "sans-serif", 10) ||
-        str_ieq(family, flen, "monospace", 9) ||
-        str_ieq(family, flen, "cursive", 7) ||
-        str_ieq(family, flen, "fantasy", 7) ||
-        str_ieq(family, flen, "system-ui", 9) ||
-        str_ieq(family, flen, "ui-serif", 8) ||
-        str_ieq(family, flen, "ui-sans-serif", 13) ||
-        str_ieq(family, flen, "ui-monospace", 12) ||
-        str_ieq(family, flen, "ui-rounded", 10) ||
-        str_ieq(family, flen, "BlinkMacSystemFont", 18)) {
-        return true;
-    }
-    if (lycon->ui_context && lycon->ui_context->font_faces && lycon->ui_context->font_face_count > 0) {
-        for (int i = 0; i < lycon->ui_context->font_face_count; i++) {
-            FontFaceDescriptor* desc = lycon->ui_context->font_faces[i];
-            if (desc && desc->family_name &&
-                str_ieq(desc->family_name, strlen(desc->family_name), family, strlen(family))) {
-                return true;
-            }
-        }
-    }
-    if (lycon->ui_context && lycon->ui_context->font_ctx) {
-        return font_family_exists(lycon->ui_context->font_ctx, family);
-    }
-    return false;
-}
-
-static const char* select_intrinsic_font_family(LayoutContext* lycon, const CssValue* value) {
-    if (!value) return NULL;
-    if (value->type != CSS_VALUE_TYPE_LIST) return css_font_family_name_from_value(value);
-
-    const char* fallback = NULL;
-    for (int i = 0; i < value->data.list.count; i++) {
-        CssValue* item = value->data.list.values[i];
-        const char* family = css_font_family_name_from_value(item);
-        if (!family) continue;
-        fallback = family;
-        if (css_font_family_available_for_intrinsic(lycon, family)) return family;
-    }
-    return fallback;
-}
-
-static const char* intrinsic_join_font_family_values(LayoutContext* lycon, const CssValue* list,
-                                                     size_t start, size_t end) {
-    if (!lycon || !lycon->doc || !lycon->doc->view_tree ||
-        !list || list->type != CSS_VALUE_TYPE_LIST || start >= end) {
-        return NULL;
-    }
-    size_t list_count = (size_t)list->data.list.count;
-    if (end > list_count) end = list_count;
-    if (start >= end) return NULL;
-
-    if (end == start + 1) {
-        return css_font_family_name_from_value(list->data.list.values[start]);
-    }
-
-    size_t total_len = 0;
-    size_t part_count = 0;
-    for (size_t i = start; i < end; i++) {
-        const char* part = css_font_family_name_from_value(list->data.list.values[i]);
-        if (!part || !*part) continue;
-        total_len += strlen(part);
-        part_count++;
-    }
-    if (part_count == 0) return NULL;
-    total_len += part_count - 1;
-
-    char* combined = (char*)pool_alloc(lycon->doc->view_tree->pool, total_len + 1);
-    if (!combined) return NULL;
-    combined[0] = '\0';
-
-    size_t pos = 0;
-    bool first = true;
-    for (size_t i = start; i < end; i++) {
-        const char* part = css_font_family_name_from_value(list->data.list.values[i]);
-        if (!part || !*part) continue;
-        if (!first) {
-            pos = str_cat(combined, pos, total_len + 1, " ", 1);
-        }
-        pos = str_cat(combined, pos, total_len + 1, part, strlen(part));
-        first = false;
-    }
-    return combined;
-}
-
-static const char* select_intrinsic_font_shorthand_family(LayoutContext* lycon,
-                                                          const CssValue* shorthand_value,
-                                                          const CssValue* main_group,
-                                                          size_t family_start_index) {
-    const char* selected = NULL;
-    const char* fallback = NULL;
-
-    if (main_group && main_group->type == CSS_VALUE_TYPE_LIST) {
-        selected = intrinsic_join_font_family_values(
-            lycon, main_group, family_start_index, main_group->data.list.count);
-        fallback = selected;
-        if (selected) return selected;
-    }
-
-    if (shorthand_value && shorthand_value->type == CSS_VALUE_TYPE_LIST &&
-        shorthand_value->data.list.count >= 2 &&
-        shorthand_value->data.list.values[0] &&
-        shorthand_value->data.list.values[0]->type == CSS_VALUE_TYPE_LIST) {
-        size_t shorthand_count = (size_t)shorthand_value->data.list.count;
-        for (size_t i = 1; i < shorthand_count; i++) {
-            const CssValue* item = shorthand_value->data.list.values[i];
-            const char* family = NULL;
-            if (item && item->type == CSS_VALUE_TYPE_LIST) {
-                family = intrinsic_join_font_family_values(lycon, item, 0, item->data.list.count);
-            } else {
-                family = css_font_family_name_from_value(item);
-            }
-            if (!family) continue;
-            fallback = family;
-            if (css_font_family_available_for_intrinsic(lycon, family)) return family;
-        }
-    }
-
-    return fallback;
 }
 
 static void intrinsic_apply_monospace_font_size_quirk(FontProp* font,
@@ -2185,6 +2036,66 @@ CssEnum get_element_text_transform(DomElement* element) {
     return CSS_VALUE_NONE;
 }
 
+struct IntrinsicSvgSize {
+    float width;
+    float height;
+};
+
+static IntrinsicSvgSize intrinsic_svg_size(DomElement* element,
+                                           float constrained_width = -1.0f) {
+    IntrinsicSvgSize size = {300.0f, 150.0f};
+    bool has_width = false;
+    bool has_height = false;
+    const char* width_attr = element ? element->get_attribute("width") : nullptr;
+    const char* height_attr = element ? element->get_attribute("height") : nullptr;
+    if (width_attr) {
+        float width = (float)atof(width_attr);
+        if (width > 0.0f) {
+            size.width = width;
+            has_width = true;
+        }
+    }
+    if (height_attr) {
+        float height = (float)atof(height_attr);
+        if (height > 0.0f) {
+            size.height = height;
+            has_height = true;
+        }
+    }
+
+    const char* viewbox = element ? element->get_attribute("viewBox") : nullptr;
+    float vb_x = 0.0f, vb_y = 0.0f, vb_width = 0.0f, vb_height = 0.0f;
+    bool has_viewbox = viewbox &&
+        sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_width, &vb_height) == 4 &&
+        vb_width > 0.0f && vb_height > 0.0f;
+    if (has_viewbox) {
+        if (!has_width && !has_height) {
+            size.width = vb_width;
+            size.height = vb_height;
+        } else if (has_width && !has_height) {
+            size.height = size.width * vb_height / vb_width;
+        } else if (!has_width && has_height) {
+            size.width = size.height * vb_width / vb_height;
+        }
+    }
+
+    // Width and height paths must use the same SVG aspect ratio resolution.
+    if (constrained_width > 0.0f && constrained_width < size.width) {
+        size.height = constrained_width * size.height / size.width;
+        size.width = constrained_width;
+    }
+    return size;
+}
+
+static float intrinsic_image_height(ImageSurface* image, float constrained_width) {
+    float height = (float)image->height;
+    if (constrained_width > 0.0f && image->width > 0 &&
+        (image->format == IMAGE_FORMAT_SVG || constrained_width < image->width)) {
+        height = constrained_width * (float)image->height / (float)image->width;
+    }
+    return height;
+}
+
 // Helper to get font-variant property from an element, traversing parent chain
 // since font-variant is an inherited property.
 // Uses elem->font (available after CSS resolution) rather than specified_style.
@@ -2326,8 +2237,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             }
                         }
                         if (fam_idx < count) {
-                            css_family = select_intrinsic_font_shorthand_family(
-                                lycon, fv, font_group, fam_idx);
+                            css_family = css_select_font_shorthand_family(
+                                lycon, fv, font_group, fam_idx, false);
                         }
                         need_font_setup = true;
                         break;
@@ -2351,8 +2262,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                                 // everything after is font-family
                                 size_t fam_idx = fi + 1;
                                 if (fam_idx < count) {
-                                    css_family = select_intrinsic_font_shorthand_family(
-                                        lycon, fv, font_group, fam_idx);
+                                    css_family = css_select_font_shorthand_family(
+                                        lycon, fv, font_group, fam_idx, false);
                                 }
                                 need_font_setup = true;
                                 break;
@@ -2386,7 +2297,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
         if (font_family_decl && font_family_decl->value &&
             (!font_shorthand_decl || font_family_decl->source_order > font_shorthand_decl->source_order)) {
-            const char* longhand_family = select_intrinsic_font_family(lycon, font_family_decl->value);
+            const char* longhand_family = css_select_font_family(
+                lycon, font_family_decl->value, false);
 
             if (longhand_family) {
                 css_family = longhand_family;
@@ -2901,22 +2813,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             log_debug("  -> replaced AUDIO intrinsic width: 300");
         }
         else if (replaced_tag == HTM_TAG_SVG) {
-            float svg_width = 300.0f;  // CSS default
-            const char* attr_w = element->get_attribute("width");
-            if (attr_w) {
-                float w = (float)atof(attr_w);
-                if (w > 0) svg_width = w;
-            } else {
-                const char* viewbox = element->get_attribute("viewBox");
-                if (viewbox) {
-                    float vb_x, vb_y, vb_w, vb_h;
-                    if (sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_w, &vb_h) == 4 && vb_w > 0) {
-                        svg_width = vb_w;
-                    }
-                }
-            }
-            replaced_width = svg_width;
-            log_debug("  -> replaced SVG intrinsic width: %.0f", svg_width);
+            replaced_width = intrinsic_svg_size(element).width;
+            log_debug("  -> replaced SVG intrinsic width: %.0f", replaced_width);
         }
         else if (replaced_tag == HTM_TAG_HR) {
             replaced_width = 0;
@@ -3089,20 +2987,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     // SVG fallback: handle SVG elements even when display.inner is not yet resolved
     if (!replaced_intrinsic_set && element->tag() == HTM_TAG_SVG) {
-        float svg_width = 300.0f;
-        const char* attr_w = element->get_attribute("width");
-        if (attr_w) {
-            float w = (float)atof(attr_w);
-            if (w > 0) svg_width = w;
-        } else {
-            const char* viewbox = element->get_attribute("viewBox");
-            if (viewbox) {
-                float vb_x, vb_y, vb_w, vb_h;
-                if (sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_w, &vb_h) == 4 && vb_w > 0) {
-                    svg_width = vb_w;
-                }
-            }
-        }
+        float svg_width = intrinsic_svg_size(element).width;
         sizes.min_content = svg_width;
         sizes.max_content = svg_width;
         replaced_intrinsic_set = true;
@@ -5400,14 +5285,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         if (elem_tag == HTM_TAG_IMG) {
             if (view->embed && view->embed->img) {
                 ImageSurface* img = view->embed->img;
-                float img_height = (float)img->height;
-                // Scale height proportionally when width differs from intrinsic.
-                // For SVG: always scale (vector images are resolution-independent).
-                // For raster: only scale down (raster images have fixed pixel counts).
-                if (width > 0 && img->width > 0 &&
-                    (img->format == IMAGE_FORMAT_SVG || width < img->width)) {
-                    img_height = width * (float)img->height / (float)img->width;
-                }
+                float img_height = intrinsic_image_height(img, width);
                 log_debug("calculate_max_content_height: IMG intrinsic height=%.1f", img_height);
                 return img_height;
             }
@@ -5424,11 +5302,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 strbuf_free(src_buf);
                 if (view->embed->img) {
                     ImageSurface* img = view->embed->img;
-                    float img_height = (float)img->height;
-                    if (width > 0 && img->width > 0 &&
-                        (img->format == IMAGE_FORMAT_SVG || width < img->width)) {
-                        img_height = width * (float)img->height / (float)img->width;
-                    }
+                    float img_height = intrinsic_image_height(img, width);
                     log_debug("calculate_max_content_height: IMG intrinsic height=%.1f (loaded)", img_height);
                     return img_height;
                 }
@@ -5465,50 +5339,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             return 54.0f;  // audio controls default height
         }
         else if (elem_tag == HTM_TAG_SVG) {
-            // SVG replaced element: determine intrinsic height from attributes/viewBox
-            float svg_width = 300.0f;   // CSS default
-            float svg_height = 150.0f;  // CSS default
-            bool has_w = false, has_h = false;
-
-            const char* attr_w = element->get_attribute("width");
-            const char* attr_h = element->get_attribute("height");
-            if (attr_w) { float w = (float)atof(attr_w); if (w > 0) { svg_width = w; has_w = true; } }
-            if (attr_h) { float h = (float)atof(attr_h); if (h > 0) { svg_height = h; has_h = true; } }
-
-            if (!has_w && !has_h) {
-                // try viewBox
-                const char* viewbox = element->get_attribute("viewBox");
-                if (viewbox) {
-                    float vb_x, vb_y, vb_w, vb_h;
-                    if (sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_w, &vb_h) == 4) {
-                        if (vb_w > 0 && vb_h > 0) { svg_width = vb_w; svg_height = vb_h; has_w = true; has_h = true; }
-                    }
-                }
-            } else if (has_w && !has_h) {
-                // width only - try viewBox for aspect ratio
-                const char* viewbox = element->get_attribute("viewBox");
-                if (viewbox) {
-                    float vb_x, vb_y, vb_w, vb_h;
-                    if (sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_w, &vb_h) == 4 && vb_w > 0 && vb_h > 0) {
-                        svg_height = svg_width * vb_h / vb_w;
-                    }
-                }
-            } else if (!has_w && has_h) {
-                // height only - try viewBox for aspect ratio
-                const char* viewbox = element->get_attribute("viewBox");
-                if (viewbox) {
-                    float vb_x, vb_y, vb_w, vb_h;
-                    if (sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_w, &vb_h) == 4 && vb_w > 0 && vb_h > 0) {
-                        svg_width = svg_height * vb_w / vb_h;
-                    }
-                }
-            }
-
-            // scale height if width is constrained
-            if (width > 0 && width < svg_width && svg_width > 0) {
-                svg_height = width * svg_height / svg_width;
-            }
-
+            float svg_height = intrinsic_svg_size(element, width).height;
             log_debug("calculate_max_content_height: SVG intrinsic height=%.1f", svg_height);
             return svg_height;
         }
@@ -5516,33 +5347,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 
     // SVG fallback: handle SVG elements even when display.inner is not yet resolved
     if (element->tag() == HTM_TAG_SVG) {
-        float svg_width = 300.0f;
-        float svg_height = 150.0f;
-        const char* attr_w = element->get_attribute("width");
-        const char* attr_h = element->get_attribute("height");
-        bool has_w = false, has_h = false;
-        if (attr_w) { float w = (float)atof(attr_w); if (w > 0) { svg_width = w; has_w = true; } }
-        if (attr_h) { float h = (float)atof(attr_h); if (h > 0) { svg_height = h; has_h = true; } }
-        if (!has_w && !has_h) {
-            const char* viewbox = element->get_attribute("viewBox");
-            if (viewbox) {
-                float vb_x, vb_y, vb_w, vb_h;
-                if (sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_w, &vb_h) == 4 && vb_w > 0 && vb_h > 0) {
-                    svg_width = vb_w; svg_height = vb_h;
-                }
-            }
-        } else if (has_w && !has_h) {
-            const char* viewbox = element->get_attribute("viewBox");
-            if (viewbox) {
-                float vb_x, vb_y, vb_w, vb_h;
-                if (sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_w, &vb_h) == 4 && vb_w > 0 && vb_h > 0) {
-                    svg_height = svg_width * vb_h / vb_w;
-                }
-            }
-        }
-        if (width > 0 && width < svg_width && svg_width > 0) {
-            svg_height = width * svg_height / svg_width;
-        }
+        float svg_height = intrinsic_svg_size(element, width).height;
         log_debug("calculate_max_content_height: SVG (tag-based) intrinsic height=%.1f", svg_height);
         return svg_height;
     }

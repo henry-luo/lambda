@@ -13,17 +13,11 @@
 #include "../lib/shell.h"
 #include "../lib/uv_loop.h"
 #include "layout.hpp"
-#include "font_face.h"
-#include "state_store.hpp"
+#include "view.hpp"
+#include "event.hpp"
 #include "event_sim.hpp"
-#include "webview.h"
-#include "animation.h"
-#include "frame_clock.h"
 #include "render.hpp"
-#include "browsing_session.h"
-#include "event_state_log.hpp"
-#include "render.hpp"
-#include "script_runner.h"
+#include "radiant.hpp"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/network/network_integration.h"
 #include "../lambda/network/network_thread_pool.h"
@@ -1207,7 +1201,14 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
                 // ticking between user actions. Without this, page-JS never sees
                 // selection changes from native caret moves. Bounded/non-blocking
                 // so a self-rescheduling callback can't spin to the watchdog.
-                js_event_loop_pump_nowait();
+                if (event_sim_assertion_retry_pending(sim_ctx)) {
+                    int retry_wait_ms = event_sim_assertion_retry_wait_ms(sim_ctx);
+                    if (js_event_loop_pump_wait(retry_wait_ms)) {
+                        event_sim_wake_assertion_retry(sim_ctx);
+                    }
+                } else {
+                    js_event_loop_pump_nowait();
+                }
                 // Advance time by event interval
                 SimEvent* ev = (sim_ctx->current_index > 0 && sim_ctx->current_index <= sim_ctx->events->length)
                     ? (SimEvent*)sim_ctx->events->data[sim_ctx->current_index - 1] : NULL;

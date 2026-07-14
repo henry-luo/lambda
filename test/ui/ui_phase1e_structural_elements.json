@@ -4,7 +4,6 @@
   "description": "Tests click hit-testing on table cells and positioned elements. Table section starts at y=189 with padding 10. Table header 'Name' text center ~(42,215), 'Value' ~(106,215). Data cell 'Alpha' ~(40,244), '100' ~(98,244). 'Beta' ~(37,273), '200' ~(98,273). Position section at y=298. Relative text 'Relative' ~(90,333). Absolute text 'Absolute' ~(1120,363). Body height=398, outside at y=430.",
   "events": [
     {"type": "log", "message": "=== Phase 1e: structural element click tests (table, position) ==="},
-    {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "--- A. Table cell clicks ---"},
 

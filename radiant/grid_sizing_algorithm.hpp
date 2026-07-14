@@ -30,7 +30,7 @@
 #endif
 
 #include "grid_track.hpp"
-#include "grid_types.hpp"
+#include "layout.hpp"
 #include <math.h>    // isinf, INFINITY, fabsf
 #include <float.h>   // FLT_MAX
 #include "../lib/mem.h"

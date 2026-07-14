@@ -11,16 +11,18 @@
 // ============================================================================
 
 #include "view.hpp"
-#include "layout_counters.hpp"
-#include "layout_debug.hpp"
-#include "layout_box.hpp"
-#include "layout_containing_block.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lib/arraylist.h"
+#include "../lib/arraylist.hpp"
+#include "../lib/hashmap.h"
 #include "../lib/scratch_arena.h"
+#include <cassert>
 #include <cstdint>
+#include <stdarg.h>
 #include <math.h>
+
+typedef struct LayoutContext LayoutContext;
 
 // ============================================================================
 // Layout Safety Guards
@@ -166,6 +168,109 @@ inline float compute_shrink_to_fit_width(float min_content, float max_content, A
     if (avail > max_content) return max_content;
     return avail;
 }
+
+// ============================================================================
+// Intrinsic Sizing and Measurement
+// ============================================================================
+
+struct TextIntrinsicWidths {
+    float min_content;
+    float max_content;
+};
+
+float calculate_min_content_width(LayoutContext* lycon, DomNode* node);
+float calculate_max_content_width(LayoutContext* lycon, DomNode* node);
+float calculate_min_content_height(LayoutContext* lycon, DomNode* node, float width);
+float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width);
+float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float available_width);
+
+TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
+                                                   const char* text,
+                                                   size_t length,
+                                                   CssEnum text_transform = CSS_VALUE_NONE,
+                                                   CssEnum font_variant = CSS_VALUE_NONE,
+                                                   CssEnum white_space = CSS_VALUE_NORMAL,
+                                                   CssEnum overflow_wrap = CSS_VALUE_NORMAL,
+                                                   CssEnum word_break = CSS_VALUE_NORMAL);
+
+CssEnum get_element_text_transform(DomElement* element);
+CssEnum get_element_font_variant(DomElement* element);
+
+float compute_text_height_at_width(LayoutContext* lycon,
+                                    const char* text,
+                                    size_t length,
+                                    float available_width,
+                                    float line_height,
+                                    CssEnum text_transform = CSS_VALUE_NONE,
+                                    CssEnum font_variant = CSS_VALUE_NONE);
+
+IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
+                                                 bool content_only = false);
+
+struct IntrinsicSizesBidirectional {
+    float min_content_width;
+    float max_content_width;
+    float min_content_height;
+    float max_content_height;
+};
+
+IntrinsicSizesBidirectional measure_intrinsic_sizes(
+    LayoutContext* lycon,
+    ViewBlock* element,
+    AvailableSpace available_space
+);
+
+inline IntrinsicSizes intrinsic_sizes_width(IntrinsicSizesBidirectional sizes) {
+    return {sizes.min_content_width, sizes.max_content_width};
+}
+
+inline IntrinsicSizes intrinsic_sizes_height(IntrinsicSizesBidirectional sizes) {
+    return {sizes.min_content_height, sizes.max_content_height};
+}
+
+inline IntrinsicSizes intrinsic_sizes_for_axis(IntrinsicSizesBidirectional sizes, bool is_row_axis) {
+    if (is_row_axis) {
+        return {sizes.min_content_width, sizes.max_content_width};
+    }
+    return {sizes.min_content_height, sizes.max_content_height};
+}
+
+struct CellIntrinsicWidths {
+    float min_width;
+    float max_width;
+};
+
+CellIntrinsicWidths measure_table_cell_intrinsic_widths(
+    LayoutContext* lycon,
+    ViewBlock* cell
+);
+
+typedef struct IntrinsicSize {
+    float min_width;
+    float max_width;
+    float min_height;
+    float max_height;
+    bool has_baseline;
+    float first_baseline;
+    float last_baseline;
+} IntrinsicSize;
+
+IntrinsicSize layout_measure_intrinsic(LayoutContext* lycon, DomNode* node,
+    AvailableSpace space);
+IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
+IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
+
+IntrinsicSizes layout_measure_intrinsic_widths(LayoutContext* lycon, DomElement* element,
+    const char* log_context = nullptr, bool content_only = false);
+
+TextIntrinsicWidths layout_measure_text_intrinsic_widths(LayoutContext* lycon,
+    const char* text, size_t length,
+    CssEnum text_transform = CSS_VALUE_NONE,
+    CssEnum font_variant = CSS_VALUE_NONE,
+    CssEnum white_space = CSS_VALUE_NORMAL,
+    CssEnum overflow_wrap = CSS_VALUE_NORMAL,
+    CssEnum word_break = CSS_VALUE_NORMAL,
+    const char* log_context = nullptr);
 
 namespace radiant {
 
@@ -350,6 +455,687 @@ inline void layout_cache_store(
 }
 
 } // namespace radiant
+
+// ============================================================================
+// Box Metrics
+// ============================================================================
+
+typedef struct BoxEdges {
+    float left;
+    float right;
+    float top;
+    float bottom;
+} BoxEdges;
+
+typedef struct BoxMetrics {
+    BoxEdges margin;
+    BoxEdges padding;
+    BoxEdges border;
+    float margin_h;
+    float margin_v;
+    float padding_h;
+    float padding_v;
+    float border_h;
+    float border_v;
+    float pad_border_h;
+    float pad_border_v;
+} BoxMetrics;
+
+BoxMetrics layout_box_metrics(ViewBlock* block);
+BoxMetrics layout_boundary_metrics(const BoundaryProp* bound);
+
+float layout_padding_border_width(ViewBlock* block);
+float layout_padding_border_height(ViewBlock* block);
+float layout_boundary_padding_border_axis(const BoundaryProp* bound, bool horizontal);
+
+float layout_content_width_from_border_box(ViewBlock* block, float border_width);
+float layout_content_height_from_border_box(ViewBlock* block, float border_height);
+float layout_border_width_from_content_box(ViewBlock* block, float content_width);
+float layout_border_height_from_content_box(ViewBlock* block, float content_height);
+float layout_padding_border_axis(ViewBlock* block, bool horizontal);
+float layout_boundary_content_size_from_border_box(const BoundaryProp* bound, float border_size, bool horizontal);
+float layout_boundary_border_size_from_content_box(const BoundaryProp* bound, float content_size, bool horizontal);
+float layout_content_size_from_border_box(ViewBlock* block, float border_size, bool horizontal);
+float layout_border_size_from_content_box(ViewBlock* block, float content_size, bool horizontal);
+float layout_css_size_to_content_box(const BoundaryProp* bound, CssEnum box_sizing, float css_size, bool horizontal);
+float layout_css_size_to_border_box(const BoundaryProp* bound, CssEnum box_sizing, float css_size, bool horizontal);
+float layout_floor_border_box_width(ViewBlock* block, float border_width);
+float layout_floor_border_box_height(ViewBlock* block, float border_height);
+float layout_floor_border_box_axis(ViewBlock* block, float border_size, bool horizontal);
+
+static inline CssEnum layout_box_sizing(ViewBlock* block) {
+    return (block && block->blk) ? block->blk->box_sizing : CSS_VALUE_CONTENT_BOX;
+}
+
+static inline bool layout_uses_border_box(ViewBlock* block) {
+    return layout_box_sizing(block) == CSS_VALUE_BORDER_BOX;
+}
+
+float layout_apply_min_max_width(ViewBlock* block, float width, bool width_is_border_box);
+float layout_apply_min_max_height(ViewBlock* block, float height, bool height_is_border_box);
+float layout_apply_min_max_axis(ViewBlock* block, float size, bool horizontal, bool size_is_border_box);
+float layout_clamp_min_max_width(ViewBlock* block, float width);
+float layout_clamp_min_max_height(ViewBlock* block, float height);
+float layout_clamp_min_max_axis(ViewBlock* block, float size, bool horizontal);
+
+static inline float layout_clamp_positive_min_max_width(ViewBlock* block, float width) {
+    if (!block || !block->blk) return width;
+    float constrained_width = width;
+    if (block->blk->given_max_width > 0.0f && constrained_width > block->blk->given_max_width) {
+        constrained_width = block->blk->given_max_width;
+    }
+    if (block->blk->given_min_width > 0.0f && constrained_width < block->blk->given_min_width) {
+        constrained_width = block->blk->given_min_width;
+    }
+    return constrained_width;
+}
+
+static inline float layout_clamp_positive_min_max_height(ViewBlock* block, float height) {
+    if (!block || !block->blk) return height;
+    float constrained_height = height;
+    if (block->blk->given_max_height > 0.0f && constrained_height > block->blk->given_max_height) {
+        constrained_height = block->blk->given_max_height;
+    }
+    if (block->blk->given_min_height > 0.0f && constrained_height < block->blk->given_min_height) {
+        constrained_height = block->blk->given_min_height;
+    }
+    return constrained_height;
+}
+
+static inline float layout_clamp_positive_min_max_axis(ViewBlock* block, float size, bool horizontal) {
+    return horizontal
+        ? layout_clamp_positive_min_max_width(block, size)
+        : layout_clamp_positive_min_max_height(block, size);
+}
+
+static inline float layout_explicit_min_width_or(ViewBlock* block, float fallback) {
+    return (block && block->blk && block->blk->given_min_width >= 0.0f)
+        ? block->blk->given_min_width
+        : fallback;
+}
+
+static inline float layout_explicit_min_height_or(ViewBlock* block, float fallback) {
+    return (block && block->blk && block->blk->given_min_height >= 0.0f)
+        ? block->blk->given_min_height
+        : fallback;
+}
+
+static inline float layout_explicit_min_axis_or(ViewBlock* block, bool horizontal, float fallback) {
+    return horizontal
+        ? layout_explicit_min_width_or(block, fallback)
+        : layout_explicit_min_height_or(block, fallback);
+}
+
+static inline float layout_explicit_max_width_or(ViewBlock* block, float fallback) {
+    return (block && block->blk && block->blk->given_max_width >= 0.0f)
+        ? block->blk->given_max_width
+        : fallback;
+}
+
+static inline float layout_explicit_max_height_or(ViewBlock* block, float fallback) {
+    return (block && block->blk && block->blk->given_max_height >= 0.0f)
+        ? block->blk->given_max_height
+        : fallback;
+}
+
+static inline float layout_explicit_max_axis_or(ViewBlock* block, bool horizontal, float fallback) {
+    return horizontal
+        ? layout_explicit_max_width_or(block, fallback)
+        : layout_explicit_max_height_or(block, fallback);
+}
+
+static inline bool layout_has_explicit_min_width(ViewBlock* block) {
+    return layout_explicit_min_width_or(block, -1.0f) >= 0.0f;
+}
+
+static inline bool layout_has_explicit_min_height(ViewBlock* block) {
+    return layout_explicit_min_height_or(block, -1.0f) >= 0.0f;
+}
+
+static inline float layout_positive_min_width(ViewBlock* block) {
+    float min_width = layout_explicit_min_width_or(block, -1.0f);
+    return min_width > 0.0f ? min_width : 0.0f;
+}
+
+static inline float layout_positive_min_height(ViewBlock* block) {
+    float min_height = layout_explicit_min_height_or(block, -1.0f);
+    return min_height > 0.0f ? min_height : 0.0f;
+}
+
+static inline float layout_positive_min_axis(ViewBlock* block, bool horizontal) {
+    return horizontal
+        ? layout_positive_min_width(block)
+        : layout_positive_min_height(block);
+}
+
+static inline float layout_positive_max_width_or(ViewBlock* block, float fallback) {
+    float max_width = layout_explicit_max_width_or(block, fallback);
+    return max_width > 0.0f ? max_width : fallback;
+}
+
+static inline float layout_positive_max_height_or(ViewBlock* block, float fallback) {
+    float max_height = layout_explicit_max_height_or(block, fallback);
+    return max_height > 0.0f ? max_height : fallback;
+}
+
+static inline float layout_positive_max_axis_or(ViewBlock* block, bool horizontal, float fallback) {
+    return horizontal
+        ? layout_positive_max_width_or(block, fallback)
+        : layout_positive_max_height_or(block, fallback);
+}
+
+static inline float layout_floor_min_width(ViewBlock* block, float width) {
+    if (!block || !block->blk || block->blk->given_min_width < 0.0f) return width;
+    return width < block->blk->given_min_width ? block->blk->given_min_width : width;
+}
+
+static inline float layout_floor_min_height(ViewBlock* block, float height) {
+    if (!block || !block->blk || block->blk->given_min_height < 0.0f) return height;
+    return height < block->blk->given_min_height ? block->blk->given_min_height : height;
+}
+
+static inline float layout_floor_min_axis(ViewBlock* block, float size, bool horizontal) {
+    return horizontal ? layout_floor_min_width(block, size) : layout_floor_min_height(block, size);
+}
+
+static inline void layout_apply_positive_min_max_contribution(ViewBlock* block, bool horizontal,
+                                                              float* min_size, float* max_size) {
+    if (!block || !block->blk) return;
+    if (horizontal) {
+        if (min_size && block->blk->given_min_width > 0.0f && *min_size < block->blk->given_min_width) {
+            *min_size = block->blk->given_min_width;
+        }
+        if (max_size && block->blk->given_max_width > 0.0f && *max_size > block->blk->given_max_width) {
+            *max_size = block->blk->given_max_width;
+        }
+    } else {
+        if (min_size && block->blk->given_min_height > 0.0f && *min_size < block->blk->given_min_height) {
+            *min_size = block->blk->given_min_height;
+        }
+        if (max_size && block->blk->given_max_height > 0.0f && *max_size > block->blk->given_max_height) {
+            *max_size = block->blk->given_max_height;
+        }
+    }
+}
+
+static inline const CssValue* css_box_shorthand_side_value(const CssValue* value, int side) {
+    if (!value) return nullptr;
+    if (value->type != CSS_VALUE_TYPE_LIST) return value;
+    int count = value->data.list.count;
+    CssValue** values = value->data.list.values;
+    if (count <= 0 || !values) return nullptr;
+    int index = 0;
+    if (side == 0) {
+        index = 0;                                // top
+    } else if (side == 1) {
+        index = (count >= 2) ? 1 : 0;             // right
+    } else if (side == 2) {
+        index = (count >= 3) ? 2 : 0;             // bottom
+    } else {
+        index = (count >= 4) ? 3 : ((count >= 2) ? 1 : 0); // left
+    }
+    return index < count ? values[index] : nullptr;
+}
+
+static inline float layout_non_negative_free_space(float value) {
+    return value > 0.0f ? value : 0.0f;
+}
+
+static inline int layout_count_auto_margins(bool start_auto, bool end_auto) {
+    return (start_auto ? 1 : 0) + (end_auto ? 1 : 0);
+}
+
+static inline float layout_auto_margin_share(float free_space, int auto_margin_count) {
+    return (auto_margin_count > 0 && free_space > 0.0f)
+        ? free_space / (float)auto_margin_count
+        : 0.0f;
+}
+
+static inline void layout_resolve_auto_margin_pair(float available_size, float border_box_size,
+                                                   bool start_auto, bool end_auto,
+                                                   float* start_margin, float* end_margin) {
+    if (!start_margin || !end_margin) return;
+    if (start_auto && end_auto) {
+        float used_margin = layout_non_negative_free_space(
+            (available_size - border_box_size) / 2.0f);
+        *start_margin = used_margin;
+        *end_margin = used_margin;
+    } else if (start_auto) {
+        *start_margin = layout_non_negative_free_space(
+            available_size - border_box_size - *end_margin);
+    } else if (end_auto) {
+        *end_margin = layout_non_negative_free_space(
+            available_size - border_box_size - *start_margin);
+    }
+}
+
+float adjust_min_max_width(ViewBlock* block, float width);
+float adjust_min_max_height(ViewBlock* block, float height);
+float adjust_border_padding_width(ViewBlock* block, float width);
+float adjust_border_padding_height(ViewBlock* block, float height);
+
+// ============================================================================
+// Containing Blocks
+// ============================================================================
+
+typedef struct LayoutContainingBlock {
+    ViewBlock* view;
+
+    float border_x;
+    float border_y;
+    float border_width;
+    float border_height;
+
+    float padding_x;
+    float padding_y;
+    float padding_width;
+    float padding_height;
+
+    float content_x;
+    float content_y;
+    float content_width;
+    float content_height;
+
+    bool has_definite_width;
+    bool has_definite_height;
+} LayoutContainingBlock;
+
+bool layout_view_is_abs_or_fixed(ViewBlock* block);
+ViewBlock* layout_nearest_block_ancestor(ViewElement* view);
+bool layout_is_initial_containing_block(LayoutContext* lycon, ViewBlock* block);
+
+LayoutContainingBlock layout_containing_block_for_view(ViewBlock* block);
+LayoutContainingBlock layout_initial_containing_block(LayoutContext* lycon);
+LayoutContainingBlock layout_absolute_containing_block(LayoutContext* lycon, ViewBlock* block);
+
+void layout_resolve_percent_size_for_child(LayoutContext* lycon, ViewBlock* child,
+    LayoutContainingBlock cb, bool use_content_box, const char* log_context);
+void layout_resolve_percent_offsets_for_child(ViewBlock* child,
+    LayoutContainingBlock cb, const char* log_context);
+
+// ============================================================================
+// CSS Counters
+// ============================================================================
+
+typedef struct Arena Arena;
+typedef struct DomElement DomElement;
+
+typedef struct CounterValue {
+    const char* name;
+    int value;
+    bool propagated;
+    bool created_by_reset;
+} CounterValue;
+
+typedef struct CounterScope {
+    HashMap* counters;
+    CounterScope* parent;
+} CounterScope;
+
+typedef struct CounterContext {
+    Arena* arena;
+    CounterScope* current_scope;
+    lam::ArrayList<CounterScope*>* scope_stack;
+} CounterContext;
+
+CounterContext* counter_context_create(Arena* arena);
+void counter_context_destroy(CounterContext* ctx);
+void counter_push_scope(CounterContext* ctx);
+void counter_pop_scope(CounterContext* ctx);
+void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets = false);
+void counter_reset(CounterContext* ctx, const char* counter_spec);
+void counter_increment(CounterContext* ctx, const char* counter_spec);
+void counter_set(CounterContext* ctx, const char* counter_spec);
+int counter_get_value(CounterContext* ctx, const char* name);
+void counter_get_all_values(CounterContext* ctx, const char* name, int** values, int* count);
+int counter_format_value(int value, uint32_t style, char* buffer, size_t buffer_size);
+int counter_format(CounterContext* ctx, const char* name, uint32_t style,
+                   char* buffer, size_t buffer_size);
+int counters_format(CounterContext* ctx, const char* name, const char* separator,
+                    uint32_t style, char* buffer, size_t buffer_size);
+
+// ============================================================================
+// Layout Debugging and Profiling
+// ============================================================================
+
+namespace radiant {
+
+enum LayoutDebugCategory : uint32_t {
+    LAYOUT_DEBUG_NONE  = 0,
+    LAYOUT_DEBUG_BOX   = 1u << 0,
+    LAYOUT_DEBUG_PASS  = 1u << 1,
+    LAYOUT_DEBUG_ABS   = 1u << 2,
+    LAYOUT_DEBUG_FLEX  = 1u << 3,
+    LAYOUT_DEBUG_GRID  = 1u << 4,
+    LAYOUT_DEBUG_TABLE = 1u << 5,
+    LAYOUT_DEBUG_TEXT  = 1u << 6,
+    LAYOUT_DEBUG_CACHE = 1u << 7,
+    LAYOUT_DEBUG_ALL   = 0xffffffffu
+};
+
+typedef struct LayoutDebugState {
+    uint32_t enabled_categories;
+    bool initialized;
+} LayoutDebugState;
+
+enum LayoutProfileBucket : uint8_t {
+    LAYOUT_PROFILE_BLOCK = 0,
+    LAYOUT_PROFILE_INLINE,
+    LAYOUT_PROFILE_TEXT,
+    LAYOUT_PROFILE_FLEX,
+    LAYOUT_PROFILE_GRID,
+    LAYOUT_PROFILE_TABLE,
+    LAYOUT_PROFILE_INTRINSIC,
+    LAYOUT_PROFILE_STYLE,
+    LAYOUT_PROFILE_IMAGE,
+    LAYOUT_PROFILE_BUCKET_COUNT
+};
+
+typedef struct LayoutProfileNode {
+    const DomNode* node;
+    LayoutProfileBucket bucket;
+    double elapsed_ms;
+} LayoutProfileNode;
+
+typedef struct LayoutProfiler {
+    double block_ms;
+    double inline_ms;
+    double text_ms;
+    double flex_ms;
+    double grid_ms;
+    double table_ms;
+    double intrinsic_ms;
+    double style_ms;
+    double image_ms;
+    int64_t cache_hits;
+    int64_t cache_misses;
+
+    bool enabled;
+    LayoutProfileNode top_nodes[8];
+    int top_node_count;
+} LayoutProfiler;
+
+void layout_debug_init(LayoutDebugState* state);
+bool layout_debug_enabled(LayoutContext* lycon, LayoutDebugCategory category);
+void layout_debug_log(LayoutContext* lycon, LayoutDebugCategory category,
+                      const DomNode* node, const char* format, ...);
+void layout_debug_vlog(LayoutContext* lycon, LayoutDebugCategory category,
+                       const DomNode* node, const char* format, va_list args);
+
+void layout_profiler_init(LayoutProfiler* profiler);
+void layout_profiler_set_bucket(LayoutProfiler* profiler, LayoutProfileBucket bucket,
+                                double elapsed_ms);
+void layout_profiler_add_bucket(LayoutProfiler* profiler, LayoutProfileBucket bucket,
+                                double elapsed_ms);
+void layout_profiler_record_node(LayoutProfiler* profiler, LayoutProfileBucket bucket,
+                                 const DomNode* node, double elapsed_ms);
+void layout_profiler_note_cache_hit(LayoutProfiler* profiler);
+void layout_profiler_note_cache_miss(LayoutProfiler* profiler);
+void layout_profiler_set_cache(LayoutProfiler* profiler, int64_t hits, int64_t misses);
+void layout_profiler_report(LayoutContext* lycon);
+double layout_profiler_now_ms();
+
+struct LayoutProfileScope {
+    LayoutContext* lycon;
+    const DomNode* node;
+    LayoutProfileBucket bucket;
+    double start_ms;
+
+    LayoutProfileScope(LayoutContext* l, LayoutProfileBucket b, const DomNode* n);
+    ~LayoutProfileScope();
+
+    LayoutProfileScope(const LayoutProfileScope&) = delete;
+    LayoutProfileScope& operator=(const LayoutProfileScope&) = delete;
+};
+
+} // namespace radiant
+
+// ============================================================================
+// Layout Alignment
+// ============================================================================
+
+namespace radiant {
+
+struct SpaceDistribution {
+    float gap_before_first;
+    float gap_between;
+    float gap_after_last;
+};
+
+inline SpaceDistribution space_distribution_none() {
+    return {0.0f, 0.0f, 0.0f};
+}
+
+float compute_alignment_offset(
+    int32_t alignment,
+    float free_space,
+    bool is_safe
+);
+
+inline float compute_alignment_offset_simple(int32_t alignment, float free_space) {
+    return compute_alignment_offset(alignment, free_space, false);
+}
+
+SpaceDistribution compute_space_distribution(
+    int32_t alignment,
+    float free_space,
+    int32_t item_count
+);
+
+int32_t alignment_fallback_for_overflow(int32_t alignment, float free_space);
+bool alignment_is_space_distribution(int32_t alignment);
+bool alignment_is_baseline(int32_t alignment);
+bool alignment_is_stretch(int32_t alignment);
+int32_t resolve_align_self(int32_t align_self, int32_t align_items);
+int32_t resolve_justify_self(int32_t justify_self, int32_t justify_items);
+
+float compute_font_baseline_ascender(
+    ::LayoutContext* lycon,
+    FontProp* font,
+    bool use_normal_line_height,
+    float fallback_ascender
+);
+
+float compute_element_first_baseline(
+    ::LayoutContext* lycon,
+    ViewBlock* element,
+    bool is_row_direction
+);
+
+typedef float (*FirstBaselineRowCallback)(::LayoutContext* lycon, View* row);
+
+float compute_view_first_text_baseline(
+    ::LayoutContext* lycon,
+    View* parent,
+    float cumulative_y,
+    bool use_normal_line_height,
+    bool skip_block_children_of_table,
+    FirstBaselineRowCallback row_baseline
+);
+
+float compute_element_last_baseline(
+    ::LayoutContext* lycon,
+    ViewBlock* element,
+    bool is_row_direction
+);
+
+float compute_stretched_cross_size(
+    float item_cross_size,
+    float line_cross_size,
+    float margin_cross,
+    float min_cross,
+    float max_cross,
+    bool has_definite_size
+);
+
+} // namespace radiant
+
+// ============================================================================
+// Text Layout Utilities
+// ============================================================================
+
+CssEnum get_white_space_value(DomNode* node);
+bool text_codepoint_has_zero_advance(uint32_t codepoint);
+
+// ============================================================================
+// Table Metadata
+// ============================================================================
+
+struct TableMetadata {
+    int column_count;
+    int row_count;
+    bool* grid_occupied;
+    float* col_widths;
+    float* col_single_min_widths;
+    float* col_min_widths;
+    float* col_max_widths;
+    float* col_percent_widths;
+    float* row_heights;
+    float* row_y_positions;
+    bool* row_collapsed;
+    bool* col_collapsed;
+    float* col_original_widths;
+    bool* row_has_percent_height;
+    float* col_edge_max_border;
+    bool* col_has_explicit_width;
+
+    float collapsed_border_top;
+    float collapsed_border_right;
+    float collapsed_border_bottom;
+    float collapsed_border_left;
+
+    ScratchArena* sa;
+
+    TableMetadata(ScratchArena* scratch, int cols, int rows);
+    ~TableMetadata();
+
+    inline bool& grid(int row, int col) {
+        return grid_occupied[row * column_count + col];
+    }
+};
+
+TableMetadata* table_metadata_create(ScratchArena* scratch, int cols, int rows);
+void table_metadata_destroy(TableMetadata* meta);
+
+// ============================================================================
+// Custom Layout
+// ============================================================================
+
+typedef struct VelmtBox {
+    float x;
+    float y;
+    float width;
+    float height;
+} VelmtBox;
+
+typedef struct VelmtEdges {
+    float left;
+    float right;
+    float top;
+    float bottom;
+} VelmtEdges;
+
+typedef struct Velmt {
+    View* view;
+    DomElement* element;
+    int index;
+    VelmtBox border_box;
+    VelmtEdges margin;
+    VelmtEdges border;
+    VelmtEdges padding;
+} Velmt;
+
+typedef struct CustomLayoutContext {
+    LayoutContext* lycon;
+    ViewBlock* parent;
+    const char* layout_name;
+    Velmt* children;
+    int child_count;
+    float available_width;
+    float available_height;
+    float css_width;
+    float css_height;
+    float child_available_width;
+    float child_available_height;
+    bool child_available_width_definite;
+    bool child_available_height_definite;
+    const char* child_available_width_source;
+    const char* child_available_height_source;
+    CssEnum direction;
+    const char* writing_mode;
+} CustomLayoutContext;
+
+typedef struct CustomLayoutPlacement {
+    int child_index;
+    float x;
+    float y;
+    int z;
+    bool has_z;
+} CustomLayoutPlacement;
+
+typedef struct CustomLayoutPaintLayer {
+    Element* content;
+    int z;
+    int order;
+} CustomLayoutPaintLayer;
+
+typedef struct CustomLayoutPaintState {
+    CustomLayoutPaintLayer* layers;
+    int layer_count;
+} CustomLayoutPaintState;
+
+typedef struct CustomLayoutResult {
+    CustomLayoutPlacement* placements;
+    int placement_count;
+    int placement_capacity;
+    float width;
+    float height;
+    float baseline;
+    bool has_width;
+    bool has_height;
+    bool has_baseline;
+} CustomLayoutResult;
+
+typedef bool (*CustomLayoutFn)(const CustomLayoutContext* context, CustomLayoutResult* result);
+
+bool custom_layout_register(const char* name, CustomLayoutFn fn);
+CustomLayoutFn custom_layout_lookup(const char* name);
+void custom_layout_registry_clear(void);
+bool custom_layout_result_place(CustomLayoutResult* result, int child_index, float x, float y);
+void custom_layout_fill_velmt_from_view(Velmt* velmt, View* child, int index, bool normalize_origin);
+
+const char* custom_layout_name_from_css_value(const CssValue* value);
+const char* custom_layout_name_for_element(DomElement* element);
+bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* layout_name);
+
+// ============================================================================
+// List Layout and Counters
+// ============================================================================
+
+typedef struct StyleTree StyleTree;
+
+void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomElement* dom_elem);
+void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem);
+void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
+                       DomElement* dom_elem, DisplayValue display);
+const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyId css_property,
+                                            LayoutContext* lycon);
+void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
+
+// ============================================================================
+// Multi-column Layout
+// ============================================================================
+
+bool is_multicol_container(ViewBlock* block);
+void calculate_multicol_dimensions(
+    MultiColumnProp* multicol,
+    float available_width,
+    float normal_gap_size,
+    int* out_column_count,
+    float* out_column_width,
+    float* out_gap
+);
+void layout_multicol_content(LayoutContext* lycon, ViewBlock* block);
 
 typedef struct StyleContext {
     struct StyleElement* parent;
@@ -633,7 +1419,44 @@ typedef enum LineFillStatus {
 //     ArrayList* positioned_children; // list of positioned child elements
 // } StackingBox;
 
-// Integrated flex container layout state
+// ============================================================================
+// Flex Layout
+// ============================================================================
+
+typedef enum {
+    DIR_ROW = CSS_VALUE_ROW,
+    DIR_ROW_REVERSE = CSS_VALUE_ROW_REVERSE,
+    DIR_COLUMN = CSS_VALUE_COLUMN,
+    DIR_COLUMN_REVERSE = CSS_VALUE_COLUMN_REVERSE
+} FlexDirection;
+
+typedef enum {
+    WRAP_NOWRAP = CSS_VALUE_NOWRAP,
+    WRAP_WRAP = CSS_VALUE_WRAP,
+    WRAP_WRAP_REVERSE = CSS_VALUE_WRAP_REVERSE
+} FlexWrap;
+
+typedef enum {
+    JUSTIFY_START = CSS_VALUE_FLEX_START,
+    JUSTIFY_END = CSS_VALUE_FLEX_END,
+    JUSTIFY_CENTER = CSS_VALUE_CENTER,
+    JUSTIFY_SPACE_BETWEEN = CSS_VALUE_SPACE_BETWEEN,
+    JUSTIFY_SPACE_AROUND = CSS_VALUE_SPACE_AROUND,
+    JUSTIFY_SPACE_EVENLY = CSS_VALUE_SPACE_EVENLY
+} JustifyContent;
+
+typedef struct FlexLineInfo {
+    View** items;
+    int item_count;
+    float main_size;
+    float cross_size;
+    float cross_position;
+    float free_space;
+    float total_flex_grow;
+    float total_flex_shrink;
+    float baseline;
+} FlexLineInfo;
+
 typedef struct FlexContainerLayout : FlexProp {
     // Layout state (computed during layout)
     View** flex_items;  // Array of child flex items
@@ -664,7 +1487,465 @@ typedef struct FlexContainerLayout : FlexProp {
     struct LayoutContext* lycon;
 } FlexContainerLayout;
 
-typedef struct GridContainerLayout GridContainerLayout;
+// ============================================================================
+// Layout Axis Helpers
+// ============================================================================
+
+typedef enum LayoutAxis {
+    LAYOUT_AXIS_X,
+    LAYOUT_AXIS_Y,
+} LayoutAxis;
+
+inline float layout_axis_size(ViewElement* item, LayoutAxis axis) {
+    if (!item) return 0.0f;
+    return axis == LAYOUT_AXIS_X ? item->width : item->height;
+}
+
+inline void layout_axis_set_size(ViewElement* item, LayoutAxis axis, float size) {
+    if (!item) return;
+    if (axis == LAYOUT_AXIS_X) {
+        item->width = size;
+    } else {
+        item->height = size;
+    }
+}
+
+inline float layout_axis_pos(ViewElement* item, LayoutAxis axis) {
+    if (!item) return 0.0f;
+    return axis == LAYOUT_AXIS_X ? item->x : item->y;
+}
+
+inline void layout_axis_set_pos(ViewElement* item, LayoutAxis axis, float pos) {
+    if (!item) return;
+    if (axis == LAYOUT_AXIS_X) {
+        item->x = pos;
+    } else {
+        item->y = pos;
+    }
+}
+
+inline bool layout_axis_is_horizontal(LayoutAxis axis) {
+    return axis == LAYOUT_AXIS_X;
+}
+
+inline float layout_axis_given_size(const BlockProp* block, LayoutAxis axis) {
+    if (!block) return -1.0f;
+    return axis == LAYOUT_AXIS_X ? block->given_width : block->given_height;
+}
+
+inline float layout_axis_given_max_size(const BlockProp* block, LayoutAxis axis) {
+    if (!block) return -1.0f;
+    return axis == LAYOUT_AXIS_X ? block->given_max_width : block->given_max_height;
+}
+
+inline float layout_axis_spacing_start(const Spacing* spacing, LayoutAxis axis) {
+    if (!spacing) return 0.0f;
+    return axis == LAYOUT_AXIS_X ? spacing->left : spacing->top;
+}
+
+inline float layout_axis_spacing_end(const Spacing* spacing, LayoutAxis axis) {
+    if (!spacing) return 0.0f;
+    return axis == LAYOUT_AXIS_X ? spacing->right : spacing->bottom;
+}
+
+inline CssEnum layout_axis_margin_start_type(const Margin* margin, LayoutAxis axis) {
+    if (!margin) return CSS_VALUE__UNDEF;
+    return axis == LAYOUT_AXIS_X ? margin->left_type : margin->top_type;
+}
+
+inline CssEnum layout_axis_margin_end_type(const Margin* margin, LayoutAxis axis) {
+    if (!margin) return CSS_VALUE__UNDEF;
+    return axis == LAYOUT_AXIS_X ? margin->right_type : margin->bottom_type;
+}
+
+inline float layout_axis_border_start(const BorderProp* border, LayoutAxis axis) {
+    return border ? layout_axis_spacing_start(&border->width, axis) : 0.0f;
+}
+
+inline float layout_axis_border_end(const BorderProp* border, LayoutAxis axis) {
+    return border ? layout_axis_spacing_end(&border->width, axis) : 0.0f;
+}
+
+inline float layout_axis_padding_start(const BoundaryProp* bound, LayoutAxis axis) {
+    return bound ? layout_axis_spacing_start(&bound->padding, axis) : 0.0f;
+}
+
+inline float layout_axis_margin_start(const BoundaryProp* bound, LayoutAxis axis) {
+    return bound ? layout_axis_spacing_start(&bound->margin, axis) : 0.0f;
+}
+
+inline float layout_axis_margin_end(const BoundaryProp* bound, LayoutAxis axis) {
+    return bound ? layout_axis_spacing_end(&bound->margin, axis) : 0.0f;
+}
+
+inline LayoutAxis flex_main_axis_from_props(const FlexProp* flex) {
+    if (!flex) return LAYOUT_AXIS_X;
+    bool column_direction = flex->direction == CSS_VALUE_COLUMN ||
+                            flex->direction == CSS_VALUE_COLUMN_REVERSE;
+    if (flex->writing_mode == WM_VERTICAL_RL ||
+        flex->writing_mode == WM_VERTICAL_LR) {
+        return column_direction ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
+    }
+    return column_direction ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
+}
+
+inline LayoutAxis flex_main_axis(FlexContainerLayout* flex) {
+    return flex_main_axis_from_props(flex);
+}
+
+inline LayoutAxis flex_cross_axis(FlexContainerLayout* flex) {
+    return flex_main_axis(flex) == LAYOUT_AXIS_X ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
+}
+
+inline float flex_gap_for_axis(FlexContainerLayout* flex, LayoutAxis axis) {
+    if (!flex) return 0.0f;
+    return axis == LAYOUT_AXIS_X ? flex->column_gap : flex->row_gap;
+}
+
+void init_flex_container(LayoutContext* lycon, ViewBlock* container);
+void cleanup_flex_container(LayoutContext* lycon);
+int collect_and_prepare_flex_items(LayoutContext* lycon, FlexContainerLayout* flex_layout, ViewBlock* container);
+float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout);
+void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_layout);
+void apply_constraints_to_flex_items(FlexContainerLayout* flex_layout);
+float apply_flex_constraint(ViewElement* item, float computed_size, bool is_main_axis,
+                          FlexContainerLayout* flex_layout, bool* hit_min, bool* hit_max);
+float apply_flex_constraint(ViewElement* item, float computed_size, bool is_main_axis,
+                          FlexContainerLayout* flex_layout);
+float apply_stretch_constraint(ViewElement* item, float container_cross_size,
+                             FlexContainerLayout* flex_layout);
+void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line);
+void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line);
+void align_content(FlexContainerLayout* flex_layout);
+void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container);
+bool is_main_axis_horizontal(FlexProp* flex);
+float get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
+float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
+float get_cross_axis_position(ViewElement* item, FlexContainerLayout* flex_layout);
+void set_main_axis_position(ViewElement* item, float position, FlexContainerLayout* flex_layout);
+void set_cross_axis_position(ViewElement* item, float position, FlexContainerLayout* flex_layout);
+void set_main_axis_size(ViewElement* item, float size, FlexContainerLayout* flex_layout);
+void set_cross_axis_size(ViewElement* item, float size, FlexContainerLayout* flex_layout);
+float get_item_flex_grow(ViewElement* item);
+float get_item_flex_shrink(ViewElement* item);
+float get_item_flex_basis(ViewElement* item);
+bool get_item_flex_basis_is_percent(ViewElement* item);
+float find_max_baseline(FlexLineInfo* line, int container_align_items);
+float calculate_gap_space(FlexContainerLayout* flex_layout, int item_count, bool is_main_axis);
+
+typedef struct MeasurementCacheEntry {
+    DomNode* node;
+    float measured_width;
+    float measured_height;
+    float content_width;
+    float content_height;
+    float context_width;
+    uint32_t generation;
+} MeasurementCacheEntry;
+
+void measure_flex_child_content(LayoutContext* lycon, DomNode* child);
+void measure_all_flex_children_content(LayoutContext* lycon, ViewBlock* flex_container);
+bool requires_content_measurement(ViewBlock* flex_container);
+void measure_text_content(LayoutContext* lycon, DomNode* text_node, int* width, int* height);
+int estimate_text_width(LayoutContext* lycon, const unsigned char* text, size_t length);
+void cleanup_temporary_view(ViewBlock* temp_view);
+void calculate_intrinsic_sizes(ViewBlock* view, LayoutContext* lycon);
+void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout);
+void measure_text_content_accurate(LayoutContext* lycon, DomNode* text_node,
+    int* min_width, int* max_width, int* height);
+void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
+    int* min_width, int* max_width, int* height);
+void store_measured_sizes(DomNode* node, ViewBlock* measured_view, LayoutContext* lycon);
+void store_in_measurement_cache(DomNode* node, float width, float height, float content_width, float content_height, float context_width = -1);
+MeasurementCacheEntry* get_from_measurement_cache(DomNode* node);
+void clear_measurement_cache();
+void invalidate_measurement_cache_for_node(DomNode* node);
+void advance_measurement_cache_generation();
+uint32_t get_measurement_cache_generation();
+void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node);
+void init_flex_item_view(LayoutContext* lycon, DomNode* node);
+void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNode* node);
+void layout_block_with_measured_size(LayoutContext* lycon, DomNode* node,
+    DisplayValue display, MeasurementCacheEntry* cached);
+
+void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* flex_container);
+void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
+void layout_flex_item_final_content(LayoutContext* lycon, ViewBlock* flex_item);
+
+// ============================================================================
+// Grid Layout
+// ============================================================================
+
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+
+namespace radiant {
+namespace grid {
+
+struct TrackCounts;
+
+template <typename T>
+constexpr T grid_min_value(T a, T b) {
+    return (a < b) ? a : b;
+}
+
+template <typename T>
+constexpr T grid_max_value(T a, T b) {
+    return (a > b) ? a : b;
+}
+
+enum class CellOccupancyState : uint8_t {
+    Unoccupied = 0,
+    DefinitelyPlaced = 1,
+    AutoPlaced = 2
+};
+
+struct OriginZeroLine {
+    int16_t value;
+
+    constexpr OriginZeroLine() : value(0) {}
+    constexpr explicit OriginZeroLine(int16_t v) : value(v) {}
+
+    constexpr OriginZeroLine operator+(OriginZeroLine other) const {
+        return OriginZeroLine(value + other.value);
+    }
+    constexpr OriginZeroLine operator-(OriginZeroLine other) const {
+        return OriginZeroLine(value - other.value);
+    }
+    constexpr OriginZeroLine operator+(uint16_t n) const {
+        return OriginZeroLine(value + static_cast<int16_t>(n));
+    }
+    constexpr OriginZeroLine operator-(uint16_t n) const {
+        return OriginZeroLine(value - static_cast<int16_t>(n));
+    }
+    OriginZeroLine& operator+=(uint16_t n) {
+        value += static_cast<int16_t>(n);
+        return *this;
+    }
+
+    constexpr bool operator==(OriginZeroLine other) const { return value == other.value; }
+    constexpr bool operator!=(OriginZeroLine other) const { return value != other.value; }
+    constexpr bool operator<(OriginZeroLine other) const { return value < other.value; }
+    constexpr bool operator<=(OriginZeroLine other) const { return value <= other.value; }
+    constexpr bool operator>(OriginZeroLine other) const { return value > other.value; }
+    constexpr bool operator>=(OriginZeroLine other) const { return value >= other.value; }
+};
+
+struct GridLine {
+    int16_t value;
+
+    constexpr GridLine() : value(0) {}
+    constexpr explicit GridLine(int16_t v) : value(v) {}
+
+    constexpr int16_t as_i16() const { return value; }
+    constexpr bool is_valid() const { return value != 0; }
+};
+
+struct LineSpan {
+    OriginZeroLine start;
+    OriginZeroLine end;
+
+    constexpr LineSpan() : start(), end() {}
+    constexpr LineSpan(OriginZeroLine s, OriginZeroLine e) : start(s), end(e) {}
+
+    constexpr uint16_t span() const {
+        int16_t diff = end.value - start.value;
+        return diff > 0 ? static_cast<uint16_t>(diff) : 0;
+    }
+};
+
+struct TrackCounts {
+    uint16_t negative_implicit;
+    uint16_t explicit_count;
+    uint16_t positive_implicit;
+
+    constexpr TrackCounts() : negative_implicit(0), explicit_count(0), positive_implicit(0) {}
+    constexpr TrackCounts(uint16_t neg, uint16_t exp, uint16_t pos)
+        : negative_implicit(neg), explicit_count(exp), positive_implicit(pos) {}
+
+    constexpr size_t len() const {
+        return static_cast<size_t>(negative_implicit + explicit_count + positive_implicit);
+    }
+
+    constexpr OriginZeroLine implicit_start_line() const {
+        return OriginZeroLine(-static_cast<int16_t>(negative_implicit));
+    }
+
+    constexpr OriginZeroLine implicit_end_line() const {
+        return OriginZeroLine(static_cast<int16_t>(explicit_count + positive_implicit));
+    }
+
+    constexpr int16_t oz_line_to_next_track(OriginZeroLine line) const {
+        return line.value + static_cast<int16_t>(negative_implicit);
+    }
+
+    constexpr void oz_line_range_to_track_range(
+        LineSpan span,
+        int16_t& out_start,
+        int16_t& out_end
+    ) const {
+        out_start = oz_line_to_next_track(span.start);
+        out_end = oz_line_to_next_track(span.end);
+    }
+
+    constexpr OriginZeroLine track_to_prev_oz_line(uint16_t track_idx) const {
+        return OriginZeroLine(static_cast<int16_t>(track_idx) - static_cast<int16_t>(negative_implicit));
+    }
+};
+
+enum class AbsoluteAxis : uint8_t {
+    Horizontal = 0,
+    Vertical = 1
+};
+
+constexpr AbsoluteAxis other_axis(AbsoluteAxis axis) {
+    return axis == AbsoluteAxis::Horizontal ? AbsoluteAxis::Vertical : AbsoluteAxis::Horizontal;
+}
+
+} // namespace grid
+} // namespace radiant
+
+inline GridItemProp* grid_item_prop(ViewBlock* item) {
+    if (!item) return nullptr;
+    if (item->item_prop_type == DomElement::ITEM_PROP_GRID) return item->gi;
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) return item->form->grid_item;
+    return nullptr;
+}
+
+typedef enum GridTrackSizeType {
+    GRID_TRACK_SIZE_LENGTH,
+    GRID_TRACK_SIZE_PERCENTAGE,
+    GRID_TRACK_SIZE_FR,
+    GRID_TRACK_SIZE_MIN_CONTENT,
+    GRID_TRACK_SIZE_MAX_CONTENT,
+    GRID_TRACK_SIZE_AUTO,
+    GRID_TRACK_SIZE_FIT_CONTENT,
+    GRID_TRACK_SIZE_MINMAX,
+    GRID_TRACK_SIZE_REPEAT
+} GridTrackSizeType;
+
+typedef struct GridTrackSize {
+    GridTrackSizeType type;
+    int value;
+    bool is_percentage;
+    struct GridTrackSize* min_size;
+    struct GridTrackSize* max_size;
+    int fit_content_limit;
+    int repeat_count;
+    struct GridTrackSize** repeat_tracks;
+    int repeat_track_count;
+    bool is_auto_fill;
+    bool is_auto_fit;
+} GridTrackSize;
+
+typedef struct GridTrackList {
+    GridTrackSize** tracks;
+    int track_count;
+    int allocated_tracks;
+    char** line_names;
+    int line_name_count;
+    bool is_repeat;
+    int repeat_count;
+} GridTrackList;
+
+typedef struct GridTrack {
+    GridTrackSize* size;
+    float computed_size;
+    float base_size;
+    float growth_limit;
+    bool is_flexible;
+    bool is_implicit;
+    bool owns_size;
+} GridTrack;
+
+typedef struct GridArea {
+    char* name;
+    int row_start;
+    int row_end;
+    int column_start;
+    int column_end;
+} GridArea;
+
+typedef struct GridLineName {
+    char* name;
+    int line_number;
+    bool is_row;
+} GridLineName;
+
+typedef struct GridContainerLayout : GridProp {
+    GridTrack* computed_rows;
+    GridTrack* computed_columns;
+    struct ViewBlock** grid_items;
+    int item_count;
+    int allocated_items;
+    GridLineName* line_names;
+    int line_name_count;
+    int allocated_line_names;
+    bool needs_reflow;
+    int explicit_row_count;
+    int explicit_column_count;
+    int implicit_row_count;
+    int implicit_column_count;
+    int negative_implicit_row_count;
+    int negative_implicit_column_count;
+    int auto_row_cursor;
+    int auto_col_cursor;
+    float container_width;
+    float container_height;
+    float content_width;
+    float content_height;
+    bool has_explicit_height;
+    bool is_shrink_to_fit_width;
+    float row_intrinsic_height;
+    struct LayoutContext* lycon;
+    bool auto_fit_columns[64];
+    bool auto_fit_rows[64];
+    int auto_fit_col_count;
+    int auto_fit_row_count;
+    bool owns_template_rows;
+    bool owns_template_columns;
+    bool owns_auto_rows;
+    bool owns_auto_columns;
+    bool owns_grid_areas;
+} GridContainerLayout;
+
+void init_grid_container(LayoutContext* lycon, struct ViewBlock* container);
+void cleanup_grid_container(LayoutContext* lycon);
+GridTrackList* create_grid_track_list(int initial_capacity);
+void destroy_grid_track_list(GridTrackList* track_list);
+GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value);
+GridTrackSize* clone_grid_track_size(const GridTrackSize* track_size);
+void destroy_grid_track_size(GridTrackSize* track_size);
+GridArea* create_grid_area(const char* name, int row_start, int row_end, int column_start, int column_end);
+void destroy_grid_area(GridArea* area);
+void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_number, bool is_row);
+int find_grid_line_by_name(GridContainerLayout* grid, const char* name, bool is_row);
+int collect_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, struct ViewBlock*** items);
+void determine_grid_size(GridContainerLayout* grid_layout);
+void initialize_track_sizes(GridContainerLayout* grid_layout);
+void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, struct ViewBlock* container);
+void position_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, ScratchArena* sa);
+void align_grid_items(GridContainerLayout* grid_layout);
+void align_grid_item(struct ViewBlock* item, GridContainerLayout* grid_layout);
+void parse_grid_template_areas(GridProp* grid_layout, const char* areas_string, ScratchArena* sa);
+void resolve_grid_template_areas(GridContainerLayout* grid_layout);
+IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlock* item, bool is_row_axis);
+void layout_grid_container(LayoutContext* lycon, ViewBlock* container);
+void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
+int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container);
+void init_grid_item_view(LayoutContext* lycon, DomNode* child);
+void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout);
+void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
+                                  float* min_width, float* max_width,
+                                  float* min_height, float* max_height);
+void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_layout);
+bool grid_item_is_nested_container(ViewBlock* item);
+void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container);
+
 typedef struct LayoutContext {
     View* view;  // current view
     DomNode* elmt;  // current dom element, used before the view is created
@@ -755,6 +2036,87 @@ inline bool layout_context_is_hidden(LayoutContext* lycon) {
 inline bool layout_context_use_content_size(LayoutContext* lycon) {
     return lycon->sizing_mode == radiant::SizingMode::ContentSize;
 }
+
+// ============================================================================
+// Percentage Resolution
+// ============================================================================
+
+bool layout_resolve_percentage_value(const CssValue* value, float percentage_base, float* out);
+bool layout_resolve_deferred_percentage(float percent, float percentage_base, float* out);
+bool layout_apply_deferred_percentage(float percent, float percentage_base, float* target, float* resolved);
+float layout_block_used_content_size(ViewBlock* block, bool horizontal, bool require_positive);
+float layout_block_given_content_size(ViewBlock* block, bool horizontal);
+float layout_block_declared_content_size(LayoutContext* lycon, ViewBlock* block, CssPropertyId property, bool horizontal);
+float layout_block_auto_content_width_from_inline_base(ViewBlock* block, float inline_base);
+void layout_reresolve_percentage_box(ViewBlock* block, float inline_base);
+
+// ============================================================================
+// Table Captions
+// ============================================================================
+
+float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_width);
+float adjust_table_caption_width(ViewBlock* cap, float wrapper_content_width);
+
+// ============================================================================
+// Table Layout
+// ============================================================================
+
+void layout_table_content(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
+struct ViewTable* build_table_tree(LayoutContext* lycon, DomNode* elmt);
+void table_auto_layout(LayoutContext* lycon, struct ViewTable* table);
+void adjust_table_text_positions_final(struct ViewTable* table);
+float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y, bool use_normal_lh = false);
+void adjust_row_text_positions_final(struct ViewTable* table, struct ViewBlock* row,
+    float table_abs_x, float cell_border, float cell_padding);
+void adjust_cell_text_positions_final(struct ViewBlock* cell, float text_abs_x);
+bool wrap_orphaned_table_children(LayoutContext* lycon, struct DomElement* parent);
+bool is_table_internal_display(CssEnum display);
+
+// ============================================================================
+// Absolute Children
+// ============================================================================
+
+typedef enum AbsStaticContextKind {
+    ABS_STATIC_BLOCK,
+    ABS_STATIC_FLEX,
+    ABS_STATIC_GRID,
+} AbsStaticContextKind;
+
+struct AbsStaticContext;
+
+typedef struct AbsChildLayoutState {
+    DomNode* child;
+    ViewBlock* child_block;
+    LayoutContainingBlock containing_block;
+    BlockContext parent_block;
+    Linebox parent_line;
+    float original_given_width;
+    float original_given_height;
+    bool has_grid_area;
+    float grid_area_x;
+    float grid_area_y;
+    float grid_area_width;
+    float grid_area_height;
+} AbsChildLayoutState;
+
+typedef void (*AbsPrepareChildFn)(LayoutContext* lycon, ViewBlock* container,
+    AbsStaticContext* ctx, AbsChildLayoutState* state);
+typedef void (*AbsAfterChildFn)(LayoutContext* lycon, ViewBlock* container,
+    AbsStaticContext* ctx, AbsChildLayoutState* state);
+
+typedef struct AbsStaticContext {
+    AbsStaticContextKind kind;
+    LayoutContainingBlock containing_block;
+    FlexContainerLayout* flex;
+    GridContainerLayout* grid;
+    bool resolve_percent_against_content_box;
+    const char* log_context;
+    AbsPrepareChildFn prepare_child;
+    AbsAfterChildFn after_child;
+} AbsStaticContext;
+
+void layout_absolute_children_in_context(LayoutContext* lycon, ViewBlock* container,
+    AbsStaticContext* ctx);
 
 namespace radiant {
 
@@ -964,51 +2326,6 @@ int map_lambda_font_weight_keyword(const char* keyword);
  */
 const char* map_lambda_font_family_keyword(const char* keyword);
 
-// ============================================================================
-// Value Conversion: Lambda CSS → Radiant Property Structures
-// ============================================================================
-
-/**
- * Convert Lambda CSS length/percentage to pixels
- *
- * @param value CssValue with length or percentage type
- * @param lycon Layout context for font size, viewport calculations
- * @param prop_id Property ID for context-specific resolution
- * @return Float value in pixels
- */
-float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon,
-                                   CssPropertyId prop_id);
-
-// Convert Lambda CSS color to Radiant Color type
-Color resolve_color_value(const CssValue* value);
-Color color_name_to_rgb(CssEnum color_name);
-
-/**
- * Get specificity value from Lambda CSS declaration
- * Converts Lambda CssDeclaration to a full cascade priority value encoding
- * cascade level, CSS specificity, and source order for correct shorthand vs
- * longhand resolution.
- *
- * @param decl CSS declaration with specificity info
- * @return int64_t cascade priority value (higher = higher priority)
- */
-int64_t get_cascade_priority(const CssDeclaration* decl);
-
-// Resolve CSS length value to pixels
-float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
-
-// Resolve var() function to get the actual CSS value
-const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
-
-// Resolve Lambda CSS styles for a DomElement
-void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon);
-
-// Process single Lambda CSS property declaration
-// Called for each property in DomElement->specified_style
-void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon);
-DisplayValue resolve_display_value(void* child); // Unified function for both Lexbor and Lambda CSS
-DisplayValue blockify_display(DisplayValue display); // CSS Display Level 3 §3: blockify inline-level displays
-
 void line_break(LayoutContext* lycon);
 void line_align(LayoutContext* lycon);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
@@ -1046,10 +2363,20 @@ static inline bool layout_element_is_display_none(const DomElement* element) {
 }
 
 // CSS Positioning functions
+void layout_relative_position_offset(ViewBlock* block, float* offset_x, float* offset_y);
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
 void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block);
 bool element_has_positioning(ViewBlock* block);
 bool element_has_float(ViewBlock* block);
+ViewBlock* find_initial_containing_view_block(ViewBlock* element);
+ViewBlock* find_positioned_containing_block(ViewElement* view);
+ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type);
+void layout_float_element(LayoutContext* lycon, ViewBlock* block);
+void adjust_line_for_floats(LayoutContext* lycon);
+void layout_clear_element(LayoutContext* lycon, ViewBlock* block);
+void re_resolve_abs_children_vertical(ViewBlock* containing_block);
+void layout_finalize_static_positioned_abs_descendants(ViewBlock* root);
+void layout_shift_static_positioned_abs_descendants(ViewElement* root, float delta_x, float delta_y);
 
 static inline bool layout_position_is_abs_fixed(const PositionProp* position) {
     return position &&

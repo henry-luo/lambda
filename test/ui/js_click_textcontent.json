@@ -4,7 +4,6 @@
   "description": "Tests onclick handlers that mutate textContent. Verifies counter incrementing across multiple clicks, message setting, and clearing.",
   "events": [
     {"type": "log", "message": "=== js_click_textcontent: textContent mutation ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "Step 1: Verify initial counter is 0"},
     {"type": "assert_text", "target": {"selector": "#counter-display"}, "equals": "0"},

@@ -7,9 +7,7 @@
 #include <string.h>
 #include <thorvg_capi.h>
 #include "view.hpp"
-#include "state_store.hpp"
-#include "clip_shape.h"
-#include "animation.h"
+#include "event.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/arena.h"
@@ -42,13 +40,6 @@
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-// 3x3 affine transform matrix (same layout as Tvg_Matrix)
-typedef struct {
-    float e11, e12, e13;   // row 1: scale-x, shear-x, translate-x
-    float e21, e22, e23;   // row 2: shear-y, scale-y, translate-y
-    float e31, e32, e33;   // row 3: 0, 0, 1
-} RdtMatrix;
 
 typedef enum {
     RDT_CAP_BUTT   = 0,
@@ -309,61 +300,6 @@ void rdt_set_font_context(struct FontContext* ctx);
 RdtPicture* rdt_picture_take_tvg_paint(Tvg_Paint paint, float w, float h);
 
 #endif
-
-static inline RdtMatrix rdt_matrix_identity(void) {
-    RdtMatrix m = { 1, 0, 0,  0, 1, 0,  0, 0, 1 };
-    return m;
-}
-
-// multiply two 3x3 affine matrices: result = a * b
-static inline RdtMatrix rdt_matrix_multiply(const RdtMatrix* a, const RdtMatrix* b) {
-    RdtMatrix r;
-    r.e11 = a->e11 * b->e11 + a->e12 * b->e21 + a->e13 * b->e31;
-    r.e12 = a->e11 * b->e12 + a->e12 * b->e22 + a->e13 * b->e32;
-    r.e13 = a->e11 * b->e13 + a->e12 * b->e23 + a->e13 * b->e33;
-    r.e21 = a->e21 * b->e11 + a->e22 * b->e21 + a->e23 * b->e31;
-    r.e22 = a->e21 * b->e12 + a->e22 * b->e22 + a->e23 * b->e32;
-    r.e23 = a->e21 * b->e13 + a->e22 * b->e23 + a->e23 * b->e33;
-    r.e31 = a->e31 * b->e11 + a->e32 * b->e21 + a->e33 * b->e31;
-    r.e32 = a->e31 * b->e12 + a->e32 * b->e22 + a->e33 * b->e32;
-    r.e33 = a->e31 * b->e13 + a->e32 * b->e23 + a->e33 * b->e33;
-    return r;
-}
-
-static inline void rdt_matrix_transform_point(const RdtMatrix* m,
-                                              float x, float y,
-                                              float* out_x, float* out_y) {
-    if (!m || !out_x || !out_y) return;
-    *out_x = m->e11 * x + m->e12 * y + m->e13;
-    *out_y = m->e21 * x + m->e22 * y + m->e23;
-}
-
-static inline void rdt_matrix_transform_rect_bounds(const RdtMatrix* m,
-                                                    float left, float top,
-                                                    float right, float bottom,
-                                                    float* out_left,
-                                                    float* out_top,
-                                                    float* out_right,
-                                                    float* out_bottom) {
-    if (!m || !out_left || !out_top || !out_right || !out_bottom) return;
-
-    float tx0, ty0, tx1, ty1, tx2, ty2, tx3, ty3;
-    rdt_matrix_transform_point(m, left, top, &tx0, &ty0);
-    rdt_matrix_transform_point(m, right, top, &tx1, &ty1);
-    rdt_matrix_transform_point(m, right, bottom, &tx2, &ty2);
-    rdt_matrix_transform_point(m, left, bottom, &tx3, &ty3);
-
-    *out_left = LMB_MIN(LMB_MIN(tx0, tx1), LMB_MIN(tx2, tx3));
-    *out_right = LMB_MAX(LMB_MAX(tx0, tx1), LMB_MAX(tx2, tx3));
-    *out_top = LMB_MIN(LMB_MIN(ty0, ty1), LMB_MIN(ty2, ty3));
-    *out_bottom = LMB_MAX(LMB_MAX(ty0, ty1), LMB_MAX(ty2, ty3));
-}
-
-// create a translation matrix
-static inline RdtMatrix rdt_matrix_translate(float tx, float ty) {
-    RdtMatrix m = { 1, 0, tx,  0, 1, ty,  0, 0, 1 };
-    return m;
-}
 
 // ===== display_list.h =====
 // ==========================================================================
@@ -1830,6 +1766,9 @@ Bound render_geometry_rect_to_bound(Rect rect);
 bool render_geometry_bounds_intersect(Bound a, Bound b);
 float render_geometry_filter_effect_expand(const FilterProp* filter);
 float render_geometry_block_visual_overflow(const ViewBlock* block);
+bool render_geometry_transform_matrix(const TransformProp* transform,
+                                      float x, float y, float width, float height,
+                                      RdtMatrix* out_matrix);
 
 // ===== display_list_bounds.hpp =====
 static const float DL_UNBOUNDED_EXTENT = 99999.0f;
@@ -2407,7 +2346,7 @@ int             rdt_video_get_frame(RdtVideo* video, RdtVideoFrame* frame);
 
 #endif // RADIANT_RDT_VIDEO_API
 
-// ===== gif_player.h =====
+// ===== GIF player declarations =====
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -2458,7 +2397,7 @@ GifFrames* gif_detect_animated_from_memory(const unsigned char* data, size_t len
 }
 #endif
 
-// ===== lottie_player.h =====
+// ===== Lottie player declarations =====
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -2524,7 +2463,7 @@ bool lottie_detect_by_content(const unsigned char* data, size_t length);
 }
 #endif
 
-// ===== video_frame_wake.h =====
+// ===== video frame wake declarations =====
 struct DocState;
 
 typedef void (*RadiantVideoWakeCallback)(void* user_data);
@@ -3378,11 +3317,10 @@ int cmd_render_batch(int argc, char** argv);
 struct RenderContext;
 
 void render_marker_view(struct RenderContext* rdcon, ViewSpan* marker);
-void render_list_bullet(struct RenderContext* rdcon, ViewBlock* list_item);
 void render_litem_view(struct RenderContext* rdcon, ViewBlock* list_item);
 void render_list_view(struct RenderContext* rdcon, ViewBlock* view);
 
-// ===== render_media.hpp =====
+// ===== media render declarations =====
 struct RenderContext;
 
 bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
@@ -3419,8 +3357,21 @@ typedef struct RenderOutputTarget {
     float pixel_ratio;
 } RenderOutputTarget;
 
+typedef struct RenderExportSession {
+    UiContext* ui_context;
+    Url* base_url;
+    DomDocument* document;
+    float scale;
+    int content_width;
+    int content_height;
+} RenderExportSession;
+
 void render_output_target_init(RenderOutputTarget* target, RenderOutputKind kind,
                                const char* output_file);
+bool render_export_session_begin(RenderExportSession* session, const char* html_file,
+                                 int viewport_width, int viewport_height,
+                                 int fallback_width, int fallback_height, float scale);
+void render_export_session_end(RenderExportSession* session);
 int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tree,
                                              RenderOutputTarget* target);
 int render_html_to_output_target(const char* html_file, const char* output_file,
@@ -3585,6 +3536,20 @@ extern "C" bool svg_get_registered_image_resolver(Element* svg_root,
  */
 SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element);
 
+typedef struct SvgInitialPaint {
+    Color current_color;
+    Color fill_color;
+    Color stroke_color;
+    bool has_fill_color;
+    bool fill_none;
+    bool has_stroke_color;
+    bool stroke_none;
+    float stroke_width;
+} SvgInitialPaint;
+
+void render_svg_initial_paint(const ViewSpan* view, Color current_color,
+                              SvgInitialPaint* paint);
+
 void render_svg_build_subscene(PaintSvgSubscene* subscene,
                       Element* svg_element,
                       float viewport_width, float viewport_height,
@@ -3635,13 +3600,18 @@ void render_custom_svg_subscene(RenderContext* rdcon, Element* svg_element,
 
 // ===== render_text.hpp =====
 void render_text_view(RenderContext* rdcon, ViewText* text_view);
+CssEnum render_text_inherited_transform(ViewText* text_view);
+char* render_text_create_export_segment(const unsigned char* text,
+                                        const TextRect* text_rect,
+                                        CssEnum text_transform,
+                                        bool include_ellipsis);
 
 // ===== render_vector_path.hpp =====
 struct RenderContext;
 
 void render_vector_path(struct RenderContext* rdcon, ViewBlock* block);
 
-// ===== render_video.hpp =====
+// ===== video render declarations =====
 struct DisplayList;
 struct DocState;
 struct ImageSurface;

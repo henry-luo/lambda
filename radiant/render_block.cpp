@@ -1,5 +1,5 @@
 #include "render.hpp"
-#include "scroller.hpp"
+#include "event.hpp"
 #include "layout.hpp"
 #include "render.hpp"
 
@@ -413,15 +413,6 @@ static void render_block_setup_font(RenderContext* rdcon, ViewBlock* block) {
         std::chrono::duration<double, std::milli>(t2 - t1).count());
 }
 
-static void render_block_default_list_marker(RenderContext* rdcon, ViewBlock* block,
-                                             bool self_hidden) {
-    if (!rdcon || !block || self_hidden || block->view_type != RDT_VIEW_LIST_ITEM) return;
-    DomElement* li_elem = lam::dom_require_element(lam::view_dom_node(block));
-    if (!li_elem->pseudo || !li_elem->pseudo->marker) {
-        render_list_bullet(rdcon, block);
-    }
-}
-
 static RenderBlockPhase render_block_begin_phase(RenderContext* rdcon, ViewBlock* block) {
     RenderBlockPhase phase = {};
     phase.parent_block = rdcon->block;
@@ -435,7 +426,6 @@ static RenderBlockPhase render_block_begin_phase(RenderContext* rdcon, ViewBlock
     phase.transform_scope = render_state_push_transform(rdcon, block, &phase.parent_block);
 
     render_block_setup_font(rdcon, block);
-    render_block_default_list_marker(rdcon, block, phase.self_hidden);
 
     phase.css_clip_scope = render_clip_push_css_scope(rdcon, block,
         phase.parent_block.x, phase.parent_block.y, rdcon->scale);

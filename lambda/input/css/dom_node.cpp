@@ -10,7 +10,7 @@
 #include "../../../lib/hashmap.h"
 #include "../../../lib/str.h"
 #include "../../../radiant/view.hpp"  // For HTM_TAG_* constants
-#include "../../../radiant/symbol_resolver.h"  // For symbol resolution
+#include "../../../radiant/view.hpp"  // For symbol resolution
 #include <strings.h>  // For strcasecmp
 
 /**

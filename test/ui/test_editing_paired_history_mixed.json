@@ -4,10 +4,8 @@
   "viewport": {"width": 760, "height": 380},
   "events": [
     {"type": "log", "message": "=== editing_paired_history_mixed ==="},
-    {"type": "wait", "ms": 150},
     {"type": "click", "target": {"text": "Alpha"}},
     {"type": "key_combo", "key": "z", "mods_str": "super"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#history-log"}, "equals": "history:historyUndo"},
     {"type": "assert_event_log", "contains": "\"owned_by\":\"consumer\"", "min": 1}
   ]

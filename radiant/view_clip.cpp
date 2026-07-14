@@ -1,35 +1,17 @@
-#pragma once
+#include "view.hpp"
+
 #include <math.h>
 #include <string.h>
 
-// ============================================================================
-// Vector clip shapes for overflow:hidden and CSS clip-path
-// ============================================================================
+static int clip_ceil_to_scanline(float value) {
+    return (int)ceilf(value); // INT_CAST_OK: raster scanline bounds are integer pixel columns.
+}
 
-enum ClipShapeType {
-    CLIP_SHAPE_NONE = 0,
-    CLIP_SHAPE_POLYGON,
-    CLIP_SHAPE_CIRCLE,
-    CLIP_SHAPE_ELLIPSE,
-    CLIP_SHAPE_INSET,
-    CLIP_SHAPE_ROUNDED_RECT
-};
+static int clip_floor_to_scanline(float value) {
+    return (int)floorf(value); // INT_CAST_OK: raster scanline bounds are integer pixel columns.
+}
 
-struct ClipShape {
-    ClipShapeType type;
-    union {
-        struct { float* vx; float* vy; int count; } polygon;
-        struct { float cx, cy, r; } circle;
-        struct { float cx, cy, rx, ry; } ellipse;
-        struct { float x, y, w, h, rx, ry; } inset;
-        struct { float x, y, w, h, r_tl, r_tr, r_br, r_bl; } rounded_rect;
-    };
-};
-
-#define RDT_MAX_CLIP_SHAPES 8
-
-// Point-in-rounded-rect test
-static inline bool clip_point_in_rounded_rect(float px, float py,
+bool clip_point_in_rounded_rect(float px, float py,
     float rx, float ry, float rw, float rh,
     float r_tl, float r_tr, float r_br, float r_bl) {
     if (px < rx || px > rx + rw || py < ry || py > ry + rh) return false;
@@ -52,9 +34,7 @@ static inline bool clip_point_in_rounded_rect(float px, float py,
     return true;
 }
 
-// Compute scanline left/right bounds for a rounded rect at a given y-coordinate.
-// Outputs the visible x-range [out_left, out_right] for the rounded rect interior at row y.
-static inline void clip_scanline_rounded_rect(
+void clip_scanline_rounded_rect(
     float rx, float ry, float rw, float rh,
     float r_tl, float r_tr, float r_br, float r_bl,
     float y, float* out_left, float* out_right) {
@@ -62,7 +42,6 @@ static inline void clip_scanline_rounded_rect(
     *out_left = rx;
     *out_right = rx + rw;
 
-    // top-left corner arc
     if (r_tl > 0 && y < ry + r_tl) {
         float cy = ry + r_tl;
         float dy = y - cy;
@@ -71,10 +50,9 @@ static inline void clip_scanline_rounded_rect(
             float xl = rx + r_tl - sqrtf(d2);
             if (xl > *out_left) *out_left = xl;
         } else {
-            *out_left = rx + r_tl; // at the very top of the arc
+            *out_left = rx + r_tl;
         }
     }
-    // top-right corner arc
     if (r_tr > 0 && y < ry + r_tr) {
         float cy = ry + r_tr;
         float dy = y - cy;
@@ -86,7 +64,6 @@ static inline void clip_scanline_rounded_rect(
             *out_right = rx + rw - r_tr;
         }
     }
-    // bottom-left corner arc
     if (r_bl > 0 && y > ry + rh - r_bl) {
         float cy = ry + rh - r_bl;
         float dy = y - cy;
@@ -98,7 +75,6 @@ static inline void clip_scanline_rounded_rect(
             *out_left = rx + r_bl;
         }
     }
-    // bottom-right corner arc
     if (r_br > 0 && y > ry + rh - r_br) {
         float cy = ry + rh - r_br;
         float dy = y - cy;
@@ -112,25 +88,21 @@ static inline void clip_scanline_rounded_rect(
     }
 }
 
-// Point-in-circle test
-static inline bool clip_point_in_circle(float px, float py, float cx, float cy, float r) {
+bool clip_point_in_circle(float px, float py, float cx, float cy, float r) {
     float dx = px - cx, dy = py - cy;
     return dx * dx + dy * dy <= r * r;
 }
 
-// Point-in-ellipse test
-static inline bool clip_point_in_ellipse(float px, float py, float cx, float cy, float rx, float ry) {
+bool clip_point_in_ellipse(float px, float py, float cx, float cy, float rx, float ry) {
     float dx = (px - cx) / rx, dy = (py - cy) / ry;
     return dx * dx + dy * dy <= 1.0f;
 }
 
-// Point-in-inset test (axis-aligned rect)
-static inline bool clip_point_in_inset(float px, float py, float ix, float iy, float iw, float ih) {
+bool clip_point_in_inset(float px, float py, float ix, float iy, float iw, float ih) {
     return px >= ix && px <= ix + iw && py >= iy && py <= iy + ih;
 }
 
-// Point-in-polygon test (ray casting)
-static inline bool clip_point_in_polygon(float px, float py, const float* vx, const float* vy, int count) {
+bool clip_point_in_polygon(float px, float py, const float* vx, const float* vy, int count) {
     bool inside = false;
     for (int i = 0, j = count - 1; i < count; j = i++) {
         if (((vy[i] > py) != (vy[j] > py)) &&
@@ -141,8 +113,7 @@ static inline bool clip_point_in_polygon(float px, float py, const float* vx, co
     return inside;
 }
 
-// Point-in-clip-shape test (dispatches by type)
-static inline bool clip_point_in_shape(ClipShape* cs, float px, float py) {
+bool clip_point_in_shape(ClipShape* cs, float px, float py) {
     if (!cs) return true;
     switch (cs->type) {
         case CLIP_SHAPE_ROUNDED_RECT:
@@ -161,8 +132,7 @@ static inline bool clip_point_in_shape(ClipShape* cs, float px, float py) {
     }
 }
 
-// Compute scanline left/right bounds for a circle at a given y-coordinate.
-static inline void clip_scanline_circle(float cx, float cy, float r,
+void clip_scanline_circle(float cx, float cy, float r,
     float y, float* out_left, float* out_right) {
     float dy = y - cy;
     float d2 = r * r - dy * dy;
@@ -176,8 +146,7 @@ static inline void clip_scanline_circle(float cx, float cy, float r,
     }
 }
 
-// Compute scanline left/right bounds for an ellipse at a given y-coordinate.
-static inline void clip_scanline_ellipse(float cx, float cy, float rx, float ry,
+void clip_scanline_ellipse(float cx, float cy, float rx, float ry,
     float y, float* out_left, float* out_right) {
     float dy = (y - cy) / ry;
     float d2 = 1.0f - dy * dy;
@@ -191,10 +160,7 @@ static inline void clip_scanline_ellipse(float cx, float cy, float rx, float ry,
     }
 }
 
-// Compute scanline left/right bounds for a polygon at a given y-coordinate.
-// Uses edge intersection: find all x-coordinates where polygon edges cross y,
-// then take the min and max of those intersections.
-static inline void clip_scanline_polygon(const float* vx, const float* vy, int count,
+void clip_scanline_polygon(const float* vx, const float* vy, int count,
     float y, float* out_left, float* out_right) {
     float x_min = 1e9f, x_max = -1e9f;
     int crossings = 0;
@@ -215,8 +181,7 @@ static inline void clip_scanline_polygon(const float* vx, const float* vy, int c
     }
 }
 
-// Test if an axis-aligned rect is entirely inside a single clip shape.
-static inline bool clip_shape_rect_inside(ClipShape* cs, float x, float y, float w, float h) {
+bool clip_shape_rect_inside(ClipShape* cs, float x, float y, float w, float h) {
     if (!cs || cs->type == CLIP_SHAPE_NONE) return true;
     return clip_point_in_shape(cs, x, y) &&
            clip_point_in_shape(cs, x + w, y) &&
@@ -224,8 +189,7 @@ static inline bool clip_shape_rect_inside(ClipShape* cs, float x, float y, float
            clip_point_in_shape(cs, x + w, y + h);
 }
 
-// Test if an axis-aligned rect is entirely inside ALL clip shapes in the stack.
-static inline bool clip_shapes_rect_inside(ClipShape** shapes, int depth, // UNUSED_DEPTH_OK: stack size (loop bound), not a recursion depth.
+bool clip_shapes_rect_inside(ClipShape** shapes, int depth,
     float x, float y, float w, float h) {
     for (int i = 0; i < depth; i++) {
         if (!clip_shape_rect_inside(shapes[i], x, y, w, h)) return false;
@@ -233,9 +197,7 @@ static inline bool clip_shapes_rect_inside(ClipShape** shapes, int depth, // UNU
     return true;
 }
 
-// Compute the tightest scanline [left, right] at row y across ALL clip shapes.
-// Intersects with [base_left, base_right] from the axis-aligned clip.
-static inline void clip_shapes_scanline_bounds(ClipShape** shapes, int depth, // UNUSED_DEPTH_OK: stack size (loop bound), not a recursion depth.
+void clip_shapes_scanline_bounds(ClipShape** shapes, int depth,
     float y, int base_left, int base_right, int* out_left, int* out_right) {
     int left = base_left, right = base_right;
     for (int i = 0; i < depth; i++) {
@@ -247,30 +209,32 @@ static inline void clip_shapes_scanline_bounds(ClipShape** shapes, int depth, //
                 clip_scanline_rounded_rect(rr.x, rr.y, rr.w, rr.h,
                     rr.r_tl, rr.r_tr, rr.r_br, rr.r_bl,
                     y, &sl, &sr);
-                int il = (int)ceilf(sl);
-                int ir = (int)floorf(sr);
+                int il = clip_ceil_to_scanline(sl);
+                int ir = clip_floor_to_scanline(sr);
                 if (il > left) left = il;
                 if (ir < right) right = ir;
                 break;
             }
             case CLIP_SHAPE_CIRCLE:
                 clip_scanline_circle(cs->circle.cx, cs->circle.cy, cs->circle.r, y, &sl, &sr);
-                if ((int)ceilf(sl) > left) left = (int)ceilf(sl);
-                if ((int)floorf(sr) < right) right = (int)floorf(sr);
+                if (clip_ceil_to_scanline(sl) > left) left = clip_ceil_to_scanline(sl);
+                if (clip_floor_to_scanline(sr) < right) right = clip_floor_to_scanline(sr);
                 break;
             case CLIP_SHAPE_ELLIPSE:
                 clip_scanline_ellipse(cs->ellipse.cx, cs->ellipse.cy, cs->ellipse.rx, cs->ellipse.ry, y, &sl, &sr);
-                if ((int)ceilf(sl) > left) left = (int)ceilf(sl);
-                if ((int)floorf(sr) < right) right = (int)floorf(sr);
+                if (clip_ceil_to_scanline(sl) > left) left = clip_ceil_to_scanline(sl);
+                if (clip_floor_to_scanline(sr) < right) right = clip_floor_to_scanline(sr);
                 break;
             case CLIP_SHAPE_INSET:
-                if ((int)ceilf(cs->inset.x) > left) left = (int)ceilf(cs->inset.x);
-                if ((int)floorf(cs->inset.x + cs->inset.w) < right) right = (int)floorf(cs->inset.x + cs->inset.w);
+                if (clip_ceil_to_scanline(cs->inset.x) > left) left = clip_ceil_to_scanline(cs->inset.x);
+                if (clip_floor_to_scanline(cs->inset.x + cs->inset.w) < right) {
+                    right = clip_floor_to_scanline(cs->inset.x + cs->inset.w);
+                }
                 break;
             case CLIP_SHAPE_POLYGON:
                 clip_scanline_polygon(cs->polygon.vx, cs->polygon.vy, cs->polygon.count, y, &sl, &sr);
-                if ((int)ceilf(sl) > left) left = (int)ceilf(sl);
-                if ((int)floorf(sr) < right) right = (int)floorf(sr);
+                if (clip_ceil_to_scanline(sl) > left) left = clip_ceil_to_scanline(sl);
+                if (clip_floor_to_scanline(sr) < right) right = clip_floor_to_scanline(sr);
                 break;
             default: break;
         }
@@ -279,9 +243,7 @@ static inline void clip_shapes_scanline_bounds(ClipShape** shapes, int depth, //
     *out_right = right;
 }
 
-// Build a stack-local ClipShape from serialized DL parameters (type + float[8]).
-// Used by display list replay to reconstruct clip shape for post-blur masking.
-static inline ClipShape clip_shape_from_params(int type, const float* params) {
+ClipShape clip_shape_from_params(int type, const float* params) {
     ClipShape cs = {};
     cs.type = (ClipShapeType)type;
     switch (cs.type) {
@@ -303,9 +265,8 @@ static inline ClipShape clip_shape_from_params(int type, const float* params) {
     return cs;
 }
 
-// Serialize a ClipShape into type + float[8] for DL recording.
-static inline void clip_shape_to_params(const ClipShape* cs, int* out_type, float* out_params) {
-    *out_type = cs ? (int)cs->type : 0;
+void clip_shape_to_params(const ClipShape* cs, int* out_type, float* out_params) {
+    *out_type = cs ? (int)cs->type : 0; // INT_CAST_OK: enum serialization into display-list type field.
     memset(out_params, 0, 8 * sizeof(float));
     if (!cs) return;
     switch (cs->type) {

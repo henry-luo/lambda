@@ -1,9 +1,6 @@
-#include "state_store.hpp"
+#include "event.hpp"
 #include "state_store_internal.hpp"
-#include "animation.h"
-#include "dom_range.hpp"
-#include "dom_range_resolver.hpp"
-#include "source_pos_bridge.hpp"   // R7 step 3c — register path recorder
+#include "view.hpp"
 #include "../lib/log.h"
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
@@ -11,18 +8,11 @@
 #include "../lib/escape.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
-#include "event_state_log.hpp"
-#include "form_control.hpp"
-#include "text_control.hpp"
-#include "text_edit.hpp"
-#include "editing.hpp"
-#include "state_machine.hpp"
-#include "state_schema.hpp"
+#include "view.hpp"
 #include "render.hpp"
 #include "../lambda/ast.hpp"
 #include "../lambda/mark_builder.hpp"
 // str.h included via view.hpp
-#include "view.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/arraylist.h"
 
@@ -3448,6 +3438,12 @@ static FormControlProp* form_prop_for_view(View* view) {
     return block->form;
 }
 
+static ViewBlock* form_block_for_view(View* view) {
+    if (!view || !view->is_block()) return NULL;
+    ViewBlock* block = lam::view_require_block(view);
+    return block->form ? block : NULL;
+}
+
 static bool view_element_has_attr(View* view, const char* attr_name) {
     if (!view || !view->is_element() || !attr_name) return false;
     ViewElement* elem = lam::view_require_element(view);
@@ -3624,35 +3620,67 @@ static void form_state_mark_dirty(DocState* state) {
     state_assert_after_mutation(state, "form_view_state_mutation");
 }
 
-static void view_state_set_hovered_internal(DocState* state, View* view, bool hovered,
-                                            bool assert_after_mutation) {
+enum ViewStateFlagKind {
+    VIEW_STATE_FLAG_HOVERED,
+    VIEW_STATE_FLAG_ACTIVE,
+    VIEW_STATE_FLAG_FOCUSED,
+};
+
+static bool view_state_flag_value(const ViewState* state, ViewStateFlagKind flag) {
+    switch (flag) {
+        case VIEW_STATE_FLAG_HOVERED: return state->flags.hovered != 0;
+        case VIEW_STATE_FLAG_ACTIVE: return state->flags.active != 0;
+        case VIEW_STATE_FLAG_FOCUSED: return state->flags.focused != 0;
+    }
+    return false;
+}
+
+static void view_state_assign_flag(ViewState* state, ViewStateFlagKind flag, bool value) {
+    switch (flag) {
+        case VIEW_STATE_FLAG_HOVERED: state->flags.hovered = value ? 1 : 0; break;
+        case VIEW_STATE_FLAG_ACTIVE: state->flags.active = value ? 1 : 0; break;
+        case VIEW_STATE_FLAG_FOCUSED: state->flags.focused = value ? 1 : 0; break;
+    }
+}
+
+static void view_state_set_flag_internal(DocState* state, View* view, ViewStateFlagKind flag,
+                                         bool value, const char* transition_name,
+                                         const char* assertion_name, bool assert_after_mutation) {
     ViewState* view_state = view_state_get(state, view);
-    if (!view_state && !hovered) return;
+    if (!view_state && !value) return;
     if (!view_state) view_state = view_state_get_or_create(state, view, VIEW_STATE_BASE);
     if (!view_state) return;
-    bool old_value = view_state->flags.hovered != 0;
+
+    bool old_value = view_state_flag_value(view_state, flag);
     bool changed = false;
     uint32_t view_id = view_state_resolve_id(view);
     if (view_id != 0 && state && state->view_state_map) {
+        // A logical interaction flag is mirrored across every state kind for one view id.
         for (int kind_int = VIEW_STATE_BASE; kind_int <= VIEW_STATE_CUSTOM; kind_int++) {
             ViewStateKind kind = (ViewStateKind)kind_int;
             ViewStateEntry query = { .view_id = view_id, .kind = kind, .state = NULL };
             const ViewStateEntry* found = (const ViewStateEntry*)hashmap_get(state->view_state_map, &query);
-            if (!found || !found->state) continue;
-            if ((found->state->flags.hovered != 0) == hovered) continue;
-            found->state->flags.hovered = hovered ? 1 : 0;
+            if (!found || !found->state || view_state_flag_value(found->state, flag) == value) continue;
+            view_state_assign_flag(found->state, flag, value);
             changed = true;
         }
-    } else if ((view_state->flags.hovered != 0) != hovered) {
-        view_state->flags.hovered = hovered ? 1 : 0;
+    } else if (old_value != value) {
+        view_state_assign_flag(view_state, flag, value);
         changed = true;
     }
     if (!changed) return;
-    view_state_log_bool_transition(state, view, "hover", old_value, hovered);
+
+    view_state_log_bool_transition(state, view, transition_name, old_value, value);
     state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
-    if (assert_after_mutation) state_assert_after_mutation(state, "view_state_set_hovered");
+    if (assert_after_mutation) state_assert_after_mutation(state, assertion_name);
+}
+
+static void view_state_set_hovered_internal(DocState* state, View* view, bool hovered,
+                                            bool assert_after_mutation) {
+    view_state_set_flag_internal(state, view, VIEW_STATE_FLAG_HOVERED, hovered, "hover",
+        "view_state_set_hovered", assert_after_mutation);
 }
 
 void view_state_set_hovered(DocState* state, View* view, bool hovered) {
@@ -3668,63 +3696,13 @@ void view_state_set_active(DocState* state, View* view, bool active) {
 
 static void view_state_set_active_internal(DocState* state, View* view, bool active,
                                            bool assert_after_mutation) {
-    ViewState* view_state = view_state_get(state, view);
-    if (!view_state && !active) return;
-    if (!view_state) view_state = view_state_get_or_create(state, view, VIEW_STATE_BASE);
-    if (!view_state) return;
-    bool old_value = view_state->flags.active != 0;
-    bool changed = false;
-    uint32_t view_id = view_state_resolve_id(view);
-    if (view_id != 0 && state && state->view_state_map) {
-        for (int kind_int = VIEW_STATE_BASE; kind_int <= VIEW_STATE_CUSTOM; kind_int++) {
-            ViewStateKind kind = (ViewStateKind)kind_int;
-            ViewStateEntry query = { .view_id = view_id, .kind = kind, .state = NULL };
-            const ViewStateEntry* found = (const ViewStateEntry*)hashmap_get(state->view_state_map, &query);
-            if (!found || !found->state) continue;
-            if ((found->state->flags.active != 0) == active) continue;
-            found->state->flags.active = active ? 1 : 0;
-            changed = true;
-        }
-    } else if ((view_state->flags.active != 0) != active) {
-        view_state->flags.active = active ? 1 : 0;
-        changed = true;
-    }
-    if (!changed) return;
-    view_state_log_bool_transition(state, view, "active", old_value, active);
-    state->is_dirty = true;
-    state->needs_repaint = true;
-    state->version++;
-    if (assert_after_mutation) state_assert_after_mutation(state, "view_state_set_active");
+    view_state_set_flag_internal(state, view, VIEW_STATE_FLAG_ACTIVE, active, "active",
+        "view_state_set_active", assert_after_mutation);
 }
 
 void view_state_set_focused(DocState* state, View* view, bool focused) {
-    ViewState* view_state = view_state_get(state, view);
-    if (!view_state && !focused) return;
-    if (!view_state) view_state = view_state_get_or_create(state, view, VIEW_STATE_BASE);
-    if (!view_state) return;
-    bool old_value = view_state->flags.focused != 0;
-    bool changed = false;
-    uint32_t view_id = view_state_resolve_id(view);
-    if (view_id != 0 && state && state->view_state_map) {
-        for (int kind_int = VIEW_STATE_BASE; kind_int <= VIEW_STATE_CUSTOM; kind_int++) {
-            ViewStateKind kind = (ViewStateKind)kind_int;
-            ViewStateEntry query = { .view_id = view_id, .kind = kind, .state = NULL };
-            const ViewStateEntry* found = (const ViewStateEntry*)hashmap_get(state->view_state_map, &query);
-            if (!found || !found->state) continue;
-            if ((found->state->flags.focused != 0) == focused) continue;
-            found->state->flags.focused = focused ? 1 : 0;
-            changed = true;
-        }
-    } else if ((view_state->flags.focused != 0) != focused) {
-        view_state->flags.focused = focused ? 1 : 0;
-        changed = true;
-    }
-    if (!changed) return;
-    view_state_log_bool_transition(state, view, "focus", old_value, focused);
-    state->is_dirty = true;
-    state->needs_repaint = true;
-    state->version++;
-    state_assert_after_mutation(state, "view_state_set_focused");
+    view_state_set_flag_internal(state, view, VIEW_STATE_FLAG_FOCUSED, focused, "focus",
+        "view_state_set_focused", true);
 }
 
 void doc_state_set_hover_target(DocState* state, View* target) {
@@ -4480,10 +4458,8 @@ bool form_control_restore_text_control_state(DocState* state, View* view) {
 }
 
 void form_control_set_value(DocState* state, View* view, const char* value, uint32_t len) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_TEXT, SM_EV_FORM_SET_VALUE, view);
 
     DomElement* elem = lam::dom_require_element(block);
@@ -4561,10 +4537,8 @@ void form_control_get_selection(DocState* state, View* view,
         return;
     }
 
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
 
     FormControlProp* form = block->form;
     if (out_start) *out_start = form->selection_start;
@@ -4695,10 +4669,8 @@ int form_control_get_selected_index(DocState* state, View* view) {
 }
 
 void form_control_set_selected_index(DocState* state, View* view, int index) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_SELECT, SM_EV_FORM_SET_SELECTED_INDEX, view);
 
     FormControlProp* form = block->form;
@@ -4729,10 +4701,8 @@ float form_control_get_range_value(DocState* state, View* view) {
 }
 
 void form_control_set_range_value(DocState* state, View* view, float value) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_RANGE, SM_EV_FORM_SET_RANGE_VALUE, view);
 
     FormControlProp* form = block->form;
@@ -4766,25 +4736,55 @@ bool form_control_is_disabled(DocState* state, View* view) {
     return view_element_has_attr(view, "disabled");
 }
 
-void form_control_set_disabled(DocState* state, View* view, bool disabled) {
-    if (!view || !view->is_block()) return;
+typedef enum FormConstraintKind {
+    FORM_CONSTRAINT_DISABLED,
+    FORM_CONSTRAINT_READONLY,
+    FORM_CONSTRAINT_REQUIRED,
+} FormConstraintKind;
 
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
-    SmFamily family = form_control_schema_family_for_view(view);
-    SmTransitionGuard sm_guard(state, family, SM_EV_FORM_SET_DISABLED, view);
+static bool form_constraint_stored_value(const ViewState* view_state,
+                                         FormConstraintKind kind) {
+    if (kind == FORM_CONSTRAINT_DISABLED) return view_state->data.form.disabled != 0;
+    if (kind == FORM_CONSTRAINT_READONLY) return view_state->data.form.readonly != 0;
+    return view_state->data.form.required != 0;
+}
 
+static void form_constraint_store_value(ViewState* view_state,
+                                        FormConstraintKind kind, bool value) {
+    if (kind == FORM_CONSTRAINT_DISABLED) view_state->data.form.disabled = value ? 1 : 0;
+    else if (kind == FORM_CONSTRAINT_READONLY) view_state->data.form.readonly = value ? 1 : 0;
+    else view_state->data.form.required = value ? 1 : 0;
+}
+
+static void form_control_set_constraint(DocState* state, View* view, bool value,
+                                        FormConstraintKind kind,
+                                        const char* attr_name, const char* log_name,
+                                        SmEvent event) {
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
+
+    SmFamily family = kind == FORM_CONSTRAINT_READONLY
+        ? form_control_schema_family_for_readonly(view)
+        : form_control_schema_family_for_view(view);
+    SmTransitionGuard sm_guard(state, family, event, view);
     FormControlProp* form = block->form;
     form->state_ref = state;
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    bool old_value = view_state ? view_state->data.form.disabled != 0 : view_element_has_attr(view, "disabled");
+    bool old_value = view_state
+        ? form_constraint_stored_value(view_state, kind)
+        : view_element_has_attr(view, attr_name);
     if (view_state) {
-        if (old_value == disabled) return;
-        view_state->data.form.disabled = disabled ? 1 : 0;
+        if (old_value == value) return;
+        form_constraint_store_value(view_state, kind, value);
     }
-    view_state_log_bool_transition(state, view, "form.disabled", old_value, disabled);
+    view_state_log_bool_transition(state, view, log_name, old_value, value);
     if (family != SM_FAMILY__COUNT) sm_guard.commit();
     form_state_mark_dirty(state);
+}
+
+void form_control_set_disabled(DocState* state, View* view, bool disabled) {
+    form_control_set_constraint(state, view, disabled, FORM_CONSTRAINT_DISABLED,
+                                "disabled", "form.disabled", SM_EV_FORM_SET_DISABLED);
 }
 
 bool form_control_is_readonly(DocState* state, View* view) {
@@ -4796,24 +4796,8 @@ bool form_control_is_readonly(DocState* state, View* view) {
 }
 
 void form_control_set_readonly(DocState* state, View* view, bool readonly) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
-    SmFamily family = form_control_schema_family_for_readonly(view);
-    SmTransitionGuard sm_guard(state, family, SM_EV_FORM_SET_READONLY, view);
-
-    FormControlProp* form = block->form;
-    form->state_ref = state;
-    ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    bool old_value = view_state ? view_state->data.form.readonly != 0 : view_element_has_attr(view, "readonly");
-    if (view_state) {
-        if (old_value == readonly) return;
-        view_state->data.form.readonly = readonly ? 1 : 0;
-    }
-    view_state_log_bool_transition(state, view, "form.readonly", old_value, readonly);
-    if (family != SM_FAMILY__COUNT) sm_guard.commit();
-    form_state_mark_dirty(state);
+    form_control_set_constraint(state, view, readonly, FORM_CONSTRAINT_READONLY,
+                                "readonly", "form.readonly", SM_EV_FORM_SET_READONLY);
 }
 
 bool form_control_is_required(DocState* state, View* view) {
@@ -4825,24 +4809,8 @@ bool form_control_is_required(DocState* state, View* view) {
 }
 
 void form_control_set_required(DocState* state, View* view, bool required) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
-    SmFamily family = form_control_schema_family_for_view(view);
-    SmTransitionGuard sm_guard(state, family, SM_EV_FORM_SET_REQUIRED, view);
-
-    FormControlProp* form = block->form;
-    form->state_ref = state;
-    ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    bool old_value = view_state ? view_state->data.form.required != 0 : view_element_has_attr(view, "required");
-    if (view_state) {
-        if (old_value == required) return;
-        view_state->data.form.required = required ? 1 : 0;
-    }
-    view_state_log_bool_transition(state, view, "form.required", old_value, required);
-    if (family != SM_FAMILY__COUNT) sm_guard.commit();
-    form_state_mark_dirty(state);
+    form_control_set_constraint(state, view, required, FORM_CONSTRAINT_REQUIRED,
+                                "required", "form.required", SM_EV_FORM_SET_REQUIRED);
 }
 
 // ============================================================================
@@ -4993,10 +4961,8 @@ void doc_state_set_context_menu_hover(DocState* state, int hover_index) {
 }
 
 void form_control_open_dropdown(DocState* state, View* view) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_SELECT, SM_EV_DROPDOWN_OPEN, view);
 
     FormControlProp* form = block->form;
@@ -5016,10 +4982,8 @@ void form_control_open_dropdown(DocState* state, View* view) {
 }
 
 void form_control_close_dropdown(DocState* state, View* view) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_SELECT, SM_EV_DROPDOWN_CLOSE, view);
 
     FormControlProp* form = block->form;
@@ -5038,10 +5002,8 @@ void form_control_close_dropdown(DocState* state, View* view) {
 }
 
 void form_control_set_hover_index(DocState* state, View* view, int index) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_SELECT, SM_EV_FORM_SET_HOVER_INDEX, view);
 
     FormControlProp* form = block->form;
@@ -8521,7 +8483,6 @@ char* extract_selected_html(DocState* state, Arena* arena) {
 // pasteboard via its installed backend; for headless / test builds the
 // default in-memory backend is used and writes never touch GLFW.
 
-#include "clipboard.hpp"
 
 void clipboard_copy_text(const char* text) {
     if (!text) return;

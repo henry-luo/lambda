@@ -4,14 +4,12 @@
   "viewport": {"width": 640, "height": 360},
   "events": [
     {"type": "log", "message": "=== editing_sim_helpers_input ==="},
-    {"type": "wait", "ms": 150},
     {"type": "assert_editing_value", "target": {"selector": "#auto-input"}, "equals": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"},
     {"type": "set_editing_selection", "target": {"selector": "#auto-input"}, "start": 1, "end": 3},
     {"type": "assert_form_selection", "target": {"selector": "#auto-input"}, "start": 1, "end": 3},
     {"type": "click", "target": {"selector": "#surface"}},
     {"type": "wait", "ms": 60},
     {"type": "type", "target": {"selector": "#surface"}, "text": "Z"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#input-log"}, "equals": "input:insertText|Z|Z"}
   ]
 }

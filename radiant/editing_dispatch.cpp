@@ -1,13 +1,5 @@
-#include "editing_dispatch.hpp"
+#include "event.hpp"
 
-#include "editing_geometry.hpp"
-#include "editing_host.hpp"
-#include "editing_target_range.hpp"
-#include "event_state_log.hpp"
-#include "handler.hpp"
-#include "state_machine.hpp"
-#include "state_schema.hpp"
-#include "state_store.hpp"
 #include "view.hpp"
 #include "../lib/log.h"
 

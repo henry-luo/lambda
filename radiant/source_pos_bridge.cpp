@@ -22,7 +22,7 @@
 // since Item is passed by value across the C ABI.
 #include "../lambda/lambda-data.hpp"
 
-#include "source_pos_bridge.hpp"
+#include "event.hpp"
 
 #include <stdlib.h>
 #include <string.h>
@@ -34,8 +34,6 @@
 #include "../lambda/render_map.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
-#include "dom_range.hpp"
-#include "state_store.hpp"
 
 // The full Radiant binary links state_store.cpp and uses the canonical writer.
 // Source-position bridge unit tests link this file without the full StateStore

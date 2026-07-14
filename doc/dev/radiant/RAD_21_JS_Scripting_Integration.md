@@ -2,7 +2,7 @@
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the Radiant-side driver that runs a page's `<script>` elements: how `execute_document_scripts` walks the parsed HTML tree, concatenates a browser-global preamble (window/document/XHR/WebSocket stubs) with inline, external, and onload sources, and transpiles them to MIR through the LambdaJS engine — all under an `alarm` + `sigsetjmp` + SIGSEGV/SIGBUS watchdog — with the unified `DomElement*` tree as the DOM context. It also covers how the retained JS runtime is stashed on `DomDocument` and reused by `collect_and_compile_event_handlers` to compile `on<type>` inline handlers, and how the loader now runs CSS cascade before scripts and recascades after script mutations.
 >
-> **Primary sources:** `radiant/script_runner.cpp` / `script_runner.h` (`execute_document_scripts`, `execute_document_script_tasks_postdom`, `append_browser_document_preamble`, `collect_and_compile_event_handlers`, the watchdog handlers), `radiant/cmd_layout.cpp` (the cascade → scripts → optional recascade load pipeline), `lambda/input/css/dom_element.hpp` (the retained-runtime fields on `DomDocument`). The DOM/CSSOM binding surface it drives lives in `lambda/js/` and is documented in [JS_13 — Web-Platform DOM, CSSOM, Events & Fetch](../js/JS_13_Web_DOM.md).
+> **Primary sources:** `radiant/radiant.hpp` + `radiant/script_runner.cpp` (`execute_document_scripts`, `execute_document_script_tasks_postdom`, `append_browser_document_preamble`, `collect_and_compile_event_handlers`, the watchdog handlers), `radiant/cmd_layout.cpp` (the cascade → scripts → optional recascade load pipeline), `lambda/input/css/dom_element.hpp` (the retained-runtime fields on `DomDocument`). The DOM/CSSOM binding surface it drives lives in `lambda/js/` and is documented in [JS_13 — Web-Platform DOM, CSSOM, Events & Fetch](../js/JS_13_Web_DOM.md).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -107,7 +107,7 @@ Editing-related handlers reach JS through the same retained runtime but a differ
 | File | Responsibility (this doc) |
 |---|---|
 | `radiant/script_runner.cpp` | The whole driver: `execute_document_scripts`, task collection, `append_browser_document_preamble`, the post-DOM scheduler, the signal watchdog, retained-runtime handoff, and `collect_and_compile_event_handlers`. |
-| `radiant/script_runner.h` | Public surface: the two entry points plus `script_runner_set_retain_js_state`/`set_execute_external_scripts`/`cleanup_*`/`js_batch_cleanup_unsafe`. |
+| `radiant/radiant.hpp` | Public script-runner surface: the two entry points plus `script_runner_set_retain_js_state`/`set_execute_external_scripts`/`cleanup_*`/`js_batch_cleanup_unsafe`. |
 | `radiant/cmd_layout.cpp` | Load pipeline ordering: initial cascade before scripts, `<style>` re-collection and recascade after JS mutation, event-handler compilation. |
 | `lambda/input/css/dom_element.hpp` | The retained-runtime fields on `DomDocument` (`js_mir_ctx`, `js_runtime_*`, `js_preamble_state`, `js_mutation_count`). |
 | `lambda/js/js_dom.cpp` | `js_dom_set_event_handler_function`, `js_dom_set_document`/`set_ui_context`/`set_host_driven_loop` — the binding calls this driver invokes (internals in JS_13). |

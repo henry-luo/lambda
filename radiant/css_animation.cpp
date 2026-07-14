@@ -1,7 +1,6 @@
-#include "css_animation.h"
 #include "view.hpp"
 #include "layout.hpp"
-#include "state_store.hpp"
+#include "event.hpp"
 
 extern "C" {
 #include "../lib/log.h"
@@ -463,6 +462,10 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
 
 KeyframeRegistry* keyframe_registry_create(DomDocument* doc, Pool* pool) {
     if (!doc || !pool) return NULL;
+
+    // keyframe parsing resolves property names; standalone animation paths may
+    // reach here before the layout engine initializes the CSS property table.
+    if (!css_property_system_init(pool)) return NULL;
 
     KeyframeRegistry* registry = (KeyframeRegistry*)pool_calloc(pool, sizeof(KeyframeRegistry));
     registry->pool = pool;

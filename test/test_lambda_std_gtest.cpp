@@ -16,6 +16,11 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include "test_process.h"
+
+extern "C" {
+#include "../lib/shell.h"
+}
 #ifdef _WIN32
 #include <process.h>
 #define getpid _getpid
@@ -264,24 +269,27 @@ static void run_std_sub_batch(
     }
     fclose(manifest);
 
-    char command[512];
-#ifdef _WIN32
-    snprintf(command, sizeof(command),
-             "lambda.exe test-batch --no-log --timeout=60 --c2mir < \"%s\"", manifest_path);
-#else
-    snprintf(command, sizeof(command),
-             "./lambda.exe test-batch --no-log --timeout=60 --c2mir < \"%s\"", manifest_path);
-#endif
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) return;
+    const char* args[] = {
+        LAMBDA_EXE, "test-batch", "--no-log", "--timeout=60", "--c2mir", NULL,
+    };
+    ShellOptions options = {0};
+    options.stdin_path = manifest_path;
+    // Parallel batches must not serialize through shell stdin redirection.
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    if (shell_result.exit_code < 0) {
+        shell_result_free(&shell_result);
+        unlink(manifest_path);
+        return;
+    }
 
     char buffer[4096];
     std::string current_script;
     std::string current_output;
     bool in_script = false;
 
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+    TestProcessLines lines;
+    test_process_lines_init(&lines, shell_result.stdout_buf, shell_result.stdout_len);
+    while (test_process_next_line(&lines, buffer, sizeof(buffer))) {
         if (buffer[0] == '\x01') {
             if (strncmp(buffer + 1, "BATCH_START ", 12) == 0) {
                 current_script = std::string(buffer + 13);
@@ -311,7 +319,7 @@ static void run_std_sub_batch(
         }
     }
 
-    pclose(pipe);
+    shell_result_free(&shell_result);
     unlink(manifest_path);
 }
 

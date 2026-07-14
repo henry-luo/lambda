@@ -6,6 +6,7 @@
 //==============================================================================
 
 #include "test_lambda_helpers.hpp"
+#include "../lib/shell.h"
 #include <string.h>
 
 //==============================================================================
@@ -355,24 +356,16 @@ INSTANTIATE_TEST_SUITE_P(
 // Helper to test that a script reports type errors but doesn't crash
 // Note: Lambda currently exits with code 0 even on type errors (errors are reported to stderr)
 void test_lambda_script_expects_error(const char* script_path) {
-    char command[512];
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe --no-log \"%s\" 2>&1", script_path);
-#else
-    snprintf(command, sizeof(command), "./lambda.exe --no-log \"%s\" 2>&1", script_path);
-#endif
-
-    FILE* pipe = popen(command, "r");
-    ASSERT_NE(pipe, nullptr) << "Failed to execute command: " << command;
-
-    char buffer[4096];
+    const char* args[] = {LAMBDA_EXE, "--no-log", script_path, NULL};
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    // Negative script paths are argv data and must not pass through shell parsing.
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
     std::string output;
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        output += buffer;
+    if (shell_result.stdout_buf) {
+        output.assign(shell_result.stdout_buf, shell_result.stdout_len);
     }
-
-    int exit_code = pclose(pipe);
-    (void)exit_code;  // exit code may be 0 even with errors
+    shell_result_free(&shell_result);
 
     // Should contain error messages (type_error, [ERR!], or error[E...])
     bool has_error_msg = output.find("type_error") != std::string::npos ||
@@ -398,28 +391,19 @@ TEST(LambdaNegativeTests, test_bare_vector_comparison_error) {
 
 TEST(LambdaNegativeTests, test_condition_lint_masks) {
     const char* script_path = "test/lambda/negative/semantic/condition_lint_masks.ls";
-    char command[512];
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe \"%s\" 2>&1", script_path);
-#else
-    snprintf(command, sizeof(command), "./lambda.exe \"%s\" 2>&1", script_path);
-#endif
-
-    FILE* pipe = popen(command, "r");
-    ASSERT_NE(pipe, nullptr) << "Failed to execute command: " << command;
-
+    const char* args[] = {LAMBDA_EXE, script_path, NULL};
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
     char output[65536];
-    output[0] = '\0';
-    size_t output_len = 0;
-    char buffer[4096];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        size_t buffer_len = strlen(buffer);
-        if (output_len + buffer_len < sizeof(output)) {
-            memcpy(output + output_len, buffer, buffer_len + 1);
-            output_len += buffer_len;
-        }
+    size_t output_len = shell_result.stdout_len;
+    if (output_len >= sizeof(output)) output_len = sizeof(output) - 1;
+    if (shell_result.stdout_buf && output_len > 0) {
+        memcpy(output, shell_result.stdout_buf, output_len);
     }
-    int exit_code = pclose(pipe);
+    output[output_len] = '\0';
+    int exit_code = shell_result.exit_code;
+    shell_result_free(&shell_result);
 
     EXPECT_EQ(exit_code, 0) << "Lint probe should not fail:\n" << output;
     EXPECT_TRUE(strstr(output, "lambda_condition_lint") != nullptr)
@@ -437,33 +421,20 @@ TEST(LambdaNegativeTests, test_condition_lint_masks) {
 }
 
 void test_lambda_proc_script_expects_error(const char* script_path) {
-    char command[512];
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe --no-log run \"%s\" 2>&1", script_path);
-#else
-    snprintf(command, sizeof(command), "./lambda.exe --no-log run \"%s\" 2>&1", script_path);
-#endif
-
-    FILE* pipe = popen(command, "r");
-    ASSERT_NE(pipe, nullptr) << "Failed to execute command: " << command;
-
-    char buffer[4096];
+    const char* args[] = {LAMBDA_EXE, "--no-log", "run", script_path, NULL};
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
     char output[8192];
-    size_t output_len = 0;
-    output[0] = '\0';
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        size_t len = strlen(buffer);
-        size_t available = sizeof(output) - output_len - 1;
-        if (len > available) len = available;
-        if (len > 0) {
-            memcpy(output + output_len, buffer, len);
-            output_len += len;
-            output[output_len] = '\0';
-        }
+    size_t output_len = shell_result.stdout_len;
+    if (output_len >= sizeof(output)) output_len = sizeof(output) - 1;
+    if (shell_result.stdout_buf && output_len > 0) {
+        memcpy(output, shell_result.stdout_buf, output_len);
     }
-
-    int exit_code = pclose(pipe);
-    EXPECT_NE(WEXITSTATUS(exit_code), 0) << "Expected failure for: " << script_path
+    output[output_len] = '\0';
+    int exit_code = shell_result.exit_code;
+    shell_result_free(&shell_result);
+    EXPECT_NE(exit_code, 0) << "Expected failure for: " << script_path
                                          << "\nOutput was: " << output;
 
     bool has_error_msg = strstr(output, "Error:") != nullptr ||

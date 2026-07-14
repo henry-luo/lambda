@@ -243,11 +243,23 @@ fi
 # ---------- structural dispatch ----------
 struct_fail=0
 run_struct=0
-(( ! NO_STRUCTURAL )) && [[ -z "$RULE_FILTER" ]] && run_struct=1
-(( STRUCTURAL_ONLY )) && run_struct=1
+if (( ! NO_STRUCTURAL )); then
+  if (( STRUCTURAL_ONLY )) || [[ -z "$RULE_FILTER" ]]; then
+    run_struct=1
+  else
+    for entry in "${STRUCTURAL_CHECKS[@]}"; do
+      id="${entry%%:*}"
+      if [[ "$id" =~ $RULE_FILTER ]]; then
+        run_struct=1
+        break
+      fi
+    done
+  fi
+fi
 if (( run_struct )); then
   for entry in "${STRUCTURAL_CHECKS[@]}"; do
     id="${entry%%:*}"; cmd="${entry#*:}"
+    [[ -n "$RULE_FILTER" && ! "$id" =~ $RULE_FILTER ]] && continue
     if ! $cmd; then
       struct_fail=1
       printf '%s❌ structural:%s failed%s\n' "$RED" "$id" "$RESET" >&2

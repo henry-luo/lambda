@@ -1,0 +1,161 @@
+{
+  "version": 1,
+  "file_exclusions": [
+    {
+      "pattern": "lambda/lambda-embed.h",
+      "modules": ["lambda"],
+      "reason": "Generated embedded-resource data is not maintained source code."
+    },
+    {
+      "pattern": "lambda/*/parser.c",
+      "modules": ["lambda"],
+      "reason": "Tree-sitter parser.c files are generated parser tables and contain unavoidable repeated structures."
+    }
+  ],
+  "block_exclusions": [
+    {
+      "id": "independent_event_enum_declarations",
+      "modules": ["radiant"],
+      "reason": "Lizard normalizes these independent sequential enums to the same token shape; sharing them would incorrectly couple separate event domains.",
+      "regions": [
+        {
+          "file": "radiant/event.hpp",
+          "start": "typedef enum  {",
+          "end": "} EventType;"
+        },
+        {
+          "file": "radiant/event.hpp",
+          "start": "typedef enum InputIntentType {",
+          "end": "} InputIntentType;"
+        },
+        {
+          "file": "radiant/event.hpp",
+          "start": "typedef enum SmFamily {",
+          "end": "} SmFamily;"
+        },
+        {
+          "file": "radiant/event.hpp",
+          "start": "typedef enum SmEvent {",
+          "end": "} SmEvent;"
+        },
+        {
+          "file": "radiant/event.hpp",
+          "start": "typedef enum SmInvariantId {",
+          "end": "} SmInvariantId;"
+        },
+        {
+          "file": "radiant/event_sim.hpp",
+          "start": "enum SimEventType {",
+          "end": "};"
+        }
+      ]
+    },
+    {
+      "id": "independent_enum_name_switches",
+      "modules": ["radiant"],
+      "reason": "These enum-to-name switches belong to unrelated APIs; Lizard ignores the case labels that distinguish their domains.",
+      "regions": [
+        {
+          "file": "radiant/editing_intent.cpp",
+          "start": "const char* input_intent_type_name(",
+          "end": "bool input_intent_is_dispatchable("
+        },
+        {
+          "file": "radiant/state_schema.cpp",
+          "start": "static const char* sm_family_name(",
+          "end": "static const char* sm_event_name("
+        },
+        {
+          "file": "radiant/state_schema.cpp",
+          "start": "static const char* sm_event_name(",
+          "end": "static int sm_derive_selection_state("
+        },
+        {
+          "file": "radiant/webdriver/webdriver_errors.cpp",
+          "start": "const char* webdriver_error_name(",
+          "end": "int webdriver_error_http_status("
+        },
+        {
+          "file": "radiant/layout_debug.cpp",
+          "start": "static const char* category_name(",
+          "end": "static const char* bucket_name("
+        },
+        {
+          "file": "radiant/layout_debug.cpp",
+          "start": "static const char* bucket_name(",
+          "end": "void layout_debug_init("
+        },
+        {
+          "file": "radiant/state_machine.cpp",
+          "start": "static const char* editing_drag_mode_name(",
+          "end": "static const char* editing_rich_transaction_phase_name("
+        },
+        {
+          "file": "radiant/state_machine.cpp",
+          "start": "static const char* editing_rich_transaction_phase_name(",
+          "end": "static void write_editing_surface_ref("
+        },
+        {
+          "file": "radiant/editing.cpp",
+          "start": "const char* editing_surface_kind_name(",
+          "end": "const char* editing_mode_name("
+        },
+        {
+          "file": "radiant/editing.cpp",
+          "start": "const char* editing_mode_name(",
+          "end": "}"
+        }
+      ]
+    },
+    {
+      "id": "independent_switch_case_inventories",
+      "modules": ["radiant"],
+      "reason": "These switches are independent membership inventories over unrelated intent, HTML tag, and display-op enums; Lizard discards the distinguishing case labels.",
+      "regions": [
+        {
+          "file": "radiant/editing_intent.cpp",
+          "start": "bool input_intent_is_dispatchable(",
+          "end": "bool input_intent_from_key_event("
+        },
+        {
+          "file": "radiant/editing_target_range.cpp",
+          "start": "static bool target_range_is_simple_inline_tag(",
+          "end": "struct TargetRangeJoinContent"
+        },
+        {
+          "file": "radiant/editing_dispatch.cpp",
+          "start": "static bool editing_history_intent_is_recordable(",
+          "end": "static bool editing_history_intent_is_boundary("
+        },
+        {
+          "file": "radiant/editing_dispatch.cpp",
+          "start": "static bool editing_history_intent_is_boundary(",
+          "end": "static const char* editing_history_boundary_reason("
+        },
+        {
+          "file": "radiant/tile_pool.cpp",
+          "start": "// vector ops are handled before this switch by dl_replay_vector_item().",
+          "end": "// -- Direct-pixel operations: manual tile-local coordinate translation --"
+        },
+        {
+          "file": "radiant/render_list.cpp",
+          "start": "case CSS_VALUE_DECIMAL:",
+          "end": "if (marker_prop->text_content && *marker_prop->text_content"
+        }
+      ]
+    },
+    {
+      "id": "declarative_state_transition_rows",
+      "modules": ["radiant"],
+      "reason": "The static state-machine schema intentionally uses one fixed aggregate row shape; converting readable data rows into macros or runtime builders would add code without reducing behavior duplication.",
+      "allow_within_region": true,
+      "regions": [
+        {
+          "file": "radiant/state_schema.cpp",
+          "start": "static const StateTransitionRule RADIANT_STATE_RULES[] = {",
+          "end": "#undef SM_RULE_TO"
+        }
+      ]
+    }
+  ]
+}

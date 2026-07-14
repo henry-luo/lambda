@@ -4,10 +4,8 @@
   "viewport": {"width": 760, "height": 420},
   "events": [
     {"type": "log", "message": "=== editing_paired_shift_click_mixed ==="},
-    {"type": "wait", "ms": 150},
     {"type": "set_editing_selection", "target": {"selector": "#nav-embedded-input"}, "start": 0, "end": 0},
     {"type": "click", "target": {"selector": "#nav-embedded-input", "offset_x": 70, "offset_y": 10}, "mods_str": "shift"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
     {"type": "assert_editing_selection", "target": {"selector": "#nav-embedded-input"}, "start": 0, "end": 7}
   ]

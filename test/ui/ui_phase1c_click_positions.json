@@ -6,7 +6,6 @@
     {"type": "log", "message": "=== Phase 1c: pixel-position click tests ==="},
     {"type": "log", "message": "Target: <p> inside .center  x=32 y=104 w=300 h=18"},
     {"type": "log", "message": "  x range [32,331]  y range [104,121]"},
-    {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "--- Group A: Inside clicks on text element borders - caret must be text (view_type=1) ---"},
 

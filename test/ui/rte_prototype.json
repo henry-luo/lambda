@@ -3,7 +3,6 @@
   "html": "test/ui/rte_prototype.ls",
   "viewport": {"width": 1000, "height": 720},
   "events": [
-    {"type": "wait", "ms": 250},
 
     {"type": "log", "message": "--- initial render of simple.md ---"},
     {"type": "assert_text",  "target": {"selector": "#status"},  "contains": "opened:"},
@@ -21,17 +20,14 @@
 
     {"type": "log", "message": "--- bold button dispatches ---"},
     {"type": "click", "target": {"selector": "#toolbar .btn-bold"}},
-    {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#status"}, "contains": "btn-bold"},
 
     {"type": "log", "message": "--- table button dispatches ---"},
     {"type": "click", "target": {"selector": "#toolbar .btn-table"}},
-    {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#status"}, "contains": "btn-table"},
 
     {"type": "log", "message": "--- save populates #markdown-output ---"},
     {"type": "click", "target": {"selector": "#toolbar .btn-save"}},
-    {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#status"}, "contains": "saved"}
   ]
 }

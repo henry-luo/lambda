@@ -10,6 +10,11 @@
 #include <unordered_map>
 #include <thread>
 #include <atomic>
+#include "test_process.h"
+
+extern "C" {
+#include "../lib/shell.h"
+}
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -28,6 +33,7 @@
     #define popen _popen
     #define pclose _pclose
     #define WEXITSTATUS(status) (status)
+    #define LAMBDA_EXE "lambda.exe"
     #ifndef F_OK
     #define F_OK 0
     #endif
@@ -35,51 +41,21 @@
     #include <unistd.h>
     #include <sys/wait.h>
     #include <dirent.h>
+    #define LAMBDA_EXE "./lambda.exe"
 #endif
 
 // Helper function to execute a JavaScript file with lambda js and capture output
 static char* execute_js_script(const char* script_path) {
-    char command[512];
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js \"%s\" --no-log", script_path);
-#else
-    snprintf(command, sizeof(command), "./lambda.exe js \"%s\" --no-log", script_path);
-#endif
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
-        fprintf(stderr, "Error: Could not execute command: %s\n", command);
-        return nullptr;
-    }
-
-    char buffer[1024];
-    size_t total_size = 0;
-    char* full_output = nullptr;
-
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        size_t len = strlen(buffer);
-        char* new_output = (char*)realloc(full_output, total_size + len + 1);
-        if (!new_output) {
-            free(full_output);
-            pclose(pipe);
-            return nullptr;
-        }
-        full_output = new_output;
-        strcpy(full_output + total_size, buffer);
-        total_size += len;
-    }
-
-    int exit_code = pclose(pipe);
-    if (WEXITSTATUS(exit_code) != 0) {
+    const char* args[] = {LAMBDA_EXE, "js", script_path, "--no-log", NULL};
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, NULL);
+    if (shell_result.exit_code != 0) {
         fprintf(stderr, "Error: lambda.exe js exited with code %d for script: %s\n",
-                WEXITSTATUS(exit_code), script_path);
-        free(full_output);
+                shell_result.exit_code, script_path);
+        shell_result_free(&shell_result);
         return nullptr;
     }
-
-    if (!full_output) {
-        return strdup("");
-    }
+    char* full_output = shell_result.stdout_buf ? strdup(shell_result.stdout_buf) : strdup("");
+    shell_result_free(&shell_result);
     char* marker = strstr(full_output, "##### Script");
     if (marker) {
         char* result_start = strchr(marker, '\n');
@@ -155,15 +131,14 @@ static void run_node_sub_batch(
     }
     fclose(manifest);
 
-    char command[512];
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js-test-batch --no-log --timeout=10 < \"%s\"", manifest_path);
-#else
-    snprintf(command, sizeof(command), "./lambda.exe js-test-batch --no-log --timeout=10 < \"%s\"", manifest_path);
-#endif
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
+    const char* args[] = {
+        LAMBDA_EXE, "js-test-batch", "--no-log", "--timeout=10", NULL,
+    };
+    ShellOptions options = {0};
+    options.stdin_path = manifest_path;
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    if (shell_result.exit_code < 0) {
+        shell_result_free(&shell_result);
         unlink(manifest_path);
         return;
     }
@@ -173,7 +148,9 @@ static void run_node_sub_batch(
     std::string current_output;
     bool in_script = false;
 
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+    TestProcessLines lines;
+    test_process_lines_init(&lines, shell_result.stdout_buf, shell_result.stdout_len);
+    while (test_process_next_line(&lines, buffer, sizeof(buffer))) {
         if (buffer[0] == '\x01') {
             if (strncmp(buffer + 1, "BATCH_START ", 12) == 0) {
                 current_script = std::string(buffer + 13);
@@ -192,7 +169,7 @@ static void run_node_sub_batch(
         }
     }
 
-    pclose(pipe);
+    shell_result_free(&shell_result);
     unlink(manifest_path);
 }
 

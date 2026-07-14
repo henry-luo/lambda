@@ -4,7 +4,6 @@
   "viewport": {"width": 760, "height": 420},
   "events": [
     {"type": "log", "message": "=== editing_sim_helpers_mixed ==="},
-    {"type": "wait", "ms": 150},
     {"type": "set_editing_selection", "target": {"selector": "#embedded-input"}, "start": 1, "end": 4},
     {"type": "assert_form_selection", "target": {"selector": "#embedded-input"}, "start": 1, "end": 4},
     {"type": "assert_editing_value", "target": {"selector": "#embedded-input"}, "equals": "inner"}

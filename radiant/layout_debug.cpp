@@ -1,4 +1,3 @@
-#include "layout_debug.hpp"
 #include "layout.hpp"
 
 extern "C" {

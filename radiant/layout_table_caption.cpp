@@ -1,7 +1,5 @@
-#include "layout_table_caption.hpp"
-
 #include "layout.hpp"
-#include "layout_box.hpp"
+
 #include "../lib/log.h"
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/dom_element.hpp"

@@ -4,13 +4,11 @@
   "viewport": {"width": 760, "height": 380},
   "events": [
     {"type": "log", "message": "=== editing_paired_clipboard_mixed ==="},
-    {"type": "wait", "ms": 150},
     {"type": "click", "target": {"text": "Alpha"}},
     {"type": "wait", "ms": 60},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "wait", "ms": 80},
     {"type": "key_combo", "key": "c", "mods_str": "super"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_clipboard", "contains": "Alpha words"},
     {"type": "assert_value", "target": {"selector": "#embedded-input"}, "equals": "inner"}
   ]

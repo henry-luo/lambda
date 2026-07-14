@@ -4,7 +4,6 @@
   "viewport": {"width": 640, "height": 360},
   "events": [
     {"type": "log", "message": "=== editing_paired_autoscroll_hold_input ==="},
-    {"type": "wait", "ms": 150},
     {"type": "mouse_down", "target": {"selector": "#auto-input", "offset_x": 4, "offset_y": 11}, "button": 0},
     {"type": "mouse_move", "target": {"selector": "#auto-input", "offset_x": 148, "offset_y": 11}},
     {"type": "advance_time", "ms": 160, "steps": 10},
@@ -12,7 +11,6 @@
     {"type": "assert_event_log", "contains": "\"operation\":\"start\"", "min": 1},
     {"type": "assert_event_log", "contains": "\"operation\":\"tick\"", "min": 1},
     {"type": "mouse_up", "target": {"selector": "#auto-input", "offset_x": 148, "offset_y": 11}, "button": 0},
-    {"type": "wait", "ms": 80},
     {"type": "assert_event_log", "contains": "\"operation\":\"stop\"", "min": 1},
     {"type": "assert_editing_selection", "target": {"selector": "#auto-input"}, "start": 0, "end": 44}
   ]

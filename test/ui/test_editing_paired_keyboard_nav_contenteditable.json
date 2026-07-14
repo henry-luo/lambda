@@ -4,21 +4,16 @@
   "viewport": {"width": 640, "height": 360},
   "events": [
     {"type": "log", "message": "=== editing_paired_keyboard_nav_contenteditable ==="},
-    {"type": "wait", "ms": 150},
     {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 2, "end": 2},
     {"type": "key_press", "key": "End"},
-    {"type": "wait", "ms": 40},
     {"type": "assert_editing_selection", "target": {"selector": "#surface"}, "start": 4, "end": 4},
     {"type": "key_press", "key": "Home"},
-    {"type": "wait", "ms": 40},
     {"type": "assert_editing_selection", "target": {"selector": "#surface"}, "start": 0, "end": 0},
     {"type": "key_press", "key": "Right", "mods_str": "shift"},
-    {"type": "wait", "ms": 40},
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
     {"type": "assert_editing_selection", "target": {"selector": "#surface"}, "start": 0, "end": 1},
     {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 2, "end": 2},
     {"type": "key_press", "key": "End", "mods_str": "super shift"},
-    {"type": "wait", "ms": 40},
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
     {"type": "assert_editing_selection", "target": {"selector": "#surface"}, "start": 2, "end": 4}
   ]

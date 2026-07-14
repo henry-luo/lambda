@@ -1,4 +1,3 @@
-#include "layout_containing_block.hpp"
 #include "layout.hpp"
 
 #include "../lib/log.h"

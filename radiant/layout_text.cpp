@@ -1,6 +1,4 @@
-#include "layout_text.hpp"
 #include "layout.hpp"
-#include "layout_positioned.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
@@ -435,23 +433,27 @@ static inline bool should_apply_text_spacing_trim(LayoutContext* lycon, DomNode*
     return value != CSS_VALUE_SPACE_ALL;
 }
 
+static CssEnum get_inherited_text_enum(
+        LayoutContext* lycon, CssEnum BlockProp::*member, CssEnum fallback) {
+    DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
+            if (elem->blk && elem->blk->*member != 0) {
+                return elem->blk->*member;
+            }
+        }
+        node = node->parent;
+    }
+    return fallback;
+}
+
 /**
  * Get word-break property from the layout context.
  * Checks block property for the current element or parent elements.
  */
 static inline CssEnum get_word_break(LayoutContext* lycon) {
-    // Check parent chain for word-break property (it's inherited)
-    DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
-            if (elem->blk && elem->blk->word_break != 0) {
-                return elem->blk->word_break;
-            }
-        }
-        node = node->parent;
-    }
-    return CSS_VALUE_NORMAL;  // Default to normal
+    return get_inherited_text_enum(lycon, &BlockProp::word_break, CSS_VALUE_NORMAL);
 }
 
 /**
@@ -459,17 +461,7 @@ static inline CssEnum get_word_break(LayoutContext* lycon) {
  * Checks block property for the current element or parent elements.
  */
 static inline CssEnum get_line_break(LayoutContext* lycon) {
-    DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
-            if (elem->blk && elem->blk->line_break != 0) {
-                return elem->blk->line_break;
-            }
-        }
-        node = node->parent;
-    }
-    return CSS_VALUE_AUTO;
+    return get_inherited_text_enum(lycon, &BlockProp::line_break, CSS_VALUE_AUTO);
 }
 
 /**
@@ -477,17 +469,7 @@ static inline CssEnum get_line_break(LayoutContext* lycon) {
  * Checks block property for the current element or parent elements.
  */
 static inline CssEnum get_overflow_wrap(LayoutContext* lycon) {
-    DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
-            if (elem->blk && elem->blk->overflow_wrap != 0) {
-                return elem->blk->overflow_wrap;
-            }
-        }
-        node = node->parent;
-    }
-    return CSS_VALUE_NORMAL;
+    return get_inherited_text_enum(lycon, &BlockProp::overflow_wrap, CSS_VALUE_NORMAL);
 }
 
 /**
@@ -2642,6 +2624,104 @@ static float initial_letter_sink_size(DomNode* text_node) {
     return 0.0f;
 }
 
+static bool output_break_at_last_space(LayoutContext* lycon, DomNode* text_node,
+                                       ViewText* text_view, TextRect* rect,
+                                       unsigned char** cursor,
+                                       const unsigned char* text_start,
+                                       const unsigned char* text_end,
+                                       bool trim_cjk_spacing,
+                                       bool restore_collapsible_trailing_space,
+                                       float* soft_hyphen_leading_width) {
+    unsigned char* str = lycon->line.last_space + 1;
+    if (lycon->line.last_space_hanging_width > 0) {
+        lycon->line.hanging_space_width = lycon->line.last_space_hanging_width;
+        lycon->line.hanging_space_text_trim = lycon->line.last_space_hanging_text_trim;
+    }
+
+    float output_width = lycon->line.last_space_pos;
+    int text_len = str - text_start - rect->start_index;
+    // Mid-loop overflow and end-of-node lookahead must preserve identical SHY fallback semantics.
+    if (lycon->line.last_space_kind == BRK_SOFT_HYPHEN) {
+        float hyphen_width = measure_current_glyph_advance(lycon, '-', trim_cjk_spacing);
+        float line_right = lycon->line.has_float_intrusion ?
+            lycon->line.effective_right : lycon->line.right;
+        if (rect->x + output_width + hyphen_width > line_right + 0.001f
+            && lycon->line.last_non_shy_space
+            && text_start <= lycon->line.last_non_shy_space
+            && lycon->line.last_non_shy_space < str) {
+            str = lycon->line.last_non_shy_space + 1;
+            output_width = lycon->line.last_non_shy_space_pos;
+            text_len = str - text_start - rect->start_index;
+            lycon->line.last_space_kind = lycon->line.last_non_shy_space_kind;
+            lycon->line.hanging_space_width = lycon->line.last_non_shy_space_hanging_width;
+            lycon->line.hanging_space_text_trim = lycon->line.last_non_shy_space_hanging_text_trim;
+        } else {
+            const unsigned char* continuation = lycon->line.last_space + 1;
+            uint32_t continuation_cp = 0;
+            int continuation_bytes = 0;
+            if (continuation < text_end && *continuation) {
+                continuation_bytes = str_utf8_decode((const char*)continuation,
+                    (size_t)(text_end - continuation), &continuation_cp);
+                if (continuation_bytes <= 0) {
+                    continuation_cp = *continuation;
+                    continuation_bytes = 1;
+                }
+                text_len = (int)(continuation + continuation_bytes - text_start - rect->start_index);
+                *soft_hyphen_leading_width =
+                    measure_current_glyph_advance(lycon, continuation_cp, trim_cjk_spacing);
+                str = (unsigned char*)continuation + continuation_bytes;
+            } else {
+                text_len -= 2;  // U+00AD is 2 bytes in UTF-8 (0xC2 0xAD)
+            }
+            output_width += hyphen_width;
+        }
+    }
+
+    output_text(lycon, text_view, rect, text_len, output_width);
+    if (lycon->line.last_space_kind == BRK_SOFT_HYPHEN) {
+        rect->has_trailing_hyphen = true;
+    }
+    if (restore_collapsible_trailing_space && lycon->line.last_space_kind == BRK_SPACE) {
+        lycon->line.trailing_space_width =
+            measure_current_space_advance(lycon, lycon->font.font_handle, lycon->font.style)
+            + lycon->font.style->word_spacing
+            + lycon->font.style->letter_spacing;
+    }
+    line_break(lycon);
+
+    *cursor = str;
+    if (*str) return true;
+    if (*soft_hyphen_leading_width > 0.0f) {
+        record_soft_hyphen_inline_fragment(
+            text_node, lycon, *soft_hyphen_leading_width, rect->height);
+        lycon->line.advance_x += *soft_hyphen_leading_width;
+        *soft_hyphen_leading_width = 0.0f;
+    }
+    return false;
+}
+
+// A rectangle discarded during reflow is always the uncommitted tail; retaining
+// it leaves a zero-length fragment that later alignment treats as visible text.
+static void discard_uncommitted_text_rect(ViewText* text, TextRect* rect) {
+    if (text->rect == rect) {
+        text->rect = nullptr;
+        return;
+    }
+    TextRect* prev = text->rect;
+    while (prev && prev->next != rect) prev = prev->next;
+    if (prev) prev->next = nullptr;
+}
+
+// Non-space glyphs terminate all trailing and hanging-space accounting from
+// the preceding glyph, while preserving the last legal wrap opportunity.
+static void mark_line_non_space(Linebox* line) {
+    line->is_line_start = false;
+    line->has_space = false;
+    line->trailing_space_width = 0;
+    line->hanging_space_width = 0;
+    line->hanging_space_text_trim = 0;
+}
+
 void layout_text(LayoutContext* lycon, DomNode *text_node) {
     auto t_start = high_resolution_clock::now();
 
@@ -3445,57 +3525,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             else if (lycon->line.last_space) { // break at the last space
                 log_debug("break at last space");
                 if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
-                    str = lycon->line.last_space + 1;
-                    // Restore hanging_space_width from saved values so line_break()
-                    // can subtract it from the line box width.
-                    if (lycon->line.last_space_hanging_width > 0) {
-                        lycon->line.hanging_space_width = lycon->line.last_space_hanging_width;
-                        lycon->line.hanging_space_text_trim = lycon->line.last_space_hanging_text_trim;
-                    }
-                    // Output full width including hanging spaces — visual rect preserves
-                    // hanging width. line_break() adjusts advance_x to exclude it.
-                    float output_width = lycon->line.last_space_pos;
-                    int text_len = str - text_start - rect->start_index;
-                    // CSS Text 3 §5.2: Soft hyphen — exclude SHY bytes from output,
-                    // add visible hyphen width, and mark rect for hyphen rendering.
-                    if (lycon->line.last_space_kind == BRK_SOFT_HYPHEN) {
-                        float hyphen_width = measure_current_glyph_advance(lycon, '-', trim_cjk_spacing);
-                        float line_right = lycon->line.has_float_intrusion ?
-                            lycon->line.effective_right : lycon->line.right;
-                        if (rect->x + output_width + hyphen_width > line_right + 0.001f
-                            && lycon->line.last_non_shy_space
-                            && text_start <= lycon->line.last_non_shy_space
-                            && lycon->line.last_non_shy_space < str) {
-                            str = lycon->line.last_non_shy_space + 1;
-                            output_width = lycon->line.last_non_shy_space_pos;
-                            text_len = str - text_start - rect->start_index;
-                            lycon->line.last_space_kind = lycon->line.last_non_shy_space_kind;
-                            lycon->line.hanging_space_width = lycon->line.last_non_shy_space_hanging_width;
-                            lycon->line.hanging_space_text_trim = lycon->line.last_non_shy_space_hanging_text_trim;
-                        } else {
-                            const unsigned char* continuation = lycon->line.last_space + 1;
-                            uint32_t continuation_cp = 0;
-                            int continuation_bytes = 0;
-                            if (continuation < (const unsigned char*)text_end && *continuation) {
-                                continuation_bytes = str_utf8_decode((const char*)continuation,
-                                    (size_t)((const unsigned char*)text_end - continuation), &continuation_cp);
-                                if (continuation_bytes <= 0) {
-                                    continuation_cp = *continuation;
-                                    continuation_bytes = 1;
-                                }
-                                text_len = (int)(continuation + continuation_bytes - text_start - rect->start_index);
-                                soft_hyphen_leading_width = measure_current_glyph_advance(lycon, continuation_cp, trim_cjk_spacing);
-                                str = (unsigned char*)continuation + continuation_bytes;
-                            } else {
-                                text_len -= 2;  // U+00AD is 2 bytes in UTF-8 (0xC2 0xAD)
-                            }
-                            output_width += hyphen_width;
-                        }
-                    }
-                    output_text(lycon, text_view, rect, text_len, output_width);
-                    if (lycon->line.last_space_kind == BRK_SOFT_HYPHEN) {
-                        rect->has_trailing_hyphen = true;
-                    }
                     // CSS 2.1 §16.6.1: When wrapping at a collapsible space, the
                     // trailing space must be trimmed from the line box width.
                     // trailing_space_width was reset when subsequent non-space chars
@@ -3504,20 +3533,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     // CSS Text 3 §8: Include word-spacing and letter-spacing that were
                     // part of the space's total width, since trailing space trimming
                     // should remove the entire space contribution (glyph + spacing).
-                    if (lycon->line.last_space_kind == BRK_SPACE && collapse_spaces) {
-                        lycon->line.trailing_space_width =
-                            measure_current_space_advance(lycon, lycon->font.font_handle, lycon->font.style)
-                            + lycon->font.style->word_spacing
-                            + lycon->font.style->letter_spacing;
-                    }
-                    line_break(lycon);
-                    if (*str) {
+                    if (output_break_at_last_space(
+                            lycon, text_node, text_view, rect, &str, text_start, text_end,
+                            trim_cjk_spacing, collapse_spaces, &soft_hyphen_leading_width)) {
                         goto LAYOUT_TEXT;
-                    }
-                    if (soft_hyphen_leading_width > 0.0f) {
-                        record_soft_hyphen_inline_fragment(text_node, lycon, soft_hyphen_leading_width, rect->height);
-                        lycon->line.advance_x += soft_hyphen_leading_width;
-                        soft_hyphen_leading_width = 0.0f;
                     }
                     return;
                 }
@@ -3544,13 +3563,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                                 output_text(lycon, text_view, rect, text_len, rect->width);
                             } else {
                                 // first char already overflows: unlink the empty rect
-                                if (text_view->rect == rect) {
-                                    text_view->rect = nullptr;
-                                } else {
-                                    TextRect* prev = text_view->rect;
-                                    while (prev && prev->next != rect) prev = prev->next;
-                                    if (prev) prev->next = nullptr;
-                                }
+                                discard_uncommitted_text_rect(text_view, rect);
                             }
                             line_break(lycon);
                             goto LAYOUT_TEXT;
@@ -3559,13 +3572,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                         log_debug("break-word: rewinding text to next line (word fits on fresh line)");
                         str = text_start + rect->start_index;  // rewind to text start
                         // Unlink the partially-measured rect
-                        if (text_view->rect == rect) {
-                            text_view->rect = nullptr;
-                        } else {
-                            TextRect* prev = text_view->rect;
-                            while (prev && prev->next != rect) prev = prev->next;
-                            if (prev) prev->next = nullptr;
-                        }
+                        discard_uncommitted_text_rect(text_view, rect);
                         line_break(lycon);
                         goto LAYOUT_TEXT;
                     }
@@ -3600,14 +3607,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // Reset str to start of current rect (we haven't output anything yet)
                 str = text_start + rect->start_index;
                 // Remove the rect we allocated (it will be re-created in LAYOUT_TEXT)
-                // Find and unlink this rect from the chain
-                if (text_view->rect == rect) {
-                    text_view->rect = nullptr;
-                } else {
-                    TextRect* prev = text_view->rect;
-                    while (prev && prev->next != rect) prev = prev->next;
-                    if (prev) prev->next = nullptr;
-                }
+                discard_uncommitted_text_rect(text_view, rect);
                 if (lycon->line.is_line_start) {
                     BlockContext* bfc = block_context_find_bfc(&lycon->block);
                     float query_height = lycon->block.line_height > 0.0f ? lycon->block.line_height : 16.0f;
@@ -3638,13 +3638,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 } else {
                     // first char of this rect already overflows: unlink the empty rect
                     // so goto LAYOUT_TEXT starts fresh without a zero-length entry
-                    if (text_view->rect == rect) {
-                        text_view->rect = nullptr;
-                    } else {
-                        TextRect* prev = text_view->rect;
-                        while (prev && prev->next != rect) prev = prev->next;
-                        if (prev) prev->next = nullptr;
-                    }
+                    discard_uncommitted_text_rect(text_view, rect);
                 }
                 line_break(lycon);
                 goto LAYOUT_TEXT;
@@ -3664,13 +3658,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // Reset to start of current text segment
             str = text_start + rect->start_index;
             // Unlink the current (incomplete) rect — LAYOUT_TEXT will create a new one
-            if (text_view->rect == rect) {
-                text_view->rect = nullptr;
-            } else {
-                TextRect* prev = text_view->rect;
-                while (prev && prev->next != rect) prev = prev->next;
-                if (prev) prev->next = nullptr;
-            }
+            discard_uncommitted_text_rect(text_view, rect);
             line_break(lycon);
             goto LAYOUT_TEXT;
         }
@@ -3795,11 +3783,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.last_space = str - 1;
             lycon->line.last_space_pos = rect->width;
             lycon->line.last_space_kind = BRK_HYPHEN;  // BA class: break-after, width included
-            lycon->line.is_line_start = false;
-            lycon->line.has_space = false;
-            lycon->line.trailing_space_width = 0;
-            lycon->line.hanging_space_width = 0;
-            lycon->line.hanging_space_text_trim = 0;
+            mark_line_non_space(&lycon->line);
         }
         else if (codepoint == 0x002D || codepoint == 0x2010 || codepoint == 0x2013 || codepoint == 0x2014) {
             // Hyphens and dashes are break opportunities (CSS Text 3 §5.2, UAX #14)
@@ -3811,11 +3795,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.last_space = str - 1;  // last byte of the dash
             lycon->line.last_space_pos = rect->width;  // width including the dash
             lycon->line.last_space_kind = BRK_HYPHEN;
-            lycon->line.is_line_start = false;
-            lycon->line.has_space = false;
-            lycon->line.trailing_space_width = 0;
-            lycon->line.hanging_space_width = 0;
-            lycon->line.hanging_space_text_trim = 0;
+            mark_line_non_space(&lycon->line);
         }
         else if (codepoint == 0x003F && wrap_lines && !lycon->line.is_line_start) {
             // CSS Text 3 §5.2: UAs may add wrap opportunities at typographic symbol units.
@@ -3829,11 +3809,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 lycon->line.last_space_pos = rect->width;
                 lycon->line.last_space_kind = BRK_TEXT;
             }
-            lycon->line.is_line_start = false;
-            lycon->line.has_space = false;
-            lycon->line.trailing_space_width = 0;
-            lycon->line.hanging_space_width = 0;
-            lycon->line.hanging_space_text_trim = 0;
+            mark_line_non_space(&lycon->line);
         }
         else if (((break_all && (is_typographic_letter_unit(codepoint)
                                   // CSS Text 3 §5.2: line-break: anywhere introduces soft wrap
@@ -3849,11 +3825,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             //   - No break before OP (opening punctuation) or NS (non-starter)
             //   - No break after CL (closing punctuation)
             str = next_ch;
-            lycon->line.is_line_start = false;
-            lycon->line.has_space = false;
-            lycon->line.trailing_space_width = 0;
-            lycon->line.hanging_space_width = 0;
-            lycon->line.hanging_space_text_trim = 0;
+            mark_line_non_space(&lycon->line);
 
             // Record break opportunity after this character, unless forbidden by line-break rules
             bool allow_break = true;
@@ -3906,10 +3878,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
         }
         else {
-            str = next_ch;  lycon->line.is_line_start = false;  lycon->line.has_space = false;
-            lycon->line.trailing_space_width = 0;
-            lycon->line.hanging_space_width = 0;
-            lycon->line.hanging_space_text_trim = 0;
+            str = next_ch;
+            mark_line_non_space(&lycon->line);
             zwj_preceded = false;
             // UAX #14 / CSS Text 3 §5.2: CL/NS characters adjacent to CJK text
             // participate in CJK-style break tracking. After CL/NS, a break is
@@ -3931,67 +3901,13 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         float saved_advance_x = lycon->line.advance_x;  lycon->line.advance_x += rect->width;
         if (view_has_line_filled(lycon, text_view) == RDT_LINE_FILLED) {
             if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
-                str = lycon->line.last_space + 1;
                 // Restore advance_x before output_text (it will add the correct width)
                 lycon->line.advance_x = saved_advance_x;
-                // Restore hanging_space_width from saved values so line_break()
-                // can subtract it from the line box width.
-                if (lycon->line.last_space_hanging_width > 0) {
-                    lycon->line.hanging_space_width = lycon->line.last_space_hanging_width;
-                    lycon->line.hanging_space_text_trim = lycon->line.last_space_hanging_text_trim;
+                if (output_break_at_last_space(
+                        lycon, text_node, text_view, rect, &str, text_start, text_end,
+                        trim_cjk_spacing, false, &soft_hyphen_leading_width)) {
+                    goto LAYOUT_TEXT;
                 }
-                // Output with full width including hanging spaces — the visual rect
-                // preserves hanging space width. line_break() adjusts advance_x
-                // to exclude hanging width from line box calculations.
-                float output_width = lycon->line.last_space_pos;
-                int text_len = str - text_start - rect->start_index;
-                // CSS Text 3 §5.2: Soft hyphen — exclude SHY bytes, add visible hyphen
-                if (lycon->line.last_space_kind == BRK_SOFT_HYPHEN) {
-                    float hyphen_width = measure_current_glyph_advance(lycon, '-', trim_cjk_spacing);
-                    float line_right = lycon->line.has_float_intrusion ?
-                        lycon->line.effective_right : lycon->line.right;
-                    if (rect->x + output_width + hyphen_width > line_right + 0.001f
-                        && lycon->line.last_non_shy_space
-                        && text_start <= lycon->line.last_non_shy_space
-                        && lycon->line.last_non_shy_space < str) {
-                        str = lycon->line.last_non_shy_space + 1;
-                        output_width = lycon->line.last_non_shy_space_pos;
-                        text_len = str - text_start - rect->start_index;
-                        lycon->line.last_space_kind = lycon->line.last_non_shy_space_kind;
-                        lycon->line.hanging_space_width = lycon->line.last_non_shy_space_hanging_width;
-                        lycon->line.hanging_space_text_trim = lycon->line.last_non_shy_space_hanging_text_trim;
-                    } else {
-                        const unsigned char* continuation = lycon->line.last_space + 1;
-                        uint32_t continuation_cp = 0;
-                        int continuation_bytes = 0;
-                        if (continuation < (const unsigned char*)text_end && *continuation) {
-                            continuation_bytes = str_utf8_decode((const char*)continuation,
-                                (size_t)((const unsigned char*)text_end - continuation), &continuation_cp);
-                            if (continuation_bytes <= 0) {
-                                continuation_cp = *continuation;
-                                continuation_bytes = 1;
-                            }
-                            text_len = (int)(continuation + continuation_bytes - text_start - rect->start_index);
-                            soft_hyphen_leading_width = measure_current_glyph_advance(lycon, continuation_cp, trim_cjk_spacing);
-                            str = (unsigned char*)continuation + continuation_bytes;
-                        } else {
-                            text_len -= 2;  // U+00AD is 2 bytes in UTF-8 (0xC2 0xAD)
-                        }
-                        output_width += hyphen_width;
-                    }
-                }
-                output_text(lycon, text_view, rect, text_len, output_width);
-                if (lycon->line.last_space_kind == BRK_SOFT_HYPHEN) {
-                    rect->has_trailing_hyphen = true;
-                }
-                line_break(lycon);
-                if (*str) goto LAYOUT_TEXT;
-                if (soft_hyphen_leading_width > 0.0f) {
-                    record_soft_hyphen_inline_fragment(text_node, lycon, soft_hyphen_leading_width, rect->height);
-                    lycon->line.advance_x += soft_hyphen_leading_width;
-                    soft_hyphen_leading_width = 0.0f;
-                }
-                else return;  // end of text
                 return;
             }
             else { // last_space outside the text, break at start of text

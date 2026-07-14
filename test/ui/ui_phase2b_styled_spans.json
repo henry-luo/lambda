@@ -4,7 +4,6 @@
   "events": [
     {"type": "log", "message": "=== Phase 2b: inline spans on baseline_503_styled_spans ==="},
     {"type": "log", "message": "Coord note: .bold-text at (70,24) 66x17; .colored-text at (218,24) 53x17"},
-    {"type": "wait", "ms": 300},
 
     {"type": "assert_visible", "target": {"selector": ".text-container"}, "visible": true},
     {"type": "assert_visible", "target": {"selector": ".bold-text"},      "visible": true},

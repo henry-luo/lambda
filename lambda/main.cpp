@@ -42,10 +42,7 @@
 // System info for sys.* paths
 #include "sysinfo.h"
 
-#include "../radiant/state_store.hpp"
-#include "../radiant/clipboard.hpp"
-#include "../radiant/font_face.h"
-#include "../radiant/render.hpp"
+#include "../radiant/radiant.hpp"
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
 #include "input/css/css_style.hpp"   // css_property_system_init
 #include "input/css/css_engine.hpp"  // CssEngine for CSS extraction

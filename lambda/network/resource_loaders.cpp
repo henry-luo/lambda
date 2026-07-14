@@ -15,7 +15,7 @@
 #include "../input/css/css_font_face.hpp"
 #include "../../radiant/view.hpp"
 #include "../../radiant/layout.hpp"
-#include "../../radiant/font_face.h"
+#include "../../radiant/view.hpp"
 #include "../../lib/font/font.h"
 #include <string.h>
 #include "../../lib/mem.h"

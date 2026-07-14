@@ -1,7 +1,7 @@
 #include "render.hpp"
 #include "layout.hpp"
 #include "render.hpp"
-#include "state_store.hpp"
+#include "event.hpp"
 #include "render.hpp"
 
 #include "../lib/tagged.hpp"
@@ -97,6 +97,94 @@ void render_output_target_init(RenderOutputTarget* target, RenderOutputKind kind
     target->jpeg_quality = 85;
     target->scale = 1.0f;
     target->pixel_ratio = 1.0f;
+}
+
+bool render_export_session_begin(RenderExportSession* session, const char* html_file,
+                                 int viewport_width, int viewport_height,
+                                 int fallback_width, int fallback_height, float scale) {
+    if (!session || !html_file) return false;
+    memset(session, 0, sizeof(*session));
+
+    bool auto_width = viewport_width == 0;
+    bool auto_height = viewport_height == 0;
+    int layout_width = viewport_width > 0 ? viewport_width : fallback_width;
+    int layout_height = viewport_height > 0 ? viewport_height : fallback_height;
+    session->scale = scale > 0.0f ? scale : 1.0f;
+
+    session->ui_context = (UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER);
+    if (!session->ui_context) {
+        log_error("[EXPORT_SESSION] Failed to allocate headless UI context");
+        return false;
+    }
+    if (ui_context_init(session->ui_context, true) != 0) {
+        log_error("[EXPORT_SESSION] Failed to initialize headless UI context");
+        mem_free(session->ui_context);
+        session->ui_context = nullptr;
+        return false;
+    }
+    ui_context_create_surface(session->ui_context, layout_width, layout_height);
+    session->ui_context->window_width = layout_width;
+    session->ui_context->window_height = layout_height;
+
+    session->base_url = get_current_dir();
+    if (!session->base_url) {
+        log_error("[EXPORT_SESSION] Could not resolve the current directory");
+        ui_context_cleanup(session->ui_context);
+        mem_free(session->ui_context);
+        session->ui_context = nullptr;
+        return false;
+    }
+
+    session->document = load_html_doc(
+        session->base_url, (char*)html_file, layout_width, layout_height);
+    if (!session->document) {
+        log_error("[EXPORT_SESSION] Could not load HTML file: %s", html_file);
+        render_export_session_end(session);
+        return false;
+    }
+
+    // Every file exporter must lay out and measure the same scaled document before encoding.
+    session->ui_context->document = session->document;
+    session->document->given_scale = session->scale;
+    session->document->scale = session->scale;
+    process_document_font_faces(session->ui_context, session->document);
+    layout_html_doc(session->ui_context, session->document, false);
+
+    session->content_width = layout_width;
+    session->content_height = layout_height;
+    if (session->document->view_tree && session->document->view_tree->root) {
+        int bounds_width = 0;
+        int bounds_height = 0;
+        calculate_content_bounds(
+            session->document->view_tree->root, &bounds_width, &bounds_height);
+        bounds_width += 50;
+        bounds_height += 50;
+        if (auto_width || bounds_width > layout_width) session->content_width = bounds_width;
+        if (auto_height || bounds_height > layout_height) session->content_height = bounds_height;
+    }
+
+    if (auto_width || auto_height) {
+        log_info("[EXPORT_SESSION] Auto-sized output to %dx%d with content padding",
+                 session->content_width, session->content_height);
+    } else {
+        log_debug("[EXPORT_SESSION] Content bounds are %dx%d",
+                  session->content_width, session->content_height);
+    }
+    return true;
+}
+
+void render_export_session_end(RenderExportSession* session) {
+    if (!session) return;
+    if (session->base_url) {
+        url_destroy(session->base_url);
+        session->base_url = nullptr;
+    }
+    if (session->ui_context) {
+        ui_context_cleanup(session->ui_context);
+        mem_free(session->ui_context);
+        session->ui_context = nullptr;
+    }
+    session->document = nullptr;
 }
 
 static const char* render_output_path_trace_target(RenderOutputKind kind) {

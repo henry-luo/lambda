@@ -4,22 +4,18 @@
   "viewport": {"width": 600, "height": 600},
   "events": [
     {"type": "log", "message": "=== form_input_dblclick_word ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "click", "target": {"selector": "#name"}},
     {"type": "wait", "ms": 80},
     {"type": "paste_text", "target": {"selector": "#name"}, "text": "world"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "world"},
 
     {"type": "log", "message": "Double-click should select the word"},
     {"type": "dblclick", "target": {"selector": "#name"}},
-    {"type": "wait", "ms": 100},
     {"type": "assert_selection", "is_collapsed": false},
 
     {"type": "log", "message": "Cmd+C copies selection to clipboard"},
     {"type": "key_combo", "key": "c", "mods_str": "super"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_clipboard", "equals": "world"},
     {"type": "assert_state_dump", "reference": "test/ui/state/test_form_input_dblclick_word_final.mark"}
   ]

@@ -12,6 +12,7 @@ Radiant loads a document into a DOM tree, resolves CSS onto it, lays it out with
 - **The DOM node *is* the view.** There is no parallel layout tree; a parsed `DomNode` carries its own geometry and is tagged in place during layout. This removes a whole allocation-and-sync layer. See [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md).
 - **Radiant consumes the shared CSS engine, it does not reimplement it.** Parsing and the cascade live in `lambda/input/css/`; Radiant performs only the used/computed-value step onto the view tree. See [RAD_02 — CSS Style Resolution](RAD_02_CSS_Style_Resolution.md).
 - **Browser-spec fidelity where it counts.** Flex follows CSS Flexbox §9, grid is a C+ port of the Rust Taffy track-sizing algorithm, and tables implement the CSS 2.1 §17 auto/fixed algorithms — each with a measurement/multipass structure feeding a shared intrinsic-sizing engine.
+- **Public Radiant headers are consolidated by subsystem.** New code should include the coherent subsystem headers (`view.hpp`, `layout.hpp`, `render.hpp`, `event.hpp`, `radiant.hpp`) rather than adding one header per implementation file; the lint ratchet enforces the allow-list and header-count cap.
 - **Reuse over reimplementation.** The `Item`/Mark data model, the GC, the MIR JIT, the font engine (`lib/font/`), and the input parsers are shared Lambda subsystems; page JavaScript runs on the embedded LambdaJS engine ([doc/dev/js/](../js/JS_00_Overview.md)).
 
 ---

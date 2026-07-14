@@ -4,7 +4,6 @@
   "viewport": {"width": 600, "height": 600},
   "events": [
     {"type": "log", "message": "=== form_ime_compose ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "click", "target": {"selector": "#name"}},
     {"type": "wait", "ms": 80},
@@ -13,7 +12,6 @@
     {"type": "ime_compose", "phase": "update", "preedit": "か", "caret": 1},
     {"type": "assert_preedit", "target": {"selector": "#name"}, "equals": "か"},
     {"type": "ime_compose", "phase": "commit", "commit": "日本"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_preedit", "target": {"selector": "#name"}, "equals": ""},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "日本"},
 
@@ -22,7 +20,6 @@
     {"type": "ime_compose", "phase": "update", "preedit": "あ", "caret": 1},
     {"type": "assert_preedit", "target": {"selector": "#name"}, "equals": "あ"},
     {"type": "ime_compose", "phase": "cancel"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_preedit", "target": {"selector": "#name"}, "equals": ""},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "日本"},
     {"type": "assert_state_dump", "reference": "test/ui/state/test_form_ime_compose_final.mark"}

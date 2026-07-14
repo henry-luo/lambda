@@ -24,7 +24,9 @@
 
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#define RADIANT_EVENT_CORE_ONLY
 #include "event.hpp"
+#undef RADIANT_EVENT_CORE_ONLY
 
 // Opaque types — see ime_mac.mm comment.
 struct UiContext;

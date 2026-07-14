@@ -5,6 +5,10 @@
 #include <cstring>
 #include <cerrno>
 
+extern "C" {
+#include "../lib/shell.h"
+}
+
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #include <windows.h>
@@ -47,36 +51,16 @@ char* read_text_file(const char* file_path) {
     return content;
 }
 
-// Execute a command and capture output
-char* execute_command(const char* command) {
-    // Redirect stderr to stdout so we can capture error messages
-    char full_command[512];
-    snprintf(full_command, sizeof(full_command), "%s 2>&1", command);
-    
-    FILE* pipe = popen(full_command, "r");
-    if (!pipe) {
-        return nullptr;
-    }
-    
-    char buffer[1024];
-    size_t total_size = 0;
-    char* full_output = nullptr;
-    
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        size_t len = strlen(buffer);
-        char* new_output = (char*)realloc(full_output, total_size + len + 1);
-        if (!new_output) {
-            free(full_output);
-            pclose(pipe);
-            return nullptr;
-        }
-        full_output = new_output;
-        strcpy(full_output + total_size, buffer);
-        total_size += len;
-    }
-    
-    pclose(pipe);
-    return full_output;
+// Execute lambda.exe with one argument and capture combined output.
+char* execute_lambda_command(const char* argument) {
+    const char* args[] = {LAMBDA_EXE, argument, NULL};
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    // These smoke tests pass one argv value; shell operators would obscure the actual CLI result.
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    char* output = shell_result.stdout_buf ? strdup(shell_result.stdout_buf) : strdup("");
+    shell_result_free(&shell_result);
+    return output;
 }
 
 // Test basic procedural functionality
@@ -85,9 +69,7 @@ TEST(LambdaProcTests, test_lambda_executable_exists) {
 }
 
 TEST(LambdaProcTests, test_lambda_version) {
-    char command[256];
-    snprintf(command, sizeof(command), "%s --version", LAMBDA_EXE);
-    char* output = execute_command(command);
+    char* output = execute_lambda_command("--version");
     if (output) {
         ASSERT_GT(strlen(output), 0) << "Version output should not be empty";
         free(output);
@@ -96,9 +78,7 @@ TEST(LambdaProcTests, test_lambda_version) {
 }
 
 TEST(LambdaProcTests, test_lambda_help) {
-    char command[256];
-    snprintf(command, sizeof(command), "%s --help", LAMBDA_EXE);
-    char* output = execute_command(command);
+    char* output = execute_lambda_command("--help");
     if (output) {
         ASSERT_GT(strlen(output), 0) << "Help output should not be empty";
         free(output);
@@ -107,9 +87,7 @@ TEST(LambdaProcTests, test_lambda_help) {
 }
 
 TEST(LambdaProcTests, test_lambda_with_nonexistent_file) {
-    char command[256];
-    snprintf(command, sizeof(command), "%s nonexistent_file.ls", LAMBDA_EXE);
-    char* output = execute_command(command);
+    char* output = execute_lambda_command("nonexistent_file.ls");
     ASSERT_NE(output, nullptr);
     // Should produce some output (error message)
     ASSERT_GT(strlen(output), 0);
@@ -122,9 +100,7 @@ TEST(LambdaProcTests, test_lambda_working_directory) {
     ASSERT_NE(result, nullptr) << "Could not get current working directory";
     
     // Test that lambda.exe can be executed from current directory
-    char command[256];
-    snprintf(command, sizeof(command), "%s --help 2>/dev/null || echo 'executable_found'", LAMBDA_EXE);
-    char* output = execute_command(command);
+    char* output = execute_lambda_command("--help");
     ASSERT_NE(output, nullptr);
     free(output);
 }

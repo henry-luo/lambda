@@ -1,5 +1,5 @@
 #include "render.hpp"
-#include "clip_shape.h"
+#include "view.hpp"
 #include "../lib/log.h"
 #include "../lib/lambda_alloca.h"
 #include "../lib/memtrack.h"

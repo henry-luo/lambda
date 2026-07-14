@@ -9,8 +9,7 @@
  * - Counter spec extraction from pseudo-element styles
  */
 
-#include "layout_list.hpp"
-#include "layout_counters.hpp"
+#include "layout.hpp"
 #include "render.hpp"
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
@@ -35,47 +34,56 @@ static bool marker_image_orientation_uses_from_image(DomElement* element) {
     return true;
 }
 
-// Extract counter-increment value for a specific counter from element's CSS
-static bool get_element_counter_inc(DomElement* elem, const char* counter_name, int* out_value) {
+static const char* counter_name_from_css_value(CssValue* item) {
+    if (!item) return nullptr;
+    if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
+        return item->data.custom_property.name;
+    }
+    if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(item->data.keyword);
+        return info ? info->name : nullptr;
+    }
+    return nullptr;
+}
+
+static bool get_element_counter_property_value(DomElement* elem, CssPropertyId property,
+                                               const char* counter_name,
+                                               int implicit_value, int* out_value) {
     if (!elem || !elem->specified_style || !elem->specified_style->tree) return false;
-    AvlNode* node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_COUNTER_INCREMENT);
+    AvlNode* node = avl_tree_search(elem->specified_style->tree, property);
     if (!node) return false;
     StyleNode* sn = (StyleNode*)node->declaration;
     if (!sn || !sn->winning_decl || !sn->winning_decl->value) return false;
     CssValue* val = sn->winning_decl->value;
     if (!val) return false;
 
-    auto match_name = [&](CssValue* item) -> const char* {
-        if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name)
-            return item->data.custom_property.name;
-        if (item->type == CSS_VALUE_TYPE_KEYWORD) {
-            const CssEnumInfo* info = css_enum_info(item->data.keyword);
-            return info ? info->name : nullptr;
-        }
-        return nullptr;
-    };
-
     if (val->type == CSS_VALUE_TYPE_LIST) {
         for (int i = 0; i < val->data.list.count; i++) {
-            const char* name = match_name(val->data.list.values[i]);
+            const char* name = counter_name_from_css_value(val->data.list.values[i]);
             if (name && strcmp(name, counter_name) == 0) {
                 if (i + 1 < val->data.list.count &&
                     val->data.list.values[i + 1]->type == CSS_VALUE_TYPE_NUMBER) {
                     *out_value = (int)val->data.list.values[i + 1]->data.number.value; // INT_CAST_OK: counter value
                 } else {
-                    *out_value = 1;
+                    *out_value = implicit_value;
                 }
                 return true;
             }
         }
     } else {
-        const char* name = match_name(val);
+        const char* name = counter_name_from_css_value(val);
         if (name && strcmp(name, counter_name) == 0) {
-            *out_value = 1;
+            *out_value = implicit_value;
             return true;
         }
     }
     return false;
+}
+
+// Extract counter-increment value for a specific counter from element's CSS
+static bool get_element_counter_inc(DomElement* elem, const char* counter_name, int* out_value) {
+    return get_element_counter_property_value(elem, CSS_PROPERTY_COUNTER_INCREMENT,
+                                              counter_name, 1, out_value);
 }
 
 // Check if element's CSS counter-reset contains a specific counter name
@@ -122,45 +130,8 @@ static bool element_resets_counter(DomElement* elem, const char* counter_name) {
 
 // Get the counter-set integer value for a specific counter name on an element
 static bool get_element_counter_set_value(DomElement* elem, const char* counter_name, int* out_value) {
-    if (!elem || !elem->specified_style || !elem->specified_style->tree) return false;
-    AvlNode* node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_COUNTER_SET);
-    if (!node) return false;
-    StyleNode* sn = (StyleNode*)node->declaration;
-    if (!sn || !sn->winning_decl || !sn->winning_decl->value) return false;
-    CssValue* val = sn->winning_decl->value;
-    if (!val) return false;
-
-    auto match_name = [&](CssValue* item) -> const char* {
-        if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name)
-            return item->data.custom_property.name;
-        if (item->type == CSS_VALUE_TYPE_KEYWORD) {
-            const CssEnumInfo* info = css_enum_info(item->data.keyword);
-            return info ? info->name : nullptr;
-        }
-        return nullptr;
-    };
-
-    if (val->type == CSS_VALUE_TYPE_LIST) {
-        for (int i = 0; i < val->data.list.count; i++) {
-            const char* name = match_name(val->data.list.values[i]);
-            if (name && strcmp(name, counter_name) == 0) {
-                if (i + 1 < val->data.list.count &&
-                    val->data.list.values[i + 1]->type == CSS_VALUE_TYPE_NUMBER) {
-                    *out_value = (int)val->data.list.values[i + 1]->data.number.value; // INT_CAST_OK: counter value
-                } else {
-                    *out_value = 0;
-                }
-                return true;
-            }
-        }
-    } else {
-        const char* name = match_name(val);
-        if (name && strcmp(name, counter_name) == 0) {
-            *out_value = 0;
-            return true;
-        }
-    }
-    return false;
+    return get_element_counter_property_value(elem, CSS_PROPERTY_COUNTER_SET,
+                                              counter_name, 0, out_value);
 }
 
 // DFS walk: sum non-zero counter-increments for a reversed counter in scope.

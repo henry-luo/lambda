@@ -3,7 +3,6 @@
   "html": "test/ui/test_phase5b_page1.html",
   "events": [
     {"type": "log", "message": "=== Phase 5b: Page navigation ==="},
-    {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "--- Verify page 1 content ---"},
     {"type": "assert_text", "target": {"selector": "h1"}, "contains": "Page One"},
@@ -15,7 +14,6 @@
 
     {"type": "log", "message": "--- Navigate to page 2 ---"},
     {"type": "navigate", "url": "test_phase5b_page2.html"},
-    {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "--- Verify page 2 content ---"},
     {"type": "assert_text", "target": {"selector": "h1"}, "contains": "Page Two"},
@@ -27,7 +25,6 @@
 
     {"type": "log", "message": "--- Navigate back to page 1 ---"},
     {"type": "navigate", "url": "test_phase5b_page1.html"},
-    {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "--- Verify back on page 1 ---"},
     {"type": "assert_text", "target": {"selector": "h1"}, "contains": "Page One"},

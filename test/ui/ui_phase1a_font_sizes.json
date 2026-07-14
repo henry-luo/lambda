@@ -4,7 +4,6 @@
   "events": [
     {"type": "log", "message": "=== Phase 1a: assert_visible + assert_text on baseline_201_font_sizes ==="},
     {"type": "log", "message": "No mouse interaction — pure layout verification."},
-    {"type": "wait", "ms": 300},
 
     {"type": "assert_visible", "target": {"selector": "p.small-text"},  "visible": true},
     {"type": "assert_visible", "target": {"selector": "p.medium-text"}, "visible": true},

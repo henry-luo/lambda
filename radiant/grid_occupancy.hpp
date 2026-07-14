@@ -27,7 +27,7 @@
 #undef max
 #endif
 
-#include "grid_types.hpp"
+#include "layout.hpp"
 #include "../lib/mem.h"
 
 namespace radiant {

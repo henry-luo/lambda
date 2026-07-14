@@ -10,7 +10,7 @@
 #define RADIANT_WEBDRIVER_HPP
 
 #include "../view.hpp"
-#include "../state_store.hpp"
+#include "../event.hpp"
 #include "../../lib/hashmap.h"
 #include "../../lib/arena.h"
 #include "../../lib/arraylist.h"

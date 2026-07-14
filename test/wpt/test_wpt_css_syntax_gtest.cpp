@@ -19,6 +19,10 @@
 #include <vector>
 #include <algorithm>
 
+extern "C" {
+#include "../../lib/shell.h"
+}
+
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #define NOGDI
@@ -33,6 +37,7 @@
     #define popen _popen
     #define pclose _pclose
     #define WEXITSTATUS(status) (status)
+    #define LAMBDA_EXE "lambda.exe"
     #ifndef F_OK
     #define F_OK 0
     #endif
@@ -40,6 +45,7 @@
     #include <unistd.h>
     #include <sys/wait.h>
     #include <dirent.h>
+    #define LAMBDA_EXE "./lambda.exe"
 #endif
 
 static const char* WPT_DIRS[] = {
@@ -139,29 +145,19 @@ static std::string extract_inline_scripts(const std::string& html) {
  * Returns the stdout output and sets exit_code.
  */
 static std::string execute_js_with_doc(const char* js_path, const char* html_path, int* exit_code) {
-    char command[1024];
-#ifdef _WIN32
-    snprintf(command, sizeof(command),
-             "lambda.exe js \"%s\" --document \"%s\" --no-log 2>&1", js_path, html_path);
-#else
-    snprintf(command, sizeof(command),
-             "./lambda.exe js \"%s\" --document \"%s\" --no-log 2>&1", js_path, html_path);
-#endif
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
-        *exit_code = -1;
-        return "";
-    }
-
+    const char* args[] = {
+        LAMBDA_EXE, "js", js_path, "--document", html_path, "--no-log", NULL,
+    };
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    // WPT paths are data, not shell syntax; direct argv preserves them exactly.
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
     std::string output;
-    char buffer[1024];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        output += buffer;
+    if (shell_result.stdout_buf) {
+        output.assign(shell_result.stdout_buf, shell_result.stdout_len);
     }
-
-    int raw = pclose(pipe);
-    *exit_code = WEXITSTATUS(raw);
+    *exit_code = shell_result.exit_code;
+    shell_result_free(&shell_result);
     return output;
 }
 

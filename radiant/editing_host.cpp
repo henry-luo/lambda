@@ -1,7 +1,7 @@
 // editing_host.cpp — central `contenteditable` lookup + IDL.
 // See vibe/radiant/Radiant_Design_Content_Editable.md §4.
 
-#include "editing_host.hpp"
+#include "event.hpp"
 
 #include <string.h>
 #include <strings.h>  // strcasecmp

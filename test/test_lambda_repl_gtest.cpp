@@ -3,17 +3,25 @@
 #include <cstdlib>
 #include <cstring>
 
+extern "C" {
+#include "../lib/shell.h"
+}
+
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #include <windows.h>
     #include <io.h>
     #include <direct.h>
+    #define access _access
+    #define X_OK 0
     #define popen _popen
     #define pclose _pclose
     #define WEXITSTATUS(status) (status)
+    #define LAMBDA_EXE "lambda.exe"
 #else
     #include <unistd.h>
     #include <sys/wait.h>
+    #define LAMBDA_EXE "./lambda.exe"
 #endif
 
 // Helper to run Lambda REPL and capture output
@@ -35,41 +43,15 @@ test_result run_lambda_repl(const char* input) {
     fprintf(temp, "%s\n", input);
     fclose(temp);
 
-    // Run lambda.exe with redirected input
-    char command[512];
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe --no-log < %s 2>&1", temp_file);
-#else
-    snprintf(command, sizeof(command), "./lambda.exe --no-log < %s 2>&1", temp_file);
-#endif
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
-        unlink(temp_file);
-        return result;
-    }
-
-    // Read output
-    char buffer[4096];
-    size_t total_size = 0;
-    char* full_output = nullptr;
-
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        size_t len = strlen(buffer);
-        char* new_output = (char*)realloc(full_output, total_size + len + 1);
-        if (!new_output) {
-            free(full_output);
-            pclose(pipe);
-            unlink(temp_file);
-            return result;
-        }
-        full_output = new_output;
-        strcpy(full_output + total_size, buffer);
-        total_size += len;
-    }
-
-    result.exit_code = pclose(pipe);
-    result.output = full_output;
+    const char* args[] = {LAMBDA_EXE, "--no-log", NULL};
+    ShellOptions options = {0};
+    options.stdin_path = temp_file;
+    options.merge_stderr = true;
+    // File-backed stdin preserves REPL input without invoking a redirection shell.
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    result.exit_code = shell_result.exit_code;
+    result.output = shell_result.stdout_buf ? strdup(shell_result.stdout_buf) : strdup("");
+    shell_result_free(&shell_result);
 
     unlink(temp_file);
     return result;
@@ -94,7 +76,7 @@ TEST(LambdaReplTests, test_quit_command) {
     test_result result = run_lambda_repl("quit");
     ASSERT_NE(result.output, nullptr);
     // Should exit cleanly
-    ASSERT_EQ(WEXITSTATUS(result.exit_code), 0);
+    ASSERT_EQ(result.exit_code, 0);
     free_test_result(&result);
 }
 
@@ -144,12 +126,9 @@ TEST(LambdaReplTests, test_empty_input) {
 // Additional tests migrated from Criterion version to achieve full parity
 
 TEST(LambdaReplTests, test_executable_exists) {
-#ifdef _WIN32
-    int result = system("where lambda.exe > nul 2>&1");
-#else
-    int result = system("test -x ./lambda.exe");
-#endif
-    ASSERT_EQ(result, 0) << "Lambda executable should exist and be executable";
+    // Executability is filesystem state; spawning a shell made this check slower and less precise.
+    ASSERT_EQ(access("./lambda.exe", X_OK), 0)
+        << "Lambda executable should exist and be executable";
 }
 
 TEST(LambdaReplTests, test_startup_and_quit) {

@@ -1,7 +1,22 @@
 #include "render.hpp"
-
-#include "render.hpp"
 #include <string.h>
+
+static uint32_t* dl_replay_backdrop_pop(DisplayReplayBackdropStack* stack,
+                                        IRect* region) {
+    if (!stack || stack->sp <= 0) return nullptr;
+    stack->sp--;
+    uint32_t* backdrop = stack->stack[stack->sp];
+    if (region) *region = stack->region[stack->sp];
+    return backdrop;
+}
+
+static void dl_replay_backdrop_release(DisplayReplayBackdropStack* stack,
+                                       ScratchArena* scratch,
+                                       uint32_t* backdrop) {
+    if (!stack) return;
+    if (backdrop && scratch) scratch_free(scratch, backdrop);
+    stack->stack[stack->sp] = nullptr;
+}
 
 void dl_replay_backdrop_init(DisplayReplayBackdropStack* stack) {
     if (!stack) return;
@@ -57,11 +72,9 @@ void dl_replay_backdrop_push_empty(DisplayReplayBackdropStack* stack) {
 
 void dl_replay_backdrop_discard(DisplayReplayBackdropStack* stack,
                                 ScratchArena* scratch) {
-    if (!stack || stack->sp <= 0) return;
-    stack->sp--;
-    uint32_t* backdrop = stack->stack[stack->sp];
-    if (backdrop && scratch) scratch_free(scratch, backdrop);
-    stack->stack[stack->sp] = nullptr;
+    uint32_t* backdrop = dl_replay_backdrop_pop(stack, nullptr);
+    if (!stack) return;
+    dl_replay_backdrop_release(stack, scratch, backdrop);
 }
 
 void dl_replay_backdrop_composite_opacity(DisplayReplayBackdropStack* stack,
@@ -69,22 +82,21 @@ void dl_replay_backdrop_composite_opacity(DisplayReplayBackdropStack* stack,
                                           ScratchArena* scratch,
                                           const DlCompositeOpacity* opacity) {
     if (!stack || !surface || !surface->pixels || !opacity || stack->sp <= 0) return;
-    stack->sp--;
-    uint32_t* backdrop = stack->stack[stack->sp];
+    IRect region = {};
+    uint32_t* backdrop = dl_replay_backdrop_pop(stack, &region);
     if (!backdrop) return;
 
-    int bx = stack->region[stack->sp].x;
-    int by = stack->region[stack->sp].y;
-    int bw = stack->region[stack->sp].w;
-    int bh = stack->region[stack->sp].h;
+    int bx = region.x;
+    int by = region.y;
+    int bw = region.w;
+    int bh = region.h;
     if (opacity->premultiplied_source && opacity->opacity >= 0.999f) {
         render_composite_source_over_premul(surface, backdrop, bx, by, bw, bh);
     } else {
         render_composite_opacity(surface, backdrop, bx, by, bw, bh,
                                  opacity->opacity);
     }
-    if (scratch) scratch_free(scratch, backdrop);
-    stack->stack[stack->sp] = nullptr;
+    dl_replay_backdrop_release(stack, scratch, backdrop);
 }
 
 void dl_replay_backdrop_apply_blend_mode(DisplayReplayBackdropStack* stack,
@@ -92,14 +104,14 @@ void dl_replay_backdrop_apply_blend_mode(DisplayReplayBackdropStack* stack,
                                          ScratchArena* scratch,
                                          const DlApplyBlendMode* blend) {
     if (!stack || !surface || !surface->pixels || !blend || stack->sp <= 0) return;
-    stack->sp--;
-    uint32_t* backdrop = stack->stack[stack->sp];
+    IRect region = {};
+    uint32_t* backdrop = dl_replay_backdrop_pop(stack, &region);
     if (!backdrop) return;
 
-    int bx = stack->region[stack->sp].x;
-    int by = stack->region[stack->sp].y;
-    int bw = stack->region[stack->sp].w;
-    int bh = stack->region[stack->sp].h;
+    int bx = region.x;
+    int by = region.y;
+    int bw = region.w;
+    int bh = region.h;
     uint32_t* px = (uint32_t*)surface->pixels;
     int pitch = surface->pitch / 4;
     for (int row = 0; row < bh; row++) {
@@ -110,8 +122,7 @@ void dl_replay_backdrop_apply_blend_mode(DisplayReplayBackdropStack* stack,
                 render_composite_blend_pixel(bd, source, (CssEnum)blend->blend_mode);
         }
     }
-    if (scratch) scratch_free(scratch, backdrop);
-    stack->stack[stack->sp] = nullptr;
+    dl_replay_backdrop_release(stack, scratch, backdrop);
 }
 
 bool dl_replay_backdrop_skip_item(DisplayReplayBackdropStack* stack,

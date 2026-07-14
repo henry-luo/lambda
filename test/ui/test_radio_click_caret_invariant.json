@@ -3,10 +3,8 @@
   "html": "test/layout/data/form/form_state.html",
   "description": "Regression: clicking radio after caret blur must not leave visible caret without target view.",
   "events": [
-    {"type": "wait", "ms": 120},
     {"type": "log", "message": "Step 1: focus text input to create caret"},
     {"type": "click", "target": {"selector": ".focus-input"}},
-    {"type": "wait", "ms": 80},
     {"type": "assert_selection", "is_collapsed": true, "check_dom": true},
 
     {"type": "log", "message": "Step 2: blur input and wait past blink interval"},
@@ -15,7 +13,6 @@
 
     {"type": "log", "message": "Step 3: click radio; state machine must stay valid"},
     {"type": "click", "target": {"selector": "#radio1"}},
-    {"type": "wait", "ms": 80},
     {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
   ]
 }

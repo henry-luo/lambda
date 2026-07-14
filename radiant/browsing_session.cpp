@@ -2,8 +2,7 @@
 // Browsing session with history management for Radiant web browser.
 
 #include "view.hpp"
-#include "browsing_session.h"
-#include "webview.h"
+#include "radiant.hpp"
 #include "../lib/log.h"
 #include "../lib/mem.h"
 #include "../lib/mem_grow.hpp"
@@ -182,22 +181,24 @@ DomDocument* session_navigate(BrowsingSession* session, struct UiContext* uicon,
     return new_doc;
 }
 
-DomDocument* session_go_back(BrowsingSession* session, struct UiContext* uicon,
-                             int vw, int vh) {
-    if (!session_can_go_back(session) || !uicon) return nullptr;
+static DomDocument* session_go_history(BrowsingSession* session, struct UiContext* uicon,
+                                       int vw, int vh, int offset,
+                                       const char* direction) {
+    bool can_go = offset < 0 ? session_can_go_back(session) : session_can_go_forward(session);
+    if (!can_go || !uicon) return nullptr;
 
-    session->history_index--;
+    session->history_index += offset;
     HistoryEntry* entry = &session->history[session->history_index];
 
     if (!entry->url || !entry->url->href) {
-        log_error("browse_session: back — invalid history entry");
-        session->history_index++;
+        log_error("browse_session: %s — invalid history entry", direction);
+        session->history_index -= offset;
         return nullptr;
     }
 
     const char* href = entry->url->href->chars;
-    log_info("browse_session: going back to %s (%d/%d)",
-             href, session->history_index + 1, session->history_count);
+    log_info("browse_session: going %s to %s (%d/%d)", direction, href,
+             session->history_index + 1, session->history_count);
 
     // clean up old document's network resources
     DomDocument* old_doc = uicon->document;
@@ -216,7 +217,7 @@ DomDocument* session_go_back(BrowsingSession* session, struct UiContext* uicon,
 
     if (!new_doc) {
         log_error("browse_session: failed to reload %s", href);
-        session->history_index++;
+        session->history_index -= offset;
         return nullptr;
     }
 
@@ -230,52 +231,14 @@ DomDocument* session_go_back(BrowsingSession* session, struct UiContext* uicon,
     return new_doc;
 }
 
+DomDocument* session_go_back(BrowsingSession* session, struct UiContext* uicon,
+                             int vw, int vh) {
+    return session_go_history(session, uicon, vw, vh, -1, "back");
+}
+
 DomDocument* session_go_forward(BrowsingSession* session, struct UiContext* uicon,
                                 int vw, int vh) {
-    if (!session_can_go_forward(session) || !uicon) return nullptr;
-
-    session->history_index++;
-    HistoryEntry* entry = &session->history[session->history_index];
-
-    if (!entry->url || !entry->url->href) {
-        log_error("browse_session: forward — invalid history entry");
-        session->history_index--;
-        return nullptr;
-    }
-
-    const char* href = entry->url->href->chars;
-    log_info("browse_session: going forward to %s (%d/%d)",
-             href, session->history_index + 1, session->history_count);
-
-    // clean up old document's network resources
-    DomDocument* old_doc = uicon->document;
-    if (old_doc) {
-        radiant_cleanup_network_support(old_doc);
-    }
-
-    // destroy all webviews from the old page before loading the new one
-    if (uicon->webview_mgr) {
-        webview_manager_clear(uicon->webview_mgr);
-    }
-
-    char* href_copy = mem_strdup(href, MEM_CAT_TEMP);
-    DomDocument* new_doc = show_html_doc(entry->url, href_copy, vw, vh);
-    mem_free(href_copy);
-
-    if (!new_doc) {
-        log_error("browse_session: failed to reload %s", href);
-        session->history_index--;
-        return nullptr;
-    }
-
-    // update title if it changed
-    const char* title_text = session_extract_title(new_doc);
-    if (title_text && (!entry->title || strcmp(entry->title, title_text) != 0)) {
-        if (entry->title) mem_free(entry->title);
-        entry->title = mem_strdup(title_text, MEM_CAT_TEMP);
-    }
-
-    return new_doc;
+    return session_go_history(session, uicon, vw, vh, 1, "forward");
 }
 
 bool session_can_go_back(const BrowsingSession* session) {

@@ -9,7 +9,6 @@
 #include <cmath>
 #include <cstring>
 
-#include "../radiant/css_animation.h"
 #include "../radiant/view.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"

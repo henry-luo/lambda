@@ -1,7 +1,7 @@
 #include "layout.hpp"
-#include "form_control.hpp"
+#include "view.hpp"
 #include "rdt_video.h"
-#include "state_store.hpp"
+#include "event.hpp"
 #include "render.hpp"
 #include "../lib/str.h"
 #include "../lib/strview.h"
@@ -146,14 +146,23 @@ static FontProp* ensure_html_span_font(LayoutContext* lycon, ViewSpan* span) {
     return span->font;
 }
 
+static BoundaryProp* ensure_html_boundary_prop(LayoutContext* lycon, ViewBlock* block) {
+    BoundaryProp* boundary = block->bound;
+    if (!boundary) {
+        boundary = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        block->bound = boundary;
+    }
+    return boundary;
+}
+
 static BackgroundProp* ensure_html_background_prop(LayoutContext* lycon, ViewBlock* block) {
-    if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+    ensure_html_boundary_prop(lycon, block);
     if (!block->bound->background) { block->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp)); }
     return block->bound->background;
 }
 
 static BorderProp* ensure_html_border_prop(LayoutContext* lycon, ViewBlock* block) {
-    if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+    ensure_html_boundary_prop(lycon, block);
     if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
     return block->bound->border;
 }
@@ -201,6 +210,20 @@ static void apply_html_block_monospace_font(LayoutContext* lycon, ViewBlock* blo
 
 static void apply_html_span_monospace_font(LayoutContext* lycon, ViewSpan* span) {
     radiant_retain_font_family(ensure_html_span_font(lycon, span), lam::GcPtr<char>((char*)"monospace"));
+}
+
+static void apply_html_text_align_attribute(LayoutContext* lycon, DomNode* element,
+                                            ViewBlock* block) {
+    const char* align = element->get_attribute("align");
+    if (!align) return;
+
+    size_t length = strlen(align);
+    CssEnum value = CSS_VALUE_UNSET;
+    if (str_ieq_const(align, length, "left")) value = CSS_VALUE_LEFT;
+    else if (str_ieq_const(align, length, "right")) value = CSS_VALUE_RIGHT;
+    else if (str_ieq_const(align, length, "center")) value = CSS_VALUE_CENTER;
+    else if (str_ieq_const(align, length, "justify")) value = CSS_VALUE_JUSTIFY;
+    if (value != CSS_VALUE_UNSET) ensure_html_block_prop(lycon, block)->text_align = value;
 }
 
 static void apply_html_form_control_font(LayoutContext* lycon, ViewBlock* block) {
@@ -305,6 +328,34 @@ static void apply_html_deferred_height_percent(LayoutContext* lycon, ViewBlock* 
 static void apply_html_context_default_size(LayoutContext* lycon, float width, float height) {
     lycon->block.given_width = width;
     lycon->block.given_height = height;
+}
+
+static float html_pixel_dimension_or_default(DomNode* element, const char* attribute,
+                                             float default_value, bool require_digit_start) {
+    const char* value = element->get_attribute(attribute);
+    HtmlDimensionAttr dimension;
+    if (parse_html_dimension_attr(value, false, require_digit_start, &dimension)) {
+        return dimension.value;
+    }
+    return default_value;
+}
+
+static void apply_html_replaced_pixel_size(LayoutContext* lycon, DomNode* element,
+                                           ViewBlock* block, float default_width,
+                                           float default_height, bool require_digit_start,
+                                           bool persist_in_block) {
+    float width = html_pixel_dimension_or_default(
+        element, "width", default_width, require_digit_start);
+    float height = html_pixel_dimension_or_default(
+        element, "height", default_height, require_digit_start);
+    lycon->block.given_width = width;
+    lycon->block.given_height = height;
+    if (persist_in_block) {
+        // Replaced object dimensions must survive later intrinsic sizing passes.
+        BlockProp* prop = ensure_html_block_prop(lycon, block);
+        prop->given_width = width;
+        prop->given_height = height;
+    }
 }
 
 // Get the border attribute value from the parent TABLE element
@@ -482,6 +533,82 @@ static const char* get_parent_tr_valign(DomNode* elmt) {
     return nullptr;
 }
 
+static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_node,
+                                           ViewBlock* block, bool is_header) {
+    DomElement* cell = cell_node->as_element();
+    const char* tag_name = is_header ? "TH" : "TD";
+    if (is_header) {
+        log_debug("apply default TH styles");
+        apply_html_font_weight_bold(ensure_html_block_font(lycon, block));
+    }
+
+    BlockProp* block_prop = ensure_html_block_prop(lycon, block);
+    block_prop->text_align = is_header ? CSS_VALUE_CENTER : CSS_VALUE_LEFT;
+    apply_table_cell_width_attribute(cell, block);
+    apply_table_cell_height_attribute(cell, block);
+
+    if (!block->in_line) block->in_line = alloc_inline_prop(lycon);
+    block->in_line->vertical_align = CSS_VALUE_MIDDLE;
+
+    float cellpadding = get_parent_table_cellpadding(cell_node);
+    float padding = cellpadding >= 0.0f ? cellpadding : 1.0f;
+    ensure_html_boundary_prop(lycon, block);
+    block->bound->padding.top = block->bound->padding.right =
+        block->bound->padding.bottom = block->bound->padding.left = padding;
+    block->bound->padding.top_specificity = block->bound->padding.right_specificity =
+        block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
+
+    const char* align_attr = cell->get_attribute("align");
+    if (align_attr) {
+        size_t align_len = strlen(align_attr);
+        if (str_ieq_const(align_attr, align_len, "left")) {
+            block_prop->text_align = CSS_VALUE_LEFT;
+            block_prop->legacy_block_align = CSS_VALUE_LEFT;
+        } else if (str_ieq_const(align_attr, align_len, "right")) {
+            block_prop->text_align = CSS_VALUE_RIGHT;
+            block_prop->legacy_block_align = CSS_VALUE_RIGHT;
+        } else if (str_ieq_const(align_attr, align_len, "center")) {
+            block_prop->text_align = CSS_VALUE_CENTER;
+            block_prop->legacy_align_center_blocks = true;
+            block_prop->legacy_block_align = CSS_VALUE_CENTER;
+        }
+    }
+
+    const char* valign_attr = cell->get_attribute("valign");
+    if (!valign_attr) valign_attr = get_parent_tr_valign(cell_node);
+    if (valign_attr) {
+        size_t valign_len = strlen(valign_attr);
+        if (str_ieq_const(valign_attr, valign_len, "top")) {
+            block->in_line->vertical_align = CSS_VALUE_TOP;
+        } else if (str_ieq_const(valign_attr, valign_len, "middle")) {
+            block->in_line->vertical_align = CSS_VALUE_MIDDLE;
+        } else if (str_ieq_const(valign_attr, valign_len, "bottom")) {
+            block->in_line->vertical_align = CSS_VALUE_BOTTOM;
+        }
+    }
+
+    if (cell->get_attribute("nowrap")) {
+        block_prop->white_space = CSS_VALUE_NOWRAP;
+        log_debug("[HTML] %s nowrap attribute -> white-space: nowrap", tag_name);
+    }
+
+    const char* bgcolor_attr = cell->get_attribute("bgcolor");
+    if (bgcolor_attr) {
+        Color bg_color = parse_html_color(bgcolor_attr);
+        apply_html_background_color(lycon, block, bg_color);
+        log_debug("[HTML] %s bgcolor attribute: #%02x%02x%02x",
+                  tag_name, bg_color.r, bg_color.g, bg_color.b);
+    }
+
+    if (get_parent_table_border(cell_node) > 0.0f) {
+        Color grey = (Color){ .r=128, .g=128, .b=128, .a=255 };
+        apply_html_uniform_border(lycon, block, 1.0f, CSS_VALUE_INSET, grey);
+        log_debug("[HTML] %s border from parent TABLE: 1px inset grey", tag_name);
+    }
+    apply_html_table_rules_cell_border(
+        lycon, block, get_parent_table_rules(cell_node), is_header);
+}
+
 // HTML5 §14.3.4 / Unicode UAX #9: Detect first strong directional character.
 // Returns 1 for RTL (R/AL), -1 for LTR (L), 0 for neutral/not found.
 static int bidi_strong_class(uint32_t cp) {
@@ -590,7 +717,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     float em_size = 0;  uintptr_t elmt_name = elmt->tag();
     switch (elmt_name) {
     case HTM_TAG_BODY: {
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
         // margin: 8px (CSS logical pixels)
         block->bound->margin.top = block->bound->margin.right =
             block->bound->margin.bottom = block->bound->margin.left = 8;
@@ -674,7 +801,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Default margins for headings (browser UA stylesheet)
         // margin: 0.67em 0 for h1, varying for other levels
         // The margin is relative to the heading's computed font-size
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
         float margin_em;
         switch (elmt_name) {
             case HTM_TAG_H1: margin_em = 0.67; break;
@@ -687,50 +814,20 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         block->bound->margin.top = block->bound->margin.bottom = heading_font_size * margin_em;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
-        // Handle HTML align attribute (e.g., align="left", align="right", align="center")
-        {
-            const char* align_attr = elmt->get_attribute("align");
-            if (align_attr) {
-                if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-                if (str_ieq_const(align_attr, strlen(align_attr), "left")) {
-                    block->blk->text_align = CSS_VALUE_LEFT;
-                } else if (str_ieq_const(align_attr, strlen(align_attr), "right")) {
-                    block->blk->text_align = CSS_VALUE_RIGHT;
-                } else if (str_ieq_const(align_attr, strlen(align_attr), "center")) {
-                    block->blk->text_align = CSS_VALUE_CENTER;
-                } else if (str_ieq_const(align_attr, strlen(align_attr), "justify")) {
-                    block->blk->text_align = CSS_VALUE_JUSTIFY;
-                }
-            }
-        }
+        apply_html_text_align_attribute(lycon, elmt, block);
         break;
     }
     case HTM_TAG_P: {
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
         // margin: 1em 0;
         block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
-        // Handle HTML align attribute (e.g., align="left", align="right", align="center")
-        const char* align_attr = elmt->get_attribute("align");
-        if (align_attr) {
-            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-            if (str_ieq_const(align_attr, strlen(align_attr), "left")) {
-                block->blk->text_align = CSS_VALUE_LEFT;
-            } else if (str_ieq_const(align_attr, strlen(align_attr), "right")) {
-                block->blk->text_align = CSS_VALUE_RIGHT;
-            } else if (str_ieq_const(align_attr, strlen(align_attr), "center")) {
-                block->blk->text_align = CSS_VALUE_CENTER;
-            } else if (str_ieq_const(align_attr, strlen(align_attr), "justify")) {
-                block->blk->text_align = CSS_VALUE_JUSTIFY;
-            }
-        }
+        apply_html_text_align_attribute(lycon, elmt, block);
         break;
     }
     case HTM_TAG_UL:  case HTM_TAG_OL:  case HTM_TAG_MENU:
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        if (!block->bound) {
-            block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-        }
+        ensure_html_boundary_prop(lycon, block);
         // margin: 1em 0; padding: 0 0 0 40px;
         // UA stylesheet: nested lists have margin: 0
         // Chrome: :is(ul, ol, dir, menu, dl) ul, :is(ul, ol, dir, menu, dl) ol { margin-block: 0 }
@@ -847,7 +944,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     }
     case HTM_TAG_IFRAME: {
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
         // HTML spec §15.5.14: iframe { border: 2px inset; }
         block->bound->border->width.top = block->bound->border->width.right =
@@ -1004,23 +1101,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_VIDEO: {
         // replaced element with default 300x150 per HTML spec
         block->display.inner = RDT_DISPLAY_REPLACED;
-        // Parse HTML width/height attributes; default 300x150
-        if (const char* w_attr = elmt->get_attribute("width")) {
-            HtmlDimensionAttr width_attr;
-            if (parse_html_dimension_attr(w_attr, false, false, &width_attr)) {
-                lycon->block.given_width = width_attr.value;
-            } else {
-                lycon->block.given_width = 300.0f;
-            }
-        } else { lycon->block.given_width = 300.0f; }
-        if (const char* h_attr = elmt->get_attribute("height")) {
-            HtmlDimensionAttr height_attr;
-            if (parse_html_dimension_attr(h_attr, false, false, &height_attr)) {
-                lycon->block.given_height = height_attr.value;
-            } else {
-                lycon->block.given_height = 150.0f;
-            }
-        } else { lycon->block.given_height = 150.0f; }
+        apply_html_replaced_pixel_size(
+            lycon, elmt, block, 300.0f, 150.0f, false, false);
 
         // initialize video playback if src attribute is present
         const char* src = elmt->get_attribute("src");
@@ -1085,62 +1167,20 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // HTML §4.12.5: canvas is a replaced element with default
         // coordinate-space dimensions 300x150 when attributes are absent.
         block->display.inner = RDT_DISPLAY_REPLACED;
-        lycon->block.given_width = 300;
-        lycon->block.given_height = 150;
-        if (const char* w_attr = elmt->get_attribute("width")) {
-            size_t w_len = strlen(w_attr);
-            if (w_len > 0 && w_attr[0] >= '0' && w_attr[0] <= '9') {
-                StrView w_view = strview_init(w_attr, w_len);
-                float w = strview_to_int(&w_view);
-                if (w >= 0.0f) lycon->block.given_width = w;
-            }
-        }
-        if (const char* h_attr = elmt->get_attribute("height")) {
-            size_t h_len = strlen(h_attr);
-            if (h_len > 0 && h_attr[0] >= '0' && h_attr[0] <= '9') {
-                StrView h_view = strview_init(h_attr, h_len);
-                float h = strview_to_int(&h_view);
-                if (h >= 0.0f) lycon->block.given_height = h;
-            }
-        }
+        apply_html_replaced_pixel_size(
+            lycon, elmt, block, 300.0f, 150.0f, true, false);
         break;
     case HTM_TAG_OBJECT:
         // HTML §4.8.7: <object> is replaced only when it has a data attribute.
         // Without data, it renders its fallback content (children) as normal flow.
         if (elmt->get_attribute("data")) {
             block->display.inner = RDT_DISPLAY_REPLACED;
-            lycon->block.given_width = 300;
-            lycon->block.given_height = 150;
-            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-            block->blk->given_width = 300;
-            block->blk->given_height = 150;
-            if (const char* w_attr = elmt->get_attribute("width")) {
-                size_t w_len = strlen(w_attr);
-                if (w_len > 0 && w_attr[0] >= '0' && w_attr[0] <= '9') {
-                    StrView w_view = strview_init(w_attr, w_len);
-                    float w = strview_to_int(&w_view);
-                    if (w >= 0.0f) {
-                        // Object replaced sizing follows its legacy HTML dimension attributes.
-                        lycon->block.given_width = w;
-                        block->blk->given_width = w;
-                    }
-                }
-            }
-            if (const char* h_attr = elmt->get_attribute("height")) {
-                size_t h_len = strlen(h_attr);
-                if (h_len > 0 && h_attr[0] >= '0' && h_attr[0] <= '9') {
-                    StrView h_view = strview_init(h_attr, h_len);
-                    float h = strview_to_int(&h_view);
-                    if (h >= 0.0f) {
-                        lycon->block.given_height = h;
-                        block->blk->given_height = h;
-                    }
-                }
-            }
+            apply_html_replaced_pixel_size(
+                lycon, elmt, block, 300.0f, 150.0f, true, true);
         }
         break;
     case HTM_TAG_HR:
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
         // hr default: 1px border on all sides (creates 2px height from border-top + border-bottom)
         // This matches browser UA stylesheet behavior (CSS logical pixels)
@@ -1338,14 +1378,15 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->white_space = CSS_VALUE_PRE;
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
         block->bound->margin.top = block->bound->margin.bottom = pre_font_size;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
         break;
     }
     case HTM_TAG_BLOCKQUOTE:
+    case HTM_TAG_FIGURE:
         // margin: 1em 40px
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
         block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
         block->bound->margin.left = block->bound->margin.right = 40;  // CSS logical pixels
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity =
@@ -1355,26 +1396,18 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // italic, block display
         ensure_html_block_font(lycon, block)->font_style = CSS_VALUE_ITALIC;
         break;
-    case HTM_TAG_FIGURE:
-        // margin: 1em 40px
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-        block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
-        block->bound->margin.left = block->bound->margin.right = 40;  // CSS logical pixels
-        block->bound->margin.top_specificity = block->bound->margin.bottom_specificity =
-            block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
-        break;
     case HTM_TAG_FIGCAPTION:
         // Chrome UA: figcaption is a plain block element, no special text-align
         break;
     case HTM_TAG_DL:
         // definition list: margin 1em 0
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
         block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
         break;
     case HTM_TAG_DD:
         // definition description: margin-left 40px
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
         block->bound->margin.left = 40;  // CSS logical pixels
         block->bound->margin.left_specificity = -1;
         break;
@@ -1475,7 +1508,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (align_attr) {
             size_t alen = strlen(align_attr);
             if (str_ieq_const(align_attr, alen, "center")) {
-                if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
                 block->bound->margin.left_type = CSS_VALUE_AUTO;
                 block->bound->margin.right_type = CSS_VALUE_AUTO;
                 block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
@@ -1509,172 +1542,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     }
     case HTM_TAG_TH: {
-        // font-weight: bold;  text-align: center;  vertical-align: middle;
-        log_debug("apply default TH styles");
-        apply_html_font_weight_bold(ensure_html_block_font(lycon, block));
-        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->text_align = CSS_VALUE_CENTER;  // TH defaults to center
-        apply_table_cell_width_attribute(elmt->as_element(), block);
-        apply_table_cell_height_attribute(elmt->as_element(), block);
-        if (!block->in_line) { block->in_line = alloc_inline_prop(lycon); }
-        block->in_line->vertical_align = CSS_VALUE_MIDDLE;
-
-        // Per HTML spec (WHATWG 15.3.8): td, th { padding: 1px; }
-        // However, the cellpadding attribute on the parent TABLE overrides this default
-        float cellpadding = get_parent_table_cellpadding(elmt);
-        if (cellpadding >= 0) {
-            // Use cellpadding from parent table (can be 0)
-            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-            block->bound->padding.top = block->bound->padding.right =
-                block->bound->padding.bottom = block->bound->padding.left = cellpadding;
-            block->bound->padding.top_specificity = block->bound->padding.right_specificity =
-                block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
-        } else {
-            // No cellpadding attribute - apply UA default of 1px (CSS logical pixels)
-            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-            block->bound->padding.top = block->bound->padding.right =
-                block->bound->padding.bottom = block->bound->padding.left = 1;
-            block->bound->padding.top_specificity = block->bound->padding.right_specificity =
-                block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
-        }
-
-        // Handle HTML align attribute (e.g., align="left", align="right", align="center")
-        const char* align_attr = elmt->get_attribute("align");
-        if (align_attr) {
-            if (str_ieq_const(align_attr, strlen(align_attr), "left")) {
-                block->blk->text_align = CSS_VALUE_LEFT;
-                block->blk->legacy_block_align = CSS_VALUE_LEFT;
-            } else if (str_ieq_const(align_attr, strlen(align_attr), "right")) {
-                block->blk->text_align = CSS_VALUE_RIGHT;
-                block->blk->legacy_block_align = CSS_VALUE_RIGHT;
-            } else if (str_ieq_const(align_attr, strlen(align_attr), "center")) {
-                block->blk->text_align = CSS_VALUE_CENTER;
-                block->blk->legacy_align_center_blocks = true;
-                block->blk->legacy_block_align = CSS_VALUE_CENTER;
-            }
-        }
-        // Handle HTML valign attribute (e.g., valign="top", valign="middle", valign="bottom")
-        const char* valign_attr = elmt->get_attribute("valign");
-        // if TH doesn't have valign, inherit from parent TR
-        if (!valign_attr) {
-            valign_attr = get_parent_tr_valign(elmt);
-        }
-        if (valign_attr) {
-            if (str_ieq_const(valign_attr, strlen(valign_attr), "top")) {
-                block->in_line->vertical_align = CSS_VALUE_TOP;
-            } else if (str_ieq_const(valign_attr, strlen(valign_attr), "middle")) {
-                block->in_line->vertical_align = CSS_VALUE_MIDDLE;
-            } else if (str_ieq_const(valign_attr, strlen(valign_attr), "bottom")) {
-                block->in_line->vertical_align = CSS_VALUE_BOTTOM;
-            }
-        }
-        // WHATWG 15.3.7: td[nowrap], th[nowrap] → white-space: nowrap
-        if (elmt->get_attribute("nowrap")) {
-            block->blk->white_space = CSS_VALUE_NOWRAP;
-            log_debug("[HTML] TH nowrap attribute -> white-space: nowrap");
-        }
-        // Handle HTML bgcolor attribute for TH
-        const char* bgcolor_attr = elmt->get_attribute("bgcolor");
-        if (bgcolor_attr) {
-            Color bg_color = parse_html_color(bgcolor_attr);
-            apply_html_background_color(lycon, block, bg_color);
-            log_debug("[HTML] TH bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
-        }
-        // Per WHATWG 15.3.10: table[border] td, table[border] th { border: 1px inset grey; }
-        {
-            float parent_border = get_parent_table_border(elmt);
-            if (parent_border > 0) {
-                Color grey = (Color){ .r=128, .g=128, .b=128, .a=255 };
-                apply_html_uniform_border(lycon, block, 1.0f, CSS_VALUE_INSET, grey);
-                log_debug("[HTML] TH border from parent TABLE: 1px inset grey");
-            }
-        }
-        apply_html_table_rules_cell_border(lycon, block, get_parent_table_rules(elmt), true);
+        apply_html_table_cell_defaults(lycon, elmt, block, true);
         break;
     }
     case HTM_TAG_TD: {
-        // TD defaults to vertical-align: middle (CSS 2.1), text-align: start
-        if (!block->in_line) { block->in_line = alloc_inline_prop(lycon); }
-        block->in_line->vertical_align = CSS_VALUE_MIDDLE;
-
-        // Set default text-align to left (start) - table cells don't inherit text-align from outside
-        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->text_align = CSS_VALUE_LEFT;  // Default for TD
-        apply_table_cell_width_attribute(elmt->as_element(), block);
-        apply_table_cell_height_attribute(elmt->as_element(), block);
-
-        // Per HTML spec (WHATWG 15.3.8): td, th { padding: 1px; }
-        // However, the cellpadding attribute on the parent TABLE overrides this default
-        // Per HTML spec: cellpadding maps to padding-top/right/bottom/left on TD/TH elements
-        float cellpadding = get_parent_table_cellpadding(elmt);
-        if (cellpadding >= 0) {
-            // Use cellpadding from parent table (can be 0)
-            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-            block->bound->padding.top = block->bound->padding.right =
-                block->bound->padding.bottom = block->bound->padding.left = cellpadding;
-            block->bound->padding.top_specificity = block->bound->padding.right_specificity =
-                block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
-        } else {
-            // No cellpadding attribute - apply UA default of 1px (CSS logical pixels)
-            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-            block->bound->padding.top = block->bound->padding.right =
-                block->bound->padding.bottom = block->bound->padding.left = 1;
-            block->bound->padding.top_specificity = block->bound->padding.right_specificity =
-                block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
-        }
-
-        // Handle HTML align attribute (e.g., align="left", align="right", align="center")
-        const char* align_attr = elmt->get_attribute("align");
-        if (align_attr) {
-            if (str_ieq_const(align_attr, strlen(align_attr), "left")) {
-                block->blk->text_align = CSS_VALUE_LEFT;
-                block->blk->legacy_block_align = CSS_VALUE_LEFT;
-            } else if (str_ieq_const(align_attr, strlen(align_attr), "right")) {
-                block->blk->text_align = CSS_VALUE_RIGHT;
-                block->blk->legacy_block_align = CSS_VALUE_RIGHT;
-            } else if (str_ieq_const(align_attr, strlen(align_attr), "center")) {
-                block->blk->text_align = CSS_VALUE_CENTER;
-                block->blk->legacy_align_center_blocks = true;
-                block->blk->legacy_block_align = CSS_VALUE_CENTER;
-            }
-        }
-        // Handle HTML valign attribute (e.g., valign="top", valign="middle", valign="bottom")
-        const char* valign_attr = elmt->get_attribute("valign");
-        // if TD doesn't have valign, inherit from parent TR
-        if (!valign_attr) {
-            valign_attr = get_parent_tr_valign(elmt);
-        }
-        if (valign_attr) {
-            if (str_ieq_const(valign_attr, strlen(valign_attr), "top")) {
-                block->in_line->vertical_align = CSS_VALUE_TOP;
-            } else if (str_ieq_const(valign_attr, strlen(valign_attr), "middle")) {
-                block->in_line->vertical_align = CSS_VALUE_MIDDLE;
-            } else if (str_ieq_const(valign_attr, strlen(valign_attr), "bottom")) {
-                block->in_line->vertical_align = CSS_VALUE_BOTTOM;
-            }
-        }
-        // Handle HTML bgcolor attribute for TD
-        const char* bgcolor_attr = elmt->get_attribute("bgcolor");
-        if (bgcolor_attr) {
-            Color bg_color = parse_html_color(bgcolor_attr);
-            apply_html_background_color(lycon, block, bg_color);
-            log_debug("[HTML] TD bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
-        }
-        // WHATWG 15.3.7: td[nowrap], th[nowrap] → white-space: nowrap
-        if (elmt->get_attribute("nowrap")) {
-            block->blk->white_space = CSS_VALUE_NOWRAP;
-            log_debug("[HTML] TD nowrap attribute -> white-space: nowrap");
-        }
-        // Per WHATWG 15.3.10: table[border] td, table[border] th { border: 1px inset grey; }
-        {
-            float parent_border = get_parent_table_border(elmt);
-            if (parent_border > 0) {
-                Color grey = (Color){ .r=128, .g=128, .b=128, .a=255 };
-                apply_html_uniform_border(lycon, block, 1.0f, CSS_VALUE_INSET, grey);
-                log_debug("[HTML] TD border from parent TABLE: 1px inset grey");
-            }
-        }
-        apply_html_table_rules_cell_border(lycon, block, get_parent_table_rules(elmt), false);
+        apply_html_table_cell_defaults(lycon, elmt, block, false);
         break;
     }
     case HTM_TAG_CAPTION:
@@ -1685,7 +1557,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     // ========== Form elements ==========
     case HTM_TAG_FIELDSET:
         // fieldset: border and padding (CSS logical pixels)
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
         // Chrome uses groove style with gray color for fieldset borders
         apply_html_uniform_border(lycon, block, 2.0f, CSS_VALUE_GROOVE,
             (Color){ .r=192, .g=192, .b=192, .a=255 });
@@ -1700,7 +1572,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     case HTM_TAG_LEGEND:
         // legend: padding (CSS logical pixels)
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
         block->bound->padding.left = block->bound->padding.right = 2;
         block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
         break;
@@ -1726,7 +1598,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
         // Chrome UA: font-size 13.3333px, font-family Arial for form controls
         apply_html_form_control_font(lycon, block);
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
         block->bound->padding.top = block->bound->padding.bottom = FormDefaults::BUTTON_PADDING_V;
         block->bound->padding.left = block->bound->padding.right = FormDefaults::BUTTON_PADDING_H;
         block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
@@ -1796,7 +1668,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             lycon->block.given_height = block->form->intrinsic_height;
             // Default margin: Chrome UA stylesheet
             // checkbox: 3px 3px 3px 4px, radio: 3px 3px 0px 5px
-            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
             block->bound->margin.top = 3; block->bound->margin.right = FormDefaults::CHECK_MARGIN;
             block->bound->margin.bottom = (block->form->control_type == FORM_CONTROL_RADIO) ? 0 : FormDefaults::CHECK_MARGIN;
             block->bound->margin.left = (block->form->control_type == FORM_CONTROL_RADIO) ? FormDefaults::RADIO_MARGIN_LEFT : FormDefaults::CHECKBOX_MARGIN_LEFT;
@@ -1808,7 +1680,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
             // Button intrinsic size depends on value text - computed in layout
             // Default padding: 1px 6px (Chrome UA stylesheet)
-            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
             block->bound->padding.top = block->bound->padding.bottom = FormDefaults::BUTTON_PADDING_V;
             block->bound->padding.left = block->bound->padding.right = FormDefaults::BUTTON_PADDING_H;
             block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
@@ -1864,7 +1736,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             lycon->block.given_width = block->form->intrinsic_width;
             lycon->block.given_height = block->form->intrinsic_height;
             // Chrome default margin: 2px all sides
-            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
             block->bound->margin.top = block->bound->margin.right =
                 block->bound->margin.bottom = block->bound->margin.left = 2;
             block->bound->margin.top_specificity = block->bound->margin.right_specificity =
@@ -1906,7 +1778,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             // Don't set given_width/given_height — layout_form_control computes
             // intrinsic size dynamically from size attribute and font metrics
             // Default border for text inputs (CSS logical pixels)
-            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
             apply_html_uniform_border(lycon, block, FormDefaults::TEXT_BORDER, CSS_VALUE_SOLID,
                 (Color){ .r=118, .g=118, .b=118, .a=255 });
             // Chrome UA: date/time inputs have padding=0; text-like inputs have padding=1
@@ -2012,7 +1884,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // layout_form_control compute it after CSS cascade applies padding/border.
         block->form->intrinsic_height = FormDefaults::SELECT_HEIGHT - 2.0f;
         // Default border (UA): 1px solid #767676, 2px border-radius (Chrome-like)
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
         apply_html_uniform_border_no_specificity(lycon, block, 1.0f, CSS_VALUE_SOLID,
             (Color){ .r=118, .g=118, .b=118, .a=255 });
         // Border-radius 2px on all four corners (Chrome UA)
@@ -2059,7 +1931,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Don't set given_width/given_height — layout_form_control computes
         // intrinsic size dynamically from cols/rows and font metrics
         // Default border and padding
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        ensure_html_boundary_prop(lycon, block);
         apply_html_uniform_border_no_specificity(lycon, block, FormDefaults::TEXTAREA_BORDER, CSS_VALUE_SOLID,
             (Color){ .r=118, .g=118, .b=118, .a=255 });
         block->bound->padding.top = block->bound->padding.bottom =

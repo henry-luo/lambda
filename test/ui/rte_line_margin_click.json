@@ -3,7 +3,6 @@
   "html": "test/ui/rte_prototype.ls",
   "viewport": {"width": 980, "height": 720},
   "events": [
-    {"type": "wait", "ms": 250},
     {"type": "assert_text", "target": {"selector": "#status"}, "contains": "opened:./test/input/simple.md"},
     {"type": "click", "target": {"selector": "#doc h1", "offset_x": 700, "offset_y": 24}},
     {"type": "assert_caret", "view_type": 1, "char_offset": 20},

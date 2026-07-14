@@ -4,10 +4,8 @@
   "viewport": {"width": 640, "height": 420},
   "events": [
     {"type": "log", "message": "=== editing_paired_logging_textarea ==="},
-    {"type": "wait", "ms": 150},
     {"type": "click", "target": {"selector": "#surface"}},
     {"type": "paste_text", "target": {"selector": "#surface"}, "text": "log\nline"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#input-log"}, "equals": "input:insertFromPaste|log\nline|log\nline"},
     {"type": "assert_event_log", "contains": "\"type\":\"editing.intent\"", "min": 1},
     {"type": "assert_event_log", "contains": "\"type\":\"editing.beforeinput\"", "min": 1},

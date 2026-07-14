@@ -4,22 +4,18 @@
   "viewport": {"width": 600, "height": 600},
   "events": [
     {"type": "log", "message": "=== form_input_cut_keyboard ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "click", "target": {"selector": "#name"}},
     {"type": "wait", "ms": 80},
     {"type": "type", "target": {"selector": "#name"}, "text": "abc"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "abc"},
 
     {"type": "key_press", "key": "Home"},
     {"type": "wait", "ms": 60},
     {"type": "key_press", "key": "Right", "mods_str": "shift"},
-    {"type": "wait", "ms": 60},
     {"type": "assert_selection", "is_collapsed": false},
 
     {"type": "key_combo", "key": "x", "mods_str": "super"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_clipboard", "equals": "a"},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "bc"},
     {"type": "assert_caret", "char_offset": 0},

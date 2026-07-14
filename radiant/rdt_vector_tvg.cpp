@@ -393,11 +393,8 @@ static void paint_cache_insert_entry_locked(RdtPaintCacheEntry* entry) {
     g_paint_cache_count++;
 }
 
-static Tvg_Paint paint_cache_store_fill(uint64_t hash, RdtPaintCacheKind kind,
-                                        const RdtPath* path, Color color,
-                                        RdtFillRule rule, Tvg_Paint paint) {
-    pthread_mutex_lock(&g_paint_cache_mutex);
-    Tvg_Paint existing = paint_cache_dup_fill_locked(hash, kind, path, color, rule);
+static Tvg_Paint paint_cache_prepare_store_locked(Tvg_Paint existing,
+                                                  Tvg_Paint paint) {
     if (existing) {
         tvg_paint_unref(paint, true);
         pthread_mutex_unlock(&g_paint_cache_mutex);
@@ -409,18 +406,34 @@ static Tvg_Paint paint_cache_store_fill(uint64_t hash, RdtPaintCacheKind kind,
     }
 
     Tvg_Paint draw = tvg_duplicate_paint_locked(paint);
-    if (!draw) {
-        pthread_mutex_unlock(&g_paint_cache_mutex);
-        return nullptr;
-    }
+    if (!draw) pthread_mutex_unlock(&g_paint_cache_mutex);
+    return draw;
+}
 
-    RdtPaintCacheEntry* e = (RdtPaintCacheEntry*)mem_calloc(1, sizeof(RdtPaintCacheEntry), MEM_CAT_CACHE_IMAGE);
-    e->kind = kind;
-    e->hash = hash;
-    e->path = rdt_path_clone(path);
+static RdtPaintCacheEntry* paint_cache_new_entry(uint64_t hash,
+                                                 RdtPaintCacheKind kind,
+                                                 const RdtPath* path,
+                                                 Tvg_Paint paint) {
+    RdtPaintCacheEntry* entry = (RdtPaintCacheEntry*)mem_calloc(
+        1, sizeof(RdtPaintCacheEntry), MEM_CAT_CACHE_IMAGE);
+    entry->kind = kind;
+    entry->hash = hash;
+    entry->path = rdt_path_clone(path);
+    entry->paint = paint;
+    return entry;
+}
+
+static Tvg_Paint paint_cache_store_fill(uint64_t hash, RdtPaintCacheKind kind,
+                                        const RdtPath* path, Color color,
+                                        RdtFillRule rule, Tvg_Paint paint) {
+    pthread_mutex_lock(&g_paint_cache_mutex);
+    Tvg_Paint existing = paint_cache_dup_fill_locked(hash, kind, path, color, rule);
+    Tvg_Paint draw = paint_cache_prepare_store_locked(existing, paint);
+    if (!draw || existing) return draw;
+
+    RdtPaintCacheEntry* e = paint_cache_new_entry(hash, kind, path, paint);
     e->color = color;
     e->fill_rule = rule;
-    e->paint = paint;
     paint_cache_insert_entry_locked(e);
     pthread_mutex_unlock(&g_paint_cache_mutex);
     return draw;
@@ -434,26 +447,11 @@ static Tvg_Paint paint_cache_store_stroke(uint64_t hash, const RdtPath* path,
     pthread_mutex_lock(&g_paint_cache_mutex);
     Tvg_Paint existing = paint_cache_dup_stroke_locked(hash, path, color, width, cap, join,
                                                        dash_array, dash_count, dash_phase);
-    if (existing) {
-        tvg_paint_unref(paint, true);
-        pthread_mutex_unlock(&g_paint_cache_mutex);
-        return existing;
-    }
-    if (g_paint_cache_count >= RDT_PAINT_CACHE_MAX_ENTRIES) {
-        pthread_mutex_unlock(&g_paint_cache_mutex);
-        return nullptr;
-    }
+    Tvg_Paint draw = paint_cache_prepare_store_locked(existing, paint);
+    if (!draw || existing) return draw;
 
-    Tvg_Paint draw = tvg_duplicate_paint_locked(paint);
-    if (!draw) {
-        pthread_mutex_unlock(&g_paint_cache_mutex);
-        return nullptr;
-    }
-
-    RdtPaintCacheEntry* e = (RdtPaintCacheEntry*)mem_calloc(1, sizeof(RdtPaintCacheEntry), MEM_CAT_CACHE_IMAGE);
-    e->kind = RDT_PAINT_CACHE_STROKE_PATH;
-    e->hash = hash;
-    e->path = rdt_path_clone(path);
+    RdtPaintCacheEntry* e = paint_cache_new_entry(
+        hash, RDT_PAINT_CACHE_STROKE_PATH, path, paint);
     e->color = color;
     e->stroke_width = width;
     e->stroke_cap = cap;
@@ -464,7 +462,6 @@ static Tvg_Paint paint_cache_store_stroke(uint64_t hash, const RdtPath* path,
         e->dash_array = (float*)mem_alloc((size_t)dash_count * sizeof(float), MEM_CAT_CACHE_IMAGE);
         memcpy(e->dash_array, dash_array, (size_t)dash_count * sizeof(float));
     }
-    e->paint = paint;
     paint_cache_insert_entry_locked(e);
     pthread_mutex_unlock(&g_paint_cache_mutex);
     return draw;
@@ -476,33 +473,16 @@ static Tvg_Paint paint_cache_store_gradient(uint64_t hash, RdtPaintCacheKind kin
                                             RdtFillRule rule, Tvg_Paint paint) {
     pthread_mutex_lock(&g_paint_cache_mutex);
     Tvg_Paint existing = paint_cache_dup_gradient_locked(hash, kind, path, values, stops, stop_count, rule);
-    if (existing) {
-        tvg_paint_unref(paint, true);
-        pthread_mutex_unlock(&g_paint_cache_mutex);
-        return existing;
-    }
-    if (g_paint_cache_count >= RDT_PAINT_CACHE_MAX_ENTRIES) {
-        pthread_mutex_unlock(&g_paint_cache_mutex);
-        return nullptr;
-    }
-
-    Tvg_Paint draw = tvg_duplicate_paint_locked(paint);
-    if (!draw) {
-        pthread_mutex_unlock(&g_paint_cache_mutex);
-        return nullptr;
-    }
+    Tvg_Paint draw = paint_cache_prepare_store_locked(existing, paint);
+    if (!draw || existing) return draw;
 
     int value_count = kind == RDT_PAINT_CACHE_LINEAR_GRADIENT ? 4 : 3;
-    RdtPaintCacheEntry* e = (RdtPaintCacheEntry*)mem_calloc(1, sizeof(RdtPaintCacheEntry), MEM_CAT_CACHE_IMAGE);
-    e->kind = kind;
-    e->hash = hash;
-    e->path = rdt_path_clone(path);
+    RdtPaintCacheEntry* e = paint_cache_new_entry(hash, kind, path, paint);
     e->fill_rule = rule;
     memcpy(e->gradient_values, values, (size_t)value_count * sizeof(float));
     e->stop_count = stop_count;
     e->stops = (RdtGradientStop*)mem_alloc((size_t)stop_count * sizeof(RdtGradientStop), MEM_CAT_CACHE_IMAGE);
     memcpy(e->stops, stops, (size_t)stop_count * sizeof(RdtGradientStop));
-    e->paint = paint;
     paint_cache_insert_entry_locked(e);
     pthread_mutex_unlock(&g_paint_cache_mutex);
     return draw;
@@ -1077,6 +1057,22 @@ bool rdt_path_visit(const RdtPath* p, RdtPathVisitFn fn, void* context) {
 // forward declare clip-aware draw helper (defined in Clipping section below)
 static void tvg_push_draw_remove_clipped(RdtVectorImpl* impl, Tvg_Paint shape);
 
+static bool tvg_draw_cached_paint(RdtVectorImpl* impl, Tvg_Paint cached,
+                                  const RdtMatrix* transform) {
+    if (!cached) return false;
+    apply_transform(cached, transform);
+    tvg_push_draw_remove_clipped(impl, cached);
+    return true;
+}
+
+static void tvg_draw_stored_or_original(RdtVectorImpl* impl, Tvg_Paint stored,
+                                        Tvg_Paint original,
+                                        const RdtMatrix* transform) {
+    Tvg_Paint paint = stored ? stored : original;
+    apply_transform(paint, transform);
+    tvg_push_draw_remove_clipped(impl, paint);
+}
+
 void rdt_fill_path(RdtVector* vec, RdtPath* p, Color color,
                    RdtFillRule rule, const RdtMatrix* transform) {
     if (!vec || !vec->impl || !p) return;
@@ -1102,11 +1098,7 @@ void rdt_fill_path(RdtVector* vec, RdtPath* p, Color color,
     pthread_mutex_lock(&g_paint_cache_mutex);
     Tvg_Paint cached = paint_cache_dup_fill_locked(hash, RDT_PAINT_CACHE_FILL_PATH, p, color, rule);
     pthread_mutex_unlock(&g_paint_cache_mutex);
-    if (cached) {
-        apply_transform(cached, transform);
-        tvg_push_draw_remove_clipped(impl, cached);
-        return;
-    }
+    if (tvg_draw_cached_paint(impl, cached, transform)) return;
 
     Tvg_Paint shape = tvg_shape_new();
     path_replay(p, shape);
@@ -1115,13 +1107,7 @@ void rdt_fill_path(RdtVector* vec, RdtPath* p, Color color,
         tvg_shape_set_fill_rule(shape, TVG_FILL_RULE_EVEN_ODD);
     }
     Tvg_Paint draw = paint_cache_store_fill(hash, RDT_PAINT_CACHE_FILL_PATH, p, color, rule, shape);
-    if (draw) {
-        apply_transform(draw, transform);
-        tvg_push_draw_remove_clipped(impl, draw);
-    } else {
-        apply_transform(shape, transform);
-        tvg_push_draw_remove_clipped(impl, shape);
-    }
+    tvg_draw_stored_or_original(impl, draw, shape, transform);
 }
 
 void rdt_fill_rect(RdtVector* vec, float x, float y, float w, float h,
@@ -1200,11 +1186,7 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
     Tvg_Paint cached = paint_cache_dup_stroke_locked(hash, p, color, width, cap, join,
                                                      dash_array, dash_count, dash_phase);
     pthread_mutex_unlock(&g_paint_cache_mutex);
-    if (cached) {
-        apply_transform(cached, transform);
-        tvg_push_draw_remove_clipped(impl, cached);
-        return;
-    }
+    if (tvg_draw_cached_paint(impl, cached, transform)) return;
 
     Tvg_Paint shape = tvg_shape_new();
     path_replay(p, shape);
@@ -1237,18 +1219,35 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
 
     Tvg_Paint draw = paint_cache_store_stroke(hash, p, color, width, cap, join,
                                               dash_array, dash_count, dash_phase, shape);
-    if (draw) {
-        apply_transform(draw, transform);
-        tvg_push_draw_remove_clipped(impl, draw);
-    } else {
-        apply_transform(shape, transform);
-        tvg_push_draw_remove_clipped(impl, shape);
-    }
+    tvg_draw_stored_or_original(impl, draw, shape, transform);
 }
 
 // ============================================================================
 // Gradient fill
 // ============================================================================
+
+static void tvg_gradient_set_stops(Tvg_Gradient gradient,
+                                   const RdtGradientStop* stops,
+                                   int stop_count) {
+    Tvg_Color_Stop* tvg_stops = LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
+    for (int index = 0; index < stop_count; index++) {
+        tvg_stops[index].offset = stops[index].offset;
+        tvg_stops[index].r = stops[index].r;
+        tvg_stops[index].g = stops[index].g;
+        tvg_stops[index].b = stops[index].b;
+        tvg_stops[index].a = stops[index].a;
+    }
+    tvg_gradient_set_color_stops(gradient, tvg_stops, stop_count);
+}
+
+static void tvg_gradient_apply_transform(Tvg_Gradient gradient,
+                                         const RdtMatrix* transform) {
+    if (!transform) return;
+    Tvg_Matrix matrix = {transform->e11, transform->e12, transform->e13,
+                         transform->e21, transform->e22, transform->e23,
+                         transform->e31, transform->e32, transform->e33};
+    tvg_gradient_set_transform(gradient, &matrix);
+}
 
 void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
                               float x1, float y1, float x2, float y2,
@@ -1272,15 +1271,7 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
         }
         Tvg_Gradient grad = tvg_linear_gradient_new();
         tvg_linear_gradient_set(grad, tx1, ty1, tx2, ty2);
-        Tvg_Color_Stop* tvg_stops = LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
-        for (int i = 0; i < stop_count; i++) {
-            tvg_stops[i].offset = stops[i].offset;
-            tvg_stops[i].r = stops[i].r;
-            tvg_stops[i].g = stops[i].g;
-            tvg_stops[i].b = stops[i].b;
-            tvg_stops[i].a = stops[i].a;
-        }
-        tvg_gradient_set_color_stops(grad, tvg_stops, stop_count);
+        tvg_gradient_set_stops(grad, stops, stop_count);
         tvg_shape_set_gradient(shape, grad);
         tvg_push_draw_remove_clipped(impl, shape);
         return;
@@ -1297,11 +1288,7 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
     Tvg_Paint cached = paint_cache_dup_gradient_locked(hash, RDT_PAINT_CACHE_LINEAR_GRADIENT,
                                                        p, values, stops, stop_count, rule);
     pthread_mutex_unlock(&g_paint_cache_mutex);
-    if (cached) {
-        apply_transform(cached, transform);
-        tvg_push_draw_remove_clipped(impl, cached);
-        return;
-    }
+    if (tvg_draw_cached_paint(impl, cached, transform)) return;
 
     Tvg_Paint shape = tvg_shape_new();
     path_replay(p, shape);
@@ -1313,32 +1300,13 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
     Tvg_Gradient grad = tvg_linear_gradient_new();
     tvg_linear_gradient_set(grad, x1, y1, x2, y2);
 
-    Tvg_Color_Stop* tvg_stops = LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
-    for (int i = 0; i < stop_count; i++) {
-        tvg_stops[i].offset = stops[i].offset;
-        tvg_stops[i].r = stops[i].r;
-        tvg_stops[i].g = stops[i].g;
-        tvg_stops[i].b = stops[i].b;
-        tvg_stops[i].a = stops[i].a;
-    }
-    tvg_gradient_set_color_stops(grad, tvg_stops, stop_count);
-    if (gradient_transform) {
-        Tvg_Matrix gm = { gradient_transform->e11, gradient_transform->e12, gradient_transform->e13,
-                          gradient_transform->e21, gradient_transform->e22, gradient_transform->e23,
-                          gradient_transform->e31, gradient_transform->e32, gradient_transform->e33 };
-        tvg_gradient_set_transform(grad, &gm);
-    }
+    tvg_gradient_set_stops(grad, stops, stop_count);
+    tvg_gradient_apply_transform(grad, gradient_transform);
     tvg_shape_set_gradient(shape, grad);
 
     Tvg_Paint draw = paint_cache_store_gradient(hash, RDT_PAINT_CACHE_LINEAR_GRADIENT,
                                                 p, values, stops, stop_count, rule, shape);
-    if (draw) {
-        apply_transform(draw, transform);
-        tvg_push_draw_remove_clipped(impl, draw);
-    } else {
-        apply_transform(shape, transform);
-        tvg_push_draw_remove_clipped(impl, shape);
-    }
+    tvg_draw_stored_or_original(impl, draw, shape, transform);
 }
 
 void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
@@ -1364,15 +1332,7 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
         }
         Tvg_Gradient grad = tvg_radial_gradient_new();
         tvg_radial_gradient_set(grad, tcx, tcy, tr, tcx, tcy, 0);
-        Tvg_Color_Stop* tvg_stops = LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
-        for (int i = 0; i < stop_count; i++) {
-            tvg_stops[i].offset = stops[i].offset;
-            tvg_stops[i].r = stops[i].r;
-            tvg_stops[i].g = stops[i].g;
-            tvg_stops[i].b = stops[i].b;
-            tvg_stops[i].a = stops[i].a;
-        }
-        tvg_gradient_set_color_stops(grad, tvg_stops, stop_count);
+        tvg_gradient_set_stops(grad, stops, stop_count);
         tvg_shape_set_gradient(shape, grad);
         tvg_push_draw_remove_clipped(impl, shape);
         return;
@@ -1389,11 +1349,7 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
     Tvg_Paint cached = paint_cache_dup_gradient_locked(hash, RDT_PAINT_CACHE_RADIAL_GRADIENT,
                                                        p, values, stops, stop_count, rule);
     pthread_mutex_unlock(&g_paint_cache_mutex);
-    if (cached) {
-        apply_transform(cached, transform);
-        tvg_push_draw_remove_clipped(impl, cached);
-        return;
-    }
+    if (tvg_draw_cached_paint(impl, cached, transform)) return;
 
     Tvg_Paint shape = tvg_shape_new();
     path_replay(p, shape);
@@ -1405,32 +1361,13 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
     Tvg_Gradient grad = tvg_radial_gradient_new();
     tvg_radial_gradient_set(grad, cx, cy, r, cx, cy, 0);
 
-    Tvg_Color_Stop* tvg_stops = LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
-    for (int i = 0; i < stop_count; i++) {
-        tvg_stops[i].offset = stops[i].offset;
-        tvg_stops[i].r = stops[i].r;
-        tvg_stops[i].g = stops[i].g;
-        tvg_stops[i].b = stops[i].b;
-        tvg_stops[i].a = stops[i].a;
-    }
-    tvg_gradient_set_color_stops(grad, tvg_stops, stop_count);
-    if (gradient_transform) {
-        Tvg_Matrix gm = { gradient_transform->e11, gradient_transform->e12, gradient_transform->e13,
-                          gradient_transform->e21, gradient_transform->e22, gradient_transform->e23,
-                          gradient_transform->e31, gradient_transform->e32, gradient_transform->e33 };
-        tvg_gradient_set_transform(grad, &gm);
-    }
+    tvg_gradient_set_stops(grad, stops, stop_count);
+    tvg_gradient_apply_transform(grad, gradient_transform);
     tvg_shape_set_gradient(shape, grad);
 
     Tvg_Paint draw = paint_cache_store_gradient(hash, RDT_PAINT_CACHE_RADIAL_GRADIENT,
                                                 p, values, stops, stop_count, rule, shape);
-    if (draw) {
-        apply_transform(draw, transform);
-        tvg_push_draw_remove_clipped(impl, draw);
-    } else {
-        apply_transform(shape, transform);
-        tvg_push_draw_remove_clipped(impl, shape);
-    }
+    tvg_draw_stored_or_original(impl, draw, shape, transform);
 }
 
 // ============================================================================

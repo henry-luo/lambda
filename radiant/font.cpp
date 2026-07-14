@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include "view.hpp"
 #include "../lambda/input/css/css_value.hpp"
-#include "font_face.h"
 
 #include "../lib/log.h"
 #include "../lib/font/font.h"

@@ -1,6 +1,5 @@
-#include "editing_intent.hpp"
+#include "event.hpp"
 
-#include "clipboard.hpp"
 #include "../lib/memtrack.h"
 #include "../lib/utf.h"
 

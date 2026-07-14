@@ -1,17 +1,10 @@
 #include "layout.hpp"
-#include "layout_flex.hpp"
-#include "layout_flex_measurement.hpp"
-#include "layout_positioned.hpp"
-#include "layout_counters.hpp"
-#include "layout_table.hpp"
-#include "form_control.hpp"
+#include "view.hpp"
 #include "render.hpp"
-#include "state_store.hpp"
-#include "font_face.h"
+#include "event.hpp"
 #include "../lib/font/font.h"
 #include "../lib/mem_factory.h"
-#include "css_animation.h"
-#include "webview.h"
+#include "radiant.hpp"
 #include "../lib/tagged.hpp"
 
 #include <chrono>
@@ -1575,6 +1568,16 @@ static bool line_align_view_is_out_of_flow(View* view) {
 
 // CSS 2.1 §16.2: Shift current-line text rects inside a span that was laid out
 // on a previous line but has continuation content on the current line.
+static void shift_text_current_line_rects(float offset, float line_y, ViewText* text) {
+    TextRect* rect = text->rect;
+    while (rect) {
+        if (rect->y >= line_y - 1.0f) {
+            rect->x += offset;
+        }
+        rect = rect->next;
+    }
+}
+
 static void shift_span_current_line_rects(float offset, float line_y, ViewSpan* span) {
     if (line_align_view_is_out_of_flow(static_cast<View*>(span))) return;
     View* child = static_cast<View*>(span->first_child);
@@ -1584,14 +1587,7 @@ static void shift_span_current_line_rects(float offset, float line_y, ViewSpan* 
             continue;
         }
         if (child->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = lam::view_require_text(child);
-            TextRect* rect = text->rect;
-            while (rect) {
-                if (rect->y >= line_y - 1.0f) {
-                    rect->x += offset;
-                }
-                rect = rect->next;
-            }
+            shift_text_current_line_rects(offset, line_y, lam::view_require_text(child));
         } else if (child->view_type == RDT_VIEW_INLINE) {
             shift_span_current_line_rects(offset, line_y, lam::view_require<RDT_VIEW_INLINE>(child));
         }
@@ -1599,6 +1595,18 @@ static void shift_span_current_line_rects(float offset, float line_y, ViewSpan* 
     }
     if (span->y >= line_y - 1.0f) {
         span->x += offset;
+    }
+}
+
+static void shift_preceding_current_line_views(float offset, float line_y, View* view) {
+    View* prev = static_cast<View*>(static_cast<DomNode*>(view)->prev_sibling);
+    while (prev) {
+        if (prev->view_type == RDT_VIEW_TEXT) {
+            shift_text_current_line_rects(offset, line_y, lam::view_require_text(prev));
+        } else if (prev->view_type == RDT_VIEW_INLINE) {
+            shift_span_current_line_rects(offset, line_y, lam::view_require<RDT_VIEW_INLINE>(prev));
+        }
+        prev = static_cast<View*>(static_cast<DomNode*>(prev)->prev_sibling);
     }
 }
 
@@ -1886,13 +1894,7 @@ void line_align(LayoutContext* lycon) {
             if (is_wrapped_continuation) {
                 ViewText* text = lam::view_require_text(view);
                 float line_y = lycon->block.advance_y;
-                TextRect* rect = text->rect;
-                while (rect) {
-                    if (rect->y >= line_y - 1.0f) {
-                        rect->x += offset;
-                    }
-                    rect = rect->next;
-                }
+                shift_text_current_line_rects(offset, line_y, text);
                 // Also shift any sibling views that follow on the current line
                 View* next = view->next();
                 if (next) {
@@ -1904,22 +1906,7 @@ void line_align(LayoutContext* lycon) {
                 // node wraps and a sibling inline element (e.g., <span>) follows on the same
                 // line — start_view points to the span, but the wrapped text rect precedes it.
                 float line_y = lycon->block.advance_y;
-                View* prev = static_cast<View*>(static_cast<DomNode*>(view)->prev_sibling);
-                while (prev) {
-                    if (prev->view_type == RDT_VIEW_TEXT) {
-                        ViewText* text = lam::view_require_text(prev);
-                        TextRect* rect = text->rect;
-                        while (rect) {
-                            if (rect->y >= line_y - 1.0f) {
-                                rect->x += offset;
-                            }
-                            rect = rect->next;
-                        }
-                    } else if (prev->view_type == RDT_VIEW_INLINE) {
-                        shift_span_current_line_rects(offset, line_y, lam::view_require<RDT_VIEW_INLINE>(prev));
-                    }
-                    prev = static_cast<View*>(static_cast<DomNode*>(prev)->prev_sibling);
-                }
+                shift_preceding_current_line_views(offset, line_y, view);
                 // Normal case: align all views in the line
                 view_line_align(lycon, offset, view);
             }
@@ -1943,13 +1930,7 @@ void line_align(LayoutContext* lycon) {
                                 float line_y = lycon->block.advance_y;
                                 if (view->view_type == RDT_VIEW_TEXT) {
                                     ViewText* text = lam::view_require_text(view);
-                                    TextRect* rect = text->rect;
-                                    while (rect) {
-                                        if (rect->y >= line_y - 1.0f) {
-                                            rect->x += offset;
-                                        }
-                                        rect = rect->next;
-                                    }
+                                    shift_text_current_line_rects(offset, line_y, text);
                                     adjust_text_bounds(text);
                                 }
                                 // Also shift any sibling views on the current line
@@ -1961,22 +1942,7 @@ void line_align(LayoutContext* lycon) {
                                 // CSS 2.1 §16.2: Also check preceding siblings for
                                 // text continuation rects on the current line.
                                 float line_y = lycon->block.advance_y;
-                                View* prev = static_cast<View*>(static_cast<DomNode*>(view)->prev_sibling);
-                                while (prev) {
-                                    if (prev->view_type == RDT_VIEW_TEXT) {
-                                        ViewText* text = lam::view_require_text(prev);
-                                        TextRect* rect = text->rect;
-                                        while (rect) {
-                                            if (rect->y >= line_y - 1.0f) {
-                                                rect->x += offset;
-                                            }
-                                            rect = rect->next;
-                                        }
-                                    } else if (prev->view_type == RDT_VIEW_INLINE) {
-                                        shift_span_current_line_rects(offset, line_y, lam::view_require<RDT_VIEW_INLINE>(prev));
-                                    }
-                                    prev = static_cast<View*>(static_cast<DomNode*>(prev)->prev_sibling);
-                                }
+                                shift_preceding_current_line_views(offset, line_y, view);
                                 view_line_align(lycon, offset, view);
                             }
                         }

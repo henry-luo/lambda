@@ -1,6 +1,6 @@
 #include "render.hpp"
 
-#include "state_store.hpp"
+#include "event.hpp"
 
 static RadiantVideoWakeCallback g_video_wake_callback = nullptr;
 static void* g_video_wake_user_data = nullptr;

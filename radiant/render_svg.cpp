@@ -1,13 +1,11 @@
 #include "render.hpp"
 #include "view.hpp"
 #include "layout.hpp"
-#include "layout_box.hpp"
 #include "render.hpp"
 #include "render_effect_raster_fallback.hpp"
 #include "render_glyph_run_raster_lower.hpp"
 #include "render.hpp"
-#include "state_store.hpp"
-#include "font_face.h"
+#include "event.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/font/font.h"
@@ -278,99 +276,15 @@ static void svg_color_to_string(Color color, char* result) {
 
 static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     if (!text || !text->text_data()) return;
-    // Extract the text content
     unsigned char* str = text->text_data();
-
-    // Get text-transform from the text node's parent elements
-    CssEnum text_transform = CSS_VALUE_NONE;
-    DomNode* parent = text->parent;
-    while (parent) {
-        if (parent->is_element()) {
-            DomElement* elem = lam::dom_require_element(parent);
-            text_transform = get_text_transform_from_block(elem->blk);
-            if (text_transform != CSS_VALUE_NONE) break;
-        }
-        parent = parent->parent;
-    }
+    CssEnum text_transform = render_text_inherited_transform(text);
 
     TextRect *text_rect = text->rect;
     NEXT_RECT:
     float x = ctx->block.x + text_rect->x, y = ctx->block.y + text_rect->y;
 
-    // Transform text if needed
-    char* text_content = (char*)mem_alloc(text_rect->length * 4 + 2, MEM_CAT_RENDER);  // Extra for UTF-8 + trailing hyphen
-    if (text_transform != CSS_VALUE_NONE) {
-        // Apply text-transform character by character
-        unsigned char* src = str + text_rect->start_index;
-        unsigned char* src_end = src + text_rect->length;
-        char* dst = text_content;
-        bool is_word_start = true;
-
-        while (src < src_end) {
-            uint32_t codepoint = *src;
-            int bytes = 1;
-
-            if (codepoint >= 128) {
-                bytes = str_utf8_decode((const char*)src, (size_t)(src_end - src), &codepoint);
-                if (bytes <= 0) bytes = 1;
-            }
-
-            // Skip soft hyphens (U+00AD) — they are invisible in rendered output
-            if (codepoint == 0x00AD) { src += bytes; continue; }
-
-            // Track word boundaries
-            if (is_space(codepoint)) {
-                is_word_start = true;
-                *dst++ = *src;
-                src += bytes;
-                continue;
-            }
-
-            // Apply transformation (full case mapping: 1 codepoint may become 2-3)
-            uint32_t tt_out[3];
-            int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
-            is_word_start = false;
-
-            // Encode all expanded codepoints back to UTF-8
-            for (int tti = 0; tti < tt_count; tti++) {
-            uint32_t transformed = tt_out[tti];
-            if (transformed == 0) continue;
-            dst += utf8_encode(transformed, dst);
-            } // end for tti
-
-            src += bytes;
-        }
-        *dst = '\0';
-    } else {
-        // No transformation — copy while stripping soft hyphens (U+00AD = 0xC2 0xAD)
-        unsigned char* src = str + text_rect->start_index;
-        unsigned char* src_end = src + text_rect->length;
-        char* dst = text_content;
-        while (src < src_end) {
-            if (src[0] == 0xC2 && src + 1 < src_end && src[1] == 0xAD) {
-                src += 2;  // skip soft hyphen
-            } else {
-                *dst++ = (char)*src++;
-            }
-        }
-        *dst = '\0';
-    }
-    // CSS Text 3 §5.2: Soft hyphen — append visible '-' when line breaks at SHY
-    if (text_rect->has_trailing_hyphen) {
-        size_t len = strlen(text_content);
-        text_content[len] = '-';
-        text_content[len + 1] = '\0';
-    }
-
-    // -webkit-line-clamp: append ellipsis character
-    if (text_rect->has_trailing_ellipsis) {
-        size_t len = strlen(text_content);
-        // U+2026 HORIZONTAL ELLIPSIS = 0xE2 0x80 0xA6 in UTF-8
-        text_content[len] = (char)0xE2;
-        text_content[len + 1] = (char)0x80;
-        text_content[len + 2] = (char)0xA6;
-        text_content[len + 3] = '\0';
-    }
+    char* text_content = render_text_create_export_segment(
+        str, text_rect, text_transform, true);
 
     // Calculate natural text width and gap count for justify rendering.
     // NOTE: includes trailing spaces. The layout's count_justify_opportunities
@@ -1176,93 +1090,6 @@ static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
     }
 }
 
-static bool svg_build_transform_matrix(const TransformProp* tp, float elem_x, float elem_y,
-                                       float elem_w, float elem_h, RdtMatrix* out_matrix) {
-    if (!tp || !tp->functions) return false;
-
-    // Compose 2D affine matrix: [a c e; b d f; 0 0 1]
-    // Identity:
-    double ma = 1, mb = 0, mc = 0, md = 1, me = 0, mf = 0;
-
-    // Resolve transform-origin
-    float ox = tp->origin_x_percent ? elem_x + elem_w * tp->origin_x / 100.0f : elem_x + tp->origin_x;
-    float oy = tp->origin_y_percent ? elem_y + elem_h * tp->origin_y / 100.0f : elem_y + tp->origin_y;
-
-    // Pre-translate for transform-origin
-    me += ox; mf += oy;
-
-    for (TransformFunction* tf = tp->functions; tf; tf = tf->next) {
-        // accumulate: result = result * local
-        double la=1, lb=0, lc=0, ld=1, le=0, lf=0;
-        switch (tf->type) {
-            case TRANSFORM_TRANSLATE:
-            case TRANSFORM_TRANSLATEX:
-            case TRANSFORM_TRANSLATEY: {
-                float tx = tf->params.translate.x, ty = tf->params.translate.y;
-                if (!isnan(tf->translate_x_percent)) tx = tf->translate_x_percent * elem_w / 100.0f;
-                if (!isnan(tf->translate_y_percent)) ty = tf->translate_y_percent * elem_h / 100.0f;
-                le = tx; lf = ty;
-                break;
-            }
-            case TRANSFORM_TRANSLATE3D:
-            case TRANSFORM_TRANSLATEZ:
-                le = tf->params.translate3d.x; lf = tf->params.translate3d.y;
-                break;
-            case TRANSFORM_SCALE:
-            case TRANSFORM_SCALEX:
-            case TRANSFORM_SCALEY:
-                la = tf->params.scale.x > 0 ? tf->params.scale.x : 1.0;
-                ld = tf->params.scale.y > 0 ? tf->params.scale.y : 1.0;
-                break;
-            case TRANSFORM_ROTATE:
-            case TRANSFORM_ROTATEZ: {
-                double ang = tf->params.angle;  // radians
-                la = cos(ang); lc = -sin(ang); lb = sin(ang); ld = cos(ang);
-                break;
-            }
-            case TRANSFORM_SKEWX:
-                lc = tan((double)tf->params.angle);
-                break;
-            case TRANSFORM_SKEWY:
-                lb = tan((double)tf->params.angle);
-                break;
-            case TRANSFORM_MATRIX:
-                la = tf->params.matrix.a; lb = tf->params.matrix.b;
-                lc = tf->params.matrix.c; ld = tf->params.matrix.d;
-                le = tf->params.matrix.e; lf = tf->params.matrix.f;
-                break;
-            default:
-                break;
-        }
-        // result = result * L
-        double na = ma*la + mc*lb, nb = mb*la + md*lb;
-        double nc = ma*lc + mc*ld, nd = mb*lc + md*ld;
-        double ne = ma*le + mc*lf + me, nf = mb*le + md*lf + mf;
-        ma=na; mb=nb; mc=nc; md=nd; me=ne; mf=nf;
-    }
-
-    // Post-translate: undo transform-origin shift
-    me -= ox; mf -= oy;
-
-    // Skip if effectively identity
-    bool is_identity = (fabs(ma-1)<1e-5 && fabs(mb)<1e-5 && fabs(mc)<1e-5
-                     && fabs(md-1)<1e-5 && fabs(me)<1e-5 && fabs(mf)<1e-5);
-    if (is_identity) return false;
-
-    if (out_matrix) {
-        out_matrix->e11 = ma;
-        out_matrix->e12 = mc;
-        out_matrix->e13 = me;
-        out_matrix->e21 = mb;
-        out_matrix->e22 = md;
-        out_matrix->e23 = mf;
-        out_matrix->e31 = 0.0f;
-        out_matrix->e32 = 0.0f;
-        out_matrix->e33 = 1.0f;
-    }
-    return true;
-}
-
 // ============================================================================
 // SVG RenderBackend vtable callbacks
 // ============================================================================
@@ -1323,38 +1150,8 @@ static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
     Rect content_rect = render_geometry_block_content_rect(&block_context, block, 1.0f);
     if (content_rect.width <= 0.0f || content_rect.height <= 0.0f) return;
 
-    Color initial_current_color = color;
-    Color initial_fill_color = {};
-    Color initial_stroke_color = {};
-    Color* current_color_ptr = &initial_current_color;
-    Color* fill_color_ptr = nullptr;
-    Color* stroke_color_ptr = nullptr;
-    bool initial_fill_none = false;
-    bool initial_stroke_none = true;
-    float initial_stroke_width = -1.0f;
-    if (block->in_line && block->in_line->has_color) {
-        initial_current_color = block->in_line->color;
-    }
-    if (block->in_line && block->in_line->has_svg_fill) {
-        if (block->in_line->svg_fill_none) {
-            initial_fill_none = true;
-        } else {
-            initial_fill_color = block->in_line->svg_fill_color;
-            fill_color_ptr = &initial_fill_color;
-        }
-    }
-    if (block->in_line && block->in_line->has_svg_stroke) {
-        if (block->in_line->svg_stroke_none) {
-            initial_stroke_none = true;
-        } else {
-            initial_stroke_color = block->in_line->svg_stroke_color;
-            stroke_color_ptr = &initial_stroke_color;
-            initial_stroke_none = false;
-        }
-    }
-    if (block->in_line && block->in_line->has_svg_stroke_width) {
-        initial_stroke_width = block->in_line->svg_stroke_width;
-    }
+    SvgInitialPaint initial_paint;
+    render_svg_initial_paint(block, color, &initial_paint);
 
     RdtMatrix transform = rdt_matrix_translate(content_rect.x, content_rect.y);
     Bound content_clip = {content_rect.x, content_rect.y,
@@ -1370,14 +1167,14 @@ static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
                               ctx->ui_context ? ctx->ui_context->font_ctx : nullptr,
                               &transform,
                               &content_clip,
-                              current_color_ptr,
-                              fill_color_ptr,
+                              &initial_paint.current_color,
+                              initial_paint.has_fill_color ? &initial_paint.fill_color : nullptr,
                               nullptr,
                               1.0f,
-                              initial_fill_none,
-                              stroke_color_ptr,
-                              initial_stroke_none,
-                              initial_stroke_width);
+                              initial_paint.fill_none,
+                              initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
+                              initial_paint.stroke_none,
+                              initial_paint.stroke_width);
     paint_svg_subscene(svg_active_paint_list(ctx), &subscene);
     svg_lower_paint_list(ctx);
     if (font) ctx->font = *font;
@@ -1464,7 +1261,7 @@ static void svg_cb_begin_transform(void* vctx, ViewBlock* block, float abs_x, fl
     }
 
     RdtMatrix transform = {};
-    bool has = svg_build_transform_matrix(
+    bool has = render_geometry_transform_matrix(
         block->transform,
         abs_x, abs_y,
         block->width, block->height,
@@ -1836,105 +1633,27 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
     log_debug("render_html_to_svg called with html_file='%s', svg_file='%s', viewport=%dx%d, scale=%.2f",
               html_file, svg_file, viewport_width, viewport_height, scale);
 
-    // Validate scale
-    if (scale <= 0) scale = 1.0f;
-
-    // Remember if we need to auto-size (viewport was 0)
-    bool auto_width = (viewport_width == 0);
-    bool auto_height = (viewport_height == 0);
-
-    // Use reasonable defaults for layout if auto-sizing
-    int layout_width = viewport_width > 0 ? viewport_width : 1200;
-    int layout_height = viewport_height > 0 ? viewport_height : 800;
-
-    // Initialize UI context in headless mode
-    UiContext ui_context;
-    if (ui_context_init(&ui_context, true) != 0) {
-        log_debug("Failed to initialize UI context for SVG rendering");
+    RenderExportSession session;
+    if (!render_export_session_begin(
+            &session, html_file, viewport_width, viewport_height, 1200, 800, scale)) {
         return 1;
     }
-
-    // Create a surface for layout calculations with layout dimensions
-    ui_context_create_surface(&ui_context, layout_width, layout_height);
-
-    // Update UI context viewport dimensions for layout calculations
-    ui_context.window_width = layout_width;
-    ui_context.window_height = layout_height;
-
-    // Get current directory for relative path resolution
-    Url* cwd = get_current_dir();
-    if (!cwd) {
-        log_debug("Could not get current directory");
-        ui_context_cleanup(&ui_context);
-        return 1;
-    }
-
-    // Load HTML document
-    log_debug("Loading HTML document: %s", html_file);
-    DomDocument* doc = load_html_doc(cwd, (char*)html_file, layout_width, layout_height);
-    if (!doc) {
-        log_debug("Could not load HTML file: %s", html_file);
-        url_destroy(cwd);
-        ui_context_cleanup(&ui_context);
-        return 1;
-    }
-
-    ui_context.document = doc;
-
-    // Set document scale for rendering
-    doc->given_scale = scale;
-    doc->scale = scale;  // In headless mode, pixel_ratio is always 1.0
-
-    // Process @font-face rules before layout
-    process_document_font_faces(&ui_context, doc);
-
-    // Layout the document (produces CSS logical pixels)
-    log_debug("Performing layout...");
-    layout_html_doc(&ui_context, doc, false);
-
-    // Calculate actual content dimensions (in CSS logical pixels)
-    int content_max_x = layout_width;
-    int content_max_y = layout_height;
-    if (doc->view_tree && doc->view_tree->root) {
-        int bounds_x = 0, bounds_y = 0;
-        calculate_content_bounds(doc->view_tree->root, &bounds_x, &bounds_y);
-        // Add some padding to ensure nothing is cut off
-        bounds_x += 50;
-        bounds_y += 50;
-
-        // If auto-sizing, use content bounds; otherwise use minimum of viewport and content
-        if (auto_width) {
-            content_max_x = bounds_x;
-        } else {
-            content_max_x = (bounds_x > layout_width) ? bounds_x : layout_width;
-        }
-        if (auto_height) {
-            content_max_y = bounds_y;
-        } else {
-            content_max_y = (bounds_y > layout_height) ? bounds_y : layout_height;
-        }
-
-        if (auto_width || auto_height) {
-            log_info("Auto-sized output dimensions: %dx%d (content bounds with 50px padding)", content_max_x, content_max_y);
-        } else {
-            log_debug("Calculated content bounds: %dx%d", content_max_x, content_max_y);
-        }
-    }
+    UiContext* ui_context = session.ui_context;
+    DomDocument* doc = session.document;
 
     // Render to SVG (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
         log_debug("Rendering view tree to SVG...");
         // SVG output dimensions are scaled; coordinates inside are in CSS pixels with viewBox transform
-        int svg_width = (int)(content_max_x * scale);
-        int svg_height = (int)(content_max_y * scale);
-        char* svg_content = render_view_tree_to_svg(&ui_context, doc->view_tree->root,
+        int svg_width = (int)(session.content_width * session.scale); // INT_CAST_OK: SVG dimensions are integer pixels.
+        int svg_height = (int)(session.content_height * session.scale); // INT_CAST_OK: SVG dimensions are integer pixels.
+        char* svg_content = render_view_tree_to_svg(ui_context, doc->view_tree->root,
                                                    svg_width, svg_height, doc->state);
         if (svg_content) {
             if (save_svg_to_file(svg_content, svg_file)) {
                 log_info("Successfully rendered HTML to SVG: %s", svg_file);
                 mem_free(svg_content);
-                url_destroy(cwd);
-                ui_context_cleanup(&ui_context);
+                render_export_session_end(&session);
                 return 0;
             } else {
                 log_debug("Failed to save SVG to file: %s", svg_file);
@@ -1948,7 +1667,6 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
     }
 
     // Cleanup
-    url_destroy(cwd);
-    ui_context_cleanup(&ui_context);
+    render_export_session_end(&session);
     return 1;
 }

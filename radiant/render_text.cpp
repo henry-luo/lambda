@@ -1,9 +1,9 @@
 #include "render.hpp"
-#include "layout_text.hpp"
 #include "layout.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include "../lib/str.h"
 #include "../lib/font/font.h"
 #include "../lib/utf.h"
@@ -56,6 +56,84 @@ static Color render_text_sample_linear_gradient(LinearGradient* gradient, Rect r
 
 static inline bool render_text_preserve_spaces(CssEnum ws) {
     return ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP || ws == CSS_VALUE_BREAK_SPACES;
+}
+
+CssEnum render_text_inherited_transform(ViewText* text_view) {
+    if (!text_view) return CSS_VALUE_NONE;
+
+    DomNode* parent = text_view->parent;
+    while (parent) {
+        if (parent->is_element()) {
+            DomElement* element = lam::dom_require_element(parent);
+            CssEnum transform = get_text_transform_from_block(element->blk);
+            if (transform != CSS_VALUE_NONE) return transform;
+        }
+        parent = parent->parent;
+    }
+    return CSS_VALUE_NONE;
+}
+
+char* render_text_create_export_segment(const unsigned char* text,
+                                        const TextRect* text_rect,
+                                        CssEnum text_transform,
+                                        bool include_ellipsis) {
+    if (!text || !text_rect) return nullptr;
+
+    // An ellipsis needs three UTF-8 bytes plus the terminator beyond transformed text.
+    char* content = (char*)mem_alloc(text_rect->length * 4 + 4, MEM_CAT_RENDER);
+    unsigned char* src = (unsigned char*)text + text_rect->start_index;
+    unsigned char* src_end = src + text_rect->length;
+    char* dst = content;
+
+    if (text_transform != CSS_VALUE_NONE) {
+        bool is_word_start = true;
+        while (src < src_end) {
+            uint32_t codepoint = *src;
+            int bytes = 1;
+            if (codepoint >= 128) {
+                bytes = str_utf8_decode((const char*)src, (size_t)(src_end - src), &codepoint);
+                if (bytes <= 0) bytes = 1;
+            }
+
+            if (codepoint == 0x00AD) {
+                src += bytes;
+                continue;
+            }
+            if (is_space(codepoint)) {
+                is_word_start = true;
+                *dst++ = *src;
+                src += bytes;
+                continue;
+            }
+
+            uint32_t transformed_codepoints[3];
+            int transformed_count = apply_text_transform_full(
+                codepoint, text_transform, is_word_start, transformed_codepoints);
+            is_word_start = false;
+            for (int i = 0; i < transformed_count; i++) {
+                uint32_t transformed = transformed_codepoints[i];
+                if (transformed != 0) dst += utf8_encode(transformed, dst);
+            }
+            src += bytes;
+        }
+    } else {
+        while (src < src_end) {
+            if (src[0] == 0xC2 && src + 1 < src_end && src[1] == 0xAD) {
+                src += 2;
+            } else {
+                *dst++ = (char)*src++;
+            }
+        }
+    }
+
+    if (text_rect->has_trailing_hyphen) *dst++ = '-';
+    if (include_ellipsis && text_rect->has_trailing_ellipsis) {
+        *dst++ = (char)0xE2;
+        *dst++ = (char)0x80;
+        *dst++ = (char)0xA6;
+    }
+    *dst = '\0';
+    return content;
 }
 
 static bool render_text_rect_misses_clip(RenderContext* rdcon, float x, float y,

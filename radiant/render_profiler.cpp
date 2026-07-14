@@ -1,7 +1,6 @@
 #include "render.hpp"
 
-#include "event_state_log.hpp"
-#include "state_store.hpp"
+#include "event.hpp"
 #include "view.hpp"
 #include "../lib/log.h"
 

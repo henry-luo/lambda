@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Warn about Radiant headers that violate the DD4 global-header plan."""
+"""Enforce the Radiant global-header allow-list and header-count ratchet."""
 import os
 import subprocess
 import sys
@@ -27,6 +27,7 @@ ALLOW_LIST = {
     "event_sim.hpp",
 }
 
+HEADER_COUNT_MAX = 24
 SOURCE_EXTS = (".c", ".cpp", ".mm")
 HEADER_EXTS = (".h", ".hpp")
 
@@ -90,7 +91,8 @@ def main() -> int:
         is_new_header = status.startswith("A") or status.startswith("??")
         if is_new_header and (not is_allowed or (has_sibling and not is_allowed)):
             new_violations.append((rel, is_allowed, has_sibling))
-    mode = os.environ.get("RADIANT_HEADER_LINT_MODE", "warn")
+    over_cap = len(headers) > HEADER_COUNT_MAX
+    mode = os.environ.get("RADIANT_HEADER_LINT_MODE", "error")
     prefix = "no-new-per-file-header"
     if new_violations:
         print(f"{prefix}: {len(new_violations)} new Radiant header(s) violate DD4:")
@@ -103,15 +105,16 @@ def main() -> int:
             print(f"  radiant/{rel}: {', '.join(reasons)}")
     else:
         print(f"{prefix}: no new Radiant headers violate DD4")
+    print(f"{prefix}: Radiant header count {len(headers)}/{HEADER_COUNT_MAX}")
+    if over_cap:
+        print(f"{prefix}: header count exceeds ratchet cap")
     if disallowed or per_file:
-        # Legacy headers remain during H1-H5; keep default output concise until
-        # H6 flips the ratchet to error mode.
         print(
-            f"{prefix}: legacy inventory: "
+            f"{prefix}: violations: "
             f"{len(disallowed)} non-allow-listed, {len(per_file)} per-file mirror(s)"
         )
 
-    if mode == "error" and (new_violations or disallowed or per_file):
+    if mode == "error" and (new_violations or disallowed or per_file or over_cap):
         return 1
     return 0
 

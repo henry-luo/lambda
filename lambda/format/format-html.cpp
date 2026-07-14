@@ -6,7 +6,7 @@
 #include "../../lib/stringbuf.h"
 #include "../../lib/str.h"
 #include "../../lib/mem_factory.h"
-#include "../../radiant/symbol_resolver.h"
+#include "../../radiant/view.hpp"
 
 void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 
