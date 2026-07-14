@@ -1,0 +1,9 @@
+{
+  attrs: {
+    id: "a",
+    label: "Alpha",
+    custom: 42
+  },
+  rebuilt_attrs: ["a", "Alpha", 42],
+  rebuilt_content: ["new content"]
+}

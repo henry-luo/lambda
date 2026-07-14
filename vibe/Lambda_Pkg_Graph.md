@@ -749,6 +749,8 @@ Normalization invariants are:
 7. Source spans survive normalization for diagnostics and editor integration.
 8. Unknown source extensions are either preserved in a namespaced metadata
    element or diagnosed; they are not silently thrown away.
+9. Labeled nodes, edges, and subgraphs carry source semantics in `<label>` and
+   measured Mark in `<content>`; a second normalization pass is idempotent.
 
 ### 18.4 Stage 2 module structure
 
@@ -1103,7 +1105,7 @@ The initial Stage 2 tranche is implemented as follows:
   diagnoses invalid roots and directions, missing or duplicate identities, and
   missing or unresolved edge endpoints, while preserving parser diagnostics;
 - `transform.to_html()` passes Mark through this normalization boundary before
-  semantic lowering, without adding state or changing the graph value;
+  semantic lowering, without adding state;
 - Mermaid `accTitle` and line or block `accDescr` directives survive under
   source-spanned `<meta>` children; model queries apply last-declaration
   semantics and semantic HTML exposes them through `aria-label`,
@@ -1132,9 +1134,18 @@ The initial Stage 2 tranche is implemented as follows:
   being parsed as fake flowcharts;
 - `graph/model.ls` provides recursive node, edge, subgraph, style, class, and
   direction queries over Mark without replacing the public IR with maps;
+- `graph/normalize.ls` recursively rebuilds `<graph>`, `<subgraph>`, `<node>`,
+  and `<edge>` values into canonical Mark. It preserves arbitrary source
+  attributes, materializes one `<label>` source element and one measured
+  `<content>` element for labeled values, wraps authored rich node children in
+  `<content>`, and returns an already-canonical recursive tree unchanged;
+- canonical `<label>` and `<content>` children are authoritative. Legacy
+  `label` and `label-format` attributes remain as compatibility/provenance
+  attributes, but model and transform consumers prefer the canonical children;
 - `transform.to_html()` recursively lowers nested graph nodes and edges, carries
-  subgraph membership as stable metadata, applies class assignments, and emits
-  separately measured `<edge-label>` children;
+  subgraph membership as stable metadata, applies class assignments, places
+  canonical `<content>` in measured nodes, and emits separately measured
+  `<edge-label>` children from canonical edge content;
 - `graph/transform/content.ls` reuses Lambda's Markdown and HTML-fragment parsers
   to lower rich node and edge labels into measured semantic Mark; its sanitizer
   reconstructs only safe inline formatting (`strong`, `em`, `code`, `u`, `sub`,
@@ -1171,16 +1182,18 @@ fixtures additionally cover recursive HTML membership, rich Markdown/HTML node
 and edge labels, hostile-tag removal, class lowering, accessibility lowering,
 measured edge-label placement, bidirectional markers,
 shape clipping, self-loop bounds, parallel-edge separation and label anchors,
-safe style rejection and precedence, and styled edge paint propagation.
+safe style rejection and precedence, and styled edge paint propagation. They
+also cover recursive canonical rebuilding, arbitrary-attribute retention,
+authored block content, canonical HTML consumption, and normalization
+idempotency.
 
 The following Stage 2 work remains open:
 
 - a distinct Mermaid source AST, declaration-list provenance for merged values,
-  full schema-driven Graph IR validation, and canonical rebuilding in
-  `normalize.ls`; the current boundary validates semantic invariants and retains
-  first-declaration spans but does not yet separate parsing from normalization;
-- canonical `<label>`/`<content>` rebuilding during normalization, ports,
-  interaction metadata, edge-ID property/class statements, the remaining
+  and full schema-driven Graph IR validation; the current boundary validates
+  semantic invariants and retains first-declaration spans but does not yet
+  separate parsing from normalization;
+- ports, interaction metadata, edge-ID property/class statements, the remaining
   Mermaid style properties beyond the initial safe
   paint allowlist, and rendering semantics for general shapes beyond the
   currently canonicalized rectangle, rounded, cylinder, diamond, circle, and

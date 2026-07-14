@@ -329,6 +329,25 @@ extern "C" Item vmap_new() {
 extern "C" Item vmap_from_array(Item array_item) {
     log_debug("vmap_from_array: creating VMap from array");
     TypeId type_id = get_type_id(array_item);
+    if (type_id == LMD_TYPE_ELEMENT) {
+        Element* element = array_item.element;
+        if (!element || !element->type) return ItemNull;
+        TypeMap* attr_type = (TypeMap*)element->type;
+        size_t data_size = attr_type->byte_size > 0 ? (size_t)attr_type->byte_size : 0;
+        Map* attrs = (Map*)heap_calloc(sizeof(Map) + data_size, LMD_TYPE_MAP);
+        if (!attrs) return ItemNull;
+        attrs->type_id = LMD_TYPE_MAP;
+        attrs->map_kind = element->map_kind;
+        attrs->type = attr_type;
+        if (data_size > 0) {
+            // Element and map containers have different headers, so the attribute
+            // facet must be copied into map storage before ordinary map spreading.
+            attrs->data = (char*)attrs + sizeof(Map);
+            attrs->data_cap = (int)data_size;
+            if (element->data) memcpy(attrs->data, element->data, data_size);
+        }
+        return {.map = attrs};
+    }
     // lists are represented as LMD_TYPE_ARRAY at runtime (LMD_TYPE_LIST was removed);
     // LMD_TYPE_ARRAY_NUM is intentionally rejected — its packed int64/double layout is
     // incompatible with the Item* items[] access below.
