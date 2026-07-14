@@ -38,6 +38,7 @@
 #include "../lib/hashmap.h"
 #include "../lib/hashmap_helpers.h"
 #include "../lib/tagged.hpp"
+#include "../lib/time_util.h"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/network/network_resource_manager.h"
 
@@ -1866,9 +1867,11 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
 }
 
 static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTaskCollection* collection,
-                                                  JsPreambleState* preamble) {
+                                                  JsPreambleState* preamble,
+                                                  DocumentScriptPhaseTiming* timing) {
     if (!runtime || !collection || !preamble) return ItemError;
 
+    uint64_t phase_start_us = timing ? time_now_us() : 0;
     StrBuf* preamble_buf = nullptr;
 #ifndef NDEBUG
     size_t preamble_source_len = 0;
@@ -1936,12 +1939,14 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     }
 #endif
     if (preamble_buf) strbuf_free(preamble_buf);
+    if (timing) timing->preamble_us += time_now_us() - phase_start_us;
     if (get_type_id(result) == LMD_TYPE_ERROR) {
         log_error("execute_document_scripts: document preamble execution failed");
         return result;
     }
 
     bool any_error = false;
+    phase_start_us = timing ? time_now_us() : 0;
     JsScriptSchedulerQueues queues;
     if (!script_scheduler_queues_init(&queues)) {
         log_error("execute_document_scripts: failed to initialize scheduler queues");
@@ -1952,7 +1957,9 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
         log_error("execute_document_scripts: failed to build scheduler queues");
         return ItemError;
     }
+    if (timing) timing->scheduler_us += time_now_us() - phase_start_us;
 
+    phase_start_us = timing ? time_now_us() : 0;
     script_runner_set_ready_state(runtime, "interactive");
     if (!execute_lifecycle_snippet(runtime, preamble,
         "if (document && document.dispatchEvent && typeof Event === 'function') {\n"
@@ -1961,14 +1968,18 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
         "<document-readystatechange-interactive>")) {
         any_error = true;
     }
+    if (timing) timing->interactive_us += time_now_us() - phase_start_us;
 
+    phase_start_us = timing ? time_now_us() : 0;
     if (!execute_script_task_queue(runtime, queues.post_dom, preamble, "post-dom", collection)) {
         any_error = true;
     }
     if (!execute_script_task_queue(runtime, queues.defer, preamble, "defer", collection)) {
         any_error = true;
     }
+    if (timing) timing->user_scripts_us += time_now_us() - phase_start_us;
 
+    phase_start_us = timing ? time_now_us() : 0;
     if (!execute_lifecycle_snippet(runtime, preamble,
         "if (document && document.dispatchEvent && typeof Event === 'function') {\n"
         "  document.dispatchEvent(new Event('DOMContentLoaded'));\n"
@@ -1976,17 +1987,23 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
         "<document-domcontentloaded>")) {
         any_error = true;
     }
+    if (timing) timing->dom_content_loaded_us += time_now_us() - phase_start_us;
 
     // Async classics do not block DOMContentLoaded in Radiant's post-DOM
     // model, but ready async tasks still run before the window load boundary.
+    phase_start_us = timing ? time_now_us() : 0;
     if (!execute_script_task_queue(runtime, queues.async_ready, preamble, "async-ready", collection)) {
         any_error = true;
     }
+    if (timing) timing->async_scripts_us += time_now_us() - phase_start_us;
 
+    phase_start_us = timing ? time_now_us() : 0;
     if (!script_runner_wait_for_load_blockers(runtime, collection)) {
         any_error = true;
     }
+    if (timing) timing->load_blockers_us += time_now_us() - phase_start_us;
 
+    phase_start_us = timing ? time_now_us() : 0;
     script_runner_set_ready_state(runtime, "complete");
     if (!execute_lifecycle_snippet(runtime, preamble,
         "if (document && document.dispatchEvent && typeof Event === 'function') {\n"
@@ -1995,11 +2012,15 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
         "<document-readystatechange-complete>")) {
         any_error = true;
     }
+    if (timing) timing->complete_us += time_now_us() - phase_start_us;
 
+    phase_start_us = timing ? time_now_us() : 0;
     if (!execute_body_onload_tasks(runtime, collection, preamble)) {
         any_error = true;
     }
+    if (timing) timing->body_onload_us += time_now_us() - phase_start_us;
 
+    phase_start_us = timing ? time_now_us() : 0;
     if (!execute_lifecycle_snippet(runtime, preamble,
         "if (window && window.dispatchEvent && typeof Event === 'function') {\n"
         "  window.dispatchEvent(new Event('load'));\n"
@@ -2008,6 +2029,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
         "<window-load>")) {
         any_error = true;
     }
+    if (timing) timing->window_load_us += time_now_us() - phase_start_us;
 
     script_scheduler_queues_free(&queues);
     return any_error ? ItemError : result;
@@ -2017,7 +2039,11 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 // Main entry point
 // ============================================================================
 
-extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool, Url* base_url) {
+extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocument* dom_doc,
+                                                  Pool* pool, Url* base_url,
+                                                  DocumentScriptPhaseTiming* timing) {
+    if (timing) memset(timing, 0, sizeof(*timing));
+    uint64_t phase_start_us = timing ? time_now_us() : 0;
     if (!html_root || !dom_doc) {
         log_debug("execute_document_scripts: null parameters, skipping");
         return;
@@ -2037,6 +2063,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     }
     collect_scripts_recursive(html_root, &script_tasks, base_url, 0);
     log_script_task_diagnostics(&script_tasks);
+    if (timing) timing->collect_us += time_now_us() - phase_start_us;
 
     if (!script_task_collection_has_executable_tasks(&script_tasks)) {
         log_debug("execute_document_scripts: no scripts found");
@@ -2069,6 +2096,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         watchdog_source_len);
 #endif
 
+    phase_start_us = timing ? time_now_us() : 0;
     // set up Runtime for JS transpiler
     Runtime runtime = {};
     runtime.dom_doc = (void*)dom_doc;
@@ -2124,7 +2152,10 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         // large MIR/transpiler pools for pages with big inline scripts.
         preamble = (JsPreambleState*)mem_calloc(1, sizeof(JsPreambleState), MEM_CAT_EVAL);
         log_mem_stage("js: before transpile/exec");
-        result = execute_document_script_tasks_postdom(&runtime, &script_tasks, preamble);
+        if (timing) timing->runtime_setup_us += time_now_us() - phase_start_us;
+        phase_start_us = timing ? time_now_us() : 0;
+        result = execute_document_script_tasks_postdom(&runtime, &script_tasks, preamble, timing);
+        if (timing) timing->postdom_total_us += time_now_us() - phase_start_us;
         log_mem_stage("js: after transpile/exec");
 #ifndef _WIN32
         js_exec_guarded = 0;
@@ -2183,6 +2214,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     }
 #endif
 
+    phase_start_us = timing ? time_now_us() : 0;
     context = saved_js_context;
     input_context = saved_input_context;
     if (saved_js_context && saved_js_context->heap && saved_js_context->name_pool) {
@@ -2216,7 +2248,9 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
             log_info("execute_document_scripts: timer queue drained");
         }
     }
+    if (timing) timing->event_loop_us += time_now_us() - phase_start_us;
 
+    phase_start_us = timing ? time_now_us() : 0;
     // Retain JS state on DomDocument for interactive event handler dispatch.
     // The MIR context, heap, nursery, and name_pool stay alive so compiled
     // functions (clicked(), toggle(), setFontFamily(), etc.) can be invoked
@@ -2282,10 +2316,18 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
             runtime.type_list = nullptr;
         }
     }
+    if (timing) timing->runtime_cleanup_us += time_now_us() - phase_start_us;
 
+    phase_start_us = timing ? time_now_us() : 0;
     script_task_collection_free(&script_tasks);
     script_runner_cleanup_source_cache();
     js_batch_cleanup_unsafe = 0;
+    if (timing) timing->source_cleanup_us += time_now_us() - phase_start_us;
+}
+
+extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool,
+                                         Url* base_url) {
+    execute_document_scripts_profiled(html_root, dom_doc, pool, base_url, nullptr);
 }
 
 extern "C" bool script_runner_js_batch_cleanup_unsafe(void) {
