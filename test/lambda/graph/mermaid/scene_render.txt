@@ -1,0 +1,13 @@
+{
+  installed: true,
+  metadata: true,
+  nodes: 3,
+  edges: 2,
+  measured: true,
+  routes: true,
+  semantic: true,
+  diagnostics: [],
+  upstream_semantic: true,
+  tolerant_geometry: true,
+  strict_geometry: false
+}

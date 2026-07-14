@@ -1,27 +1,35 @@
-<mermaid-suite version: 1;
-  <case id: 'implicit-endpoints', source: 'implicit_endpoints.mmd';
+<mermaid-suite version: 2, upstream-commit: 'f3dea58385fd5c7dd1f4e9c9c1876751ae6943cc',
+    reference-version: '11.16.0';
+  <case id: 'implicit-endpoints', source: 'implicit_endpoints.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir', features: 'edges,implicit-nodes';
     <expect direction: 'LR', nodes: 2, edges: 1>
     <node id: 'A', label: 'A', shape: 'box'>
     <node id: 'B', label: 'B', shape: 'box'>
     <edge from: 'A', to: 'B', arrow-end: 'true'>
   >
-  <case id: 'direction-rl', source: 'direction_rl.mmd';
+  <case id: 'direction-rl', source: 'direction_rl.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir', features: 'direction';
     <expect direction: 'RL', nodes: 2, edges: 1>
   >
-  <case id: 'direction-bt', source: 'direction_bt.mmd';
+  <case id: 'direction-bt', source: 'direction_bt.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir', features: 'direction';
     <expect direction: 'BT', nodes: 2, edges: 1>
   >
-  <case id: 'shapes-and-labels', source: 'shapes_and_labels.mmd';
+  <case id: 'shapes-and-labels', source: 'shapes_and_labels.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'scene-semantic', features: 'shapes,labels,edges',
+      expected-scene: 'expected/scene/shapes_and_labels.mark';
     <expect direction: 'TB', nodes: 3, source-nodes: 4, edges: 2>
     <node id: 'A', label: 'Start', shape: 'rounded'>
     <node id: 'B', label: 'Valid?', shape: 'diamond'>
     <node id: 'C', label: 'Done', shape: 'doublecircle'>
     <edge from: 'A', to: 'B', label: 'check', arrow-end: 'true'>
   >
-  <case id: 'node-redeclarations', source: 'node_redeclarations.mmd';
+  <case id: 'node-redeclarations', source: 'node_redeclarations.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir', features: 'node-redeclaration';
     <expect direction: 'TB', nodes: 1, source-nodes: 2, edges: 0>
   >
-  <case id: 'rich-labels', source: 'rich_labels.mmd';
+  <case id: 'rich-labels', source: 'rich_labels.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir', features: 'markdown,html-labels';
     <expect direction: 'LR', nodes: 2, edges: 1>
     <node id: 'A', label: 'The **API** _service_', label-format: 'markdown'>
     <node id: 'B', label: '<b>Safe</b><br><code>HTML</code><script>drop</script>',
@@ -29,17 +37,20 @@
     <edge from: 'A', to: 'B',
       label: '<strong>calls</strong><script>drop</script>', label-format: 'html'>
   >
-  <case id: 'nested-subgraph', source: 'nested_subgraph.mmd';
+  <case id: 'nested-subgraph', source: 'nested_subgraph.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir', features: 'subgraphs,nesting';
     <expect direction: 'TB', nodes: 3, edges: 2, subgraphs: 1>
     <subgraph id: 'backend', label: 'Backend', direction: 'LR'>
     <node id: 'db', label: 'Database', shape: 'cylinder'>
   >
-  <case id: 'class-metadata', source: 'class_metadata.mmd';
+  <case id: 'class-metadata', source: 'class_metadata.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir', features: 'classes,styles';
     <expect direction: 'TB', nodes: 2, edges: 1, style-rules: 1, class-assignments: 1>
     <class-assignment targets: 'A,B', class: 'warning'>
     <style-rule class: 'warning', declarations: 'fill:#fff4cc,stroke:#8a6500'>
   >
-  <case id: 'chained-classes', source: 'chained_classes.mmd';
+  <case id: 'chained-classes', source: 'chained_classes.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir', features: 'chained-edges,classes';
     <expect direction: 'LR', nodes: 3, edges: 2, style-rules: 2, class-assignments: 2>
     <node id: 'A', label: 'Start', shape: 'rounded'>
     <node id: 'B', label: 'Valid?', shape: 'diamond'>
@@ -49,7 +60,8 @@
     <class-assignment targets: 'A', class: 'entry'>
     <class-assignment targets: 'C', class: 'success'>
   >
-  <case id: 'multi-node-length', source: 'multi_node_length.mmd';
+  <case id: 'multi-node-length', source: 'multi_node_length.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir', features: 'multi-node,min-length';
     <expect direction: 'TB', nodes: 5, edges: 6>
     <edge from: 'A', to: 'C', min-length: '2'>
     <edge from: 'A', to: 'D', min-length: '2'>
@@ -58,17 +70,20 @@
     <edge from: 'C', to: 'E', arrow-end: 'true'>
     <edge from: 'D', to: 'E', arrow-end: 'true'>
   >
-  <case id: 'edge-ids-markers', source: 'edge_ids_markers.mmd';
+  <case id: 'edge-ids-markers', source: 'edge_ids_markers.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir', features: 'edge-ids,markers';
     <expect direction: 'LR', nodes: 5, edges: 4>
     <edge id: 'e1', from: 'A', to: 'B', arrow-tail: 'none', arrow-head: 'circle'>
     <edge id: 'e2', from: 'B', to: 'C', arrow-tail: 'none', arrow-head: 'cross'>
     <edge id: 'e3', from: 'C', to: 'D', arrow-tail: 'circle', arrow-head: 'circle'>
     <edge id: 'e4', from: 'D', to: 'E', arrow-tail: 'cross', arrow-head: 'cross'>
   >
-  <case id: 'parallel-edges', source: 'parallel_edges.mmd';
+  <case id: 'parallel-edges', source: 'parallel_edges.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir', features: 'parallel-edges';
     <expect direction: 'TB', nodes: 2, edges: 3>
   >
-  <case id: 'metadata-styles', source: 'metadata_styles.mmd';
+  <case id: 'metadata-styles', source: 'metadata_styles.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir', features: 'metadata,styles';
     <expect direction: 'LR', nodes: 2, edges: 1, style-assignments: 2;
       <title value: 'Service request graph'>
       <description value: 'Client request flow to the API.'>
@@ -78,9 +93,37 @@
         declarations: 'stroke:#0f766e,stroke-width:2px'>
     >
   >
-  <case id: 'chart-routing', source: 'chart_routing.mmd';
+  <case id: 'chart-routing', source: 'chart_routing.mmd',
+      origin: 'lambda', status: 'unsupported', policy: 'ir', features: 'chart-dispatch';
     <expect kind: 'sequence', status: 'unsupported', nodes: 0, edges: 0;
       <diagnostic code: 'mermaid.chart-family', severity: 'error'>
     >
+  >
+  <case id: 'upstream-single-diamond',
+      source: 'cases/flowchart/nodes/upstream_single_diamond.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'scene-semantic',
+      features: 'nodes,diamond', expected-scene: 'expected/scene/upstream_single_diamond.mark',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-singlenode.spec.js',
+      upstream-test: 'should handle a single diamond node', reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 1, edges: 0>
+    <node id: 'a', label: 'A', shape: 'diamond'>
+  >
+  <case id: 'upstream-subgraph-direction-bt',
+      source: 'cases/flowchart/subgraphs/upstream_direction_bt.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'ir',
+      features: 'subgraphs,direction',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-direction.spec.js',
+      upstream-test: 'should handle a subgraph with a direction', reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 2, edges: 1, subgraphs: 1>
+    <subgraph id: 'A', label: 'A', direction: 'BT'>
+  >
+  <case id: 'upstream-subgraph-id-title',
+      source: 'cases/flowchart/subgraphs/upstream_id_title.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'ir',
+      features: 'subgraphs,labels,ids',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/subgraph.spec.js',
+      upstream-test: 'should handle subgraph with id and title notation', reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 2, edges: 1, subgraphs: 1>
+    <subgraph id: 'some-id', label: 'Some Title'>
   >
 >
