@@ -308,15 +308,9 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         uintptr_t ctag = child_elem->tag();
 
         if (ctag == HTM_TAG_OPTION) {
-            // Get text from DomText children of option
-            for (DomNode* tc = child_elem->first_child; tc; tc = tc->next_sibling) {
-                DomText* dt = tc->as_text();
-                if (dt && dt->text && dt->length > 0) {
-                    TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
-                    float w = use_min_content ? tw.min_content : tw.max_content;
-                    if (w > max_text_width) max_text_width = w;
-                }
-            }
+            float width = measure_direct_text_children_intrinsic_width(
+                lycon, child_elem, use_min_content, CSS_VALUE_NONE);
+            if (width > max_text_width) max_text_width = width;
         } else if (ctag == HTM_TAG_OPTGROUP) {
             // Measure optgroup label — shown as a header row in the dropdown (no indent)
             const char* label_attr = child_elem->get_attribute("label");
@@ -331,15 +325,8 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
             // Check options inside optgroup — they are indented in the dropdown on macOS Chrome
             for (DomNode* gc = child_elem->first_child; gc; gc = gc->next_sibling) {
                 if (gc->is_element() && gc->as_element()->tag() == HTM_TAG_OPTION) {
-                    float opt_text_width = 0;
-                    for (DomNode* tc = gc->as_element()->first_child; tc; tc = tc->next_sibling) {
-                        DomText* dt = tc->as_text();
-                        if (dt && dt->text && dt->length > 0) {
-                            TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
-                            float w = use_min_content ? tw.min_content : tw.max_content;
-                            if (w > opt_text_width) opt_text_width = w;
-                        }
-                    }
+                    float opt_text_width = measure_direct_text_children_intrinsic_width(
+                        lycon, gc->as_element(), use_min_content, CSS_VALUE_NONE);
                     // Apply indent; blank options in an optgroup still occupy at least OPTGROUP_OPTION_MIN_WIDTH
                     float effective = opt_text_width + FormDefaults::OPTGROUP_OPTION_INDENT;
                     if (effective < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH)

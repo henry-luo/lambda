@@ -119,72 +119,7 @@ static void on_script_message(WebKitUserContentManager* manager,
 
 static void on_lambda_scheme_request(WebKitURISchemeRequest* request, gpointer user_data) {
     (void)user_data;
-    const char* uri = webkit_uri_scheme_request_get_uri(request);
-    const char* path = webkit_uri_scheme_request_get_path(request);
-    if (!path) path = "/";
-
-    // strip leading /
-    const char* rel = (path[0] == '/') ? path + 1 : path;
-
-    char cwd[4096];
-    if (!getcwd(cwd, sizeof(cwd))) {
-        GError* err = g_error_new(G_FILE_ERROR, G_FILE_ERROR_NOENT,
-                                  "failed to get CWD");
-        webkit_uri_scheme_request_finish_error(request, err);
-        g_error_free(err);
-        return;
-    }
-
-    char full_path[8192];
-    snprintf(full_path, sizeof(full_path), "%s/%s", cwd, rel);
-
-    // security: resolve and ensure within CWD
-    char* resolved = realpath(full_path, nullptr);
-    if (!resolved) {
-        log_error("webview lambda:// scheme: file not found: %s", full_path);
-        GError* err = g_error_new(G_FILE_ERROR, G_FILE_ERROR_NOENT,
-                                  "file not found: %s", full_path);
-        webkit_uri_scheme_request_finish_error(request, err);
-        g_error_free(err);
-        return;
-    }
-
-    char* cwd_resolved = realpath(cwd, nullptr);
-    if (!cwd_resolved || strncmp(resolved, cwd_resolved, strlen(cwd_resolved)) != 0) {
-        log_error("webview lambda:// scheme: path traversal blocked: %s", resolved);
-        if (cwd_resolved) g_free(cwd_resolved);
-        g_free(resolved);
-        GError* err = g_error_new(G_FILE_ERROR, G_FILE_ERROR_ACCES,
-                                  "path traversal blocked");
-        webkit_uri_scheme_request_finish_error(request, err);
-        g_error_free(err);
-        return;
-    }
-    g_free(cwd_resolved);
-
-    // read file
-    GError* file_err = nullptr;
-    GMappedFile* mapped = g_mapped_file_new(resolved, FALSE, &file_err);
-    g_free(resolved);
-
-    if (!mapped) {
-        log_error("webview lambda:// scheme: cannot read file: %s", file_err->message);
-        webkit_uri_scheme_request_finish_error(request, file_err);
-        g_error_free(file_err);
-        return;
-    }
-
-    gsize data_len = g_mapped_file_get_length(mapped);
-    const char* data = g_mapped_file_get_contents(mapped);
-    GInputStream* stream = g_memory_input_stream_new_from_data(
-        g_memdup2(data, data_len), data_len, g_free);
-    g_mapped_file_unref(mapped);
-
-    const char* mime = webview_linux_mime_for_path(full_path);
-    webkit_uri_scheme_request_finish(request, stream, (gint64)data_len, mime);
-    g_object_unref(stream);
-
-    log_debug("webview lambda:// scheme: served %s (%zu bytes, %s)", full_path, data_len, mime);
+    webview_linux_finish_lambda_scheme_request(request, "webview lambda:// scheme");
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +178,24 @@ static WebKitWebView* create_webkit_view(WebViewHandle* handle,
 // Platform API — child window mode
 // ---------------------------------------------------------------------------
 
+static void apply_child_window_bounds(WebViewHandle* handle,
+                                      float x, float y, float width, float height,
+                                      float pixel_ratio) {
+    int window_x = 0, window_y = 0;
+    glfwGetWindowPos(handle->glfw_window, &window_x, &window_y);
+    int absolute_x = (int)(window_x + x);  // INT_CAST_OK: screen pixel coordinates
+    int absolute_y = (int)(window_y + y);  // INT_CAST_OK: screen pixel coordinates
+    int gtk_width = (int)width;             // INT_CAST_OK: CSS pixels to GTK logical pixels
+    int gtk_height = (int)height;           // INT_CAST_OK: CSS pixels to GTK logical pixels
+    gtk_window_move(GTK_WINDOW(handle->gtk_window), absolute_x, absolute_y);
+    gtk_window_resize(GTK_WINDOW(handle->gtk_window), gtk_width, gtk_height);
+    handle->last_x = x;
+    handle->last_y = y;
+    handle->width = width;
+    handle->height = height;
+    handle->pixel_ratio = pixel_ratio;
+}
+
 WebViewHandle* webview_platform_create(GLFWwindow* window,
                                        float x, float y, float w, float h,
                                        float pixel_ratio) {
@@ -268,23 +221,12 @@ WebViewHandle* webview_platform_create(GLFWwindow* window,
     gtk_container_add(GTK_CONTAINER(handle->gtk_window), GTK_WIDGET(handle->wk_view));
     gtk_widget_show_all(handle->gtk_window);
 
-    // position at absolute screen coordinates
-    int win_x = 0, win_y = 0;
-    glfwGetWindowPos(window, &win_x, &win_y);
-    int abs_x = (int)(win_x + x);          // INT_CAST_OK: screen pixel coordinates
-    int abs_y = (int)(win_y + y);          // INT_CAST_OK: screen pixel coordinates
-    int ww    = (int)(w);                  // INT_CAST_OK: CSS pixel width → GTK logical px
-    int wh    = (int)(h);                  // INT_CAST_OK: CSS pixel height → GTK logical px
-    gtk_window_move(GTK_WINDOW(handle->gtk_window), abs_x, abs_y);
-    gtk_window_resize(GTK_WINDOW(handle->gtk_window), ww, wh);
-
-    handle->last_x = x;
-    handle->last_y = y;
+    apply_child_window_bounds(handle, x, y, w, h, pixel_ratio);
 
     // pump GTK events so the window appears
     while (gtk_events_pending()) gtk_main_iteration_do(FALSE);
 
-    log_info("webview_platform_create (linux): GTK popup at (%d,%d) %dx%d", abs_x, abs_y, ww, wh);
+    log_info("webview_platform_create (linux): GTK popup at (%.0f,%.0f) %.0fx%.0f", x, y, w, h);
     return handle;
 }
 
@@ -323,22 +265,7 @@ void webview_platform_set_bounds(WebViewHandle* handle,
                                  float x, float y, float w, float h,
                                  float pixel_ratio) {
     if (!handle || !handle->gtk_window || !handle->glfw_window) return;
-
-    int win_x = 0, win_y = 0;
-    glfwGetWindowPos(handle->glfw_window, &win_x, &win_y);
-    int abs_x = (int)(win_x + x);      // INT_CAST_OK: screen pixel coordinates
-    int abs_y = (int)(win_y + y);      // INT_CAST_OK: screen pixel coordinates
-    int ww    = (int)(w);              // INT_CAST_OK: CSS pixel width
-    int wh    = (int)(h);              // INT_CAST_OK: CSS pixel height
-
-    gtk_window_move(GTK_WINDOW(handle->gtk_window), abs_x, abs_y);
-    gtk_window_resize(GTK_WINDOW(handle->gtk_window), ww, wh);
-
-    handle->last_x = x;
-    handle->last_y = y;
-    handle->width  = w;
-    handle->height = h;
-    handle->pixel_ratio = pixel_ratio;
+    apply_child_window_bounds(handle, x, y, w, h, pixel_ratio);
 
     // pump pending GTK events to apply the move/resize
     while (gtk_events_pending()) gtk_main_iteration_do(FALSE);

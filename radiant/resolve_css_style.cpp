@@ -1757,7 +1757,7 @@ static bool css_url_has_scheme(const char* url) {
     return false;
 }
 
-static char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl, const char* url) {
+char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl, const char* url) {
     if (!lycon || !url) return nullptr;
 
     size_t url_len = strlen(url);
@@ -1783,6 +1783,42 @@ static char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration
     if (!copy) return nullptr;
     str_copy(copy, url_len + 1, url, url_len);
     return copy;
+}
+
+static bool css_line_decoration_style(CssEnum keyword) {
+    return keyword == CSS_VALUE_SOLID || keyword == CSS_VALUE_DOTTED ||
+        keyword == CSS_VALUE_DASHED || keyword == CSS_VALUE_DOUBLE ||
+        keyword == CSS_VALUE_GROOVE || keyword == CSS_VALUE_RIDGE ||
+        keyword == CSS_VALUE_INSET || keyword == CSS_VALUE_OUTSET ||
+        keyword == CSS_VALUE_NONE;
+}
+
+static void resolve_css_line_decoration_component(LayoutContext* lycon,
+                                                  CssPropertyId prop_id,
+                                                  const CssValue* value,
+                                                  float* width,
+                                                  CssEnum* style,
+                                                  Color* color) {
+    if (!value || !width || !style || !color) return;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = value->data.keyword;
+        if (css_line_decoration_style(keyword)) {
+            *style = keyword;
+        // width keywords must be classified before named colors in every line-decoration shorthand.
+        } else if (keyword == CSS_VALUE_THIN || keyword == CSS_VALUE_MEDIUM ||
+                   keyword == CSS_VALUE_THICK) {
+            *width = keyword == CSS_VALUE_THIN ? 1.0f :
+                (keyword == CSS_VALUE_MEDIUM ? 3.0f : 5.0f);
+        } else {
+            *color = color_name_to_rgb(keyword);
+        }
+    } else if (value->type == CSS_VALUE_TYPE_LENGTH ||
+               value->type == CSS_VALUE_TYPE_NUMBER) {
+        *width = resolve_length_value(lycon, prop_id, value);
+    } else if (value->type == CSS_VALUE_TYPE_COLOR ||
+               value->type == CSS_VALUE_TYPE_FUNCTION) {
+        *color = resolve_color_value(lycon, value);
+    }
 }
 
 static bool parse_border_radius_component(LayoutContext* lycon, int prop_id, const CssValue* value,
@@ -8067,27 +8103,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_LIST) {
                 for (int i = 0; i < value->data.list.count; i++) {
                     const CssValue* v = value->data.list.values[i];
-                    if (!v) continue;
-                    if (v->type == CSS_VALUE_TYPE_KEYWORD) {
-                        CssEnum kw = v->data.keyword;
-                        if (kw == CSS_VALUE_SOLID || kw == CSS_VALUE_DOTTED || kw == CSS_VALUE_DASHED ||
-                            kw == CSS_VALUE_DOUBLE || kw == CSS_VALUE_GROOVE || kw == CSS_VALUE_RIDGE ||
-                            kw == CSS_VALUE_INSET || kw == CSS_VALUE_OUTSET || kw == CSS_VALUE_NONE) {
-                            block->multicol->rule_style = kw;
-                        } else if (kw == CSS_VALUE_THIN) {
-                            block->multicol->rule_width = 1.0f;
-                        } else if (kw == CSS_VALUE_MEDIUM) {
-                            block->multicol->rule_width = 3.0f;
-                        } else if (kw == CSS_VALUE_THICK) {
-                            block->multicol->rule_width = 5.0f;
-                        } else {
-                            block->multicol->rule_color = color_name_to_rgb(kw);
-                        }
-                    } else if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_NUMBER) {
-                        block->multicol->rule_width = resolve_length_value(lycon, prop_id, v);
-                    } else if (v->type == CSS_VALUE_TYPE_COLOR || v->type == CSS_VALUE_TYPE_FUNCTION) {
-                        block->multicol->rule_color = resolve_color_value(lycon, v);
-                    }
+                    resolve_css_line_decoration_component(
+                        lycon, prop_id, v, &block->multicol->rule_width,
+                        &block->multicol->rule_style, &block->multicol->rule_color);
                 }
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
                 block->multicol->rule_style = CSS_VALUE_NONE;
@@ -11675,21 +11693,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_LIST) {
                 for (int i = 0; i < value->data.list.count; i++) {
                     const CssValue* v = value->data.list.values[i];
-                    if (!v) continue;
-                    if (v->type == CSS_VALUE_TYPE_KEYWORD) {
-                        CssEnum kw = v->data.keyword;
-                        if (kw == CSS_VALUE_SOLID || kw == CSS_VALUE_DOTTED || kw == CSS_VALUE_DASHED ||
-                            kw == CSS_VALUE_DOUBLE || kw == CSS_VALUE_GROOVE || kw == CSS_VALUE_RIDGE ||
-                            kw == CSS_VALUE_INSET || kw == CSS_VALUE_OUTSET || kw == CSS_VALUE_NONE) {
-                            span->bound->outline->style = kw;
-                        } else {
-                            span->bound->outline->color = color_name_to_rgb(kw);
-                        }
-                    } else if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_NUMBER) {
-                        span->bound->outline->width = resolve_length_value(lycon, prop_id, v);
-                    } else if (v->type == CSS_VALUE_TYPE_COLOR || v->type == CSS_VALUE_TYPE_FUNCTION) {
-                        span->bound->outline->color = resolve_color_value(lycon, v);
-                    }
+                    resolve_css_line_decoration_component(
+                        lycon, prop_id, v, &span->bound->outline->width,
+                        &span->bound->outline->style, &span->bound->outline->color);
                 }
             } else if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
                 span->bound->outline->width = resolve_length_value(lycon, prop_id, value);

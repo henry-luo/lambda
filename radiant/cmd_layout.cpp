@@ -4148,6 +4148,35 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
  * @param pool Memory pool for allocations
  * @return DomDocument structure with Lambda CSS DOM, ready for layout
  */
+static void release_layout_runtime(Runtime* runtime) {
+    if (!runtime) return;
+    runtime_cleanup(runtime);
+    mem_free(runtime);
+}
+
+static DomDocument* create_layout_dom(Input* input, Element* root,
+                                      const char* document_kind,
+                                      Runtime* owned_runtime,
+                                      DomElement** out_root) {
+    if (out_root) *out_root = nullptr;
+    DomDocument* document = dom_document_create(input);
+    if (!document) {
+        log_error("[LAYOUT DOC INIT] failed to create %s document", document_kind);
+        release_layout_runtime(owned_runtime);
+        return nullptr;
+    }
+    DomElement* dom_root = build_dom_tree_from_element(root, document, nullptr);
+    if (!dom_root) {
+        log_error("[LAYOUT DOC INIT] failed to build %s DOM tree", document_kind);
+        dom_document_destroy(document);
+        // initialization owns the optional runtime until the DOM adopts it.
+        release_layout_runtime(owned_runtime);
+        return nullptr;
+    }
+    if (out_root) *out_root = dom_root;
+    return document;
+}
+
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool) {
     auto total_start = std::chrono::high_resolution_clock::now();
 
@@ -4346,10 +4375,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
                 log_error("[Lambda Markdown] Math rendering script failed or returned unexpected type");
             }
 
-            if (math_runtime) {
-                runtime_cleanup(math_runtime);
-                mem_free(math_runtime);
-            }
+            release_layout_runtime(math_runtime);
             strbuf_free(script);
         }
 
@@ -4366,26 +4392,10 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 
     // Step 2: Create DomDocument and build DomElement tree from Lambda Element tree
     auto step2_start = std::chrono::high_resolution_clock::now();
-    DomDocument* dom_doc = dom_document_create(input);
-    if (!dom_doc) {
-        log_error("Failed to create DomDocument");
-        if (markdown_math_runtime) {
-            runtime_cleanup(markdown_math_runtime);
-            mem_free(markdown_math_runtime);
-        }
-        return nullptr;
-    }
-
-    DomElement* dom_root = build_dom_tree_from_element(markdown_root, dom_doc, nullptr);
-    if (!dom_root) {
-        log_error("Failed to build DomElement tree from markdown");
-        dom_document_destroy(dom_doc);
-        if (markdown_math_runtime) {
-            runtime_cleanup(markdown_math_runtime);
-            mem_free(markdown_math_runtime);
-        }
-        return nullptr;
-    }
+    DomElement* dom_root = nullptr;
+    DomDocument* dom_doc = create_layout_dom(
+        input, markdown_root, "markdown", markdown_math_runtime, &dom_root);
+    if (!dom_doc) return nullptr;
 
     auto step2_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 2 - Build DOM tree: %.1fms",
@@ -4397,10 +4407,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     if (!css_engine) {
         log_error("Failed to create CSS engine");
         dom_document_destroy(dom_doc);
-        if (markdown_math_runtime) {
-            runtime_cleanup(markdown_math_runtime);
-            mem_free(markdown_math_runtime);
-        }
+        release_layout_runtime(markdown_math_runtime);
         return nullptr;
     }
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
@@ -4508,18 +4515,10 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
 
     // Step 2: Create DomDocument and build DomElement tree from Lambda Element tree
     auto step2_start = std::chrono::high_resolution_clock::now();
-    DomDocument* dom_doc = dom_document_create(input);
-    if (!dom_doc) {
-        log_error("Failed to create DomDocument");
-        return nullptr;
-    }
-
-    DomElement* dom_root = build_dom_tree_from_element(wiki_root, dom_doc, nullptr);
-    if (!dom_root) {
-        log_error("Failed to build DomElement tree from wiki");
-        dom_document_destroy(dom_doc);
-        return nullptr;
-    }
+    DomElement* dom_root = nullptr;
+    DomDocument* dom_doc = create_layout_dom(
+        input, wiki_root, "wiki", nullptr, &dom_root);
+    if (!dom_doc) return nullptr;
 
     auto step2_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 2 - Build DOM tree: %.1fms",
@@ -4643,8 +4642,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     if (!script_result || get_type_id(script_result->root) == LMD_TYPE_NULL
         || get_type_id(script_result->root) == LMD_TYPE_ERROR) {
         log_error("[Lambda LaTeX] Lambda LaTeX package - HTML rendering failed for: %s", latex_filepath);
-        runtime_cleanup(latex_runtime);
-        mem_free(latex_runtime);
+        release_layout_runtime(latex_runtime);
         pool_destroy(result_pool);
         return nullptr;
     }
@@ -4659,8 +4657,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         html_root = script_result->root.element;
     } else {
         log_error("[Lambda LaTeX] Lambda package returned non-element type: %d", result_type);
-        runtime_cleanup(latex_runtime);
-        mem_free(latex_runtime);
+        release_layout_runtime(latex_runtime);
         pool_destroy(result_pool);
         return nullptr;
     }
@@ -4672,8 +4669,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     if (!html_root) {
         log_error("[Lambda LaTeX] Failed to get HTML root element from LaTeX conversion");
-        runtime_cleanup(latex_runtime);
-        mem_free(latex_runtime);
+        release_layout_runtime(latex_runtime);
         pool_destroy(result_pool);
         return nullptr;
     }
@@ -4685,8 +4681,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     DomDocument* dom_doc = dom_document_create(result_input);
     if (!dom_doc) {
         log_error("Failed to create DomDocument");
-        runtime_cleanup(latex_runtime);
-        mem_free(latex_runtime);
+        release_layout_runtime(latex_runtime);
         pool_destroy(result_pool);
         return nullptr;
     }
@@ -4699,8 +4694,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     if (!dom_root) {
         log_error("Failed to build DomElement tree from HTML");
         dom_document_destroy(dom_doc);
-        runtime_cleanup(latex_runtime);
-        mem_free(latex_runtime);
+        release_layout_runtime(latex_runtime);
         pool_destroy(result_pool);
         return nullptr;
     }
@@ -4712,8 +4706,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     if (!css_engine) {
         log_error("Failed to create CSS engine");
         dom_document_destroy(dom_doc);
-        runtime_cleanup(latex_runtime);
-        mem_free(latex_runtime);
+        release_layout_runtime(latex_runtime);
         pool_destroy(result_pool);
         return nullptr;
     }
@@ -5102,8 +5095,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
 
     if (!script_output || !script_output->root.item) {
         log_error("[Lambda Script] Failed to evaluate script or script returned null");
-        runtime_cleanup(runtime);
-        mem_free(runtime);
+        release_layout_runtime(runtime);
         pool_destroy(result_pool);
         return nullptr;
     }
@@ -5119,8 +5111,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     // Check if the script returned an error
     if (result_type == LMD_TYPE_ERROR) {
         log_error("[Lambda Script] Script evaluation returned an error");
-        runtime_cleanup(runtime);
-        mem_free(runtime);
+        release_layout_runtime(runtime);
         pool_destroy(result_pool);
         return nullptr;
     }
@@ -5138,8 +5129,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
             "svg{display:block;}"
             "</style></head><body>%s</body></html>",
             svg_content);
-        runtime_cleanup(runtime);
-        mem_free(runtime);
+        release_layout_runtime(runtime);
         pool_destroy(result_pool);
         url_destroy(script_url);
         log_info("[Lambda Script] Loading SVG-in-HTML from string (%zu bytes)", html_buf->length);
@@ -5158,8 +5148,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
                 return write_svg_wrapped_html(svg_str->chars);
             }
             log_error("[Lambda Script] Failed to format SVG element");
-            runtime_cleanup(runtime);
-            mem_free(runtime);
+            release_layout_runtime(runtime);
             pool_destroy(result_pool);
             return nullptr;
         }
@@ -5181,8 +5170,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
             // SVG helper above, which frees its buffer right after the call), so the
             // document is self-contained once it returns. (was heap-use-after-free)
             DomDocument* doc = load_html_string_doc(result_str->chars, viewport_width, viewport_height);
-            runtime_cleanup(runtime);
-            mem_free(runtime);
+            release_layout_runtime(runtime);
             pool_destroy(result_pool);
             url_destroy(script_url);
             return doc;
@@ -5276,8 +5264,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     if (!dom_doc) {
         log_error("[Lambda Script] Failed to create DomDocument");
         pool_destroy(result_pool);
-        runtime_cleanup(runtime);
-        mem_free(runtime);
+        release_layout_runtime(runtime);
         return nullptr;
     }
 
@@ -5290,8 +5277,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         log_error("[Lambda Script] Failed to build DomElement tree");
         dom_document_destroy(dom_doc);
         pool_destroy(result_pool);
-        runtime_cleanup(runtime);
-        mem_free(runtime);
+        release_layout_runtime(runtime);
         return nullptr;
     }
 
@@ -5304,8 +5290,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     CssEngine* css_engine = css_engine_create(pool);
     if (!css_engine) {
         log_error("[Lambda Script] Failed to create CSS engine");
-        runtime_cleanup(runtime);
-        mem_free(runtime);
+        release_layout_runtime(runtime);
         return nullptr;
     }
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
@@ -6270,6 +6255,20 @@ static void layout_phase_timing_set_js(LayoutPhaseTiming* timing,
     timing->js_preamble_ms = js_phase_us_to_ms(js->preamble_us);
 }
 
+static void layout_phase_timing_set_load(LayoutPhaseTiming* timing,
+                                         double total_ms, double load_ms,
+                                         const HtmlLoadPhaseTiming* html,
+                                         const DocumentScriptPhaseTiming* script,
+                                         const JsMirPhaseTiming* js) {
+    timing->total_ms = total_ms;
+    timing->load_ms = load_ms;
+    set_detailed_load_timing(timing, html);
+    set_detailed_script_timing(timing, script);
+    layout_phase_timing_set_js(timing, js);
+    timing->document_parse_ms = load_ms - timing->js_total_ms;
+    if (timing->document_parse_ms < 0.0) timing->document_parse_ms = 0.0;
+}
+
 static void write_layout_phase_timing(FILE* timing_file, const char* input_file,
                                       bool success, const LayoutPhaseTiming* timing) {
     if (!timing_file || !timing) return;
@@ -6534,13 +6533,11 @@ static bool layout_single_file(
         load_end = std::chrono::high_resolution_clock::now();
         js_mir_end_document_phase_timing(&document_js_timing);
         LayoutPhaseTiming timing = {};
-        timing.total_ms = std::chrono::duration<double, std::milli>(load_end - total_start).count();
-        timing.load_ms = std::chrono::duration<double, std::milli>(load_end - load_start).count();
-        set_detailed_load_timing(&timing, &html_load_timing);
-        set_detailed_script_timing(&timing, &document_script_timing);
-        layout_phase_timing_set_js(&timing, &document_js_timing);
-        timing.document_parse_ms = timing.load_ms - timing.js_total_ms;
-        if (timing.document_parse_ms < 0.0) timing.document_parse_ms = 0.0;
+        layout_phase_timing_set_load(
+            &timing,
+            std::chrono::duration<double, std::milli>(load_end - total_start).count(),
+            std::chrono::duration<double, std::milli>(load_end - load_start).count(),
+            &html_load_timing, &document_script_timing, &document_js_timing);
         write_layout_phase_timing(timing_file, input_file, false, &timing);
         log_error("Failed to load document: %s", input_file);
         if (event_log) {
@@ -6654,13 +6651,11 @@ static bool layout_single_file(
     {
         auto total_end = std::chrono::high_resolution_clock::now();
         LayoutPhaseTiming timing = {};
-        timing.total_ms = std::chrono::duration<double, std::milli>(total_end - total_start).count();
-        timing.load_ms = std::chrono::duration<double, std::milli>(load_end - load_start).count();
-        set_detailed_load_timing(&timing, &html_load_timing);
-        set_detailed_script_timing(&timing, &document_script_timing);
-        layout_phase_timing_set_js(&timing, &document_js_timing);
-        timing.document_parse_ms = timing.load_ms - timing.js_total_ms;
-        if (timing.document_parse_ms < 0.0) timing.document_parse_ms = 0.0;
+        layout_phase_timing_set_load(
+            &timing,
+            std::chrono::duration<double, std::milli>(total_end - total_start).count(),
+            std::chrono::duration<double, std::milli>(load_end - load_start).count(),
+            &html_load_timing, &document_script_timing, &document_js_timing);
         timing.layout_ms = layout_phase_ran
             ? std::chrono::duration<double, std::milli>(layout_end - layout_start).count()
             : 0.0;

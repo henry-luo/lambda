@@ -2851,6 +2851,29 @@ static void dispatch_form_modified_delete(EventContext* evcon, DomElement* elem,
     evcon->need_repaint = true;
 }
 
+static bool dispatch_form_modified_delete_key(EventContext* evcon,
+                                              DomElement* elem,
+                                              DocState* state,
+                                              View* target,
+                                              const char* value,
+                                              int value_len,
+                                              int caret,
+                                              int key,
+                                              bool alt,
+                                              bool cmd) {
+    if ((alt || cmd) && key == RDT_KEY_BACKSPACE) {
+        dispatch_form_modified_delete(
+            evcon, elem, state, target, value, value_len, caret, true, cmd);
+        return true;
+    }
+    if (alt && key == RDT_KEY_DELETE) {
+        dispatch_form_modified_delete(
+            evcon, elem, state, target, value, value_len, caret, false, false);
+        return true;
+    }
+    return false;
+}
+
 static void dispatch_form_delete_key(EventContext* evcon, DomElement* elem,
                                      DocState* state, View* target,
                                      const char* value, int value_len, int caret,
@@ -5861,19 +5884,9 @@ static bool handle_select_click(EventContext* evcon, View* target) {
     log_debug("handle_select_click: opening dropdown with %d options", select->form->option_count);
     doc_state_open_dropdown(state, static_cast<View*>(select));
 
-    // Calculate position (below the select, in absolute screen coords)
-    // Walk up parent chain to get absolute position
-    float abs_x = select->x;
-    float abs_y = select->y + select->height;  // Below the select
-    View* parent = select->parent;
-    while (parent) {
-        if (parent->is_block()) {
-            ViewBlock* pblock = lam::view_require_block(parent);
-            abs_x += pblock->x;
-            abs_y += pblock->y;
-        }
-        parent = parent->parent;
-    }
+    float abs_x = 0.0f, abs_y = 0.0f;
+    view_to_absolute_position(select_view, select->x, select->y + select->height,
+                              0.0f, 0.0f, &abs_x, &abs_y);
 
     doc_state_set_dropdown_geometry(state, abs_x * scale, abs_y * scale,
         state->dropdown_width, state->dropdown_height);
@@ -6568,6 +6581,22 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
     *out_height = rect->height;  // use rect height as caret height
 }
 
+static void event_text_caret_rect(EventContext* evcon, ViewText* text,
+                                  TextRect* fallback_rect, int char_offset,
+                                  float* x, float* y, float* height) {
+    EditingCaretRect caret_rect;
+    if (editing_geometry_dom_text_caret_rect(
+            evcon->ui_context, text,
+            char_offset < 0 ? 0 : (uint32_t)char_offset, &caret_rect)) {
+        *x = caret_rect.x;
+        *y = caret_rect.y;
+        *height = caret_rect.height;
+        return;
+    }
+    calculate_position_from_char_offset(
+        evcon, text, fallback_rect, char_offset, x, y, height);
+}
+
 // Glyph-precise X resolver registered with the dom_range resolver so that
 // `dom_range_for_each_rect()` (used to paint selection rectangles) computes
 // rect-relative x using the SAME glyph walk as the caret painter
@@ -7252,17 +7281,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 // Calculate and set visual position for the caret
                 float caret_x, caret_y, caret_height;
-                EditingCaretRect caret_rect;
-                if (editing_geometry_dom_text_caret_rect(evcon.ui_context,
-                        text, char_offset < 0 ? 0 : (uint32_t)char_offset,
-                        &caret_rect)) {
-                    caret_x = caret_rect.x;
-                    caret_y = caret_rect.y;
-                    caret_height = caret_rect.height;
-                } else {
-                    calculate_position_from_char_offset(&evcon, text, rect,
-                        char_offset, &caret_x, &caret_y, &caret_height);
-                }
+                event_text_caret_rect(&evcon, text, rect, char_offset,
+                                      &caret_x, &caret_y, &caret_height);
 
                 log_debug("[CARET DRAG] char_offset=%d, calc pos: (%.1f, %.1f) height=%.1f, sel_block: (%.1f, %.1f)",
                     char_offset, caret_x, caret_y, caret_height, sel_block_x, sel_block_y);
@@ -7543,18 +7563,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
 
                 // Calculate visual position for the caret
-                float caret_x = 0, caret_y = 0, caret_height = 16;
-                EditingCaretRect caret_rect;
-                if (editing_geometry_dom_text_caret_rect(evcon.ui_context,
-                        text, char_offset < 0 ? 0 : (uint32_t)char_offset,
-                        &caret_rect)) {
-                    caret_x = caret_rect.x;
-                    caret_y = caret_rect.y;
-                    caret_height = caret_rect.height;
-                } else {
-                    calculate_position_from_char_offset(&evcon, text, rect, char_offset,
-                        &caret_x, &caret_y, &caret_height);
-                }
+                float caret_x, caret_y, caret_height;
+                event_text_caret_rect(&evcon, text, rect, char_offset,
+                                      &caret_x, &caret_y, &caret_height);
 
                 caret_project_visual_from_block(state, static_cast<View*>(text), caret_x, caret_y, caret_height,
                                                 evcon.block.x, evcon.block.y);
@@ -8782,15 +8793,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
                 // F3: Alt+Backspace → delete previous word.
                 //     Cmd+Backspace → delete to start of value.
-                if ((alt || cmd) && key_event->key == RDT_KEY_BACKSPACE) {
-                    dispatch_form_modified_delete(&evcon, focus_elem, state, focused,
-                        value, value_len, cur, true, cmd);
-                    break;
-                }
-                // F3: Alt+Delete → delete next word.
-                if (alt && key_event->key == RDT_KEY_DELETE) {
-                    dispatch_form_modified_delete(&evcon, focus_elem, state, focused,
-                        value, value_len, cur, false, false);
+                if (dispatch_form_modified_delete_key(
+                        &evcon, focus_elem, state, focused, value, value_len,
+                        cur, key_event->key, alt, cmd)) {
                     break;
                 }
 
@@ -9007,16 +9012,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 // F3: Alt+Backspace → delete previous word.
                 //     Cmd+Backspace → delete to start of current line.
-                if ((alt || cmd) && key_event->key == RDT_KEY_BACKSPACE) {
-                    dispatch_form_modified_delete(&evcon, focus_elem, state, focused,
-                        value, value_len, cur, true, cmd);
-                    break;
-                }
-
-                // F3: Alt+Delete → delete next word.
-                if (alt && key_event->key == RDT_KEY_DELETE) {
-                    dispatch_form_modified_delete(&evcon, focus_elem, state, focused,
-                        value, value_len, cur, false, false);
+                if (dispatch_form_modified_delete_key(
+                        &evcon, focus_elem, state, focused, value, value_len,
+                        cur, key_event->key, alt, cmd)) {
                     break;
                 }
 

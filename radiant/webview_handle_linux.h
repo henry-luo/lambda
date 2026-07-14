@@ -31,6 +31,9 @@ static inline const char* webview_linux_mime_for_path(const char* path) {
     return "application/octet-stream";
 }
 
+void webview_linux_finish_lambda_scheme_request(WebKitURISchemeRequest* request,
+                                                const char* log_prefix);
+
 struct WebViewHandle {
     WebKitWebView* wk_view;     // the WebKitWebView instance
     int mode;                    // 0 = child window, 1 = layer (matches WebViewMode enum)

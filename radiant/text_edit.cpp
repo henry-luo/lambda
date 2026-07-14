@@ -866,10 +866,7 @@ void te_ime_cancel(DomElement* elem) {
     FormControlProp* f = elem->form;
     if (!f) return;
     te_clear_preedit(f);
-    // Recompute placeholder_shown: visible iff value is empty.
-    bool show = (f->current_value_len == 0) && f->placeholder && f->placeholder[0];
-    state_set_bool(f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr),
-        elem, STATE_PLACEHOLDER, show);
+    tc_refresh_placeholder_shown(elem, f);
     log_debug("te_ime_cancel: composition aborted");
 }
 

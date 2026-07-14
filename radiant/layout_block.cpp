@@ -636,46 +636,6 @@ static const char* pseudo_resolve_quote_char(DomElement* element, bool is_open_q
     return is_open_quote ? "\xe2\x80\x9c" : "\xe2\x80\x9d";
 }
 
-static char* pseudo_resolve_content_url(LayoutContext* lycon, const CssDeclaration* decl, const char* url) {
-    if (!lycon || !url) return nullptr;
-
-    size_t url_len = strlen(url);
-    const char* source_file = decl ? decl->source_file : nullptr;
-    bool already_resolved = url[0] == '/' || strncmp(url, "data:", 5) == 0;
-    if (!already_resolved) {
-        const char* p = url;
-        while (*p) {
-            if (*p == ':') {
-                already_resolved = (p != url);
-                break;
-            }
-            if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
-                  (*p >= '0' && *p <= '9') || *p == '+' || *p == '-' || *p == '.')) {
-                break;
-            }
-            p++;
-        }
-    }
-
-    if (!already_resolved && source_file && source_file[0] && strcmp(source_file, "<inline-style>") != 0) {
-        const char* slash = strrchr(source_file, '/');
-        if (slash) {
-            size_t dir_len = slash - source_file + 1;
-            char* resolved = (char*)alloc_prop(lycon, dir_len + url_len + 1);
-            if (!resolved) return nullptr;
-            memcpy(resolved, source_file, dir_len);
-            memcpy(resolved + dir_len, url, url_len);
-            resolved[dir_len + url_len] = '\0';
-            return resolved;
-        }
-    }
-
-    char* copy = (char*)alloc_prop(lycon, url_len + 1);
-    if (!copy) return nullptr;
-    str_copy(copy, url_len + 1, url, url_len);
-    return copy;
-}
-
 static void pseudo_append_child(DomElement* parent, DomNode* child) {
     if (!parent || !child) return;
     child->parent = parent;
@@ -719,7 +679,7 @@ static DomElement* pseudo_create_image_child(LayoutContext* lycon, DomElement* p
     }
     if (!img_elem->embed) return nullptr;
 
-    char* resolved_url = pseudo_resolve_content_url(lycon, content_decl, raw_url);
+    char* resolved_url = resolve_css_resource_url(lycon, content_decl, raw_url);
     if (!resolved_url) return nullptr;
 
     img_elem->embed->img = load_image(lycon->ui_context, resolved_url);
@@ -5671,7 +5631,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             block->embed->content_image_resolution = is_generated_content_image ?
                 content_replacement_image.resolution : 0.0f;
             char* resolved_content_url = is_generated_content_image ?
-                pseudo_resolve_content_url(lycon, content_replacement_decl, src->str) : nullptr;
+                resolve_css_resource_url(lycon, content_replacement_decl, src->str) : nullptr;
             const char* image_url = resolved_content_url ? resolved_content_url : src->str;
             // content:url() has no src attribute, but it still creates a replaced image object.
             // async network loading attaches embed->img before reflow; reuse that

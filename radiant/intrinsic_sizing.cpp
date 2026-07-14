@@ -22,6 +22,32 @@
 
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 
+enum IntrinsicZeroWidthChar {
+    INTRINSIC_ZERO_WIDTH_NONE,
+    INTRINSIC_ZERO_WIDTH_BREAK,
+    INTRINSIC_ZERO_WIDTH_NO_BREAK,
+    INTRINSIC_ZERO_WIDTH_NON_JOINER,
+    INTRINSIC_ZERO_WIDTH_JOINER,
+};
+
+static IntrinsicZeroWidthChar intrinsic_zero_width_char(const unsigned char* text,
+                                                        size_t offset,
+                                                        size_t length) {
+    if (offset + 2 >= length) return INTRINSIC_ZERO_WIDTH_NONE;
+    if (text[offset] == 0xEF && text[offset + 1] == 0xBB && text[offset + 2] == 0xBF) {
+        return INTRINSIC_ZERO_WIDTH_NO_BREAK;
+    }
+    if (text[offset] != 0xE2 || text[offset + 1] != 0x80) {
+        return INTRINSIC_ZERO_WIDTH_NONE;
+    }
+    switch (text[offset + 2]) {
+        case 0x8B: return INTRINSIC_ZERO_WIDTH_BREAK;
+        case 0x8C: return INTRINSIC_ZERO_WIDTH_NON_JOINER;
+        case 0x8D: return INTRINSIC_ZERO_WIDTH_JOINER;
+        default: return INTRINSIC_ZERO_WIDTH_NONE;
+    }
+}
+
 static bool intrinsic_css_function_is(const CssValue* value, const char* name) {
     return value && value->type == CSS_VALUE_TYPE_FUNCTION &&
         value->data.function && value->data.function->name &&
@@ -999,32 +1025,17 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 
     for (size_t i = 0; i < length; ) {
         unsigned char ch = str[i];
+        IntrinsicZeroWidthChar zero_width = intrinsic_zero_width_char(str, i, length);
 
-        // Check for zero-width space (U+200B) - UTF-8 encoding: 0xE2 0x80 0x8B
-        // This is a break opportunity with no width
-        if (ch == 0xE2 && i + 2 < length && str[i+1] == 0x80 && str[i+2] == 0x8B) {
-            // Zero-width space is a break opportunity
+        if (zero_width == INTRINSIC_ZERO_WIDTH_BREAK) {
             longest_word = fmax(longest_word, current_word);
             current_word = 0.0f;
-            i += 3;  // Skip all bytes of zero-width space
-            is_word_start = true;  // Next character starts a new word
-            continue;
-        }
-
-        // Check for Zero Width No-Break Space / BOM (U+FEFF) - UTF-8: 0xEF 0xBB 0xBF
-        // This has zero width and is NOT a break opportunity
-        if (ch == 0xEF && i + 2 < length && str[i+1] == 0xBB && str[i+2] == 0xBF) {
-            // Zero width, no break, just skip
+            is_word_start = true;
             i += 3;
-            // Don't set is_word_start - this is not a word boundary
             continue;
         }
-
-        // Check for other zero-width characters (ZWNJ U+200C, ZWJ U+200D)
-        // UTF-8: U+200C = 0xE2 0x80 0x8C, U+200D = 0xE2 0x80 0x8D
-        if (ch == 0xE2 && i + 2 < length && str[i+1] == 0x80 && (str[i+2] == 0x8C || str[i+2] == 0x8D)) {
-            // ZWJ: only trigger composition if preceded by a valid base
-            if (str[i+2] == 0x8D && prev_is_zwj_base) after_zwj = true;
+        if (zero_width != INTRINSIC_ZERO_WIDTH_NONE) {
+            if (zero_width == INTRINSIC_ZERO_WIDTH_JOINER && prev_is_zwj_base) after_zwj = true;
             i += 3;
             continue;
         }
@@ -1208,6 +1219,23 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     return result;
 }
 
+float measure_direct_text_children_intrinsic_width(LayoutContext* lycon,
+                                                   DomElement* element,
+                                                   bool use_min_content,
+                                                   CssEnum text_transform) {
+    float max_width = 0.0f;
+    for (DomNode* child = element ? element->first_child : nullptr;
+         child; child = child->next_sibling) {
+        DomText* text = child->as_text();
+        if (!text || !text->text || text->length == 0) continue;
+        TextIntrinsicWidths widths = measure_text_intrinsic_widths(
+            lycon, text->text, text->length, text_transform);
+        float width = use_min_content ? widths.min_content : widths.max_content;
+        if (width > max_width) max_width = width;
+    }
+    return max_width;
+}
+
 static TextIntrinsicWidths intrinsic_measure_pseudo_text_widths(LayoutContext* lycon,
                                                                 StyleTree* pseudo_style,
                                                                 const char* content) {
@@ -1348,9 +1376,9 @@ float compute_text_height_at_width(LayoutContext* lycon,
 
     for (size_t i = 0; i < length; ) {
         unsigned char ch = str[i];
+        IntrinsicZeroWidthChar zero_width = intrinsic_zero_width_char(str, i, length);
 
-        // Check for zero-width space (U+200B) - break opportunity
-        if (ch == 0xE2 && i + 2 < length && str[i+1] == 0x80 && str[i+2] == 0x8B) {
+        if (zero_width == INTRINSIC_ZERO_WIDTH_BREAK) {
             // end of break unit - try to fit on current line
             if (current_line_width > 0 && current_line_width + current_word_width > available_width) {
                 line_count++;
@@ -1363,12 +1391,7 @@ float compute_text_height_at_width(LayoutContext* lycon,
             i += 3;
             continue;
         }
-
-        // Skip ZWNBSP (U+FEFF), ZWNJ (U+200C), ZWJ (U+200D) - zero width, no break
-        if (ch == 0xEF && i + 2 < length && str[i+1] == 0xBB && str[i+2] == 0xBF) {
-            i += 3; continue;
-        }
-        if (ch == 0xE2 && i + 2 < length && str[i+1] == 0x80 && (str[i+2] == 0x8C || str[i+2] == 0x8D)) {
+        if (zero_width != INTRINSIC_ZERO_WIDTH_NONE) {
             i += 3; continue;
         }
 
@@ -3163,47 +3186,53 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 return run_sizes;
             };
 
+            auto classify_row_item = [&classify_table_cell, &should_skip_anonymous_row_child](
+                    DomNode* item, IntrinsicAnonymousRowContext anon_context,
+                    bool* in_non_cell_run, bool* last_content_was_text,
+                    DomElement** item_element, bool* is_cell, int* span) -> bool {
+                *item_element = nullptr;
+                *is_cell = false;
+                *span = 1;
+                if (item->is_text()) {
+                    if (!text_node_has_intrinsic_table_content(item) ||
+                        (text_node_is_ascii_whitespace(item) && !*last_content_was_text)) {
+                        return false;
+                    }
+                    bool starts_run = !*in_non_cell_run;
+                    *in_non_cell_run = true;
+                    *last_content_was_text = true;
+                    return starts_run;
+                }
+                if (!item->is_element()) return false;
+
+                *item_element = item->as_element();
+                if (should_skip_anonymous_row_child(*item_element, anon_context)) {
+                    *in_non_cell_run = false;
+                    *last_content_was_text = false;
+                    return false;
+                }
+
+                *span = classify_table_cell(*item_element, is_cell);
+                bool starts_run = !*in_non_cell_run;
+                *last_content_was_text = false;
+                *in_non_cell_run = !*is_cell;
+                return *is_cell || starts_run;
+            };
+
             // Helper: count columns in a row (accounting for colspan)
-            auto count_cells = [&classify_table_cell, &should_skip_anonymous_row_child](
+            auto count_cells = [&classify_row_item](
                     DomElement* row_elem, IntrinsicAnonymousRowContext anon_context) -> int {
                 int n = 0;
                 bool in_non_cell_run = false;
                 bool non_cell_run_last_content_was_text = false;
                 for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
-                    if (cell->is_text()) {
-                        if (!text_node_has_intrinsic_table_content(cell)) {
-                            continue;
-                        }
-                        if (text_node_is_ascii_whitespace(cell) &&
-                            !non_cell_run_last_content_was_text) {
-                            continue;
-                        }
-                        if (!in_non_cell_run) {
-                            n++;
-                            in_non_cell_run = true;
-                        }
-                        non_cell_run_last_content_was_text = true;
-                        continue;
-                    }
-                    if (!cell->is_element()) continue;
-                    DomElement* cell_elem = cell->as_element();
-                    if (should_skip_anonymous_row_child(cell_elem, anon_context)) {
-                        in_non_cell_run = false;
-                        non_cell_run_last_content_was_text = false;
-                        continue;
-                    }
+                    DomElement* cell_elem;
                     bool is_cell = false;
-                    int span = classify_table_cell(cell_elem, &is_cell);
-                    if (is_cell) {
+                    int span = 1;
+                    if (classify_row_item(cell, anon_context, &in_non_cell_run,
+                                          &non_cell_run_last_content_was_text,
+                                          &cell_elem, &is_cell, &span)) {
                         n += span;
-                        in_non_cell_run = false;
-                        non_cell_run_last_content_was_text = false;
-                    } else if (!in_non_cell_run) {
-                        n++;
-                        in_non_cell_run = true;
-                        non_cell_run_last_content_was_text = false;
-                    } else {
-                        non_cell_run_last_content_was_text = false;
                     }
                 }
                 return n;
@@ -3290,37 +3319,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 bool in_non_cell_run = false;
                 bool non_cell_run_last_content_was_text = false;
                 for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
-                    if (cell->is_text()) {
-                        if (!text_node_has_intrinsic_table_content(cell)) {
-                            continue;
-                        }
-                        if (text_node_is_ascii_whitespace(cell) &&
-                            !non_cell_run_last_content_was_text) {
-                            continue;
-                        }
-                        if (!in_non_cell_run && col < num_columns) {
-                            IntrinsicSizes cell_sizes = measure_anonymous_cell_run(cell, anon_context);
-                            if (cell_sizes.min_content > col_min[col]) col_min[col] = cell_sizes.min_content;
-                            if (cell_sizes.max_content > col_max[col]) col_max[col] = cell_sizes.max_content;
-                            col++;
-                            in_non_cell_run = true;
-                        }
-                        non_cell_run_last_content_was_text = true;
-                        continue;
-                    }
-                    if (!cell->is_element()) continue;
-                    DomElement* cell_elem = cell->as_element();
-                    if (should_skip_anonymous_row_child(cell_elem, anon_context)) {
-                        in_non_cell_run = false;
-                        non_cell_run_last_content_was_text = false;
-                        continue;
-                    }
+                    DomElement* cell_elem;
                     bool is_cell = false;
-                    int span = classify_table_cell(cell_elem, &is_cell);
-                    if (!is_cell && in_non_cell_run) continue;
+                    int span = 1;
+                    if (!classify_row_item(cell, anon_context, &in_non_cell_run,
+                                           &non_cell_run_last_content_was_text,
+                                           &cell_elem, &is_cell, &span)) continue;
                     if (col + span > num_columns) break;
-                    in_non_cell_run = !is_cell;
-                    non_cell_run_last_content_was_text = false;
                     if (span == 1) {
                         IntrinsicSizes cell_sizes = is_cell
                             ? measure_element_intrinsic_widths(lycon, cell_elem)
@@ -3337,7 +3342,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         if (cmax > col_max[col]) col_max[col] = cmax;
                     }
                     col += span;
-                    if (is_cell) in_non_cell_run = false;
                 }
             });
 

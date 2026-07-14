@@ -3724,6 +3724,19 @@ static const char* svg_resolve_pdf_image_href(SvgInlineRenderContext* ctx, const
     return href;
 }
 
+static void render_svg_image_picture(SvgInlineRenderContext* ctx, Element* elem,
+                                     RdtPicture* picture, float x, float y,
+                                     float width, float height) {
+    if (width > 0.0f && height > 0.0f) {
+        rdt_picture_set_size(picture, width, height);
+    }
+    uint8_t opacity = svg_element_opacity_u8(elem);
+    RdtMatrix transform = compose_element_transform(ctx, elem);
+    RdtMatrix translate = rdt_matrix_translate(x, y);
+    RdtMatrix final_transform = rdt_matrix_multiply(&transform, &translate);
+    svg_draw_picture(ctx, picture, opacity, &final_transform);
+}
+
 static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
     if (!elem) return;
 
@@ -3790,16 +3803,7 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
                 log_debug("[SVG] <image> failed to parse nested SVG data URI");
                 return;
             }
-            if (width > 0 && height > 0) {
-                rdt_picture_set_size(rdt_pic, width, height);
-            }
-
-            uint8_t op = svg_element_opacity_u8(elem);
-
-            RdtMatrix m = compose_element_transform(ctx, elem);
-            RdtMatrix translate = rdt_matrix_translate(x, y);
-            RdtMatrix final_m = rdt_matrix_multiply(&m, &translate);
-            svg_draw_picture(ctx, rdt_pic, op, &final_m);
+            render_svg_image_picture(ctx, elem, rdt_pic, x, y, width, height);
             log_debug("[SVG] <image> loaded nested SVG data URI at (%.1f, %.1f) size %.1fx%.1f", x, y, width, height);
             return;
         }
@@ -3866,16 +3870,7 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
             if (resolved_href) mem_free(resolved_href);
             return;
         }
-        if (width > 0 && height > 0) {
-            rdt_picture_set_size(rdt_pic, width, height);
-        }
-
-        uint8_t op = svg_element_opacity_u8(elem);
-
-        RdtMatrix m = compose_element_transform(ctx, elem);
-        RdtMatrix translate = rdt_matrix_translate(x, y);
-        RdtMatrix final_m = rdt_matrix_multiply(&m, &translate);
-        svg_draw_picture(ctx, rdt_pic, op, &final_m);
+        render_svg_image_picture(ctx, elem, rdt_pic, x, y, width, height);
         log_debug("[SVG] <image> loaded nested SVG: %s at (%.1f, %.1f) size %.1fx%.1f", resolved_href ? resolved_href : href, x, y, width, height);
         if (resolved_href) mem_free(resolved_href);
         return;
@@ -5222,12 +5217,6 @@ static void render_svg_to_display_list(Element* svg_element, float viewport_widt
                        const char* source_path, float initial_opacity, bool initial_fill_none,
                        const Color* initial_stroke_color, bool initial_stroke_none,
                        float initial_stroke_width, PaintList* paint_list) {
-    if (!svg_element) return;
-    if (!dl || !paint_list) {
-        log_error("[SVG] render_svg_to_display_list requires display-list and PaintIR targets");
-        return;
-    }
-
     render_svg_inline_register_paint_ir_lowerers();
     render_svg_to_display_list_primitives(svg_element,
                                           viewport_width,

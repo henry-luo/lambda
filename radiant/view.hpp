@@ -1651,6 +1651,8 @@ struct ViewTree {
     HtmlVersion html_version;
 };
 
+void release_dom_owned_embed_images(DomElement* elem);
+
 // Forward declaration for DocState (full definition in state_store.hpp)
 struct DocState;
 typedef struct DocState DocState;
@@ -2483,6 +2485,8 @@ Color resolve_color_value(const CssValue* value);
 Color color_name_to_rgb(CssEnum color_name);
 int64_t get_cascade_priority(const CssDeclaration* decl);
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
+char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
+                               const char* url);
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
 const char* css_font_family_name_from_value(const CssValue* value);
 bool css_font_family_is_available(LayoutContext* lycon, const char* family,
