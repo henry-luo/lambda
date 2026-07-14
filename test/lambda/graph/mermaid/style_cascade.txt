@@ -1,0 +1,6 @@
+{
+  parsed: ["rgb(10, 20, 30)", "#abc", 2, 0.5, "5 3", "background:rgb(10, 20, 30);border-color:#abc;border-width:2px;opacity:0.5;"],
+  invalid_preserves_previous: ["#123456", 3],
+  class_cascade: ["fill:#fff4cc,stroke:#8a6500", "fill:#fff4cc,stroke:#8a6500", true, true],
+  edge_cascade: ["#0f766e", 2, "#0f766e", 2]
+}
