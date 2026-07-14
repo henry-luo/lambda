@@ -701,22 +701,30 @@ static bool target_range_backspace_inline_fragment_block_join(
     return true;
 }
 
+static DomElement* target_range_direct_text_block(DomBoundary caret,
+                                                  EditingTargetRange* out,
+                                                  bool require_start,
+                                                  DomText** out_text) {
+    if (!out || !caret.node || !caret.node->is_text() ||
+        (require_start && caret.offset != 0)) return nullptr;
+
+    DomText* text = caret.node->as_text();
+    DomElement* block = target_range_text_block_parent(text);
+    TargetRangeJoinContent content;
+    if (!block || !target_range_simple_text_content(block, text, &content) ||
+        !content.direct_text) return nullptr;
+
+    *out_text = text;
+    return block;
+}
+
 static bool target_range_backspace_trailing_br_block_join(
         DomBoundary caret,
         EditingTargetRange* out) {
-    if (!out || !caret.node || !caret.node->is_text() || caret.offset != 0) {
-        return false;
-    }
-
-    DomText* text = caret.node->as_text();
-    DomElement* current_block = target_range_text_block_parent(text);
-    TargetRangeJoinContent current_content;
-    if (!current_block ||
-        !target_range_simple_text_content(current_block, text,
-            &current_content) ||
-        !current_content.direct_text) {
-        return false;
-    }
+    DomText* text = nullptr;
+    DomElement* current_block = target_range_direct_text_block(
+        caret, out, true, &text);
+    if (!current_block) return false;
 
     DomNode* current_node = static_cast<DomNode*>(current_block);
     DomNode* prev_node = current_node->prev_sibling;
@@ -749,19 +757,10 @@ static bool target_range_backspace_trailing_br_block_join(
 static bool target_range_backspace_empty_br_block_join(
         DomBoundary caret,
         EditingTargetRange* out) {
-    if (!out || !caret.node || !caret.node->is_text() || caret.offset != 0) {
-        return false;
-    }
-
-    DomText* text = caret.node->as_text();
-    DomElement* current_block = target_range_text_block_parent(text);
-    TargetRangeJoinContent current_content;
-    if (!current_block ||
-        !target_range_simple_text_content(current_block, text,
-            &current_content) ||
-        !current_content.direct_text) {
-        return false;
-    }
+    DomText* text = nullptr;
+    DomElement* current_block = target_range_direct_text_block(
+        caret, out, true, &text);
+    if (!current_block) return false;
 
     DomNode* current_node = static_cast<DomNode*>(current_block);
     DomNode* prev_node = current_node->prev_sibling;
@@ -827,19 +826,10 @@ static bool target_range_backspace_child_block_parent_join(
 static bool target_range_backspace_parent_text_child_block_join(
         DomBoundary caret,
         EditingTargetRange* out) {
-    if (!out || !caret.node || !caret.node->is_text()) {
-        return false;
-    }
-
-    DomText* text = caret.node->as_text();
-    DomElement* current_block = target_range_text_block_parent(text);
-    TargetRangeJoinContent current_content;
-    if (!current_block ||
-        !target_range_simple_text_content(current_block, text,
-            &current_content) ||
-        !current_content.direct_text) {
-        return false;
-    }
+    DomText* text = nullptr;
+    DomElement* current_block = target_range_direct_text_block(
+        caret, out, false, &text);
+    if (!current_block) return false;
 
     DomNode* current_node = static_cast<DomNode*>(current_block);
     DomNode* prev_node = current_node->prev_sibling;

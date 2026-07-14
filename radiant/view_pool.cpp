@@ -1573,64 +1573,75 @@ static void print_text_rect_bounds_json(ViewText* text, StrBuf* buf, int indent,
     print_bounds_json(text, buf, indent, rect);
 }
 
-static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int indent) {
-    // If text combination is disabled, just print this single text node
-    if (!g_combine_text_nodes || text_white_space_preserves_space_advance(first_text)) {
-        // Output single text node without combining
-        ViewText* text = first_text;
-        TextRect* rect = text->rect;
-        unsigned char* text_data = text->text_data();
+static void print_text_rects_json(ViewText* text, StrBuf* buf, int indent,
+                                  bool include_text_info) {
+    TextRect* rect = text->rect;
+    TextRect* previous_emitted_rect = NULL;
+    bool first_emitted = true;
+    unsigned char* text_data = text->text_data();
 
-        bool first_emitted = true;
-        TextRect* previous_emitted_rect = NULL;
-        while (rect) {
-            if (text_rect_is_collapsed_whitespace(text, rect)) {
-                rect = rect->next;
-                continue;
-            }
+    while (rect) {
+        if (text_rect_is_collapsed_whitespace(text, rect)) {
+            rect = rect->next;
+            continue;
+        }
+        if (!first_emitted) strbuf_append_str(buf, ",\n");
+        first_emitted = false;
 
-            if (!first_emitted) strbuf_append_str(buf, ",\n");
-            first_emitted = false;
+        strbuf_append_char_n(buf, ' ', indent);
+        strbuf_append_str(buf, "{\n");
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_str(buf, "\"type\": \"text\",\n");
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_str(buf, "\"tag\": \"text\",\n");
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_str(buf, "\"selector\": \"text\",\n");
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_str(buf, "\"content\": ");
 
-            strbuf_append_char_n(buf, ' ', indent);
-            strbuf_append_str(buf, "{\n");
-            strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "\"type\": \"text\",\n");
-            strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "\"tag\": \"text\",\n");
-            strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "\"selector\": \"text\",\n");
-            strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "\"content\": ");
-
-            if (text_data && rect->length > 0) {
-                char content[2048];
-                int len = rect->length;
-                if (len >= (int)sizeof(content)) len = (int)sizeof(content) - 1;
-                if (len > 0) {
-                    memcpy(content, (char*)(text_data + rect->start_index), len);
-                    content[len] = '\0';
-                    append_json_string(buf, content);
-                } else {
-                    append_json_string(buf, "[empty]");
-                }
+        if (text_data && rect->length > 0) {
+            char content[2048];
+            int length = rect->length < 2048 ? rect->length : 2047;
+            if (length > 0) {
+                memcpy(content, (char*)(text_data + rect->start_index), length);
+                content[length] = '\0';
+                append_json_string(buf, content);
             } else {
                 append_json_string(buf, "[empty]");
             }
-            strbuf_append_str(buf, ",\n");
+        } else {
+            append_json_string(buf, "[empty]");
+        }
+        strbuf_append_str(buf, ",\n");
 
+        if (include_text_info) {
             strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "\"layout\": {\n");
-            print_text_rect_bounds_json(text, buf, indent, rect, previous_emitted_rect);
+            strbuf_append_str(buf, "\"text_info\": {\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_format(buf, "\"start_index\": %d,\n", rect->start_index);
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_format(buf, "\"length\": %d\n", rect->length);
             strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "}\n");
-            strbuf_append_char_n(buf, ' ', indent);
-            strbuf_append_str(buf, "}");
-
-            previous_emitted_rect = rect;
-            rect = rect->next;
+            strbuf_append_str(buf, "},\n");
         }
 
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_str(buf, "\"layout\": {\n");
+        print_text_rect_bounds_json(text, buf, indent, rect, previous_emitted_rect);
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_str(buf, "}\n");
+        strbuf_append_char_n(buf, ' ', indent);
+        strbuf_append_str(buf, "}");
+
+        previous_emitted_rect = rect;
+        rect = rect->next;
+    }
+}
+
+static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int indent) {
+    // If text combination is disabled, just print this single text node
+    if (!g_combine_text_nodes || text_white_space_preserves_space_advance(first_text)) {
+        print_text_rects_json(first_text, buf, indent, false);
         return static_cast<View*>(first_text);  // Return this text node only
     }
 
@@ -1660,80 +1671,7 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
 
     // If only one text node, use the regular print function
     if (text_node_count == 1) {
-        // Output single text node with all its rects
-        ViewText* text = text_nodes[0].text;
-        TextRect* rect = text->rect;
-        bool first_emitted = true;
-        TextRect* previous_emitted_rect = NULL;
-
-        while (rect) {
-            // browsers do not expose DOMRects for fully-collapsed whitespace.
-            if (text_rect_is_collapsed_whitespace(text, rect)) {
-                rect = rect->next;
-                continue;
-            }
-
-            if (!first_emitted) strbuf_append_str(buf, ",\n");
-            first_emitted = false;
-
-            strbuf_append_char_n(buf, ' ', indent);
-            strbuf_append_str(buf, "{\n");
-
-            strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "\"type\": \"text\",\n");
-
-            strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "\"tag\": \"text\",\n");
-
-            strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "\"selector\": \"text\",\n");
-
-            strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "\"content\": ");
-
-            unsigned char* text_data = text->text_data();
-            if (text_data && rect->length > 0) {
-                char content[2048];
-                int len = rect->length;
-                // Ensure len doesn't exceed buffer size
-                if (len >= (int)sizeof(content)) {
-                    len = (int)sizeof(content) - 1;
-                }
-                // Safe copy with explicit bounds
-                if (len > 0) {
-                    memcpy(content, (char*)(text_data + rect->start_index), len);
-                    content[len] = '\0';
-                    append_json_string(buf, content);
-                } else {
-                    append_json_string(buf, "[empty]");
-                }
-            } else {
-                append_json_string(buf, "[empty]");
-            }
-            strbuf_append_str(buf, ",\n");
-
-            strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "\"text_info\": {\n");
-            strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_format(buf, "\"start_index\": %d,\n", rect->start_index);
-            strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_format(buf, "\"length\": %d\n", rect->length);
-            strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "},\n");
-
-            strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "\"layout\": {\n");
-            print_text_rect_bounds_json(text, buf, indent, rect, previous_emitted_rect);
-            strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "}\n");
-
-            strbuf_append_char_n(buf, ' ', indent);
-            strbuf_append_str(buf, "}");
-
-            previous_emitted_rect = rect;
-            rect = rect->next;
-        }
-
+        print_text_rects_json(text_nodes[0].text, buf, indent, true);
         return first_text;  // Return the single text node
     }
 

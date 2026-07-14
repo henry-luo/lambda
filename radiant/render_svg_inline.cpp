@@ -750,6 +750,30 @@ static void svg_apply_inherited_paint_attrs(SvgInlineRenderContext* ctx, Element
     }
 }
 
+void render_svg_initial_paint(const ViewSpan* view, Color current_color,
+                              SvgInitialPaint* paint) {
+    if (!paint) return;
+    *paint = {};
+    paint->current_color = current_color;
+    paint->stroke_none = true;
+    paint->stroke_width = -1.0f;
+    if (!view || !view->in_line) return;
+
+    InlineProp* in_line = view->in_line;
+    if (in_line->has_color) paint->current_color = in_line->color;
+    if (in_line->has_svg_fill) {
+        paint->fill_none = in_line->svg_fill_none;
+        paint->has_fill_color = !paint->fill_none;
+        if (paint->has_fill_color) paint->fill_color = in_line->svg_fill_color;
+    }
+    if (in_line->has_svg_stroke) {
+        paint->stroke_none = in_line->svg_stroke_none;
+        paint->has_stroke_color = !paint->stroke_none;
+        if (paint->has_stroke_color) paint->stroke_color = in_line->svg_stroke_color;
+    }
+    if (in_line->has_svg_stroke_width) paint->stroke_width = in_line->svg_stroke_width;
+}
+
 // ============================================================================
 // SVG Transform Parsing
 // ============================================================================
@@ -4394,41 +4418,7 @@ static void render_svg_group(SvgInlineRenderContext* ctx, Element* elem) {
         ctx->opacity *= group_op;
     }
 
-    // update CSS 'color' property (for currentColor keyword)
-    char color_buf[256];
-    const char* color_attr = get_svg_attr_or_style(ctx, elem, "color", color_buf, sizeof(color_buf));
-    if (color_attr) {
-        ctx->current_color = parse_svg_color(color_attr);
-    }
-
-    // update inherited state from group attributes
-    char fill_buf[256];
-    const char* fill = get_svg_attr_or_style(ctx, elem, "fill", fill_buf, sizeof(fill_buf));
-    if (fill) {
-        if (strcmp(fill, "none") == 0) {
-            ctx->fill_none = true;
-        } else if (strncmp(fill, "url(#", 5) != 0) {
-            ctx->fill_color = svg_resolve_color_keyword(ctx, fill);
-            ctx->fill_none = false;
-        }
-    }
-
-    char stroke_buf[256];
-    const char* stroke = get_svg_attr_or_style(ctx, elem, "stroke", stroke_buf, sizeof(stroke_buf));
-    if (stroke) {
-        if (strcmp(stroke, "none") == 0) {
-            ctx->stroke_none = true;
-        } else {
-            ctx->stroke_color = svg_resolve_color_keyword(ctx, stroke);
-            ctx->stroke_none = false;
-        }
-    }
-
-    char stroke_width_buf[64];
-    const char* stroke_width = get_svg_attr_or_style(ctx, elem, "stroke-width", stroke_width_buf, sizeof(stroke_width_buf));
-    if (stroke_width) {
-        ctx->stroke_width = parse_svg_length(stroke_width, 1.0f);
-    }
+    svg_apply_inherited_paint_attrs(ctx, elem);
 
     // inherited text properties from group attributes
     const char* g_font_family = get_svg_attr(elem, "font-family");
@@ -5535,46 +5525,18 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
 
     // render SVG through the shared painter gateway
     FontContext* font_ctx = rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr;
-    Color initial_current_color = rdcon->color;
-    Color initial_fill_color = {};
-    Color initial_stroke_color = {};
-    Color* current_color_ptr = &initial_current_color;
-    Color* fill_color_ptr = nullptr;
-    Color* stroke_color_ptr = nullptr;
-    bool initial_fill_none = false;
-    bool initial_stroke_none = true;
-    float initial_stroke_width = -1.0f;
-    if (view->in_line && view->in_line->has_color) {
-        initial_current_color = view->in_line->color;
-    }
-    if (view->in_line && view->in_line->has_svg_fill) {
-        if (view->in_line->svg_fill_none) {
-            initial_fill_none = true;
-        } else {
-            initial_fill_color = view->in_line->svg_fill_color;
-            fill_color_ptr = &initial_fill_color;
-        }
-    }
-    if (view->in_line && view->in_line->has_svg_stroke) {
-        if (view->in_line->svg_stroke_none) {
-            initial_stroke_none = true;
-        } else {
-            initial_stroke_color = view->in_line->svg_stroke_color;
-            stroke_color_ptr = &initial_stroke_color;
-            initial_stroke_none = false;
-        }
-    }
-    if (view->in_line && view->in_line->has_svg_stroke_width) {
-        initial_stroke_width = view->in_line->svg_stroke_width;
-    }
+    SvgInitialPaint initial_paint;
+    render_svg_initial_paint(view, rdcon->color, &initial_paint);
     RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
     g_svg_active_rdcon = rdcon;
     render_svg_to_display_list(svg_elem, viewport_width, viewport_height,
                                rdcon->ui_context->document->pool, scale,
                                font_ctx, &base_transform, rdcon->dl,
-                               current_color_ptr, fill_color_ptr, nullptr, 1.0f,
-                               initial_fill_none, stroke_color_ptr,
-                               initial_stroke_none, initial_stroke_width,
+                               &initial_paint.current_color,
+                               initial_paint.has_fill_color ? &initial_paint.fill_color : nullptr,
+                               nullptr, 1.0f, initial_paint.fill_none,
+                               initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
+                               initial_paint.stroke_none, initial_paint.stroke_width,
                                rdcon->paint_list);
     g_svg_active_rdcon = saved_svg_rdcon;
 

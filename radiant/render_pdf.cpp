@@ -1648,38 +1648,8 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
     Pool* pool = (ctx->ui_context && ctx->ui_context->document)
         ? ctx->ui_context->document->pool
         : nullptr;
-    Color initial_current_color = color;
-    Color initial_fill_color = {};
-    Color initial_stroke_color = {};
-    Color* current_color_ptr = &initial_current_color;
-    Color* fill_color_ptr = nullptr;
-    Color* stroke_color_ptr = nullptr;
-    bool initial_fill_none = false;
-    bool initial_stroke_none = true;
-    float initial_stroke_width = -1.0f;
-    if (block->in_line && block->in_line->has_color) {
-        initial_current_color = block->in_line->color;
-    }
-    if (block->in_line && block->in_line->has_svg_fill) {
-        if (block->in_line->svg_fill_none) {
-            initial_fill_none = true;
-        } else {
-            initial_fill_color = block->in_line->svg_fill_color;
-            fill_color_ptr = &initial_fill_color;
-        }
-    }
-    if (block->in_line && block->in_line->has_svg_stroke) {
-        if (block->in_line->svg_stroke_none) {
-            initial_stroke_none = true;
-        } else {
-            initial_stroke_color = block->in_line->svg_stroke_color;
-            stroke_color_ptr = &initial_stroke_color;
-            initial_stroke_none = false;
-        }
-    }
-    if (block->in_line && block->in_line->has_svg_stroke_width) {
-        initial_stroke_width = block->in_line->svg_stroke_width;
-    }
+    SvgInitialPaint initial_paint;
+    render_svg_initial_paint(block, color, &initial_paint);
 
     Bound content_clip = {content_rect.x, content_rect.y,
                           content_rect.x + content_rect.width,
@@ -1695,14 +1665,14 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
                               font_ctx,
                               &identity,
                               &content_clip,
-                              current_color_ptr,
-                              fill_color_ptr,
+                              &initial_paint.current_color,
+                              initial_paint.has_fill_color ? &initial_paint.fill_color : nullptr,
                               nullptr,
                               1.0f,
-                              initial_fill_none,
-                              stroke_color_ptr,
-                              initial_stroke_none,
-                              initial_stroke_width);
+                              initial_paint.fill_none,
+                              initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
+                              initial_paint.stroke_none,
+                              initial_paint.stroke_width);
     paint_svg_subscene(pdf_active_paint_list(ctx), &subscene);
     pdf_lower_paint_list(ctx);
     (void)font;

@@ -340,8 +340,8 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             continue;
         }
 
-        switch (item->op) {
         // vector ops are handled before this switch by dl_replay_vector_item().
+        switch (item->op) {
         case DL_FILL_RECT:
         case DL_FILL_ROUNDED_RECT:
         case DL_FILL_PATH:

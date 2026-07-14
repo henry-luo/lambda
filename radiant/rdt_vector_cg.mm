@@ -709,6 +709,24 @@ static CGGradientRef create_cg_gradient(CGColorSpaceRef colorspace,
     return CGGradientCreateWithColorComponents(colorspace, components, locations, count);
 }
 
+static CGGradientRef cg_begin_gradient_fill(RdtVectorImpl* cg, RdtPath* path,
+                                            const RdtGradientStop* stops, int stop_count,
+                                            RdtFillRule rule, const RdtMatrix* transform,
+                                            const RdtMatrix* gradient_transform) {
+    cg_begin_draw_state(cg);
+    if (transform) CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(transform));
+
+    CGContextAddPath(cg->ctx, path->cg);
+    if (rule == RDT_FILL_EVEN_ODD) CGContextEOClip(cg->ctx);
+    else CGContextClip(cg->ctx);
+
+    CGGradientRef gradient = create_cg_gradient(cg->colorspace, stops, stop_count);
+    if (gradient_transform) {
+        CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(gradient_transform));
+    }
+    return gradient;
+}
+
 void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
                               float x1, float y1, float x2, float y2,
                               const RdtGradientStop* stops, int stop_count,
@@ -718,24 +736,8 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
     if (!vec || !vec->impl || !p || !stops || stop_count < 2) return;
     RdtVectorImpl* cg = vec->impl;
 
-    cg_begin_draw_state(cg);
-
-    if (transform) {
-        CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(transform));
-    }
-
-    // clip to path
-    CGContextAddPath(cg->ctx, p->cg);
-    if (rule == RDT_FILL_EVEN_ODD) {
-        CGContextEOClip(cg->ctx);
-    } else {
-        CGContextClip(cg->ctx);
-    }
-
-    CGGradientRef gradient = create_cg_gradient(cg->colorspace, stops, stop_count);
-    if (gradient_transform) {
-        CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(gradient_transform));
-    }
+    CGGradientRef gradient = cg_begin_gradient_fill(
+        cg, p, stops, stop_count, rule, transform, gradient_transform);
     CGContextDrawLinearGradient(cg->ctx, gradient,
         CGPointMake(x1, y1), CGPointMake(x2, y2),
         kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
@@ -753,24 +755,8 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
     if (!vec || !vec->impl || !p || !stops || stop_count < 2) return;
     RdtVectorImpl* cg = vec->impl;
 
-    cg_begin_draw_state(cg);
-
-    if (transform) {
-        CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(transform));
-    }
-
-    // clip to path
-    CGContextAddPath(cg->ctx, p->cg);
-    if (rule == RDT_FILL_EVEN_ODD) {
-        CGContextEOClip(cg->ctx);
-    } else {
-        CGContextClip(cg->ctx);
-    }
-
-    CGGradientRef gradient = create_cg_gradient(cg->colorspace, stops, stop_count);
-    if (gradient_transform) {
-        CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(gradient_transform));
-    }
+    CGGradientRef gradient = cg_begin_gradient_fill(
+        cg, p, stops, stop_count, rule, transform, gradient_transform);
     CGContextDrawRadialGradient(cg->ctx, gradient,
         CGPointMake(cx, cy), 0,    // start center + radius
         CGPointMake(cx, cy), r,    // end center + radius

@@ -60,11 +60,258 @@ static BorderProp* ensure_span_border(LayoutContext* lycon, ViewSpan* span) {
     return bound->border;
 }
 
+static OutlineProp* ensure_span_outline(LayoutContext* lycon, ViewSpan* span) {
+    BoundaryProp* bound = ensure_span_bound(lycon, span);
+    if (!bound->outline) {
+        bound->outline = (OutlineProp*)alloc_prop(lycon, sizeof(OutlineProp));
+    }
+    return bound->outline;
+}
+
 static BlockProp* ensure_span_block(LayoutContext* lycon, ViewSpan* span) {
     if (!span->blk) {
         span->blk = alloc_block_prop(lycon);
     }
     return span->blk;
+}
+
+static MultiColumnProp* ensure_multicol_prop(LayoutContext* lycon, ViewSpan* span) {
+    if (!span->multicol) {
+        span->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
+        memset(span->multicol, 0, sizeof(MultiColumnProp));
+        // Every multicol entry property must establish the same CSS initial state.
+        span->multicol->column_gap = 16.0f;
+        span->multicol->column_gap_is_normal = true;
+        span->multicol->rule_style = CSS_VALUE_NONE;
+        span->multicol->rule_color.a = 255;
+        span->multicol->span = COLUMN_SPAN_NONE;
+        span->multicol->fill = COLUMN_FILL_BALANCE;
+        span->multicol->wrap = COLUMN_WRAP_AUTO;
+    }
+    return span->multicol;
+}
+
+static TransformProp* ensure_transform_prop(LayoutContext* lycon, ViewSpan* span) {
+    if (!span->transform) {
+        span->transform = (TransformProp*)alloc_prop(lycon, sizeof(TransformProp));
+        memset(span->transform, 0, sizeof(TransformProp));
+        span->transform->origin_x = 50.0f;
+        span->transform->origin_y = 50.0f;
+        span->transform->origin_x_percent = true;
+        span->transform->origin_y_percent = true;
+        span->transform->perspective_origin_x = 50.0f;
+        span->transform->perspective_origin_y = 50.0f;
+    }
+    return span->transform;
+}
+
+typedef struct FilterAmountSpec {
+    const char* name;
+    FilterFunctionType type;
+    bool clamp_unit_interval;
+} FilterAmountSpec;
+
+static const FilterAmountSpec FILTER_AMOUNT_SPECS[] = {
+    {"brightness", FILTER_BRIGHTNESS, false},
+    {"contrast", FILTER_CONTRAST, false},
+    {"grayscale", FILTER_GRAYSCALE, true},
+    {"invert", FILTER_INVERT, true},
+    {"opacity", FILTER_OPACITY, true},
+    {"saturate", FILTER_SATURATE, false},
+    {"sepia", FILTER_SEPIA, true},
+};
+
+static const FilterAmountSpec* find_filter_amount_spec(const char* name) {
+    for (const FilterAmountSpec& spec : FILTER_AMOUNT_SPECS) {
+        if (strcmp(name, spec.name) == 0) return &spec;
+    }
+    return nullptr;
+}
+
+static float resolve_filter_amount(const CssValue* value, bool clamp_unit_interval) {
+    float amount = 1.0f;
+    if (value && value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        amount = (float)value->data.percentage.value / 100.0f;
+    } else if (value && value->type == CSS_VALUE_TYPE_NUMBER) {
+        amount = (float)value->data.number.value;
+    }
+    if (clamp_unit_interval) {
+        if (amount > 1.0f) amount = 1.0f;
+        if (amount < 0.0f) amount = 0.0f;
+    }
+    return amount;
+}
+
+static bool font_shorthand_overrides_longhand(LayoutContext* lycon,
+                                              const CssDeclaration* longhand,
+                                              const char* longhand_name) {
+    DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
+    if (!elem || !elem->specified_style) return false;
+    CssDeclaration* shorthand = style_tree_get_declaration(
+        elem->specified_style, CSS_PROPERTY_FONT);
+    if (!shorthand || shorthand->source_order <= longhand->source_order) return false;
+    log_debug("[CSS] Skipping %s: font shorthand (order=%u) overrides (order=%u)",
+              longhand_name, shorthand->source_order, longhand->source_order);
+    return true;
+}
+
+template <typename SlotType>
+static bool resolve_keyword_slot(const CssValue* value, SlotType* slot,
+                                 const char* property_name) {
+    if (value->type != CSS_VALUE_TYPE_KEYWORD || value->data.keyword <= 0) return false;
+    *slot = value->data.keyword;
+    const CssEnumInfo* info = css_enum_info(value->data.keyword);
+    log_debug("[CSS] %s: %s -> 0x%04X", property_name,
+              css_enum_name_or_unknown(info), value->data.keyword);
+    return true;
+}
+
+static float resolve_transform_angle(const CssValue* value) {
+    if (!value) return 0.0f;
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        return (float)value->data.number.value * (float)M_PI / 180.0f;
+    }
+    if (value->type != CSS_VALUE_TYPE_LENGTH && value->type != CSS_VALUE_TYPE_ANGLE) {
+        return 0.0f;
+    }
+    // Axis-specific transforms must not lose grad/turn units handled by rotate().
+    float angle = (float)value->data.length.value;
+    switch (value->data.length.unit) {
+        case CSS_UNIT_RAD: return angle;
+        case CSS_UNIT_GRAD: return angle * (float)M_PI / 200.0f;
+        case CSS_UNIT_TURN: return angle * 2.0f * (float)M_PI;
+        default: return angle * (float)M_PI / 180.0f;
+    }
+}
+
+static const char* counter_named_value(const CssValue* value) {
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_CUSTOM) return value->data.custom_property.name;
+    if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : nullptr;
+    }
+    return nullptr;
+}
+
+static void append_counter_text(StringBuf* buffer, const char* text) {
+    if (!text) return;
+    if (buffer->length > 0) stringbuf_append_char(buffer, ' ');
+    stringbuf_append_str(buffer, text);
+}
+
+static void append_counter_value(StringBuf* buffer, const CssValue* value,
+                                 bool allow_reversed) {
+    const char* text = counter_named_value(value);
+    if (text) {
+        append_counter_text(buffer, text);
+        return;
+    }
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        if (buffer->length > 0) stringbuf_append_char(buffer, ' ');
+        // INT_CAST_OK: CSS counter values are serialized as integer tokens.
+        stringbuf_append_int(buffer, (int)value->data.number.value);
+        return;
+    }
+    if (!allow_reversed || value->type != CSS_VALUE_TYPE_FUNCTION ||
+        !value->data.function) return;
+
+    CssFunction* function = value->data.function;
+    if (function->name && strcmp(function->name, "reversed") == 0 &&
+        function->arg_count >= 1) {
+        append_counter_text(buffer, counter_named_value(function->args[0]));
+    }
+}
+
+static void resolve_counter_property(LayoutContext* lycon, const CssValue* value,
+                                     char** destination, const char* property_name,
+                                     bool allow_reversed) {
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+        *destination = (char*)alloc_prop(lycon, 5);
+        str_copy(*destination, 5, "none", 4);
+        log_debug("[CSS] %s: none", property_name);
+        return;
+    }
+
+    const char* direct_value =
+        (value->type == CSS_VALUE_TYPE_CUSTOM || value->type == CSS_VALUE_TYPE_STRING)
+            ? counter_named_value(value) : nullptr;
+    if (direct_value) {
+        size_t length = strlen(direct_value);
+        *destination = (char*)alloc_prop(lycon, length + 1);
+        str_copy(*destination, length + 1, direct_value, length);
+        log_debug("[CSS] %s: %s", property_name, direct_value);
+        return;
+    }
+
+    bool is_list = value->type == CSS_VALUE_TYPE_LIST;
+    bool is_reversed = allow_reversed && value->type == CSS_VALUE_TYPE_FUNCTION;
+    if (!is_list && !is_reversed) return;
+
+    StringBuf* buffer = stringbuf_new(lycon->doc->view_tree->pool);
+    if (!buffer) {
+        log_error("[CSS] %s: stringbuf_new failed", property_name);
+        return;
+    }
+    if (is_list) {
+        for (int index = 0; index < value->data.list.count; index++) {
+            append_counter_value(buffer, value->data.list.values[index], allow_reversed);
+        }
+    } else {
+        append_counter_value(buffer, value, allow_reversed);
+    }
+    if (buffer->length > 0) {
+        *destination = (char*)alloc_prop(lycon, buffer->length + 1);
+        str_copy(*destination, buffer->length + 1,
+                 buffer->str->chars, buffer->length);
+        log_debug("[CSS] %s: %s", property_name, buffer->str->chars);
+    }
+    stringbuf_free(buffer);
+}
+
+static void resolve_background_position_axis(LayoutContext* lycon,
+                                             CssPropertyId property,
+                                             const CssValue* value,
+                                             BackgroundProp* background,
+                                             bool horizontal) {
+    float* position = horizontal
+        ? &background->bg_position_x : &background->bg_position_y;
+    bool is_percent = false;
+    bool update_percent_flag = true;
+
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        *position = resolve_length_value(lycon, property, value);
+    } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        *position = value->data.percentage.value;
+        is_percent = true;
+    } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = value->data.keyword;
+        if (keyword == CSS_VALUE_CENTER) {
+            *position = 50.0f;
+            is_percent = true;
+        } else if ((horizontal && keyword == CSS_VALUE_LEFT) ||
+                   (!horizontal && keyword == CSS_VALUE_TOP)) {
+            *position = 0.0f;
+            is_percent = true;
+        } else if ((horizontal && keyword == CSS_VALUE_RIGHT) ||
+                   (!horizontal && keyword == CSS_VALUE_BOTTOM)) {
+            *position = 100.0f;
+            is_percent = true;
+        } else {
+            update_percent_flag = false;
+        }
+    } else {
+        return;
+    }
+
+    if (update_percent_flag) {
+        if (horizontal) background->bg_position_x_is_percent = is_percent;
+        else background->bg_position_y_is_percent = is_percent;
+    }
+    background->bg_position_set = 1;
+    log_debug("[CSS] background-position-%c: %.2f%s",
+              horizontal ? 'x' : 'y', *position, is_percent ? "%" : "px");
 }
 
 enum CssBoxSide {
@@ -666,6 +913,61 @@ static void resolve_grid_axis_shorthand(LayoutContext* lycon, ViewSpan* span,
     log_debug("[CSS] grid-%s: %d / %d (has_start=%d, has_end=%d, end_is_span=%d)",
               axis.name, *axis.start, *axis.end, *axis.has_start, *axis.has_end,
               *axis.end_is_span);
+}
+
+static void resolve_grid_line_longhand(LayoutContext* lycon, ViewSpan* span,
+                                       const CssValue* value, bool is_row,
+                                       bool is_end) {
+    alloc_grid_item_prop(lycon, span);
+    GridItemProp* item = span->gi;
+    CssGridAxisSlots axis = css_grid_axis_slots(item, is_row);
+    int* line = is_end ? axis.end : axis.start;
+    const char** line_name = is_end ? axis.end_name : axis.start_name;
+    bool* has_line = is_end ? axis.has_end : axis.has_start;
+    bool* line_is_span = is_end ? axis.end_is_span : axis.start_is_span;
+    const char* edge = is_end ? "end" : "start";
+    log_debug("[CSS] Processing grid-%s-%s property", axis.name, edge);
+
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        // INT_CAST_OK: grid lines are discrete indices.
+        *line = (int)value->data.number.value;
+        *has_line = true;
+    } else if (value->type == CSS_VALUE_TYPE_KEYWORD &&
+               value->data.keyword == CSS_VALUE_AUTO) {
+        *line = 0;
+        log_debug("[CSS] grid-%s-%s: auto", axis.name, edge);
+        return;
+    } else {
+        const char* name = css_grid_named_line(value);
+        if (name) {
+            replace_view_pool_layout_const_string(lycon, line_name, name);
+            *has_line = true;
+        } else if (is_end && value->type == CSS_VALUE_TYPE_LIST) {
+            bool saw_span = false;
+            int span_value = 1;
+            for (int index = 0; index < value->data.list.count; index++) {
+                CssValue* part = value->data.list.values[index];
+                const char* identifier = css_grid_identifier(part);
+                if (identifier && strcmp(identifier, "span") == 0) {
+                    saw_span = true;
+                } else if (part->type == CSS_VALUE_TYPE_NUMBER) {
+                    // INT_CAST_OK: grid spans are discrete track counts.
+                    span_value = (int)part->data.number.value;
+                }
+            }
+            if (saw_span) {
+                *line = -span_value;
+                *line_is_span = true;
+                *has_line = true;
+            }
+        }
+    }
+
+    if (*has_line) {
+        item->is_grid_auto_placed = false;
+        log_debug("[CSS] grid-%s-%s: %d%s", axis.name, edge, *line,
+                  *line_name ? " named" : "");
+    }
 }
 
 static bool css_font_face_source_is_available(const char* path) {
@@ -5604,20 +5906,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_SIZE: {
             log_debug("[CSS] Processing font-size property");
-            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
-            // it already set font-size. Skip the longhand to respect cascade.
-            {
-                DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
-                if (elem && elem->specified_style) {
-                    CssDeclaration* font_sh = style_tree_get_declaration(
-                        elem->specified_style, CSS_PROPERTY_FONT);
-                    if (font_sh && font_sh->source_order > decl->source_order) {
-                        log_debug("[CSS] Skipping font-size: font shorthand (order=%u) overrides (order=%u)",
-                            font_sh->source_order, decl->source_order);
-                        break;
-                    }
-                }
-            }
+            if (font_shorthand_overrides_longhand(lycon, decl, "font-size")) break;
             if (!span->font) { span->font = alloc_font_prop(lycon); }
 
             float font_size = 0.0f;  bool valid = false;
@@ -5719,20 +6008,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_WEIGHT: {
             log_debug("[CSS] Processing font-weight property");
-            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
-            // it already set/reset font-weight. Skip the longhand to respect cascade.
-            {
-                DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
-                if (elem && elem->specified_style) {
-                    CssDeclaration* font_sh = style_tree_get_declaration(
-                        elem->specified_style, CSS_PROPERTY_FONT);
-                    if (font_sh && font_sh->source_order > decl->source_order) {
-                        log_debug("[CSS] Skipping font-weight: font shorthand (order=%u) overrides (order=%u)",
-                            font_sh->source_order, decl->source_order);
-                        break;
-                    }
-                }
-            }
+            if (font_shorthand_overrides_longhand(lycon, decl, "font-weight")) break;
             if (!span->font) {
                 span->font = alloc_font_prop(lycon);
                 log_debug("[CSS]   Created new FontProp with defaults");
@@ -5745,20 +6021,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_FAMILY: {
             log_debug("[CSS] Processing font-family property");
-            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
-            // it already set font-family. Skip the longhand to respect cascade.
-            {
-                DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
-                if (elem && elem->specified_style) {
-                    CssDeclaration* font_sh = style_tree_get_declaration(
-                        elem->specified_style, CSS_PROPERTY_FONT);
-                    if (font_sh && font_sh->source_order > decl->source_order) {
-                        log_debug("[CSS] Skipping font-family: font shorthand (order=%u) overrides (order=%u)",
-                            font_sh->source_order, decl->source_order);
-                        break;
-                    }
-                }
-            }
+            if (font_shorthand_overrides_longhand(lycon, decl, "font-family")) break;
             if (!span->font) {
                 span->font = alloc_font_prop(lycon);
             }
@@ -5834,20 +6097,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_LINE_HEIGHT: {
             log_debug("[CSS] Processing line-height property");
-            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
-            // it already set line-height. Skip the longhand to respect cascade.
-            {
-                DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
-                if (elem && elem->specified_style) {
-                    CssDeclaration* font_sh = style_tree_get_declaration(
-                        elem->specified_style, CSS_PROPERTY_FONT);
-                    if (font_sh && font_sh->source_order > decl->source_order) {
-                        log_debug("[CSS] Skipping line-height: font shorthand (order=%u) overrides (order=%u)",
-                            font_sh->source_order, decl->source_order);
-                        break;
-                    }
-                }
-            }
+            if (font_shorthand_overrides_longhand(lycon, decl, "line-height")) break;
             ensure_span_block(lycon, span);
             span->blk->line_height = value;  // Store CssValue*, resolve during layout
             break;
@@ -6799,10 +7049,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             ViewSpan* span = lam::view_require_element(lycon->view);
             const char* elem_name = span && span->tag_name ? span->tag_name : "unknown";
             log_debug("[CSS] Processing background-image property on <%s> (value type=%d)", elem_name, value->type);
-            ensure_span_bound(lycon, span);
-            if (!span->bound->background) {
-                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-            }
+            ensure_span_background(lycon, span);
 
             if (value->type == CSS_VALUE_TYPE_FUNCTION) {
                 // url() is parsed as a function
@@ -6856,135 +7103,49 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         // ===== GROUP 16: Background Advanced Properties =====
         case CSS_PROPERTY_BACKGROUND_ATTACHMENT: {
             log_debug("[CSS] Processing background-attachment property");
-            ensure_span_bound(lycon, span);
-            if (!span->bound->background) {
-                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-            }
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // Values: scroll, fixed, local
-                span->bound->background->bg_attachment = value->data.keyword;
-                log_debug("[CSS] background-attachment: %s", css_enum_info(value->data.keyword)->name);
-            }
+            ensure_span_background(lycon, span);
+            resolve_keyword_slot(value, &span->bound->background->bg_attachment,
+                                 "background-attachment");
             break;
         }
 
         case CSS_PROPERTY_BACKGROUND_ORIGIN: {
             log_debug("[CSS] Processing background-origin property");
-            ensure_span_bound(lycon, span);
-            if (!span->bound->background) {
-                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-            }
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // Values: border-box, padding-box, content-box
-                span->bound->background->bg_origin = value->data.keyword;
-                log_debug("[CSS] background-origin: %s", css_enum_info(value->data.keyword)->name);
-            }
+            ensure_span_background(lycon, span);
+            resolve_keyword_slot(value, &span->bound->background->bg_origin,
+                                 "background-origin");
             break;
         }
 
         case CSS_PROPERTY_BACKGROUND_CLIP: {
             log_debug("[CSS] Processing background-clip property");
-            ensure_span_bound(lycon, span);
-            if (!span->bound->background) {
-                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-            }
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // Values: border-box, padding-box, content-box
-                span->bound->background->bg_clip = value->data.keyword;
-                log_debug("[CSS] background-clip: %s", css_enum_info(value->data.keyword)->name);
-            }
+            ensure_span_background(lycon, span);
+            resolve_keyword_slot(value, &span->bound->background->bg_clip,
+                                 "background-clip");
             break;
         }
 
         case CSS_PROPERTY_BACKGROUND_POSITION_X: {
             log_debug("[CSS] Processing background-position-x property");
-            ensure_span_bound(lycon, span);
-            if (!span->bound->background) {
-                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-            }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float pos_x = resolve_length_value(lycon, prop_id, value);
-                span->bound->background->bg_position_x = pos_x;
-                span->bound->background->bg_position_x_is_percent = 0;
-                span->bound->background->bg_position_set = 1;
-                log_debug("[CSS] background-position-x: %.2fpx", pos_x);
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float pos_x_percent = value->data.percentage.value;
-                span->bound->background->bg_position_x = pos_x_percent;
-                span->bound->background->bg_position_x_is_percent = 1;
-                span->bound->background->bg_position_set = 1;
-                log_debug("[CSS] background-position-x: %.2f%%", pos_x_percent);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum kw = value->data.keyword;
-                if (kw == CSS_VALUE_LEFT) {
-                    span->bound->background->bg_position_x = 0.0f;
-                    span->bound->background->bg_position_x_is_percent = 1;
-                } else if (kw == CSS_VALUE_CENTER) {
-                    span->bound->background->bg_position_x = 50.0f;
-                    span->bound->background->bg_position_x_is_percent = 1;
-                } else if (kw == CSS_VALUE_RIGHT) {
-                    span->bound->background->bg_position_x = 100.0f;
-                    span->bound->background->bg_position_x_is_percent = 1;
-                }
-                span->bound->background->bg_position_set = 1;
-                log_debug("[CSS] background-position-x: %s", css_enum_info(kw)->name);
-            }
+            ensure_span_background(lycon, span);
+            resolve_background_position_axis(
+                lycon, prop_id, value, span->bound->background, true);
             break;
         }
 
         case CSS_PROPERTY_BACKGROUND_POSITION_Y: {
             log_debug("[CSS] Processing background-position-y property");
-            ensure_span_bound(lycon, span);
-            if (!span->bound->background) {
-                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-            }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float pos_y = resolve_length_value(lycon, prop_id, value);
-                span->bound->background->bg_position_y = pos_y;
-                span->bound->background->bg_position_y_is_percent = 0;
-                span->bound->background->bg_position_set = 1;
-                log_debug("[CSS] background-position-y: %.2fpx", pos_y);
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float pos_y_percent = value->data.percentage.value;
-                span->bound->background->bg_position_y = pos_y_percent;
-                span->bound->background->bg_position_y_is_percent = 1;
-                span->bound->background->bg_position_set = 1;
-                log_debug("[CSS] background-position-y: %.2f%%", pos_y_percent);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum kw = value->data.keyword;
-                if (kw == CSS_VALUE_TOP) {
-                    span->bound->background->bg_position_y = 0.0f;
-                    span->bound->background->bg_position_y_is_percent = 1;
-                } else if (kw == CSS_VALUE_CENTER) {
-                    span->bound->background->bg_position_y = 50.0f;
-                    span->bound->background->bg_position_y_is_percent = 1;
-                } else if (kw == CSS_VALUE_BOTTOM) {
-                    span->bound->background->bg_position_y = 100.0f;
-                    span->bound->background->bg_position_y_is_percent = 1;
-                }
-                span->bound->background->bg_position_set = 1;
-                log_debug("[CSS] background-position-y: %s", css_enum_info(kw)->name);
-            }
+            ensure_span_background(lycon, span);
+            resolve_background_position_axis(
+                lycon, prop_id, value, span->bound->background, false);
             break;
         }
 
         case CSS_PROPERTY_BACKGROUND_BLEND_MODE: {
             log_debug("[CSS] Processing background-blend-mode property");
-            ensure_span_bound(lycon, span);
-            if (!span->bound->background) {
-                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-            }
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum mode = value->data.keyword;
-                span->bound->background->blend_mode = mode;
-                log_debug("[CSS] background-blend-mode: %s", css_enum_info(mode)->name);
-            }
+            ensure_span_background(lycon, span);
+            resolve_keyword_slot(value, &span->bound->background->blend_mode,
+                                 "background-blend-mode");
             break;
         }
 
@@ -7005,10 +7166,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_BACKGROUND_SIZE: {
             log_debug("[CSS] Processing background-size property");
-            ensure_span_bound(lycon, span);
-            if (!span->bound->background) {
-                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-            }
+            ensure_span_background(lycon, span);
             BackgroundProp* bg = span->bound->background;
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -7074,10 +7232,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_BACKGROUND_REPEAT: {
             log_debug("[CSS] Processing background-repeat property");
-            ensure_span_bound(lycon, span);
-            if (!span->bound->background) {
-                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-            }
+            ensure_span_background(lycon, span);
             BackgroundProp* bg = span->bound->background;
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -7105,10 +7260,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_BACKGROUND_POSITION: {
             log_debug("[CSS] Processing background-position property");
-            ensure_span_bound(lycon, span);
-            if (!span->bound->background) {
-                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-            }
+            ensure_span_background(lycon, span);
             BackgroundProp* bg = span->bound->background;
             bg->bg_position_set = 1;
 
@@ -7300,18 +7452,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 break;
             }
 
-            // Allocate transform property
-            if (!span->transform) {
-                span->transform = (TransformProp*)alloc_prop(lycon, sizeof(TransformProp));
-                memset(span->transform, 0, sizeof(TransformProp));
-                // Default origin: center (50% 50%)
-                span->transform->origin_x = 50.0f;
-                span->transform->origin_y = 50.0f;
-                span->transform->origin_x_percent = true;
-                span->transform->origin_y_percent = true;
-                span->transform->perspective_origin_x = 50.0f;
-                span->transform->perspective_origin_y = 50.0f;
-            }
+            ensure_transform_prop(lycon, span);
 
             TransformFunction* func_list_head = nullptr;
             TransformFunction* func_list_tail = nullptr;
@@ -7412,80 +7553,31 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 else if (str_ieq_const(func->name, strlen(func->name), "rotate")) {
                     tf->type = TRANSFORM_ROTATE;
                     if (func->arg_count >= 1 && func->args[0]) {
-                        const CssValue* angle_val = func->args[0];
-                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH) {
-                            // Angle values come as LENGTH with angle units
-                            float angle = angle_val->data.length.value;
-                            CssUnit unit = angle_val->data.length.unit;
-                            // Convert to radians
-                            if (unit == CSS_UNIT_DEG) {
-                                tf->params.angle = angle * M_PI / 180.0f;
-                            } else if (unit == CSS_UNIT_RAD) {
-                                tf->params.angle = angle;
-                            } else if (unit == CSS_UNIT_GRAD) {
-                                tf->params.angle = angle * M_PI / 200.0f;
-                            } else if (unit == CSS_UNIT_TURN) {
-                                tf->params.angle = angle * 2.0f * M_PI;
-                            } else {
-                                tf->params.angle = angle * M_PI / 180.0f; // default to deg
-                            }
-                        } else if (angle_val->type == CSS_VALUE_TYPE_NUMBER) {
-                            // Unitless number = radians in some browsers, deg in CSS spec
-                            tf->params.angle = angle_val->data.number.value * M_PI / 180.0f;
-                        }
+                        tf->params.angle = resolve_transform_angle(func->args[0]);
                     }
                     log_debug("[CSS] transform: rotate(%g rad)", tf->params.angle);
                 }
                 else if (str_ieq_const(func->name, strlen(func->name), "skew")) {
                     tf->type = TRANSFORM_SKEW;
-                    // Parse skew angles
                     if (func->arg_count >= 1 && func->args[0]) {
-                        const CssValue* angle_val = func->args[0];
-                        float angle = (angle_val->type == CSS_VALUE_TYPE_LENGTH)
-                            ? angle_val->data.length.value : angle_val->data.number.value;
-                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH && angle_val->data.length.unit == CSS_UNIT_RAD) {
-                            tf->params.skew.x = angle;
-                        } else {
-                            tf->params.skew.x = angle * M_PI / 180.0f;
-                        }
+                        tf->params.skew.x = resolve_transform_angle(func->args[0]);
                     }
                     if (func->arg_count >= 2 && func->args[1]) {
-                        const CssValue* angle_val = func->args[1];
-                        float angle = (angle_val->type == CSS_VALUE_TYPE_LENGTH)
-                            ? angle_val->data.length.value : angle_val->data.number.value;
-                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH && angle_val->data.length.unit == CSS_UNIT_RAD) {
-                            tf->params.skew.y = angle;
-                        } else {
-                            tf->params.skew.y = angle * M_PI / 180.0f;
-                        }
+                        tf->params.skew.y = resolve_transform_angle(func->args[1]);
                     }
                     log_debug("[CSS] transform: skew(%g, %g rad)", tf->params.skew.x, tf->params.skew.y);
                 }
                 else if (str_ieq_const(func->name, strlen(func->name), "skewX")) {
                     tf->type = TRANSFORM_SKEWX;
                     if (func->arg_count >= 1 && func->args[0]) {
-                        const CssValue* angle_val = func->args[0];
-                        float angle = (angle_val->type == CSS_VALUE_TYPE_LENGTH)
-                            ? angle_val->data.length.value : angle_val->data.number.value;
-                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH && angle_val->data.length.unit == CSS_UNIT_RAD) {
-                            tf->params.angle = angle;
-                        } else {
-                            tf->params.angle = angle * M_PI / 180.0f;
-                        }
+                        tf->params.angle = resolve_transform_angle(func->args[0]);
                     }
                     log_debug("[CSS] transform: skewX(%g rad)", tf->params.angle);
                 }
                 else if (str_ieq_const(func->name, strlen(func->name), "skewY")) {
                     tf->type = TRANSFORM_SKEWY;
                     if (func->arg_count >= 1 && func->args[0]) {
-                        const CssValue* angle_val = func->args[0];
-                        float angle = (angle_val->type == CSS_VALUE_TYPE_LENGTH)
-                            ? angle_val->data.length.value : angle_val->data.number.value;
-                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH && angle_val->data.length.unit == CSS_UNIT_RAD) {
-                            tf->params.angle = angle;
-                        } else {
-                            tf->params.angle = angle * M_PI / 180.0f;
-                        }
+                        tf->params.angle = resolve_transform_angle(func->args[0]);
                     }
                     log_debug("[CSS] transform: skewY(%g rad)", tf->params.angle);
                 }
@@ -7535,42 +7627,21 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 else if (str_ieq_const(func->name, strlen(func->name), "rotateX")) {
                     tf->type = TRANSFORM_ROTATEX;
                     if (func->arg_count >= 1 && func->args[0]) {
-                        const CssValue* angle_val = func->args[0];
-                        float angle = (angle_val->type == CSS_VALUE_TYPE_LENGTH)
-                            ? angle_val->data.length.value : angle_val->data.number.value;
-                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH && angle_val->data.length.unit == CSS_UNIT_RAD) {
-                            tf->params.angle = angle;
-                        } else {
-                            tf->params.angle = angle * M_PI / 180.0f;
-                        }
+                        tf->params.angle = resolve_transform_angle(func->args[0]);
                     }
                     log_debug("[CSS] transform: rotateX(%g rad)", tf->params.angle);
                 }
                 else if (str_ieq_const(func->name, strlen(func->name), "rotateY")) {
                     tf->type = TRANSFORM_ROTATEY;
                     if (func->arg_count >= 1 && func->args[0]) {
-                        const CssValue* angle_val = func->args[0];
-                        float angle = (angle_val->type == CSS_VALUE_TYPE_LENGTH)
-                            ? angle_val->data.length.value : angle_val->data.number.value;
-                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH && angle_val->data.length.unit == CSS_UNIT_RAD) {
-                            tf->params.angle = angle;
-                        } else {
-                            tf->params.angle = angle * M_PI / 180.0f;
-                        }
+                        tf->params.angle = resolve_transform_angle(func->args[0]);
                     }
                     log_debug("[CSS] transform: rotateY(%g rad)", tf->params.angle);
                 }
                 else if (str_ieq_const(func->name, strlen(func->name), "rotateZ")) {
                     tf->type = TRANSFORM_ROTATEZ;
                     if (func->arg_count >= 1 && func->args[0]) {
-                        const CssValue* angle_val = func->args[0];
-                        float angle = (angle_val->type == CSS_VALUE_TYPE_LENGTH)
-                            ? angle_val->data.length.value : angle_val->data.number.value;
-                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH && angle_val->data.length.unit == CSS_UNIT_RAD) {
-                            tf->params.angle = angle;
-                        } else {
-                            tf->params.angle = angle * M_PI / 180.0f;
-                        }
+                        tf->params.angle = resolve_transform_angle(func->args[0]);
                     }
                     log_debug("[CSS] transform: rotateZ(%g rad)", tf->params.angle);
                 }
@@ -7624,17 +7695,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         case CSS_PROPERTY_TRANSFORM_ORIGIN: {
             log_debug("[CSS] Processing transform-origin property (value type=%d)", value->type);
 
-            // Allocate transform property if needed
-            if (!span->transform) {
-                span->transform = (TransformProp*)alloc_prop(lycon, sizeof(TransformProp));
-                memset(span->transform, 0, sizeof(TransformProp));
-                span->transform->origin_x = 50.0f;
-                span->transform->origin_y = 50.0f;
-                span->transform->origin_x_percent = true;
-                span->transform->origin_y_percent = true;
-                span->transform->perspective_origin_x = 50.0f;
-                span->transform->perspective_origin_y = 50.0f;
-            }
+            ensure_transform_prop(lycon, span);
 
             // Parse transform-origin: can be keywords (left, center, right, top, bottom)
             // or length/percentage values
@@ -7721,16 +7782,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_PERSPECTIVE: {
             log_debug("[CSS] Processing perspective property (value type=%d)", value->type);
-            if (!span->transform) {
-                span->transform = (TransformProp*)alloc_prop(lycon, sizeof(TransformProp));
-                memset(span->transform, 0, sizeof(TransformProp));
-                span->transform->origin_x = 50.0f;
-                span->transform->origin_y = 50.0f;
-                span->transform->origin_x_percent = true;
-                span->transform->origin_y_percent = true;
-                span->transform->perspective_origin_x = 50.0f;
-                span->transform->perspective_origin_y = 50.0f;
-            }
+            ensure_transform_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
                 span->transform->perspective = 0.0f;
             } else if (value->type == CSS_VALUE_TYPE_LENGTH ||
@@ -7746,16 +7798,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_PERSPECTIVE_ORIGIN: {
             log_debug("[CSS] Processing perspective-origin property (value type=%d)", value->type);
-            if (!span->transform) {
-                span->transform = (TransformProp*)alloc_prop(lycon, sizeof(TransformProp));
-                memset(span->transform, 0, sizeof(TransformProp));
-                span->transform->origin_x = 50.0f;
-                span->transform->origin_y = 50.0f;
-                span->transform->origin_x_percent = true;
-                span->transform->origin_y_percent = true;
-                span->transform->perspective_origin_x = 50.0f;
-                span->transform->perspective_origin_y = 50.0f;
-            }
+            ensure_transform_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_LIST) {
                 for (int i = 0; i < value->data.list.count && i < 2; i++) {
                     CssValue* item = value->data.list.values[i];
@@ -7823,122 +7866,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] %s: blur(%.2fpx)", filter_label, filter->params.blur_radius);
                 }
-                else if (strcmp(name, "brightness") == 0) {
-                    filter->type = FILTER_BRIGHTNESS;
-                    if (arg) {
-                        if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                            filter->params.amount = (float)arg->data.percentage.value / 100.0f;
-                        } else if (arg->type == CSS_VALUE_TYPE_NUMBER) {
-                            filter->params.amount = (float)arg->data.number.value;
-                        } else {
-                            filter->params.amount = 1.0f;
-                        }
-                    } else {
-                        filter->params.amount = 1.0f;
-                    }
-                    log_debug("[CSS] %s: brightness(%.2f)", filter_label, filter->params.amount);
-                }
-                else if (strcmp(name, "contrast") == 0) {
-                    filter->type = FILTER_CONTRAST;
-                    if (arg) {
-                        if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                            filter->params.amount = (float)arg->data.percentage.value / 100.0f;
-                        } else if (arg->type == CSS_VALUE_TYPE_NUMBER) {
-                            filter->params.amount = (float)arg->data.number.value;
-                        } else {
-                            filter->params.amount = 1.0f;
-                        }
-                    } else {
-                        filter->params.amount = 1.0f;
-                    }
-                    log_debug("[CSS] %s: contrast(%.2f)", filter_label, filter->params.amount);
-                }
-                else if (strcmp(name, "grayscale") == 0) {
-                    filter->type = FILTER_GRAYSCALE;
-                    if (arg) {
-                        if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                            filter->params.amount = (float)arg->data.percentage.value / 100.0f;
-                        } else if (arg->type == CSS_VALUE_TYPE_NUMBER) {
-                            filter->params.amount = (float)arg->data.number.value;
-                        } else {
-                            filter->params.amount = 1.0f;
-                        }
-                    } else {
-                        filter->params.amount = 1.0f;
-                    }
-                    // Clamp to [0, 1]
-                    if (filter->params.amount > 1.0f) filter->params.amount = 1.0f;
-                    if (filter->params.amount < 0.0f) filter->params.amount = 0.0f;
-                    log_debug("[CSS] %s: grayscale(%.2f)", filter_label, filter->params.amount);
-                }
-                else if (strcmp(name, "invert") == 0) {
-                    filter->type = FILTER_INVERT;
-                    if (arg) {
-                        if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                            filter->params.amount = (float)arg->data.percentage.value / 100.0f;
-                        } else if (arg->type == CSS_VALUE_TYPE_NUMBER) {
-                            filter->params.amount = (float)arg->data.number.value;
-                        } else {
-                            filter->params.amount = 1.0f;
-                        }
-                    } else {
-                        filter->params.amount = 1.0f;
-                    }
-                    // Clamp to [0, 1]
-                    if (filter->params.amount > 1.0f) filter->params.amount = 1.0f;
-                    if (filter->params.amount < 0.0f) filter->params.amount = 0.0f;
-                    log_debug("[CSS] %s: invert(%.2f)", filter_label, filter->params.amount);
-                }
-                else if (strcmp(name, "opacity") == 0) {
-                    filter->type = FILTER_OPACITY;
-                    if (arg) {
-                        if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                            filter->params.amount = (float)arg->data.percentage.value / 100.0f;
-                        } else if (arg->type == CSS_VALUE_TYPE_NUMBER) {
-                            filter->params.amount = (float)arg->data.number.value;
-                        } else {
-                            filter->params.amount = 1.0f;
-                        }
-                    } else {
-                        filter->params.amount = 1.0f;
-                    }
-                    // Clamp to [0, 1]
-                    if (filter->params.amount > 1.0f) filter->params.amount = 1.0f;
-                    if (filter->params.amount < 0.0f) filter->params.amount = 0.0f;
-                    log_debug("[CSS] %s: opacity(%.2f)", filter_label, filter->params.amount);
-                }
-                else if (strcmp(name, "saturate") == 0) {
-                    filter->type = FILTER_SATURATE;
-                    if (arg) {
-                        if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                            filter->params.amount = (float)arg->data.percentage.value / 100.0f;
-                        } else if (arg->type == CSS_VALUE_TYPE_NUMBER) {
-                            filter->params.amount = (float)arg->data.number.value;
-                        } else {
-                            filter->params.amount = 1.0f;
-                        }
-                    } else {
-                        filter->params.amount = 1.0f;
-                    }
-                    log_debug("[CSS] %s: saturate(%.2f)", filter_label, filter->params.amount);
-                }
-                else if (strcmp(name, "sepia") == 0) {
-                    filter->type = FILTER_SEPIA;
-                    if (arg) {
-                        if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                            filter->params.amount = (float)arg->data.percentage.value / 100.0f;
-                        } else if (arg->type == CSS_VALUE_TYPE_NUMBER) {
-                            filter->params.amount = (float)arg->data.number.value;
-                        } else {
-                            filter->params.amount = 1.0f;
-                        }
-                    } else {
-                        filter->params.amount = 1.0f;
-                    }
-                    // Clamp to [0, 1]
-                    if (filter->params.amount > 1.0f) filter->params.amount = 1.0f;
-                    if (filter->params.amount < 0.0f) filter->params.amount = 0.0f;
-                    log_debug("[CSS] %s: sepia(%.2f)", filter_label, filter->params.amount);
+                else if (const FilterAmountSpec* spec = find_filter_amount_spec(name)) {
+                    filter->type = spec->type;
+                    filter->params.amount = resolve_filter_amount(arg, spec->clamp_unit_interval);
+                    log_debug("[CSS] %s: %s(%.2f)", filter_label, name, filter->params.amount);
                 }
                 else if (strcmp(name, "hue-rotate") == 0) {
                     filter->type = FILTER_HUE_ROTATE;
@@ -8058,23 +7989,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 break;
             }
 
-            if (!block->multicol) {
-                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
-                block->multicol->column_count = 0;  // auto
-                block->multicol->column_width = 0;  // auto
-                block->multicol->column_height = 0; // auto
-                block->multicol->column_gap = 16.0f;  // default 1em (assuming 16px font)
-                block->multicol->column_gap_is_normal = true;
-                block->multicol->rule_width = 0;
-                block->multicol->rule_style = CSS_VALUE_NONE;
-                block->multicol->rule_color.r = 0;
-                block->multicol->rule_color.g = 0;
-                block->multicol->rule_color.b = 0;
-                block->multicol->rule_color.a = 255;
-                block->multicol->span = COLUMN_SPAN_NONE;
-                block->multicol->fill = COLUMN_FILL_BALANCE;
-                block->multicol->wrap = COLUMN_WRAP_AUTO;
-            }
+            ensure_multicol_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
                 block->multicol->column_count = 0;  // auto
@@ -8096,23 +8011,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 break;
             }
 
-            if (!block->multicol) {
-                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
-                block->multicol->column_count = 0;
-                block->multicol->column_width = 0;
-                block->multicol->column_height = 0;
-                block->multicol->column_gap = 16.0f;
-                block->multicol->column_gap_is_normal = true;
-                block->multicol->rule_width = 0;
-                block->multicol->rule_style = CSS_VALUE_NONE;
-                block->multicol->rule_color.r = 0;
-                block->multicol->rule_color.g = 0;
-                block->multicol->rule_color.b = 0;
-                block->multicol->rule_color.a = 255;
-                block->multicol->span = COLUMN_SPAN_NONE;
-                block->multicol->fill = COLUMN_FILL_BALANCE;
-                block->multicol->wrap = COLUMN_WRAP_AUTO;
-            }
+            ensure_multicol_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
                 block->multicol->column_width = 0;  // auto
@@ -8138,23 +8037,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 break;
             }
 
-            if (!block->multicol) {
-                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
-                block->multicol->column_count = 0;
-                block->multicol->column_width = 0;
-                block->multicol->column_height = 0;
-                block->multicol->column_gap = 16.0f;
-                block->multicol->column_gap_is_normal = true;
-                block->multicol->rule_width = 0;
-                block->multicol->rule_style = CSS_VALUE_NONE;
-                block->multicol->rule_color.r = 0;
-                block->multicol->rule_color.g = 0;
-                block->multicol->rule_color.b = 0;
-                block->multicol->rule_color.a = 255;
-                block->multicol->span = COLUMN_SPAN_NONE;
-                block->multicol->fill = COLUMN_FILL_BALANCE;
-                block->multicol->wrap = COLUMN_WRAP_AUTO;
-            }
+            ensure_multicol_prop(lycon, block);
 
             // Reset both longhands to initial (auto) per shorthand rules
             block->multicol->column_count = 0;
@@ -8209,13 +8092,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing column-rule shorthand property");
             if (!block) break;
 
-            if (!block->multicol) {
-                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
-                memset(block->multicol, 0, sizeof(MultiColumnProp));
-                block->multicol->column_gap = 16.0f;
-                block->multicol->column_gap_is_normal = true;
-                block->multicol->fill = COLUMN_FILL_BALANCE;
-            }
+            ensure_multicol_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_LIST) {
                 for (int i = 0; i < value->data.list.count; i++) {
@@ -8258,13 +8135,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing column-rule-width property");
             if (!block) break;
 
-            if (!block->multicol) {
-                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
-                memset(block->multicol, 0, sizeof(MultiColumnProp));
-                block->multicol->column_gap = 16.0f;
-                block->multicol->column_gap_is_normal = true;
-                block->multicol->fill = COLUMN_FILL_BALANCE;
-            }
+            ensure_multicol_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 block->multicol->rule_width = resolve_length_value(lycon, prop_id, value);
@@ -8284,13 +8155,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing column-rule-style property");
             if (!block) break;
 
-            if (!block->multicol) {
-                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
-                memset(block->multicol, 0, sizeof(MultiColumnProp));
-                block->multicol->column_gap = 16.0f;
-                block->multicol->column_gap_is_normal = true;
-                block->multicol->fill = COLUMN_FILL_BALANCE;
-            }
+            ensure_multicol_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 block->multicol->rule_style = value->data.keyword;
@@ -8304,13 +8169,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing column-rule-color property");
             if (!block) break;
 
-            if (!block->multicol) {
-                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
-                memset(block->multicol, 0, sizeof(MultiColumnProp));
-                block->multicol->column_gap = 16.0f;
-                block->multicol->column_gap_is_normal = true;
-                block->multicol->fill = COLUMN_FILL_BALANCE;
-            }
+            ensure_multicol_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_COLOR) {
                 block->multicol->rule_color.r = value->data.color.data.rgba.r;
@@ -8328,13 +8187,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing column-span property");
             if (!block) break;
 
-            if (!block->multicol) {
-                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
-                memset(block->multicol, 0, sizeof(MultiColumnProp));
-                block->multicol->column_gap = 16.0f;
-                block->multicol->column_gap_is_normal = true;
-                block->multicol->fill = COLUMN_FILL_BALANCE;
-            }
+            ensure_multicol_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum kw = value->data.keyword;
@@ -8426,13 +8279,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing column-fill property");
             if (!block) break;
 
-            if (!block->multicol) {
-                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
-                memset(block->multicol, 0, sizeof(MultiColumnProp));
-                block->multicol->column_gap = 16.0f;
-                block->multicol->column_gap_is_normal = true;
-                block->multicol->fill = COLUMN_FILL_BALANCE;
-            }
+            ensure_multicol_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum kw = value->data.keyword;
@@ -8451,14 +8298,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing column-height property");
             if (!block) break;
 
-            if (!block->multicol) {
-                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
-                memset(block->multicol, 0, sizeof(MultiColumnProp));
-                block->multicol->column_gap = 16.0f;
-                block->multicol->column_gap_is_normal = true;
-                block->multicol->fill = COLUMN_FILL_BALANCE;
-                block->multicol->wrap = COLUMN_WRAP_AUTO;
-            }
+            ensure_multicol_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
                 block->multicol->column_height = 0;
@@ -8477,14 +8317,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing column-wrap property");
             if (!block) break;
 
-            if (!block->multicol) {
-                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
-                memset(block->multicol, 0, sizeof(MultiColumnProp));
-                block->multicol->column_gap = 16.0f;
-                block->multicol->column_gap_is_normal = true;
-                block->multicol->fill = COLUMN_FILL_BALANCE;
-                block->multicol->wrap = COLUMN_WRAP_AUTO;
-            }
+            ensure_multicol_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 if (value->data.keyword == CSS_VALUE_WRAP) {
@@ -9815,59 +9648,23 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_STYLE: {
             log_debug("[CSS] Processing font-style property");
-            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
-            // it already set/reset font-style. Skip the longhand to respect cascade.
-            {
-                DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
-                if (elem && elem->specified_style) {
-                    CssDeclaration* font_sh = style_tree_get_declaration(
-                        elem->specified_style, CSS_PROPERTY_FONT);
-                    if (font_sh && font_sh->source_order > decl->source_order) {
-                        log_debug("[CSS] Skipping font-style: font shorthand (order=%u) overrides (order=%u)",
-                            font_sh->source_order, decl->source_order);
-                        break;
-                    }
-                }
-            }
+            if (font_shorthand_overrides_longhand(lycon, decl, "font-style")) break;
             if (!span->font) { span->font = alloc_font_prop(lycon); }
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum val = value->data.keyword;
-                if (val > 0) {
-                    span->font->font_style = val;
-                    log_debug("[CSS] font-style: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
-                }
-            }
+            resolve_keyword_slot(value, &span->font->font_style, "font-style");
             break;
         }
 
         case CSS_PROPERTY_TEXT_TRANSFORM: {
             log_debug("[CSS] Processing text-transform property");
             ensure_span_block(lycon, span);
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum val = value->data.keyword;
-                if (val > 0) {
-                    span->blk->text_transform = val;
-                    log_debug("[CSS] text-transform: %s -> 0x%04X",
-                             css_enum_info(value->data.keyword)->name, val);
-                }
-            }
+            resolve_keyword_slot(value, &span->blk->text_transform, "text-transform");
             break;
         }
 
         case CSS_PROPERTY_TEXT_WRAP_STYLE: {
             log_debug("[CSS] Processing text-wrap-style property");
             ensure_span_block(lycon, span);
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum val = value->data.keyword;
-                if (val > 0) {
-                    span->blk->text_wrap_style = val;
-                    log_debug("[CSS] text-wrap-style: %s -> 0x%04X",
-                             css_enum_info(value->data.keyword)->name, val);
-                }
-            }
+            resolve_keyword_slot(value, &span->blk->text_wrap_style, "text-wrap-style");
             break;
         }
 
@@ -9878,15 +9675,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 break;
             }
             ensure_span_block(lycon, block);
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum val = value->data.keyword;
-                if (val != CSS_VALUE__UNDEF) {
-                    block->blk->text_overflow = val;
-                    log_debug("[CSS] text-overflow: %s -> 0x%04X",
-                             css_enum_info(val)->name, val);
-                }
-            }
+            resolve_keyword_slot(value, &block->blk->text_overflow, "text-overflow");
             break;
         }
 
@@ -9919,28 +9708,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         case CSS_PROPERTY_WORD_BREAK: {
             log_debug("[CSS] Processing word-break property");
             ensure_span_block(lycon, span);
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum val = value->data.keyword;
-                if (val > 0) {
-                    span->blk->word_break = val;
-                    log_debug("[CSS] word-break: %s -> 0x%04X",
-                             css_enum_info(value->data.keyword)->name, val);
-                }
-            }
+            resolve_keyword_slot(value, &span->blk->word_break, "word-break");
             break;
         }
 
         case CSS_PROPERTY_LINE_BREAK: {
             log_debug("[CSS] Processing line-break property");
             ensure_span_block(lycon, span);
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum val = value->data.keyword;
-                if (val > 0) {
-                    span->blk->line_break = val;
-                    log_debug("[CSS] line-break: %s -> 0x%04X",
-                             css_enum_info(value->data.keyword)->name, val);
-                }
-            }
+            resolve_keyword_slot(value, &span->blk->line_break, "line-break");
             break;
         }
 
@@ -9961,34 +9736,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         case CSS_PROPERTY_OVERFLOW_WRAP: {
             log_debug("[CSS] Processing overflow-wrap/word-wrap property");
             ensure_span_block(lycon, span);
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum val = value->data.keyword;
-                if (val > 0) {
-                    span->blk->overflow_wrap = val;
-                    log_debug("[CSS] overflow-wrap: %s -> 0x%04X",
-                        css_enum_info(value->data.keyword)->name, val);
-                }
-            }
+            resolve_keyword_slot(value, &span->blk->overflow_wrap, "overflow-wrap");
             break;
         }
 
         case CSS_PROPERTY_FONT_VARIANT: {
             log_debug("[CSS] Processing font-variant property");
-            // CSS 2.1 §15.8: If a font shorthand with higher source_order exists,
-            // it already set/reset font-variant. Skip the longhand to respect cascade.
-            {
-                DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
-                if (elem && elem->specified_style) {
-                    CssDeclaration* font_sh = style_tree_get_declaration(
-                        elem->specified_style, CSS_PROPERTY_FONT);
-                    if (font_sh && font_sh->source_order > decl->source_order) {
-                        log_debug("[CSS] Skipping font-variant: font shorthand (order=%u) overrides (order=%u)",
-                            font_sh->source_order, decl->source_order);
-                        break;
-                    }
-                }
-            }
+            if (font_shorthand_overrides_longhand(lycon, decl, "font-variant")) break;
             if (!span->font) {
                 span->font = alloc_font_prop(lycon);
             }
@@ -10146,14 +9900,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             // Allocate FlexProp if needed (same as resolve_style.cpp)
             alloc_flex_prop(lycon, block);
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum val = value->data.keyword;
-                if (val > 0) {
-                    block->embed->flex->direction = val;
-                    log_debug("[CSS] flex-direction: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
-                }
-            }
+            resolve_keyword_slot(value, &block->embed->flex->direction, "flex-direction");
             break;
         }
 
@@ -10164,13 +9911,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 break;
             }
             alloc_flex_prop(lycon, block);
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum val = value->data.keyword;
-                if (val > 0) {
-                    block->embed->flex->wrap = val;
-                    log_debug("[CSS] flex-wrap: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
-                }
-            }
+            resolve_keyword_slot(value, &block->embed->flex->wrap, "flex-wrap");
             break;
         }
 
@@ -10183,24 +9924,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             // Allocate FlexProp if needed (for flexbox)
             alloc_flex_prop(lycon, block);
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum val = value->data.keyword;
-                if (val > 0) {
-                    block->embed->flex->justify = val;
-                    log_debug("[CSS] justify-content (flex): %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
-                }
-            }
+            resolve_keyword_slot(value, &block->embed->flex->justify,
+                                 "justify-content (flex)");
 
             // Also allocate GridProp and store value (for grid containers)
             alloc_grid_prop(lycon, block);
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum val = value->data.keyword;
-                if (val > 0) {
-                    block->embed->grid->justify_content = val;
-                    log_debug("[CSS] justify-content (grid): %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
-                }
-            }
+            resolve_keyword_slot(value, &block->embed->grid->justify_content,
+                                 "justify-content (grid)");
             break;
         }
 
@@ -10213,24 +9943,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             // Allocate FlexProp if needed (for flexbox)
             alloc_flex_prop(lycon, block);
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum val = value->data.keyword;
-                if (val > 0) {
-                    block->embed->flex->align_items = val;
-                    log_debug("[CSS] align-items (flex): %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
-                }
-            }
+            resolve_keyword_slot(value, &block->embed->flex->align_items,
+                                 "align-items (flex)");
 
             // Also allocate GridProp and store value (for grid containers)
             alloc_grid_prop(lycon, block);
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum val = value->data.keyword;
-                if (val > 0) {
-                    block->embed->grid->align_items = val;
-                    log_debug("[CSS] align-items (grid): %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
-                }
-            }
+            resolve_keyword_slot(value, &block->embed->grid->align_items,
+                                 "align-items (grid)");
             break;
         }
 
@@ -10333,25 +10052,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             block->embed->grid->column_gap = gap_value;
             block->embed->grid->column_gap_is_percent = is_percent;
 
-            // Also apply to multi-column layout
-            // Create multicol struct if it doesn't exist (column-gap may be processed before column-count)
-            if (!block->multicol) {
-                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
-                block->multicol->column_count = 0;  // auto
-                block->multicol->column_width = 0;  // auto
-                block->multicol->column_height = 0; // auto
-                block->multicol->column_gap = 16.0f;  // default 1em
-                block->multicol->column_gap_is_normal = true;
-                block->multicol->rule_width = 0;
-                block->multicol->rule_style = CSS_VALUE_NONE;
-                block->multicol->rule_color.r = 0;
-                block->multicol->rule_color.g = 0;
-                block->multicol->rule_color.b = 0;
-                block->multicol->rule_color.a = 255;
-                block->multicol->span = COLUMN_SPAN_NONE;
-                block->multicol->fill = COLUMN_FILL_BALANCE;
-                block->multicol->wrap = COLUMN_WRAP_AUTO;
-            }
+            // Also apply to multi-column layout.
+            ensure_multicol_prop(lycon, block);
             block->multicol->column_gap = gap_value;
             block->multicol->column_gap_is_normal = is_normal;
 
@@ -10733,180 +10435,22 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         // Grid Item Placement Properties
         case CSS_PROPERTY_GRID_COLUMN_START: {
-            log_debug("[CSS] Processing grid-column-start property");
-            alloc_grid_item_prop(lycon, span);
-            if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                int line = (int)value->data.number.value;
-                span->gi->grid_column_start = line;
-                span->gi->has_explicit_grid_column_start = true;
-                span->gi->is_grid_auto_placed = false;
-                log_debug("[CSS] grid-column-start: %d", line);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                if (value->data.keyword == CSS_VALUE_AUTO) {
-                    span->gi->grid_column_start = 0;  // auto
-                    log_debug("[CSS] grid-column-start: auto");
-                } else {
-                    const CssEnumInfo* ki = css_enum_info(value->data.keyword);
-                    if (ki && ki->name) {
-                        replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_start_name, ki->name);
-                        span->gi->has_explicit_grid_column_start = true;
-                        span->gi->is_grid_auto_placed = false;
-                        log_debug("[CSS] grid-column-start: named line '%s'", ki->name);
-                    }
-                }
-            } else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
-                const char* n = value->data.custom_property.name;
-                if (n[0] != '[' && n[0] != ']' && strcmp(n, "span") != 0) {
-                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_start_name, n);
-                    span->gi->has_explicit_grid_column_start = true;
-                    span->gi->is_grid_auto_placed = false;
-                    log_debug("[CSS] grid-column-start: named line '%s'", n);
-                }
-            }
+            resolve_grid_line_longhand(lycon, span, value, false, false);
             break;
         }
 
         case CSS_PROPERTY_GRID_COLUMN_END: {
-            log_debug("[CSS] Processing grid-column-end property");
-            alloc_grid_item_prop(lycon, span);
-            if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                int line = (int)value->data.number.value;
-                span->gi->grid_column_end = line;
-                span->gi->has_explicit_grid_column_end = true;
-                span->gi->is_grid_auto_placed = false;
-                log_debug("[CSS] grid-column-end: %d", line);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
-                span->gi->grid_column_end = 0;  // auto
-                log_debug("[CSS] grid-column-end: auto");
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                const CssEnumInfo* ki = css_enum_info(value->data.keyword);
-                if (ki && ki->name) {
-                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_end_name, ki->name);
-                    span->gi->has_explicit_grid_column_end = true;
-                    span->gi->is_grid_auto_placed = false;
-                    log_debug("[CSS] grid-column-end: named line '%s'", ki->name);
-                }
-            } else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
-                const char* n = value->data.custom_property.name;
-                if (n[0] != '[' && n[0] != ']' && strcmp(n, "span") != 0) {
-                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_end_name, n);
-                    span->gi->has_explicit_grid_column_end = true;
-                    span->gi->is_grid_auto_placed = false;
-                    log_debug("[CSS] grid-column-end: named line '%s'", n);
-                }
-            } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-                // "span N" comes as a list [keyword:span, number:N]
-                bool is_span = false;
-                int span_n = 1;
-                for (int i = 0; i < value->data.list.count; i++) {
-                    CssValue* v = value->data.list.values[i];
-                    if (v->type == CSS_VALUE_TYPE_KEYWORD) {
-                        const CssEnumInfo* ki = css_enum_info(v->data.keyword);
-                        if (ki && ki->name && strcmp(ki->name, "span") == 0) is_span = true;
-                    } else if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name &&
-                               strcmp(v->data.custom_property.name, "span") == 0) {
-                        is_span = true;
-                    } else if (v->type == CSS_VALUE_TYPE_NUMBER) {
-                        span_n = (int)v->data.number.value;
-                    }
-                }
-                if (is_span) {
-                    // CSS spec: grid-column-end: span N → end is "span N" (stored as -N with is_span=true)
-                    span->gi->grid_column_end = -span_n;
-                    span->gi->grid_column_end_is_span = true;
-                    span->gi->has_explicit_grid_column_end = true;
-                    span->gi->is_grid_auto_placed = false;
-                    log_debug("[CSS] grid-column-end: span %d", span_n);
-                }
-            }
+            resolve_grid_line_longhand(lycon, span, value, false, true);
             break;
         }
 
         case CSS_PROPERTY_GRID_ROW_START: {
-            log_debug("[CSS] Processing grid-row-start property");
-            alloc_grid_item_prop(lycon, span);
-            if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                int line = (int)value->data.number.value;
-                span->gi->grid_row_start = line;
-                span->gi->has_explicit_grid_row_start = true;
-                span->gi->is_grid_auto_placed = false;
-                log_debug("[CSS] grid-row-start: %d", line);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
-                span->gi->grid_row_start = 0;  // auto
-                log_debug("[CSS] grid-row-start: auto");
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                const CssEnumInfo* ki = css_enum_info(value->data.keyword);
-                if (ki && ki->name) {
-                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_start_name, ki->name);
-                    span->gi->has_explicit_grid_row_start = true;
-                    span->gi->is_grid_auto_placed = false;
-                    log_debug("[CSS] grid-row-start: named line '%s'", ki->name);
-                }
-            } else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
-                const char* n = value->data.custom_property.name;
-                if (n[0] != '[' && n[0] != ']' && strcmp(n, "span") != 0) {
-                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_start_name, n);
-                    span->gi->has_explicit_grid_row_start = true;
-                    span->gi->is_grid_auto_placed = false;
-                    log_debug("[CSS] grid-row-start: named line '%s'", n);
-                }
-            }
+            resolve_grid_line_longhand(lycon, span, value, true, false);
             break;
         }
 
         case CSS_PROPERTY_GRID_ROW_END: {
-            log_debug("[CSS] Processing grid-row-end property");
-            alloc_grid_item_prop(lycon, span);
-            if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                int line = (int)value->data.number.value;
-                span->gi->grid_row_end = line;
-                span->gi->has_explicit_grid_row_end = true;
-                span->gi->is_grid_auto_placed = false;
-                log_debug("[CSS] grid-row-end: %d", line);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
-                span->gi->grid_row_end = 0;  // auto
-                log_debug("[CSS] grid-row-end: auto");
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                const CssEnumInfo* ki = css_enum_info(value->data.keyword);
-                if (ki && ki->name) {
-                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_end_name, ki->name);
-                    span->gi->has_explicit_grid_row_end = true;
-                    span->gi->is_grid_auto_placed = false;
-                    log_debug("[CSS] grid-row-end: named line '%s'", ki->name);
-                }
-            } else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
-                const char* n = value->data.custom_property.name;
-                if (n[0] != '[' && n[0] != ']' && strcmp(n, "span") != 0) {
-                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_end_name, n);
-                    span->gi->has_explicit_grid_row_end = true;
-                    span->gi->is_grid_auto_placed = false;
-                    log_debug("[CSS] grid-row-end: named line '%s'", n);
-                }
-            } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-                // "span N" comes as a list [keyword:span, number:N]
-                bool is_span = false;
-                int span_n = 1;
-                for (int i = 0; i < value->data.list.count; i++) {
-                    CssValue* v = value->data.list.values[i];
-                    if (v->type == CSS_VALUE_TYPE_KEYWORD) {
-                        const CssEnumInfo* ki = css_enum_info(v->data.keyword);
-                        if (ki && ki->name && strcmp(ki->name, "span") == 0) is_span = true;
-                    } else if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name &&
-                               strcmp(v->data.custom_property.name, "span") == 0) {
-                        is_span = true;
-                    } else if (v->type == CSS_VALUE_TYPE_NUMBER) {
-                        span_n = (int)v->data.number.value;
-                    }
-                }
-                if (is_span) {
-                    // CSS spec: grid-row-end: span N → end is "span N" (stored as -N with is_span=true)
-                    span->gi->grid_row_end = -span_n;
-                    span->gi->grid_row_end_is_span = true;
-                    span->gi->has_explicit_grid_row_end = true;
-                    span->gi->is_grid_auto_placed = false;
-                    log_debug("[CSS] grid-row-end: span %d", span_n);
-                }
-            }
+            resolve_grid_line_longhand(lycon, span, value, true, true);
             break;
         }
 
@@ -11879,228 +11423,26 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_COUNTER_RESET: {
-            // CSS 2.1 Section 12.4: counter-reset property
-            // Syntax: counter-reset: [ <identifier> <integer>? ]+ | none
             log_debug("[CSS] counter-reset value type=%d", (int)value->type);
-
             ensure_span_block(lycon, span);
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-                span->blk->counter_reset = (char*)alloc_prop(lycon, 5);
-                str_copy(span->blk->counter_reset, 5, "none", 4);
-                log_debug("[CSS] counter-reset: none");
-            } else if (value->type == CSS_VALUE_TYPE_STRING || value->type == CSS_VALUE_TYPE_CUSTOM) {
-                // Direct string value (parsed by CSS parser) or custom property name (identifier)
-                const char* str = (value->type == CSS_VALUE_TYPE_STRING) ? value->data.string : value->data.custom_property.name;
-                if (str) {
-                    size_t len = strlen(str);
-                    span->blk->counter_reset = (char*)alloc_prop(lycon, len + 1);
-                    str_copy(span->blk->counter_reset, len + 1, str, len);
-                    log_debug("[CSS] counter-reset: %s", str);
-                }
-            } else if (value->type == CSS_VALUE_TYPE_LIST) {
-                // Parse list of name-value pairs
-                log_debug("[CSS] counter-reset list with %d items", value->data.list.count);
-                StringBuf* sb = stringbuf_new(lycon->doc->view_tree->pool);
-
-                if (!sb) {
-                    log_error("[CSS] counter-reset: stringbuf_new failed!");
-                    break;
-                }
-
-                int count = value->data.list.count;
-                CssValue** values_list = value->data.list.values;
-                for (int i = 0; i < count; i++) {
-                    CssValue* item = values_list[i];
-                    if (item->type == CSS_VALUE_TYPE_KEYWORD) {
-                        const CssEnumInfo* info = css_enum_info(item->data.keyword);
-                        if (info) {
-                            if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                            stringbuf_append_str(sb, info->name);
-                        }
-                    } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
-                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                        stringbuf_append_str(sb, item->data.custom_property.name);
-                    } else if (item->type == CSS_VALUE_TYPE_STRING && item->data.string) {
-                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                        stringbuf_append_str(sb, item->data.string);
-                    } else if (item->type == CSS_VALUE_TYPE_NUMBER) {
-                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                        stringbuf_append_int(sb, (int)item->data.number.value);
-                    } else if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function) {
-                        // CSS Lists 3: reversed(counter-name) in counter-reset
-                        CssFunction* func = item->data.function;
-                        if (func->name && strcmp(func->name, "reversed") == 0 &&
-                            func->arg_count >= 1 && func->args[0]) {
-                            const char* counter_name = nullptr;
-                            if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM &&
-                                func->args[0]->data.custom_property.name) {
-                                counter_name = func->args[0]->data.custom_property.name;
-                            } else if (func->args[0]->type == CSS_VALUE_TYPE_KEYWORD) {
-                                const CssEnumInfo* info = css_enum_info(func->args[0]->data.keyword);
-                                if (info) counter_name = info->name;
-                            }
-                            if (counter_name) {
-                                if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                                stringbuf_append_str(sb, counter_name);
-                                log_debug("[CSS] counter-reset: reversed(%s)", counter_name);
-                            }
-                        }
-                    }
-                }
-
-                if (sb->length > 0) {
-                    span->blk->counter_reset = (char*)alloc_prop(lycon, sb->length + 1);
-                    str_copy(span->blk->counter_reset, sb->length + 1, sb->str->chars, sb->length);
-                    log_debug("[CSS] counter-reset: %s", sb->str->chars);
-                }
-                stringbuf_free(sb);
-            } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
-                // CSS Lists 3: standalone reversed(counter-name) in counter-reset
-                CssFunction* func = value->data.function;
-                if (func->name && strcmp(func->name, "reversed") == 0 &&
-                    func->arg_count >= 1 && func->args[0]) {
-                    const char* counter_name = nullptr;
-                    if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM &&
-                        func->args[0]->data.custom_property.name) {
-                        counter_name = func->args[0]->data.custom_property.name;
-                    } else if (func->args[0]->type == CSS_VALUE_TYPE_KEYWORD) {
-                        const CssEnumInfo* info = css_enum_info(func->args[0]->data.keyword);
-                        if (info) counter_name = info->name;
-                    }
-                    if (counter_name) {
-                        size_t len = strlen(counter_name);
-                        span->blk->counter_reset = (char*)alloc_prop(lycon, len + 1);
-                        str_copy(span->blk->counter_reset, len + 1, counter_name, len);
-                        log_debug("[CSS] counter-reset: reversed(%s) → %s", counter_name, counter_name);
-                    }
-                }
-            }
+            resolve_counter_property(lycon, value, &span->blk->counter_reset,
+                                     "counter-reset", true);
             break;
         }
 
         case CSS_PROPERTY_COUNTER_INCREMENT: {
-            // CSS 2.1 Section 12.4: counter-increment property
-            // Syntax: counter-increment: [ <identifier> <integer>? ]+ | none
             log_debug("[CSS] counter-increment: entry, value type=%d", (int)value->type);
-
             ensure_span_block(lycon, span);
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-                span->blk->counter_increment = (char*)alloc_prop(lycon, 5);
-                str_copy(span->blk->counter_increment, 5, "none", 4);
-                log_debug("[CSS] counter-increment: none");
-            } else if (value->type == CSS_VALUE_TYPE_STRING || value->type == CSS_VALUE_TYPE_CUSTOM) {
-                // Direct string value (parsed by CSS parser) or custom property name (identifier)
-                const char* str = (value->type == CSS_VALUE_TYPE_STRING) ? value->data.string : value->data.custom_property.name;
-                if (str) {
-                    size_t len = strlen(str);
-                    span->blk->counter_increment = (char*)alloc_prop(lycon, len + 1);
-                    str_copy(span->blk->counter_increment, len + 1, str, len);
-                    log_debug("[CSS] counter-increment: %s", str);
-                }
-            } else if (value->type == CSS_VALUE_TYPE_LIST) {
-                // Parse list of name-value pairs
-                log_debug("[CSS] counter-increment: LIST case entered, value ptr=%p", (void*)value);
-                log_debug("[CSS] counter-increment: about to access list.count");
-                int count = value->data.list.count;
-                log_debug("[CSS] counter-increment: list.count=%d", count);
-                log_debug("[CSS] counter-increment: about to call stringbuf_new");
-                StringBuf* sb = stringbuf_new(lycon->doc->view_tree->pool);
-                log_debug("[CSS] counter-increment: stringbuf created at %p", (void*)sb);
-
-                if (!sb) {
-                    log_error("[CSS] counter-increment: stringbuf_new failed!");
-                    break;
-                }
-
-                CssValue** values = value->data.list.values;
-                for (int i = 0; i < count; i++) {
-                    CssValue* item = values[i];
-                    if (item->type == CSS_VALUE_TYPE_KEYWORD) {
-                        const CssEnumInfo* info = css_enum_info(item->data.keyword);
-                        if (info) {
-                            if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                            stringbuf_append_str(sb, info->name);
-                        }
-                    } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
-                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                        stringbuf_append_str(sb, item->data.custom_property.name);
-                    } else if (item->type == CSS_VALUE_TYPE_STRING && item->data.string) {
-                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                        stringbuf_append_str(sb, item->data.string);
-                    } else if (item->type == CSS_VALUE_TYPE_NUMBER) {
-                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                        stringbuf_append_int(sb, (int)item->data.number.value);
-                    }
-                }
-
-                if (sb->length > 0) {
-                    span->blk->counter_increment = (char*)alloc_prop(lycon, sb->length + 1);
-                    str_copy(span->blk->counter_increment, sb->length + 1, sb->str->chars, sb->length);
-                    log_debug("[CSS] counter-increment: %s", sb->str->chars);
-                }
-                stringbuf_free(sb);
-            }
+            resolve_counter_property(lycon, value, &span->blk->counter_increment,
+                                     "counter-increment", false);
             break;
         }
 
         case CSS_PROPERTY_COUNTER_SET: {
-            // CSS Lists 3 §5.2: counter-set property
-            // Syntax: counter-set: [ <counter-name> <integer>? ]+ | none
             log_debug("[CSS] counter-set value type=%d", (int)value->type);
-
             ensure_span_block(lycon, span);
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-                span->blk->counter_set = (char*)alloc_prop(lycon, 5);
-                str_copy(span->blk->counter_set, 5, "none", 4);
-                log_debug("[CSS] counter-set: none");
-            } else if (value->type == CSS_VALUE_TYPE_STRING || value->type == CSS_VALUE_TYPE_CUSTOM) {
-                const char* str = (value->type == CSS_VALUE_TYPE_STRING) ? value->data.string : value->data.custom_property.name;
-                if (str) {
-                    size_t len = strlen(str);
-                    span->blk->counter_set = (char*)alloc_prop(lycon, len + 1);
-                    str_copy(span->blk->counter_set, len + 1, str, len);
-                    log_debug("[CSS] counter-set: %s", str);
-                }
-            } else if (value->type == CSS_VALUE_TYPE_LIST) {
-                log_debug("[CSS] counter-set list with %d items", value->data.list.count);
-                StringBuf* sb = stringbuf_new(lycon->doc->view_tree->pool);
-                if (!sb) {
-                    log_error("[CSS] counter-set: stringbuf_new failed!");
-                    break;
-                }
-
-                int count = value->data.list.count;
-                CssValue** values = value->data.list.values;
-                for (int i = 0; i < count; i++) {
-                    CssValue* item = values[i];
-                    if (item->type == CSS_VALUE_TYPE_KEYWORD) {
-                        const CssEnumInfo* info = css_enum_info(item->data.keyword);
-                        if (info) {
-                            if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                            stringbuf_append_str(sb, info->name);
-                        }
-                    } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
-                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                        stringbuf_append_str(sb, item->data.custom_property.name);
-                    } else if (item->type == CSS_VALUE_TYPE_STRING && item->data.string) {
-                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                        stringbuf_append_str(sb, item->data.string);
-                    } else if (item->type == CSS_VALUE_TYPE_NUMBER) {
-                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                        stringbuf_append_int(sb, (int)item->data.number.value);
-                    }
-                }
-
-                if (sb->length > 0) {
-                    span->blk->counter_set = (char*)alloc_prop(lycon, sb->length + 1);
-                    str_copy(span->blk->counter_set, sb->length + 1, sb->str->chars, sb->length);
-                    log_debug("[CSS] counter-set: %s", sb->str->chars);
-                }
-                stringbuf_free(sb);
-            }
+            resolve_counter_property(lycon, value, &span->blk->counter_set,
+                                     "counter-set", false);
             break;
         }
 
@@ -12246,10 +11588,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
 
                 // Ensure background prop exists
-                ensure_span_bound(lycon, span);
-                if (!span->bound->background) {
-                    span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-                }
+                ensure_span_background(lycon, span);
                 BackgroundProp* bg = span->bound->background;
 
                 // First, look for a solid color in the last layer (base background)
@@ -12443,10 +11782,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 if (str_ieq_const(func_name, strlen(func_name), "rgb") || str_ieq_const(func_name, strlen(func_name), "rgba") ||
                     str_ieq_const(func_name, strlen(func_name), "hsl") || str_ieq_const(func_name, strlen(func_name), "hsla")) {
                     // Color function - treat as background-color
-                    ensure_span_bound(lycon, span);
-                    if (!span->bound->background) {
-                        span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-                    }
+                    ensure_span_background(lycon, span);
                     span->bound->background->color = resolve_color_value(lycon, value);
                     log_debug("[Lambda CSS Shorthand] Expanding %s to background-color #%02x%02x%02x%02x",
                         func_name, span->bound->background->color.r, span->bound->background->color.g,
@@ -12461,10 +11797,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 if (strcmp(func_name, "linear-gradient") == 0 ||
                     strcmp(func_name, "repeating-linear-gradient") == 0) {
                     // Parse linear-gradient(angle, color1, color2, ...)
-                    ensure_span_bound(lycon, span);
-                    if (!span->bound->background) {
-                        span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-                    }
+                    ensure_span_background(lycon, span);
                     span->bound->background->gradient_type = GRADIENT_LINEAR;
 
                     // Allocate LinearGradient
@@ -12665,10 +11998,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 else if (strcmp(func_name, "radial-gradient") == 0 ||
                          strcmp(func_name, "repeating-radial-gradient") == 0) {
                     // Parse radial-gradient(shape size at position, color-stops...)
-                    ensure_span_bound(lycon, span);
-                    if (!span->bound->background) {
-                        span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-                    }
+                    ensure_span_background(lycon, span);
                     span->bound->background->gradient_type = GRADIENT_RADIAL;
 
                     // Allocate RadialGradient
@@ -12836,10 +12166,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 else if (strcmp(func_name, "conic-gradient") == 0 ||
                          strcmp(func_name, "repeating-conic-gradient") == 0) {
                     // Parse conic-gradient(from angle at position, color-stops...)
-                    ensure_span_bound(lycon, span);
-                    if (!span->bound->background) {
-                        span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-                    }
+                    ensure_span_background(lycon, span);
                     span->bound->background->gradient_type = GRADIENT_CONIC;
 
                     // Allocate ConicGradient
@@ -13183,8 +12510,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         // ===== Outline Properties =====
         case CSS_PROPERTY_OUTLINE_STYLE: {
             log_debug("[CSS] Processing outline-style property");
-            ensure_span_bound(lycon, span);
-            if (!span->bound->outline) { span->bound->outline = (OutlineProp*)alloc_prop(lycon, sizeof(OutlineProp)); }
+            ensure_span_outline(lycon, span);
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 span->bound->outline->style = value->data.keyword;
                 log_debug("[CSS] outline-style: %s", css_enum_info(value->data.keyword)->name);
@@ -13193,8 +12519,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
         case CSS_PROPERTY_OUTLINE_WIDTH: {
             log_debug("[CSS] Processing outline-width property");
-            ensure_span_bound(lycon, span);
-            if (!span->bound->outline) { span->bound->outline = (OutlineProp*)alloc_prop(lycon, sizeof(OutlineProp)); }
+            ensure_span_outline(lycon, span);
             float width = resolve_length_value(lycon, prop_id, value);
             span->bound->outline->width = width;
             log_debug("[CSS] outline-width: %.1fpx", width);
@@ -13202,8 +12527,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
         case CSS_PROPERTY_OUTLINE_COLOR: {
             log_debug("[CSS] Processing outline-color property");
-            ensure_span_bound(lycon, span);
-            if (!span->bound->outline) { span->bound->outline = (OutlineProp*)alloc_prop(lycon, sizeof(OutlineProp)); }
+            ensure_span_outline(lycon, span);
             span->bound->outline->color = resolve_color_value(lycon, value);
             log_debug("[CSS] outline-color: #%02x%02x%02x%02x",
                       span->bound->outline->color.r, span->bound->outline->color.g,
@@ -13212,8 +12536,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
         case CSS_PROPERTY_OUTLINE_OFFSET: {
             log_debug("[CSS] Processing outline-offset property");
-            ensure_span_bound(lycon, span);
-            if (!span->bound->outline) { span->bound->outline = (OutlineProp*)alloc_prop(lycon, sizeof(OutlineProp)); }
+            ensure_span_outline(lycon, span);
             span->bound->outline->offset = resolve_length_value(lycon, prop_id, value);
             log_debug("[CSS] outline-offset: %.1fpx", span->bound->outline->offset);
             break;
@@ -13227,8 +12550,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
                 break;
             }
-            ensure_span_bound(lycon, span);
-            if (!span->bound->outline) { span->bound->outline = (OutlineProp*)alloc_prop(lycon, sizeof(OutlineProp)); }
+            ensure_span_outline(lycon, span);
             if (value->type == CSS_VALUE_TYPE_LIST) {
                 for (int i = 0; i < value->data.list.count; i++) {
                     const CssValue* v = value->data.list.values[i];

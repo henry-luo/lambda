@@ -3511,6 +3511,20 @@ extern "C" bool svg_get_registered_image_resolver(Element* svg_root,
  */
 SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element);
 
+typedef struct SvgInitialPaint {
+    Color current_color;
+    Color fill_color;
+    Color stroke_color;
+    bool has_fill_color;
+    bool fill_none;
+    bool has_stroke_color;
+    bool stroke_none;
+    float stroke_width;
+} SvgInitialPaint;
+
+void render_svg_initial_paint(const ViewSpan* view, Color current_color,
+                              SvgInitialPaint* paint);
+
 void render_svg_build_subscene(PaintSvgSubscene* subscene,
                       Element* svg_element,
                       float viewport_width, float viewport_height,

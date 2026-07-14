@@ -7,6 +7,48 @@ extern "C" {
 #include "../lib/memtrack.h"
 }
 
+static void initialize_grid_axis(GridTrack** destination, int track_count,
+                                 int explicit_count, int negative_implicit_count,
+                                 GridTrackList* template_tracks,
+                                 GridTrackList* automatic_tracks,
+                                 const char* axis_name) {
+    if (track_count <= 0) return;
+
+    *destination = (GridTrack*)mem_calloc(track_count, sizeof(GridTrack), MEM_CAT_LAYOUT);
+    log_debug("  Allocated %d %s tracks", track_count, axis_name);
+    int explicit_start = negative_implicit_count;
+    int explicit_end = explicit_start + explicit_count;
+
+    for (int index = 0; index < track_count; index++) {
+        GridTrack* track = &(*destination)[index];
+        if (index >= explicit_start && index < explicit_end && template_tracks &&
+            index - explicit_start < template_tracks->track_count) {
+            track->size = template_tracks->tracks[index - explicit_start];
+            track->is_implicit = false;
+            track->owns_size = false;
+        } else {
+            if (automatic_tracks && automatic_tracks->track_count > 0) {
+                int auto_count = automatic_tracks->track_count;
+                int auto_index = index < explicit_start
+                    ? (auto_count - ((explicit_start - index) % auto_count)) % auto_count
+                    : (index - explicit_end) % auto_count;
+                track->size = automatic_tracks->tracks[auto_index];
+                track->owns_size = false;
+            } else {
+                track->size = create_grid_track_size(GRID_TRACK_SIZE_AUTO, 0);
+                track->owns_size = true;
+            }
+            track->is_implicit = true;
+        }
+
+        track->growth_limit = INFINITY;
+        track->is_flexible = track->size &&
+            (track->size->type == GRID_TRACK_SIZE_FR ||
+             (track->size->type == GRID_TRACK_SIZE_MINMAX && track->size->max_size &&
+              track->size->max_size->type == GRID_TRACK_SIZE_FR));
+    }
+}
+
 // Initialize track sizes
 void initialize_track_sizes(GridContainerLayout* grid_layout) {
     if (!grid_layout) return;
@@ -14,145 +56,19 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
     log_debug("Initializing track sizes: computed_rows=%d, computed_cols=%d",
               grid_layout->computed_row_count, grid_layout->computed_column_count);
 
-    // Get negative implicit offsets (tracks added before the explicit grid)
-    int neg_row_offset = grid_layout->negative_implicit_row_count;
-    int neg_col_offset = grid_layout->negative_implicit_column_count;
-
     // Allocate computed tracks (clamp to prevent excessive allocation)
     if (grid_layout->computed_row_count > 1000) grid_layout->computed_row_count = 1000;
     if (grid_layout->computed_column_count > 1000) grid_layout->computed_column_count = 1000;
 
-    if (grid_layout->computed_row_count > 0) {
-        grid_layout->computed_rows = (GridTrack*)mem_calloc(grid_layout->computed_row_count, sizeof(GridTrack), MEM_CAT_LAYOUT);
-        log_debug("  Allocated %d row tracks", grid_layout->computed_row_count);
-
-        // Initialize row tracks
-        for (int i = 0; i < grid_layout->computed_row_count; i++) {
-            GridTrack* track = &grid_layout->computed_rows[i];
-
-            // Calculate the adjusted index relative to the explicit grid
-            // With neg_row_offset negative implicit tracks:
-            //   Tracks 0 to (neg_row_offset-1) = negative implicit (before explicit)
-            //   Tracks neg_row_offset to (neg_row_offset + explicit - 1) = explicit
-            //   Tracks (neg_row_offset + explicit) onwards = positive implicit
-            int explicit_start = neg_row_offset;
-            int explicit_end = neg_row_offset + grid_layout->explicit_row_count;
-
-            if (i >= explicit_start && i < explicit_end &&
-                grid_layout->grid_template_rows &&
-                (i - explicit_start) < grid_layout->grid_template_rows->track_count) {
-                // Explicit track - use template definition (shared, don't free)
-                track->size = grid_layout->grid_template_rows->tracks[i - explicit_start];
-                track->is_implicit = false;
-                track->owns_size = false;  // Shared with template
-            } else {
-                // Implicit track - use grid-auto-rows if defined, otherwise auto sizing
-                if (grid_layout->grid_auto_rows && grid_layout->grid_auto_rows->track_count > 0) {
-                    // Calculate auto-row cycle index
-                    // For negative implicit tracks (i < explicit_start): cycle backwards
-                    // For positive implicit tracks (i >= explicit_end): cycle forwards
-                    int auto_track_idx;
-                    if (i < explicit_start) {
-                        // Negative implicit tracks - count backwards from explicit grid
-                        // Track at i=neg_row_offset-1 should be auto_rows[(auto_count-1)]
-                        // Track at i=neg_row_offset-2 should be auto_rows[(auto_count-2)]
-                        // etc.
-                        int distance_from_explicit = explicit_start - i;  // 1, 2, 3...
-                        int auto_count = grid_layout->grid_auto_rows->track_count;
-                        // Wrap backwards: -1 mod 3 should give 2, -2 mod 3 should give 1
-                        auto_track_idx = ((auto_count - (distance_from_explicit % auto_count)) % auto_count);
-                    } else {
-                        // Positive implicit tracks - count forwards from explicit grid end
-                        int distance_from_explicit = i - explicit_end;  // 0, 1, 2...
-                        auto_track_idx = distance_from_explicit % grid_layout->grid_auto_rows->track_count;
-                    }
-                    track->size = grid_layout->grid_auto_rows->tracks[auto_track_idx];
-                    track->owns_size = false;  // Shared with auto tracks
-                } else {
-                    track->size = create_grid_track_size(GRID_TRACK_SIZE_AUTO, 0);
-                    track->owns_size = true;  // We created this, we own it
-                }
-                track->is_implicit = true;
-            }
-
-            track->computed_size = 0;
-            track->base_size = 0;
-            track->growth_limit = INFINITY;
-            // Check if track is flexible (has fr units)
-            if (track->size) {
-                if (track->size->type == GRID_TRACK_SIZE_FR) {
-                    track->is_flexible = true;
-                } else if (track->size->type == GRID_TRACK_SIZE_MINMAX &&
-                           track->size->max_size && track->size->max_size->type == GRID_TRACK_SIZE_FR) {
-                    track->is_flexible = true;
-                } else {
-                    track->is_flexible = false;
-                }
-            } else {
-                track->is_flexible = false;
-            }
-        }
-    }
-
-    if (grid_layout->computed_column_count > 0) {
-        grid_layout->computed_columns = (GridTrack*)mem_calloc(grid_layout->computed_column_count, sizeof(GridTrack), MEM_CAT_LAYOUT);
-        log_debug("  Allocated %d column tracks", grid_layout->computed_column_count);
-
-        // Initialize column tracks
-        for (int i = 0; i < grid_layout->computed_column_count; i++) {
-            GridTrack* track = &grid_layout->computed_columns[i];
-
-            // Calculate the adjusted index relative to the explicit grid
-            int explicit_start = neg_col_offset;
-            int explicit_end = neg_col_offset + grid_layout->explicit_column_count;
-
-            if (i >= explicit_start && i < explicit_end &&
-                grid_layout->grid_template_columns &&
-                (i - explicit_start) < grid_layout->grid_template_columns->track_count) {
-                // Explicit track - use template definition (shared, don't free)
-                track->size = grid_layout->grid_template_columns->tracks[i - explicit_start];
-                track->is_implicit = false;
-                track->owns_size = false;  // Shared with template
-            } else {
-                // Implicit track - use grid-auto-columns if defined, otherwise auto sizing
-                if (grid_layout->grid_auto_columns && grid_layout->grid_auto_columns->track_count > 0) {
-                    // Calculate auto-column cycle index
-                    int auto_track_idx;
-                    if (i < explicit_start) {
-                        int distance_from_explicit = explicit_start - i;
-                        int auto_count = grid_layout->grid_auto_columns->track_count;
-                        auto_track_idx = ((auto_count - (distance_from_explicit % auto_count)) % auto_count);
-                    } else {
-                        int distance_from_explicit = i - explicit_end;
-                        auto_track_idx = distance_from_explicit % grid_layout->grid_auto_columns->track_count;
-                    }
-                    track->size = grid_layout->grid_auto_columns->tracks[auto_track_idx];
-                    track->owns_size = false;  // Shared with auto tracks
-                } else {
-                    track->size = create_grid_track_size(GRID_TRACK_SIZE_AUTO, 0);
-                    track->owns_size = true;  // We created this, we own it
-                }
-                track->is_implicit = true;
-            }
-
-            track->computed_size = 0;
-            track->base_size = 0;
-            track->growth_limit = INFINITY;
-            // Check if track is flexible (has fr units)
-            if (track->size) {
-                if (track->size->type == GRID_TRACK_SIZE_FR) {
-                    track->is_flexible = true;
-                } else if (track->size->type == GRID_TRACK_SIZE_MINMAX &&
-                           track->size->max_size && track->size->max_size->type == GRID_TRACK_SIZE_FR) {
-                    track->is_flexible = true;
-                } else {
-                    track->is_flexible = false;
-                }
-            } else {
-                track->is_flexible = false;
-            }
-        }
-    }
+    initialize_grid_axis(&grid_layout->computed_rows, grid_layout->computed_row_count,
+                         grid_layout->explicit_row_count,
+                         grid_layout->negative_implicit_row_count,
+                         grid_layout->grid_template_rows, grid_layout->grid_auto_rows, "row");
+    initialize_grid_axis(&grid_layout->computed_columns, grid_layout->computed_column_count,
+                         grid_layout->explicit_column_count,
+                         grid_layout->negative_implicit_column_count,
+                         grid_layout->grid_template_columns,
+                         grid_layout->grid_auto_columns, "column");
 
     log_debug("Track sizes initialized - %d rows, %d columns\n",
               grid_layout->computed_row_count, grid_layout->computed_column_count);

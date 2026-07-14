@@ -136,12 +136,20 @@ def active_block_exclusions(config, selected_modules, root):
             raise ConfigError("duplicate block exclusion id: %s" % rule_id)
         seen_ids.add(rule_id)
         regions = rule.get("regions")
-        if not isinstance(regions, list) or len(regions) < 2:
-            raise ConfigError("block rule %s must contain at least two regions" % rule_id)
+        allow_within_region = rule.get("allow_within_region", False)
+        if not isinstance(allow_within_region, bool):
+            raise ConfigError("block rule %s allow_within_region must be boolean" % rule_id)
+        minimum_regions = 1 if allow_within_region else 2
+        if not isinstance(regions, list) or len(regions) < minimum_regions:
+            raise ConfigError(
+                "block rule %s must contain at least %d region(s)"
+                % (rule_id, minimum_regions)
+            )
         if active:
             rules.append({
                 "id": rule_id,
                 "reason": rule["reason"],
+                "allow_within_region": allow_within_region,
                 "regions": [
                     resolve_region(root, region, rule_id, index)
                     for index, region in enumerate(regions)
@@ -195,8 +203,9 @@ def exclusion_for_block(block, rules):
                 break
             matched_regions.add(region["key"])
         else:
-            # A block is excluded only when all of it spans distinct documented regions.
-            if len(matched_regions) >= 2:
+            # Executable copies must span distinct regions; explicitly declarative
+            # tables may opt into a narrow single-region exclusion.
+            if rule["allow_within_region"] or len(matched_regions) >= 2:
                 return rule
     return None
 
