@@ -2,6 +2,129 @@
 
 import model: .model
 import diagnostic: .diagnostics
+import graph_content: .transform.content
+
+fn tag(value) => if (value is element) string(name(value)) else ""
+
+fn all_children(value) {
+  if (value is element and len(value) > 0) {
+    [for (i in 0 to (len(value) - 1)) value[i]]
+  } else []
+}
+
+fn noncanonical_children(value) => [
+  for (child in all_children(value)
+    where not (child is element) or
+      (tag(child) != "label" and tag(child) != "content")) child
+]
+
+fn direct_tag_count(value, wanted_tag) => len([
+  for (child in all_children(value)
+    where child is element and tag(child) == wanted_tag) child
+])
+
+fn has_canonical_label_content(value, require_pair) {
+  let labels = direct_tag_count(value, "label");
+  let contents = direct_tag_count(value, "content");
+  (labels <= 1) and (contents <= 1) and labels == contents and
+    (not require_pair or labels == 1)
+}
+
+fn is_canonical_child(child) {
+  if (not (child is element)) true
+  else {
+    let child_tag = tag(child);
+    if (child_tag == "node") {
+      has_canonical_label_content(child, true) and len(noncanonical_children(child)) == 0
+    }
+    else if (child_tag == "edge") { has_canonical_label_content(child, false) }
+    else if (child_tag == "subgraph") {
+      has_canonical_label_content(child, child.id != null and child.id != "") and
+        all([for (nested in noncanonical_children(child)) is_canonical_child(nested)])
+    }
+    else { true }
+  }
+}
+
+fn is_canonical_graph(graph) =>
+  all([for (child in all_children(graph)) is_canonical_child(child)])
+
+fn canonical_label(value, fallback = null) {
+  let source = model.label_source(value, fallback);
+  let format = model.label_format(value);
+  if (source == null) { null }
+  else { <label format: format; source> }
+}
+
+fn canonical_content(value, label, preserve_other_children) {
+  let existing = model.content_element(value);
+  let authored = if (existing != null) model.content_items(value)
+    else if (preserve_other_children) noncanonical_children(value)
+    else [];
+  let lowered = if (len(authored) > 0) authored
+    else if (label != null and len(label) > 0)
+      graph_content.lower(label[0], string(label.format))
+    else [];
+  if (label == null and len(lowered) == 0) { null }
+  else {
+    let result = <content;
+      for (child in lowered) child
+    >
+    result
+  }
+}
+
+fn canonical_node(node) {
+  let attrs = map(node);
+  let fallback = if (node.id != null and node.id != "") string(node.id) else null;
+  let label = canonical_label(node, fallback);
+  let content = canonical_content(node, label, true);
+  <node *:attrs;
+    if (label != null) { label }
+    if (content != null) { content }
+  >
+}
+
+fn canonical_edge(edge) {
+  let attrs = map(edge);
+  let label = canonical_label(edge);
+  let content = canonical_content(edge, label, false);
+  <edge *:attrs;
+    if (label != null) { label }
+    if (content != null) { content }
+    for (child in noncanonical_children(edge)) child
+  >
+}
+
+fn canonical_subgraph(subgraph) {
+  let attrs = map(subgraph);
+  let fallback = if (subgraph.id != null and subgraph.id != "") string(subgraph.id) else null;
+  let label = canonical_label(subgraph, fallback);
+  let content = canonical_content(subgraph, label, false);
+  <subgraph *:attrs;
+    if (label != null) { label }
+    if (content != null) { content }
+    for (child in noncanonical_children(subgraph)) canonical_child(child)
+  >
+}
+
+fn canonical_child(child) {
+  if (not (child is element)) child
+  else {
+    let child_tag = tag(child);
+    if (child_tag == "node") canonical_node(child)
+    else if (child_tag == "edge") canonical_edge(child)
+    else if (child_tag == "subgraph") canonical_subgraph(child)
+    else child
+  }
+}
+
+fn canonical_graph(graph) {
+  let attrs = map(graph);
+  <graph *:attrs;
+    for (child in all_children(graph)) canonical_child(child)
+  >
+}
 
 fn item_id(value) =>
   if (value.id != null and value.id != "") string(value.id) else ""
@@ -106,9 +229,11 @@ pub fn validate(graph) {
 }
 
 pub fn normalize(graph) {
-  let values = validate(graph);
+  let canonical = if (graph is element and string(name(graph)) == "graph")
+    (if (is_canonical_graph(graph)) graph else canonical_graph(graph)) else graph;
+  let values = validate(canonical);
   {
-    graph: graph,
+    graph: canonical,
     diagnostics: values,
     valid: not diagnostic.has_errors(values)
   }

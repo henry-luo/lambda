@@ -9,6 +9,40 @@ fn element_children(value) {
 
 fn tag(value) => if (value is element) string(name(value)) else ""
 
+fn first_direct_child(value, wanted_tag) {
+  let matches = [for (child in element_children(value) where tag(child) == wanted_tag) child];
+  if (len(matches) > 0) matches[0] else null
+}
+
+fn child_items(value) {
+  if (value is element and len(value) > 0) {
+    [for (i in 0 to (len(value) - 1)) value[i]]
+  } else []
+}
+
+pub fn label_element(value) => first_direct_child(value, "label")
+
+pub fn content_element(value) => first_direct_child(value, "content")
+
+pub fn label_source(value, fallback = null) {
+  let label = label_element(value);
+  if (label != null and len(label) > 0) label[0]
+  else if (value.label != null) value.label
+  else fallback
+}
+
+pub fn label_format(value) {
+  let label = label_element(value);
+  if (label != null and label.format != null) string(label.format)
+  else if (value["label-format"] != null) string(value["label-format"])
+  else "text"
+}
+
+pub fn content_items(value) {
+  let content = content_element(value);
+  if (content != null) child_items(content) else []
+}
+
 fn group_id(group, fallback) {
   if (group.id != null and group.id != "") string(group.id) else fallback
 }

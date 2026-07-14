@@ -2029,6 +2029,12 @@ Item fn_or(Item a_item, Item b_item) {
 static Item _map_field_value(TypeMap* map_type, void* data, ShapeEntry* field) {
     (void)map_type;
     if (!data || !field || !field->type) return ItemNull;
+    if (!field->name) {
+        // Spread attributes occupy unnamed slots containing a raw Map pointer;
+        // reading that slot as its inferred ANY type corrupts equality and ordering.
+        Map* nested_map = map_shape_field_to_map(data, field);
+        return nested_map ? (Item){.map = nested_map} : ItemNull;
+    }
     // packed map slots must use the canonical reader so query/equality handle
     // every scalar field type the same way as MapReader and serializers.
     return map_shape_field_to_item(data, field);

@@ -18,6 +18,14 @@
     <node id: 'C', label: 'Done', shape: 'doublecircle'>
     <edge from: 'A', to: 'B', label: 'check', arrow-end: 'true'>
   >
+  <case id: 'rich-labels', source: 'rich_labels.mmd';
+    <expect direction: 'LR', nodes: 2, edges: 1>
+    <node id: 'A', label: 'The **API** _service_', label-format: 'markdown'>
+    <node id: 'B', label: '<b>Safe</b><br><code>HTML</code><script>drop</script>',
+      label-format: 'html'>
+    <edge from: 'A', to: 'B',
+      label: '<strong>calls</strong><script>drop</script>', label-format: 'html'>
+  >
   <case id: 'nested-subgraph', source: 'nested_subgraph.mmd';
     <expect direction: 'TB', nodes: 3, edges: 2, subgraphs: 1>
     <subgraph id: 'backend', label: 'Backend', direction: 'LR'>
