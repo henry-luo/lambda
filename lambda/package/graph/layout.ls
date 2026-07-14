@@ -61,6 +61,7 @@ fn semantic_edges(children) {
     arrow_start: attr_or(child, "data-arrow-start", "false") == "true",
     arrow_end: attr_or(child, "data-arrow-end", attr_or(child, "data-directed", "true")) == "true",
     style: string(attr_or(child, "data-style", "solid")),
+    min_length: int(attr_or(child, "data-min-length", 1)),
     z: child_z(child, -1),
     child_index: child_index(child, i)
   }]

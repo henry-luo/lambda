@@ -4,6 +4,7 @@
 #include "input-context.hpp"
 #include "input-utils.hpp"
 #include "source_tracker.hpp"
+#include "../../lib/arraylist.h"
 #include "../../lib/log.h"
 #include <string.h>
 
@@ -12,10 +13,12 @@ using namespace lambda;
 // Forward declarations for Mermaid parsing
 static void skip_whitespace_and_comments_mermaid(SourceTracker& tracker);
 static String* parse_mermaid_identifier(InputContext& ctx);
-static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, Element* root_graph,
-                                    String* from_id);
+static ArrayList* parse_mermaid_edge_def(InputContext& ctx, Element* graph,
+                                         Element* root_graph, const ArrayList* from_ids);
 static void parse_mermaid_class_def(InputContext& ctx, Element* graph);
 static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id, const char** out_shape);
+static bool parse_mermaid_general_shape(InputContext& ctx, const char* node_id,
+                                        String** out_label, String** out_shape);
 static void parse_mermaid_subgraph(InputContext& ctx, Element* parent_graph, Element* root_graph);
 static void parse_mermaid_subgraph_content(InputContext& ctx, Element* subgraph_elem,
                                             Element* root_graph);
@@ -51,6 +54,13 @@ static bool parse_mermaid_direction(SourceTracker& tracker, char direction[3]) {
     direction[2] = '\0';
     tracker.advance(2);
     return true;
+}
+
+static bool is_mermaid_edge_start(SourceTracker& tracker) {
+    return tracker.current() == '<' || tracker.match("-->") || tracker.match("-.->") ||
+        tracker.match("==>") || tracker.match("---") || tracker.match("-.-") ||
+        tracker.match("===") || tracker.match("--") || tracker.current() == '-' ||
+        tracker.current() == '=';
 }
 
 static Element* find_direct_node(Element* graph, const char* id) {
@@ -121,6 +131,22 @@ static void add_mermaid_metadata(InputContext& ctx, Element* graph, const char* 
     if (key1 && value1) builder.attr(key1, value1);
     if (key2 && value2) builder.attr(key2, value2);
     add_node_to_graph(ctx.input(), graph, builder.final().element);
+}
+
+static bool parse_mermaid_class_suffix(InputContext& ctx, Element* graph,
+                                        const char* node_id) {
+    SourceTracker& tracker = ctx.tracker;
+    skip_inline_whitespace(tracker);
+    if (!tracker.match(":::")) return false;
+    tracker.advance(3);
+    String* class_name = read_graph_identifier(ctx, "-", true);
+    if (!class_name) {
+        ctx.addWarning(tracker.location(), "Expected class name after ':::'");
+        return true;
+    }
+    add_mermaid_metadata(ctx, graph, "class-assignment", "targets", node_id,
+                         "class", class_name->chars);
+    return true;
 }
 
 // skip whitespace and %% line comments
@@ -305,77 +331,219 @@ static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id, 
     return ctx.builder.createString(label_text, label_length);
 }
 
-// Parse Mermaid edge definition: nodeA --> nodeB or nodeA -->|label| nodeB etc.
-// Supports all Mermaid edge styles:
-//   -->   solid arrow
-//   --->  solid arrow (longer)
-//   -.->  dotted arrow
-//   ==>   thick arrow
-//   ---   solid line (no arrow)
-//   -.-   dotted line (no arrow)
-//   ===   thick line (no arrow)
-//   <-->  bidirectional solid
-//   <-.-> bidirectional dotted
-//   <==>  bidirectional thick
-static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, Element* root_graph,
-                                    String* from_id) {
+static const char* canonical_mermaid_shape(const char* shape) {
+    if (!shape) return "box";
+    if (strcmp(shape, "rect") == 0) return "box";
+    if (strcmp(shape, "diam") == 0) return "diamond";
+    if (strcmp(shape, "dbl-circ") == 0) return "doublecircle";
+    if (strcmp(shape, "cyl") == 0) return "cylinder";
+    return shape;
+}
+
+static String* parse_mermaid_property_value(InputContext& ctx) {
+    SourceTracker& tracker = ctx.tracker;
+    skip_inline_whitespace(tracker);
+    StringBuf* sb = ctx.sb;
+    stringbuf_reset(sb);
+    if (tracker.current() == '"') {
+        tracker.advance();
+        while (!tracker.atEnd() && tracker.current() != '"' && tracker.current() != '\n') {
+            if (tracker.current() == '\\' && tracker.peek(1) != '\0') tracker.advance();
+            stringbuf_append_char(sb, tracker.current());
+            tracker.advance();
+        }
+        if (tracker.current() == '"') tracker.advance();
+    } else {
+        while (!tracker.atEnd() && tracker.current() != ',' && tracker.current() != '}' &&
+               tracker.current() != '\n' && !str_char_is_ascii_space(tracker.current())) {
+            stringbuf_append_char(sb, tracker.current());
+            tracker.advance();
+        }
+    }
+    return ctx.builder.createString(sb->str->chars, sb->str->len);
+}
+
+static bool parse_mermaid_general_shape(InputContext& ctx, const char* node_id,
+                                        String** out_label, String** out_shape) {
+    SourceTracker& tracker = ctx.tracker;
+    if (!tracker.match("@{")) return false;
+    tracker.advance(2);
+
+    String* label = ctx.builder.createString(node_id);
+    String* shape = ctx.builder.createString("box");
+    while (!tracker.atEnd()) {
+        skip_inline_whitespace(tracker);
+        if (tracker.current() == '}') {
+            tracker.advance();
+            break;
+        }
+        String* key = read_graph_identifier(ctx, "-", true);
+        if (!key) {
+            ctx.addWarning(tracker.location(), "Expected property name in Mermaid node shape");
+            break;
+        }
+        skip_inline_whitespace(tracker);
+        if (tracker.current() != ':') {
+            ctx.addWarning(tracker.location(), "Expected ':' after Mermaid node property");
+            break;
+        }
+        tracker.advance();
+        String* value = parse_mermaid_property_value(ctx);
+        if (strcmp(key->chars, "label") == 0) {
+            label = value;
+        } else if (strcmp(key->chars, "shape") == 0) {
+            shape = ctx.builder.createString(canonical_mermaid_shape(value->chars));
+        } else {
+            ctx.addWarning(tracker.location(), "Unsupported Mermaid node property '%s'", key->chars);
+        }
+        skip_inline_whitespace(tracker);
+        if (tracker.current() == ',') tracker.advance();
+    }
+
+    *out_label = label;
+    *out_shape = shape;
+    return true;
+}
+
+static String* parse_mermaid_node_ref(InputContext& ctx, Element* graph,
+                                      Element* root_graph) {
+    String* node_id = parse_mermaid_identifier(ctx);
+    if (!node_id) return nullptr;
+
+    skip_inline_whitespace(ctx.tracker);
+    char c0 = ctx.tracker.current();
+    if (c0 == '[' || c0 == '(' || c0 == '{' || c0 == '>') {
+        const char* shape = "box";
+        String* label = parse_mermaid_node_shape(ctx, node_id->chars, &shape);
+        upsert_mermaid_node(ctx, graph, node_id->chars, root_graph,
+            label ? label->chars : node_id->chars, shape);
+    } else if (ctx.tracker.match("@{")) {
+        String* label = nullptr;
+        String* shape = nullptr;
+        parse_mermaid_general_shape(ctx, node_id->chars, &label, &shape);
+        upsert_mermaid_node(ctx, graph, node_id->chars, root_graph,
+            label ? label->chars : node_id->chars, shape ? shape->chars : "box");
+    } else {
+        ensure_mermaid_node(ctx, graph, root_graph, node_id->chars);
+    }
+
+    parse_mermaid_class_suffix(ctx, graph, node_id->chars);
+    skip_inline_whitespace(ctx.tracker);
+    return node_id;
+}
+
+static ArrayList* parse_mermaid_node_list(InputContext& ctx, Element* graph,
+                                          Element* root_graph) {
+    ArrayList* nodes = arraylist_new(2);
+    if (!nodes) {
+        ctx.addError(ctx.tracker.location(), "Unable to allocate Mermaid endpoint list");
+        return nullptr;
+    }
+
+    String* node_id = parse_mermaid_node_ref(ctx, graph, root_graph);
+    if (!node_id) {
+        arraylist_free(nodes);
+        return nullptr;
+    }
+    arraylist_append(nodes, node_id);
+
+    while (ctx.tracker.current() == '&') {
+        ctx.tracker.advance();
+        node_id = parse_mermaid_node_ref(ctx, graph, root_graph);
+        if (!node_id) {
+            ctx.addError(ctx.tracker.location(), "Expected node identifier after '&'");
+            arraylist_free(nodes);
+            return nullptr;
+        }
+        arraylist_append(nodes, node_id);
+    }
+    return nodes;
+}
+
+static void add_mermaid_edges(InputContext& ctx, Element* graph,
+                              const ArrayList* from_ids, const ArrayList* to_ids,
+                              String* label, const char* edge_style,
+                              bool has_arrow_start, bool has_arrow_end,
+                              int min_length) {
+    for (int from_index = 0; from_index < from_ids->length; from_index++) {
+        String* from_id = (String*)arraylist_get(from_ids, from_index);
+        for (int to_index = 0; to_index < to_ids->length; to_index++) {
+            String* to_id = (String*)arraylist_get(to_ids, to_index);
+            Element* edge = create_edge_element(ctx.input(), from_id->chars, to_id->chars,
+                label ? label->chars : nullptr, edge_style,
+                has_arrow_start ? "true" : "false",
+                has_arrow_end ? "true" : "false");
+            if (min_length > 1) {
+                char length_text[16];
+                snprintf(length_text, sizeof(length_text), "%d", min_length);
+                add_graph_attribute(ctx.input(), edge, "min-length", length_text);
+            }
+            add_edge_to_graph(ctx.input(), graph, edge);
+        }
+    }
+}
+
+// parse one Mermaid edge operator and its possibly multi-node target list.
+static ArrayList* parse_mermaid_edge_def(InputContext& ctx, Element* graph,
+                                         Element* root_graph, const ArrayList* from_ids) {
     SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
 
-    // Edge properties
     bool has_arrow_start = false;
     bool has_arrow_end = false;
     String* label = nullptr;
     const char* edge_style = "solid";
+    int stroke_units = 0;
+    int dotted_units = 0;
 
-    // Check for starting arrow (bidirectional)
     if (tracker.current() == '<') {
         has_arrow_start = true;
         tracker.advance();
     }
 
-    // Determine edge style from first character
     char first_char = tracker.current();
     if (first_char == '=') {
         edge_style = "thick";
     } else if (first_char == '.') {
         edge_style = "dotted";
+        dotted_units++;
         tracker.advance();
-        // After '.', expect '-' for dashed pattern
         if (tracker.current() != '-') {
             ctx.addError(tracker.location(), "Invalid edge syntax after '.'");
-            return;
+            return nullptr;
         }
-    } else if (first_char == '-') {
-        // Could be solid or dotted (-.->)
-        // Check if this is part of -.- pattern
-    } else {
+    } else if (first_char != '-') {
         ctx.addError(tracker.location(), "Invalid edge syntax, expected '-', '=', or '.'");
-        return;
+        return nullptr;
     }
 
-    // Skip main line characters (-, =, or . combinations)
-    if (edge_style[0] == 't') {  // thick
+    if (edge_style[0] == 't') {
         while (!tracker.atEnd() && tracker.current() == '=') {
+            stroke_units++;
             tracker.advance();
         }
     } else {
-        // solid or dotted - skip dashes and dots
         while (!tracker.atEnd() && (tracker.current() == '-' || tracker.current() == '.')) {
             if (tracker.current() == '.') {
                 edge_style = "dotted";
+                dotted_units++;
+            } else {
+                stroke_units++;
             }
             tracker.advance();
         }
     }
 
-    // Check for ending arrow
     if (tracker.current() == '>') {
         has_arrow_end = true;
         tracker.advance();
     }
 
-    // Check for label inside |text| AFTER arrow head (Mermaid syntax: -->|label| target)
+    int min_length = dotted_units > 0
+        ? dotted_units
+        : stroke_units - (has_arrow_end ? 1 : 2);
+    if (min_length < 1) min_length = 1;
+
     if (tracker.current() == '|') {
         tracker.advance();
         StringBuf* sb = ctx.sb;
@@ -393,43 +561,29 @@ static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, Element* r
     }
 
     skip_whitespace_and_comments_mermaid(tracker);
-
-    // parse target node
-    String* to_id = parse_mermaid_identifier(ctx);
-    if (!to_id) {
+    ArrayList* to_ids = parse_mermaid_node_list(ctx, graph, root_graph);
+    if (!to_ids) {
         ctx.addError(tracker.location(), "Expected target node identifier");
-        return;
+        return nullptr;
     }
 
-    // check if target node has a shape and create node if so
-    skip_whitespace_and_comments_mermaid(tracker);
-    char c0 = tracker.current();
+    add_mermaid_edges(ctx, graph, from_ids, to_ids, label, edge_style,
+                       has_arrow_start, has_arrow_end, min_length);
+    return to_ids;
+}
 
-    // Check for any shape opening pattern
-    bool has_shape = (c0 == '[') || (c0 == '(') || (c0 == '{') || (c0 == '>');
-
-    if (has_shape) {
-        // parse node shape and get label
-        const char* to_shape = "box";
-        String* to_label = parse_mermaid_node_shape(ctx, to_id->chars, &to_shape);
-
-        upsert_mermaid_node(ctx, graph, to_id->chars, root_graph,
-            to_label ? to_label->chars : to_id->chars, to_shape);
-    } else {
-        ensure_mermaid_node(ctx, graph, root_graph, to_id->chars);
+static void parse_mermaid_edge_chain(InputContext& ctx, Element* graph, Element* root_graph,
+                                     ArrayList* from_ids) {
+    ArrayList* edge_from = from_ids;
+    while (is_mermaid_edge_start(ctx.tracker)) {
+        ArrayList* edge_to = parse_mermaid_edge_def(ctx, graph, root_graph, edge_from);
+        arraylist_free(edge_from);
+        if (!edge_to) return;
+        // the previous target set is the source set for the next chained operator.
+        edge_from = edge_to;
+        skip_inline_whitespace(ctx.tracker);
     }
-
-    ensure_mermaid_node(ctx, graph, root_graph, from_id->chars);
-
-    // create edge element with all attributes passed directly (before finalization)
-    Element* edge = create_edge_element(ctx.input(), from_id->chars, to_id->chars,
-                                        label ? label->chars : nullptr,
-                                        edge_style,
-                                        has_arrow_start ? "true" : "false",
-                                        has_arrow_end ? "true" : "false");
-
-    // add to graph
-    add_edge_to_graph(ctx.input(), graph, edge);
+    arraylist_free(edge_from);
 }
 
 // Parse Mermaid class assignment (for styling): class nodeIds className
@@ -616,40 +770,12 @@ static void parse_mermaid_subgraph_content(InputContext& ctx, Element* subgraph_
 
         const char* line_start = tracker.rest();
 
-        // Try to parse node or edge (same logic as main parser)
-        String* potential_node = parse_mermaid_identifier(ctx);
-
-        if (potential_node) {
-            // Check if node has shape
-            skip_whitespace_and_comments_mermaid(tracker);
-            String* node_label = nullptr;
-
-            char c0 = tracker.current();
-            if (c0 == '[' || c0 == '(' || c0 == '{' || c0 == '>') {
-                const char* sub_node_shape = "box";
-                node_label = parse_mermaid_node_shape(ctx, potential_node->chars, &sub_node_shape);
-                skip_whitespace_and_comments_mermaid(tracker);
-
-                upsert_mermaid_node(ctx, subgraph_elem, potential_node->chars, root_graph,
-                    node_label ? node_label->chars : potential_node->chars, sub_node_shape);
-            }
-
-            // Check for edge operator
-            bool is_edge = false;
-            if (tracker.current() == '<') {
-                is_edge = true;
-            } else if (tracker.match("-->") || tracker.match("-.->") ||
-                tracker.match("==>") || tracker.match("---") ||
-                tracker.match("-.-") || tracker.match("===") ||
-                tracker.match("--") || tracker.current() == '-' || tracker.current() == '=') {
-                is_edge = true;
-            }
-
-            if (is_edge) {
-                parse_mermaid_edge_def(ctx, subgraph_elem, root_graph, potential_node);
-            } else if (!node_label) {
-                // Standalone node without shape - create it
-                ensure_mermaid_node(ctx, subgraph_elem, root_graph, potential_node->chars);
+        ArrayList* potential_nodes = parse_mermaid_node_list(ctx, subgraph_elem, root_graph);
+        if (potential_nodes) {
+            if (is_mermaid_edge_start(tracker)) {
+                parse_mermaid_edge_chain(ctx, subgraph_elem, root_graph, potential_nodes);
+            } else {
+                arraylist_free(potential_nodes);
             }
         }
 
@@ -749,47 +875,12 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
             continue;
         }
 
-        // try to parse as edge (look for edge operators)
-        // size_t checkpoint = tracker.offset();
-        String* potential_node = parse_mermaid_identifier(ctx);
-
-        if (potential_node) {
-            // check if node has shape and create node if so
-            skip_whitespace_and_comments_mermaid(tracker);
-            String* node_label = nullptr;
-
-            // Check for any shape opening pattern
-            char c0 = tracker.current();
-            if (c0 == '[' || c0 == '(' || c0 == '{' || c0 == '>') {
-                // parse node shape and get label
-                const char* main_node_shape = "box";
-                node_label = parse_mermaid_node_shape(ctx, potential_node->chars, &main_node_shape);
-                skip_whitespace_and_comments_mermaid(tracker);
-
-                upsert_mermaid_node(ctx, graph, potential_node->chars, graph,
-                    node_label ? node_label->chars : potential_node->chars, main_node_shape);
-            }
-
-            // look for edge operator (including bidirectional <-->)
-            bool is_edge = false;
-            if (tracker.current() == '<') {
-                // could be bidirectional: <-->, <-.->, <==>
-                is_edge = true;
-            } else if (tracker.match("-->") || tracker.match("-.->") ||
-                tracker.match("==>") || tracker.match("---") ||
-                tracker.match("-.-") || tracker.match("===") ||
-                tracker.match("--") || tracker.match("-.-") ||
-                tracker.current() == '-' || tracker.current() == '=') {
-                is_edge = true;
-            }
-
-            if (is_edge) {
-                // this is an edge
-                parse_mermaid_edge_def(ctx, graph, graph, potential_node);
-            } else if (!node_label) {
-                // The identifier was already consumed; reparsing here used to consume
-                // the following statement and lose the actual standalone node.
-                ensure_mermaid_node(ctx, graph, graph, potential_node->chars);
+        ArrayList* potential_nodes = parse_mermaid_node_list(ctx, graph, graph);
+        if (potential_nodes) {
+            if (is_mermaid_edge_start(tracker)) {
+                parse_mermaid_edge_chain(ctx, graph, graph, potential_nodes);
+            } else {
+                arraylist_free(potential_nodes);
             }
         }
 

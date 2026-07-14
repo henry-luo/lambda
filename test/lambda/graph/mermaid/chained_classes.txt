@@ -1,0 +1,6 @@
+{
+  source_counts: [3, 2],
+  edge_pairs: [["A", "B", "true"], ["B", "C", "true"]],
+  node_classes: [["A", "graph-node entry"], ["B", "graph-node"], ["C", "graph-node success"]],
+  node_shapes: [["A", "rounded"], ["B", "diamond"], ["C", "doublecircle"]]
+}

@@ -78,6 +78,8 @@ fn normalize_edge(edge, nodes, index, directed) {
         else if (edge["arrow-end"] != null) edge["arrow-end"]
         else directed,
       style: if (edge.style != null) string(edge.style) else "solid",
+      min_length: max([1, int(if (edge.min_length != null) edge.min_length
+        else if (edge["min-length"] != null) edge["min-length"] else 1)]),
       z: if (edge.z != null) int(edge.z) else -1,
       index: index
     }
@@ -116,7 +118,8 @@ fn rank_of(id, edges, stack) {
   else {
     let preds = incoming_edges(edges, id);
     if (len(preds) == 0) 0
-    else max([for (edge in preds) rank_of(edge.from, edges, [*stack, id]) + 1])
+    else max([for (edge in preds)
+      rank_of(edge.from, edges, [*stack, id]) + edge.min_length])
   }
 }
 
@@ -411,6 +414,7 @@ fn route_edge(edge, nodes, opts) {
       arrow_start: edge.arrow_start,
       arrow_end: edge.arrow_end,
       style: edge.style,
+      min_length: edge.min_length,
       z: edge.z,
       index: edge.index,
       is_bezier: opts.use_splines

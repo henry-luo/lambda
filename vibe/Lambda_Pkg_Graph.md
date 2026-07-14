@@ -1073,6 +1073,20 @@ The initial Stage 2 tranche is implemented as follows:
 - `classDef` and `class` statements survive as `<style-rule>` and
   `<class-assignment>` metadata instead of being discarded;
 - quoted node labels lose only their Mermaid delimiter quotes;
+- chained flowchart links normalize each operator into an explicit edge whose
+  source is the preceding target, including independently styled operators;
+- multi-node source and target sets use the same node-reference parser and
+  normalize to the Cartesian set of explicit edges; chained operators consume
+  the preceding target set as their next source set;
+- extra solid, dotted, and thick link units normalize to `min-length`; the
+  constraint survives semantic HTML and Velmt adaptation and is enforced by
+  layered rank assignment rather than retained as inert parser metadata;
+- node-local `:::` classes normalize to ordinary `<class-assignment>` metadata
+  and therefore share the common model and HTML class-lowering path;
+- Mermaid's general `id@{ shape: ..., label: ... }` node form is parsed, with
+  `rect`, `diam`, `dbl-circ`, and `cyl` aliases canonicalized to the existing
+  graph shape vocabulary while other shape names remain available to later
+  renderers;
 - chart-oriented Mermaid headers produce an `unsupported` graph result and a
   diagnostic identifying `lambda.package.chart` as their owner, rather than
   being parsed as fake flowcharts;
@@ -1101,9 +1115,10 @@ The following Stage 2 work remains open:
 
 - a distinct source AST, source spans, structured diagnostic values, and the
   schema validator/`normalize.ls` boundary;
-- chained and multi-node links, general shape syntax, `:::`, `style`,
-  `linkStyle`, HTML/Markdown labels, accessibility metadata, edge ids, ports,
-  minimum lengths, and interaction metadata;
+- `style`, `linkStyle`, HTML/Markdown labels, accessibility metadata, edge ids,
+  ports, interaction metadata, circle/cross edge markers, and the rendering
+  semantics for general shapes beyond the currently canonicalized rectangle,
+  rounded, cylinder, diamond, circle, and double-circle families;
 - visual recursive subgraph boxes and measured subgraph labels rather than only
   preserved membership metadata;
 - parallel-edge separation, compound/cluster crossing routes, ports, and route

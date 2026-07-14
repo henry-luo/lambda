@@ -28,6 +28,25 @@
     <class-assignment targets: 'A,B', class: 'warning'>
     <style-rule class: 'warning', declarations: 'fill:#fff4cc,stroke:#8a6500'>
   >
+  <case id: 'chained-classes', source: 'chained_classes.mmd';
+    <expect direction: 'LR', nodes: 3, edges: 2, style-rules: 2, class-assignments: 2>
+    <node id: 'A', label: 'Start', shape: 'rounded'>
+    <node id: 'B', label: 'Valid?', shape: 'diamond'>
+    <node id: 'C', label: 'Done', shape: 'doublecircle'>
+    <edge from: 'A', to: 'B', arrow-end: 'true'>
+    <edge from: 'B', to: 'C', arrow-end: 'true'>
+    <class-assignment targets: 'A', class: 'entry'>
+    <class-assignment targets: 'C', class: 'success'>
+  >
+  <case id: 'multi-node-length', source: 'multi_node_length.mmd';
+    <expect direction: 'TB', nodes: 5, edges: 6>
+    <edge from: 'A', to: 'C', min-length: '2'>
+    <edge from: 'A', to: 'D', min-length: '2'>
+    <edge from: 'B', to: 'C', min-length: '2'>
+    <edge from: 'B', to: 'D', min-length: '2'>
+    <edge from: 'C', to: 'E', arrow-end: 'true'>
+    <edge from: 'D', to: 'E', arrow-end: 'true'>
+  >
   <case id: 'chart-routing', source: 'chart_routing.mmd';
     <expect kind: 'sequence', status: 'unsupported', nodes: 0, edges: 0>
   >

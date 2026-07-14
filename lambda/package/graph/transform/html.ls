@@ -85,6 +85,7 @@ fn html_edge(edge, index, group, graph_directed) {
       'data-arrow-start': bool_text(source_attr(edge, "arrow-start", source_attr(edge, "arrow_start", false)), false),
       'data-arrow-end': bool_text(source_attr(edge, "arrow-end", source_attr(edge, "arrow_end", null)), directed == "true"),
       'data-style': string(source_attr(edge, "style", "solid")),
+      'data-min-length': string(source_attr(edge, "min-length", source_attr(edge, "min_length", 1))),
       'data-z': string(source_attr(edge, "z", -1)),
       style: "display:block;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;">
 }
