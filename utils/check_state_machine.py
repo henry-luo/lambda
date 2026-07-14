@@ -13,8 +13,7 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HEADER_PATH = os.path.join(ROOT, "radiant", "state_schema.hpp")
-STATE_STORE_HEADER_PATH = os.path.join(ROOT, "radiant", "state_store.hpp")
+HEADER_PATH = os.path.join(ROOT, "radiant", "event.hpp")
 SOURCE_PATH = os.path.join(ROOT, "radiant", "state_schema.cpp")
 
 
@@ -557,7 +556,8 @@ def validate(enums, rules, invariant_bindings):
 
 def main():
     try:
-        header_text = read_text(HEADER_PATH) + "\n" + read_text(STATE_STORE_HEADER_PATH)
+        # State schema and store declarations were consolidated into event.hpp.
+        header_text = read_text(HEADER_PATH)
         source_text = read_text(SOURCE_PATH)
         enums = parse_enums(header_text)
         arrays = parse_to_state_arrays(source_text)

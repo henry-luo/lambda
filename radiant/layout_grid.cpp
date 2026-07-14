@@ -953,219 +953,116 @@ fail:
     return nullptr;
 }
 
-// Expand auto-fill/auto-fit repeat() tracks based on available space
+static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_column) {
+    GridTrackList** list_slot = is_column ? &grid_layout->grid_template_columns
+                                         : &grid_layout->grid_template_rows;
+    bool* owns_list = is_column ? &grid_layout->owns_template_columns
+                                : &grid_layout->owns_template_rows;
+    bool* auto_fit_tracks = is_column ? grid_layout->auto_fit_columns
+                                      : grid_layout->auto_fit_rows;
+    int* auto_fit_count = is_column ? &grid_layout->auto_fit_col_count
+                                    : &grid_layout->auto_fit_row_count;
+    GridTrackList* tracks = *list_slot;
+    if (!tracks || tracks->track_count <= 0) return true;
+
+    const char* axis = is_column ? "column" : "row";
+    const char* available_axis = is_column ? "width" : "height";
+    float available_size = is_column ? grid_layout->content_width : grid_layout->content_height;
+    float gap = is_column ? grid_layout->column_gap : grid_layout->row_gap;
+
+    for (int repeat_index = 0; repeat_index < tracks->track_count; repeat_index++) {
+        GridTrackSize* repeat = tracks->tracks[repeat_index];
+        if (!repeat || repeat->type != GRID_TRACK_SIZE_REPEAT ||
+            (!repeat->is_auto_fill && !repeat->is_auto_fit)) continue;
+
+        log_debug("GRID: Expanding auto-%s %ss (available %s: %.0f, item_count: %d)",
+                  repeat->is_auto_fill ? "fill" : "fit", axis, available_axis,
+                  available_size, grid_layout->item_count);
+
+        int pattern_size = calculate_track_pattern_min_size(
+            repeat->repeat_tracks, repeat->repeat_track_count);
+        if (pattern_size <= 0) pattern_size = 100;
+
+        int fixed_track_space = 0;
+        int fixed_track_count = 0;
+        for (int i = 0; i < tracks->track_count; i++) {
+            if (i == repeat_index) continue;
+            GridTrackSize* other = tracks->tracks[i];
+            if (other && other->type == GRID_TRACK_SIZE_LENGTH) {
+                fixed_track_space += other->value;
+                fixed_track_count++;
+            }
+        }
+        int gap_for_fixed = fixed_track_count > 0
+            ? (int)(fixed_track_count * gap) : 0; // INT_CAST_OK: grid track count needs an integral gap budget.
+        int available = (int)available_size - fixed_track_space - gap_for_fixed; // INT_CAST_OK: auto-repeat count is discrete.
+        int repeat_count = 1;
+        if (pattern_size + gap > 0.0f) {
+            repeat_count = (int)((available + gap) / (pattern_size + gap)); // INT_CAST_OK: CSS repeat count is integral.
+            if (repeat_count < 1) repeat_count = 1;
+        }
+        log_debug("GRID: %s pattern size=%d, gap=%.1f, available=%d -> %d repetitions",
+                  axis, pattern_size, gap, available, repeat_count);
+
+        // Preserve the existing column-only cap until empty auto-fit gutters collapse fully.
+        if (is_column && repeat->is_auto_fit && grid_layout->item_count > 0 &&
+            repeat_count > grid_layout->item_count) {
+            repeat_count = grid_layout->item_count;
+            log_debug("GRID: auto-fit adjusted repeat_count to %d (item_count)", repeat_count);
+        }
+
+        long long expanded = (long long)repeat_count * (long long)repeat->repeat_track_count;
+        long long total_tracks = (long long)tracks->track_count - 1 + expanded;
+        if (total_tracks <= 0 || total_tracks != (long long)(int)total_tracks) return false;
+        int new_track_count = (int)total_tracks; // INT_CAST_OK: range equality above proves the count fits.
+        int auto_fit_start = 0;
+        int auto_fit_end = 0;
+        GridTrackSize** new_tracks = expand_repeat_track_entries(
+            tracks, repeat_index, repeat, repeat_count, new_track_count,
+            &auto_fit_start, &auto_fit_end);
+        if (!new_tracks) return false;
+
+        if (repeat->is_auto_fit && new_track_count <= 64) {
+            for (int i = 0; i < new_track_count; i++) {
+                auto_fit_tracks[i] = i >= auto_fit_start && i < auto_fit_end;
+            }
+            *auto_fit_count = new_track_count;
+        }
+
+        if (*owns_list) {
+            destroy_grid_track_entries(tracks->tracks, tracks->track_count);
+            mem_free(tracks->tracks);
+            tracks->tracks = new_tracks;
+            tracks->track_count = new_track_count;
+            tracks->allocated_tracks = new_track_count;
+            tracks->is_repeat = false;
+            free_grid_line_name_slots(tracks);
+            tracks->line_names = (char**)mem_calloc(
+                new_track_count + 1, sizeof(char*), MEM_CAT_LAYOUT);
+        } else {
+            GridTrackList* expanded_list = create_grid_track_list(new_track_count);
+            if (!expanded_list) {
+                destroy_grid_track_entries(new_tracks, new_track_count);
+                mem_free(new_tracks);
+                return false;
+            }
+            mem_free(expanded_list->tracks);
+            expanded_list->tracks = new_tracks;
+            expanded_list->track_count = new_track_count;
+            expanded_list->allocated_tracks = new_track_count;
+            expanded_list->is_repeat = false;
+            *list_slot = expanded_list;
+            *owns_list = true;
+        }
+
+        log_debug("GRID: Expanded to %d %s tracks", new_track_count, axis);
+        break; // CSS permits only one auto-repeat per axis.
+    }
+    return true;
+}
+
+// Expand auto-fill/auto-fit repeat() tracks based on available space.
 void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
-    if (!grid_layout) return;
-
-    // Count items for auto-fit (need to limit tracks to item count)
-    int item_count = grid_layout->item_count;
-
-    // Check columns for auto-fill/auto-fit
-    GridTrackList* cols = grid_layout->grid_template_columns;
-    if (cols && cols->track_count > 0) {
-        for (int i = 0; i < cols->track_count; i++) {
-            GridTrackSize* ts = cols->tracks[i];
-            if (!ts || ts->type != GRID_TRACK_SIZE_REPEAT) continue;
-            if (!ts->is_auto_fill && !ts->is_auto_fit) continue;
-
-            // Found an auto-fill/auto-fit repeat
-            log_debug("GRID: Expanding auto-%s columns (available width: %d, item_count: %d)",
-                      ts->is_auto_fill ? "fill" : "fit", grid_layout->content_width, item_count);
-
-            int pattern_size = calculate_track_pattern_min_size(ts->repeat_tracks, ts->repeat_track_count);
-            if (pattern_size <= 0) pattern_size = 100;
-
-            // Account for gaps
-            float gap = grid_layout->column_gap;
-
-            // Subtract the space already consumed by other (non-auto-repeat) tracks and
-            // their associated gaps, then compute how many repetitions fit in what's left.
-            // CSS Grid §7.2.3.3: available_space = container_size - non-auto-repeat tracks - gaps
-            int fixed_track_space = 0;
-            int fixed_track_count = 0;
-            for (int j = 0; j < cols->track_count; j++) {
-                if (j == i) continue;  // skip the auto-fill repeat track itself
-                GridTrackSize* other = cols->tracks[j];
-                if (!other) continue;
-                if (other->type == GRID_TRACK_SIZE_LENGTH) {
-                    fixed_track_space += (int)other->value;
-                    fixed_track_count++;
-                }
-                // percentage/flex tracks: skip (can't know their size without container width)
-            }
-            // Total gaps for the non-auto-fill tracks we know about
-            // (will be recalculated once the final track count is known, but we approximate here)
-            int total_explicit_tracks = fixed_track_count;
-            int gap_for_fixed = (total_explicit_tracks > 0) ? (int)(total_explicit_tracks * gap) : 0; // INT_CAST_OK: gap calculation
-            int available = grid_layout->content_width - fixed_track_space - gap_for_fixed;
-
-            // Calculate how many repetitions fit
-            // Formula: (available + gap) / (pattern_size + gap) = max repetitions
-            int repeat_count = 1;
-            if (pattern_size + gap > 0) {
-                repeat_count = (int)((available + gap) / (pattern_size + gap)); // INT_CAST_OK: integer count
-                if (repeat_count < 1) repeat_count = 1;
-            }
-
-            log_debug("GRID: Pattern size=%d, gap=%.1f, available=%d -> %d repetitions (before auto-fit adjustment)",
-                      pattern_size, gap, available, repeat_count);
-
-            // For auto-fit: CSS Grid §7.2.3.2 says empty tracks should be collapsed.
-            // Current approach: limit repeat count to item count to avoid creating empty
-            // tracks, since proper gutter collapsing for empty auto-fit tracks is not yet
-            // implemented. A full implementation would expand like auto-fill, then collapse
-            // empty tracks AND their adjacent gutters after placement.
-            bool is_auto_fit = ts->is_auto_fit;
-            if (is_auto_fit && item_count > 0 && repeat_count > item_count) {
-                repeat_count = item_count;
-                log_debug("GRID: auto-fit adjusted repeat_count to %d (item_count)", repeat_count);
-            }
-
-            // Expand the track list. Guard against int overflow: a huge container width
-            // with a small pattern could otherwise wrap (repeat_count * repeat_track_count)
-            // to a small/negative count, after which the copy loops below write past the
-            // allocation. Compute in 64-bit and bail if the result doesn't fit an int.
-            long long expanded = (long long)repeat_count * (long long)ts->repeat_track_count;
-            long long total_tracks = (long long)cols->track_count - 1 + expanded;
-            if (total_tracks <= 0 || total_tracks != (long long)(int)total_tracks) return;
-            int new_track_count = (int)total_tracks;
-            int auto_fit_start, auto_fit_end;
-            GridTrackSize** new_tracks = expand_repeat_track_entries(
-                cols, i, ts, repeat_count, new_track_count, &auto_fit_start, &auto_fit_end);
-            if (!new_tracks) return;
-
-            // Record auto-fit column indices for post-placement collapsing
-            if (is_auto_fit && new_track_count <= 64) {
-                for (int k = 0; k < new_track_count; k++) {
-                    grid_layout->auto_fit_columns[k] = (k >= auto_fit_start && k < auto_fit_end);
-                }
-                grid_layout->auto_fit_col_count = new_track_count;
-            }
-
-            if (grid_layout->owns_template_columns) {
-                destroy_grid_track_entries(cols->tracks, cols->track_count);
-                mem_free(cols->tracks);
-                cols->tracks = new_tracks;
-                cols->track_count = new_track_count;
-                cols->allocated_tracks = new_track_count;
-                cols->is_repeat = false; // No longer has unexpanded repeat
-
-                // Reallocate line_names to match the new track count.
-                // The old line_names was sized for the original (unexpanded) track count.
-                free_grid_line_name_slots(cols);
-                cols->line_names = (char**)mem_calloc(new_track_count + 1, sizeof(char*), MEM_CAT_LAYOUT);
-            } else {
-                GridTrackList* expanded_cols = create_grid_track_list(new_track_count);
-                if (!expanded_cols) {
-                    destroy_grid_track_entries(new_tracks, new_track_count);
-                    mem_free(new_tracks);
-                    return;
-                }
-                mem_free(expanded_cols->tracks);
-                expanded_cols->tracks = new_tracks;
-                expanded_cols->track_count = new_track_count;
-                expanded_cols->allocated_tracks = new_track_count;
-                expanded_cols->is_repeat = false;
-                grid_layout->grid_template_columns = expanded_cols;
-                grid_layout->owns_template_columns = true;
-            }
-
-            log_debug("GRID: Expanded to %d column tracks", new_track_count);
-            break; // Only one auto-repeat per axis allowed
-        }
-    }
-
-    // Check rows for auto-fill/auto-fit (same logic)
-    GridTrackList* rows = grid_layout->grid_template_rows;
-    if (rows && rows->track_count > 0) {
-        for (int i = 0; i < rows->track_count; i++) {
-            GridTrackSize* ts = rows->tracks[i];
-            if (!ts || ts->type != GRID_TRACK_SIZE_REPEAT) continue;
-            if (!ts->is_auto_fill && !ts->is_auto_fit) continue;
-
-            log_debug("GRID: Expanding auto-%s rows (available height: %d, item_count: %d)",
-                      ts->is_auto_fill ? "fill" : "fit", grid_layout->content_height, item_count);
-
-            int pattern_size = calculate_track_pattern_min_size(ts->repeat_tracks, ts->repeat_track_count);
-            if (pattern_size <= 0) pattern_size = 100;
-
-            float gap = grid_layout->row_gap;
-
-            // Subtract space consumed by non-auto-repeat row tracks (same logic as columns)
-            int fixed_row_space = 0;
-            int fixed_row_count = 0;
-            for (int j = 0; j < rows->track_count; j++) {
-                if (j == i) continue;
-                GridTrackSize* other = rows->tracks[j];
-                if (!other) continue;
-                if (other->type == GRID_TRACK_SIZE_LENGTH) {
-                    fixed_row_space += (int)other->value;
-                    fixed_row_count++;
-                }
-            }
-            int gap_for_fixed_rows = fixed_row_count > 0 ? (int)(fixed_row_count * gap) : 0; // INT_CAST_OK: gap calculation
-            int available = grid_layout->content_height - fixed_row_space - gap_for_fixed_rows;
-
-            int repeat_count = 1;
-            if (pattern_size + gap > 0) {
-                repeat_count = (int)((available + gap) / (pattern_size + gap)); // INT_CAST_OK: integer count
-                if (repeat_count < 1) repeat_count = 1;
-            }
-
-            log_debug("GRID: Row pattern size=%d, gap=%.1f, available=%d -> %d repetitions (before auto-fit adjustment)",
-                      pattern_size, gap, available, repeat_count);
-
-            // For auto-fit: expand like auto-fill, collapse empty tracks after placement.
-            bool is_auto_fit_row = ts->is_auto_fit;
-
-            // guard the row track-count expansion against int overflow (see cols path above)
-            long long expanded_r = (long long)repeat_count * (long long)ts->repeat_track_count;
-            long long total_tracks_r = (long long)rows->track_count - 1 + expanded_r;
-            if (total_tracks_r <= 0 || total_tracks_r != (long long)(int)total_tracks_r) return;
-            int new_track_count = (int)total_tracks_r;
-            int auto_fit_row_start, auto_fit_row_end;
-            GridTrackSize** new_tracks = expand_repeat_track_entries(
-                rows, i, ts, repeat_count, new_track_count,
-                &auto_fit_row_start, &auto_fit_row_end);
-            if (!new_tracks) return;
-
-            // Record auto-fit row indices for post-placement collapsing
-            if (is_auto_fit_row && new_track_count <= 64) {
-                for (int k = 0; k < new_track_count; k++) {
-                    grid_layout->auto_fit_rows[k] = (k >= auto_fit_row_start && k < auto_fit_row_end);
-                }
-                grid_layout->auto_fit_row_count = new_track_count;
-            }
-
-            if (grid_layout->owns_template_rows) {
-                destroy_grid_track_entries(rows->tracks, rows->track_count);
-                mem_free(rows->tracks);
-                rows->tracks = new_tracks;
-                rows->track_count = new_track_count;
-                rows->allocated_tracks = new_track_count;
-                rows->is_repeat = false;
-
-                // Reallocate line_names to match the new track count (same fix as columns).
-                free_grid_line_name_slots(rows);
-                rows->line_names = (char**)mem_calloc(new_track_count + 1, sizeof(char*), MEM_CAT_LAYOUT);
-            } else {
-                GridTrackList* expanded_rows = create_grid_track_list(new_track_count);
-                if (!expanded_rows) {
-                    destroy_grid_track_entries(new_tracks, new_track_count);
-                    mem_free(new_tracks);
-                    return;
-                }
-                mem_free(expanded_rows->tracks);
-                expanded_rows->tracks = new_tracks;
-                expanded_rows->track_count = new_track_count;
-                expanded_rows->allocated_tracks = new_track_count;
-                expanded_rows->is_repeat = false;
-                grid_layout->grid_template_rows = expanded_rows;
-                grid_layout->owns_template_rows = true;
-            }
-
-            log_debug("GRID: Expanded to %d row tracks", new_track_count);
-            break;
-        }
-    }
+    if (!grid_layout || !expand_auto_repeat_axis(grid_layout, true)) return;
+    expand_auto_repeat_axis(grid_layout, false);
 }
