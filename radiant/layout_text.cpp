@@ -1303,16 +1303,9 @@ void update_line_for_bfc_floats(LayoutContext* lycon, float query_height) {
         return;
     }
 
-    // Get current view
-    ViewBlock* current_view = lam::view_as_block(lycon->view);
-    if (!current_view) {
-        lycon->line.effective_left = lycon->line.left;
-        lycon->line.effective_right = lycon->line.right;
-        lycon->line.has_float_intrusion = false;
-        return;
-    }
-
     // Use cached BFC offset from BlockContext
+    // Inline/text layout has no block current view, but it still must see
+    // floats registered in the surrounding block formatting context.
     float offset_x = lycon->block.bfc_offset_x;
     float offset_y = lycon->block.bfc_offset_y;
 

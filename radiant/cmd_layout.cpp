@@ -84,6 +84,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../radiant/view.hpp"
 #include "render.hpp"
 #include "../radiant/layout.hpp"
+#include "resource_resolver.hpp"
 #include "view.hpp"
 #include "render.hpp"
 #include "event.hpp"
@@ -1553,6 +1554,14 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
             } else {
                 strncpy(css_path, href, sizeof(css_path) - 1);
                 css_path[sizeof(css_path) - 1] = '\0';
+            }
+
+            if (!is_http_css && access(css_path, R_OK) != 0) {
+                char shared_path[1024];
+                if (radiant_resolve_shared_data_resource_path(href, base_path,
+                                                              shared_path, sizeof(shared_path))) {
+                    str_copy(css_path, sizeof(css_path), shared_path, strlen(shared_path));
+                }
             }
 
             log_debug("[CSS] Loading stylesheet from: %s", css_path);
