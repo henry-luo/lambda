@@ -276,99 +276,15 @@ static void svg_color_to_string(Color color, char* result) {
 
 static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     if (!text || !text->text_data()) return;
-    // Extract the text content
     unsigned char* str = text->text_data();
-
-    // Get text-transform from the text node's parent elements
-    CssEnum text_transform = CSS_VALUE_NONE;
-    DomNode* parent = text->parent;
-    while (parent) {
-        if (parent->is_element()) {
-            DomElement* elem = lam::dom_require_element(parent);
-            text_transform = get_text_transform_from_block(elem->blk);
-            if (text_transform != CSS_VALUE_NONE) break;
-        }
-        parent = parent->parent;
-    }
+    CssEnum text_transform = render_text_inherited_transform(text);
 
     TextRect *text_rect = text->rect;
     NEXT_RECT:
     float x = ctx->block.x + text_rect->x, y = ctx->block.y + text_rect->y;
 
-    // Transform text if needed
-    char* text_content = (char*)mem_alloc(text_rect->length * 4 + 2, MEM_CAT_RENDER);  // Extra for UTF-8 + trailing hyphen
-    if (text_transform != CSS_VALUE_NONE) {
-        // Apply text-transform character by character
-        unsigned char* src = str + text_rect->start_index;
-        unsigned char* src_end = src + text_rect->length;
-        char* dst = text_content;
-        bool is_word_start = true;
-
-        while (src < src_end) {
-            uint32_t codepoint = *src;
-            int bytes = 1;
-
-            if (codepoint >= 128) {
-                bytes = str_utf8_decode((const char*)src, (size_t)(src_end - src), &codepoint);
-                if (bytes <= 0) bytes = 1;
-            }
-
-            // Skip soft hyphens (U+00AD) — they are invisible in rendered output
-            if (codepoint == 0x00AD) { src += bytes; continue; }
-
-            // Track word boundaries
-            if (is_space(codepoint)) {
-                is_word_start = true;
-                *dst++ = *src;
-                src += bytes;
-                continue;
-            }
-
-            // Apply transformation (full case mapping: 1 codepoint may become 2-3)
-            uint32_t tt_out[3];
-            int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
-            is_word_start = false;
-
-            // Encode all expanded codepoints back to UTF-8
-            for (int tti = 0; tti < tt_count; tti++) {
-            uint32_t transformed = tt_out[tti];
-            if (transformed == 0) continue;
-            dst += utf8_encode(transformed, dst);
-            } // end for tti
-
-            src += bytes;
-        }
-        *dst = '\0';
-    } else {
-        // No transformation — copy while stripping soft hyphens (U+00AD = 0xC2 0xAD)
-        unsigned char* src = str + text_rect->start_index;
-        unsigned char* src_end = src + text_rect->length;
-        char* dst = text_content;
-        while (src < src_end) {
-            if (src[0] == 0xC2 && src + 1 < src_end && src[1] == 0xAD) {
-                src += 2;  // skip soft hyphen
-            } else {
-                *dst++ = (char)*src++;
-            }
-        }
-        *dst = '\0';
-    }
-    // CSS Text 3 §5.2: Soft hyphen — append visible '-' when line breaks at SHY
-    if (text_rect->has_trailing_hyphen) {
-        size_t len = strlen(text_content);
-        text_content[len] = '-';
-        text_content[len + 1] = '\0';
-    }
-
-    // -webkit-line-clamp: append ellipsis character
-    if (text_rect->has_trailing_ellipsis) {
-        size_t len = strlen(text_content);
-        // U+2026 HORIZONTAL ELLIPSIS = 0xE2 0x80 0xA6 in UTF-8
-        text_content[len] = (char)0xE2;
-        text_content[len + 1] = (char)0x80;
-        text_content[len + 2] = (char)0xA6;
-        text_content[len + 3] = '\0';
-    }
+    char* text_content = render_text_create_export_segment(
+        str, text_rect, text_transform, true);
 
     // Calculate natural text width and gap count for justify rendering.
     // NOTE: includes trailing spaces. The layout's count_justify_opportunities

@@ -3543,6 +3543,11 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view);
 
 // ===== render_text.hpp =====
 void render_text_view(RenderContext* rdcon, ViewText* text_view);
+CssEnum render_text_inherited_transform(ViewText* text_view);
+char* render_text_create_export_segment(const unsigned char* text,
+                                        const TextRect* text_rect,
+                                        CssEnum text_transform,
+                                        bool include_ellipsis);
 
 // ===== render_vector_path.hpp =====
 struct RenderContext;

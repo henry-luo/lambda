@@ -378,58 +378,52 @@ static void compute_span_from_collapsed_line_fragment(ViewSpan* span) {
     span->height = fragment_height + top_edge + bottom_edge;
 }
 
+static void compute_empty_span_bounding_box(ViewSpan* span, FontHandle* fallback_fh) {
+    if (span->has_collapsed_line_fragment_union) {
+        compute_span_from_collapsed_line_fragment(span);
+        return;
+    }
+
+    // CSS 2.1 section 9.4.2: only inline-axis decorations keep an empty span present.
+    float border_left = 0.0f, border_right = 0.0f;
+    float border_top = 0.0f, border_bottom = 0.0f;
+    float pad_left = 0.0f, pad_right = 0.0f;
+    float pad_top = 0.0f, pad_bottom = 0.0f;
+    float margin_left = 0.0f, margin_right = 0.0f;
+    if (span->bound) {
+        if (span->bound->border) {
+            border_left = span->bound->border->width.left;
+            border_right = span->bound->border->width.right;
+            border_top = span->bound->border->width.top;
+            border_bottom = span->bound->border->width.bottom;
+        }
+        pad_left = max(span->bound->padding.left, 0.0f);
+        pad_right = max(span->bound->padding.right, 0.0f);
+        pad_top = max(span->bound->padding.top, 0.0f);
+        pad_bottom = max(span->bound->padding.bottom, 0.0f);
+        margin_left = span->bound->margin.left;
+        margin_right = span->bound->margin.right;
+    }
+
+    float inline_size = border_left + pad_left + pad_right + border_right;
+    if (inline_size > 0.0f || margin_left != 0.0f || margin_right != 0.0f) {
+        FontHandle* font = span->font ? span->font->font_handle : fallback_fh;
+        float font_content_height = font ? font_get_cell_height(font) : 0.0f;
+        span->width = inline_size;
+        span->height = roundf(font_content_height + border_top + pad_top +
+                              pad_bottom + border_bottom);
+    } else {
+        span->width = 0.0f;
+        span->height = 0.0f;
+    }
+}
+
 // Compute bounding box of a ViewSpan based on union of child views
 // The bounding box includes the span's own border and padding
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh) {
     View* child = span->first_child;
     if (!child) {
-        if (span->has_collapsed_line_fragment_union) {
-            compute_span_from_collapsed_line_fragment(span);
-            return;
-        }
-
-        // Truly empty inline element (no children at all) — CSS 2.1 §9.4.2:
-        // A line box is zero-height when it contains no text, no preserved whitespace,
-        // and no inline elements with non-zero inline-direction decorations.
-        // Per browser behavior, only horizontal (inline-direction) borders/padding/margins
-        // keep a line box non-zero-height. Vertical-only borders (top/bottom) do not.
-        float border_left = 0, border_right = 0, border_top = 0, border_bottom = 0;
-        float pad_left = 0, pad_right = 0, pad_top = 0, pad_bottom = 0;
-        float margin_left = 0, margin_right = 0;
-        if (span->bound) {
-            if (span->bound->border) {
-                border_left = span->bound->border->width.left;
-                border_right = span->bound->border->width.right;
-                border_top = span->bound->border->width.top;
-                border_bottom = span->bound->border->width.bottom;
-            }
-            pad_left = span->bound->padding.left > 0 ? span->bound->padding.left : 0;
-            pad_right = span->bound->padding.right > 0 ? span->bound->padding.right : 0;
-            pad_top = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
-            pad_bottom = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
-            margin_left = span->bound->margin.left;
-            margin_right = span->bound->margin.right;
-        }
-        float inline_sum = border_left + pad_left + pad_right + border_right;
-        // CSS Inline 3 §2.1: non-zero inline-axis margin also makes the span not invisible
-        bool has_inline_decorations = (inline_sum > 0 || margin_left != 0 || margin_right != 0);
-        if (has_inline_decorations) {
-            // CSS 2.1 §10.6.1: Horizontal decorations keep the inline box "present".
-            // The inline box height includes the font content area (ascender + descender)
-            // plus vertical borders and padding. Borders/padding extend around the
-            // content area, not just around zero.
-            float font_content_h = 0;
-            struct FontHandle* fh = span->font ? span->font->font_handle : fallback_fh;
-            if (fh) {
-                font_content_h = font_get_cell_height(fh);
-            }
-            span->width = inline_sum;
-            span->height = roundf(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
-        } else {
-            // No inline-axis decorations — the inline box is invisible, collapse to zero
-            span->width = 0;
-            span->height = 0;
-        }
+        compute_empty_span_bounding_box(span, fallback_fh);
         return;
     }
 
@@ -444,45 +438,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         child = child->next();
     }
     if (!child) {
-        if (span->has_collapsed_line_fragment_union) {
-            compute_span_from_collapsed_line_fragment(span);
-            return;
-        }
-
-        // All children are nil-views or out-of-flow — treat as effectively empty.
-        // CSS 2.1 §9.4.2: Only inline-direction (horizontal) decorations keep the
-        // line box non-zero-height. If no horizontal border/padding/margin exists, collapse.
-        float border_left = 0, border_right = 0, border_top = 0, border_bottom = 0;
-        float pad_left = 0, pad_right = 0, pad_top = 0, pad_bottom = 0;
-        float margin_left = 0, margin_right = 0;
-        if (span->bound) {
-            if (span->bound->border) {
-                border_left = span->bound->border->width.left;
-                border_right = span->bound->border->width.right;
-                border_top = span->bound->border->width.top;
-                border_bottom = span->bound->border->width.bottom;
-            }
-            pad_left = span->bound->padding.left > 0 ? span->bound->padding.left : 0;
-            pad_right = span->bound->padding.right > 0 ? span->bound->padding.right : 0;
-            pad_top = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
-            pad_bottom = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
-            margin_left = span->bound->margin.left;
-            margin_right = span->bound->margin.right;
-        }
-        float inline_sum = border_left + pad_left + pad_right + border_right;
-        bool has_inline_decorations = (inline_sum > 0 || margin_left != 0 || margin_right != 0);
-        if (has_inline_decorations) {
-            float font_content_h = 0;
-            struct FontHandle* fh = span->font ? span->font->font_handle : fallback_fh;
-            if (fh) {
-                font_content_h = font_get_cell_height(fh);
-            }
-            span->width = inline_sum;
-            span->height = roundf(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
-        } else {
-            span->width = 0;
-            span->height = 0;
-        }
+        compute_empty_span_bounding_box(span, fallback_fh);
         return;
     }
 

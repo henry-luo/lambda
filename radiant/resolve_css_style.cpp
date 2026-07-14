@@ -521,6 +521,153 @@ static void replace_view_pool_layout_const_string(LayoutContext* lycon, const ch
     *target = duplicate_view_pool_layout_string(lycon, value);
 }
 
+struct CssGridAxisSlots {
+    int* start;
+    int* end;
+    const char** start_name;
+    const char** end_name;
+    bool* has_start;
+    bool* has_end;
+    bool* start_is_span;
+    bool* end_is_span;
+    const char* name;
+};
+
+static CssGridAxisSlots css_grid_axis_slots(GridItemProp* item, bool is_row) {
+    if (is_row) {
+        return {&item->grid_row_start, &item->grid_row_end,
+                &item->grid_row_start_name, &item->grid_row_end_name,
+                &item->has_explicit_grid_row_start, &item->has_explicit_grid_row_end,
+                &item->grid_row_start_is_span, &item->grid_row_end_is_span, "row"};
+    }
+    return {&item->grid_column_start, &item->grid_column_end,
+            &item->grid_column_start_name, &item->grid_column_end_name,
+            &item->has_explicit_grid_column_start, &item->has_explicit_grid_column_end,
+            &item->grid_column_start_is_span, &item->grid_column_end_is_span, "column"};
+}
+
+static const char* css_grid_identifier(const CssValue* value) {
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : nullptr;
+    }
+    if (value->type == CSS_VALUE_TYPE_CUSTOM) {
+        return value->data.custom_property.name;
+    }
+    return nullptr;
+}
+
+static bool css_grid_is_separator(const CssValue* value) {
+    const char* text = value->type == CSS_VALUE_TYPE_STRING
+        ? value->data.string : css_grid_identifier(value);
+    return text && strcmp(text, "/") == 0;
+}
+
+static const char* css_grid_named_line(const CssValue* value) {
+    const char* name = css_grid_identifier(value);
+    if (!name || strcmp(name, "span") == 0 || strcmp(name, "/") == 0 ||
+        name[0] == '[' || name[0] == ']' ||
+        (value->type == CSS_VALUE_TYPE_KEYWORD && strcmp(name, "auto") == 0)) {
+        return nullptr;
+    }
+    return name;
+}
+
+static void resolve_grid_axis_shorthand(LayoutContext* lycon, ViewSpan* span,
+                                        const CssValue* value, bool is_row) {
+    alloc_grid_item_prop(lycon, span);
+    GridItemProp* item = span->gi;
+    CssGridAxisSlots axis = css_grid_axis_slots(item, is_row);
+    log_debug("[CSS] Processing grid-%s shorthand property", axis.name);
+
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        int line = (int)value->data.number.value; // INT_CAST_OK: grid lines are discrete indices.
+        *axis.start = line;
+        *axis.has_start = true;
+        item->is_grid_auto_placed = false;
+        log_debug("[CSS] grid-%s: %d", axis.name, line);
+        return;
+    }
+    if (value->type != CSS_VALUE_TYPE_LIST || value->data.list.count == 0) return;
+
+    size_t count = value->data.list.count;
+    CssValue** values = value->data.list.values;
+    bool has_separator = false;
+    for (size_t i = 0; i < count; i++) {
+        if (css_grid_is_separator(values[i])) {
+            has_separator = true;
+            break;
+        }
+    }
+
+    if (!has_separator) {
+        bool is_span = false;
+        int span_value = 1;
+        int line_value = 0;
+        for (size_t i = 0; i < count; i++) {
+            CssValue* part = values[i];
+            const char* identifier = css_grid_identifier(part);
+            if (identifier && strcmp(identifier, "span") == 0) {
+                is_span = true;
+            } else if (part->type == CSS_VALUE_TYPE_NUMBER) {
+                int number = (int)part->data.number.value; // INT_CAST_OK: grid lines and spans are discrete indices.
+                if (is_span) span_value = number;
+                else line_value = number;
+            }
+        }
+        if (is_span) {
+            *axis.start = 0;
+            *axis.end = -span_value;
+            *axis.has_end = true;
+            *axis.end_is_span = true;
+        } else if (line_value != 0) {
+            *axis.start = line_value;
+            *axis.has_start = true;
+        }
+    } else {
+        int value_index = 0;
+        bool saw_span = false;
+        for (size_t i = 0; i < count; i++) {
+            CssValue* part = values[i];
+            if (css_grid_is_separator(part)) {
+                value_index = 1;
+                saw_span = false;
+                continue;
+            }
+
+            const char* identifier = css_grid_identifier(part);
+            if (identifier && strcmp(identifier, "span") == 0) {
+                saw_span = true;
+                continue;
+            }
+            if (part->type == CSS_VALUE_TYPE_NUMBER) {
+                int number = (int)part->data.number.value; // INT_CAST_OK: grid lines and spans are discrete indices.
+                int* line = value_index == 0 ? axis.start : axis.end;
+                bool* has_line = value_index == 0 ? axis.has_start : axis.has_end;
+                bool* line_is_span = value_index == 0 ? axis.start_is_span : axis.end_is_span;
+                *line = saw_span ? -number : number;
+                *has_line = true;
+                if (saw_span) *line_is_span = true;
+                saw_span = false;
+                continue;
+            }
+
+            const char* line_name = css_grid_named_line(part);
+            if (line_name) {
+                const char** name_slot = value_index == 0 ? axis.start_name : axis.end_name;
+                bool* has_line = value_index == 0 ? axis.has_start : axis.has_end;
+                replace_view_pool_layout_const_string(lycon, name_slot, line_name);
+                *has_line = true;
+            }
+        }
+    }
+
+    item->is_grid_auto_placed = false;
+    log_debug("[CSS] grid-%s: %d / %d (has_start=%d, has_end=%d, end_is_span=%d)",
+              axis.name, *axis.start, *axis.end, *axis.has_start, *axis.has_end,
+              *axis.end_is_span);
+}
+
 static bool css_font_face_source_is_available(const char* path) {
     if (!path || !*path) return false;
     if (strncmp(path, "data:", 5) == 0) return true;
@@ -10764,298 +10911,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_GRID_COLUMN: {
-            log_debug("[CSS] Processing grid-column shorthand property");
-            alloc_grid_item_prop(lycon, span);
-            // grid-column: <start> / <end> or span <n> or <line>
-            // Per CSS Grid spec: "span N" without "/" means "auto / span N"
-            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-                size_t count = value->data.list.count;
-                CssValue** values = value->data.list.values;
-                bool has_separator = false;
-
-                // First pass: check if there's a "/" separator
-                // Note: "/" may come as STRING or CUSTOM type depending on parser
-                for (size_t i = 0; i < count; i++) {
-                    CssValue* v = values[i];
-                    if (v->type == CSS_VALUE_TYPE_STRING && v->data.string && strcmp(v->data.string, "/") == 0) {
-                        has_separator = true;
-                        break;
-                    }
-                    if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name &&
-                        strcmp(v->data.custom_property.name, "/") == 0) {
-                        has_separator = true;
-                        break;
-                    }
-                }
-
-                if (!has_separator) {
-                    // No separator: "span N" or just "N"
-                    // Check if first value is span keyword
-                    bool is_span = false;
-                    int span_value = 1;
-                    int line_value = 0;
-
-                    for (size_t i = 0; i < count; i++) {
-                        CssValue* v = values[i];
-                        if (v->type == CSS_VALUE_TYPE_KEYWORD) {
-                            const CssEnumInfo* info = css_enum_info(v->data.keyword);
-                            if (info && info->name && strcmp(info->name, "span") == 0) {
-                                is_span = true;
-                            }
-                        } else if (v->type == CSS_VALUE_TYPE_CUSTOM) {
-                            // "span" may come as custom identifier
-                            const char* name = v->data.custom_property.name;
-                            if (name && strcmp(name, "span") == 0) {
-                                is_span = true;
-                            }
-                        } else if (v->type == CSS_VALUE_TYPE_NUMBER) {
-                            if (is_span) {
-                                span_value = (int)v->data.number.value;
-                            } else {
-                                line_value = (int)v->data.number.value;
-                            }
-                        }
-                    }                    if (is_span) {
-                        // "span N" -> auto / span N
-                        span->gi->grid_column_start = 0;  // auto
-                        span->gi->grid_column_end = -span_value;  // negative for span
-                        span->gi->has_explicit_grid_column_end = true;
-                        span->gi->grid_column_end_is_span = true;
-                    } else if (line_value != 0) {
-                        // Just a line number
-                        span->gi->grid_column_start = line_value;
-                        span->gi->has_explicit_grid_column_start = true;
-                    }
-                } else {
-                    // Has separator: <start> / <end>
-                    int value_idx = 0;  // 0 = start, 1 = end
-                    bool saw_span = false;
-
-                    for (size_t i = 0; i < count; i++) {
-                        CssValue* v = values[i];
-                        if (v->type == CSS_VALUE_TYPE_NUMBER) {
-                            int num = (int)v->data.number.value;
-                            if (saw_span) {
-                                if (value_idx == 0) {
-                                    span->gi->grid_column_start = -num;
-                                    span->gi->has_explicit_grid_column_start = true;
-                                    span->gi->grid_column_start_is_span = true;
-                                } else {
-                                    span->gi->grid_column_end = -num;
-                                    span->gi->grid_column_end_is_span = true;
-                                    span->gi->has_explicit_grid_column_end = true;
-                                }
-                                saw_span = false;
-                            } else {
-                                if (value_idx == 0) {
-                                    span->gi->grid_column_start = num;
-                                    span->gi->has_explicit_grid_column_start = true;
-                                } else {
-                                    span->gi->grid_column_end = num;
-                                    span->gi->has_explicit_grid_column_end = true;
-                                }
-                            }
-                        } else if (v->type == CSS_VALUE_TYPE_KEYWORD) {
-                            const CssEnumInfo* info = css_enum_info(v->data.keyword);
-                            if (info && info->name) {
-                                if (strcmp(info->name, "span") == 0) {
-                                    saw_span = true;
-                                } else if (strcmp(info->name, "auto") != 0) {
-                                    // CSS keyword used as a named line reference (e.g. "start", "end")
-                                    if (value_idx == 0) {
-                                        replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_start_name, info->name);
-                                        span->gi->has_explicit_grid_column_start = true;
-                                    } else {
-                                        replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_end_name, info->name);
-                                        span->gi->has_explicit_grid_column_end = true;
-                                    }
-                                }
-                            }
-                        } else if (v->type == CSS_VALUE_TYPE_CUSTOM) {
-                            const char* name = v->data.custom_property.name;
-                            if (name && strcmp(name, "span") == 0) {
-                                saw_span = true;
-                            } else if (name && strcmp(name, "/") == 0) {
-                                // "/" separator may come as CUSTOM type
-                                value_idx = 1;
-                                saw_span = false;
-                            } else if (name && name[0] != '[' && name[0] != ']') {
-                                // Named line reference (e.g. grid-column: header-start / content-end)
-                                if (value_idx == 0) {
-                                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_start_name, name);
-                                    span->gi->has_explicit_grid_column_start = true;
-                                } else {
-                                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_end_name, name);
-                                    span->gi->has_explicit_grid_column_end = true;
-                                }
-                            }
-                        } else if (v->type == CSS_VALUE_TYPE_STRING) {
-                            if (v->data.string && strcmp(v->data.string, "/") == 0) {
-                                value_idx = 1;
-                                saw_span = false;
-                            }
-                        }
-                    }
-                }
-                span->gi->is_grid_auto_placed = false;
-                log_debug("[CSS] grid-column: %d / %d (has_start=%d, has_end=%d, end_is_span=%d)",
-                          span->gi->grid_column_start, span->gi->grid_column_end,
-                          span->gi->has_explicit_grid_column_start, span->gi->has_explicit_grid_column_end,
-                          span->gi->grid_column_end_is_span);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                // Single line number
-                int line = (int)value->data.number.value;
-                span->gi->grid_column_start = line;
-                span->gi->has_explicit_grid_column_start = true;
-                span->gi->is_grid_auto_placed = false;
-                log_debug("[CSS] grid-column: %d", line);
-            }
+            resolve_grid_axis_shorthand(lycon, span, value, false);
             break;
         }
 
         case CSS_PROPERTY_GRID_ROW: {
-            log_debug("[CSS] Processing grid-row shorthand property");
-            alloc_grid_item_prop(lycon, span);
-            // grid-row: <start> / <end> or span <n> or <line>
-            // Per CSS Grid spec: "span N" without "/" means "auto / span N"
-            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-                size_t count = value->data.list.count;
-                CssValue** values = value->data.list.values;
-                bool has_separator = false;
-
-                // First pass: check if there's a "/" separator
-                // Note: "/" may come as STRING or CUSTOM type depending on parser
-                for (size_t i = 0; i < count; i++) {
-                    CssValue* v = values[i];
-                    if (v->type == CSS_VALUE_TYPE_STRING && v->data.string && strcmp(v->data.string, "/") == 0) {
-                        has_separator = true;
-                        break;
-                    }
-                    if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name &&
-                        strcmp(v->data.custom_property.name, "/") == 0) {
-                        has_separator = true;
-                        break;
-                    }
-                }
-
-                if (!has_separator) {
-                    // No separator: "span N" or just "N"
-                    bool is_span = false;
-                    int span_value = 1;
-                    int line_value = 0;
-
-                    for (size_t i = 0; i < count; i++) {
-                        CssValue* v = values[i];
-                        if (v->type == CSS_VALUE_TYPE_KEYWORD) {
-                            const CssEnumInfo* info = css_enum_info(v->data.keyword);
-                            if (info && info->name && strcmp(info->name, "span") == 0) {
-                                is_span = true;
-                            }
-                        } else if (v->type == CSS_VALUE_TYPE_CUSTOM) {
-                            const char* name = v->data.custom_property.name;
-                            if (name && strcmp(name, "span") == 0) {
-                                is_span = true;
-                            }
-                        } else if (v->type == CSS_VALUE_TYPE_NUMBER) {
-                            if (is_span) {
-                                span_value = (int)v->data.number.value;
-                            } else {
-                                line_value = (int)v->data.number.value;
-                            }
-                        }
-                    }
-
-                    if (is_span) {
-                        // "span N" -> auto / span N
-                        span->gi->grid_row_start = 0;  // auto
-                        span->gi->grid_row_end = -span_value;  // negative for span
-                        span->gi->has_explicit_grid_row_end = true;
-                        span->gi->grid_row_end_is_span = true;
-                    } else if (line_value != 0) {
-                        span->gi->grid_row_start = line_value;
-                        span->gi->has_explicit_grid_row_start = true;
-                    }
-                } else {
-                    // Has separator: <start> / <end>
-                    int value_idx = 0;
-                    bool saw_span = false;
-
-                    for (size_t i = 0; i < count; i++) {
-                        CssValue* v = values[i];
-                        if (v->type == CSS_VALUE_TYPE_NUMBER) {
-                            int num = (int)v->data.number.value;
-                            if (saw_span) {
-                                if (value_idx == 0) {
-                                    span->gi->grid_row_start = -num;
-                                    span->gi->has_explicit_grid_row_start = true;
-                                    span->gi->grid_row_start_is_span = true;
-                                } else {
-                                    span->gi->grid_row_end = -num;
-                                    span->gi->has_explicit_grid_row_end = true;
-                                    span->gi->grid_row_end_is_span = true;
-                                }
-                                saw_span = false;
-                            } else {
-                                if (value_idx == 0) {
-                                    span->gi->grid_row_start = num;
-                                    span->gi->has_explicit_grid_row_start = true;
-                                } else {
-                                    span->gi->grid_row_end = num;
-                                    span->gi->has_explicit_grid_row_end = true;
-                                }
-                            }
-                        } else if (v->type == CSS_VALUE_TYPE_KEYWORD) {
-                            const CssEnumInfo* info = css_enum_info(v->data.keyword);
-                            if (info && info->name) {
-                                if (strcmp(info->name, "span") == 0) {
-                                    saw_span = true;
-                                } else if (strcmp(info->name, "auto") != 0) {
-                                    // CSS keyword used as a named line reference (e.g. "top", "center")
-                                    if (value_idx == 0) {
-                                        replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_start_name, info->name);
-                                        span->gi->has_explicit_grid_row_start = true;
-                                    } else {
-                                        replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_end_name, info->name);
-                                        span->gi->has_explicit_grid_row_end = true;
-                                    }
-                                }
-                            }
-                        } else if (v->type == CSS_VALUE_TYPE_CUSTOM) {
-                            const char* name = v->data.custom_property.name;
-                            if (name && strcmp(name, "span") == 0) {
-                                saw_span = true;
-                            } else if (name && strcmp(name, "/") == 0) {
-                                // "/" separator may come as CUSTOM type
-                                value_idx = 1;
-                                saw_span = false;
-                            } else if (name && name[0] != '[' && name[0] != ']') {
-                                // Named line reference (e.g. grid-row: header-start / content-end)
-                                if (value_idx == 0) {
-                                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_start_name, name);
-                                    span->gi->has_explicit_grid_row_start = true;
-                                } else {
-                                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_end_name, name);
-                                    span->gi->has_explicit_grid_row_end = true;
-                                }
-                            }
-                        } else if (v->type == CSS_VALUE_TYPE_STRING) {
-                            if (v->data.string && strcmp(v->data.string, "/") == 0) {
-                                value_idx = 1;
-                                saw_span = false;
-                            }
-                        }
-                    }
-                }
-                span->gi->is_grid_auto_placed = false;
-                log_debug("[CSS] grid-row: %d / %d",
-                          span->gi->grid_row_start, span->gi->grid_row_end);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                int line = (int)value->data.number.value;
-                span->gi->grid_row_start = line;
-                span->gi->has_explicit_grid_row_start = true;
-                span->gi->is_grid_auto_placed = false;
-                log_debug("[CSS] grid-row: %d", line);
-            }
+            resolve_grid_axis_shorthand(lycon, span, value, true);
             break;
         }
 

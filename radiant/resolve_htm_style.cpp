@@ -482,6 +482,84 @@ static const char* get_parent_tr_valign(DomNode* elmt) {
     return nullptr;
 }
 
+static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_node,
+                                           ViewBlock* block, bool is_header) {
+    DomElement* cell = cell_node->as_element();
+    const char* tag_name = is_header ? "TH" : "TD";
+    if (is_header) {
+        log_debug("apply default TH styles");
+        apply_html_font_weight_bold(ensure_html_block_font(lycon, block));
+    }
+
+    BlockProp* block_prop = ensure_html_block_prop(lycon, block);
+    block_prop->text_align = is_header ? CSS_VALUE_CENTER : CSS_VALUE_LEFT;
+    apply_table_cell_width_attribute(cell, block);
+    apply_table_cell_height_attribute(cell, block);
+
+    if (!block->in_line) block->in_line = alloc_inline_prop(lycon);
+    block->in_line->vertical_align = CSS_VALUE_MIDDLE;
+
+    float cellpadding = get_parent_table_cellpadding(cell_node);
+    float padding = cellpadding >= 0.0f ? cellpadding : 1.0f;
+    if (!block->bound) {
+        block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+    }
+    block->bound->padding.top = block->bound->padding.right =
+        block->bound->padding.bottom = block->bound->padding.left = padding;
+    block->bound->padding.top_specificity = block->bound->padding.right_specificity =
+        block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
+
+    const char* align_attr = cell->get_attribute("align");
+    if (align_attr) {
+        size_t align_len = strlen(align_attr);
+        if (str_ieq_const(align_attr, align_len, "left")) {
+            block_prop->text_align = CSS_VALUE_LEFT;
+            block_prop->legacy_block_align = CSS_VALUE_LEFT;
+        } else if (str_ieq_const(align_attr, align_len, "right")) {
+            block_prop->text_align = CSS_VALUE_RIGHT;
+            block_prop->legacy_block_align = CSS_VALUE_RIGHT;
+        } else if (str_ieq_const(align_attr, align_len, "center")) {
+            block_prop->text_align = CSS_VALUE_CENTER;
+            block_prop->legacy_align_center_blocks = true;
+            block_prop->legacy_block_align = CSS_VALUE_CENTER;
+        }
+    }
+
+    const char* valign_attr = cell->get_attribute("valign");
+    if (!valign_attr) valign_attr = get_parent_tr_valign(cell_node);
+    if (valign_attr) {
+        size_t valign_len = strlen(valign_attr);
+        if (str_ieq_const(valign_attr, valign_len, "top")) {
+            block->in_line->vertical_align = CSS_VALUE_TOP;
+        } else if (str_ieq_const(valign_attr, valign_len, "middle")) {
+            block->in_line->vertical_align = CSS_VALUE_MIDDLE;
+        } else if (str_ieq_const(valign_attr, valign_len, "bottom")) {
+            block->in_line->vertical_align = CSS_VALUE_BOTTOM;
+        }
+    }
+
+    if (cell->get_attribute("nowrap")) {
+        block_prop->white_space = CSS_VALUE_NOWRAP;
+        log_debug("[HTML] %s nowrap attribute -> white-space: nowrap", tag_name);
+    }
+
+    const char* bgcolor_attr = cell->get_attribute("bgcolor");
+    if (bgcolor_attr) {
+        Color bg_color = parse_html_color(bgcolor_attr);
+        apply_html_background_color(lycon, block, bg_color);
+        log_debug("[HTML] %s bgcolor attribute: #%02x%02x%02x",
+                  tag_name, bg_color.r, bg_color.g, bg_color.b);
+    }
+
+    if (get_parent_table_border(cell_node) > 0.0f) {
+        Color grey = (Color){ .r=128, .g=128, .b=128, .a=255 };
+        apply_html_uniform_border(lycon, block, 1.0f, CSS_VALUE_INSET, grey);
+        log_debug("[HTML] %s border from parent TABLE: 1px inset grey", tag_name);
+    }
+    apply_html_table_rules_cell_border(
+        lycon, block, get_parent_table_rules(cell_node), is_header);
+}
+
 // HTML5 §14.3.4 / Unicode UAX #9: Detect first strong directional character.
 // Returns 1 for RTL (R/AL), -1 for LTR (L), 0 for neutral/not found.
 static int bidi_strong_class(uint32_t cp) {
@@ -1509,172 +1587,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     }
     case HTM_TAG_TH: {
-        // font-weight: bold;  text-align: center;  vertical-align: middle;
-        log_debug("apply default TH styles");
-        apply_html_font_weight_bold(ensure_html_block_font(lycon, block));
-        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->text_align = CSS_VALUE_CENTER;  // TH defaults to center
-        apply_table_cell_width_attribute(elmt->as_element(), block);
-        apply_table_cell_height_attribute(elmt->as_element(), block);
-        if (!block->in_line) { block->in_line = alloc_inline_prop(lycon); }
-        block->in_line->vertical_align = CSS_VALUE_MIDDLE;
-
-        // Per HTML spec (WHATWG 15.3.8): td, th { padding: 1px; }
-        // However, the cellpadding attribute on the parent TABLE overrides this default
-        float cellpadding = get_parent_table_cellpadding(elmt);
-        if (cellpadding >= 0) {
-            // Use cellpadding from parent table (can be 0)
-            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-            block->bound->padding.top = block->bound->padding.right =
-                block->bound->padding.bottom = block->bound->padding.left = cellpadding;
-            block->bound->padding.top_specificity = block->bound->padding.right_specificity =
-                block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
-        } else {
-            // No cellpadding attribute - apply UA default of 1px (CSS logical pixels)
-            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-            block->bound->padding.top = block->bound->padding.right =
-                block->bound->padding.bottom = block->bound->padding.left = 1;
-            block->bound->padding.top_specificity = block->bound->padding.right_specificity =
-                block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
-        }
-
-        // Handle HTML align attribute (e.g., align="left", align="right", align="center")
-        const char* align_attr = elmt->get_attribute("align");
-        if (align_attr) {
-            if (str_ieq_const(align_attr, strlen(align_attr), "left")) {
-                block->blk->text_align = CSS_VALUE_LEFT;
-                block->blk->legacy_block_align = CSS_VALUE_LEFT;
-            } else if (str_ieq_const(align_attr, strlen(align_attr), "right")) {
-                block->blk->text_align = CSS_VALUE_RIGHT;
-                block->blk->legacy_block_align = CSS_VALUE_RIGHT;
-            } else if (str_ieq_const(align_attr, strlen(align_attr), "center")) {
-                block->blk->text_align = CSS_VALUE_CENTER;
-                block->blk->legacy_align_center_blocks = true;
-                block->blk->legacy_block_align = CSS_VALUE_CENTER;
-            }
-        }
-        // Handle HTML valign attribute (e.g., valign="top", valign="middle", valign="bottom")
-        const char* valign_attr = elmt->get_attribute("valign");
-        // if TH doesn't have valign, inherit from parent TR
-        if (!valign_attr) {
-            valign_attr = get_parent_tr_valign(elmt);
-        }
-        if (valign_attr) {
-            if (str_ieq_const(valign_attr, strlen(valign_attr), "top")) {
-                block->in_line->vertical_align = CSS_VALUE_TOP;
-            } else if (str_ieq_const(valign_attr, strlen(valign_attr), "middle")) {
-                block->in_line->vertical_align = CSS_VALUE_MIDDLE;
-            } else if (str_ieq_const(valign_attr, strlen(valign_attr), "bottom")) {
-                block->in_line->vertical_align = CSS_VALUE_BOTTOM;
-            }
-        }
-        // WHATWG 15.3.7: td[nowrap], th[nowrap] → white-space: nowrap
-        if (elmt->get_attribute("nowrap")) {
-            block->blk->white_space = CSS_VALUE_NOWRAP;
-            log_debug("[HTML] TH nowrap attribute -> white-space: nowrap");
-        }
-        // Handle HTML bgcolor attribute for TH
-        const char* bgcolor_attr = elmt->get_attribute("bgcolor");
-        if (bgcolor_attr) {
-            Color bg_color = parse_html_color(bgcolor_attr);
-            apply_html_background_color(lycon, block, bg_color);
-            log_debug("[HTML] TH bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
-        }
-        // Per WHATWG 15.3.10: table[border] td, table[border] th { border: 1px inset grey; }
-        {
-            float parent_border = get_parent_table_border(elmt);
-            if (parent_border > 0) {
-                Color grey = (Color){ .r=128, .g=128, .b=128, .a=255 };
-                apply_html_uniform_border(lycon, block, 1.0f, CSS_VALUE_INSET, grey);
-                log_debug("[HTML] TH border from parent TABLE: 1px inset grey");
-            }
-        }
-        apply_html_table_rules_cell_border(lycon, block, get_parent_table_rules(elmt), true);
+        apply_html_table_cell_defaults(lycon, elmt, block, true);
         break;
     }
     case HTM_TAG_TD: {
-        // TD defaults to vertical-align: middle (CSS 2.1), text-align: start
-        if (!block->in_line) { block->in_line = alloc_inline_prop(lycon); }
-        block->in_line->vertical_align = CSS_VALUE_MIDDLE;
-
-        // Set default text-align to left (start) - table cells don't inherit text-align from outside
-        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->text_align = CSS_VALUE_LEFT;  // Default for TD
-        apply_table_cell_width_attribute(elmt->as_element(), block);
-        apply_table_cell_height_attribute(elmt->as_element(), block);
-
-        // Per HTML spec (WHATWG 15.3.8): td, th { padding: 1px; }
-        // However, the cellpadding attribute on the parent TABLE overrides this default
-        // Per HTML spec: cellpadding maps to padding-top/right/bottom/left on TD/TH elements
-        float cellpadding = get_parent_table_cellpadding(elmt);
-        if (cellpadding >= 0) {
-            // Use cellpadding from parent table (can be 0)
-            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-            block->bound->padding.top = block->bound->padding.right =
-                block->bound->padding.bottom = block->bound->padding.left = cellpadding;
-            block->bound->padding.top_specificity = block->bound->padding.right_specificity =
-                block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
-        } else {
-            // No cellpadding attribute - apply UA default of 1px (CSS logical pixels)
-            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-            block->bound->padding.top = block->bound->padding.right =
-                block->bound->padding.bottom = block->bound->padding.left = 1;
-            block->bound->padding.top_specificity = block->bound->padding.right_specificity =
-                block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
-        }
-
-        // Handle HTML align attribute (e.g., align="left", align="right", align="center")
-        const char* align_attr = elmt->get_attribute("align");
-        if (align_attr) {
-            if (str_ieq_const(align_attr, strlen(align_attr), "left")) {
-                block->blk->text_align = CSS_VALUE_LEFT;
-                block->blk->legacy_block_align = CSS_VALUE_LEFT;
-            } else if (str_ieq_const(align_attr, strlen(align_attr), "right")) {
-                block->blk->text_align = CSS_VALUE_RIGHT;
-                block->blk->legacy_block_align = CSS_VALUE_RIGHT;
-            } else if (str_ieq_const(align_attr, strlen(align_attr), "center")) {
-                block->blk->text_align = CSS_VALUE_CENTER;
-                block->blk->legacy_align_center_blocks = true;
-                block->blk->legacy_block_align = CSS_VALUE_CENTER;
-            }
-        }
-        // Handle HTML valign attribute (e.g., valign="top", valign="middle", valign="bottom")
-        const char* valign_attr = elmt->get_attribute("valign");
-        // if TD doesn't have valign, inherit from parent TR
-        if (!valign_attr) {
-            valign_attr = get_parent_tr_valign(elmt);
-        }
-        if (valign_attr) {
-            if (str_ieq_const(valign_attr, strlen(valign_attr), "top")) {
-                block->in_line->vertical_align = CSS_VALUE_TOP;
-            } else if (str_ieq_const(valign_attr, strlen(valign_attr), "middle")) {
-                block->in_line->vertical_align = CSS_VALUE_MIDDLE;
-            } else if (str_ieq_const(valign_attr, strlen(valign_attr), "bottom")) {
-                block->in_line->vertical_align = CSS_VALUE_BOTTOM;
-            }
-        }
-        // Handle HTML bgcolor attribute for TD
-        const char* bgcolor_attr = elmt->get_attribute("bgcolor");
-        if (bgcolor_attr) {
-            Color bg_color = parse_html_color(bgcolor_attr);
-            apply_html_background_color(lycon, block, bg_color);
-            log_debug("[HTML] TD bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
-        }
-        // WHATWG 15.3.7: td[nowrap], th[nowrap] → white-space: nowrap
-        if (elmt->get_attribute("nowrap")) {
-            block->blk->white_space = CSS_VALUE_NOWRAP;
-            log_debug("[HTML] TD nowrap attribute -> white-space: nowrap");
-        }
-        // Per WHATWG 15.3.10: table[border] td, table[border] th { border: 1px inset grey; }
-        {
-            float parent_border = get_parent_table_border(elmt);
-            if (parent_border > 0) {
-                Color grey = (Color){ .r=128, .g=128, .b=128, .a=255 };
-                apply_html_uniform_border(lycon, block, 1.0f, CSS_VALUE_INSET, grey);
-                log_debug("[HTML] TD border from parent TABLE: 1px inset grey");
-            }
-        }
-        apply_html_table_rules_cell_border(lycon, block, get_parent_table_rules(elmt), false);
+        apply_html_table_cell_defaults(lycon, elmt, block, false);
         break;
     }
     case HTM_TAG_CAPTION:
