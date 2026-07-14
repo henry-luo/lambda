@@ -61,9 +61,51 @@ fn semantic_edges(children) {
     arrow_start: attr_or(child, "data-arrow-start", "false") == "true",
     arrow_end: attr_or(child, "data-arrow-end", attr_or(child, "data-directed", "true")) == "true",
     style: string(attr_or(child, "data-style", "solid")),
+    min_length: int(attr_or(child, "data-min-length", 1)),
     z: child_z(child, -1),
     child_index: child_index(child, i)
   }]
+}
+
+fn semantic_edge_labels(children) {
+  [for (i, child in children where child_tag(child) == "edge-label") {
+    edge_id: string(attr_or(child, "data-edge-id", "")),
+    width: child_width(child),
+    height: child_height(child),
+    z: child_z(child, 0),
+    child_index: child_index(child, i)
+  }]
+}
+
+fn routed_edge(edges, edge_id) {
+  let matches = [for (edge in edges where edge.id == edge_id) edge];
+  if (len(matches) > 0) matches[0] else null
+}
+
+fn route_anchor(edge) {
+  if (edge == null or len(edge.points) == 0) null
+  else if (len(edge.points) == 1) edge.points[0]
+  else if (len(edge.points) == 2) {
+    {
+      x: (edge.points[0].x + edge.points[1].x) / 2.0,
+      y: (edge.points[0].y + edge.points[1].y) / 2.0
+    }
+  }
+  else edge.points[int(len(edge.points) / 2)]
+}
+
+fn label_placement(label, edges) {
+  let anchor = route_anchor(routed_edge(edges, label.edge_id));
+  if (anchor == null) {
+    {index: label.child_index, x: 0.0, y: 0.0, z: label.z}
+  } else {
+    {
+      index: label.child_index,
+      x: anchor.x - label.width / 2.0,
+      y: anchor.y - label.height / 2.0,
+      z: label.z
+    }
+  }
 }
 
 fn graph_option(parent, opts, key, attr_key, fallback) {
@@ -81,6 +123,7 @@ fn placement_z(nodes, index) {
 pub fn from_velmts(parent, children, ctx, opts = null) {
   let nodes = semantic_nodes(children);
   let metadata_edges = semantic_edges(children);
+  let edge_labels = semantic_edge_labels(children);
   let edges = if (opts != null and opts.edges != null) opts.edges else metadata_edges;
   let node_sep = float(graph_option(parent, opts, "node_sep", "data-node-sep", 60.0));
   let rank_sep = float(graph_option(parent, opts, "rank_sep", "data-rank-sep", 80.0));
@@ -118,7 +161,8 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
         x: 0.0,
         y: 0.0,
         z: edge.z
-      }
+      },
+      for (label in edge_labels) label_placement(label, result.edges)
     ],
     algorithm: result.algorithm,
     direction: result.direction

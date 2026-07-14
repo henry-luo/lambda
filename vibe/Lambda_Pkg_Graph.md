@@ -1,9 +1,12 @@
 # Lambda Graph Package - Design Proposal
 
-**Status:** implemented for the initial rich-node release. The package split,
-semantic HTML transform, Velmt callback, generated SVG paint, signed stacking,
-runtime-scoped registration, CLI bridges, and C graph ABI removal are complete.
-Advanced routing parity remains future work as described in Section 17.
+**Status:** Stage 1 is implemented for the initial rich-node release. The package
+split, semantic HTML transform, Velmt callback, generated SVG paint, signed
+stacking, runtime-scoped registration, CLI bridges, and C graph ABI removal are
+complete. Stage 2 is in progress: the first common Mark IR contract, recursive
+model queries, Mermaid flowchart normalization fixes, measured edge labels,
+shape-aware routing, and semantic corpus runner are implemented. Section 18.12
+records the current boundary and remaining work.
 
 ## 1. Summary
 
@@ -47,6 +50,9 @@ path now enters the Lambda HTML transform and normal Radiant renderer.
    across repeated layout passes.
 8. Remove the old C graph layout and SVG generation pipeline after CLI and
    rendering parity is established.
+9. Normalize graph-oriented source formats through one public Mark Graph IR.
+10. Support the graph-oriented Mermaid families without moving chart-oriented
+    Mermaid diagrams into the graph package.
 
 ## 3. Non-goals
 
@@ -117,38 +123,49 @@ element tree, not a serialized HTML string. Keeping the element tree in the
 same Lambda document runtime preserves structured values, the compiled callback,
 and future reactive updates.
 
-## 5. Canonical Graph Model
+## 5. Canonical Mark Graph IR
 
-The layout package should consume one normalized model regardless of whether
-the source was a Lambda map, Mermaid, D2, DOT, or author-created elements:
+The public representation between graph parsers, format adapters, transforms,
+and formatters is a Lambda Mark element tree. A JSON-shaped map is not the graph
+interchange format. Mermaid, D2, DOT, GV, and author-created graph data normalize
+to the same recursive Mark structure:
 
-```lambda
-{
-  nodes: [{
-    id: "a",
-    index: 0,
-    width: 120.0,
-    height: 48.0,
-    shape: "box",
-    z: 0
-  }],
-  edges: [{
-    id: "e0",
-    from: "a",
-    to: "b",
-    directed: true,
-    arrow_start: false,
-    arrow_end: true,
-    style: "solid",
-    z: -1
-  }],
-  direction: "TB"
-}
+```mark
+<graph version:1 flavor:"mermaid" kind:"flowchart"
+       directed:true rank-dir:"TB">
+  <meta title:"Example" acc-title:"Example flow">
+
+  <styles>
+    <style-rule target:"node" class:"warning"
+                fill:"#fff4cc" stroke:"#8a6500">
+  >
+
+  <subgraph id:"backend" label:"Backend" direction:"LR">
+    <node id:"a" shape:"rounded" classes:["service"];
+      <label format:"text"; "Start">
+    >
+    <node id:"b" shape:"diamond";
+      <label format:"text"; "Valid?">
+    >
+  >
+
+  <edge id:"e0" from:"a" to:"b"
+        arrow-head:"normal" arrow-tail:"none"
+        line-style:"solid" min-length:1;
+    <label position:"center" format:"text"; "continue">
+  >
+>
 ```
 
-Node `width` and `height` are border-box dimensions read from Velmt for deferred
-HTML layout. The input parser or transform may supply shape and visual metadata,
-but Radiant remains the authority for resolved node size.
+The Mark IR preserves recursive subgraphs, rich labels, style rules, endpoint
+and marker semantics, source metadata, and stable identities. A node may contain
+arbitrary Mark content in addition to or instead of a simple `<label>`.
+
+The layout implementation may derive compact immutable records from this tree
+after normalization and Velmt measurement. Those records are an internal
+calculation form, not a second public graph format. Node `width` and `height` in
+that internal form are border-box dimensions read from Velmt; Radiant remains
+the authority for resolved rich-content size.
 
 The layout result contains both nodes and routed edges:
 
@@ -525,6 +542,8 @@ removed. Only graph syntax parsing and data formatting remain native.
 
 ## 15. Implementation Plan
 
+The phases below constitute Stage 1.
+
 ### Phase 1 - Package split (complete)
 
 - add `graph/layout.ls` and move the current public geometry API there;
@@ -536,7 +555,8 @@ removed. Only graph syntax parsing and data formatting remain native.
 ### Phase 2 - HTML transform (complete)
 
 - add `graph/transform.ls` and `graph/transform/html.ls`;
-- normalize `<graph>` parser output and map-shaped graph input;
+- normalize canonical `<graph>` Mark input and retain map input only as a
+  compatibility adapter;
 - produce the specified `<graph>/<node>/<edge>` semantic tree;
 - add package CSS for measured nodes and zero-size metadata edges;
 - add exact Lambda `*.ls` and expected `*.txt` transform tests.
@@ -607,3 +627,510 @@ The first graph package release is complete when:
 - graph animation using stable node, edge, and segment identities;
 - LambdaJS registration over the same Velmt and paint-layer contracts;
 - additional layout algorithms behind the same canonical model.
+
+## 18. Stage 2 - Rich Mermaid and Graph Conformance
+
+Stage 2 evolves the working rich-node path into a format-independent graph
+pipeline with broad Mermaid graph support. It does not put every Mermaid diagram
+inside `lambda.package.graph`; package ownership follows the required layout
+model rather than the source language name.
+
+### 18.1 Package ownership
+
+`lambda.package.graph` owns diagrams whose defining problem is graph topology:
+node ranking or free placement, recursive grouping, relationship routing, ports,
+markers, and overlap avoidance. Mermaid flowcharts are the first conformance
+target. Class, state, entity-relationship, requirement, architecture, block,
+mindmap, and other topology-oriented Mermaid families may reuse the graph IR and
+graph layout with family-specific transforms.
+
+`lambda.package.chart` owns Sequence, Gantt, pie, Sankey, timeline, XY, and
+other data-, axis-, or time-oriented Mermaid families. The existing chart
+package already accepts `<chart>` Mark and renders SVG. Those families require
+new chart adapters and specialized chart layouts; they must not be represented
+as fake Dagre graphs merely because their source syntax is Mermaid.
+
+The Mermaid parser therefore belongs to the input layer and dispatches by
+diagram family:
+
+```text
+Mermaid source
+  -> Mermaid source AST
+  -> graph-oriented family -> Mark Graph IR -> graph package
+  -> chart-oriented family -> Mark Chart IR -> chart package
+```
+
+The graph proposal specifies only the graph-oriented branch and the boundary by
+which chart-oriented ASTs are handed to `lambda.package.chart`.
+
+### 18.2 Stage 2 pipeline
+
+The complete graph path is:
+
+```text
+Mermaid, D2, DOT, GV, or Mark graph source
+  -> format-specific parser
+  -> source AST with source spans and format-specific statements
+  -> pure normalization and semantic resolution
+  -> canonical Mark Graph IR
+  -> graph.transform.to_html()
+  -> semantic HTML <graph>/<node>/<edge> tree
+  -> Radiant lays out each rich node subtree
+  -> measured node and edge-label Velmts
+  -> retained JIT-compiled graph layout fn
+  -> node/group placements and routed edge geometry
+  -> generated SVG paint layers
+  -> final SVG, PDF, raster, or interactive view
+```
+
+The source AST and common IR are distinct. The AST preserves declarations in
+source order, comments or directives where needed, exact source spans, and
+format-specific constructs. The normalizer applies source-language semantics,
+including Mermaid node redeclaration, chained-edge expansion, class assignment,
+defaults, subgraph membership, and generated identity. Only then does it emit
+the canonical Mark Graph IR.
+
+A parser may build the Mark IR directly when the source grammar is already
+canonical, but it must still pass through the same validation and normalization
+contract. Unsupported syntax must produce a diagnostic; it must never be
+silently discarded or accepted as a different diagram family.
+
+### 18.3 Mark Graph IR contract
+
+The Stage 2 IR extends the base schema in
+`vibe/mark_graph_notation_schema.md`. Its stable top-level elements are:
+
+- `<graph>` for identity, flavor, graph kind, direction, defaults, and options;
+- `<meta>` for title, accessibility, provenance, and source information;
+- `<styles>` containing normalized `<style-rule>` elements;
+- recursive `<subgraph>` elements for clusters and local layout direction;
+- `<node>` elements with stable ids, shape roles, classes, ports, and content;
+- `<edge>` elements with stable ids, endpoints, constraints, markers, and labels;
+- `<constraint>` elements for same-rank, ordering, minimum length, or fixed
+  placement requirements that do not naturally belong to one edge.
+
+Node labels, edge labels, and subgraph labels are content elements rather than
+opaque serialized attributes when they contain formatting:
+
+```mark
+<node id:"api" shape:"rounded" source-start:42 source-end:71;
+  <label format:"markdown"; "The **API** service">
+  <content; <strong; "API"> " service">
+>
+```
+
+`<label>` preserves the source-level label and format. `<content>` contains the
+safe normalized Mark subtree that `to_html()` places in the measured graph node.
+This separation allows formatting and text semantics to be tested without
+depending on final HTML wrapper elements.
+
+Edges use explicit endpoint and marker semantics:
+
+```mark
+<edge id:"request" from:"client" to:"api"
+      from-port:"right" to-port:"left"
+      arrow-tail:"none" arrow-head:"normal"
+      line-style:"dashed" stroke-width:2
+      constraint:true min-length:2;
+  <label position:"center"; "HTTP">
+>
+```
+
+Normalization invariants are:
+
+1. Node, edge, and subgraph identities are stable and unique within a graph.
+2. References resolve to canonical identities or produce structured diagnostics.
+3. Node redeclarations merge according to source-format semantics.
+4. Chained and multi-node links expand into explicit edge elements.
+5. Subgraph containment remains recursive and deterministic.
+6. Defaults, classes, and inline styles remain distinguishable until the style
+   cascade is resolved; resolved values may be attached for layout and paint.
+7. Source spans survive normalization for diagnostics and editor integration.
+8. Unknown source extensions are either preserved in a namespaced metadata
+   element or diagnosed; they are not silently thrown away.
+
+### 18.4 Stage 2 module structure
+
+The package should grow along established boundaries rather than enlarge
+`dagre.ls` indefinitely:
+
+```text
+lambda/package/graph/
+  graph.ls                     compatibility facade
+  model.ls                     Mark Graph IR queries and constructors
+  normalize.ls                 validation and canonicalization
+  diagnostics.ls               structured graph diagnostics
+  style.ls                     graph style cascade and safe properties
+  layout.ls                    public measured-layout adapter
+  layout/
+    layered.ls                 ranking and rank constraints
+    ordering.ls                crossing reduction and stable ordering
+    positioning.ls             node and cluster coordinates
+    routing.ls                 edge routing coordinator
+    shapes.ls                  shape bounds and endpoint clipping
+    clusters.ls                recursive subgraph geometry
+    labels.ls                  edge and cluster label placement
+  transform.ls                 public installation and HTML API
+  transform/
+    html.ls                    Mark Graph IR to semantic HTML
+    content.ls                 safe rich-label/content lowering
+    paint.ls                   routed geometry to SVG paint layers
+    theme.ls                   graph visual defaults
+  mermaid/
+    flowchart.ls               flowchart-specific normalization
+    class.ls                   class-node and relation semantics
+    state.ls                   state-node and transition semantics
+    er.ls                      entity and cardinality semantics
+```
+
+`dagre.ls` may remain as the Stage 1 implementation while the shared layered
+components are extracted. The extraction should happen when the richer cases
+require it, without duplicating ranking or routing logic among Mermaid families.
+
+### 18.5 Mermaid flowchart coverage
+
+Flowchart support is developed as feature groups so the conformance matrix can
+show useful partial progress without claiming support based only on parsing the
+header. The Stage 2 target includes:
+
+- all directions (`TB`, `TD`, `BT`, `LR`, and `RL`) at graph and subgraph level;
+- stable node identity, later declarations, quoted ids, Unicode, and escapes;
+- legacy delimiter shapes and the general `@{ shape: ..., label: ... }` form;
+- plain, quoted, HTML, and Markdown labels with wrapping and line breaks;
+- solid, dotted, thick, open, directed, bidirectional, circle, and cross links;
+- edge ids, edge labels, minimum lengths, chained links, and multi-node links;
+- recursive subgraphs, explicit subgraph ids, local direction, and links to
+  subgraphs;
+- `classDef`, `class`, `:::`, `style`, and `linkStyle` semantics;
+- graph defaults, front matter, supported initialization options, title,
+  accessibility title and description, comments, and statement separators;
+- links, tooltips, and safe interaction metadata without executing callbacks
+  during parse, transform, or layout;
+- self-loops, parallel edges, cluster crossing, ports, edge-label placement,
+  shape-specific clipping, and deterministic routing.
+
+Each feature is recorded as `baseline`, `extended`, `unsupported`, or
+`invalid` in the test manifest. Merely producing an SVG is not a passing test.
+
+### 18.6 Semantic HTML and render metadata
+
+`transform.to_html()` continues to produce measured HTML rather than eager SVG.
+Stage 2 adds recursive group representation and measured edge-label children.
+Zero-size `<edge>` metadata remains available to the callback, while visual edge
+labels are separate measured children associated by edge id.
+
+Final SVG output should preserve renderer-neutral identity metadata:
+
+```html
+<g data-graph-role="node" data-node-id="api">...</g>
+<g data-graph-role="subgraph" data-subgraph-id="backend">...</g>
+<path data-graph-role="edge" data-edge-id="request"
+      data-from="client" data-to="api">...</path>
+<g data-graph-role="edge-label" data-edge-id="request">...</g>
+```
+
+These attributes support accessibility, hit testing, editor integration, and
+semantic conformance tests. They are not styling hooks and do not determine
+paint order. Renderer-generated wrapper tags, classes, marker ids, and grouping
+remain implementation details.
+
+### 18.7 Semantic Graph Scene Mark
+
+Raw SVG strings and raster screenshots are not conformance fixtures. Mermaid and
+Radiant legitimately use different SVG tags, wrappers, classes, transforms,
+marker definitions, and floating-point formatting. Both outputs are therefore
+adapted into a smaller renderer-neutral Graph Scene Mark:
+
+```mark
+<graph-scene direction:"LR" width:286 height:104>
+  <node id:"a" shape:"rounded" x:0 y:30 width:86 height:44;
+    <label; "Start">
+  >
+  <node id:"b" shape:"diamond" x:180 y:10 width:106 height:84;
+    <label; "Valid?">
+  >
+  <edge id:"e0" from:"a" to:"b"
+        marker-start:"none" marker-end:"normal"
+        start-side:"right" end-side:"left" route-kind:"orthogonal";
+    <route;
+      <point x:86 y:52>
+      <point x:180 y:52>
+    >
+  >
+>
+```
+
+The Mermaid SVG adapter and Lambda HTML/SVG adapter must perform equivalent
+normalization:
+
+- flatten nested SVG transforms into graph-local coordinates;
+- map `rect`, `path`, `polygon`, `ellipse`, and renderer-specific wrappers to
+  graph shape roles;
+- collapse `<text>`, `<tspan>`, HTML labels, and `<foreignObject>` into normalized
+  label content and whitespace;
+- resolve CSS and presentation attributes into optional semantic paint values;
+- replace generated DOM ids and marker URLs with source-level node, edge, and
+  subgraph identities;
+- remove wrapper groups, raw classes, implementation tag names, definition
+  order, and insignificant numeric precision;
+- parse path geometry, normalize its origin, and classify straight,
+  orthogonal, curved, parallel, and self-loop routes;
+- represent only meaningful bends or sampled curve structure rather than the
+  original path command spelling.
+
+Raw classes and element names may be used by a version-specific adapter to find
+objects, but they are not emitted into Graph Scene Mark and are never compared.
+
+The comparator has three levels:
+
+1. **Exact semantics:** identities, topology, group membership, labels, shape
+   roles, endpoint markers, directions, and declared constraints must match.
+2. **Relational geometry:** ranks, ordering, containment, non-overlap, endpoint
+   attachment, attachment side, and route kind must match.
+3. **Tolerant geometry and paint:** dimensions, points, colors, stroke widths,
+   and dash patterns use explicit per-category tolerances and comparison flags.
+
+This contract intentionally ignores DOM construction while still detecting a
+node attached to the wrong edge, a reversed rank, a lost label, an incorrect
+shape, overlap, containment failure, or materially different route.
+
+### 18.8 Adapted Mermaid conformance corpus
+
+All Stage 2 Mermaid graph tests live under:
+
+```text
+test/lambda/graph/mermaid/
+  README.md
+  LICENSE.mermaid
+  UPSTREAM_COMMIT
+  manifest.mark
+  cases/
+    flowchart/
+      basic/
+      nodes/
+      edges/
+      labels/
+      subgraphs/
+      styles/
+      interactions/
+      invalid/
+  expected/
+    ir/
+    html/
+    scene/
+  reference/
+    package.json
+    package-lock.json
+    extract_cases.mjs
+    generate_scene_refs.mjs
+    mermaid_svg_adapter.mjs
+```
+
+The corpus adapts Mermaid's source fixtures and rendering-test diagram strings,
+not its screenshots. `UPSTREAM_COMMIT` pins the exact source revision, and each
+manifest case records the upstream file, upstream test name, Mermaid options,
+feature tags, expected status, and reference version. The Mermaid license and
+provenance remain beside the adapted corpus.
+
+`expected/ir` contains canonical Mark Graph IR for parser and normalization
+tests. `expected/html` contains selected semantic HTML structure expectations;
+it excludes unstable CSS serialization. `expected/scene` contains Graph Scene
+Mark generated from the pinned Mermaid SVG DOM. No PNG, JPEG, PDF, or screenshot
+goldens are part of this suite.
+
+The reference tools are maintenance tools, not production dependencies and not
+part of ordinary test execution. Reference generation runs pinned Mermaid in a
+browser DOM because Mermaid uses browser text measurement. The adapter reads the
+live SVG DOM, computed styles, and `getBBox()` results and writes canonical Mark
+scene files. Updating references is an explicit reviewed operation; normal test
+runs never rewrite expected output.
+
+### 18.9 Dedicated test runner
+
+Stage 2 adds a dedicated native test runner:
+
+```text
+source: test/test_graph_mermaid_gtest.cpp
+binary: test/test_graph_mermaid_gtest.exe
+cases:  test/lambda/graph/mermaid/manifest.mark
+```
+
+The runner is registered through `build_lambda_config.json` and the normal test
+orchestrator. A focused Make target should be provided:
+
+```text
+make test-graph-mermaid
+./test/test_graph_mermaid_gtest.exe
+./test/test_graph_mermaid_gtest.exe --gtest_filter='*subgraph*'
+```
+
+The runner must use project `lib/` containers and strings rather than `std::`
+types. It owns one retained Lambda runtime and compiled graph package for the
+suite, so cases exercise the same module and JIT caching behavior as repeated
+document layout. It must not start a new `lambda.exe` process for every fixture.
+
+For each manifest entry the runner performs the applicable stages:
+
+1. Parse source into the source AST and collect structured diagnostics.
+2. Normalize to Mark Graph IR and compare with `expected/ir`.
+3. Transform to semantic HTML and compare selected normalized structure with
+   `expected/html`.
+4. Run Radiant measurement, custom graph layout, and SVG rendering in-process.
+5. Adapt Lambda HTML/SVG to Graph Scene Mark.
+6. Compare the actual scene with `expected/scene` using the case policy.
+7. Write actual IR, HTML, scene, and mismatch reports only under
+   `temp/graph_mermaid/<case-id>/` when a case fails or diagnostic output is
+   explicitly requested.
+
+Every manifest case becomes a named parameterized GTest result. Baseline cases
+must pass. Extended and explicitly unsupported cases remain visible and report
+their expected status; they must not be silently omitted from discovery.
+Invalid cases pass only when the expected diagnostic category and source span
+are produced without a crash or partial graph masquerading as success.
+
+The runner supports case and feature filtering, deterministic fixed font and
+viewport configuration, concise semantic diffs, and a verbose mode that retains
+all normalized artifacts. It never generates image fixtures and never updates
+checked-in references during a normal test invocation.
+
+### 18.10 Stage 2 implementation sequence
+
+#### Stage 2A - IR and diagnostics
+
+- finalize the Mark Graph IR schema and validator;
+- separate Mermaid source AST construction from graph normalization;
+- preserve graph direction, source spans, diagnostics, and stable identities;
+- add common IR queries and constructors in `graph/model.ls`;
+- add exact IR fixtures and the initial dedicated runner.
+
+#### Stage 2B - Mermaid flowchart semantics
+
+- implement node redeclaration, chained and multi-node edge expansion;
+- preserve recursive subgraphs and local direction;
+- implement full label forms, general shape syntax, classes, styles, and
+  accessibility metadata;
+- diagnose chart-oriented and unsupported Mermaid families rather than parsing
+  them as flowcharts;
+- import and classify the pinned upstream flowchart corpus.
+
+#### Stage 2C - Rich HTML transform
+
+- lower safe Markdown and HTML label content into Mark/HTML children;
+- emit recursive groups and separately measured edge and cluster labels;
+- preserve stable graph-role metadata through final SVG rendering;
+- compare normalized semantic HTML for selected cases.
+
+#### Stage 2D - Layout and routing parity
+
+- extract ranking, ordering, positioning, shapes, clusters, labels, and routing
+  from the Stage 1 implementation into shared modules;
+- add shape-specific bounds and clipping, self-loops, parallel edges, ports,
+  compound routing, cluster crossing, and deterministic label placement;
+- compare Graph Scene Mark semantics and tolerant geometry against the pinned
+  Mermaid references.
+
+#### Stage 2E - Additional graph-oriented Mermaid families
+
+- add family adapters only when their semantics fit or deliberately extend the
+  common Mark Graph IR;
+- reuse rich HTML nodes, generated paint, stacking, routing, and the semantic
+  runner;
+- route chart-oriented Mermaid ASTs to `lambda.package.chart` and test that
+  dispatch independently in the chart suite.
+
+### 18.11 Stage 2 acceptance criteria
+
+Stage 2 rich Mermaid graph support is complete when:
+
+1. The public parser-to-transform boundary is canonical Mark Graph IR.
+2. Mermaid graph and chart families dispatch to the correct package.
+3. Unsupported syntax yields structured diagnostics rather than silent loss.
+4. Recursive groups, rich node labels, edge labels, classes, styles, markers,
+   accessibility metadata, and stable ids survive normalization and transform.
+5. Flowchart directions, shapes, edge forms, subgraphs, self-loops, parallel
+   edges, and compound routes satisfy the declared conformance matrix.
+6. Final SVG retains renderer-neutral graph identity metadata.
+7. The dedicated runner discovers all manifest cases and reuses one retained
+   compiled runtime across the suite.
+8. Parser IR, semantic HTML, and Graph Scene Mark comparisons pass for all
+   baseline cases.
+9. No image fixture or raw SVG string equality is required.
+10. Every adapted Mermaid case records upstream provenance, pinned revision,
+    feature tags, status, and comparison policy.
+
+### 18.12 Current implementation status
+
+The initial Stage 2 tranche is implemented as follows:
+
+- the Mermaid parser emits `version`, `kind`, `diagram-type`, `directed`,
+  `direction`, and `rank-dir` on the root Mark `<graph>`;
+- `TD` is normalized to `TB`, and all five flowchart directions are preserved;
+- every edge materializes both endpoint nodes, repeated declarations update one
+  graph-global node identity, and subgraph references no longer create duplicate
+  nodes;
+- recursive `<subgraph>` structure and local direction are retained, including
+  quoted subgraph labels and ids;
+- `classDef` and `class` statements survive as `<style-rule>` and
+  `<class-assignment>` metadata instead of being discarded;
+- quoted node labels lose only their Mermaid delimiter quotes;
+- chained flowchart links normalize each operator into an explicit edge whose
+  source is the preceding target, including independently styled operators;
+- multi-node source and target sets use the same node-reference parser and
+  normalize to the Cartesian set of explicit edges; chained operators consume
+  the preceding target set as their next source set;
+- extra solid, dotted, and thick link units normalize to `min-length`; the
+  constraint survives semantic HTML and Velmt adaptation and is enforced by
+  layered rank assignment rather than retained as inert parser metadata;
+- node-local `:::` classes normalize to ordinary `<class-assignment>` metadata
+  and therefore share the common model and HTML class-lowering path;
+- Mermaid's general `id@{ shape: ..., label: ... }` node form is parsed, with
+  `rect`, `diam`, `dbl-circ`, and `cyl` aliases canonicalized to the existing
+  graph shape vocabulary while other shape names remain available to later
+  renderers;
+- chart-oriented Mermaid headers produce an `unsupported` graph result and a
+  diagnostic identifying `lambda.package.chart` as their owner, rather than
+  being parsed as fake flowcharts;
+- `graph/model.ls` provides recursive node, edge, subgraph, style, class, and
+  direction queries over Mark without replacing the public IR with maps;
+- `transform.to_html()` recursively lowers nested graph nodes and edges, carries
+  subgraph membership as stable metadata, applies class assignments, and emits
+  separately measured `<edge-label>` children;
+- the Velmt adapter places measured edge labels at routed anchors, paints start
+  and end arrow markers, clips rectangle, ellipse/circle, and diamond endpoints,
+  routes self-loops, and includes route extents in graph bounds;
+- `test/test_graph_mermaid_gtest.cpp` reads
+  `test/lambda/graph/mermaid/manifest.mark` once, retains one input runtime, and
+  compares recursive Mark semantics without raw SVG or image fixtures;
+- `make test-graph-mermaid` builds and runs the focused native runner; the build
+  generator now applies a target's platform library exclusions consistently to
+  consuming tests.
+
+The checked-in manifest is a bootstrap corpus covering implicit endpoints,
+directions, shapes and labels, recursive subgraphs, class metadata, and chart
+family diagnostics. Lambda integration fixtures additionally cover recursive
+HTML membership, class lowering, measured edge-label placement, bidirectional
+markers, shape clipping, and self-loop bounds.
+
+The following Stage 2 work remains open:
+
+- a distinct source AST, source spans, structured diagnostic values, and the
+  schema validator/`normalize.ls` boundary;
+- `style`, `linkStyle`, HTML/Markdown labels, accessibility metadata, edge ids,
+  ports, interaction metadata, circle/cross edge markers, and the rendering
+  semantics for general shapes beyond the currently canonicalized rectangle,
+  rounded, cylinder, diamond, circle, and double-circle families;
+- visual recursive subgraph boxes and measured subgraph labels rather than only
+  preserved membership metadata;
+- parallel-edge separation, compound/cluster crossing routes, ports, and route
+  label anchors based on full segment length;
+- renderer-neutral graph-role metadata in final SVG, Graph Scene Mark adapters,
+  tolerant geometry comparison, and in-process Radiant render stages in the
+  native runner;
+- the pinned and licensed adapted upstream Mermaid corpus, provenance files,
+  feature/status policies, and named per-case GTest registration;
+- graph-oriented Mermaid family adapters beyond flowcharts and independent
+  chart-package dispatch tests for chart-oriented families.
+
+Accordingly, the current runner proves the parser-to-Mark semantic baseline. It
+does not yet claim full Mermaid compatibility or satisfy the final Stage 2
+acceptance criteria in Section 18.11.

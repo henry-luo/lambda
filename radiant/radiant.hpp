@@ -96,7 +96,28 @@ const char* radiant_frame_clock_mode_name(const RadiantFrameClock* clock);
 
 // ===== script runner =====
 
+typedef struct DocumentScriptPhaseTiming {
+    uint64_t collect_us;
+    uint64_t runtime_setup_us;
+    uint64_t postdom_total_us;
+    uint64_t preamble_us;
+    uint64_t scheduler_us;
+    uint64_t interactive_us;
+    uint64_t user_scripts_us;
+    uint64_t dom_content_loaded_us;
+    uint64_t async_scripts_us;
+    uint64_t load_blockers_us;
+    uint64_t complete_us;
+    uint64_t body_onload_us;
+    uint64_t window_load_us;
+    uint64_t event_loop_us;
+    uint64_t runtime_cleanup_us;
+    uint64_t source_cleanup_us;
+} DocumentScriptPhaseTiming;
+
 void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool, Url* base_url);
+void execute_document_scripts_profiled(Element* html_root, DomDocument* dom_doc, Pool* pool,
+                                       Url* base_url, DocumentScriptPhaseTiming* timing);
 void script_runner_set_retain_js_state(bool retain);
 void script_runner_set_execute_external_scripts(bool execute);
 void script_runner_set_preamble_cache_enabled(bool enabled);

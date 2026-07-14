@@ -861,28 +861,29 @@ class PremakeGenerator:
             # support libraries from being expressed without pulling the monolithic input target.
             self._generate_complex_library(lib)
 
+    def _target_libraries_for_platform(self, target: Dict[str, Any]) -> List[str]:
+        libraries = list(target.get('libraries', []))
+        platform_overrides = {}
+        if self.use_macos_config:
+            platform_overrides = target.get('macos', {})
+        elif self.use_windows_config:
+            platform_overrides = target.get('windows', {})
+        elif self.use_linux_config:
+            platform_overrides = target.get('linux', {})
+
+        for library in platform_overrides.get('additional_libraries', []):
+            if library not in libraries:
+                libraries.append(library)
+        excluded = set(platform_overrides.get('exclude_libraries', []))
+        return [library for library in libraries if library not in excluded]
+
     def _generate_complex_library(self, lib: Dict[str, Any]) -> None:
         """Generate complex library with multiple source files and dependencies"""
         lib_name = lib['name']
         # Handle both 'sources' (targets) and 'source_files' (libraries) field names
         source_files = lib.get('source_files', []) or lib.get('sources', [])
         source_patterns = lib.get('source_patterns', [])
-        dependencies = list(lib.get('libraries', []))
-        platform_overrides = {}
-        if self.use_macos_config:
-            platform_overrides = lib.get('macos', {})
-        elif self.use_windows_config:
-            platform_overrides = lib.get('windows', {})
-        elif self.use_linux_config:
-            platform_overrides = lib.get('linux', {})
-
-        if platform_overrides:
-            for dep in platform_overrides.get('additional_libraries', []):
-                if dep not in dependencies:
-                    dependencies.append(dep)
-            exclude_deps = set(platform_overrides.get('exclude_libraries', []))
-            if exclude_deps:
-                dependencies = [dep for dep in dependencies if dep not in exclude_deps]
+        dependencies = self._target_libraries_for_platform(lib)
 
         # Separate C and C++ files
         c_files = [f for f in source_files if f.endswith('.c')]
@@ -2040,7 +2041,10 @@ class PremakeGenerator:
             target = configured_targets.get(dep)
             if not target:
                 continue
-            for target_library in target.get('libraries', []):
+            # Consumers must inherit the same platform-filtered dependency set as
+            # the target itself; otherwise excluded optional libraries leak back
+            # into test executable link lines.
+            for target_library in self._target_libraries_for_platform(target):
                 if target_library not in libraries:
                     libraries.append(target_library)
 

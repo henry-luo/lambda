@@ -1,0 +1,6 @@
+flowchart TB
+  start[Start] --> api[API]
+  subgraph backend [Backend]
+    direction LR
+    api --> db[(Database)]
+  end

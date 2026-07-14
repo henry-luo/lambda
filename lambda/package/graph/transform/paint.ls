@@ -18,27 +18,30 @@ fn dash_array(style) {
   else "none"
 }
 
-fn marker_id(edge) => "lambda-graph-arrow-" ++ string(edge.index)
+fn marker_id(edge, end_name) => "lambda-graph-arrow-" ++ string(edge.index) ++ "-" ++ end_name
+
+fn arrow_marker(id, color) {
+  <marker id: id, markerWidth: 8, markerHeight: 8,
+      refX: 7, refY: 4, orient: "auto-start-reverse", markerUnits: "strokeWidth";
+    <path d: "M 0 0 L 8 4 L 0 8 z", fill: color>
+  >
+}
 
 fn edge_defs(edge, color) {
-  if (edge.arrow_end != true) { [] }
-  else {
-    [
-      <defs;
-        <marker id: marker_id(edge), markerWidth: 8, markerHeight: 8,
-            refX: 7, refY: 4, orient: "auto", markerUnits: "strokeWidth";
-          <path d: "M 0 0 L 8 4 L 0 8 z", fill: color>
-        >
-      >
-    ]
-  }
+  [<defs;
+    arrow_marker(marker_id(edge, "start"), color)
+    arrow_marker(marker_id(edge, "end"), color)
+  >]
 }
 
 fn edge_path(edge, color, stroke_width) {
-  let marker = if (edge.arrow_end == true) "url(#" ++ marker_id(edge) ++ ")" else null;
+  let marker_start = if (edge.arrow_start == true)
+    "url(#" ++ marker_id(edge, "start") ++ ")" else null;
+  let marker_end = if (edge.arrow_end == true)
+    "url(#" ++ marker_id(edge, "end") ++ ")" else null;
   <path d: path_data(edge.points), fill: "none", stroke: color,
       'stroke-width': stroke_width, 'stroke-dasharray': dash_array(edge.style),
-      'marker-end': marker>
+      'marker-start': marker_start, 'marker-end': marker_end>
 }
 
 fn edge_svg(edge, width, height, opts) {
