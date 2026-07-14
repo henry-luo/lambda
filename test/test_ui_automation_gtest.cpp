@@ -38,6 +38,10 @@
 #include <atomic>
 #include <chrono>
 
+extern "C" {
+#include "../lib/shell.h"
+}
+
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #define NOGDI
@@ -287,29 +291,22 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
     // Build command: ./lambda.exe view <html> --event-file <json>
     // The window auto-closes when simulation completes (auto_close=true in EventSimContext).
     // Exit code: 0 = all assertions passed, 1 = one or more failed.
-    std::string cmd = std::string(LAMBDA_EXE)
-        + " view " + info.html_path
-        + " --event-file " + info.json_path
-        + " --headless"
-        + " --no-log"
-        + " --font-dir test/layout/data/font"
-        + " 2>&1";
-
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) {
-        result.output = "Failed to popen: " + cmd;
-        return result;
+    const char* args[] = {
+        LAMBDA_EXE, "view", info.html_path.c_str(),
+        "--event-file", info.json_path.c_str(),
+        "--headless", "--no-log", "--font-dir", "test/layout/data/font", NULL,
+    };
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    // Worker threads must launch argv directly; a shell adds process and quoting overhead.
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    if (shell_result.stdout_buf) {
+        result.output.assign(shell_result.stdout_buf, shell_result.stdout_len);
     }
-
-    char buf[512];
-    while (fgets(buf, sizeof(buf), pipe) != nullptr) {
-        result.output += buf;
-    }
-
-    int status = pclose(pipe);
     auto t1 = std::chrono::steady_clock::now();
     result.elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-    result.exit_code = WEXITSTATUS(status);
+    result.exit_code = shell_result.exit_code;
+    shell_result_free(&shell_result);
 
     // Parse assertion counts from the event_sim output
     // Pattern: " Assertions: N passed, M failed"
@@ -470,10 +467,12 @@ INSTANTIATE_TEST_SUITE_P(
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
 
-    // Parse -j N for parallelism (default: leave one CPU free for the OS/editor)
-    int jobs = (int)std::thread::hardware_concurrency();
-    if (jobs <= 1) jobs = 1;
-    else jobs -= 1;
+    // Child startup and event I/O leave CPU gaps, so 1.5x logical CPUs keeps
+    // the worker pool busy without encoding a machine-specific job count.
+    int cpu_count = (int)std::thread::hardware_concurrency();
+    if (cpu_count <= 0) cpu_count = 1;
+    int jobs = (cpu_count * 3) / 2;
+    if (jobs <= 0) jobs = 1;
     const char* env_jobs = getenv("LAMBDA_UI_TEST_JOBS");
     if (env_jobs && *env_jobs) {
         jobs = atoi(env_jobs);

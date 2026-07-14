@@ -15,15 +15,21 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
+extern "C" {
+#include "../lib/shell.h"
+}
+
 #ifdef _WIN32
     #include <process.h>
     #include <io.h>
     #define popen _popen
     #define pclose _pclose
     #define WEXITSTATUS(status) (status)
+    #define LAMBDA_EXE "lambda.exe"
 #else
     #include <unistd.h>
     #include <sys/wait.h>
+    #define LAMBDA_EXE "./lambda.exe"
 #endif
 
 // ============================================================================
@@ -90,38 +96,19 @@ static std::vector<TsTestInfo> discover_ts_tests(const char* dir_path) {
 
 // Execute a TS script via CLI, return captured stdout
 static char* execute_ts_script(const char* script_path) {
-    char command[512];
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe ts \"%s\" --no-log", script_path);
-#else
-    snprintf(command, sizeof(command), "./lambda.exe ts \"%s\" --no-log", script_path);
-#endif
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) return nullptr;
-
-    char buffer[1024];
-    size_t total = 0;
-    char* output = nullptr;
-
-    while (fgets(buffer, sizeof(buffer), pipe)) {
-        size_t len = strlen(buffer);
-        char* tmp = (char*)realloc(output, total + len + 1);
-        if (!tmp) { free(output); pclose(pipe); return nullptr; }
-        output = tmp;
-        memcpy(output + total, buffer, len);
-        total += len;
-        output[total] = '\0';
-    }
-
-    int exit_code = pclose(pipe);
-    if (WEXITSTATUS(exit_code) != 0) {
+    const char* args[] = {LAMBDA_EXE, "ts", script_path, "--no-log", NULL};
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    // Script paths must remain single argv values even when they contain shell characters.
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    if (shell_result.exit_code != 0) {
         fprintf(stderr, "Error: lambda.exe ts exited with code %d for: %s\n",
-                WEXITSTATUS(exit_code), script_path);
-        free(output);
+                shell_result.exit_code, script_path);
+        shell_result_free(&shell_result);
         return nullptr;
     }
-    if (!output) output = strdup("");
+    char* output = shell_result.stdout_buf ? strdup(shell_result.stdout_buf) : strdup("");
+    shell_result_free(&shell_result);
     return output;
 }
 

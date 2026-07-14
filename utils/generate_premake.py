@@ -857,10 +857,9 @@ class PremakeGenerator:
         targets = self.config.get('targets', [])
 
         for lib in targets:
-            lib_name = lib.get('name', '')
-            # Handle library targets
-            if lib_name in ['lambda-runtime-full', 'lambda-input-full']:
-                self._generate_complex_library(lib)
+            # Every configured target is a library; name-gating prevented small shared
+            # support libraries from being expressed without pulling the monolithic input target.
+            self._generate_complex_library(lib)
 
     def _generate_complex_library(self, lib: Dict[str, Any]) -> None:
         """Generate complex library with multiple source files and dependencies"""
@@ -2030,6 +2029,21 @@ class PremakeGenerator:
             '    '
         ])
 
+        # Static support targets do not propagate their external link requirements,
+        # so carry those libraries into the consuming test project explicitly.
+        libraries = list(libraries or [])
+        configured_targets = {
+            target.get('name'): target for target in self.config.get('targets', [])
+            if target.get('name')
+        }
+        for dep in dependencies:
+            target = configured_targets.get(dep)
+            if not target:
+                continue
+            for target_library in target.get('libraries', []):
+                if target_library not in libraries:
+                    libraries.append(target_library)
+
         # Add library dependencies
         self.premake_content.append('    links {')
 
@@ -2050,6 +2064,16 @@ class PremakeGenerator:
                     else:
                         # Regular tests: only need -cpp version (C++ project includes all C files)
                         self.premake_content.append(f'        "{dep}-cpp",')
+                elif dep in configured_targets:
+                    target = configured_targets[dep]
+                    target_sources = target.get('source_files', []) or target.get('sources', [])
+                    target_patterns = target.get('source_patterns', [])
+                    has_cpp = any(path.endswith('.cpp') for path in target_sources) or any(
+                        '*.cpp' in pattern for pattern in target_patterns)
+                    has_c = any(path.endswith('.c') for path in target_sources) or any(
+                        '*.c' in pattern for pattern in target_patterns)
+                    project_name = f'{dep}-cpp' if has_cpp and has_c else dep
+                    self.premake_content.append(f'        "{project_name}",')
 
         # Add test framework libraries
         # Add libraries specified in the test configuration

@@ -133,6 +133,34 @@ TEST_F(ShellExecTest, WorkingDirectory) {
     shell_result_free(&r);
 }
 
+TEST_F(ShellExecTest, StdinFile) {
+    const char* input_path = "./temp/test_shell_stdin.txt";
+    FILE* input = fopen(input_path, "w");
+    ASSERT_NE(input, nullptr);
+    fputs("stdin-through-direct-launch\n", input);
+    fclose(input);
+
+    ShellOptions opts = {0};
+    opts.stdin_path = input_path;
+    const char* args[] = {"cat", NULL};
+    ShellResult r = shell_exec("cat", args, &opts);
+    ASSERT_EQ(r.exit_code, 0);
+    ASSERT_NE(r.stdout_buf, nullptr);
+    EXPECT_NE(strstr(r.stdout_buf, "stdin-through-direct-launch"), nullptr);
+    shell_result_free(&r);
+    remove(input_path);
+}
+
+TEST_F(ShellExecTest, TimeoutKillsProcessGroup) {
+    ShellOptions opts = {0};
+    opts.timeout_ms = 200;
+    const char* args[] = {"sh", "-c", "trap '' TERM; sleep 30 & wait", NULL};
+    ShellResult r = shell_exec("sh", args, &opts);
+    EXPECT_TRUE(r.timed_out);
+    EXPECT_NE(r.exit_code, 0);
+    shell_result_free(&r);
+}
+
 /* ================================================================== *
  *  §2  Shell Line Execution                                          *
  * ================================================================== */
@@ -220,6 +248,40 @@ TEST_F(ShellEnvTest, SetenvNull) {
 
 TEST_F(ShellEnvTest, UnsetenvNull) {
     EXPECT_FALSE(shell_unsetenv(NULL));
+}
+
+TEST_F(ShellEnvTest, ChildEnvironmentOverridesWithoutMutatingParent) {
+    shell_setenv("LAMBDA_SHELL_CHILD_ENV", "parent");
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_SHELL_CHILD_ENV", "child"},
+        {NULL, NULL},
+    };
+    ShellOptions opts = {0};
+    opts.env = env;
+    const char* args[] = {"sh", "-c", "printf %s \"$LAMBDA_SHELL_CHILD_ENV\"", NULL};
+    ShellResult r = shell_exec("sh", args, &opts);
+    ASSERT_EQ(r.exit_code, 0);
+    ASSERT_NE(r.stdout_buf, nullptr);
+    EXPECT_STREQ(r.stdout_buf, "child");
+    EXPECT_STREQ(shell_getenv("LAMBDA_SHELL_CHILD_ENV"), "parent");
+    shell_result_free(&r);
+    shell_unsetenv("LAMBDA_SHELL_CHILD_ENV");
+}
+
+TEST_F(ShellEnvTest, NullChildEnvironmentValueUnsetsVariable) {
+    shell_setenv("LAMBDA_SHELL_CHILD_UNSET", "parent");
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_SHELL_CHILD_UNSET", NULL},
+        {NULL, NULL},
+    };
+    ShellOptions opts = {0};
+    opts.env = env;
+    const char* args[] = {"sh", "-c", "test -z \"${LAMBDA_SHELL_CHILD_UNSET+x}\"", NULL};
+    ShellResult r = shell_exec("sh", args, &opts);
+    EXPECT_EQ(r.exit_code, 0);
+    EXPECT_STREQ(shell_getenv("LAMBDA_SHELL_CHILD_UNSET"), "parent");
+    shell_result_free(&r);
+    shell_unsetenv("LAMBDA_SHELL_CHILD_UNSET");
 }
 
 /* ================================================================== *
@@ -509,6 +571,22 @@ TEST_F(ShellEdgeTest, LargeOutput) {
     ASSERT_EQ(r.exit_code, 0);
     ASSERT_NE(r.stdout_buf, nullptr);
     EXPECT_GE(r.stdout_len, (size_t)(100 * 1024));
+    shell_result_free(&r);
+}
+
+TEST_F(ShellEdgeTest, LargeStdoutAndStderrAreDrainedConcurrently) {
+    const char* args[] = {
+        "sh", "-c",
+        "(dd if=/dev/zero bs=1024 count=100 2>/dev/null | tr '\\0' O) & "
+        "(dd if=/dev/zero bs=1024 count=100 2>/dev/null | tr '\\0' E >&2) & wait",
+        NULL,
+    };
+    ShellResult r = shell_exec_simple("sh", args);
+    ASSERT_EQ(r.exit_code, 0);
+    ASSERT_NE(r.stdout_buf, nullptr);
+    ASSERT_NE(r.stderr_buf, nullptr);
+    EXPECT_GE(r.stdout_len, (size_t)(100 * 1024));
+    EXPECT_GE(r.stderr_len, (size_t)(100 * 1024));
     shell_result_free(&r);
 }
 

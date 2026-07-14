@@ -30,13 +30,16 @@
 #include <atomic>
 #include <chrono>
 
+extern "C" {
+#include "../lib/shell.h"
+}
+
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #define NOGDI
     #define NOUSER
     #include <windows.h>
     #include <io.h>
-    #define WEXITSTATUS(s) (s)
     #define LAMBDA_EXE "lambda.exe"
     #define PAGE_DIR "test\\layout\\data\\page"
     #define MARKDOWN_DIR "test\\layout\\data\\markdown"
@@ -263,25 +266,36 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     result.exit_code = -1;
     result.timed_out = false;
     result.elapsed_ms = 0;
+    result.layout_ms = -1;
+    result.render_ms = -1;
+    result.peak_rss_bytes = 0;
     result.baseline_footprint_bytes = 0;
-
-    std::string cmd = std::string(LAMBDA_EXE) + " view " + info.html_path + " --headless --no-log 2>&1";
+    result.current_footprint_bytes = 0;
+    result.peak_footprint_bytes = 0;
+    result.memtrack_live_seen = false;
+    result.memtrack_live_bytes = 0;
+    result.memtrack_live_count = 0;
 
     auto t0 = std::chrono::steady_clock::now();
-    _putenv_s("VIEW_MEM_STAGES", "1");
-    FILE* pipe = _popen(cmd.c_str(), "r");
-    if (!pipe) {
-        result.output = "Failed to popen: " + cmd;
-        return result;
+    const ShellEnvEntry env[] = {
+        {"VIEW_MEM_STAGES", "1"},
+        {NULL, NULL},
+    };
+    const char* args[] = {
+        LAMBDA_EXE, "view", info.html_path.c_str(), "--headless", "--no-log", NULL,
+    };
+    ShellOptions options = {0};
+    options.env = env;
+    options.merge_stderr = true;
+    options.timeout_ms = PAGE_TIMEOUT_SECONDS * 1000;
+    // Per-child telemetry avoids mutating the parent environment while workers launch in parallel.
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    if (shell_result.stdout_buf) {
+        result.output.assign(shell_result.stdout_buf, shell_result.stdout_len);
     }
-
-    char buf[512];
-    while (fgets(buf, sizeof(buf), pipe) != nullptr) {
-        result.output += buf;
-    }
-
-    int status = _pclose(pipe);
-    result.exit_code = status;
+    result.timed_out = shell_result.timed_out;
+    result.exit_code = result.timed_out ? -1 : shell_result.exit_code;
+    shell_result_free(&shell_result);
     auto t1 = std::chrono::steady_clock::now();
     result.elapsed_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
     result.layout_ms = parse_prof_ms(result.output, "[LAYOUT_PROF]");

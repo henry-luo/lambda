@@ -10,6 +10,7 @@
 
 extern "C" {
 #include "../lib/gc/gc_heap.h"
+#include "../lib/shell.h"
 }
 
 namespace {
@@ -283,9 +284,21 @@ TEST(ItemRepresentation, MirMemberAccessKeepsContainerItemUnmodified) {
     // the parallel harness), which raced this test and made member_calls == 0 flaky.
     const char* dump_path = "temp/item_repr_mir_dump.txt";
     remove(dump_path);
-    int rc = system("LAMBDA_MIR_DUMP_PATH=temp/item_repr_mir_dump.txt "
-                    "./lambda.exe test/lambda/item_repr_container_member_load.ls > temp/item_repr_mir_stdout.txt");
-    ASSERT_EQ(rc, 0);
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_MIR_DUMP_PATH", dump_path},
+        {NULL, NULL},
+    };
+    const char* args[] = {
+        "./lambda.exe", "test/lambda/item_repr_container_member_load.ls", NULL,
+    };
+    ShellOptions options = {0};
+    options.env = env;
+    options.merge_stderr = true;
+    // A child-only dump path prevents parallel lambda.exe launches from racing this assertion.
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    ASSERT_EQ(shell_result.exit_code, 0)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
 
     FILE* f = fopen(dump_path, "r");
     if (!f) {
