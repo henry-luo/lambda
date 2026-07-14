@@ -1189,24 +1189,7 @@ static float compute_cell_strut_baseline(LayoutContext* lycon, ViewTableCell* tc
         setup_font(lycon->ui_context, &lycon->font, tcell->font);
     }
     setup_line_height(lycon, tcell);
-    if (lycon->font.font_handle) {
-        if (lycon->block.line_height_is_normal) {
-            font_get_normal_lh_split(lycon->font.font_handle,
-                &lycon->block.init_ascender, &lycon->block.init_descender);
-        } else {
-            TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
-            if (typo.valid && typo.use_typo_metrics) {
-                lycon->block.init_ascender = typo.ascender;
-                lycon->block.init_descender = typo.descender;
-            } else {
-                const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
-                if (m) {
-                    lycon->block.init_ascender = m->hhea_ascender;
-                    lycon->block.init_descender = -(m->hhea_descender);
-                }
-            }
-        }
-    }
+    layout_setup_block_font_metrics(lycon);
     float half_leading = (lycon->block.line_height -
         (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f;
     float baseline = lycon->block.init_ascender + half_leading;
@@ -3932,15 +3915,6 @@ static bool table_view_is_caption(ViewBlock* child) {
         is_caption_display(child_display.inner);
 }
 
-static CssEnum element_specified_keyword(DomElement* elem, CssPropertyId property) {
-    if (!elem || !elem->specified_style) return (CssEnum)0;
-    CssDeclaration* decl = style_tree_get_declaration(elem->specified_style, property);
-    if (!decl || !decl->value || decl->value->type != CSS_VALUE_TYPE_KEYWORD) {
-        return (CssEnum)0;
-    }
-    return decl->value->data.keyword;
-}
-
 static void inherit_anonymous_table_block_props(LayoutContext* lycon, DomElement* anon, DomElement* parent) {
     if (!lycon || !anon || !parent) return;
 
@@ -3969,27 +3943,27 @@ static void inherit_anonymous_table_block_props(LayoutContext* lycon, DomElement
         anon->blk->line_clamp = parent->blk->line_clamp;
     }
 
-    CssEnum specified_white_space = element_specified_keyword(parent, CSS_PROPERTY_WHITE_SPACE);
+    CssEnum specified_white_space = layout_specified_keyword(parent, CSS_PROPERTY_WHITE_SPACE);
     if (specified_white_space != 0) {
         anon->blk->white_space = specified_white_space;
     }
-    CssEnum specified_direction = element_specified_keyword(parent, CSS_PROPERTY_DIRECTION);
+    CssEnum specified_direction = layout_specified_keyword(parent, CSS_PROPERTY_DIRECTION);
     if (specified_direction != 0) {
         anon->blk->direction = specified_direction;
     }
-    CssEnum specified_text_transform = element_specified_keyword(parent, CSS_PROPERTY_TEXT_TRANSFORM);
+    CssEnum specified_text_transform = layout_specified_keyword(parent, CSS_PROPERTY_TEXT_TRANSFORM);
     if (specified_text_transform != 0) {
         anon->blk->text_transform = specified_text_transform;
     }
-    CssEnum specified_word_break = element_specified_keyword(parent, CSS_PROPERTY_WORD_BREAK);
+    CssEnum specified_word_break = layout_specified_keyword(parent, CSS_PROPERTY_WORD_BREAK);
     if (specified_word_break != 0) {
         anon->blk->word_break = specified_word_break;
     }
-    CssEnum specified_overflow_wrap = element_specified_keyword(parent, CSS_PROPERTY_OVERFLOW_WRAP);
+    CssEnum specified_overflow_wrap = layout_specified_keyword(parent, CSS_PROPERTY_OVERFLOW_WRAP);
     if (specified_overflow_wrap != 0) {
         anon->blk->overflow_wrap = specified_overflow_wrap;
     }
-    CssEnum specified_line_break = element_specified_keyword(parent, CSS_PROPERTY_LINE_BREAK);
+    CssEnum specified_line_break = layout_specified_keyword(parent, CSS_PROPERTY_LINE_BREAK);
     if (specified_line_break != 0) {
         anon->blk->line_break = specified_line_break;
     }
@@ -4225,22 +4199,9 @@ static bool is_abspos_or_fixed(DomElement* elem) {
         }
     }
 
-    // Check specified_style (CSS cascade result before full resolution)
-    if (elem->specified_style && elem->specified_style->tree) {
-        AvlNode* pos_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_POSITION);
-        if (pos_node) {
-            StyleNode* style_node = (StyleNode*)pos_node->declaration;
-            if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
-                CssValue* val = style_node->winning_decl->value;
-                if (val->type == CSS_VALUE_TYPE_KEYWORD &&
-                    (val->data.keyword == CSS_VALUE_ABSOLUTE || val->data.keyword == CSS_VALUE_FIXED)) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    return false;
+    CssEnum position = layout_specified_keyword(
+        elem, CSS_PROPERTY_POSITION, CSS_VALUE_STATIC);
+    return position == CSS_VALUE_ABSOLUTE || position == CSS_VALUE_FIXED;
 }
 
 static bool table_white_space_preserves_space_advance(CssEnum white_space) {
@@ -4802,17 +4763,9 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
     CssEnum float_value = CSS_VALUE_NONE;
     if (elem->position) {
         float_value = elem->position->float_prop;
-    } else if (elem->specified_style && elem->specified_style->tree) {
-        AvlNode* float_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_FLOAT);
-        if (float_node) {
-            StyleNode* style_node = (StyleNode*)float_node->declaration;
-            if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
-                CssValue* val = style_node->winning_decl->value;
-                if (val->type == CSS_VALUE_TYPE_KEYWORD) {
-                    float_value = val->data.keyword;
-                }
-            }
-        }
+    } else {
+        float_value = layout_specified_keyword(
+            elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
     }
 
     // If floated, treat as a regular block element and skip table-specific handling
@@ -4924,25 +4877,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
                 setup_font(lycon->ui_context, &lycon->font, caption->font);
             }
             setup_line_height(lycon, caption);
-            // Recalculate init_ascender/init_descender/lead_y for caption's font
-            if (lycon->font.font_handle) {
-                if (lycon->block.line_height_is_normal) {
-                    font_get_normal_lh_split(lycon->font.font_handle, &lycon->block.init_ascender, &lycon->block.init_descender);
-                } else {
-                    TypoMetrics typo_c = get_os2_typo_metrics(lycon->font.font_handle);
-                    if (typo_c.valid && typo_c.use_typo_metrics) {
-                        lycon->block.init_ascender = typo_c.ascender;
-                        lycon->block.init_descender = typo_c.descender;
-                    } else {
-                        const FontMetrics* mc = font_get_metrics(lycon->font.font_handle);
-                        if (mc) {
-                            lycon->block.init_ascender = mc->hhea_ascender;
-                            lycon->block.init_descender = -(mc->hhea_descender);
-                        }
-                    }
-                }
-            }
-            lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
+            layout_setup_block_font_metrics(lycon);
 
             // CSS 2.1 §16.1: Propagate text-indent for caption's first line
             if (caption->blk) {
@@ -6217,24 +6152,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     // CSS 2.1 §10.8.1: Recalculate init_ascender/init_descender/lead_y for the cell's
     // font and line-height. Without this, stale parent values cause incorrect half-leading
     // placement for text in cells with explicit line-height (e.g., line-height: 2in).
-    if (lycon->font.font_handle) {
-        if (lycon->block.line_height_is_normal) {
-            font_get_normal_lh_split(lycon->font.font_handle, &lycon->block.init_ascender, &lycon->block.init_descender);
-        } else {
-            TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
-            if (typo.valid && typo.use_typo_metrics) {
-                lycon->block.init_ascender = typo.ascender;
-                lycon->block.init_descender = typo.descender;
-            } else {
-                const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
-                if (m) {
-                    lycon->block.init_ascender = m->hhea_ascender;
-                    lycon->block.init_descender = -(m->hhea_descender);
-                }
-            }
-        }
-    }
-    lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
+    layout_setup_block_font_metrics(lycon);
 
     // Check if parent table uses border-collapse
     ViewTable* parent_table = get_parent_table(tcell);
@@ -6553,37 +6471,6 @@ static bool is_all_whitespace(const char* text, size_t length) {
         }
     }
     return true;
-}
-
-// Helper: Normalize whitespace in-place to a buffer
-// Returns length of normalized text (0 if all whitespace)
-// Collapses consecutive whitespace to single space, trims leading/trailing
-static size_t normalize_whitespace_to_buffer(const char* text, size_t length, char* buffer, size_t buffer_size) {
-    if (!text || length == 0 || !buffer || buffer_size == 0) return 0;
-
-    size_t out_pos = 0;
-    bool in_whitespace = true;  // Start as if preceded by whitespace (trims leading)
-
-    for (size_t i = 0; i < length && out_pos < buffer_size - 1; i++) {
-        unsigned char ch = (unsigned char)text[i];
-        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
-            if (!in_whitespace) {
-                buffer[out_pos++] = ' ';  // Collapse to single space
-                in_whitespace = true;
-            }
-        } else {
-            buffer[out_pos++] = (char)ch;
-            in_whitespace = false;
-        }
-    }
-
-    // Trim trailing whitespace
-    while (out_pos > 0 && buffer[out_pos - 1] == ' ') {
-        out_pos--;
-    }
-
-    buffer[out_pos] = '\0';
-    return out_pos;
 }
 
 // Result structure for consolidated width measurement
@@ -6965,7 +6852,7 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
                         continue; // Skip whitespace-only text nodes
                     }
                     // Normalize whitespace to buffer
-                    size_t normalized_len = normalize_whitespace_to_buffer(
+                    size_t normalized_len = layout_normalize_collapsible_whitespace(
                         (const char*)text, text_len, normalized_buffer, sizeof(normalized_buffer));
                     log_debug("%s Cell width measuring text: '%s' -> normalized: '%s'", cell->source_loc(), text, normalized_buffer);
                     if (normalized_len == 0) continue; // Skip if normalized to nothing

@@ -1216,7 +1216,7 @@ test-radiant-baseline: build-radiant-baseline
 # Run radiant tests without rebuilding (use when test executables are already built).
 # Commands wait directly on their child process; periodic polling used to round
 # every short phase up to the next second and accumulated substantial tail time.
-# A crashed combined layout category must fail the gate instead of disappearing from its totals.
+# A crashed layout category must fail the gate instead of disappearing from its totals.
 run-radiant-baseline:
 	@ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
 	radiant_view_passed=0; radiant_view_failed=0; radiant_view_status="⏭️  SKIP"; \
@@ -1242,28 +1242,31 @@ run-radiant-baseline:
 	\
 	echo ""; \
 	echo "📦 Layout Baseline Tests:"; \
-	layout_log="temp/_layout_baseline_all.log"; \
-	rm -f "$$layout_log"; \
-	$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --categories "$(LAYOUT_BASELINE_SUITES)" > "$$layout_log" 2>&1 || true; \
-	tail -20 "$$layout_log"; \
-	grep '^LAYOUT_CATEGORY_RESULT|' "$$layout_log" > temp/_layout_category_results.txt || true; \
-	for expected_suite in $(LAYOUT_BASELINE_SUITES); do \
-		if ! grep -q "^LAYOUT_CATEGORY_RESULT|$$expected_suite|" temp/_layout_category_results.txt; then \
-			echo "LAYOUT_CATEGORY_RESULT|$$expected_suite|FAIL|0|1|0" >> temp/_layout_category_results.txt; \
-		fi; \
-	done; \
-	while IFS='|' read -r marker suite raw_status s_passed s_failed s_skipped; do \
-		s_passed=$${s_passed:-0}; s_failed=$${s_failed:-0}; s_skipped=$${s_skipped:-0}; \
+	for suite in $(LAYOUT_BASELINE_SUITES); do \
+		echo ""; \
+		echo "  ▸ $$suite:"; \
+		layout_log="temp/_layout_baseline_$${suite}.log"; \
+		rm -f "$$layout_log"; \
+		layout_exit=0; \
+		$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js -c "$$suite" > "$$layout_log" 2>&1 || layout_exit=$$?; \
+		tail -8 "$$layout_log"; \
+		s_passed=$$(grep "Successful:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_passed=$${s_passed:-0}; \
+		s_skipped=$$(grep "Skipped:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_skipped=$${s_skipped:-0}; \
+		s_failed=0; \
 		s_status="✅ PASS"; \
-		if [ "$$raw_status" != "PASS" ]; then \
+		if grep -q "Baseline Regressions" "$$layout_log"; then \
+			s_failed=$$(grep "Baseline Regressions" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_failed=$${s_failed:-1}; \
+			s_status="❌ FAIL"; any_failed=1; layout_overall_status="❌ FAIL"; \
+		elif [ $$layout_exit -ne 0 ] || ! grep -q "Successful:" "$$layout_log"; then \
+			s_failed=1; \
 			s_status="❌ FAIL"; any_failed=1; layout_overall_status="❌ FAIL"; \
 		fi; \
 		layout_total_passed=$$((layout_total_passed + s_passed)); \
 		layout_total_failed=$$((layout_total_failed + s_failed)); \
 		layout_total_skipped=$$((layout_total_skipped + s_skipped)); \
 		echo "$$suite|$$s_status|$$s_passed|$$s_failed|$$s_skipped" >> temp/_layout_baseline_results.txt; \
-	done < temp/_layout_category_results.txt; \
-	rm -f "$$layout_log" temp/_layout_category_results.txt; \
+		rm -f "$$layout_log"; \
+	done; \
 	\
 	if [ -f test/layout/snapshot/page.json ]; then \
 		echo ""; \

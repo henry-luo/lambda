@@ -358,6 +358,61 @@ static void apply_html_replaced_pixel_size(LayoutContext* lycon, DomNode* elemen
     }
 }
 
+static void initialize_html_media(LayoutContext* lycon, DomNode* element,
+                                  ViewBlock* block, bool is_video) {
+    const char* src = element->get_attribute("src");
+    DomDocument* doc = lycon->ui_context ? lycon->ui_context->document : nullptr;
+    if (!src || !*src || !doc || !doc->url) return;
+
+    if (!block->embed) {
+        block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+    }
+    if (block->embed->video) return;
+
+    Url* abs_url = parse_url(doc->url, src);
+    char* file_path = abs_url ? url_to_local_path(abs_url) : NULL;
+    if (abs_url) url_destroy(abs_url);
+    if (!file_path) {
+        log_error("media source resolution failed: kind=%s src=%s",
+                  is_video ? "video" : "audio", src);
+        return;
+    }
+
+    const char* preload = is_video ? element->get_attribute("preload") : nullptr;
+    bool preload_none = preload && strcmp(preload, "none") == 0;
+    RdtVideo* media = rdt_video_create(&media_callbacks, doc->state);
+    if (media) {
+        if (!preload_none) {
+            log_debug("media source opening: kind=%s path=%s",
+                      is_video ? "video" : "audio", file_path);
+            rdt_video_open_file(media, file_path);
+        } else {
+            log_debug("media source deferred: kind=video path=%s", file_path);
+        }
+        if (element->has_attribute("loop")) rdt_video_set_loop(media, true);
+        if (element->has_attribute("muted")) rdt_video_set_muted(media, true);
+        block->embed->video = media;
+
+        if (is_video) {
+            block->embed->has_controls = element->has_attribute("controls");
+            const char* poster_src = element->get_attribute("poster");
+            if (poster_src && *poster_src) {
+                block->embed->poster = load_image(lycon->ui_context, poster_src);
+                if (block->embed->poster) {
+                    log_debug("video poster loaded: src=%s", poster_src);
+                }
+            }
+        }
+
+        if (element->has_attribute("autoplay")) {
+            if (preload_none) rdt_video_open_file(media, file_path);
+            rdt_video_play(media);
+            if (doc->state) doc->state->has_active_video = true;
+        }
+    }
+    mem_free(file_path);
+}
+
 // Get the border attribute value from the parent TABLE element
 // Returns -1 if no border attribute is found, otherwise returns the pixel value
 // Per WHATWG 15.3.10: table[border] td, table[border] th { border-width: 1px; border-style: inset; border-color: grey; }
@@ -1066,36 +1121,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             lycon->block.given_height = 54;
             block->blk->given_height = 54;
         }
-        // audio-only playback: create RdtVideo (AVPlayer handles audio files natively)
-        const char* src = elmt->get_attribute("src");
-        if (src && *src && lycon->ui_context && lycon->ui_context->document && lycon->ui_context->document->url) {
-            if (!block->embed) { block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp)); }
-            if (!block->embed->video) {
-                Url* abs_url = parse_url(lycon->ui_context->document->url, src);
-                char* file_path = abs_url ? url_to_local_path(abs_url) : NULL;
-                if (abs_url) url_destroy(abs_url);
-
-                if (file_path) {
-                    DomDocument* doc = lycon->ui_context->document;
-                    DocState* doc_state = doc ? doc->state : NULL;
-                    RdtVideo* video = rdt_video_create(&media_callbacks, doc_state);
-                    if (video) {
-                        log_debug("audio: opening file: %s", file_path);
-                        rdt_video_open_file(video, file_path);
-                        if (elmt->has_attribute("loop")) rdt_video_set_loop(video, true);
-                        if (elmt->has_attribute("muted")) rdt_video_set_muted(video, true);
-                        block->embed->video = video;
-                        if (elmt->has_attribute("autoplay")) {
-                            rdt_video_play(video);
-                            if (doc->state) doc->state->has_active_video = true;
-                        }
-                    }
-                    mem_free(file_path);
-                } else {
-                    log_error("audio: failed to resolve src path: %s", src);
-                }
-            }
-        }
+        // audio-only playback uses the same media ownership path as <video>.
+        initialize_html_media(lycon, elmt, block, false);
         break;
     }
     case HTM_TAG_VIDEO: {
@@ -1104,63 +1131,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         apply_html_replaced_pixel_size(
             lycon, elmt, block, 300.0f, 150.0f, false, false);
 
-        // initialize video playback if src attribute is present
-        const char* src = elmt->get_attribute("src");
-        if (src && *src && lycon->ui_context && lycon->ui_context->document && lycon->ui_context->document->url) {
-            if (!block->embed) { block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp)); }
-            if (!block->embed->video) {
-                // resolve relative src path against document URL (same as load_image)
-                Url* abs_url = parse_url(lycon->ui_context->document->url, src);
-                char* file_path = abs_url ? url_to_local_path(abs_url) : NULL;
-                if (abs_url) url_destroy(abs_url);
-
-                if (file_path) {
-                    // preload attribute: "none" defers open until play
-                    const char* preload = elmt->get_attribute("preload");
-                    bool preload_none = preload && strcmp(preload, "none") == 0;
-
-                    DomDocument* doc = lycon->ui_context->document;
-                    DocState* doc_state = doc ? doc->state : NULL;
-                    RdtVideo* video = rdt_video_create(&media_callbacks, doc_state);
-                    if (video) {
-                        if (!preload_none) {
-                            log_debug("video: opening file: %s", file_path);
-                            rdt_video_open_file(video, file_path);
-                        } else {
-                            log_debug("video: preload=none, deferring open: %s", file_path);
-                        }
-                        if (elmt->has_attribute("loop")) rdt_video_set_loop(video, true);
-                        if (elmt->has_attribute("muted")) rdt_video_set_muted(video, true);
-                        block->embed->video = video;
-                        // controls attribute
-                        if (elmt->has_attribute("controls")) {
-                            block->embed->has_controls = true;
-                        }
-                        // poster attribute: load poster image
-                        const char* poster_src = elmt->get_attribute("poster");
-                        if (poster_src && *poster_src) {
-                            block->embed->poster = load_image(lycon->ui_context, poster_src);
-                            if (block->embed->poster) {
-                                log_debug("video: loaded poster image: %s", poster_src);
-                            }
-                        }
-                        // autoplay: start playback immediately
-                        if (elmt->has_attribute("autoplay")) {
-                            if (preload_none) {
-                                // need to open first when preload=none + autoplay
-                                rdt_video_open_file(video, file_path);
-                            }
-                            rdt_video_play(video);
-                            // enable continuous redraw for video playback
-                            if (doc->state) doc->state->has_active_video = true;
-                        }
-                    }
-                    mem_free(file_path);
-                } else {
-                    log_error("video: failed to resolve src path: %s", src);
-                }
-            }
-        }
+        initialize_html_media(lycon, elmt, block, true);
         break;
     }
     case HTM_TAG_CANVAS:
@@ -1824,33 +1795,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             // Count options and find selected index
             int option_count = 0;
             int selected_idx = -1;
-            DomNode* child = block->first_child;
-            while (child) {
-                if (child->is_element()) {
-                    DomElement* child_elem = lam::dom_require_element(child);
-                    if (child_elem->tag() == HTM_TAG_OPTION) {
-                        if (child_elem->has_attribute("selected") && selected_idx < 0) {
-                            selected_idx = option_count;
-                        }
-                        option_count++;
-                    } else if (child_elem->tag() == HTM_TAG_OPTGROUP) {
-                        // Count options inside optgroup
-                        DomNode* opt_child = child_elem->first_child;
-                        while (opt_child) {
-                            if (opt_child->is_element()) {
-                                DomElement* opt_elem = lam::dom_require_element(opt_child);
-                                if (opt_elem->tag() == HTM_TAG_OPTION) {
-                                    if (opt_elem->has_attribute("selected") && selected_idx < 0) {
-                                        selected_idx = option_count;
-                                    }
-                                    option_count++;
-                                }
-                            }
-                            opt_child = opt_child->next_sibling;
-                        }
-                    }
+            for (DomElement* option = dom_select_next_option(block, nullptr); option;
+                 option = dom_select_next_option(block, option)) {
+                if (option->has_attribute("selected") && selected_idx < 0) {
+                    selected_idx = option_count;
                 }
-                child = child->next_sibling;
+                option_count++;
             }
             block->form->option_count = option_count;
             int init_index = (selected_idx >= 0) ? selected_idx : (option_count > 0 ? 0 : -1);

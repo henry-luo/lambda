@@ -153,55 +153,17 @@ uint32_t dom_node_child_index(const DomNode* child) {
 // a follow-up (cache UTF-16 ↔ UTF-8 mapping per DomText).
 
 uint32_t dom_text_utf16_length(const DomText* t) {
-    if (!t || !t->text) return 0;
-    // Fast ASCII path; for non-ASCII this overcounts (every UTF-8 byte counts
-    // as one UTF-16 code unit). TODO: replace with a proper utf8→utf16
-    // length once non-ASCII selection tests are exercised.
-    uint32_t n = 0;
-    const unsigned char* p = (const unsigned char*)t->text;
-    for (size_t i = 0; i < t->length; i++) {
-        unsigned char b = p[i];
-        if ((b & 0xC0) != 0x80) {
-            // Start of a code point.
-            if (b < 0x80) n += 1;       // ASCII
-            else if (b < 0xF0) n += 1;  // BMP (1 UTF-16 code unit)
-            else n += 2;                // outside BMP (surrogate pair)
-        }
-    }
-    return n;
+    return t && t->text ? tc_utf8_to_utf16_length(t->text, (uint32_t)t->length) : 0;
 }
 
 uint32_t dom_text_utf16_to_utf8(const DomText* t, uint32_t u16) {
-    if (!t || !t->text) return 0;
-    if (u16 == 0) return 0;
-    uint32_t u16_seen = 0;
-    const unsigned char* p = (const unsigned char*)t->text;
-    for (size_t i = 0; i < t->length; i++) {
-        unsigned char b = p[i];
-        if ((b & 0xC0) != 0x80) {
-            if (u16_seen >= u16) return (uint32_t)i;
-            if (b < 0x80) u16_seen += 1;
-            else if (b < 0xF0) u16_seen += 1;
-            else u16_seen += 2;
-        }
-    }
-    return (uint32_t)t->length;
+    return t && t->text
+        ? tc_utf16_to_utf8_offset(t->text, (uint32_t)t->length, u16) : 0;
 }
 
 uint32_t dom_text_utf8_to_utf16(const DomText* t, uint32_t u8) {
-    if (!t || !t->text) return 0;
-    if (u8 > t->length) u8 = (uint32_t)t->length;
-    uint32_t n = 0;
-    const unsigned char* p = (const unsigned char*)t->text;
-    for (uint32_t i = 0; i < u8; i++) {
-        unsigned char b = p[i];
-        if ((b & 0xC0) != 0x80) {
-            if (b < 0x80) n += 1;
-            else if (b < 0xF0) n += 1;
-            else n += 2;
-        }
-    }
-    return n;
+    return t && t->text
+        ? tc_utf8_to_utf16_offset(t->text, (uint32_t)t->length, u8) : 0;
 }
 
 // ============================================================================
@@ -2180,31 +2142,13 @@ static uint32_t select_all_utf8_step(const DomText* text,
     return 1;
 }
 
-static bool select_all_text_start_offset(DomText* text, uint32_t* out_offset) {
-    if (out_offset) *out_offset = 0;
-    if (!text || !text->text || text->length == 0) return false;
-    uint32_t u16 = 0;
-    for (size_t i = 0; i < text->length;) {
-        unsigned char b = (unsigned char)text->text[i];
-        uint32_t u16_step = 1;
-        uint32_t byte_step = select_all_utf8_step(text, i, &u16_step);
-        if (byte_step == 0) break;
-        if (b >= 0x80 || !select_all_ascii_space(b)) {
-            if (out_offset) *out_offset = u16;
-            return true;
-        }
-        i += byte_step;
-        u16 += u16_step;
-    }
-    return false;
-}
-
-static bool select_all_text_end_offset(DomText* text, uint32_t* out_offset) {
+static bool select_all_text_edge_offset(DomText* text, bool end,
+                                        uint32_t* out_offset) {
     if (out_offset) *out_offset = 0;
     if (!text || !text->text || text->length == 0) return false;
     bool found = false;
     uint32_t u16 = 0;
-    uint32_t last_end = 0;
+    uint32_t edge = 0;
     for (size_t i = 0; i < text->length;) {
         unsigned char b = (unsigned char)text->text[i];
         uint32_t u16_step = 1;
@@ -2212,13 +2156,14 @@ static bool select_all_text_end_offset(DomText* text, uint32_t* out_offset) {
         if (byte_step == 0) break;
         if (b >= 0x80 || !select_all_ascii_space(b)) {
             found = true;
-            last_end = u16 + u16_step;
+            edge = end ? u16 + u16_step : u16;
+            if (!end) break;
         }
         i += byte_step;
         u16 += u16_step;
     }
     if (!found) return false;
-    if (out_offset) *out_offset = last_end;
+    if (out_offset) *out_offset = edge;
     return true;
 }
 
@@ -2353,7 +2298,7 @@ static bool first_select_all_boundary(DomNode* root, DomBoundary* out) {
     if (!root || !out) return false;
     if (root->is_text()) {
         uint32_t start = 0;
-        if (!select_all_text_start_offset(root->as_text(), &start)) return false;
+        if (!select_all_text_edge_offset(root->as_text(), false, &start)) return false;
         out->node = root;
         out->offset = start;
         return true;
@@ -2363,7 +2308,7 @@ static bool first_select_all_boundary(DomNode* root, DomBoundary* out) {
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
         if (child->is_text()) {
             uint32_t start = 0;
-            if (select_all_text_start_offset(child->as_text(), &start)) {
+            if (select_all_text_edge_offset(child->as_text(), false, &start)) {
                 out->node = child;
                 out->offset = start;
                 return true;
@@ -2385,7 +2330,7 @@ static bool last_select_all_boundary(DomNode* root, DomBoundary* out) {
     if (!root || !out) return false;
     if (root->is_text()) {
         uint32_t end = 0;
-        if (!select_all_text_end_offset(root->as_text(), &end)) return false;
+        if (!select_all_text_edge_offset(root->as_text(), true, &end)) return false;
         out->node = root;
         out->offset = end;
         return true;
@@ -2397,7 +2342,7 @@ static bool last_select_all_boundary(DomNode* root, DomBoundary* out) {
     for (DomNode* child = elem->last_child; child; child = child->prev_sibling) {
         if (child->is_text()) {
             uint32_t end = 0;
-            if (select_all_text_end_offset(child->as_text(), &end)) {
+            if (select_all_text_edge_offset(child->as_text(), true, &end)) {
                 if (has_trailing_br_boundary) {
                     DomNode* next = child->next_sibling;
                     if (node_is_br(next) &&
@@ -2560,6 +2505,18 @@ static void append_collapsed(StrBuf* sb, const char* buf, size_t len,
     }
 }
 
+static bool range_stringify_advance(DomText** current,
+                                    const DomBoundary* text_end,
+                                    const DomBoundary* range_end) {
+    if (!current || !*current || !text_end || !range_end) return false;
+    if (static_cast<DomNode*>(*current) == range_end->node) return false;
+    if (dom_boundary_compare(text_end, range_end) != DOM_BOUNDARY_BEFORE) {
+        return false;
+    }
+    *current = next_text_after_any(static_cast<DomNode*>(*current));
+    return true;
+}
+
 char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
     if (!r || !r->start.node || !r->end.node) {
         char* empty = (char*)mem_alloc(1, MEM_CAT_DOM);
@@ -2626,9 +2583,7 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
             // a following ws-only text is treated as freshly-adjacent-to-skip.
             ws_streak = 0;
             prev_skipped = true;
-            if (static_cast<DomNode*>(cur) == r->end.node) break;
-            if (dom_boundary_compare(&t_end, &r->end) != DOM_BOUNDARY_BEFORE) break;
-            cur = next_text_after_any(static_cast<DomNode*>(cur));
+            if (!range_stringify_advance(&cur, &t_end, &r->end)) break;
             continue;
         }
         // Layout-free block-boundary serialization. Each visible block
@@ -2652,9 +2607,7 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
             // ws-adjacent-to-skipped is consumed; don't increment streak.
             prev_block = this_block;
             prev_skipped = false;
-            if (static_cast<DomNode*>(cur) == r->end.node) break;
-            if (dom_boundary_compare(&t_end, &r->end) != DOM_BOUNDARY_BEFORE) break;
-            cur = next_text_after_any(static_cast<DomNode*>(cur));
+            if (!range_stringify_advance(&cur, &t_end, &r->end)) break;
             continue;
         }
         // Append the in-text portion (skip if slice fell outside this node).
@@ -2722,9 +2675,7 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
             }
         }
         // Stop once we've covered the end-position.
-        if (static_cast<DomNode*>(cur) == r->end.node) break;
-        if (dom_boundary_compare(&t_end, &r->end) != DOM_BOUNDARY_BEFORE) break;
-        cur = next_text_after_any(static_cast<DomNode*>(cur));
+        if (!range_stringify_advance(&cur, &t_end, &r->end)) break;
     }
 
     // Build NUL-terminated copy.
@@ -3706,6 +3657,22 @@ static DomElement* nested_false_island_root(DomNode* node,
     return nullptr;
 }
 
+static DomText* editing_host_line_edge_text(DomText* start,
+                                            DomElement* host,
+                                            int edge_dir) {
+    DomText* best = text_is_selectable_for_modify(start, host) ? start : nullptr;
+    DomNode* cur = static_cast<DomNode*>(start);
+    for (int safety = 0; safety < 100000; safety++) {
+        cur = edge_dir > 0 ? next_node_in_doc_order(cur)
+                           : prev_node_in_doc_order(cur);
+        if (!cur || !node_is_descendant_of(cur, host) || node_is_br(cur)) break;
+        if (cur->is_text() && text_is_selectable_for_modify(cur->as_text(), host)) {
+            best = cur->as_text();
+        }
+    }
+    return best;
+}
+
 static DomBoundary editing_host_line_boundary(DomBoundary focus,
                                               DomElement* host,
                                               int edge_dir) {
@@ -3722,30 +3689,10 @@ static DomBoundary editing_host_line_boundary(DomBoundary focus,
         return subtree_edge_boundary(static_cast<DomNode*>(host), edge_dir, host);
     }
 
-    DomText* best = text_is_selectable_for_modify(start, host) ? start : nullptr;
-    if (edge_dir > 0) {
-        DomNode* cur = static_cast<DomNode*>(start);
-        for (int safety = 0; safety < 100000; safety++) {
-            cur = next_node_in_doc_order(cur);
-            if (!cur || !node_is_descendant_of(cur, host)) break;
-            if (node_is_br(cur)) break;
-            if (cur->is_text() && text_is_selectable_for_modify(cur->as_text(), host)) {
-                best = cur->as_text();
-            }
-        }
-        if (best) return DomBoundary{ static_cast<DomNode*>(best),
-                                      dom_text_utf16_length(best) };
-    } else {
-        DomNode* cur = static_cast<DomNode*>(start);
-        for (int safety = 0; safety < 100000; safety++) {
-            cur = prev_node_in_doc_order(cur);
-            if (!cur || !node_is_descendant_of(cur, host)) break;
-            if (node_is_br(cur)) break;
-            if (cur->is_text() && text_is_selectable_for_modify(cur->as_text(), host)) {
-                best = cur->as_text();
-            }
-        }
-        if (best) return DomBoundary{ static_cast<DomNode*>(best), 0 };
+    DomText* best = editing_host_line_edge_text(start, host, edge_dir);
+    if (best) {
+        return DomBoundary{ static_cast<DomNode*>(best),
+                            edge_dir > 0 ? dom_text_utf16_length(best) : 0 };
     }
     return subtree_edge_boundary(static_cast<DomNode*>(host), edge_dir, host);
 }

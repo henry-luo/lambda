@@ -133,46 +133,6 @@ void form_control_release_prop(DomElement* elem) {
     elem->item_prop_type = DomElement::ITEM_PROP_NONE;
 }
 
-// ---- public: UTF-8 ↔ UTF-16 --------------------------------------------
-
-uint32_t tc_utf8_to_utf16_length(const char* s, uint32_t byte_len) {
-    if (!s) return 0;
-    uint32_t n = 0;
-    const unsigned char* p = (const unsigned char*)s;
-    for (uint32_t i = 0; i < byte_len; i++) {
-        unsigned char b = p[i];
-        if ((b & 0xC0) != 0x80) {
-            if (b < 0x80)      n += 1;
-            else if (b < 0xF0) n += 1;
-            else               n += 2;  // surrogate pair
-        }
-    }
-    return n;
-}
-
-uint32_t tc_utf16_to_utf8_offset(const char* s, uint32_t byte_len, uint32_t u16) {
-    if (!s) return 0;
-    if (u16 == 0) return 0;
-    uint32_t seen = 0;
-    const unsigned char* p = (const unsigned char*)s;
-    for (uint32_t i = 0; i < byte_len; i++) {
-        unsigned char b = p[i];
-        if ((b & 0xC0) != 0x80) {
-            if (seen >= u16) return i;
-            if (b < 0x80)      seen += 1;
-            else if (b < 0xF0) seen += 1;
-            else               seen += 2;
-        }
-    }
-    return byte_len;
-}
-
-uint32_t tc_utf8_to_utf16_offset(const char* s, uint32_t byte_len, uint32_t u8) {
-    if (!s) return 0;
-    if (u8 > byte_len) u8 = byte_len;
-    return tc_utf8_to_utf16_length(s, u8);
-}
-
 // ---- internal: initial value resolution --------------------------------
 
 static char* tc_initial_value(DomElement* elem, uint32_t* out_len) {

@@ -499,17 +499,22 @@ static bool pdf_paint_effective_transform(const RenderExportTargetCaps* caps, co
     return true;
 }
 
-static bool pdf_draw_abgr_image(PdfRenderContext* ctx, const uint32_t* pixels,
-                                int src_w, int src_h, int src_stride,
-                                float dst_x, float dst_y, float dst_w, float dst_h,
-                                uint8_t opacity, const RdtMatrix* transform) {
+static bool pdf_draw_abgr_image_impl(PdfRenderContext* ctx,
+                                     const uint32_t* pixels,
+                                     int src_w, int src_h, int src_stride,
+                                     float dst_x, float dst_y,
+                                     float dst_w, float dst_h,
+                                     uint8_t opacity,
+                                     const RdtMatrix* transform,
+                                     bool preserve_alpha) {
     if (!ctx || !pixels || src_w <= 0 || src_h <= 0 || dst_w <= 0.0f || dst_h <= 0.0f) {
         return false;
     }
     if (opacity != 255) return false;
 
     int stride_pixels = pdf_image_stride_pixels(src_w, src_stride);
-    if (!pdf_image_pixels_are_opaque(pixels, src_w, src_h, stride_pixels)) {
+    bool opaque = pdf_image_pixels_are_opaque(pixels, src_w, src_h, stride_pixels);
+    if (!opaque && !preserve_alpha) {
         return false;
     }
 
@@ -527,43 +532,34 @@ static bool pdf_draw_abgr_image(PdfRenderContext* ctx, const uint32_t* pixels,
     float e = x0;
     float f = pdf_coord_y(ctx, y0);
 
-    return HPDF_Page_DrawABGRImage(ctx->current_page, pixels, src_w, src_h,
-                                   stride_pixels, a, b, c, d, e, f) == HPDF_OK;
+    if (opaque) {
+        return HPDF_Page_DrawABGRImage(ctx->current_page, pixels, src_w, src_h,
+                                       stride_pixels, a, b, c, d, e, f) == HPDF_OK;
+    }
+    return HPDF_Page_DrawABGRImageWithAlpha(ctx->current_page, pixels,
+                                            src_w, src_h, stride_pixels,
+                                            a, b, c, d, e, f) == HPDF_OK;
 }
 
-static bool pdf_draw_abgr_image_preserve_alpha(PdfRenderContext* ctx, const uint32_t* pixels,
+static bool pdf_draw_abgr_image(PdfRenderContext* ctx, const uint32_t* pixels,
+                                int src_w, int src_h, int src_stride,
+                                float dst_x, float dst_y, float dst_w, float dst_h,
+                                uint8_t opacity, const RdtMatrix* transform) {
+    return pdf_draw_abgr_image_impl(ctx, pixels, src_w, src_h, src_stride,
+                                    dst_x, dst_y, dst_w, dst_h, opacity,
+                                    transform, false);
+}
+
+static bool pdf_draw_abgr_image_preserve_alpha(PdfRenderContext* ctx,
+                                               const uint32_t* pixels,
                                                int src_w, int src_h, int src_stride,
                                                float dst_x, float dst_y,
                                                float dst_w, float dst_h,
                                                uint8_t opacity,
                                                const RdtMatrix* transform) {
-    if (!ctx || !pixels || src_w <= 0 || src_h <= 0 || dst_w <= 0.0f || dst_h <= 0.0f) {
-        return false;
-    }
-    if (opacity != 255) return false;
-
-    int stride_pixels = pdf_image_stride_pixels(src_w, src_stride);
-
-    float x0 = 0.0f, y0 = 0.0f;
-    float x1 = 0.0f, y1 = 0.0f;
-    float x2 = 0.0f, y2 = 0.0f;
-    pdf_transform_point(transform, dst_x, dst_y + dst_h, &x0, &y0);
-    pdf_transform_point(transform, dst_x + dst_w, dst_y + dst_h, &x1, &y1);
-    pdf_transform_point(transform, dst_x, dst_y, &x2, &y2);
-
-    float a = x1 - x0;
-    float b = pdf_coord_y(ctx, y1) - pdf_coord_y(ctx, y0);
-    float c = x2 - x0;
-    float d = pdf_coord_y(ctx, y2) - pdf_coord_y(ctx, y0);
-    float e = x0;
-    float f = pdf_coord_y(ctx, y0);
-
-    if (pdf_image_pixels_are_opaque(pixels, src_w, src_h, stride_pixels)) {
-        return HPDF_Page_DrawABGRImage(ctx->current_page, pixels, src_w, src_h,
-                                       stride_pixels, a, b, c, d, e, f) == HPDF_OK;
-    }
-    return HPDF_Page_DrawABGRImageWithAlpha(ctx->current_page, pixels, src_w, src_h,
-                                            stride_pixels, a, b, c, d, e, f) == HPDF_OK;
+    return pdf_draw_abgr_image_impl(ctx, pixels, src_w, src_h, src_stride,
+                                    dst_x, dst_y, dst_w, dst_h, opacity,
+                                    transform, true);
 }
 
 static void pdf_paint_record_fallback(PdfPaintLoweringState* state,
@@ -812,15 +808,35 @@ static bool pdf_draw_gradient_surface(PdfRenderContext* ctx, RdtPath* path,
     return ok;
 }
 
-static bool pdf_raster_fallback_linear_gradient(PdfRenderContext* ctx,
-                                                const PaintFillLinearGradient* p,
-                                                const RdtMatrix* transform) {
-    if (!ctx || !p || !p->path || !p->stops || p->stop_count <= 0) return false;
+typedef float (*PdfGradientPosition)(const void* paint, float x, float y);
+
+static float pdf_linear_gradient_position(const void* paint, float x, float y) {
+    const PaintFillLinearGradient* p = (const PaintFillLinearGradient*)paint;
+    float dx = p->x2 - p->x1;
+    float dy = p->y2 - p->y1;
+    float denom = dx * dx + dy * dy;
+    return denom > 1e-6f
+        ? ((x - p->x1) * dx + (y - p->y1) * dy) / denom : 0.0f;
+}
+
+static float pdf_radial_gradient_position(const void* paint, float x, float y) {
+    const PaintFillRadialGradient* p = (const PaintFillRadialGradient*)paint;
+    return hypotf(x - p->cx, y - p->cy) / p->r;
+}
+
+static bool pdf_raster_fallback_gradient(PdfRenderContext* ctx,
+                                         RdtPath* path,
+                                         const RdtGradientStop* stops,
+                                         int stop_count,
+                                         const RdtMatrix* transform,
+                                         const void* paint,
+                                         PdfGradientPosition position,
+                                         const char* kind) {
     float left = 0.0f;
     float top = 0.0f;
     float width = 0.0f;
     float height = 0.0f;
-    if (!pdf_gradient_path_bounds(p->path, &left, &top, &width, &height)) return false;
+    if (!pdf_gradient_path_bounds(path, &left, &top, &width, &height)) return false;
 
     int surface_w = (int)ceilf(width); // INT_CAST_OK: PDF gradient fallback surface dimensions are integer pixels.
     int surface_h = (int)ceilf(height); // INT_CAST_OK: PDF gradient fallback surface dimensions are integer pixels.
@@ -828,30 +844,34 @@ static bool pdf_raster_fallback_linear_gradient(PdfRenderContext* ctx,
     ImageSurface* surface = image_surface_create(surface_w, surface_h);
     if (!surface) return false;
 
-    float dx = p->x2 - p->x1;
-    float dy = p->y2 - p->y1;
-    float denom = dx * dx + dy * dy;
     uint32_t* pixels = (uint32_t*)surface->pixels;
     for (int py = 0; py < surface_h; py++) {
         float y = top + ((float)py + 0.5f) * height / (float)surface_h;
         for (int px = 0; px < surface_w; px++) {
             float x = left + ((float)px + 0.5f) * width / (float)surface_w;
-            float t = denom > 1e-6f
-                ? ((x - p->x1) * dx + (y - p->y1) * dy) / denom
-                : 0.0f;
+            float t = position(paint, x, y);
             if (t < 0.0f) t = 0.0f;
             if (t > 1.0f) t = 1.0f;
-            Color color = pdf_gradient_sample_stops(p->stops, p->stop_count, t);
-            pixels[py * surface_w + px] = color.c;
+            pixels[py * surface_w + px] =
+                pdf_gradient_sample_stops(stops, stop_count, t).c;
         }
     }
 
-    log_info("[PDF_PAINT_IR] raster fallback linear gradient %.1fx%.1f to %dx%d",
-             width, height, surface_w, surface_h);
-    bool ok = pdf_draw_gradient_surface(ctx, p->path, transform, surface,
+    log_info("[PDF_PAINT_IR] raster fallback %s gradient %.1fx%.1f to %dx%d",
+             kind, width, height, surface_w, surface_h);
+    bool ok = pdf_draw_gradient_surface(ctx, path, transform, surface,
                                         left, top, width, height);
     image_surface_destroy(surface);
     return ok;
+}
+
+static bool pdf_raster_fallback_linear_gradient(PdfRenderContext* ctx,
+                                                const PaintFillLinearGradient* p,
+                                                const RdtMatrix* transform) {
+    if (!ctx || !p || !p->path || !p->stops || p->stop_count <= 0) return false;
+    return pdf_raster_fallback_gradient(ctx, p->path, p->stops, p->stop_count,
+                                        transform, p,
+                                        pdf_linear_gradient_position, "linear");
 }
 
 static bool pdf_raster_fallback_radial_gradient(PdfRenderContext* ctx,
@@ -861,38 +881,9 @@ static bool pdf_raster_fallback_radial_gradient(PdfRenderContext* ctx,
         p->r <= 0.0f) {
         return false;
     }
-    float left = 0.0f;
-    float top = 0.0f;
-    float width = 0.0f;
-    float height = 0.0f;
-    if (!pdf_gradient_path_bounds(p->path, &left, &top, &width, &height)) return false;
-
-    int surface_w = (int)ceilf(width); // INT_CAST_OK: PDF gradient fallback surface dimensions are integer pixels.
-    int surface_h = (int)ceilf(height); // INT_CAST_OK: PDF gradient fallback surface dimensions are integer pixels.
-    if (surface_w <= 0 || surface_h <= 0) return false;
-    ImageSurface* surface = image_surface_create(surface_w, surface_h);
-    if (!surface) return false;
-
-    uint32_t* pixels = (uint32_t*)surface->pixels;
-    for (int py = 0; py < surface_h; py++) {
-        float y = top + ((float)py + 0.5f) * height / (float)surface_h;
-        for (int px = 0; px < surface_w; px++) {
-            float x = left + ((float)px + 0.5f) * width / (float)surface_w;
-            float dist = hypotf(x - p->cx, y - p->cy);
-            float t = dist / p->r;
-            if (t < 0.0f) t = 0.0f;
-            if (t > 1.0f) t = 1.0f;
-            Color color = pdf_gradient_sample_stops(p->stops, p->stop_count, t);
-            pixels[py * surface_w + px] = color.c;
-        }
-    }
-
-    log_info("[PDF_PAINT_IR] raster fallback radial gradient %.1fx%.1f to %dx%d",
-             width, height, surface_w, surface_h);
-    bool ok = pdf_draw_gradient_surface(ctx, p->path, transform, surface,
-                                        left, top, width, height);
-    image_surface_destroy(surface);
-    return ok;
+    return pdf_raster_fallback_gradient(ctx, p->path, p->stops, p->stop_count,
+                                        transform, p,
+                                        pdf_radial_gradient_position, "radial");
 }
 
 static bool pdf_raster_fallback_svg_subscene(PdfRenderContext* ctx,

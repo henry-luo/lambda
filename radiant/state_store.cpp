@@ -3429,32 +3429,12 @@ static int form_default_selected_index_from_tree(View* view) {
 
     int option_count = 0;
     int selected_index = -1;
-    DomNode* child = element->first_child;
-    while (child) {
-        if (child->is_element()) {
-            DomElement* child_elem = lam::dom_require_element(child);
-            if (child_elem->tag() == HTM_TAG_OPTION) {
-                if (child_elem->has_attribute("selected") && selected_index < 0) {
-                    selected_index = option_count;
-                }
-                option_count++;
-            } else if (child_elem->tag() == HTM_TAG_OPTGROUP) {
-                DomNode* opt_child = child_elem->first_child;
-                while (opt_child) {
-                    if (opt_child->is_element()) {
-                        DomElement* opt_elem = lam::dom_require_element(opt_child);
-                        if (opt_elem->tag() == HTM_TAG_OPTION) {
-                            if (opt_elem->has_attribute("selected") && selected_index < 0) {
-                                selected_index = option_count;
-                            }
-                            option_count++;
-                        }
-                    }
-                    opt_child = opt_child->next_sibling;
-                }
-            }
+    for (DomElement* option = dom_select_next_option(element, nullptr); option;
+         option = dom_select_next_option(element, option)) {
+        if (option->has_attribute("selected") && selected_index < 0) {
+            selected_index = option_count;
         }
-        child = child->next_sibling;
+        option_count++;
     }
     if (selected_index >= 0) return selected_index;
     return option_count > 0 ? 0 : -1;
@@ -4475,8 +4455,8 @@ void form_control_set_value(DocState* state, View* view, const char* value, uint
     form_state_mark_dirty(state);
 }
 
-void form_control_get_selection(DocState* state, View* view,
-                                uint32_t* out_start, uint32_t* out_end, uint8_t* out_direction) {
+void form_control_peek_selection(DocState* state, View* view,
+                                 uint32_t* out_start, uint32_t* out_end, uint8_t* out_direction) {
     if (out_start) *out_start = 0;
     if (out_end) *out_end = 0;
     if (out_direction) *out_direction = 0;
@@ -4484,7 +4464,6 @@ void form_control_get_selection(DocState* state, View* view,
     if (view && view->is_element()) {
         DomElement* elem = lam::dom_require_element(view);
         if (elem && tc_is_text_control(elem)) {
-            tc_ensure_init(elem);
             FormControlProp* form = elem->form;
             if (!form) return;
             if (state && state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
@@ -4518,6 +4497,23 @@ void form_control_get_selection(DocState* state, View* view,
     if (out_direction) *out_direction = form->selection_direction;
 }
 
+static void form_view_state_store_selection(ViewState* view_state,
+                                            FormControlProp* form) {
+    if (!view_state || !form) return;
+    view_state->data.form.selection_start = form->selection_start;
+    view_state->data.form.selection_end = form->selection_end;
+    view_state->data.form.selection_direction = form->selection_direction;
+}
+
+void form_control_get_selection(DocState* state, View* view,
+                                uint32_t* out_start, uint32_t* out_end, uint8_t* out_direction) {
+    if (view && view->is_element()) {
+        DomElement* elem = lam::dom_require_element(view);
+        if (elem && tc_is_text_control(elem)) tc_ensure_init(elem);
+    }
+    form_control_peek_selection(state, view, out_start, out_end, out_direction);
+}
+
 void form_control_set_selection(DocState* state, View* view,
                                 uint32_t start, uint32_t end, uint8_t direction) {
     if (!view) return;
@@ -4533,9 +4529,7 @@ void form_control_set_selection(DocState* state, View* view,
             tc_set_selection_range(elem, start, end, direction);
             ViewState* view_state = form_view_state_get_or_create(state, view, form);
             if (view_state) {
-                view_state->data.form.selection_start = form->selection_start;
-                view_state->data.form.selection_end = form->selection_end;
-                view_state->data.form.selection_direction = form->selection_direction;
+                form_view_state_store_selection(view_state, form);
                 if (form->current_value) {
                     form_view_state_store_text_value(view_state, form);
                 }
@@ -4560,11 +4554,7 @@ void form_control_set_selection(DocState* state, View* view,
     if (tc_is_text_control(elem)) {
         tc_set_selection_range(elem, start, end, direction);
         ViewState* view_state = form_view_state_get_or_create(state, view, form);
-        if (view_state) {
-            view_state->data.form.selection_start = form->selection_start;
-            view_state->data.form.selection_end = form->selection_end;
-            view_state->data.form.selection_direction = form->selection_direction;
-        }
+        form_view_state_store_selection(view_state, form);
     } else {
         // For non-text controls, directly update selection fields.
         uint32_t max_offset = form->current_value_u16_len;
@@ -4574,11 +4564,7 @@ void form_control_set_selection(DocState* state, View* view,
         form->selection_end = end;
         form->selection_direction = direction & 3;
         ViewState* view_state = form_view_state_get_or_create(state, view, form);
-        if (view_state) {
-            view_state->data.form.selection_start = form->selection_start;
-            view_state->data.form.selection_end = form->selection_end;
-            view_state->data.form.selection_direction = form->selection_direction;
-        }
+        form_view_state_store_selection(view_state, form);
     }
 
     sm_guard.commit();
@@ -4594,9 +4580,7 @@ void form_control_sync_text_control_state(DocState* state, View* view) {
     form->state_ref = state;
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
     if (!view_state) return;
-    view_state->data.form.selection_start = form->selection_start;
-    view_state->data.form.selection_end = form->selection_end;
-    view_state->data.form.selection_direction = form->selection_direction;
+    form_view_state_store_selection(view_state, form);
     if (form->current_value) {
         form_view_state_store_text_value(view_state, form);
     }
@@ -6185,6 +6169,19 @@ void state_store_caret_move(DocState* state, int delta) {
         delta, caret->view, caret->char_offset);
 }
 
+static TextRect* caret_rect_at_offset(TextRect* rect, int offset,
+                                     int* out_line) {
+    int line = 0;
+    while (rect) {
+        int rect_end = rect->start_index + rect->length;
+        if (offset >= rect->start_index && offset <= rect_end) break;
+        line++;
+        rect = rect->next;
+    }
+    if (out_line) *out_line = line;
+    return rect;
+}
+
 void state_store_caret_move_to_boundary(DocState* state, int where) {
     if (!state || !state->caret || !state->caret->view) return;
 
@@ -6198,18 +6195,9 @@ void state_store_caret_move_to_boundary(DocState* state, int where) {
 
         switch (where) {
             case 0: {  // line start
-                // Find current line's rect
-                TextRect* current_rect = rect;
                 int line = 0;
-                while (current_rect) {
-                    int rect_end = current_rect->start_index + current_rect->length;
-                    if (caret->char_offset >= current_rect->start_index &&
-                        caret->char_offset <= rect_end) {
-                        break;
-                    }
-                    line++;
-                    current_rect = current_rect->next;
-                }
+                TextRect* current_rect = caret_rect_at_offset(
+                    rect, caret->char_offset, &line);
                 if (current_rect) {
                     caret->char_offset = current_rect->start_index;
                     caret->line = line;
@@ -6218,18 +6206,9 @@ void state_store_caret_move_to_boundary(DocState* state, int where) {
                 break;
             }
             case 1: {  // line end
-                // Find current line's rect
-                TextRect* current_rect = rect;
                 int line = 0;
-                while (current_rect) {
-                    int rect_end = current_rect->start_index + current_rect->length;
-                    if (caret->char_offset >= current_rect->start_index &&
-                        caret->char_offset <= rect_end) {
-                        break;
-                    }
-                    line++;
-                    current_rect = current_rect->next;
-                }
+                TextRect* current_rect = caret_rect_at_offset(
+                    rect, caret->char_offset, &line);
                 if (current_rect) {
                     caret->char_offset = current_rect->start_index + current_rect->length;
                     caret->line = line;
@@ -6776,9 +6755,9 @@ bool caret_prepare_selective_repaint(DocState* state) {
     return true;
 }
 
-bool caret_get_position(DocState* state, View** out_view, int* out_offset) {
-    if (out_view) *out_view = NULL;
-    if (out_offset) *out_offset = 0;
+static bool caret_get_text_control_projection(DocState* state,
+                                              View** out_view,
+                                              int* out_offset) {
     if (state && state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
         state->sel.control && tc_is_text_control(state->sel.control)) {
         DomElement* control = state->sel.control;
@@ -6795,6 +6774,13 @@ bool caret_get_position(DocState* state, View** out_view, int* out_offset) {
             return true;
         }
     }
+    return false;
+}
+
+bool caret_get_position(DocState* state, View** out_view, int* out_offset) {
+    if (out_view) *out_view = NULL;
+    if (out_offset) *out_offset = 0;
+    if (caret_get_text_control_projection(state, out_view, out_offset)) return true;
     DomBoundary focus = dom_selection_focus_boundary(state ? state->dom_selection : NULL);
     if (state && state->dom_selection && state->dom_selection->range_count > 0 &&
         focus.node) {
@@ -6809,21 +6795,7 @@ bool caret_get_position(DocState* state, View** out_view, int* out_offset) {
 
 bool caret_get_offset(DocState* state, int* out_offset) {
     if (out_offset) *out_offset = 0;
-    if (state && state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
-        state->sel.control && tc_is_text_control(state->sel.control)) {
-        DomElement* control = state->sel.control;
-        tc_ensure_init(control);
-        FormControlProp* form = control->form;
-        if (form) {
-            uint32_t focus_u16 = state->sel.direction == DOM_SEL_DIR_BACKWARD ?
-                state->sel.start_u16 : state->sel.end_u16;
-            uint32_t focus_byte = text_control_u16_offset_to_byte(form, focus_u16);
-            if (out_offset) {
-                *out_offset = static_cast<int>(focus_byte); // INT_CAST_OK: caret projection exposes text-control byte offsets as int.
-            }
-            return true;
-        }
-    }
+    if (caret_get_text_control_projection(state, NULL, out_offset)) return true;
     DomBoundary focus = dom_selection_focus_boundary(state ? state->dom_selection : NULL);
     if (state && state->dom_selection && state->dom_selection->range_count > 0 &&
         focus.node) {

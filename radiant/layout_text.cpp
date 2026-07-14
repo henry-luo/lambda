@@ -900,22 +900,6 @@ static inline float get_unicode_space_width_em(uint32_t codepoint) {
     }
 }
 
-static float measure_current_space_advance(LayoutContext* lycon, FontHandle* handle, FontProp* style) {
-    if (!style) return 0.0f;
-    if (!handle) handle = style->font_handle;
-
-    if (handle) {
-        FontStyleDesc sd = font_style_desc_from_prop(style);
-        LoadedGlyph* glyph = font_load_glyph(handle, &sd, (uint32_t)' ', false);
-        if (glyph && glyph->advance_x > 0.0f) {
-            float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0)
-                ? lycon->ui_context->pixel_ratio : 1.0f;
-            return glyph->advance_x / pixel_ratio;
-        }
-    }
-    return style->space_width;
-}
-
 static float measure_current_glyph_advance(LayoutContext* lycon, uint32_t codepoint, bool trim_cjk_spacing) {
     if (!lycon || !lycon->font.style) return 0.0f;
     FontHandle* handle = lycon->font.font_handle ? lycon->font.font_handle : lycon->font.style->font_handle;
@@ -2683,7 +2667,7 @@ static bool output_break_at_last_space(LayoutContext* lycon, DomNode* text_node,
     }
     if (restore_collapsible_trailing_space && lycon->line.last_space_kind == BRK_SPACE) {
         lycon->line.trailing_space_width =
-            measure_current_space_advance(lycon, lycon->font.font_handle, lycon->font.style)
+            layout_measure_space_advance(lycon, lycon->font.font_handle, lycon->font.style)
             + lycon->font.style->word_spacing
             + lycon->font.style->letter_spacing;
     }
@@ -3013,7 +2997,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 const unsigned char* check = str - 1;
                 float trailing_width = 0;
                 while (check >= text_start + rect->start_index && is_space(*check)) {
-                    trailing_width += measure_current_space_advance(
+                    trailing_width += layout_measure_space_advance(
                         lycon, lycon->font.font_handle, lycon->font.style);
                     check--;
                 }
@@ -3083,7 +3067,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // Width already includes shaping and internal kerning for this simple word run.
         }
         else if (is_space(codepoint)) {
-            wd = measure_current_space_advance(lycon, lycon->font.font_handle, lycon->font.style);
+            wd = layout_measure_space_advance(lycon, lycon->font.font_handle, lycon->font.style);
             // Tab characters with preserved whitespace: use tab-size * space_width
             // Only when whitespace is preserved (pre, pre-wrap, break-spaces)
             if (codepoint == '\t' && !collapse_spaces) {
@@ -3111,7 +3095,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 if (ts == 0) {
                     wd = 0;
                 } else {
-                    float raw_space_advance = measure_current_space_advance(
+                    float raw_space_advance = layout_measure_space_advance(
                         lycon, block_font->font_handle ? block_font->font_handle : lycon->font.font_handle, block_font);
                     float space_advance = raw_space_advance
                         + block_font->word_spacing

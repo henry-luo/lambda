@@ -2446,12 +2446,21 @@ TypoMetrics get_os2_typo_metrics(struct FontHandle* handle);
 // Calculate normal line height following Chrome's algorithm
 // Delegates to font_calc_normal_line_height() from lib/font/
 float calc_normal_line_height(struct FontHandle* handle);
+CssEnum layout_specified_keyword(DomElement* element, CssPropertyId property,
+                                 CssEnum fallback = (CssEnum)0);
+float layout_resolve_line_height_value(LayoutContext* lycon, const CssValue* value,
+                                       DomElement* owner, float target_font_size);
+float layout_measure_space_advance(LayoutContext* lycon, struct FontHandle* handle,
+                                   FontProp* style);
+size_t layout_normalize_collapsible_whitespace(const char* text, size_t length,
+                                               char* buffer, size_t buffer_size);
 
 // DomNode style resolution
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 
 CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block);
 void setup_line_height(LayoutContext* lycon, ViewBlock* block);
+void layout_setup_block_font_metrics(LayoutContext* lycon);
 
 // ViewSpan bounding box computation
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false, struct FontHandle* fallback_fh = nullptr);

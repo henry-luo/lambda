@@ -183,45 +183,6 @@ static bool intrinsic_style_flex_wrap_enabled(StyleTree* style, bool* is_wrappin
     return true;
 }
 
-static float intrinsic_resolve_line_height_for_owner(LayoutContext* lycon, const CssValue* value,
-                                                     DomElement* owner, float target_font_size) {
-    if (!lycon || !value) return 0;
-    if (target_font_size <= 0) target_font_size = 16.0f;
-
-    if (value->type == CSS_VALUE_TYPE_NUMBER) {
-        return value->data.number.value * target_font_size;
-    }
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        if (value->data.keyword == CSS_VALUE_NORMAL && lycon->font.font_handle) {
-            return font_calc_normal_line_height(lycon->font.font_handle);
-        }
-        return 0;
-    }
-    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        float owner_font_size = target_font_size;
-        if (owner && owner->font && owner->font->font_size > 0) {
-            owner_font_size = owner->font->font_size;
-        }
-        return (float)(value->data.percentage.value * owner_font_size / 100.0);
-    }
-    if (value->type == CSS_VALUE_TYPE_LENGTH) {
-        CssUnit unit = value->data.length.unit;
-        if (unit == CSS_UNIT_EM || unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
-            float owner_font_size = target_font_size;
-            if (owner && owner->font && owner->font->font_size > 0) {
-                owner_font_size = owner->font->font_size;
-            }
-            float multiplier = (float)value->data.length.value;
-            if (unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
-                multiplier *= 0.5f;
-            }
-            return multiplier * owner_font_size;
-        }
-        return resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
-    }
-    return resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
-}
-
 static float intrinsic_resolve_font_size_value(LayoutContext* lycon, const CssValue* value,
                                                bool* resolved_from_medium) {
     if (resolved_from_medium) *resolved_from_medium = false;
@@ -543,22 +504,6 @@ static void get_horizontal_padding_widths_from_css(LayoutContext* lycon, DomElem
         *padding_right = intrinsic_resolve_box_length(
             lycon, CSS_PROPERTY_PADDING_RIGHT, right_decl->value, inline_base);
     }
-}
-
-static float measure_current_space_advance(LayoutContext* lycon, FontHandle* handle, FontProp* style) {
-    if (!style) return 0.0f;
-    if (!handle) handle = style->font_handle;
-
-    if (handle) {
-        FontStyleDesc sd = font_style_desc_from_prop(style);
-        LoadedGlyph* glyph = font_load_glyph(handle, &sd, (uint32_t)' ', false);
-        if (glyph && glyph->advance_x > 0.0f) {
-            float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0)
-                ? lycon->ui_context->pixel_ratio : 1.0f;
-            return glyph->advance_x / pixel_ratio;
-        }
-    }
-    return style->space_width;
 }
 
 static inline bool intrinsic_is_simple_latin_shaping_byte(unsigned char ch) {
@@ -912,7 +857,7 @@ static float measure_preserved_line_width_with_tabs(LayoutContext* lycon, const 
     while (i < length) {
         unsigned char ch = str[i];
         if (ch == '\t') {
-            float raw_space = measure_current_space_advance(
+            float raw_space = layout_measure_space_advance(
                 lycon, lycon->font.font_handle, lycon->font.style);
             float tab_period = raw_space * tab_size;
             if (tab_period > 0.0f) {
@@ -927,7 +872,7 @@ static float measure_preserved_line_width_with_tabs(LayoutContext* lycon, const 
         }
 
         if (ch == ' ' || ch == '\r' || ch == '\n') {
-            float space_width = measure_current_space_advance(
+            float space_width = layout_measure_space_advance(
                 lycon, lycon->font.font_handle, lycon->font.style);
             if (lycon->font.style) {
                 space_width += lycon->font.style->word_spacing;
@@ -1162,7 +1107,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 kerning_adj = font_get_kerning(lycon->font.font_handle, prev_codepoint, (uint32_t)ch);
             }
 
-            float space_width = measure_current_space_advance(
+            float space_width = layout_measure_space_advance(
                 lycon, lycon->font.font_handle, lycon->font.style);
             // Apply word-spacing to space characters (matching layout_text.cpp)
             if (lycon->font.style) {
@@ -1507,7 +1452,7 @@ float compute_text_height_at_width(LayoutContext* lycon,
             }
             current_word_width = 0;
             // add space width
-            float space_width = measure_current_space_advance(
+            float space_width = layout_measure_space_advance(
                 lycon, lycon->font.font_handle, lycon->font.style);
             if (lycon->font.style) {
                 space_width += lycon->font.style->word_spacing;
@@ -1766,7 +1711,7 @@ static bool intrinsic_node_ends_with_collapsible_space(DomNode* node) {
 }
 
 static float intrinsic_collapsed_space_width(LayoutContext* lycon) {
-    float width = measure_current_space_advance(
+    float width = layout_measure_space_advance(
         lycon, lycon->font.font_handle, lycon->font.style);
     if (lycon && lycon->font.style) {
         width += lycon->font.style->word_spacing;
@@ -2921,50 +2866,42 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
                     float max_text_min = 0;  // longest unbreakable word across options
                     float max_text_max = 0;  // longest no-wrap option text
+                    auto include_text = [&](const char* text, size_t length, float indent) {
+                        if (!text || length == 0) return;
+                        TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, text, length);
+                        float min_width = tw.min_content + indent;
+                        float max_width = tw.max_content + indent;
+                        if (indent > 0.0f) {
+                            if (min_width < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH) min_width = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
+                            if (max_width < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH) max_width = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
+                        }
+                        if (min_width > max_text_min) max_text_min = min_width;
+                        if (max_width > max_text_max) max_text_max = max_width;
+                    };
                     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-                        if (!child->is_element()) continue;
                         DomElement* ce = child->as_element();
-                        uintptr_t ctag = ce->tag();
-                        if (ctag == HTM_TAG_OPTION) {
-                            for (DomNode* tc = ce->first_child; tc; tc = tc->next_sibling) {
-                                DomText* dt = tc->as_text();
-                                if (dt && dt->text && dt->length > 0) {
-                                    TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
-                                    if (tw.min_content > max_text_min) max_text_min = tw.min_content;
-                                    if (tw.max_content > max_text_max) max_text_max = tw.max_content;
-                                }
-                            }
-                        } else if (ctag == HTM_TAG_OPTGROUP) {
+                        if (ce && ce->tag() == HTM_TAG_OPTGROUP) {
                             const char* lbl = ce->get_attribute("label");
-                            if (lbl) {
-                                size_t ll = strlen(lbl);
-                                if (ll > 0) {
-                                    TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, lbl, ll);
-                                    if (tw.min_content > max_text_min) max_text_min = tw.min_content;
-                                    if (tw.max_content > max_text_max) max_text_max = tw.max_content;
-                                }
+                            include_text(lbl, lbl ? strlen(lbl) : 0, 0.0f);
+                        }
+                    }
+                    for (DomElement* option = dom_select_next_option(element, nullptr); option;
+                         option = dom_select_next_option(element, option)) {
+                        DomElement* parent = option->parent ? option->parent->as_element() : nullptr;
+                        float indent = parent && parent->tag() == HTM_TAG_OPTGROUP
+                            ? FormDefaults::OPTGROUP_OPTION_INDENT : 0.0f;
+                        bool has_text = false;
+                        for (DomNode* child = option->first_child; child; child = child->next_sibling) {
+                            DomText* text = child->as_text();
+                            if (text && text->text && text->length > 0) {
+                                include_text(text->text, text->length, indent);
+                                has_text = true;
                             }
-                            for (DomNode* gc = ce->first_child; gc; gc = gc->next_sibling) {
-                                if (gc->is_element() && gc->as_element()->tag() == HTM_TAG_OPTION) {
-                                    float opt_min = 0, opt_max = 0;
-                                    for (DomNode* tc = gc->as_element()->first_child; tc; tc = tc->next_sibling) {
-                                        DomText* dt = tc->as_text();
-                                        if (dt && dt->text && dt->length > 0) {
-                                            TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
-                                            if (tw.min_content > opt_min) opt_min = tw.min_content;
-                                            if (tw.max_content > opt_max) opt_max = tw.max_content;
-                                        }
-                                    }
-                                    float eff_min = opt_min + FormDefaults::OPTGROUP_OPTION_INDENT;
-                                    float eff_max = opt_max + FormDefaults::OPTGROUP_OPTION_INDENT;
-                                    if (eff_min < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH)
-                                        eff_min = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
-                                    if (eff_max < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH)
-                                        eff_max = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
-                                    if (eff_min > max_text_min) max_text_min = eff_min;
-                                    if (eff_max > max_text_max) max_text_max = eff_max;
-                                }
-                            }
+                        }
+                        if (!has_text && indent > 0.0f) {
+                            // blank optgroup options still reserve the native minimum row width.
+                            if (FormDefaults::OPTGROUP_OPTION_MIN_WIDTH > max_text_min) max_text_min = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
+                            if (FormDefaults::OPTGROUP_OPTION_MIN_WIDTH > max_text_max) max_text_max = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
                         }
                     }
                     // CSS `appearance: none` removes the UA dropdown arrow; skip its width overhead.
@@ -3205,7 +3142,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         const char* text = (const char*)item->text_data();
                         if (!text || !*text) continue;
                         if (inline_run_has_content && intrinsic_text_starts_with_whitespace(text)) {
-                            inline_run_max += measure_current_space_advance(
+                            inline_run_max += layout_measure_space_advance(
                                 lycon, lycon->font.font_handle, lycon->font.style);
                         }
                         TextIntrinsicWidths text_widths = measure_text_intrinsic_widths(
@@ -3257,7 +3194,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     } else if (item_is_inline_level) {
                         bool starts_with_ws = intrinsic_element_text_starts_with_whitespace(item);
                         if (inline_run_has_content && (prev_ended_with_space || starts_with_ws)) {
-                            inline_run_max += measure_current_space_advance(
+                            inline_run_max += layout_measure_space_advance(
                                 lycon, lycon->font.font_handle, lycon->font.style);
                         }
                         inline_run_max += child_sizes.max_content;
@@ -4133,7 +4070,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         CSS_VALUE_NORMAL, ow, wb);
                     if (preserve_space_after_table_cell &&
                         (out_pos == 0 || normalized_buffer[0] != ' ')) {
-                        text_widths.max_content += measure_current_space_advance(
+                        text_widths.max_content += layout_measure_space_advance(
                             lycon, lycon->font.font_handle, lycon->font.style);
                     }
                     if (preserve_spaces && text_line_has_tab(normalized_buffer, out_pos)) {
@@ -4955,32 +4892,6 @@ static bool intrinsic_height_should_collapse_whitespace(CssEnum white_space) {
            white_space == CSS_VALUE_PRE_LINE || white_space == 0;
 }
 
-static size_t normalize_intrinsic_height_text(const char* text, size_t length,
-                                              char* buffer, size_t buffer_size) {
-    if (!text || !buffer || buffer_size == 0) return 0;
-
-    size_t out_pos = 0;
-    bool in_whitespace = true;
-    for (size_t i = 0; i < length && out_pos < buffer_size - 1; i++) {
-        unsigned char ch = (unsigned char)text[i];
-        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
-            if (!in_whitespace) {
-                buffer[out_pos++] = ' ';
-                in_whitespace = true;
-            }
-        } else {
-            buffer[out_pos++] = (char)ch;
-            in_whitespace = false;
-        }
-    }
-
-    while (out_pos > 0 && buffer[out_pos - 1] == ' ') {
-        out_pos--;
-    }
-    buffer[out_pos] = '\0';
-    return out_pos;
-}
-
 float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width) {
     if (!node) return 0;
 
@@ -5020,7 +4931,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             ViewBlock* anc_view = lam::unsafe_view_block_element_storage(ancestor->as_element());
             if (anc_view->blk && anc_view->blk->line_height) {
                 const CssValue* lh = anc_view->blk->line_height;
-                float lh_px = intrinsic_resolve_line_height_for_owner(
+                float lh_px = layout_resolve_line_height_value(
                     lycon, lh, ancestor->as_element(), font_size);
                 if (lh_px > 0) line_height = lh_px;
                 break;
@@ -5029,7 +4940,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 CssDeclaration* lh_decl = style_tree_get_declaration(
                     anc_view->specified_style, CSS_PROPERTY_LINE_HEIGHT);
                 if (lh_decl && lh_decl->value) {
-                    float lh_px = intrinsic_resolve_line_height_for_owner(
+                    float lh_px = layout_resolve_line_height_value(
                         lycon, lh_decl->value, ancestor->as_element(), font_size);
                     if (lh_px > 0) line_height = lh_px;
                     break;
@@ -5045,7 +4956,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 	            size_t measure_len = text_len;
 	            static thread_local char normalized_text[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
 	            if (intrinsic_height_should_collapse_whitespace(ws_val)) {
-	                measure_len = normalize_intrinsic_height_text(text, text_len,
+	                measure_len = layout_normalize_collapsible_whitespace(text, text_len,
 	                                                              normalized_text,
 	                                                              sizeof(normalized_text));
 	                if (measure_len == 0) return 0;
