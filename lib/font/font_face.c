@@ -156,6 +156,20 @@ const FontFaceEntry* font_face_find_internal(FontContext* ctx, const char* famil
     return best;
 }
 
+bool font_face_family_registered(FontContext* ctx, const char* family) {
+    if (!ctx || !family) return false;
+
+    for (int i = 0; i < ctx->face_descriptor_count; i++) {
+        FontFaceEntry* entry = ctx->face_descriptors[i];
+        if (!entry || !entry->family) continue;
+        if (str_icmp(entry->family, strlen(entry->family),
+                     family, strlen(family)) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // ============================================================================
 // Public: find (returns FontFaceDesc view of internal entry)
 // ============================================================================

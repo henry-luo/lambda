@@ -7,6 +7,7 @@
 #include "resource_loaders.h"
 #include "cookie_jar.h"
 #include "../input/css/dom_element.hpp"
+#include "../input/css/css_font_face.hpp"
 #include "../../radiant/view.hpp"
 #include "../../radiant/event.hpp"
 #include "../../lib/url.h"
@@ -115,6 +116,13 @@ void free_network_resource(NetworkResource* res) {
             image_surface_destroy(embed->img);
             embed->img = nullptr;
         }
+    }
+
+    if (res->type == RESOURCE_FONT && res->user_data) {
+        // Font downloads own a transient @font-face descriptor until the main
+        // thread registers the cached file path with the font resolver.
+        css_font_face_descriptor_free((CssFontFaceDescriptor*)res->user_data);
+        res->user_data = NULL;
     }
     
     mem_free(res->url);

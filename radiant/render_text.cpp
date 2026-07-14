@@ -60,17 +60,7 @@ static inline bool render_text_preserve_spaces(CssEnum ws) {
 
 CssEnum render_text_inherited_transform(ViewText* text_view) {
     if (!text_view) return CSS_VALUE_NONE;
-
-    DomNode* parent = text_view->parent;
-    while (parent) {
-        if (parent->is_element()) {
-            DomElement* element = lam::dom_require_element(parent);
-            CssEnum transform = get_text_transform_from_block(element->blk);
-            if (transform != CSS_VALUE_NONE) return transform;
-        }
-        parent = parent->parent;
-    }
-    return CSS_VALUE_NONE;
+    return get_text_transform_from_node(text_view->parent);
 }
 
 char* render_text_create_export_segment(const unsigned char* text,
@@ -210,17 +200,13 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     bool preserve_spaces = render_text_preserve_spaces(white_space);
 
     // Get text-transform from parent elements
-    CssEnum text_transform = CSS_VALUE_NONE;
+    CssEnum text_transform = get_text_transform_from_node(text_view->parent);
     CssEnum text_align = CSS_VALUE_LEFT;  // default to left alignment
     bool text_align_found = false;
     DomNode* parent = text_view->parent;
     while (parent) {
         if (parent->is_element()) {
             DomElement* elem = lam::dom_require_element(parent);
-            CssEnum transform = get_text_transform_from_block(elem->blk);
-            if (transform != CSS_VALUE_NONE) {
-                text_transform = transform;
-            }
             // Get text-align from the nearest ancestor that has block properties.
             // text-align is CSS-inherited, so the closest block already holds the
             // resolved value; walking further would overwrite it with an outer
@@ -229,9 +215,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 BlockProp* blk_prop = (BlockProp*)elem->blk;
                 text_align = blk_prop->text_align;
                 text_align_found = true;
-            }
-            if (transform != CSS_VALUE_NONE) {
-                break;
             }
         }
         parent = parent->parent;

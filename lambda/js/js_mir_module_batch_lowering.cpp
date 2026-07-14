@@ -954,7 +954,7 @@ static void jm_compose_derived_ctor_shapes(JsMirTranspiler* mt) {
         if (ce->constructor && ce->constructor->fc &&
             ce->constructor->fc->ctor_prop_count > 0 &&
             !ce->shape_cache_ptr) {
-            ce->shape_cache_ptr = (void**)mem_calloc(1, sizeof(void*), MEM_CAT_JS_RUNTIME);
+            ce->shape_cache_ptr = jm_alloc_shape_cache_slot(mt);
         }
     }
 }

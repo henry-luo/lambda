@@ -902,7 +902,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             // §7: Allocate per-class shape cache slot for inline shape guard
             if (ce->constructor && ce->constructor->fc &&
                 ce->constructor->fc->ctor_prop_count > 0) {
-                ce->shape_cache_ptr = (void**)mem_calloc(1, sizeof(void*), MEM_CAT_JS_RUNTIME);
+                ce->shape_cache_ptr = jm_alloc_shape_cache_slot(mt);
             }
         } else if (cls->body && cls->body->node_type == JS_AST_NODE_BLOCK_STATEMENT &&
                    !mt->class_collection_overflow_logged) {

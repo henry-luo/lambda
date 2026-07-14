@@ -3151,8 +3151,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     if (item_is_float) {
                         // CSS Sizing 3 §5: max-content places floats side-by-side,
                         // while min-content stacks them and uses the widest item.
-                        float rounded_child = ceilf(child_sizes.max_content * 2.0f) / 2.0f;
-                        float_run_max += rounded_child;
+                        // Float layout keeps shrink-to-fit widths at subpixel
+                        // precision; max-content must use the same invariant or
+                        // a measured-fitting run can wrap during actual layout.
+                        float_run_max += child_sizes.max_content;
                         if (child_sizes.min_content > float_run_min) {
                             float_run_min = child_sizes.min_content;
                         }
@@ -4371,13 +4373,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // Floated block child: accumulate for side-by-side arrangement
                 // At max-content (infinite width), all floats fit on one line → sum widths
                 // At min-content, each float wraps to its own line → max of widths
-                // Pre-round each child's width to match the 0.5px ceil rounding applied
-                // during actual float layout (layout_block.cpp shrink-to-fit). This ensures
-                // the parent's intrinsic width accommodates the sum of rounded children,
-                // preventing float wrapping caused by cumulative rounding error.
-                float rounded_child = ceilf(child_width * 2.0f) / 2.0f;
-                float_max_sum += rounded_child;
-                float_width_alongside_inline += rounded_child;
+                // Float layout keeps shrink-to-fit widths at subpixel precision;
+                // pre-rounding each child can make a measured-fitting float run
+                // wrap once the shrink-wrapped parent is laid out.
+                float_max_sum += child_width;
+                float_width_alongside_inline += child_width;
                 float_min_max = max(float_min_max, child_sizes.min_content);
                 log_debug("  float child: accumulating max_sum=%.1f, min_max=%.1f",
                           float_max_sum, float_min_max);

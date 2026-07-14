@@ -2712,6 +2712,12 @@ static void collect_deferred_inline_line_runs(View* child, DeferredInlineLineRun
             }
         } else if (child->view_type == RDT_VIEW_INLINE) {
             ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(child);
+            if (span->width > 0.0f && span->height > 0.0f) {
+                // Deferred shrink-to-fit alignment must include inline border boxes;
+                // otherwise trailing padding is treated as free space and centered into.
+                add_deferred_line_extent(runs, run_count, span->y, span->x,
+                                         span->x + span->width);
+            }
             if (span->first_child) {
                 collect_deferred_inline_line_runs(span->first_child, runs, run_count);
             }
@@ -6563,14 +6569,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 fit_content, block->width, available);
 
             // Update block width to shrink-to-fit size.
-            // Inline-block max-content contributions are accumulated at subpixel
-            // precision by intrinsic sizing. Rounding each child upward here can
-            // make a shrink-wrapped parent immediately wrap content that measured
-            // as fitting, so keep inline-block widths exact.
-            float used_fit_width = is_inline_block_auto_width
-                ? fit_content
-                : ceilf(fit_content * 2.0f) / 2.0f;
-            block->width = used_fit_width;
+            // Intrinsic sizing accumulates float and inline-block runs at subpixel
+            // precision; rounding each item upward here can make a shrink-wrapped
+            // parent wrap content that measured as fitting.
+            block->width = fit_content;
 
             // CSS 2.1 §10.4: Apply min-width/max-width constraints to the
             // shrink-to-fit width. Elements with max-width (e.g., table with
