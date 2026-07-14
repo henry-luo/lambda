@@ -82,6 +82,7 @@ Element* create_cluster_element(Input* input, const char* id, const char* label)
 
 // Attribute management
 void add_graph_attribute(Input* input, Element* element, const char* name, const char* value);
+void add_graph_integer_attribute(Input* input, Element* element, const char* name, int64_t value);
 void add_node_attributes(Input* input, Element* node, const char* attr_string);
 void add_edge_attributes(Input* input, Element* edge, const char* attr_string);
 

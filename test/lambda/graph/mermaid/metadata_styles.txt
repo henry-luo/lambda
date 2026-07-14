@@ -1,0 +1,7 @@
+{
+  metadata: ["Service request graph", "Client request flow to the API."],
+  assignments: [["node", "A", "fill:#f8fafc,stroke:#334155", true], ["edge", "0", "stroke:#0f766e,stroke-width:2px", true]],
+  html_graph: ["group", "Service request graph", "Client request flow to the API.", "Service request graph"],
+  html_nodes: [["A", "fill:#f8fafc,stroke:#334155"], ["B", ""]],
+  html_edges: [["e0", "stroke:#0f766e,stroke-width:2px"]]
+}

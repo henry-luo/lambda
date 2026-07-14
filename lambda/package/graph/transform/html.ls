@@ -56,12 +56,13 @@ fn node_content(node, id) {
   else { [id] }
 }
 
-fn html_node(node, index, group, assigned_classes, palette) {
+fn html_node(node, index, group, assigned_classes, style_declarations, palette) {
   let id = node_id(node, index);
   let content = node_content(node, id);
   <node class: node_class(node, assigned_classes), 'data-node-id': id,
       'data-subgraph-id': group,
       'data-shape': source_attr(node, "shape", "box"),
+      'data-style-declarations': style_declarations,
       'data-z': string(source_attr(node, "z", 0)),
       style: node_style(node, palette);
     for (child in content) child
@@ -83,7 +84,7 @@ fn marker_text(value, enabled) {
   else string(value)
 }
 
-fn html_edge(edge, index, group, graph_directed) {
+fn html_edge(edge, index, group, graph_directed, style_declarations) {
   let directed = bool_text(source_attr(edge, "directed", null), graph_directed);
   let marker_start = marker_text(source_attr(edge, "arrow-tail", source_attr(edge, "marker-start", null)),
     source_attr(edge, "arrow-start", source_attr(edge, "arrow_start", false)));
@@ -100,6 +101,7 @@ fn html_edge(edge, index, group, graph_directed) {
       'data-arrow-end': bool_text(marker_end != "none", false),
       'data-marker-start': marker_start, 'data-marker-end': marker_end,
       'data-style': string(source_attr(edge, "style", "solid")),
+      'data-style-declarations': style_declarations,
       'data-min-length': string(source_attr(edge, "min-length", source_attr(edge, "min_length", 1))),
       'data-z': string(source_attr(edge, "z", -1)),
       style: "display:block;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;">
@@ -138,16 +140,26 @@ pub fn to_html(graph, opts = null) {
   let directed = graph_directed(graph);
   let theme = string(opt(opts, "theme", "light"));
   let palette = theme_defaults.palette(theme);
+  let title = if (graph is element) model.title(graph) else source_attr(graph, "title", null);
+  let description = if (graph is element) model.description(graph)
+    else source_attr(graph, "description", null);
   let children = [
     for (i, entry in node_entries) html_node(entry.value, i, entry.group,
-      if (graph is element) model.classes_for(graph, node_id(entry.value, i)) else [], palette),
+      if (graph is element) model.classes_for(graph, node_id(entry.value, i)) else [],
+      if (graph is element) model.style_declarations_for(
+        graph, "node", [node_id(entry.value, i)]) else "", palette),
     for (i, entry in edge_entries,
       let label = html_edge_label(entry.value, i, entry.group, palette)
       where label != null) label,
-    for (i, entry in edge_entries) html_edge(entry.value, i, entry.group, directed)
+    for (i, entry in edge_entries) html_edge(entry.value, i, entry.group, directed,
+      if (graph is element) model.style_declarations_for(graph, "edge", [
+        string(i), string(source_attr(entry.value, "id", "e" ++ string(i)))
+      ]) else "")
   ];
   <'graph' class: "lambda-graph lambda-graph-theme-" ++ theme,
       'data-radiant-layout': "lambda-graph", 'data-theme': theme,
+      role: "group", 'aria-label': title, 'aria-description': description,
+      'data-graph-title': title,
       'data-edge-color': palette.edge,
       'data-direction': direction, 'data-node-sep': node_sep,
       'data-rank-sep': rank_sep,

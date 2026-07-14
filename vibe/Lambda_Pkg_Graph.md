@@ -1087,6 +1087,28 @@ The initial Stage 2 tranche is implemented as follows:
 - normal, circle, and cross endpoint markers normalize independently as
   `arrow-tail` and `arrow-head`, survive HTML and Velmt adaptation, and render
   as distinct SVG marker geometry;
+- Mermaid graph, node, edge, and recursive subgraph values now retain numeric
+  `source-start`, `source-end`, `source-line`, and `source-column` attributes;
+  repeated node references preserve the first declaration span rather than
+  replacing provenance during semantic upsert;
+- parser errors and warnings are retained as structured `<diagnostic>` Mark
+  values with stable code, severity, message, and source location; chart-family
+  dispatch uses the explicit `mermaid.chart-family` code;
+- `graph/diagnostics.ls` and `graph/normalize.ls` establish the pure public
+  validation result `{graph, diagnostics, valid}`; the initial invariant pass
+  diagnoses invalid roots and directions, missing or duplicate identities, and
+  missing or unresolved edge endpoints, while preserving parser diagnostics;
+- `transform.to_html()` passes Mark through this normalization boundary before
+  semantic lowering, without adding state or changing the graph value;
+- Mermaid `accTitle` and line or block `accDescr` directives survive under
+  source-spanned `<meta>` children; model queries apply last-declaration
+  semantics and semantic HTML exposes them through `aria-label`,
+  `aria-description`, and graph title metadata;
+- `style` and `linkStyle` statements survive as source-spanned
+  `<style-assignment>` values with node/edge target kind, canonical target text,
+  and raw declarations; model queries resolve node ids, edge indices, explicit
+  edge ids, and `default`, while HTML retains the result in
+  `data-style-declarations` for the future safe style cascade;
 - node-local `:::` classes normalize to ordinary `<class-assignment>` metadata
   and therefore share the common model and HTML class-lowering path;
 - Mermaid's general `id@{ shape: ..., label: ... }` node form is parsed, with
@@ -1114,19 +1136,23 @@ The initial Stage 2 tranche is implemented as follows:
   consuming tests.
 
 The checked-in manifest is a bootstrap corpus covering implicit endpoints,
-directions, shapes and labels, recursive subgraphs, class metadata, and chart
-family diagnostics. Lambda integration fixtures additionally cover recursive
-HTML membership, class lowering, measured edge-label placement, bidirectional
-markers, shape clipping, and self-loop bounds.
+directions, shapes and labels, recursive subgraphs, class and style metadata,
+accessibility directives, and chart family diagnostics. Lambda integration
+fixtures additionally cover recursive HTML membership, class lowering,
+accessibility lowering, measured edge-label placement, bidirectional markers,
+shape clipping, and self-loop bounds.
 
 The following Stage 2 work remains open:
 
-- a distinct source AST, source spans, structured diagnostic values, and the
-  schema validator/`normalize.ls` boundary;
-- `style`, `linkStyle`, HTML/Markdown labels, accessibility metadata, ports,
-  interaction metadata, edge-ID property/class statements, and the rendering
-  semantics for general shapes beyond the currently canonicalized rectangle,
-  rounded, cylinder, diamond, circle, and double-circle families;
+- a distinct Mermaid source AST, declaration-list provenance for merged values,
+  full schema-driven Graph IR validation, and canonical rebuilding in
+  `normalize.ls`; the current boundary validates semantic invariants and retains
+  first-declaration spans but does not yet separate parsing from normalization;
+- the safe property cascade and paint semantics for preserved `style` and
+  `linkStyle` declarations, HTML/Markdown labels, ports, interaction metadata,
+  edge-ID property/class statements, and the rendering semantics for general
+  shapes beyond the currently canonicalized rectangle, rounded, cylinder,
+  diamond, circle, and double-circle families;
 - visual recursive subgraph boxes and measured subgraph labels rather than only
   preserved membership metadata;
 - parallel-edge separation, compound/cluster crossing routes, ports, and route

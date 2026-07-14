@@ -33,27 +33,34 @@ enum class ParseErrorSeverity {
 struct ParseError {
     SourceLocation location;
     ParseErrorSeverity severity;
+    const char* code;           // optional stable machine-readable identifier
     const char* message;        // Arena-allocated or static
     const char* context_line;   // Source line where error occurred (may be null)
     const char* hint;           // Optional hint for fixing the error (may be null)
 
-    ParseError() : location(), severity(ParseErrorSeverity::ERROR),
+    ParseError() : location(), severity(ParseErrorSeverity::ERROR), code(nullptr),
                    message(nullptr), context_line(nullptr), hint(nullptr) {}
 
     ParseError(const SourceLocation& loc, ParseErrorSeverity sev,
                const char* msg)
-        : location(loc), severity(sev), message(msg),
+        : location(loc), severity(sev), code(nullptr), message(msg),
           context_line(nullptr), hint(nullptr) {}
 
     ParseError(const SourceLocation& loc, ParseErrorSeverity sev,
                const char* msg, const char* ctx)
-        : location(loc), severity(sev), message(msg),
+        : location(loc), severity(sev), code(nullptr), message(msg),
           context_line(ctx), hint(nullptr) {}
 
     ParseError(const SourceLocation& loc, ParseErrorSeverity sev,
                const char* msg, const char* ctx,
                const char* h)
-        : location(loc), severity(sev), message(msg),
+        : location(loc), severity(sev), code(nullptr), message(msg),
+          context_line(ctx), hint(h) {}
+
+    ParseError(const SourceLocation& loc, ParseErrorSeverity sev,
+               const char* stable_code, const char* msg,
+               const char* ctx, const char* h)
+        : location(loc), severity(sev), code(stable_code), message(msg),
           context_line(ctx), hint(h) {}
 };
 

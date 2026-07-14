@@ -92,6 +92,9 @@ public:
     void addError(const SourceLocation& loc, const char* message,
                   const char* hint);
 
+    void addErrorCode(const SourceLocation& loc, const char* code,
+                      const char* fmt, ...);
+
     void addWarning(const SourceLocation& loc, const char* fmt, ...);
 
     void addNote(const SourceLocation& loc, const char* fmt, ...);
