@@ -217,7 +217,7 @@ static int editing_geometry_first_strong_direction(const char* text,
             p++;
             continue;
         }
-        int cls = bidi_strong_class(cp);
+        int cls = utf_bidi_strong_class(cp);
         if (cls != 0) return cls;
         p += bytes;
     }

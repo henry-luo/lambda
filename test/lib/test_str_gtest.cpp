@@ -1650,6 +1650,14 @@ TEST_F(UtfClassifyTest, HangulNonMatches) {
     EXPECT_FALSE(utf_is_hangul(0xD800));   // surrogate, not Hangul
 }
 
+TEST_F(UtfClassifyTest, BidiStrongClass) {
+    EXPECT_EQ(utf_bidi_strong_class('A'), -1);
+    EXPECT_EQ(utf_bidi_strong_class(0x05D0), 1);  // Hebrew alef
+    EXPECT_EQ(utf_bidi_strong_class(0x0627), 1);  // Arabic alef
+    EXPECT_EQ(utf_bidi_strong_class(0x4E00), -1); // CJK ideograph
+    EXPECT_EQ(utf_bidi_strong_class('0'), 0);
+}
+
 // ── utf_is_emoji_for_zwj ─────────────────────────────────────────────
 
 TEST_F(UtfClassifyTest, EmojiForZwjSMP) {

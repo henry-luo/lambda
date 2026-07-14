@@ -1,11 +1,11 @@
 // Safe rich-label lowering for measured graph content.
 
-fn tag(value) => if (value is element) string(name(value)) else ""
+import model: lambda.package.graph.model
 
 fn sanitize_value(value) {
   if (value is string) { [value] }
   else if (value is element) {
-    let value_tag = tag(value);
+    let value_tag = model.tag(value);
     let children = if (len(value) > 0) [
       for (i in 0 to (len(value) - 1), child in sanitize_value(value[i])) child
     ] else [];
